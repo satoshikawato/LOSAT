@@ -558,6 +558,33 @@ impl BlastnDatabase {
         shared::prefetch_messages(&self.db, &self.taxdb, subjects, PROGRAM)
     }
 
+    /// [`Self::prefetch_messages`] by subject (`shared::subject_read_texts`): the text of the
+    /// first read of each subject that writes one, with its ordinal id, where a query's report
+    /// reads its subjects one by one.
+    pub(super) fn subject_read_texts(
+        &self,
+        titles: &DatabaseTitles,
+        hit_lists: &[Option<BlastnHitList>],
+        rows_open: bool,
+    ) -> Result<crate::report::query_warnings::QueryReads> {
+        let subjects = hit_lists
+            .iter()
+            .flatten()
+            .flat_map(|hit_list| {
+                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                &hit_list.hsplist_array[..count]
+            })
+            .filter(|hsp_list| !hsp_list.hsps.is_empty())
+            .map(|hsp_list| {
+                let parsed = match titles.get(&hsp_list.oid) {
+                    Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+                    _ => None,
+                };
+                (hsp_list.oid, hsp_list.oid, parsed)
+            });
+        shared::subject_read_texts(&self.db, &self.taxdb, subjects, rows_open, PROGRAM)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:307-308
     // ```c++
     //     case C_Segs::e_Dendiag:

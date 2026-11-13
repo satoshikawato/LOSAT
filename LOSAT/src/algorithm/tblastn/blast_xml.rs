@@ -495,6 +495,13 @@ impl PreparedXml {
                 searched: self.searched[q_idx],
                 masks: &masks,
             };
+            // Where NCBI loads the subject of each `Hit` (`HitSink::position`), for the texts
+            // of the subjects that the query's report reads one by one
+            // (`QueryWarnings::subject_read`).
+            let mut reads: Vec<(usize, u32)> = Vec::new();
+            let marks = warnings
+                .as_deref()
+                .is_some_and(|warnings| warnings.reads_with_texts(q_idx));
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
                 let lists = hitlist.lists();
                 ensure!(
@@ -514,6 +521,9 @@ impl PreparedXml {
                 for range in hits {
                     let first = usize::try_from(lists[range.start].oid)
                         .context("negative TBLASTN subject OID")?;
+                    if let Some(at) = sink.position().filter(|_| marks) {
+                        reads.push((at, first as u32));
+                    }
                     let names = self.subject_names[first]
                         .as_ref()
                         .context("names of a subject with hits")?;
@@ -609,7 +619,13 @@ impl PreparedXml {
             });
             // A failed query leaves its partial bytes in `buf`, which the error return drops.
             written?;
-            writer.write_all(&buf)?;
+            crate::report::query_warnings::write_marked(
+                &buf,
+                &reads,
+                q_idx,
+                writer,
+                warnings.as_deref_mut(),
+            )?;
             buf.clear();
         }
         if ranges.epilog {

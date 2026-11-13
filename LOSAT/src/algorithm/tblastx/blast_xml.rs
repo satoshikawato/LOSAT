@@ -363,10 +363,19 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
             searched: run.searched[q_idx],
             masks: &masks,
         };
+        // Where NCBI loads the subject of each `Hit` (`HitSink::position`), for the texts of
+        // the subjects that the query's report reads one by one (`QueryWarnings::subject_read`).
+        let mut reads: Vec<(usize, u32)> = Vec::new();
+        let marks = warnings
+            .as_deref()
+            .is_some_and(|warnings| warnings.reads_with_texts(q_idx));
         let written = document.query(&xml_run, &xml_query, &mut buf, |sink| {
             let mut first = 0usize;
             while first < query_hits.len() {
                 let s_idx = query_hits[first].hit.s_idx;
+                if let Some(at) = sink.position().filter(|_| marks) {
+                    reads.push((at, s_idx));
+                }
                 // The subject's HSPs and those of the copies of one record that follow it
                 // (`XmlSubjects::joins`, as `hit_ranges`).
                 let mut end = first + 1;
@@ -448,7 +457,13 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         });
         // A failed query leaves its partial bytes in `buf`, which the error return drops.
         written?;
-        writer.write_all(&buf)?;
+        crate::report::query_warnings::write_marked(
+            &buf,
+            &reads,
+            q_idx,
+            writer,
+            warnings.as_deref_mut(),
+        )?;
         buf.clear();
     }
     if run.epilog {

@@ -77,7 +77,8 @@ pub(crate) struct PssmPrelim<'a, R: PssmRows> {
     pub(crate) word_size: i32,
     /// `-window_size`; 0 for the one-hit search.
     pub(crate) window: i32,
-    /// `cutoffs->x_dropoff` of the context (`ceil(7 ln 2 / kbp_psi->Lambda)`).
+    /// `cutoffs->x_dropoff` of the context (`ceil(x_dropoff ln 2 / kbp_psi->Lambda)` of the
+    /// search's `-xdrop_ungap`, 7 bits by default).
     pub(crate) x_dropoff: i32,
     /// `word_params->cutoffs[0].cutoff_score`.
     pub(crate) word_cutoff: i32,

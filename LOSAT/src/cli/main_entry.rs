@@ -147,6 +147,18 @@ fn run_main_entry() -> Result<()> {
     if argv.get(1).is_some_and(|word| word == "segmasker") {
         std::process::exit(crate::segmasker::run(&argv[2..]));
     }
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263
+    // ```c++
+    // int main(int argc, const char* argv[])
+    // {
+    //     // Execute main application function
+    //     return CConvert2BlastMaskApplication().AppMain(argc, argv);
+    // }
+    // ```
+    // `losat convert2blastmask` too.
+    if argv.get(1).is_some_and(|word| word == "convert2blastmask") {
+        std::process::exit(crate::convert2blastmask::run(&argv[2..]));
+    }
     // No NCBI counterpart: makes those names (`cli::install_shims`). Read before clap, as the
     // top level has no options of its own.
     if argv
@@ -279,7 +291,7 @@ fn run_main_entry() -> Result<()> {
     // `[Diag]`, `[LOG]`), let it through: LOSAT refuses the settings it refuses in a run, which
     // include those, with the same check (line RG DECISIONS E1b-6). rpsbproc has its own
     // `DryRun`, after its `Init` (`rpsbproc::dry_run`, which makes the same check; item E1c).
-    // rpstblastn's `-help` and `-h` reach here as a parsed flag (`RpstblastnArgs::ncbi_help`);
+    // rpstblastn's `-help`, `-help-full` and `-h` reach here as a parsed flag (`RpstblastnArgs::ncbi_help`);
     // NCBI's reader writes their text before the application runs, `-dryrun` or not (NCBI BLAST+
     // 2.17.0, PS12a probes `dry_h`, `dry_help`), as the parser's help of the other programs.
     let help_flag =

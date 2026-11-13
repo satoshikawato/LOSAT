@@ -217,8 +217,8 @@ pub enum Commands {
     //     arg.Reset(new CProgramDescriptionArgs(kProgram,
     //                                "Translated Reverse Position Specific BLAST"));
     // ```
-    // `-h` and `-help` write NCBI's frozen texts (`RpstblastnArgs::ncbi_help`; the reader
-    // stops at them, `try_parse_from_command`).
+    // `-h`, `-help` and `-help-full` write NCBI's frozen texts (`RpstblastnArgs::ncbi_help`; the
+    // reader stops at them, `try_parse_from_command`).
     /// Translated Reverse Position Specific BLAST (rpstblastn)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Rpstblastn(rpstblastn::RpstblastnArgs),
@@ -236,7 +236,7 @@ pub enum Commands {
     // static const char *PROGRAM_USAGE =	//multiline
     // "Process output from offline rpsblast to annotate sequence with conserved domain information";
     // ```
-    /// Process output from offline rpsblast to annotate sequence with conserved domain information (rpsbproc; its domain hits, sites and motifs of protein queries)
+    /// Process output from offline rpsblast to annotate sequence with conserved domain information (rpsbproc; its domain hits, sites and motifs of protein and nucleotide queries)
     #[command(name = "rpsbproc", help_template = NCBI_HELP_TEMPLATE)]
     Rpsbproc(crate::rpsbproc::RpsbprocArgs),
 }
@@ -351,11 +351,40 @@ where
             }
             continue;
         }
-        // NCBI's reader stops at its help flags (`CArgDescriptions::x_CheckAutoHelp`, the words
-        // before them read first); rpstblastn writes NCBI's texts and reads no word after them
-        // (`RpstblastnArgs::ncbi_help`).
-        let stops_at_help = scope.get_name() == "rpstblastn";
-        if matches!(text, "-help" | "--help") {
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3020-3023, 2840-2852
+        // ```c++
+        //     const CArgDesc& arg = **it;
+        //
+        //     if ( s_IsFlag(arg) ) {
+        //         x_CheckAutoHelp(arg1);
+        // ...
+        // void CArgDescriptions::x_CheckAutoHelp(const string& arg) const
+        // {
+        //     if (arg.compare(string("-") + s_AutoHelp) == 0) {
+        //         if (m_AutoHelp) {
+        //             NCBI_THROW(CArgHelpException,eHelp,kEmptyStr);
+        //         }
+        //     } else if (arg.compare(string("-") + s_AutoHelpFull) == 0) {
+        //         NCBI_THROW(CArgHelpException,eHelpFull,kEmptyStr);
+        //     } else if (arg.compare(string("-") + s_AutoHelpXml) == 0) {
+        //         NCBI_THROW(CArgHelpException,eHelpXml,kEmptyStr);
+        //     } else if (arg.compare(string("-") + s_AutoHelpShowAll) == 0) {
+        //         NCBI_THROW(CArgHelpException,eHelpShowAll,kEmptyStr);
+        //     }
+        // ```
+        // NCBI's reader stops at its help flags, the words before them read first: a word after
+        // one is never read (NCBI BLAST+ 2.17.0: `-help -bogus`, `-help ... -out` with no value
+        // and `-h -xmlhelp` print the help, exit status 0; line RG item E2). Every program of
+        // this parser follows NCBI's reader; rpstblastn writes NCBI's texts
+        // (`RpstblastnArgs::ncbi_help`). An option's value is not a flag (`-out -help` names a
+        // file). `--help` is LOSAT's spelling of `-help` (clap's) and stops the reader too.
+        // `-help-full` (`s_AutoHelpShowAll`) is `-help` with the arguments defined `fHidden`
+        // (`ShowAllArguments`). Of NCBI's programs only makeblastdb has one, `-randomize`, which
+        // LOSAT refuses; LOSAT's help lists the arguments LOSAT runs (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+        // exception 1), so its text is `-help`'s, as NCBI's other programs write the bytes of
+        // `-help` (in every place: line RG, `E/SURVEY_E2.md`).
+        let stops_at_help = !std::ptr::eq(scope, &command);
+        if matches!(text, "-help" | "--help") || (stops_at_help && text == "-help-full") {
             translated.push("--help".into());
             if stops_at_help {
                 ncbi_help = ncbi_help.map(|(start, _)| (start, "full"));
@@ -672,7 +701,6 @@ const UNPORTED_BLASTN_ARGS: &[&str] = &[
     "db_hard_mask",
     "db_soft_mask",
     "entrez_query",
-    "export_search_strategy",
     "filtering_db",
     "gilist",
     "html",
@@ -705,7 +733,6 @@ const UNPORTED_BLASTP_ARGS: &[&str] = &[
     "db_hard_mask",
     "db_soft_mask",
     "entrez_query",
-    "export_search_strategy",
     "gilist",
     "html",
     "import_search_strategy",
@@ -737,22 +764,17 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 // ```
 /// psiblast's NCBI arguments that LOSAT does not run: the MSA inputs (series PS6; the ASCII and
 /// ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
-/// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), `-gap_trigger`, `-sum_stats`, `-culling_limit` (blastp runs it since
-/// O3b; psiblast's first round is not compared with NCBI's under it yet), and the arguments that blastp's engine
-/// does not run either (`is_unported_blastp_arg`; psiblast has no database masks and no
-/// `-mt_mode`).
+/// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), the search strategy file (item F1b of line
+/// RG), and the arguments that blastp's engine does not run either (`is_unported_blastp_arg`;
+/// psiblast has no database masks and no `-mt_mode`). `-sum_stats true` is refused with the
+/// options (`PsiblastArgs::into_blastp_args`).
 const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
-    "culling_limit",
-    "gap_trigger",
+    // Line RG-F1 ported it to BLASTP's search, not to PSIBLAST's (item F1b).
+    "export_search_strategy",
     "ignore_msa_master",
     "in_msa",
     "msa_master_idx",
     "phi_pattern",
-    "sum_stats",
-    // Line RG X1 ported them to BLASTP's search, not to PSIBLAST's rounds (series RG-Q).
-    "xdrop_gap",
-    "xdrop_gap_final",
-    "xdrop_ungap",
 ];
 
 fn is_unported_psiblast_arg(name: &str) -> bool {
@@ -900,8 +922,11 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
             format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's RPSTBLASTN"),
         );
     }
+    // makeblastdb reads the toolkit's words with its own branch of `try_parse_from`, and refuses
+    // the words left as the others do (`-xmlhelp`; a full version in the library API).
     if let Some(program) = TOOLKIT_PROGRAMS
         .iter()
+        .chain(&["makeblastdb"])
         .copied()
         .find(|program| scope.get_name() == *program)
         .filter(|_| is_ncbi_toolkit_arg(name))
@@ -1165,9 +1190,9 @@ fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
 // The standard options of an NCBI C++ Toolkit application, which NCBI's BLAST+ programs
 // accept without listing them in -help. `-logfile` and `-conffile` run in the BLAST programs and
 // makeblastdb (line RG item E1), `-dryrun` in them and blastdbcmd (item E1b), the three in
-// rpsbproc (item E1c, its own `DryRun`: `rpsbproc::dry_run`).
+// rpsbproc (item E1c, its own `DryRun`: `rpsbproc::dry_run`), `-help-full` in every program (item
+// E2, `try_parse_from`). The words left are refused by name, in makeblastdb too.
 const NCBI_TOOLKIT_ARGS: &[&str] = &[
-    "help-full",
     "xmlhelp",
     "version-full",
     "version-full-xml",
@@ -1195,7 +1220,6 @@ const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "db_hard_mask",
     "db_soft_mask",
     "entrez_query",
-    "export_search_strategy",
     "gilist",
     "html",
     "import_search_strategy",
@@ -1228,7 +1252,6 @@ const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "db_hard_mask",
     "db_soft_mask",
     "entrez_query",
-    "export_search_strategy",
     "gilist",
     "html",
     "import_search_strategy",
@@ -1266,7 +1289,6 @@ const UNPORTED_BLASTX_ARGS: &[&str] = &[
     "best_hit_overhang",
     "best_hit_score_edge",
     "import_search_strategy",
-    "export_search_strategy",
     "remote",
     "use_sw_tback",
 ];

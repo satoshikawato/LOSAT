@@ -54,15 +54,23 @@ pub(crate) enum Serial {
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FilterProgram {
+    NotSet,
     Dust,
     Seg,
+    Windowmasker,
+    Repeat,
+    Other,
 }
 
 impl FilterProgram {
     fn name_and_value(self) -> (&'static str, i32) {
         match self {
+            FilterProgram::NotSet => ("not-set", 0),
             FilterProgram::Dust => ("dust", 10),
             FilterProgram::Seg => ("seg", 20),
+            FilterProgram::Windowmasker => ("windowmasker", 30),
+            FilterProgram::Repeat => ("repeat", 40),
+            FilterProgram::Other => ("other", 100),
         }
     }
 }
@@ -79,7 +87,7 @@ pub(crate) fn writes_serial_objects(outfmt: &str) -> bool {
 pub(crate) enum WriteError {
     Io(io::Error),
     /// A case LOSAT does not reproduce: what it is, as a noun phrase that the tool completes
-    /// with "is not supported by LOSAT's <program>".
+    /// with "is not supported by LOSAT's `<program>`".
     Refused(String),
 }
 
@@ -104,9 +112,11 @@ pub(crate) enum MaskWriter {
 }
 
 /// `CMaskWriterBlastDbMaskInfo`: the masks of every sequence, written as one
-/// `Blast-db-mask-info` when the writer is finished.
+/// `Blast-db-mask-info` when the writer is finished; or, made with the format `interval`
+/// (convert2blastmask's), the intervals of each sequence as they are printed.
 pub(crate) struct MaskInfoWriter {
-    serial: Serial,
+    /// `m_OutputFormat`: `None` is `eSerial_None`, the signal of the `interval` format.
+    serial: Option<Serial>,
     algo_id: i32,
     program: FilterProgram,
     options: Vec<u8>,
@@ -115,7 +125,8 @@ pub(crate) struct MaskInfoWriter {
 }
 
 impl MaskWriter {
-    /// `CMaskWriterBlastDbMaskInfo(os, format, algo_id, filt_program, algo_options)`.
+    /// `CMaskWriterBlastDbMaskInfo(os, format, algo_id, filt_program, algo_options)`;
+    /// `serial` is `None` for the format `interval`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_blastdb_maskinfo.cpp:45-54
     /// ```c++
@@ -123,20 +134,26 @@ impl MaskWriter {
     ///     m_BlastDbMaskInfo->SetAlgo_id(algo_id);
     ///     m_BlastDbMaskInfo->SetAlgo_program((int)filt_program);
     ///     m_BlastDbMaskInfo->SetAlgo_options(algo_options);
+    ///
+    ///     if (format == "maskinfo_asn1_bin") {
+    ///         m_OutputFormat = eSerial_AsnBinary;
+    ///     } else if (format == "maskinfo_asn1_text") {
+    ///         m_OutputFormat = eSerial_AsnText;
+    ///     } else if (format == "maskinfo_xml") {
+    ///         m_OutputFormat = eSerial_Xml;
+    ///     } else if (format == "interval") {
+    ///         m_OutputFormat = eSerial_None;  // N.B.: used to signal interval format
+    ///     } else {
+    ///         throw runtime_error("Invalid output format: " + format);
+    ///     }
     /// ```
     pub(crate) fn mask_info(
-        serial: Serial,
+        serial: Option<Serial>,
         algo_id: i32,
         program: FilterProgram,
         options: Vec<u8>,
     ) -> Self {
-        MaskWriter::MaskInfo(MaskInfoWriter {
-            serial,
-            algo_id,
-            program,
-            options,
-            masks: Vec::new(),
-        })
+        MaskWriter::MaskInfo(MaskInfoWriter::new(serial, algo_id, program, options))
     }
 
     /// `Print(bsh, mask, parsed_id)` of the writer.
@@ -161,9 +178,7 @@ impl MaskWriter {
                 // ```
                 let mut text = id_to_string(seq, parsed_id)?;
                 text.push(b'\n');
-                for &(from, to) in mask {
-                    text.extend_from_slice(format!("{from} - {to}\n").as_bytes());
-                }
+                text.extend_from_slice(&interval_lines(mask));
                 out.write_all(&text)?;
             }
             MaskWriter::Tabular => {
@@ -228,9 +243,7 @@ impl MaskWriter {
                 // ...
                 //     Print(*bsh.GetSeqId(), mask);
                 // ```
-                if !mask.is_empty() {
-                    writer.masks.push((first_id(seq).clone(), mask.to_vec()));
-                }
+                writer.print_id(first_id(seq), mask, out)?;
             }
         }
         Ok(())
@@ -255,27 +268,98 @@ impl MaskWriter {
     /// ```
     /// (`x_ConsolidateListOfMasks`, :108-136, moves the Seq-loc of each list into one list and
     /// sets its `more` to false.)
+    /// (`m_OutputFormat` `eSerial_None`, the format `interval`, writes nothing either.)
     pub(crate) fn finish(self, out: &mut dyn Write) -> Result<(), WriteError> {
         let MaskWriter::MaskInfo(writer) = self else {
             return Ok(());
         };
+        let Some(serial) = writer.serial else {
+            return Ok(());
+        };
         let mut bytes = Vec::new();
-        write_document(writer.serial, &Document::MaskInfo(&writer), &mut bytes)?;
+        write_document(serial, &Document::MaskInfo(&writer), &mut bytes)?;
         out.write_all(&bytes)?;
         Ok(())
     }
 }
 
+impl MaskInfoWriter {
+    /// `CMaskWriterBlastDbMaskInfo(os, format, algo_id, filt_program, algo_options)`, quoted at
+    /// `MaskWriter::mask_info`.
+    pub(crate) fn new(
+        serial: Option<Serial>,
+        algo_id: i32,
+        program: FilterProgram,
+        options: Vec<u8>,
+    ) -> Self {
+        MaskInfoWriter {
+            serial,
+            algo_id,
+            program,
+            options,
+            masks: Vec::new(),
+        }
+    }
+
+    /// `CMaskWriterBlastDbMaskInfo::Print(id, mask)`: nothing for an empty mask; with the
+    /// format `interval`, the intervals at once (`CMaskWriterInt::PrintMasks`, no id); else
+    /// the mask is kept for the object that `finish` writes.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_blastdb_maskinfo.cpp:138-150
+    /// ```c++
+    /// void CMaskWriterBlastDbMaskInfo::Print( const objects::CSeq_id& id,
+    ///                                         const TMaskList & mask )
+    /// {
+    ///     if (mask.empty()) {
+    ///         return;
+    ///     }
+    ///
+    ///     if (m_OutputFormat == eSerial_None) {
+    ///         // assume interval output format and return
+    ///         CMaskWriterInt::PrintMasks(os, mask);
+    ///         return;
+    ///     }
+    /// ```
+    pub(crate) fn print_id(
+        &mut self,
+        id: &ParsedSeqId,
+        mask: &[(u32, u32)],
+        out: &mut dyn Write,
+    ) -> Result<(), WriteError> {
+        if mask.is_empty() {
+            return Ok(());
+        }
+        if self.serial.is_none() {
+            out.write_all(&interval_lines(mask))?;
+            return Ok(());
+        }
+        self.masks.push((id.clone(), mask.to_vec()));
+        Ok(())
+    }
+}
+
+/// `CMaskWriterInt::PrintMasks`: one line `from - to` for each interval.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_int.cpp:50-56
+/// ```c++
+/// void CMaskWriterInt::PrintMasks(CNcbiOstream& os, const TMaskList& mask)
+/// {
+///     ITERATE(TMaskList, i, mask) {
+///         os << i->first << " - " << i->second << "\n";
+///     }
+/// }
+/// ```
+fn interval_lines(mask: &[(u32, u32)]) -> Vec<u8> {
+    let mut text = Vec::new();
+    for &(from, to) in mask {
+        text.extend_from_slice(format!("{from} - {to}\n").as_bytes());
+    }
+    text
+}
+
 /// `bsh.GetSeqId()`: the first Seq-id of the sequence.
 fn first_id<'a>(seq: &MaskedBioseq<'a>) -> &'a ParsedSeqId {
     seq.ids.first().expect("a sequence has a Seq-id")
-}
-
-/// The intervals as the `Seq-interval` integers (`TSeqPos` stored in an INTEGER).
-fn intervals(mask: &[(u32, u32)]) -> Vec<(i32, i32)> {
-    mask.iter()
-        .map(|&(from, to)| (from as i32, to as i32))
-        .collect()
 }
 
 /// The object of one document.
@@ -316,7 +400,7 @@ fn encode<E: Encoder>(enc: &mut E, document: &Document<'_>) -> Option<SerialErro
     match document {
         Document::SeqLoc(id, mask) => {
             enc.begin_document("Seq-loc");
-            write_ranges_seq_loc(enc, &SeqId::Db(id), &intervals(mask));
+            write_ranges_seq_loc(enc, &SeqId::Db(id), mask);
         }
         Document::MaskInfo(writer) => {
             enc.begin_document("Blast-db-mask-info");
@@ -339,7 +423,7 @@ fn encode<E: Encoder>(enc: &mut E, document: &Document<'_>) -> Option<SerialErro
             enc.begin_list(false);
             for (id, mask) in &writer.masks {
                 enc.element();
-                write_ranges_seq_loc(enc, &SeqId::Db(id), &intervals(mask));
+                write_ranges_seq_loc(enc, &SeqId::Db(id), mask);
             }
             enc.end_list();
             enc.end_member();

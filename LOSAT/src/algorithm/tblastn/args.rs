@@ -125,6 +125,11 @@ pub struct TblastnArgs {
     pub task: String,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
+    /// (quoted at `BlastpArgs::export_search_strategy`). The search strategy file
+    /// (`report::archive::strategy`), created by `run` before the other options are read.
+    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     // An omitted value keeps the default of the task (10).
     #[arg(long, value_parser = tblastn_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,
@@ -326,6 +331,10 @@ pub struct TblastnArgs {
     /// reads the arguments (`archive::handle_for`).
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// The run's search strategy export (`-export_search_strategy`), made by `run`
+    /// (`archive::strategy_for`).
+    #[arg(skip)]
+    pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
     /// by the command line before the search where a tabular field list shows a name of the
     /// taxonomy database (`algorithm::tblastn::tabular`); `None` elsewhere (`run_local`'s callers

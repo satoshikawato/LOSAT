@@ -21,6 +21,7 @@ use super::{
 };
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::report::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi};
+use crate::report::query_warnings::SubjectReadHook;
 use crate::report::x_pairwise_par::QueryGroup;
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -124,10 +125,20 @@ pub(crate) fn write_psiblast_round_report(
         let group = QueryGroup::new(query_hits, subject_titles, |previous, s_idx| {
             sections.joins(previous, s_idx)
         });
-        sections.head(writer, q_idx, group.as_ref())?;
+        // NCBI loads each subject that the query's batch did not prefetch at its description
+        // line, or one the table does not show at its alignment's heading
+        // (`QueryWarnings::subject_read`).
+        let mut read = |s_idx: u32, writer: &mut io::BufWriter<RoundWriter<'_>>| match warnings
+            .as_deref_mut()
+        {
+            Some(warnings) => warnings.subject_read(q_idx, s_idx, writer),
+            None => Ok(()),
+        };
+        sections.head(writer, q_idx, group.as_ref(), &mut read)?;
         if let Some(group) = &group {
             let aligned = group.subject_order.len().min(report.num_alignments);
             for &s_idx in &group.subject_order[..aligned] {
+                read(s_idx, &mut *writer)?;
                 sections.subject(writer, probe.as_deref_mut(), group, s_idx)?;
             }
             sections.foot(writer, q_idx)?;
@@ -189,6 +200,7 @@ impl RoundSections<'_> {
         writer: &mut W,
         q_idx: usize,
         group: Option<&QueryGroup<'_>>,
+        read: SubjectReadHook<'_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
         writeln!(writer, "Results from round {}", self.round.number)?;
@@ -221,7 +233,7 @@ impl RoundSections<'_> {
             return Ok(());
         };
         match self.round.found_before {
-            Some(found_before) => self.write_two_part_table(writer, group, found_before)?,
+            Some(found_before) => self.write_two_part_table(writer, group, found_before, read)?,
             None => write_description_table(
                 writer,
                 &group.subject_order[..group.subject_order.len().min(report.num_descriptions)],
@@ -231,6 +243,7 @@ impl RoundSections<'_> {
                 // psiblast does not hand `-sorthits` to the formatter (psiblast_app.cpp:502).
                 None,
                 |s_idx| self.label(group, s_idx),
+                read,
             )?,
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1528
@@ -300,6 +313,7 @@ impl RoundSections<'_> {
         writer: &mut W,
         group: &QueryGroup<'_>,
         found_before: &[bool],
+        read: SubjectReadHook<'_, W>,
     ) -> io::Result<()> {
         let mut repeated: Vec<(u32, Vec<&PairwiseHit>)> = Vec::new();
         let mut new: Vec<(u32, Vec<&PairwiseHit>)> = Vec::new();
@@ -325,9 +339,9 @@ impl RoundSections<'_> {
                 }
             }
         }
-        self.write_part(writer, group, &repeated, true)?;
+        self.write_part(writer, group, &repeated, true, &mut *read)?;
         writeln!(writer)?;
-        self.write_part(writer, group, &new, false)?;
+        self.write_part(writer, group, &new, false, read)?;
         writeln!(writer)
     }
 
@@ -383,6 +397,7 @@ impl RoundSections<'_> {
         group: &QueryGroup<'_>,
         part: &[(u32, Vec<&PairwiseHit>)],
         repeat_pass: bool,
+        read: SubjectReadHook<'_, W>,
     ) -> io::Result<()> {
         let rows: Vec<(u32, &PairwiseHit, f64)> = part
             .iter()
@@ -430,6 +445,8 @@ impl RoundSections<'_> {
         }
         writeln!(writer)?;
         for (s_idx, best, _) in &rows {
+            // Each line loads its subject (`write_description_table`).
+            read(*s_idx, writer)?;
             let label = self.label(group, *s_idx);
             if label.len() > 68 {
                 writer.write_all(&label[..65])?;

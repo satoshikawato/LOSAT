@@ -280,7 +280,9 @@ fn write_parsed<E: Encoder>(id: &ParsedSeqId, enc: &mut E) {
     enc.end_variant();
 }
 
-fn write_object_id<E: Encoder>(enc: &mut E, tag: &ObjectId) {
+/// Writes an `Object-id` (a CHOICE): the tag of a local id and of a `Dbtag`, and a PSSM's
+/// `identifier` (`report::serial::pssm`).
+pub(crate) fn write_object_id<E: Encoder>(enc: &mut E, tag: &ObjectId) {
     match tag {
         ObjectId::Id(id) => {
             enc.variant("Object-id", "id", 0);

@@ -9,7 +9,7 @@ use std::path::Path;
 
 use super::deflines;
 use super::dir_entry;
-use super::fasta_source::{FastaBioseqSource, Warn};
+use super::fasta_source::{FastaBioseqSource, SourceErrorKind, Warn};
 use super::platform::Platform;
 use super::taxid_set::TaxIdSet;
 use super::time::LocalTime;
@@ -942,12 +942,10 @@ impl<'a> BuildDatabase<'a> {
         let mut found = false;
         let start = std::time::Instant::now();
         let mut count = 0u64;
-        while let Some(mut bioseq) = source.next_bioseq(warn).map_err(|error| {
-            if error.out_of_memory {
-                WriteDbError::OutOfMemory
-            } else {
-                WriteDbError::Creation(error.message)
-            }
+        while let Some(mut bioseq) = source.next_bioseq(warn).map_err(|error| match error.kind {
+            SourceErrorKind::Creation => WriteDbError::Creation(error.message),
+            SourceErrorKind::OutOfMemory => WriteDbError::OutOfMemory,
+            SourceErrorKind::Refused => WriteDbError::Other(error.message),
         })? {
             let bioseq_id = bioseq.first_id_fasta();
             if let Some(parsed) = bioseq.parsed.as_mut() {

@@ -236,11 +236,15 @@ impl AffineRows<'_> {
 
     /// Takes the row of distance `d` out, to be written while the earlier rows are read; `put`
     /// gives it back.
+    ///
+    /// No NCBI counterpart: NCBI indexes its `last_seq2_off` rows through a pointer array; this
+    /// moves one row out of the ring so that Rust can borrow the other rows meanwhile.
     fn take(&mut self, d: i32) -> AffineRow {
         let slot = self.slot(d);
         std::mem::take(&mut self.rows[slot])
     }
 
+    /// No NCBI counterpart: gives back the row that `take` moved out.
     fn put(&mut self, d: i32, row: AffineRow) {
         let slot = self.slot(d);
         self.rows[slot] = row;
@@ -257,6 +261,10 @@ impl AffineRow {
 
 /// The offsets of diagonal `k` in the offsets of a row whose first diagonal is `lower`, or
 /// invalid ones outside the row.
+///
+/// No NCBI counterpart: NCBI's bound tests (`k <= diag_upper[..] && k >= diag_lower[..]`) keep its
+/// reads inside the row; this returns the invalid offsets instead of indexing outside it, which
+/// the loop's bound tests never reach.
 #[inline(always)]
 fn offset_at(offsets: &[GreedyOffset], lower: i32, k: i32) -> GreedyOffset {
     usize::try_from(k - lower)
@@ -2667,7 +2675,7 @@ struct XGreedyRowCold {
 
 const X_NO_CELL: usize = usize::MAX;
 
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:352-361
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:327-339,351-362
 /// ```c
 ///             while (seq1_index < len1 && seq2_index < len2 &&
 ///                    seq1[seq1_index] < 4 &&
@@ -2677,11 +2685,12 @@ const X_NO_CELL: usize = usize::MAX;
 ///                 ASSERT(fence_hit);
 ///                 *fence_hit = TRUE;
 /// ```
-/// Whether a kept diagonal lies past the end of `seq1` (`seq1_index > len1`, reached from a
-/// neighbour's offset plus one) inside `seq2`, without the fence sentry at `seq2_index`. Such a
-/// diagonal has no slide: `s_FindFirstMismatch` returns 0 at once, and of the updates after it only
-/// `last_seq2_off[d][k] = seq2_index` and the extent can change (the seed needs a run longer than
-/// the longest, the end tests need `seq2_index == len2` or `seq1_index == len1`). The row loops
+/// Whether a kept diagonal lies past the end of `seq1` (`seq1_index > len1`, one past an offset
+/// of distance `d - 1` that had already reached `len1`) inside `seq2`, without the fence sentry at
+/// `seq2_index`. Such a diagonal has no slide: `s_FindFirstMismatch` returns 0 at once, and of the
+/// updates after it only `diag_upper = k` (C 565, before the slide), `last_seq2_off[d][k] =
+/// seq2_index` and the extent can change (the seed needs a run longer than the longest, the end
+/// tests need `seq2_index == len2` or `seq1_index == len1`). The row loops
 /// handle it inline, as the C loop does, instead of sending it to their out-of-line cell; with an
 /// X-drop that drops no diagonal, most diagonals of the late distances are such diagonals.
 ///
@@ -2837,7 +2846,9 @@ const X_GREEDY_BLOCK: usize = 256;
 /// 3. The diagonals in the reference order: dropped diagonals as in the
 ///    reference loop; diagonals with a slide length from pass 2 store their
 ///    cell and compare their extent, which is all the reference loop does for
-///    them; every other surviving diagonal goes through `x_greedy_cell_slow`.
+///    them; every other surviving diagonal goes through `x_greedy_cell_slow`, except a diagonal
+///    past the end of `seq1` (`x_past_seq1_end`), which is handled in place (not with the fence
+///    already hit on entry).
 ///
 /// What the reference loop assigns on every diagonal is recovered from the
 /// cell where it was last assigned:
@@ -2981,9 +2992,13 @@ unsafe fn x_greedy_row_impl<const REVERSE: bool>(
             }
             let index = *slide.add(i);
             if index < 0 {
-                // A diagonal past the end of `seq1` (`x_past_seq1_end`).
+                // A diagonal past the end of `seq1` (`x_past_seq1_end`), unless the fence was
+                // already hit on entry (C returns at the first kept diagonal then).
+                // NCBI reference (598d8ae6): greedy_align.c:565-600
                 let seq1_index = seq2_index + block_first + i as i32;
-                if x_past_seq1_end::<REVERSE>(seq2, len1, len2, seq1_index, seq2_index) {
+                if !cold.fence_hit
+                    && x_past_seq1_end::<REVERSE>(seq2, len1, len2, seq1_index, seq2_index)
+                {
                     *current.add(cell) = seq2_index;
                     let extent = seq1_index + seq2_index;
                     if extent > curr_extent {
@@ -4125,7 +4140,7 @@ fn blast_affine_greedy_align(
         let tmp_diag_lower = curr_diag_lower;
         let tmp_diag_upper = curr_diag_upper;
         last_seq2_off.start(d, tmp_diag_lower, tmp_diag_upper);
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:1018-1060
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:1000-1047
         // ```c
         //             if (k + 1 <= diag_upper[d - gap_open_extend] &&
         //                 k + 1 >= diag_lower[d - gap_open_extend]) {

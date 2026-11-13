@@ -62,7 +62,8 @@
 //!   extent for the diagonal. Every other kept diagonal (fewer than eight positions left, eight
 //!   or more matches, the sentry at the stop, a new seed) takes `x_cell_cold`: the byte loop
 //!   (`x_first_mismatch`, the same predicate eight bytes at a time and then byte by byte), the C
-//!   fence test with its bound and the C updates in order.
+//!   fence test with its bound and the C updates in order. The exception is a diagonal past the
+//!   end of `seq1` (`x_past_seq1_end`), which is handled in place.
 //! - The same integers. `seq2_index`, `seq1_index`, the extent and the scores are the C
 //!   expressions on `i32`. `xdrop_score` is the reference's
 //!   `((raw as f64) / (match_cost as f64 / 2.0)).ceil() as i32`, except for `match_cost == 2`
@@ -268,7 +269,8 @@ struct XColdState {
 /// `s_FindFirstMismatch` for `rem == 4` (`x_first_mismatch`: the same predicate, eight bytes at a
 /// time, then byte by byte), its fence test with its bound, and every update in the C order. The
 /// diagonals whose slide one eight-byte comparison does not settle (fewer than eight positions
-/// left, eight or more matches, the fence at the stop, a longer run than the seed's). With a
+/// left, eight or more matches, the fence at the stop, a longer run than the seed's), except a
+/// diagonal past the end of `seq1` (`x_past_seq1_end`), which is handled in place. With a
 /// fence, `cold.fence_hit` is set and nothing else changes (the C code returns at once).
 ///
 /// SAFETY: `seq1` / `seq2` readable for `len1` / `len2` bytes, `current` writable at `k`.
@@ -519,7 +521,9 @@ unsafe fn x_fused_loop<const REVERSE: bool, const WIDE: bool>(
             // eight positions left and it stops within them. The C code then runs, for this
             // diagonal: `diag_upper = k`; no fence (the stop byte of `seq2` is not the sentry);
             // no seed (`index <= longest_match_run`); the cell; the extent; no end test fires
-            // (the stop lies inside both sequences). Every other kept diagonal is `x_cell_cold`.
+            // (the stop lies inside both sequences). Every other kept diagonal is `x_cell_cold`,
+            // except a diagonal past the end of `seq1` (`x_past_seq1_end`), which is handled in
+            // place.
             if WIDE && ((last1 - seq1_index) | (last2 - seq2_index) | seq1_index) >= 0 {
                 let (w1, w2) = if REVERSE {
                     (
@@ -568,6 +572,7 @@ unsafe fn x_fused_loop<const REVERSE: bool, const WIDE: bool>(
                 }
             }
             // A diagonal past the end of `seq1` (`x_past_seq1_end`).
+            // NCBI reference (598d8ae6): greedy_align.c:565-600
             if x_past_seq1_end::<REVERSE>(seq2, len1, len2, seq1_index, seq2_index) {
                 diag_upper = k;
                 *current.add(k as usize) = seq2_index;
@@ -1290,5 +1295,121 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// No NCBI counterpart: the fused loop handles a kept diagonal past the end of `seq1`
+    /// (`x_past_seq1_end`) in place, and this test is the independent check of that branch. On
+    /// random lengths, bases, directions and offsets (`seq1_index` in `len1 + 1..=len1 + 5`,
+    /// `seq2_index` inside `seq2`), with and without the fence sentry at the byte that
+    /// `x_past_seq1_end` reads: it is true exactly when the sentry is absent, and then the
+    /// inline update (`diag_upper = k`, the cell is `seq2_index`, `curr_extent` and `curr_diag`
+    /// change only when `seq1_index + seq2_index` is larger, nothing else) equals what
+    /// `x_cell_cold` leaves from the same inputs; with the sentry `x_cell_cold` sets the fence.
+    #[test]
+    fn past_seq1_end_branch_equals_x_cell_cold() {
+        let mut rng = Rng(0x5EED_0F_E1D5_u64);
+        let (mut inline, mut fenced) = (0usize, 0usize);
+        for _ in 0..4000 {
+            let len1 = 8 + rng.below(41) as i32;
+            let len2 = 8 + rng.below(41) as i32;
+            let seq1: Vec<u8> = (0..len1).map(|_| rng.below(4) as u8).collect();
+            let mut seq2: Vec<u8> = (0..len2).map(|_| rng.below(4) as u8).collect();
+            let reverse = rng.below(2) == 0;
+            let seq2_index = rng.below(len2 as u64) as i32;
+            let seq1_index = len1 + 1 + rng.below(5) as i32;
+            let sentry = rng.below(2) == 0;
+            let at = if reverse {
+                len2 - 1 - seq2_index
+            } else {
+                seq2_index
+            } as usize;
+            if sentry {
+                seq2[at] = FENCE_SENTRY;
+            }
+            let k = rng.below(8) as i32;
+            let hot = XHot {
+                diag_lower: rng.below(19) as i32 - 9,
+                diag_upper: rng.below(19) as i32 - 9,
+                curr_extent: rng.below((len1 + len2 + 16) as u64) as i32 - 5,
+                curr_diag: rng.below(8) as i32,
+                longest_match_run: rng.below(6) as i32,
+            };
+            let cold_in = XColdState {
+                end1_reached: rng.below(2) == 0,
+                end2_reached: rng.below(2) == 0,
+                seed_start_q: rng.below(9) as i32 - 1,
+                seed_start_s: rng.below(9) as i32 - 1,
+                fence_hit: false,
+            };
+            let hot_tuple = |h: &XHot| {
+                (
+                    h.diag_lower,
+                    h.diag_upper,
+                    h.curr_extent,
+                    h.curr_diag,
+                    h.longest_match_run,
+                )
+            };
+            let cold_tuple = |c: &XColdState| {
+                (
+                    c.end1_reached,
+                    c.end2_reached,
+                    c.seed_start_q,
+                    c.seed_start_s,
+                    c.fence_hit,
+                )
+            };
+            let past = unsafe {
+                if reverse {
+                    x_past_seq1_end::<true>(seq2.as_ptr(), len1, len2, seq1_index, seq2_index)
+                } else {
+                    x_past_seq1_end::<false>(seq2.as_ptr(), len1, len2, seq1_index, seq2_index)
+                }
+            };
+            assert_eq!(past, !sentry, "len1 {len1} len2 {len2} reverse {reverse}");
+
+            let before = [-9i32; 8];
+            let mut current = before;
+            let mut cold = XColdState { ..cold_in };
+            let got = unsafe {
+                let (s1, s2) = (seq1.as_ptr(), seq2.as_ptr());
+                let cur = current.as_mut_ptr();
+                if reverse {
+                    x_cell_cold::<true>(
+                        s1, s2, len1, len2, cur, k, seq1_index, seq2_index, hot, &mut cold,
+                    )
+                } else {
+                    x_cell_cold::<false>(
+                        s1, s2, len1, len2, cur, k, seq1_index, seq2_index, hot, &mut cold,
+                    )
+                }
+            };
+            if !past {
+                fenced += 1;
+                assert!(cold.fence_hit, "the sentry sets the fence");
+                continue;
+            }
+            inline += 1;
+            // what the inline branch does
+            let mut expected = hot;
+            expected.diag_upper = k;
+            let mut expected_current = before;
+            expected_current[k as usize] = seq2_index;
+            if seq1_index + seq2_index > expected.curr_extent {
+                expected.curr_extent = seq1_index + seq2_index;
+                expected.curr_diag = k;
+            }
+            let what = format!(
+                "len1 {len1} len2 {len2} reverse {reverse} seq1_index {seq1_index} \
+                 seq2_index {seq2_index}"
+            );
+            assert_eq!(hot_tuple(&got), hot_tuple(&expected), "{what}");
+            assert_eq!(cold_tuple(&cold), cold_tuple(&cold_in), "{what}");
+            assert_eq!(current, expected_current, "{what}");
+        }
+        assert!(
+            inline > 500 && fenced > 500,
+            "inline {inline}, fenced {fenced}"
+        );
     }
 }

@@ -341,9 +341,11 @@ blastx, tblastn and tblastx follow the same stages with their own drivers: blast
 sets up a query batch with `batch_setup.rs`, `context_cutoffs.rs` and `seed_tables.rs`, runs its
 subject loop with `subject_loop.rs` and ends with `batch_finish.rs`; its `process_subject`
 prepares a subject with `subject_prep.rs` (the preliminary frames and the unit path), searches the
-chunks of each frame with `frame_chunks.rs`, and ends a subject with `subject_link.rs` (the seed
-stage's end, the linking calls, the reap and the re-evaluation), `subject_report.rs` (the report
-hits) and `subject_debug.rs` (their debugging output). rpsblast has no driver of its own: it runs
+chunks of each frame with `frame_chunks.rs`, whose two chunk scans (NCBI's order and SEEDBUCKET's)
+share the word finder of `word_finder.rs` (a chunk's start and end, its scan calls, and the two-hit
+test and extension of each hit), and ends a subject with `subject_link.rs` (the seed stage's end,
+the linking calls, the reap and the re-evaluation), `subject_report.rs` (the report hits) and
+`subject_debug.rs` (their debugging output). rpsblast has no driver of its own: it runs
 blastp's (`BlastpApp::Rpsblast`), which hands the search to `rps_search` from
 `blastp/blast_engine/rps_hooks.rs`. In RPS the roles are swapped as in NCBI: the profiles are the
 "query" and the user's query is the "subject".

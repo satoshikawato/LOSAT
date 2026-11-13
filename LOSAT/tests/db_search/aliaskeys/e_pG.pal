@@ -1,0 +1,4 @@
+TITLE empty G
+DBLIST ../../seqdb/db/empty
+NSEQ 1
+STATS_TOTLEN 100

@@ -6227,7 +6227,7 @@ fn psiblast_stop_at_invalid_query(
             .is_none_or(|psi| psi.ungapped_karlin_valid(&context.karlin_params))
     };
     // The PSSM query whose letters give no Karlin-Altschul parameters crashes NCBI before (below).
-    let empty_database = database.is_some_and(|database| database.num_oids() == 0)
+    let empty_database = database.is_some_and(|database| database.first_oid_read_fails())
         && contexts
             .first()
             .is_some_and(|context| args.psi_search.is_none() || context.is_valid);
@@ -9280,15 +9280,16 @@ fn run_resolved_in_pool(
     let t_search = crate::utils::xtiming::clock();
 
     // A database without sequences (makeblastdb builds none; a volume whose index holds
-    // no sequence): NCBI opens it, writes the outfmt 0 prolog, reads the first query
-    // batch and fails in that batch's preliminary search, where its reader cannot map
-    // the sequence file (fixture `LOSAT/tests/seqdb/db/empty`).
+    // no sequence) and without an alias file's LENGTH or STATS_TOTLEN
+    // (`SeqDb::first_oid_read_fails`): NCBI opens it, writes the outfmt 0 prolog, reads the
+    // first query batch and fails in that batch's preliminary search, where its reader cannot
+    // map the sequence file (fixture `LOSAT/tests/seqdb/db/empty`).
     // A first batch of invalid queries only is not searched: the batches up to the first one that
     // is are reported before the error (`unsearched_batches_then_engine_error`); a call of invalid
     // queries only searches no batch, and NCBI reports them (NCBI 2.17.0 blastp, an all-X query
     // and the empty database: exit 0).
     if let Some(database) = database.filter(|database| {
-        database.num_oids() == 0
+        database.first_oid_read_fails()
             && (chunk_prelim.is_some() || query_batch_skipped.iter().any(|skipped| !skipped))
     }) {
         return Err(preliminary_search_error(
@@ -13362,6 +13363,10 @@ fn run_resolved_in_pool(
     let places_reads = format_plans
         .first()
         .is_some_and(|outfmt| outfmt.places_subject_reads());
+    let pairwise_first = matches!(
+        format_plans.first(),
+        Some(BlastpReport::Text(OutputFormat::Pairwise))
+    );
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
         if prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
@@ -13412,13 +13417,44 @@ fn run_resolved_in_pool(
                                 // The first format writes the texts where it reads each
                                 // subject (`places_subject_reads`), else before the report.
                                 if places_reads {
+                                    // The pairwise report reads its subjects in the order of
+                                    // its sorted groups (`QueryGroup::read_order` of the rows'
+                                    // hits, `-sorthits`), the other formats in their rows' order.
+                                    let ranks: Vec<usize> = if pairwise_first {
+                                        let hits = collect_hits_and_methods_from_hit_lists(
+                                            shown,
+                                            query,
+                                            &engine_counts,
+                                        );
+                                        crate::report::x_pairwise_par::QueryGroup::read_order(
+                                            hits.into_iter().map(|(hit, _, seqalign_num_ident)| {
+                                                (hit.s_idx, (hit, seqalign_num_ident))
+                                            }),
+                                            |(hit, seqalign_num_ident)| {
+                                                crate::report::hit_sort::HspScores::of_hit(
+                                                    hit,
+                                                    *seqalign_num_ident,
+                                                )
+                                            },
+                                            |previous, s_idx| {
+                                                crate::report::db_subject::rank_joins_as_copy(
+                                                    &titles.parsed,
+                                                    previous as usize,
+                                                    s_idx as usize,
+                                                )
+                                            },
+                                            args.sort,
+                                            false,
+                                        )
+                                        .into_iter()
+                                        .map(|rank| rank as usize)
+                                        .collect()
+                                    } else {
+                                        fetched.collect()
+                                    };
                                     subject_reads.set(
                                         query,
-                                        titles.subject_read_texts(
-                                            database,
-                                            fetched,
-                                            plural_names,
-                                        )?,
+                                        titles.subject_read_texts(database, ranks, plural_names)?,
                                     );
                                 } else {
                                     let messages = titles.prefetch_messages(database, fetched)?;

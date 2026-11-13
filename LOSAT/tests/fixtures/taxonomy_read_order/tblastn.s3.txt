@@ -1,0 +1,97 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: txr_sn (parsed Seq-ids)
+           3 sequences; 1,635 total letters
+
+
+
+Query= q
+
+Length=250
+                                                                      Score   Total  Query    E      Max
+Sequences producing significant alignments:                          (Bits)   Score  cover   Value   Ident
+
+Error: [tblastn] Error: Tax database file has wrong magic number.
+FFF00001.1 f_frag                                                     98.6     113    21%    2e-31   100%      
+AAA00001.1 a_title                                                    461      461    100%   2e-171  90%       
+
+
+>FFF00001.1 f_frag
+Length=135
+
+ Score = 98.6 bits (244),  Expect = 2e-31, Method: Compositional matrix adjust.
+ Identities = 45/45 (100%), Positives = 45/45 (100%), Gaps = 0/45 (0%)
+ Frame = +1
+
+Query  1    RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNG  45
+            RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNG
+Sbjct  1    RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNG  135
+
+
+ Score = 15.4 bits (28),  Expect = 1.3, Method: Composition-based stats.
+ Identities = 5/8 (63%), Positives = 6/8 (75%), Gaps = 0/8 (0%)
+ Frame = -3
+
+Query  225  ICHNNHVP  232
+            IC  NH+P
+Sbjct  43   ICCYNHLP  20
+
+
+>AAA00001.1 a_title
+Length=750
+
+ Score = 461 bits (1186),  Expect = 2e-171, Method: Compositional matrix adjust.
+ Identities = 225/250 (90%), Positives = 227/250 (91%), Gaps = 0/250 (0%)
+ Frame = +1
+
+Query  1    RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNGSSHQLCFYKRPFEKA  60
+            RKNGRMWEGD SSKFLNEYKVHDHDCSMDENQ KLSR FHGGQNGSSH LCFYKRPFEK 
+Sbjct  1    RKNGRMWEGDQSSKFLNEYKVHDHDCSMDENQDKLSRNFHGGQNGSSHFLCFYKRPFEKT  180
+
+Query  61   PPDMVHSHRNSQLIAINVSKAHWGPGTWLEPVKLSQCDENTAEKEGRGTKDRGPVKLKEQ  120
+            PPDMVH+HRNSQLIAI VSKAHWGPGTWLEPVKLS CD NT EKEGRGTKDRGPVKLKEQ
+Sbjct  181  PPDMVHAHRNSQLIAIKVSKAHWGPGTWLEPVKLSDCDANTPEKEGRGTKDRGPVKLKEQ  360
+
+Query  121  TWWPGKMKITWIHMCNVCGIQTYALGWSTDPLKIAYTAIYIDMWRIWHVIMFSNSNWTNG  180
+            TWWPG MKITWIHM NVCGIQTYA GWSTDPLKIAYTAIYIDMWR W VIMFSN NWTNG
+Sbjct  361  TWWPGTMKITWIHMHNVCGIQTYAPGWSTDPLKIAYTAIYIDMWRQWGVIMFSNLNWTNG  540
+
+Query  181  TGRAPLRYAKIAIIKVLCMTAWNGIVPFGEMSIGHRHKDVKGPCICHNNHVPCRRKMTCD  240
+            TGRAPLRYAKIAIIKVLC+TA NGIV FGEMSIGHRHKDVK P ICHNN  P R KMTCD
+Sbjct  541  TGRAPLRYAKIAIIKVLCITASNGIVYFGEMSIGHRHKDVKSPPICHNNECPKRHKMTCD  720
+
+Query  241  WMHDTMHKWG  250
+            WMHDTMHKWG
+Sbjct  721  WMHDTMHKWG  750
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.136    0.482    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 101218
+
+
+  Database: txr_sn (parsed Seq-ids)
+    Posted date:  Nov 13, 2026  9:29 PM
+  Number of letters in database: 1,635
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

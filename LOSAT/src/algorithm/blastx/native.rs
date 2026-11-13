@@ -1607,7 +1607,17 @@ pub(super) fn reported_batch(
             // the tabular rows write the texts where they read each subject.
             let places = matches!(options.outfmt, 0 | 5 | 6 | 7 | 10 | 20);
             let rows_open = options.tabular.is_some_and(|spec| spec.checks_taxdb());
-            reported.fetch_by_query(database, results, options.gapped, rows, places, rows_open)?;
+            // The pairwise report reads its subjects in the order of its `-sorthits`.
+            let pairwise = (options.outfmt == 0).then(|| options.report_sort());
+            reported.fetch_by_query(
+                database,
+                results,
+                options.gapped,
+                rows,
+                places,
+                rows_open,
+                pairwise,
+            )?;
             if options.outfmt == 5 {
                 diagnostics.write_all(&reported.take_query_fetches())?;
             }

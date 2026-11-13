@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -90,6 +91,50 @@ class CaseTableTests(unittest.TestCase):
     def test_the_entry_is_to_frozen_as_data(self):
         entry = frozen_paths.case_table_entry()
         self.assertEqual(entry, {"run": RUN_ROOT + "/", "frozen": FROZEN_PREFIX + "/", "not_after": "/."})
+
+
+# 2026-11-13: two fixtures named `nul.fa` made `actions/checkout` fail on Windows
+# (`error: invalid path 'LOSAT/tests/convert2blastmask/in/nul.fa'`): Windows treats the base name
+# of NUL, CON, ... as a device whatever the extension. Linux and macOS accept such paths, so only
+# a check of the tracked names keeps them out.
+WINDOWS_RESERVED = frozenset(["CON", "PRN", "AUX", "NUL"]
+                             + [f"COM{n}" for n in range(1, 10)] + [f"LPT{n}" for n in range(1, 10)])
+
+
+def is_windows_reserved(component: str) -> bool:
+    """True when `component` (one path component) names a Windows device: the part before the
+    first `.`, trailing spaces and dots ignored, any case."""
+    return component.rstrip(" .").split(".", 1)[0].rstrip(" ").upper() in WINDOWS_RESERVED
+
+
+def tracked_paths() -> list[str]:
+    """Every tracked path of the repository (`git ls-files`); the directory walk without `.git`
+    when git is not available."""
+    try:
+        out = subprocess.run(["git", "ls-files", "-z"], cwd=REPO, check=True,
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
+        return [p for p in out.decode("utf-8", "surrogateescape").split("\0") if p]
+    except (OSError, subprocess.CalledProcessError):
+        found = []
+        for root, dirs, files in os.walk(REPO):
+            dirs[:] = [d for d in dirs if d != ".git"]
+            found.extend(os.path.relpath(os.path.join(root, f), REPO).replace(os.sep, "/")
+                         for f in dirs + files)
+        return found
+
+
+class WindowsReservedNameTests(unittest.TestCase):
+    def test_reserved_names_are_found(self):
+        for name in ("nul.fa", "NUL", "Com1.txt", "lpt9.tar.gz", "aux", "nul .fa", "nul."):
+            self.assertTrue(is_windows_reserved(name), name)
+
+    def test_other_names_are_not(self):
+        for name in ("nul_bytes.fa", "null.fa", "console.txt", "com10", "lpt0", "auxiliary.fa", "a.nul", ""):
+            self.assertFalse(is_windows_reserved(name), name)
+
+    def test_no_tracked_path_has_a_windows_reserved_component(self):
+        bad = [p for p in tracked_paths() if any(is_windows_reserved(c) for c in p.split("/"))]
+        self.assertEqual(bad, [], "Windows cannot check these paths out; rename them: " + ", ".join(bad))
 
 
 if __name__ == "__main__":

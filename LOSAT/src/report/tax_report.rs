@@ -179,22 +179,29 @@ impl Text {
         out
     }
 
-    fn write_to(&self, out: &mut dyn Write) -> io::Result<()> {
-        static BLANK: [u8; 1 << 16] = [b' '; 1 << 16];
-        for seg in &self.0 {
-            match seg {
-                Seg::Bytes(bytes) => out.write_all(bytes)?,
-                Seg::Spaces(count) => {
-                    let mut left = *count;
-                    while left > 0 {
-                        let n = left.min(BLANK.len() as u64) as usize;
-                        out.write_all(&BLANK[..n])?;
-                        left -= n as u64;
-                    }
+    /// The number of bytes of the text.
+    fn len(&self) -> u64 {
+        self.0
+            .iter()
+            .map(|seg| match seg {
+                Seg::Bytes(bytes) => bytes.len() as u64,
+                Seg::Spaces(count) => *count,
+            })
+            .sum()
+    }
+
+    /// `out << text`: one insertion of NCBI's, streamed (`cli::insert_streamed`), so that a run
+    /// of spaces is never held whole.
+    fn insert_into(&self, out: &mut dyn Write) -> io::Result<()> {
+        crate::cli::insert_streamed(out, self.len(), |insertion| {
+            for seg in &self.0 {
+                match seg {
+                    Seg::Bytes(bytes) => insertion.bytes(bytes)?,
+                    Seg::Spaces(count) => insertion.spaces(*count)?,
                 }
             }
-        }
-        Ok(())
+            Ok(())
+        })
     }
 }
 
@@ -1005,6 +1012,9 @@ impl TaxReport {
         title: &[u8],
         length: usize,
     ) -> io::Result<()> {
+        // The report's insertions are NCBI's (`cli::insert`, `Text::insert_into`): `m_Outfile <<
+        // reportCaption`, `m_Outfile << "\n"` (module docs), the `Query=` block's and
+        // `out << orgReportData` (`organism_report`).
         add_spaces(
             b"Tax BLAST report",
             u64::from(LINE_LENGTH),
@@ -1012,12 +1022,17 @@ impl TaxReport {
             true,
             true,
         )
-        .write_to(out)?;
-        out.write_all(b"\n")?;
-        // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:729-746
-        // (`AcknowledgeBlastQuery` with `kFormatLineLength`, 68: outfmt 0's `Query=` block).
-        let mut out = out;
-        crate::report::pairwise::write_blastp_query_header(&mut out, title, length)?;
+        .insert_into(out)?;
+        crate::cli::insert(out, b"\n")?;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:885-888
+        // ```c++
+        //     CBlastFormatUtil::AcknowledgeBlastQuery(*bioseq, kFormatLineLength,
+        //                                             m_Outfile, m_BelieveQuery,
+        //                                             m_IsHTML, false,
+        //                                             results.GetRID());
+        // ```
+        // outfmt 0's `Query=` block (`kFormatLineLength`, 68).
+        crate::report::pairwise::write_blastp_query_header(out, title, length)?;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:165-172
         // ```c++
         //     m_Protocol = CAlignFormatUtil::GetProtocol();
@@ -1053,7 +1068,11 @@ impl TaxReport {
                 }
             }
         }
-        text.write_to(out)
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:515
+        // ```c++
+        //     out << orgReportData;
+        // ```
+        text.insert_into(out)
     }
 }
 

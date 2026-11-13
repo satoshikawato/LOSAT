@@ -2473,25 +2473,6 @@ impl BlastpReport {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
-    // ```c++
-    //        		const CBioseq_Handle& subject_bh =
-    //                 scope.GetBioseqHandle(align.GetSeq_id(1));
-    // ```
-    /// Whether the report's writer writes the texts of the subjects that a query's report reads
-    /// one by one where it reads each (`QueryWarnings::subject_read`): outfmt 0 (description
-    /// lines and alignment headings), 5 (`Hit`s), the tabular rows and the organism report (18,
-    /// a `CustomTabular`, `report::tax_report`); the others write them before the query's report.
-    fn places_subject_reads(self) -> bool {
-        matches!(
-            self,
-            BlastpReport::Text(
-                OutputFormat::Pairwise | OutputFormat::Tabular | OutputFormat::TabularWithComments
-            ) | BlastpReport::CustomTabular(_)
-                | BlastpReport::Xml
-        )
-    }
-
     /// Whether NCBI writes a query's result warnings with its report
     /// (`ReportFormat::writes_query_warnings`): not for the Seq-annot formats.
     fn writes_query_warnings(self) -> bool {
@@ -13360,11 +13341,14 @@ fn run_resolved_in_pool(
     // first format's rows read their Bioseqs (`TabularSpec::subject_fetch`; `nident` alone on
     // rows with identities, `ListedTitles::fetched_ranks`).
     // The texts of the subjects that the reports of the queries whose batch's prefetch is off
-    // read one by one, by query, where the first format places them (`places_subject_reads`).
+    // read one by one, by query, where the first format places them
+    // (`ReportFormat::places_subject_reads`).
     let mut subject_reads = crate::report::query_warnings::SubjectReads::default();
-    let places_reads = format_plans
+    let places_reads = outputs
+        .formats
         .first()
-        .is_some_and(|outfmt| outfmt.places_subject_reads());
+        .and_then(crate::api::local_blast::FormatOutput::report_format)
+        .is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
         if prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0

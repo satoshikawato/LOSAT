@@ -136,26 +136,6 @@ impl BlastnOutputFormat {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
-    // ```c++
-    //        		const CBioseq_Handle& subject_bh =
-    //                 scope.GetBioseqHandle(align.GetSeq_id(1));
-    // ```
-    /// Whether the report's writer writes the texts of the subjects that a query's report reads
-    /// one by one where it reads each (`QueryWarnings::subject_read`): outfmt 0 (description
-    /// lines and alignment headings), 5 (`Hit`s), the tabular rows and the organism report (18,
-    /// a `CustomTabular`, `report::tax_report`); the others write them before the query's report.
-    pub(crate) fn places_subject_reads(self) -> bool {
-        matches!(
-            self,
-            BlastnOutputFormat::Pairwise
-                | BlastnOutputFormat::Tabular
-                | BlastnOutputFormat::TabularWithComments
-                | BlastnOutputFormat::CustomTabular(_)
-                | BlastnOutputFormat::Xml
-        )
-    }
-
     /// Whether NCBI writes a query's result warnings with its report
     /// (`ReportFormat::writes_query_warnings`): not for the structured formats.
     pub(crate) fn writes_query_warnings(self) -> bool {

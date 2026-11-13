@@ -2066,12 +2066,12 @@ fn search(
                     .and_then(|format| super::tabular::tabular_spec(format.outfmt));
                 // Whether the first format's writer writes the texts of the subjects that a
                 // query's report reads one by one where it reads each
-                // (`common::database::places_subject_reads`).
-                let places_reads = outputs.formats.first().is_some_and(|format| {
-                    crate::algorithm::common::database::places_subject_reads(
-                        super::stage_e_report::format_number(format.outfmt),
-                    )
-                });
+                // (`ReportFormat::places_subject_reads`).
+                let places_reads = outputs
+                    .formats
+                    .first()
+                    .and_then(crate::api::local_blast::FormatOutput::report_format)
+                    .is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
                 let plural_names = taxdb_found
                     && first_spec
                         .as_ref()

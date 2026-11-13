@@ -175,7 +175,7 @@ impl Report {
             return;
         }
         self.pending.extend_from_slice(bytes);
-        self.buffer.sputn(bytes.len());
+        self.buffer.sputn(bytes.len(), &self.pending);
         // An insertion that ends a line is `endl`, which flushes the stream. LOSAT writes the
         // report in the pieces of NCBI's insertions where a piece can reach a buffer's limit: the
         // strings of the archive and the data. NCBI rpsbproc 0.5.1, both builds, on a `SESSION`
@@ -194,7 +194,7 @@ impl Report {
             return;
         }
         self.pending.push(byte);
-        self.buffer.sputc();
+        self.buffer.sputc(&self.pending);
         self.write_blocks();
     }
 

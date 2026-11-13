@@ -73,7 +73,7 @@ fn report(
 ) -> (Vec<u8>, Vec<Step>) {
     let (steps, text) = organism_report(hsps, subjects, &mut lookups(names)).unwrap();
     let mut out = Vec::new();
-    text.write_to(&mut out).unwrap();
+    text.insert_into(&mut out).unwrap();
     (out, steps)
 }
 

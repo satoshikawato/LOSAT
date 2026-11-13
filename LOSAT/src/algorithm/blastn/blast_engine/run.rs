@@ -10422,11 +10422,13 @@ fn run_in_pool(
                 };
                 // A query's own fetches where the batch's prefetch is off: the texts of the
                 // subjects its report reads, kept by subject where the first format writes them
-                // where it reads each (`BlastnOutputFormat::places_subject_reads`), else returned
-                // for the query's warnings.
-                let places = output_formats
+                // where it reads each (`ReportFormat::places_subject_reads`), else returned for the
+                // query's warnings.
+                let places = outputs
+                    .formats
                     .first()
-                    .is_some_and(|format| format.places_subject_reads());
+                    .and_then(crate::api::local_blast::FormatOutput::report_format)
+                    .is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
                 let query_fetch = |query: usize,
                                    shown: &[Option<BlastnHitList>],
                                    reads: &mut [QueryReads]|

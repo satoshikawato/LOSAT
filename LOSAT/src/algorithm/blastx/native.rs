@@ -626,7 +626,12 @@ fn run_inner(
     }
     // The run keeps its output in the caller's slot: an error of NCBI's own is followed by the
     // error archive in the same output (`run`).
-    let writer = output.insert(BufWriter::new(destination));
+    // The organism report's stream is NCBI's buffer (`cli::report_destination`), which takes each
+    // write as one of NCBI's insertions (`cli::insert`): no buffer of LOSAT's comes before it.
+    let writer = output.insert(match (tax_report, &hold) {
+        (true, None) => BufWriter::with_capacity(0, destination),
+        _ => BufWriter::new(destination),
+    });
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
     // ```c++
     //     if(hitlist_size < 5){
@@ -1622,9 +1627,10 @@ pub(super) fn reported_batch(
                 });
             // The writers of outfmt 0 (description lines and alignment headings), 5 (`Hit`s), the
             // tabular rows and the organism report write the texts where they read each subject
-            // (`common::database::places_subject_reads`).
-            let places =
-                crate::algorithm::common::database::places_subject_reads(i32::from(options.outfmt));
+            // (`ReportFormat::places_subject_reads`).
+            use crate::blastinput::app::ReportFormat;
+            let places = ReportFormat::from_number(i32::from(options.outfmt))
+                .is_some_and(ReportFormat::places_subject_reads);
             // A field list with a plural name and the organism report look every taxid up, taxid
             // 0 too: the first row or report line opens the taxonomy database after the first
             // read (`common::database::subject_read_texts`).

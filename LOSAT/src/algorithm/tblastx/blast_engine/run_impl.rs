@@ -3403,11 +3403,12 @@ fn run_batch_loop(
         .first()
         .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
     // Whether the first format writes the texts of the subjects that a query's report reads one
-    // by one where it reads each (`TblastxOutputFormat::places_subject_reads`).
+    // by one where it reads each (`ReportFormat::places_subject_reads`).
     let places_reads = outputs
         .formats
         .first()
-        .is_some_and(|format| report::output_format(format.outfmt).places_subject_reads());
+        .and_then(crate::api::local_blast::FormatOutput::report_format)
+        .is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
     // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0 too,
     // which the prefetch does not: the rows of a batch with hits may open the taxonomy database
     // before a later batch's prefetch (`TaxdbRun::open_for_rows`).
@@ -3887,7 +3888,7 @@ fn run_batch_loop(
                                 }
                             };
                             // The first format writes the texts where it reads each subject
-                            // (`TblastxOutputFormat::places_subject_reads`), else before the
+                            // (`ReportFormat::places_subject_reads`), else before the
                             // report.
                             query_fetches.push(if shown.is_empty() {
                                 Vec::new()

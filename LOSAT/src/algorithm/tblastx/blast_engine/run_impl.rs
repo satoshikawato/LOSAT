@@ -3380,7 +3380,7 @@ fn run_batch_loop(
                 warnings: error_warnings,
             } = std::mem::replace(&mut reading, QueryReading::End)
             {
-                reports.write_before_failed_batch(outputs, done, &warnings)?;
+                reports.write_before_failed_batch(outputs, done, &warnings, None)?;
                 outputs.diagnostics.write_all(&batch_warnings)?;
                 outputs.diagnostics.write_all(&error_warnings)?;
                 return Err(error.into_app_error());
@@ -3397,7 +3397,7 @@ fn run_batch_loop(
         // the reports of the batches before (without the epilog), when NCBI has read that
         // batch (its records' messages).
         if start == end {
-            reports.write_before_failed_batch(outputs, done, &warnings)?;
+            reports.write_before_failed_batch(outputs, done, &warnings, None)?;
             outputs.diagnostics.write_all(&batch_warnings)?;
             return Err(crate::cli::NativeError {
                 exit: 3,
@@ -3412,7 +3412,7 @@ fn run_batch_loop(
             if let Err(error) =
                 crate::blastinput::app::check_query_split_environment("TBLASTX", true, true)?
             {
-                reports.write_before_failed_batch(outputs, done, &warnings)?;
+                reports.write_before_failed_batch(outputs, done, &warnings, Some(start..end))?;
                 outputs.diagnostics.write_all(&batch_warnings)?;
                 return Err(error);
             }
@@ -3476,7 +3476,7 @@ fn run_batch_loop(
                 .iter()
                 .all(|record| record.seq().len() < CODON_LENGTH)
         {
-            reports.write_before_failed_batch(outputs, done, &warnings)?;
+            reports.write_before_failed_batch(outputs, done, &warnings, Some(start..end))?;
             outputs.diagnostics.write_all(&batch_warnings)?;
             let mut message = String::from("BLAST engine error: ");
             for _ in 0..no_data_queries {
@@ -3512,7 +3512,7 @@ fn run_batch_loop(
         // kBlastMessageNoContext = -1), which `RemoveDuplicates` sorts first
         // (`CSearchMessage::operator<`, blast_types.hpp:295-304).
         if args.scoring_matrix() == TblastxMatrix::Unknown {
-            reports.write_before_failed_batch(outputs, done, &warnings)?;
+            reports.write_before_failed_batch(outputs, done, &warnings, Some(start..end))?;
             outputs.diagnostics.write_all(&batch_warnings)?;
             let mut message = String::from("BLAST engine error: ");
             for record in batch_queries {
@@ -3545,7 +3545,7 @@ fn run_batch_loop(
             .any(|format| report::output_format(format.outfmt).is_structured_xml())
             && crate::report::blast_xml::matrix::FormattingMatrix::new(args.matrix_name()).is_none()
         {
-            reports.write_before_failed_batch(outputs, done, &warnings)?;
+            reports.write_before_failed_batch(outputs, done, &warnings, Some(start..end))?;
             outputs.diagnostics.write_all(&batch_warnings)?;
             return Err(crate::cli::NativeError {
                 exit: 3,
@@ -3578,7 +3578,7 @@ fn run_batch_loop(
                 };
                 let read_error =
                     error.downcast::<crate::algorithm::common::database::PreliminaryReadError>()?;
-                reports.write_before_failed_batch(outputs, done, &warnings)?;
+                reports.write_before_failed_batch(outputs, done, &warnings, Some(start..end))?;
                 outputs.diagnostics.write_all(&batch_warnings)?;
                 return Err(crate::blastinput::app::engine_error(read_error.0));
             }
@@ -3597,7 +3597,12 @@ fn run_batch_loop(
                 // outfmt 0 prolog), then the messages of the failing batch's records (read
                 // before its search), then the error, which skips `PrintEpilog`.
                 Ok(ErrorAfterBatchReports(error)) => {
-                    reports.write_before_failed_batch(outputs, done, &warnings)?;
+                    reports.write_before_failed_batch(
+                        outputs,
+                        done,
+                        &warnings,
+                        Some(start..end),
+                    )?;
                     outputs.diagnostics.write_all(&batch_warnings)?;
                     return Err(error);
                 }
@@ -3629,7 +3634,12 @@ fn run_batch_loop(
             if let Err(error) = read {
                 match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
                     Ok(failure) => {
-                        reports.write_before_failed_batch(outputs, done, &warnings)?;
+                        reports.write_before_failed_batch(
+                            outputs,
+                            done,
+                            &warnings,
+                            Some(start..end),
+                        )?;
                         outputs.diagnostics.write_all(&batch_warnings)?;
                         return Err(failure.error);
                     }
@@ -3665,7 +3675,12 @@ fn run_batch_loop(
                     let read_error = error
                         .downcast::<crate::algorithm::common::database::PreliminaryReadError>(
                     )?;
-                    reports.write_before_failed_batch(outputs, done, &warnings)?;
+                    reports.write_before_failed_batch(
+                        outputs,
+                        done,
+                        &warnings,
+                        Some(start..end),
+                    )?;
                     outputs.diagnostics.write_all(&batch_warnings)?;
                     return Err(crate::blastinput::app::engine_error(read_error.0));
                 }
@@ -4126,7 +4141,38 @@ impl BatchReports<'_> {
     /// outfmt 0 prolog of the sinks that write it with the reports (the others wrote it
     /// before the search, `write_pairwise_prologs`). Where the loop wrote the batches before
     /// when it took them (`report_stream`), nothing remains.
+    ///
+    /// `failed` is the queries of the failing batch when NCBI has made its query factory: the
+    /// batch's search strategy request (`-export_search_strategy`), which NCBI writes before the
+    /// search (tblastx_app.cpp:181), follows those of the batches before. A batch that fails while
+    /// it is read, or without a query (`Empty CBlastQueryVector`), has none.
     fn write_before_failed_batch(
+        &self,
+        outputs: &mut ReportOutputs<'_>,
+        done: SearchedBatches,
+        warnings: &[Vec<u8>],
+        failed: Option<std::ops::Range<usize>>,
+    ) -> Result<()> {
+        self.write_reports_before_failed_batch(outputs, done, warnings)?;
+        match (self.args.strategy.as_ref(), failed) {
+            (Some(strategy), Some(failed)) => {
+                crate::algorithm::tblastx::archive::write_tblastx_failed_strategy(
+                    strategy,
+                    self.query_runs.records,
+                    match self.subjects {
+                        ShownSubjects::Fasta { records, .. } => records,
+                        ShownSubjects::Database { .. } => &[],
+                    },
+                    &self.query_runs.input.placements,
+                    self.args.lcase_masking,
+                    failed,
+                )
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn write_reports_before_failed_batch(
         &self,
         outputs: &mut ReportOutputs<'_>,
         done: SearchedBatches,

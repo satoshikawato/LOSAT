@@ -440,6 +440,35 @@ pub(crate) fn write_blastp_strategy(
     })
 }
 
+/// Writes the search strategy's request of the batch of the queries `span` of `call`, whose
+/// search fails (a sequence or header file of the database that cannot be read, the setup's
+/// errors): NCBI writes a batch's request before its search, so the file holds that batch's
+/// request after those of the batches before (NCBI BLAST+ 2.17.0, probe 4 of RG-F1: a database
+/// without its `.psq` or `.phr`, one batch and `BATCH_SIZE=300` after an all-X batch). The request
+/// does not read the search (`call.masks` and `call.unsearched` are not read), and no request
+/// follows it.
+pub(crate) fn write_blastp_failed_strategy(
+    strategy: &StrategyExport,
+    call: &CallBatches<'_>,
+    span: Range<usize>,
+) -> Result<()> {
+    let unsearched = vec![true; call.queries.len()];
+    let spans = [span];
+    let call = CallBatches {
+        masks: &[],
+        unsearched: &unsearched,
+        spans: &spans,
+        ..*call
+    };
+    let no_context = |_: usize| FirstContext {
+        karlin: None,
+        search_space: 0,
+        length_adjustment: 0,
+        context0_space: 0,
+    };
+    write_blastp_strategy(strategy, &call, &no_context)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

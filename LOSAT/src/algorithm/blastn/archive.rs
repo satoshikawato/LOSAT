@@ -536,6 +536,30 @@ pub(crate) fn write_blastn_strategy(
     })
 }
 
+/// Writes the search strategy's request of the one batch of `call` (its queries), whose search
+/// fails: NCBI writes a batch's request before its search, and no request follows it. The request
+/// does not read the search (`call.unsearched`, the masks and the lengths are not read).
+pub(crate) fn write_blastn_failed_strategy(
+    strategy: &StrategyExport,
+    call: &CallBatches<'_>,
+) -> Result<()> {
+    let unsearched = vec![true; call.queries.len()];
+    let call = CallBatches {
+        unsearched: &unsearched,
+        spans: &[],
+        ..*call
+    };
+    let no_context = |_: usize| {
+        Ok(FirstContext {
+            karlin: None,
+            search_space: 0,
+            length_adjustment: 0,
+            context0_space: 0,
+        })
+    };
+    write_blastn_strategy(strategy, &call, &no_context)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

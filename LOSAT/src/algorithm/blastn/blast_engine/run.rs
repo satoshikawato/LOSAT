@@ -9828,6 +9828,13 @@ fn run_in_pool(
                 } else {
                     before(outputs)?;
                 }
+                write_failed_batch_strategy(
+                    &args,
+                    batch_records.searched(),
+                    start,
+                    &report_ranges,
+                    source,
+                )?;
                 outputs.diagnostics.write_all(&batch_title_warnings)?;
                 outputs.diagnostics.write_all(&masker_warnings)?;
                 return Err(failure.into());
@@ -9908,6 +9915,13 @@ fn run_in_pool(
             } else {
                 before(outputs)?;
             }
+            write_failed_batch_strategy(
+                &args,
+                batch_records.searched(),
+                start,
+                &report_ranges,
+                source,
+            )?;
             outputs.diagnostics.write_all(&batch_title_warnings)?;
             let mut message = String::from("BLAST engine error: ");
             for _ in start..end {
@@ -10037,6 +10051,13 @@ fn run_in_pool(
                     } else {
                         before(outputs)?;
                     }
+                    write_failed_batch_strategy(
+                        &args,
+                        batch_records.searched(),
+                        start,
+                        &report_ranges,
+                        source,
+                    )?;
                     // The failing batch was read (its title warnings) before its search.
                     outputs.diagnostics.write_all(&warnings[start])?;
                     return Err(error);
@@ -10048,6 +10069,17 @@ fn run_in_pool(
                 // traceback's of ambiguity data that it cannot decode, `x_rpt_stream`); the off
                 // path writes no report here.
                 Err(error) => {
+                    // NCBI's error of the first batch's search (`database_search_error`; not
+                    // LOSAT's refusal): the batch's search strategy request was written before it.
+                    if input_start == 0 && error.is::<crate::cli::NativeError>() {
+                        write_failed_batch_strategy(
+                            &args,
+                            batch_records.searched(),
+                            start,
+                            &report_ranges,
+                            source,
+                        )?;
+                    }
                     let written = if stream.acting() { start } else { 0 };
                     for query_warnings in &warnings[written..=start] {
                         outputs.diagnostics.write_all(query_warnings)?;
@@ -10150,6 +10182,13 @@ fn run_in_pool(
                 } else {
                     before(outputs)?;
                 }
+                write_failed_batch_strategy(
+                    &args,
+                    batch_records.searched(),
+                    start,
+                    &report_ranges,
+                    source,
+                )?;
                 outputs.diagnostics.write_all(&warnings[start])?;
                 return Err(error);
             }
@@ -10710,6 +10749,62 @@ struct BatchResults<'a> {
     /// batch's prefetch counts its own Seq-aligns, `common::database::BatchPrefetch`); empty
     /// when the call is one batch.
     batches: &'a [std::ops::Range<usize>],
+}
+
+/// Writes the search strategy request (`-export_search_strategy`) of the failing batch, whose
+/// searched queries are `records` (the call's searched queries from `start`): NCBI writes it
+/// after making the batch's query factory and before its search (blastn_app.cpp:282), so a batch
+/// whose search fails (its setup, the masks of `-window_masker_db`, a sequence or header file of
+/// the database that cannot be read) has one, after those of the batches before (NCBI BLAST+
+/// 2.17.0, probe 4 of RG-F1). A batch that fails while it is read, or without a query, has none.
+fn write_failed_batch_strategy(
+    args: &BlastnArgs,
+    records: &[FastaRecord],
+    start: usize,
+    ranges: &ReportRanges<'_>,
+    source: SubjectSource<'_>,
+) -> Result<()> {
+    let Some(strategy) = args.strategy.as_ref() else {
+        return Ok(());
+    };
+    let placements = crate::blastinput::seq_range::Placements(
+        ranges
+            .queries
+            .placements
+            .0
+            .get(start..start + records.len())
+            .map_or_else(Vec::new, <[_]>::to_vec),
+    );
+    let prepared_records;
+    let subject_records = match source {
+        SubjectSource::Prepared(prepared) => {
+            prepared_records = prepared.letters();
+            Some(
+                ranges
+                    .subjects
+                    .records
+                    .unwrap_or_else(|| prepared_records.records()),
+            )
+        }
+        SubjectSource::Database(_) => None,
+    };
+    archive::write_blastn_failed_strategy(
+        strategy,
+        &archive::CallBatches {
+            queries: records,
+            query_lengths: &[],
+            query_placements: &placements,
+            subject_records,
+            query_masks: &[],
+            dust_masks: &[],
+            unsearched: &[],
+            lcase_masking: args.lcase_masking,
+            window_masker: false,
+            both_strands: args.strand == "both",
+            minus_strand: QueryStrand::from_option(&args.strand) == QueryStrand::Minus,
+            spans: &[],
+        },
+    )
 }
 
 /// Writes what NCBI has written when a query batch fails, before its error: the reports of

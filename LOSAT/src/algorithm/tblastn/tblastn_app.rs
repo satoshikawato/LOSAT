@@ -2058,8 +2058,19 @@ fn search(
             &tabular_inputs,
         )?;
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);
-        // The failed batch's reading messages, then its error.
+        // The failed batch's search strategy request (written before its search: NCBI has
+        // made its query factory), its reading messages, then its error.
         if let Some((range, error)) = failed {
+            if let Some(strategy) = args.strategy.as_ref() {
+                super::archive::write_tblastn_failed_strategy(
+                    strategy,
+                    &searched_queries[..searched_done],
+                    database.is_none().then_some(subject_records),
+                    &query_input.placements,
+                    resolved.lcase_masking,
+                    range.clone(),
+                )?;
+            }
             for warnings in &batches.warnings[range] {
                 outputs.diagnostics.write_all(warnings)?;
             }

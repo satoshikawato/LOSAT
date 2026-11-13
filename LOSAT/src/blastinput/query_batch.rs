@@ -199,6 +199,18 @@ impl QueryBatches {
             .partition_point(|&(_, searched)| searched <= query);
         self.starts[after.saturating_sub(1)]
     }
+
+    /// The searched queries of the batch of the searched query `query`.
+    pub(crate) fn searched_span(&self, query: usize) -> std::ops::Range<usize> {
+        let after = self
+            .starts
+            .partition_point(|&(_, searched)| searched <= query);
+        let end = self
+            .starts
+            .get(after)
+            .map_or(self.searched_done, |&(_, searched)| searched);
+        self.start_of(query).1..end
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input.cpp:134-171

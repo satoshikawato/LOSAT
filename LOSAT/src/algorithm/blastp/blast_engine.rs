@@ -7051,6 +7051,14 @@ fn search(
             } else {
                 write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
             }
+            // The failed batch's search strategy request, which NCBI writes before its search.
+            write_failed_batch_strategy(
+                &args,
+                &searched_queries[..batches.searched_done],
+                &query_input.placements,
+                subject_source,
+                batches.searched_span(failure.query),
+            )?;
             outputs
                 .diagnostics
                 .write_all(&batches.warnings[searched_start])?;
@@ -7824,6 +7832,21 @@ fn preliminary_search_error(
         if reports.x_prolog {
             write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
         }
+        // The failed batch's search strategy request (a chunk's is that of its query's batch,
+        // `search_split_query_batches`).
+        if let Some(batch) = query_batches
+            .iter()
+            .find(|batch| !batch.searched.is_empty())
+            .filter(|_| !chunk)
+        {
+            write_failed_batch_strategy(
+                args,
+                query_records,
+                &ranges.query_input.placements,
+                subject_source,
+                batch.searched.clone(),
+            )?;
+        }
         if let Some(first_batch_messages) = reports.reader_warnings.first() {
             outputs.diagnostics.write_all(first_batch_messages)?;
         }
@@ -7833,6 +7856,37 @@ fn preliminary_search_error(
         Ok(()) => crate::blastinput::app::engine_error(text),
         Err(error) => error,
     }
+}
+
+/// Writes the search strategy request (`-export_search_strategy`) of the batch of the queries
+/// `span` of `query_records`, whose search fails: NCBI writes it before the batch's search
+/// (`archive::write_blastp_failed_strategy`).
+fn write_failed_batch_strategy(
+    args: &ResolvedBlastpArgs,
+    query_records: &[FastaRecord],
+    query_placements: &seq_range::Placements,
+    subject_source: BlastpSubjectSource<'_>,
+    span: std::ops::Range<usize>,
+) -> Result<()> {
+    let Some(strategy) = args.strategy.as_ref() else {
+        return Ok(());
+    };
+    super::archive::write_blastp_failed_strategy(
+        strategy,
+        &super::archive::CallBatches {
+            queries: query_records,
+            query_placements,
+            subject_records: subject_source
+                .database()
+                .is_none()
+                .then(|| subject_source.fasta_records()),
+            masks: &[],
+            lcase_masking: args.lcase_masking,
+            unsearched: &[],
+            spans: &[],
+        },
+        span,
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
@@ -7936,6 +7990,15 @@ fn unsearched_batches_then_engine_error(
         &prefix_ranges,
         &prefix_reports,
         x_lookup_ahead::XAheadBlock::none(),
+    ) {
+        return error;
+    }
+    if let Err(error) = write_failed_batch_strategy(
+        args,
+        query_records,
+        &ranges.query_input.placements,
+        subject_source,
+        batch.searched.clone(),
     ) {
         return error;
     }
@@ -8149,7 +8212,7 @@ fn search_split_query_batches(
                 .collect();
             let mut chunk_lists = Vec::new();
             let part_input = seq_range::QueryInput::whole(&parts);
-            run_resolved_in_pool(
+            let searched = run_resolved_in_pool(
                 args.clone(),
                 &parts,
                 subject_source,
@@ -8180,7 +8243,19 @@ fn search_split_query_batches(
                     titles_may_refuse: false,
                 },
                 x_lookup_ahead::XAheadBlock::none(),
-            )?;
+            );
+            // A chunk's search that fails is its batch's (`preliminary_search_error`): the
+            // batch's search strategy request comes before the error.
+            if let Err(error) = searched {
+                write_failed_batch_strategy(
+                    args,
+                    query_records,
+                    &query_input.placements,
+                    subject_source,
+                    range.clone(),
+                )?;
+                return Err(error);
+            }
             let chunk_parts: Vec<super::query_split::BlastpChunkPart> = chunk
                 .queries
                 .iter()

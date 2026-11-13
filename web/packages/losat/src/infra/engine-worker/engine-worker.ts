@@ -2,12 +2,12 @@
 // thread ends it to cancel a search or to renew the instance; it keeps no working state
 // that cannot be rebuilt from the Data worker (design D01). This module is the worker's
 // composition root.
-import { InputMismatchError } from '../../ports/engine';
-import type { OutputStream } from '../../ports/run-output';
-import { EngineStoppedError } from '../reactor/abi';
-import { loadReactor } from '../reactor/instance';
-import { RunOutputWriter } from '../run-output/writer';
-import { InstanceUse } from './instance-use';
+import { InputMismatchError } from '../../ports/engine.js';
+import type { OutputStream } from '../../ports/run-output.js';
+import { EngineStoppedError } from '../reactor/abi.js';
+import { loadReactor } from '../reactor/instance.js';
+import { RunOutputWriter } from '../run-output/writer.js';
+import { InstanceUse } from './instance-use.js';
 import {
   HOLD_USE_CHANNEL,
   STOP_AT_OUTPUT_CHANNEL,
@@ -19,8 +19,8 @@ import {
   type WorkerPrepare,
   type WorkerRun,
   type WorkerTestCommand,
-} from './protocol';
-import { EngineRuntime } from './runtime';
+} from './protocol.js';
+import { EngineRuntime } from './runtime.js';
 
 const scope = self as unknown as {
   onmessage: ((event: MessageEvent<EngineCommand>) => void) | null;

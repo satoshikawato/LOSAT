@@ -4,8 +4,8 @@
 // once, so the verdict and its message are the engine's own (for example "query record 3
 // (id) has … which is not supported by LOSAT's BLASTN"). The application never rebuilds
 // these rules; it shows the message and lets the user exclude the record.
-import type { RecordKey } from '../domain/dataset';
-import type { InputRole, ProgramId } from '../domain/programs';
+import type { RecordKey } from '../domain/dataset.js';
+import type { InputRole, ProgramId } from '../domain/programs.js';
 
 export type InputCheck =
   | { readonly ok: true; readonly records: readonly RecordKey[] }

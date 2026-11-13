@@ -2,7 +2,7 @@
 // Data worker over the MessagePort that `DataGateway.openRun` returns, so the outputs do
 // not pass through the main thread. The engine side writes with RunOutputWriter
 // (src/infra/run-output/writer.ts); web/app/tests/contract/run-output.contract.ts is the contract.
-import type { RunOutput } from '../domain/output-format';
+import type { RunOutput } from '../domain/output-format.js';
 
 export const HITS_STREAM = 1;
 export const DIAGNOSTICS_STREAM = 3;

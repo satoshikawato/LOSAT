@@ -1,6 +1,6 @@
 // Engine side of the run output channel (ports/run-output.ts). The Engine worker (S09) and
 // the FakeEngine write through it.
-import type { OutputStream, RunOutputMessage } from '../../ports/run-output';
+import type { OutputStream, RunOutputMessage } from '../../ports/run-output.js';
 
 export class RunOutputWriter {
   private chunks = 0;

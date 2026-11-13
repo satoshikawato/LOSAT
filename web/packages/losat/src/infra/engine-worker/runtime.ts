@@ -8,19 +8,19 @@
 // record tables (plan §5.4; a difference stops the run before any output), run, and send
 // the output streams to the Data worker's port. A BLASTN search with -window_masker_db also
 // gives the engine the counts file, which the instance holds for later BLASTN searches.
-import { recordMismatch, type RecordKey } from '../../domain/dataset';
-import { InputMismatchError, type EnginePhase } from '../../ports/engine';
-import { OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output';
-import type { CountsUse } from '../../domain/counts';
-import { EngineCallError, FILE_WINDOW_MASKER_COUNTS, ROLE_QUERY, ROLE_SUBJECT, type ChunkBuffer, type FileInfo } from '../reactor/abi';
-import type { ReactorArtifact } from '../reactor/artifact';
-import { instantiateSerial, instantiateThreadedMain, type ReactorInstance } from '../reactor/instance';
-import { createSharedMemory } from '../reactor/shared-memory';
-import { RunOutputWriter } from '../run-output/writer';
-import type { InstanceUse } from './instance-use';
-import type { RuntimePath, WorkerCounts, WorkerRun, WorkerRunResult } from './protocol';
-import { ThreadHost } from './thread-host';
-import { warmUp } from './warm-up';
+import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
+import { InputMismatchError, type EnginePhase } from '../../ports/engine.js';
+import { OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
+import type { CountsUse } from '../../domain/counts.js';
+import { EngineCallError, FILE_WINDOW_MASKER_COUNTS, ROLE_QUERY, ROLE_SUBJECT, type ChunkBuffer, type FileInfo } from '../reactor/abi.js';
+import type { ReactorArtifact } from '../reactor/artifact.js';
+import { instantiateSerial, instantiateThreadedMain, type ReactorInstance } from '../reactor/instance.js';
+import { createSharedMemory } from '../reactor/shared-memory.js';
+import { RunOutputWriter } from '../run-output/writer.js';
+import type { InstanceUse } from './instance-use.js';
+import type { RuntimePath, WorkerCounts, WorkerRun, WorkerRunResult } from './protocol.js';
+import { ThreadHost } from './thread-host.js';
+import { warmUp } from './warm-up.js';
 
 export interface RuntimeOptions {
   readonly serial: () => Promise<WebAssembly.Module>;

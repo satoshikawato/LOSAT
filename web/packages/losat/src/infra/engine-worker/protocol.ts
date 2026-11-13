@@ -2,12 +2,12 @@
 // thread workers (thread-worker.ts) and the keeper of their shared memory (memory-keeper.ts).
 // Every message of the Engine worker carries the runtime generation it belongs to; the main
 // thread drops messages of an older one.
-import type { RecordKey } from '../../domain/dataset';
-import type { CountsUse } from '../../domain/counts';
-import type { EnginePhase } from '../../ports/engine';
-import type { OutputStream } from '../../ports/run-output';
-import type { ReactorArtifact } from '../reactor/artifact';
-import type { ReactorAsset } from '../reactor/assets';
+import type { RecordKey } from '../../domain/dataset.js';
+import type { CountsUse } from '../../domain/counts.js';
+import type { EnginePhase } from '../../ports/engine.js';
+import type { OutputStream } from '../../ports/run-output.js';
+import type { ReactorArtifact } from '../reactor/artifact.js';
+import type { ReactorAsset } from '../reactor/assets.js';
 
 export type RuntimePath = 'serial' | 'threaded';
 

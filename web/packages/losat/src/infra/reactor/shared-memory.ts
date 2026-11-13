@@ -9,7 +9,7 @@
 // ones in turn, down to the 1 GiB that the modules declared before. Below that the
 // threaded engine does not start, as before, and the search runs on the serial module
 // (plan §4.7): its memory is not reserved in advance and grows as far as the device lets it.
-import type { MemoryLimits } from './artifact';
+import type { MemoryLimits } from './artifact.js';
 
 const PAGE_BYTES = 65_536;
 

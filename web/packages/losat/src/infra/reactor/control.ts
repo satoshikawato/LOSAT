@@ -5,11 +5,11 @@
 // search: the argv of the application has no -num_threads, the only option whose
 // validation depends on the build; the Engine worker validates the argv it runs, with its
 // -num_threads, again before the search.
-import { OUTPUT_FORMATS, type OutputFormat } from '../../domain/output-format';
-import type { ResolvedDefault } from '../../domain/parameters';
-import type { ProgramId } from '../../domain/programs';
-import type { EngineGateway, ParameterDescription, ProgramDescription, ValidationResult } from '../../ports/engine';
-import type { ReactorAbi } from './abi';
+import { OUTPUT_FORMATS, type OutputFormat } from '../../domain/output-format.js';
+import type { ResolvedDefault } from '../../domain/parameters.js';
+import type { ProgramId } from '../../domain/programs.js';
+import type { EngineGateway, ParameterDescription, ProgramDescription, ValidationResult } from '../../ports/engine.js';
+import type { ReactorAbi } from './abi.js';
 
 export type EngineControl = Pick<EngineGateway, 'describe' | 'validate'>;
 

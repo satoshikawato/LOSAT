@@ -7,8 +7,8 @@
 // inflation ends (end, cancel, error or trap): what the decoders grow in the linear memory (a
 // zstd window of up to 128 MiB, with the buffers of the file's slices) cannot be given back
 // while the instance lives, so it goes with the instance and not into the session's shared one.
-import type { Compression, FileInflater, InflatedSink, Inflation } from '../../ports/inflate';
-import type { BegunInflation, ReactorAbi } from './abi';
+import type { Compression, FileInflater, InflatedSink, Inflation } from '../../ports/inflate.js';
+import type { BegunInflation, ReactorAbi } from './abi.js';
 
 export class ReactorInflater implements FileInflater {
   /**

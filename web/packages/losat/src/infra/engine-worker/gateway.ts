@@ -9,7 +9,7 @@
 // thread workers, or that renewal, before the search that would start them. `describe` and
 // `validate` go to the Data worker's serial reactor, which can answer while a search runs
 // (src/infra/reactor/control.ts).
-import type { CountsFile } from '../../domain/counts';
+import type { CountsFile } from '../../domain/counts.js';
 import {
   InputMismatchError,
   RunCancelledError,
@@ -21,12 +21,12 @@ import {
   type ProgramDescription,
   type RuntimeInfo,
   type ValidationResult,
-} from '../../ports/engine';
-import { engineBuildName, type EngineAssets } from '../reactor/assets';
-import type { EngineControl } from '../reactor/control';
-import { loadReactor } from '../reactor/instance';
-import { InstanceUse } from './instance-use';
-import { chooseThreads, DEFAULT_RENEWAL, limitsHolding, renewalReason, type RenewalLimits } from './policy';
+} from '../../ports/engine.js';
+import { engineBuildName, type EngineAssets } from '../reactor/assets.js';
+import type { EngineControl } from '../reactor/control.js';
+import { loadReactor } from '../reactor/instance.js';
+import { InstanceUse } from './instance-use.js';
+import { chooseThreads, DEFAULT_RENEWAL, limitsHolding, renewalReason, type RenewalLimits } from './policy.js';
 import type {
   EngineCommand,
   EngineEvent,
@@ -39,7 +39,7 @@ import type {
   WorkerCounts,
   WorkerInput,
   WorkerRun,
-} from './protocol';
+} from './protocol.js';
 
 /**
  * How a runtime ended (retire): at once (its threaded instance was not in use), or once the
@@ -216,7 +216,7 @@ export class WasmEngine implements EngineGateway {
     const id = ++this.generations;
     const worker =
       this.options.createWorker?.() ??
-      new Worker(new URL('./engine-worker.ts', import.meta.url), { type: 'module', name: 'losat-engine' });
+      new Worker(new URL('./engine-worker.js', import.meta.url), { type: 'module', name: 'losat-engine' });
     const faults = new BroadcastChannel(`losat-web:engine-faults:${crypto.randomUUID()}`);
     const keeper = new BroadcastChannel(`losat-web:engine-keeper:${crypto.randomUUID()}`);
     // A page that cannot share memory with its workers has no SharedArrayBuffer, or cannot post one.

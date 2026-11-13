@@ -10,9 +10,9 @@
 // 17-55 ms). Longer searches gain less or nothing: what remains is the time until the
 // optimizing compiler's code of their hot functions is ready, which the small sequences do
 // not reach.
-import { REGION_FLAG, WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG } from '../../domain/options';
-import { PROGRAM_INPUTS, type ProgramId, type SequenceKind } from '../../domain/programs';
-import { ROLE_QUERY, ROLE_SUBJECT, type ReactorAbi } from '../reactor/abi';
+import { REGION_FLAG, WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG } from '../../domain/options.js';
+import { PROGRAM_INPUTS, type ProgramId, type SequenceKind } from '../../domain/programs.js';
+import { ROLE_QUERY, ROLE_SUBJECT, type ReactorAbi } from '../reactor/abi.js';
 
 /**
  * Options whose values are positions in the user's inputs, or name counts of the user's (the counts

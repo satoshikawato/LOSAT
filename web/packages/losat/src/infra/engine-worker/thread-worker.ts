@@ -2,10 +2,10 @@
 // on the shared memory, waits until the host starts a thread in it, runs that thread
 // (`wasi_thread_start`), counts it off the instance's use count (instance-use.ts), and then
 // prepares itself again for the next thread.
-import { stopMessage } from '../reactor/abi';
-import { instantiateThread } from '../reactor/instance';
-import { createWasi, type WasiContext } from '../reactor/wasi';
-import { InstanceUse } from './instance-use';
+import { stopMessage } from '../reactor/abi.js';
+import { instantiateThread } from '../reactor/instance.js';
+import { createWasi, type WasiContext } from '../reactor/wasi.js';
+import { InstanceUse } from './instance-use.js';
 import {
   SLOT_FAILED,
   SLOT_PREPARING,
@@ -17,7 +17,7 @@ import {
   type ThreadFault,
   type ThreadPrepare,
   type ThreadStart,
-} from './protocol';
+} from './protocol.js';
 
 const scope = self as unknown as {
   onmessage: ((event: MessageEvent<ThreadCommand>) => void) | null;

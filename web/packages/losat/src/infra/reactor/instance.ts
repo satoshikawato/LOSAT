@@ -1,9 +1,9 @@
 // Loading and instantiating the engine modules (docs/web/abi_v2.md §2-§3).
-import { sha256Hex } from '../digest';
-import { ReactorAbi, type AbiExports } from './abi';
-import { inspectReactor, type ReactorArtifact } from './artifact';
-import type { ReactorAsset } from './assets';
-import { createWasi, type WasiContext } from './wasi';
+import { sha256Hex } from '../digest.js';
+import { ReactorAbi, type AbiExports } from './abi.js';
+import { inspectReactor, type ReactorArtifact } from './artifact.js';
+import type { ReactorAsset } from './assets.js';
+import { createWasi, type WasiContext } from './wasi.js';
 
 export interface CompiledReactor {
   readonly module: WebAssembly.Module;

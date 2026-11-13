@@ -17,8 +17,8 @@
 // pool spawns, and they cannot return while it waits, because the engine's thread library holds a
 // lock across `thread-spawn` that an ending thread needs (S09). A search of N threads therefore
 // has one set of N-1 thread workers, all ready before the search starts (`prepare`).
-import { endWaits, growToMaximum } from '../reactor/shared-memory';
-import type { InstanceUse } from './instance-use';
+import { endWaits, growToMaximum } from '../reactor/shared-memory.js';
+import type { InstanceUse } from './instance-use.js';
 import {
   SLOT_ENDED,
   SLOT_FAILED,
@@ -31,7 +31,7 @@ import {
   type KeeperCommand,
   type ThreadCommand,
   type ThreadFault,
-} from './protocol';
+} from './protocol.js';
 
 export interface ThreadHostOptions {
   readonly module: WebAssembly.Module;
@@ -88,7 +88,7 @@ export class ThreadHost {
   constructor(private readonly options: ThreadHostOptions) {
     this.keeper =
       options.createKeeper?.() ??
-      new Worker(new URL('./memory-keeper-worker.ts', import.meta.url), { type: 'module', name: 'losat-memory' });
+      new Worker(new URL('./memory-keeper-worker.js', import.meta.url), { type: 'module', name: 'losat-memory' });
     this.keeper.onmessage = (event: MessageEvent<{ type?: string }>) => {
       if (event.data?.type === 'ready') this.keeperReady = true;
     };
@@ -231,7 +231,7 @@ export class ThreadHost {
   private createSlot(): Slot {
     const worker =
       this.options.createWorker?.() ??
-      new Worker(new URL('./thread-worker.ts', import.meta.url), { type: 'module', name: 'losat-thread' });
+      new Worker(new URL('./thread-worker.js', import.meta.url), { type: 'module', name: 'losat-thread' });
     const state = new Int32Array(new SharedArrayBuffer(4));
     Atomics.store(state, 0, SLOT_PREPARING);
     const slot: Slot = { worker, state, error: undefined };

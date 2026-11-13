@@ -6,8 +6,8 @@
 // Pointers and lengths are unsigned 32-bit values (ABI v2 §6). JavaScript receives a Wasm
 // i32 as a signed number, so a pointer of 2 GiB or more arrives negative: every pointer
 // and length is converted with `>>> 0` before it is used as an offset into the memory.
-import type { RecordKey } from '../../domain/dataset';
-import type { Compression } from '../../ports/inflate';
+import type { RecordKey } from '../../domain/dataset.js';
+import type { Compression } from '../../ports/inflate.js';
 
 /** Stream 2: the JSON response of describe, register, scan_end and inflate_begin. */
 export const RESPONSE_STREAM = 2;

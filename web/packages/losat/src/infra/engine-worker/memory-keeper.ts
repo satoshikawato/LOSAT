@@ -17,8 +17,8 @@
 // be moved to them by the Engine worker, which then runs a search synchronously. In
 // Playwright's Firefox 151, a port that a worker moved carried no message while that worker
 // ran synchronously, also after a setTimeout of 0 ms before it; after one of 5 ms, it did.
-import { endWaits, growToMaximum } from '../reactor/shared-memory';
-import type { KeeperCommand, KeeperGrow, KeeperGrown, KeeperReady } from './protocol';
+import { endWaits, growToMaximum } from '../reactor/shared-memory.js';
+import type { KeeperCommand, KeeperGrow, KeeperGrown, KeeperReady } from './protocol.js';
 
 export class MemoryKeeper {
   private channel: BroadcastChannel | undefined;

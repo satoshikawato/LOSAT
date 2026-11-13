@@ -1,5 +1,5 @@
 // Data worker side of the run output channel (ports/run-output.ts).
-import { OUTPUT_STREAMS, type OutputStream, type RunOutputMessage } from '../../ports/run-output';
+import { OUTPUT_STREAMS, type OutputStream, type RunOutputMessage } from '../../ports/run-output.js';
 
 export type RunOutputResult =
   /** `end` arrived and its totals agree with what arrived. */

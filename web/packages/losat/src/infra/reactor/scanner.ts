@@ -2,8 +2,8 @@
 // `scan_end`, docs/web/abi_v2.md §4, §9; plan TD-8): the RecordScanner of the Data worker.
 // The response is the *scan* JSON as the adapter writes it, and a failure is the parser's
 // error text.
-import type { RecordScanner, ScanResponse } from '../../ports/scan';
-import type { ReactorAbi } from './abi';
+import type { RecordScanner, ScanResponse } from '../../ports/scan.js';
+import type { ReactorAbi } from './abi.js';
 
 export class ReactorScanner implements RecordScanner {
   constructor(private readonly reactor: () => Promise<ReactorAbi>) {}

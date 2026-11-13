@@ -19,7 +19,7 @@
 //
 // The buffer holds no part of the engine's shared memory: the main thread must not hold that
 // memory (memory-keeper.ts).
-import { SLOT_RUNNING } from './protocol';
+import { SLOT_RUNNING } from './protocol.js';
 
 /** The bit that the Gateway sets when it ends the generation; the count of uses is below it. */
 export const USE_RETIRING = 0x4000_0000;

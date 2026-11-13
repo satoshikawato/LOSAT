@@ -1,11 +1,11 @@
 // Engine port: the application's only view of the search engine. The Wasm implementation
 // (src/infra/engine-worker/gateway.ts) follows docs/web/abi_v2.md; LOSAT Web's development
 // build has a FakeEngine of its own (web/app/src/infra/fake/fake-engine.ts).
-import type { RecordKey } from '../domain/dataset';
-import type { OutputFormat } from '../domain/output-format';
-import type { ResolvedDefault } from '../domain/parameters';
-import type { ProgramId } from '../domain/programs';
-import type { CountsFile, CountsUse } from '../domain/counts';
+import type { RecordKey } from '../domain/dataset.js';
+import type { OutputFormat } from '../domain/output-format.js';
+import type { ResolvedDefault } from '../domain/parameters.js';
+import type { ProgramId } from '../domain/programs.js';
+import type { CountsFile, CountsUse } from '../domain/counts.js';
 
 export interface ParameterDescription {
   readonly flag: string;

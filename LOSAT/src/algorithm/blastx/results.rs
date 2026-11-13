@@ -505,6 +505,14 @@ impl HspList {
     pub(crate) fn sort_evalue(&mut self) {
         self.hsps.sort_by(compare_hsp);
     }
+
+    /// The HSPs in the order `sort_evalue` puts them (the reports' order, `report::sort_lists`),
+    /// without moving them: the same stable sort by `compare_hsp`.
+    pub(crate) fn evalue_order(&self) -> Vec<&Hsp> {
+        let mut hsps: Vec<&Hsp> = self.hsps.iter().collect();
+        hsps.sort_by(|a, b| compare_hsp(a, b));
+        hsps
+    }
 }
 pub(crate) fn compare_list(a: &HspList, b: &HspList) -> Ordering {
     match (a.hsps.first(), b.hsps.first()) {

@@ -555,14 +555,8 @@ impl PreparedXml {
                                 // translated coordinates use three nucleotide letters per
                                 // residue and reverse strand endpoints run in descending order.
                                 let subject_len = i32::try_from(subject_seq.len())?;
-                                let (s_start, s_end) = if frame > 0 {
-                                    (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
-                                } else {
-                                    (
-                                        subject_len - 3 * hsp.s_start + frame + 1,
-                                        subject_len - 3 * hsp.s_end + frame + 2,
-                                    )
-                                };
+                                let (s_start, s_end) =
+                                    super::stage_e_report::subject_endpoints(hsp, subject_len);
                                 // The rows, without the lower case of the masks.
                                 aligned_sequences_into(
                                     query_letters,

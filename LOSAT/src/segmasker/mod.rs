@@ -297,25 +297,33 @@ mod tests {
         );
     }
 
-    // NCBI's toolkit options that LOSAT's segmasker refuses, as dustmasker and blastdbcmd do.
+    // NCBI's toolkit option that LOSAT's segmasker refuses, as dustmasker and blastdbcmd do.
     #[test]
     fn toolkit_options_are_refused_as_dustmasker_refuses_them() {
-        for word in [
-            "-xmlhelp",
-            "-version-full",
-            "-version-full-xml",
-            "-version-full-json",
+        assert_eq!(
+            run_words(&["-xmlhelp"], b""),
+            (
+                1,
+                String::new(),
+                "Error: the NCBI BLAST+ option -xmlhelp is not supported by LOSAT's SEGMASKER\n"
+                    .to_string()
+            )
+        );
+    }
+
+    // The full versions, as dustmasker's (line RG item E3; NCBI BLAST+ 2.17.0
+    // `segmasker -version-full`: `segmasker: 1.0.0`).
+    #[test]
+    fn the_full_versions_are_segmasker_s() {
+        use crate::ncbi_version::{print, VersionRequest};
+        for (word, request) in [
+            ("-version-full", VersionRequest::Full),
+            ("-version-full-xml", VersionRequest::FullXml),
+            ("-version-full-json", VersionRequest::FullJson),
         ] {
             assert_eq!(
-                run_words(&[word], b""),
-                (
-                    1,
-                    String::new(),
-                    format!(
-                        "Error: the NCBI BLAST+ option {word} is not supported by LOSAT's \
-                         SEGMASKER\n"
-                    )
-                ),
+                run_words(&["-out", word], b""),
+                (0, print(request, "segmasker", "1.0.0"), String::new()),
                 "{word}"
             );
         }

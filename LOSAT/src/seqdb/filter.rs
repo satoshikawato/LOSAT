@@ -12,6 +12,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use super::file::DbFile;
@@ -120,22 +121,71 @@ const VOLUME_COUNT_ERROR: &str = "Input db vol size does not match lmdb vol size
 // ```
 const VOLUME_NAME_ERROR: &str = "Input db vol does not match lmdb vol";
 
-/// The included OIDs of a restricted database: bit `oid % 64` of word `oid / 64`, with the
-/// number of included OIDs before every 512th OID.
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:356-385
+// ```c++
+//     // Case 3: Ones and Zeros - The bitmap provides OIDs.
+//
+//     int next_oid = begin_chunk;
+//     if (m_NumThreads) {
+//         oid_list.clear();
+//         while(next_oid < end_chunk) {
+//             // Find next ordinal id, and save it if it falls within iteration range.
+//             if (m_OIDList->CheckOrFindOID(next_oid) &&
+//                 next_oid < end_chunk) {
+//                 oid_list.push_back(next_oid++);
+//     ...
+//     } else {
+//         ...
+//         while (iter < oid_size) {
+//             if (next_oid >= m_RestrictEnd) break;
+//             // Find next ordinal id, and save it if it falls within iteration range.
+//             if (m_OIDList->CheckOrFindOID(next_oid) &&
+//                 next_oid < m_RestrictEnd) {
+//                 oid_list[iter++] = next_oid++;
+// ```
+// A search reads the OIDs of NCBI's OID list (the alias files' ranges, a user list) inside the
+// iteration range `[m_RestrictBegin, m_RestrictEnd)` (`GetNextOIDChunk` caps every chunk at the
+// range's end): those are the ordinal ids here, the rank of an OID counted from the range's
+// start. The other readers of the list (`x_CheckOrFindOID`) see the OIDs outside the range too
+// (`OidFilter::check_or_find`, `OidFilter::walk`).
+/// NCBI's OID list of a database (`CSeqDBOIDList`: bit `oid % 64` of word `oid / 64`, with the
+/// number of listed OIDs before every 512th OID) and its iteration range `[begin, end)`
+/// (`m_RestrictBegin`, `m_RestrictEnd` once the list is set up). The included OIDs, which a
+/// search reads and the ordinal ids number (`count`, `contains`, `rank`, `select`, `run_end`),
+/// are the listed OIDs inside the range.
 #[derive(Debug)]
 pub(crate) struct OidFilter {
     words: Vec<u64>,
-    /// `supers[s]`: the included OIDs below OID `512 * s`.
+    /// `supers[s]`: the listed OIDs below OID `512 * s`.
     supers: Vec<u32>,
+    num_oids: u32,
+    /// The number of listed OIDs.
+    total: u32,
+    /// The iteration range, `begin <= end <= num_oids`.
+    begin: u32,
+    end: u32,
+    /// The listed OIDs below `begin`.
+    below: u32,
+    /// The included OIDs: the listed OIDs of `begin..end`.
     count: u32,
 }
 
 /// Words of one entry of `OidFilter::supers`.
 const SUPER_WORDS: usize = 8;
 
+/// The OIDs of NCBI's loop `for (oid = 0; CheckOrFindOID(oid); oid++)` (`OidFilter::walk`):
+/// `first`, then the listed OIDs of `from..to`, then `last`, ascending.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OidWalk {
+    pub first: Option<u32>,
+    pub from: u32,
+    pub to: u32,
+    pub last: Option<u32>,
+}
+
 impl OidFilter {
-    /// The filter of the OIDs whose bits are set in `words` (bits at `num_oids` and above
-    /// are cleared).
+    /// The list of the OIDs whose bits are set in `words` (bits at `num_oids` and above
+    /// are cleared), with the iteration range of every OID.
     pub(super) fn new(mut words: Vec<u64>, num_oids: u32) -> Self {
         words.resize((num_oids as usize).div_ceil(64), 0);
         if !num_oids.is_multiple_of(64) {
@@ -154,8 +204,29 @@ impl OidFilter {
         Self {
             words,
             supers,
+            num_oids,
+            total: count,
+            begin: 0,
+            end: num_oids,
+            below: 0,
             count,
         }
+    }
+
+    /// The same list with the iteration range `(begin, end)` (as `SetIterationRange` leaves it:
+    /// `begin <= end <= num_oids`).
+    pub(super) fn with_range(mut self, (begin, end): (u32, u32)) -> Self {
+        debug_assert!(begin <= end && end <= self.num_oids, "{begin} {end}");
+        self.begin = begin;
+        self.end = end;
+        self.below = self.listed_below(begin);
+        self.count = self.listed_below(end) - self.below;
+        self
+    }
+
+    /// The iteration range `(begin, end)`.
+    pub(crate) fn range(&self) -> (u32, u32) {
+        (self.begin, self.end)
     }
 
     /// The number of included OIDs: the ordinal ids are `0..count`.
@@ -165,32 +236,17 @@ impl OidFilter {
 
     /// Whether `oid` is included.
     pub(crate) fn contains(&self, oid: u32) -> bool {
-        self.words
-            .get((oid / 64) as usize)
-            .is_some_and(|word| word >> (oid % 64) & 1 == 1)
+        (self.begin..self.end).contains(&oid) && self.listed(oid)
     }
 
     /// The number of included OIDs below `oid`: the ordinal id of `oid` when it is included.
     pub(crate) fn rank(&self, oid: u32) -> u32 {
-        let word = (oid / 64) as usize;
-        if word >= self.words.len() {
-            return self.count;
-        }
-        let first = word - word % SUPER_WORDS;
-        let mut rank = self.supers[first / SUPER_WORDS]
-            + self.words[first..word]
-                .iter()
-                .map(|w| w.count_ones())
-                .sum::<u32>();
-        let bits = oid % 64;
-        if bits > 0 {
-            rank += (self.words[word] & ((1u64 << bits) - 1)).count_ones();
-        }
-        rank
+        self.listed_below(oid.clamp(self.begin, self.end)) - self.below
     }
 
     /// The OID of ordinal id `ordinal` (below `count`).
     pub(crate) fn select(&self, ordinal: u32) -> u32 {
+        let ordinal = self.below + ordinal;
         let block = self.supers.partition_point(|&rank| rank <= ordinal) - 1;
         let mut rest = ordinal - self.supers[block];
         let first = block * SUPER_WORDS;
@@ -211,6 +267,13 @@ impl OidFilter {
     /// The first OID from `oid` on that is not included, `limit` when every OID of
     /// `oid..limit` is.
     pub(crate) fn run_end(&self, oid: u32, limit: u32) -> u32 {
+        if oid >= limit {
+            return limit;
+        }
+        if !(self.begin..self.end).contains(&oid) {
+            return oid;
+        }
+        let limit = limit.min(self.end);
         let mut at = oid;
         while at < limit {
             let word = (at / 64) as usize;
@@ -224,6 +287,176 @@ impl OidFilter {
             at = (word as u32 + 1) * 64;
         }
         limit
+    }
+
+    /// Whether NCBI's OID list holds `oid`, inside the iteration range or not.
+    pub(crate) fn listed(&self, oid: u32) -> bool {
+        self.words
+            .get((oid / 64) as usize)
+            .is_some_and(|word| word >> (oid % 64) & 1 == 1)
+    }
+
+    /// The number of listed OIDs below `oid`.
+    pub(crate) fn listed_below(&self, oid: u32) -> u32 {
+        let word = (oid / 64) as usize;
+        if word >= self.words.len() {
+            return self.total;
+        }
+        let first = word - word % SUPER_WORDS;
+        let mut rank = self.supers[first / SUPER_WORDS]
+            + self.words[first..word]
+                .iter()
+                .map(|w| w.count_ones())
+                .sum::<u32>();
+        let bits = oid % 64;
+        if bits > 0 {
+            rank += (self.words[word] & ((1u64 << bits) - 1)).count_ones();
+        }
+        rank
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:90-140
+    // ```c++
+    // bool CSeqDB_BitSet::CheckOrFindBit(size_t & index) const
+    // {
+    //     if (index < m_Start)
+    //         index = m_Start;
+    //
+    //     if (index >= m_End)
+    //         return false;
+    //     ...
+    //     while(ix < bitcount) {
+    //         vx = ix >> eWordShift;
+    //         int wx = ix & eWordMask;
+    //
+    //         _ASSERT(nwords > vx);
+    //         if (m_Bits[vx] & (TByte(0x80) >> wx))
+    //             break;
+    //
+    //         ix ++;
+    //     }
+    //
+    //     if (ix < bitcount) {
+    //         index = (ix + m_Start);
+    //         return true;
+    //     }
+    //
+    //     return false;
+    // }
+    // ```
+    /// The first listed OID from `oid` on (`CSeqDBOIDList::CheckOrFindOID`).
+    pub(crate) fn next_listed(&self, oid: u32) -> Option<u32> {
+        let mut word = (oid / 64) as usize;
+        let mut bits = *self.words.get(word)? & (u64::MAX << (oid % 64));
+        while bits == 0 {
+            word += 1;
+            bits = *self.words.get(word)?;
+        }
+        Some(word as u32 * 64 + bits.trailing_zeros())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:272-296
+    // ```c++
+    // bool CSeqDBImpl::x_CheckOrFindOID(int & next_oid, CSeqDBLockHold & locked)
+    // {
+    //     CHECK_MARKER();
+    //     bool success = true;
+    //
+    //     if (next_oid < m_RestrictBegin) {
+    //         next_oid = m_RestrictBegin;
+    //     }
+    //
+    //     if (next_oid >= m_RestrictEnd) {
+    //         success = false;
+    //     }
+    //
+    //     if (! m_OidListSetup) {
+    //         x_GetOidList(locked);
+    //     }
+    //
+    //     if (success && m_OIDList.NotEmpty()) {
+    //         success = m_OIDList->CheckOrFindOID(next_oid);
+    //
+    //         if (next_oid > m_RestrictEnd) {
+    //             success = false;
+    //         }
+    //     }
+    //
+    //     return success;
+    // }
+    // ```
+    // Before the list is set up the range is the constructor's `[0, num_oids)`; `x_GetOidList`
+    // sets `[begin, end)` (`alias::top_iteration_range`). The last check is `>`, not `>=`: the
+    // OID at the range's end passes when the list holds it.
+    /// `x_CheckOrFindOID(next)`: whether the listed OID it moves `next` to (the first from `next`
+    /// on, `next` first clamped to the range's start) passes NCBI's checks of the range, where
+    /// `set_up` tells whether NCBI's list was set up before the call (it is after).
+    pub(crate) fn check_or_find(&self, next: &mut u32, set_up: bool) -> bool {
+        let (begin, end) = if set_up {
+            (self.begin, self.end)
+        } else {
+            (0, self.num_oids)
+        };
+        if *next < begin {
+            *next = begin;
+        }
+        if *next >= end {
+            return false;
+        }
+        match self.next_listed(*next) {
+            Some(oid) => {
+                *next = oid;
+                oid <= self.end
+            }
+            None => false,
+        }
+    }
+
+    /// The OIDs of `for (oid = 0; x_CheckOrFindOID(oid); oid++)` (`check_or_find`), `set_up`
+    /// whether NCBI's list was set up before the loop. Each call after the first sees the range
+    /// `[begin, end)` and moves to the next listed OID, so the loop visits the listed OIDs of
+    /// the range from where it is, and `end` itself when the list holds it and the OID before
+    /// it was not visited. Before the first call the list is not set up: that call sees every
+    /// OID and passes the first listed OID if it is not past `end`, inside the range or not.
+    pub(crate) fn walk(&self, set_up: bool) -> OidWalk {
+        let empty = OidWalk {
+            first: None,
+            from: 0,
+            to: 0,
+            last: None,
+        };
+        let (first, from) = if set_up {
+            (None, self.begin)
+        } else {
+            let mut oid = 0;
+            if !self.check_or_find(&mut oid, false) {
+                return empty;
+            }
+            (Some(oid), (oid + 1).max(self.begin))
+        };
+        if from >= self.end {
+            return OidWalk { first, ..empty };
+        }
+        let last = (self.listed(self.end) && !self.listed(self.end - 1)).then_some(self.end);
+        OidWalk {
+            first,
+            from,
+            to: self.end,
+            last,
+        }
+    }
+}
+
+impl OidWalk {
+    /// The OIDs of the walk of `filter`, ascending.
+    pub(crate) fn oids(self, filter: &OidFilter) -> impl Iterator<Item = u32> + '_ {
+        let mut next = self.from;
+        let middle = std::iter::from_fn(move || {
+            let oid = filter.next_listed(next).filter(|&oid| oid < self.to)?;
+            next = oid + 1;
+            Some(oid)
+        });
+        self.first.into_iter().chain(middle).chain(self.last)
     }
 }
 
@@ -1711,24 +1944,19 @@ impl TaxIdLookup<'_> {
     //     	}
     //     }
     // ```
-    /// `TaxIdsToOids(tax_ids)`: the OIDs of the sequences that carry one of `tax_ids`,
-    /// ascending (the entries cover ascending ranges of OIDs). Errors: NCBI's when no OID
-    /// carries one (`Taxonomy ID(s) not found in the <names> database[s].`), and for the
-    /// lookup files ([`SeqDb::restrict_taxids`]).
+    /// `TaxIdsToOids(tax_ids)`: the OIDs of the sequences that carry one of `tax_ids`, in the
+    /// order of the lookup files, that pass NCBI's check (`SeqDb::check_oid`; the first one
+    /// checked can set NCBI's OID list up). Errors: NCBI's when no OID carries one (`Taxonomy
+    /// ID(s) not found in the <names> database[s].`), and for the lookup files
+    /// ([`SeqDb::restrict_taxids`]).
     pub fn tax_ids_to_oids(&self, tax_ids: &BTreeSet<i32>) -> Result<Vec<u32>, SeqDbError> {
         let (oids, _) = entries_tax_oids(&self.entries, false, tax_ids)?;
         if oids.is_empty() {
             return Err(SeqDbError::NotFound(tax_ids_not_found(&self.entries)));
         }
-        // `x_CheckOrFindOID` keeps the OIDs of the database that its OID list includes (the
-        // alias files' ranges; a database opened without a list has no other).
-        let num_oids = self.db.volume_starts[self.db.volumes.len()];
         Ok(oids
             .into_iter()
-            .filter(|&oid| match &self.db.filter {
-                Some(filter) => filter.contains(oid),
-                None => oid < num_oids,
-            })
+            .filter(|&oid| self.db.check_oid(oid))
             .collect())
     }
 
@@ -1773,14 +2001,16 @@ impl TaxIdLookup<'_> {
     // ```
     // NCBI's OID list is that of the alias files' ranges here (`FIRST_OID`, `LAST_OID`: the
     // database's filter; a `losat blastdbcmd` database has no other list): the taxids of the
-    // included OIDs. Without it they are every key of every entry's `.ntf`, also those of the
-    // volumes an alias of some volumes leaves out.
-    /// `GetDBTaxIds`: the taxids of the database's taxid lookup files (of its included OIDs
-    /// where a range leaves some out), ascending.
+    // OIDs of the loop, which sets the list up first (`SeqDb::oid_walk`: the listed OIDs of the
+    // iteration range, and its end when the list holds it). Without it they are every key of
+    // every entry's `.ntf`, also those of the volumes an alias of some volumes leaves out.
+    /// `GetDBTaxIds`: the taxids of the database's taxid lookup files (of the OIDs NCBI's loop
+    /// visits where the alias files have ranges), ascending.
     pub fn db_tax_ids(&self) -> Result<BTreeSet<i32>, SeqDbError> {
         let mut tax_ids = BTreeSet::new();
         if self.db.filter.is_some() {
-            let oids: Vec<u32> = (0..self.db.num_seqs()).map(|o| self.db.oid(o)).collect();
+            self.db.set_up_oid_list();
+            let oids: Vec<u32> = self.db.oid_walk().collect();
             entries_oid_tax_ids(&self.entries, &oids, &mut tax_ids)?;
             return Ok(tax_ids);
         }
@@ -1817,6 +2047,76 @@ impl SeqDb {
     /// ranges alone do not make it so.
     pub fn is_restricted(&self) -> bool {
         self.list_applied
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:229-258
+    // ```c++
+    // void CSeqDBImpl::x_GetOidList(CSeqDBLockHold & locked)
+    // {
+    //     ...
+    //         m_OidListSetup = true;
+    //         // Handle the case where FIRST_OID and LAST_OID is set on a top level
+    //         // alias file and that's the only alias file present
+    //         if (ft->HasFilter()) {
+    //             ...
+    //                     SetIterationRange(alias_mask.GetBegin(), alias_mask.GetEnd());
+    // ```
+    // NCBI builds its OID list at its first use: `x_CheckOrFindOID`, and the readers that call
+    // `x_GetOidList` first (`AccessionToOids`, `GetDBTaxIds`, `GetBioseq`, `GetHdr`,
+    // `GetSeqIDs`, `OidToGi`, `GetNextOIDChunk`), or in the constructor that scans the totals
+    // with a list (`apply_filter`). Only `x_CheckOrFindOID` sees the difference: before the
+    // build its range is every OID.
+    /// Marks NCBI's OID list as built (`x_GetOidList`): from here on `x_CheckOrFindOID`
+    /// ([`SeqDb::check_or_find_oid`]) sees the iteration range.
+    pub fn set_up_oid_list(&self) {
+        self.oid_list_set_up.store(true, Ordering::Relaxed);
+    }
+
+    /// `x_CheckOrFindOID(next)` (`OidFilter::check_or_find`; without an OID list every OID of
+    /// the volumes passes): whether `next`, moved to the first OID from it on that NCBI's list
+    /// holds, passes NCBI's checks of the iteration range. Sets the list up
+    /// ([`SeqDb::set_up_oid_list`]).
+    pub fn check_or_find_oid(&self, next: &mut u32) -> bool {
+        let set_up = self.oid_list_set_up.swap(true, Ordering::Relaxed);
+        match &self.filter {
+            Some(filter) => filter.check_or_find(next, set_up),
+            None => *next < self.num_oids(),
+        }
+    }
+
+    /// Whether the database includes `oid` ([`SeqDb::num_seqs`]: NCBI's list holds it, inside
+    /// the iteration range): `x_CheckOrFindOID(oid2) && oid2 == oid` once NCBI's list is set up,
+    /// as it is for the lookups after a search ([`SeqDb::check_oid`] at any time).
+    pub fn includes_oid(&self, oid: u32) -> bool {
+        match &self.filter {
+            Some(filter) => filter.contains(oid),
+            None => oid < self.num_oids(),
+        }
+    }
+
+    /// `x_CheckOrFindOID(oid2) && oid2 == oid`: whether NCBI's check keeps `oid`. Once the list
+    /// is set up, the OIDs it keeps are the included ones ([`SeqDb::includes_oid`]); the first
+    /// check of a list not set up keeps any listed OID up to the range's end.
+    pub fn check_oid(&self, oid: u32) -> bool {
+        let mut next = oid;
+        self.check_or_find_oid(&mut next) && next == oid
+    }
+
+    /// The OIDs of NCBI's loop `for (oid = 0; CheckOrFindOID(oid); oid++)`, ascending
+    /// (`OidFilter::walk`; without an OID list every OID of the volumes). The loop sets the list
+    /// up ([`SeqDb::set_up_oid_list`]).
+    pub fn oid_walk(&self) -> impl Iterator<Item = u32> + '_ {
+        let set_up = self.oid_list_set_up.swap(true, Ordering::Relaxed);
+        let (filter, walk) = match &self.filter {
+            Some(filter) => (Some(&**filter), Some(filter.walk(set_up))),
+            None => (None, None),
+        };
+        let all = filter.is_none().then_some(0..self.num_oids());
+        let listed = walk
+            .zip(filter)
+            .into_iter()
+            .flat_map(|(walk, filter)| walk.oids(filter));
+        all.into_iter().flatten().chain(listed)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:275-286
@@ -2582,42 +2882,61 @@ impl SeqDb {
     //     ...
     // ```
     // The user list narrows the OID list of the alias files' ranges (`x_ApplyUserGiList`
-    // intersects `m_AllBits`; a negative list clears bits of it): an OID is included when both
-    // include it. NCBI's `CSeqDBImpl` then scans the totals of the included OIDs.
+    // intersects `m_AllBits`; a negative list clears bits of it): an OID is listed when both
+    // include it.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:144-151
+    // ```c++
+    //     catch(CSeqDBException & e) {
+    //         ...
+    //     }
+    //
+    //     SetIterationRange(oid_begin, oid_end);
+    // ```
+    // The constructor scans the totals with the list (`x_ScanTotals`, quoted at `scan_totals`):
+    // its first `x_CheckOrFindOID` sets the list up, with the iteration range of the only alias
+    // file of a `-db` (`OidFilter::walk` of a list not set up), and then the constructor's
+    // `SetIterationRange(0, 0)` sets the range back to every OID, so the search reads every
+    // listed OID (line RG D1a-2, survey A M4, M6).
     /// Makes `words` (bit `oid` set for an OID the list includes) and the alias files' ranges
-    /// the database's OID set: the ordinal ids, NCBI's scanned totals and the definition lines
-    /// `rule` keeps.
+    /// the database's OID list with the iteration range of every OID: the ordinal ids, NCBI's
+    /// scanned totals and the definition lines `rule` keeps.
     fn apply_filter(
         &mut self,
         mut words: Vec<u64>,
         num_oids: u32,
         rule: Option<DeflineRule>,
     ) -> Result<(), SeqDbError> {
-        if let Some(mask) = &self.alias_mask {
-            for (word, range) in words.iter_mut().zip(mask) {
-                *word &= range;
+        let range = match &self.filter {
+            Some(ranges) => {
+                for (word, range) in words.iter_mut().zip(&ranges.words) {
+                    *word &= range;
+                }
+                ranges.range()
             }
-        }
-        let filter = OidFilter::new(words, num_oids);
-        let (total_length, max_length, min_length) = self.scan_totals(&filter)?;
+            None => (0, num_oids),
+        };
+        let list = OidFilter::new(words, num_oids).with_range(range);
+        let scan = self.scan_walk(&list, list.walk(false))?;
+        let filter = list.with_range((0, num_oids));
         if let Some(rule) = rule.map(Arc::new) {
             for volume in &mut self.volumes {
                 volume.set_defline_rule(Arc::clone(&rule));
             }
         }
-        // `x_ScanTotals` counts the included OIDs in an `int` (the volume set holds fewer than
-        // 2^31 OIDs: `open_tree`) and keeps the shortest length without the `<= 0` fallback.
+        // `x_ScanTotals` counts the OIDs in an `int` (the volume set holds fewer than 2^31 OIDs:
+        // `open_tree`) and keeps the shortest length without the `<= 0` fallback.
         self.num_seqs = filter.count();
         self.counts = super::Counts {
-            num_seqs: filter.count() as i32,
-            total_length,
-            max_length,
-            min_length: min_length as i32,
+            num_seqs: scan.count as i32,
+            total_length: scan.total,
+            max_length: scan.longest,
+            min_length: scan.shortest as i32,
         };
         self.list_applied = true;
+        self.oid_list_set_up.store(true, Ordering::Relaxed);
+        // The scan is that of `included_length` when it visited every included OID.
+        self.set_included_length((scan.count == filter.count()).then_some(scan.total));
         self.filter = Some(Box::new(filter));
-        // The scan is that of `included_length`.
-        self.set_included_length(Some(total_length));
         self.update_first_oid_length()
     }
 
@@ -2691,24 +3010,6 @@ impl SeqDb {
     // A protein's length is exact (`GetSeqLengthProt`: the bytes up to the next sequence
     // less the NUL between them); a nucleotide's is approximate, from its bytes and the
     // volume-relative OID, not from the count in its last byte.
-    // No NCBI counterpart: the schedules of the searches; it changes no value NCBI computes.
-    /// The length of the included sequences ([`SeqDb::num_seqs`] of them), which the searches'
-    /// schedules read: the volumes' total length when every OID is included, else the total of
-    /// NCBI's scan of the included OIDs (`scan_totals`, made at the first call). NCBI's
-    /// `GetTotalLength` ([`SeqDb::total_length`]) is the walk of the alias files' `LENGTH`
-    /// without a list, which can differ from it (an OID range, a `LENGTH` key).
-    #[cfg(any(test, feature = "parallel"))]
-    pub fn included_length(&self) -> Result<u64, SeqDbError> {
-        let Some(filter) = &self.filter else {
-            return Ok(self.volume_set_length);
-        };
-        if let Some(&length) = self.included_length.get() {
-            return Ok(length);
-        }
-        let (length, _, _) = self.scan_totals(filter)?;
-        Ok(*self.included_length.get_or_init(|| length))
-    }
-
     /// Keeps `length` as the length of the included sequences (`included_length`), or makes it
     /// at the first call (`None`). Only the parallel searches' schedules read it.
     pub(super) fn set_included_length(&mut self, length: Option<u64>) {
@@ -2721,16 +3022,27 @@ impl SeqDb {
         let _ = length;
     }
 
-    /// NCBI's totals of the included OIDs: the total length, the longest length and the
-    /// shortest (`INT4_MAX` when no OID is included, as `min_count` starts).
-    fn scan_totals(&self, filter: &OidFilter) -> Result<(u64, u32, u32), SeqDbError> {
-        let (mut total, mut longest, mut shortest) = (0u64, 0u32, i32::MAX as u32);
+    /// NCBI's totals of the OIDs of the walk `walk` of the list `list` (`OidFilter::walk`).
+    fn scan_walk(&self, list: &OidFilter, walk: OidWalk) -> Result<ScanTotals, SeqDbError> {
+        let mut totals = self.scan_totals(list, walk.from, walk.to)?;
+        for oid in walk.first.into_iter().chain(walk.last) {
+            totals.add(self.scan_totals(list, oid, oid + 1)?);
+        }
+        Ok(totals)
+    }
+
+    /// NCBI's totals of the listed OIDs of `from..to` of `list`: their number, the total
+    /// length, the longest length and the shortest (`INT4_MAX` when there is none, as
+    /// `min_count` starts).
+    fn scan_totals(&self, list: &OidFilter, from: u32, to: u32) -> Result<ScanTotals, SeqDbError> {
+        let mut totals = ScanTotals::default();
         for (at, volume) in self.volumes.iter().enumerate() {
             let start = self.volume_starts[at];
-            let mut first = 0;
-            while first < volume.num_oids() {
-                let end = volume.num_oids().min(first.saturating_add(SCAN_WINDOW));
-                if filter.rank(start + end) == filter.rank(start + first) {
+            let mut first = from.max(start) - start;
+            let stop = to.min(start + volume.num_oids()).saturating_sub(start);
+            while first < stop {
+                let end = stop.min(first.saturating_add(SCAN_WINDOW));
+                if list.listed_below(start + end) == list.listed_below(start + first) {
                     first = end;
                     continue;
                 }
@@ -2739,18 +3051,35 @@ impl SeqDb {
                 let amb = index.ambiguity_offsets(first, end)?;
                 for i in 0..(end - first) as usize {
                     let oid = first + i as u32;
-                    if !filter.contains(start + oid) {
+                    if !list.listed(start + oid) {
                         continue;
                     }
-                    let length = approx_length(self.seqtype, &seq, &amb, i, oid);
-                    total += u64::from(length);
-                    longest = longest.max(length);
-                    shortest = shortest.min(length);
+                    totals.add_length(approx_length(self.seqtype, &seq, &amb, i, oid));
                 }
                 first = end;
             }
         }
-        Ok((total, longest, shortest))
+        Ok(totals)
+    }
+
+    // No NCBI counterpart: the schedules of the searches; it changes no value NCBI computes.
+    /// The length of the included sequences ([`SeqDb::num_seqs`] of them, those a search
+    /// reads), which the searches' schedules read: the volumes' total length when every OID is
+    /// included, else the total of NCBI's scan of the included OIDs (`scan_totals`, made at the
+    /// first call). NCBI's `GetTotalLength` ([`SeqDb::total_length`]) is the walk of the alias
+    /// files' `LENGTH` without a list, and the scan of `x_CheckOrFindOID`'s OIDs with one, which
+    /// can differ from it (an OID range, a `LENGTH` key, the iteration range).
+    #[cfg(any(test, feature = "parallel"))]
+    pub fn included_length(&self) -> Result<u64, SeqDbError> {
+        let Some(filter) = &self.filter else {
+            return Ok(self.volume_set_length);
+        };
+        if let Some(&length) = self.included_length.get() {
+            return Ok(length);
+        }
+        let (begin, end) = filter.range();
+        let length = self.scan_totals(filter, begin, end)?.total;
+        Ok(*self.included_length.get_or_init(|| length))
     }
 
     // No NCBI counterpart: NCBI's database reader hands its search threads chunks of sequences
@@ -2798,6 +3127,42 @@ impl SeqDb {
             }
         }
         Ok(())
+    }
+}
+
+/// What NCBI's `x_ScanTotals` adds up of the OIDs it visits.
+#[derive(Debug, Clone, Copy)]
+struct ScanTotals {
+    count: u32,
+    total: u64,
+    longest: u32,
+    shortest: u32,
+}
+
+impl Default for ScanTotals {
+    fn default() -> Self {
+        Self {
+            count: 0,
+            total: 0,
+            longest: 0,
+            shortest: i32::MAX as u32,
+        }
+    }
+}
+
+impl ScanTotals {
+    fn add_length(&mut self, length: u32) {
+        self.count += 1;
+        self.total += u64::from(length);
+        self.longest = self.longest.max(length);
+        self.shortest = self.shortest.min(length);
+    }
+
+    fn add(&mut self, other: ScanTotals) {
+        self.count += other.count;
+        self.total += other.total;
+        self.longest = self.longest.max(other.longest);
+        self.shortest = self.shortest.min(other.shortest);
     }
 }
 
@@ -2873,6 +3238,100 @@ mod tests {
                     end.max(oid.min(limit)),
                     "{num_oids} run {oid}"
                 );
+            }
+        }
+    }
+
+    /// NCBI's `x_CheckOrFindOID` (seqdbimpl.cpp:272-296, quoted at `OidFilter::check_or_find`)
+    /// over the list `listed` of `num_oids` OIDs with the range `[begin, end)` once set up.
+    fn ncbi_check_or_find(
+        listed: &[u32],
+        num_oids: u32,
+        (begin, end): (u32, u32),
+        set_up: &mut bool,
+        next: &mut u32,
+    ) -> bool {
+        let (restrict_begin, restrict_end) = if *set_up { (begin, end) } else { (0, num_oids) };
+        let mut success = true;
+        if *next < restrict_begin {
+            *next = restrict_begin;
+        }
+        if *next >= restrict_end {
+            success = false;
+        }
+        *set_up = true;
+        if success {
+            match listed.iter().find(|&&oid| oid >= *next) {
+                Some(&oid) => {
+                    *next = oid;
+                    success = oid <= end;
+                }
+                None => success = false,
+            }
+        }
+        success
+    }
+
+    #[test]
+    fn the_range_and_ncbis_checks_agree_with_ncbis_loop() {
+        let mut state = 0x2026_1113_u64;
+        for round in 0..400u32 {
+            let num_oids = [0u32, 1, 5, 64, 65, 130, 700][(round % 7) as usize];
+            let per_mille = [0u64, 300, 700, 1000][(round / 7 % 4) as usize];
+            let listed: Vec<u32> = (0..num_oids)
+                .filter(|_| next(&mut state) % 1000 < per_mille)
+                .collect();
+            let end = (next(&mut state) % (u64::from(num_oids) + 1)) as u32;
+            let begin = (next(&mut state) % (u64::from(end) + 1)) as u32;
+            let filter = filter_of(num_oids, &listed).with_range((begin, end));
+            let included: Vec<u32> = listed
+                .iter()
+                .copied()
+                .filter(|oid| (begin..end).contains(oid))
+                .collect();
+            let case = format!("{num_oids} {listed:?} [{begin}, {end})");
+            // The search's view: the listed OIDs inside the range.
+            assert_eq!(filter.count() as usize, included.len(), "{case}");
+            for (ordinal, &oid) in included.iter().enumerate() {
+                assert_eq!(filter.select(ordinal as u32), oid, "{case}");
+            }
+            for oid in 0..=num_oids {
+                let below = included.partition_point(|&o| o < oid) as u32;
+                assert_eq!(filter.rank(oid), below, "{case} rank {oid}");
+                assert_eq!(filter.contains(oid), included.contains(&oid), "{case}");
+                let limit = num_oids.min(oid + 70);
+                let mut stop = oid;
+                while stop < limit && included.contains(&stop) {
+                    stop += 1;
+                }
+                assert_eq!(
+                    filter.run_end(oid, limit),
+                    stop.max(oid.min(limit)),
+                    "{case}"
+                );
+            }
+            // NCBI's loop from OID 0, with the list set up before it or not.
+            for set_up in [false, true] {
+                let mut flag = set_up;
+                let mut want = Vec::new();
+                let mut oid = 0;
+                while ncbi_check_or_find(&listed, num_oids, (begin, end), &mut flag, &mut oid) {
+                    want.push(oid);
+                    oid += 1;
+                }
+                let walk: Vec<u32> = filter.walk(set_up).oids(&filter).collect();
+                assert_eq!(walk, want, "{case} set up {set_up}");
+                // Each check alone.
+                for oid in 0..=num_oids {
+                    let (mut flag, mut at, mut got) = (set_up, oid, oid);
+                    let want =
+                        ncbi_check_or_find(&listed, num_oids, (begin, end), &mut flag, &mut at);
+                    assert_eq!(
+                        (filter.check_or_find(&mut got, set_up), got),
+                        (want, at),
+                        "{case} set up {set_up} check {oid}"
+                    );
+                }
             }
         }
     }

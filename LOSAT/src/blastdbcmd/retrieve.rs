@@ -255,6 +255,16 @@ enum Formatter {
 }
 
 impl Formatter {
+    /// Whether the formatter reads the definition lines of a sequence (the FASTA's `GetBioseq`,
+    /// a `%` specifier's `GetHdr`), which set NCBI's OID list up (`SeqDb::set_up_oid_list`).
+    fn reads_deflines(&self) -> bool {
+        match self {
+            Formatter::Fasta(_) => true,
+            Formatter::Fields(spec) => spec.reads_deflines(),
+            Formatter::Refused(_) => false,
+        }
+    }
+
     /// Whether the formatter writes the letters of the sequence (the FASTA, `%s`).
     fn reads_letters(&self) -> bool {
         match self {
@@ -794,7 +804,6 @@ struct DbIds<'a> {
     lookup: Option<IdLookup<'a>>,
     /// `GetBlastDbVersion() == eBDB_Version5`.
     version5: bool,
-    num_seqs: u32,
 }
 
 impl<'a> DbIds<'a> {
@@ -811,7 +820,6 @@ impl<'a> DbIds<'a> {
                 None
             },
             version5: db.is_version5(),
-            num_seqs: db.num_seqs(),
         })
     }
 }
@@ -1078,9 +1086,12 @@ impl Run<'_, '_, '_> {
                     .to_string(),
             ));
         }
-        // `oid` is NCBI's OID, which the formatters read as NCBI's do (`Source::at`): one the
-        // database includes (the lookups keep only those: `IdLookup::visible`), or, for
-        // `-ipg`, the OID of a PIG whose volume holds it (`PigToOid`), included or not.
+        // `oid` is NCBI's OID, which the formatters read as NCBI's do (`Source::at`): one NCBI's
+        // check keeps (`SeqDb::check_oid`, `SeqDb::oid_walk`), or, for `-ipg`, the OID of a
+        // PIG whose volume holds it (`PigToOid`), kept or not.
+        if self.formatter.reads_deflines() {
+            self.source.db.set_up_oid_list();
+        }
         self.formatter
             .write(self.source, oid, config, target, self.out)
     }
@@ -1094,10 +1105,15 @@ impl Run<'_, '_, '_> {
     // 	}
     // }
     // ```
-    /// `-entry all`: every included sequence in the order of its OID.
+    /// `-entry all`: the sequences of NCBI's loop (`SeqDb::oid_walk`) in the order of their
+    /// OIDs. Its first check sets NCBI's OID list up: the sequences the database includes,
+    /// and, where the iteration range of the only alias file of `-db` leaves listed OIDs out,
+    /// also the first listed OID up to the range's end and the OID at the range's end (line RG
+    /// D1a-2, survey A, pattern 3).
     fn dump_all(&mut self, config: &Config) -> Result<(), Stop> {
-        for ordinal in 0..self.ids.num_seqs {
-            self.write(self.source.db.oid(ordinal), config, None)?;
+        let db = self.source.db;
+        for oid in db.oid_walk() {
+            self.write(oid, config, None)?;
         }
         Ok(())
     }
@@ -1626,7 +1642,6 @@ mod tests {
             let ids = DbIds {
                 lookup: Some(db.id_lookup().unwrap()),
                 version5: false,
-                num_seqs: db.num_seqs(),
             };
             match get_oids(&ids, id) {
                 Lookup::Oids(oids) => format!("oids {oids:?}"),

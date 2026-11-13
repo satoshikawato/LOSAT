@@ -150,6 +150,21 @@ pub(crate) fn restrict_database(
     // without it, before the search (`pairwise_database`), and meets the others there.
     db.check_alias_values()
         .map_err(|error| database_error(error, program))?;
+    if db.is_restricted() && db.statistics_per_subject() {
+        return Err(database_error(
+            SeqDbError::Unsupported {
+                path: std::path::PathBuf::from(name),
+                message: format!(
+                    "the total length of NCBI's scan of the list is 0 while the search reads {} \
+                     sequences (the scan stops at the FIRST_OID-LAST_OID range of the only alias \
+                     file of the -db), so NCBI computes the statistics of each subject on its \
+                     own; LOSAT does not search such a database with this list yet",
+                    db.num_seqs()
+                ),
+            },
+            program,
+        ));
+    }
     db.read_name_records(name)
         .map_err(|error| database_error(error, program))?;
     db.check_accession_tables()

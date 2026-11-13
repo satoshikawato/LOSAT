@@ -69,6 +69,7 @@ mod tests;
 mod x_dbidxread_tests;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::OnceLock;
 
 use crate::seqid::model::ObjectId;
@@ -612,17 +613,17 @@ pub struct SeqDb {
     /// The walks of the alias tree, with the exception of each one whose value does not
     /// convert (`check_alias_values`).
     alias_totals: alias::AliasTotals,
-    /// Why LOSAT refuses the alias files' values (not supported yet), checked after NCBI's
-    /// errors (`check_alias_values`).
-    alias_refusal: Option<(PathBuf, String)>,
-    /// The OIDs the alias files' ranges include (`alias::range_mask`): `None` without a range.
-    alias_mask: Option<Vec<u64>>,
+    /// Whether the alias files give an OID range (`alias::range_mask`).
+    alias_ranges: bool,
+    /// NCBI's `m_OidListSetup`: whether its OID list was built, which a database opened
+    /// without a list does at its first use (`SeqDb::check_or_find_oid`).
+    oid_list_set_up: AtomicBool,
     /// Whether a list was applied (`SeqDb::restrict`): NCBI's `CSeqDB` then scans the totals.
     list_applied: bool,
     /// The name the database was opened with (`-db`), for LOSAT's refusals.
     name: String,
-    /// The included OIDs when not every OID is (the alias files' ranges, a list): ordinal id
-    /// `i` is the `i`-th of them.
+    /// NCBI's OID list (the alias files' ranges, a list) and its iteration range, when there
+    /// is one: ordinal id `i` is the `i`-th OID of the list inside the range.
     filter: Option<Box<filter::OidFilter>>,
     /// The search path the database was found on (`open_in`), for files NCBI looks for
     /// beside it (`taxdb.bti`).
@@ -653,6 +654,16 @@ struct Counts {
     min_length: i32,
 }
 
+/// The walks of the alias files' counts that NCBI's `CSeqDB` constructor makes without a list,
+/// in its order (seqdbimpl.cpp:117-139, quoted at [`SeqDb::open_every_oid_in`]).
+const UNLISTED_WALK_KEYS: &[alias::WalkKey] = &[
+    alias::WalkKey::Nseq,
+    alias::WalkKey::Length,
+    alias::WalkKey::MinSeqLength,
+    alias::WalkKey::StatsNseq,
+    alias::WalkKey::StatsTotlen,
+];
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1093-1102
 // ```c++
 // string CSeqDBImpl::x_FixString(const string & s) const
@@ -666,82 +677,6 @@ struct Counts {
 //     return s;
 // }
 // ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:269-296
-// ```c++
-// bool CSeqDBImpl::x_CheckOrFindOID(int & next_oid, CSeqDBLockHold & locked)
-// {
-//     CHECK_MARKER();
-//     bool success = true;
-//
-//     if (next_oid < m_RestrictBegin) {
-//         next_oid = m_RestrictBegin;
-//     }
-//
-//     if (next_oid >= m_RestrictEnd) {
-//         success = false;
-//     }
-//
-//     if (! m_OidListSetup) {
-//         x_GetOidList(locked);
-//     }
-//
-//     if (success && m_OIDList.NotEmpty()) {
-//         success = m_OIDList->CheckOrFindOID(next_oid);
-//
-//         if (next_oid > m_RestrictEnd) {
-//             success = false;
-//         }
-//     }
-//
-//     return success;
-// }
-// ```
-// `x_GetOidList` sets the iteration range of a top node with a single alias file that has a
-// range (`alias::top_iteration_range`) after the first OID was checked against the old range,
-// and a list's constructor resets the range after its scan of the totals (seqdbimpl.cpp:151):
-// when the OID list holds OIDs outside that range (the range's alias file and another name in
-// one `-db`), NCBI's search, its totals and blastdbcmd's first OID disagree on the OIDs.
-/// LOSAT's refusals of the OID ranges of the alias tree `root` (line RG, item D1a-2): a
-/// `FIRST_OID` or `LAST_OID` that NCBI's `int` reads as negative, and an OID list (`mask`)
-/// with OIDs outside the iteration range that NCBI sets for it.
-fn alias_range_refusal(
-    root: &alias::AliasNode,
-    mask: Option<&[u64]>,
-    num_oids: u32,
-) -> Option<(PathBuf, String)> {
-    if let Some(name) = alias::range_beyond_int(root) {
-        return Some((
-            PathBuf::from(name),
-            "FIRST_OID or LAST_OID is 2^31 or more, a negative int to NCBI; LOSAT does not read \
-             such alias files yet"
-                .to_string(),
-        ));
-    }
-    let (mask, (begin, end)) = (mask?, alias::top_iteration_range(root, num_oids)?);
-    let outside = (0..num_oids)
-        .filter(|&oid| oid < begin || oid >= end)
-        .any(|oid| mask[(oid / 64) as usize] >> (oid % 64) & 1 == 1);
-    outside.then(|| {
-        (
-            PathBuf::from(root.subnodes[0].this_name.as_deref().unwrap_or("-")),
-            "the OID range of the alias file with another database of the same -db, whose \
-             OIDs outside the range NCBI's search and blastdbcmd read differently; LOSAT does \
-             not read such alias files yet"
-                .to_string(),
-        )
-    })
-}
-
-/// The walks of the alias files' counts that NCBI's `CSeqDB` constructor makes without a list,
-/// in its order (seqdbimpl.cpp:117-139, quoted at [`SeqDb::open_every_oid_in`]).
-const UNLISTED_WALK_KEYS: &[alias::WalkKey] = &[
-    alias::WalkKey::Nseq,
-    alias::WalkKey::Length,
-    alias::WalkKey::MinSeqLength,
-    alias::WalkKey::StatsNseq,
-    alias::WalkKey::StatsTotlen,
-];
-
 fn fix_string(s: &[u8]) -> &[u8] {
     match s.iter().position(|&byte| byte == 0) {
         Some(at) => &s[..at],
@@ -1240,8 +1175,8 @@ impl SeqDb {
             included_length: OnceLock::new(),
             first_oid_length: None,
             alias_totals: alias::AliasTotals::default(),
-            alias_refusal: None,
-            alias_mask: None,
+            alias_ranges: false,
+            oid_list_set_up: AtomicBool::new(false),
             list_applied: false,
             name: name.to_string(),
             filter: None,
@@ -1295,7 +1230,8 @@ impl SeqDb {
     // where NCBI's constructor reaches them, which depends on the list (`check_alias_values`).
     // `x_GetNumSeqs` and `x_GetNumSeqsStats` are the `int` of the walks' `Int8`
     // (seqdbimpl.cpp:948-949); the ranges make the OID list (`alias::range_mask`), which a
-    // list later intersects (`restrict`).
+    // list later intersects (`restrict`), and the iteration range that its first build sets
+    // (`alias::top_iteration_range`), inside which a search reads the list's OIDs.
     /// Reads the counts, the OID ranges and their errors from the alias tree `root` of the
     /// volumes `names` (the volume paths in the order of `self.volumes`).
     fn read_alias_tree(
@@ -1341,14 +1277,14 @@ impl SeqDb {
         self.stats_total_length = totals.stats_totlen.as_ref().map_or(0, |&value| value);
         self.printed_num_seqs = nseq;
         self.printed_total_length = length;
-        self.alias_refusal = alias_range_refusal(root, mask.as_deref(), num_oids);
-        if let Some(words) = &mask {
-            let filter = filter::OidFilter::new(words.clone(), num_oids);
+        self.alias_ranges = mask.is_some();
+        if let Some(words) = mask {
+            let range = alias::top_iteration_range(root, num_oids).unwrap_or((0, num_oids));
+            let filter = filter::OidFilter::new(words, num_oids).with_range(range);
             self.num_seqs = filter.count();
             self.filter = Some(Box::new(filter));
             self.set_included_length(None);
         }
-        self.alias_mask = mask;
         self.alias_totals = totals;
         self.update_first_oid_length()?;
         Ok(())
@@ -1434,11 +1370,12 @@ impl SeqDb {
         self.seqtype
     }
 
-    /// The number of included OIDs: ordinal ids run from 0 to this number minus one. They are
-    /// the OIDs of the volumes that the alias files' ranges (`FIRST_OID`, `LAST_OID`) and a list
-    /// ([`SeqDb::restrict`]) include; iterations and schedules count them. NCBI's
-    /// `GetNumSeqs` is another number, which the statistics ([`SeqDb::statistics_numbers`]) and
-    /// the warning of [`SeqDb::filtered_empty`] read.
+    /// The number of included OIDs, the sequences a search reads: ordinal ids run from 0 to
+    /// this number minus one. They are the OIDs of the volumes that the alias files' ranges
+    /// (`FIRST_OID`, `LAST_OID`) and a list ([`SeqDb::restrict`]) include, inside the iteration
+    /// range NCBI sets for the only alias file of a `-db` (without a list); iterations and
+    /// schedules count them. NCBI's `GetNumSeqs` is another number, which the statistics
+    /// ([`SeqDb::statistics_numbers`]) and the warning of [`SeqDb::filtered_empty`] read.
     pub fn num_seqs(&self) -> u32 {
         self.num_seqs
     }
@@ -1653,7 +1590,7 @@ impl SeqDb {
     /// `MIN_SEQ_LENGTH`): RPS-BLAST, which searches the volumes' profiles by OID, refuses them
     /// (`rps_hooks::check_alias_keys`).
     pub fn alias_ranges_or_statistics(&self) -> bool {
-        self.alias_mask.is_some()
+        self.alias_ranges
             || self.stats_num_seqs != 0
             || self.stats_total_length != 0
             || !matches!(self.alias_totals.min_seq_length, Ok(0))
@@ -1745,12 +1682,6 @@ impl SeqDb {
             UNLISTED_WALK_KEYS
         };
         self.walk_errors(keys)?;
-        if let Some((path, message)) = &self.alias_refusal {
-            return Err(SeqDbError::Unsupported {
-                path: path.clone(),
-                message: message.clone(),
-            });
-        }
         // Values NCBI reads in ways LOSAT does not reproduce yet (line RG, item D1a-2).
         let refuse = |message: &str| {
             Err(SeqDbError::Unsupported {
@@ -1764,7 +1695,7 @@ impl SeqDb {
                 self.counts.num_seqs
             ));
         }
-        if self.counts.total_length as i64 <= 0 && self.num_seqs > 0 {
+        if !self.list_applied && self.statistics_per_subject() {
             return refuse(&format!(
                 "the total length of the alias files (LENGTH) is {} as NCBI's Int8 while the \
                  database includes sequences",
@@ -1775,6 +1706,30 @@ impl SeqDb {
             self.check_printed_counts()?;
         }
         Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443
+    // ```c
+    //        if (db_length == 0) {
+    //            /* This is not a database search, hence need to recalculate and save
+    //             the effective search spaces and length adjustments for all
+    //             queries based on the length of the current single subject
+    //             sequence. */
+    //            if ((status = BLAST_OneSubjectUpdateParameters(program_number,
+    //                           seq_arg.seq->length, score_options, query_info,
+    //                           sbp, hit_params, word_params,
+    //                           eff_len_options)) != 0)
+    // ```
+    // `db_length` is `BlastSeqSrcGetTotLen`, NCBI's `GetTotalLength` (`counts`): an alias file's
+    // `LENGTH 0`, or a list whose scan of the totals visits no sequence (the walk of
+    // `OidFilter::walk` stops before the listed OIDs that the search reads: line RG D1a-2,
+    // survey A, the iteration range of the only alias file of a `-db`).
+    /// Whether NCBI's search computes the statistics of each subject on its own: `GetTotalLength`
+    /// is not positive as NCBI's `Int8` while the search reads sequences. LOSAT's database
+    /// searches do not (an alias file's `LENGTH 0` is refused by [`SeqDb::check_alias_values`],
+    /// a list's scan by the search's opener).
+    pub fn statistics_per_subject(&self) -> bool {
+        self.counts.total_length as i64 <= 0 && self.num_seqs > 0
     }
 
     /// The first exception of the walks of `keys`, in that order.

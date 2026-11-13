@@ -104,6 +104,12 @@ impl FormatSpec {
         })
     }
 
+    /// Whether a specifier reads the definition lines (`m_GetDefline`: `Write` reads them with
+    /// `GetHdr`).
+    pub fn reads_deflines(&self) -> bool {
+        self.get_defline
+    }
+
     /// Whether a specifier writes the letters of the sequence (`%s`).
     pub fn writes_letters(&self) -> bool {
         self.need_seq

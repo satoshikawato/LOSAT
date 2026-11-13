@@ -801,7 +801,6 @@ fn alias_count_keys_follow_ncbis_walks() {
         "DBLIST prot_v4\nLENGTH 0\n",
         "DBLIST prot_v4\nLENGTH 9223372036854775808\n",
         "DBLIST prot_v4\nLENGTH 1000000000000000000\n",
-        "DBLIST prot_v4\nFIRST_OID 2147483648\n",
     ] {
         let error = open(text).expect_err(text);
         assert!(
@@ -809,6 +808,10 @@ fn alias_count_keys_follow_ncbis_walks() {
             "{text}: {error}"
         );
     }
+    // FIRST_OID 2^31 is NCBI's INT_MAX (D1a-2 part 2): no OID listed, the range [10, 10), the
+    // walks' counts.
+    let db = open("DBLIST prot_v4\nFIRST_OID 2147483648\n").unwrap();
+    assert_eq!((db.num_seqs(), db.ncbi_num_seqs()), (0, 10));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -931,21 +934,69 @@ fn alias_oid_ranges_select_ncbis_oids() {
     assert_eq!(oids(&db), [2, 4, 6]);
     assert_eq!(db.ncbi_num_seqs(), 3);
     assert_eq!(db.included_length().unwrap(), lengths(&db));
-    // The range of the only alias file of the -db with another name: NCBI's search and
-    // blastdbcmd read the OIDs outside the range differently (D1a-2).
-    let error = SeqDb::open(
-        &format!(
-            "{} {}",
-            dir.join("r").display(),
-            dir.join("prot_v4").display()
-        ),
+    // The range of the only alias file of the -db with another name (D1a-2, survey A): the
+    // OID list holds every OID of prot_v4, the iteration range is r's. A search reads the
+    // listed OIDs inside the range; NCBI's loop from OID 0 also passes the first listed OID at
+    // its first check, made before the list is set up, and the checks after that keep the
+    // included OIDs.
+    let names = |a: &str, b: &str| format!("{} {}", dir.join(a).display(), dir.join(b).display());
+    let db = SeqDb::open(&names("r", "prot_v4"), SeqType::Protein).unwrap();
+    assert_eq!(oids(&db), [2, 3, 4, 5, 6]);
+    assert_eq!(db.included_length().unwrap(), lengths(&db));
+    assert_eq!((db.ncbi_num_seqs(), db.total_length()), (20, 1602));
+    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), [0, 2, 3, 4, 5, 6]);
+    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), [2, 3, 4, 5, 6]);
+    assert!(!db.check_oid(0) && db.check_oid(2) && !db.check_oid(7));
+    assert!((0..20).all(|oid| db.includes_oid(oid) == db.check_oid(oid)));
+    let db = SeqDb::open(&names("r", "prot_v4"), SeqType::Protein).unwrap();
+    assert!(db.check_oid(0) && !db.check_oid(0));
+    // With a list the constructor's scan of the totals follows that loop over the listed OIDs,
+    // and the search reads every listed OID (the constructor sets the range back).
+    let mut db = SeqDb::open_search_in(
+        &names("r", "prot_v4"),
         SeqType::Protein,
+        &SearchPath::new(&std::env::current_dir().unwrap(), None, None).unwrap(),
     )
-    .unwrap_err();
-    assert!(
-        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("OID range")),
-        "{error}"
+    .unwrap();
+    db.x_keep_oids(|oid| [0, 4, 8].contains(&oid));
+    assert_eq!(oids(&db), [0, 4, 8]);
+    assert_eq!(db.ncbi_num_seqs(), 2);
+    assert_eq!(db.included_length().unwrap(), lengths(&db));
+    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), [0, 4, 8]);
+    // The loop passes the OID at the range's end when the list holds it and not the OID before
+    // it (`x_CheckOrFindOID` tests `next_oid > m_RestrictEnd`).
+    write("b.pal", "DBLIST prot_old\nFIRST_OID 1\nLAST_OID 5\n");
+    write("t.pal", "DBLIST b\nFIRST_OID 1\nLAST_OID 10\n");
+    let db = SeqDb::open(&names("t", "prot_v4"), SeqType::Protein).unwrap();
+    assert_eq!(oids(&db), [0, 1, 2, 3, 4]);
+    let walk = [0, 1, 2, 3, 4, 10];
+    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), walk);
+    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), walk);
+    // FIRST_OID and LAST_OID of 2^31 or more are NCBI's negative ints: a negative first OID
+    // keeps no OID, a negative last OID is no bound for the list and the end 0 of the range.
+    write("l3g.pal", "DBLIST prot_v4\nLAST_OID 3000000000\n");
+    let db = open("l3g").unwrap();
+    assert_eq!((db.num_seqs(), db.ncbi_num_seqs()), (0, 10));
+    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), [0]);
+    write("f3g.pal", "DBLIST prot_v4\nFIRST_OID 3000000000\n");
+    let db = open("f3g").unwrap();
+    assert_eq!(db.oid_walk().count(), 0);
+    write(
+        "f3l3g.pal",
+        "DBLIST prot_v4\nFIRST_OID 3\nLAST_OID 3000000000\n",
     );
+    let db = open("f3l3g").unwrap();
+    assert_eq!((db.num_seqs(), db.oid_walk().count()), (0, 0));
+    write("nest.pal", "DBLIST f3l3g\n");
+    assert_eq!(oids(&open("nest").unwrap()), [2, 3, 4, 5, 6, 7, 8, 9]);
+    // FIRST_OID 2^31: NCBI's `INT_MIN--` gives INT_MAX, the range [N, N).
+    write("f31.pal", "DBLIST prot_old\nFIRST_OID 2147483648\n");
+    let db = SeqDb::open(&names("f31", "prot_v4"), SeqType::Protein).unwrap();
+    assert_eq!(oids(&db), Vec::<u32>::new());
+    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), [10]);
+    write("f31p1.pal", "DBLIST prot_old\nFIRST_OID 2147483649\n");
+    let db = SeqDb::open(&names("f31p1", "prot_v4"), SeqType::Protein).unwrap();
+    assert_eq!(oids(&db), (10..20).collect::<Vec<u32>>());
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

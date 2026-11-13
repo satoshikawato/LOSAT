@@ -8,3 +8,9 @@
 - The search programs report a database's errors in NCBI's order: a list's error and an alias file's
   `NSEQ`/`STATS_NSEQ`/`LENGTH`/`MIN_SEQ_LENGTH` error come before a damaged first header and before
   LOSAT's refusal of mixed accession tables.
+- Alias files whose `FIRST_OID` or `LAST_OID` is 2^31 or more are read as NCBI BLAST+ 2.17.0 reads
+  them, as negative numbers (LOSAT refused them), and the `FIRST_OID`-`LAST_OID` range of the only
+  alias file of a `-db` that also names another database is searched as NCBI does (LOSAT refused
+  it): the searches read the sequences inside that range, a list's search reads every listed
+  sequence with NCBI's statistics, and `losat blastdbcmd -entry all`, `-entry`, `-entry_batch`,
+  `-taxids`, `-tax_info` and `-metadata` give the sequences and taxids NCBI's blastdbcmd gives.

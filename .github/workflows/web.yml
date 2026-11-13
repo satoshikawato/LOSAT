@@ -101,10 +101,9 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04
-    # About three times the longest of 60 passing runs of the single job (13.6 min,
-    # 2026-11-11), as for the other jobs here: a job that hangs (2026-11-11, below) gives its
-    # runner back.
-    timeout-minutes: 45
+    # About three times the longest of 224 passing runs of these jobs (7.8 min, 2026-11-12/13),
+    # as for the other jobs here: a job that hangs (2026-11-11, below) gives its runner back.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -267,13 +266,22 @@ jobs:
           name: native
           path: ${{ runner.temp }}/native
       - run: chmod +x ${{ runner.temp }}/native/losat
+      # One process per reactor, at once (`--engines`): the serial reactor runs each search with 1
+      # thread, the threaded one with 1, 2 and 4, and each process runs the CLI for its own
+      # comparisons. In one process, one reactor after the other, the step took 11.6 min (p50 of
+      # 69 runs, 2026-11-12/13; serial 43 %, threaded 57 %) and was the longest path of the
+      # workflow in 46 of them. The first process to fail ends the step and stops the other.
       - name: V-ABI (quick suite)
         run: |
           python3 web/adapter/tools/v_abi_cases.py --suite quick --out ${{ runner.temp }}/v-abi-cases.json
-          node web/adapter/tests/v_abi.js --native ${{ runner.temp }}/native/losat \
-            --serial ${{ runner.temp }}/reactors/losat-web-serial.wasm \
-            --threads ${{ runner.temp }}/reactors/losat-web-threads.wasm \
-            --cases ${{ runner.temp }}/v-abi-cases.json
+          for engine in serial threads; do
+            node web/adapter/tests/v_abi.js --native ${{ runner.temp }}/native/losat \
+              --serial ${{ runner.temp }}/reactors/losat-web-serial.wasm \
+              --threads ${{ runner.temp }}/reactors/losat-web-threads.wasm \
+              --cases ${{ runner.temp }}/v-abi-cases.json --engines "$engine" &
+          done
+          wait -n || { kill $(jobs -p) 2>/dev/null; exit 1; }
+          wait -n
 
   # V-BR (plan §6.2): the application's EngineGateway and Engine worker with the reactors
   # of the reactors job, in Chromium, Firefox and WebKit, compared with the native CLI of the
@@ -293,7 +301,8 @@ jobs:
     needs: [changes, reactors, native]
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # About three times the longest of 527 passing runs of the shards (11.6 min, 2026-11-12/13).
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:

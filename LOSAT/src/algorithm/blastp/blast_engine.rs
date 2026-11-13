@@ -7303,11 +7303,16 @@ fn x_query_block_plan(
         return None;
     }
     // Several outputs, the hit records or an observer. Each
-    // output of several is a writer of the caller (a sink the block search opens itself would be
-    // flushed by every block, and a stream that two outputs share would get each block's formats in
-    // turn); no `-db` (the records' `s_idx` of a database search rank the subjects that the call's
-    // lists name); an observer only with the hit records, which count the HSPs of each block for
-    // the observer's indices (`XOffsetObserver`).
+    // output of several is a writer of the caller: the search of all queries writes each output's
+    // whole report in turn and opens its sink just before (`OutputSink::open`), while the block
+    // search opens every sink once and writes them block by block, so two outputs on standard
+    // output would get each block's formats in turn, two outputs to one file would write over each
+    // other through two handles (the search of all queries leaves the last report), and a file that
+    // cannot be created would stop the run after the first block's part of the outputs before it
+    // instead of after their whole reports (test
+    // `several_file_outputs_are_written_one_after_the_other`); no `-db` (the records' `s_idx` of a
+    // database search rank the subjects that the call's lists name); an observer only with the hit
+    // records, which count the HSPs of each block for the observer's indices (`XOffsetObserver`).
     let x_web = outputs.formats.len() > 1 || outputs.hits.is_some() || outputs.observer.is_some();
     if x_web
         && (subject_source.database().is_some()

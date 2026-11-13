@@ -465,7 +465,7 @@ pub(crate) enum SeqInst {
 }
 
 /// What LOSAT refuses in a program that reads the residues of a `SeqInst::PastSeqPos` record
-/// (the text before "is not supported by LOSAT's <program>").
+/// (the text before `is not supported by LOSAT's <program>`).
 pub(crate) fn past_seq_pos_refusal(length: u64) -> String {
     format!(
         "a FASTA record of 4,294,967,296 letters or more, counting the letters of its gaps \

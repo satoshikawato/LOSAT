@@ -364,28 +364,6 @@ impl StrategyExport {
         });
     }
 
-    /// TRANSITIONAL (until every program writes through the cursor): the request of a batch whose
-    /// place in the run the caller keeps, then its searched space.
-    pub fn write_unkeyed(&self, request: &RequestInputs<'_>, searched: Option<i64>) -> Result<()> {
-        self.with_state(|state| {
-            let mut buf = Vec::new();
-            let mut out = text_out(&mut buf, &mut *state.sink);
-            write_strategy_document(
-                &mut out,
-                &self.0.request,
-                request,
-                state.carry.option(),
-                self.0.options.database_list(),
-            );
-            let written = out.finish();
-            let flushed = state.sink.flush();
-            self.0.options.pass(&mut state.carry, searched);
-            written?;
-            flushed?;
-            Ok(())
-        })
-    }
-
     /// NCBI stops the run when it formats the batch whose queries end at `queries_end`, after
     /// that batch's request (a matrix name that its BLAST XML data does not know): no request of a
     /// later batch is written.

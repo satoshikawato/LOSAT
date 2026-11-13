@@ -1581,6 +1581,7 @@ impl RecordState {
     /// length while the line is read; `x_CloseGap` reads that length (`close_gap`). The
     /// fast copy of `fSkipCheck` is not taken (no `fSkipCheck`). `x_NucOrProt()` is empty:
     /// the molecule is set only in `AssembleSeq`.
+    #[inline]
     fn parse_data_line(
         &mut self,
         s: &[u8],
@@ -1596,8 +1597,9 @@ impl RecordState {
     }
 
     /// `parse_data_line` with `ReaderFlags::mask_from_fasta` as `MASK_FROM_FASTA`, so that the
-    /// other readers' lines take no step of convert2blastmask's masks.
-    #[inline(always)]
+    /// other readers' lines take no step of convert2blastmask's masks. Each of the two is a
+    /// function of its own (one hot loop in each).
+    #[inline(never)]
     fn parse_data_line_of<const MASK_FROM_FASTA: bool>(
         &mut self,
         s: &[u8],

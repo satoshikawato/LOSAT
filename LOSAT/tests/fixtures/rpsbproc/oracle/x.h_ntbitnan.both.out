@@ -1,0 +1,93 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_h_n_bitnan.xml
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	10
+#Redundancy:	Full
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSTBLASTN 2.17.0+	Cdd	BLOSUM62	10
+QUERY	Query_1	Nucleotide	5000	mg00067_330001-335000
+DOMAINS
+1	Query_1[1]	Specific	214491	2698	3420	1.20804e-94	305.681	smart00052	EAL	-	531754
+1	Query_1[1]	Specific	238923	2701	3414	9.36906e-81	265.948	cd01948	EAL	-	531754
+1	Query_1[1]	Non-specific	443970	2707	3441	8.91738e-80	-nan	COG4943	YjcC	N	-
+1	Query_1[1]	Non-specific	441802	2701	3432	2.51322e-73	257.02	COG2200	EAL	N	-
+1	Query_1[1]	Non-specific	444025	2716	3429	2.86174e-69	247.765	COG5001	COG5001	N	-
+1	Query_1[1]	Specific	513554	2701	3408	4.50529e-65	221.04	pfam00563	EAL	-	531754
+1	Query_1[1]	Non-specific	508224	2704	3441	4.6328e-30	129.504	NF008467	PRK11359	N	-
+1	Query_1[1]	Non-specific	442660	3043	3414	1.39112e-15	81.0018	COG3434	YuxH	C	-
+1	Query_1[1]	Specific	99777	2446	2610	5.90383e-09	53.6924	cd06170	LuxR_C_like	-	532797
+1	Query_1[1]	Non-specific	197715	2434	2601	7.54961e-07	-nan	smart00421	HTH_LUXR	-	481199
+1	Query_1[1]	Specific	442052	2446	2583	0.00204713	41.2798	COG2771	CsgD	N	-
+1	Query_1[1]	Non-specific	441799	2482	2583	0.0143973	37.5642	COG2197	CitB	N	-
+1	Query_1[1]	Non-specific	513237	2440	2586	0.0399704	34.4985	pfam00196	GerE	-	532797
+1	Query_1[1]	Non-specific	442153	2482	2583	0.757538	33.5242	COG2909	MalT	N	-
+1	Query_1[1]	Non-specific	516697	3244	3393	0.825947	32.2791	pfam05204	Hom_end	NC	447602
+1	Query_1[1]	Non-specific	508291	2443	2589	0.95022	-nan	NF008548	PRK11475	N	-
+1	Query_1[1]	Non-specific	197713	2488	2577	1.36062	30.2563	smart00418	HTH_ARSR	C	481199
+1	Query_1[1]	Non-specific	238042	2485	2577	6.15808	-nan	cd00090	HTH_ARSR	NC	532797
+1	Query_1[2]	Non-specific	511468	4712	4996	4.12665	32.1207	NF042960	AcphenoCarb_ApcA	N	-
+1	Query_1[3]	Non-specific	507226	3	1493	0	1021.94	NF007399	PRK09928	N	-
+1	Query_1[3]	Specific	440903	3	1007	7.3437e-138	436.884	COG1292	BetT	N	-
+1	Query_1[3]	Non-specific	213565	3	971	3.90687e-136	-nan	TIGR00842	bcct	N	529170
+1	Query_1[3]	Specific	514667	3	971	1.52244e-126	404.999	pfam02028	BCCT	N	-
+1	Query_1[3]	Non-specific	503764	3	965	5.4693e-44	-nan	NF002887	PRK03356	N	-
+1	Query_1[-1]	Specific	440348	3555	4406	7.48505e-41	151.943	COG0583	LysR	-	-
+1	Query_1[-1]	Non-specific	176122	3573	4142	2.41605e-32	125.459	cd08431	PBP2_HupR	-	531135
+1	Query_1[-1]	Non-specific	515602	3594	4148	4.70648e-20	-nan	pfam03466	LysR_substrate	-	-
+1	Query_1[-1]	Non-specific	468737	3642	4433	3.29996e-19	90.3687	NF040786	LysR_Sec_metab	-	-
+1	Query_1[-1]	Non-specific	513171	4236	4412	8.94867e-18	78.9728	pfam00126	HTH_1	-	-
+1	Query_1[-1]	Non-specific	508122	4200	4406	6.89647e-14	74.4945	NF008352	PRK11139	C	-
+1	Query_1[-1]	Non-specific	177082	3984	4421	3.93837e-09	60.0337	CHL00180	rbcR	C	-
+1	Query_1[-1]	Non-specific	176102	3606	4100	1.83865e-06	50.2913	cd05466	PBP2_LTTR_substrate	-	531135
+1	Query_1[-1]	Non-specific	468673	3837	4409	0.000506678	44.2396	NF040709	benzoate_BenM	C	-
+1	Query_1[-1]	Non-specific	176112	3633	4097	0.0105626	-nan	cd08420	PBP2_CysL_like	-	531135
+1	Query_1[-1]	Non-specific	197670	4191	4373	0.0241865	36.4179	smart00347	HTH_MARR	N	532797
+1	Query_1[-1]	Non-specific	441451	4191	4358	0.255977	-nan	COG1846	MarR	N	-
+1	Query_1[-1]	Non-specific	520712	4302	4373	0.506777	30.7984	pfam13404	HTH_AsnC-type	N	532797
+1	Query_1[-1]	Non-specific	500391	4311	4379	1.36082	29.9377	pfam22083	I-HmuI_NUMOD-like	NC	-
+1	Query_1[-1]	Non-specific	350009	945	1004	2.32802	32.5381	cd18565	ABC_6TM_exporter_like	N	532173
+1	Query_1[-1]	Non-specific	440932	4206	4358	2.74447	-nan	COG1321	MntR	NC	-
+1	Query_1[-1]	Non-specific	441131	4302	4373	5.25647	30.5169	COG1522	Lrp	C	-
+1	Query_1[-1]	Non-specific	176162	3657	3890	5.72276	30.9866	cd08473	PBP2_CrgA_like_4	N	531135
+1	Query_1[-1]	Non-specific	523667	4287	4376	6.79165	29.6984	pfam19425	Csd3_N2	C	-
+1	Query_1[-1]	Non-specific	349989	945	1001	7.68328	30.8989	cd18545	ABC_6TM_YknV_like	N	532173
+1	Query_1[-1]	Non-specific	176107	3885	4112	7.9719	30.6078	cd08415	PBP2_LysR_opines_like	C	531135
+1	Query_1[-1]	Non-specific	512688	4182	4358	8.89617	-nan	COG4742	ArnR	C	-
+1	Query_1[-3]	Non-specific	517306	4564	4995	2.01694e-14	-nan	pfam06496	DUF1097	-	-
+ENDDOMAINS
+SITES
+1	Query_1[1]	Specific	DNA binding residues	S2446-2448,E2449-2451,K2452-2454,S2491-2493,V2494-2496,T2497-2499,R2521-2523,S2524-2526,K2530-2532,T2533-2535,S2539-2541,H2542-2544,Q2545-2547,K2548-2550,K2551-2553,D2584-2586	16	0	99777
+1	Query_1[1]	Specific	dimerization interface	M2479-2481,G2485-2487,S2491-2493,D2584-2586,I2587-2589,T2590-2592,R2599-2601,F2608-2610	9	0	99777
+1	Query_1[-1]	Specific	putative dimerization interface	L4091-4089,Q4088-4086,L4082-4080,K4079-4077,P4067-4065,C4061-4059,Q4058-4056,I4055-4053,T4052-4050,V4049-4047,T4046-4044,T4043-4041,S3770-3768,I3767-3765,L3764-3762,V3761-3759,P3758-3756,D3755-3753,Q3737-3735,C3734-3732,I3728-3726,L3725-3723	23	0	176122
+ENDSITES
+MOTIFS
+ENDMOTIFS
+ENDQUERY
+ENDSESSION	1
+ENDDATA

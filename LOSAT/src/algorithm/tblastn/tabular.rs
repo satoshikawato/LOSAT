@@ -455,14 +455,7 @@ pub(super) fn write_tblastn_tabular(
                 // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105: the nucleotide
                 // coordinates of a translated frame, descending on a minus frame (the default
                 // row's, `write_tabular`).
-                let (s_start, s_end) = if frame > 0 {
-                    (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
-                } else {
-                    (
-                        subject_len - 3 * hsp.s_start + frame + 1,
-                        subject_len - 3 * hsp.s_end + frame + 2,
-                    )
-                };
+                let (s_start, s_end) = super::stage_e_report::subject_endpoints(hsp, subject_len);
                 let (q_start, q_end, s_start, s_end) = record_coordinates(
                     tab.ranges,
                     q_idx,

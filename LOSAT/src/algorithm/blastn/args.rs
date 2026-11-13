@@ -774,7 +774,7 @@ pub struct BlastnArgs {
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
     /// The run's search strategy export (`-export_search_strategy`), made by `run`
-    /// (`archive::strategy_for`).
+    /// (`strategy::StrategyExport::for_run`).
     #[arg(skip)]
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
 

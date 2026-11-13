@@ -203,16 +203,16 @@ mod tests {
         );
     }
 
-    // The NCBI C++ Toolkit option that LOSAT's dustmasker refuses, as blastdbcmd does.
+    // The library run refuses `-xmlhelp`, which the command line answers with NCBI's XML, as
+    // blastdbcmd's (line RG DECISIONS E2x-1).
     #[test]
-    fn toolkit_options_are_refused_as_blastdbcmd_refuses_them() {
+    fn the_library_refuses_xmlhelp_as_blastdbcmd_does() {
         assert_eq!(
             run_words(&["-xmlhelp"]),
             (
                 1,
                 String::new(),
-                "Error: the NCBI BLAST+ option -xmlhelp is not supported by LOSAT's DUSTMASKER\n"
-                    .to_string()
+                format!("Error: {}\n", crate::cli::xml_help_refusal("DUSTMASKER"))
             )
         );
     }

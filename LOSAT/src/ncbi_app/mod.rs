@@ -44,16 +44,6 @@ pub(crate) struct Tool {
     pub(crate) post_prefix: Option<&'static str>,
 }
 
-impl Tool {
-    /// LOSAT's refusal of the option `word`.
-    pub(crate) fn unsupported_option(&self, word: &str) -> String {
-        format!(
-            "the NCBI BLAST+ option {word} is not supported by LOSAT's {}",
-            self.refusal_name
-        )
-    }
-}
-
 /// `Tool::dependencies` of a program that sets none.
 pub(crate) fn no_dependencies() -> Vec<(&'static str, Dep, &'static str)> {
     Vec::new()
@@ -260,7 +250,13 @@ pub(crate) fn run(tool: &'static Tool, words: &[OsString], body: Body) -> i32 {
     let stderr = std::io::stderr();
     let mut out = stdout.lock();
     let mut err = stderr.lock();
-    let status = run_with(tool, words, &mut std::io::stdin(), &mut out, &mut err, body);
+    let status = run_app(
+        tool,
+        words,
+        (&mut std::io::stdin(), &mut out, &mut err),
+        body,
+        Some(ncbi_xml),
+    );
     let _ = out.flush();
     let _ = err.flush();
     status
@@ -299,7 +295,7 @@ pub(crate) type Body = fn(
 /// argument error prints the usage and a line of `=` on stderr and NCBI's report of the
 /// exception as diagnostics. LOSAT's refusals come where NCBI would start the work they stand
 /// for, before anything is written: `-conffile` without the command line's application start
-/// (which loads its file), `-xmlhelp` where the reader takes it, and `-dryrun` without that start; with it, `-dryrun`
+/// (which loads its file), `-xmlhelp` where the reader takes it without that start, and `-dryrun` without it; with it, `-dryrun`
 /// ends the run with exit status 0 after the arguments and the settings. Then `body` runs.
 pub(crate) fn run_with(
     tool: &'static Tool,
@@ -308,6 +304,25 @@ pub(crate) fn run_with(
     out: &mut dyn Write,
     err: &mut dyn Write,
     body: Body,
+) -> i32 {
+    run_app(tool, words, (input, out, err), body, None)
+}
+
+/// NCBI's XML of `program`'s arguments, whole: the readers of `ncbi_app` refuse no argument of
+/// NCBI's by name (`ncbi_xmlhelp_tests`).
+fn ncbi_xml(program: &str) -> Option<String> {
+    crate::ncbi_xmlhelp::print(program, |_| false)
+}
+
+/// `run_with`, with the XML of `-xmlhelp` that the command line's `run` writes (`xml_help`); the
+/// library API's run has none and refuses the word (`cli::xml_help_refusal`, line RG DECISIONS
+/// E2x-1), so the library does not carry the XML.
+fn run_app(
+    tool: &'static Tool,
+    words: &[OsString],
+    (input, out, err): (&mut dyn Read, &mut dyn Write, &mut dyn Write),
+    body: Body,
+    xml_help: Option<fn(&str) -> Option<String>>,
 ) -> i32 {
     // NCBI's application start (`ncbi_environment::ApplicationStart`), which the command line's
     // entry has made: the file of `-logfile` gets the usage report's messages when NCBI opens it,
@@ -382,6 +397,15 @@ pub(crate) fn run_with(
             let _ = out.write_all(tool.help.as_bytes());
             return 0;
         }
+        // NCBI's XML, which the command line's run writes (`ncbi_xml`); the library API writes
+        // none (`cli::xml_help_refusal`, line RG DECISIONS E2x-1).
+        Err(ArgsError::XmlHelp) => match xml_help.and_then(|xml| xml(tool.program)) {
+            Some(xml) => {
+                let _ = out.write_all(xml.as_bytes());
+                return 0;
+            }
+            None => return diag.refuse(&crate::cli::xml_help_refusal(tool.refusal_name)),
+        },
         // `eNoValue` (which prints no usage) is not raised by the reader.
         Err(ArgsError::Invalid(error)) => return diag.report_arg_exception(&error, None),
         Err(ArgsError::Refused(reason)) => return diag.refuse(&reason),

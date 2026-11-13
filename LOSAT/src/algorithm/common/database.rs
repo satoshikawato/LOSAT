@@ -197,8 +197,9 @@ fn apply_list(
 }
 
 /// Tells the BLAST archive of the run (`archive`, `None` without one) and its search strategy
-/// export (`strategy`) what the database's list makes of their requests
-/// (`ArchiveHandle::set_database_filter`). `empty_length` is whether the
+/// export (`strategy`) what the database's list makes of their requests: the run's options
+/// handle, made once per run and shared by both (`report::archive::OptionsHandle::set_database_filter`).
+/// `empty_length` is whether the
 /// total length of the statistics is not positive (`SeqDb::statistics_length_is_empty`: a list
 /// that kept no sequence, without `STATS_TOTLEN`). `dbsize` is whether `-dbsize` is given: the
 /// `EffectiveSearchSpace` option then counts the length adjustment with no sequence, while the
@@ -227,14 +228,21 @@ pub(crate) fn note_archive_database_filter(
             "-dbsize with {option} and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
         );
     }
-    let list = filter.archive_parameter(list_taxids);
-    let empty_database = empty_length && !searchsp;
-    if let Some(strategy) = strategy {
-        strategy.set_database_filter(list.clone(), empty_database);
-    }
-    if let Some(handle) = archive {
-        handle.set_database_filter(list, empty_database);
-    }
+    let options = match (archive, strategy) {
+        (Some(handle), strategy) => {
+            anyhow::ensure!(
+                strategy.is_none_or(|strategy| strategy.options().same(handle.options())),
+                "LOSAT internal error: the archive and the search strategy of one run have two options handles"
+            );
+            handle.options()
+        }
+        (None, Some(strategy)) => strategy.options(),
+        (None, None) => return Ok(()),
+    };
+    options.set_database_filter(
+        filter.archive_parameter(list_taxids),
+        empty_length && !searchsp,
+    )?;
     Ok(())
 }
 

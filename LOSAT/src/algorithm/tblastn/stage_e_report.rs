@@ -239,39 +239,21 @@ pub(super) fn render(
     // NCBI writes the XML2 and JSON documents' start before the search (`PrintProlog`) and
     // fails for a matrix of its formatting table's that it does not know when it makes the
     // first report's data: the start alone is written then (probe `tblastn_sub_lcmatrix`).
-    if outputs
-        .formats
-        .iter()
-        .any(|format| is_structured_xml(format.outfmt))
+    // (The search strategy's file holds the first batch's request alone: `search` stops the
+    // requests after it with the same decision, `StrategyExport::stop_after`.)
+    if crate::report::blast_xml::matrix::xml_formatting_fails(
+        outputs.formats.iter().map(|format| format.outfmt),
+        matrix_name,
+    ) && !query_records.is_empty()
     {
-        if let Err(error) =
-            super::blast_xml::unsupported_matrix(matrix_name, !query_records.is_empty())
-        {
-            // NCBI wrote the first batch's search strategy request before its search
-            // (tblastn_app.cpp:280) and fails when it formats that batch: the file holds that
-            // request alone, whatever the number of batches (probe 7 of RG-F1, `-matrix blosum62`
-            // with outfmt 5 and 16).
-            if let Some(render) = archive {
-                if let (Some(strategy), Some(first)) = (render.strategy, render.spans.first()) {
-                    super::archive::write_tblastn_failed_strategy(
-                        strategy,
-                        query_records,
-                        matches!(shown, ShownSubjects::Fasta { .. }).then_some(subject_records),
-                        ranges.queries,
-                        mask_lowercase,
-                        first.clone(),
-                    )?;
-                }
+        for format in outputs.formats.iter_mut() {
+            if let Some(kind) = xml2_kind(format.outfmt) {
+                let mut writer = format.sink.open()?;
+                writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+                writer.flush()?;
             }
-            for format in outputs.formats.iter_mut() {
-                if let Some(kind) = xml2_kind(format.outfmt) {
-                    let mut writer = format.sink.open()?;
-                    writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
-                    writer.flush()?;
-                }
-            }
-            return Err(error);
         }
+        return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
     }
     let xml_is_xml2 = outputs
         .formats
@@ -388,7 +370,7 @@ pub(super) fn render(
             observer.query_stats(q_idx, stats);
         }
     }
-    // What the archive and the search strategy read of the report's data.
+    // What the archive reads of the report's data.
     let archive_data = || super::archive::ArchiveData {
         queries: query_records,
         subject_records,
@@ -408,25 +390,10 @@ pub(super) fn render(
         mask_lowercase,
         ranges,
     };
-    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:277-280
-    // ```c++
-    //                 query =  input->GetNextSeqBatch(*scope);
-    //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
-    //
-    //                 SaveSearchStrategy(args, m_CmdLineArgs, query_factory, m_OptsHndl);
-    // ```
-    // The search strategy's request of each batch (`-export_search_strategy`), which NCBI writes
-    // before the batch's search: the file is apart from the reports, and its documents are those
-    // of the batches the run reports.
-    if let Some(render) = archive {
-        if let Some(strategy) = render.strategy {
-            super::archive::write_tblastn_strategy(strategy, render, &archive_data())?;
-        }
-    }
     for (format_index, format) in outputs.formats.iter_mut().enumerate() {
         // The warnings that a format other than the archive writes are not the archive's
         // messages (a call with several formats, `run_local`).
-        if let Some(handle) = archive.and_then(|render| render.handle) {
+        if let Some(handle) = archive.map(|render| render.handle) {
             handle.set_muted(format_number(format.outfmt) != ARCHIVE_FORMAT);
         }
         let mut probe = observer
@@ -610,9 +577,7 @@ pub(super) fn render(
             ARCHIVE_FORMAT => {
                 let render = archive.expect("a BLAST archive request has its handle");
                 super::archive::write_tblastn_archives(
-                    render
-                        .handle
-                        .expect("a BLAST archive request has its handle"),
+                    render.handle,
                     render,
                     &archive_data(),
                     warnings.as_mut(),
@@ -625,7 +590,7 @@ pub(super) fn render(
     }
     // The messages that `search` writes after the formats (the stop messages) are the archive's
     // again, whichever format came last (as in blastn and blastp).
-    if let Some(handle) = archive.and_then(|render| render.handle) {
+    if let Some(handle) = archive.map(|render| render.handle) {
         handle.set_muted(false);
     }
     Ok(())
@@ -725,7 +690,6 @@ fn write_tabular(
             );
             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
                 let hsp = &linked.hsp;
-                let frame = i32::from(hsp.frame);
                 // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105:
                 // if (segment->frame < 0) {
                 //     *start = seq_length - 3*segment->offset + segment->frame;
@@ -736,14 +700,7 @@ fn write_tabular(
                 // }
                 // Stage D's local subject coordinate conversion is 1-offset.
                 let subject_len = i32::try_from(subject_letters.length(oid))?;
-                let (s_start, s_end) = if frame > 0 {
-                    (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
-                } else {
-                    (
-                        subject_len - 3 * hsp.s_start + frame + 1,
-                        subject_len - 3 * hsp.s_end + frame + 2,
-                    )
-                };
+                let (s_start, s_end) = subject_endpoints(hsp, subject_len);
                 // The coordinates in the searched letters, moved into the records
                 // (`record_coordinates`).
                 let (q_start, q_end, s_start, s_end) = record_coordinates(
@@ -925,6 +882,53 @@ fn tabular_subject_ids(
         .collect())
 }
 
+// NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105: the nucleotide coordinates of a
+// translated frame, descending on a minus frame.
+/// The 1-based subject coordinates of the rows of `hsp` (the pairwise, tabular and BLAST XML
+/// reports) in a subject of `subject_len` nucleotides: those of its frame's codons, from the end
+/// of the minus strand, before the records' offsets (`record_coordinates`).
+pub(super) fn subject_endpoints(
+    hsp: &super::search_gapped::GappedHsp,
+    subject_len: i32,
+) -> (i32, i32) {
+    let frame = i32::from(hsp.frame);
+    if frame > 0 {
+        (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
+    } else {
+        (
+            subject_len - 3 * hsp.s_start + frame + 1,
+            subject_len - 3 * hsp.s_end + frame + 2,
+        )
+    }
+}
+
+/// The values of the outfmt 0 row of `linked` with its payload `payload` in a subject of
+/// `subject_len` nucleotides (`pairwise_hits`) that the report's sorts read (`HspScores::of`),
+/// without making the row, for the model of the reads (`TblastnDatabase::subject_read_texts`):
+/// the payload's bit score and columns, the linked E-value, the engine's identities (the row's
+/// `seqalign_num_ident`) and the row's coordinates (`subject_endpoints`). The records' offsets of
+/// a ranged query move every HSP of the query alike (a database subject has none), which no sort
+/// reads, and are left out.
+pub(super) fn hsp_scores(
+    linked: &super::stage_d_linking::LinkedHsp,
+    payload: &super::stage_d_results::KappaHspPayload,
+    subject_len: usize,
+) -> Result<crate::report::hit_sort::HspScores> {
+    let hsp = &linked.hsp;
+    let (s_start, s_end) = subject_endpoints(hsp, i32::try_from(subject_len)?);
+    Ok(crate::report::hit_sort::HspScores::of_values(
+        payload.bit_score,
+        linked.evalue,
+        usize::try_from(payload.num_ident)?,
+        payload.align_length,
+        (
+            usize::try_from(hsp.q_start + 1)?,
+            usize::try_from(hsp.q_end)?,
+        ),
+        (usize::try_from(s_start)?, usize::try_from(s_end)?),
+    ))
+}
+
 // NCBI c++/src/algo/blast/format/blast_format.cpp:1490-1589;
 // c++/src/objtools/align_format/showalign.cpp:1600-1625:
 // AcknowledgeBlastQuery; x_DisplayDeflines; DisplaySeqalign;
@@ -984,15 +988,7 @@ fn pairwise_hits(
                 // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105:
                 // translated coordinates use three nucleotide letters per
                 // residue and reverse strand endpoints run in descending order.
-                let subject_len = i32::try_from(subject_seq.len())?;
-                let (s_start, s_end) = if frame > 0 {
-                    (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
-                } else {
-                    (
-                        subject_len - 3 * hsp.s_start + frame + 1,
-                        subject_len - 3 * hsp.s_end + frame + 2,
-                    )
-                };
+                let (s_start, s_end) = subject_endpoints(hsp, i32::try_from(subject_seq.len())?);
                 let (qseq, sseq) = aligned_sequences(
                     query,
                     subject_seq,
@@ -1048,12 +1044,9 @@ fn pairwise_hits(
                     crate::utils::matrix::protein_display_positives(&qseq, &sseq, scoring.matrix);
                 // The rows are read from the searched letters; the report prints record
                 // coordinates (`record_coordinates`).
-                let (q_start, q_end, s_start, s_end) = record_coordinates(
-                    ranges,
-                    q_idx,
-                    oid,
-                    (hsp.q_start + 1, hsp.q_end, s_start, s_end),
-                )?;
+                let searched = (hsp.q_start + 1, hsp.q_end, s_start, s_end);
+                let (q_start, q_end, s_start, s_end) =
+                    record_coordinates(ranges, q_idx, oid, searched)?;
                 // NCBI reference: c++/src/objtools/align_format/showalign.cpp:411-422
                 // ```c++
                 // static int s_GetFrame (int start, ENa_strand strand, const CSeq_id& id,
@@ -1156,6 +1149,15 @@ fn pairwise_hits(
                     // (`report_num_ident`).
                     seqalign_num_ident: usize::try_from(payload.num_ident)?,
                 });
+                // The model of the reads sorts by `hsp_scores` without the rows
+                // (`TblastnDatabase::subject_read_texts`): the row's values where the records'
+                // offsets move nothing.
+                debug_assert!(
+                    searched != (q_start, q_end, s_start, s_end)
+                        || hsp_scores(linked, payload, subject_seq.len()).ok()
+                            == hits.last().map(crate::report::hit_sort::HspScores::of),
+                    "TBLASTN hsp_scores differs from its row"
+                );
             }
         }
     }

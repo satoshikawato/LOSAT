@@ -1,6 +1,6 @@
 # name<TAB>arguments (shell words, run in this directory; "< file" = stdin). NCBI BLAST+ 2.17.0 convert2blastmask, the official Linux x64 release (local oracle), 2026-11-13, ad-RG-K-6 (line RG item K3):
 # in/ made by remaining-gaps-20261112/K/k3/probe/gen_inputs.py; conf/malformed.ini is that of tests/segmasker. Run without LOSAT_, NCBI_ and BLAST variables but NCBI_CONFIG_PATH (this directory) and BLAST_USAGE_REPORT=false (NCBI only).
-# Not frozen: -version, -version-full and -xmlhelp (LOSAT prints its own versions, NCBI's forms with LOSAT's package, and refuses -xmlhelp, as dustmasker; line RG item E3), the -out /dev/full rows of the maskinfo formats (LOSAT refuses a failed write of the serial stream) and -masking_options with a byte outside the visible ASCII range in maskinfo_asn1_text and maskinfo_asn1_bin (NCBI writes # for it and posts an error; LOSAT refuses it, as in an archive).
+# help_xml (-xmlhelp, line RG item E2x) comes from the local official NCBI BLAST+ 2.17.0 (2026-11-14, ad-RG-E-8). Not frozen: -version and -version-full (LOSAT prints its own versions, NCBI's forms with LOSAT's package, as dustmasker; line RG item E3), the -out /dev/full rows of the maskinfo formats (LOSAT refuses a failed write of the serial stream) and -masking_options with a byte outside the visible ASCII range in maskinfo_asn1_text and maskinfo_asn1_bin (NCBI writes # for it and posts an error; LOSAT refuses it, as in an archive).
 # gapinv_* (a lower case letter at position 4294967295, kInvalidSeqPos: no interval opens there; RG DECISIONS K3-8) frozen 2026-11-13 by ad-RG-K-7 with the local official release, in/gapinv.fa by hand (the F2 review's inv.fa). gapwrap0_* and gapwrap1_* (>? lines that sum to 2^32 or more; RG DECISIONS K3-6): frozen on ws with its NCBI BLAST+ 2.17.0 (env_blast) under a 32 GiB address space, since NCBI allocates the run of N of gapwrap1 (4 GiB, 8.4 GB resident); in/gapwrap*.fa written by hand.
 ambig_int	-in in/ambig.fa -masking_algorithm dust -masking_options o -outfmt interval
 ambig_txt	-in in/ambig.fa -masking_algorithm dust -masking_options o
@@ -164,9 +164,9 @@ nucE_ps	-in in/nucE.fa -masking_algorithm dust -masking_options o -parse_seqids
 nucE2_int	-in in/nucE2.fa -masking_algorithm dust -masking_options o -outfmt interval
 nucE2_txt	-in in/nucE2.fa -masking_algorithm dust -masking_options o
 nucE2_ps	-in in/nucE2.fa -masking_algorithm dust -masking_options o -parse_seqids
-nul_int	-in in/nul.fa -masking_algorithm dust -masking_options o -outfmt interval
-nul_txt	-in in/nul.fa -masking_algorithm dust -masking_options o
-nul_ps	-in in/nul.fa -masking_algorithm dust -masking_options o -parse_seqids
+nul_int	-in in/nul_bytes.fa -masking_algorithm dust -masking_options o -outfmt interval
+nul_txt	-in in/nul_bytes.fa -masking_algorithm dust -masking_options o
+nul_ps	-in in/nul_bytes.fa -masking_algorithm dust -masking_options o -parse_seqids
 prot_int	-in in/prot.fa -masking_algorithm dust -masking_options o -outfmt interval
 prot_txt	-in in/prot.fa -masking_algorithm dust -masking_options o
 prot_ps	-in in/prot.fa -masking_algorithm dust -masking_options o -parse_seqids
@@ -223,6 +223,7 @@ noargs
 h	-h
 help	-help
 help_full	-help-full
+help_xml	-xmlhelp
 h_noalgo	-h -in in/lc.fa
 outfmt_bad	-in in/lc.fa -masking_algorithm dust -masking_options o -outfmt fasta
 outfmt_seqloc	-in in/lc.fa -masking_algorithm dust -masking_options o -outfmt seqloc_xml

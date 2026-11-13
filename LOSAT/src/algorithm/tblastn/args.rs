@@ -332,7 +332,7 @@ pub struct TblastnArgs {
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
     /// The run's search strategy export (`-export_search_strategy`), made by `run`
-    /// (`archive::strategy_for`).
+    /// (`strategy::StrategyExport::for_run`).
     #[arg(skip)]
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
@@ -877,7 +877,7 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // IDENTITY with the compressed lookup table is refused where the search reaches its first
     // query batch (`check_identity_compressed_lookup_of`).
     if !args.gapped {
-        anyhow::bail!("-ungapped (an ungapped search) is not supported by LOSAT's TBLASTN");
+        anyhow::bail!("{}", crate::cli::run_refusal("TBLASTN", "ungapped"));
     }
     // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:774-815 (uneven gap
     // linking of the HSPs, `longest_intron`)

@@ -392,6 +392,7 @@ impl RpsblastArgs {
             subject_taxdb: None,
             inclusion_ethresh: None,
             gap_trigger: None,
+            sum_stats: false,
             first_query_ordinal: 0,
             psiblast_pssm: None,
             formatting: self.formatting,

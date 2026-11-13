@@ -1564,8 +1564,6 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("blastp", &["-gilist", "ids.gil"]),
         ("blastp", &["-db_soft_mask", "21"]),
         ("blastp", &["-db_hard_mask", "21"]),
-        ("blastp", &["-xmlhelp"]),
-        ("tblastx", &["-xmlhelp"]),
     ] {
         let error = crate::cli::render_message(&parse(program, words).unwrap_err());
         assert!(
@@ -2250,12 +2248,15 @@ fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {
             .map(|error| error.exit_code()),
         Some(0)
     );
-    // `-xmlhelp` stays refused by name (an Owner's decision, line RG item E2), in makeblastdb too.
+    // `-xmlhelp` prints NCBI's XML on the command line (line RG item E2x, `ncbi_xmlhelp_tests`);
+    // the library API, which these tests are (no application start), refuses it by name.
     for program in ["blastn", "makeblastdb", "rpsbproc"] {
         let error = try_parse_from::<Cli, _, _>(["losat", program, "-xmlhelp"]).unwrap_err();
         let text = crate::cli::render_message(&error);
         assert!(
-            text.contains("the NCBI C++ Toolkit option -xmlhelp is not supported by LOSAT's"),
+            text.contains(
+                "the NCBI C++ Toolkit option -xmlhelp runs on the command line of LOSAT's"
+            ),
             "{program}: {text}"
         );
     }

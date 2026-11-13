@@ -14,7 +14,11 @@
 //! error), so the text comes between A's and B's lines, in the default tables (outfmt 6 and 7
 //! without fields) too; `txr_q2.*` end with a query without hits; in `ids/prd_txself` B (taxid 0,
 //! the best hit) comes before A (99990), and the plural name of B's row opens the damaged
-//! `tests/seqdb/taxdb/bad_magic` first.
+//! `tests/seqdb/taxdb/bad_magic` first. The pairwise report reads its subjects in the order of
+//! `-sorthits` (line DBID taxrow2; NCBI sorts the Seq-aligns before the description table and the
+//! alignments, blast_format.cpp:1523-1530): in `ids/txr_s` and `ids/txr_sn` F (taxid 99990, a
+//! fragment of the query with every letter identical) comes before A with `-sorthits 3`, so the
+//! damaged `bad_magic`'s open, which the first read writes, comes before F's description line.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
 //! ```c++
@@ -413,6 +417,60 @@ const CASES: &[(&str, &str, &str, &str, &str, &[&str], &str)] = &[
         "txr_q2.fna",
         &["-evalue", "1e-50"],
         "18",
+    ),
+    (
+        "blastp.s3",
+        "bad_magic",
+        "blastp",
+        "txr_s",
+        "txr_q.faa",
+        &["-sorthits", "3"],
+        "0",
+    ),
+    (
+        "blastx.s3",
+        "bad_magic",
+        "blastx",
+        "txr_s",
+        "txr_q.fna",
+        &["-sorthits", "3"],
+        "0",
+    ),
+    (
+        "tblastn.s3",
+        "bad_magic",
+        "tblastn",
+        "txr_sn",
+        "txr_q.faa",
+        &["-sorthits", "3"],
+        "0",
+    ),
+    (
+        "tblastx.s3",
+        "bad_magic",
+        "tblastx",
+        "txr_sn",
+        "txr_q.fna",
+        &["-sorthits", "3"],
+        "0",
+    ),
+    (
+        "blastn.s3",
+        "bad_magic",
+        "blastn",
+        "txr_sn",
+        "txr_q.fna",
+        &["-task", "blastn", "-sorthits", "3"],
+        "0",
+    ),
+    (
+        "megablast.s3",
+        "bad_magic",
+        "blastn",
+        "txr_sn",
+        "txr_q.fna",
+        &["-task", "megablast", "-sorthits", "3"],
+        "0",
     ),
 ];
 

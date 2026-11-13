@@ -413,12 +413,7 @@ pub(crate) fn alignment(
     // of the rows (a stored gap character of the subject is one).
     let mut gaps = 0;
     let mut subject_stored_gaps = Vec::new();
-    let script = if hsp.edit_script.is_empty() {
-        vec![GapEditOp::Sub(u32::try_from(raw.q_end - raw.q_start)?)]
-    } else {
-        hsp.edit_script.clone()
-    };
-    for op in script {
+    for op in display_script(hsp)? {
         let (count, consume_q, consume_s) = match op {
             GapEditOp::Sub(n) => (n, true, true),
             GapEditOp::Ins(n) => (n, true, false),
@@ -705,6 +700,48 @@ pub(crate) fn alignment(
         subject_stored_gaps,
     })
 }
+
+/// The operations of the display alignment of `hsp` (`alignment`, a column for each letter of an
+/// operation): its edit script, or one substitution of its query span without one.
+fn display_script(hsp: &Hsp) -> Result<Vec<GapEditOp>> {
+    let raw = &hsp.hsp;
+    Ok(if hsp.edit_script.is_empty() {
+        vec![GapEditOp::Sub(u32::try_from(raw.q_end - raw.q_start)?)]
+    } else {
+        hsp.edit_script.clone()
+    })
+}
+
+/// The values of the outfmt 0 row of `hsp`, of a query of `query_length` letters
+/// (`pairwise_hits`), that the report's sorts read (`HspScores::of`), without making the row, for
+/// the model of the reads (`ReportedSubjects::fetch_by_query`): the row's columns (those of
+/// `display_script`, `alignment`'s rows), `alignment`'s coordinates (`query_endpoints` and the
+/// subject's), the engine's identities (the row's `seqalign_num_ident`). The records' offsets of
+/// a ranged query move every HSP of the query alike (a database subject has none), which no sort
+/// reads, and are left out.
+pub(crate) fn hsp_scores(
+    hsp: &Hsp,
+    query_length: usize,
+) -> Result<crate::report::hit_sort::HspScores> {
+    let raw = &hsp.hsp;
+    let length = display_script(hsp)?
+        .iter()
+        .map(|op| op.num() as usize)
+        .sum();
+    let (qstart, qend) = query_endpoints(query_length, raw.frame, raw.q_start, raw.q_end);
+    Ok(crate::report::hit_sort::HspScores::of_values(
+        hsp.bit_score,
+        hsp.evalue,
+        hsp.identity,
+        length,
+        (usize::try_from(qstart)?, usize::try_from(qend)?),
+        (
+            usize::try_from(raw.s_start + 1)?,
+            usize::try_from(raw.s_end)?,
+        ),
+    ))
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
 // ```c++
 // CRef<CSeq_id> s_ReplaceLocalId(const CBioseq_Handle& bh, CConstRef<CSeq_id> sid_in, bool parse_local)
@@ -1787,6 +1824,16 @@ pub(super) fn pairwise_hits(
                         // and the subject's stored gap characters make.
                         seqalign_num_ident: hsp.identity,
                     });
+                    // The model of the reads sorts by `hsp_scores` of the batch's query length
+                    // without the rows (`ReportedSubjects::fetch_by_query`): the row's values
+                    // where the records' offsets move nothing.
+                    debug_assert!(
+                        query.placement().offset != 0
+                            || subject.placement().offset != 0
+                            || hsp_scores(hsp, batch.prepared.original_lengths[qidx]).ok()
+                                == hits.last().map(crate::report::hit_sort::HspScores::of),
+                        "BLASTX hsp_scores differs from its row"
+                    );
                 }
             }
         }

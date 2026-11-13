@@ -254,9 +254,18 @@ pub struct OptionsHandle(Arc<HandleOptions>);
 #[derive(Debug, Default)]
 struct HandleOptions {
     filter: OnceLock<DatabaseFilter>,
-    /// `DbFilteringAlgorithmId` or `DbFilteringAlgorithmKey`, then `SubjectMaskingType`
-    /// (`blastinput::db_mask::ResolvedMask::archive_params`).
-    masking: OnceLock<Vec<options::Param>>,
+    /// `DbFilteringAlgorithmId` or `DbFilteringAlgorithmKey`, then `SubjectMaskingType`: the
+    /// archive's (`blastinput::db_mask::ResolvedMask::archive_params`) and the search strategy's
+    /// (`DbMaskOption::strategy_params`).
+    masking: OnceLock<DatabaseMasking>,
+}
+
+/// The database masking's program options of the archive and of the search strategy, which
+/// differ after the formatter's warning (`DbMaskOption::strategy_params`).
+#[derive(Debug)]
+struct DatabaseMasking {
+    archive: Vec<options::Param>,
+    strategy: Vec<options::Param>,
 }
 
 #[derive(Debug)]
@@ -325,26 +334,54 @@ impl OptionsHandle {
     //     {
     //     	int mask_type = (int) db->GetMaskType();
     // ```
-    /// The database masking's program options (`ResolvedMask::archive_params`), which follow the
-    /// list's: set once per run, where the formatter resolves the masking; a second setting is
-    /// LOSAT's internal error.
-    pub fn set_database_masking(&self, params: Vec<options::Param>) -> anyhow::Result<()> {
+    /// The database masking's program options of the archive (`ResolvedMask::archive_params`)
+    /// and of the search strategy (`DbMaskOption::strategy_params`), which follow the list's: set
+    /// once per run, where the formatter resolves the masking; a second setting is LOSAT's
+    /// internal error.
+    pub fn set_database_masking(
+        &self,
+        archive: Vec<options::Param>,
+        strategy: Vec<options::Param>,
+    ) -> anyhow::Result<()> {
         anyhow::ensure!(
-            self.0.masking.set(params).is_ok(),
+            self.0
+                .masking
+                .set(DatabaseMasking { archive, strategy })
+                .is_ok(),
             "LOSAT internal error: the database masking is set twice in one run"
         );
         Ok(())
     }
 
-    /// The program options of the database: the `TaxidList` or `NegativeTaxidList` option
-    /// (`set_database_filter`), then the masking's (`set_database_masking`).
+    /// The archive's program options of the database: the `TaxidList` or `NegativeTaxidList`
+    /// option (`set_database_filter`), then the masking's (`set_database_masking`).
     pub fn database_params(&self) -> Vec<options::Param> {
+        self.params_with(|masking| &masking.archive)
+    }
+
+    /// `database_params` of the search strategy, whose masking options are its own.
+    pub fn strategy_database_params(&self) -> Vec<options::Param> {
+        self.params_with(|masking| &masking.strategy)
+    }
+
+    fn params_with(
+        &self,
+        masking: impl Fn(&DatabaseMasking) -> &Vec<options::Param>,
+    ) -> Vec<options::Param> {
         self.0
             .filter
             .get()
             .and_then(|filter| filter.list.clone())
             .into_iter()
-            .chain(self.0.masking.get().into_iter().flatten().cloned())
+            .chain(
+                self.0
+                    .masking
+                    .get()
+                    .map(masking)
+                    .into_iter()
+                    .flatten()
+                    .cloned(),
+            )
             .collect()
     }
 

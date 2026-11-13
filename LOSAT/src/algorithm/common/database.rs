@@ -263,21 +263,22 @@ pub(crate) fn note_archive_database_filter(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-516 (quoted at
 // `blastinput::db_mask::ResolvedMask::archive_params`)
-/// The database masking's program options (`ResolvedMask::archive_params`) in the run's options
-/// handle, which the archive (`archive`) and the search strategy (`strategy`) share
-/// (`note_archive_database_filter`): set where the formatter resolves the masking, after the
-/// list's, and only for a masked search (NCBI writes none after its warning).
+/// The database masking's program options in the run's options handle, which the archive
+/// (`archive`) and the search strategy (`strategy`) share (`note_archive_database_filter`): the
+/// archive's (`ResolvedMask::archive_params`, none after the formatter's warning) and the
+/// strategy's (`DbMaskOption::strategy_params`), set where the formatter resolves the masking.
 pub(crate) fn note_archive_database_masking(
     archive: Option<&crate::report::archive::ArchiveHandle>,
     strategy: Option<&crate::report::archive::strategy::StrategyExport>,
-    params: Vec<crate::report::archive::options::Param>,
+    archive_params: Vec<crate::report::archive::options::Param>,
+    strategy_params: Vec<crate::report::archive::options::Param>,
 ) -> Result<()> {
     let options = match (archive, strategy) {
         (Some(handle), _) => handle.options(),
         (None, Some(strategy)) => strategy.options(),
         (None, None) => return Ok(()),
     };
-    options.set_database_masking(params)
+    options.set_database_masking(archive_params, strategy_params)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203

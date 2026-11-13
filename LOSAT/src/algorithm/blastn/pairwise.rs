@@ -29,6 +29,9 @@ pub(crate) struct DisplayMasks<'a> {
     pub query_offsets: &'a crate::blastinput::seq_range::Placements,
     /// Per subject, with `-lcase_masking`: the input lowercase of the subject's record.
     pub subject: Option<&'a [Vec<MaskedInterval>]>,
+    /// Per reported database sequence (by rank), with `-db_soft_mask`: its stored masks of the
+    /// search's algorithm in the order they are stored (`BlastnDatabase::display_masks`).
+    pub database: Option<&'a [Vec<MaskedInterval>]>,
 }
 
 impl<'a> Rows<'a> {
@@ -63,6 +66,7 @@ impl<'a> Rows<'a> {
             subjects,
             query_masks,
             subject_masks,
+            database_masks: masks.database.map(<[Vec<MaskedInterval>]>::to_vec),
         }
     }
 }
@@ -182,16 +186,28 @@ pub(crate) struct Rows<'a> {
     query_masks: Vec<Vec<MaskedInterval>>,
     /// Per subject, with `-lcase_masking`: its merged masks.
     subject_masks: Option<Vec<Vec<MaskedInterval>>>,
+    /// Per reported database sequence, with `-db_soft_mask`: its stored masks as stored
+    /// (`DisplayMasks::database`), which are kept where they meet an HSP before they are merged.
+    database_masks: Option<Vec<Vec<MaskedInterval>>>,
 }
 
 impl Rows<'_> {
     /// The rows of every HSP of one subject's list, appended to `hits` in the list's order.
     fn list(&self, hsp_list: &BlastnHspList, hits: &mut Vec<PairwiseHit>) -> Result<()> {
         let (queries, subjects) = (self.queries, self.subjects);
-        let list_subject_masks = self.subject_masks.as_deref().and_then(|subject_masks| {
-            let s_idx = hsp_list.hsps.first()?.s_idx as usize;
-            Some(shown_subject_masks(&subject_masks[s_idx], &hsp_list.hsps))
-        });
+        let list_subject_masks = match (&self.database_masks, self.subject_masks.as_deref()) {
+            (Some(database_masks), _) => hsp_list.hsps.first().map(|hsp| {
+                merged(&shown_database_masks(
+                    &database_masks[hsp.s_idx as usize],
+                    &hsp_list.hsps,
+                ))
+            }),
+            (None, Some(subject_masks)) => hsp_list
+                .hsps
+                .first()
+                .map(|hsp| shown_subject_masks(&subject_masks[hsp.s_idx as usize], &hsp_list.hsps)),
+            (None, None) => None,
+        };
         for hsp in &hsp_list.hsps {
             let query = queries
                 .get(hsp.q_idx as usize)
@@ -492,6 +508,52 @@ fn shown_subject_masks(masks: &[MaskedInterval], hsps: &[BlastnHsp]) -> Vec<Mask
         .collect()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:121-133
+// ```c++
+//     CSeqDB::TSequenceRanges ranges;
+//     m_iSeqDb->GetMaskData(index, m_FilteringAlgoId, ranges);
+//     ITERATE(CSeqDB::TSequenceRanges, itr, ranges) {
+//         for (size_t it=0; it<target.size(); it++) {
+//             if (target[it] != TSeqRange::GetEmpty() &&
+//                 target[it].IntersectingWith(*itr)) {
+//                 CRef<CSeq_interval> si
+//                     (new CSeq_interval(*id, itr->first, itr->second-1));
+//                 CRef<CSeqLocInfo> sli(new CSeqLocInfo(si, kFrame));
+//                 retval.push_back(sli);
+//                 break;
+//             }
+//         }
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1588-1600
+// ```c++
+//         vector <TSeqRange> ranges;
+//         for (int i=0; i<hsp_list->hspcnt; i++) {
+//             const BlastHSP* hsp = hsp_list->hsp_array[i];
+//             TSeqRange rg;
+//             rg.SetFrom(hsp->subject.offset);
+//             rg.SetTo(hsp->subject.end);
+//             ranges.push_back(rg);
+//         }
+// ```
+// The masks of a database sequence shown with the HSPs of one subject (`CSeqDbSeqInfoSrc::GetMasks`):
+// each stored mask `[start, end)` (`TSeqRange(first, second-1)`, empty when it holds no letter)
+// that meets the closed range `[offset, end]` of an HSP (the end one past the HSP), in the order
+// they are stored; the caller merges them for `lowercase_masked`, as the display marks each
+// position once.
+fn shown_database_masks(masks: &[MaskedInterval], hsps: &[BlastnHsp]) -> Vec<MaskedInterval> {
+    masks
+        .iter()
+        .filter(|mask| {
+            mask.start < mask.end
+                && hsps.iter().any(|hsp| {
+                    mask.start <= hsp.internal_s_end_0 && hsp.internal_s_offset_0 < mask.end
+                })
+        })
+        .cloned()
+        .collect()
+}
+
 /// The masked positions as disjoint intervals in order, for `lowercase_masked`.
 fn merged(masks: &[MaskedInterval]) -> Vec<MaskedInterval> {
     let mut sorted = masks.to_vec();
@@ -680,6 +742,46 @@ mod tests {
             gap_info: ops,
             num_positives: 0,
         }
+    }
+
+    // seqinfosrc_seqdb.cpp:121-133 (quoted at `shown_database_masks`): a stored mask is shown
+    // when it meets the closed range `[offset, end]` of an HSP (the end one past the HSP), in the
+    // order the masks are stored; overlapping and nested masks are kept as they are (hand-made
+    // masks of the M4a-2 edge databases) and merged for the display.
+    #[test]
+    fn database_masks_meeting_an_hsp_are_shown() {
+        let masks = [
+            MaskedInterval::new(600, 700),
+            MaskedInterval::new(100, 200),
+            MaskedInterval::new(150, 250),
+            MaskedInterval::new(250, 260),
+            MaskedInterval::new(300, 300),
+            MaskedInterval::new(900, 950),
+        ];
+        // The mask 600-700 holds 600..=699: it meets an HSP from 699 on, not one from 700 on.
+        let hsps = [
+            hsp(1, (0, 10), (199, 250), None),
+            hsp(1, (0, 10), (700, 760), None),
+        ];
+        assert!(shown_database_masks(&masks[..1], &hsps).is_empty());
+        let hsps = [
+            hsp(1, (0, 10), (199, 250), None),
+            hsp(1, (0, 10), (699, 701), None),
+        ];
+        let shown = shown_database_masks(&masks, &hsps);
+        assert_eq!(
+            shown,
+            [
+                MaskedInterval::new(600, 700),
+                MaskedInterval::new(100, 200),
+                MaskedInterval::new(150, 250),
+                MaskedInterval::new(250, 260),
+            ]
+        );
+        assert_eq!(
+            merged(&shown),
+            [MaskedInterval::new(100, 260), MaskedInterval::new(600, 700)]
+        );
     }
 
     #[test]

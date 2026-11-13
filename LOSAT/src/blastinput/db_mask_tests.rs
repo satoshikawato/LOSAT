@@ -348,3 +348,30 @@ fn a_hard_masked_search_is_refused() {
         "-db_hard_mask (hard masking of the database sequences) is not supported by LOSAT's BLASTN"
     );
 }
+
+// blast_app_util.cpp:644-651 and local_db_adapter.cpp:54-58 (quoted at `strategy_params`): after
+// the formatter's warning the search strategy still writes a name as its key (probe of
+// `-export_search_strategy` with `-db_soft_mask dust`; frozen as the strategy case
+// blastn.db.dbmask.name), not the empty name or the id -1.
+#[test]
+fn the_strategy_keeps_a_name_the_database_does_not_know() {
+    let names = |params: Vec<Param>| -> Vec<&'static str> {
+        params.iter().map(|param| param.name).collect()
+    };
+    assert_eq!(
+        names(soft("dust").strategy_params(None)),
+        ["DbFilteringAlgorithmKey", "SubjectMaskingType"]
+    );
+    assert!(soft("").strategy_params(None).is_empty());
+    assert!(soft("-1").strategy_params(None).is_empty());
+    let mask = ResolvedMask {
+        kind: MaskKind::Soft,
+        id: 11,
+        key: None,
+        shown: Vec::new(),
+    };
+    assert_eq!(
+        names(soft("+11").strategy_params(Some(&mask))),
+        ["DbFilteringAlgorithmId", "SubjectMaskingType"]
+    );
+}

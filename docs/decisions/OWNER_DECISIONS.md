@@ -259,7 +259,7 @@ entry's number in that log. 131 entries: 17 Owner, 3 Owner in part,
 
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
 | --- | --- | --- | --- | --- | --- | --- |
-| 9 | 2026-10-20 | Owner-delegated |  | Refuse an alias whose volumes have differing algorithm sets or a missing mask-algorithm column, and a big-endian-only mask volume; NCBI reads uninitialised or wrong data there. | window-masker column reader (series M, M4); for blastdbcmd the big-endian-only part is superseded by swebok-improve SW8 DECISIONS 40 (2026-11-08): NCBI's reading there is deterministic and is reproduced; the searches' -db_soft_mask/-db_hard_mask (M4) keep the refusal | `LOSAT/src/blastdbcmd/retrieve.rs:185` |
+| 9 | 2026-10-20 | Owner-delegated |  | Refuse an alias whose volumes have differing algorithm sets or a missing mask-algorithm column, and a big-endian-only mask volume; NCBI reads uninitialised or wrong data there. | window-masker column reader (series M, M4); for blastdbcmd the big-endian-only part is superseded by swebok-improve SW8 DECISIONS 40 (2026-11-08): NCBI's reading there is deterministic and is reproduced; the searches' -db_soft_mask/-db_hard_mask (M4) keep the refusal (BLASTN's -db_soft_mask since M4a-2a, 2026-11-14) | `LOSAT/src/blastdbcmd/retrieve.rs:185`; `LOSAT/src/seqdb/mask.rs` (`SeqDb::check_search_masks`) |
 | 14 | 2026-10-25 | Owner-delegated |  | Where NCBI exception reports are copied, write the official Linux x64 2.17.0 tarball build root; conda builds differ only in that root. | NCBI exception text, NCBI_BUILD_ROOT | `LOSAT/src/utils/winmask/ncbi_report.rs:30`, `LOSAT/tests/blastn_window_masker.rs:3` and 1 more |
 
 ### `ncbi-parity-20261019/WW`: line NP, stage WW0 (the Wasm memory maximum on dev)

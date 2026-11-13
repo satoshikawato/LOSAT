@@ -402,6 +402,52 @@ impl DbMaskOption {
     }
 }
 
+impl DbMaskOption {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:644-651
+    // ```c++
+    //     CNcbiOstream* out = cmdline_args->GetExportSearchStrategyStream(args);
+    //     if ( !out ) {
+    //         return;
+    //     }
+    //
+    //     s_ExportSearchStrategy(out, queries, opts_hndl,
+    //                            cmdline_args->GetBlastDatabaseArgs(),
+    //                            pssm, num_iters);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_db_adapter.cpp:54-58
+    // ```c++
+    // CLocalDbAdapter::CLocalDbAdapter(const CSearchDatabase& dbinfo)
+    //     : m_SeqSrc(0), m_SeqInfoSrc(0), m_DbName(dbinfo.GetDatabaseName()), m_DbScanMode(false)
+    // {
+    //     m_DbInfo.Reset(new CSearchDatabase(dbinfo));
+    // }
+    // ```
+    // The search strategy reads the command line's `CSearchDatabase`; the formatter's warning
+    // resets the database adapter's copy (blast_format.cpp:146), which the archive reads. So
+    // after the warning the strategy still writes the name as its key (search_strategy.cpp:500-505,
+    // quoted at `ResolvedMask::archive_params`); an empty name and the id -1 write nothing.
+    /// The search strategy's program options of the masking (`-export_search_strategy`): the
+    /// archive's (`ResolvedMask::archive_params`) when the formatter resolved it (`resolved`), else,
+    /// after its warning, `DbFilteringAlgorithmKey` and `SubjectMaskingType` of a name that is not
+    /// empty.
+    pub fn strategy_params(&self, resolved: Option<&ResolvedMask>) -> Vec<Param> {
+        match (resolved, &self.algorithm) {
+            (Some(mask), _) => mask.archive_params(),
+            (None, FilteringAlgorithm::Name(name)) if !name.is_empty() => vec![
+                Param {
+                    name: "DbFilteringAlgorithmKey",
+                    value: ParamValue::Str(name.clone()),
+                },
+                Param {
+                    name: "SubjectMaskingType",
+                    value: ParamValue::Integer(self.kind as i32),
+                },
+            ],
+            (None, _) => Vec::new(),
+        }
+    }
+}
+
 impl ResolvedMask {
     /// LOSAT's refusals of the masked search of `db`, where NCBI starts the search (after its own
     /// checks; `program` names the program): `-db_hard_mask` (`cli::run_refusal`; series NP,
@@ -412,9 +458,7 @@ impl ResolvedMask {
             anyhow::bail!("{}", crate::cli::run_refusal(program, self.kind.option()));
         }
         db.check_search_masks(self.id)
-            .map_err(|error| crate::algorithm::common::database::database_error(error, program))?;
-        // TEMPORARY (M4a-2a phase A1): the soft-masked search comes with phase A2.
-        anyhow::bail!("-db_soft_mask is not supported by LOSAT's {program} yet")
+            .map_err(|error| crate::algorithm::common::database::database_error(error, program))
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-516

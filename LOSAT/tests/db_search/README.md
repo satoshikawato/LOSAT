@@ -1327,5 +1327,23 @@ blastdb_aliastool -dblist "b5 a5" -dbtype nucl -out al_b_a -title "b5 and a5"
 linker=1`) and 30 (windowmasker, default options); `b5` has the second dust as its 11; `k5` has 100 (`mydust`) and 101
 (`mywm`); `p5` has the dust of `-parse_seqids` ids as 11; `nm5` has no mask data; `xb4` is a mask column without its
 little-endian `.nac`, which LOSAT refuses for a search (NCBI reads its ranges byte-reversed, M/DECISIONS 9). The rows
-also use `../seqdb/db/mask_nucl_colon_id` (`-mask_id c:id`, stored with 0x01 for the colon) and
-`../fasta/outfmt11/arch_empty.fna` (an empty query).
+also use `../seqdb/db/mask_nucl_colon_id` (`-mask_id c:id`, stored with 0x01 for the colon),
+`../seqdb/db/mask_nucl_mv` (two volumes, dust 11 and windowmasker 30) and `../fasta/outfmt11/arch_empty.fna`
+(an empty query).
+
+The edge databases hold hand-made masks of `s5` (local id 5, 1200 letters) and `s4` (local id 4, 300 letters) in
+ASN.1 text (`edge_<case>.asnt`, the survey's `scripts/mkedge.py` form: `algo-program dust`, `algo-options "edge
+<case>"`, one `packed-int` per sequence, `from`/`to` inclusive): `unsorted` (600-699, 100-199), `overlap` (100-299,
+200-399), `adjacent` (100-199, 200-299), `ends` (0-99, 1100-1199), `tiny` (301-301, 500-502, 703-705), `nested`
+(100-499, 200-299), `many` (25 masks of 5 letters every 37 from 150), `head` (0-99), `tail` (1000-1199), `whole5`
+(0-1199) and `whole4` (`s4` 0-299, `s5` 400-449). makeblastdb stores each sequence's masks in the order given, so the
+searches meet unsorted and overlapping lists:
+
+```
+makeblastdb -in subj.fna -dbtype nucl -out edge1 -title "edge masks 1" -blastdb_version 4 \
+  -mask_data edge_unsorted.asnt,edge_overlap.asnt,edge_adjacent.asnt,edge_ends.asnt,edge_tiny.asnt
+makeblastdb -in subj.fna -dbtype nucl -out edge2 -title "edge masks 2" -blastdb_version 4 \
+  -mask_data edge_nested.asnt,edge_many.asnt,edge_head.asnt,edge_tail.asnt,edge_whole5.asnt,edge_whole4.asnt
+```
+
+`edge1` has the algorithms 11 to 15 in that order, `edge2` 11 to 16.

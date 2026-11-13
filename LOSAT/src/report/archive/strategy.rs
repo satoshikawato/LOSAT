@@ -340,7 +340,7 @@ impl StrategyExport {
                     &shared.request,
                     request,
                     state.carry.option(),
-                    &shared.options.database_params(),
+                    &shared.options.strategy_database_params(),
                 );
                 let written = out.finish();
                 // The file is complete after every request: the command line's exit does not run

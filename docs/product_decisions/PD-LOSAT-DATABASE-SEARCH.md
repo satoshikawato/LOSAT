@@ -192,7 +192,11 @@ where NCBI's arithmetic overflows: the total lengths of a `-db` list's databases
 and a summed length of exactly 2^63 in BLAST XML and XML2 (outfmt 5, 14, 16; NCBI writes `-0`;
 the Owner's question D1a3-2 of line RG may make it an exception). The requests of `-outfmt 11` and
 `-export_search_strategy` compute their `EffectiveSearchSpace` from the negative length as NCBI does
-(the query length of context 0; probe run2 of D1a-3). Refused until the statistics of
+(the query length of context 0; probe run2 of D1a-3). Refused until ported: a `LENGTH` of 2^63 or
+more in a search without the Gumbel block and without `-searchsp` (BLASTN, TBLASTX, BLASTX
+`-ungapped`, `OLD_FSC`), whose preliminary stage NCBI runs with the per-context search spaces of
+the negative length (`SplitQuery_SetEffectiveSearchSpace`, prelim_stage.cpp:219-220: each
+context's query length) while its traceback and reports read the setup's. Refused until the statistics of
 each subject are ported: `LENGTH` 0 while sequences are included; until item D1a-4: OID ranges,
 `STATS_NSEQ`, `STATS_TOTLEN` and `MIN_SEQ_LENGTH` in RPSBLAST databases. Refused for
 good: a statistics count of 0 (an alias file's `NSEQ 0`, or its `LENGTH` or `STATS_TOTLEN` over

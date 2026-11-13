@@ -18,7 +18,7 @@
 //! The records are those of NCBI's HSPs (the starts, lengths and scores printed in the
 //! files; an e-value or bit score as its 15 printed digits, which give back the same double).
 
-use super::encoder::{Encoder, SerialError};
+use super::encoder::{Encoder, ReplacedChar, SerialError, StreamPosition};
 use super::{write_query, SeqAlignError, SerialFormat};
 use crate::blastinput::app::Program;
 use crate::common::GapEditOp::{self, Del, Ins, Sub};
@@ -487,14 +487,84 @@ fn json_strings_are_escaped_as_ncbi() {
     assert_eq!(buf, b"\"a\\\"b\\\\c\\u0001\\u001F\x7f\xc3\xa9d\"");
 }
 
-/// A byte outside the visible range is an error of the ASN.1 text encoder (the callers
-/// refuse such titles before the search).
+/// A byte outside the visible range is an error of the ASN.1 text encoder without `Frames`
+/// (its callers refuse such strings, or write the document again with `Frames`).
 #[test]
 fn asn_text_records_a_non_visible_byte() {
     let mut buf = Vec::new();
     let mut enc = super::asn_text::AsnTextEncoder::new(&mut buf);
     enc.visible_str(b"a\tb");
     assert_eq!(enc.error(), Some(SerialError::NonVisibleChar(b'\t')));
+    assert_eq!(enc.take_replaced(), Vec::new());
+}
+
+/// With `Frames`, each byte outside the visible range is `#` and a `ReplacedChar` at the line
+/// where NCBI checks it: before the byte's wrap (NCBI 2.17.0 convert2blastmask, probe RG
+/// K/k4/probe case c_txt_w62: the two bytes of the first `é` at the 63rd and 64th place of a
+/// line that wraps at the second are both on line 4, the next `é` on line 5). Lines that the
+/// encoder has flushed count.
+#[test]
+fn asn_text_with_frames_replaces_each_byte_at_its_line() {
+    // `  m "` is 5 columns: the wrap comes before the 75th byte of the string (column 79).
+    let string = [
+        b"a".repeat(73),
+        "\u{e9}\u{e9}".as_bytes().to_vec(),
+        b"b".to_vec(),
+    ]
+    .concat();
+    let mut sink = Vec::new();
+    let mut buf = Vec::new();
+    let mut enc = super::asn_text::AsnTextEncoder::traced(&mut buf);
+    enc.begin_document("T");
+    enc.begin_sequence("T");
+    enc.member("n", 0);
+    enc.int(1);
+    enc.end_member();
+    enc.flush_to(&mut sink, false).unwrap();
+    enc.member("m", 1);
+    enc.visible_str(&string);
+    enc.end_member();
+    enc.member("l", 2);
+    enc.begin_list(false);
+    enc.element();
+    enc.visible_str(b"x");
+    enc.element();
+    enc.visible_str(b"\x7fy");
+    enc.end_list();
+    enc.end_member();
+    enc.end_sequence();
+    enc.end_document();
+    assert_eq!(enc.error(), None);
+    let replaced = enc.take_replaced();
+    enc.flush_to(&mut sink, true).unwrap();
+    let text = String::from_utf8(sink).unwrap();
+    assert_eq!(
+        text,
+        format!(
+            "T ::= {{\n  n 1,\n  m \"{}\n####b\",\n  l {{\n    \"x\",\n    \"#y\"\n  }}\n}}\n",
+            "a".repeat(73)
+        )
+    );
+    let at = |byte: u8, line: u64, trace: &str, string: &[u8]| ReplacedChar {
+        trace: trace.to_string(),
+        byte,
+        position: StreamPosition::Line(line),
+        string: string.to_vec(),
+    };
+    assert_eq!(
+        replaced,
+        vec![
+            at(0xc3, 3, "T.m", &string),
+            at(0xa9, 3, "T.m", &string),
+            at(0xc3, 4, "T.m", &string),
+            at(0xa9, 4, "T.m", &string),
+            at(0x7f, 7, "T.l.E", b"\x7fy"),
+        ]
+    );
+    assert_eq!(
+        replaced[4].message(),
+        b"T.l.E\nBad char [0x7F] in string at line 7\n\x7fy".to_vec()
+    );
 }
 
 /// `COStreamBuffer::PutInt4`.

@@ -64,7 +64,7 @@
 //! own line only when the last thing written was a closing tag (`m_EndTag`): a primitive
 //! member is one line, `<T_m>value</T_m>`.
 
-use super::encoder::{Encoder, SerialError};
+use super::encoder::{Encoder, Frames, NoTrace, ReplacedChar, SerialError, StreamPosition, Trace};
 use super::real::write_xml_double;
 
 /// What the stream writes at the start and end of a document.
@@ -101,8 +101,9 @@ pub const XML2_ROOT_ATTRIBUTES: &str = "\n    xmlns=\"http://www.ncbi.nlm.nih.go
 /// const parameter, so that the instance of outfmt 5 / 14 / 16 (`OBJECT = false`, the default
 /// of the type) compiles without any test of the object mode and runs the instructions it ran
 /// before the mode existed (the archive's pending element, `value=` attribute and `_E` state
-/// are only read under `OBJECT`).
-pub struct XmlEncoder<'b, const OBJECT: bool = false> {
+/// are only read under `OBJECT`). `T` keeps what NCBI's posts of a replaced byte need
+/// (`Trace`).
+pub struct XmlEncoder<'b, const OBJECT: bool = false, T: Trace = NoTrace> {
     out: &'b mut Vec<u8>,
     piece: Piece,
     /// The module of the root type, for the DOCTYPE of a document (`NCBI-BlastOutput`).
@@ -134,6 +135,7 @@ pub struct XmlEncoder<'b, const OBJECT: bool = false> {
     names: Vec<u8>,
     marks: Vec<usize>,
     error: Option<SerialError>,
+    trace: T,
 }
 
 impl<'b> XmlEncoder<'b, false> {
@@ -191,7 +193,15 @@ impl<'b> XmlEncoder<'b, true> {
     }
 }
 
-impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
+impl<'b> XmlEncoder<'b, true, Frames> {
+    /// `ncbi_object` with `Frames`: a replaced byte is a `ReplacedChar` (`take_replaced`), not
+    /// an error.
+    pub fn ncbi_object_traced(out: &'b mut Vec<u8>, module: &'static str) -> Self {
+        Self::new(out, Piece::NcbiObject, module)
+    }
+}
+
+impl<'b, const OBJECT: bool, T: Trace> XmlEncoder<'b, OBJECT, T> {
     fn new(out: &'b mut Vec<u8>, piece: Piece, module: &'static str) -> Self {
         debug_assert_eq!(OBJECT, piece == Piece::NcbiObject);
         let start = out.len();
@@ -212,6 +222,21 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
             names: Vec::new(),
             marks: Vec::new(),
             error: None,
+            trace: T::default(),
+        }
+    }
+
+    /// `x_VerifyChar` of the control character `byte`: `ReplaceVisibleChar` without the
+    /// string, at the stream's line (`ReplacedChar`; without `Frames`,
+    /// `SerialError::NonVisibleChar`).
+    #[cold]
+    #[inline(never)]
+    fn replace(&mut self, byte: u8) {
+        if T::FRAMES {
+            let line = self.trace.line(&self.out[self.start..]);
+            self.trace.replaced(byte, StreamPosition::Line(line), &[]);
+        } else {
+            self.fail(SerialError::NonVisibleChar(byte));
         }
     }
 
@@ -343,7 +368,7 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
     }
 }
 
-impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
+impl<const OBJECT: bool, T: Trace> Encoder for XmlEncoder<'_, OBJECT, T> {
     /// `WriteFileHeader`: the declaration and the DOCTYPE of a document.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:232-276
@@ -360,6 +385,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// (`SetEncoding(eEncoding_Ascii)`, blastxml_format.cpp:786: `US-ASCII`; the DTD prefix
     /// `SetDefaultDTDFilePrefix`, :789.)
     fn begin_document(&mut self, type_name: &str) {
+        self.trace.document(type_name);
         if self.piece == Piece::Xml2Document {
             // `WriteFileHeader` of the standard-XML mode: no DOCTYPE (objostrxml.cpp:232-276,
             // `m_UseSchemaRef` / `m_EnforcedStdXml`).
@@ -429,6 +455,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// class's name, an underscore and the member's name, outside the standard-XML mode; in it
     /// the member's name alone).
     fn member(&mut self, name: &str, _tag: u8) {
+        self.trace.push(name);
         if self.std_xml {
             self.push_name(&[name.as_bytes()]);
             let start = *self.marks.last().expect("just pushed");
@@ -440,6 +467,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
 
     /// `EndClassMember`.
     fn end_member(&mut self) {
+        self.trace.pop();
         self.close_tag();
     }
 
@@ -462,12 +490,15 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
 
     /// `BeginContainer`: the member's tag holds the elements; a container writes nothing of
     /// its own.
-    fn begin_list(&mut self, _set: bool) {}
+    fn begin_list(&mut self, _set: bool) {
+        self.trace.begin_list();
+    }
 
     /// `BeginContainerElement`: a class element writes its own `<Type>` tag (`begin_sequence`).
     /// In the object mode the element's first call decides: a primitive is wrapped in
     /// `<Parent_E>`, which this call (or `end_list`) closes.
     fn element(&mut self) {
+        self.trace.element();
         if OBJECT {
             self.close_element();
             self.pending_elem = true;
@@ -476,6 +507,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
 
     /// `EndContainer`.
     fn end_list(&mut self) {
+        self.trace.end_list();
         if OBJECT {
             self.close_element();
             self.pending_elem = false;
@@ -502,6 +534,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
                 let start = *self.marks.last().expect("just pushed");
                 self.open_tag(start);
             }
+            self.trace.push(name);
             self.child_tag(name);
             return;
         }
@@ -509,6 +542,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
             self.fail(SerialError::XmlUnsupported("CHOICE"));
             return;
         }
+        // `member` keeps the variant's frame.
         self.begin_sequence(type_name);
         self.member(name, tag);
     }
@@ -516,6 +550,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// `EndChoiceVariant` and `EndChoice`.
     fn end_variant(&mut self) {
         if OBJECT {
+            self.trace.pop();
             self.close_tag();
             if self.opened.pop() == Some(2) {
                 self.close_tag();
@@ -666,12 +701,12 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     ///             ... hi (if not 0) and lo in lower-case hex ... ';'
     /// ```
     /// A byte of 0x01-0x1F other than TAB, LF and CR is replaced by `#` with an error
-    /// message (`x_VerifyChar`, `BAD_CHAR`), which LOSAT does not write: an error here (the
-    /// callers refuse such strings first). A byte >= 0x80 makes the US-ASCII stream of outfmt 5
-    /// throw (`CUtf8::SymbolToChar`, corelib/ncbistr.cpp:6900-6903), an error here too; the
-    /// archive's stream has no encoding, so `WriteEncodedChar` takes its first branch
-    /// (objostrxml.cpp:559-565) and the byte passes `x_VerifyChar` and is written as it is (the
-    /// object mode). A NUL byte is dropped (`if (s != '\0')`).
+    /// message (`x_VerifyChar`, `BAD_CHAR`, objostrxml.cpp:548-554; `replace`). A byte >= 0x80
+    /// makes the US-ASCII stream of outfmt 5 throw (`CUtf8::SymbolToChar`,
+    /// corelib/ncbistr.cpp:6900-6903), an error here too; the archive's stream has no encoding,
+    /// so `WriteEncodedChar` takes its first branch (objostrxml.cpp:559-565) and the byte passes
+    /// `x_VerifyChar` and is written as it is (the object mode). A NUL byte is dropped
+    /// (`if (s != '\0')`).
     fn visible_str(&mut self, value: &[u8]) {
         if OBJECT && self.pending_elem {
             self.open_element();
@@ -689,7 +724,10 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
                     self.out.push(b"0123456789abcdef"[usize::from(byte & 0xf)]);
                     self.out.push(b';');
                 }
-                0x01..=0x1f => self.fail(SerialError::NonVisibleChar(byte)),
+                0x01..=0x1f => {
+                    self.replace(byte);
+                    self.out.push(b'#');
+                }
                 0x80..=0xff if OBJECT => self.out.push(byte),
                 0x80..=0xff => self.fail(SerialError::NonAsciiChar(byte)),
                 _ => self.out.push(byte),
@@ -744,6 +782,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
         };
         if end > self.start {
             sink.write_all(&self.out[self.start..end])?;
+            self.trace.flushed(&self.out[self.start..end]);
             self.out.drain(self.start..end);
         }
         Ok(())
@@ -751,6 +790,10 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
 
     fn error(&self) -> Option<SerialError> {
         self.error
+    }
+
+    fn take_replaced(&mut self) -> Vec<ReplacedChar> {
+        self.trace.take()
     }
 }
 

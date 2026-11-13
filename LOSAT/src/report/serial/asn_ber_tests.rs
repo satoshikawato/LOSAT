@@ -4,7 +4,7 @@
 //! do not hold (an integer of three or four bytes, a string of 128 bytes or more).
 
 use super::asn_ber::AsnBinaryEncoder;
-use super::encoder::{Encoder, SerialError};
+use super::encoder::{Encoder, ReplacedChar, SerialError, StreamPosition};
 
 /// The bytes that `write` makes the encoder append.
 fn bytes(write: impl FnOnce(&mut AsnBinaryEncoder<'_>)) -> Vec<u8> {
@@ -104,14 +104,81 @@ fn visible_strings_have_short_and_long_lengths() {
     );
 }
 
-/// A byte outside 0x20..0x7E is an error (the callers refuse such titles before the search),
-/// as in the ASN.1 text encoder.
+/// A byte outside 0x20..0x7E is an error without `Frames`, as in the ASN.1 text encoder.
 #[test]
 fn a_non_visible_byte_is_an_error() {
     let mut buf = Vec::new();
     let mut enc = AsnBinaryEncoder::new(&mut buf);
     enc.visible_str(b"a\tb");
     assert_eq!(enc.error(), Some(SerialError::NonVisibleChar(b'\t')));
+}
+
+/// With `Frames`, a byte outside 0x20..0x7E is `#` and a `ReplacedChar` at its offset in the
+/// stream (bytes already flushed count), with NCBI's stack trace: members and variants by name,
+/// `.E` for a container element, nothing for named types and classes (`GetStackTraceASN`;
+/// NCBI 2.17.0 convert2blastmask, probe RG K/k4/probe case c_bin_e: `Bad char [0xC3] in string
+/// at byte 20` for the string's first byte at offset 20).
+#[test]
+fn with_frames_a_non_visible_byte_is_replaced_at_its_offset() {
+    let mut sink = Vec::new();
+    let mut buf = Vec::new();
+    let mut enc = AsnBinaryEncoder::traced(&mut buf);
+    enc.begin_document("Seq-loc");
+    enc.variant("Seq-loc", "packed-int", 5);
+    enc.begin_named("Packed-seqint");
+    enc.begin_list(false);
+    for title in [&b"a"[..], b"b\tc"] {
+        enc.element();
+        enc.begin_sequence("Seq-interval");
+        enc.member("from", 0);
+        enc.int(0);
+        enc.end_member();
+        enc.flush_to(&mut sink, false).unwrap();
+        enc.member("id", 3);
+        enc.variant("Seq-id", "local", 0);
+        enc.variant("Object-id", "str", 1);
+        enc.visible_str(title);
+        enc.end_variant();
+        enc.end_variant();
+        enc.end_member();
+        enc.end_sequence();
+    }
+    enc.end_list();
+    enc.end_named();
+    enc.end_variant();
+    enc.member("x", 0);
+    enc.visible_str(b"\xff");
+    enc.end_member();
+    enc.end_document();
+    assert_eq!(enc.error(), None);
+    let replaced = enc.take_replaced();
+    enc.flush_to(&mut sink, true).unwrap();
+    let first = sink.iter().position(|&byte| byte == b'#').unwrap() as u64;
+    let last = sink.iter().rposition(|&byte| byte == b'#').unwrap() as u64;
+    assert_eq!(
+        replaced,
+        vec![
+            ReplacedChar {
+                trace: "Seq-loc.packed-int.E.id.local.str".to_string(),
+                byte: b'\t',
+                position: StreamPosition::Byte(first),
+                string: b"b\tc".to_vec(),
+            },
+            ReplacedChar {
+                trace: "Seq-loc.x".to_string(),
+                byte: 0xff,
+                position: StreamPosition::Byte(last),
+                string: b"\xff".to_vec(),
+            },
+        ]
+    );
+    assert_eq!(
+        replaced[0].message(),
+        format!(
+            "Seq-loc.packed-int.E.id.local.str\nBad char [0x9] in string at byte {first}\nb\tc"
+        )
+        .into_bytes()
+    );
 }
 
 /// `WriteDouble2(data, DBL_DIG)`: `09`, the length (digits + 1), the decimal form byte 0 and

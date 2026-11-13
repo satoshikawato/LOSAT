@@ -8,13 +8,14 @@
 
 use std::io::{self, Write};
 
+use crate::ncbi_app::Diag;
 use crate::report::archive::masks::write_ranges_seq_loc;
 use crate::report::db_subject::bioseq_ids;
 use crate::report::defline::generate_bioseq_defline;
 use crate::report::seqid::SeqId;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
-use crate::report::serial::encoder::{Encoder, SerialError};
+use crate::report::serial::encoder::{Encoder, ReplacedChar, SerialError};
 use crate::report::serial::xml::XmlEncoder;
 use crate::seqdb::mask::FilterProgram;
 use crate::seqid::label::bioseq_fasta;
@@ -120,13 +121,15 @@ impl MaskWriter {
         MaskWriter::MaskInfo(MaskInfoWriter::new(serial, algo_id, program, options))
     }
 
-    /// `Print(bsh, mask, parsed_id)` of the writer.
+    /// `Print(bsh, mask, parsed_id)` of the writer; `diag` takes the posts of the serial
+    /// stream (`post_document`).
     pub(crate) fn print(
         &mut self,
         seq: &MaskedBioseq<'_>,
         mask: &[(u32, u32)],
         parsed_id: bool,
         out: &mut dyn Write,
+        diag: &mut Diag,
     ) -> Result<(), WriteError> {
         match self {
             MaskWriter::Interval => {
@@ -185,7 +188,9 @@ impl MaskWriter {
                     return Ok(());
                 }
                 let mut bytes = Vec::new();
-                write_document(*serial, &Document::SeqLoc(first_id(seq), mask), &mut bytes)?;
+                let replaced =
+                    write_document(*serial, &Document::SeqLoc(first_id(seq), mask), &mut bytes)?;
+                post_document(&replaced, out, diag);
                 out.write_all(&bytes)?;
             }
             MaskWriter::MaskInfo(writer) => {
@@ -233,7 +238,7 @@ impl MaskWriter {
     /// (`x_ConsolidateListOfMasks`, :108-136, moves the Seq-loc of each list into one list and
     /// sets its `more` to false.)
     /// (`m_OutputFormat` `eSerial_None`, the format `interval`, writes nothing either.)
-    pub(crate) fn finish(self, out: &mut dyn Write) -> Result<(), WriteError> {
+    pub(crate) fn finish(self, out: &mut dyn Write, diag: &mut Diag) -> Result<(), WriteError> {
         let MaskWriter::MaskInfo(writer) = self else {
             return Ok(());
         };
@@ -241,7 +246,8 @@ impl MaskWriter {
             return Ok(());
         };
         let mut bytes = Vec::new();
-        write_document(serial, &Document::MaskInfo(&writer), &mut bytes)?;
+        let replaced = write_document(serial, &Document::MaskInfo(&writer), &mut bytes)?;
+        post_document(&replaced, out, diag);
         out.write_all(&bytes)?;
         Ok(())
     }
@@ -336,28 +342,67 @@ enum Document<'a> {
     MaskInfo(&'a MaskInfoWriter),
 }
 
-/// `os << MSerial_<format> << object`: one document in `serial`.
+/// `os << MSerial_<format> << object`: one document in `serial`, and the bytes that NCBI's
+/// stream writes as `#` with an error message (`ReplacedChar`). A document with such a byte is
+/// written again with the encoder's `Frames`, which knows the messages.
 fn write_document(
     serial: Serial,
     document: &Document<'_>,
     out: &mut Vec<u8>,
-) -> Result<(), WriteError> {
-    let error = match serial {
+) -> Result<Vec<ReplacedChar>, WriteError> {
+    let module = match document {
+        Document::SeqLoc(..) => "NCBI-Seqloc",
+        Document::MaskInfo(_) => "NCBI-BlastDL",
+    };
+    let start = out.len();
+    let mut replaced = Vec::new();
+    let mut error = match serial {
         Serial::AsnText => encode(&mut AsnTextEncoder::new(out), document),
         Serial::AsnBinary => encode(&mut AsnBinaryEncoder::new(out), document),
-        Serial::Xml => {
-            let module = match document {
-                Document::SeqLoc(..) => "NCBI-Seqloc",
-                Document::MaskInfo(_) => "NCBI-BlastDL",
-            };
-            encode(&mut XmlEncoder::ncbi_object(out, module), document)
-        }
+        Serial::Xml => encode(&mut XmlEncoder::ncbi_object(out, module), document),
     };
+    if let Some(SerialError::NonVisibleChar(_)) = error {
+        out.truncate(start);
+        error = match serial {
+            Serial::AsnText => {
+                encode_traced(&mut AsnTextEncoder::traced(out), document, &mut replaced)
+            }
+            Serial::AsnBinary => {
+                encode_traced(&mut AsnBinaryEncoder::traced(out), document, &mut replaced)
+            }
+            Serial::Xml => encode_traced(
+                &mut XmlEncoder::ncbi_object_traced(out, module),
+                document,
+                &mut replaced,
+            ),
+        };
+    }
     match error {
-        None => Ok(()),
+        None => Ok(replaced),
         Some(error) => Err(WriteError::Refused(format!(
             "an object on which LOSAT's serial writer stops ({error})"
         ))),
+    }
+}
+
+/// `encode` with an encoder that records the replaced bytes, which go to `replaced`.
+fn encode_traced<E: Encoder>(
+    enc: &mut E,
+    document: &Document<'_>,
+    replaced: &mut Vec<ReplacedChar>,
+) -> Option<SerialError> {
+    let error = encode(enc, document);
+    *replaced = enc.take_replaced();
+    error
+}
+
+/// NCBI's posts of the bytes that its stream replaced in a document (`Diag::post_replaced`),
+/// which come while the document is written: the output written before goes first (NCBI's
+/// `cerr` is tied to `cout`), the document after (it is in the serial stream's buffer).
+fn post_document(replaced: &[ReplacedChar], out: &mut dyn Write, diag: &mut Diag) {
+    if !replaced.is_empty() {
+        let _ = out.flush();
+        diag.post_replaced(replaced);
     }
 }
 

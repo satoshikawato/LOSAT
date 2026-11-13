@@ -41,9 +41,11 @@ pub enum SerialError {
     /// `CObjectOStreamJson::WriteDouble2` on a NaN or an infinity
     /// (`real::JsonDoubleError`).
     JsonDouble(super::real::JsonDoubleError),
-    /// A VisibleString byte outside 0x20..0x7E in the ASN.1 text or binary stream, which NCBI replaces
-    /// by `#` with an error message (`eFNP_ReplaceAndWarn`); the callers refuse such strings
-    /// before the search, so this does not occur.
+    /// A VisibleString byte outside 0x20..0x7E in the ASN.1 text or binary stream (in XML a
+    /// control character other than TAB, LF and CR), which NCBI replaces by `#` with an error
+    /// message (`eFNP_ReplaceAndWarn`, `ReplacedChar`): an encoder without `Frames` reports it
+    /// here, and a caller that posts NCBI's messages writes the document again with `Frames`
+    /// (`ReplacedChar`); the other callers refuse such strings before the search.
     NonVisibleChar(u8),
     /// A NaN or an infinity in the ASN.1 binary stream, which NCBI marks with its own form
     /// byte and LOSAT does not write (no BLAST report has one).
@@ -87,6 +89,295 @@ impl std::fmt::Display for SerialError {
 }
 
 impl std::error::Error for SerialError {}
+
+/// Where NCBI's object stream stands when it replaces a byte (`GetPosition`): the line of the
+/// ASN.1 text or XML stream (`m_Output.GetLine()`, 1 at the stream's start and one more for each
+/// end of line written), the offset of the binary stream (`GetStreamPos()`, 0 at its start).
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:100-103
+/// ```c++
+/// string CObjectOStreamAsn::GetPosition(void) const
+/// {
+///     return "line "+NStr::SizetToString(m_Output.GetLine());
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:510-513
+/// ```c++
+/// string CObjectOStream::GetPosition(void) const
+/// {
+///     return "byte "+NStr::Int8ToString(NcbiStreamposToInt8(GetStreamPos()));
+/// }
+/// ```
+/// (`CObjectOStreamXml::GetPosition`, objostrxml.cpp:192-195, is the text stream's.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StreamPosition {
+    Line(u64),
+    Byte(u64),
+}
+
+/// A byte of a VisibleString that NCBI's object stream writes as `#` and reports with
+/// `ERR_POST_X(7, message)` of `Serial_IStream` (error 803.7: the function is in objistr.cpp).
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897
+/// ```c++
+/// char ReplaceVisibleChar(char c, EFixNonPrint fix_method,
+///     const CObjectStack* io, const CTempString& str, char subst)
+/// {
+///     ...
+///     if ( fix_method != eFNP_Replace ) {
+///         string message;
+///         if (io != NULL) {
+///             message += io->GetStackTrace() + "\n";
+///         }
+///         message += "Bad char [0x" +
+///                    NStr::NumericToString((unsigned char)c,0,16)+
+///                    "] in string";
+///         if (io != NULL) {
+///             message += " at " + io->GetPosition();
+///         }
+///         if (!str.empty()) {
+///             message += "\n" + str;
+///         }
+///         switch (fix_method) {
+///         case eFNP_ReplaceAndWarn:
+///             ...
+///             ERR_POST_X(7, message);
+///             ...
+///     }
+///     return subst;
+/// }
+/// ```
+/// The text and binary streams pass the whole string as `str`, the XML stream `kEmptyStr`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReplacedChar {
+    /// `GetStackTrace()` (`Frames::stack_trace`).
+    pub trace: String,
+    pub byte: u8,
+    pub position: StreamPosition,
+    /// The string that holds the byte (empty in XML).
+    pub string: Vec<u8>,
+}
+
+impl ReplacedChar {
+    /// The error code of the post (`Serial_IStream`, include/serial/error_codes.hpp:47).
+    pub const ERR_CODE: (u32, u32) = (803, 7);
+
+    /// The message of the post: the stack trace, `Bad char [0x<hex>] in string at <position>`
+    /// (the hex digits in upper case without padding, `NumericToString(c, 0, 16)`) and the
+    /// string when there is one.
+    pub fn message(&self) -> Vec<u8> {
+        let position = match self.position {
+            StreamPosition::Line(line) => format!("line {line}"),
+            StreamPosition::Byte(byte) => format!("byte {byte}"),
+        };
+        let mut message = format!(
+            "{}\nBad char [0x{:X}] in string at {position}",
+            self.trace, self.byte
+        )
+        .into_bytes();
+        if !self.string.is_empty() {
+            message.push(b'\n');
+            message.extend_from_slice(&self.string);
+        }
+        message
+    }
+}
+
+/// What an encoder keeps for the posts of `ReplacedChar`. `NoTrace`, the default, keeps nothing
+/// and costs nothing: its encoder reports a replaced byte as `SerialError::NonVisibleChar`.
+/// `Frames` follows NCBI's object stack and the stream's position and records each replaced
+/// byte instead; a caller that posts NCBI's messages writes a document with `Frames` only when
+/// its first writing reported the error.
+pub trait Trace: Default {
+    /// Whether the encoder records `ReplacedChar`s (`Frames`).
+    const FRAMES: bool;
+    /// `WriteFileHeader(type)`: the bottom frame, the document's type.
+    fn document(&mut self, _type_name: &str) {}
+    /// `BeginClassMember` / `BeginChoiceVariant`: a frame named `name`.
+    fn push(&mut self, _name: &str) {}
+    /// `EndClassMember` / `EndChoiceVariant`.
+    fn pop(&mut self) {}
+    /// `BeginContainer`.
+    fn begin_list(&mut self) {}
+    /// `BeginContainerElement` (and the `EndContainerElement` of the element before).
+    fn element(&mut self) {}
+    /// `EndContainer` (and the `EndContainerElement` of the last element).
+    fn end_list(&mut self) {}
+    /// The bytes of the document that the encoder handed to its sink and dropped.
+    fn flushed(&mut self, _bytes: &[u8]) {}
+    /// A replaced byte of `string` at `position` (`Frames` only).
+    fn replaced(&mut self, _byte: u8, _position: StreamPosition, _string: &[u8]) {}
+    /// The line of the stream after the document's bytes `buffered` that the encoder still
+    /// holds (`Frames` only).
+    fn line(&mut self, _buffered: &[u8]) -> u64 {
+        0
+    }
+    /// The offset in the stream after the document's bytes `buffered` that the encoder still
+    /// holds (`Frames` only).
+    fn offset(&self, _buffered: &[u8]) -> u64 {
+        0
+    }
+    /// The replaced bytes recorded so far, which the trace forgets.
+    fn take(&mut self) -> Vec<ReplacedChar> {
+        Vec::new()
+    }
+}
+
+/// The encoders' default `Trace`: nothing kept.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoTrace;
+
+impl Trace for NoTrace {
+    const FRAMES: bool = false;
+}
+
+/// A frame of NCBI's object stack that `GetStackTraceASN` reads.
+#[derive(Clone, Debug)]
+enum Frame {
+    /// A member or a choice variant: `.name`.
+    Named(String),
+    /// A container: nothing.
+    List,
+    /// A container element: `.E`.
+    Element,
+}
+
+/// NCBI's object stack and the stream's position, for the posts of `ReplacedChar`.
+#[derive(Clone, Debug, Default)]
+pub struct Frames {
+    root: String,
+    frames: Vec<Frame>,
+    /// The document's bytes that went to the sink, and the ends of line among them.
+    flushed_bytes: u64,
+    flushed_lines: u64,
+    /// The ends of line before `counted` in the bytes still held: the bytes before the last end
+    /// of line are final (the string wrap inserts its end of line into the last line only).
+    counted: usize,
+    counted_lines: u64,
+    replaced: Vec<ReplacedChar>,
+}
+
+impl Frames {
+    /// `CObjectStack::GetStackTraceASN`: the document's type, then `.name` for each member or
+    /// variant frame and `.E` for each container element.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:80-120
+    /// ```c++
+    ///     string stack = FetchFrameFromBottom(0).HasTypeInfo() ?
+    ///         FetchFrameFromBottom(0).m_TypeInfo->GetName() : "?";
+    ///     for ( size_t i = 1; i < GetStackDepth(); ++i ) {
+    ///         const TFrame& frame = FetchFrameFromBottom(i);
+    ///         switch ( frame.m_FrameType ) {
+    ///         case TFrame::eFrameClassMember:
+    ///         case TFrame::eFrameChoiceVariant:
+    ///             {
+    ///                 ...
+    ///                     const CMemberId& id = *frame.m_MemberId;
+    ///                     stack += '.';
+    ///                     if ( !id.GetName().empty() ) {
+    ///                         stack += id.GetName();
+    ///                     }
+    ///                     ...
+    ///             }
+    ///             break;
+    ///         case TFrame::eFrameArrayElement:
+    ///             stack += ".E";
+    ///             break;
+    ///         default:
+    ///             break;
+    ///         }
+    ///     }
+    ///     return stack;
+    /// ```
+    /// (A member without a name, `.[tag]`, is not in LOSAT's types.)
+    pub fn stack_trace(&self) -> String {
+        let mut stack = self.root.clone();
+        for frame in &self.frames {
+            match frame {
+                Frame::Named(name) => {
+                    stack.push('.');
+                    stack.push_str(name);
+                }
+                Frame::Element => stack.push_str(".E"),
+                Frame::List => {}
+            }
+        }
+        stack
+    }
+}
+
+impl Trace for Frames {
+    const FRAMES: bool = true;
+
+    fn document(&mut self, type_name: &str) {
+        self.root = type_name.to_string();
+    }
+
+    fn push(&mut self, name: &str) {
+        self.frames.push(Frame::Named(name.to_string()));
+    }
+
+    fn pop(&mut self) {
+        self.frames.pop();
+    }
+
+    fn begin_list(&mut self) {
+        self.frames.push(Frame::List);
+    }
+
+    fn element(&mut self) {
+        if matches!(self.frames.last(), Some(Frame::Element)) {
+            self.frames.pop();
+        }
+        self.frames.push(Frame::Element);
+    }
+
+    fn end_list(&mut self) {
+        if matches!(self.frames.last(), Some(Frame::Element)) {
+            self.frames.pop();
+        }
+        self.frames.pop();
+    }
+
+    fn flushed(&mut self, bytes: &[u8]) {
+        self.flushed_bytes += bytes.len() as u64;
+        self.flushed_lines += bytes.iter().filter(|&&byte| byte == b'\n').count() as u64;
+        self.counted = 0;
+        self.counted_lines = 0;
+    }
+
+    fn replaced(&mut self, byte: u8, position: StreamPosition, string: &[u8]) {
+        self.replaced.push(ReplacedChar {
+            trace: self.stack_trace(),
+            byte,
+            position,
+            string: string.to_vec(),
+        });
+    }
+
+    fn line(&mut self, buffered: &[u8]) -> u64 {
+        let end = buffered
+            .iter()
+            .rposition(|&byte| byte == b'\n')
+            .map_or(0, |at| at + 1);
+        if end > self.counted {
+            self.counted_lines += buffered[self.counted..end]
+                .iter()
+                .filter(|&&byte| byte == b'\n')
+                .count() as u64;
+            self.counted = end;
+        }
+        1 + self.flushed_lines + self.counted_lines
+    }
+
+    fn offset(&self, buffered: &[u8]) -> u64 {
+        self.flushed_bytes + buffered.len() as u64
+    }
+
+    fn take(&mut self) -> Vec<ReplacedChar> {
+        std::mem::take(&mut self.replaced)
+    }
+}
 
 /// The calls of NCBI's `CObjectOStream` that the serialized BLAST reports make.
 pub trait Encoder {
@@ -196,4 +487,9 @@ pub trait Encoder {
     }
     /// The first error raised while writing (the document is then not written), if any.
     fn error(&self) -> Option<SerialError>;
+    /// The bytes replaced so far by an encoder with `Frames` (`ReplacedChar`), which it forgets;
+    /// none for the other encoders.
+    fn take_replaced(&mut self) -> Vec<ReplacedChar> {
+        Vec::new()
+    }
 }

@@ -38,7 +38,7 @@ Inputs and frozen NCBI outputs for `losat rpsbproc` (NCBI rpsbproc 0.5.1, the 20
 
 `case`, `use` (`compare`: LOSAT must give the same stdout, stderr and exit code; `linux`: the same, on Linux only; `refuse`: LOSAT refuses, exit 1, with
 the bytes of `refused/<case>.{out,err,rc}`: the XML input until the XML reader of a later item, PS16d, and the
-refusals of PS16b below), `stdin` (`-` = empty), `setup`
+refusals of PS16b and PS16c below), `stdin` (`-` = empty), `setup`
 (`data-without:<file>`: a directory `data_missing/` holding the data files except that one; `data-with:<dir>`: a
 directory `<dir>/` holding the data files with those of `data_with/<dir>/` in their place; `data-with:<a>+<dir>`: the
 same with those of `data_with/<a>/` first, then those of `data_with/<dir>/`), `arguments` (split on
@@ -131,6 +131,25 @@ spaces). PS16a's cases of `-t feats`, `-t both` and the default `-t` (named `ref
   and `nt`'s `cddid.tbl` with the parents and roots those rows name. For every PS16c case, NCBI's output with these
   data equals its output with the full v3.22 files (with the preview `cdtrack.txt` for `ntprev`), and bioconda's
   rpsbproc 0.5.1 gives the same bytes.
+- The cases of the PS16c review (2026-11-13; NCBI's binary and bioconda's 0.5.1 gave the same bytes, with these data
+  and with the full v3.22 files), archives edited by hand as the review's oracles were (`gzip -9n`):
+  - `ntnull1.asn`: `nt67.asn` with a second `Std-seg` in its first alignment whose only location is `null`
+    (`loc { null NULL }`). NCBI's `seqlocs[0]->IsNull() || seqlocs[1]->IsNull()` skips it without reading a second
+    location: the output is that of `nt67.asn`.
+  - `ntshort2.asn`: `nt67.asn` with the Seq-data `iupacna "AC"` (its `length` stays 5000). With `-t doms` NCBI prints
+    the hits (`ntshort2.doms`); where it translates the query for sites, see `refuse_ntshort2` below.
+- `refused/` holds the refusals of PS16c (PD-LOSAT-NCBI-DEFECTS 1.16) too, each LOSAT's output cut where NCBI's goes on
+  (checked against NCBI's output of the same case):
+  - `refuse_ntshort2`: `ntshort2.asn` with `-t both`: NCBI's `TranslateAll` erases from an empty string after
+    `ENDDOMAINS` (segmentation fault in both builds).
+  - `refuse_natoprot`: `arch/natoprot.asn`, `three.asn` with `mol na` (the protein queries read as nucleotide ones:
+    their Dense-seg hits in frame 1, their sites on the translation of their letters), `-t both -m std`: a site at
+    residue 117 of a translation of 58 residues, where NCBI reads outside the string (NCBI's binary, bioconda's and
+    NCBI's binary with the full data files print three different lines).
+  - `refuse_ntnoids1`: `nt67.asn` whose first alignment has no ids in its segments (its query id comes from the
+    first location): NCBI reads the hit id past the ids (segmentation fault after the `SESSION` line).
+  - `refuse_ntplusmax`: `nt67.asn` whose first alignment, on the plus strand, ends at base 2^31 (`to 2147483647`):
+    NCBI's `int` overflows and both builds print `-2147483648`.
 
 ## The NCBI C++ Toolkit options (line RG, item E1c)
 

@@ -232,3 +232,10 @@ nt68rc.prev.full	compare	-	data-with:nt+ntprev	-i arch/nt68rc.asn -d ntprev -t b
 ntnohit.doms.rep	compare	-	data-with:nt	-i arch/ntnohit.asn -d nt -t doms -m rep
 nt94had.both.rep	compare	-	data-with:nt	-i arch/nt94had.asn -d nt -t both -m rep
 nt94had.both.full.f	compare	-	data-with:nt	-i arch/nt94had.asn -d nt -t both -m full -f
+ntnull1.both.rep	compare	-	data-with:nt	-i arch/ntnull1.asn -d nt -t both -m rep
+ntnull1.doms.std.f	compare	-	data-with:nt	-i arch/ntnull1.asn -d nt -t doms -m std -f
+ntshort2.doms	compare	-	data-with:nt	-i arch/ntshort2.asn -d nt -t doms
+refuse_ntshort2	refuse	-	data-with:nt	-i arch/ntshort2.asn -d nt -t both
+refuse_natoprot	refuse	-	-	-i arch/natoprot.asn -d data -t both -m std
+refuse_ntnoids1	refuse	-	data-with:nt	-i arch/ntnoids1.asn -d nt -t doms
+refuse_ntplusmax	refuse	-	data-with:nt	-i arch/ntplusmax.asn -d nt -t doms -m std

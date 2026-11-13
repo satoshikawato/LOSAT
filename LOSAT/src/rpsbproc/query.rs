@@ -864,14 +864,36 @@ fn process_cd_query(
                 "a Seq-align whose e_value or bit_score is not a number is not supported by LOSAT's rpsbproc".to_string(),
             ));
         }
-        query.aligns.push(match (dom, &align.segs) {
+        let dom = match (dom, &align.segs) {
             (Some(mut dom), _) => {
                 dom.pssm_id = pssm_id;
                 dom
             }
             (None, Segs::Denseg(seg)) => parse_align(seg, align, pssm_id),
             (None, _) => unreachable!("a Dense-seg"),
-        });
+        };
+        // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1809,1836
+        // ```c++
+        // 	(*m_ostream) << pType << DELIMIT << (rec.pAlign->m_uiPssmId >= INVALIDPSSMID ? 0 : rec.pAlign->m_uiPssmId) << DELIMIT << rec.pAlign->m_iFrom + COORDSBASE << DELIMIT << rec.pAlign->m_iTo + COORDSBASE << DELIMIT << ...
+        // 	(*m_ostream) << HITTYPE_CLUSTER << DELIMIT << (rec.pCdInfo->m_uiClusterPssmId >= INVALIDPSSMID ? 0 : rec.pCdInfo->m_uiClusterPssmId) << DELIMIT << rec.pAlign->m_iFrom + COORDSBASE << DELIMIT << rec.pAlign->m_iTo + COORDSBASE << DELIMIT << ...
+        // ```
+        // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_base.cpp:205-206
+        // ```c++
+        // 			CSegSet thisSegs;
+        // 			thisSegs.AddSeg(iter->pAlign->m_iFrom, iter->pAlign->m_iTo);
+        // ```
+        // A kept hit of a nucleotide query whose range starts or ends at 2^31 - 1: the `int`
+        // sums of its DOMAINS and SUPERFAMILIES lines overflow (undefined; PS16c review oracle
+        // `plusmax`: both 0.5.1 builds print -2147483648), and so may the overlap sets of
+        // `Calculate` that start from the range (`GetTotalResidues`' `to - from + 1`, the
+        // `+ 1` of `Cross` and `Merge`): refused, whatever the strand (PD-LOSAT-NCBI-DEFECTS
+        // 1.16). A protein query's hit keeps PS16a's widened sums (`print_dom_line`).
+        if query.is_na && (dom.from == i32::MAX || dom.to == i32::MAX) {
+            return Err(ProcessError::Unsupported(
+                "a hit of a nucleotide query that starts or ends at position 2147483647 (NCBI's int overflows) is not supported by LOSAT's rpsbproc".to_string(),
+            ));
+        }
+        query.aligns.push(dom);
     }
     if !query.is_na {
         let all: Vec<usize> = (0..query.aligns.len()).collect();
@@ -978,8 +1000,8 @@ fn query_row_id(align: &Align) -> Result<&ParsedSeqId, ProcessError> {
     }
 }
 
-/// `ProcessBlastResults` of protein queries: each query with the alignments that follow in the
-/// list while their first id matches the query's local id (else its first id).
+/// `ProcessBlastResults`: each query with the alignments that follow in the list while their
+/// first id matches the query's local id (else its first id).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_biodata.cpp:308-366
 // ```c++
 // void CNcbiCdAlignProcessor::ProcessBlastResults(list<TDomQuery> &dst, const list<CRef<CSeq_entry> > &qseqs, const TSeqLocInfoVector & masks, const list< CRef<CSeq_align > > &aligns, int gcode, vector<PssmId_t> *missed) const
@@ -1026,8 +1048,9 @@ fn query_row_id(align: &Align) -> Result<&ParsedSeqId, ProcessError> {
 // 		}
 // ```
 // (`CSeq_id::Match` is `Compare(...) == e_YES`, `seqid::defline_set::compare`. The masks of
-// each query are not printed. A Seq-align other than a `Dense-seg` comes from a nucleotide
-// search, item PS16c: refused.)
+// each query are not printed. `query_row_id` is `GetSeq_id(0)` of a `Dense-seg`, of the
+// `Std-seg`s of a translated search and of a `Packed-seg` (NCBI's exception); the other
+// segments are refused there.)
 pub(crate) fn process_blast_results(
     entries: &[SeqEntry],
     aligns: &[Align],
@@ -1110,7 +1133,105 @@ pub(crate) fn process_blast_results(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rpsbproc::archive::{StdAlign, StdLoc, StdPair};
+    use crate::rpsbproc::data::DataFiles;
     use crate::seqid::model::{Dbtag, TextseqId};
+
+    /// The data files of the fixtures (`tests/fixtures/rpsbproc/data`).
+    fn fixture_data() -> CddData {
+        let file = |name: &str| {
+            format!(
+                "{}/tests/fixtures/rpsbproc/data/{name}",
+                env!("CARGO_MANIFEST_DIR")
+            )
+        };
+        CddData::load(&DataFiles {
+            cddids: file("cddid.tbl"),
+            spfeats: file("cddannot.dat"),
+            genfeats: file("cddannot_generic.dat"),
+            bscores: file("bitscore_specific.txt"),
+            cdtrack: file("cdtrack.txt"),
+            famlinks: file("family_superfamily_links"),
+        })
+        .unwrap()
+    }
+
+    // The refusals of a nucleotide query's `Std-seg`s (cdalignproc_biodata.cpp:195-232,
+    // Seq_align.cpp:339-358 and rpsbproc_main.cpp:1809,1836, quoted at `process_cd_query` and
+    // `query_row_id`): a first segment with fewer than 2 ids is read past its end (PS16c oracle
+    // `noids1`: segmentation fault in both 0.5.1 builds); a first location of a variant whose
+    // id LOSAT does not look up; a kept hit whose range starts or ends at 2^31 - 1, whose
+    // DOMAINS line overflows `int` (review oracle `plusmax`), whatever the strand. A hit whose
+    // PSSM-ID is 0 is dropped before it is classified or printed.
+    #[test]
+    fn refusals_of_translated_hits() {
+        let data = fixture_data();
+        let local = ParsedSeqId::Local(ObjectId::Str(b"Query_1".to_vec()));
+        let cdd = |tag: i32| {
+            Some(ParsedSeqId::General(Dbtag {
+                db: b"CDD".to_vec(),
+                tag: ObjectId::Id(tag),
+            }))
+        };
+        let entries = [SeqEntry::Seq(Query {
+            ids: vec![local.clone()],
+            mol: 1,
+            length: Some(6),
+            seq_data: Some(("iupacna", b"ACGTAC".to_vec())),
+            ..Query::default()
+        })];
+        let run =
+            |query_id: QueryRowId, hit_id: Option<ParsedSeqId>, from: u32, to: u32, strand: i32| {
+                let align = Align {
+                    segs: Segs::Std(Box::new(StdAlign {
+                        query_id,
+                        hit_id,
+                        segs: vec![StdPair {
+                            query: StdLoc::Int {
+                                from,
+                                to,
+                                strand: Some(strand),
+                            },
+                            hit: StdLoc::Int {
+                                from: 0,
+                                to: 2,
+                                strand: None,
+                            },
+                        }],
+                    })),
+                    score: Some(10),
+                    e_value: Some(1e-5),
+                    bit_score: Some(40.5),
+                    num_ident: None,
+                    score_of_other_type: None,
+                };
+                match process_blast_results(&entries, &[align], &data) {
+                    Ok(queries) => Ok(queries[0].aligns.len()),
+                    Err(ProcessError::Unsupported(message)) => Err(message),
+                    Err(other) => panic!("{other:?}"),
+                }
+            };
+        let row = || QueryRowId::Id(local.clone());
+        let refused =
+            |message: &str| Err(format!("{message} is not supported by LOSAT's rpsbproc"));
+        assert_eq!(
+            run(row(), None, 0, 2, 1),
+            refused("a Seq-align whose first Std-seg has fewer than 2 ids (NCBI reads past them)")
+        );
+        assert_eq!(
+            run(QueryRowId::Location("packed-int"), cdd(5), 0, 2, 1),
+            refused("a Std-seg without ids whose first location is a packed-int")
+        );
+        let end = 0x7fff_ffff;
+        let overflow = refused(
+            "a hit of a nucleotide query that starts or ends at position 2147483647 (NCBI's int overflows)",
+        );
+        for strand in [0, 1, 3, 255] {
+            assert_eq!(run(row(), cdd(5), 0, end, strand), overflow);
+        }
+        assert_eq!(run(row(), cdd(5), end, end, 1), overflow);
+        assert_eq!(run(row(), cdd(0), 0, end, 1), Ok(0));
+    }
 
     // `Get1LetterSeqData` (biodata_core.cpp:199-253, quoted at `one_letter_residues`): the
     // literals of `ext delta` one after another (NCBIstdaa converted), cut to `inst.length`;

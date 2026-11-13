@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::rpsbproc::archive::{Align, DenseSeg, Segs, StdLoc, StdPair};
+use crate::rpsbproc::segset::Seg;
 
 fn dense_seg(starts: &[i32], lens: &[u32]) -> DenseSeg {
     DenseSeg {
@@ -123,8 +124,8 @@ fn a_minus_strand_hit_of_a_translated_query() {
 
 // Without a strand the hit is an alignment of two proteins; a subject location that is not
 // `int` or `pnt` leaves its query start alone (plus strand: kept as NCBI does), which the
-// minus strand reads past (refused); fewer than 2 locations are refused; `null` and `empty`
-// segments are skipped; a `pnt` is a position of length 1.
+// minus strand reads past (refused); `null` and `empty` segments are skipped; a `pnt` is a
+// position of length 1; a subject interval whose length overflows `int` is refused.
 #[test]
 fn std_seg_forms() {
     let none =
@@ -150,14 +151,106 @@ fn std_seg_forms() {
     assert_eq!(dom.s_starts, vec![12]);
     assert_eq!(dom.lens, vec![1]);
     let minus = [std_seg(int(30, 59, Some(2)), StdLoc::Whole)];
-    assert!(parse_std_align(&minus, &align(), 1).is_err());
-    let short = [std_seg(int(0, 2, Some(1)), StdLoc::Missing)];
-    assert!(parse_std_align(&short, &align(), 1).is_err());
+    assert_eq!(
+        parse_std_align(&minus, &align(), 1).unwrap_err(),
+        "a minus-strand Std-seg with a subject location other than int or pnt (NCBI reads past its segment lengths) is not supported by LOSAT's rpsbproc"
+    );
     let overflow = [std_seg(
         int(0, 2, Some(1)),
         int(0x8000_0000, 0x7fff_ffff, None),
     )];
-    assert!(parse_std_align(&overflow, &align(), 1).is_err());
+    assert_eq!(
+        parse_std_align(&overflow, &align(), 1).unwrap_err(),
+        "a Std-seg subject interval from 2147483648 to 2147483647, whose length overflows NCBI's int (undefined), is not supported by LOSAT's rpsbproc"
+    );
+}
+
+// biodata_blast.cpp:63 (quoted at `parse_std_align`): `seqlocs[0]->IsNull() ||
+// seqlocs[1]->IsNull()` reads the second location only when the first is not `null`. A
+// segment whose only location is `null` is skipped (PS16c review oracle `nullone`: NCBI's
+// output is that of the archive without the segment); a segment without locations, or whose
+// only location is not `null`, is read past its end: refused.
+#[test]
+fn locations_are_read_in_ncbis_order() {
+    let hit = std_seg(int(30, 59, Some(1)), int(0, 9, None));
+    let alone = parse_std_align(&[hit], &align(), 1).unwrap();
+    let with_null =
+        parse_std_align(&[hit, std_seg(StdLoc::Null, StdLoc::Missing)], &align(), 1).unwrap();
+    assert_eq!(
+        (
+            with_null.from,
+            with_null.to,
+            with_null.m_starts,
+            with_null.lens
+        ),
+        (alone.from, alone.to, alone.m_starts, alone.lens)
+    );
+    let refusal = |segs: &[StdPair]| parse_std_align(segs, &align(), 1).unwrap_err();
+    for segs in [
+        [hit, std_seg(StdLoc::Missing, StdLoc::Missing)],
+        [std_seg(StdLoc::Missing, StdLoc::Missing), hit],
+    ] {
+        assert_eq!(
+            refusal(&segs),
+            "a Std-seg without locations (NCBI reads past them) is not supported by LOSAT's rpsbproc"
+        );
+    }
+    for only in [int(0, 2, Some(1)), StdLoc::Empty, StdLoc::Whole] {
+        assert_eq!(
+            refusal(&[hit, std_seg(only, StdLoc::Missing)]),
+            "a Std-seg whose only location is not null (NCBI reads past it) is not supported by LOSAT's rpsbproc"
+        );
+    }
+}
+
+// biodata_blast.cpp:178-182 (quoted at `parse_std_align`): `alignedLen = (dst.m_iTo + 1) /
+// RF_SIZE` of a minus-strand hit is `int` arithmetic, which overflows for a hit that ends at
+// 2^31 - 1 (refused); one base before, the aligned length is 715,827,882 codons. A plus-strand
+// hit with that end parses (the caller refuses it as a kept hit of a nucleotide query).
+#[test]
+fn a_minus_strand_hit_that_ends_at_int_max() {
+    let hit = |to: u32, strand: i32| {
+        [std_seg(
+            int(2_147_483_640, to, Some(strand)),
+            int(0, 2, None),
+        )]
+    };
+    assert_eq!(
+        parse_std_align(&hit(0x7fff_ffff, 2), &align(), 1).unwrap_err(),
+        "a minus-strand Std-seg that ends at position 2147483647 (NCBI's int overflows) is not supported by LOSAT's rpsbproc"
+    );
+    let dom = parse_std_align(&hit(0x7fff_fffe, 2), &align(), 1).unwrap();
+    assert_eq!(dom.aligned_len(), 715_827_882);
+    let dom = parse_std_align(&hit(0x7fff_ffff, 1), &align(), 1).unwrap();
+    assert_eq!((dom.from, dom.to), (2_147_483_640, i32::MAX));
+}
+
+// basedata.cpp:1137-1177 and segset_impl.hpp:281-290 (quoted at `pr2na_ends`): a range of the
+// set outside `int` (NCBI's set arithmetic overflowed before) and, on the minus strand, a
+// residue at `INT_MIN` (`MinusPr2PlusNA`'s `pr - 1`) give no ends: the motif is refused.
+#[test]
+fn ends_that_overflow_int() {
+    let plus = parse_std_align(
+        &[std_seg(int(388, 2583, Some(1)), int(0, 731, None))],
+        &align(),
+        7,
+    )
+    .unwrap();
+    let minus = parse_std_align(
+        &[std_seg(int(301, 599, Some(2)), int(0, 99, None))],
+        &align(),
+        7,
+    )
+    .unwrap();
+    let set = |from: i64, to: i64| SegSet::from_segs(vec![Seg::new(from, to)]);
+    let past = i64::from(i32::MAX) + 1;
+    assert_eq!(pr2na_ends(&set(5, past), &plus), None);
+    assert_eq!(pr2na_ends(&set(5, past), &minus), None);
+    let min = i64::from(i32::MIN);
+    assert_eq!(pr2na_ends(&set(min, 10), &minus), None);
+    assert!(pr2na_ends(&set(min + 1, 10), &minus).is_some());
+    // The plus strand has no `pr - 1`: `INT_MIN * 3 + rfidx` wraps.
+    assert!(pr2na_ends(&set(min, 10), &plus).is_some());
 }
 
 // basedata.cpp:1252-1300 (quoted at `translated_pos_map`): a minus-strand hit's positions move

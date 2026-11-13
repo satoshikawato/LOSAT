@@ -30,6 +30,7 @@ use super::domains::{
 };
 use super::frames::{minus_pr_to_plus_na, plus_pr_to_plus_na, translate_all, RF_IDS, RF_SIZE};
 use super::query::DomQuery;
+use super::segset::SegSet;
 use super::sites::MotifState;
 use super::{
     mostly_mapped, print_cluster_line, print_dom_line, site_segset, write_source, MotifRecord,
@@ -331,16 +332,7 @@ fn print_features(
             .first()
             .is_some_and(|record| !data.domains[record.domain].is_struct_dom)
     });
-    let Some(translations) = translate_all(&query.residues) else {
-        return Err(PrintError::Unsupported(
-            format!(
-                "a nucleotide query of {} bases whose reverse complement has {} IUPACna letters, fewer than 3 in either (NCBI's TranslateAll erases from an empty string, undefined), is not supported by LOSAT's rpsbproc",
-                query.residues.len(),
-                super::frames::complement(&query.residues).len()
-            )
-            .into_bytes(),
-        ));
-    };
+    let translations = translations(&query.residues)?;
     if has_regular {
         report.line(&[b"SITES"]);
     }
@@ -433,6 +425,25 @@ fn print_features(
         print_motifs(report, query, session, data, &records, &motifs)?;
     }
     Ok(())
+}
+
+/// `TranslateAll` of a query whose hits have sites or motifs, or the refusal where NCBI's
+/// `TranslateAll` erases from an empty string (`frames::translate_all`).
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1376
+// ```c++
+// 					TranslateAll(q.m_strSeqData, q.m_iGenCode, __dimTranslated);
+// ```
+fn translations(residues: &[u8]) -> Result<[Vec<u8>; 6], PrintError> {
+    translate_all(residues).ok_or_else(|| {
+        PrintError::Unsupported(
+            format!(
+                "a nucleotide query of {} bases whose reverse complement has {} IUPACna letters, fewer than 3 in either (NCBI's TranslateAll erases from an empty string, undefined), is not supported by LOSAT's rpsbproc",
+                residues.len(),
+                super::frames::complement(residues).len()
+            )
+            .into_bytes(),
+        )
+    })
 }
 
 /// A reading frame of the site output: its index, its label and its translation.
@@ -534,17 +545,7 @@ fn print_site(
     let mut delimit: &[u8] = b"";
     for position in &mapped_positions {
         let letter = translated_residue(frame, position.curr)?;
-        let (xres, last) = if frame.rfidx < RF_SIZE {
-            let xres = plus_pr_to_plus_na(position.curr, frame.rfidx);
-            (xres, (xres as u32).wrapping_add(2).wrapping_add(1))
-        } else {
-            let xres = minus_pr_to_plus_na(position.curr, frame.rfidx, query.length)
-                .ok_or_else(|| overflow(frame, position.curr))?;
-            (xres, (xres as u32).wrapping_sub(2).wrapping_add(1))
-        };
-        let first = xres
-            .checked_add(1)
-            .ok_or_else(|| overflow(frame, position.curr))?;
+        let (first, last) = codon(frame, position.curr, query.length)?;
         codons.extend_from_slice(delimit);
         codons.push(letter);
         codons.extend_from_slice(format!("{first}-{last}").as_bytes());
@@ -594,15 +595,39 @@ fn translated_residue(frame: &Frame, curr: i32) -> Result<u8, PrintError> {
     }
 }
 
-/// The refusal of a position whose plus-strand coordinate overflows NCBI's `int`.
-fn overflow(frame: &Frame, curr: i32) -> PrintError {
-    PrintError::Unsupported(
-        format!(
-            "a site at residue {curr} of reading frame {} whose position on the query overflows NCBI's int (undefined) is not supported by LOSAT's rpsbproc",
-            frame.label
+/// The two numbers of the codon of residue `curr` of the frame's translation (quoted at
+/// `print_site`): `xres + COORDSBASE` in `int`, `xres + codonEnd + COORDSBASE` (minus strand
+/// `xres - codonEnd + COORDSBASE`) in `unsigned int`; refused where the `int` arithmetic
+/// overflows (`pr - 1` of `MinusPr2PlusNA` at `INT_MIN`, `xres + 1` at `INT_MAX`).
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:949,1456-1457,1631-1633
+// ```c++
+// 	static constexpr const SeqLen_t codonEnd = READINGFRAME::RF_SIZE - 1;
+// 									SeqPos_t xres = READINGFRAME::PlusPr2PlusNA(iterRP->curr, rfidx, q.m_uiSeqLen);
+// 									(*m_ostream) << dimDelimit << (char)toupper(dimTranslated[rfidx][iterRP->curr]) << (xres + COORDSBASE) << '-' << (xres + codonEnd + COORDSBASE);
+// 									SeqPos_t xres = READINGFRAME::MinusPr2PlusNA(iterRP->curr, rfidx, q.m_uiSeqLen);
+//
+// 									(*m_ostream) << dimDelimit << (char)toupper(dimTranslated[rfidx][iterRP->curr]) << (xres + COORDSBASE) << '-' << (xres - codonEnd + COORDSBASE);
+// ```
+fn codon(frame: &Frame, curr: i32, query_len: u32) -> Result<(i32, u32), PrintError> {
+    let overflow = || {
+        PrintError::Unsupported(
+            format!(
+                "a site at residue {} of reading frame {} whose position on the query overflows NCBI's int (undefined) is not supported by LOSAT's rpsbproc",
+                i64::from(curr) + 1,
+                frame.label
+            )
+            .into_bytes(),
         )
-        .into_bytes(),
-    )
+    };
+    let (xres, last) = if frame.rfidx < RF_SIZE {
+        let xres = plus_pr_to_plus_na(curr, frame.rfidx);
+        (xres, (xres as u32).wrapping_add(2).wrapping_add(1))
+    } else {
+        let xres = minus_pr_to_plus_na(curr, frame.rfidx, query_len).ok_or_else(overflow)?;
+        (xres, (xres as u32).wrapping_sub(2).wrapping_add(1))
+    };
+    let first = xres.checked_add(1).ok_or_else(overflow)?;
+    Ok((first, last))
 }
 
 /// The MOTIFS part of a nucleotide query: each motif as the range of bases of its mapped
@@ -679,21 +704,7 @@ fn print_motifs(
             if !mostly_mapped(&featsegs, motif.site) {
                 continue;
             }
-            let refusal = || {
-                PrintError::Unsupported(
-                    format!(
-                        "a motif of reading frame {rf} whose positions overflow NCBI's int (undefined) is not supported by LOSAT's rpsbproc"
-                    )
-                    .into_bytes(),
-                )
-            };
-            let (left, right) = pr2na_ends(&featsegs, align).ok_or_else(refusal)?;
-            let first = left.checked_add(1).ok_or_else(refusal)?;
-            let last = if rfidx < 3 {
-                (right as u32).wrapping_add(2).wrapping_add(1)
-            } else {
-                (right as u32).wrapping_sub(2).wrapping_add(1)
-            };
+            let (first, last) = motif_ends(&featsegs, align, rfidx, &rf)?;
             report.write(session.as_bytes());
             report.write(b"\t");
             report.write(&query.accession);
@@ -707,3 +718,42 @@ fn print_motifs(
     report.line(&[b"ENDMOTIFS"]);
     Ok(())
 }
+
+/// The two numbers of a motif line of frame `rfidx` (quoted at `print_motifs`):
+/// `GetLeft() + COORDSBASE` in `int`, `GetRight() + codonEnd + COORDSBASE` (minus strand
+/// `- codonEnd`) in `unsigned int`, after `Pr2NaConvert`; refused where the `int` arithmetic
+/// overflows (`domains::pr2na_ends`, and `+ 1` at `INT_MAX`).
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1746-1747,1788-1789
+// ```c++
+// 								iterM->iterAlignRec->pAlign->Pr2NaConvert(featsegs);
+// 								(*m_ostream) << ... << featsegs.GetLeft() + COORDSBASE << DELIMIT << featsegs.GetRight() + codonEnd + COORDSBASE << DELIMIT << iterM->uiSrcPssmId << endl;
+// 								iterM->iterAlignRec->pAlign->Pr2NaConvert(featsegs);
+// 								(*m_ostream) << ... << featsegs.GetLeft() + COORDSBASE << DELIMIT << featsegs.GetRight() - codonEnd + COORDSBASE << DELIMIT << iterM->uiSrcPssmId << endl;
+// ```
+fn motif_ends(
+    featsegs: &SegSet,
+    align: &DomAlign,
+    rfidx: usize,
+    rf: &str,
+) -> Result<(i32, u32), PrintError> {
+    let refusal = || {
+        PrintError::Unsupported(
+            format!(
+                "a motif of reading frame {rf} whose positions overflow NCBI's int (undefined) is not supported by LOSAT's rpsbproc"
+            )
+            .into_bytes(),
+        )
+    };
+    let (left, right) = pr2na_ends(featsegs, align).ok_or_else(refusal)?;
+    let first = left.checked_add(1).ok_or_else(refusal)?;
+    let last = if rfidx < 3 {
+        (right as u32).wrapping_add(2).wrapping_add(1)
+    } else {
+        (right as u32).wrapping_sub(2).wrapping_add(1)
+    };
+    Ok((first, last))
+}
+
+#[cfg(test)]
+#[path = "nucleotide_tests.rs"]
+mod tests;

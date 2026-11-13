@@ -471,18 +471,22 @@ of exception 9 (PS16a) did.
     without residues: NCBI reads memory outside the string (its two 0.5.1 builds print different
     bytes for a query without `seq-data`).
   - Nucleotide queries (rpstblastn's archives; version 1.16, 2026-11-13, line PS item PS16c,
-    `DECISIONS.md` 37 and 40): a first `Std-seg` with fewer than 2 ids or a `Std-seg` with fewer
-    than 2 locations (`ParseAlignSegs` reads past them; PS16c oracle `noids1`: segmentation fault
-    in both 0.5.1 builds), a minus-strand alignment with a subject location other than `int` or
-    `pnt` (its loop reads `m_vecLens` past its end); a query with sites to print whose bases, or
-    the IUPACna letters of their reverse complement, are fewer than 3 (`TranslateAll` erases the
-    first byte of an empty string, and libstdc++ moves `SIZE_MAX` bytes: oracle `short2`,
-    segmentation fault); a site at a residue outside its reading frame's translation other than
-    its end (`operator[]` past the string; oracles `nostrand` and `natoprot`, where the two builds
-    print different bytes); and arithmetic of the coordinates that overflows NCBI's `int`
-    (undefined: a subject interval's length, `m_iTo + 1` of an alignment that ends at 2^31 - 1,
-    `pr - 1` of a residue at `INT_MIN`, `xres + 1` of a site's or motif's base). Every case is
-    made by hand; none occurs in the rpstblastn archives of PS16c probe 1 (891 jobs).
+    `DECISIONS.md` 37 and 40): a first `Std-seg` with fewer than 2 ids, or a `Std-seg` without
+    locations or whose only location is not `null` (`ParseAlignSegs` reads past them; PS16c oracle
+    `noids1`: segmentation fault in both 0.5.1 builds; a `Std-seg` whose only location is `null`
+    is skipped, as NCBI's `seqlocs[0]->IsNull() || ...` skips it: review oracle `nullone`), a
+    minus-strand alignment with a subject location other than `int` or `pnt` (its loop reads
+    `m_vecLens` past its end); a query whose hits carry sites or motifs and whose bases, or the
+    IUPACna letters of their reverse complement, are fewer than 3 (`TranslateAll` erases the first
+    byte of an empty string, and libstdc++ moves `SIZE_MAX` bytes: oracle `short2`, segmentation
+    fault); a site at a residue outside its reading frame's translation other than its end
+    (`operator[]` past the string; oracle `natoprot` and the review's `otherstrand`, where the two
+    builds print different bytes); and arithmetic of the coordinates that overflows NCBI's `int`
+    (undefined: a subject interval's length, `m_iFrom + 1` and `m_iTo + 1` of a hit that starts or
+    ends at 2^31 - 1, in its DOMAINS and SUPERFAMILIES lines and `Calculate`'s overlap sets (review
+    oracle `plusmax`: both builds print -2147483648), `pr - 1` of a residue at `INT_MIN`,
+    `xres + 1` of a site's or motif's base). Every case is made by hand; none occurs in the
+    rpstblastn archives of PS16c probe 1 (891 jobs).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

@@ -374,10 +374,15 @@ pub(crate) fn parse_align(seg: &DenseSeg, align: &Align, pssm_id: u32) -> DomAli
 // neither `int` nor `pnt` leaves its query start without a subject start and length: the
 // vectors differ in length, which the plus-strand code and the classification read within
 // bounds (LOSAT keeps the three vectors as NCBI does), but the minus-strand loop above reads
-// `m_vecLens` past its end (refused). `ids` with fewer than 2 ids in the first segment and a
-// segment with fewer than 2 locations are read past their ends (refused). The strand that
-// counts is the last one set; `unknown`, `plus` and `both` make a plus-strand hit, `minus`
-// and `both-rev` a minus-strand one, `other` (or none) an alignment of two proteins.
+// `m_vecLens` past its end (refused). `ids` with fewer than 2 ids in the first segment is read
+// past its end (refused, by the caller). `seqlocs[0]->IsNull() || seqlocs[1]->IsNull()` reads
+// `seqlocs[1]` only when the first location is not `null`: a segment without locations, or
+// whose only location is not `null`, is read past its end (refused), and a segment whose first
+// location is `null` is skipped whatever follows (PS16c review oracle `nullone`). The strand
+// that counts is the last one set; `unknown`, `plus` and `both` make a plus-strand hit, `minus`
+// and `both-rev` a minus-strand one, `other` (or none) an alignment of two proteins. (The
+// `m_iFrom + COORDSBASE` and `m_iTo + COORDSBASE` of the DOMAINS lines are checked by the
+// caller, for the hits it keeps.)
 pub(crate) fn parse_std_align(
     segs: &[StdPair],
     align: &Align,
@@ -389,12 +394,20 @@ pub(crate) fn parse_std_align(
     let mut dom = DomAlign::empty(align, pssm_id);
     let mut qstrand = STRAND_OTHER;
     for &StdPair { query, hit } in segs {
-        if query == StdLoc::Missing || hit == StdLoc::Missing {
+        if query == StdLoc::Missing {
             return Err(
-                "a Std-seg with fewer than 2 locations (NCBI reads past them) is not supported by LOSAT's rpsbproc".to_string(),
+                "a Std-seg without locations (NCBI reads past them) is not supported by LOSAT's rpsbproc".to_string(),
             );
         }
-        if query == StdLoc::Null || hit == StdLoc::Null {
+        if query == StdLoc::Null {
+            continue;
+        }
+        if hit == StdLoc::Missing {
+            return Err(
+                "a Std-seg whose only location is not null (NCBI reads past it) is not supported by LOSAT's rpsbproc".to_string(),
+            );
+        }
+        if hit == StdLoc::Null {
             continue;
         }
         if query == StdLoc::Empty || hit == StdLoc::Empty {
@@ -1146,6 +1159,10 @@ pub(crate) fn translated_pos_map(
 // Only the ends are printed (the motif lines), so only the first and the last ranges are
 // converted; `ori_from` is not read after the conversion. The minus strand reverses the list:
 // the left end comes from the last range's `to`, the right end from the first range's `from`.
+// The minus strand's `ori_from += (to - from + 1) / m_iFactor - 1` is `int` arithmetic on the
+// converted bases, which overflows only for a range of more than 2^31 bases (made by hand
+// only). It is left unchecked on purpose: its value is never read, so no printed number
+// depends on it (PS16c review S3-4).
 pub(crate) fn pr2na_ends(set: &SegSet, align: &DomAlign) -> Option<(i32, i32)> {
     let (first, last) = (set.segs().first()?, set.segs().last()?);
     let int = |value: i64| i32::try_from(value).ok();

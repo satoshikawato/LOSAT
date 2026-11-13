@@ -225,7 +225,7 @@ fn compare_rows(stem: &str, usage: &str) -> usize {
 
 #[test]
 fn rpsbproc_gives_ncbis_bytes() {
-    assert_eq!(compare_rows("compare", "compare"), 227);
+    assert_eq!(compare_rows("compare", "compare"), 230);
 }
 
 // The rows of `use` `linux`: `-logfile /dev/stdout` writes the diagnostics into the pipe of the
@@ -270,7 +270,7 @@ fn rpsbproc_refuses_what_it_does_not_give() {
         assert_same(&expected, &case, &out, &err, status);
         refused += 1;
     }
-    assert_eq!(refused, 5);
+    assert_eq!(refused, 9);
 }
 
 // The command line outside NCBI's report (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): `-version`

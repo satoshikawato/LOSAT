@@ -15,11 +15,20 @@
     "./ports": "./src/ports/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "build": "node build/build.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.tools.json",
     "lint": "eslint .",
+    "test": "vitest run",
     "check": "npm run typecheck && npm run lint"
   },
   "dependencies": {
     "@bjorn3/browser_wasi_shim": "0.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "eslint": "10.14.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.1.0"
   }
 }

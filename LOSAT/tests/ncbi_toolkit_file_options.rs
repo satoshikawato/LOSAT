@@ -2,6 +2,12 @@
 //! item E1), against NCBI BLAST+ 2.17.0, the official Linux x64 release (probes of 2026-11-12,
 //! `remaining-gaps-20261112/E/SURVEY_E1.md`, run with `env -i` in a fresh directory).
 //!
+//! The library API runs the same start in each call (line RG item E1w-2): the same words through
+//! `examples/library_command_line` (`LOSAT::api::run`, `run_to_file`) in the same directory and
+//! environment give the command line's standard output, standard error and `-logfile` file; a
+//! failure's message is the text that the command line writes to its standard error without
+//! `-logfile` (the example ends every failure with exit status 1).
+//!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:844-871, 926-1022 (quoted at
 //! `ncbi_environment::log_file`, `preparse` and `conf_file_path`), and
 //! c++/src/app/blast/tblastx_app.cpp:93-95 (quoted at `ncbi_environment::run_messages_follow_log`).
@@ -10,6 +16,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+
+use crate::library_examples::example_binary;
 
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 
@@ -36,7 +44,17 @@ fn scratch(name: &str) -> PathBuf {
 
 /// `losat <words>` in `dir` with an environment of NCBI's probes (`env -i PATH HOME`) and `envs`.
 fn run_in(dir: &Path, words: &[&str], envs: &[(&str, &str)]) -> Output {
-    let mut command = Command::new(BIN);
+    run_binary_in(Path::new(BIN), dir, words, envs)
+}
+
+/// `run_in` through the library API: `examples/library_command_line <words>`.
+fn library_in(dir: &Path, words: &[&str], envs: &[(&str, &str)]) -> Output {
+    run_binary_in(&example_binary("library_command_line"), dir, words, envs)
+}
+
+/// `run_in` of `binary` (the command line, or the library's example).
+fn run_binary_in(binary: &Path, dir: &Path, words: &[&str], envs: &[(&str, &str)]) -> Output {
+    let mut command = Command::new(binary);
     command
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
@@ -84,6 +102,23 @@ fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+/// Runs `words` through the library in `dir` with `envs` (`library_in`) and checks it against
+/// `cli`, the command line's run of the same words: the same standard output and standard error,
+/// and exit status 0 where the command line's is 0 (1, the example's, for a failure).
+fn check_library(dir: &Path, words: &[&str], envs: &[(&str, &str)], cli: &Output) {
+    let library = library_in(dir, words, envs);
+    let status = cli.status.code().map(|code| i32::from(code != 0));
+    assert_eq!(
+        (
+            library.status.code(),
+            text(&library.stdout),
+            text(&library.stderr)
+        ),
+        (status, text(&cli.stdout), text(&cli.stderr)),
+        "{words:?} {envs:?}: the library"
+    );
+}
+
 /// NCBI BLAST+ 2.17.0 (probes `log_warn`, `log_qerr`, `log_empty`, `log_nodir`, `log_old`): the
 /// warning of `-max_target_seqs 1` and the error of a missing `-query` go to the `-logfile` file
 /// in tblastx, rpsblast and rpstblastn (its missing `-query` here) and to the standard error in
@@ -115,19 +150,61 @@ fn run_messages_go_where_ncbi_sends_them() {
             assert_eq!(text(&logged.stderr), warning, "{program}");
             assert_eq!(file, "OLD LINE\n", "{program}");
         }
+        // The library: the same file, the same streams (`run`, and `run_to_file` with `-out`).
+        for out in [&[][..], &["-out", "out.txt"]] {
+            fs::write(dir.join("log.txt"), "OLD LINE\n").unwrap();
+            let mut library_words = logged_words.clone();
+            library_words.extend_from_slice(out);
+            let library = library_in(&dir, &library_words, &[]);
+            assert_eq!(library.status.code(), Some(0), "{program}: {library:?}");
+            let stdout = match out {
+                [] => library.stdout,
+                _ => fs::read(dir.join("out.txt")).unwrap(),
+            };
+            assert_eq!(
+                (
+                    stdout,
+                    text(&library.stderr),
+                    fs::read_to_string(dir.join("log.txt")).unwrap()
+                ),
+                (logged.stdout.clone(), text(&logged.stderr), file.clone()),
+                "{program} library {out:?}"
+            );
+            let _ = fs::remove_file(dir.join("out.txt"));
+        }
         // `-logfile ""` sends the diagnostics nowhere; a file in a missing directory leaves them
-        // on the standard error.
-        for (value, quiet) in [("", to_log), ("nodir/log.txt", false)] {
+        // on the standard error. The library's too, and `-` (the standard error,
+        // `ncbi_environment::diag_target`) is the command line's there.
+        for (value, quiet) in [
+            ("", Some(to_log)),
+            ("nodir/log.txt", Some(false)),
+            ("-", None),
+        ] {
             let mut words = words.clone();
             words.extend(["-logfile", value]);
             let run = run_in(&dir, &words, &[]);
             assert_eq!(run.status.code(), Some(0), "{program} {value:?}");
             assert_eq!(run.stdout, plain.stdout, "{program} {value:?}");
-            let expected = if quiet { "" } else { warning.as_str() };
-            assert_eq!(text(&run.stderr), expected, "{program} {value:?}");
+            if let Some(quiet) = quiet {
+                let expected = if quiet { "" } else { warning.as_str() };
+                assert_eq!(text(&run.stderr), expected, "{program} {value:?}");
+            }
+            let library = library_in(&dir, &words, &[]);
+            assert_eq!(
+                (
+                    library.status.code(),
+                    &library.stdout,
+                    text(&library.stderr)
+                ),
+                (Some(0), &run.stdout, text(&run.stderr)),
+                "{program} {value:?} library"
+            );
         }
         assert!(!dir.join("nodir").exists());
+        assert!(!dir.join("-").exists());
     }
+    // The library takes no `-query` file: its caller reads the records (the example does, before
+    // the call), so the missing file below is the command line's only.
     // A missing `-query`, rpsblast and rpstblastn too (their error comes before the database is
     // opened; rpstblastn: PS12a's probe `log_qerr` of 2026-11-13, NCBI's official 2.17.0, which
     // writes it into the file as rpsblast does, rpstblastn_app.cpp:111-114).
@@ -207,6 +284,7 @@ fn the_conffile_is_read_in_place_of_the_programs_ini() {
                 (Some(0), String::new(), &plain.stdout),
                 "{program} {conffile:?}"
             );
+            check_library(&dir, &with, &[], &read);
             fs::write(dir.join("c.ini"), "[x\n").unwrap();
             let failed = run_in(&dir, &with, &[]);
             assert_eq!(
@@ -215,7 +293,38 @@ fn the_conffile_is_read_in_place_of_the_programs_ini() {
                 "{program} {conffile:?}"
             );
             assert!(failed.stdout.is_empty());
+            check_library(&dir, &with, &[], &failed);
         }
+        // With `-logfile`: the library's file is the command line's, and its error is the text
+        // that the command line writes without the file.
+        let mut logged = words.clone();
+        logged.extend(["-conffile", "c.ini", "-logfile", "log.txt"]);
+        let _ = fs::remove_file(dir.join("log.txt"));
+        let cli = run_in(&dir, &logged, &[]);
+        assert_eq!(cli.status.code(), Some(2), "{program}: {cli:?}");
+        let cli_log = fs::read(dir.join("log.txt")).unwrap();
+        assert!(!cli_log.is_empty(), "{program}");
+        fs::remove_file(dir.join("log.txt")).unwrap();
+        let library = library_in(&dir, &logged, &[]);
+        assert_eq!(
+            (
+                library.status.code(),
+                text(&library.stderr),
+                fs::read(dir.join("log.txt")).unwrap()
+            ),
+            (Some(1), SECTION_REPORT.repeat(2), cli_log),
+            "{program} -logfile: the library"
+        );
+        fs::remove_file(dir.join("log.txt")).unwrap();
+        // A registry that turns NCBI's data loaders off: the library reads its records with them,
+        // and they read the same (`api::start::CallStart::settings`).
+        fs::write(dir.join("c.ini"), "[BLAST]\nDATA_LOADERS = none\n").unwrap();
+        let mut no_loaders = words.clone();
+        no_loaders.extend(["-conffile", "c.ini"]);
+        let cli = run_in(&dir, &no_loaders, &[]);
+        assert_eq!(cli.status.code(), Some(0), "{program}: {cli:?}");
+        check_library(&dir, &no_loaders, &[], &cli);
+        fs::write(dir.join("c.ini"), "[x\n").unwrap();
         fs::remove_file(dir.join(format!("{program}.ini"))).unwrap();
         let mut bare = words.clone();
         bare.extend(["-conffile", "c.ini"]);
@@ -225,10 +334,22 @@ fn the_conffile_is_read_in_place_of_the_programs_ini() {
             (Some(0), &plain.stdout),
             "{program}"
         );
+        check_library(
+            &dir,
+            &bare,
+            &[("NCBI_DONT_USE_LOCAL_CONFIG", "1")],
+            &not_looked_for,
+        );
         let mut dotted = words.clone();
         dotted.extend(["-conffile", "./c.ini"]);
         let as_is = run_in(&dir, &dotted, &[("NCBI_DONT_USE_LOCAL_CONFIG", "1")]);
         assert_eq!(as_is.status.code(), Some(2), "{program}: {as_is:?}");
+        check_library(
+            &dir,
+            &dotted,
+            &[("NCBI_DONT_USE_LOCAL_CONFIG", "1")],
+            &as_is,
+        );
     }
     let _ = fs::remove_dir_all(&dir);
 }
@@ -269,6 +390,12 @@ fn a_conffile_that_is_not_a_file_aborts_as_ncbi_aborts() {
                 (Some(255), critical(name), 0),
                 "{program} {conffile:?}"
             );
+            // The library's `validate` reads the arguments before a call runs the start: a
+            // `-conffile` given twice is the parser's error there (`api::validate`), where the
+            // command line's start has aborted before its arguments are read.
+            if conffile.len() <= 2 {
+                check_library(&dir, &with, &[], &aborted);
+            }
         }
         let _ = fs::remove_file(dir.join("log.txt"));
         let mut logged = words.clone();
@@ -282,6 +409,18 @@ fn a_conffile_that_is_not_a_file_aborts_as_ncbi_aborts() {
             ),
             (String::new(), critical("missing.ini")),
             "{program}"
+        );
+        // The library: the same file; its error is the post.
+        fs::remove_file(dir.join("log.txt")).unwrap();
+        let library = library_in(&dir, &logged, &[]);
+        assert_eq!(
+            (
+                library.status.code(),
+                text(&library.stderr),
+                fs::read_to_string(dir.join("log.txt")).unwrap()
+            ),
+            (Some(1), critical("missing.ini"), critical("missing.ini")),
+            "{program}: the library"
         );
         let help = run_in(&dir, &[program, "-h", "-conffile", "missing.ini"], &[]);
         assert_eq!(help.status.code(), Some(255), "{program}");
@@ -316,6 +455,20 @@ fn a_conffile_that_is_not_a_file_aborts_as_ncbi_aborts() {
         (Some(255), critical("missing.ini"))
     );
     assert!(!dir.join("mdb.pin").exists());
+    // The library's makeblastdb (`api::run_makeblastdb`) runs the same start.
+    let words = [
+        "makeblastdb",
+        "-in",
+        "arch_bp_s.faa",
+        "-dbtype",
+        "prot",
+        "-out",
+        "mdb",
+        "-conffile",
+        "missing.ini",
+    ];
+    check_library(&dir, &words, &[], &made);
+    assert!(!dir.join("mdb.pin").exists());
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -347,10 +500,12 @@ fn an_unreadable_conffile_and_a_last_word_without_value() {
                 "{program}"
             );
         }
+        check_library(&dir, &dotted, &[], &run);
         let mut bare = words.clone();
         bare.extend(["-conffile", "c.ini"]);
         let run = run_in(&dir, &bare, &[]);
         assert_eq!(run.status.code(), Some(0), "{program}: {run:?}");
+        check_library(&dir, &bare, &[], &run);
     }
     fs::set_permissions(dir.join("c.ini"), fs::Permissions::from_mode(0o644)).unwrap();
     for last in ["-logfile", "-conffile"] {
@@ -370,6 +525,28 @@ fn an_unreadable_conffile_and_a_last_word_without_value() {
         );
         assert_eq!(run.status.code(), Some(0), "{last}: {run:?}");
         assert!(dir.join("mdb.pin").exists(), "{last}");
+        fs::remove_file(dir.join("mdb.pin")).unwrap();
+        let library = library_in(
+            &dir,
+            &[
+                "makeblastdb",
+                "-in",
+                "arch_bp_s.faa",
+                "-dbtype",
+                "prot",
+                "-out",
+                "mdb",
+                last,
+            ],
+            &[],
+        );
+        // The standard output names the time and the build's duration.
+        assert_eq!(
+            (library.status.code(), &library.stderr),
+            (Some(0), &run.stderr),
+            "{last}: the library"
+        );
+        assert!(dir.join("mdb.pin").exists(), "{last}: the library");
         fs::remove_file(dir.join("mdb.pin")).unwrap();
     }
     let _ = fs::remove_dir_all(&dir);

@@ -79,7 +79,20 @@
 //!   which change no output; the diagnostic variables of `docs/agents/diagnostics.md`) are read
 //!   here too. A database search reads what the command line reads to find a database (`BLASTDB`,
 //!   `.ncbirc`) and the query batch and archive settings (`BATCH_SIZE`, `ARCHIVE_FORMAT`, ...);
-//!   a search of records reads no NCBI setting.
+//!   a search of records reads no NCBI setting, unless its argv has one of the NCBI C++ Toolkit's
+//!   words below.
+//! - `-logfile`, `-conffile` and `-dryrun` work as on the command line: a call whose argv has one
+//!   runs NCBI's application start first (as does a call that reads NCBI's settings, when it
+//!   first reads them). The start's messages about the registry files come in the diagnostics,
+//!   the `-logfile` file gets what the command line writes there (with tblastx, the messages of
+//!   its run too), and a start that ends the command line's program is an [`Error::Search`] with
+//!   its text. With `-dryrun` ([`Search::dry_run`]) a call ends after the start and the settings:
+//!   no record or `-outfmt` value is read, no report is written. The versions and `-xmlhelp`,
+//!   whose texts only the command line writes, are refused ([`validate`]); the tools print the
+//!   versions. [`validate`] parses the argv without the start, which runs with each search: an
+//!   argv whose start ends the command line's program before its arguments are read (a missing
+//!   `-conffile` file) and that the parser refuses too (two `-conffile`) gets the parser's error
+//!   there.
 //! - [`run_batches`] searches one of NCBI's query batches at a time: the host reports progress
 //!   between batches and stops the search by not asking for the next one. Inside a batch only
 //!   the host can stop it, by ending the thread or the process.

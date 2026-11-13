@@ -297,57 +297,47 @@ fn convert2blastmask_gives_ncbis_bytes() {
     assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
 }
 
-// `run_dustmasker` and `run_segmasker` are the command line's run without its application start,
-// which reads the file of `-conffile` and ends `-dryrun` (`ncbi_app::run_with`): the library
-// refuses those two words, as `run_blastdbcmd` does, and `-xmlhelp`, whose XML only the command
-// line writes (line RG DECISIONS E2x-1). The example ends every failure with exit status 1. The
-// rows of `program`'s table whose run through the library differs.
+// `run_dustmasker`, `run_segmasker` and `run_convert2blastmask` run NCBI's application start as
+// the command line does (`ncbi_app::run_with`, line RG item E1w-2): the rows of `-logfile`,
+// `-conffile` and `-dryrun` give the command line's bytes through the library too. `-xmlhelp`,
+// whose XML only the command line writes, is refused (line RG DECISIONS E2x-1). The example ends
+// every failure with exit status 1. The rows of `program`'s table whose run through the library
+// differs.
 fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Vec<String> {
     let example = example_binary("library_command_line");
     let mut differ = Vec::new();
-    let mut refused = 0;
+    let (mut refused, mut started) = (0, 0);
     for case in cases_here(program) {
         let (out, err, status) = run_binary(&example, program, &case);
-        let word = ["-conffile", "-dryrun"].into_iter().find(|word| {
-            case.words
-                .iter()
-                .any(|given| given == word || given.starts_with(&format!("{word}=")))
-        });
-        let expected = match word {
-            None if case
-                .words
-                .iter()
-                .find(|given| matches!(given.as_str(), "-h" | "-help" | "-help-full" | "-xmlhelp"))
-                .is_some_and(|given| given == "-xmlhelp") =>
-            {
-                refused += 1;
-                let text = format!(
-                    "Error: the NCBI C++ Toolkit option -xmlhelp runs on the command line of \
-                     LOSAT's {refusal_name} only: the library API and the Web engine do not write \
-                     NCBI's XML description of the arguments\n"
-                );
-                (Vec::new(), text.into_bytes(), 1)
+        let help = case
+            .words
+            .iter()
+            .find(|given| matches!(given.as_str(), "-h" | "-help" | "-help-full" | "-xmlhelp"));
+        let expected = if help.is_some_and(|given| given == "-xmlhelp") {
+            refused += 1;
+            let text = format!(
+                "Error: the NCBI C++ Toolkit option -xmlhelp runs on the command line of \
+                 LOSAT's {refusal_name} only: the library API and the Web engine do not write \
+                 NCBI's XML description of the arguments\n"
+            );
+            (Vec::new(), text.into_bytes(), 1)
+        } else {
+            if ["-conffile", "-dryrun"].into_iter().any(|word| {
+                case.words
+                    .iter()
+                    .any(|given| given == word || given.starts_with(&format!("{word}=")))
+            }) {
+                started += 1;
             }
-            Some(word) => {
-                refused += 1;
-                let text = format!(
-                    "Error: the NCBI C++ Toolkit option {word} runs on the command line of \
-                     LOSAT's {refusal_name} only: the library API and the Web engine run no NCBI \
-                     application start, which reads it\n"
-                );
-                (Vec::new(), text.into_bytes(), 1)
-            }
-            None => {
-                let (out, err, status) = expected(program, &case);
-                (out, err, i32::from(status != 0))
-            }
+            let (out, err, status) = expected(program, &case);
+            (out, err, i32::from(status != 0))
         };
         let got = (out, err, status);
         if got != expected {
             differ.push((case.name.clone(), got, expected));
         }
     }
-    assert!(refused > 0);
+    assert!(refused > 0 && started > 0, "{program}: {refused} {started}");
     if !differ.is_empty() {
         eprintln!("{}", describe(&differ));
     }

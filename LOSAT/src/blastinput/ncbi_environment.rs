@@ -3518,9 +3518,12 @@ mod tests {
         assert_eq!(settings(&[]), Ok(true));
         std::fs::write(&ini, "[BLAST]\nDATA_LOADERS = \"\"\n").unwrap();
         assert_eq!(settings(&[]), Ok(false));
-        // A value NCBI reports as malformed is refused by the library (no application start).
+        // A value NCBI reports as malformed ends the program (exit status 2): the start has no
+        // settings, and its caller writes NCBI's report before it reaches them
+        // (`ApplicationStart::write_config_load`; the library's calls too, `api::start`, line RG
+        // item E1w-2).
         std::fs::write(&ini, "[BLAST]\nDATA_LOADERS = no\"ne\n").unwrap();
-        assert!(settings(&[]).unwrap_err().contains("syntax error"));
+        assert!(settings(&[]).unwrap_err().contains("exit status 2"));
         // The escapes are read: `\x6e` is `n`.
         std::fs::write(&ini, "[BLAST]\nDATA_LOADERS = \\x6eone\n").unwrap();
         assert_eq!(settings(&[]), Ok(false));

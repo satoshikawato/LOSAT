@@ -158,8 +158,11 @@ impl CallStart {
     // ```
     /// The application settings of the call, after running the start now (its messages on
     /// `diagnostics`) when it has not run. The records of a library call are read before its
-    /// start, with NCBI's data loaders (`read_fasta`, `read_inputs`): settings that turn them off
-    /// (`[BLAST] DATA_LOADERS`) would read a record's first line otherwise, and are refused.
+    /// start, with NCBI's data loaders (`read_fasta`, `read_inputs`); settings that turn them off
+    /// (`[BLAST] DATA_LOADERS`) read the same records: the loaders only make NCBI's reader take a
+    /// record's first line as a Seq-id, which LOSAT's reader refuses
+    /// (`fasta_reader::FastaReader::read_one_seq`), so a record that it read is read the same without
+    /// them.
     pub(crate) fn settings(
         &mut self,
         diagnostics: &mut dyn Write,
@@ -169,17 +172,10 @@ impl CallStart {
                 .map_err(|error| anyhow::Error::msg(error.message().to_string()))?;
             self.settings = Some(started.settings);
         }
-        let settings = self
-            .settings
+        self.settings
             .clone()
             .expect("the start has run")
-            .map_err(anyhow::Error::msg)?;
-        if !settings.data_loaders {
-            anyhow::bail!(
-                "the registry turns NCBI BLAST+'s data loaders off ([BLAST] DATA_LOADERS), with which its reader takes a record's first line otherwise; LOSAT's library reads the records before the call's application start, with the data loaders, and this is not supported by LOSAT"
-            );
-        }
-        Ok(settings)
+            .map_err(anyhow::Error::msg)
     }
 
     /// The `-logfile` target of the call's run messages (tblastx's), which the caller holds for
@@ -225,3 +221,7 @@ impl RunLog {
         Error::search(error)
     }
 }
+
+#[cfg(test)]
+#[path = "start_tests.rs"]
+mod start_tests;

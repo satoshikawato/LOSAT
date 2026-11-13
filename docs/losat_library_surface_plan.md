@@ -434,7 +434,7 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 |---|---|---|
 | 入力 | `Inputs::database(&query, name)`。`name` は `-db` の値（空白区切りの複数名も同じ）で、CLI と同じく `BLASTDB` の探索で開く | 開く処理は engine の中にあり、順番（リスト → オプション → 開く → `Query is Empty!`）が NCBI の順である。開いたものを渡す形は順番を呼び出し側に出す |
 | `validate` | `-subject` で解析し、失敗したら `-db` で解析する。`Search::command(inputs)` が入力の種類で解析し直す | argv は入力より先に検査する。`-subject_loc` と `-taxids` は片方の種類でしか解析を通らない |
-| 入口 | 各 program の `run_local_database(args, query, settings, outputs)`。`run_local` はブラウザの入口のままで、`-db` を拒否する | `settings` は `library_application_settings`（CLI は起動の `ApplicationStart::settings`。2026-11-14 の RG E1w-1 で global の start を値にした）。レコードの検索は NCBI の設定を読まない（§9）が、データベースは `BLASTDB` と `.ncbirc` で見つかる |
+| 入口 | 各 program の `run_local_database(args, query, settings, outputs)`。`run_local` はブラウザの入口のままで、`-db` を拒否する | `settings` は呼び出しの application start のもの（`api::start::CallStart`、線 RG の E1w-2: argv に `-logfile`・`-conffile`・`-dryrun` があれば呼び出しの始めに、なければ設定を初めて読む所で走らせ、NCBI の文を diagnostics と `-logfile` の file に書く。CLI は起動の `ApplicationStart::settings`）。レコードの検索はこの 3 語が無ければ NCBI の設定を読まない（§9）が、データベースは `BLASTDB` と `.ncbirc` で見つかる |
 | 共有 | データベースを開く塊を `open_search_database` に切り出し、`search_cli` と共有する。BLASTX は `reported_batch`、`database_search_error`、`ReportedAsks` を `native.rs` に切り出す | 重ねて書くと CLI との差が生まれる |
 | BLASTX の複数形式 | `report_batches`：`-subject` と `-db` が同じ batch loop を通る。1 回の検索で全形式を書き、`for_batch` の引数は全形式の和（`ReportedAsks::or`） | CLI の `run_inner` は 1 形式で、ライブラリは 1 回の検索で全形式を書く |
 | HSP の subject | `FormatObserver::database_subjects`（`ReportedSubject`：OID、`saccver`、長さ）。`HspRecord::s_idx` は database の順序 ID（`gnl\|BL_ORD_ID\|n` の n） | engine の `Hit::s_idx` は報告の rank で、バッチごとに意味が変わる。ID は表形式の報告が拒否するときも検索を失敗させない（`library_subject`） |
@@ -483,9 +483,9 @@ BLASTX の `-parse_deflines` は `-subject` でも使えるようにした（`bl
 
 | 項目 | 実装 |
 |---|---|
-| `run_makeblastdb(argv, input, output, diagnostics)` | CLI の語をそのまま parser に渡し、`run_with` を呼ぶ。`input` は CLI の標準入力で、`-in -` か `-in` なしのときに読むので、メモリ上の FASTA から database を作れる。データベースの書き先は `-out` |
+| `run_makeblastdb(argv, input, output, diagnostics)` | CLI と同じ application start（`api::start`: usage report の文、`-logfile`、版の語は `output` へ、`-conffile`）の後、CLI の語をそのまま parser に渡し、`-dryrun` は設定の検査の後で終わり、`run_with` を呼ぶ。`input` は CLI の標準入力で、`-in -` か `-in` なしのときに読むので、メモリ上の FASTA から database を作れる。データベースの書き先は `-out` |
 | `run_blastdbcmd(argv, input, output, diagnostics)` | NCBI の引数読み（`ncbi_app::args`）をそのまま使う `run_with`。`input` は CLI の標準入力（`-entry_batch -`、`-ipg_batch -`、`-taxidlist -`）、`output` は CLI の標準出力 |
-| `run_dustmasker(argv, input, output, diagnostics)` | blastdbcmd と同じ殻（`ncbi_app`）の `dustmasker::run_with`。`input` は CLI の標準入力（`-in -` と `-in` なし）、`output` は CLI の標準出力。`-conffile`・`-dryrun` は CLI の application start が読むので断る |
+| `run_dustmasker(argv, input, output, diagnostics)` | blastdbcmd と同じ殻（`ncbi_app`）の `dustmasker::run_with`。`input` は CLI の標準入力（`-in -` と `-in` なし）、`output` は CLI の標準出力。呼び出しごとに CLI と同じ application start を走らせる（`-logfile`・`-conffile`・`-dryrun`・版の語、線 RG の E1w-2） |
 | `run_segmasker(argv, input, output, diagnostics)` | `run_dustmasker` と同じ殻の `segmasker::run_with`（線 RG の K2）。標準入力・出力・`-conffile`・`-dryrun` の扱いは `run_dustmasker` と同じ |
 | `run_convert2blastmask(argv, input, output, diagnostics)` | `run_dustmasker` と同じ殻の `convert2blastmask::run_with`（線 RG の K3）。標準入力・出力・`-conffile`・`-dryrun` の扱いは `run_dustmasker` と同じ |
 | 失敗 | `Error::Search` で、文言は CLI が標準エラーに書いたものそのまま（`diagnostics` にも書く）。`run_makeblastdb` の clap の parser の拒否は `Error::Argv`。`run_blastdbcmd`・`run_dustmasker`・`run_segmasker`・`run_convert2blastmask` は NCBI の引数読みの拒否も CLI と同じ usage と報告を書くので `Error::Search` |

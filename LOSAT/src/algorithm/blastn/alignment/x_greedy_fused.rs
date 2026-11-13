@@ -1307,7 +1307,7 @@ mod tests {
     /// `x_cell_cold` leaves from the same inputs; with the sentry `x_cell_cold` sets the fence.
     #[test]
     fn past_seq1_end_branch_equals_x_cell_cold() {
-        let mut rng = Rng(0x5EED_0F_E1D5_u64);
+        let mut rng = Rng(0x005E_ED0F_E1D5_u64);
         let (mut inline, mut fenced) = (0usize, 0usize);
         for _ in 0..4000 {
             let len1 = 8 + rng.below(41) as i32;

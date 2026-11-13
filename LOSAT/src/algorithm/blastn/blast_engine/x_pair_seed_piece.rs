@@ -215,8 +215,8 @@ impl Links {
 ///
 /// Each buffer is one allocation whose capacity is above glibc's ceiling of the mmap threshold
 /// (`utils/x_mapped.rs` `x_unthresholded_capacity`), not initialized: glibc maps it, its free
-/// leaves the threshold as it is, and only the pages of the blocks pieces wrote are resident.
-/// (An arena allocated by itself, 266-328 KiB of seeds, was mapped and its free raised glibc's
+/// leaves the threshold as it is, and only the pages of the blocks pieces wrote are resident; a
+/// dropped store's buffers wait for the next store (`KEPT`). (An arena allocated by itself, 266-328 KiB of seeds, was mapped and its free raised glibc's
 /// threshold to its size, so that later blocks of up to that size came from the arenas of the
 /// heap and stayed resident there: BLASTN cDNA x genome -subject at 16 threads, peak x1.13-1.15
 /// of the strips stage, x1.04 with the threshold held at 128 KiB, line EB s14u / s14w.)
@@ -228,9 +228,40 @@ pub(super) struct Store {
     len: usize,
 }
 
+/// No NCBI counterpart (scheduling only): the buffers of a dropped `Store` (`KEPT`).
+struct StoreBufs {
+    seeds: Vec<MaybeUninit<Seed>>,
+    pos: Vec<MaybeUninit<u32>>,
+    len: usize,
+}
+
+/// No NCBI counterpart (scheduling only): the buffers of the `Store`s dropped so far, for the
+/// next stores' first stages (`Store::slots`), as glibc keeps the heap's freed blocks for the
+/// next allocations. A scratch lives for one query batch (`run.rs` `SubjectScratch`), and the
+/// pages of a mapped buffer go back to the system when it is freed, so each batch's stages wrote
+/// the store's pages anew (BLASTN cDNA x genome -subject at 16 threads: 66,000 page faults more
+/// than the strips stage, whose buffers come from the heap; line EB s15). A store takes one when
+/// it has none, of its layout if one is there, so it holds no more buffers than were alive at
+/// once.
+static KEPT: Mutex<Vec<StoreBufs>> = Mutex::new(Vec::new());
+
+impl Drop for Store {
+    fn drop(&mut self) {
+        if self.len == 0 {
+            return;
+        }
+        let bufs = StoreBufs {
+            seeds: std::mem::take(&mut self.seeds),
+            pos: std::mem::take(&mut self.pos),
+            len: self.len,
+        };
+        lock(&KEPT).push(bufs);
+    }
+}
+
 impl Store {
     /// The regions of `slots` slots of `len` seeds each (the buffers allocated anew when they
-    /// are too small).
+    /// are too small; a store without buffers first takes those of one dropped before, `KEPT`).
     #[allow(clippy::type_complexity)]
     fn slots(
         &mut self,
@@ -238,6 +269,20 @@ impl Store {
         len: usize,
     ) -> impl Iterator<Item = (&mut [MaybeUninit<Seed>], &mut [MaybeUninit<u32>])> {
         let need = slots * len;
+        if self.len == 0 {
+            let mut kept = lock(&KEPT);
+            let at = kept.iter().rposition(|b| b.len == len);
+            let bufs = match at {
+                Some(at) => Some(kept.swap_remove(at)),
+                None => kept.pop(),
+            };
+            drop(kept);
+            if let Some(b) = bufs {
+                self.seeds = b.seeds;
+                self.pos = b.pos;
+                self.len = b.len;
+            }
+        }
         // (a stage of another layout allocates anew, so that the pages the regions of the old one
         // touched are not kept; one of the same layout with more slots takes the capacity the
         // buffers have, above glibc's ceiling)

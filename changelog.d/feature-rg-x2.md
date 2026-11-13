@@ -5,5 +5,5 @@
   whose gapped start lies after the last letter of its frame (LOSAT does not reproduce NCBI BLAST+'s results
   there yet); a `tblastn` one of negative length whose gapped start reads past NCBI BLAST+'s buffer of the
   query batch or of the subject's frames, or with `-in_pssm` past the PSSM (NCBI BLAST+ reads outside its
-  memory there); and two whose gapped starts lie past the end of their 5,000,000-letter part of a frame
-  (NCBI BLAST+ never finishes there).
+  memory there); and two whose gapped starts lie at the end of their 5,000,000-letter part of a frame
+  or past it (NCBI BLAST+ never finishes there).

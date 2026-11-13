@@ -542,9 +542,12 @@ of exception 9 (PS16a) did.
   `blast_gapalign.c:3829-3830`) in one subject subtree. `BlastIntervalTreeAddHSP` sends both
   right at every node, splits the node `[s_max, s_max]` into `[s_max + 1, s_max]`, whose middle is
   `s_max` again, and repeats that split while its node pool doubles (`blast_itree.c:57-112,
-  603-793`), so the search never returns. LOSAT stops where that first inverted node would be
-  made; ranges inside the tree's bounds never make one, and only this word finder's HSPs leave
-  them.
+  603-793`), so the search never returns. A gapped start at the chunk's last letter or past it can
+  also give an alignment of score 0 whose right extension did not run (its start one past its end,
+  kept by a cutoff of 0: `blast_gapalign.c:4290-4295`, `blast_stat.c:5236-5266`); such a range
+  never straddles a node's middle, and two of them split a node `[p, p]` the same way. LOSAT stops
+  where that first inverted node would be made; ranges in order inside the tree's bounds never
+  make one, and only this word finder's HSPs are out of order or leave them.
 
   BLASTP's approved exception 3 (version 1.3), which reads such letters as the sentinel, is not
   extended to TBLASTN.

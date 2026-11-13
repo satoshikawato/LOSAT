@@ -498,10 +498,13 @@ impl<'a> XOneHitBuffers<'a> {
 /// (the chunk's length + 1, blast_gapalign.c:3829-3830). Two such HSPs in one subject subtree
 /// always go right and never part: NCBI splits the node `[s_max, s_max]` into `[s_max + 1, s_max]`,
 /// whose middle is `s_max` again, and goes on splitting it while its node pool doubles, so the
-/// search never returns (PD-LOSAT-NCBI-DEFECTS, rule 3). The search stops where that first node
-/// would be made (`BlastIntervalTree::try_add_hsp`). Ranges inside the tree's bounds never make
-/// such a node (a node `[p, p]` is entered only by a range that holds `p`), and only this word
-/// finder's HSPs leave the bounds, so the other searches keep `add_hsp`.
+/// search never returns (PD-LOSAT-NCBI-DEFECTS, rule 3). A gapped start at the chunk's last letter
+/// or past it can also give an alignment of score 0 whose right extension did not run (its start
+/// one past its end, kept by a cutoff of 0, blast_gapalign.c:4290-4295, blast_stat.c:5236-5266),
+/// which never straddles a node's middle: two of them split `[p, p]` the same way. The search
+/// stops where that first node would be made (`BlastIntervalTree::try_add_hsp`). Ranges in order
+/// inside the tree's bounds never make such a node, and only this word finder's HSPs are out of
+/// order or leave the bounds, so the other searches keep `add_hsp`.
 #[cold]
 #[inline(never)]
 fn x_add_one_hit_hsp(
@@ -511,7 +514,7 @@ fn x_add_one_hit_hsp(
 ) -> Result<()> {
     if !tree.try_add_hsp(hsp, context_offset) {
         bail!(
-            "TBLASTN -window_size 0: two one-hit alignments of negative length whose gapped starts lie past the end of their subject chunk make NCBI BLAST+ split a node of its interval tree without end (it does not finish the search there), which LOSAT does not support"
+            "TBLASTN -window_size 0: two one-hit alignments of negative length whose gapped starts lie at the end of their subject chunk or past it (alignments past the chunk, or of score 0 and no letters) make NCBI BLAST+ split a node of its interval tree without end (it does not finish the search there), which LOSAT does not support"
         );
     }
     Ok(())

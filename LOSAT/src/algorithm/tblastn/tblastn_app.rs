@@ -1765,13 +1765,14 @@ fn search(
             //     }
             // ```
             // `-max_hsps` and `-qcov_hsp_perc` filter the batch's final hit lists (each query's
-            // context is its searched letters), which the search has sorted by e-value; the
-            // sort is a total order (best e-value, first score, OID), so sorting again after
-            // the filter gives NCBI's order. A search with hits has subject letters.
+            // context is its searched letters), which the search has sorted by e-value where NCBI
+            // sorts the results (a positive `BlastSeqSrcGetTotLen`); the sort is a total order
+            // (best e-value, first score, OID), so sorting again after the filter gives NCBI's
+            // order, and where NCBI does not sort the lists keep their order.
             // `-culling_limit` runs NCBI's culling pipe first on each query's hit list
             // (`BlastHSPStreamTBackClose`, before the filters of `s_FilterBlastResults`;
             // hspfilter_culling.c:699-733); its lists leave in the order of the tree, and the
-            // sort by e-value below is the one NCBI runs unconditionally after the pipes.
+            // sort by e-value below is NCBI's after the pipes, where it sorts.
             if resolved.max_hsps > 0
                 || resolved.query_cov_hsp_perc > 0.0
                 || resolved.culling_limit > 0

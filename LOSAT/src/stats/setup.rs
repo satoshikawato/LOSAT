@@ -136,11 +136,7 @@ pub(crate) fn calc_eff_lengths(
     options_searchsp: i64,
     program: &str,
 ) -> Result<ContextEffLengths, SearchSpaceOverflow> {
-    let adjustment =
-        compute_length_adjustment_ncbi(query_length, db_length, i64::from(db_num_seqs), ka)
-            .length_adjustment;
-    // `BLAST_ComputeLengthAdjustment` writes an `Int4`.
-    let length_adjustment = adjustment as i32;
+    let length_adjustment = length_adjustment(query_length, db_length, db_num_seqs, ka);
     if options_searchsp != 0 {
         return Ok(ContextEffLengths {
             length_adjustment,
@@ -165,6 +161,26 @@ pub(crate) fn calc_eff_lengths(
         length_adjustment,
         eff_searchsp,
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:821-824
+// ```c
+//          BLAST_ComputeLengthAdjustment(kbp->K, kbp->logK,
+//                                        alpha/kbp->Lambda, beta,
+//                                        query_length, db_length,
+//                                        db_num_seqs, &length_adjustment);
+// ```
+/// The length adjustment of `BLAST_CalcEffLengths` for a valid context of `query_length` letters
+/// (`calc_eff_lengths`' own, which the reports that keep only the search space read again):
+/// `BLAST_ComputeLengthAdjustment` with NCBI's `Int4` count, written as an `Int4`.
+pub(crate) fn length_adjustment(
+    query_length: i64,
+    db_length: i64,
+    db_num_seqs: i32,
+    ka: &KarlinParams,
+) -> i32 {
+    compute_length_adjustment_ncbi(query_length, db_length, i64::from(db_num_seqs), ka)
+        .length_adjustment as i32
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220
@@ -364,8 +380,9 @@ impl SubjectSpaceOverflow {
 /// `Int4 avg_subj_length`), or `None` where the setup fails with `The average subject length is
 /// too short`: with the Gumbel block (`gumbel_min`: `GetMinLength`, and whether the subject is
 /// translated) the shortest length (divided by 3 for a translated subject), else the statistics'
-/// total `total_length` over their number `num_seqs` as NCBI's `Int4`. `num_seqs` is not 0 there
-/// (NCBI divides by 0: LOSAT refuses, `common::database::check_statistics_count`).
+/// total `total_length` over their number `num_seqs` as NCBI's `Int4`. A `num_seqs` of 0 (NCBI
+/// divides by 0: LOSAT refuses it before, `common::database::check_statistics_count`) gives `None`
+/// here too, so that no input reaches a division by 0.
 pub(crate) fn setup_subject_length(
     total_length: i64,
     num_seqs: i32,
@@ -381,9 +398,7 @@ pub(crate) fn setup_subject_length(
             }
         }
         None => {
-            let average = total_length
-                .checked_div(i64::from(num_seqs))
-                .expect("a statistics count of 0 is refused before the setup");
+            let average = total_length.checked_div(i64::from(num_seqs))?;
             average as i32 as u32
         }
     };

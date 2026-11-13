@@ -28,7 +28,6 @@ use crate::core::blast_encoding::{
     encode_iupac_to_blastna, encode_iupac_to_blastna_into, encode_subject_ncbi2na_packed,
     COMPRESSION_RATIO,
 };
-use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
 
 // Import from parent blastn module (super::super:: because we're in blast_engine/)
 use super::super::alignment::{
@@ -6008,13 +6007,13 @@ fn archive_first_context(
         });
     };
     let search_space = report.query_eff_searchsp[2 * first + report.first_context];
-    let length_adjustment = compute_length_adjustment_ncbi(
+    // `stats::setup::length_adjustment`: the setup's (`calc_eff_lengths`) for this context.
+    let length_adjustment = i64::from(crate::stats::setup::length_adjustment(
         query_lengths[first] as i64,
         report.eff_db_length,
-        report.db_num_seqs as i64,
+        report.db_num_seqs,
         &blocks.gapped,
-    )
-    .length_adjustment;
+    ));
     Ok(archive::FirstContext {
         karlin: Some(blocks),
         search_space,
@@ -6039,13 +6038,14 @@ fn blastn_xml_stats(
                 return Ok(crate::report::blast_xml::XmlStats::NONE);
             };
             let eff_space = report.query_eff_searchsp[2 * q_idx + report.first_context];
-            let length_adjustment = compute_length_adjustment_ncbi(
+            // `stats::setup::length_adjustment`: the setup's (`calc_eff_lengths`) for this
+            // context.
+            let length_adjustment = i64::from(crate::stats::setup::length_adjustment(
                 query_lengths[q_idx] as i64,
                 report.eff_db_length,
-                report.db_num_seqs as i64,
+                report.db_num_seqs,
                 &blocks.gapped,
-            )
-            .length_adjustment;
+            ));
             Ok(crate::report::blast_xml::XmlStats {
                 hsp_len: length_adjustment as i32,
                 eff_space,

@@ -726,6 +726,8 @@ impl SubjectSetNumbers {
         })
     }
 
+    /// The database length of the effective lengths, in bases: `-dbsize` when above 0, else
+    /// the real total.
     pub(crate) fn effective_length(&self) -> i64 {
         self.dbsize
             .filter(|&dbsize| dbsize > 0)

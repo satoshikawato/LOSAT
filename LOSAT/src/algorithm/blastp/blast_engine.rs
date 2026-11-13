@@ -9463,9 +9463,8 @@ fn run_resolved_in_pool(
     } else {
         total_db_len as i64
     };
-    // The `-subject` search without `-dbsize` keeps its computation (`f64` products of
-    // numbers that it holds exactly); a database or `-dbsize` can pass 2^53, so their
-    // effective search space is computed in NCBI's `Int8` (`blastp_database_search_space`).
+    // The effective search space of a database or a FASTA subject set is computed in NCBI's
+    // `Int8` (`blastp_database_search_space`, the one owner `stats::setup::calc_eff_lengths`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
     // ```c
     //    if (sbp->gbp) {
@@ -9528,7 +9527,6 @@ fn run_resolved_in_pool(
     // Without the Gumbel block (`old_fsc`: `-searchsp` or `OLD_FSC`) the hit cutoffs read
     // each context's search space, which the exact computation hands them
     // (`exact_search_spaces`; `blastp_cutoff_score_max`).
-    let exact_search_space = database.is_some() || args.dbsize > 0 || args.old_fsc;
     let options_searchsp = args.searchsp.unwrap_or(0);
     // NCBI reference: c++/src/algo/blast/core/blast_setup.c:729-732
     // ```c
@@ -9577,25 +9575,15 @@ fn run_resolved_in_pool(
                     length_adjustment: 0,
                 });
             }
-            if exact_search_space {
-                let (space, exact) = database::blastp_database_search_space(
-                    ctx.aa_len,
-                    eff_db_length,
-                    num_subjects,
-                    &gapped_params,
-                    args.app.name(),
-                )?;
-                exact_search_spaces.push(Some(exact));
-                return Ok(space);
-            }
-            exact_search_spaces.push(None);
-            Ok(SearchSpace::for_database_search(
+            let (space, exact) = database::blastp_database_search_space(
                 ctx.aa_len,
-                total_db_len,
-                num_subjects as usize,
+                eff_db_length,
+                num_subjects,
                 &gapped_params,
-                true,
-            ))
+                args.app.name(),
+            )?;
+            exact_search_spaces.push(Some(exact));
+            Ok(space)
         })
         .collect::<Result<Vec<_>>>()?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:195-221

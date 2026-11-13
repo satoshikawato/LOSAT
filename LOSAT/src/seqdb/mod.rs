@@ -1701,8 +1701,8 @@ impl SeqDb {
     // ```
     /// Whether the total length of the statistics is not positive before their fallback to the
     /// length of OID 0 (`STATS_TOTLEN` and `GetTotalLength` are not: a list that kept no
-    /// sequence, without `STATS_TOTLEN`): the effective search space that NCBI's BLAST archive
-    /// records is then computed with a database length of 0 (`note_archive_database_filter`).
+    /// sequence, without `STATS_TOTLEN`, or of 2^63 or more): with no OID either, the first query
+    /// batch's setup fails (`first_oid_read_fails`).
     pub fn statistics_length_is_empty(&self) -> bool {
         self.statistics().gumbel_db_length <= 0
     }

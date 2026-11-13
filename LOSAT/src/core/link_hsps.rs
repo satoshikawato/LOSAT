@@ -62,8 +62,9 @@ pub(crate) const BLAST_GAP_DECAY_RATE_GAPPED: f64 = 0.1;
 /// `BLAST_GAP_DECAY_RATE`, the gap decay rate of an ungapped search.
 pub(crate) const BLAST_GAP_DECAY_RATE: f64 = 0.5;
 
-/// The linking parameters (`BlastLinkHSPParameters`) of a gapped protein search with sum
-/// statistics.
+/// The linking parameters (`BlastLinkHSPParameters`) of a protein search with sum statistics and
+/// even-gap linking: a gapped one (`preliminary`, `traceback`; psiblast) or an ungapped one
+/// (`ungapped`; BLASTX, and TBLASTX's cutoffs), and whether the query is translated.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:609-617
 /// ```c
@@ -345,11 +346,15 @@ const LARGE: usize = 1;
 //    struct LinkHSPStruct* next;         /**< Next HSP in a set, if any */
 // ```
 /// `LinkHSPStruct`; the links are slots of `LinkState::nodes` (slot 0 is `hp_start`, the HSP of
-/// sorted position `i` is slot `i + 1`).
+/// sorted position `i` is slot `i + 1`). `num` is NCBI's `Int2`: a set of more than 32,767 HSPs
+/// wraps on the store `H->hsp_link.num[index] = H_hsp_num+1` (an `Int4` converted to `Int2`,
+/// deterministic, so kept as NCBI's; the sums are `i64`, Owner 2026-10-10, as their `Int4`
+/// overflow is undefined), and every later reading takes the wrapped value: the sum statistics
+/// then give a set of a count below 1 the E-value 0 (`s_BlastSumP` returns 0 for `r < 1`).
 #[derive(Debug, Clone, Default)]
 struct Node {
     link: [Option<usize>; 2],
-    num: [i32; 2],
+    num: [i16; 2],
     sum: [i64; 2],
     xsum: [f64; 2],
     changed: bool,
@@ -744,7 +749,7 @@ pub(crate) fn even_gap_link_hsps(
             });
             continue;
         }
-        let num_links = head.num[method];
+        let num_links = i32::from(head.num[method]);
         let mut current = Some(slot);
         while let Some(h) = current {
             out.push(LinkedHsp {
@@ -1072,7 +1077,7 @@ fn link_frame<'a>(
                 let mut h_index = 2usize;
                 let mut h = nodes[HP_START].next;
                 while let Some(slot) = h {
-                    let mut h_hsp_num = 0i32;
+                    let mut h_hsp_num = 0i16;
                     let mut h_hsp_sum = 0i64;
                     let mut h_hsp_xsum = 0.0f64;
                     let mut h_hsp_link: Option<usize> = None;
@@ -1108,7 +1113,7 @@ fn link_frame<'a>(
                     let new_sum = h_hsp_sum + (score_of(slot) - cutoff[index]);
                     let node = &mut nodes[slot];
                     node.sum[index] = new_sum;
-                    node.num[index] = h_hsp_num + 1;
+                    node.num[index] = (i32::from(h_hsp_num) + 1) as i16;
                     node.link[index] = h_hsp_link;
                     lh_helper[h_index].sum[index] = new_sum;
                     if new_sum >= maxscore {
@@ -1224,7 +1229,7 @@ fn link_frame<'a>(
             let mut h_index = 2usize;
             let mut h = nodes[HP_START].next;
             while let Some(slot) = h {
-                let mut h_hsp_num = 0i32;
+                let mut h_hsp_num = 0i16;
                 let mut h_hsp_sum = 0i64;
                 let mut h_hsp_xsum = 0.0f64;
                 let mut h_hsp_link: Option<usize> = None;
@@ -1270,7 +1275,7 @@ fn link_frame<'a>(
                 let new_sum = h_hsp_sum + (score_of(slot) - cutoff[index]);
                 let node = &mut nodes[slot];
                 node.sum[index] = new_sum;
-                node.num[index] = h_hsp_num + 1;
+                node.num[index] = (i32::from(h_hsp_num) + 1) as i16;
                 node.link[index] = h_hsp_link;
                 lh_helper[h_index].sum[index] = new_sum;
                 lh_helper[h_index].next_larger = next_larger(lh_helper, h_index);
@@ -1341,7 +1346,7 @@ fn link_frame<'a>(
         let large_gap_e = |nodes: &[Node], best: usize| {
             let num = nodes[best].num[LARGE];
             ncbi_large_gap_sum_e(
-                num as i16,
+                num,
                 nodes[best].xsum[LARGE],
                 query_length,
                 subject_length,
@@ -1354,11 +1359,11 @@ fn link_frame<'a>(
         if !ignore_small_gaps {
             let b0 = best[SMALL].expect("a frame with HSPs has a best small-gap set");
             let b1 = best[LARGE].expect("a frame with HSPs has a best large-gap set");
-            nodes[b0].sum[SMALL] += nodes[b0].num[SMALL] as i64 * cutoff[SMALL];
+            nodes[b0].sum[SMALL] += i64::from(nodes[b0].num[SMALL]) * cutoff[SMALL];
             let num0 = nodes[b0].num[SMALL];
             prob[SMALL] = small_gap_sum_e(
                 window_size,
-                num0 as i16,
+                num0,
                 nodes[b0].xsum[SMALL],
                 query_length,
                 subject_length,
@@ -1393,7 +1398,7 @@ fn link_frame<'a>(
             };
         } else {
             let b1 = best[LARGE].expect("a frame with HSPs has a best large-gap set");
-            nodes[b1].sum[LARGE] += nodes[b1].num[LARGE] as i64 * cutoff[LARGE];
+            nodes[b1].sum[LARGE] += i64::from(nodes[b1].num[LARGE]) * cutoff[LARGE];
             prob[LARGE] = large_gap_e(nodes, b1);
             ordering_method = LARGE;
         }
@@ -1555,5 +1560,39 @@ mod tests {
             &EvenGapLinkParams::preliminary(41),
         );
         assert!(out.iter().all(|l| l.num == 1), "{out:?}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:871 (the store into the `Int2`
+    // `num`, as at :756) and blast_stat.c:4390-4391 (`s_BlastSumP`: `if (r < 1) return 0.;`)
+    // ```c
+    //                   H->hsp_link.num[index] = H_hsp_num+1;
+    // ```
+    #[test]
+    fn a_set_of_more_than_32767_hsps_takes_the_wrapped_int2_count() {
+        // 32,770 HSPs in order on both sequences link into one large-gap set; NCBI's count wraps
+        // to -32766, and the sum statistics give a count below 1 the E-value 0.
+        let n = 32_770;
+        let hsps: Vec<LinkHsp> = (0..n)
+            .map(|i| hsp((100 * i, 100 * i + 30), (100 * i, 100 * i + 30), 60))
+            .collect();
+        let ctx = LinkContext {
+            query_length: 100 * n + 100,
+            eff_searchsp: (100 * n as i64) * (100 * n as i64),
+            ..context()
+        };
+        let params = EvenGapLinkParams {
+            gap_prob: 0.0,
+            gap_decay_rate: BLAST_GAP_DECAY_RATE,
+            cutoff_small_gap: 0,
+            cutoff_big_gap: 1,
+            query_translated: false,
+        };
+        let out = even_gap_link_hsps(&hsps, |_| ctx, 100 * n + 100, &params);
+        assert_eq!(out.len(), n as usize);
+        assert!(out.iter().all(|l| l.num == -32766), "{:?}", &out[..2]);
+        assert!(out.iter().all(|l| l.evalue == 0.0), "{:?}", &out[..2]);
+        // One HSP fewer than the wrap keeps its count.
+        let out = even_gap_link_hsps(&hsps[..32_767], |_| ctx, 100 * n + 100, &params);
+        assert!(out.iter().all(|l| l.num == 32_767), "{:?}", &out[..2]);
     }
 }

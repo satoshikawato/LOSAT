@@ -102,7 +102,11 @@ pub fn link_parameters(options: &ResolvedOptions) -> Option<LinkParameters> {
         gap_size: 40,
         overlap_size: 9,
         longest_intron: intron,
-        gap_decay_rate: if options.gapped { 0.1 } else { 0.5 },
+        gap_decay_rate: if options.gapped {
+            crate::core::link_hsps::BLAST_GAP_DECAY_RATE_GAPPED
+        } else {
+            crate::core::link_hsps::BLAST_GAP_DECAY_RATE
+        },
     })
 }
 
@@ -1013,11 +1017,19 @@ pub(crate) fn link_even(
         })
         .collect();
     hsps.sort_by(|a, b| compare_score(&a.hsp, &b.hsp));
-    let best_evalue = hsps
-        .iter()
-        .map(|h| h.evalue)
-        .reduce(f64::min)
-        .unwrap_or(0.0);
+    // `best_evalue` from the first HSP, lowered by each smaller one (the empty list keeps 0).
+    let best_evalue = hsps.split_first().map_or(0.0, |(first, rest)| {
+        rest.iter().fold(
+            first.evalue,
+            |best, h| {
+                if h.evalue < best {
+                    h.evalue
+                } else {
+                    best
+                }
+            },
+        )
+    });
     LinkedHspList { hsps, best_evalue }
 }
 

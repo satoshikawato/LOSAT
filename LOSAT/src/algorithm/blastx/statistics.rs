@@ -56,7 +56,7 @@ pub fn evaluate_gapped(
 ) -> Result<LinkedHspList> {
     ensure!(
         options.gapped,
-        "BLASTX even-gap ungapped linking is not implemented"
+        "BLASTX's gapped statistics called for an ungapped search"
     );
     // Speed (graduated 2026-10-27; the switch was `LOSAT_X_BXEVALEMPTY`): a subject without HSPs
     // gets at once the list that both ways below give for no input (`link_uneven`'s first lines,

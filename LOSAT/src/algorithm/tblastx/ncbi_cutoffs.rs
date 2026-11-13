@@ -11,11 +11,6 @@
 use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
 use crate::stats::KarlinParams;
 
-/// ln(2) constant used in NCBI BLAST
-/// Reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h
-/// #define NCBIMATH_LN2 0.69314718055994530941723212145818
-const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
-
 /// Smallest float to avoid floating point exception in BlastKarlinEtoS_simple
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4049
 const K_SMALL_FLOAT: f64 = 1.0e-297;
@@ -80,14 +75,18 @@ pub fn x_drop_raw_score(
 /// * `ungapped_params` - UNGAPPED Karlin-Altschul parameters (kbp_std)
 ///
 /// # Returns
-/// Raw score threshold for gap trigger (truncated to integer)
+/// Raw score threshold for gap trigger (truncated to integer; a value past `Int4`, such as one of
+/// psiblast's `-gap_trigger 1e300`, `-1e300` or `-inf`, is converted as the x86-64 build of NCBI
+/// converts it, to `INT_MIN`: `core::blast_util::ncbi_int4_from_double`, as the X-drops are in
+/// `core::x_drop`)
 pub fn gap_trigger_raw_score(bit_trigger: f64, ungapped_params: &KarlinParams) -> i32 {
-    // NCBI: gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
-    // Note: kbp->logK = ln(K), so we use ungapped_params.k.ln()
-    let raw = (bit_trigger * NCBIMATH_LN2 + ungapped_params.k.ln()) / ungapped_params.lambda;
-
-    // C's (Int4) cast truncates toward zero (same as Rust's `as i32` for positive values)
-    raw as i32
+    // NCBI: gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda),
+    // every program's one conversion (`core::x_drop`).
+    crate::core::x_drop::gap_trigger_raw_score(
+        bit_trigger,
+        ungapped_params.lambda,
+        ungapped_params.k,
+    )
 }
 
 /// Result of effective length calculation for TBLASTX -subject mode.
@@ -662,6 +661,24 @@ mod tests {
         // If ceil were used, the result would be 42
         let gap_trigger = gap_trigger_raw_score(22.0, &ungapped);
         assert!(gap_trigger < 42, "gap_trigger should use trunc, not ceil");
+    }
+
+    // psiblast's `-gap_trigger` takes any double (NCBI 2.17.0's x86-64 conversion past `Int4`:
+    // INT_MIN, `core::blast_util::ncbi_int4_from_double`).
+    #[test]
+    fn test_gap_trigger_past_int4_is_int_min() {
+        let ungapped = blosum62_ungapped();
+        assert_eq!(gap_trigger_raw_score(-5.0, &ungapped), -17);
+        for bits in [
+            1e300,
+            -1e300,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+            1e9,
+        ] {
+            assert_eq!(gap_trigger_raw_score(bits, &ungapped), i32::MIN, "{bits}");
+        }
     }
 
     #[test]

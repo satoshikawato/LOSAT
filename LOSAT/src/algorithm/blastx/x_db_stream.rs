@@ -217,6 +217,12 @@ impl<'a> XStreamDb<'a> {
         self.db.total_length()
     }
 
+    /// The length of the included sequences (`SeqDb::included_length`), which the schedules read.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn included_length(&self) -> Result<u64, crate::seqdb::SeqDbError> {
+        self.db.included_length()
+    }
+
     /// The total length and the number of sequences of the statistics
     /// (`SeqDb::statistics_numbers`).
     pub(crate) fn statistics_numbers(&self) -> (u64, u32) {

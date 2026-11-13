@@ -84,10 +84,9 @@ impl TblastxDatabase {
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
-        // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
-        // NCBI's choice of its Seq-ids.
-        let parsed = shared::check_seqids(&db, settings, PROGRAM)?;
-        shared::restrict_database(&mut db, name, list, diagnostics, PROGRAM)?;
+        // A database with parsed Seq-ids is read (line DBID, ID2b).
+        let parsed =
+            shared::restrict_database(&mut db, name, list, diagnostics, settings, PROGRAM)?;
         // TBLASTX has no Gumbel block: NCBI's average subject length divides by the statistics'
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;
@@ -221,8 +220,14 @@ impl TblastxDatabase {
         self.db.list_taxids()
     }
 
-    /// The OIDs of the volumes (`SeqDb::num_oids`): none is the database whose first query
-    /// batch fails, also with a list or an alias file's range or `NSEQ`.
+    /// Whether the first query batch with a valid context fails with NCBI's `Database memory map
+    /// file error` (`SeqDb::first_oid_read_fails`: no OID, and statistics that read OID 0).
+    pub(crate) fn first_oid_read_fails(&self) -> bool {
+        self.db.first_oid_read_fails()
+    }
+
+    /// The OIDs of the volumes (`SeqDb::num_oids`).
+    #[cfg(test)]
     pub(crate) fn num_oids(&self) -> u32 {
         self.db.num_oids()
     }
@@ -424,6 +429,26 @@ pub(crate) fn prefetch_messages<'h>(
         (ordinal, parsed)
     });
     shared::prefetch_messages(&database.db, &database.taxdb, subjects, PROGRAM)
+}
+
+/// [`prefetch_messages`] by subject (`shared::subject_read_texts`): the text of the first read
+/// of each subject that writes one, with its ordinal id, where a query's report reads its
+/// subjects one by one.
+pub(crate) fn subject_read_texts<'h>(
+    database: &TblastxDatabase,
+    ordered: impl IntoIterator<Item = &'h TblastxHsp>,
+    titles: &DatabaseTitles,
+    rows_open: bool,
+) -> Result<crate::report::query_warnings::QueryReads> {
+    let subjects = ordered.into_iter().map(|hsp| {
+        let ordinal = hsp.hit.s_idx;
+        let parsed = match titles.get(&ordinal) {
+            Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+            _ => None,
+        };
+        (ordinal, ordinal, parsed)
+    });
+    shared::subject_read_texts(&database.db, &database.taxdb, subjects, rows_open, PROGRAM)
 }
 
 /// NCBI's prefetch of the query batch whose reported hits are `ordered` (in report order, by

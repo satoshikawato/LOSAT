@@ -163,6 +163,9 @@ pub(crate) fn write_blastn_tabular(
 ) -> Result<()> {
     let spec = tab.spec;
     let needs = spec.needs();
+    // Whether the rows read their subject (`TabularSpec::subject_fetch`).
+    let fetches = spec.subject_fetch(crate::blastinput::app::Program::Blastn)
+        != crate::report::tabular::SubjectFetch::Never;
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;
     // those of the other ids are the reader's (`ShownSubjects`).
     for hit_list in hit_lists.iter().flatten().filter(|_| needs.all_deflines) {
@@ -286,6 +289,24 @@ pub(crate) fn write_blastn_tabular(
                 -1
             };
             let subject = values.nucleotide_subject(tab.names, qcovs, qcovus);
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+            // ```c++
+            //        		const CBioseq_Handle& subject_bh =
+            //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+            // ```
+            // A table whose rows read the subject (every row or none in BLASTN,
+            // `TabularSpec::subject_fetch`) loads it at its first row where the query's batch
+            // did not prefetch it: the texts of its taxonomy lookups follow the rows before it
+            // (`QueryWarnings::subject_read`), before those of the row's own lookups.
+            if fetches && !hsp_list.hsps.is_empty() {
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    if warnings.reads_with_texts(q_idx) {
+                        writer.write_all(&buf)?;
+                        buf.clear();
+                        warnings.subject_read(q_idx, hsp_list.oid, &mut *writer)?;
+                    }
+                }
+            }
             for hsp in &hsp_list.hsps {
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.

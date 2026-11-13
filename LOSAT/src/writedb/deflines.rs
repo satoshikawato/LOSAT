@@ -568,6 +568,7 @@ mod tests {
             length: 1,
             seq_data: None,
             parsed: Some(p),
+            past_seq_pos: None,
         };
         let set = extract_bioseq_deflines(&bioseq, &mut no_warn);
         assert_eq!(
@@ -608,6 +609,7 @@ mod tests {
             length: 1,
             seq_data: None,
             parsed: Some(p),
+            past_seq_pos: None,
         };
         let set = extract_bioseq_deflines(&bioseq, &mut no_warn);
         assert_eq!(

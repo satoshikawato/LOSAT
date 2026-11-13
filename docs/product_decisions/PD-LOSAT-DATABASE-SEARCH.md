@@ -169,14 +169,22 @@ into), the statistics read `STATS_*` before `GetNumSeqs` and `GetTotalLength`, t
 print the walks, and the OID ranges select the OIDs of the volume set (nested ranges ANDed,
 two paths to one volume ORed, a taxid or seqid list ANDed with them). A value that NCBI's
 `NStr` functions do not convert is NCBI's `Error: <what()>`, exit status 255, in NCBI's order of
-the walks. `VDBLIST` is ignored (NCBI's `CSeqDB` does not read it). Refused until item D1a-2:
-`NSEQ` negative as NCBI's `int`, `LENGTH` 0 or at least 2^63 while sequences are included,
-`LENGTH` of 10^18 or more (NCBI's commas lose digits), `FIRST_OID` or `LAST_OID` of 2^31 or
-more, and the OID range of a top alias file that NCBI sets as its iteration range while other
-OIDs are included (another name of the same `-db`). Refused for good: a statistics count of 0
-(an alias file's `NSEQ 0`) in a search without the Gumbel block (BLASTN, TBLASTX, and BLASTP,
-BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX also with `-ungapped`), where
-NCBI divides by zero (SIGFPE). With the Gumbel block, a TBLASTN database whose `GetMinLength` is
+the walks. `VDBLIST` is ignored (NCBI's `CSeqDB` does not read it). Since item D1a-2
+(2026-11-13): a `FIRST_OID` or `LAST_OID` of 2^31 or more is NCBI's negative `int`; the OID
+range of the only alias file of a `-db` is NCBI's iteration range, also with another name of the
+same `-db` (a taxid or seqid list's search reads every listed OID, as NCBI's list forgets the
+range); a `LENGTH` or `STATS_TOTLEN` over volumes without sequences is searched as NCBI searches
+it (no hit, the empty-database warning where no count is given); `blastdbcmd -ipg` and
+`-ipg_batch` write a PIG whose OID a range leaves out, as NCBI's formatter reads by OID; and a
+database's errors come in NCBI's order (a list, the alias files' values, the first header, the
+accession tables). Refused until item D1a-3: `NSEQ` negative as NCBI's `int`, `LENGTH` 0 or at
+least 2^63 while sequences are included (NCBI computes the statistics of each subject, or reads
+a negative `Int8`), `LENGTH` of 10^18 or more (NCBI's commas lose digits); until item D1a-4:
+OID ranges, `STATS_NSEQ`, `STATS_TOTLEN` and `MIN_SEQ_LENGTH` in RPSBLAST databases. Refused for
+good: a statistics count of 0 (an alias file's `NSEQ 0`, or its `LENGTH` or `STATS_TOTLEN` over
+volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without the Gumbel block
+(BLASTN, TBLASTX, and BLASTP, BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX
+also with `-ungapped`), where NCBI divides by zero (SIGFPE). With the Gumbel block, a TBLASTN database whose `GetMinLength` is
 below 3 (an alias file's `MIN_SEQ_LENGTH` 1 or 2) fails as NCBI's does: `BLAST engine error: The
 average subject length is too short`, exit status 3.
 
@@ -203,7 +211,7 @@ is an explicit error of `LOSAT/src/seqdb`:
 | --- | --- |
 | A header with a Seq-id other than `gnl|BL_ORD_ID|n` of the sequence's number n in its volume | parsed Seq-ids (P4); searched since version 1.3, section "Databases with parsed Seq-ids" |
 | Alias keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `OID_MASK_TYPE`, `MEMB_BIT`, `MASKLIST` | filters (P4); `FIRST_OID`, `LAST_OID` read since line RG D1a, `VDBLIST` ignored as NCBI's reader ignores it |
-| Alias keys `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`; `NSEQ` or `LENGTH` whose value is not the number of sequences or the total length of the alias file's databases | read since line RG D1a (2026-11-12) as NCBI's walks; the values listed above as refused until D1a-2 |
+| Alias keys `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`; `NSEQ` or `LENGTH` whose value is not the number of sequences or the total length of the alias file's databases | read since line RG D1a (2026-11-12) as NCBI's walks; the values listed above as refused until D1a-3 and D1a-4 |
 | A name that lists several databases | one database per search (P4); searched since version 1.2 |
 | A volume listed more than once, a group alias file (`index.alx`) in a directory, two volumes of one name in different directories | NCBI derives counts or the volume order from them in ways the reader does not reproduce; since version 1.2 two volumes of one name in different directories are read (NCBI orders them by base name, then path); since line RG D1a a volume listed more than once is read once and counted per alias node, as NCBI does |
 | Column files of a volume (mask data of `makeblastdb -mask_data`) | not read; searched since 2026-11-11 (line SW, SW8 follow-up 2): NCBI's searches open no column file without a database mask named by `-db_soft_mask`, `-db_hard_mask` or an imported search strategy (`-import_search_strategy`; LOSAT refuses all three), so LOSAT searches the volume without reading them, whatever they hold |

@@ -30,6 +30,7 @@ use crate::blastinput::value_parsers::{parse_dust_filtering, DustSpec};
 use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::strategy::StrategyExport;
 use crate::report::archive::{
     defline_of, ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive,
     KaBlock,
@@ -53,6 +54,9 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs.word_size = args.word_size.map(|size| size as i32);
     inputs.perc_identity = args.percent_identity;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
+    // (`-ungapped` with outfmt 11 is refused, `cli_output_formats`; the search strategy records
+    // it, probe `ung` of RG-F1.)
+    inputs.ungapped = args.ungapped;
     inputs.max_hsps = args.max_hsps_per_subject.map(|count| count as i32);
     inputs.penalty = args.penalty;
     inputs.reward = args.reward;
@@ -113,29 +117,53 @@ pub(crate) fn handle_for(
     ArchiveHandle::for_program(&option_inputs(args, dust), args.database_name(), "BLASTN").map(Some)
 }
 
-/// `report::archive::check_titles` for BLASTN's records.
-pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    crate::report::archive::check_titles(records, role, "BLASTN")
+/// The search strategy export of a run (`-export_search_strategy`), into `file`
+/// (`strategy::create_strategy_file`), with BLASTN's recorded options and `-db` name; `dust` as
+/// `option_inputs`'. The `HitlistSize` is that of the run's format `outfmt`
+/// (`strategy::hitlist_size`).
+pub(crate) fn strategy_for(
+    args: &BlastnArgs,
+    dust: Option<&str>,
+    outfmt: i32,
+    file: std::fs::File,
+) -> Result<StrategyExport> {
+    let mut inputs = option_inputs(args, dust);
+    inputs.hitlist_size = crate::report::archive::strategy::hitlist_size(
+        outfmt,
+        args.max_target_seqs,
+        args.num_descriptions,
+        args.num_alignments,
+    );
+    StrategyExport::for_file(file, &inputs, args.database_name(), "BLASTN")
+}
+
+/// `report::archive::check_request_titles` for BLASTN's records: the archive's (`archive`) and
+/// the search strategy's (`strategy`).
+pub(crate) fn check_request_titles(
+    records: &[FastaRecord],
+    role: &str,
+    archive: bool,
+    strategy: bool,
+) -> Result<()> {
+    crate::report::archive::check_request_titles(records, role, "BLASTN", archive, strategy)
 }
 
 pub(crate) use crate::report::archive::error_lines;
 
-/// What the archive of a call needs: the call's queries (one batch, or several when the
-/// reports of every batch are written after the search) and their data.
-pub(crate) struct ArchiveCall<'a> {
-    pub handle: &'a ArchiveHandle,
+/// The queries of a call's batches and what their requests read (the archive's and the search
+/// strategy's, `for_each_batch`).
+pub(crate) struct CallBatches<'a> {
+    /// The call's queries: one batch, or several when the reports of every batch are written
+    /// after the search.
     pub queries: &'a [FastaRecord],
     pub query_lengths: &'a [usize],
     pub query_placements: &'a Placements,
     /// `-subject`: every subject record, whole (the Bioseqs of the request).
     pub subject_records: Option<&'a [FastaRecord]>,
-    /// The subject names of the Seq-aligns.
-    pub subjects: SubjectNames<'a>,
-    pub subject_placements: &'a Placements,
-    pub hit_lists: &'a [Option<BlastnHitList>],
     pub query_masks: &'a [Vec<MaskedInterval>],
     /// The DUST-only masks of the call's queries (plus strand, in the searched letters),
     /// made for every query; with `-window_masker_db` (`window_masker`) the WindowMasker masks.
+    /// Only the archive reads them (empty without it).
     pub dust_masks: &'a [Vec<MaskedInterval>],
     pub unsearched: &'a [bool],
     pub lcase_masking: bool,
@@ -144,6 +172,16 @@ pub(crate) struct ArchiveCall<'a> {
     pub minus_strand: bool,
     /// The queries of each batch of the call, in order; empty for a call that is one batch.
     pub spans: &'a [Range<usize>],
+}
+
+/// What the archive of a call needs: the call's batches and their results.
+pub(crate) struct ArchiveCall<'a> {
+    pub handle: &'a ArchiveHandle,
+    pub batches: CallBatches<'a>,
+    /// The subject names of the Seq-aligns.
+    pub subjects: SubjectNames<'a>,
+    pub subject_placements: &'a Placements,
+    pub hit_lists: &'a [Option<BlastnHitList>],
 }
 
 /// The values of a batch's first query that `search-stats`, `ka-blocks` and the
@@ -293,26 +331,26 @@ fn lcase_mask_intervals(
         .collect()
 }
 
-/// Writes the archive of each batch of `call` to `writer`; `warnings` writes the warnings
-/// of a batch's queries (to the diagnostics, which saves them as the batch's messages)
-/// before its archive. `first_context(first_query)` gives the values of a batch's first
-/// query.
-pub(crate) fn write_blastn_archives(
-    call: &ArchiveCall<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+/// Calls `each` with the queries and the request inputs of each batch of `call`, in order
+/// (`BatchArchive`; the archive and the search strategy file write their documents from it).
+/// `first_context(first_query)` gives the values of a batch's first query.
+///
+/// `strategy`: the inputs of the search strategy's requests, which NCBI writes before the
+/// batch's search (`strategy::StrategyExport::write_batch`): the `LCaseMask` parameters then
+/// hold the lower-case runs of `-lcase_masking` only, as the query vector's mask has no DUST
+/// or WindowMasker interval before `x_CalculateMasks` (probe `lcq` of RG-F1), and the results'
+/// masks are not made.
+pub(crate) fn for_each_batch(
+    call: &CallBatches<'_>,
     first_context: &dyn Fn(usize) -> Result<FirstContext>,
-    writer: &mut dyn Write,
+    strategy: bool,
+    mut each: impl FnMut(Range<usize>, &BatchArchive<'_>) -> Result<()>,
 ) -> Result<()> {
     let whole = [0..call.queries.len()];
     let spans: &[Range<usize>] = if call.spans.is_empty() {
         &whole
     } else {
         call.spans
-    };
-    let run = RunRecord {
-        program: Program::Blastn,
-        db_title: call.subjects.db_title(),
-        gapped: true,
     };
     // The Bioseq inputs borrow their deflines: keep them alive for the whole call.
     let subject_deflines: Vec<Cow<'_, [u8]>> = call
@@ -340,11 +378,6 @@ pub(crate) fn write_blastn_archives(
     for span in spans.iter().cloned() {
         if span.is_empty() {
             continue;
-        }
-        if let Some(warnings) = warnings.as_deref_mut() {
-            for index in span.clone() {
-                warnings.before_query(index, &mut *writer)?;
-            }
         }
         let records = &call.queries[span.clone()];
         let deflines: Vec<Cow<'_, [u8]>> = records.iter().map(defline_of).collect();
@@ -381,7 +414,7 @@ pub(crate) fn write_blastn_archives(
             let offset = call.query_placements.offset(index);
             // The results' masks are those of the search, so only a searched batch has them
             // (and leave out a mask over the whole query, `shown_query_masks`).
-            if searched {
+            if searched && !strategy {
                 let shown: Vec<(i32, i32)> =
                     shown_query_masks(&call.query_masks[index], call.query_lengths[index], offset)
                         .iter()
@@ -397,16 +430,29 @@ pub(crate) fn write_blastn_archives(
                 }
             }
             // The `LCaseMask` parameters are the masks of NCBI's query vector, which every
-            // query has, valid or not and searched or not (`x_CalculateMasks`).
-            let intervals = lcase_mask_intervals(
-                record,
-                &call.dust_masks[index],
-                offset,
-                call.lcase_masking,
-                call.window_masker,
-                call.both_strands,
-                call.minus_strand,
-            );
+            // query has, valid or not and searched or not (`x_CalculateMasks`); before the
+            // search (`strategy`) only the lower-case runs.
+            let intervals = if strategy {
+                lcase_mask_intervals(
+                    record,
+                    &[],
+                    offset,
+                    call.lcase_masking,
+                    false,
+                    call.both_strands,
+                    call.minus_strand,
+                )
+            } else {
+                lcase_mask_intervals(
+                    record,
+                    &call.dust_masks[index],
+                    offset,
+                    call.lcase_masking,
+                    call.window_masker,
+                    call.both_strands,
+                    call.minus_strand,
+                )
+            };
             if !intervals.is_empty() {
                 lcase_masks.push(MaskEntry {
                     id: record.local_id.clone(),
@@ -435,21 +481,83 @@ pub(crate) fn write_blastn_archives(
             length_adjustment: context.length_adjustment,
             searched_space: searched.then_some(context.context0_space),
         };
+        each(span, &batch)?;
+    }
+    Ok(())
+}
+
+/// Writes the archive of each batch of `call` to `writer`; `warnings` writes the warnings
+/// of a batch's queries (to the diagnostics, which saves them as the batch's messages)
+/// before its archive. `first_context(first_query)` gives the values of a batch's first
+/// query.
+pub(crate) fn write_blastn_archives(
+    call: &ArchiveCall<'_>,
+    mut warnings: Option<&mut QueryWarnings<'_>>,
+    first_context: &dyn Fn(usize) -> Result<FirstContext>,
+    writer: &mut dyn Write,
+) -> Result<()> {
+    let run = RunRecord {
+        program: Program::Blastn,
+        db_title: call.subjects.db_title(),
+        gapped: true,
+    };
+    for_each_batch(&call.batches, first_context, false, |span, batch| {
+        if let Some(warnings) = warnings.as_deref_mut() {
+            for index in span.clone() {
+                warnings.before_query(index, &mut *writer)?;
+            }
+        }
         let mut aligns = BlastnAligns {
             run,
             queries: QueryNames {
-                records: call.queries,
-                searched_lengths: call.query_lengths,
-                placements: call.query_placements,
+                records: call.batches.queries,
+                searched_lengths: call.batches.query_lengths,
+                placements: call.batches.query_placements,
             },
             subjects: call.subjects,
             subject_placements: call.subject_placements,
             hit_lists: &call.hit_lists[span.clone()],
-            first,
+            first: span.start,
         };
-        write_archive(call.handle, &batch, &mut aligns, writer)?;
-    }
-    Ok(())
+        write_archive(call.handle, batch, &mut aligns, &mut *writer)
+    })
+}
+
+/// Writes the search strategy's request of each batch of `call`
+/// (`StrategyExport::write_batch`, with the `LCaseMask` parameters before the search,
+/// `for_each_batch`).
+pub(crate) fn write_blastn_strategy(
+    strategy: &StrategyExport,
+    call: &CallBatches<'_>,
+    first_context: &dyn Fn(usize) -> Result<FirstContext>,
+) -> Result<()> {
+    for_each_batch(call, first_context, true, |_, batch| {
+        strategy.write_batch(batch, batch.lcase_masks)
+    })
+}
+
+/// Writes the search strategy's request of the one batch of `call` (its queries), whose search
+/// fails: NCBI writes a batch's request before its search, and no request follows it. The request
+/// does not read the search (`call.unsearched`, the masks and the lengths are not read).
+pub(crate) fn write_blastn_failed_strategy(
+    strategy: &StrategyExport,
+    call: &CallBatches<'_>,
+) -> Result<()> {
+    let unsearched = vec![true; call.queries.len()];
+    let call = CallBatches {
+        unsearched: &unsearched,
+        spans: &[],
+        ..*call
+    };
+    let no_context = |_: usize| {
+        Ok(FirstContext {
+            karlin: None,
+            search_space: 0,
+            length_adjustment: 0,
+            context0_space: 0,
+        })
+    };
+    write_blastn_strategy(strategy, &call, &no_context)
 }
 
 #[cfg(test)]

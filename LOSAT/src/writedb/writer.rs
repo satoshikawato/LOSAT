@@ -141,8 +141,8 @@ fn post_bad_title_chars(diagnostics: &mut Vec<u8>, title: &[u8], bad: &[BadTitle
 }
 
 /// `post_bad_title_chars` for the strings of definition lines with parsed Seq-ids:
-/// "Error: (803.7) [makeblastdb] Blast-def-line-set.E.seqid.E.local.str", "Bad char
-/// [0xE9] in string at byte 38" and the string (makeblastdb 2.17.0, survey B fixture
+/// `Error: (803.7) [makeblastdb] Blast-def-line-set.E.seqid.E.local.str`, `Bad char
+/// [0xE9] in string at byte 38` and the string (makeblastdb 2.17.0, survey B fixture
 /// p23_nonascii; the member paths of the other alternatives from the S3a probes).
 fn post_bad_chars(diagnostics: &mut Vec<u8>, bad: &[BadChar]) {
     for bad_char in bad {

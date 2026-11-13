@@ -636,7 +636,7 @@ fn a_malformed_ini_with_a_logfile_is_replayed_where_ncbi_replays_it() {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1022 (quoted at
-// `ncbi_environment::preparse` and `cli::ncbi_toolkit_word_error`) and
+// `ncbi_environment::preparse` and `ncbi_environment::conf_file_path`) and
 // c++/src/algo/blast/api/blast_usage_report.cpp:195-206 (quoted at
 // `ncbi_environment::usage_report_reads_ncbirc`). NCBI BLAST+ 2.17.0 (env parity review G, F2-F4):
 // `-conffile other.ini` loads that file in place of a malformed `blastn.ini`, which is not read

@@ -9235,6 +9235,17 @@ impl<'a> SubjectSource<'a> {
         }
     }
 
+    // No NCBI counterpart: the schedules (`subjects_parallel`, the progress bar); it changes no
+    // value NCBI computes.
+    /// The number of subjects the search reads: the records, or the database's included
+    /// sequences (`SeqDb::num_seqs`; the statistics' number, `metadata`, can be another).
+    pub(super) fn num_subjects(self) -> usize {
+        match self {
+            SubjectSource::Prepared(prepared) => prepared.metadata.db_num_seqs,
+            SubjectSource::Database(database) => database.num_subjects(),
+        }
+    }
+
     /// The prepared subject set; none for a database.
     fn prepared(self) -> Option<&'a PreparedSubjects<'a>> {
         match self {
@@ -10389,6 +10400,9 @@ fn run_in_pool(
                 let places = output_formats
                     .first()
                     .is_some_and(|format| format.places_subject_reads());
+                // The pairwise report reads its subjects in the order of its `-sorthits`.
+                let pairwise = matches!(output_formats.first(), Some(BlastnOutputFormat::Pairwise))
+                    .then(|| args.formatting.report_sort());
                 let query_fetch = |query: usize,
                                    shown: &[Option<BlastnHitList>],
                                    reads: &mut [QueryReads]|
@@ -10396,7 +10410,8 @@ fn run_in_pool(
                     if !places {
                         return database.prefetch_messages(&titles, shown);
                     }
-                    reads[query] = database.subject_read_texts(&titles, shown, plural_names)?;
+                    reads[query] =
+                        database.subject_read_texts(&titles, shown, plural_names, pairwise)?;
                     Ok(Vec::new())
                 };
                 let seq_aligns = seq_aligns_of(&batch_hit_lists);
@@ -11670,7 +11685,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     // (*thread)->Run(); (*thread)->Join(&result);
     // The subjects as tasks of the pool; `use_parallel` after LOSAT_X_BNFEWSUBJ's rule
     // (`subject_env::subject_schedule`).
-    let subjects_parallel = requested_parallel && subject_metadata.db_num_seqs > 1;
+    let subjects_parallel = requested_parallel && subjects.num_subjects() > 1;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
     // ```c
@@ -12111,7 +12126,6 @@ fn search_query_batch<const UNGAPPED: bool>(
     } = subject_env::subject_search_env::<UNGAPPED>(&subject_env::SubjectEnvInputs {
         args,
         config: &config,
-        seq_data: &seq_data,
         subjects,
         subjects_parallel,
         parallel_pool,

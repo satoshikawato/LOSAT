@@ -393,10 +393,9 @@ impl BlastnDatabase {
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
-        // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
-        // NCBI's choice of its Seq-ids.
-        let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
-        shared::restrict_database(&mut db, name, list, diagnostics, PROGRAM)?;
+        // A database with parsed Seq-ids is read (line DBID, ID2b).
+        let parsed_seqids =
+            shared::restrict_database(&mut db, name, list, diagnostics, settings, PROGRAM)?;
         // BLASTN has no Gumbel block: NCBI's average subject length divides by the statistics'
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;
@@ -560,28 +559,52 @@ impl BlastnDatabase {
 
     /// [`Self::prefetch_messages`] by subject (`shared::subject_read_texts`): the text of the
     /// first read of each subject that writes one, with its ordinal id, where a query's report
-    /// reads its subjects one by one.
+    /// reads its subjects one by one: in the order of the hit lists, or, for the pairwise report
+    /// (`pairwise`, its `-sorthits` and `-sorthsps`), in the order of its sorted groups
+    /// (`QueryGroup::read_order` of the rows' hits, `pairwise::Rows::list`: `into_hit` of each
+    /// HSP and its `num_ident`; the rows' later shift to the records of a ranged query moves
+    /// every HSP of the query alike, which no sort reads, and the rows name the subjects by rank,
+    /// in the order of the ordinal ids).
     pub(super) fn subject_read_texts(
         &self,
         titles: &DatabaseTitles,
         hit_lists: &[Option<BlastnHitList>],
         rows_open: bool,
+        pairwise: Option<crate::report::hit_sort::ReportSort>,
     ) -> Result<crate::report::query_warnings::QueryReads> {
-        let subjects = hit_lists
+        let lists = hit_lists
             .iter()
             .flatten()
             .flat_map(|hit_list| {
                 let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
                 &hit_list.hsplist_array[..count]
             })
-            .filter(|hsp_list| !hsp_list.hsps.is_empty())
-            .map(|hsp_list| {
-                let parsed = match titles.get(&hsp_list.oid) {
-                    Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
-                    _ => None,
-                };
-                (hsp_list.oid, hsp_list.oid, parsed)
-            });
+            .filter(|hsp_list| !hsp_list.hsps.is_empty());
+        let parsed = |oid: u32| match titles.get(&oid) {
+            Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+            _ => None,
+        };
+        let ordinals: Vec<u32> = match pairwise {
+            Some(sort) => crate::report::x_pairwise_par::QueryGroup::read_order(
+                lists.flat_map(|hsp_list| hsp_list.hsps.iter().map(|hsp| (hsp_list.oid, hsp))),
+                |hsp| {
+                    crate::report::hit_sort::HspScores::of_hit(
+                        &crate::algorithm::blastn::hsp::BlastnHsp::clone(hsp).into_hit(),
+                        hsp.num_ident,
+                    )
+                },
+                |previous, oid| match (parsed(previous), parsed(oid)) {
+                    (Some(earlier), Some(later)) => {
+                        crate::report::db_subject::joins_as_copy(earlier, later)
+                    }
+                    _ => false,
+                },
+                sort,
+                false,
+            ),
+            None => lists.map(|hsp_list| hsp_list.oid).collect(),
+        };
+        let subjects = ordinals.into_iter().map(|oid| (oid, oid, parsed(oid)));
         shared::subject_read_texts(&self.db, &self.taxdb, subjects, rows_open, PROGRAM)
     }
 
@@ -642,10 +665,10 @@ impl BlastnDatabase {
         self.db.filtered_empty()
     }
 
-    /// The OIDs of the volumes (`SeqDb::num_oids`): none is the database whose first query
-    /// batch fails, also with a list or an alias file's range or `NSEQ`.
-    pub(super) fn num_oids(&self) -> u32 {
-        self.db.num_oids()
+    /// Whether the first query batch with a valid context fails with NCBI's `Database memory map
+    /// file error` (`SeqDb::first_oid_read_fails`: no OID, and statistics that read OID 0).
+    pub(super) fn first_oid_read_fails(&self) -> bool {
+        self.db.first_oid_read_fails()
     }
 
     /// `BlastSeqSrcGetAvgSeqLen` (`SeqDb::average_length`).
@@ -662,6 +685,12 @@ impl BlastnDatabase {
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(super) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
+    }
+
+    /// The number of sequences the search reads: the included ones (`SeqDb::num_seqs`), which
+    /// the schedules count; the statistics' number (`metadata`) can be another.
+    pub(super) fn num_subjects(&self) -> usize {
+        self.db.num_seqs() as usize
     }
 
     /// The number of sequences and the total length that the statistics read

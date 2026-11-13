@@ -41,6 +41,28 @@ fn the_version_is_blast_s() {
     );
 }
 
+// The full versions, as dustmasker's, before the mandatory keys are checked (line RG item E3;
+// NCBI BLAST+ 2.17.0 `convert2blastmask -version-full`: `convert2blastmask: 2.17.0+`, rc 0).
+#[test]
+fn the_full_versions_are_blast_s() {
+    use crate::ncbi_version::{print, VersionRequest};
+    for (word, request) in [
+        ("-version-full", VersionRequest::Full),
+        ("-version-full-xml", VersionRequest::FullXml),
+        ("-version-full-json", VersionRequest::FullJson),
+    ] {
+        assert_eq!(
+            run_words(&["-out", word], b""),
+            (
+                0,
+                print(request, "convert2blastmask", crate::NCBI_BLAST_VERSION),
+                String::new()
+            ),
+            "{word}"
+        );
+    }
+}
+
 // NCBI 2.17.0: `Argument "masking_algorithm". Mandatory value is missing:  `String'` after
 // the usage, exit status 1 (fixture `noalgo`).
 #[test]

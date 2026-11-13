@@ -682,7 +682,6 @@ fn write_tabular(
             );
             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
                 let hsp = &linked.hsp;
-                let frame = i32::from(hsp.frame);
                 // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105:
                 // if (segment->frame < 0) {
                 //     *start = seq_length - 3*segment->offset + segment->frame;
@@ -693,14 +692,7 @@ fn write_tabular(
                 // }
                 // Stage D's local subject coordinate conversion is 1-offset.
                 let subject_len = i32::try_from(subject_letters.length(oid))?;
-                let (s_start, s_end) = if frame > 0 {
-                    (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
-                } else {
-                    (
-                        subject_len - 3 * hsp.s_start + frame + 1,
-                        subject_len - 3 * hsp.s_end + frame + 2,
-                    )
-                };
+                let (s_start, s_end) = subject_endpoints(hsp, subject_len);
                 // The coordinates in the searched letters, moved into the records
                 // (`record_coordinates`).
                 let (q_start, q_end, s_start, s_end) = record_coordinates(
@@ -882,6 +874,53 @@ fn tabular_subject_ids(
         .collect())
 }
 
+// NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105: the nucleotide coordinates of a
+// translated frame, descending on a minus frame.
+/// The 1-based subject coordinates of the rows of `hsp` (the pairwise, tabular and BLAST XML
+/// reports) in a subject of `subject_len` nucleotides: those of its frame's codons, from the end
+/// of the minus strand, before the records' offsets (`record_coordinates`).
+pub(super) fn subject_endpoints(
+    hsp: &super::search_gapped::GappedHsp,
+    subject_len: i32,
+) -> (i32, i32) {
+    let frame = i32::from(hsp.frame);
+    if frame > 0 {
+        (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
+    } else {
+        (
+            subject_len - 3 * hsp.s_start + frame + 1,
+            subject_len - 3 * hsp.s_end + frame + 2,
+        )
+    }
+}
+
+/// The values of the outfmt 0 row of `linked` with its payload `payload` in a subject of
+/// `subject_len` nucleotides (`pairwise_hits`) that the report's sorts read (`HspScores::of`),
+/// without making the row, for the model of the reads (`TblastnDatabase::subject_read_texts`):
+/// the payload's bit score and columns, the linked E-value, the engine's identities (the row's
+/// `seqalign_num_ident`) and the row's coordinates (`subject_endpoints`). The records' offsets of
+/// a ranged query move every HSP of the query alike (a database subject has none), which no sort
+/// reads, and are left out.
+pub(super) fn hsp_scores(
+    linked: &super::stage_d_linking::LinkedHsp,
+    payload: &super::stage_d_results::KappaHspPayload,
+    subject_len: usize,
+) -> Result<crate::report::hit_sort::HspScores> {
+    let hsp = &linked.hsp;
+    let (s_start, s_end) = subject_endpoints(hsp, i32::try_from(subject_len)?);
+    Ok(crate::report::hit_sort::HspScores::of_values(
+        payload.bit_score,
+        linked.evalue,
+        usize::try_from(payload.num_ident)?,
+        payload.align_length,
+        (
+            usize::try_from(hsp.q_start + 1)?,
+            usize::try_from(hsp.q_end)?,
+        ),
+        (usize::try_from(s_start)?, usize::try_from(s_end)?),
+    ))
+}
+
 // NCBI c++/src/algo/blast/format/blast_format.cpp:1490-1589;
 // c++/src/objtools/align_format/showalign.cpp:1600-1625:
 // AcknowledgeBlastQuery; x_DisplayDeflines; DisplaySeqalign;
@@ -941,15 +980,7 @@ fn pairwise_hits(
                 // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105:
                 // translated coordinates use three nucleotide letters per
                 // residue and reverse strand endpoints run in descending order.
-                let subject_len = i32::try_from(subject_seq.len())?;
-                let (s_start, s_end) = if frame > 0 {
-                    (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
-                } else {
-                    (
-                        subject_len - 3 * hsp.s_start + frame + 1,
-                        subject_len - 3 * hsp.s_end + frame + 2,
-                    )
-                };
+                let (s_start, s_end) = subject_endpoints(hsp, i32::try_from(subject_seq.len())?);
                 let (qseq, sseq) = aligned_sequences(
                     query,
                     subject_seq,
@@ -1005,12 +1036,9 @@ fn pairwise_hits(
                     crate::utils::matrix::protein_display_positives(&qseq, &sseq, scoring.matrix);
                 // The rows are read from the searched letters; the report prints record
                 // coordinates (`record_coordinates`).
-                let (q_start, q_end, s_start, s_end) = record_coordinates(
-                    ranges,
-                    q_idx,
-                    oid,
-                    (hsp.q_start + 1, hsp.q_end, s_start, s_end),
-                )?;
+                let searched = (hsp.q_start + 1, hsp.q_end, s_start, s_end);
+                let (q_start, q_end, s_start, s_end) =
+                    record_coordinates(ranges, q_idx, oid, searched)?;
                 // NCBI reference: c++/src/objtools/align_format/showalign.cpp:411-422
                 // ```c++
                 // static int s_GetFrame (int start, ENa_strand strand, const CSeq_id& id,
@@ -1113,6 +1141,15 @@ fn pairwise_hits(
                     // (`report_num_ident`).
                     seqalign_num_ident: usize::try_from(payload.num_ident)?,
                 });
+                // The model of the reads sorts by `hsp_scores` without the rows
+                // (`TblastnDatabase::subject_read_texts`): the row's values where the records'
+                // offsets move nothing.
+                debug_assert!(
+                    searched != (q_start, q_end, s_start, s_end)
+                        || hsp_scores(linked, payload, subject_seq.len()).ok()
+                            == hits.last().map(crate::report::hit_sort::HspScores::of),
+                    "TBLASTN hsp_scores differs from its row"
+                );
             }
         }
     }

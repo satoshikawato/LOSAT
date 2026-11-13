@@ -1,12 +1,14 @@
-//! The even-gap linking of the HSPs of one subject with sum statistics, for a gapped search with an
-//! untranslated query and subject: psiblast's `-sum_stats true` (NCBI core/link_hsps.c
-//! `BLAST_LinkHsps` with `longest_intron <= 0`, `s_BlastEvenGapLinkHSPs`).
+//! The even-gap linking of the HSPs of one subject with sum statistics (NCBI core/link_hsps.c
+//! `BLAST_LinkHsps` with `longest_intron <= 0`, `s_BlastEvenGapLinkHSPs`) for an untranslated
+//! subject: psiblast's `-sum_stats true` (a gapped search, untranslated query) and BLASTX's
+//! `-ungapped` search with a `-max_intron_length` of at most 4 (an ungapped search, translated
+//! query: `longest_intron` is then 0, blast_parameters.c:809-814).
 //!
-//! NCBI's blastp and blastn have no `-sum_stats`, and the other programs that link take other
-//! forms: TBLASTX links ungapped HSPs of translated sequences (`algorithm::tblastx::
-//! sum_stats_linking`, its own kernels for its `UngappedHit`), and BLASTX and TBLASTN use the
-//! uneven-gap linking (`s_BlastUnevenGapLinkHSPs`). So PSIBLAST's rounds (the matrix round 1 and
-//! the PSSM rounds) are the users of this port.
+//! NCBI's blastp and blastn have no `-sum_stats`, and the other linking searches take other forms:
+//! TBLASTX links ungapped HSPs of translated sequences (`algorithm::tblastx::sum_stats_linking`, its
+//! own kernels for its `UngappedHit`), and the gapped BLASTX and TBLASTN searches use the
+//! uneven-gap linking (`s_BlastUnevenGapLinkHSPs`). The parameters of the ungapped searches'
+//! linking (`CalculateLinkHSPCutoffs`) are `EvenGapLinkParams::ungapped`'s, which TBLASTX reads too.
 //!
 //! The port is literal, with NCBI's shortcuts (`use_current_max`, `path_changed`, the `changed`
 //! flags, `next_larger`): they decide which of equal sums a chain takes, so the result depends on
@@ -54,6 +56,8 @@ use crate::stats::sum_statistics::{gap_decay_divisor, ncbi_large_gap_sum_e, smal
 pub(crate) const BLAST_GAP_PROB_GAPPED: f64 = 1.0;
 /// `BLAST_GAP_DECAY_RATE_GAPPED`.
 pub(crate) const BLAST_GAP_DECAY_RATE_GAPPED: f64 = 0.1;
+/// `BLAST_GAP_DECAY_RATE`, the gap decay rate of an ungapped search.
+pub(crate) const BLAST_GAP_DECAY_RATE: f64 = 0.5;
 
 /// The linking parameters (`BlastLinkHSPParameters`) of a gapped protein search with sum
 /// statistics.
@@ -96,6 +100,10 @@ pub(crate) struct EvenGapLinkParams {
     pub(crate) cutoff_small_gap: i32,
     /// `cutoff_big_gap`.
     pub(crate) cutoff_big_gap: i32,
+    /// `kTranslatedQuery` (`Blast_QueryIsTranslated`): the HSPs of the three frames of a strand
+    /// (contexts `3k..3k+3`) form one query frame of the linking (`strand_factor` 3), sorted by
+    /// `s_RevCompareHSPsTbx`, `s_RevCompareHSPsTransl` and `s_FwdCompareHSPsTransl`.
+    pub(crate) query_translated: bool,
 }
 
 impl EvenGapLinkParams {
@@ -116,13 +124,25 @@ impl EvenGapLinkParams {
             gap_decay_rate: BLAST_GAP_DECAY_RATE_GAPPED,
             cutoff_small_gap: 0,
             cutoff_big_gap: 0,
+            query_translated: false,
+        }
+    }
+
+    /// `strand_factor` (link_hsps.c:513): the number of contexts of a query frame of the linking.
+    fn strand_factor(&self) -> usize {
+        if self.query_translated {
+            3
+        } else {
+            1
         }
     }
 }
 
 /// One HSP as the linking reads it (`BlastHSP`): its context, its query and subject ranges
-/// (0-based, the end exclusive, `query.offset`/`query.end`) and its raw score. The subject is not
-/// translated, so its frame is 0 for every HSP.
+/// (0-based, the end exclusive, `query.offset`/`query.end`, in the context's letters) and its raw
+/// score. The subject is not translated, so its frame is 0 for every HSP (a translated subject,
+/// TBLASTN's ungapped search, would add `subject.frame`: the sign splits the query frames and
+/// `s_RevCompareHSPsTbn` orders by it after the context).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct LinkHsp {
     pub(crate) context: usize,
@@ -133,9 +153,9 @@ pub(crate) struct LinkHsp {
     pub(crate) score: i32,
 }
 
-/// The values of a query context the linking reads: the gapped Karlin block of the context
-/// (`sbp->kbp_gap[context]`, scaled in the composition-based redo) and the context's lengths
-/// (`query_info->contexts[context]`).
+/// The values of a query context the linking reads: the Karlin block of the context (gapped,
+/// `sbp->kbp_gap[context]`, scaled in the composition-based redo; ungapped, `sbp->kbp[context]`)
+/// and the context's lengths (`query_info->contexts[context]`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct LinkContext {
     pub(crate) lambda: f64,
@@ -256,10 +276,12 @@ struct Helper {
 // 		return -1;
 // 	return 0;
 // ```
-/// `s_RevCompareHSPsTbn` (the subject frames are all 0).
-fn rev_compare_tbn(h1: &LinkHsp, h2: &LinkHsp) -> Ordering {
-    h1.context
-        .cmp(&h2.context)
+/// `s_RevCompareHSPsTbn` (the subject frames are all 0), with `context / strand_factor` in place
+/// of `context`: `s_RevCompareHSPsTbx` (link_hsps.c:331-375) for a translated query, whose
+/// `NUM_FRAMES / 2` is the `strand_factor` 3.
+fn rev_compare_tbn(h1: &LinkHsp, h2: &LinkHsp, strand_factor: usize) -> Ordering {
+    (h1.context / strand_factor)
+        .cmp(&(h2.context / strand_factor))
         .then(h2.query_offset.cmp(&h1.query_offset))
         .then(h2.query_end.cmp(&h1.query_end))
         .then(h2.subject_offset.cmp(&h1.subject_offset))
@@ -286,10 +308,11 @@ fn rev_compare_tbn(h1: &LinkHsp, h2: &LinkHsp) -> Ordering {
 // 		return -1;
 // 	return 0;
 // ```
-/// `s_RevCompareHSPs`.
-fn rev_compare(h1: &LinkHsp, h2: &LinkHsp) -> Ordering {
-    h1.context
-        .cmp(&h2.context)
+/// `s_RevCompareHSPs`, and with a `strand_factor` of 3 `s_RevCompareHSPsTransl`
+/// (link_hsps.c:226-262: `context / (NUM_FRAMES / 2)`).
+fn rev_compare(h1: &LinkHsp, h2: &LinkHsp, strand_factor: usize) -> Ordering {
+    (h1.context / strand_factor)
+        .cmp(&(h2.context / strand_factor))
         .then(h2.query_offset.cmp(&h1.query_offset))
         .then(h2.subject_offset.cmp(&h1.subject_offset))
 }
@@ -315,10 +338,11 @@ fn rev_compare(h1: &LinkHsp, h2: &LinkHsp) -> Ordering {
 //
 //     return 0;
 // ```
-/// `s_FwdCompareHSPs`.
-fn fwd_compare(h1: &LinkHsp, h2: &LinkHsp) -> Ordering {
-    h1.context
-        .cmp(&h2.context)
+/// `s_FwdCompareHSPs`, and with a `strand_factor` of 3 `s_FwdCompareHSPsTransl`
+/// (link_hsps.c:157-188).
+fn fwd_compare(h1: &LinkHsp, h2: &LinkHsp, strand_factor: usize) -> Ordering {
+    (h1.context / strand_factor)
+        .cmp(&(h2.context / strand_factor))
         .then(h1.query_offset.cmp(&h2.query_offset))
         .then(h1.subject_offset.cmp(&h2.subject_offset))
 }
@@ -330,7 +354,7 @@ fn fwd_compare(h1: &LinkHsp, h2: &LinkHsp) -> Ordering {
 pub(crate) fn link_in_place<T>(
     items: &mut Vec<T>,
     hsp: impl Fn(&T) -> LinkHsp,
-    contexts: &[LinkContext],
+    contexts: impl Fn(usize) -> LinkContext,
     subject_length: i32,
     params: &EvenGapLinkParams,
     take: impl Fn(&mut T, &LinkedHsp),
@@ -350,16 +374,16 @@ pub(crate) fn link_in_place<T>(
         .collect();
 }
 
-/// Links the HSPs of one subject (`s_BlastEvenGapLinkHSPs` for an untranslated query and
-/// subject) and returns the list NCBI builds, in its order: every HSP once, with its linked set's
-/// e-value and size. `contexts` is indexed by `LinkHsp::context`; `subject_length` is the
+/// Links the HSPs of one subject (`s_BlastEvenGapLinkHSPs` for an untranslated subject) and
+/// returns the list NCBI builds, in its order: every HSP once, with its linked set's e-value and
+/// size. `contexts` gives the values of a context (`LinkHsp::context`); `subject_length` is the
 /// subject's length in letters.
 ///
 /// NCBI's `qsort` calls are stable sorts here (the comparators are partial: HSPs with the same
 /// start keep the order of the previous sort), as TBLASTX's port sorts them.
 pub(crate) fn even_gap_link_hsps(
     hsps: &[LinkHsp],
-    contexts: &[LinkContext],
+    contexts: impl Fn(usize) -> LinkContext,
     subject_length: i32,
     params: &EvenGapLinkParams,
 ) -> Vec<LinkedHsp> {
@@ -377,7 +401,8 @@ pub(crate) fn even_gap_link_hsps(
     // ...
     //    /* Sort by (reverse) position. */
     //    if (kTranslatedQuery) {
-    // ...
+    //       qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+    //             s_RevCompareHSPsTbx);
     //    } else {
     //       qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
     //             s_RevCompareHSPsTbn);
@@ -396,10 +421,11 @@ pub(crate) fn even_gap_link_hsps(
     let gap_decay_rate = params.gap_decay_rate;
     let cutoff = [params.cutoff_small_gap as i64, params.cutoff_big_gap as i64];
     let ignore_small_gaps = params.cutoff_small_gap == 0;
+    let strand_factor = params.strand_factor();
 
-    // `link_hsp_array`: the input positions in the order of `s_RevCompareHSPsTbn`.
+    // `link_hsp_array`: the input positions in the order of `s_RevCompareHSPsTbn` (`Tbx`).
     let mut order: Vec<usize> = (0..total_number_of_hsps).collect();
-    order.sort_by(|&a, &b| rev_compare_tbn(&hsps[a], &hsps[b]));
+    order.sort_by(|&a, &b| rev_compare_tbn(&hsps[a], &hsps[b], strand_factor));
     // Slot 0 is `hp_start`; the HSP at sorted position `i` is slot `i + 1`.
     let mut nodes: Vec<Node> = vec![Node::default(); total_number_of_hsps + 1];
     let hsp_of = |slot: usize| -> &LinkHsp { &hsps[order[slot - 1]] };
@@ -433,7 +459,8 @@ pub(crate) fn even_gap_link_hsps(
     //       num_query_frames = cur_frame+1;
     //    }
     // ```
-    // (frame start slot, number of HSPs) of each query frame (a context here).
+    // (frame start slot, number of HSPs) of each query frame (a context, or the three contexts of a
+    // strand of a translated query).
     let mut frames: Vec<(usize, usize)> = vec![(1, 0)];
     for index in 0..total_number_of_hsps {
         let slot = index + 1;
@@ -441,7 +468,9 @@ pub(crate) fn even_gap_link_hsps(
         frames.last_mut().expect("one frame").1 += 1;
         nodes[slot].prev = (index > 0).then_some(slot - 1);
         nodes[slot].next = (index + 1 < total_number_of_hsps).then_some(slot + 1);
-        if index > 0 && hsp_of(slot).context != hsp_of(slot - 1).context {
+        if index > 0
+            && hsp_of(slot).context / strand_factor != hsp_of(slot - 1).context / strand_factor
+        {
             frames.last_mut().expect("one frame").1 -= 1;
             frames.push((slot, 1));
             nodes[slot - 1].next = None;
@@ -490,7 +519,7 @@ pub(crate) fn even_gap_link_hsps(
             frame_start,
             frame_count,
             &hsp_of,
-            contexts,
+            &contexts,
             subject_length,
             LinkConstants {
                 window_size,
@@ -506,7 +535,10 @@ pub(crate) fn even_gap_link_hsps(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:988-1001
     // ```c
     //    if (kTranslatedQuery) {
-    // ...
+    //       qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+    //             s_RevCompareHSPsTransl);
+    //       qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
+    //             s_FwdCompareHSPsTransl);
     //    } else {
     //       qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
     //             s_RevCompareHSPs);
@@ -515,8 +547,8 @@ pub(crate) fn even_gap_link_hsps(
     //    }
     // ```
     let mut array: Vec<usize> = (1..=total_number_of_hsps).collect();
-    array.sort_by(|&a, &b| rev_compare(hsp_of(a), hsp_of(b)));
-    array.sort_by(|&a, &b| fwd_compare(hsp_of(a), hsp_of(b)));
+    array.sort_by(|&a, &b| rev_compare(hsp_of(a), hsp_of(b), strand_factor));
+    array.sort_by(|&a, &b| fwd_compare(hsp_of(a), hsp_of(b), strand_factor));
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1006-1080
     // ```c
@@ -604,7 +636,7 @@ fn link_frame<'a>(
     frame_start: usize,
     frame_count: usize,
     hsp_of: &impl Fn(usize) -> &'a LinkHsp,
-    contexts: &[LinkContext],
+    contexts: &impl Fn(usize) -> LinkContext,
     subject_length_orig: i32,
     k: LinkConstants,
 ) {
@@ -646,8 +678,10 @@ fn link_frame<'a>(
     nodes[HP_START].next = Some(frame_start);
     nodes[frame_start].prev = Some(HP_START);
     let mut number_of_hsps = frame_count;
+    // The lengths and the search space of the frame's first HSP's context, for every HSP of a
+    // frame of a translated query too (NCBI's `query_context`).
     let query_context = hsp_of(frame_start).context;
-    let ctx = &contexts[query_context];
+    let ctx = contexts(query_context);
     let length_adjustment = ctx.length_adjustment;
     let query_length = (ctx.query_length - length_adjustment).max(1);
     let subject_length = (subject_length_orig - length_adjustment).max(1);
@@ -671,7 +705,7 @@ fn link_frame<'a>(
     // C's order: the score's term first, then logK subtracted.
     let add_xsum = |h_hsp_xsum: f64, slot: usize| {
         let hsp = hsp_of(slot);
-        let c = &contexts[hsp.context];
+        let c = contexts(hsp.context);
         h_hsp_xsum + hsp.score as f64 * c.lambda - c.log_k
     };
 
@@ -1339,7 +1373,7 @@ mod tests {
     fn a_lone_hsp_gets_the_e_value_of_one_segment() {
         let hsps = [hsp((10, 60), (20, 70), 80)];
         let ctx = context();
-        let out = even_gap_link_hsps(&hsps, &[ctx], 1000, &EvenGapLinkParams::traceback());
+        let out = even_gap_link_hsps(&hsps, |_| ctx, 1000, &EvenGapLinkParams::traceback());
         assert_eq!(out.len(), 1);
         assert_eq!((out[0].index, out[0].num), (0, 1));
         let xsum = 80.0 * ctx.lambda - ctx.log_k;
@@ -1351,7 +1385,7 @@ mod tests {
     fn two_hsps_in_order_on_both_sequences_link_into_one_set() {
         // The first HSP ends before the second starts on the query and on the subject.
         let hsps = [hsp((200, 260), (500, 560), 60), hsp((10, 60), (20, 70), 80)];
-        let out = even_gap_link_hsps(&hsps, &[context()], 1000, &EvenGapLinkParams::traceback());
+        let out = even_gap_link_hsps(&hsps, |_| context(), 1000, &EvenGapLinkParams::traceback());
         // The chain starts at the upstream HSP (the head) and follows its link downstream.
         assert_eq!(out.iter().map(|l| l.index).collect::<Vec<_>>(), vec![1, 0]);
         assert!(out.iter().all(|l| l.num == 2));
@@ -1361,7 +1395,7 @@ mod tests {
     #[test]
     fn hsps_in_opposite_orders_on_the_sequences_stay_apart() {
         let hsps = [hsp((200, 260), (20, 70), 60), hsp((10, 60), (500, 560), 80)];
-        let out = even_gap_link_hsps(&hsps, &[context()], 1000, &EvenGapLinkParams::traceback());
+        let out = even_gap_link_hsps(&hsps, |_| context(), 1000, &EvenGapLinkParams::traceback());
         assert!(out.iter().all(|l| l.num == 1));
         // The list is in the forward order of the query starts.
         assert_eq!(out.iter().map(|l| l.index).collect::<Vec<_>>(), vec![1, 0]);
@@ -1374,7 +1408,7 @@ mod tests {
         let hsps = [hsp((70, 120), (80, 130), 41), hsp((10, 60), (20, 70), 41)];
         let out = even_gap_link_hsps(
             &hsps,
-            &[context()],
+            |_| context(),
             1000,
             &EvenGapLinkParams::preliminary(41),
         );

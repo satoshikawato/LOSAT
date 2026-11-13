@@ -1,10 +1,11 @@
 //! BLASTX ungapped even-gap linking, with protein-subject lengths in AA.
+#[cfg(test)]
 use super::{
     linking::{LinkedHsp, LinkedHspList},
-    parameters::ContextParameters,
     preliminary::{compare_score, PreliminaryHsp},
-    query_setup::PreparedQueryBatch,
 };
+use super::{parameters::ContextParameters, query_setup::PreparedQueryBatch};
+#[cfg(test)]
 use crate::stats::sum_statistics::{gap_decay_divisor, ncbi_large_gap_sum_e, small_gap_sum_e};
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:998-1097
 // ```c++
@@ -221,6 +222,7 @@ pub(crate) fn cutoffs(
 //   Int4 next_larger;           /**< offset into array of HelpStructs containing
 //                                    HSP with higher score, used in bailout
 // ```
+#[cfg(test)]
 #[derive(Clone, Default)]
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:63-68
 // ```c++
@@ -242,6 +244,7 @@ struct Path {
     linked: bool,
     head: bool,
 }
+#[cfg(test)]
 #[derive(Clone, Copy, Default)]
 struct Helper {
     id: Option<usize>,
@@ -428,6 +431,9 @@ struct Helper {
 //          H->hsp_link.changed=1;
 //
 // ```
+// The port the differential test of `core::link_hsps` compares with (`statistics::link_even` is
+// BLASTX's linking).
+#[cfg(test)]
 pub(crate) fn link_even(
     input: &[PreliminaryHsp],
     batch: &PreparedQueryBatch,
@@ -1406,5 +1412,130 @@ mod cutoff_boundary_tests {
                 "{line}"
             );
         }
+    }
+}
+
+// No NCBI counterpart: a differential test of two ports of `s_BlastEvenGapLinkHSPs`
+// (link_hsps.c:415-1092) on random lists; it goes with the BLASTX port it compares with.
+#[cfg(test)]
+mod core_link_differential_tests {
+    use super::*;
+    use crate::core::link_hsps::{EvenGapLinkParams, BLAST_GAP_DECAY_RATE};
+
+    /// xorshift64*: a fixed sequence of random numbers without a dependency.
+    struct Rng(u64);
+    impl Rng {
+        fn below(&mut self, n: u64) -> u64 {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            self.0.wrapping_mul(0x2545_f491_4f6c_dd1d) % n
+        }
+    }
+
+    #[test]
+    fn the_core_linking_returns_the_lists_of_the_blastx_port() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/outfmt0");
+        let mut options = super::super::stage_c_tests::options();
+        options.gapped = false;
+        let records =
+            super::super::input::read_fasta(&root.join("q3c_multi.fna"), false, false).unwrap();
+        let batch = super::super::query_setup::prepare_queries(&records, &options).unwrap();
+        let mut parameters = super::super::parameters::score_block(&batch);
+        super::super::parameters::subject_parameters(
+            &batch,
+            &mut parameters,
+            &options,
+            super::super::parameters::SubjectNumbers {
+                total: 5000,
+                count: 3,
+                shortest: 300,
+                average: 1600,
+            },
+            None,
+        )
+        .unwrap();
+        let valid: Vec<usize> = (0..batch.contexts.len())
+            .filter(|&c| parameters[c].valid && batch.contexts[c].length > 0)
+            .collect();
+        assert!(valid.len() >= 24, "{} valid contexts", valid.len());
+        let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+        let (mut chains, mut ties) = (0usize, 0usize);
+        for case in 0..20_000u64 {
+            let subject_length = 20 + rng.below(2000) as i32;
+            let n = 1 + rng.below(40) as usize;
+            let mut input: Vec<PreliminaryHsp> = Vec::with_capacity(n);
+            while input.len() < n {
+                // A tie: the ranges of an HSP in another frame of its strand.
+                if !input.is_empty() && rng.below(6) == 0 {
+                    let mut h = input[rng.below(input.len() as u64) as usize].clone();
+                    let context = h.context / 3 * 3 + rng.below(3) as usize;
+                    if valid.contains(&context) && context != h.context {
+                        h.context = context;
+                        h.frame = batch.contexts[context].frame;
+                        h.score = 1 + rng.below(150) as i32;
+                        input.push(h);
+                        ties += 1;
+                        continue;
+                    }
+                }
+                let context = valid[rng.below(valid.len() as u64) as usize];
+                let qlen = batch.contexts[context].length as i32;
+                let q_start = rng.below(qlen as u64) as i32;
+                let len = (1 + rng.below(60) as i32).min(qlen - q_start);
+                let s_start = rng.below(subject_length as u64) as i32;
+                let len = len.min(subject_length - s_start);
+                input.push(PreliminaryHsp {
+                    context,
+                    frame: batch.contexts[context].frame,
+                    score: 1 + rng.below(150) as i32,
+                    q_start,
+                    q_end: q_start + len,
+                    q_gapped_start: q_start,
+                    s_start,
+                    s_end: s_start + len,
+                    s_gapped_start: s_start,
+                });
+            }
+            // CalculateLinkHSPCutoffs' two outcomes: small gaps ignored (gap_prob 0) or both.
+            let (cutoff, gap_prob) = match case % 3 {
+                0 => ([0, 1 + rng.below(40) as i32], 0.0),
+                1 => ([1 + rng.below(40) as i32, 1 + rng.below(40) as i32], 0.5),
+                _ => ([1 + rng.below(8) as i32, 1 + rng.below(8) as i32], 0.5),
+            };
+            let old = link_even(
+                &input,
+                &batch,
+                &parameters,
+                subject_length,
+                (cutoff, gap_prob),
+            );
+            let new = super::super::statistics::link_even(
+                &input,
+                &batch,
+                &parameters,
+                subject_length,
+                &EvenGapLinkParams {
+                    gap_prob,
+                    gap_decay_rate: BLAST_GAP_DECAY_RATE,
+                    cutoff_small_gap: cutoff[0],
+                    cutoff_big_gap: cutoff[1],
+                    query_translated: true,
+                },
+            );
+            let view = |list: &LinkedHspList| -> (Vec<(usize, i32, u64)>, u64) {
+                (
+                    list.hsps
+                        .iter()
+                        .map(|h| (h.source_index, h.num, h.evalue.to_bits()))
+                        .collect(),
+                    list.best_evalue.to_bits(),
+                )
+            };
+            assert_eq!(view(&old), view(&new), "case {case}: {input:?} {cutoff:?}");
+            chains += old.hsps.iter().filter(|h| h.num > 1).count();
+        }
+        // The lists reach linked sets and ties.
+        assert!(chains > 10_000 && ties > 10_000, "{chains} {ties}");
     }
 }

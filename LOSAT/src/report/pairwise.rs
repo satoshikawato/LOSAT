@@ -797,6 +797,20 @@ pub fn write_hsp_info<W: Write>(
     // NCBI: " Score = XXX bits (YYY),  Expect = Z.Ze-NN"
     let bit_score_str = format_bitscore_ncbi(h.bit_score);
     let evalue_str = format_evalue_ncbi(h.e_value);
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3593-3598
+    // ```c++
+    //             out<<" Score = "<<bit_score_buf<<" ";
+    //             out<<"bits ("<<aln_vec_info->score<<"),"<<"  ";
+    //             out<<"Expect";
+    //             if (aln_vec_info->sum_n > 0) {
+    //             out << "(" << aln_vec_info->sum_n << ")";
+    //             }
+    // ```
+    // An HSP of a linked set (psiblast's `-sum_stats true`) has its "sum_n" score, the set's size.
+    let expect = hit
+        .sum_n
+        .filter(|&count| count > 1)
+        .map_or_else(|| "Expect".to_string(), |count| format!("Expect({count})"));
     // psiblast's first round has blastp's methods; rpsblast's redo marks its HSPs likewise.
     if matches!(config.program.as_str(), "blastp" | "psiblast" | "rpsblast") {
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3600-3603
@@ -813,14 +827,14 @@ pub fn write_hsp_info<W: Write>(
         };
         writeln!(
             writer,
-            " Score = {} bits ({}),  Expect = {}{}",
-            bit_score_str, h.raw_score, evalue_str, method
+            " Score = {} bits ({}),  {} = {}{}",
+            bit_score_str, h.raw_score, expect, evalue_str, method
         )?;
     } else {
         writeln!(
             writer,
-            " Score = {} bits ({}),  Expect = {}",
-            bit_score_str, h.raw_score, evalue_str
+            " Score = {} bits ({}),  {} = {}",
+            bit_score_str, h.raw_score, expect, evalue_str
         )?;
     }
 

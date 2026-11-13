@@ -47,45 +47,52 @@
 //!
 //! # The steps
 //!
-//! 1. Sources. A stable counting sort of the words of L_0, then L_1, .., by source cell s (the loop
-//!    of `blast_lookup_index_query_exact_matches`, `x_wide_exact_words`): the sources with a word,
-//!    ascending, and each source's offsets ordered by (table, order of the table's loop). Table
-//!    t's part of source s is therefore E_t(s), in its order (x_pair_lut.rs item 2: each location
-//!    is indexed on its own, so the loop over L_t adds exactly the words of L_t, in L_t's order).
+//! 1. Sources. A stable sort of the words of L_0, then L_1, .., by source cell s (the loop of
+//!    `blast_lookup_index_query_exact_matches`, `x_wide_exact_words`; a radix sort of the words'
+//!    order, `x_wide_radix_order`): the sources with a word, ascending, and each source's offsets
+//!    ordered by (table, order of the table's loop). Table t's part of source s is therefore one
+//!    run, E_t(s), in its order (x_pair_lut.rs item 2: each location is indexed on its own, so the
+//!    loop over L_t adds exactly the words of L_t, in L_t's order).
 //! 2. Lists. T(s) of each source, once for all tables, on the pool over ranges of sources: the
-//!    statements of `x_target_list` (the exact cell first when s_AddWordHits adds it, then the
-//!    neighbours in the order of the `s_AddWordHitsCore` recursion) with 32-bit indices. T(s) reads
-//!    only the residues of s, the matrix, the threshold and the word length (x_lut_direct.rs header),
-//!    so it is read at s's first offset, as the reference reads it (blast_aalookup.c:490).
-//! 3. Each table on its own, its sources cut into P contiguous ranges (of about equal work):
-//!    (a) each range counts its appends per cell, c_p[w] = sum of |E_t(s)| over its s with w in
-//!    T(s); (b) each stripe of cells (a multiple of 32 cells) sums them, count[w] = sum over p of
-//!    c_p[w], the reference's chain length, with its cells' overflow size, longest count and used
-//!    cells; (c) each stripe, after the overflow and the kept cells of the stripes before it (cells
-//!    ascending: `BlastAaLookupFinalize` assigns the overflow cursors in ascending cell order, and a
-//!    compacted table keeps its cells in index order), writes its cells (`num_used`, the pv bit,
-//!    the cursor of an overflow cell; a cell without entries all zero, as after the C `calloc`) and
-//!    turns c_p[w] into range p's first position in cell w: the cell's start plus the counts of
-//!    the ranges before p; (d) each range appends, for s ascending and w in T(s) in list order,
-//!    E_t(s) at its position for w, advanced by the offsets written.
+//!    statements of `x_target_list` (the exact cell when s_AddWordHits adds it, and the neighbours
+//!    of the `s_AddWordHitsCore` recursion, found in another order: `x_wide_neighbors`) with 32-bit
+//!    indices. T(s) reads only the residues of s, the matrix, the threshold and the word length
+//!    (x_lut_direct.rs header), so it is read at s's first offset, as the reference reads it
+//!    (blast_aalookup.c:490). The cells of T(s) are distinct, so the order of a list changes no
+//!    chain. A range keeps its lists by stripe of the backbone (2^b cells, a multiple of 32: step
+//!    3): for stripe j, its sources ascending, each with its cells in stripe j, one `u32` a cell
+//!    (the source's index in the range above bit b, the cell's index in the stripe below). A range
+//!    also takes, by table, the least and greatest offset of its sources with a target.
+//! 3. The tables, all of them at once, by stripe (the stripes side by side): (a) each stripe counts
+//!    the appends to each of its cells in each table, count_t[w] = sum of |E_t(s)| over the s with
+//!    w in T(s) (the reference's chain length), from every range's list for the stripe, and sums
+//!    each table's overflow size, longest count and used cells in the stripe; (b) each table's
+//!    cells and overflow go to the stripes in cell order (`BlastAaLookupFinalize` assigns the
+//!    overflow cursors in ascending cell order, and a compacted table keeps its cells in index
+//!    order); (c) each stripe counts again, writes its cells (`num_used`, the pv bit, the cursor of
+//!    an overflow cell; a cell without entries all zero, as after the C `calloc`), turns count_t[w]
+//!    into the first position of cell w, then walks the lists as (a) did and appends, for each s
+//!    with w in T(s), E_t(s) at the position of w in table t, advanced by the offsets written.
 //!
 //! # Why the tables are those of `x_build_group`
 //!
-//! In each cell the appends of range p come after those of every range before it and before those
-//! of every range after it, and inside a range they come in source order, so cell w of table t
-//! holds, for s ascending with w in T(s), E_t(s) in order: the chain of x_pair_lut.rs item 5. The
-//! ranges write disjoint positions, every position of a cell with entries once. `num_used`, the pv
-//! bits, the inline entries or the overflow cursor, the overflow array and `longest_chain` are
-//! `BlastAaLookupFinalize`'s function of these chains; the compaction keeps the cells with entries
-//! in index order (`x_scan_bf::x_compact`) with the rank of the presence vector (`x_scan_bf::x_rank`);
-//! `q_min` and `q_max` are the least and greatest offset of a source word with a target, as in
-//! `x_build_group`; the header fields are the expressions of `x_build_group`. Only the scheduling
-//! (ranges, stripes, the pool's threads) differs, and it changes no value.
+//! A cell is one stripe's, and the stripe appends to it in the order of the ranges, each range's
+//! sources ascending, so cell w of table t holds, for s ascending with w in T(s), E_t(s) in order:
+//! the chain of x_pair_lut.rs item 5. The positions of a cell are written once each (a cell's run
+//! starts at its first position and takes count_t[w] offsets), and the cells' runs of the overflow
+//! are disjoint. `num_used`, the pv bits, the inline entries or the overflow cursor, the overflow
+//! array and `longest_chain` are `BlastAaLookupFinalize`'s function of these chains; the compaction
+//! keeps the cells with entries in index order (`x_scan_bf::x_compact`) with the rank of the
+//! presence vector (`x_scan_bf::x_rank`); `q_min` and `q_max` are the least and greatest offset of a
+//! source word with a target, as in `x_build_group`; the header fields are the expressions of
+//! `x_build_group`. Only the scheduling (ranges, stripes, the pool's threads) differs, and it changes
+//! no value.
 //!
-//! Memory: the tables, the lists T(s) of the batch's sources (freed when the tables are built; no
-//! memo is kept across batches: at 4 letters the lists of a batch take hundreds of megabytes) and P
-//! counts per backbone cell (P at most `X_WIDE_MOST_PARTS`, 3.6 MB each at 4 letters). No chain is
-//! made: the reference builder holds the chains and the table at once.
+//! Memory: the tables, the lists T(s) of the batch's sources by stripe (4 bytes a cell of a list,
+//! freed when the tables are built; no memo is kept across batches: at 4 letters the lists of a
+//! batch take tens of megabytes), and, while a stripe runs, a count for each of its cells and
+//! tables (`X_WIDE_STRIPE_COUNTS`). No chain is made: the reference builder holds the chains and the
+//! table at once.
 
 use super::*;
 
@@ -93,30 +100,28 @@ use super::*;
 /// constant.
 const X_WIDE_CHARSIZE: usize = LOOKUP_ALPHABET_SIZE.ilog2() as usize + 1;
 
-/// No NCBI counterpart: the widest backbone index the joint builder takes, in bits. Each source
-/// range counts per backbone cell (`X_WIDE_MOST_PARTS` arrays): 3.6 MB each at 20 bits (words of
-/// 4 letters, the longest TBLASTX takes: `Word-size must be less than 6`, checked at 5).
+/// No NCBI counterpart: the widest backbone index the joint builder takes, in bits (words of 4
+/// letters, the longest TBLASTX takes: `Word-size must be less than 6`, checked at 5).
 const X_WIDE_INDEX_BITS: usize = 20;
 
-/// No NCBI counterpart: the most source ranges of a table (each holds a count per backbone cell).
-const X_WIDE_MOST_PARTS: usize = 16;
+/// No NCBI counterpart: the bits of a digit of the radix sort of the sources (`x_wide_radix_order`):
+/// two passes over 1,024 counts for 4-letter words.
+const X_WIDE_RADIX_BITS: usize = 10;
 
-/// No NCBI counterpart: the least work of a table's source range, per backbone cell (`x_wide_table`).
-/// A range zeroes, sums and lays out a count per backbone cell (passes of about a nanosecond a
-/// cell), against several nanoseconds an append, so the ranges of a small table (short queries,
-/// many groups) cost more than they split. Measured (60 queries of 1.5-3 kb against a 0.6 Mb
-/// subject, 3 rounds): with a range per thread (up to 16) 0.80, 1.02 and 1.02 s at 8, 16 and 32
-/// threads (user 4.1, 8.0, 9.5 s); with one append a cell 0.74, 0.85 and 0.89 s (user 3.9, 5.1,
-/// 6.4 s); with two 0.82, 1.23 and 1.30 s (too few ranges). Two 0.6 Mb genomes at 8 threads: 1.98
-/// s against 2.15 (their tables take every range either way).
-const X_WIDE_RANGE_WORK_PER_CELL: u64 = 1;
+/// No NCBI counterpart: stripes of the backbone per pool thread (step 3; the pool's threads claim
+/// the stripes in turn, and the stripes' work differs with the cells' counts).
+const X_WIDE_STRIPES_PER_THREAD: usize = 4;
+
+/// No NCBI counterpart: the most counts a stripe holds while it runs (its cells times the tables,
+/// 256 KiB), which bounds a stripe's cells (at least 32).
+const X_WIDE_STRIPE_COUNTS: usize = 1 << 16;
 
 /// No NCBI counterpart: ranges of sources per pool thread for the lists T(s) (they differ in
 /// length; the pool's threads claim the ranges in turn).
 const X_WIDE_LIST_PARTS_PER_THREAD: usize = 4;
 
-/// No NCBI counterpart: the bit of a range's position that says the position is in the overflow
-/// array; without it the position is `(cell slot << 2) | entry`.
+/// No NCBI counterpart: the bit of a position in a stripe that says the position is in the stripe's
+/// part of the overflow array; without it the position is `(cell's slot in the stripe << 2) | entry`.
 const X_WIDE_IN_OVERFLOW: u32 = 1 << 31;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:103-105 (ComputeTableIndex,
@@ -204,10 +209,38 @@ fn x_wide_exact_words(
 }
 
 /// No NCBI counterpart: the matrix rows and row maxima the lists read (`info->matrix`,
-/// `info->row_max` of s_AddWordHits), as arrays of the alphabet's size.
+/// `info->row_max` of s_AddWordHits), as arrays of the alphabet's size, and each row's letters by
+/// descending score (`x_wide_neighbors`).
 struct XWideScores {
     rows: [[i32; LOOKUP_ALPHABET_SIZE]; LOOKUP_ALPHABET_SIZE],
     row_max: [i32; LOOKUP_ALPHABET_SIZE],
+    by_score: [[(i32, u8); LOOKUP_ALPHABET_SIZE]; LOOKUP_ALPHABET_SIZE],
+}
+
+impl XWideScores {
+    /// The rows of `matrix`, the row maxima `row_max`, and each row's letters by score.
+    fn new(matrix: ScoringMatrix, row_max: &[i32]) -> Self {
+        let mut scores = XWideScores {
+            rows: [[0; LOOKUP_ALPHABET_SIZE]; LOOKUP_ALPHABET_SIZE],
+            row_max: [0; LOOKUP_ALPHABET_SIZE],
+            by_score: [[(0, 0); LOOKUP_ALPHABET_SIZE]; LOOKUP_ALPHABET_SIZE],
+        };
+        for (a, (row, by_score)) in scores
+            .rows
+            .iter_mut()
+            .zip(scores.by_score.iter_mut())
+            .enumerate()
+        {
+            for (b, (score, entry)) in row.iter_mut().zip(by_score.iter_mut()).enumerate() {
+                *score = lookup_matrix_score(matrix, a, b);
+                *entry = (*score, b as u8);
+            }
+            // Descending score, equal scores in letter order (any order finds the same words).
+            by_score.sort_by_key(|&(score, b)| (std::cmp::Reverse(score), b));
+        }
+        scores.row_max.copy_from_slice(row_max);
+        scores
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:562-563,580-582,600-604
@@ -224,9 +257,12 @@ struct XWideScores {
 //             subject_word[current_pos] = i;
 //             s_AddWordHitsCore(info, score + row[i], current_pos + 1);
 // ```
-// The recursion of `x_record_neighbors` with the same tests in the same order; the letters chosen
-// so far are carried as their index (`prefix`, ComputeTableIndex's shifts over `subject_word`), so a
-// complete word's backbone index is `(prefix << charsize) | i`.
+// The recursion of `x_record_neighbors` with the same tests; the letters chosen so far are carried
+// as their index (`prefix`, ComputeTableIndex's shifts over `subject_word`), so a complete word's
+// backbone index is `(prefix << charsize) | i`. Each level takes the row's letters by descending
+// score (`XWideScores::by_score`) and stops at the first that fails `score + row[i] >= threshold`:
+// every later one fails it too. So the words are the C loops' words, in another order, which
+// changes no table (module comment, step 2).
 #[allow(clippy::too_many_arguments)]
 fn x_wide_neighbors(
     query_word: &[u8],
@@ -240,28 +276,30 @@ fn x_wide_neighbors(
 ) {
     let query_residue = query_word[current_pos] as usize;
     let score = score - scores.row_max[query_residue];
-    let row = &scores.rows[query_residue];
+    let by_score = &scores.by_score[query_residue];
     if current_pos == word_length - 1 {
-        for (residue, &residue_score) in row.iter().enumerate() {
-            if score + residue_score >= threshold {
-                out.push((prefix << X_WIDE_CHARSIZE) | residue as u32);
+        for &(residue_score, residue) in by_score {
+            if score + residue_score < threshold {
+                break;
             }
+            out.push((prefix << X_WIDE_CHARSIZE) | u32::from(residue));
         }
         return;
     }
-    for (residue, &residue_score) in row.iter().enumerate() {
-        if score + residue_score >= threshold {
-            x_wide_neighbors(
-                query_word,
-                word_length,
-                scores,
-                threshold,
-                score + residue_score,
-                current_pos + 1,
-                (prefix << X_WIDE_CHARSIZE) | residue as u32,
-                out,
-            );
+    for &(residue_score, residue) in by_score {
+        if score + residue_score < threshold {
+            break;
         }
+        x_wide_neighbors(
+            query_word,
+            word_length,
+            scores,
+            threshold,
+            score + residue_score,
+            current_pos + 1,
+            (prefix << X_WIDE_CHARSIZE) | u32::from(residue),
+            out,
+        );
     }
 }
 
@@ -327,11 +365,11 @@ fn x_wide_targets(
     }
 }
 
-/// No NCBI counterpart: table t's part of one source (step 1): source `i` (its index among the
-/// sources) and its offsets E_t(s), `offsets[from..to]`.
+/// No NCBI counterpart: table t's part of one source (step 1): its offsets E_t(s),
+/// `offsets[from..to]`.
 #[derive(Clone, Copy)]
-struct XWideSource {
-    i: u32,
+struct XWideRun {
+    t: u32,
     from: u32,
     to: u32,
 }
@@ -343,115 +381,162 @@ struct XWideSources {
     /// The offsets of the sources, by source, then by table, then in the order of the table's
     /// loop.
     offsets: Vec<i32>,
-    /// Source i's first offset (`offsets[first[i]]`), where its word is read.
-    first: Vec<u32>,
-    /// Each table's sources, in source order.
-    by_table: Vec<Vec<XWideSource>>,
+    /// The runs of source i, `runs[run_starts[i]..run_starts[i + 1]]`: one for each table with an
+    /// offset of the source, tables ascending.
+    runs: Vec<XWideRun>,
+    run_starts: Vec<u32>,
+}
+
+// No NCBI counterpart (the form of a stable sort): the order of `keys`, each below `2^bits`,
+// ascending, equal keys in their order: a least-significant-digit radix sort, digits of at most
+// `X_WIDE_RADIX_BITS` bits.
+/// The positions of `keys` sorted by key, stably.
+fn x_wide_radix_order(keys: &[u32], bits: usize) -> Vec<u32> {
+    let passes = bits.div_ceil(X_WIDE_RADIX_BITS).max(1);
+    let digit = bits.div_ceil(passes);
+    let mask = (1u32 << digit) - 1;
+    let mut order: Vec<u32> = (0..keys.len() as u32).collect();
+    let mut next: Vec<u32> = vec![0; keys.len()];
+    let mut at: Vec<usize> = vec![0; 1 << digit];
+    for pass in 0..passes {
+        let shift = pass * digit;
+        at.fill(0);
+        for &key in keys {
+            at[((key >> shift) & mask) as usize] += 1;
+        }
+        let mut sum = 0usize;
+        for slot in at.iter_mut() {
+            sum += std::mem::replace(slot, sum);
+        }
+        for &k in &order {
+            let d = ((keys[k as usize] >> shift) & mask) as usize;
+            next[at[d]] = k;
+            at[d] += 1;
+        }
+        std::mem::swap(&mut order, &mut next);
+    }
+    order
 }
 
 impl XWideSources {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-456 (cited at
     // `XPairLutQuery::x_build_group`): the exact backbone of each table's locations. No NCBI
-    // counterpart for the form (a counting sort, as `x_build_lean_in` makes it).
+    // counterpart for the form (a stable sort of the words by cell).
     /// The sources of the tables of `tables` (step 1).
-    fn new(
-        query: &[u8],
-        tables: &[Vec<(i32, i32)>],
-        word_length: usize,
-        backbone_size: usize,
-    ) -> Self {
+    fn new(query: &[u8], tables: &[Vec<(i32, i32)>], word_length: usize) -> Self {
         assert!(
-            tables.len() <= usize::from(u16::MAX) + 1,
+            u32::try_from(tables.len()).is_ok(),
             "joint lookup build: too many tables"
         );
-        let mut cursor: Vec<u32> = vec![0; backbone_size];
-        let mut words = 0usize;
-        for locations in tables {
-            x_wide_exact_words(query, locations, word_length, |idx, _| {
-                cursor[idx as usize] += 1;
-                words += 1;
+        // The words in the order of the loops: table by table, each in its loop's order.
+        let (mut keys, mut words, mut table_of) = (Vec::new(), Vec::new(), Vec::new());
+        for (t, locations) in tables.iter().enumerate() {
+            x_wide_exact_words(query, locations, word_length, |idx, offset| {
+                keys.push(idx);
+                words.push(offset);
+                table_of.push(t as u32);
             });
         }
         assert!(
-            words < u32::MAX as usize,
+            keys.len() < u32::MAX as usize,
             "joint lookup build: query words must fit 32 bits"
         );
+        let order = x_wide_radix_order(&keys, word_length * X_WIDE_CHARSIZE);
         let mut cells: Vec<u32> = Vec::new();
-        let mut starts: Vec<u32> = Vec::new();
-        let mut running = 0u32;
-        for (idx, slot) in cursor.iter_mut().enumerate() {
-            if *slot != 0 {
-                cells.push(idx as u32);
-                starts.push(running);
-                running += std::mem::replace(slot, running);
+        let mut offsets: Vec<i32> = Vec::with_capacity(order.len());
+        let mut runs: Vec<XWideRun> = Vec::new();
+        let mut run_starts: Vec<u32> = Vec::new();
+        for (at, &k) in order.iter().enumerate() {
+            let (k, at) = (k as usize, at as u32);
+            let (cell, t) = (keys[k], table_of[k]);
+            let new_source = cells.last() != Some(&cell);
+            if new_source {
+                cells.push(cell);
+                run_starts.push(runs.len() as u32);
             }
-        }
-        starts.push(running);
-        let mut offsets: Vec<i32> = vec![0; words];
-        let mut table_of: Vec<u16> = vec![0; words];
-        for (t, locations) in tables.iter().enumerate() {
-            x_wide_exact_words(query, locations, word_length, |idx, offset| {
-                let at = cursor[idx as usize] as usize;
-                offsets[at] = offset;
-                table_of[at] = t as u16;
-                cursor[idx as usize] += 1;
-            });
-        }
-        drop(cursor);
-        // Each source's offsets come table by table (the tables were walked in order), so table
-        // t's part of source i is one run.
-        let mut by_table: Vec<Vec<XWideSource>> = vec![Vec::new(); tables.len()];
-        for i in 0..cells.len() {
-            let (start, end) = (starts[i], starts[i + 1]);
-            let mut from = start;
-            while from < end {
-                let t = table_of[from as usize];
-                let mut to = from + 1;
-                while to < end && table_of[to as usize] == t {
-                    to += 1;
-                }
-                by_table[usize::from(t)].push(XWideSource {
-                    i: i as u32,
-                    from,
-                    to,
-                });
-                from = to;
+            // Equal cells keep the loops' order, so a source's offsets come table by table.
+            match runs.last_mut() {
+                Some(run) if !new_source && run.t == t => run.to += 1,
+                _ => runs.push(XWideRun {
+                    t,
+                    from: at,
+                    to: at + 1,
+                }),
             }
+            offsets.push(words[k]);
         }
-        starts.pop();
+        run_starts.push(runs.len() as u32);
         Self {
             cells,
             offsets,
-            first: starts,
-            by_table,
+            runs,
+            run_starts,
         }
     }
 
-    /// The offsets of `source` (E_t(s) of its table).
+    /// The runs of source `i`.
     #[inline(always)]
-    fn offsets(&self, source: XWideSource) -> &[i32] {
-        &self.offsets[source.from as usize..source.to as usize]
+    fn runs_of(&self, i: usize) -> &[XWideRun] {
+        &self.runs[self.run_starts[i] as usize..self.run_starts[i + 1] as usize]
+    }
+
+    /// The offsets of `run` (E_t(s) of its table).
+    #[inline(always)]
+    fn offsets(&self, run: XWideRun) -> &[i32] {
+        &self.offsets[run.from as usize..run.to as usize]
     }
 }
 
-/// No NCBI counterpart: the lists T(s) of the sources (step 2), made by ranges of sources: range
-/// r holds the sources `bounds[r]..bounds[r + 1]`, source i's list
-/// `targets[ends[j - 1]..ends[j]]` of its range (j = i - bounds[r], `ends[-1]` = 0).
+/// No NCBI counterpart: the stripes of the backbone (step 3): `1 << bits` cells each (`bits` >= 5:
+/// a stripe's presence-vector words are its own), `count` of them.
+#[derive(Clone, Copy)]
+struct XWideStripes {
+    bits: u32,
+    count: usize,
+}
+
+/// No NCBI counterpart: a range's lists T(s) by stripe (step 2): for stripe j,
+/// `words[starts[j]..starts[j + 1]]`, for the range's sources ascending, the cells of T(s) in the
+/// stripe, each as `(source's index in the range << stripes.bits) | cell's index in the stripe`;
+/// and, by table, the least and greatest offset of the range's sources with a target.
+struct XWideListPart {
+    words: Vec<u32>,
+    starts: Vec<u32>,
+    q_bounds: Vec<(u32, u32)>,
+}
+
+/// No NCBI counterpart: the lists T(s) of the sources (step 2), by ranges of sources: range r holds
+/// the sources `bounds[r]..bounds[r + 1]`.
 struct XWideLists {
     bounds: Vec<usize>,
-    parts: Vec<(Vec<u32>, Vec<usize>)>,
+    parts: Vec<XWideListPart>,
 }
 
 impl XWideLists {
-    /// T(s) of source `i`.
+    /// `visit(runs of s, cell's index in the stripe)` for each source s ascending and each cell of
+    /// T(s) in stripe `j` (in the ranges' order, which is the sources' order).
     #[inline(always)]
-    fn list(&self, i: u32) -> &[u32] {
-        let i = i as usize;
-        let r = self.bounds.partition_point(|&b| b <= i) - 1;
-        let (targets, ends) = &self.parts[r];
-        let j = i - self.bounds[r];
-        let from = if j == 0 { 0 } else { ends[j - 1] };
-        &targets[from..ends[j]]
+    fn for_each_in(
+        &self,
+        sources: &XWideSources,
+        stripes: XWideStripes,
+        j: usize,
+        mut visit: impl FnMut(&[XWideRun], usize),
+    ) {
+        let mask = (1u32 << stripes.bits) - 1;
+        for (part, &base) in self.parts.iter().zip(&self.bounds) {
+            let words = &part.words[part.starts[j] as usize..part.starts[j + 1] as usize];
+            let mut current = u32::MAX;
+            let mut runs: &[XWideRun] = &[];
+            for &word in words {
+                let i = word >> stripes.bits;
+                if i != current {
+                    current = i;
+                    runs = sources.runs_of(base + i as usize);
+                }
+                visit(runs, (word & mask) as usize);
+            }
+        }
     }
 }
 
@@ -507,60 +592,36 @@ fn x_wide_threads(on: XWideOn<'_, '_>) -> usize {
     }
 }
 
-/// No NCBI counterpart: where the ranges of step (d) write their appends (a table's backbone and
-/// overflow, written by the ranges side by side at disjoint positions).
-struct XWideOut {
-    backbone: *mut BackboneCell,
-    overflow: *mut i32,
-    #[cfg(debug_assertions)]
-    lens: (usize, usize),
-}
-
-// SAFETY: the ranges write through the pointers only, each at positions no other range writes
-// (`XWideOut::put`), while nothing else reads or writes the vectors.
-unsafe impl Sync for XWideOut {}
-
-impl XWideOut {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:74-76 (an append at the
-    // chain's end, cited in the module comment); the copy of BlastAaLookupFinalize
-    // (blast_aalookup.c:351-359, cited at `x_build_group`) to the cell's entries or the overflow.
-    /// Writes `src` at position `at`: with `X_WIDE_IN_OVERFLOW` the overflow from `at`'s other
-    /// bits, else the entries of the cell in slot `at >> 2` from entry `at & 3`.
-    ///
-    /// # Safety
-    /// The positions `at..at + src.len()` lie in one cell's entries or in the overflow, and no other
-    /// thread reads or writes them while this runs.
-    #[inline(always)]
-    unsafe fn put(&self, at: u32, src: &[i32]) {
-        let dst: *mut i32 = if at & X_WIDE_IN_OVERFLOW == 0 {
-            let (slot, entry) = ((at >> 2) as usize, (at & 3) as usize);
-            #[cfg(debug_assertions)]
-            debug_assert!(slot < self.lens.0 && entry + src.len() <= AA_HITS_PER_CELL);
-            // SAFETY: (caller) the slot is a cell of the backbone; no reference to it is made.
-            unsafe { std::ptr::addr_of_mut!((*self.backbone.add(slot)).entries) }
-                .cast::<i32>()
-                .wrapping_add(entry)
-        } else {
-            let at = (at & !X_WIDE_IN_OVERFLOW) as usize;
-            #[cfg(debug_assertions)]
-            debug_assert!(at + src.len() <= self.lens.1);
-            self.overflow.wrapping_add(at)
-        };
-        for (k, &offset) in src.iter().enumerate() {
-            // SAFETY: (caller) `dst..dst + src.len()` lies in the cell's entries or the overflow
-            // and is written by this call alone.
-            unsafe { dst.add(k).write(offset) };
-        }
-    }
-}
-
-/// No NCBI counterpart: the totals of a stripe of cells (step (b)): overflow entries, longest
-/// count, cells with entries.
+/// No NCBI counterpart: a table's totals in a stripe of cells (step 3 (a)): overflow entries,
+/// longest count, cells with entries.
 #[derive(Clone, Copy, Default)]
 struct XWideStripe {
     overflow: usize,
     longest: u32,
     used: usize,
+}
+
+/// No NCBI counterpart: a table being built (step 3 (b)): its vectors, the lengths they take, and
+/// its totals.
+struct XWideTable {
+    backbone: Vec<BackboneCell>,
+    overflow: Vec<i32>,
+    pv: Vec<u32>,
+    backbone_len: usize,
+    overflow_size: usize,
+    longest: u32,
+    compact: bool,
+}
+
+/// No NCBI counterpart: a table's part of a stripe of cells (step 3 (b)): its cells (all the
+/// stripe's, or, compacted, the stripe's cells with entries), its part of the overflow (cells
+/// ascending) and where that starts in the overflow, and the stripe's presence-vector words.
+struct XWidePlace<'a> {
+    cells: &'a mut [std::mem::MaybeUninit<BackboneCell>],
+    overflow: &'a mut [std::mem::MaybeUninit<i32>],
+    cursor_base: usize,
+    pv: &'a mut [u32],
+    compact: bool,
 }
 
 impl XPairLutQuery {
@@ -575,45 +636,33 @@ impl XPairLutQuery {
         pool: &crate::utils::threading::SearchPool<'_>,
         mapped: bool,
     ) -> Vec<XPairLutGroup> {
-        self.x_build_tables_wide_with(
-            tables,
-            XWideOn::Pool(pool),
-            mapped,
-            X_WIDE_RANGE_WORK_PER_CELL,
-            true,
-        )
+        self.x_build_tables_wide_with(tables, XWideOn::Pool(pool), mapped, None, true)
     }
 
     /// BLASTX's lookup table of 4-letter words (`-word_size 4`, item SC9 of line NP), whose backbone
     /// index the 16-bit direct builder does not cover: the table of one list of lookup locations,
     /// all of the query's, which is `build_lookup_from_prepared`'s table (module comment: the full
     /// table filtered to its own locations), in `BlastAaLookupFinalize`'s layout and never
-    /// compacted (BLASTX's scans index the whole backbone), built in at most `parts` tasks of the
-    /// pool the build runs on.
+    /// compacted (BLASTX's scans index the whole backbone), built in tasks for `parts` threads of
+    /// the pool the build runs on.
     pub(crate) fn x_build_full_wide(&self, parts: usize) -> BlastAaLookupTable {
         let tables = [self.prepared.lookup_locations.clone()];
-        let mut built = self.x_build_tables_wide_with(
-            &tables,
-            XWideOn::Here(parts),
-            false,
-            X_WIDE_RANGE_WORK_PER_CELL,
-            false,
-        );
+        let mut built =
+            self.x_build_tables_wide_with(&tables, XWideOn::Here(parts), false, None, false);
         debug_assert!(built.len() == 1 && built[0].rank.is_empty());
         built.pop().expect("one table").table
     }
 
-    // No NCBI counterpart (scheduling only): `x_build_tables_wide` with the least work of a source
-    // range per backbone cell as an argument (the unit tests take 0: as many ranges as threads, up to
-    // `X_WIDE_MOST_PARTS`, whatever a table's size).
-    /// `x_build_tables_wide` with `range_work` in place of `X_WIDE_RANGE_WORK_PER_CELL`, the tasks on
-    /// `on`, and tables compacted only where `compactable`.
+    // No NCBI counterpart (scheduling only): `x_build_tables_wide` with the stripes' size as an
+    // argument (the unit tests take stripes of 32 cells: as many stripes as the backbone holds).
+    /// `x_build_tables_wide` with stripes of `2^stripe_bits` cells where given, the tasks on `on`,
+    /// and tables compacted only where `compactable`.
     fn x_build_tables_wide_with(
         &self,
         tables: &[Vec<(i32, i32)>],
         on: XWideOn<'_, '_>,
         mapped: bool,
-        range_work: u64,
+        stripe_bits: Option<u32>,
         compactable: bool,
     ) -> Vec<XPairLutGroup> {
         let word_length = self.word_length;
@@ -628,24 +677,38 @@ impl XPairLutQuery {
         assert!(backbone_size < 1 << 29, "joint lookup build: backbone size");
         let query = &self.prepared.concat_query;
         let threads = x_wide_threads(on);
+        let groups = tables.len();
 
         // 1. The sources.
-        let sources = XWideSources::new(query, tables, word_length, backbone_size);
+        let sources = XWideSources::new(query, tables, word_length);
 
-        // 2. The lists T(s), once for every table.
-        let mut scores = XWideScores {
-            rows: [[0; LOOKUP_ALPHABET_SIZE]; LOOKUP_ALPHABET_SIZE],
-            row_max: [0; LOOKUP_ALPHABET_SIZE],
-        };
-        for (a, row) in scores.rows.iter_mut().enumerate() {
-            for (b, score) in row.iter_mut().enumerate() {
-                *score = lookup_matrix_score(self.matrix, a, b);
+        // The stripes: about `X_WIDE_STRIPES_PER_THREAD` a thread, a stripe's counts over its cells
+        // and the tables at most `X_WIDE_STRIPE_COUNTS` (step 3).
+        let stripes = {
+            let cells = (backbone_size / (threads * X_WIDE_STRIPES_PER_THREAD))
+                .min(X_WIDE_STRIPE_COUNTS / groups.max(1))
+                .max(1 << PV_ARRAY_BTS);
+            let bits = stripe_bits
+                .unwrap_or(cells.ilog2())
+                .max(PV_ARRAY_BTS as u32);
+            assert!(bits < 32, "joint lookup build: stripe of 2^{bits} cells");
+            XWideStripes {
+                bits,
+                count: backbone_size.div_ceil(1 << bits),
             }
-        }
-        scores.row_max.copy_from_slice(&self.row_max);
+        };
+        let stripe_len =
+            |j: usize| (1usize << stripes.bits).min(backbone_size - (j << stripes.bits));
+
+        // 2. The lists T(s) by stripe, once for every table. A range numbers its sources in the
+        // bits above a stripe's cell, so it holds fewer than 2^(32 - bits).
+        let scores = XWideScores::new(self.matrix, &self.row_max);
         let n = sources.cells.len();
-        let parts = (threads * X_WIDE_LIST_PARTS_PER_THREAD).min(n).max(1);
-        let bounds: Vec<usize> = (0..=parts).map(|r| n * r / parts).collect();
+        let ranges = (threads * X_WIDE_LIST_PARTS_PER_THREAD)
+            .max(n.div_ceil(1usize << (32 - stripes.bits)))
+            .min(n)
+            .max(1);
+        let bounds: Vec<usize> = (0..=ranges).map(|r| n * r / ranges).collect();
         let threshold = self.threshold;
         let made = x_wide_parts(
             on,
@@ -653,10 +716,13 @@ impl XPairLutQuery {
             &|range: std::ops::Range<usize>| {
                 let mut targets: Vec<u32> = Vec::new();
                 let mut ends: Vec<usize> = Vec::with_capacity(range.len());
+                let mut q_bounds = vec![(u32::MAX, 0u32); groups];
                 for i in range {
+                    let runs = sources.runs_of(i);
                     // blast_aalookup.c:490: w = query + offset_list[2];
-                    let first = usize::try_from(sources.offsets[sources.first[i] as usize])
+                    let first = usize::try_from(sources.offsets[runs[0].from as usize])
                         .expect("NCBI BLAST query offset must fit");
+                    let before = targets.len();
                     x_wide_targets(
                         &query[first..],
                         word_length,
@@ -665,309 +731,285 @@ impl XPairLutQuery {
                         &mut targets,
                     );
                     ends.push(targets.len());
+                    if targets.len() > before {
+                        for &run in runs {
+                            let (q_min, q_max) = &mut q_bounds[run.t as usize];
+                            for &q in sources.offsets(run) {
+                                *q_min = (*q_min).min(q as u32);
+                                *q_max = (*q_max).max(q as u32);
+                            }
+                        }
+                    }
                 }
-                targets.shrink_to_fit();
-                (targets, ends)
+                assert!(
+                    u32::try_from(targets.len()).is_ok(),
+                    "joint lookup build: a range's lists must fit 32 bits"
+                );
+                // The cells by stripe: counted, then placed, each stripe's in source order.
+                let mut starts: Vec<u32> = vec![0; stripes.count + 1];
+                for &w in &targets {
+                    starts[(w >> stripes.bits) as usize + 1] += 1;
+                }
+                for j in 0..stripes.count {
+                    starts[j + 1] += starts[j];
+                }
+                let mut at: Vec<u32> = starts[..stripes.count].to_vec();
+                let mut words: Vec<u32> = vec![0; targets.len()];
+                let mask = (1u32 << stripes.bits) - 1;
+                let mut from = 0usize;
+                for (k, &end) in ends.iter().enumerate() {
+                    let source = (k as u32) << stripes.bits;
+                    for &w in &targets[from..end] {
+                        let j = (w >> stripes.bits) as usize;
+                        words[at[j] as usize] = source | (w & mask);
+                        at[j] += 1;
+                    }
+                    from = end;
+                }
+                XWideListPart {
+                    words,
+                    starts,
+                    q_bounds,
+                }
             },
         );
         let lists = XWideLists {
             bounds,
             parts: made,
         };
-
-        // 3. Each table, its counts kept from one table to the next.
-        let mut counts: Vec<u32> = Vec::new();
-        sources
-            .by_table
-            .iter()
-            .map(|table_sources| {
-                self.x_wide_table(
-                    table_sources,
-                    &sources,
-                    &lists,
-                    &mut counts,
-                    (on, threads),
-                    (backbone_size, mapped, range_work, compactable),
-                )
-            })
-            .collect()
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:283-299,338-358 (cited at
-    // `x_build_group`): the counts, the cells' layout and the copy of the chains.
-    /// One table of `x_build_tables_wide` from its sources `table_sources` (steps (a)-(d)).
-    fn x_wide_table(
-        &self,
-        table_sources: &[XWideSource],
-        sources: &XWideSources,
-        lists: &XWideLists,
-        counts: &mut Vec<u32>,
-        (on, threads): (XWideOn<'_, '_>, usize),
-        (backbone_size, mapped, range_work, compactable): (usize, bool, u64, bool),
-    ) -> XPairLutGroup {
-        let word_length = self.word_length;
-        let alphabet_size = LOOKUP_ALPHABET_SIZE;
-        let charsize = X_WIDE_CHARSIZE;
-        // The ranges: range p ends at the first source whose work so far reaches total * (p + 1) /
-        // P (the work of a source: its list, read in (a) and (d), and its appends in (d)). Each
-        // range costs passes over a count per backbone cell ((a)-(c)), so a table takes no more
-        // ranges than its work pays for (`X_WIDE_RANGE_WORK_PER_CELL`).
-        let work =
-            |s: &XWideSource| (lists.list(s.i).len() as u64 + 1) * (u64::from(s.to - s.from) + 1);
-        let total: u64 = table_sources.iter().map(work).sum();
-        let paid = total
-            .checked_div(range_work * backbone_size as u64)
-            .unwrap_or(u64::MAX);
-        let parts = threads
-            .min(X_WIDE_MOST_PARTS)
-            .min(usize::try_from(paid).unwrap_or(usize::MAX))
-            .min(table_sources.len())
-            .max(1);
-        let mut bounds: Vec<usize> = vec![table_sources.len(); parts + 1];
-        bounds[0] = 0;
-        let (mut cut, mut so_far) = (1usize, 0u64);
-        for (j, s) in table_sources.iter().enumerate() {
-            if cut == parts {
-                break;
-            }
-            so_far += work(s);
-            while cut < parts && so_far * parts as u64 >= total * cut as u64 {
-                bounds[cut] = j + 1;
-                cut += 1;
+        let mut q_bounds = vec![(u32::MAX, 0u32); groups];
+        for part in &lists.parts {
+            for (bound, &(q_min, q_max)) in q_bounds.iter_mut().zip(&part.q_bounds) {
+                bound.0 = bound.0.min(q_min);
+                bound.1 = bound.1.max(q_max);
             }
         }
-        let ranges = || bounds.windows(2).map(|b| &table_sources[b[0]..b[1]]);
-        // Each range zeroes its own counts in (a).
-        counts.truncate(parts * backbone_size);
-        counts.resize(parts * backbone_size, 0);
 
-        // (a) Each range's appends per cell, and the bounds of the entries of its sources with a
-        // target.
-        let bounds_of: Vec<(u32, u32)> = x_wide_parts(
-            on,
-            counts.chunks_mut(backbone_size).zip(ranges()).collect(),
-            &|(c, range): (&mut [u32], &[XWideSource])| {
-                c.fill(0);
-                let (mut q_min, mut q_max) = (u32::MAX, 0u32);
-                for &s in range {
-                    let list = lists.list(s.i);
-                    let k = s.to - s.from;
-                    for &w in list {
-                        c[w as usize] += k;
-                    }
-                    if !list.is_empty() {
-                        for &q in sources.offsets(s) {
-                            q_min = q_min.min(q as u32);
-                            q_max = q_max.max(q as u32);
-                        }
-                    }
-                }
-                (q_min, q_max)
-            },
-        );
-        let q_min = bounds_of.iter().map(|b| b.0).min().unwrap_or(u32::MAX);
-        let q_max = bounds_of.iter().map(|b| b.1).max().unwrap_or(0);
-
-        // (b) The stripes' totals.
-        let counted: &[u32] = counts;
-        let stripe = backbone_size.div_ceil(parts).next_multiple_of(32);
-        let stripes = backbone_size.div_ceil(stripe);
-        let summed: Vec<XWideStripe> = x_wide_parts(on, (0..stripes).collect(), &|j: usize| {
-            let cells = j * stripe..((j + 1) * stripe).min(backbone_size);
-            let mut totals = XWideStripe::default();
-            for w in cells {
-                let count: u32 = (0..parts).map(|p| counted[p * backbone_size + w]).sum();
-                if count == 0 {
-                    continue;
-                }
-                totals.used += 1;
-                if count as usize > AA_HITS_PER_CELL {
-                    totals.overflow += count as usize;
-                }
-                totals.longest = totals.longest.max(count);
-            }
-            totals
-        });
-        let overflow_size: usize = summed.iter().map(|s| s.overflow).sum();
-        let used: usize = summed.iter().map(|s| s.used).sum();
-        let longest_chain = i32::try_from(summed.iter().map(|s| s.longest).max().unwrap_or(0))
-            .expect("NCBI BLAST lookup chain hit count must fit Int4");
-        // The ranges' positions are absolute `u32`s beside the flag, so the joint builder takes
-        // fewer than 2^31 overflow entries. Positions within each cell's run (the other builders'
-        // form) cost this build 2 % more instructions and 10-17 % more time at word size 4
-        // (P-S2, LIB DECISIONS 21); NCBI's `Int4` cursor overflows at the same size.
-        assert!(
-            overflow_size < X_WIDE_IN_OVERFLOW as usize,
-            "TBLASTX's lookup table of 4-letter words is limited to 2^31 - 1 overflow entries"
-        );
-
-        // (c) The layout: BlastAaLookupFinalize's rule, compacted where the branch-free scan takes
-        // the table (`x_scan_bf_takes`, as `x_build_group` decides).
-        let compact = compactable
-            && crate::algorithm::tblastx::x_scan_bf::x_scan_bf_takes(used, backbone_size);
-        let backbone_len = if compact { used } else { backbone_size };
-        let mut backbone: Vec<BackboneCell> =
-            Vec::with_capacity(x_group_capacity::<BackboneCell>(backbone_len, mapped));
-        let mut overflow: Vec<i32> =
-            Vec::with_capacity(x_group_capacity::<i32>(overflow_size, mapped));
-        let pv_size = (backbone_size >> PV_ARRAY_BTS) + 1;
-        let mut pv: Vec<u32> = vec![0u32; pv_size];
-        {
-            // Each stripe's columns of counts, its cells (kept ones only when compacted), its pv
-            // words (a stripe is a multiple of 32 cells) and its part of the overflow.
-            let mut columns: Vec<Vec<&mut [u32]>> =
-                (0..stripes).map(|_| Vec::with_capacity(parts)).collect();
-            for c in counts.chunks_mut(backbone_size) {
-                for (column, part) in columns.iter_mut().zip(c.chunks_mut(stripe)) {
-                    column.push(part);
-                }
-            }
-            let mut cells_left = &mut backbone.spare_capacity_mut()[..backbone_len];
-            let mut overflow_left = &mut overflow.spare_capacity_mut()[..overflow_size];
-            let mut pv_left = &mut pv[..];
-            let mut placed = Vec::with_capacity(stripes);
-            let (mut slot_base, mut cursor_base) = (0usize, 0usize);
-            for (j, (column, totals)) in columns.into_iter().zip(&summed).enumerate() {
-                let first = j * stripe;
-                let len = (stripe).min(backbone_size - first);
-                let kept = if compact { totals.used } else { len };
-                let (cells, rest) = std::mem::take(&mut cells_left).split_at_mut(kept);
-                cells_left = rest;
-                let (part, rest) = std::mem::take(&mut overflow_left).split_at_mut(totals.overflow);
-                overflow_left = rest;
-                let words = (stripe >> PV_ARRAY_BTS).min(pv_left.len());
-                let (pv_part, rest) = std::mem::take(&mut pv_left).split_at_mut(words);
-                pv_left = rest;
-                placed.push((
-                    (first, slot_base, cursor_base),
-                    column,
-                    cells,
-                    part,
-                    pv_part,
-                ));
-                slot_base += if compact { totals.used } else { len };
-                cursor_base += totals.overflow;
-            }
-            debug_assert!(cells_left.is_empty() && overflow_left.is_empty());
-            x_wide_parts(on, placed, &|(
-                (first, slot_base, mut cursor),
-                mut column,
-                cells,
-                part,
-                pv_part,
-            ): (
-                (usize, usize, usize),
-                Vec<&mut [u32]>,
-                &mut [std::mem::MaybeUninit<BackboneCell>],
-                &mut [std::mem::MaybeUninit<i32>],
-                &mut [u32],
-            )| {
-                let len = column[0].len();
-                let mut kept = 0usize;
-                for local in 0..len {
-                    let count: u32 = column.iter().map(|c| c[local]).sum();
-                    if count == 0 {
-                        if !compact {
-                            cells[local].write(BackboneCell::default());
-                        }
-                        continue;
-                    }
-                    // pv_set at the stripe's first cell + local (a multiple of 32).
-                    pv_part[local >> PV_ARRAY_BTS] |=
-                        1u32 << (local & crate::algorithm::tblastx::lookup::PV_ARRAY_MASK);
-                    let (at_cell, slot) = if compact {
-                        kept += 1;
-                        (kept - 1, slot_base + kept - 1)
-                    } else {
-                        (local, first + local)
-                    };
-                    let mut cell = BackboneCell {
-                        num_used: count as i32,
-                        ..BackboneCell::default()
-                    };
-                    let mut at = if count as usize > AA_HITS_PER_CELL {
-                        cell.set_cursor(cursor);
-                        cursor += count as usize;
-                        (cursor - count as usize) as u32 | X_WIDE_IN_OVERFLOW
-                    } else {
-                        (slot as u32) << 2
-                    };
-                    cells[at_cell].write(cell);
-                    for c in column.iter_mut() {
-                        let n = c[local];
-                        c[local] = at;
-                        at += n;
-                    }
-                }
-                debug_assert!(!compact || kept == cells.len());
-                // The overflow's entries are all written in (d); zeroed here first, by the
-                // stripes side by side.
-                for entry in part.iter_mut() {
-                    entry.write(0);
+        // 3 (a). The counts of stripe j's cells, table after table (`stripe_len(j)` each), and
+        // each table's totals in the stripe.
+        let count_stripe = |j: usize, counts: &mut [u32]| {
+            let len = stripe_len(j);
+            lists.for_each_in(&sources, stripes, j, |runs, w| {
+                for run in runs {
+                    counts[run.t as usize * len + w] += run.to - run.from;
                 }
             });
-        }
-        // SAFETY: (c) wrote every cell of the backbone (each stripe its `kept` cells: all of its
-        // cells, or, compacted, its cells with entries, which `summed` counted) and every entry of
-        // the overflow (each stripe its part, the parts' sizes summing to `overflow_size`).
-        unsafe {
-            backbone.set_len(backbone_len);
-            overflow.set_len(overflow_size);
+        };
+        let totals: Vec<Vec<XWideStripe>> =
+            x_wide_parts(on, (0..stripes.count).collect(), &|j: usize| {
+                let len = stripe_len(j);
+                let mut counts: Vec<u32> = vec![0; groups * len];
+                count_stripe(j, &mut counts);
+                counts
+                    .chunks(len)
+                    .map(|counts| {
+                        let mut totals = XWideStripe::default();
+                        for &count in counts {
+                            if count == 0 {
+                                continue;
+                            }
+                            totals.used += 1;
+                            if count as usize > AA_HITS_PER_CELL {
+                                totals.overflow += count as usize;
+                            }
+                            totals.longest = totals.longest.max(count);
+                        }
+                        totals
+                    })
+                    .collect()
+            });
+
+        // 3 (b). Each table: its size and layout (BlastAaLookupFinalize's rule, compacted where
+        // the branch-free scan takes the table: `x_scan_bf_takes`, as `x_build_group` decides),
+        // and its parts of the stripes, cells ascending.
+        let pv_size = (backbone_size >> PV_ARRAY_BTS) + 1;
+        let mut built: Vec<XWideTable> = (0..groups)
+            .map(|t| {
+                let (mut overflow_size, mut used, mut longest) = (0usize, 0usize, 0u32);
+                for stripe in &totals {
+                    overflow_size += stripe[t].overflow;
+                    used += stripe[t].used;
+                    longest = longest.max(stripe[t].longest);
+                }
+                // The positions in a stripe's part of the overflow are `u32`s beside the flag, and
+                // NCBI's `Int4` cursor overflows at the same size.
+                assert!(
+                    overflow_size < X_WIDE_IN_OVERFLOW as usize,
+                    "TBLASTX's lookup table of 4-letter words is limited to 2^31 - 1 overflow entries"
+                );
+                let compact = compactable
+                    && crate::algorithm::tblastx::x_scan_bf::x_scan_bf_takes(used, backbone_size);
+                let backbone_len = if compact { used } else { backbone_size };
+                XWideTable {
+                    backbone: Vec::with_capacity(x_group_capacity::<BackboneCell>(
+                        backbone_len,
+                        mapped,
+                    )),
+                    overflow: Vec::with_capacity(x_group_capacity::<i32>(overflow_size, mapped)),
+                    pv: vec![0u32; pv_size],
+                    backbone_len,
+                    overflow_size,
+                    longest,
+                    compact,
+                }
+            })
+            .collect();
+        let mut places: Vec<Vec<XWidePlace<'_>>> = (0..stripes.count)
+            .map(|_| Vec::with_capacity(groups))
+            .collect();
+        for (t, table) in built.iter_mut().enumerate() {
+            let mut cells_left = &mut table.backbone.spare_capacity_mut()[..table.backbone_len];
+            let mut overflow_left = &mut table.overflow.spare_capacity_mut()[..table.overflow_size];
+            let mut pv_left = &mut table.pv[..];
+            let mut cursor_base = 0usize;
+            for (j, (stripe, place)) in totals.iter().zip(places.iter_mut()).enumerate() {
+                let len = stripe_len(j);
+                let kept = if table.compact { stripe[t].used } else { len };
+                let (cells, rest) = std::mem::take(&mut cells_left).split_at_mut(kept);
+                cells_left = rest;
+                let (overflow, rest) =
+                    std::mem::take(&mut overflow_left).split_at_mut(stripe[t].overflow);
+                overflow_left = rest;
+                // A stripe starts at a multiple of 32 cells; the last takes the words left.
+                let words = len.div_ceil(1 << PV_ARRAY_BTS).min(pv_left.len());
+                let (pv, rest) = std::mem::take(&mut pv_left).split_at_mut(words);
+                pv_left = rest;
+                place.push(XWidePlace {
+                    cells,
+                    overflow,
+                    cursor_base,
+                    pv,
+                    compact: table.compact,
+                });
+                cursor_base += stripe[t].overflow;
+            }
+            debug_assert!(cells_left.is_empty() && overflow_left.is_empty());
         }
 
-        // (d) The appends.
-        let out = XWideOut {
-            backbone: backbone.as_mut_ptr(),
-            overflow: overflow.as_mut_ptr(),
-            #[cfg(debug_assertions)]
-            lens: (backbone_len, overflow_size),
-        };
+        // 3 (c). Each stripe: its counts again, its cells, each cell's first position, then the
+        // appends.
         x_wide_parts(
             on,
-            counts.chunks_mut(backbone_size).zip(ranges()).collect(),
-            &|(at, range): (&mut [u32], &[XWideSource])| {
-                for &s in range {
-                    let src = sources.offsets(s);
-                    for &w in lists.list(s.i) {
-                        let w = w as usize;
-                        // SAFETY: by (c), range p's appends to cell w take the positions from
-                        // at[w] (its first) for c_p[w] offsets, inside the cell's entries or its
-                        // part of the overflow, after the ranges before p and before the ranges
-                        // after p; the cells' parts of the overflow are disjoint. So no two tasks
-                        // write a position, and the vectors are read or written by nothing else
-                        // until the tasks end.
-                        unsafe { out.put(at[w], src) };
-                        at[w] += src.len() as u32;
+            places.into_iter().enumerate().collect(),
+            &|(j, place): (usize, Vec<XWidePlace<'_>>)| {
+                let len = stripe_len(j);
+                let mut counts: Vec<u32> = vec![0; groups * len];
+                count_stripe(j, &mut counts);
+                let mut cells: Vec<&mut [BackboneCell]> = Vec::with_capacity(groups);
+                let mut overflows: Vec<&mut [std::mem::MaybeUninit<i32>]> =
+                    Vec::with_capacity(groups);
+                for (place, counts) in place.into_iter().zip(counts.chunks_mut(len)) {
+                    let mut kept = 0usize;
+                    let mut cursor = 0usize;
+                    for (local, at) in counts.iter_mut().enumerate() {
+                        let count = *at;
+                        if count == 0 {
+                            if !place.compact {
+                                place.cells[local].write(BackboneCell::default());
+                            }
+                            continue;
+                        }
+                        // pv_set at the stripe's first cell (a multiple of 32) + local.
+                        place.pv[local >> PV_ARRAY_BTS] |=
+                            1u32 << (local & crate::algorithm::tblastx::lookup::PV_ARRAY_MASK);
+                        let slot = if place.compact {
+                            kept += 1;
+                            kept - 1
+                        } else {
+                            local
+                        };
+                        let mut cell = BackboneCell {
+                            num_used: count as i32,
+                            ..BackboneCell::default()
+                        };
+                        *at = if count as usize > AA_HITS_PER_CELL {
+                            cell.set_cursor(place.cursor_base + cursor);
+                            cursor += count as usize;
+                            (cursor - count as usize) as u32 | X_WIDE_IN_OVERFLOW
+                        } else {
+                            (slot as u32) << 2
+                        };
+                        place.cells[slot].write(cell);
                     }
+                    debug_assert!(!place.compact || kept == place.cells.len());
+                    debug_assert_eq!(cursor, place.overflow.len());
+                    let n = place.cells.len();
+                    // SAFETY: the loop wrote every cell of `place.cells` (all the stripe's, or,
+                    // compacted, its cells with entries, which `kept` counts and the totals sized).
+                    cells.push(unsafe {
+                        std::slice::from_raw_parts_mut(
+                            place.cells.as_mut_ptr().cast::<BackboneCell>(),
+                            n,
+                        )
+                    });
+                    overflows.push(place.overflow);
                 }
+                // The appends: a cell's position advances by the offsets written, from the
+                // cell's first position, over the walk the counts took.
+                lists.for_each_in(&sources, stripes, j, |runs, w| {
+                    for &run in runs {
+                        let t = run.t as usize;
+                        let src = sources.offsets(run);
+                        let at = &mut counts[t * len + w];
+                        if *at & X_WIDE_IN_OVERFLOW == 0 {
+                            let (slot, entry) = ((*at >> 2) as usize, (*at & 3) as usize);
+                            cells[t][slot].entries[entry..entry + src.len()].copy_from_slice(src);
+                        } else {
+                            let from = (*at & !X_WIDE_IN_OVERFLOW) as usize;
+                            for (entry, &q) in
+                                overflows[t][from..from + src.len()].iter_mut().zip(src)
+                            {
+                                entry.write(q);
+                            }
+                        }
+                        *at += src.len() as u32;
+                    }
+                });
             },
         );
 
-        let rank = if compact {
-            crate::algorithm::tblastx::x_scan_bf::x_rank(&pv)
-        } else {
-            Vec::new()
-        };
-        XPairLutGroup {
-            q_min: if longest_chain > 0 { q_min } else { 0 },
-            q_max,
-            rank,
-            table: BlastAaLookupTable {
-                backbone,
-                overflow,
-                pv,
-                frame_bases: self.prepared.frame_bases.clone(),
-                num_contexts: self.prepared.contexts.len(),
-                query_length: self.query_length,
-                word_length: word_length as i32,
-                alphabet_size: alphabet_size as i32,
-                charsize: charsize as i32,
-                mask: compute_mask(word_length, charsize) as i32,
-                longest_chain,
-                threshold: self.threshold,
-                row_max: self.row_max.clone(),
-            },
-        }
+        built
+            .into_iter()
+            .zip(q_bounds)
+            .map(|(mut table, (q_min, q_max))| {
+                // SAFETY: 3 (c) wrote every cell of the backbone (each stripe its part: all its
+                // cells, or, compacted, its cells with entries, which the totals counted) and
+                // every entry of the overflow (each overflow cell of a stripe its count of entries
+                // from its cursor, the walk of the appends being the walk of the counts; the cells'
+                // runs cover the stripe's part, and the parts the overflow).
+                unsafe {
+                    table.backbone.set_len(table.backbone_len);
+                    table.overflow.set_len(table.overflow_size);
+                }
+                let longest_chain = i32::try_from(table.longest)
+                    .expect("NCBI BLAST lookup chain hit count must fit Int4");
+                let rank = if table.compact {
+                    crate::algorithm::tblastx::x_scan_bf::x_rank(&table.pv)
+                } else {
+                    Vec::new()
+                };
+                XPairLutGroup {
+                    q_min: if longest_chain > 0 { q_min } else { 0 },
+                    q_max,
+                    rank,
+                    table: BlastAaLookupTable {
+                        backbone: table.backbone,
+                        overflow: table.overflow,
+                        pv: table.pv,
+                        frame_bases: self.prepared.frame_bases.clone(),
+                        num_contexts: self.prepared.contexts.len(),
+                        query_length: self.query_length,
+                        word_length: word_length as i32,
+                        alphabet_size: alphabet_size as i32,
+                        charsize: charsize as i32,
+                        mask: compute_mask(word_length, charsize) as i32,
+                        longest_chain,
+                        threshold: self.threshold,
+                        row_max: self.row_max.clone(),
+                    },
+                }
+            })
+            .collect()
     }
 }
 
@@ -1096,11 +1138,15 @@ mod tests {
             .expect("every location inside one group");
         let wide = q.x_build_tables_wide(&locations, pool, true);
         assert_eq!(wide.len(), starts.len());
-        // As many source ranges as the pool has threads (up to `X_WIDE_MOST_PARTS`), whatever the
-        // tables' size: the same tables.
-        let ranged = q.x_build_tables_wide_with(&locations, XWideOn::Pool(pool), true, 0, true);
+        // Stripes of 32 cells (as many as the backbone holds), whatever the threads: the same
+        // tables.
+        let ranged =
+            q.x_build_tables_wide_with(&locations, XWideOn::Pool(pool), true, Some(5), true);
         for (g, (a, b)) in wide.iter().zip(&ranged).enumerate() {
-            assert_eq!(a.rank, b.rank, "table {g}: rank differs with every range");
+            assert_eq!(
+                a.rank, b.rank,
+                "table {g}: rank differs with stripes of 32 cells"
+            );
             x_assert_same_group(
                 g,
                 &b.table,

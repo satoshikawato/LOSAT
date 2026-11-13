@@ -25,6 +25,13 @@ over `db/m/pmg`, whose PIGs' OIDs the ranges leave out (`A52`: approved differen
 its `%s` run): `make_d1a2_blastdbcmd.py`. `A59`-`A65` (D1a-2) are `-info` and `-entry all` on alias files with `NSEQ`,
 `LENGTH`, `STATS_NSEQ` and `STATS_TOTLEN` (`db/ak/e_*`) over volumes of no OID: `db/ak/ep` (a copy of `seqdb/db/empty`) and
 `db/ak/en` (a nucleotide index of no sequence).
+`A66`-`A182` (D1a-2 part 2, 2026-11-13) are the same build on the blastdbcmd commands of the probe cases `p4a_*` of
+`remaining-gaps-20261112/D/SURVEY_D1a2_A.md` (`FIRST_OID` / `LAST_OID` of 2^31 or more, the iteration range of the only
+alias file of a `-db` with another database) over `db/ak/or/`: the cases' alias files (`<case>_<name>.pal|nal`), copies of
+`tfp`, `tfn` and its volumes from `LOSAT/tests/db_search/taxfilter`, and `o` (ten sequences of `tfp` as `lcl|o0`..`lcl|o9`,
+taxid 10116, NCBI BLAST+ 2.17.0 makeblastdb, `remaining-gaps-20261112/D/fixtures/build_o.sh`), batch files
+`in/or_<case>_*.txt`; `-taxids` with `-no_taxid_expansion`. `A183`-`A190` are GIs of `p5` through `db/ak/p_range` and
+`in/or_gi.txt`: `make_d1a2a_fixtures.py`.
 `U01`, `U03` and `U04` (line SW, SW8, 2026-11-08) are NCBI BLAST+ 2.17.0 blastdbcmd on the
 developer machine, run with the words of the tests from the `blastdbcmd` directory of a copy of
 this layout whose `seqdb/db` held the five files of `user-column-db`

@@ -1249,6 +1249,19 @@ the version 4 `multidb/n4a` (`Taxonomy filtering is not supported in v4 BLAST db
 `dh`, a copy of `multidb/p4a` whose header file is 4,096 bytes of 0xff (the alias file's error, before any header is
 read). Frozen with the release build on the developer machine (the `CStringException` texts carry its path).
 
+Rows `db.oir.*` (D1a-2 part 2, `remaining-gaps-20261112/D/SURVEY_D1a2_A.md`, `remaining-gaps-20261112/D/fixtures/make_d1a2a_fixtures.py`
+and `build_o.sh`): the probe cases `p4a_*` of that survey, each command of a search program a row (the row id ends with the
+command's index in the probe case; the commands with `-num_threads 4` are left out, the harness runs each row at 1 and 4
+threads; `-taxids` and `-negative_taxids` with `-no_taxid_expansion`). `oidrange/` holds the cases' alias files
+(`<case>_<name>.pal|nal`, over `../taxfilter/tfp`, `tfn`, `tfn.00` and `o`) and `o`: `o.faa`, ten sequences of `tfp` as
+`lcl|o0`..`lcl|o9`, made with NCBI BLAST+ 2.17.0 `makeblastdb -in o.faa -dbtype prot -out o -parse_seqids -blastdb_version 5
+-taxid 10116 -title o`; NCBI sorts the volumes by name, so `o` holds the OIDs 0-9 and `tfp` 10-32 wherever both are in a
+`-db`. `FIRST_OID` and `LAST_OID` of 2^31 or more (NCBI's negative `int`s: a negative first OID keeps no OID, a negative last
+OID is no bound and ends the iteration range at 0, `FIRST_OID 2147483648` gives `INT_MAX`), and the iteration range of the only
+alias file of a `-db` with another database or volume (a search reads the listed OIDs inside it; with `-taxids` or
+`-seqidlist` every listed OID, and the statistics count NCBI's loop over the list, which can pass the first listed OID and the
+OID at the range's end). Frozen with the release build on the developer machine (2026-11-13).
+
 ## psiblast's id options (line RG, series Q, Q1)
 
 - `q1_sq1` (protein, version 5): `makeblastdb -in tests/fasta/psiblast/q1_subj_q1.faa -dbtype prot -parse_seqids

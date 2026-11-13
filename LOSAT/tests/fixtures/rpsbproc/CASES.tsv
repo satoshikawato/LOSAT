@@ -368,7 +368,18 @@ x.h_ntqlen1500.both	compare	-	data-with:nt	-i arch/x_h_n_qlen1500.xml -d nt -t b
 refuse_xattr	refuse	-	-	-i arch/x_h_p_attr.xml -d data -t doms
 refuse_xns	refuse	-	-	-i arch/x_h_p_ns.xml -d data -t doms
 refuse_xctrl	refuse	-	-	-i arch/x_h_p_def_ctrl.xml -d data -t doms
-refuse_xevalnan	refuse	-	-	-i arch/x_h_p_evalnan.xml -d data -t both
 refuse_xhshort2	refuse	-	-	-i arch/x_h_p_hshort2.xml -d data -t both
 refuse_xqlenneg	refuse	-	-	-i arch/x_h_p_qlenneg.xml -d data -t both
 refuse_xntqlen1	refuse	-	data-with:nt	-i arch/x_h_n_qlen1.xml -d nt -t doms -m std
+x.h_nanexpect.doms	compare	-	-	-i arch/x_h_p_nanexpect.xml -d data -t doms -m std
+x.h_bitnan.both	compare	-	-	-i arch/x_h_p_bitnan.xml -d data -t both
+x.h_evalnan.both	compare	-	-	-i arch/x_h_p_evalnan.xml -d data -t both
+x.h_tnan3.full	compare	-	-	-i arch/x_h_t_nan3.xml -d data -t doms -m full
+x.h_tnan3.both	compare	-	-	-i arch/x_h_t_nan3.xml -d data -t both
+x.h_ntnanthird.full	compare	-	data-with:nt	-i arch/x_h_n_nanthird.xml -d nt -t doms -m full -e 10
+x.h_ntnanthird.both	compare	-	data-with:nt	-i arch/x_h_n_nanthird.xml -d nt -t both -e 10
+x.h_ntnanall.full	compare	-	data-with:nt	-i arch/x_h_n_nanall.xml -d nt -t doms -m full -e 10
+x.h_ntbitnan.both	compare	-	data-with:nt	-i arch/x_h_n_bitnan.xml -d nt -t both -m full -e 10
+nan_threshold	compare	-	-	-i arch/bad/a_nan.asn -d data -t doms -m std
+nan_hit	compare	-	-	-i arch/bad/a_nanhit.asn -d data -t both
+refuse_xcoordmin	refuse	-	-	-i arch/x_h_p_coordmin.xml -d data -t doms

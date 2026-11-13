@@ -184,7 +184,17 @@ fn numbers() {
     };
     assert_eq!(real(" 5.04742e-43 "), Ok(Some(5.04742e-43)));
     assert_eq!(real(""), Ok(Some(0.0)));
-    assert!(real("nan").unwrap().unwrap().is_nan());
+    // `nan` and `-nan` are NCBI's `HUGE_VAL/HUGE_VAL`, sign set (printed `-nan`; review oracles
+    // O1 `x_nan`, `x_mnan`).
+    for text in ["nan", "-nan", "NaN"] {
+        let value = real(text).unwrap().unwrap();
+        assert!(value.is_nan() && value.is_sign_negative(), "{text}");
+    }
+    // More than 18 significant digits: LOSAT's port of `StringToDoublePosix` refuses them (as
+    // the ASN.1 text readers do; h1 oracle `p_expect`).
+    assert!(!refused(real("0.0100000000000000002")));
+    assert!(refused(real("1.000000000000000001")));
+    assert!(refused(real("1.50000000000000000001e-2")));
     assert_eq!(real("1e999"), Ok(Some(f64::MAX)));
     assert!(fails(real("1e5x")));
     assert!(fails(real("1 2")));

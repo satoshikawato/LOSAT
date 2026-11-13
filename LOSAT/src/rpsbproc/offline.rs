@@ -415,12 +415,7 @@ impl OfflineQuery {
             self.pr_commit()?;
         }
         let (qseq, hseq) = (&hsp.qseq[..], &hsp.hseq[..]);
-        if qseq.len() > i32::MAX as usize {
-            return Err(unsupported(
-                "an Hsp_qseq of 2^31 or more letters (beyond NCBI's int positions)",
-            ));
-        }
-        let aln_len = qseq.len() as u32;
+        let aln_len = alignment_length(qseq.len())?;
         let mut aln_res_idx: i32 = 0;
         while (aln_res_idx as u32) < aln_len
             && (qseq[aln_res_idx as usize] == b'-' || hseq_at(hseq, aln_res_idx)? == b'-')
@@ -595,8 +590,11 @@ impl OfflineQuery {
     // ```
     // (`qf - qofs`, `qf += segLen` and `start - segLen` are `unsigned int` arithmetic, stored in an
     // `int` or passed as a `size_t`; `++qf`, `--qf`, `++hf` and `--hf` are `int`, undefined at its
-    // limits (refused). `replace` is libstdc++'s (`string_replace`); `operator[]` at or past the
-    // string's length is undefined (refused).)
+    // limits (refused). `hf` starts from `Hsp_hit-from` and reaches them with a hit near `INT_MAX`
+    // or `INT_MIN`; `qf` cannot (the `replace` before each run checks `qf` against the string's
+    // length, and each write of a run checks it), so its checks are guards. `replace` is
+    // libstdc++'s (`string_replace`); `operator[]` past the string's length is undefined (refused),
+    // at its length only a NUL is defined (`write_residue`).)
     #[allow(clippy::too_many_arguments)]
     fn parse_align_strings(
         &mut self,
@@ -709,22 +707,13 @@ impl OfflineQuery {
     // 				}
     // 			}
     // ```
-    // (A NaN E-value or bit score makes NCBI's sort of the hits undefined, as in an archive:
-    // refused for every kept hit, `query::process_cd_query`. `Calculate` of a frame without
-    // hits gives an empty classification. `missed`, the PSSM-IDs that the data lack, is never
-    // printed.)
+    // (A NaN E-value or bit score is kept, as in an archive (`query::process_cd_query`):
+    // `domains::calculate` sorts the hits as NCBI's `std::sort` does and refuses only where that
+    // sort would read outside its vector. `Calculate` of a frame without hits gives an empty
+    // classification. `missed`, the PSSM-IDs that the data lack, is never printed.)
     pub(crate) fn finish(self, data: &CddData) -> Result<DomQuery, ProcessError> {
         if let Some(failure) = self.failure {
             return Err(failure);
-        }
-        if self
-            .aligns
-            .iter()
-            .any(|align| align.e_value.is_nan() || align.bit_score.is_nan())
-        {
-            return Err(unsupported(
-                "an Hsp whose Hsp_evalue or Hsp_bit-score is not a number",
-            ));
         }
         // The sites of a protein query read `m_strSeqData`, those of a nucleotide query
         // `m_dimTranslated` (rpsbproc_main.cpp:1370-1379, quoted at `nucleotide::print_features`).
@@ -750,18 +739,32 @@ impl OfflineQuery {
         }
         if !query.is_na {
             let all: Vec<usize> = (0..query.aligns.len()).collect();
-            query.frames[0] = calculate(&mut query.aligns, &all, data);
+            query.frames[0] =
+                calculate(&mut query.aligns, &all, data).map_err(ProcessError::Unsupported)?;
             return Ok(query);
         }
         let frames = sort_reading_frames(&query.aligns, query.length)
             .map_err(|what| ProcessError::Std(what.to_string()))?;
         for (frame, selected) in frames.iter().enumerate() {
             if !selected.is_empty() {
-                query.frames[frame] = calculate(&mut query.aligns, selected, data);
+                query.frames[frame] = calculate(&mut query.aligns, selected, data)
+                    .map_err(ProcessError::Unsupported)?;
             }
         }
         Ok(query)
     }
+}
+
+/// `SeqLen_t alnLen = qseq.size()` of an `Hsp_qseq` whose positions NCBI's `int` holds; one of 2^31
+/// letters or more is refused (`SeqPos_t` positions past `INT_MAX`: the `++start` of
+/// `ParseAlignStrings` overflows; quoted at `OfflineQuery::parse_hsp`).
+fn alignment_length(len: usize) -> Result<u32, ProcessError> {
+    if len > i32::MAX as usize {
+        return Err(unsupported(
+            "an Hsp_qseq of 2^31 or more letters (beyond NCBI's int positions)",
+        ));
+    }
+    Ok(len as u32)
 }
 
 /// `hseq[i]` of a `const std::string` at an index of `qseq`: its terminating 0 at its length,
@@ -777,11 +780,21 @@ fn hseq_at(hseq: &[u8], i: i32) -> Result<u8, ProcessError> {
     }
 }
 
-/// `m_dimTranslated[rfidx][qf] = c`: a write within the string (at or past its length it is
-/// undefined: refused).
+/// `m_dimTranslated[rfidx][qf] = c`: a write within the string; at its length, the write of the
+/// terminating `charT()` that the standard defines (a NUL residue: the string is unchanged); any
+/// other write at or past its length is undefined (refused).
+// C++17 and C++20 [string.access]/2 (LWG 2475; NCBI's 0.5.1 builds are C++20): "Returns:
+// *(begin() + pos) if pos < size(). Otherwise, returns a reference to an object of type charT with
+// value charT(), where modifying the object to any value other than charT() leads to undefined
+// behavior."
+// (A NUL residue comes only from a CDATA section of `Hsp_qseq`: `ReadTagData` drops a NUL
+// character otherwise. PS16d review S3-2.)
 fn write_residue(text: &mut [u8], at: i32, c: u8) -> Result<(), ProcessError> {
     // `qf` as the `size_t` of `operator[]`.
     let at = at as i64 as u64;
+    if at == text.len() as u64 && c == 0 {
+        return Ok(());
+    }
     if at >= text.len() as u64 {
         return Err(unsupported(
             "an alignment whose residue falls outside NCBI's string of the query's frame (NCBI writes past it, undefined)",

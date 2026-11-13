@@ -223,17 +223,27 @@ spaces). PS16a's cases of `-t feats`, `-t both` and the default `-t` (named `ref
   encoding (`x.h_latin1`, `x.h_cp1252`: bytes from 0x80 converted to UTF-8; `x.h_ebcdic`: unsupported, no session),
   a comment between members (`x.h_comment`) and inside text (`x.h_defcomment`: the document fails), an unknown
   member, a missing mandatory member and two members out of order after a good document (`x.h_unknown`,
-  `x.h_missmand`, `x.h_order`: one session), `<Iteration_hits/>` (`x.h_selfhits`), a byte order mark before the
-  second document (`x.h_bom2`; after a line end it is not skipped, `x.h_bom2nl`), `-2147483648` and `2147483648` as
+  `x.h_missmand`, `x.h_order`: one session), `<Iteration_hits/>` (`x.h_selfhits`), a byte order mark right after the
+  first document's last `>` (`x.h_bom2`: skipped, two sessions; the PS16d review's `r_bom2tight`) and after a line end
+  (`x.h_bom2nl`: not skipped, one session), `-2147483648` and `2147483648` as
   INTEGER values (`x.h_intmin`: read as INT_MIN, unused; `x.h_intover`: overflow, no session), an empty REAL
   (`x.h_evalempty`: 0), `Hit_accession` beyond `long` and with leading white space (`x.h_acchuge`, `x.h_acclead`),
   a score beyond `int` (`x.h_scorehuge`: NCBI's `(int)` of it is never read), frames on a protein query
   (`x.h_frame1`, `x.h_frame4`, `x.h_framem1`; `x.h_tframe2nd`: frame 1 on the first two HSPs of `x_three`) and frame
   0 and 4 on a nucleotide one (`x.h_ntframe0`, `x.h_ntframe4`), a query length below the hits' ends
   (`x.h_ntqlen1500`).
+- NaN values (PS16d review S1-1 and S3-3; NCBI's `HUGE_VAL/HUGE_VAL`, printed `-nan`): `Parameters_expect` `nan`
+  (`x.h_nanexpect`, the review's `x_nan`), an archive's E-value threshold `NOT-A-NUMBER` (`nan_threshold`,
+  `arch/bad/a_nan.asn`, the review's `a_nan`) and a hit's `e_value` `NOT-A-NUMBER` (`nan_hit`,
+  `arch/bad/a_nanhit.asn`, both edits of `arch/one.asn`), a kept `Hsp_evalue` or `Hsp_bit-score` `nan` (`x.h_evalnan`,
+  `x.h_bitnan`), every third `Hsp_evalue` of `x_three` (`x.h_tnan3`), and in `x_ntr67e10` (47 HSPs, 18 and 22 in frames
+  +1 and -1: NCBI's introsort partitions with NaN keys) every third `Hsp_evalue` (`x.h_ntnanthird`), every one
+  (`x.h_ntnanall`) and every fourth `Hsp_bit-score` (`x.h_ntbitnan`). NCBI's bytes in the fixture layout, both builds
+  the same, cut data = full data.
 - `refused/refuse_x*`: LOSAT's bytes for the hand-made XML that it refuses (PD-LOSAT-NCBI-DEFECTS 1.17): an
   attribute (`refuse_xattr`), a namespace prefix (`refuse_xns`), a control character (`refuse_xctrl`; NCBI replaces it
-  and posts a warning), a NaN `Hsp_evalue` (`refuse_xevalnan`), an `Hsp_hseq` two letters short (`refuse_xhshort2`),
+  and posts a warning), an `Hsp_query-from` of -2147483648 (`refuse_xcoordmin`: `- 1` overflows `int`; NCBI's builds
+  then throw `basic_string::replace`), an `Hsp_hseq` two letters short (`refuse_xhshort2`),
   a protein query of length -3 (`refuse_xqlenneg`: NCBI's string of 2^32 - 3 bytes, `std::bad_alloc` by the address
   space), a nucleotide query of 1 base (`refuse_xntqlen1`: frames of 1,431,655,765 residues) and of 2 bases
   (`refuse_xntqlen2`: empty frames, whose residues NCBI writes over the strings' terminator, undefined). Each is NCBI's

@@ -76,6 +76,51 @@ fn packed_matrix(name: &str) -> Option<ScoringMatrix> {
         .find(|matrix| matrix.ncbi_name() == name)
 }
 
+/// Whether `outfmt` is a format of the BLAST XML family, whose report data takes the formatting
+/// matrix: BLAST XML (5) and the XML2 and JSON documents (16, 15, 14, 13), read as NCBI reads
+/// `-outfmt` (`parse_formatting_string`).
+pub fn is_structured_xml(outfmt: &str) -> bool {
+    use crate::blastinput::app::ReportFormat;
+    crate::blastinput::app::parse_formatting_string(outfmt)
+        .ok()
+        .and_then(|choice| ReportFormat::from_number(choice.number))
+        .is_some_and(|format| {
+            format == ReportFormat::Xml || crate::report::blast_xml2::Xml2Kind::of(format).is_some()
+        })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218
+// ```c++
+//     else {
+//         string prog_name = Blast_ProgramNameFromType(
+//                                            m_Options.GetProgramType());
+//         if (prog_name != "blastn" && prog_name != "megablast") {
+//             NCBI_THROW(blast::CBlastException, eInvalidArgument,
+//                         "unsupported score matrix");
+// ```
+/// Whether a protein program's run of the formats `outfmts` with the score matrix `matrix_name`
+/// (as typed) stops when NCBI formats its first result: a BLAST XML family format
+/// (`is_structured_xml`) makes its report data, whose matrix is found by `strcmp` of the name
+/// (`packed_matrix`). The one decision behind the error (`unsupported_score_matrix`) and the
+/// search strategy's stop after the first batch's request (`StrategyExport::stop_after`) of
+/// BLASTP, TBLASTN and TBLASTX.
+pub fn xml_formatting_fails<'a>(
+    outfmts: impl IntoIterator<Item = &'a str>,
+    matrix_name: &str,
+) -> bool {
+    packed_matrix(matrix_name).is_none() && outfmts.into_iter().any(is_structured_xml)
+}
+
+/// NCBI's error when it formats a result in BLAST XML with a score matrix that its XML data does
+/// not know (`xml_formatting_fails`): `CATCH_ALL`'s engine error, exit status 3.
+pub fn unsupported_score_matrix() -> anyhow::Error {
+    crate::cli::NativeError {
+        exit: 3,
+        message: "BLAST engine error: unsupported score matrix\n".to_string(),
+    }
+    .into()
+}
+
 impl FormattingMatrix {
     /// The matrix of the score matrix `name` (`CCmdLineBlastXMLReportData::x_FillScoreMatrix`).
     pub fn new(name: &str) -> Option<Self> {
@@ -115,6 +160,29 @@ fn packed_score(matrix: ScoringMatrix, row: u8, col: u8) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The stop of a run's XML formats (BLAST XML, the XML2 and JSON documents) with a matrix name
+    /// that NCBI's formatting table does not spell: every other format, and every name it spells,
+    /// formats.
+    #[test]
+    fn the_xml_formats_fail_for_a_name_ncbi_does_not_spell() {
+        for outfmt in ["5", "13", "14", "15", "16", " 5"] {
+            assert!(is_structured_xml(outfmt), "{outfmt}");
+            assert!(xml_formatting_fails([outfmt], "blosum62"), "{outfmt}");
+            assert!(!xml_formatting_fails([outfmt], "BLOSUM62"), "{outfmt}");
+        }
+        for outfmt in ["0", "6", "7 qseqid", "8", "11", "12", "17", "abc"] {
+            assert!(!is_structured_xml(outfmt), "{outfmt}");
+            assert!(!xml_formatting_fails([outfmt], "blosum62"), "{outfmt}");
+        }
+        assert!(xml_formatting_fails(["6", "16"], "blosum62"));
+        let error = unsupported_score_matrix();
+        let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
+        assert_eq!(
+            (native.exit, native.message.as_str()),
+            (3, "BLAST engine error: unsupported score matrix\n")
+        );
+    }
 
     #[test]
     fn engine_table_is_the_packed_ncbi_table_with_its_symbol_order() {

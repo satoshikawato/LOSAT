@@ -315,6 +315,9 @@ fn run_queries(
                         .query_scopes
                         .as_ref()
                         .map(|scopes| scopes.numbered_from(query)),
+
+                    strategy_next: None,
+                    call_requests: None,
                 },
                 super::x_lookup_ahead::XAheadBlock::none(),
             );

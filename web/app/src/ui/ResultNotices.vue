@@ -19,6 +19,8 @@ const limitFlag = computed(() => props.state.loaded?.limits.subjectFlag ?? '-max
 const limitGiven = computed(() => flagGiven(props.state.loaded?.run.snapshot.argv ?? [], limitFlag.value));
 /** What outfmt 0 does with -num_descriptions / -num_alignments; undefined where neither is given. */
 const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
+/** -sorthits orders outfmt 0's hit list: its first subjects are not the first ones in the engine's order. */
+const sorted = computed(() => props.state.loaded?.limits.sorted === true);
 /** Outfmt 0's own search failed: stream 0 is empty next to the tabular records (its error is in the diagnostics). */
 const outfmt0Failed = computed(() => props.state.loaded?.outfmt0Failed === true);
 /** Why the selected query shows no HSP (the Dot Plot tab says the same in place of its plot). */
@@ -65,7 +67,9 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
         data-testid="results-notice"
         data-kind="outfmt0-partial"
       >
-        outfmt 0 shows the alignments of the first {{ plural(state.outfmt0Subjects, 'subject') }} of this query
+        outfmt 0 shows the alignments of the first {{ plural(state.outfmt0Subjects, 'subject') }} of this query<template v-if="sorted">
+          in its order of <span class="option-name">-sorthits</span></template
+        >
         (BLAST+'s <span class="option-name">-num_alignments</span>: 250, or <span class="option-name">-max_target_seqs</span> when it is
         given). The other subjects' HSPs are in outfmt 6 and 7.
       </p>

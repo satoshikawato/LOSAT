@@ -1108,7 +1108,13 @@ impl<R: Read> FastaReader<R> {
         };
         // Two queries with one id are the scopes' of the query batches (`QueryScopes`), which
         // NCBI's formatter empties after each batch against a database.
-        let refusal = refused_id(&ids, self.config.role, self.config.program).or_else(|| {
+        let refusal = refused_id(
+            &ids,
+            self.config.role,
+            "-parse_deflines",
+            self.config.program,
+        )
+        .or_else(|| {
             (self.config.role != "query")
                 .then(|| {
                     duplicate_id(

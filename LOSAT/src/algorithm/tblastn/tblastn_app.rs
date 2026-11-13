@@ -720,7 +720,12 @@ fn search_cli(
             outputs.diagnostics,
         )?;
         crate::blastinput::app::xinclude_check_for(choice, args.out.as_deref())?;
-        let records = vec![super::in_pssm::query_record(&psi, args.parse_deflines)];
+        // The PSSM's Bioseq as the reports show it (`PsiSearch::query_record`); with
+        // `-parse_deflines` its ids join the scope of the `-subject` records as a FASTA query's do
+        // (`IdScope::add_record`; NCBI BLAST+ 2.17.0 fails on a subject with the query's id), and
+        // the database's sequences are checked as for a FASTA query (`QueryScopes`).
+        let records =
+            vec![psi.query_record_in(args.parse_deflines, args.id_scope.as_deref(), "TBLASTN")?];
         return search(
             &args,
             resolved,
@@ -1381,6 +1386,13 @@ fn search(
         )?;
         return Err(app::engine_error(error));
     }
+    // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`); with
+    // `-in_pssm`, of the PSSM's query when the reports show its ids (`PsiSearch::query_record`).
+    let believed_queries = crate::blastinput::query_batch::believed_queries(
+        args.parse_deflines,
+        resolved.pssm.is_some(),
+        input_records,
+    );
     let mut batches = crate::blastinput::query_batch::read_query_batches(
         input_records,
         &searched_queries,
@@ -1388,9 +1400,9 @@ fn search(
         reading,
         batch_size,
         crate::blastinput::query_batch::QueryScopes::of_search(
-            args.parse_deflines,
+            believed_queries,
             database.is_none(),
-            args.parse_deflines
+            believed_queries
                 && crate::blastinput::query_batch::outfmts_have_xml(
                     outputs.formats.iter().map(|format| format.outfmt),
                 ),
@@ -1887,7 +1899,7 @@ fn search(
                     // (`blastp::blast_engine::pssm_hooks::pssm_query_warning`).
                     Some(psi) => crate::report::query_warnings::query_warning_with_seq_id(
                         "tblastn",
-                        psi.query.local_id.as_bytes(),
+                        psi.query.warning_id(),
                         psi.warning_title.as_deref().unwrap_or(&psi.query.title),
                         &messages,
                     ),

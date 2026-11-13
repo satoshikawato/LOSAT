@@ -192,6 +192,43 @@ describe('formParameters', () => {
     }
   });
 
+  it('has the pairwise report options -line_length, -sorthits and -sorthsps after "Number of alignments" in Other Parameters of the five programs, with the sort orders in the words of the engine\'s help', () => {
+    const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
+    const report = ['-line_length', '-sorthits', '-sorthsps'];
+    for (const program of PROGRAMS) {
+      const options = toProgramDescription(described[program.id]).parameters;
+      const other = describedSections(program, options).find((section) => section.title === 'Other Parameters');
+      const flags = other?.fields.map((field) => field.flag) ?? [];
+      const at = flags.indexOf('-num_alignments');
+      expect(flags.slice(at + 1, at + 4), program.id).toEqual(report);
+      const fields = other!.fields.slice(at + 1, at + 4);
+      expect(fields.map((field) => [field.label, field.kind]), program.id).toEqual([
+        ['Alignment line length', 'text'],
+        ['Sort hits by', 'choice'],
+        ['Sort HSPs by', 'choice'],
+      ]);
+      for (const field of fields.slice(1)) {
+        const option = options.find((o) => o.flag === field.flag)!;
+        expect(fieldChoices(field, option), `${program.id} ${field.flag}`).toEqual(['0', '1', '2', '3', '4']);
+        // Each name is the engine's "N = <words>" of its help (NCBI BLAST+'s), shown as "N: <words>".
+        for (const choice of ['0', '1', '2', '3', '4']) {
+          const words = field.choiceLabels?.[choice]?.replace(/^\d: /, '');
+          expect(option.help, `${program.id} ${field.flag} ${choice}`).toContain(`${choice} = ${words}`);
+        }
+      }
+      // Without a value the form writes nothing: no -sorthits is not -sorthits 0 (outfmt 0's table has five columns with any value).
+      expect(formParameters(program, {}, options, 'algorithm'), program.id).toEqual([]);
+      expect(
+        formParameters(program, { '-line_length': '80', '-sorthits': '1', '-sorthsps': '3' }, options, 'algorithm'),
+        program.id,
+      ).toEqual([
+        ['-line_length', '80'],
+        ['-sorthits', '1'],
+        ['-sorthsps', '3'],
+      ]);
+    }
+  });
+
   it('omits a TBLASTX value equal to the engine default', () => {
     const tblastx = programById('tblastx');
     const opts: EngineOption[] = [valueOption('-query_gencode', '1'), valueOption('-db_gencode', '1')];

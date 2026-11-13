@@ -255,6 +255,18 @@ impl QueryScope {
     }
 }
 
+/// Whether the reports of a search show the ids of its query records `records`: under
+/// `-parse_deflines` (`parse_deflines`), and with `-in_pssm` (`pssm_query`) when the PSSM's query is
+/// shown with its ids (`pssm_search::PsiSearch::query_record`: an id that is not one local id).
+/// The scopes of such queries (`QueryScopes::of_search`) refuse what NCBI's scope mixes up.
+pub(crate) fn believed_queries(
+    parse_deflines: bool,
+    pssm_query: bool,
+    records: &[FastaRecord],
+) -> bool {
+    parse_deflines || (pssm_query && records.iter().any(|record| record.believed().is_some()))
+}
+
 /// The scopes of the query records of a search under `-parse_deflines`, by searched query:
 /// NCBI's scope finds a sequence by its id, so two queries of one scope with one id show as one
 /// (the first: its letters are searched for both), and a reported database sequence with the id
@@ -313,15 +325,15 @@ impl QueryScopes {
         self.span
     }
 
-    /// `new` for a search under `-parse_deflines` (`parse_deflines`; `None` without it), with
-    /// `QueryScopeSpan::of` of `subject` and `xml`.
+    /// `new` for a search whose reports show the ids of its queries (`believed`, `believed_queries`;
+    /// `None` otherwise), with `QueryScopeSpan::of` of `subject` and `xml`.
     pub(crate) fn of_search(
-        parse_deflines: bool,
+        believed: bool,
         subject: bool,
         xml: bool,
         program: &'static str,
     ) -> Option<Self> {
-        parse_deflines.then(|| Self::new(QueryScopeSpan::of(subject, xml), program))
+        believed.then(|| Self::new(QueryScopeSpan::of(subject, xml), program))
     }
 
     /// The scopes of `records`, the input records of one call of a search whose queries

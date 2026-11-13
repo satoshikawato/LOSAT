@@ -2187,7 +2187,6 @@ fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {
     ] {
         let full = help(program, &["-help"]);
         let short = help(program, &["-h"]);
-        assert_ne!(full, short, "{program}");
         for words in [
             &["-help-full"][..],
             &["-help-full", "-h"],

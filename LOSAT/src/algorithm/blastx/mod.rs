@@ -427,7 +427,6 @@ mod culling;
 //         /* The HSP's may be in a different order than they were before,
 //            but hsp contains the first one. */
 // ```
-mod even_gap;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:279-297
 // ```c++

@@ -38,6 +38,7 @@ use std::cmp::Ordering;
 
 use crate::stats::sum_statistics::defaults::{GAP_SIZE, OVERLAP_SIZE};
 use crate::stats::sum_statistics::{gap_decay_divisor, ncbi_large_gap_sum_e, small_gap_sum_e};
+use crate::stats::KarlinParams;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_parameters.h:66-71
 // ```c
@@ -54,6 +55,8 @@ use crate::stats::sum_statistics::{gap_decay_divisor, ncbi_large_gap_sum_e, smal
 // and `BLAST_OVERLAP_SIZE` are `stats::sum_statistics::defaults`'.
 /// `BLAST_GAP_PROB_GAPPED`.
 pub(crate) const BLAST_GAP_PROB_GAPPED: f64 = 1.0;
+/// `BLAST_GAP_PROB`, the gap probability of an ungapped search.
+const BLAST_GAP_PROB: f64 = 0.5;
 /// `BLAST_GAP_DECAY_RATE_GAPPED`.
 pub(crate) const BLAST_GAP_DECAY_RATE_GAPPED: f64 = 0.1;
 /// `BLAST_GAP_DECAY_RATE`, the gap decay rate of an ungapped search.
@@ -125,6 +128,145 @@ impl EvenGapLinkParams {
             cutoff_small_gap: 0,
             cutoff_big_gap: 0,
             query_translated: false,
+        }
+    }
+
+    /// The parameters of an ungapped search's linking with one subject: `CalculateLinkHSPCutoffs`
+    /// on the parameters of `BlastLinkHSPParametersNew` for an ungapped search (`gap_prob`
+    /// `BLAST_GAP_PROB`, `gap_decay_rate` `BLAST_GAP_DECAY_RATE`, blast_parameters.c:609-617).
+    /// `kbp` is the Karlin block of the context with the smallest positive Lambda
+    /// (`s_BlastFindSmallestLambda` on `sbp->kbp`); `avg_query_length` NCBI's average of the
+    /// contexts' lengths, `(contexts[last].query_offset + contexts[last].query_length - 1) /
+    /// (last_context + 1)`; `subject_length` the subject's length as the search gives it
+    /// (`seq_arg.seq->length`, in nucleotides for a translated subject); `db_length`
+    /// `BlastSeqSrcGetTotLen`; `subject_translated` `Blast_SubjectIsTranslated` (or RPS-TBLASTN);
+    /// `cutoff_score_min` `word_params->cutoff_score_min`. NCBI then multiplies both cutoffs by
+    /// `(Int4)sbp->scale_factor`, which is 1 in the searches that call this (BLASTX and TBLASTX;
+    /// only an RPS search scales its matrix), so the factor is left out.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:1011-1081
+    /// ```c
+    ///     /* Get KarlinBlk for context with smallest lambda (still greater than zero) */
+    ///     s_BlastFindSmallestLambda(sbp->kbp, query_info, &kbp);
+    ///     if (!kbp)
+    ///         return;
+    ///
+    ///     window_size
+    ///         = link_hsp_params->gap_size + link_hsp_params->overlap_size + 1;
+    ///     gap_prob = link_hsp_params->gap_prob = BLAST_GAP_PROB;
+    ///     gap_decay_rate = link_hsp_params->gap_decay_rate;
+    ///     /* Use average query length */
+    ///
+    ///     query_length =
+    ///         (query_info->contexts[query_info->last_context].query_offset +
+    ///         query_info->contexts[query_info->last_context].query_length - 1)
+    ///         / (query_info->last_context + 1);
+    ///
+    ///     if (Blast_SubjectIsTranslated(program) || program == eBlastTypeRpsTblastn) {
+    ///         /* Lengths in subsequent calculations should be on the protein scale */
+    ///         subject_length /= CODON_LENGTH;
+    ///         db_length /= CODON_LENGTH;
+    ///     }
+    ///
+    ///
+    ///     /* Subtract off the expected score. */
+    ///    expected_length = (Int4)BLAST_Nint(log(kbp->K*((double) query_length)*
+    ///                                     ((double) subject_length))/(kbp->H));
+    ///    query_length = query_length - expected_length;
+    ///
+    ///    subject_length = subject_length - expected_length;
+    ///    query_length = MAX(query_length, 1);
+    ///    subject_length = MAX(subject_length, 1);
+    ///
+    ///    /* If this is a database search, use database length, else the single
+    ///       subject sequence length */
+    ///    if (db_length > subject_length) {
+    ///       y_variable = log((double) (db_length)/(double) subject_length)*(kbp->K)/
+    ///          (gap_decay_rate);
+    ///    } else {
+    ///       y_variable = log((double) (subject_length + expected_length)/
+    ///                        (double) subject_length)*(kbp->K)/(gap_decay_rate);
+    ///    }
+    ///
+    ///    search_sp = ((Int8) query_length)* ((Int8) subject_length);
+    ///    x_variable = 0.25*y_variable*((double) search_sp);
+    ///
+    ///    /* To use "small" gaps the query and subject must be "large" compared to
+    ///       the gap size. If small gaps may be used, then the cutoff values must be
+    ///       adjusted for the "bayesian" possibility that both large and small gaps
+    ///       are being checked for. */
+    ///
+    ///    if (search_sp > 8*window_size*window_size) {
+    ///       x_variable /= (1.0 - gap_prob + kEpsilon);
+    ///       link_hsp_params->cutoff_big_gap =
+    ///          (Int4) floor((log(x_variable)/kbp->Lambda)) + 1;
+    ///       x_variable = y_variable*(window_size*window_size);
+    ///       x_variable /= (gap_prob + kEpsilon);
+    ///       link_hsp_params->cutoff_small_gap =
+    ///          MAX(word_params->cutoff_score_min,
+    ///              (Int4) floor((log(x_variable)/kbp->Lambda)) + 1);
+    ///    } else {
+    ///       link_hsp_params->cutoff_big_gap =
+    ///          (Int4) floor((log(x_variable)/kbp->Lambda)) + 1;
+    ///       /* The following is equivalent to forcing small gap rule to be ignored
+    ///          when linking HSPs. */
+    ///       link_hsp_params->gap_prob = 0;
+    ///       link_hsp_params->cutoff_small_gap = 0;
+    ///    }
+    ///
+    ///    link_hsp_params->cutoff_big_gap *= (Int4)sbp->scale_factor;
+    ///    link_hsp_params->cutoff_small_gap *= (Int4)sbp->scale_factor;
+    /// ```
+    pub(crate) fn ungapped(
+        kbp: &KarlinParams,
+        avg_query_length: i32,
+        subject_length: i64,
+        db_length: i64,
+        subject_translated: bool,
+        cutoff_score_min: i32,
+        query_translated: bool,
+    ) -> Self {
+        const K_EPSILON: f64 = 1.0e-9;
+        let window_size = (GAP_SIZE + OVERLAP_SIZE + 1) as i64;
+        let gap_prob = BLAST_GAP_PROB;
+        let gap_decay_rate = BLAST_GAP_DECAY_RATE;
+        let mut query_length = avg_query_length;
+        let (mut subject_length, db_length) = if subject_translated {
+            ((subject_length / 3) as i32, db_length / 3)
+        } else {
+            (subject_length as i32, db_length)
+        };
+        // `BLAST_Nint`: rounds half away from zero.
+        let expected = (kbp.k * query_length as f64 * subject_length as f64).ln() / kbp.h;
+        let expected_length = (expected + if expected >= 0.0 { 0.5 } else { -0.5 }) as i32;
+        query_length = (query_length - expected_length).max(1);
+        subject_length = (subject_length - expected_length).max(1);
+        let y_variable = if db_length > subject_length as i64 {
+            (db_length as f64 / subject_length as f64).ln() * kbp.k / gap_decay_rate
+        } else {
+            ((subject_length + expected_length) as f64 / subject_length as f64).ln() * kbp.k
+                / gap_decay_rate
+        };
+        let search_sp = query_length as i64 * subject_length as i64;
+        let mut x_variable = 0.25 * y_variable * search_sp as f64;
+        let cutoff = |x: f64| (x.ln() / kbp.lambda).floor() as i32 + 1;
+        let (gap_prob, cutoff_small_gap, cutoff_big_gap) =
+            if search_sp > 8 * window_size * window_size {
+                x_variable /= 1.0 - gap_prob + K_EPSILON;
+                let cutoff_big_gap = cutoff(x_variable);
+                x_variable = y_variable * (window_size * window_size) as f64;
+                x_variable /= gap_prob + K_EPSILON;
+                let cutoff_small_gap = cutoff_score_min.max(cutoff(x_variable));
+                (gap_prob, cutoff_small_gap, cutoff_big_gap)
+            } else {
+                (0.0, 0, cutoff(x_variable))
+            };
+        Self {
+            gap_prob,
+            gap_decay_rate,
+            cutoff_small_gap,
+            cutoff_big_gap,
+            query_translated,
         }
     }
 

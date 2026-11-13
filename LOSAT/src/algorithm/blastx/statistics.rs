@@ -1,12 +1,12 @@
 //! BLASTX HSP statistics; protein-subject lengths remain in amino acids.
 use super::{
     args::ResolvedOptions,
-    linking::{link_parameters, link_uneven, LinkedHsp, LinkedHspList},
+    linking::{link_even, link_parameters, link_uneven, LinkedHsp, LinkedHspList},
     parameters::ContextParameters,
-    preliminary::{compare_score, PreliminaryHsp},
+    preliminary::PreliminaryHsp,
     query_setup::PreparedQueryBatch,
 };
-use crate::core::link_hsps::{even_gap_link_hsps, EvenGapLinkParams, LinkContext, LinkHsp};
+use crate::core::link_hsps::EvenGapLinkParams;
 use crate::{
     config::{ProteinScoringSpec, ScoringMatrix},
     stats::{lookup_protein_params, spouge::blast_spouge_stoe},
@@ -489,19 +489,17 @@ pub(crate) fn evaluate_ungapped(
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject_length: i32,
-    prepared: Option<([i32; 2], f64)>,
+    prepared: Option<EvenGapLinkParams>,
 ) -> Result<LinkedHspList> {
     if let Some(link) = link_parameters(options) {
         if link.longest_intron <= 0 {
-            let (cutoff, gap_prob) = prepared.expect("per-subject even-gap cutoffs");
-            let params = EvenGapLinkParams {
-                gap_prob,
-                gap_decay_rate: crate::core::link_hsps::BLAST_GAP_DECAY_RATE,
-                cutoff_small_gap: cutoff[0],
-                cutoff_big_gap: cutoff[1],
-                query_translated: true,
-            };
-            return Ok(link_even(input, batch, parameters, subject_length, &params));
+            return Ok(link_even(
+                input,
+                batch,
+                parameters,
+                subject_length,
+                &prepared.expect("per-subject even-gap cutoffs"),
+            ));
         }
         let lengths: Vec<_> = batch.contexts.iter().map(|c| c.length as i32).collect();
         let ka: Vec<_> = parameters.iter().map(|p| p.ungapped).collect();
@@ -544,60 +542,4 @@ pub(crate) fn evaluate_ungapped(
             .fold(i32::MAX as f64, |best, h| h.evalue.min(best))
     };
     Ok(LinkedHspList { hsps, best_evalue })
-}
-
-/// The even-gap linking of BLASTX's ungapped search (`BLAST_LinkHsps` with `longest_intron <= 0`,
-/// `core::link_hsps`): the query is translated, so the three frames of a strand link together,
-/// and every context reads its ungapped Karlin block (`sbp->kbp`, `gapped_calculation` false).
-/// The list is then sorted by score (`Blast_HSPListSortByScore`) and its best e-value is the
-/// smallest of its e-values (link_hsps.c:1801-1811).
-pub(crate) fn link_even(
-    input: &[PreliminaryHsp],
-    batch: &PreparedQueryBatch,
-    parameters: &[ContextParameters],
-    subject_length: i32,
-    params: &EvenGapLinkParams,
-) -> LinkedHspList {
-    let hsps: Vec<LinkHsp> = input
-        .iter()
-        .map(|h| LinkHsp {
-            context: h.context,
-            query_offset: h.q_start,
-            query_end: h.q_end,
-            subject_offset: h.s_start,
-            subject_end: h.s_end,
-            score: h.score,
-        })
-        .collect();
-    let linked = even_gap_link_hsps(
-        &hsps,
-        |context| {
-            let p = &parameters[context];
-            LinkContext {
-                lambda: p.ungapped.lambda,
-                log_k: p.ungapped.k.ln(),
-                query_length: batch.contexts[context].length as i32,
-                length_adjustment: p.length_adjustment,
-                eff_searchsp: p.search_space,
-            }
-        },
-        subject_length,
-        params,
-    );
-    let mut hsps: Vec<LinkedHsp> = linked
-        .into_iter()
-        .map(|linked| LinkedHsp {
-            hsp: input[linked.index].clone(),
-            num: linked.num,
-            evalue: linked.evalue,
-            source_index: linked.index,
-        })
-        .collect();
-    hsps.sort_by(|a, b| compare_score(&a.hsp, &b.hsp));
-    let best_evalue = hsps
-        .iter()
-        .map(|h| h.evalue)
-        .reduce(f64::min)
-        .unwrap_or(0.0);
-    LinkedHspList { hsps, best_evalue }
 }

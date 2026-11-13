@@ -1,0 +1,42 @@
+
+                                          Tax BLAST report                                          
+
+Query= pq1 query protein one
+
+Length=300
+
+                                           Organism Report                                           
+Accession                                          Description                        Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ XM_000101                  subject one two HSPs                                       313   5e-109  
+ s3_local_identifier        subject three with a title that is longer than the desc... 247   5e-87   
+ XM_000111                  subject eleven strong then planted weak HSP                211   1e-71   
+
+ Tok 8888 (b10090 c 1) sp. (b10090 c <@numhits@... 
+ XM_000109                  subject nine                                               168   8e-57   
+
+                                Mus musculus (house mouse) [rodents]                                
+ CAA00102                   subject two                                                159   4e-53   
+ tag_s8                     subject eight                                              147   1e-48   
+
+                               Saccharomyces cerevisiae  [ascomycetes]                               
+ AB000106                   subject six                                                139   1e-45   
+
+                                Escherichia coli () [enterobacteria]                                
+ AB000104                   subject four                                               138   3e-45   
+
+                                     synthetic construct () [-]                                     
+ XM_000105                  subject five 131    s 1e-42    e Accession                   a <@de... 131   1e-42   
+
+                              unclassified sequences () [unclassified]                              
+ AB000110                   subject ten                                                94.0  2e-28   
+
+                                          Tax BLAST report                                          
+
+Query= pq2 unrelated query (no hits)
+
+Length=40
+
+                                           Organism Report                                           
+Accession...  Description... Score... E-value... 

@@ -3561,13 +3561,21 @@ static SUBJECT_TAXDB: std::sync::OnceLock<std::sync::Arc<crate::seqdb::taxdb::La
 
 /// The lookups of the organism report (outfmt 18) of a `-subject` search, whose subjects have
 /// no `Blast-def-line` and so the taxid 0 (`report::tax_report`), in the process's taxonomy
-/// database ([`SUBJECT_TAXDB`]); `None` where no search of the process asked for it (no lookup
-/// is then made, as without `taxdb.bti`). A database that LOSAT cannot read as NCBI does is
-/// refused as in [`tabular_names`].
+/// database ([`SUBJECT_TAXDB`]). A library call of a `-subject` search reads no application
+/// settings before it (`api::run`), so the first report that asks reads them here, as a library
+/// call of a `-db` search does. A database that LOSAT cannot read as NCBI does is refused as in
+/// [`tabular_names`].
 pub(crate) fn subject_tax_names(
     spec: &crate::report::tabular::TabularSpec,
     program: &str,
 ) -> Result<Option<crate::report::tabular::TabularNames>> {
+    if SUBJECT_TAXDB.get().is_none() {
+        let settings = crate::blastinput::ncbi_environment::check_ncbi_application_settings(
+            &program.to_ascii_lowercase(),
+        )
+        .map_err(anyhow::Error::msg)?;
+        subject_taxdb_found(&settings, program)?;
+    }
     let Some(taxdb) = SUBJECT_TAXDB.get() else {
         return Ok(None);
     };

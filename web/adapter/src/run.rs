@@ -7,7 +7,8 @@ use std::sync::Arc;
 use LOSAT::api::FastaRecord;
 use LOSAT::web_adapter::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
-    Cli, Commands, FormatObserver, FormatOutput, HspIndex, OutputSink, PairwiseHit, ReportOutputs,
+    Cli, Commands, CountsSource, FormatObserver, FormatOutput, HspIndex, OutputSink, PairwiseHit,
+    ReportOutputs,
 };
 
 use crate::emit::{emit, StreamWriter, STREAM_CUSTOM, STREAM_DIAGNOSTICS, STREAM_HITS};
@@ -33,6 +34,7 @@ impl Program {
             "blastx" => Ok(Self::Blastx),
             "psiblast" => Err("psiblast is not available in the browser (ABI v2)".into()),
             "rpsblast" => Err("rpsblast is not available in the browser (ABI v2)".into()),
+            "rpstblastn" => Err("rpstblastn is not available in the browser (ABI v2)".into()),
             other => Err(format!("unknown program '{other}'")),
         }
     }
@@ -110,6 +112,7 @@ fn outfmt_of(command: &mut Commands) -> &mut String {
         Commands::Blastx(a) => &mut a.outfmt,
         Commands::Psiblast(_)
         | Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => {
             unreachable!("rejected by Program::parse")
@@ -265,6 +268,14 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
     match command {
         Commands::Blastn(mut args) => subject_range(args.subject_loc.as_deref(), "BLASTN")
             .and_then(|()| args.resolve_dust())
+            .and_then(|()| {
+                if validates_window_masker(&args) {
+                    give_blastn_counts(&mut args, &crate::files::source());
+                    args.resolve_window_masker()
+                } else {
+                    Ok(())
+                }
+            })
             .and_then(|()| {
                 parse_optional_range(args.query_loc.as_deref(), RangeRole::Query, "BLASTN")
                     .map(|_| ())
@@ -566,6 +577,7 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
         // Rejected by `Program::parse`.
         Commands::Psiblast(_)
         | Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => [None; 3],
     }
@@ -583,6 +595,7 @@ fn num_threads(command: &Commands) -> usize {
         // Rejected by `Program::parse`.
         Commands::Psiblast(_)
         | Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => 1,
     }
@@ -601,18 +614,20 @@ pub fn hit_list_size(command: &Commands, format: u32) -> usize {
 /// that search, as the CLI writes it alone: the CLI's search depends on the hit list size,
 /// which `-num_descriptions` and `-num_alignments` (without `-max_target_seqs`) can make
 /// differ between the pairwise format 0 and the tabular formats. Without those options the
-/// sizes are equal and the group is the program's formats in their order (the one search of
-/// before). The tabular group goes first because the formatting handler's warnings belong to
-/// the first format, and the CLI writes the tabular formats' (`ReportCounts::warnings`). The
+/// sizes are equal and the group is the program's formats with the tabular ones first (the one
+/// search of before). The tabular formats go first because the formatting handler's warnings
+/// belong to the first format, and the CLI writes the tabular formats' (`ReportCounts::warnings`;
+/// `-line_length`, `-sorthits` and `-sorthsps` warn for formats above 4 or other than 0 only,
+/// blast_args.cpp:2947-2989). The
 /// output of the argv's `-outfmt` (a format above 4) has the hit list size of the tabular
 /// formats, so it joins the tabular group, first (`outputs`): it adds no search.
 pub fn search_groups(formats: &[Output], command: &Commands) -> Vec<Vec<Output>> {
     let [_, descriptions, alignments] = count_options(command);
-    if descriptions.is_none() && alignments.is_none() {
-        return vec![formats.to_vec()];
-    }
     let mut ordered: Vec<Output> = formats.to_vec();
     ordered.sort_by_key(|format| format.number <= 4);
+    if descriptions.is_none() && alignments.is_none() {
+        return vec![ordered];
+    }
     let mut groups: Vec<(usize, Vec<Output>)> = Vec::new();
     for format in ordered {
         let size = hit_list_size(command, format.number);
@@ -792,6 +807,7 @@ fn search(
             }
             Commands::Psiblast(_)
             | Commands::Rpsblast(_)
+            | Commands::Rpstblastn(_)
             | Commands::Makedb(_)
             | Commands::Rpsbproc(_) => {
                 unreachable!("rejected by Program::parse")
@@ -949,6 +965,58 @@ fn link_format0(
     }
 }
 
+/// Whether `validate` reads the WindowMasker options where the command line reads them: after
+/// `-dust`, before the query range and the other options (`resolve_window_masker`: the check of
+/// the file of `-window_masker_db`, with the CLI's message for a format other than the two binary
+/// ones, then "at most one of" the options, then the file of `-window_masker_taxid`). Not when
+/// `-window_masker_db` names a file that is not registered: a host that validates an argv without
+/// its files (the application's control reactor) leaves the file to `run`, where a name that is
+/// not registered is the CLI's file that cannot be opened. A taxid whose file is not registered
+/// is the CLI's taxid without a file, whose error comes with the search (`batch_error`). An argv
+/// without the options is validated as before named input files.
+fn validates_window_masker(args: &LOSAT::web_adapter::BlastnArgs) -> bool {
+    match args.window_masker_db.as_deref() {
+        Some(name) => crate::files::registered(name),
+        None => args.window_masker_taxid.is_some(),
+    }
+}
+
+/// The counts source of BLASTN's `-window_masker_db` and `-window_masker_taxid`: the named input
+/// files registered when the run starts (`files::source`), which the engine opens by the option's
+/// value, or by the taxid's name in `files::WINDOW_MASKER_PATH`, as the command line opens the
+/// file of that name. `None` without the options, so a run without them gives the engine what it
+/// gave before named input files.
+fn window_masker_counts(command: &Commands) -> Option<Arc<dyn CountsSource>> {
+    match command {
+        Commands::Blastn(args)
+            if args.window_masker_db.is_some() || args.window_masker_taxid.is_some() =>
+        {
+            Some(crate::files::source())
+        }
+        _ => None,
+    }
+}
+
+/// Gives a search's command the run's counts source (`window_masker_counts`).
+fn give_counts(command: &mut Commands, counts: Option<&Arc<dyn CountsSource>>) {
+    if let (Commands::Blastn(args), Some(counts)) = (command, counts) {
+        give_blastn_counts(args, counts);
+    }
+}
+
+/// Gives BLASTN's arguments the counts source, and with `-window_masker_taxid` LOSAT Web's
+/// registry of counts files, where the command line gives NCBI's registry: the directory
+/// `files::WINDOW_MASKER_PATH`, and no posts of a `.ncbirc` (LOSAT Web reads none).
+fn give_blastn_counts(args: &mut LOSAT::web_adapter::BlastnArgs, counts: &Arc<dyn CountsSource>) {
+    args.window_masker_counts = Some(counts.clone());
+    if args.window_masker_taxid.is_some() {
+        args.window_masker_registry = Some(Ok(Default::default()));
+        if let Some(Ok(registry)) = &mut args.window_masker_registry {
+            registry.path = Some(crate::files::WINDOW_MASKER_PATH.to_string());
+        }
+    }
+}
+
 /// Runs the searches of the run and emits its streams. On failure nothing more is emitted
 /// and the host discards what it received.
 ///
@@ -983,6 +1051,7 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
     let custom_accepted = custom_handler_check(program, custom.as_deref()).is_ok();
     let mut diagnostics = StreamWriter::new(STREAM_DIAGNOSTICS);
     let threads = num_threads(&command);
+    let counts = window_masker_counts(&command);
     let mut command = Some(command);
     // Each search: what it wrote or why it failed, and (after the first) its diagnostics.
     let mut outcomes: Vec<(Result<Searched, Failed>, Vec<u8>)> = Vec::new();
@@ -995,6 +1064,7 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
                 Some(command) => command,
                 None => parse(words)?.1,
             };
+            give_counts(&mut command, counts.as_ref());
             let mut scratch = Vec::new();
             // Whether the options' checks reject this search, found before `search` takes the
             // command.
@@ -1593,7 +1663,7 @@ mod tests {
 
     // The searches of a run: one per distinct hit list size of the formats 0, 6 and 7 (NCBI
     // `blast_args.cpp:2894-2973`), the tabular formats first; without -num_descriptions and
-    // -num_alignments the one search of the program's formats in their order.
+    // -num_alignments the one search of the program's formats, the tabular ones first.
     #[test]
     fn a_run_searches_once_for_each_hit_list_size() {
         let groups = |program: &str, options: &[&str]| {
@@ -1604,7 +1674,7 @@ mod tests {
                 .map(|group| group.iter().map(|output| output.stream).collect())
                 .collect::<Vec<Vec<u32>>>()
         };
-        let one = vec![vec![0, 6, 7]];
+        let one = vec![vec![6, 7, 0]];
         let one_tabular_first = vec![vec![6, 7, 0]];
         let two = vec![vec![6, 7], vec![0]];
         for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
@@ -1634,7 +1704,7 @@ mod tests {
             // The output of the argv's -outfmt (stream 4) has the hit list size of 6 and 7: it
             // joins the tabular search, first, and adds none.
             for (options, expected) in [
-                (&["-outfmt", "6 qseqid"][..], vec![vec![4, 0, 6, 7]]),
+                (&["-outfmt", "6 qseqid"][..], vec![vec![4, 6, 7, 0]]),
                 (
                     &["-outfmt", "7 std qcovs", "-num_alignments", "3"],
                     vec![vec![4, 6, 7], vec![0]],
@@ -1643,7 +1713,7 @@ mod tests {
                     &["-outfmt=6 sseqid", "-num_descriptions", "500"],
                     vec![vec![4, 6, 7, 0]],
                 ),
-                (&["-outfmt", "7"], vec![vec![0, 6, 7]]),
+                (&["-outfmt", "7"], vec![vec![6, 7, 0]]),
             ] {
                 assert_eq!(groups(program, options), expected, "{program} {options:?}");
             }
@@ -2797,7 +2867,7 @@ mod tests {
         }
     }
 
-    // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 54 rows of the manifest that a
+    // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 57 rows of the manifest that a
     // run takes (not the one with -parse_deflines, nor the one with a `>?` gap line, which the
     // store refuses: maintainer decision 3), stream 4 and stream 3.
     #[test]
@@ -2818,7 +2888,7 @@ mod tests {
                 !gap_line(file("-query")) && !gap_line(file("-subject"))
             })
             .collect();
-        assert_eq!(rows.len(), 54);
+        assert_eq!(rows.len(), 57);
         for (id, argv) in &rows {
             let words: Vec<&str> = argv.iter().map(String::as_str).collect();
             let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];

@@ -50,11 +50,18 @@ const PSSM_FILES: &[&str] = &[
     "in_pssm",
 ];
 
+/// tblastn's `-in_pssm` (PSI-TBLASTN, line PS item PS7), refused for the same reason as psiblast's.
+const TBLASTN_PSSM_FILES: &[&str] = &["in_pssm"];
+
 /// The options of `program`'s command line that write a PSSM file or read the query from one
 /// (`PSSM_FILES`): they are not in an argv that `validate` accepts, and `describe` leaves them out.
-pub(super) fn pssm_file_options(program: Program) -> &'static [&'static str] {
+/// The searches of records of LOSAT Web take none of them either (the browser refuses `-in_pssm`
+/// until line PS's PSW1), and its `describe` leaves them out through the same list
+/// (`web_adapter::records_refused_options`).
+pub(crate) fn pssm_file_options(program: Program) -> &'static [&'static str] {
     match program {
         Program::Psiblast => PSSM_FILES,
+        Program::Tblastn => TBLASTN_PSSM_FILES,
         _ => &[],
     }
 }
@@ -95,8 +102,9 @@ impl Search {
             Commands::Blastn(args) => args.parse_deflines,
             Commands::Tblastx(args) => args.parse_deflines,
             Commands::Blastx(args) => args.parse_deflines,
-            Commands::Psiblast(_)
-            | Commands::Rpsblast(_)
+            Commands::Psiblast(args) => args.parse_deflines,
+            Commands::Rpsblast(_)
+            | Commands::Rpstblastn(_)
             | Commands::Makedb(_)
             | Commands::Rpsbproc(_) => false,
         }
@@ -305,7 +313,7 @@ mod tests {
             );
             assert!(error.message().starts_with(key(word)), "{word}: {error}");
         }
-        for program in [Program::Blastp, Program::Blastx] {
+        for program in [Program::Blastp, Program::Blastx, Program::Psiblast] {
             assert!(validate(program, &["-parse_deflines"])
                 .unwrap()
                 .parse_deflines());

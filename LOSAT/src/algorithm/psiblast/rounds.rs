@@ -58,10 +58,11 @@ use std::io::Write as _;
 
 use anyhow::Result;
 
-use super::in_pssm_files::{InPssmFile, InPssmRounds};
+use super::in_pssm_files::InPssmRounds;
 use super::pssm::{
     is_regular_file, OutputFileReset, PsiblastPssmOptions, PssmFileCheck, PssmRequest,
 };
+use crate::algorithm::pssm_search::in_pssm::InPssmFile;
 use crate::report::serial::pssm::ObjectId;
 
 /// The rounds of a psiblast run of FASTA queries or of a PSSM query: `-num_iterations` (0: until
@@ -126,8 +127,9 @@ pub(crate) enum SetKey {
 
 impl SetKey {
     /// The Seq-align id of an ordinal key (`gnl|BL_ORD_ID|oid`, as NCBI names a database sequence
-    /// without parsed Seq-ids; a `-subject` record's key is never compared with a parsed id:
-    /// psiblast has no `-parse_deflines`).
+    /// without parsed Seq-ids; a `-subject` record's key is never compared with a parsed id: the
+    /// keys of `-subject` records are their indices, with `-parse_deflines` too, whose reader
+    /// refuses the ids that NCBI's handles would take for one; RG DECISIONS 27).
     fn ordinal_id(index: u32) -> crate::seqid::model::ParsedSeqId {
         use crate::seqid::model::{Dbtag, ObjectId, ParsedSeqId};
         ParsedSeqId::General(Dbtag {
@@ -417,6 +419,10 @@ pub(crate) struct RoundOutcome {
     pub(crate) has_alignments: bool,
     pub(crate) set: InclusionSet,
     pub(crate) next: Option<Result<super::pssm::QueryPssm>>,
+    /// NCBI's messages of the next PSSM's reads (`pssm::PssmReadMessages`: `Failed to retrieve
+    /// sequence` for each Seq-align whose read fails, the taxonomy texts of its loads), which
+    /// come after the round's report, before the PSSM's error.
+    pub(crate) next_warnings: super::pssm::PssmReadMessages,
     pub(crate) searched: Option<(crate::core::psi::KarlinBlk, crate::core::psi::KarlinBlk)>,
 }
 

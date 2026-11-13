@@ -7,12 +7,14 @@
 // and of downloaded Example sets (src/infra/reactor/inflater.ts) runs on an instance of its own
 // for each file, dropped at its end. This module is the worker's composition root.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
+import type { CountsStore } from '../../ports/counts';
 import type { ExampleStore } from '../../ports/example';
 import type { FileInflater, WholeFileInflater } from '../../ports/inflate';
 import type { InputChecker } from '../../ports/input-check';
 import type { RecordScanner } from '../../ports/scan';
 import { sha256Hex } from '../browser/platform';
 import { DataService } from '../data/data-service';
+import { opfsCountsStore } from '../data/counts-store';
 import { opfsExampleStore } from '../data/example-store';
 import { inflateFile } from '../data/inflate';
 import { opfsAccess } from '../data/opfs-block-store';
@@ -24,7 +26,7 @@ import { reactorControl, type EngineControl } from '../reactor/control';
 import { ReactorInflater } from '../reactor/inflater';
 import { instantiateSerial, loadReactor } from '../reactor/instance';
 import { ReactorScanner, reopening } from '../reactor/scanner';
-import { DATA_GATEWAY_METHODS, DATA_WORKER_METHODS, EXAMPLE_STORE_METHODS, type DataWorkerApi } from './methods';
+import { COUNTS_STORE_METHODS, DATA_GATEWAY_METHODS, DATA_WORKER_METHODS, EXAMPLE_STORE_METHODS, type DataWorkerApi } from './methods';
 import { serveRpc, type RpcEndpoint } from './rpc';
 
 const token = crypto.randomUUID();
@@ -110,10 +112,30 @@ const examples = started.then(async (session): Promise<ExampleStore> => {
   };
 });
 
-const endpoint = Promise.all([service, examples]).then(
-  ([data, saved]): DataWorkerApi => ({
+/** Saved WindowMasker counts last where the saved Example sets do; elsewhere each tab keeps its own download. */
+const counts = started.then(async (session): Promise<CountsStore> => {
+  if (session.fallbackReason === undefined && locks !== undefined) {
+    try {
+      return await opfsCountsStore(locks);
+    } catch {
+      // No OPFS for counts: nothing is kept.
+    }
+  }
+  return {
+    readCounts: async () => undefined,
+    beginCounts: async () => undefined,
+    appendCounts: async () => undefined,
+    finishCounts: () => Promise.reject(new Error('this browser keeps no counts')),
+    closeCounts: async () => undefined,
+    deleteCounts: async () => undefined,
+  };
+});
+
+const endpoint = Promise.all([service, examples, counts]).then(
+  ([data, saved, savedCounts]): DataWorkerApi => ({
     ...delegate(data, DATA_GATEWAY_METHODS),
     ...delegate(saved, EXAMPLE_STORE_METHODS),
+    ...delegate(savedCounts, COUNTS_STORE_METHODS),
     inflateFile: (file, maxBytes) => whole.inflateFile(file, maxBytes),
     describe: (program) => control.describe(program),
     validate: (argv) => control.validate(argv),

@@ -5,9 +5,10 @@ use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::Path;
 
+use crate::ncbi_app::args::Args;
+use crate::ncbi_app::files::Ostream;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 
-use super::args::Args;
 use super::{refusal, Diag};
 
 /// The separator NCBI puts after a directory (`CDirEntry::GetPathSeparator`).
@@ -449,7 +450,13 @@ enum ListStop {
 }
 
 impl From<SeqDbError> for ListStop {
+    // NCBI's formatter opens the database for the fields that read it and throws to the
+    // application's `CATCH_ALL` (blast_app_util.hpp:247-250, quoted at `database_error`): an
+    // alias file's value that does not convert is `Error: <what()>`, exit status 255.
     fn from(error: SeqDbError) -> Self {
+        if let Some(exception) = error.ncbi_exception() {
+            return ListStop::Ncbi(format!("Error: {}", exception.what()).into_bytes(), 255);
+        }
         match error.ncbi_message() {
             Some(text) => ListStop::Ncbi(format!("BLAST Database error: {text}").into_bytes(), 2),
             None => ListStop::Refused(refusal(&error.to_string())),
@@ -667,11 +674,11 @@ fn write_line(format: &ListFormat, db: &FoundDb, path: &SearchPath) -> Result<Ve
             b'f' => db.file_name(),
             b't' => open(&mut opened, db, path)?.title().to_vec(),
             b'n' => open(&mut opened, db, path)?
-                .num_seqs()
+                .printed_num_seqs()
                 .to_string()
                 .into_bytes(),
             b'l' => open(&mut opened, db, path)?
-                .total_length()
+                .printed_total_length()
                 .to_string()
                 .into_bytes(),
             b'p' => match db.seqtype {
@@ -738,7 +745,7 @@ fn write_line(format: &ListFormat, db: &FoundDb, path: &SearchPath) -> Result<Ve
 // refusal of a database it does not read (an empty `x.pin` on which NCBI crashes: J168)
 // writes no line.
 /// `-list`: the databases of the directory, one line each, to `out`; the exit status.
-pub(super) fn list(args: &Args, path: &SearchPath, diag: &mut Diag, out: &mut dyn Write) -> i32 {
+pub(super) fn list(args: &Args, path: &SearchPath, diag: &mut Diag, out: &mut Ostream<'_>) -> i32 {
     let dir = args.value("list").unwrap_or("");
     let dbtype = args.value("dbtype").unwrap_or("guess");
     let dbs = find_blast_dbs(
@@ -769,13 +776,18 @@ pub(super) fn list(args: &Args, path: &SearchPath, diag: &mut Diag, out: &mut dy
             Err(ListStop::Ncbi(message, status)) => {
                 let _ = out.write_all(&text);
                 let _ = out.flush();
+                // `cerr`'s tie flushed the output first: a closed pipe ends the program there.
+                if out.closed() {
+                    return 0;
+                }
                 diag.post_bytes(&message);
                 return status;
             }
             Err(ListStop::Refused(reason)) => return diag.refuse(&reason),
         }
     }
-    // NCBI's stream ignores a failed write (no exception is enabled on it), so does this.
+    // NCBI's stream ignores a failed write (no exception is enabled on it), so does the run's
+    // `ncbi_app::files::Ostream` that `out` is.
     let _ = out.write_all(&text);
     let _ = out.flush();
     0

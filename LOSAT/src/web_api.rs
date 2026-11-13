@@ -288,6 +288,7 @@ fn parse_blastn_args(
         db: None,
         // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
         db_filter: Default::default(),
+        formatting: Default::default(),
         dbsize: None,
         show_gis: false,
         parse_deflines: false,
@@ -328,7 +329,7 @@ fn parse_blastn_args(
         window_masker_db: None,
         window_masker: None,
         window_masker_counts: None,
-        window_masker_path: None,
+        window_masker_registry: None,
         // ABI v1 writes no tabular field list.
         tabular_taxdb: None,
         strand: "both".to_string(),
@@ -447,6 +448,7 @@ fn parse_tblastx_args(
         db: None,
         // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
         db_filter: Default::default(),
+        formatting: Default::default(),
         dbsize: None,
         show_gis: false,
         parse_deflines: false,
@@ -472,6 +474,7 @@ fn parse_tblastx_args(
         seg: "yes".to_string(),
         soft_masking: None,
         lcase_masking: false,
+        xdrop_ungap: None,
         window_size: None,
         outfmt: "6".to_string(),
         culling_limit: None,
@@ -639,6 +642,9 @@ fn parse_blastp_args(
         qcov_hsp_perc: None,
         culling_limit: None,
         ungapped: false,
+        xdrop_ungap: None,
+        xdrop_gap: None,
+        xdrop_gap_final: None,
         window_size: None,
         matrix: None,
         gap_open: None,

@@ -286,14 +286,83 @@ pub(super) fn local_parameters_for_call(
     options: LocalParameterOptions<'_>,
     call: LocalParameterCall,
 ) -> LocalSubjectParameters {
+    local_parameters_for_blocks(
+        query_contexts,
+        subject_nt_length,
+        db_num_seqs,
+        LocalKarlinBlocks {
+            gapped: gapped_params,
+            lengths: gapped_params,
+            ungapped: ungapped_params,
+            x_dropoff: ungapped_params,
+        },
+        options,
+        call,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2826
+// ```c
+//    sbp->kbp = Blast_QueryIsPssm(program) ? sbp->kbp_psi : sbp->kbp_std;
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:120-126,766-768
+// ```c
+//     /* Set gapped Blast_KarlinBlk* alias */
+//     sbp->kbp_gap = Blast_QueryIsPssm(program) ?
+//         sbp->kbp_gap_psi : sbp->kbp_gap_std;
+// ...
+//    /* N.B.: the old code used kbp_gap_std instead of the kbp_gap alias (which
+//     * could be kbp_gap_psi), hence we duplicate that behavior here */
+//    kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:204-221,338-345
+// ```c
+//       kbp= sbp->kbp[context];
+// ...
+//             p->cutoffs[context].x_dropoff_init =
+//             (Int4)(sbp->scale_factor *
+//                    ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
+// ...
+//       if (sbp->kbp_std) {     /* this may not be set for gapped blastn */
+//          kbp = sbp->kbp_std[context];
+//          if (s_BlastKarlinBlkIsValid(kbp)) {
+//             gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 +
+//                                      kbp->logK) / kbp->Lambda);
+// ```
+/// The Karlin-Altschul blocks of each context that `local_parameters_for_blocks` reads: the
+/// gapped `kbp_gap` of the cutoffs and the linking, the gapped `kbp_gap_std` of the effective
+/// lengths, the ungapped `kbp_std` of the gap trigger and the ungapped `kbp` of the word X-drop.
+/// A matrix query's are two blocks (`kbp_gap` is `kbp_gap_std`, `kbp` is `kbp_std`); a PSSM
+/// query's `kbp_gap` and `kbp` are its `kbp_gap_psi` and `kbp_psi` (tblastn `-in_pssm`).
+#[derive(Clone, Copy)]
+pub(super) struct LocalKarlinBlocks<'a> {
+    pub gapped: &'a [KarlinParams],
+    pub lengths: &'a [KarlinParams],
+    pub ungapped: &'a [KarlinParams],
+    pub x_dropoff: &'a [KarlinParams],
+}
+
+/// `local_parameters_for_call` with each kind of Karlin-Altschul block of its own
+/// (`LocalKarlinBlocks`).
+pub(super) fn local_parameters_for_blocks(
+    query_contexts: &[(usize, bool)],
+    subject_nt_length: usize,
+    db_num_seqs: usize,
+    blocks: LocalKarlinBlocks<'_>,
+    options: LocalParameterOptions<'_>,
+    call: LocalParameterCall,
+) -> LocalSubjectParameters {
+    let gapped_params = blocks.gapped;
     assert!(!query_contexts.is_empty());
     assert_eq!(query_contexts.len(), gapped_params.len());
-    assert_eq!(query_contexts.len(), ungapped_params.len());
+    assert_eq!(query_contexts.len(), blocks.lengths.len());
+    assert_eq!(query_contexts.len(), blocks.ungapped.len());
+    assert_eq!(query_contexts.len(), blocks.x_dropoff.len());
     let lengths = local_subject_effective_lengths_with_search_spaces(
         query_contexts,
         subject_nt_length,
         db_num_seqs,
-        gapped_params,
+        blocks.lengths,
         options.eff_searchsp_override,
     );
     // NCBI c++/src/algo/blast/core/blast_setup.c:964-985,1011-1024:
@@ -401,8 +470,11 @@ pub(super) fn local_parameters_for_call(
     // NCBI c++/src/algo/blast/core/blast_parameters.c:983-999,302-383:
     // hit cutoff and maximum are scaled before the word cutoff is computed;
     // gap_trigger uses kbp_std and the word cutoff is capped by hit cutoff_max.
-    for (context, (&(query_length, valid), ungapped)) in
-        query_contexts.iter().zip(ungapped_params).enumerate()
+    for (context, ((&(query_length, valid), ungapped), x_dropoff_kbp)) in query_contexts
+        .iter()
+        .zip(blocks.ungapped)
+        .zip(blocks.x_dropoff)
+        .enumerate()
     {
         if !valid || query_length == 0 {
             cutoffs.push(LocalContextCutoffs {
@@ -418,7 +490,8 @@ pub(super) fn local_parameters_for_call(
         hit_cutoff_min = hit_cutoff_min.min(hit_cutoff);
         let gap_trigger = gap_trigger_raw_score(options.gap_trigger_bits, ungapped);
         let word_cutoff = ((gap_trigger as f64 * options.scale_factor) as i32).min(hit_cutoff_max);
-        let xdrop_init = x_drop_raw_score(options.word_xdrop_bits, ungapped, options.scale_factor);
+        let xdrop_init =
+            x_drop_raw_score(options.word_xdrop_bits, x_dropoff_kbp, options.scale_factor);
         let word_xdrop = if xdrop_init == 0 {
             word_cutoff
         } else {
@@ -533,6 +606,91 @@ mod tests {
                 .collect::<Vec<_>>(),
             [16, 16, 0]
         );
+    }
+
+    // NCBI blast_setup.c:766-768 (the effective lengths from `kbp_gap_std`), blast_parameters.c:
+    // 204-221 (the word X-drop from `kbp`), 338-345 (the gap trigger from `kbp_std`) and 902-999
+    // (the cutoffs from `kbp_gap`): each block of a PSSM query is read where NCBI reads it (tblastn
+    // `-in_pssm`, line PS item PS7).
+    #[test]
+    fn each_karlin_block_is_read_where_ncbi_reads_it() {
+        let gapped = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
+        let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let options = LocalParameterOptions {
+            expect_value: 10.0,
+            do_sum_stats: false,
+            max_intron_length: 0,
+            gap_trigger_bits: 22.0,
+            word_xdrop_bits: 7.0,
+            scale_factor: 1.0,
+            gumbel: None,
+            eff_searchsp_override: None,
+        };
+        let call = LocalParameterCall::Initial {
+            min_subject_length: 1000,
+            composition_based_stats: 0,
+        };
+        let run = |blocks: LocalKarlinBlocks<'_>| {
+            local_parameters_for_blocks(&[(300, true)], 3_000_000, 10, blocks, options, call)
+        };
+        let base = local_parameters_for_call(
+            &[(300, true)],
+            3_000_000,
+            10,
+            &[gapped],
+            &[ungapped],
+            options,
+            call,
+        );
+        let same = run(LocalKarlinBlocks {
+            gapped: &[gapped],
+            lengths: &[gapped],
+            ungapped: &[ungapped],
+            x_dropoff: &[ungapped],
+        });
+        assert_eq!(base, same);
+        // Another gapped block for the cutoffs only: the lengths stay the matrix's.
+        let psi_gapped = KarlinParams {
+            lambda: gapped.lambda * 0.8,
+            k: gapped.k * 2.0,
+            ..gapped
+        };
+        let cutoffs = run(LocalKarlinBlocks {
+            gapped: &[psi_gapped],
+            lengths: &[gapped],
+            ungapped: &[ungapped],
+            x_dropoff: &[ungapped],
+        });
+        assert_eq!(cutoffs.lengths, base.lengths);
+        assert_ne!(cutoffs.cutoffs[0].hit_cutoff, base.cutoffs[0].hit_cutoff);
+        let lengths = run(LocalKarlinBlocks {
+            gapped: &[gapped],
+            lengths: &[psi_gapped],
+            ungapped: &[ungapped],
+            x_dropoff: &[ungapped],
+        });
+        assert_ne!(lengths.lengths, base.lengths);
+        // Another ungapped block for the X-drop only: the gap trigger stays `kbp_std`'s.
+        let psi_ungapped = KarlinParams {
+            lambda: ungapped.lambda * 0.5,
+            ..ungapped
+        };
+        let xdrop = run(LocalKarlinBlocks {
+            gapped: &[gapped],
+            lengths: &[gapped],
+            ungapped: &[ungapped],
+            x_dropoff: &[psi_ungapped],
+        });
+        assert_eq!(xdrop.cutoffs[0].word_cutoff, base.cutoffs[0].word_cutoff);
+        assert_ne!(xdrop.cutoffs[0].word_xdrop, base.cutoffs[0].word_xdrop);
+        let trigger = run(LocalKarlinBlocks {
+            gapped: &[gapped],
+            lengths: &[gapped],
+            ungapped: &[psi_ungapped],
+            x_dropoff: &[ungapped],
+        });
+        assert_eq!(trigger.cutoffs[0].word_xdrop, base.cutoffs[0].word_xdrop);
+        assert_ne!(trigger.cutoffs[0].word_cutoff, base.cutoffs[0].word_cutoff);
     }
 
     // NCBI c++/src/algo/blast/core/link_hsps.c:1788-1802;

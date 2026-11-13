@@ -25,6 +25,13 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<TblastnArgs> {
     {
         bail!("-db (a database search) is not supported in the browser yet");
     }
+    // The host has no PSSM files either (`-in_pssm`, line PS item PSW1).
+    if extra
+        .iter()
+        .any(|key| key.split('=').next().unwrap_or(key) == "-in_pssm")
+    {
+        bail!("-in_pssm (a PSSM query) is not supported in the browser yet");
+    }
     if extra.iter().any(|key| {
         matches!(
             key.split('=').next().unwrap_or(key),
@@ -167,6 +174,10 @@ mod tests {
         assert_eq!(
             error(&["-db=nt"]),
             "-db (a database search) is not supported in the browser yet"
+        );
+        assert_eq!(
+            error(&["-in_pssm", "p.asn"]),
+            "-in_pssm (a PSSM query) is not supported in the browser yet"
         );
         for word in [
             "-query",

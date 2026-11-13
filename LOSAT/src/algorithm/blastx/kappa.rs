@@ -207,17 +207,19 @@ pub fn redo_params(
             .min()
             .context("BLASTX Kappa requires a valid context")?,
     };
-    let extension_final = (options.gap_x_dropoff_final * std::f64::consts::LN_2 / ka.lambda)
-        .max(options.gap_x_dropoff * std::f64::consts::LN_2 / ka.lambda)
-        as i32;
+    // blast_parameters.c:454-463: the search's final X-drop (`parameters::gapped_x_drops`).
+    let extension_final = super::parameters::gapped_x_drops(options, &ka).1;
     Ok(BlastRedoAlignParams {
         matrix_info: build_matrix_info(matrix, ideal.lambda / scale)?,
         gapping_params: BlastCompoGappingParams {
             gap_open: options.gap_open * 32,
             gap_extend: options.gap_extend * 32,
-            x_dropoff: ((options.gap_x_dropoff_final * std::f64::consts::LN_2 / scaled_lambda)
-                as i32)
-                .max(extension_final),
+            // blast_kappa.c:2374-2382 (`core::x_drop::redo_x_dropoff`).
+            x_dropoff: crate::core::x_drop::redo_x_dropoff(
+                options.gap_x_dropoff_final,
+                scaled_lambda,
+                extension_final,
+            ),
             context: Cell::new(None),
         },
         compo_adjust_mode: compo_adjust_mode(options.composition),

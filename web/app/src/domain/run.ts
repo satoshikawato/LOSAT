@@ -1,5 +1,6 @@
 // Run records (plan §5.2). A RunSnapshot is fixed when a job is queued and never
 // changes; what actually happened is appended to the RunRecord.
+import type { CountsOrigin } from './counts';
 import type { RecordKey } from './dataset';
 import type { ProgramId } from './programs';
 
@@ -31,6 +32,35 @@ export interface InputSnapshot {
   readonly records: readonly RecordKey[];
 }
 
+/**
+ * The WindowMasker unit counts file of a run (`-window_masker_db`, or `-window_masker_taxid`): the file
+ * that the run's engine reads under the name below. It lives in the working session only, as the
+ * run does (the file of a taxonomy ID is kept by the browser, and the run reads it from there).
+ */
+export interface CountsSnapshot {
+  /** The value of `-window_masker_db` in the argv; for `-window_masker_taxid`, the name that the engine looks for (windowmasker/<taxid>/wmasker.obinary). */
+  readonly name: string;
+  readonly file: Blob;
+  readonly size: number;
+  readonly lastModified: number;
+  /** For `-window_masker_taxid`: where the file was downloaded from. */
+  readonly origin?: CountsOrigin;
+}
+
+/** What a run did with its counts file (RunRecord.windowMasker). */
+export interface CountsRecord {
+  readonly name: string;
+  readonly size: number;
+  /** Lower-case hex SHA-256 of the bytes that the engine read. */
+  readonly sha256: string;
+  /** The engine used the counts that it held from an earlier run. */
+  readonly retained: boolean;
+  /** Milliseconds spent giving the file to the engine; 0 when it was retained. */
+  readonly loadMs: number;
+  /** For `-window_masker_taxid`: the taxonomy ID, the URL and the Last-Modified of the file that was read. */
+  readonly origin?: CountsOrigin;
+}
+
 export interface RunSnapshot {
   readonly runId: string;
   /** 1-based position in this working session, used for display and file names. */
@@ -45,6 +75,8 @@ export interface RunSnapshot {
   readonly query: InputSnapshot;
   readonly subject: InputSnapshot;
   readonly requestedThreads: number | 'auto';
+  /** The counts file of `-window_masker_db`; absent without the option (BLASTN only). */
+  readonly windowMasker?: CountsSnapshot;
   readonly queuedAt: number;
   /**
    * The group of runs queued together as separate searches (plan §5.2, Separate): one
@@ -75,6 +107,8 @@ export interface RunRecord {
   };
   /** The engine searched the subject that it held from an earlier search (R1). */
   readonly subjectRetained?: boolean;
+  /** What the run did with its WindowMasker counts file. */
+  readonly windowMasker?: CountsRecord;
   readonly startedAt?: number;
   /** When each engine phase started. */
   readonly phaseTimes?: { readonly preparing?: number; readonly running?: number; readonly finalizing?: number };

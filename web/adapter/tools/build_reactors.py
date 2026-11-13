@@ -70,12 +70,29 @@ def main() -> int:
     records = {}
     cargo_home = Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo"))
     remap = [f"--remap-path-prefix={ROOT}=/losat", f"--remap-path-prefix={cargo_home}=/cargo"]
+    argvs = {name: ["cargo", "build", "--release", "--locked", "--target", triple, *options,
+                    "--target-dir", str(target / name),
+                    "--config", f"target.{triple}.rustflags={json.dumps(remap)}"]
+             for name, (triple, options, _, _) in SPECS.items()}
+    # Both builds run at once: most of each is the single-threaded fat-LTO link of one module
+    # (codegen-units = 1), so in series they left the other CPUs idle. On 4 CPUs (2026-11-12,
+    # dev 2d9093089) the two took 4.3 min at once against 7.6 in series, with the same bytes;
+    # their peaks add up (3.1 + 4.0 GB). Each target directory and log is its own.
+    builds = {}
+    for name, argv in argvs.items():
+        log = (out / f"{name}.build.log").open("w")
+        builds[name] = (subprocess.Popen(argv, cwd=ADAPTER, stdout=log, stderr=subprocess.STDOUT), log)
+    failed = []
+    for name, (process, log) in builds.items():
+        if process.wait() != 0:
+            failed.append(name)
+        log.close()
+    if failed:
+        for name in failed:
+            print((out / f"{name}.build.log").read_text(), end="")
+        raise SystemExit(f"the build of {', '.join(failed)} failed (logs: {out})")
     for name, (triple, options, features, kind) in SPECS.items():
-        argv = ["cargo", "build", "--release", "--locked", "--target", triple, *options,
-                "--target-dir", str(target / name),
-                "--config", f"target.{triple}.rustflags={json.dumps(remap)}"]
-        with (out / f"{name}.build.log").open("w") as log:
-            subprocess.run(argv, cwd=ADAPTER, stdout=log, stderr=subprocess.STDOUT, check=True)
+        argv = argvs[name]
         built = target / name / triple / "release/losat_web_adapter.wasm"
         artifact = json.loads(subprocess.check_output(
             [args.node, str(ENGINE / "tests/wasi_artifact.js"), str(built), kind], text=True))

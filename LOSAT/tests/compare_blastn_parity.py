@@ -11,6 +11,7 @@ import argparse
 import csv
 import hashlib
 import math
+import os
 import shlex
 import subprocess
 import sys
@@ -19,6 +20,9 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from db_search_fixtures import ncbi_env  # noqa: E402  (NCBI's runs: the usage report off)
 
 
 # NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-40
@@ -741,7 +745,8 @@ def run_fresh_paired(
         ncbi_command = build_ncbi_command(row, ncbi_bin, ncbi_out)
         losat_command = build_losat_command(row, losat_bin, losat_out)
         print("paired_ncbi:", shlex.join(ncbi_command))
-        subprocess.run(ncbi_command, cwd=root, check=True)
+        # NCBI's run gets BLAST_USAGE_REPORT=false (db_search_fixtures.ncbi_env); LOSAT's keeps the environment.
+        subprocess.run(ncbi_command, cwd=root, check=True, env=ncbi_env(dict(os.environ)))
         print("paired_losat:", shlex.join(losat_command))
         subprocess.run(losat_command, cwd=root, check=True)
         cases.append((case_id, ncbi_out, losat_out))

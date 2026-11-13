@@ -88,6 +88,23 @@ pub(crate) enum RpsOpenError {
     Refused(String),
 }
 
+/// Why a volume's RPS files cannot be searched, as `RpsVolumeFiles::open_for` tells it: an
+/// error of the files (`RpsOpenError`), or an `.aux` without a token. NCBI's stream then reads
+/// no matrix name, and every query of the batch fails where its score block is made, after the
+/// files are open (NCBI's error, which the search writes: "Error: Unknown error code -1 " per
+/// query, as an unknown matrix of BLASTX's).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RpsVolumeFault {
+    Files(RpsOpenError),
+    NoMatrix,
+}
+
+impl From<RpsOpenError> for RpsVolumeFault {
+    fn from(error: RpsOpenError) -> Self {
+        Self::Files(error)
+    }
+}
+
 /// The contents of the `.aux` file.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:193-225
@@ -261,6 +278,17 @@ pub(crate) struct RpsVolumeFiles {
 }
 
 impl RpsVolumeFiles {
+    /// rpsblast's `open_for` with an `.aux` without a token as a refusal (the tests' files).
+    #[cfg(test)]
+    pub(crate) fn open(base: &Path, lengths: &[u32]) -> Result<Self, RpsOpenError> {
+        Self::open_for(base, lengths, "RPSBLAST").map_err(|fault| match fault {
+            RpsVolumeFault::Files(error) => error,
+            RpsVolumeFault::NoMatrix => RpsOpenError::Refused(
+                "a profile database whose .aux file is not NCBI's text (matrix, gap costs, statistics, scale, then pairs of a length and a K) is not supported by LOSAT's RPSBLAST".to_string(),
+            ),
+        })
+    }
+
     /// Opens the RPS files of the volume `base` (its path without extension) whose sequence part
     /// holds the profiles' consensus sequences of `lengths` letters (by local ordinal id).
     ///
@@ -286,11 +314,18 @@ impl RpsVolumeFiles {
     ///     }
     /// ```
     /// (The `.rps` file's check, rps_aux.cpp:338-348, is the same.)
-    pub(crate) fn open(base: &Path, lengths: &[u32]) -> Result<Self, RpsOpenError> {
+    /// `program` is the name in LOSAT's refusals; an `.aux` without a token is
+    /// `RpsVolumeFault::NoMatrix`, NCBI's engine error of each query (review A of PS12a, N2).
+    pub(crate) fn open_for(
+        base: &Path,
+        lengths: &[u32],
+        program: &str,
+    ) -> Result<Self, RpsVolumeFault> {
         if cfg!(target_endian = "big") {
-            return Err(RpsOpenError::Refused(
-                "a profile database (its files are little endian) on a big-endian platform is not supported by LOSAT's RPSBLAST".to_string(),
-            ));
+            return Err(RpsOpenError::Refused(format!(
+                "a profile database (its files are little endian) on a big-endian platform is not supported by LOSAT's {program}"
+            ))
+            .into());
         }
         let shown = canonical_volume_path(base);
         let with = |extension: &str| {
@@ -315,7 +350,7 @@ impl RpsVolumeFiles {
         };
         let empty = |extension: &str| {
             RpsOpenError::Refused(format!(
-                "a profile database whose {extension} file is shorter than its header (NCBI BLAST+ reads past it) is not supported by LOSAT's RPSBLAST"
+                "a profile database whose {extension} file is shorter than its header (NCBI BLAST+ reads past it) is not supported by LOSAT's {program}"
             ))
         };
         let loo = map(".loo")?;
@@ -325,7 +360,7 @@ impl RpsVolumeFiles {
             .first()
             .unwrap();
         if loo_magic != RPS_MAGIC_NUM && loo_magic != RPS_MAGIC_NUM_28 {
-            return Err(magic_error(".loo"));
+            return Err(magic_error(".loo").into());
         }
         let rps = map(".rps")?;
         let rps_magic = *rps
@@ -334,15 +369,27 @@ impl RpsVolumeFiles {
             .first()
             .unwrap();
         if rps_magic != RPS_MAGIC_NUM && rps_magic != RPS_MAGIC_NUM_28 {
-            return Err(magic_error(".rps"));
+            return Err(magic_error(".rps").into());
         }
         let refused = |what: &str| {
             RpsOpenError::Refused(format!(
-                "a profile database whose {what} is not supported by LOSAT's RPSBLAST"
+                "a profile database whose {what} is not supported by LOSAT's {program}"
             ))
         };
-        let aux = std::str::from_utf8(&aux_text)
-            .ok()
+        let aux_text = std::str::from_utf8(&aux_text).ok();
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:205-208
+        // ```c++
+        //     // Read the data
+        //     input >> matrix;
+        //     input >> gap_open;
+        //     input >> gap_extend;
+        // ```
+        // An `.aux` of no token leaves the matrix name empty (the stream fails without throwing):
+        // the files open, and the batch's score blocks fail (`RpsVolumeFault::NoMatrix`).
+        if aux_text.is_some_and(|text| text.split_ascii_whitespace().next().is_none()) {
+            return Err(RpsVolumeFault::NoMatrix);
+        }
+        let aux = aux_text
             .and_then(parse_aux)
             .ok_or_else(|| refused(".aux file is not NCBI's text (matrix, gap costs, statistics, scale, then pairs of a length and a K)"))?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:139-146
@@ -355,9 +402,9 @@ impl RpsVolumeFiles {
         //         lookup->alphabet_size = 28;
         // ```
         if loo_magic != rps_magic {
-            return Err(refused(
-                ".loo and .rps files are of different alphabets (magic numbers)",
-            ));
+            return Err(
+                refused(".loo and .rps files are of different alphabets (magic numbers)").into(),
+            );
         }
         let alphabet = if loo_magic == RPS_MAGIC_NUM { 26 } else { 28 };
         let num_profiles = rps
@@ -368,12 +415,13 @@ impl RpsVolumeFiles {
             return Err(refused(&format!(
                 ".rps file holds {num_profiles} profiles for {} sequences",
                 lengths.len()
-            )));
+            ))
+            .into());
         }
         let offsets = rps.i32s(8, num_profiles + 1).ok_or_else(|| empty(".rps"))?;
         // Each profile's rows: its consensus letters and one sentinel row.
         if offsets[0] != 0 {
-            return Err(refused(".rps profiles do not start at row 0"));
+            return Err(refused(".rps profiles do not start at row 0").into());
         }
         for (i, &length) in lengths.iter().enumerate() {
             let rows = i64::from(offsets[i + 1]) - i64::from(offsets[i]);
@@ -381,7 +429,8 @@ impl RpsVolumeFiles {
                 return Err(refused(&format!(
                     ".rps profile {i} has {} rows for a consensus sequence of {length} letters",
                     rows - 1
-                )));
+                ))
+                .into());
             }
         }
         let num_rows =
@@ -397,19 +446,21 @@ impl RpsVolumeFiles {
         {
             return Err(refused(
                 ".rps file is shorter than its rows (header, offsets, one row per position)",
-            ));
+            )
+            .into());
         }
         if aux.karlin_k.len() < num_profiles {
             return Err(refused(&format!(
                 ".aux file has {} Karlin-Altschul K values for {num_profiles} profiles",
                 aux.karlin_k.len()
-            )));
+            ))
+            .into());
         }
         if aux.karlin_k[..num_profiles]
             .iter()
             .any(|k| !(k.is_finite() && *k > 0.0))
         {
-            return Err(refused(".aux file has a K value that is not positive"));
+            return Err(refused(".aux file has a K value that is not positive").into());
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:154-160
         // ```c
@@ -439,7 +490,7 @@ impl RpsVolumeFiles {
             freq: None,
         };
         if files.cells().is_none() || files.overflow().is_none() {
-            return Err(refused(".loo file is shorter than its backbone"));
+            return Err(refused(".loo file is shorter than its backbone").into());
         }
         files.check_cells(num_rows).map_err(|what| refused(&what))?;
         if alphabet == 26 {
@@ -843,6 +894,8 @@ mod tests {
         assert_eq!(ratios.len(), 2);
         assert_eq!(ratios[0][0], 4000.0 / 1e9);
         assert_eq!(ratios[1][27], 5027.0 / 1e9);
+        // The next volume is written over these files. (Windows does not write a mapped file.)
+        drop(files);
         // A 26-column `.rps` with a 28-column `.freq` reads rows two integers early: row r
         // starts at integer 26 r of the rows (NCBI's drift), and columns 26 and 27 are 0.0.
         let base = write_volume(&dir, 26, AUX);

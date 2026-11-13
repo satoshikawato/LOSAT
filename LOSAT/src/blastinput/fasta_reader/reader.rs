@@ -508,7 +508,7 @@ pub(crate) struct FastaReader<R: Read> {
     believed: Option<std::sync::Arc<super::believed::BelievedIds>>,
     /// Whether the ids of the record name a protein (`believed::named_molecule`).
     believed_molecule: Option<bool>,
-    /// The keys of the ids read so far (`believed::duplicate_id`).
+    /// The keys of the ids of the subjects read so far (`believed::duplicate_id`).
     believed_keys: std::collections::HashSet<u64>,
     /// The ids of the other role's records of the search (`set_id_scope`).
     id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
@@ -1046,7 +1046,7 @@ impl<R: Read> FastaReader<R> {
     fn parse_believed_def_line(&mut self, defline: &[u8], warn: Warn<'_>) -> Result<(), ReadError> {
         use super::believed::{
             duplicate_id, generated_ids, named_molecule, parse_believed_defline,
-            refuse_range_in_archive, BelievedIds,
+            refuse_range_in_archive, refused_id, BelievedIds,
         };
         self.titles.clear();
         if self.config.keep_defline {
@@ -1106,12 +1106,21 @@ impl<R: Read> FastaReader<R> {
         } else {
             parsed.ids
         };
-        if let Some(refusal) = duplicate_id(
-            &ids,
-            &mut self.believed_keys,
-            self.config.role,
-            self.config.program,
-        ) {
+        // Two queries with one id are the scopes' of the query batches (`QueryScopes`), which
+        // NCBI's formatter empties after each batch against a database.
+        let refusal = refused_id(&ids, self.config.role, self.config.program).or_else(|| {
+            (self.config.role != "query")
+                .then(|| {
+                    duplicate_id(
+                        &ids,
+                        &mut self.believed_keys,
+                        self.config.role,
+                        self.config.program,
+                    )
+                })
+                .flatten()
+        });
+        if let Some(refusal) = refusal {
             return Err(ReadError::Unsupported(refusal));
         }
         let believed = BelievedIds::new(ids, self.config.strand);

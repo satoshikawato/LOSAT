@@ -13,9 +13,10 @@
 //!
 //! What NCBI's object manager does with these ids is not reproduced where it shows another
 //! sequence than the record's (`dropin-survey-20261029/DI7/DECISIONS.md` 7 and 8): LOSAT refuses
-//! such input. NCBI keeps every query in one scope and finds a sequence again by its id, so of
-//! two queries with one id it searches the first's letters twice, and it shows a database
-//! sequence with the id of a query as that query (probe of 2026-10-30).
+//! such input. NCBI keeps the queries of a batch in one scope (every batch's with `-subject` and in
+//! outfmt 5) and finds a sequence again by its id, so of two queries with one id there it searches
+//! the first's letters twice, and it shows a database sequence with the id of such a query as that
+//! query (probe of 2026-10-30; per batch: series Q of line RG, Q1c, `query_batch::QueryScopes`).
 
 use std::collections::HashSet;
 
@@ -26,7 +27,8 @@ use crate::seqid::id_scope::{name_keys, version_keys, SharedRecord};
 use crate::seqid::label;
 use crate::seqid::model::{Dbtag, ObjectId, ParsedSeqId};
 use crate::seqid::rank::{best_rank_score, find_best, text_score};
-use crate::writedb::fasta_source::defline_ids::{parse_range, process_ids};
+use crate::writedb::fasta_source::defline_ids::{parse_range, post_seq_id_warning_of, process_ids};
+use crate::writedb::fasta_source::reader::ReaderWarning;
 
 /// The Seq-ids of a record that `-parse_deflines` read.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -215,15 +217,14 @@ pub(crate) fn parse_believed_defline(
     if id_string.iter().all(|&byte| space(byte)) {
         return Err("Unable to locate sequence id in definition line".to_string());
     }
-    // NCBI's diagnostics name the application; `process_ids` is makeblastdb's.
+    // A warning of the Seq-id parser names the application (`post_seq_id_warning_of`); the
+    // reader's own warnings are lines without a prefix.
     let name = program.to_ascii_lowercase();
-    let mut warn_named = |message: &[u8]| {
-        let text = String::from_utf8_lossy(message)
-            .replace("[makeblastdb]", &format!("[{name}]"))
-            .into_bytes();
-        warn(&text);
+    let mut warn_named = |warning: ReaderWarning<'_>| match warning {
+        ReaderWarning::Line(line) => warn(line),
+        ReaderWarning::SeqId(warning) => post_seq_id_warning_of(&name, warning, &mut *warn),
     };
-    let ids = process_ids(id_string, protein, line_number, &mut warn_named)
+    let ids = process_ids(id_string, protein, true, line_number, &mut warn_named)
         .map_err(|error| error.message)?;
     Ok(BelievedDefline {
         title_search: pos,
@@ -232,17 +233,8 @@ pub(crate) fn parse_believed_defline(
     })
 }
 
-/// LOSAT's refusal of the ids of a record, or `None`: a `gnl|BL_ORD_ID|n` id and an id that a record
-/// of the role read before has. An accession with a version and the same accession without one
-/// count as one id for two subjects, and in BLASTN two queries (`dropin-survey-20261029/DI7/
-/// DECISIONS.md` 11, 12). Adds the keys of the ids. A record of the other role is
-/// `crate::seqid::id_scope::IdScope::add_record`'s.
-pub(crate) fn duplicate_id(
-    ids: &[ParsedSeqId],
-    seen: &mut HashSet<u64>,
-    role: &str,
-    program: &str,
-) -> Option<anyhow::Error> {
+/// LOSAT's refusal of an id of a record, or `None`: a `gnl|BL_ORD_ID|n` id and a Geninfo import id.
+pub(crate) fn refused_id(ids: &[ParsedSeqId], role: &str, program: &str) -> Option<anyhow::Error> {
     let fasta = |id: &ParsedSeqId| {
         let mut out = Vec::new();
         label::fasta(id, &mut out);
@@ -267,32 +259,59 @@ pub(crate) fn duplicate_id(
             ));
         }
     }
+    None
+}
+
+/// LOSAT's refusal of the ids of a record, or `None`: an id that a record of the role read before
+/// has: the subjects of a reader, the queries of a scope (`query_batch::QueryScopes`). The readers
+/// refuse what `refused_id` refuses first. An accession with a version and the same accession without one
+/// count as one id for two subjects, and in BLASTN two queries (`dropin-survey-20261029/DI7/
+/// DECISIONS.md` 11, 12). Adds the keys of the ids. A record of the other role is
+/// `crate::seqid::id_scope::IdScope::add_record`'s.
+pub(crate) fn duplicate_id(
+    ids: &[ParsedSeqId],
+    seen: &mut HashSet<u64>,
+    role: &str,
+    program: &str,
+) -> Option<anyhow::Error> {
+    let fasta = |id: &ParsedSeqId| {
+        let mut out = Vec::new();
+        label::fasta(id, &mut out);
+        String::from_utf8_lossy(&out).into_owned()
+    };
+    // Where two queries are in one scope (`query_batch::QueryScopeSpan`): psiblast's batches
+    // hold one query, after each of which NCBI's formatter empties the scope against a database
+    // (`CBlastFormat::ResetScopeHistory`), so only `-subject` keeps two, where NCBI BLAST+ 2.17.0
+    // crashes on such queries (review of RG Q1, S1; series Q, Q1c).
+    let scope = match (role, program) {
+        ("query", "PSIBLAST") => " with -subject",
+        ("query", _) => " in one query batch, or in any with -subject or outfmt 5",
+        _ => "",
+    };
     let mut keys = Vec::new();
     for id in ids {
         keys.clear();
         scope_keys(id, &mut keys);
         if keys.iter().any(|key| seen.contains(key)) {
-            return Some(if role == "query" {
-                anyhow::anyhow!(
-                    "two query records have the Seq-id {} under -parse_deflines (in one query \
-                     batch NCBI BLAST+ searches the letters of the first for both); this is not \
-                     supported by LOSAT's {program}",
-                    fasta(id)
-                )
-            } else {
-                anyhow::anyhow!(
-                    "two subject records have the Seq-id {} under -parse_deflines (NCBI BLAST+ \
-                     shows the first for both); this is not supported by LOSAT's {program}",
-                    fasta(id)
-                )
-            });
+            let why = match (role, program) {
+                ("query", "PSIBLAST") => "NCBI BLAST+'s psiblast crashes",
+                ("query", _) => {
+                    "NCBI BLAST+'s scope holds both and searches the letters of the first for both"
+                }
+                _ => "NCBI BLAST+ shows the first for both",
+            };
+            return Some(anyhow::anyhow!(
+                "two {role} records have the Seq-id {} under -parse_deflines{scope} ({why}); this \
+                 is not supported by LOSAT's {program}",
+                fasta(id)
+            ));
         }
         seen.extend(keys.iter().copied());
         if let Some((own, other)) = name_keys(id) {
             if seen.contains(&other) {
                 return Some(anyhow::anyhow!(
                     "two {role} records have the name of {} with and without an accession under \
-                     -parse_deflines (NCBI BLAST+ shows them as one sequence); this is not \
+                     -parse_deflines{scope} (NCBI BLAST+ shows them as one sequence); this is not \
                      supported by LOSAT's {program}",
                     fasta(id)
                 ));
@@ -309,7 +328,8 @@ pub(crate) fn duplicate_id(
                     };
                     return Some(anyhow::anyhow!(
                         "two {role} records have the accession of {} with and without a version \
-                         under -parse_deflines ({why}); this is not supported by LOSAT's {program}",
+                         under -parse_deflines{scope} ({why}); this is not supported by LOSAT's \
+                         {program}",
                         fasta(id)
                     ));
                 }
@@ -588,8 +608,25 @@ mod tests {
         assert_eq!(records[0].title, b"t");
     }
 
+    /// The scope of the query records `fasta` of `program` (`QueryScopes`), read as one batch.
+    fn one_scope(fasta: &[u8], program: &'static str) -> Result<(), String> {
+        let config = ReaderConfig::query(program, false, false).with_parse_deflines(true);
+        let mut source = FastaInputSource::from_bytes(fasta, config);
+        let records = read_all(&mut source, &mut |_| Ok(())).map_err(|e| e.to_string())?;
+        crate::blastinput::query_batch::QueryScopes::of_records(
+            crate::blastinput::query_batch::QueryScopeSpan::Batch,
+            program,
+            &records,
+        )
+        .map(drop)
+        .map_err(|error| error.to_string())
+    }
+
+    // Two queries of one scope (series Q of line RG, Q1c): the reader reads them, the batch that
+    // holds both refuses them, two batches do not (NCBI empties its scope after a batch) but with
+    // `-subject` and outfmt 5 (`QueryScopeSpan::Run`).
     #[test]
-    fn two_records_with_one_id_are_refused() {
+    fn two_records_with_one_id_are_refused_in_one_scope() {
         for fasta in [
             &b">dup1 a\nACGT\n>dup1 b\nACGT\n"[..],
             b">abc a\nACGT\n>ABC b\nACGT\n",
@@ -598,8 +635,23 @@ mod tests {
             b">gb|AAA00007.1|NAMEA a\nACGT\n>gb||NAMEA b\nACGT\n",
             b">gb||NAMEA a\nACGT\n>gb|AAA00007.1|NAMEA b\nACGT\n",
         ] {
-            let error = read(fasta, false).unwrap_err();
+            let records = read(fasta, false).unwrap();
+            let error = one_scope(fasta, "BLASTP").unwrap_err();
             assert!(error.contains("two query records"), "{error}");
+            use crate::blastinput::query_batch::{QueryScopeSpan, QueryScopes};
+            let mut batches = QueryScopes::new(QueryScopeSpan::Batch, "BLASTP");
+            batches.add_batch(&records[..1], 0).unwrap();
+            batches.add_batch(&records[1..], 1).unwrap();
+            let mut run = QueryScopes::new(QueryScopeSpan::Run, "BLASTP");
+            run.add_batch(&records[..1], 0).unwrap();
+            let error = run.add_batch(&records[1..], 1).unwrap_err().to_string();
+            assert!(error.contains("two query records"), "{error}");
+            let config = ReaderConfig::subject("BLASTN", false, false).with_parse_deflines(true);
+            let mut source = FastaInputSource::from_bytes(fasta, config);
+            let error = read_all(&mut source, &mut |_| Ok(()))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("two subject records"), "{error}");
         }
     }
 
@@ -612,7 +664,7 @@ mod tests {
             b">gb|AAA00007.1|NAMEA a\nACGT\n>gb|AAA00008.1|NAMEA b\nACGT\n",
             b">sp|P12345.2|NAME_X a\nACGT\n>sp|Q99999.1|NAME_X b\nACGT\n",
         ] {
-            read(fasta, false).unwrap();
+            one_scope(fasta, "BLASTN").unwrap();
         }
     }
 
@@ -620,11 +672,9 @@ mod tests {
     #[test]
     fn an_accession_with_and_without_a_version_is_refused_by_blastn_only() {
         let fasta = b">NM_000005 a\nACGT\n>NM_000005.1 b\nACGT\n";
-        let error = read(fasta, false).unwrap_err();
+        let error = one_scope(fasta, "BLASTN").unwrap_err();
         assert!(error.contains("with and without a version"), "{error}");
-        let config = ReaderConfig::query("TBLASTX", false, false).with_parse_deflines(true);
-        let mut source = FastaInputSource::from_bytes(fasta, config);
-        read_all(&mut source, &mut |_| Ok(())).unwrap();
+        one_scope(fasta, "TBLASTX").unwrap();
     }
 
     // fasta.cpp:1005, 2117-2125: the message names the molecule that the accession named.
@@ -793,23 +843,6 @@ mod tests {
         read_in(&first, "subject", "BLASTN", false, b">kept1 u\nACGT\n").unwrap_err();
         let second = std::sync::Arc::new(IdScope::default());
         read_in(&second, "subject", "BLASTN", false, b">kept1 u\nACGT\n").unwrap();
-        let mut keys = Vec::new();
-        for id in read_in(&first, "subject", "BLASTN", false, b">s t\nACGT\n").unwrap()[0]
-            .believed()
-            .unwrap()
-            .ids
-            .iter()
-        {
-            scope_keys(id, &mut keys);
-        }
-        assert!(!first.query_has_key(&keys));
-        keys.clear();
-        scope_keys(
-            &ParsedSeqId::Local(ObjectId::Str(b"kept1".to_vec())),
-            &mut keys,
-        );
-        assert!(first.query_has_key(&keys));
-        assert!(!second.query_has_key(&keys));
     }
 
     // Masks of a shared query: the masks of the query, or with `-lcase_masking` the lower case of

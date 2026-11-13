@@ -18,6 +18,7 @@ use crate::blastinput::app::options_error;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::NativeError;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::ncbi_str::{string_to_int, ALLOW_LEADING_SPACES, ALLOW_TRAILING_SPACES};
 use crate::seqdb::file::DbFile;
 use crate::seqdb::tax_sqlite::TaxonomySqlite;
 use crate::seqdb::{seqidlist, DbList, SearchPath, SeqidList, TaxidList};
@@ -404,7 +405,9 @@ impl DbFilterArgs {
             if crate::ncbi_str::is_blank(id) {
                 continue;
             }
-            let taxid = string_to_int(id).ok_or_else(invalid)?;
+            // `TTaxId` is an `int`: `StringToNumeric<TTaxId>` is `NStr::StringToInt`.
+            let taxid = string_to_int(id, ALLOW_LEADING_SPACES | ALLOW_TRAILING_SPACES)
+                .map_err(|_| invalid())?;
             if self.no_taxid_expansion {
                 tax_ids.insert(taxid);
             } else if let Some(taxonomy) = &taxonomy {
@@ -561,23 +564,6 @@ fn stream_lines(bytes: &[u8]) -> Vec<Vec<u8>> {
     lines
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2431-2436
-// ```c++
-//     for (auto id : ids) {
-//         try {
-//             if (NStr::IsBlank(id)) {
-//                 continue;
-//             }
-//             auto taxid = NStr::StringToNumeric<TTaxId>(id, NStr::fAllowLeadingSpaces | NStr::fAllowTrailingSpaces);
-// ```
-// `TTaxId` is an `int` (`NStr::StringToInt`, `crate::ncbi_str`): C `isspace` may surround the
-// number, a sign may lead it, and an entry read from a file ends at a NUL byte.
-/// `NStr::StringToNumeric<TTaxId>` of a list entry, `None` for NCBI's exception.
-pub(crate) fn string_to_int(token: &[u8]) -> Option<i32> {
-    use crate::ncbi_str::{ALLOW_LEADING_SPACES, ALLOW_TRAILING_SPACES};
-    crate::ncbi_str::string_to_int(token, ALLOW_LEADING_SPACES | ALLOW_TRAILING_SPACES).ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -623,26 +609,5 @@ mod tests {
         assert_eq!(lines("9606"), ["9606"]);
         assert_eq!(lines("1\r2"), ["1", "2"]);
         assert!(lines("").is_empty());
-    }
-
-    #[test]
-    fn numbers_are_read_as_ncbis_string_to_numeric_reads_them() {
-        assert_eq!(string_to_int(b"9606"), Some(9606));
-        assert_eq!(string_to_int(b"+9606"), Some(9606));
-        assert_eq!(string_to_int(b"  -5 "), Some(-5));
-        assert_eq!(string_to_int(b"2147483647"), Some(i32::MAX));
-        assert_eq!(string_to_int(b"-2147483648"), Some(i32::MIN));
-        assert_eq!(string_to_int(b"\x0b42\x0b"), Some(42));
-        for bad in [
-            &b"abc"[..],
-            b"# human",
-            b"2147483648",
-            b"9606.0",
-            b"+",
-            b"1 2",
-            b"0x10",
-        ] {
-            assert_eq!(string_to_int(bad), None, "{}", String::from_utf8_lossy(bad));
-        }
     }
 }

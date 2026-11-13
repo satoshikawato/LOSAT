@@ -46,7 +46,7 @@ fn install(dir: &Path) -> Output {
 }
 
 /// The programs that the binary links, in the order it lists them.
-const PROGRAMS: [&str; 10] = [
+const PROGRAMS: [&str; 13] = [
     "blastn",
     "blastp",
     "blastx",
@@ -54,8 +54,11 @@ const PROGRAMS: [&str; 10] = [
     "tblastx",
     "psiblast",
     "rpsblast",
+    "rpstblastn",
     "makeblastdb",
     "blastdbcmd",
+    "dustmasker",
+    "segmasker",
     "rpsbproc",
 ];
 
@@ -89,13 +92,15 @@ fn a_shim_prints_what_the_subcommand_prints() {
     assert!(installed.status.success(), "{installed:?}");
     for name in installed_names(&installed).iter().map(String::as_str) {
         // `blastn -version` is what tools read the version from (`blastn: 2.17.0+`; rpsbproc,
-        // which is not part of BLAST+, has its own: `rpsbproc: 0.5.1`).
+        // which is not part of BLAST+, dustmasker and segmasker have their own: `rpsbproc: 0.5.1`,
+        // `dustmasker: 1.0.0`, `segmasker: 1.0.0`).
         let version = run(shim(&dir, name), &["-version"]);
         assert!(version.status.success(), "{name}: {version:?}");
-        let first_line = if name == "rpsbproc" {
-            "rpsbproc: 0.5.1\n".to_string()
-        } else {
-            format!("{name}: 2.17.0+\n")
+        let first_line = match name {
+            "rpsbproc" => "rpsbproc: 0.5.1\n".to_string(),
+            "dustmasker" => "dustmasker: 1.0.0\n".to_string(),
+            "segmasker" => "segmasker: 1.0.0\n".to_string(),
+            _ => format!("{name}: 2.17.0+\n"),
         };
         assert!(
             version.stdout.starts_with(first_line.as_bytes()),

@@ -132,6 +132,28 @@ def test_a_tool_is_the_command_line(losat):
         assert output.diagnostics == stderr.decode()
 
 
+def test_a_tool_reads_its_input_as_the_command_line_reads_standard_input(losat):
+    words = ("-db", engine_file("blastdbcmd/db/p5"), "-entry_batch", "-", "-outfmt", "%a")
+    batch = pylosat.blastdbcmd(*words, input="P99999.2\n")
+    assert batch.text == "XP_000001.1\nP99999.2\nAAA00001.1\n"
+    fasta = engine_file("dustmasker/in/basic.fa")
+    with open(fasta, "rb") as file:
+        data = file.read()
+    for words in ((), ("-outfmt", "fasta"), ("-outfmt", "maskinfo_asn1_text")):
+        stdout, stderr = losat("dustmasker", "-in", fasta, *words)
+        output = pylosat.dustmasker(*words, input=data)
+        assert output.bytes == stdout
+        assert output.diagnostics == stderr.decode()
+    fasta = engine_file("segmasker/in/basic.fa")
+    with open(fasta, "rb") as file:
+        data = file.read()
+    for words in ((), ("-outfmt", "fasta"), ("-outfmt", "maskinfo_asn1_text", "-locut", "2e")):
+        stdout, stderr = losat("segmasker", "-in", fasta, *words)
+        output = pylosat.segmasker(*words, input=data)
+        assert output.bytes == stdout
+        assert output.diagnostics == stderr.decode()
+
+
 def test_a_tool_fails_with_the_command_lines_text(tmp_path):
     with pytest.raises(pylosat.SearchError, match="No alias or index file found"):
         pylosat.blastdbcmd("-db", str(tmp_path / "none"), "-info")

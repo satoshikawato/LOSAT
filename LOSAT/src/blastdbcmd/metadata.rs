@@ -4,11 +4,12 @@
 
 use std::io::Write;
 
+use crate::ncbi_app::args::Args;
+use crate::ncbi_app::files::Ostream;
 use crate::seqdb::date::iso8601_date_time;
 use crate::seqdb::{SearchPath, SeqDb, SeqType};
 use crate::writedb::metadata::{db_files_metadata, DbMetadata};
 
-use super::args::Args;
 use super::{database_error, refusal, Diag};
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1206-1222
@@ -90,7 +91,7 @@ pub(super) fn metadata(
     args: &Args,
     path: &SearchPath,
     diag: &mut Diag,
-    out: &mut dyn Write,
+    out: &mut Ostream<'_>,
 ) -> i32 {
     let mut prefix = args
         .value("metadata_output_prefix")
@@ -143,8 +144,8 @@ pub(super) fn metadata(
         dbtype: if is_protein { "Protein" } else { "Nucleotide" },
         db_version: if db.is_version5() { 5 } else { 4 },
         description: db.title().to_vec(),
-        number_of_letters: db.total_length(),
-        number_of_sequences: i64::from(db.num_seqs()),
+        number_of_letters: db.printed_total_length(),
+        number_of_sequences: i64::from(db.printed_num_seqs()),
         last_updated,
         number_of_volumes: db.volumes().len() as i32,
         number_of_taxids,
@@ -152,8 +153,21 @@ pub(super) fn metadata(
         bytes_to_cache,
         files,
     };
-    // NCBI's stream ignores a failed write (no exception is enabled on it), so does this.
+    // NCBI's serial stream (`CObjectOStreamJson`) checks its writes: NCBI 2.17.0 with `-out
+    // /dev/full` posts the failure of `json_out->Flush()` (`CObjectOStream: error at byte <the
+    // JSON's length>`, three more lines of the stream's close, `BLAST failed to write output:
+    // COStreamBuffer::Flush: failed`) and ends with exit status 6, or with other lines where a
+    // JSON longer than the stream's buffer first fails (review 2 of line RG item K1, F2). LOSAT
+    // refuses it, as dustmasker's serial writers do (RG DECISIONS K1-9). A closed pipe ends the
+    // program silently, where SIGPIPE ends NCBI's (`Ostream::closed`).
     let _ = out.write_all(&metadata.to_json());
     let _ = out.flush();
+    if out.bad() && !out.closed() {
+        return diag.refuse(&format!(
+            "a failed write of the -metadata output (NCBI's serial stream reports it) is not \
+             supported by LOSAT's {}",
+            super::PROGRAM
+        ));
+    }
     0
 }

@@ -1,17 +1,21 @@
 //! Unit counts files (`CSeqMaskerIstat` and its readers): the format check of
 //! `CSeqMaskerIstatFactory::DiscoverStatType`, the optimized binary reader
-//! (`CSeqMaskerIstatOBinary` + `CSeqMaskerUsetHash`) and the binary reader
-//! (`CSeqMaskerIstatBin` + `CSeqMaskerUsetArray`).
+//! (`CSeqMaskerIstatOBinary` + `CSeqMaskerUsetHash`), the binary reader
+//! (`CSeqMaskerIstatBin` + `CSeqMaskerUsetArray`), the optimized ascii reader
+//! (`CSeqMaskerIstatOAscii` + `CSeqMaskerUsetHash`) and the ascii reader
+//! (`CSeqMaskerIstatAscii` + `CSeqMaskerUsetSimple`).
 //!
-//! The ascii and optimized ascii readers are not ported: blastn refuses those formats
-//! (`blast_args.cpp:446-458`, "Only optimized binary windowmasker stat files are supported").
+//! blastn reads the two ascii formats only through `-window_masker_taxid`: `-window_masker_db`
+//! refuses them (`blast_args.cpp:446-458`, "Only optimized binary windowmasker stat files are
+//! supported"), but the file of a taxid's directory is read with no check of its format.
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use super::{MaskerParams, WinMaskError};
-use crate::ncbi_exception::ThrowSite;
+use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::ncbi_str;
 
 /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_istat_factory.hpp:56-62
 /// ```c
@@ -32,12 +36,12 @@ pub enum StatType {
     Unknown,
 }
 
-/// What `DiscoverStatType` finds: the format, the metadata lines, and the bytes before the
-/// counts (the binary metadata block).
+/// What `DiscoverStatType` finds: the format, the metadata lines (bytes, as NCBI's
+/// `std::string`s), and the bytes before the counts (the binary metadata block).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatFile {
     pub stat_type: StatType,
-    pub metadata: Vec<String>,
+    pub metadata: Vec<Vec<u8>>,
     pub skip: u64,
 }
 
@@ -57,6 +61,12 @@ pub fn discover_stat_type(path: &Path) -> Result<StatFile, WinMaskError> {
     let name = path.to_string_lossy().into_owned();
     let mut file = File::open(path).map_err(|_| WinMaskError::Open { name })?;
     discover(&mut file)
+}
+
+/// `discover_stat_type` on an opened file or an in-memory copy of one (LOSAT Web's counts files,
+/// `web_adapter`).
+pub fn discover_stat_type_in<R: Read + Seek>(r: &mut R) -> Result<StatFile, WinMaskError> {
+    discover(r)
 }
 
 /// Where NCBI's counts readers throw the format errors that LOSAT's readers report: the
@@ -134,6 +144,58 @@ pub enum FormatSite {
     ///             NCBI_THROW( Exception, eFormat, "wrong length" );
     /// ```
     BinLength,
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_oascii.cpp:100-102
+    /// ```c
+    ///                 if( unit_size == 0 || unit_size > 16 )
+    ///                     NCBI_THROW( Exception, eBadParam,
+    ///                                 "unit size must be in [1,16]" );
+    /// ```
+    OAsciiUnitSize,
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_oascii.cpp:113-116
+    /// ```c
+    ///                     if( k == 0U || k > (Uint4)(2*unit_size - 1) )
+    ///                         NCBI_THROW(
+    ///                             Exception, eBadHashParam,
+    ///                             "hash key size must be in [1,2*unit_size - 1]" );
+    /// ```
+    OAsciiHashKeySize,
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_oascii.cpp:118-121
+    /// ```c
+    ///                     if( roff > 32 - k )
+    ///                         NCBI_THROW(
+    ///                             Exception, eBadHashParam,
+    ///                             "offset must by in [0,32 - hash_key_size]" );
+    /// ```
+    OAsciiHashOffset,
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_oascii.cpp:123-127
+    /// ```c
+    ///                     if( bc == 0 || bc > 32 - k )
+    ///                         NCBI_THROW(
+    ///                             Exception, eBadHashParam,
+    ///                             "shift must be in "
+    ///                             "[1, 32 - hash_key_size]" );
+    /// ```
+    OAsciiHashShift,
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_oascii.cpp:144-145
+    /// ```c
+    ///     if( linenum < HEADER_LINES )
+    ///         NCBI_THROW( Exception, eFormat, "file too short" );
+    /// ```
+    OAsciiFileTooShort,
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_oascii.cpp:175-177
+    /// ```c
+    ///     if( linenum < ht_size )
+    ///         NCBI_THROW( Exception, eFormat,
+    ///                     "not enough lines to fill the hash table" );
+    /// ```
+    OAsciiHashTable,
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_oascii.cpp:191-193
+    /// ```c
+    ///     if( linenum < M )
+    ///         NCBI_THROW( Exception, eFormat,
+    ///                     "not enough lines to fill the values table" );
+    /// ```
+    OAsciiValuesTable,
 }
 
 impl FormatSite {
@@ -150,6 +212,13 @@ impl FormatSite {
             Self::BinFileSize => "wrong file size",
             Self::BinUnitSize => "illegal unit size",
             Self::BinLength => "wrong length",
+            Self::OAsciiUnitSize => "unit size must be in [1,16]",
+            Self::OAsciiHashKeySize => "hash key size must be in [1,2*unit_size - 1]",
+            Self::OAsciiHashOffset => "offset must by in [0,32 - hash_key_size]",
+            Self::OAsciiHashShift => "shift must be in [1, 32 - hash_key_size]",
+            Self::OAsciiFileTooShort => "file too short",
+            Self::OAsciiHashTable => "not enough lines to fill the hash table",
+            Self::OAsciiValuesTable => "not enough lines to fill the values table",
         }
     }
 
@@ -170,12 +239,17 @@ impl FormatSite {
     ///         case eStreamOpenFail:   return "open failed";
     ///         case eFormat:           return "file format error";
     /// ```
+    /// The optimized ascii reader's codes are those of the optimized binary one
+    /// (`seq_masker_istat_oascii.cpp:50-54`). The lines are those of `NCBI_THROW` (NCBI BLAST+
+    /// 2.17.0, line NP M3d).
     pub(super) fn throw_site(self) -> ThrowSite {
         const OBINARY: &str = "src/algo/winmask/seq_masker_istat_obinary.cpp";
         const OBINARY_NEW: Option<&str> =
             Some("ncbi::CSeqMaskerIstatOBinary::CSeqMaskerIstatOBinary");
         const BIN: &str = "src/algo/winmask/seq_masker_istat_bin.cpp";
         const BIN_NEW: Option<&str> = Some("ncbi::CSeqMaskerIstatBin::CSeqMaskerIstatBin");
+        const OASCII: &str = "src/algo/winmask/seq_masker_istat_oascii.cpp";
+        const OASCII_NEW: Option<&str> = Some("ncbi::CSeqMaskerIstatOAscii::CSeqMaskerIstatOAscii");
         let (file, line, kind, function) = match self {
             Self::FileTooShort => (OBINARY, 63, "Exception::format error", None),
             Self::UnitSize => (OBINARY, 114, "Exception::bad parameter", OBINARY_NEW),
@@ -187,6 +261,13 @@ impl FormatSite {
             Self::BinFileSize => (BIN, 79, "Exception::file format error", BIN_NEW),
             Self::BinUnitSize => (BIN, 99, "Exception::file format error", BIN_NEW),
             Self::BinLength => (BIN, 108, "Exception::file format error", BIN_NEW),
+            Self::OAsciiUnitSize => (OASCII, 101, "Exception::bad parameter", OASCII_NEW),
+            Self::OAsciiHashKeySize => (OASCII, 114, "Exception::bad hash parameter", OASCII_NEW),
+            Self::OAsciiHashOffset => (OASCII, 119, "Exception::bad hash parameter", OASCII_NEW),
+            Self::OAsciiHashShift => (OASCII, 124, "Exception::bad hash parameter", OASCII_NEW),
+            Self::OAsciiFileTooShort => (OASCII, 145, "Exception::format error", OASCII_NEW),
+            Self::OAsciiHashTable => (OASCII, 176, "Exception::format error", OASCII_NEW),
+            Self::OAsciiValuesTable => (OASCII, 192, "Exception::format error", OASCII_NEW),
         };
         ThrowSite {
             file,
@@ -309,7 +390,7 @@ pub(super) fn discover<R: Read + Seek>(r: &mut R) -> Result<StatFile, WinMaskErr
 /// of the 3 it replaces. A file shorter than its metadata block fails the skip in
 /// `DiscoverStatType`, which then returns eUnknown, so the block is read only as far as the
 /// file goes (NCBI's bytes past the end are uninitialized and never used).
-fn metadata_lines<R: Read + Seek>(r: &mut R) -> Result<(Vec<String>, u64), WinMaskError> {
+fn metadata_lines<R: Read + Seek>(r: &mut R) -> Result<(Vec<Vec<u8>>, u64), WinMaskError> {
     seek(r, 0)?;
     let mut word = [0u8; 4];
     read_up_to(r, &mut word);
@@ -326,7 +407,7 @@ fn metadata_lines<R: Read + Seek>(r: &mut R) -> Result<(Vec<String>, u64), WinMa
         let metadata = data
             .split(|&b| b == 0)
             .take_while(|s| !s.is_empty())
-            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .map(<[u8]>::to_vec)
             .collect();
         return Ok((metadata, 8 + len as u64));
     }
@@ -346,7 +427,7 @@ fn metadata_lines<R: Read + Seek>(r: &mut R) -> Result<(Vec<String>, u64), WinMa
             line.pop();
         }
         if line.len() >= 2 && line[0] == b'#' && line[1] == b'#' {
-            metadata.push(String::from_utf8_lossy(&line).into_owned());
+            metadata.push(line.clone());
         } else {
             break;
         }
@@ -366,7 +447,7 @@ pub struct UnitCounts {
     /// The cache bit array of the optimized binary format (`optimization_data::cba_`).
     cba: Option<Vec<u32>>,
     uset: Uset,
-    metadata: Vec<String>,
+    metadata: Vec<Vec<u8>>,
     warnings: Vec<String>,
 }
 
@@ -459,22 +540,438 @@ impl UnitCounts {
             metadata: found.metadata,
             warnings: Vec::new(),
         };
-        if matches!(found.stat_type, StatType::Binary | StatType::OBinary) {
-            check_pct_line(&counts.metadata)?;
-        }
+        check_pct_lines(&counts.metadata, found.stat_type)?;
+        let start_line = counts.metadata.len();
         match found.stat_type {
             StatType::OBinary => counts.read_obinary(r, found.skip)?,
             StatType::Binary => counts.read_binary(r, found.skip)?,
-            StatType::Ascii | StatType::OAscii => {
-                return Err(WinMaskError::UnsupportedFormat(found.stat_type))
-            }
+            StatType::Ascii => counts.read_ascii(r, start_line)?,
+            StatType::OAscii => counts.read_oascii(r, start_line)?,
             StatType::Unknown => {
                 return Err(WinMaskError::CreateFail {
                     message: "unrecognized unit counts format".to_string(),
                 })
             }
         }
+        check_stat_algo_version(&counts.metadata).map_err(|e| counts.exception(e))?;
         Ok(counts)
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_ascii.cpp:65-176
+    /// ```c
+    ///     bool start = true;
+    ///     Uint4 linenum = start_line;
+    ///     Uint4 ambig_len = kMax_UI4;
+    ///     string line;
+    ///     for( Uint4 i( 0 ); i < start_line; ++i ) getline( input_stream, line );
+    ///
+    ///     while( input_stream )
+    ///     {
+    ///         line.erase();
+    ///         getline( input_stream, line );
+    ///         ++linenum;
+    ///         if( line.length() == 0 ) continue;
+    ///         if( line[0] == '#' ) continue;
+    ///
+    ///         // Check if we have a precomputed parameter.
+    ///         if( line[0] == '>' )
+    ///         {
+    ///             SIZE_TYPE name_end = line.find_first_of( " \t", 0 );
+    ///             SIZE_TYPE val_start = line.find_first_not_of( " \t", name_end );
+    ///
+    ///             if( name_end == NPOS || val_start == NPOS )
+    ///             {
+    ///                 CNcbiOstrstream str;
+    ///                 str << "at line " << linenum;
+    ///                 string msg = CNcbiOstrstreamToString(str);
+    ///                 NCBI_THROW( Exception, eSyntax, msg);
+    ///             }
+    ///
+    ///             string name = line.substr( 1, name_end - 1 );
+    ///
+    ///             if( name == "t_threshold" && get_threshold() == 0 )
+    ///                 set_threshold(
+    ///                     NStr::StringToUInt(line.substr(val_start, NPOS), 0, 0));
+    ///
+    ///             if( name == "t_extend" && get_textend() == 0 )
+    ///                 set_textend(
+    ///                     NStr::StringToUInt(line.substr(val_start, NPOS), 0, 0));
+    ///
+    ///             if( name == "t_low" )
+    ///                 set_min_count(
+    ///                     NStr::StringToUInt(line.substr(val_start, NPOS), 0, 0));
+    ///
+    ///             if( name == "t_high" && get_max_count() == 0 )
+    ///                 set_max_count(
+    ///                     NStr::StringToUInt(line.substr(val_start, NPOS), 0, 0));
+    ///
+    ///             continue;
+    ///         }
+    ///
+    ///         if( start )
+    ///         {
+    ///             start = false;
+    ///             uset.set_unit_size(
+    ///                 static_cast< Uint1 >( NStr::StringToUInt( line ) ) );
+    ///             continue;
+    ///         }
+    ///
+    ///         SIZE_TYPE unit_start = line.find_first_not_of( " \t", 0 );
+    ///         SIZE_TYPE unit_end   = line.find_first_of( " \t", unit_start );
+    ///         SIZE_TYPE cnt_start  = line.find_first_not_of( " \t", unit_end );
+    ///
+    ///         if( unit_start == NPOS || unit_end == NPOS || cnt_start == NPOS )
+    ///         {
+    /// ...
+    ///             NCBI_THROW( Exception, eSyntax, msg );
+    ///         }
+    ///
+    ///         Uint4 unit = NStr::StringToUInt(line.substr(unit_start,
+    ///                                                     unit_end - unit_start),
+    ///                                         0, 16);
+    ///         Uint4 cnt = NStr::StringToUInt(line.substr(cnt_start));
+    ///
+    ///         if( cnt < ambig_len ) {
+    ///             ambig_len = cnt;
+    ///             set_ambig_unit( unit );
+    ///         }
+    ///
+    ///         if( cnt >= get_min_count() )
+    ///             uset.add_info( unit, cnt );
+    ///     }
+    ///
+    ///     string bad_param;
+    ///
+    ///     if( get_threshold() == 0 )
+    ///         bad_param += "t_threhold ";
+    /// ...
+    ///     if( !bad_param.empty() )
+    ///         NCBI_THROW( Exception, eParam, bad_param );
+    ///
+    ///     if( get_use_min_count() == 0 )
+    ///       set_use_min_count( (get_min_count() + 1)/2 );
+    ///
+    ///     if( get_use_max_count() == 0 )
+    ///       set_use_max_count( get_max_count() );
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_simple.cpp:55-67
+    /// ```c
+    /// void CSeqMaskerUsetSimple::add_info( Uint4 unit, Uint4 count )
+    /// {
+    ///     if( !units.empty() && unit <= units[units.size() - 1] )
+    ///     {
+    ///         ostringstream s;
+    ///         s << "last unit: " << hex << units[units.size() - 1]
+    ///           << " ; adding " << hex << unit;
+    ///         NCBI_THROW( Exception, eBadOrder, s.str() );
+    ///     }
+    /// ```
+    /// The units are kept in increasing order, so the search of `CSeqMaskerUsetSimple::get_info`
+    /// (`lower_bound`) is that of the binary format's array ([`UsetArray::get_info`]). A file
+    /// without a unit size line keeps the default of 15 (`seq_masker_uset_simple.hpp:79`). The
+    /// ambiguity unit is used only by the merge pass, which blastn does not run. A line is a
+    /// `getline` of the file opened in text mode, as on NCBI's Linux builds: a carriage return
+    /// stays in it.
+    fn read_ascii<R: Read + Seek>(
+        &mut self,
+        r: &mut R,
+        start_line: usize,
+    ) -> Result<(), WinMaskError> {
+        seek(r, 0)?;
+        let mut lines = TextLines::new(r);
+        for _ in 0..start_line {
+            lines.getline();
+        }
+        let mut linenum = start_line as u32;
+        let mut unit_size: u8 = 15;
+        let mut start = true;
+        let mut entries: Vec<(u32, u32)> = Vec::new();
+        while let Some(line) = lines.getline() {
+            linenum = linenum.wrapping_add(1);
+            if line.is_empty() || line[0] == b'#' {
+                continue;
+            }
+            if line[0] == b'>' {
+                let name_end = line.iter().position(|&c| c == b' ' || c == b'\t');
+                let val_start = name_end.and_then(|end| {
+                    line[end..]
+                        .iter()
+                        .position(|&c| c != b' ' && c != b'\t')
+                        .map(|at| end + at)
+                });
+                let (Some(name_end), Some(val_start)) = (name_end, val_start) else {
+                    return Err(self.ascii_error(ascii_site(96), format!("at line {linenum}")));
+                };
+                let name = &line[1..name_end];
+                let value = &line[val_start..];
+                let parse = |value: &[u8]| ncbi_str::string_to_uint_base(value, 0);
+                match name {
+                    b"t_threshold" if self.threshold == 0 => {
+                        self.threshold = parse(value).map_err(|e| self.exception(e))?;
+                    }
+                    b"t_extend" if self.textend == 0 => {
+                        self.textend = parse(value).map_err(|e| self.exception(e))?;
+                    }
+                    b"t_low" => {
+                        let count = parse(value).map_err(|e| self.exception(e))?;
+                        self.set_min_count(count);
+                    }
+                    b"t_high" if self.max_count == 0 => {
+                        self.max_count = parse(value).map_err(|e| self.exception(e))?;
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+            if start {
+                start = false;
+                unit_size = ncbi_str::string_to_uint(line).map_err(|e| self.exception(e))? as u8;
+                continue;
+            }
+            let blank = |c: &u8| *c == b' ' || *c == b'\t';
+            let unit_start = line.iter().position(|c| !blank(c));
+            let unit_end =
+                unit_start.and_then(|from| line[from..].iter().position(blank).map(|at| from + at));
+            let cnt_start = unit_end.and_then(|from| {
+                line[from..]
+                    .iter()
+                    .position(|c| !blank(c))
+                    .map(|at| from + at)
+            });
+            let (Some(unit_start), Some(unit_end), Some(cnt_start)) =
+                (unit_start, unit_end, cnt_start)
+            else {
+                return Err(self.ascii_error(ascii_site(137), format!("at line {linenum}")));
+            };
+            let unit = ncbi_str::string_to_uint_base(&line[unit_start..unit_end], 16)
+                .map_err(|e| self.exception(e))?;
+            let count =
+                ncbi_str::string_to_uint(&line[cnt_start..]).map_err(|e| self.exception(e))?;
+            if count >= self.min_count {
+                if let Some(&(last, _)) = entries.last() {
+                    if unit <= last {
+                        return Err(self.exception(NcbiException::new(
+                            USET_SIMPLE_BAD_ORDER,
+                            format!("last unit: {last:x} ; adding {unit:x}"),
+                        )));
+                    }
+                }
+                entries.push((unit, count));
+            }
+        }
+        let mut bad_param = String::new();
+        for (missing, name) in [
+            (self.threshold == 0, "t_threhold "),
+            (self.textend == 0, "t_extend "),
+            (self.max_count == 0, "t_high "),
+            (self.min_count == 0, "t_low "),
+        ] {
+            if missing {
+                bad_param.push_str(name);
+            }
+        }
+        if !bad_param.is_empty() {
+            return Err(self.ascii_error(ASCII_BAD_PARAM, bad_param));
+        }
+        if self.use_min_count == 0 {
+            self.use_min_count = self.min_count.wrapping_add(1) / 2;
+        }
+        if self.use_max_count == 0 {
+            self.use_max_count = self.max_count;
+        }
+        entries.shrink_to_fit();
+        self.unit_size = unit_size;
+        self.uset = Uset::Array(UsetArray { unit_size, entries });
+        Ok(())
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_oascii.cpp:72-196
+    /// ```c
+    ///     Uint4 linenum = 0;
+    ///     string line;
+    ///     for( Uint4 i( 0 ); i < start_line; ++i ) getline( input_stream, line );
+    ///     Uint1 unit_size( 0 );
+    ///     Uint4 k, roff, bc;
+    ///     Uint4 t_low    = 0,
+    ///           t_extend = 0,
+    ///           t_thres  = 0,
+    ///           t_high   = 0,
+    ///           M;
+    ///
+    ///     while( getline( input_stream, line ) )
+    ///     {
+    ///         ++linenum;
+    ///
+    ///         switch( linenum )
+    ///         {
+    ///             case 1: break; //skip the file format identifier
+    ///             case 2: // unit size
+    ///
+    ///                 unit_size = (Uint1)atoi( line.c_str() );
+    /// ...
+    ///             case 3: // hash table parameters
+    ///
+    ///                 {
+    ///                     istringstream i( line );
+    ///                     i >> M >> k >> roff >> bc;
+    /// ...
+    ///             case 4: t_low    = atoi( line.c_str() ); break;
+    ///             case 5: t_extend = atoi( line.c_str() ); break;
+    ///             case 6: t_thres  = atoi( line.c_str() ); break;
+    ///             case 7: t_high   = atoi( line.c_str() ); break;
+    ///
+    ///             default: break;
+    ///         }
+    ///
+    ///         if( linenum == HEADER_LINES )
+    ///             break;
+    ///     }
+    ///
+    ///     if( linenum < HEADER_LINES )
+    ///         NCBI_THROW( Exception, eFormat, "file too short" );
+    ///
+    ///     set_min_count( t_low );
+    /// ...
+    ///     Uint4 ht_size = (1ULL<<k);
+    ///     Uint4 * ht = new Uint4[ht_size];
+    /// ...
+    ///     for( linenum = 0;
+    ///          linenum < ht_size && getline( input_stream, line );
+    ///          ++linenum )
+    ///         ht[linenum] = atoi( line.c_str() );
+    /// ...
+    ///     Uint2 * vt = new Uint2[M];
+    /// ...
+    ///     for( linenum = 0;
+    ///          linenum < M && getline( input_stream, line );
+    ///          ++linenum )
+    ///         vt[linenum] = (Uint2)atoi( line.c_str() );
+    /// ```
+    /// The numbers are glibc's `atoi` ([`ncbi_str::c_atoi`]) truncated to the field, and those of
+    /// the hash table parameters are read as libstdc++'s `>>` reads an `unsigned int`
+    /// ([`extract_uints`]). A value that `>>` does not reach (the line ends, or an earlier value
+    /// failed) is left uninitialized by NCBI: a check that reads one is refused
+    /// ([`WinMaskError::UnsetHashParameter`]). NCBI 2.17.0's errors for such lines change from
+    /// one load of the masker to the next (line NP M3d, review 2: `3694` gives the hash key
+    /// size's error for the first query, then the offset's). A value that `>>` failed to read is
+    /// set (0, or `UINT_MAX` past it), so `3694 x` and `3694 17 0 x` are NCBI's errors. The tables
+    /// grow with the lines read, so a file that names a larger table than it holds fails without
+    /// NCBI's allocation of the named size. The optimized ascii format has no cache bit array.
+    fn read_oascii<R: Read + Seek>(
+        &mut self,
+        r: &mut R,
+        start_line: usize,
+    ) -> Result<(), WinMaskError> {
+        const HEADER_LINES: u32 = 7;
+        let file_len = r
+            .seek(SeekFrom::End(0))
+            .map_err(|_| WinMaskError::format(FormatSite::FileTooShort))?;
+        seek(r, 0)?;
+        let mut lines = TextLines::new(r);
+        for _ in 0..start_line {
+            lines.getline();
+        }
+        let mut linenum = 0u32;
+        let mut unit_size: u8 = 0;
+        let [mut m, mut k, mut roff, mut bc] = [0u32; 4];
+        let mut thresholds = [0u32; 4];
+        while let Some(line) = lines.getline() {
+            linenum += 1;
+            match linenum {
+                2 => {
+                    unit_size = ncbi_str::c_atoi(line) as u8;
+                    if unit_size == 0 || unit_size > 16 {
+                        return Err(self.format_error(FormatSite::OAsciiUnitSize));
+                    }
+                }
+                3 => {
+                    // The checks read k, roff and bc in this order (M is set whenever k is).
+                    let set;
+                    ([m, k, roff, bc], set) = extract_uints(line);
+                    let unset = |field: &'static str| WinMaskError::UnsetHashParameter { field };
+                    if set < 2 {
+                        return Err(unset("k"));
+                    }
+                    if k == 0 || k > 2 * u32::from(unit_size) - 1 {
+                        return Err(self.format_error(FormatSite::OAsciiHashKeySize));
+                    }
+                    if set < 3 {
+                        return Err(unset("roff"));
+                    }
+                    if roff > 32 - k {
+                        return Err(self.format_error(FormatSite::OAsciiHashOffset));
+                    }
+                    if set < 4 {
+                        return Err(unset("bc"));
+                    }
+                    if bc == 0 || bc > 32 - k {
+                        return Err(self.format_error(FormatSite::OAsciiHashShift));
+                    }
+                }
+                4..=7 => thresholds[linenum as usize - 4] = ncbi_str::c_atoi(line) as u32,
+                _ => {}
+            }
+            if linenum == HEADER_LINES {
+                break;
+            }
+        }
+        if linenum < HEADER_LINES {
+            return Err(self.format_error(FormatSite::OAsciiFileTooShort));
+        }
+        let [t_low, t_extend, t_thres, t_high] = thresholds;
+        self.unit_size = unit_size;
+        self.set_thresholds(t_low, t_extend, t_thres, t_high);
+
+        // Every line read has at least one byte: no more lines than the file has bytes.
+        let room = usize::try_from(file_len).unwrap_or(usize::MAX);
+        let ht_size = 1usize << k;
+        let mut ht = Vec::with_capacity(ht_size.min(room));
+        while ht.len() < ht_size {
+            let Some(line) = lines.getline() else {
+                return Err(self.format_error(FormatSite::OAsciiHashTable));
+            };
+            ht.push(ncbi_str::c_atoi(line) as u32);
+        }
+        let mut vt = Vec::with_capacity((m as usize).min(room));
+        while vt.len() < m as usize {
+            let Some(line) = lines.getline() else {
+                return Err(self.format_error(FormatSite::OAsciiValuesTable));
+            };
+            vt.push(ncbi_str::c_atoi(line) as u16);
+        }
+        self.uset = Uset::Hash(UsetHash {
+            unit_size,
+            k: k as u8,
+            roff: roff as u8,
+            bc: bc as u8,
+            m,
+            cmask: ((1u64 << bc) - 1) as u32,
+            ht,
+            vt,
+        });
+        Ok(())
+    }
+
+    /// A format error of a reader, with the warnings posted before it.
+    fn format_error(&self, site: FormatSite) -> WinMaskError {
+        WinMaskError::Format {
+            site,
+            warnings: self.warnings.clone(),
+        }
+    }
+
+    /// An exception thrown inside the reader (the factory rethrows it), with the warnings
+    /// posted before it.
+    fn exception(&self, exception: NcbiException) -> WinMaskError {
+        WinMaskError::Exception {
+            exception: Box::new(exception),
+            warnings: self.warnings.clone(),
+        }
+    }
+
+    /// The ascii reader's own exception at `site`.
+    fn ascii_error(&self, site: ThrowSite, message: String) -> WinMaskError {
+        self.exception(NcbiException::new(site, message))
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:70-216
@@ -868,8 +1365,8 @@ impl UnitCounts {
         self.use_min_count
     }
 
-    /// The metadata lines of the file (`##...`).
-    pub fn metadata(&self) -> &[String] {
+    /// The metadata lines of the file (`##...`), as bytes.
+    pub fn metadata(&self) -> &[Vec<u8>] {
         &self.metadata
     }
 
@@ -1193,8 +1690,23 @@ impl<R: Read> Stream<'_, R> {
     }
 }
 
-/// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:257-264
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:239-276
 /// ```c
+///         if( stat_type == eAscii || stat_type == eOAscii )
+///         {
+///             for( auto const & line : md )
+///             {
+///                 if( !line.empty() && line.substr( 0, 6 ) == "##pct:" )
+///                 {
+///                     double pct( 0.0 );
+///                     Uint4 count;
+///                     std::istringstream iss(
+///                         line.substr( 7, line.size() - 7 ) );
+///                     iss >> count >> pct;
+///                     count_map.push_back( pct );
+///                 }
+///             }
+/// ...
 ///         if( stat_type == eBinary || stat_type == eOBinary )
 ///         {
 ///             for( auto const & line : md )
@@ -1203,6 +1715,11 @@ impl<R: Read> Stream<'_, R> {
 ///                 {
 ///                     std::istringstream iss(
 ///                         line.substr( 7, line.size() - 7 ) );
+/// ...
+///                     break;
+///                 }
+///             }
+///         }
 /// ```
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:361-366
 /// ```c
@@ -1213,17 +1730,249 @@ impl<R: Read> Stream<'_, R> {
 ///                     e.what() );
 ///     }
 /// ```
-/// Only the first `##pct:` line is read (the loop breaks after it). A line of exactly those six
-/// letters throws `std::out_of_range` from `substr( 7 )`; the text is libstdc++'s, as in NCBI's
-/// Linux builds. The percentages themselves are used only by the application's `-t_*_pct`
-/// settings, which are not ported.
-fn check_pct_line(metadata: &[String]) -> Result<(), WinMaskError> {
-    if let Some(line) = metadata.iter().find(|l| l.starts_with("##pct:")) {
-        if line.len() == 6 {
-            return Err(WinMaskError::CreateFail {
-                message: "could not create a unit counts container: basic_string::substr: __pos (which is 7) > this->size() (which is 6)".to_string(),
-            });
-        }
+/// The binary formats read the first `##pct:` line only (the loop breaks after it), the ascii
+/// ones every such line. A line of exactly those six letters throws `std::out_of_range` from
+/// `substr( 7 )`; the text is libstdc++'s, as in NCBI's Linux builds. The percentages themselves
+/// are used only by the application's `-t_*_pct` settings, which are not ported.
+fn check_pct_lines(metadata: &[Vec<u8>], stat_type: StatType) -> Result<(), WinMaskError> {
+    let mut pct = metadata.iter().filter(|line| line.starts_with(b"##pct:"));
+    let short = match stat_type {
+        StatType::Binary | StatType::OBinary => pct.next().is_some_and(|line| line.len() == 6),
+        StatType::Ascii | StatType::OAscii => pct.any(|line| line.len() == 6),
+        StatType::Unknown => false,
+    };
+    if short {
+        return Err(WinMaskError::CreateFail {
+            message: "could not create a unit counts container: basic_string::substr: __pos (which is 7) > this->size() (which is 6)".to_string(),
+        });
     }
     Ok(())
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:111-146
+/// ```c
+/// void ExtractStatAlgoVersion(
+///         vector< string > const & md, CSeqMaskerVersion & ver ) {
+///     static char const * DIGITS = "0123456789";
+///     string t;
+///
+///     for( vector< string >::const_iterator i( md.begin() );
+///             i != md.end(); ++i ) {
+///         string::size_type p( i->find( ':', 2 ) ), pp;
+///
+///         if( p != string::npos ) {
+///             if( i->substr( 2, p -2 ) ==
+///                     CSeqMaskerOstat::STAT_ALGO_COMPONENT_NAME ) {
+///                 int major = 0, minor = 0, patch = 0;
+///                 pp = p + 1;
+///                 p = i->find( '.', pp );
+///                 if( p == string::npos ) continue;
+///                 t = i->substr( pp, p - pp );
+///                 if( t.find_first_not_of( DIGITS ) != string::npos ) continue;
+///                 major = NStr::StringToInt( t );
+///                 pp = p + 1;
+///                 p = i->find( '.', pp );
+///                 if( p == string::npos ) continue;
+///                 t = i->substr( pp, p - pp );
+///                 if( t.find_first_not_of( DIGITS ) != string::npos ) continue;
+///                 minor = NStr::StringToInt( t );
+///                 t = i->substr( p + 1 );
+///                 if( t.find_first_not_of( DIGITS ) != string::npos ) continue;
+///                 patch = NStr::StringToInt( t );
+///                 ver = CSeqMaskerVersion(
+///                         CSeqMaskerOstat::STAT_ALGO_COMPONENT_NAME,
+///                         major, minor, patch );
+///                 return;
+/// ```
+/// `CSeqMaskerIstatFactory::create` calls it after the reader (`:343-348`), inside its `try`:
+/// a part of digits that `StringToInt` cannot convert (empty, or beyond `int`) is its
+/// exception, which the factory rethrows. The version itself is not used by the masker.
+fn check_stat_algo_version(metadata: &[Vec<u8>]) -> Result<(), NcbiException> {
+    const NAME: &[u8] = b"windowmasker-statistics-algorithm-version";
+    let digits = |t: &[u8]| t.iter().all(u8::is_ascii_digit);
+    let find = |line: &[u8], c: u8, from: usize| {
+        line.get(from..)
+            .and_then(|rest| rest.iter().position(|&b| b == c))
+            .map(|at| from + at)
+    };
+    for line in metadata {
+        let line = line.as_slice();
+        let Some(p) = find(line, b':', 2) else {
+            continue;
+        };
+        if &line[2..p] != NAME {
+            continue;
+        }
+        let pp = p + 1;
+        let Some(p) = find(line, b'.', pp) else {
+            continue;
+        };
+        let t = &line[pp..p];
+        if !digits(t) {
+            continue;
+        }
+        ncbi_str::string_to_int(t, 0)?;
+        let pp = p + 1;
+        let Some(p) = find(line, b'.', pp) else {
+            continue;
+        };
+        let t = &line[pp..p];
+        if !digits(t) {
+            continue;
+        }
+        ncbi_str::string_to_int(t, 0)?;
+        let t = &line[p + 1..];
+        if !digits(t) {
+            continue;
+        }
+        ncbi_str::string_to_int(t, 0)?;
+        return Ok(());
+    }
+    Ok(())
+}
+
+/// The function of the ascii reader's throws.
+const ASCII_NEW: Option<&str> = Some("ncbi::CSeqMaskerIstatAscii::CSeqMaskerIstatAscii");
+
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_ascii.cpp:40-50
+/// ```c
+/// CSeqMaskerIstatAscii::Exception::GetErrCodeString() const
+/// {
+///     switch( GetErrCode() )
+///     {
+///         case eStreamOpenFail:   return "open failed";
+///         case eSyntax:           return "syntax error";
+///         case eParam:            return "bad parameter value";
+/// ```
+/// The ascii reader's syntax errors: line 96 (a `>` line) and 137 (a unit line).
+const fn ascii_site(line: u32) -> ThrowSite {
+    ThrowSite {
+        file: "src/algo/winmask/seq_masker_istat_ascii.cpp",
+        line,
+        kind: "Exception::syntax error",
+        function: ASCII_NEW,
+    }
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_ascii.cpp:168-169
+/// ```c
+///     if( !bad_param.empty() )
+///         NCBI_THROW( Exception, eParam, bad_param );
+/// ```
+const ASCII_BAD_PARAM: ThrowSite = ThrowSite {
+    file: "src/algo/winmask/seq_masker_istat_ascii.cpp",
+    line: 169,
+    kind: "Exception::bad parameter value",
+    function: ASCII_NEW,
+};
+
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_simple.cpp:44-52
+/// ```c
+/// const char * CSeqMaskerUsetSimple::Exception::GetErrCodeString() const
+/// {
+///     switch( GetErrCode() )
+///     {
+///         case eBadOrder:     return "bad unit order";
+/// ```
+const USET_SIMPLE_BAD_ORDER: ThrowSite = ThrowSite {
+    file: "src/algo/winmask/seq_masker_uset_simple.cpp",
+    line: 62,
+    kind: "Exception::bad unit order",
+    function: Some("ncbi::CSeqMaskerUsetSimple::add_info"),
+};
+
+/// The lines of a text counts file as NCBI's readers take them with `getline` on an
+/// `ifstream` opened in text mode (Linux: no translation of line ends): each line without its
+/// line feed, the last one without one too; `None` once the stream has failed (the end of the
+/// file was reached with nothing read, or a read error), and after that.
+struct TextLines<R: Read> {
+    r: BufReader<R>,
+    line: Vec<u8>,
+    failed: bool,
+}
+
+impl<R: Read> TextLines<R> {
+    fn new(r: R) -> Self {
+        Self {
+            r: BufReader::with_capacity(1 << 16, r),
+            line: Vec::new(),
+            failed: false,
+        }
+    }
+
+    fn getline(&mut self) -> Option<&[u8]> {
+        if self.failed {
+            return None;
+        }
+        self.line.clear();
+        match self.r.read_until(b'\n', &mut self.line) {
+            Ok(0) | Err(_) => {
+                self.failed = true;
+                None
+            }
+            Ok(_) => {
+                if self.line.last() == Some(&b'\n') {
+                    self.line.pop();
+                }
+                Some(&self.line)
+            }
+        }
+    }
+}
+
+/// `istringstream( line ) >> v0 >> v1 >> ...` into `unsigned int`s, as libstdc++ reads them
+/// (`num_get::_M_extract_int` with the stream's default flags): white space, then a sign and the
+/// decimal digits up to the first other byte; no digit is 0 and a failure, a value beyond
+/// `UINT_MAX` is `UINT_MAX` and a failure, and a `-` gives the value's negation modulo 2^32.
+/// After a failure, and once the line has ended, the stream reads nothing more: the values and
+/// how many of them `>>` set (the first ones; a failed one is set), the others 0 here (NCBI
+/// leaves them uninitialized; see [`UnitCounts::read_oascii`]).
+pub(super) fn extract_uints<const N: usize>(line: &[u8]) -> ([u32; N], usize) {
+    let mut values = [0u32; N];
+    let mut set = 0;
+    let mut pos = 0;
+    for value in values.iter_mut() {
+        // The sentry: skip white space; at the end of the line it fails.
+        while pos < line.len() && ncbi_str::is_space(line[pos]) {
+            pos += 1;
+        }
+        if pos == line.len() {
+            break;
+        }
+        set += 1;
+        let negative = line[pos] == b'-';
+        if negative || line[pos] == b'+' {
+            pos += 1;
+        }
+        let digits_from = pos;
+        let mut result: u32 = 0;
+        let mut overflow = false;
+        while pos < line.len() && line[pos].is_ascii_digit() {
+            let digit = u32::from(line[pos] - b'0');
+            if result > u32::MAX / 10 {
+                overflow = true;
+            } else {
+                result *= 10;
+                overflow |= result > u32::MAX - digit;
+                result = result.wrapping_add(digit);
+            }
+            pos += 1;
+        }
+        if pos == digits_from {
+            break;
+        }
+        if overflow {
+            *value = u32::MAX;
+            break;
+        }
+        *value = if negative {
+            result.wrapping_neg()
+        } else {
+            result
+        };
+        if pos == line.len() {
+            break;
+        }
+    }
+    (values, set)
 }

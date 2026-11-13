@@ -10,12 +10,17 @@
 // 17-55 ms). Longer searches gain less or nothing: what remains is the time until the
 // optimizing compiler's code of their hot functions is ready, which the small sequences do
 // not reach.
+import { WINDOW_MASKER_TAXID_FLAG } from '../../domain/counts';
 import { programById, type ProgramId, type SequenceKind } from '../../domain/programs';
 import { REGION_FLAG } from '../../domain/region';
 import { ROLE_QUERY, ROLE_SUBJECT, type ReactorAbi } from '../reactor/abi';
 
-/** Options whose values are positions in the user's inputs: the warm-up leaves them out. */
-const INPUT_OPTIONS: ReadonlySet<string> = new Set(Object.values(REGION_FLAG));
+/**
+ * Options whose values are positions in the user's inputs, or name counts of the user's (the counts
+ * of -window_masker_db, or of the taxonomy ID of -window_masker_taxid, which the instance may not
+ * hold yet): the warm-up leaves them out.
+ */
+const INPUT_OPTIONS: ReadonlySet<string> = new Set([...Object.values(REGION_FLAG), '-window_masker_db', WINDOW_MASKER_TAXID_FLAG]);
 
 // The standard genetic code, codons in TCAG order.
 const BASES = 'TCAG';

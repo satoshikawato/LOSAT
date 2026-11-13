@@ -1,0 +1,54 @@
+USAGE
+  segmasker [-h] [-help] [-xmlhelp] [-in input_file_name]
+    [-out output_file_name] [-infmt input_format] [-parse_seqids]
+    [-outfmt output_format] [-window integer_value] [-locut float_value]
+    [-hicut float_value] [-version-full] [-version-full-xml]
+    [-version-full-json]
+
+DESCRIPTION
+   Low complexity region masker based on the SEG algorithm
+
+OPTIONAL ARGUMENTS
+ -h
+   Print USAGE and DESCRIPTION;  ignore all other parameters
+ -help
+   Print USAGE, DESCRIPTION and ARGUMENTS; ignore all other parameters
+ -xmlhelp
+   Print USAGE, DESCRIPTION and ARGUMENTS in XML format; ignore all other
+   parameters
+ -version-full
+   Print extended version data;  ignore other arguments
+ -version-full-xml
+   Print extended version data in XML format;  ignore other arguments
+ -version-full-json
+   Print extended version data in JSON format;  ignore other arguments
+
+ *** Input/output options
+ -in <File_In>
+   input file name
+   Default = `-'
+ -out <File_Out>
+   output file name
+   Default = `-'
+ -infmt <String, `blastdb', `fasta'>
+   controls the format of the masker input
+   Default = `fasta'
+ -parse_seqids
+   Parse Seq-ids in FASTA input
+ -outfmt <String, `fasta', `interval', `maskinfo_asn1_bin',
+                  `maskinfo_asn1_text', `maskinfo_xml', `seqloc_asn1_bin',
+                  `seqloc_asn1_text', `seqloc_xml'>
+   controls the format of the masker output
+   Default = `interval'
+
+ *** SEG algorithm options
+ -window <Integer>
+   SEG window
+   Default = `12'
+ -locut <Real>
+   SEG locut
+   Default = `2.2'
+ -hicut <Real>
+   SEG hicut
+   Default = `2.5'
+

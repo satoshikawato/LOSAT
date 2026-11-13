@@ -4,6 +4,8 @@
 //! two lines in its suite (`common` for the command line, the output formats and shared parts;
 //! `tests/suite_layout.rs` checks that every file is in exactly one test binary).
 
+#[path = "../blastdbcmd_alias_keys.rs"]
+mod blastdbcmd_alias_keys;
 #[path = "../blastdbcmd_batch_line_ends.rs"]
 mod blastdbcmd_batch_line_ends;
 #[path = "../blastdbcmd_discovery.rs"]
@@ -16,6 +18,8 @@ mod blastdbcmd_masks;
 mod blastdbcmd_retrieve;
 #[path = "../blastdbcmd_several_names.rs"]
 mod blastdbcmd_several_names;
+#[path = "../blastx_library_db_hold.rs"]
+mod blastx_library_db_hold;
 #[path = "../cli_smoke.rs"]
 mod cli_smoke;
 #[path = "../db_empty_title.rs"]
@@ -30,12 +34,22 @@ mod default_bundle;
 mod entry_names;
 #[path = "../library_api.rs"]
 mod library_api;
+#[path = "../library_examples.rs"]
+mod library_examples;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]
 mod makeblastdb_ncbi_exceptions;
+#[path = "../makeblastdb_output_streams.rs"]
+mod makeblastdb_output_streams;
 #[path = "../makeblastdb_rename_lock.rs"]
 mod makeblastdb_rename_lock;
+#[path = "../masker_fixtures.rs"]
+mod masker_fixtures;
 #[path = "../ncbi_lookup_paths.rs"]
 mod ncbi_lookup_paths;
+#[path = "../ncbi_toolkit_dryrun.rs"]
+mod ncbi_toolkit_dryrun;
+#[path = "../ncbi_toolkit_file_options.rs"]
+mod ncbi_toolkit_file_options;
 #[path = "../newton_lanes8_default.rs"]
 mod newton_lanes8_default;
 #[path = "../outfmt11_blastn.rs"]

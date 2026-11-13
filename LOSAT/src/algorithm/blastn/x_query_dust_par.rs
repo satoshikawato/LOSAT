@@ -36,7 +36,7 @@
 //! Why the masks are the same: the mask of a query is a function of that query's letters and of
 //! the three DUST parameters only. `DustMasker::new` builds `level`, `window`, `linker`, `low_k`
 //! and a threshold table from the three parameters and keeps no other state; every call of
-//! `mask_subsequence` makes its own `NcbiLfgRandom` (the random numbers that resolve `N`),
+//! `mask_sequence` makes its own `NcbiLfgRandom` (the random numbers that resolve `N`),
 //! windows and perfect-interval lists as locals, which is the reset of NCBI's fresh
 //! `CSymDustMasker` for each query. `utils/dust.rs` has no statics that a call writes. So no query's mask depends on another query or on the order in which they are
 //! masked, and the results are collected in query order. The verbose lines, the totals and the

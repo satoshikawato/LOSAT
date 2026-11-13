@@ -2,13 +2,16 @@
 """Tests for ci_fast_regressions.py and frozen_allowlist.py (no LOSAT binary is run)."""
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
 import json
+import os
 import re
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -16,6 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import blastn_regression_fixtures as fixtures  # noqa: E402
 import ci_fast_regressions as fast  # noqa: E402
 import db_search_fixtures as db_fixtures  # noqa: E402
+import fasta_input_fixtures as fasta_input  # noqa: E402
+import range_regression_fixtures as range_fixtures  # noqa: E402
 import tblastx_regression_fixtures as tblastx_fixtures  # noqa: E402
 import xinclude_fixtures as xinclude  # noqa: E402
 from frozen_allowlist import Allowlist  # noqa: E402
@@ -164,6 +169,47 @@ class DbSearchFixtureTests(unittest.TestCase):
                                  "LANG": "C"})
         # nothing of the caller's environment is changed
         self.assertEqual(dirty["HOME"], "/home/someone")
+
+    def test_ncbi_runs_have_the_usage_report_off(self):
+        # NCBI BLAST+ 2.17.0 sends a run's parameters to NCBI at exit unless BLAST_USAGE_REPORT is false
+        # (blast_usage_report.cpp:195-220): every NCBI run of the harness has it, LOSAT's runs do not.
+        clean = db_fixtures.clean_env({"PATH": "/bin", "BLAST_USAGE_REPORT": "true"}, "/empty/home")
+        self.assertNotIn("BLAST_USAGE_REPORT", clean)
+        self.assertEqual(db_fixtures.ncbi_env(clean)["BLAST_USAGE_REPORT"], "false")
+        self.assertEqual(db_fixtures.ncbi_env(clean), {**clean, "BLAST_USAGE_REPORT": "false"})
+        # a row's tokens cannot turn it back on
+        self.assertFalse(db_fixtures.is_env_token("BLAST_USAGE_REPORT=true"))
+
+    @unittest.skipUnless(os.name == "posix", "the stand-in NCBI programs are shell scripts")
+    def test_freeze_runs_ncbi_with_the_usage_report_off(self):
+        # `freeze` with stand-in NCBI programs that print the variable: a plain row, an RPS row
+        # (`freeze_rps`) and a rejection row whose NCBI stdout is frozen; the manifest is not written.
+        rows = db_fixtures.read_manifest()[1]
+        def first(test):
+            return dict(next(r for r in rows if test(r)))
+        plain = first(lambda r: r["kind"] == "ncbi" and not xinclude.wants_files(r) and not xinclude.wants_pssm(r)
+                      and db_fixtures.rps_cell(r["db"]) is None)
+        rps = first(lambda r: r["kind"] == "ncbi" and db_fixtures.rps_cell(r["db"]) is not None)
+        rejection = first(lambda r: r["kind"] == "losat-rejection" and r["stdout_bytes"]
+                          and not xinclude.wants_pssm(r))
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir, frozen = Path(tmp) / "bin", Path(tmp) / "frozen"
+            bin_dir.mkdir()
+            for program in db_fixtures.PROGRAMS:
+                script = bin_dir / program
+                script.write_text('#!/bin/sh\nprintf "%s" "${BLAST_USAGE_REPORT-unset}"\n')
+                script.chmod(0o755)
+            written = []
+            with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [plain, rps, rejection])), \
+                    unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: written.append(a)), \
+                    unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
+                    unittest.mock.patch.dict(os.environ, {"BLAST_USAGE_REPORT": "true"}), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                args = argparse.Namespace(ncbi_bin=str(bin_dir), program="", only="")
+                self.assertEqual(db_fixtures.freeze(args), 0)
+            for row in (plain, rps, rejection):
+                self.assertEqual((frozen / f"{row['row_id']}.out").read_bytes(), b"false", row["row_id"])
+            self.assertEqual(len(written), 1)
 
 
 def fake_search(directory: Path, master: bytes, sides: list[bytes], stdout: bytes = b"", extra: str = "") -> list[str]:
@@ -439,6 +485,68 @@ class StartupTraceNoticeTests(unittest.TestCase):
         failures = self.check("print('losat 1.0')\nsys.stderr.write('warning\\n')\nsys.exit(1)")
         self.assertTrue(any("exited" in failure for failure in failures))
         self.assertTrue(any("stderr without" in failure for failure in failures))
+
+
+STAND_IN_NCBI = '#!/bin/sh\nprintf "%s" "${BLAST_USAGE_REPORT-unset}"\n'
+
+
+def stand_in_bin(directory: Path, programs) -> Path:
+    """Stand-in NCBI programs that print the value of BLAST_USAGE_REPORT (`unset` without it)."""
+    bin_dir = directory / "bin"
+    bin_dir.mkdir()
+    for program in programs:
+        script = bin_dir / program
+        script.write_text(STAND_IN_NCBI)
+        script.chmod(0o755)
+    return bin_dir
+
+
+@unittest.skipUnless(os.name == "posix", "the stand-in NCBI programs are shell scripts")
+class NcbiUsageReportOffTests(unittest.TestCase):
+    """NCBI BLAST+ 2.17.0 sends a run's parameters to NCBI at exit unless BLAST_USAGE_REPORT is false
+    (blast_usage_report.cpp:195-220): the harnesses' NCBI runs have it (db_search_fixtures.ncbi_env), the
+    runs of LOSAT keep their environment."""
+
+    def caller_env(self, home: str) -> dict[str, str]:
+        # the freeze commands refuse to run with these set or with a ~/.ncbirc
+        env = {k: v for k, v in os.environ.items() if k not in fasta_input.REPORT_ENV + range_fixtures.REPORT_ENV}
+        return env | {"HOME": home, "BLAST_USAGE_REPORT": "true"}
+
+    def test_fasta_input_freeze(self):
+        one = next(r for r in fasta_input.build_rows() if r.kind == "ncbi" and fasta_input.network_safe(r) is None)
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = stand_in_bin(Path(tmp), {"blastn", one.program})
+            written = []
+            args = argparse.Namespace(ncbi_bin=str(bin_dir), out=str(Path(tmp) / "out"), no_netns=True, rows=None,
+                                      match=None, tier=None, verify=False, jobs=1)
+            with unittest.mock.patch.object(fasta_input, "build_rows", lambda: [one]), \
+                    unittest.mock.patch.object(fasta_input, "read_manifest", lambda: []), \
+                    unittest.mock.patch.object(fasta_input, "write_manifest", lambda *a: written.append(a)), \
+                    unittest.mock.patch.dict(os.environ, self.caller_env(tmp), clear=True), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                fasta_input.command_freeze(args)
+                # LOSAT's run keeps the caller's environment
+                self.assertEqual(fasta_input.execute([str(bin_dir / one.program)], one, False)[1], b"true")
+            self.assertEqual((Path(tmp) / "out" / f"{one.row_id}.out").read_bytes(), b"false")
+            self.assertEqual((Path(tmp) / "out" / f"{one.row_id}.merged").read_bytes(), b"false")
+            self.assertEqual(written[0][1], "false")  # the version line: `blastn -version`'s output
+
+    def test_range_regression_freeze(self):
+        case = range_fixtures.CASES[0]
+        program = case[1].split(" ", 1)[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = stand_in_bin(Path(tmp), {"blastn", program})
+            fixtures_dir = Path(tmp) / "fixtures"
+            with unittest.mock.patch.object(range_fixtures, "CASES", [case]), \
+                    unittest.mock.patch.object(range_fixtures, "FIXTURES", fixtures_dir), \
+                    unittest.mock.patch.object(range_fixtures, "MANIFEST", fixtures_dir / "manifest.tsv"), \
+                    unittest.mock.patch.dict(os.environ, self.caller_env(tmp), clear=True), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                range_fixtures.command_freeze(argparse.Namespace(bin_dir=str(bin_dir)))
+                # LOSAT's runs (`check_one`) go through run_case without `env_of`
+                self.assertEqual(fixtures.run_case(str(bin_dir / program), [], "x", "", "").stdout, b"true")
+            self.assertEqual((fixtures_dir / f"{case[0]}.out").read_bytes(), b"false")
+            self.assertIn("of false (", (fixtures_dir / "manifest.tsv").read_text())
 
 
 if __name__ == "__main__":

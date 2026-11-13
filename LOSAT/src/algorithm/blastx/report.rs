@@ -1306,11 +1306,7 @@ pub(super) fn render_queries_with(
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            stderr.write_all(&query_warning(
-                query,
-                batch.search_skipped,
-                options.filtered_empty,
-            ))?;
+            stderr.write_all(&query_warning(options, query, batch.search_skipped))?;
             stderr.write_all(shown.query_fetches(batch.query_ordinal + qidx))?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:779-783
             // ```c++
@@ -1380,7 +1376,12 @@ pub(super) fn render_queries_with(
                     })
                     .sum();
                 if comments {
-                    writeln!(writer, "# BLASTX {}", crate::NCBI_BLAST_VERSION)?;
+                    writeln!(
+                        writer,
+                        "# {} {}",
+                        options.program().upper,
+                        crate::NCBI_BLAST_VERSION
+                    )?;
                     writeln!(
                         writer,
                         "# Query: {}",
@@ -1430,11 +1431,14 @@ pub(super) fn render_queries_with(
                                 .join(", ")
                         )?;
                     }
-                    if !batch.search_skipped {
+                    // A merged result has an alignment set (`ResolvedOptions::merged_volumes`).
+                    if !batch.search_skipped || options.merged_volumes() {
                         writeln!(writer, "# {count} hits found")?;
                     }
                 }
-                for list in lists {
+                // Several volumes: the merged lists cut once per query (`ResolvedOptions::shown_lists`).
+                let listed = &lists[..lists.len().min(options.shown_lists())];
+                for list in listed {
                     let subject = &subjects[list.oid];
                     let shown_subject = ShownSubject {
                         ids: shown.subject_ids(subject, list.oid),
@@ -1568,8 +1572,7 @@ fn write_pairwise(
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            let mut query_warnings =
-                query_warning(query, batch.search_skipped, options.filtered_empty);
+            let mut query_warnings = query_warning(options, query, batch.search_skipped);
             query_warnings.extend_from_slice(shown.query_fetches(batch.query_ordinal + qidx));
             warnings.push(query_warnings);
             valid.push(first.is_some());
@@ -1613,9 +1616,17 @@ fn write_pairwise(
         ShownSubjects::Fasta { parsed, .. } => parsed.subjects.as_slice(),
         ShownSubjects::Database { .. } => &[],
     };
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:247-249
+    // ```c++
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+    // ```
     let config = PairwiseConfig {
         program: "blastx".into(),
         protein_matrix: options.scoring,
+        line_length: options.formatting.line_length(),
+        sort: options.report_sort(),
         ..PairwiseConfig::default()
     };
     write_blastx_pairwise_report(
@@ -1729,6 +1740,16 @@ pub(super) fn pairwise_hits(
                         comp_adjust_method: Some(u8::try_from(hsp.composition_method)?),
                         sum_n: Some(hsp.num),
                         subject_stored_gaps: a.subject_stored_gaps,
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:530-531
+                        // ```c
+                        //         else
+                        //             status = Blast_HSPGetNumIdentitiesAndPositives(query_nomask, subject, hsp, scoring_options, 0, sbp);
+                        // ```
+                        // The Seq-align's `num_ident` (`seqalign::query_records`): the engine's
+                        // identities on the unmasked query frame (`statistics::identity_and_positive`),
+                        // not those of the rows (`a.identity`), which the display's translation
+                        // and the subject's stored gap characters make.
+                        seqalign_num_ident: hsp.identity,
                     });
                 }
             }
@@ -1812,7 +1833,7 @@ fn pairwise_metadata(
         } else {
             Default::default()
         },
-        gumbel: (options.gapped && !options.old_fsc).then(|| {
+        gumbel: options.has_gumbel_block().then(|| {
             lookup_protein_gumbel_params(&scoring, total as i64)
                 .expect("the gap costs are in the matrix's table (`args.rs`)")
         }),
@@ -1835,6 +1856,7 @@ pub(crate) fn write_prolog(
     if options.outfmt == 0 {
         crate::report::pairwise::write_blastx_prolog(
             writer,
+            options.program().upper,
             &pairwise_metadata(options, subjects, shown),
             shown.pairwise_database(),
         )?;
@@ -1842,7 +1864,13 @@ pub(crate) fn write_prolog(
     // Outfmt 20's line of the field names, after its formatter's warning
     // (`tabular::write_prolog`).
     if let Some(spec) = options.tabular {
-        super::tabular::write_prolog(spec, options.taxdb_found, &mut *writer, diagnostics)?;
+        super::tabular::write_prolog(
+            options.program(),
+            spec,
+            options.taxdb_found,
+            &mut *writer,
+            diagnostics,
+        )?;
     }
     Ok(())
 }
@@ -1939,6 +1967,7 @@ pub(crate) fn write_epilog(
         // the taxonomy database without `taxdb.bti` (`tabular::write_epilog_warning`).
         if let Some(spec) = options.tabular {
             super::tabular::write_epilog_warning(
+                options.program(),
                 spec,
                 options.taxdb_found,
                 &mut *writer,
@@ -2059,11 +2088,20 @@ pub(crate) fn write_epilog(
 // ```
 // Global errorId0 "Could..." precedes per-query "Sequence..." after Combine.
 pub(super) fn query_warning(
+    options: &ResolvedOptions,
     query: &FastaRecord,
     search_skipped: bool,
-    filtered_empty: bool,
 ) -> Vec<u8> {
-    let empty_database = filtered_empty && !search_skipped;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:173
+    // ```c++
+    // 			aggregate_messages.Combine(thread_results[d]->GetErrors());
+    // ```
+    // RPSTBLASTN's results of a database of several volumes are merged, which keeps the
+    // messages of error severity only (`ResolvedOptions::merged_volumes`).
+    if options.merged_volumes() {
+        return Vec::new();
+    }
+    let empty_database = options.filtered_empty && !search_skipped;
     if !query.sequence.is_empty() && !search_skipped && !empty_database {
         return Vec::new();
     }
@@ -2076,7 +2114,7 @@ pub(super) fn query_warning(
         id.truncate(25);
         id.extend_from_slice(b".. ");
     }
-    let mut bytes = b"Warning: [blastx] ".to_vec();
+    let mut bytes = format!("Warning: [{}] ", options.program().lower).into_bytes();
     bytes.extend_from_slice(&id);
     bytes.extend_from_slice(b": ");
     if search_skipped {

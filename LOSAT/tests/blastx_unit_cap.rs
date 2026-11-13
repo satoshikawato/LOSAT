@@ -367,6 +367,98 @@ fn a_split_query_gives_the_report_without_the_switches() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `LOSAT_X_BXW4CAP` (the 4-letter lookup table's units at a time, built-in K = 1,
+/// `blastx/x_bx_mem.rs`): with `-word_size 4` the built-in cap acts at 4 threads (K = 1 below the
+/// threads), each unit's table built in 4 parts, also for a batch of one subject task; the report
+/// equals that of `=0` (K = 8: no cap at 4 threads) and of all the switches off, for several query
+/// batches and for a split query. Many subjects: its own K holds; one subject: K rises to the
+/// threads (`ceil(threads / subjects)`), and nothing is capped at 4 threads.
+#[test]
+fn four_letter_tables_give_the_report_without_their_cap() {
+    let dir = temp_dir("w4");
+    let w4_off = [("LOSAT_X_BXW4CAP", "0")];
+    let (query, set) = inputs(&dir, 8, 4_000, 595);
+    let args = [
+        "-word_size",
+        "4",
+        "-subject",
+        set.to_str().unwrap(),
+        "-outfmt",
+        "6",
+    ];
+    let reference = blastx(&query, &args, 4, &w4_off);
+    assert!(
+        reference.iter().filter(|&&b| b == b'\n').count() > 20,
+        "too few hits to test"
+    );
+    for env in [&[][..], ALL_OFF] {
+        assert!(
+            blastx(&query, &args, 4, env) == reference,
+            "{env:?}: report differs"
+        );
+    }
+    assert_eq!(
+        sides(&dir, &query, &args, 4, &[], "LOSAT_X_BXW4CAP"),
+        (true, false)
+    );
+    assert_eq!(cap_sides(&dir, &query, &args, &[]), (true, false));
+    assert_eq!(cap_sides(&dir, &query, &args, &w4_off), (false, true));
+    assert_eq!(
+        sides(&dir, &query, &args, 4, &[], "LOSAT_X_BXBUILDPAR"),
+        (true, false)
+    );
+    // 40 proteins: one subject task per batch (64 or fewer), which the 4-letter cap still leaves
+    // all four threads (the build in 4 parts and the tasks of LOSAT_X_BXCAPFILL).
+    let (query, few) = inputs_from(&dir, 0, 8, 4_000, 40);
+    let args = [
+        "-word_size",
+        "4",
+        "-subject",
+        few.to_str().unwrap(),
+        "-outfmt",
+        "6",
+    ];
+    assert_eq!(
+        sides(&dir, &query, &args, 4, &[], "LOSAT_X_BXW4CAP"),
+        (true, false)
+    );
+    assert!(
+        blastx(&query, &args, 4, &[]) == blastx(&query, &args, 4, &w4_off),
+        "40 proteins: report differs"
+    );
+    // One protein: K rises to the 4 threads, so the cap does not act.
+    let (query, one) = inputs(&dir, 8, 4_000, 1);
+    let args = [
+        "-word_size",
+        "4",
+        "-subject",
+        one.to_str().unwrap(),
+        "-outfmt",
+        "6",
+    ];
+    assert_eq!(
+        sides(&dir, &query, &args, 4, &[], "LOSAT_X_BXW4CAP"),
+        (false, true)
+    );
+    assert_eq!(cap_sides(&dir, &query, &args, &[]), (false, true));
+    // A split query: the chunk waves of one chunk at a time, each chunk's subjects as tasks.
+    let (query, set) = inputs(&dir, 1, 45_000, 595);
+    let args = [
+        "-word_size",
+        "4",
+        "-subject",
+        set.to_str().unwrap(),
+        "-outfmt",
+        "6",
+    ];
+    assert_eq!(cap_sides(&dir, &query, &args, &[]), (true, false));
+    assert!(
+        blastx(&query, &args, 4, &[]) == blastx(&query, &args, 4, &w4_off),
+        "split query: report differs"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `LOSAT_X_BXKAONCE` (a query batch's Karlin blocks computed once, `blastx/search.rs`): the report
 /// equals that without it. The reuse runs in the serial chunk loop for a batch that is not split,
 /// so the search is run at one thread (the loop) and at four, eight and sixteen (the batch flow).

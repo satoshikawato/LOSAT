@@ -1,0 +1,348 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "window=64; level=20; linker=1",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id general {
+            db "BL_ORD_ID",
+            tag id 1
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id general {
+            db "BL_ORD_ID",
+            tag id 1
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id general {
+            db "BL_ORD_ID",
+            tag id 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id general {
+            db "BL_ORD_ID",
+            tag id 2
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id general {
+            db "BL_ORD_ID",
+            tag id 2
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id general {
+            db "BL_ORD_ID",
+            tag id 2
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id general {
+            db "BL_ORD_ID",
+            tag id 3
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id general {
+            db "BL_ORD_ID",
+            tag id 3
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id general {
+            db "BL_ORD_ID",
+            tag id 3
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id general {
+            db "BL_ORD_ID",
+            tag id 4
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id general {
+            db "BL_ORD_ID",
+            tag id 4
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id general {
+            db "BL_ORD_ID",
+            tag id 4
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id general {
+            db "BL_ORD_ID",
+            tag id 5
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id general {
+            db "BL_ORD_ID",
+            tag id 5
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id general {
+            db "BL_ORD_ID",
+            tag id 5
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id general {
+            db "BL_ORD_ID",
+            tag id 6
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id general {
+            db "BL_ORD_ID",
+            tag id 6
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id general {
+            db "BL_ORD_ID",
+            tag id 6
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id general {
+            db "BL_ORD_ID",
+            tag id 7
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id general {
+            db "BL_ORD_ID",
+            tag id 7
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id general {
+            db "BL_ORD_ID",
+            tag id 7
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id general {
+            db "BL_ORD_ID",
+            tag id 8
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id general {
+            db "BL_ORD_ID",
+            tag id 8
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id general {
+            db "BL_ORD_ID",
+            tag id 8
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id general {
+            db "BL_ORD_ID",
+            tag id 9
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id general {
+            db "BL_ORD_ID",
+            tag id 9
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id general {
+            db "BL_ORD_ID",
+            tag id 9
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id general {
+            db "BL_ORD_ID",
+            tag id 10
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id general {
+            db "BL_ORD_ID",
+            tag id 10
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id general {
+            db "BL_ORD_ID",
+            tag id 10
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id general {
+            db "BL_ORD_ID",
+            tag id 11
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id general {
+            db "BL_ORD_ID",
+            tag id 11
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id general {
+            db "BL_ORD_ID",
+            tag id 11
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id general {
+            db "BL_ORD_ID",
+            tag id 12
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id general {
+            db "BL_ORD_ID",
+            tag id 12
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id general {
+            db "BL_ORD_ID",
+            tag id 12
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id general {
+            db "BL_ORD_ID",
+            tag id 13
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id general {
+            db "BL_ORD_ID",
+            tag id 13
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id general {
+            db "BL_ORD_ID",
+            tag id 13
+          }
+        }
+      }
+    },
+    more FALSE
+  }
+}

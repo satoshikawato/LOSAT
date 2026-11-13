@@ -135,6 +135,21 @@
     "takes_value": true
    },
    {
+    "flag": "-line_length",
+    "help": "Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]",
+    "takes_value": true
+   },
+   {
+    "flag": "-sorthits",
+    "help": "Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage; Not applicable for outfmt > 4",
+    "takes_value": true
+   },
+   {
+    "flag": "-sorthsps",
+    "help": "Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable for outfmt != 0",
+    "takes_value": true
+   },
+   {
     "flag": "-max_hsps",
     "help": "Maximum number of HSPs per subject (unlimited when omitted) Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270",
     "takes_value": true
@@ -287,6 +302,7 @@
      "-evalue": "10",
      "-gapextend": "2",
      "-gapopen": "5",
+     "-line_length": "60",
      "-max_target_seqs": "500",
      "-num_alignments": "250",
      "-num_descriptions": "500",
@@ -304,6 +320,7 @@
      "-evalue": "1000",
      "-gapextend": "2",
      "-gapopen": "5",
+     "-line_length": "60",
      "-max_target_seqs": "500",
      "-num_alignments": "250",
      "-num_descriptions": "500",
@@ -321,6 +338,7 @@
      "-evalue": "10",
      "-gapextend": "2",
      "-gapopen": "5",
+     "-line_length": "60",
      "-max_target_seqs": "500",
      "-num_alignments": "250",
      "-num_descriptions": "500",
@@ -338,6 +356,7 @@
      "-evalue": "10",
      "-gapextend": "0",
      "-gapopen": "0",
+     "-line_length": "60",
      "-max_target_seqs": "500",
      "-num_alignments": "250",
      "-num_descriptions": "500",
@@ -510,6 +529,21 @@
     "takes_value": true
    },
    {
+    "flag": "-line_length",
+    "help": "Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]",
+    "takes_value": true
+   },
+   {
+    "flag": "-sorthits",
+    "help": "Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage; Not applicable for outfmt > 4",
+    "takes_value": true
+   },
+   {
+    "flag": "-sorthsps",
+    "help": "Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable for outfmt != 0",
+    "takes_value": true
+   },
+   {
     "flag": "-max_hsps",
     "help": "",
     "takes_value": true
@@ -532,6 +566,21 @@
      "true",
      "false"
     ]
+   },
+   {
+    "flag": "-xdrop_ungap",
+    "help": "X-dropoff value (in bits) for ungapped extensions [default: 7]",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap",
+    "help": "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap_final",
+    "help": "X-dropoff value (in bits) for final gapped alignment [default: 25]",
+    "takes_value": true
    },
    {
     "flag": "-window_size",
@@ -605,6 +654,7 @@
      "-evalue": "10",
      "-gapextend": "1",
      "-gapopen": "11",
+     "-line_length": "60",
      "-matrix": "BLOSUM62",
      "-max_target_seqs": "500",
      "-num_alignments": "250",
@@ -613,13 +663,17 @@
      "-soft_masking": "false",
      "-threshold": "11",
      "-window_size": "40",
-     "-word_size": "3"
+     "-word_size": "3",
+     "-xdrop_gap": "15",
+     "-xdrop_gap_final": "25",
+     "-xdrop_ungap": "7"
     },
     "blastp-fast": {
      "-culling_limit": "0",
      "-evalue": "10",
      "-gapextend": "1",
      "-gapopen": "11",
+     "-line_length": "60",
      "-matrix": "BLOSUM62",
      "-max_target_seqs": "500",
      "-num_alignments": "250",
@@ -628,13 +682,17 @@
      "-soft_masking": "false",
      "-threshold": "20",
      "-window_size": "40",
-     "-word_size": "5"
+     "-word_size": "5",
+     "-xdrop_gap": "15",
+     "-xdrop_gap_final": "25",
+     "-xdrop_ungap": "7"
     },
     "blastp-short": {
      "-culling_limit": "0",
      "-evalue": "20000",
      "-gapextend": "1",
      "-gapopen": "9",
+     "-line_length": "60",
      "-matrix": "PAM30",
      "-max_target_seqs": "500",
      "-num_alignments": "250",
@@ -643,7 +701,10 @@
      "-soft_masking": "false",
      "-threshold": "16",
      "-window_size": "15",
-     "-word_size": "2"
+     "-word_size": "2",
+     "-xdrop_gap": "15",
+     "-xdrop_gap_final": "25",
+     "-xdrop_ungap": "7"
     }
    },
    "by": {
@@ -1091,12 +1152,27 @@
    },
    {
     "flag": "-threshold",
-    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 12; 20 for blastx-fast; 19.3 for -word_size 5]",
+    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 12; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastx-fast]",
     "takes_value": true
    },
    {
     "flag": "-window_size",
     "help": "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_ungap",
+    "help": "X-dropoff value (in bits) for ungapped extensions [default: 7]",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap",
+    "help": "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap_final",
+    "help": "X-dropoff value (in bits) for final gapped alignment [default: 25]",
     "takes_value": true
    },
    {
@@ -1169,6 +1245,21 @@
     "takes_value": true
    },
    {
+    "flag": "-line_length",
+    "help": "Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]",
+    "takes_value": true
+   },
+   {
+    "flag": "-sorthits",
+    "help": "Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage; Not applicable for outfmt > 4",
+    "takes_value": true
+   },
+   {
+    "flag": "-sorthsps",
+    "help": "Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable for outfmt != 0",
+    "takes_value": true
+   },
+   {
     "flag": "-comp_based_stats",
     "help": "Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d, T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score matrix adjustment",
     "takes_value": true,
@@ -1210,6 +1301,7 @@
      "-evalue": "10",
      "-gapextend": "1",
      "-gapopen": "11",
+     "-line_length": "60",
      "-matrix": "BLOSUM62",
      "-max_target_seqs": "500",
      "-num_alignments": "250",
@@ -1218,13 +1310,17 @@
      "-sum_stats": "true",
      "-threshold": "12",
      "-window_size": "40",
-     "-word_size": "3"
+     "-word_size": "3",
+     "-xdrop_gap": "15",
+     "-xdrop_gap_final": "25",
+     "-xdrop_ungap": "7"
     },
     "blastx-fast": {
      "-culling_limit": "0",
      "-evalue": "10",
      "-gapextend": "1",
      "-gapopen": "11",
+     "-line_length": "60",
      "-matrix": "BLOSUM62",
      "-max_target_seqs": "500",
      "-num_alignments": "250",
@@ -1233,7 +1329,10 @@
      "-sum_stats": "true",
      "-threshold": "20",
      "-window_size": "40",
-     "-word_size": "5"
+     "-word_size": "5",
+     "-xdrop_gap": "15",
+     "-xdrop_gap_final": "25",
+     "-xdrop_ungap": "7"
     }
    },
    "by": {
@@ -1352,7 +1451,23 @@
      }
     },
     "-word_size": {
+     "2": {
+      "blastx": {
+       "-threshold": "12"
+      },
+      "blastx-fast": {
+       "-threshold": "20"
+      }
+     },
      "3": {
+      "blastx": {
+       "-threshold": "12"
+      },
+      "blastx-fast": {
+       "-threshold": "20"
+      }
+     },
+     "4": {
       "blastx": {
        "-threshold": "12"
       },
@@ -1366,6 +1481,22 @@
       },
       "blastx-fast": {
        "-threshold": "19.3"
+      }
+     },
+     "6": {
+      "blastx": {
+       "-threshold": "21"
+      },
+      "blastx-fast": {
+       "-threshold": "21"
+      }
+     },
+     "7": {
+      "blastx": {
+       "-threshold": "20.25"
+      },
+      "blastx-fast": {
+       "-threshold": "20.25"
       }
      }
     }
@@ -1536,6 +1667,11 @@
     "takes_value": true
    },
    {
+    "flag": "-xdrop_ungap",
+    "help": "X-dropoff value (in bits) for ungapped extensions [default: 7]",
+    "takes_value": true
+   },
+   {
     "flag": "-xdrop_gap",
     "help": "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]",
     "takes_value": true
@@ -1606,6 +1742,21 @@
     "takes_value": true
    },
    {
+    "flag": "-line_length",
+    "help": "Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]",
+    "takes_value": true
+   },
+   {
+    "flag": "-sorthits",
+    "help": "Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage; Not applicable for outfmt > 4",
+    "takes_value": true
+   },
+   {
+    "flag": "-sorthsps",
+    "help": "Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable for outfmt != 0",
+    "takes_value": true
+   },
+   {
     "flag": "-max_hsps",
     "help": "Set maximum number of HSPs per subject sequence to save for each query",
     "takes_value": true
@@ -1666,6 +1817,7 @@
      "-evalue": "10",
      "-gapextend": "1",
      "-gapopen": "11",
+     "-line_length": "60",
      "-matrix": "BLOSUM62",
      "-max_target_seqs": "500",
      "-num_alignments": "250",
@@ -1677,13 +1829,15 @@
      "-window_size": "40",
      "-word_size": "3",
      "-xdrop_gap": "15",
-     "-xdrop_gap_final": "25"
+     "-xdrop_gap_final": "25",
+     "-xdrop_ungap": "7"
     },
     "tblastn-fast": {
      "-culling_limit": "0",
      "-evalue": "10",
      "-gapextend": "1",
      "-gapopen": "11",
+     "-line_length": "60",
      "-matrix": "BLOSUM62",
      "-max_target_seqs": "500",
      "-num_alignments": "250",
@@ -1695,7 +1849,8 @@
      "-window_size": "40",
      "-word_size": "5",
      "-xdrop_gap": "15",
-     "-xdrop_gap_final": "25"
+     "-xdrop_gap_final": "25",
+     "-xdrop_ungap": "7"
     }
    },
    "by": {
@@ -2041,6 +2196,21 @@
     "takes_value": true
    },
    {
+    "flag": "-line_length",
+    "help": "Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]",
+    "takes_value": true
+   },
+   {
+    "flag": "-sorthits",
+    "help": "Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage; Not applicable for outfmt > 4",
+    "takes_value": true
+   },
+   {
+    "flag": "-sorthsps",
+    "help": "Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable for outfmt != 0",
+    "takes_value": true
+   },
+   {
     "flag": "-max_hsps",
     "help": "Set maximum number of HSPs per subject sequence to save for each query",
     "takes_value": true
@@ -2069,6 +2239,11 @@
      "true",
      "false"
     ]
+   },
+   {
+    "flag": "-xdrop_ungap",
+    "help": "X-dropoff value (in bits) for ungapped extensions [default: 7]",
+    "takes_value": true
    },
    {
     "flag": "-window_size",
@@ -2152,6 +2327,7 @@
     "": {
      "-culling_limit": "0",
      "-evalue": "10",
+     "-line_length": "60",
      "-matrix": "BLOSUM62",
      "-max_target_seqs": "500",
      "-num_alignments": "250",
@@ -2160,7 +2336,8 @@
      "-soft_masking": "false",
      "-threshold": "13",
      "-window_size": "40",
-     "-word_size": "3"
+     "-word_size": "3",
+     "-xdrop_ungap": "7"
     }
    },
    "by": {

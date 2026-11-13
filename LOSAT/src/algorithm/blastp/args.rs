@@ -431,6 +431,11 @@ pub struct BlastpArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
+    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
+    /// `blastinput::report_counts::FormattingArgs`; psiblast's and rpsblast's from their own
+    /// parsers, `into_blastp_args`). Only blastp's report sorts (`ResolvedBlastpArgs::sort`).
+    #[command(flatten)]
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     #[arg(long = "max_hsps", value_parser = blastn_count)]
     pub max_hsps_per_subject: Option<usize>,
     // NCBI blast_args.cpp:196-201,313-315: no filter when omitted or 0.
@@ -451,6 +456,51 @@ pub struct BlastpArgs {
     pub culling_limit: Option<i32>,
     #[arg(long)]
     pub ungapped: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-229, 276-286
+    // ```c++
+    //         arg_desc.SetCurrentGroup("Extension options");
+    //         // ungapped X-drop
+    //         // Default values: blastn=20, megablast=10, others=7
+    //         arg_desc.AddOptionalKey(kArgUngappedXDropoff, "float_value",
+    //                             "X-dropoff value (in bits) for ungapped extensions",
+    //                             CArgDescriptions::eDouble);
+    //
+    //         // Tblastx is ungapped only.
+    //         if (!m_IsTblastx) {
+    //          // initial gapped X-drop
+    //          // Default values: blastn=30, megablast=20, tblastx=0, others=15
+    //             arg_desc.AddOptionalKey(kArgGappedXDropoff, "float_value",
+    //                  "X-dropoff value (in bits) for preliminary gapped extensions",
+    //                  CArgDescriptions::eDouble);
+    //
+    //          // final gapped X-drop
+    //          // Default values: blastn/megablast=50, tblastx=0, others=25
+    //             arg_desc.AddOptionalKey(kArgFinalGappedXDropoff, "float_value",
+    //                          "X-dropoff value (in bits) for final gapped alignment",
+    //                          CArgDescriptions::eDouble);
+    //         }
+    //     ...
+    //     if (args.Exist(kArgUngappedXDropoff) && args[kArgUngappedXDropoff]) {
+    //         opt.SetXDropoff(args[kArgUngappedXDropoff].AsDouble());
+    //     }
+    //
+    //     if (args.Exist(kArgGappedXDropoff) && args[kArgGappedXDropoff]) {
+    //         opt.SetGapXDropoff(args[kArgGappedXDropoff].AsDouble());
+    //     }
+    //
+    //     if (args.Exist(kArgFinalGappedXDropoff) && args[kArgFinalGappedXDropoff]) {
+    //         opt.SetGapXDropoffFinal(args[kArgFinalGappedXDropoff].AsDouble());
+    //     }
+    // ```
+    // BLASTP's X-drops in bits; `None`: the defaults of every task (`ResolvedBlastpArgs`).
+    // psiblast's parser refuses them (`cli.rs` `is_unported_psiblast_arg`); rpsblast's are its
+    // RPS engine's (`rps`).
+    #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = blastp_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
+    pub xdrop_ungap: Option<f64>,
+    #[arg(long = "xdrop_gap", value_name = "float_value", value_parser = blastp_real, help = "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]")]
+    pub xdrop_gap: Option<f64>,
+    #[arg(long = "xdrop_gap_final", value_name = "float_value", value_parser = blastp_real, help = "X-dropoff value (in bits) for final gapped alignment [default: 25]")]
+    pub xdrop_gap_final: Option<f64>,
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion; 15 (PAM30's) for blastp-short]")]
     pub window_size: Option<i32>,
     #[arg(
@@ -569,10 +619,6 @@ pub struct BlastpArgs {
     /// `-out_ascii_pssm`, `-pseudocount`); `None` for blastp.
     #[arg(skip)]
     pub psiblast_pssm: Option<crate::algorithm::psiblast::pssm::PsiblastPssmOptions>,
-    /// The formatting handler's `-line_length`, `-sorthits` and `-sorthsps` (rpsblast's; none
-    /// for blastp and psiblast, whose parsers refuse them, `cli.rs` `is_unported_blastp_arg`).
-    #[arg(skip)]
-    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     /// rpsblast's options that its RPS engine applies (`algorithm::rps_search`); `None` for
     /// blastp and psiblast.
     #[arg(skip)]
@@ -716,9 +762,8 @@ pub struct ResolvedBlastpArgs {
     /// `-searchsp`: the effective search space when above 0, and at any value no Gumbel block
     /// (blast_args.cpp:303-307, blast_stat.c:921-923).
     pub searchsp: Option<i64>,
-    /// No Gumbel block (finite-size correction): `-searchsp` at any value, or BLASTP and
-    /// PSIBLAST with the environment variable `OLD_FSC` (`app::old_fsc_environment`; RPSBLAST
-    /// refuses it, `app::check_old_fsc`).
+    /// No Gumbel block (finite-size correction): `-searchsp` at any value, or BLASTP,
+    /// PSIBLAST and RPSBLAST with the environment variable `OLD_FSC` (`app::old_fsc_environment`).
     pub old_fsc: bool,
     pub task: String,
     pub evalue: f64,
@@ -735,9 +780,11 @@ pub struct ResolvedBlastpArgs {
     /// -max_target_seqs value, -num_descriptions and -num_alignments, or 500 and 250.
     pub num_descriptions: usize,
     pub num_alignments: usize,
-    /// The width of the pairwise alignment rows (`m_LineLength`): `-line_length` (rpsblast's),
-    /// or 60.
+    /// The width of the pairwise alignment rows (`m_LineLength`): `-line_length`, or 60.
     pub line_length: usize,
+    /// `-sorthits` and `-sorthsps` of the pairwise report (`FormattingArgs::report_sort`):
+    /// blastp's; none for psiblast and rpsblast, which read them and sort nothing.
+    pub sort: crate::report::hit_sort::ReportSort,
     /// Whether -max_target_seqs was given (the text of LOSAT's limit on the hit list size).
     pub max_target_seqs_given: bool,
     pub max_hsps_per_subject: usize,
@@ -746,6 +793,28 @@ pub struct ResolvedBlastpArgs {
     /// The -culling_limit value (0: no culling, as NCBI's `SetCullingLimit(0)`).
     pub culling_limit: i32,
     pub ungapped: bool,
+    /// The X-drops in bits (`word_options->x_dropoff`, `ext_options->gap_x_dropoff` and
+    /// `gap_x_dropoff_final`): `-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final` or the defaults
+    /// of every BLASTP task, converted to raw scores by the search (`core::x_drop`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_prot_options.cpp:100-111 (no
+    /// task changes them, blast_options_handle.cpp:381-402)
+    /// ```c++
+    /// CBlastProteinOptionsHandle::SetInitialWordOptionsDefaults()
+    /// {
+    ///     SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_PROT);
+    ///     SetWindowSize(BLAST_WINDOW_SIZE_PROT);
+    /// }
+    ///
+    /// void
+    /// CBlastProteinOptionsHandle::SetGappedExtensionDefaults()
+    /// {
+    ///     SetGapXDropoff(BLAST_GAP_X_DROPOFF_PROT);
+    ///     SetGapXDropoffFinal(BLAST_GAP_X_DROPOFF_FINAL_PROT);
+    /// ```
+    pub x_drop_ungapped_bits: f64,
+    pub x_drop_gapped_bits: f64,
+    pub x_drop_final_bits: f64,
     pub window_size: usize,
     /// The matrix as the command line names it (NCBI keeps the spelling); `scoring.matrix`
     /// is its LOSAT matrix when LOSAT has it, otherwise BLOSUM62 (and the search rejects
@@ -1131,7 +1200,10 @@ impl BlastpArgs {
             .and_then(|pssm| pssm.in_pssm.as_deref())
         {
             Some(path) => {
-                let (mut search, file) = crate::algorithm::psiblast::in_pssm::read_in_pssm(path)?;
+                let (mut search, file) = crate::algorithm::pssm_search::in_pssm::read_in_pssm(
+                    path,
+                    crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST,
+                )?;
                 in_pssm_file = Some(file);
                 search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(
                     &search,
@@ -1192,8 +1264,11 @@ impl BlastpArgs {
             hitlist_size: counts.hitlist_size,
             evalue: options.evalue,
             psiblast: self.app == BlastpApp::Psiblast,
-            // rpsblast's `-xdrop_ungap` (`RpsSearch`); blastp's and psiblast's parsers refuse it.
-            x_dropoff: self.rps.as_ref().and_then(|rps| rps.x_drop_ungapped_bits),
+            psi_tblastn: false,
+            // blastp's `-xdrop_ungap`, or rpsblast's (`RpsSearch`); psiblast's parser refuses it.
+            x_dropoff: self
+                .xdrop_ungap
+                .or_else(|| self.rps.as_ref().and_then(|rps| rps.x_drop_ungapped_bits)),
         })?;
         // `validate_protein_options` has refused a matrix that NCBI's tables do not know in a
         // gapped search (blast_options.c:907-940). An ungapped search takes any name, and NCBI
@@ -1273,11 +1348,8 @@ impl BlastpArgs {
             //     use_old_fsc = getenv("OLD_FSC");
             //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
             // ```
-            // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307). RPSBLAST refuses the variable
-            // (`check_blastp_environment`).
-            old_fsc: self.searchsp.is_some()
-                || (self.app != BlastpApp::Rpsblast
-                    && crate::blastinput::app::old_fsc_environment()),
+            // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307); every app reads the variable.
+            old_fsc: self.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
             task: self.task.clone(),
             evalue: options.evalue,
             threshold: options.threshold,
@@ -1296,6 +1368,21 @@ impl BlastpArgs {
             // ```
             // (Read for the output formats up to 4, the others warn, `warnings_with`.)
             line_length: self.formatting.line_length(),
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:246-248
+            // ```c++
+            //         formatter.SetLineLength(fmt_args->GetLineLength());
+            //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+            //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+            // ```
+            // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:502
+            // ```c++
+            //         formatter.SetLineLength(fmt_args->GetLineLength());
+            // ```
+            // (rpsblast_app.cpp:187 sets the line length only, as psiblast_app.cpp does.)
+            sort: match self.app {
+                BlastpApp::Blastp => self.formatting.report_sort(),
+                BlastpApp::Psiblast | BlastpApp::Rpsblast => Default::default(),
+            },
             max_target_seqs_given: self.max_target_seqs.is_some(),
             // NCBI blast_args.cpp:317-318: if (args[kArgMaxHSPsPerSubject])
             // opt.SetMaxHspsPerSubject(args[kArgMaxHSPsPerSubject].AsInteger());
@@ -1305,6 +1392,15 @@ impl BlastpArgs {
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
             culling_limit: self.culling_limit_value(),
             ungapped: self.ungapped,
+            x_drop_ungapped_bits: self
+                .xdrop_ungap
+                .unwrap_or(crate::algorithm::tblastx::constants::X_DROP_UNGAPPED_BITS),
+            x_drop_gapped_bits: self.xdrop_gap.unwrap_or(f64::from(
+                crate::algorithm::tblastx::constants::X_DROP_GAPPED_PRELIM,
+            )),
+            x_drop_final_bits: self.xdrop_gap_final.unwrap_or(f64::from(
+                crate::algorithm::tblastx::constants::X_DROP_GAPPED_FINAL,
+            )),
             window_size: usize::try_from(options.window_size).unwrap_or(0),
             matrix_name: options.matrix_name,
             scoring: ProteinScoringSpec {
@@ -1864,5 +1960,48 @@ mod tests {
             .to_ncbi_cli_string(),
             "12 2.2 2.5"
         );
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:276-286,
+    // api/blast_prot_options.cpp:100-111 and core/blast_options.c:608-618 (quoted at the fields
+    // and at `validate_protein_options`): the X-drops reach the resolved arguments (7, 15 and 25
+    // bits at every task), and an ungapped X-drop of 0 or below is NCBI's options error.
+    #[test]
+    fn the_x_drops_reach_the_resolved_arguments() {
+        let resolved = |words: &[&str]| {
+            let mut argv = vec!["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"];
+            argv.extend_from_slice(words);
+            let TestCommand::Blastp(args) = parse_cli(argv).command;
+            args.resolve()
+        };
+        let bits = |args: &ResolvedBlastpArgs| {
+            (
+                args.x_drop_ungapped_bits,
+                args.x_drop_gapped_bits,
+                args.x_drop_final_bits,
+            )
+        };
+        for task in ["blastp", "blastp-fast", "blastp-short"] {
+            let args = resolved(&["-task", task]).unwrap();
+            assert_eq!(bits(&args), (7.0, 15.0, 25.0), "{task}");
+        }
+        let args = resolved(&[
+            "-xdrop_ungap",
+            "3",
+            "-xdrop_gap",
+            "0",
+            "-xdrop_gap_final",
+            "-1e300",
+        ])
+        .unwrap();
+        assert_eq!(bits(&args), (3.0, 0.0, -1e300));
+        for value in ["0", "-1", "-0.0", "-inf"] {
+            let error = resolved(&["-xdrop_ungap", value]).unwrap_err();
+            assert!(
+                format!("{error:#}").contains("x_dropoff must be greater than zero"),
+                "{value}: {error:#}"
+            );
+        }
+        // `<= 0.0` is false for NaN, as in C: NCBI searches with it.
+        assert!(resolved(&["-xdrop_ungap", "+nan"]).is_ok());
     }
 }

@@ -1,0 +1,13 @@
+Post-RPSBLAST Processing Utility v0.5.1
+-------------------------------------------------------
+Download:
+	ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/
+
+Blast applications download:
+	ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
+
+For more information please refer to the README file
+Warning: XML format support is deprecated!
+Specified data location (nodata) does not exist or does not contain data files
+Cannot find data files
+Dryrun failed, error subcode = 2

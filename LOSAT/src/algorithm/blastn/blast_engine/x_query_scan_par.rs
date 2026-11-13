@@ -96,8 +96,8 @@
 //! all records, so a record's ID is checked to be its part reader's counter's) and the line of a
 //! reader message, so a record of a part after the first that has a message leaves the file to the
 //! search's reader. The parts after the first need the parse of their records to have no state
-//! across the file: `-parse_deflines` (its refusal of an id read twice) and the archive are not
-//! read in parts.
+//! across the file: `-parse_deflines` (its records with ids take no number of the counter, and its
+//! reader adds every record to the search's scope of ids) and the archive are not read in parts.
 
 #![cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
 

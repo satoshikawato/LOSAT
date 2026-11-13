@@ -72,9 +72,11 @@ authoritative, current guidance for agent behavior in LOSAT.
      (NCBI: SIGPIPE) with exit 4 and no message (exception 9). Errors raised after argument parsing, the outfmt 0 write
      failure ("BLAST failed to write output", exit 6), all other warnings, and
      every search result must still match NCBI. Non-UTF-8
-     file names, `.ncbirc` keys that change output, and NCBI C++ Toolkit
-     words (`-version`, `-dryrun`, `-logfile`, ...; also in an option's value)
-     are explicit rejections, not exceptions.
+     file names, `.ncbirc` keys that change output, and the NCBI C++ Toolkit
+     words that LOSAT does not run (`-version-full*`, `-xmlhelp`, `-help-full`;
+     also in an option's value) are explicit rejections, not exceptions. `-version`, and on the
+     command line `-logfile`, `-conffile` and `-dryrun`, run as in NCBI
+     (README, NCBI C++ Toolkit options).
    - Approved exceptions for NCBI defects (`PD-LOSAT-NCBI-DEFECTS`): where
      NCBI BLAST+ fails (a crash, a debug-only assumption, a read past a buffer)
      and LOSAT's result was shown to equal NCBI's output for a nearby input
@@ -99,8 +101,9 @@ authoritative, current guidance for agent behavior in LOSAT.
      `ln K + ln searchsp - ln E` (NCBI's undefined conversion gives a cutoff of
      1; version 1.12). rpsbproc: PSSM-IDs of 2^31 and more are
      compared as signed 32-bit values without NCBI's `int` overflow, so every row
-     of the data is found (version 1.13). Deterministic NCBI results, even wrong-looking ones, are
-     reproduced, not excepted; NCBI failures without a checkable valid result
+     of the data is found (version 1.13); a motif check that reads the stored list of
+     motif positions past its end counts as failed (version 1.14). Deterministic NCBI
+     results, even wrong-looking ones, are reproduced, not excepted; NCBI failures without a checkable valid result
      are explicit rejections. A sequence that a seqid list keeps without a
      definition line (NCBI drops its hits from every report without notice)
      is an explicit rejection too (PD-LOSAT-NCBI-DEFECTS 1.7), and so are the
@@ -451,7 +454,7 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 │   ├── seqid/             # Seq-ids of database sequences (CSeq_id, deflines, id formatting)
 │   ├── writedb/           # Writer of BLAST database volumes (NCBI CWriteDB) and `losat makeblastdb`
 │   ├── blastdbcmd/        # `losat blastdbcmd`: -info and sequence retrieval
-│   ├── rpsbproc/          # `losat rpsbproc`: NCBI's rpsbproc 0.5.1 (archives of rpsblast -outfmt 11, CDD data)
+│   ├── rpsbproc/          # `losat rpsbproc`: NCBI's rpsbproc 0.5.1 (archives of rpsblast -outfmt 11, CDD data; protein queries: domain hits, sites, motifs; not yet nucleotide queries (PS16c) and XML input (PS16d))
 │   ├── utils/             # DUST, SEG, WindowMasker, matrices, genetic codes, threading, switches (`xswitch`)
 │   ├── sequence/          # Sequence storage and 2-bit packed nucleotides
 │   ├── config/            # Scoring matrix and scoring specs (`ScoringMatrix`, `*ScoringSpec`)

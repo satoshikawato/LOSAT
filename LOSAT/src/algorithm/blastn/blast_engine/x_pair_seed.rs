@@ -40,12 +40,12 @@
 //! This module cuts the grid of each scan range into strips (`plan_strips`). Phase 1, on
 //! any thread: the reference kernel scans one strip with `s_range` of the whole range (the
 //! value `scan_range[2] + lut_word_length` NCBI passes), walks the lookup chains as
-//! `on_word` does, and runs the steps of `process_offset_pairs` that read nothing but the
-//! inputs (the context of the query offset, the bounds test, the word extension of
-//! `s_BlastNaExtend`, which `process_offset_pairs` calls as `pair_extend::word_extend_pair`);
-//! a pair that passes becomes a `Seed`, in the order of the pairs.
+//! `on_word` does, and runs the steps of `pair_extend::extend_offset_pairs` that read nothing
+//! but the inputs (the context of the query offset, the bounds test, the word extension of
+//! `s_BlastNaExtend`, which `extend_offset_pairs` calls as `word_extend_pair`); a pair that
+//! passes becomes a `Seed`, in the order of the pairs.
 //! Phase 2, on the owner thread only: the seeds of strip 0, 1, 2, ... in that order go
-//! through a statement-for-statement copy of the rest of `process_offset_pairs` for one-hit
+//! through a statement-for-statement copy of the rest of `extend_offset_pairs` for one-hit
 //! mode (diagonal-hash retrieve, the `last_hit` test, `type_of_word`, the ungapped
 //! extension, the cutoff, `ungapped_hits.push`, the diagonal-hash insert) on the real
 //! `diag_hash` and `ungapped_hits`. The owner therefore sees the reference sequence of
@@ -757,8 +757,8 @@ fn scan_kernel<F: FnMut(usize, u64) -> bool>(
 ///         q_offset -= ext_left;
 ///         s_offset -= ext_left;
 /// ```
-/// Phase 1 for one pair: the statements of `process_offset_pairs` before the diagonal is
-/// read (context, bounds test, word extension), which read only the inputs. A pair that
+/// Phase 1 for one pair: the statements of `pair_extend::extend_offset_pairs` before the
+/// diagonal is read (context, bounds test, word extension), which read only the inputs. A pair that
 /// the reference drops with `continue` here is dropped; any other becomes a `Seed`, pushed to
 /// `out` (a strip's list, or with LOSAT_X_BNSEEDLISTS / LOSAT_X_DCSEEDLEAN its partition's list,
 /// `part::PartSink`).
@@ -904,9 +904,9 @@ struct FoldCounts {
 ///                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
 ///                           hit_ready, s_off_pos, window_size + Delta + 1);
 /// ```
-/// Phase 2 (owner only): the rest of `process_offset_pairs` for the seeds of one strip, in
-/// order, statement for statement for the diagonal hash in one-hit mode (`two_hits` false,
-/// so `off_found` stays false and `hit_ready` true until the cutoff test); the debug, trace
+/// Phase 2 (owner only): the rest of `pair_extend::extend_offset_pairs` for the seeds of one
+/// strip, in order, statement for statement for the diagonal hash in one-hit mode (`two_hits`
+/// false, so `off_found` stays false and `hit_ready` true until the cutoff test); the debug, trace
 /// and diagonal-array branches are outside the scope and left out.
 ///
 /// With `PT` (LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`) the seeds are one partition's seeds

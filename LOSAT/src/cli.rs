@@ -792,8 +792,7 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 /// ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
 /// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), the search strategy file (item F1b of line
 /// RG), and the arguments that blastp's engine does not run either (`is_unported_blastp_arg`;
-/// psiblast has no database masks and no `-mt_mode`). `-sum_stats true` is refused with the
-/// options (`PsiblastArgs::into_blastp_args`).
+/// psiblast has no database masks and no `-mt_mode`).
 const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
     // Line RG-F1 ported it to BLASTP's search, not to PSIBLAST's (item F1b).
     "export_search_strategy",

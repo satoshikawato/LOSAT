@@ -1676,6 +1676,7 @@ mod tests {
             app: BlastpApp::Blastp,
             inclusion_ethresh: None,
             gap_trigger: None,
+            sum_stats: false,
             first_query_ordinal: 0,
             psiblast_pssm: None,
             formatting: Default::default(),

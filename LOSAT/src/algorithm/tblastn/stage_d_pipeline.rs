@@ -240,20 +240,19 @@ impl SubjectSetNumbers {
         lookup_protein_gumbel_params(spec, self.gumbel_db_length(total_nt))
     }
 
-    /// The shortest subject length of the hit-saving cutoff, in residues
-    /// (`BlastSeqSrcGetMinSeqLen / 3`): a database answers `CSeqDB::GetMinLength`
-    /// (`SeqDb::min_length`), a FASTA set its shortest record raised to
-    /// `BLAST_SEQSRC_MINLENGTH`.
-    pub(super) fn min_subject_length(&self, subjects: &SubjectLetters<'_>) -> usize {
-        let shortest = match self.database {
-            Some(database) => usize::try_from(database.min_length).unwrap_or(0),
+    /// The shortest subject length in nucleotides (`BlastSeqSrcGetMinSeqLen`, NCBI's `int`), which
+    /// the Gumbel block's setup divides by 3 (`stats::setup::setup_subject_length`): a database
+    /// answers `CSeqDB::GetMinLength` (`SeqDb::min_length`), a FASTA set its shortest record raised
+    /// to `BLAST_SEQSRC_MINLENGTH`.
+    pub(super) fn shortest_subject_length(&self, subjects: &SubjectLetters<'_>) -> i32 {
+        match self.database {
+            Some(database) => database.min_length,
             None => subjects
                 .lengths()
                 .min()
                 .unwrap_or(i32::MAX as usize)
-                .max(Self::MIN_LENGTH),
-        };
-        shortest / 3
+                .max(Self::MIN_LENGTH) as i32,
+        }
     }
 }
 
@@ -1223,7 +1222,7 @@ fn run_local_search_with_pool(
     // ```
     // The local `-subject` sequences are a multi-sequence source: the shortest record (an
     // empty one counts as 0, in nucleotides) is raised to 10 before the division. A database
-    // answers `GetMinLength` (`SubjectSetNumbers::min_subject_length`); a quotient of 0 is
+    // answers `GetMinLength` (`SubjectSetNumbers::shortest_subject_length`); a quotient of 0 is
     // NCBI's engine error of the first searched batch (`tblastn_app.rs`).
     // Without a Gumbel block it is the average, in nucleotides (blast_setup.c:975). The block
     // itself decides, as `sbp->gbp` does in NCBI, here and in the average-length error below.
@@ -1231,7 +1230,11 @@ fn run_local_search_with_pool(
     let min_subject_length = if gumbel.is_none() {
         crate::stats::setup::setup_subject_length(total_nt as i64, num_subjects, None)
     } else {
-        Some(profile.subject_set.min_subject_length(&subjects) as i32)
+        crate::stats::setup::setup_subject_length(
+            total_nt as i64,
+            num_subjects,
+            Some((profile.subject_set.shortest_subject_length(&subjects), true)),
+        )
     };
     let options_searchsp = profile.subject_set.searchsp;
     let QuerySetSetup {

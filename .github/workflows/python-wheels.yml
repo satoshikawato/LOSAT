@@ -73,6 +73,13 @@ jobs:
       run:
         shell: bash
     steps:
+      # The smoke's inputs are compared byte for byte; keep Git for Windows from turning them into
+      # CRLF (as in platform-checks.yml).
+      - name: Check out without line-ending conversion
+        if: runner.os == 'Windows'
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -93,6 +100,11 @@ jobs:
         working-directory: python
         env:
           PYTHON: ${{ steps.newest.outputs.python-path }}
+          # The toolchain above. Without it, the build's first cargo call had rustup add the clippy,
+          # rustfmt and Wasm targets of the root rust-toolchain.toml to the toolchain, which failed on
+          # ubuntu-24.04-arm ("detected conflict: 'bin/cargo-clippy'", 2026-11-13); the release
+          # build needs none of them.
+          RUSTUP_TOOLCHAIN: 1.92.0
         run: |
           set -euo pipefail
           # The maturin of python.yml's tests, pinned in one place.
@@ -121,8 +133,9 @@ jobs:
             echo "| Python | wheel | tags | size | blastp report (SicyWSV x PajaWSV, outfmt 6) |"
             echo "|---|---|---|---|---|"
           } >> "$GITHUB_STEP_SUMMARY"
-          for python in "$OLDEST" "$NEWEST"; do
-            venv=$RUNNER_TEMP/venv-$("$python" -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+          for oldest_or_newest in oldest newest; do
+            if [ $oldest_or_newest = oldest ]; then python=$OLDEST; else python=$NEWEST; fi
+            venv=$RUNNER_TEMP/venv-$oldest_or_newest
             "$python" -m venv "$venv"
             if [ "$RUNNER_OS" = Windows ]; then py=$venv/Scripts/python.exe; else py=$venv/bin/python; fi
             "$py" -m pip install --disable-pip-version-check --quiet --no-index --no-deps "$wheel"

@@ -48,8 +48,9 @@ def wheel_metadata(wheel: Path) -> tuple[str, list[str]]:
         names = archive.namelist()
 
         def read(suffix: str) -> list[str]:
+            """The header of a .dist-info file: its lines before the first empty one (the description)."""
             (name,) = [name for name in names if name.endswith(f".dist-info/{suffix}")]
-            return archive.read(name).decode().splitlines()
+            return archive.read(name).decode().split("\n\n", 1)[0].splitlines()
 
         tags = [line.split(":", 1)[1].strip() for line in read("WHEEL") if line.startswith("Tag:")]
         (version,) = [line.split(":", 1)[1].strip() for line in read("METADATA") if line.startswith("Version:")]

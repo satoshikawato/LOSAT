@@ -60,8 +60,10 @@ fn codon_to_aa_ncbistdaa(codon: &[u8], table: &GeneticCode) -> u8 {
 /// NCBI BLAST places NULLB sentinel bytes at the beginning and end of each
 /// translated sequence to ensure proper extension termination.
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:438-453
+/// ```c
 ///   prot_seq[0] = NULLB;  // First character is sentinel
 ///   prot_seq[index_prot] = NULLB;  // Last character is sentinel
+/// ```
 ///
 /// Returns (aa_seq_with_sentinels, actual_aa_count)
 fn translate_sequence(seq: &[u8], table: &GeneticCode) -> (Vec<u8>, usize) {

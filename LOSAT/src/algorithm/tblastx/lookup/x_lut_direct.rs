@@ -40,7 +40,7 @@
 //! `s` itself when `threshold == 0 || self_score < threshold` (blast_aalookup.c:504-509), then
 //! the neighbour words in the order of the `s_AddWordHitsCore` recursion (546-606). The
 //! reference appends, for s ascending and w in T(s), the offsets of s (in chain order) to w.
-//! Here a count pass adds |offsets(s)| to count[w] for every such (s, w); the cells are laid
+//! Here a count pass adds |offsets(s)| to `count[w]` for every such (s, w); the cells are laid
 //! out from the counts by `BlastAaLookupFinalize`'s rule; and a fill pass writes, for s
 //! ascending and w in T(s), the offsets of s at w's fill cursor.
 //!
@@ -354,7 +354,7 @@ fn x_fitting_overflow<C: XVec>(kept: &mut [XAaVectors], own: &mut Vec<C::Hit>, n
 //             s_AddWordHits(lookup, matrix, query->sequence,
 //                           exact_backbone[i], query_bias, row_max);
 // ```
-/// [`x_build_direct`] with the shared neighbour lists and kept vectors (the pooled build); with
+/// `x_build_direct` with the shared neighbour lists and kept vectors (the pooled build); with
 /// `parts` above 1, its passes on that many tasks of the pool it runs on (`LOSAT_X_BXBUILDPAR`,
 /// [`x_partitioned_passes`]). With `narrow_cutoff` ([`XWidth::Choose`]) the table takes 16-bit
 /// hits where it fits and pays.
@@ -646,7 +646,7 @@ fn x_locked<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 impl XAaSpares {
     // No NCBI counterpart: where the build ahead applies; it reads switches and changes no value
     // NCBI computes.
-    /// Whether exact blastp's table is built by [`x_build_direct`] (outside diagnostics mode,
+    /// Whether exact blastp's table is built by `x_build_direct` (outside diagnostics mode,
     /// whose reference builder prints its phases), the build [`Self::x_build_ahead`] makes.
     pub(crate) fn x_applies() -> bool {
         !diagnostics_enabled()
@@ -1453,7 +1453,7 @@ pub(super) fn x_build_direct(
     })
 }
 
-/// [`x_build_direct`] for BLASTX's standard table: with `narrow_cutoff`, the table takes 16-bit hits
+/// `x_build_direct` for BLASTX's standard table: with `narrow_cutoff`, the table takes 16-bit hits
 /// where it fits and pays (`XWidth::Choose`); the build is `x_build_direct`'s otherwise.
 pub(super) fn x_bx_build_direct(
     prepared: PreparedLookupQuery,
@@ -1479,7 +1479,7 @@ pub(super) fn x_bx_build_direct(
     })
 }
 
-/// EXPERIMENT (LOSAT_X_BPDBKEEP): [`x_build_direct`] for BLASTP, whose chains glibc maps and
+/// EXPERIMENT (LOSAT_X_BPDBKEEP): `x_build_direct` for BLASTP, whose chains glibc maps and
 /// unmaps without raising its mmap threshold where the switch is on
 /// (`LookupBackboneChains::x_new_unthresholded`).
 fn x_bp_build_direct(
@@ -1504,7 +1504,7 @@ fn x_bp_build_direct(
     })
 }
 
-/// [`x_build_direct`] with the neighbour lists of `memo` (the calling thread's, or those an
+/// `x_build_direct` with the neighbour lists of `memo` (the calling thread's, or those an
 /// `XAaSpares` keeps), and, with `room` (LOSAT_X_BPLKPAHEAD), the table's backbone, overflow and pv
 /// vectors taken from `room` instead of allocated: `Ok(None)` (nothing taken) where one of them
 /// lacks the capacity. A pooled build with `parts` above 1 runs its passes on that many tasks of
@@ -2856,7 +2856,7 @@ where
 // (`build_ncbi_lookup_from_prepared` in backbone.rs carries the NCBI code); it changes no value
 // NCBI computes.
 /// `build_ncbi_lookup` for BLASTP: prepares the query as `build_ncbi_lookup_for_profile(..,
-/// Blosum62, LOOKUP_WORD_LENGTH)` does and builds the table with [`x_build_direct`] (the same
+/// Blosum62, LOOKUP_WORD_LENGTH)` does and builds the table with `x_build_direct` (the same
 /// table without the chains, so without the chains' memory while it is built), falling back to
 /// the reference builder where that declines.
 pub(super) fn x_bp_build_lookup(
@@ -2928,7 +2928,7 @@ pub(super) fn x_bp_build_lookup_as(
     }
 }
 
-/// EXPERIMENT (LOSAT_X_TBXLUT): `true` = TBLASTX's full table built in place by [`x_build_direct`],
+/// EXPERIMENT (LOSAT_X_TBXLUT): `true` = TBLASTX's full table built in place by `x_build_direct`,
 /// `false` = off (`build_ncbi_lookup`, the chain builder).
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result. A strict-set
 // switch (on unless it is `0`; `utils/xswitch.rs`).
@@ -2967,7 +2967,7 @@ pub(super) fn x_tbx_build_lookup(
     )
 }
 
-/// [`x_build_direct`] on a memo of TBLASTX's builds (`x_with_tbx_memo`) instead of the thread's,
+/// `x_build_direct` on a memo of TBLASTX's builds (`x_with_tbx_memo`) instead of the thread's,
 /// so that a run whose batches take the unit path and the full table keeps one memo, as before.
 fn x_tbx_build_direct(
     prepared: PreparedLookupQuery,
@@ -3018,7 +3018,7 @@ fn x_bp_prepared_query(
     )
 }
 
-/// The direct builder of [`x_build_direct_or_reference`]: [`x_build_direct`] or BLASTP's
+/// The direct builder of [`x_build_direct_or_reference`]: `x_build_direct` or BLASTP's
 /// [`x_bp_build_direct`].
 type XBuildDirect = fn(
     PreparedLookupQuery,
@@ -3047,7 +3047,7 @@ fn x_build_ncbi_lookup_with(
 
 /// The table of [`x_bp_build_lookup`] and of [`x_build_ncbi_lookup_with`] with `direct` true: the
 /// query is prepared as `build_ncbi_lookup_for_profile(.., Blosum62, LOOKUP_WORD_LENGTH)` prepares
-/// it and the table is built with `build_direct` ([`x_build_direct`], or [`x_bp_build_direct`] for
+/// it and the table is built with `build_direct` (`x_build_direct`, or [`x_bp_build_direct`] for
 /// BLASTP), falling back to the reference builder where that declines. `reach` is called with
 /// whether the direct builder built the table.
 fn x_build_direct_or_reference(

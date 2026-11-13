@@ -730,7 +730,7 @@ impl Lookup {
         Self::x_new_as(batch, parameters, options, parts, narrow_cutoff)
     }
 
-    /// EXPERIMENT (LOSAT_X_BXBUILDPAR): [`Lookup::new`] with a pooled standard table's passes on
+    /// EXPERIMENT (LOSAT_X_BXBUILDPAR): `Lookup::new` with a pooled standard table's passes on
     /// `parts` tasks of the pool it runs on (`tblastx/lookup/x_lut_direct.rs`
     /// `x_partitioned_passes`); the table is the same. The standard table takes 16-bit hits (a
     /// [`NarrowLookup`]) where the lookup query fits and its hits per used cell, in hundredths,
@@ -1218,8 +1218,9 @@ pub(crate) fn word_finder(
 }
 
 /// [`word_finder_bx`] with another matrix than BLOSUM62 (`MatrixBx`).
-#[cold]
-#[inline(never)]
+// Only the tests call it: the reference that they compare the searches' word finders with
+// (the tests of `x_seed_diag` and `x_soft_subject`).
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn word_finder_bx_of<S: BxScoring>(
     scoring: S,
@@ -1279,6 +1280,8 @@ pub(super) fn word_finder_any<S: BxScoring>(
 }
 
 /// [`word_finder`] for a lookup table of either width ([`BxLookup`]).
+// Only the tests call it, as `word_finder_bx_of`.
+#[cfg(test)]
 pub(super) fn word_finder_bx(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],

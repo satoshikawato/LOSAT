@@ -304,7 +304,7 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
-    /// "<what> is not supported by LOSAT's <reader>".
+    /// "`<what>` is not supported by LOSAT's `<reader>`".
     pub(crate) fn not_supported(&self, what: &str) -> AsnTextError {
         self.unsupported(format!(
             "{what} is not supported by LOSAT's {}",

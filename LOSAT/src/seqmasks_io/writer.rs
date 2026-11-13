@@ -79,7 +79,7 @@ pub(crate) fn writes_serial_objects(outfmt: &str) -> bool {
 pub(crate) enum WriteError {
     Io(io::Error),
     /// A case LOSAT does not reproduce: what it is, as a noun phrase that the tool completes
-    /// with "is not supported by LOSAT's <program>".
+    /// with "is not supported by LOSAT's `<program>`".
     Refused(String),
 }
 

@@ -416,10 +416,10 @@ LOSAT can be built as a standalone WASI module or embedded into web browsers:
 cd LOSAT
 
 # Build single-threaded WASI command
-cargo build --release --target wasm32-wasip1 --no-default-features
+cargo build --release --bin losat --target wasm32-wasip1 --no-default-features
 
 # Build multithreaded WASI command (requires shared-memory runtime)
-cargo build --release --target wasm32-wasip1-threads --features wasm-threads
+cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads
 ```
 
 LOSAT powers the client-side comparative genomic alignment engine in [gbdraw](https://github.com/satoshikawato/gbdraw), enabling interactive circular and linear genome visualization without any backend server requirements.
@@ -428,10 +428,10 @@ LOSAT powers the client-side comparative genomic alignment engine in [gbdraw](ht
 
 ## Library use (Rust)
 
-The crate's public surface is the module `LOSAT::api` ([plan](docs/losat_library_surface_plan.md)); every other module is the command line or the engine, hidden from the documentation and outside the compatibility promise. `api` searches FASTA records in memory with the command line's options and returns the command line's reports byte for byte, plus one typed record per HSP and the statistics of each query:
+The library is the crate `losat` (not on crates.io yet; until then, depend on this repository's `LOSAT/` directory by path or git). The crate's public surface is the module `losat::api` ([plan](docs/losat_library_surface_plan.md)); every other module is the command line or the engine, hidden from the documentation and outside the compatibility promise. `api` searches FASTA records in memory with the command line's options and returns the command line's reports byte for byte, plus one typed record per HSP and the statistics of each query:
 
 ```rust
-use LOSAT::api::{read_fasta, run_collect, validate, Inputs, Program, Role};
+use losat::api::{read_fasta, run_collect, validate, Inputs, Program, Role};
 
 let query = read_fasta(Program::Blastp, Role::Query, &std::fs::read("query.faa")?)?;
 let subject = read_fasta(Program::Blastp, Role::Subject, &std::fs::read("subject.faa")?)?;
@@ -448,7 +448,7 @@ let outcome = run_collect(&search, Inputs::new(&query, &subject), &["6", "0"])?;
 
 ## Library use (Python)
 
-[`python/`](python/README.md) holds `pylosat`, a binding of `LOSAT::api` built with PyO3: a search runs in the Python process, with the command line's options and report bytes, its HSPs as an Arrow table, and Ctrl-C between query batches. It is not published yet; build it from the repository with `maturin develop`.
+[`python/`](python/README.md) holds `pylosat`, a binding of `losat::api` built with PyO3: a search runs in the Python process, with the command line's options and report bytes, its HSPs as an Arrow table, and Ctrl-C between query batches. It is not published yet; build it from the repository with `maturin develop`.
 
 ---
 

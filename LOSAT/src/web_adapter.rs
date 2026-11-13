@@ -7,7 +7,7 @@
 //! one at a time.
 //!
 //! Rules:
-//! - The adapter names the engine through `LOSAT::api` (public items) and this module only.
+//! - The adapter names the engine through `losat::api` (public items) and this module only.
 //! - Each item is named on its own (no glob, no module), so a new item shows in the pull
 //!   request's diff of this file, and every item here is one the adapter uses.
 //! - The adapter is code outside the crate: a function here must be sound for every value a

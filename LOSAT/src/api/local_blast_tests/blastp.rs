@@ -1,6 +1,6 @@
 //! The shared BLASTP entry `run_local` in process: what the entry itself does, not what the
 //! command line writes. The tests that compare the entry's reports with the `losat` binary go
-//! through `LOSAT::api` (`LOSAT/tests/run_local_blastp.rs`, `LOSAT/tests/blastp_row_windows.rs`).
+//! through `losat::api` (`LOSAT/tests/run_local_blastp.rs`, `LOSAT/tests/blastp_row_windows.rs`).
 
 use std::path::{Path, PathBuf};
 
@@ -364,7 +364,7 @@ fn a_batch_of_queries_without_residues_stops() {
 // in process: the same `run_local_blastp` call with the hit records (rows up front), with
 // neither hit records nor observer, with the observer alone, and with the observer without
 // outfmt 0 write the same bytes. The CLI run of each format against these bytes, through
-// `LOSAT::api`, and the CLI's search in blocks of one query batch each against its search of all
+// `losat::api`, and the CLI's search in blocks of one query batch each against its search of all
 // queries, are checked in `LOSAT/tests/blastp_row_windows.rs`.
 // Two queries hold a low-complexity run that SEG masks (`-seg yes`: the lowercase query rows of
 // outfmt 0), and some subjects hold lower-case letters (`-lcase_masking`: the lowercase subject

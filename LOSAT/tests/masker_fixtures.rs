@@ -5,7 +5,7 @@
 //! in `tests/<program>/ncbi/<name>.{out,err,rc}` (probes of line RG, items K1, K2 and K3,
 //! 2026-11-12 and 11-13, on ws and the local official release). A name the table repeats is
 //! compared on its last row, whose output the probe kept. NCBI is not run here. Every row runs
-//! through the library API too (`LOSAT::api::run_dustmasker`, `run_segmasker`,
+//! through the library API too (`losat::api::run_dustmasker`, `run_segmasker`,
 //! `run_convert2blastmask`, by `examples/library_command_line`), with the same bytes.
 
 use std::fs;

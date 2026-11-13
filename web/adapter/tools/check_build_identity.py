@@ -11,7 +11,7 @@ command-WASI builds. This check compares, and prints as JSON:
 - the link arguments: the adapter has no build script of its own (no `build` key and no
   web/adapter/build.rs, which Cargo would find by itself), so its cdylib gets the
   reactor start-up (`crt1-reactor.o`, `--entry=_initialize`) from LOSAT/build.rs through
-  the `LOSAT` dependency, exactly as LOSAT's own reactors do;
+  the `losat` dependency, exactly as LOSAT's own reactors do;
 - that no other Cargo configuration applies: no `.cargo/config[.toml]` in the parent
   directories of either crate or in CARGO_HOME, and no profile, build or rustflags
   environment variable (Cargo reads all of these in addition to the compared files).

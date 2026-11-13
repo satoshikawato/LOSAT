@@ -8,8 +8,8 @@
 //! 15 queries, 12 of which each hit 180 subjects of about 450 letters, about 5 MB of estimated
 //! report, so a search makes four windows at one thread and two at two threads; three more queries
 //! (the letters reversed) have no hits, one of them the last. This file holds what is compared with
-//! the binary: the library's searches (`LOSAT::api::run_collect`, which gives the caller's hit
-//! records, and `LOSAT::api::run`, which gives neither) write the bytes of the CLI run of each
+//! the binary: the library's searches (`losat::api::run_collect`, which gives the caller's hit
+//! records, and `losat::api::run`, which gives neither) write the bytes of the CLI run of each
 //! format, and the CLI's search in blocks of one query batch each (`LOSAT_X_BPQBLOCK`) writes the
 //! bytes of its search of all queries with the same batches. The calls of the entry
 //! `run_local_blastp` with the hit records, with the observer alone and with the observer without
@@ -28,8 +28,8 @@ mod run_local_support;
 use std::path::Path;
 use std::process::Command;
 
+use losat::api::Program;
 use run_local_support::{read_records, temp_path, Files, TempFasta};
-use LOSAT::api::Program;
 
 const CUSTOM: &str =
     "6 qseqid sseqid pident length qstart qend sstart send evalue bitscore qseq sseq btop";

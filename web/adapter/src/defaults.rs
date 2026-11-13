@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use clap::CommandFactory;
-use LOSAT::web_adapter::{Cli, Commands};
+use losat::web_adapter::{Cli, Commands};
 
 use crate::json;
 use crate::run::Program;
@@ -44,7 +44,7 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
     let bool_text = |value: bool| value.to_string();
     match command {
         Commands::Blastn(mut args) => {
-            use LOSAT::web_adapter::{
+            use losat::web_adapter::{
                 configure_task, determine_effective_word_size, determine_evalue,
                 determine_scoring_params, determine_window_size,
             };
@@ -185,7 +185,7 @@ fn hit_list(
     num_alignments: Option<usize>,
 ) {
     let counts =
-        LOSAT::web_adapter::report_counts(0, max_target_seqs, num_descriptions, num_alignments);
+        losat::web_adapter::report_counts(0, max_target_seqs, num_descriptions, num_alignments);
     put("-max_target_seqs", counts.hitlist_size.to_string());
     put("-num_descriptions", counts.num_descriptions.to_string());
     put("-num_alignments", counts.num_alignments.to_string());
@@ -282,7 +282,7 @@ pub fn defaults(program: Program) -> Result<Defaults, String> {
                     .any(|arg| arg.get_long() == flag.strip_prefix('-'))
             })
     };
-    let matrices: Vec<String> = LOSAT::web_adapter::ScoringMatrix::ALL
+    let matrices: Vec<String> = losat::web_adapter::ScoringMatrix::ALL
         .iter()
         .map(|matrix| matrix.ncbi_name().to_string())
         .collect();

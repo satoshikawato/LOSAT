@@ -10,7 +10,7 @@
 
 ## Scope
 
-`pylosat` is the Python binding of `LOSAT::api`. This decision governs all code under `python/`:
+`pylosat` is the Python binding of `losat::api`. This decision governs all code under `python/`:
 the Rust crate that PyO3 builds into a Python extension, the Python package, its tests and tools.
 
 It does not change the rules in the root [`AGENTS.md`](../../AGENTS.md) for code under `LOSAT/`. A
@@ -21,7 +21,7 @@ comments and the parity gates.
 
 - NCBI BLAST+ source remains the only authority for search behavior and for the compatibility
   outputs (`AGENTS.md`, [`PD-PURE-RUST-RUNTIME-AUTHORITY`](PD-PURE-RUST-RUNTIME-AUTHORITY.md)).
-- `LOSAT::api` is the only way into the engine (`docs/losat_library_surface_plan.md`). A value that
+- `losat::api` is the only way into the engine (`docs/losat_library_surface_plan.md`). A value that
   the binding lacks is added there, under the rules of `LOSAT/`, and not computed here.
 
 ## Decision
@@ -32,17 +32,17 @@ comments and the parity gates.
    iterators, `HspTable`), the Arrow table, pickle and type stubs have no NCBI equivalent. They are
    permitted, but only under `python/` and only while the invariants below hold.
 3. **Invariants.**
-   1. **Engine input.** The engine receives exactly what `LOSAT::api` takes from any caller: an argv
+   1. **Engine input.** The engine receives exactly what `losat::api` takes from any caller: an argv
       that the command line's parser accepted, and FASTA bytes read by the command line's reader.
       `Search` keywords become those words and nothing else. `Sequences.from_pairs` writes whole
       FASTA records. The binding never changes sequences, options or statistics, and never splits
       one search into independent searches whose results are joined. `Search.batches` is NCBI's
-      own loop over query batches (`LOSAT::api::run_batches`), not such a split.
+      own loop over query batches (`losat::api::run_batches`), not such a split.
    2. **Compatibility outputs.** Reports are produced only by the engine's formatters. The binding
       returns them byte for byte and never rewrites, filters or regenerates them.
    3. **BLAST-defined values.** Code under `python/` does not compute or format scores, E-values,
       identities, coverages, NCBI number formats or alignment text. Every value of `Hsp`, `HspTable`
-      and `QueryStats` is the `LOSAT::api` value, not rounded.
+      and `QueryStats` is the `losat::api` value, not rounded.
    4. **Labels.** A column named as an `-outfmt` column holds that column's value for the row, with
       the difference stated in the API's documentation: `qframe` and `sframe` are null where the
       program does not translate that side. The table and pickle are binding formats and never
@@ -52,7 +52,7 @@ comments and the parity gates.
       Arrow's optional `zstd` stays off.
    6. **Process-wide state.** The binding does not call Rayon's `build_global` or change the
       process's environment, current directory or panic hook. Each search keeps its own thread
-      pool, as `LOSAT::api` documents.
+      pool, as `losat::api` documents.
    7. **Research data stays local.** Sequences, headers, file names and results are never sent over
       the network.
 4. **Stopping.** Python cannot stop a thread inside its process, so a search stops only where the

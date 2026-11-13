@@ -314,29 +314,39 @@ pub(crate) fn read_in_pssm(path: &Path, reader: PssmReader<'_>) -> Result<(PsiSe
             )))
         }
     }
-    let (pssm, skipped) =
-        match crate::blastinput::pssm_text::read_pssm_with_parameters_and_skips(&bytes) {
-            Ok(read) => read,
-            // The reader's own limits (a query Seq-entry set, Seq-ids and Seq-data it does not type,
-            // REAL numbers NCBI computes with undefined behaviour or in `long double`): LOSAT's
-            // refusal, where NCBI reads the file.
-            Err(error) if error.message.contains("is not supported by LOSAT") => {
-                return Err(reader.refuse(format!(
-                    "a PSSM that LOSAT's reader does not read ({}, line {}: {})",
-                    path.display(),
-                    error.line,
-                    error.message
-                )))
-            }
-            // NCBI's `CSerialException`.
-            Err(_) => {
-                return Err(crate::blastinput::app::options_error(&format!(
-                    "Unrecognized format for PSSM in {} (must be PssmWithParameters)",
-                    path.display()
-                )))
-            }
-        };
-    psi_search_and_object(pssm, skipped, reader)
+    let read = match crate::blastinput::pssm_text::read_pssm_with_parameters_and_skips(&bytes) {
+        Ok(read) => read,
+        // The reader's own limits (a query Seq-entry set, Seq-ids and Seq-data it does not type,
+        // REAL numbers NCBI computes with undefined behaviour or in `long double`): LOSAT's
+        // refusal, where NCBI reads the file.
+        Err(error) if error.message.contains("is not supported by LOSAT") => {
+            return Err(reader.refuse(format!(
+                "a PSSM that LOSAT's reader does not read ({}, line {}: {})",
+                path.display(),
+                error.line,
+                error.message
+            )))
+        }
+        // NCBI's `CSerialException`.
+        Err(_) => {
+            return Err(crate::blastinput::app::options_error(&format!(
+                "Unrecognized format for PSSM in {} (must be PssmWithParameters)",
+                path.display()
+            )))
+        }
+    };
+    // NCBI's reader stores `#` for a byte of a VisibleString outside the visible range (the
+    // titles, the row labels, the identifier, the matrix name, the Seq-ids' strings) and posts an
+    // error for it, which LOSAT does not write here (NCBI 2.17.0 `psiblast -in_pssm`,
+    // `ps4_rnd_ctrl.asn.gz`: `Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.title`
+    // / `Bad char [0xC3] in string at line 12` / the chunk, once per byte, status 0; PS5b: an
+    // identifier, `PssmWithParameters.pssm.identifier.str`).
+    if !read.bad_chars.is_empty() {
+        return Err(reader.refuse(
+            "a PSSM whose strings hold a byte outside the visible ASCII range (NCBI reads it as '#' with an error message)",
+        ));
+    }
+    psi_search_and_object(read.pssm, read.skipped, reader)
 }
 
 /// `CPsiBlastValidate::Pssm`'s error for `pssm`, which NCBI raises (`CBlastException`, "BLAST
@@ -412,60 +422,6 @@ fn validation_error(pssm: &PssmWithParameters) -> Option<String> {
         return Some("PSSM does not represent protein scoring matrix".to_string());
     }
     None
-}
-
-/// A string that NCBI's text reader would change: a byte outside the visible range
-/// (0x20..0x7E), which NCBI replaces by `#` with an error message (`FixVisibleChars`).
-fn visible(bytes: &[u8]) -> bool {
-    bytes.iter().all(|&c| (0x20..=0x7e).contains(&c))
-}
-
-/// Whether every string of the Seq-id `id` is `visible` (and a local id is not empty, which NCBI's
-/// reports show as no id).
-fn seq_id_strings_visible(id: &ParsedSeqId) -> bool {
-    use crate::seqid::model::{Date, PatentNumber};
-    let object = |tag: &ObjectId| match tag {
-        ObjectId::Str(text) => visible(text),
-        ObjectId::Id(_) => true,
-    };
-    let text = |value: &Option<Vec<u8>>| value.as_deref().is_none_or(visible);
-    match id {
-        ParsedSeqId::Local(ObjectId::Str(name)) => !name.is_empty() && visible(name),
-        ParsedSeqId::Local(ObjectId::Id(_))
-        | ParsedSeqId::Gi(_)
-        | ParsedSeqId::Gibbsq(_)
-        | ParsedSeqId::Gibbmt(_) => true,
-        ParsedSeqId::Giim(giim) => text(&giim.db) && text(&giim.release),
-        ParsedSeqId::General(dbtag) => visible(&dbtag.db) && object(&dbtag.tag),
-        ParsedSeqId::Patent(patent) => {
-            let number = match &patent.cit.id {
-                PatentNumber::Number(number) | PatentNumber::AppNumber(number) => number,
-            };
-            visible(&patent.cit.country) && visible(number) && text(&patent.cit.doc_type)
-        }
-        ParsedSeqId::Pdb(pdb) => {
-            let rel = match &pdb.rel {
-                Some(Date::Str(date)) => visible(date),
-                Some(Date::Std(date)) => text(&date.season),
-                None => true,
-            };
-            visible(&pdb.mol) && text(&pdb.chain_id) && rel
-        }
-        ParsedSeqId::Genbank(id)
-        | ParsedSeqId::Embl(id)
-        | ParsedSeqId::Pir(id)
-        | ParsedSeqId::Swissprot(id)
-        | ParsedSeqId::Other(id)
-        | ParsedSeqId::Ddbj(id)
-        | ParsedSeqId::Prf(id)
-        | ParsedSeqId::Tpg(id)
-        | ParsedSeqId::Tpe(id)
-        | ParsedSeqId::Tpd(id)
-        | ParsedSeqId::Gpipe(id)
-        | ParsedSeqId::NamedAnnotTrack(id) => {
-            text(&id.name) && text(&id.accession) && text(&id.release)
-        }
-    }
 }
 
 /// The PSSM search of `pssm`: its query record, rows and values, or LOSAT's refusal.
@@ -570,10 +526,13 @@ pub(crate) fn psi_search_and_object(
             "a PSSM query whose Seq-id has neither an accession nor a name (NCBI BLAST+ stops with a database error)",
         ));
     }
-    if !ids.iter().all(seq_id_strings_visible) {
-        return Err(reader.refuse(
-            "a PSSM query whose Seq-id holds an empty local id or a byte outside the visible ASCII range",
-        ));
+    // An empty local id: NCBI's reports show it as no id. (A byte outside the visible range is
+    // the reader's, `read_in_pssm`.)
+    if ids
+        .iter()
+        .any(|id| matches!(id, ParsedSeqId::Local(ObjectId::Str(name)) if name.is_empty()))
+    {
+        return Err(reader.refuse("a PSSM query whose Seq-id holds an empty local id"));
     }
     let local_id = match ids {
         [ParsedSeqId::Local(ObjectId::Str(id))] => Some(String::from_utf8_lossy(id).into_owned()),
@@ -581,34 +540,6 @@ pub(crate) fn psi_search_and_object(
         _ => None,
     };
     let titles: &[Vec<u8>] = query.titles.as_deref().unwrap_or(&[]);
-    // NCBI's reader writes an error for each such byte of every VisibleString it keeps: the titles,
-    // the row labels, the PSSM's identifier and the matrix name of its parameters too (NCBI
-    // 2.17.0, a UTF-8 identifier or matrix name: `Error: (803.7) [psiblast]
-    // PssmWithParameters.pssm.identifier.str` / `...params.rpsdbparams.matrixName`, then the
-    // search; PS5b).
-    let identifier = match &pssm.pssm.identifier {
-        Some(ObjectId::Str(identifier)) => identifier.as_slice(),
-        _ => &[],
-    };
-    let matrix_name = pssm
-        .params
-        .as_ref()
-        .and_then(|params| params.rpsdbparams.as_ref())
-        .map_or(&[][..], |rps| rps.matrix_name.as_slice());
-    if titles.iter().any(|title| !visible(title))
-        || pssm
-            .pssm
-            .row_labels
-            .iter()
-            .flatten()
-            .any(|label| !visible(label))
-        || !visible(identifier)
-        || !visible(matrix_name)
-    {
-        return Err(reader.refuse(
-            "a PSSM whose strings hold a byte outside the visible ASCII range (NCBI reads it as '#' with an error message)",
-        ));
-    }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:669-683
     // ```c++
     //         ITERATE(CBioseq::TDescr::Tdata, iter, data) {
@@ -1572,7 +1503,8 @@ mod tests {
 
     // `Q/SURVEY_Q1b.md` of line RG: a query without a Seq-id, a Geninfo import id (NCBI: `Failed to
     // resolve SeqId: gim|77`), a database ordinal, a local id among other ids (shown as no FASTA
-    // query is), an empty local id, a byte outside the visible range and a Textseq-id with neither
+    // query is), an empty local id and a Textseq-id with neither (a byte outside the visible range is
+    // the reader's, `a_bad_byte_of_a_pssm_is_noted_as_ncbi_posts_it`)
     // an accession nor a name (NCBI: a database error) are refused.
     #[test]
     fn query_seq_ids_that_are_refused() {
@@ -1604,13 +1536,6 @@ mod tests {
             (
                 vec![ParsedSeqId::Local(ObjectId::Str(Vec::new()))],
                 "an empty local id",
-            ),
-            (
-                vec![ParsedSeqId::General(Dbtag {
-                    db: b"my\x80db".to_vec(),
-                    tag: ObjectId::Id(5),
-                })],
-                "a byte outside the visible ASCII range",
             ),
             (
                 vec![ParsedSeqId::Other(crate::seqid::model::TextseqId {

@@ -6,8 +6,9 @@
 //! its variant `[n]` around the value, and every constructed item ends with `00 00` when
 //! its length is indefinite (`80`); a definite length is accepted as well.
 
-use super::reader::{format_err, Fail, Input, R};
+use super::reader::{format_err, Fail, Input, StringNote, R};
 use super::schema::{ChoiceDef, ClassDef, EnumDef};
+use crate::report::serial::visible::{fix_visible_chars, Position};
 
 pub(super) struct BerIn<'a> {
     data: &'a [u8],
@@ -838,10 +839,34 @@ impl Input for BerIn<'_> {
     // ```
     // (`SERIAL_READ_ANY_VISIBLESTRING_TAG` is 1 by default: a UTF8String is accepted for a
     // VisibleString, with a warning.)
-    fn read_string(&mut self) -> R<(Vec<u8>, bool)> {
-        let utf8_tag = self.peek(0)? == TAG_UTF8_STRING;
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:808-826
+    // ```c++
+    //     if ( length != s.size() || length > BUFFER_SIZE ) {
+    //         // new string
+    //         ReadBytes(s, length);
+    //         if (fix_method != eFNP_Allow) {
+    //             FixVisibleChars(s, fix_method);
+    //         }
+    //     }
+    //     else {
+    //         char buffer[BUFFER_SIZE];
+    //         // try to reuse old value
+    //         ReadBytes(buffer, length);
+    //         if (fix_method != eFNP_Allow) {
+    //             FixVisibleChars(buffer, length, fix_method);
+    //         }
+    // ```
+    // Both forms fix the bytes in place and show the string as it is being fixed; the position is
+    // the bytes read from the object's start, the string's content included (makeblastdb 2.17.0:
+    // "at byte 49" for a string ending at byte 49 of each of two objects). The member's type,
+    // not the tag, decides the fix: a UTF8String tag is fixed too.
+    fn read_string(&mut self, notes: &mut Vec<StringNote>) -> R<Vec<u8>> {
         match self.peek(0)? {
-            TAG_VISIBLE_STRING | TAG_UTF8_STRING => self.tag_len = 1,
+            TAG_UTF8_STRING => {
+                notes.push(StringNote::Utf8Tag);
+                self.tag_len = 1;
+            }
+            TAG_VISIBLE_STRING => self.tag_len = 1,
             got => {
                 return format_err(format!(
                     "unexpected tag: {got}, should be: {TAG_VISIBLE_STRING}"
@@ -863,9 +888,12 @@ impl Input for BerIn<'_> {
             return Err(Fail::Eof);
         }
         let length = length as usize;
-        let s = self.data[self.pos..self.pos + length].to_vec();
+        let mut s = self.data[self.pos..self.pos + length].to_vec();
         self.pos += length;
-        Ok((s, utf8_tag))
+        let mut bad = Vec::new();
+        fix_visible_chars(&mut s, Position::Byte(self.pos), &mut bad);
+        notes.extend(bad.into_iter().map(StringNote::Bad));
+        Ok(s)
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:2023-2039

@@ -508,6 +508,53 @@ MASK	h_long_comment_before_object.asnt	31	5	none
 MASK	h_long_comment_before_object.asnt	31	6	none
 MASK	h_long_comment_before_object.asnt	31	7	none
 RUN	h_comment_mostly_punctuation.asnt	nucl	mask_nucl.fna	1	BLAST options error: Unknown encoding for mask data in 'h_comment_mostly_punctuation.asnt'\n	\e
+RUN	h_bad_char_seq_id.asnt	nucl	mask_nucl.fna	0	Error: (803.7) [makeblastdb] Blast-db-mask-info.masks.masks.E.packed-int.E.id.local.str\nBad char [0x9] in string at line 1\na\tb\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n	\e
+RUN	h_bad_char_second_object.asnt	nucl	mask_nucl.fna	0	Error: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0x9] in string at line 3\nq\tr\n	x
+MASK	h_bad_char_second_object.asnt	31	0	none
+MASK	h_bad_char_second_object.asnt	31	1	none
+MASK	h_bad_char_second_object.asnt	31	2	5-15;
+MASK	h_bad_char_second_object.asnt	31	3	none
+MASK	h_bad_char_second_object.asnt	31	4	none
+MASK	h_bad_char_second_object.asnt	31	5	none
+MASK	h_bad_char_second_object.asnt	31	6	none
+MASK	h_bad_char_second_object.asnt	31	7	none
+RUN	h_bad_char_chunks.asnt	nucl	mask_nucl.fna	0	Error: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0x1] in string at line 1\nAA\x01B\nError: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0x2] in string at line 1\n"\x02C\nError: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0x3] in string at line 2\nD\x03E\n	AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA#B"#CD#E
+MASK	h_bad_char_chunks.asnt	31	0	none
+MASK	h_bad_char_chunks.asnt	31	1	none
+MASK	h_bad_char_chunks.asnt	31	2	5-15;
+MASK	h_bad_char_chunks.asnt	31	3	none
+MASK	h_bad_char_chunks.asnt	31	4	none
+MASK	h_bad_char_chunks.asnt	31	5	none
+MASK	h_bad_char_chunks.asnt	31	6	none
+MASK	h_bad_char_chunks.asnt	31	7	none
+RUN	h_bad_char_after_vertical_tab.asnt	nucl	mask_nucl.fna	0	Error: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0x7F] in string at line 1\n\x7f\n	#
+MASK	h_bad_char_after_vertical_tab.asnt	31	0	none
+MASK	h_bad_char_after_vertical_tab.asnt	31	1	none
+MASK	h_bad_char_after_vertical_tab.asnt	31	2	5-15;
+MASK	h_bad_char_after_vertical_tab.asnt	31	3	none
+MASK	h_bad_char_after_vertical_tab.asnt	31	4	none
+MASK	h_bad_char_after_vertical_tab.asnt	31	5	none
+MASK	h_bad_char_after_vertical_tab.asnt	31	6	none
+MASK	h_bad_char_after_vertical_tab.asnt	31	7	none
+RUN	h_bad_char_seq_id_strings.asnt	nucl	mask_nucl.fna	1	Error: (803.7) [makeblastdb] Blast-db-mask-info.masks.masks.E.mix.E.int.id.general.db\nBad char [0x9] in string at line 1\nd\tb\nError: (803.7) [makeblastdb] Blast-db-mask-info.masks.masks.E.mix.E.int.id.general.tag.str\nBad char [0x9] in string at line 1\nt\tg\nError: (803.7) [makeblastdb] Blast-db-mask-info.masks.masks.E.mix.E.packed-int.E.id.genbank.name\nBad char [0x9] in string at line 1\nn\tm\nError: (803.7) [makeblastdb] Blast-db-mask-info.masks.masks.E.mix.E.packed-int.E.id.genbank.accession\nBad char [0x9] in string at line 1\nA\t1\nBLAST options error: Cannot get masked range Seq-id\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n	\e
+RUN	h_bad_char_continuation.asnt	nucl	mask_nucl.fna	0	Error: (803.7) [makeblastdb] Blast-mask-list.masks.E.packed-int.E.id.local.str\nBad char [0x9] in string at line 2\nc\td\n	x
+MASK	h_bad_char_continuation.asnt	31	0	none
+MASK	h_bad_char_continuation.asnt	31	1	none
+MASK	h_bad_char_continuation.asnt	31	2	5-15;
+MASK	h_bad_char_continuation.asnt	31	3	none
+MASK	h_bad_char_continuation.asnt	31	4	none
+MASK	h_bad_char_continuation.asnt	31	5	none
+MASK	h_bad_char_continuation.asnt	31	6	none
+MASK	h_bad_char_continuation.asnt	31	7	none
+RUN	h_bad_char_second_object_same_line.asnt	nucl	mask_nucl.fna	0	Error: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0x9] in string at line 1\nu\tv\n	x
+MASK	h_bad_char_second_object_same_line.asnt	31	0	none
+MASK	h_bad_char_second_object_same_line.asnt	31	1	none
+MASK	h_bad_char_second_object_same_line.asnt	31	2	5-15;
+MASK	h_bad_char_second_object_same_line.asnt	31	3	none
+MASK	h_bad_char_second_object_same_line.asnt	31	4	none
+MASK	h_bad_char_second_object_same_line.asnt	31	5	none
+MASK	h_bad_char_second_object_same_line.asnt	31	6	none
+MASK	h_bad_char_second_object_same_line.asnt	31	7	none
 RUN	h_not_asn_fasta.fna	nucl	mask_nucl.fna	1	BLAST options error: Unknown encoding for mask data in 'h_not_asn_fasta.fna'\n	\e
 RUN	h_not_asn_text.txt	nucl	mask_nucl.fna	1	BLAST options error: Unknown encoding for mask data in 'h_not_asn_text.txt'\n	\e
 RUN	h_not_asn_empty.txt	nucl	mask_nucl.fna	1	BLAST options error: Unknown encoding for mask data in 'h_not_asn_empty.txt'\n	\e
@@ -562,6 +609,33 @@ MASK	b_utf8_options.asnb	11	4	none
 MASK	b_utf8_options.asnb	11	5	150-220;620-690;
 MASK	b_utf8_options.asnb	11	6	none
 MASK	b_utf8_options.asnb	11	7	100-186;
+RUN	b_bad_chars_options.asnb	nucl	mask_nucl.fna	0	Error: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0x9] in string at byte 49\n\ti\xe9dow=64; level=20; linker=1\nError: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0xE9] in string at byte 49\n#i\xe9dow=64; level=20; linker=1\n	#i#dow=64; level=20; linker=1
+MASK	b_bad_chars_options.asnb	11	0	199-281;
+MASK	b_bad_chars_options.asnb	11	1	0-90;
+MASK	b_bad_chars_options.asnb	11	2	none
+MASK	b_bad_chars_options.asnb	11	3	300-390;
+MASK	b_bad_chars_options.asnb	11	4	none
+MASK	b_bad_chars_options.asnb	11	5	150-220;620-690;
+MASK	b_bad_chars_options.asnb	11	6	none
+MASK	b_bad_chars_options.asnb	11	7	100-186;
+RUN	b_bad_chars_two_objects.asnb	nucl	mask_nucl.fna	0	Error: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0x9] in string at byte 49\n\ti\xe9dow=64; level=20; linker=1\nError: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0xE9] in string at byte 49\n#i\xe9dow=64; level=20; linker=1\nError: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0x9] in string at byte 49\n\ti\xe9dow=64; level=20; linker=1\nError: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0xE9] in string at byte 49\n#i\xe9dow=64; level=20; linker=1\n	#i#dow=64; level=20; linker=1
+MASK	b_bad_chars_two_objects.asnb	11	0	199-281;
+MASK	b_bad_chars_two_objects.asnb	11	1	0-90;
+MASK	b_bad_chars_two_objects.asnb	11	2	none
+MASK	b_bad_chars_two_objects.asnb	11	3	300-390;
+MASK	b_bad_chars_two_objects.asnb	11	4	none
+MASK	b_bad_chars_two_objects.asnb	11	5	150-220;620-690;
+MASK	b_bad_chars_two_objects.asnb	11	6	none
+MASK	b_bad_chars_two_objects.asnb	11	7	100-186;
+RUN	b_utf8_options_two_objects.asnb	nucl	mask_nucl.fna	0	Warning: (803.10) [makeblastdb] CObjectIStreamAsnBinary: UTF8String data for VisibleString member Blast-db-mask-info.algo-options, ASN.1 specification may need an update\n	window=64; level=20; linker=1
+MASK	b_utf8_options_two_objects.asnb	11	0	199-281;
+MASK	b_utf8_options_two_objects.asnb	11	1	0-90;
+MASK	b_utf8_options_two_objects.asnb	11	2	none
+MASK	b_utf8_options_two_objects.asnb	11	3	300-390;
+MASK	b_utf8_options_two_objects.asnb	11	4	none
+MASK	b_utf8_options_two_objects.asnb	11	5	150-220;620-690;
+MASK	b_utf8_options_two_objects.asnb	11	6	none
+MASK	b_utf8_options_two_objects.asnb	11	7	100-186;
 RUN	b_bad_options_tag.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasnb.cpp", line 377: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsnBinary::UnexpectedSysTagByte() - byte 18: unexpected tag: PrintableString (19), should be: VisibleString (26)\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp", line 752: Error: (CSerialException::eFormatError) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading algo-options ( at Blast-db-mask-info.algo-options)\n\n	\e
 RUN	b_wrong_first_tag.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasnb.cpp", line 216: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsnBinary::UnexpectedTagValue() - byte 0: Unexpected tag: 17, expected: 16 ( at Blast-db-mask-info)\n\n	\e
 RUN	b_swapped_members.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1037: Error: (CSerialException::eFormatError) ncbi::CObjectIStream::ExpectedMember() - byte 4: member algo-id expected ( at Blast-db-mask-info.algo-program)\n\n	\e

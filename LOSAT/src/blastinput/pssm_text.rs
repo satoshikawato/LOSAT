@@ -24,9 +24,10 @@
 //! of its `Seq-inst` other than `repr`, `mol`, `length` and `seq-data`, and the `constraints` and
 //! `annotatedSites` of the parameters; `read_pssm_with_parameters_and_skips` names them, since NCBI
 //! writes them back where it writes the PSSM it read (psiblast `-in_pssm` with `-out_pssm`, item
-//! PS5b). An empty `descr` is NCBI's error (`CSeq_descr::PostRead`). A string keeps its bytes as
-//! read (NCBI replaces a byte outside the visible range by `#` with an error message; a PSSM that
-//! LOSAT writes has none, `algorithm::psiblast::pssm`). LOSAT reads the forms below and refuses the others with an error
+//! PS5b). An empty `descr` is NCBI's error (`CSeq_descr::PostRead`). A VisibleString stores `#` for
+//! a byte outside the visible range, as NCBI's reader does, and the reader returns each such byte
+//! with its line and chunk (`report::serial::visible::BadChar`; NCBI posts an error for it; a PSSM
+//! that LOSAT writes has none, `algorithm::psiblast::pssm`). LOSAT reads the forms below and refuses the others with an error
 //! naming its line: a query `Seq-entry` that is a `set`, `Seq-data` other than `iupacaa`, `ncbieaa`
 //! and `ncbistdaa`, and a REAL mantissa of more than 18 digits. The query's Seq-ids, of every
 //! alternative, are read by the shared Seq-id reader (`seqid::asn_text`).
@@ -36,6 +37,7 @@ use crate::report::serial::pssm::{
     FormatRpsDbParameters, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters, PssmQuery,
     PssmWithParameters, SeqData, SeqInst, SEQ_INST_MOL, SEQ_INST_REPR,
 };
+use crate::report::serial::visible::BadChar;
 
 /// A PSSM that the reader cannot read: the line (from 1) where it stopped and why (the error of
 /// the shared ASN.1 text reader, `report::serial::asn_text_reader`).
@@ -63,15 +65,24 @@ type Result<T> = std::result::Result<T, PssmTextError>;
 // ```
 #[cfg(test)]
 pub fn read_pssm_with_parameters(text: &[u8]) -> Result<PssmWithParameters> {
-    read_pssm_with_parameters_and_skips(text).map(|(pssm, _)| pssm)
+    read_pssm_with_parameters_and_skips(text).map(|read| read.pssm)
 }
 
-/// `read_pssm_with_parameters`, with the names of the members that the reader skipped (in the
-/// order read; `"molinfo"` for a `molinfo` descriptor of the query, `"Seqdesc"` for another
-/// descriptor other than a title), which NCBI's object keeps and writes back.
-pub fn read_pssm_with_parameters_and_skips(
-    text: &[u8],
-) -> Result<(PssmWithParameters, Vec<&'static str>)> {
+/// What `read_pssm_with_parameters_and_skips` read.
+pub(crate) struct PssmRead {
+    pub(crate) pssm: PssmWithParameters,
+    /// The names of the members that the reader skipped (in the order read; `"molinfo"` for a
+    /// `molinfo` descriptor of the query, `"Seqdesc"` for another descriptor other than a title),
+    /// which NCBI's object keeps and writes back.
+    pub(crate) skipped: Vec<&'static str>,
+    /// The bytes of VisibleStrings stored as `#`, in the order read (NCBI posts an error for each).
+    pub(crate) bad_chars: Vec<BadChar>,
+}
+
+/// `read_pssm_with_parameters`, with the members skipped and the bytes replaced (`PssmRead`).
+/// A document that fails after a replaced byte is the refusal of that byte (NCBI posts its error
+/// before it fails).
+pub(crate) fn read_pssm_with_parameters_and_skips(text: &[u8]) -> Result<PssmRead> {
     let mut reader = Reader::new(SliceSource::new(text), "PSSM", "PSSM reader");
     let c = reader.skip_white_space()?;
     let id = reader.scan_end_of_id(is_first_id_char(c))?;
@@ -87,8 +98,21 @@ pub fn read_pssm_with_parameters_and_skips(
         return Err(reader.error("'::=' expected"));
     }
     reader.pos += 3;
-    let pssm = reader.pssm_with_parameters()?;
-    Ok((pssm, reader.skipped))
+    let pssm = reader.pssm_with_parameters();
+    let bad_chars = reader.take_bad_chars();
+    let pssm = match pssm {
+        Err(_) if !bad_chars.is_empty() => {
+            return Err(reader.not_supported(
+                "a PSSM that NCBI cannot read with a string that holds a byte outside the visible ASCII range (NCBI posts an error for the byte first)",
+            ))
+        }
+        pssm => pssm?,
+    };
+    Ok(PssmRead {
+        pssm,
+        skipped: reader.skipped,
+        bad_chars,
+    })
 }
 
 // The grammar of `PssmWithParameters` and of the types it holds, over the shared lexical layer.

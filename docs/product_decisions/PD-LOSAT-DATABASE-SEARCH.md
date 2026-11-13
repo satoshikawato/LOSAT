@@ -465,20 +465,22 @@ Mask data (`-mask_data`): every Seq-loc alternative of a mask is read (`null`, `
 `int`, `packed-int`, `pnt`, `packed-pnt`, `mix`, `equiv`, `bond`; a `feat` or a Seq-loc of several
 Seq-ids ends the run with NCBI's "Cannot get masked range Seq-id"), several Seq-locs of one
 sequence are combined as makeblastdb combines them, empty and whole ranges included, and a `giim`
-Seq-id finds the masks that makeblastdb gives it (which follows the order of the mask files). What
-makeblastdb reads and LOSAT refuses (`losat makeblastdb: ...`, exit status 1, without
-makeblastdb's closing "No sequences matched any of the masks provided."):
+Seq-id finds the masks that makeblastdb gives it (which follows the order of the mask files). A
+string with a byte outside 0x20-0x7e is stored with `#` for it, and the error that makeblastdb's
+reader posts for each such byte is written in the order read (`Error: (803.7) [makeblastdb]
+<stack trace>`, `Bad char [0x..] in string at line N` or `at byte N`, the part of the string being
+read), as is the warning for a `UTF8String` tag where a `VisibleString` belongs (`Warning:
+(803.10)`, once per run); the exit status stays 0. What makeblastdb reads and LOSAT refuses
+(`losat makeblastdb: ...`, exit status 1, without makeblastdb's closing "No sequences matched any
+of the masks provided."):
 
-- A string with a byte outside 0x20-0x7e, which NCBI repairs and logs, and a `UTF8String` tag
-  where a `VisibleString` belongs (`mask data that LOSAT does not read: ...`): LOSAT does not
-  write NCBI's diagnostics for them.
 - Ranges whose order NCBI takes from memory addresses: ranges of two different Seq-id handles
   with the same packed number (`gi|5` and `gb|AY000005.1|`; a local id and a `general` string
   tag; two `giim` handles of one number) written on one strand of one sequence and algorithm,
   when the two orders write different ranges. The error names the Seq-ids. It comes when that
   sequence is written, so the files are left as makeblastdb leaves them after an error of the
   build there (none in version 4; `NAME.nos`, `NAME.not`, `NAME.ntf`, `NAME.nto` in version 5,
-  `.p..` for proteins), where the refusal of a mask string comes before the build and leaves none.
+  `.p..` for proteins).
 
 A mask file that NCBI's reader rejects as damaged is no refusal: both programs stop, LOSAT with
 exit status 255 and `Error: mask data in '<file>': <LOSAT's text>` where NCBI prints an

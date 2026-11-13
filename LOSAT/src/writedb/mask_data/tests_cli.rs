@@ -326,20 +326,11 @@ fn the_command_line_matches_makeblastdb_on_every_mask_parse_file() {
                 assert_eq!(run.stdout, logs[file], "{file}: standard output");
                 no_files();
             }
-            Class::Unsupported => {
-                assert_eq!(run.status, 1, "{context}");
-                assert!(
-                    run.stderr
-                        .starts_with("losat makeblastdb: mask data that LOSAT does not read: "),
-                    "{context}"
-                );
-                no_files();
-            }
         }
     }
     assert!(compared > 300, "{compared} rows compared");
-    assert_eq!(classes["Equal"], 109);
-    assert_eq!(classes.values().sum::<usize>(), 162);
+    assert_eq!(classes["Equal"], 122);
+    assert_eq!(classes.values().sum::<usize>(), 172);
 }
 
 #[test]

@@ -667,7 +667,6 @@ impl<R: Read> ArchiveStream<R> {
     pub(crate) fn new(input: R, first: &[u8]) -> Self {
         ArchiveStream {
             reader: Reader::new(StreamSource::new(input, first), "archive", "rpsbproc")
-                .refuse_invisible_bytes()
                 .defer_refusals(),
             done: false,
         }
@@ -708,8 +707,19 @@ impl<R: Read> ArchiveStream<R> {
         self.reader.real()
     }
 
+    /// A VisibleString. NCBI's reader stores `#` for a byte outside `' '..='~'` and posts an
+    /// error with its stack trace through the archive's frames (`report::serial::visible`), which
+    /// this reader does not follow: such a byte is a refusal (deferred to the object's end).
     fn string(&mut self) -> Result<Vec<u8>> {
-        self.reader.string()
+        let s = self.reader.string()?;
+        if let Some(bad) = self.reader.take_bad_chars().first() {
+            let error = self.reader.not_supported(&format!(
+                "a string with the byte 0x{:x} (NCBI replaces it by '#' and posts an error)",
+                bad.byte
+            ));
+            self.reader.refuse(error, ())?;
+        }
+        Ok(s)
     }
 
     fn skip_value(&mut self) -> Result<()> {

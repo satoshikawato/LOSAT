@@ -25,10 +25,12 @@
 //! `null`, `empty`, `whole`, `int`, `packed-int`, `pnt`, `packed-pnt`, `mix` and `equiv` (nested),
 //! `bond`; a `feat` has no Seq-id ("Cannot get masked range Seq-id", as `null` alone).
 //!
-//! What is refused (`MaskFileError::Unsupported`, "mask data that LOSAT does not read"): strings
-//! with bytes outside 0x20-0x7e that NCBI repairs and logs (`fix_visible_chars`; a binary Seq-id
-//! has no such byte), and a `UTF8String` tag where a `VisibleString` belongs
-//! (objistrasnb.cpp:276-312): LOSAT does not write NCBI's diagnostics for them.
+//! A `VisibleString` is read as NCBI reads it (`eFNP_ReplaceAndWarn`, `report::serial::visible`):
+//! each byte outside 0x20-0x7e is stored as `#`, and the reader hands out NCBI's diagnostic for it
+//! with the stack trace of its frames ([`MaskDiagnostic`]: "Bad char [0x..] in string at line N"
+//! with the text's chunk, "at byte N" with the binary string); a `UTF8String` tag where a
+//! `VisibleString` belongs is read with NCBI's warning (objistrasnb.cpp:276-312), which NCBI posts
+//! once per process. `process_mask_data` posts them in the order read.
 
 mod ber;
 mod guess;
@@ -40,7 +42,7 @@ mod seq_id_tests;
 mod tests;
 mod text;
 
-pub(crate) use reader::{MaskFileError, MaskFileFormat, MaskFileReader};
+pub(crate) use reader::{MaskDiagnostic, MaskFileError, MaskFileFormat, MaskFileReader};
 
 use crate::seqid::ParsedSeqId;
 

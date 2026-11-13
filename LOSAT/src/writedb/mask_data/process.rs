@@ -52,7 +52,7 @@ use super::MaskedRangeSet;
 use crate::writedb::build_db::BuildDatabase;
 use crate::writedb::fasta_source::Warn;
 use crate::writedb::makeblastdb::MakedbError;
-use crate::writedb::mask_info::{MaskFileError, MaskFileReader};
+use crate::writedb::mask_info::{MaskDiagnostic, MaskFileError, MaskFileReader};
 use crate::writedb::WriteDbError;
 
 /// The values of the options that `x_ProcessMaskData` reads: `None` for an option that was not
@@ -484,6 +484,7 @@ pub(crate) fn process_mask_data(
         return Ok(());
     };
     let file_list = split_commas(truncate_spaces(files));
+    let mut utf8_warned = false;
     if file_list.is_empty() {
         return Err(options_error(
             "mask_data option found, but no files were specified.",
@@ -535,7 +536,12 @@ pub(crate) fn process_mask_data(
         let mut reader = open_mask_file(&path, Path::new(file))?;
 
         let mut algo_id: Option<i32> = None;
-        while let Some(first_obj) = reader.next_info()? {
+        loop {
+            let next = reader.next_info();
+            post_diagnostics(&mut reader, &mut utf8_warned, warn);
+            let Some(first_obj) = next? else {
+                break;
+            };
             let algo_id = match algo_id {
                 Some(id) => id,
                 None => {
@@ -578,11 +584,28 @@ pub(crate) fn process_mask_data(
                     break;
                 }
 
-                masks = reader.next_list()?;
+                let next = reader.next_list();
+                post_diagnostics(&mut reader, &mut utf8_warned, warn);
+                masks = next?;
             }
         }
     }
     Ok(())
+}
+
+/// Posts what NCBI's serial reader posted while `reader` read its last object (before its error
+/// too): an error per byte stored as `#`, and the UTF8String warning, which NCBI posts once per
+/// process (`ERR_POST_X_ONCE`; `utf8_warned` is the run's).
+fn post_diagnostics(reader: &mut MaskFileReader, utf8_warned: &mut bool, warn: Warn<'_>) {
+    for diagnostic in reader.take_diagnostics() {
+        if matches!(diagnostic, MaskDiagnostic::Utf8Tag(_)) {
+            if *utf8_warned {
+                continue;
+            }
+            *utf8_warned = true;
+        }
+        warn(&diagnostic.text("makeblastdb"));
+    }
 }
 
 /// The reader of the mask file at `path`, whose name in messages is `name`. A file that cannot

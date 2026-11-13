@@ -21,6 +21,7 @@
 //! and those of the value being read are kept). The readers are generic over the source, so the
 //! slice reader is what it was before the stream existed.
 
+use super::visible::{good_visible_char, BadChar, Position, SUBST};
 use crate::ncbi_str::is_space;
 use crate::utils::x87::X87;
 use std::io::Read;
@@ -232,11 +233,9 @@ pub(crate) struct Reader<S: AsnSource> {
     document: &'static str,
     /// The reader, for the refusals ("... is not supported by LOSAT's PSSM reader").
     reader: &'static str,
-    /// Whether a string with a byte outside the visible range is refused. NCBI replaces such a
-    /// byte by `#` and posts an error with the reader's stack trace (`ReplaceVisibleChar`,
-    /// objistr.cpp:1854-1895, `eFNP_ReplaceAndWarn`, the default of `SERIAL_WRONG_CHARS_READ`),
-    /// which a reader that sets this does not reproduce.
-    visible_only: bool,
+    /// The bytes of VisibleStrings that `string` replaced, for the reader to post or refuse
+    /// (`take_bad_chars`; `report::serial::visible`).
+    pub(crate) bad_chars: Vec<BadChar>,
     /// Whether the refusals of the lexical layer (a REAL or a string that LOSAT does not read)
     /// are noted in `refusal` and the reading goes on (a reader that must know whether NCBI's
     /// reader would read the whole object before it refuses), rather than returned at once.
@@ -269,7 +268,7 @@ impl<S: AsnSource> Reader<S> {
             skipped: Vec::new(),
             document,
             reader,
-            visible_only: false,
+            bad_chars: Vec::new(),
             defer_refusals: false,
             refusal: None,
         }
@@ -282,7 +281,7 @@ impl<S: AsnSource> Reader<S> {
     }
 
     /// `error`, returned, or noted when the refusals are deferred (then `Ok(value)`).
-    fn refuse<T>(&mut self, error: AsnTextError, value: T) -> Result<T> {
+    pub(crate) fn refuse<T>(&mut self, error: AsnTextError, value: T) -> Result<T> {
         if !self.defer_refusals {
             return Err(error);
         }
@@ -290,12 +289,6 @@ impl<S: AsnSource> Reader<S> {
             self.refusal = Some(error);
         }
         Ok(value)
-    }
-
-    /// Refuse strings with bytes outside the visible range (`visible_only`).
-    pub(crate) fn refuse_invisible_bytes(mut self) -> Self {
-        self.visible_only = true;
-        self
     }
 
     pub(crate) fn error(&self, message: impl Into<String>) -> AsnTextError {
@@ -1075,11 +1068,18 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
-    /// `ReadStringValue`: a quoted string, its lines joined, `""` read as one quote.
+    /// `ReadString` of a VisibleString (`ReadStringValue` with `eFNP_ReplaceAndWarn`): a quoted
+    /// string, its lines joined, `""` read as one quote, each byte outside `' '..='~'` stored as
+    /// `#` and noted in `bad_chars` (the reader that knows its frames posts NCBI's message for
+    /// it). The string is appended in NCBI's chunks, which the messages show: a chunk ends at a
+    /// line end, at a quote, and after 128 bytes; the second quote of `""` starts the next one.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:938-986
     // ```c++
     //     Expect('\"', true);
-    //     ...
+    //     size_t startLine = m_Input.GetLine();
+    //     size_t i = 0;
+    //     s.erase();
+    //     try {
     //         for (;;) {
     //             char c = m_Input.PeekChar(i);
     //             switch ( c ) {
@@ -1105,6 +1105,14 @@ impl<S: AsnSource> Reader<S> {
     //                     i = 1;
     //                 }
     //                 break;
+    //             default:
+    //                 // ok: append char
+    //                 if ( ++i == 128 ) {
+    //                     // too long string -> flush it
+    //                     AppendLongStringData(s, i, fix_method, startLine);
+    //                     i = 0;
+    //                 }
+    //                 break;
     // ```
     pub(crate) fn string(&mut self) -> Result<Vec<u8>> {
         let mut out = Vec::new();
@@ -1121,12 +1129,6 @@ impl<S: AsnSource> Reader<S> {
     // }
     // ```
     pub(crate) fn utf8_string(&mut self) -> Result<Vec<u8>> {
-        self.string_as_read()
-    }
-
-    /// A string with its bytes as they are in the text, for a reader that applies NCBI's rule
-    /// for a VisibleString itself.
-    pub(crate) fn string_as_read(&mut self) -> Result<Vec<u8>> {
         let mut out = Vec::new();
         self.string_value(&mut out, false)?;
         Ok(out)
@@ -1134,49 +1136,107 @@ impl<S: AsnSource> Reader<S> {
 
     /// `string`, appended to `out`.
     pub(crate) fn string_into(&mut self, out: &mut Vec<u8>) -> Result<()> {
-        self.string_value(out, self.visible_only)
+        self.string_value(out, true)
     }
 
-    /// A string appended to `out`; `visible_only`: a byte outside the visible range is refused.
-    fn string_value(&mut self, out: &mut Vec<u8>, visible_only: bool) -> Result<()> {
+    /// The bad bytes noted by `string` since the last call (in the order read).
+    pub(crate) fn take_bad_chars(&mut self) -> Vec<BadChar> {
+        std::mem::take(&mut self.bad_chars)
+    }
+
+    /// A string appended to `out`; `visible`: read as a VisibleString (else as a UTF8String).
+    fn string_value(&mut self, out: &mut Vec<u8>, visible: bool) -> Result<()> {
         self.expect(b'"')?;
         let start_line = self.line;
+        // The bytes of the chunk from `pos` on (`i`).
+        let mut i = 0usize;
         loop {
-            let Some(c) = self.src.byte_at(self.pos) else {
+            let Some(c) = self.src.byte_at(self.pos + i) else {
                 return Err(AsnTextError {
                     line: self.line,
                     message: format!("unclosed string starts at line {start_line}"),
                     kind: AsnTextErrorKind::Format,
                 });
             };
-            self.pos += 1;
             match c {
-                b'\r' | b'\n' => self.skip_end_of_line(c),
+                b'\r' | b'\n' => {
+                    self.append_string_data(out, i, visible);
+                    self.pos += 1;
+                    i = 0;
+                    self.skip_end_of_line(c);
+                }
                 b'"' => {
+                    self.append_string_data(out, i, visible);
+                    self.pos += 1;
                     if self.peek_at(0) != b'"' {
                         return Ok(());
                     }
-                    out.push(b'"');
-                    self.pos += 1;
+                    i = 1;
                 }
                 _ => {
-                    // NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:456-459
-                    // ```c++
-                    // bool GoodVisibleChar(char c)
-                    // {
-                    //     return c >= ' ' && c <= '~';
-                    // }
-                    // ```
-                    if visible_only && !(b' '..=b'~').contains(&c) {
-                        let error = self.not_supported(&format!(
-                            "a string with the byte 0x{c:x} (NCBI replaces it by '#' and posts an error)"
-                        ));
-                        self.refuse(error, ())?;
+                    i += 1;
+                    if i == 128 {
+                        self.append_string_data(out, i, visible);
+                        i = 0;
                     }
-                    out.push(c)
                 }
             }
         }
+    }
+
+    /// `AppendStringData`: the `count` bytes at `pos` appended to `out` and taken; a VisibleString
+    /// stores `#` for a bad byte and notes it with the line and the chunk.
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:876-918
+    // ```c++
+    //     const char* data = m_Input.GetCurrentPos();
+    //     if ( fix_method != eFNP_Allow ) {
+    //         size_t done = 0, valid = 0;
+    //         for ( size_t i = 0; i < count; ++i ) {
+    //             char c = data[i];
+    //             if ( !GoodVisibleChar(c) ) {
+    //                 ...
+    //                 if (valid == 0) {
+    //                     if ( i > done ) {
+    //                         s.append(data + done, i - done);
+    //                     }
+    //                     c = ReplaceVisibleChar(c, fix_method, this, CTempString(data,count), x_FixCharsSubst());
+    //                     if (c != 0) {
+    //                         s += c;
+    //                     }
+    //                     done = i + 1;
+    //                 }
+    //             }
+    //             ...
+    //         }
+    //         if ( done < count ) {
+    //             s.append(data + done, count - done);
+    //         }
+    //     }
+    //     else {
+    //         s.append(data, count);
+    //     }
+    //     if ( count > 0 ) {
+    //         m_Input.SkipChars(count);
+    //     }
+    // ```
+    fn append_string_data(&mut self, out: &mut Vec<u8>, count: usize, visible: bool) {
+        let data = self.src.bytes(self.pos..self.pos + count);
+        let start = out.len();
+        out.extend_from_slice(data);
+        if visible {
+            for k in start..out.len() {
+                let byte = out[k];
+                if !good_visible_char(byte) {
+                    self.bad_chars.push(BadChar {
+                        byte,
+                        at: Position::Line(self.line),
+                        chunk: data.to_vec(),
+                    });
+                    out[k] = SUBST;
+                }
+            }
+        }
+        self.pos += count;
     }
 
     /// An OCTET STRING: `'`, hex digits across lines, `'H`.
@@ -1454,6 +1514,20 @@ impl<S: AsnSource> Reader<S> {
         self.skip_value()
     }
 
+    /// A string of a skipped value. Its type is not known: NCBI's typed reader stores `#` for a
+    /// bad byte of a VisibleString and posts an error with a stack trace through the skipped
+    /// value's frames, and keeps the byte of a UTF8String; such a string is LOSAT's refusal.
+    fn skipped_string(&mut self) -> Result<()> {
+        let s = self.utf8_string()?;
+        if let Some(&c) = s.iter().find(|&&c| !good_visible_char(c)) {
+            let error = self.not_supported(&format!(
+                "a string with the byte 0x{c:x} in a value that it skips (NCBI replaces it by '#' in a VisibleString and posts an error)"
+            ));
+            self.refuse(error, ())?;
+        }
+        Ok(())
+    }
+
     /// Skips one value of any type: a block with what it holds, a string, an OCTET STRING or
     /// BIT STRING, or the words and numbers up to the `,` or `}` that ends it (a CHOICE is its
     /// variant's name and value). It checks the blocks, strings and octet strings of the value
@@ -1478,9 +1552,7 @@ impl<S: AsnSource> Reader<S> {
                     self.pos += 1;
                     depth -= 1;
                 }
-                b'"' => {
-                    self.string()?;
-                }
+                b'"' => self.skipped_string()?,
                 b'\'' => {
                     self.pos += 1;
                     loop {

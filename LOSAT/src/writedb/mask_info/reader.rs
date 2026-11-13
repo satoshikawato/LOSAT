@@ -32,6 +32,7 @@ use super::schema::{
 use super::text::{TextIn, TextSource};
 use super::{MaskInfo, MaskInterval, MaskList, MaskLoc, MaskPart};
 use crate::report::serial::asn_text_reader::StreamSource;
+use crate::report::serial::visible::BadChar;
 use crate::seqid::model::{
     Date, DateStd, Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId,
     PdbSeqId, TextseqId,
@@ -128,59 +129,57 @@ pub(super) trait Input {
     fn read_u32(&mut self) -> R<u32>;
     fn read_bool(&mut self) -> R<bool>;
     fn read_null(&mut self) -> R<()>;
-    /// A `VisibleString` as it is in the file (line breaks of a text string gone), and whether a
-    /// binary file gave it the tag of a UTF8String.
-    fn read_string(&mut self) -> R<(Vec<u8>, bool)>;
+    /// A `VisibleString` (line breaks of a text string gone) with each byte outside `' '..='~'`
+    /// stored as `#`; `notes` gets what NCBI posts for it, in its order (also when the read then
+    /// fails): a UTF8String tag of a binary file, then each replaced byte.
+    fn read_string(&mut self, notes: &mut Vec<StringNote>) -> R<Vec<u8>>;
     fn read_enum(&mut self, def: &'static EnumDef) -> R<i32>;
 }
 
-// NCBI reference (598d8ae6): c++/include/serial/objistr.hpp:1160-1163
+/// What a string read posts in NCBI (`Input::read_string`).
+#[derive(Debug)]
+pub(super) enum StringNote {
+    /// A binary file gave a VisibleString member the tag of a UTF8String.
+    Utf8Tag,
+    /// A byte stored as `#` (`report::serial::visible`).
+    Bad(BadChar),
+}
+
+/// A diagnostic that NCBI's reader posts while it reads a mask file (with `ERR_POST`, standard
+/// error, in the order read; the status stays 0). `process_mask_data` writes them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MaskDiagnostic {
+    /// `ReplaceVisibleChar`'s message for a byte stored as `#` in a VisibleString (`ERR_POST_X(7,
+    /// ...)`, an error): the trace, "Bad char [0x..] in string at line N" (text) or "at byte N"
+    /// (binary), the chunk.
+    BadChar(Vec<u8>),
+    /// A UTF8String tag for the VisibleString member whose trace this is (`ERR_POST_X_ONCE(10,
+    /// Warning << ...)`, once per process); the string is still read as a VisibleString.
+    Utf8Tag(String),
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:296-305
 // ```c++
-// inline
-// bool GoodVisibleChar(char c);
-//
-// #define SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_READING 0
+//             if ( PeekTagByte() == alt_tag ) {
+//                 // optionally issue a warning
+//                 if ( sx_ReadAny->Get() == 1 ) {
+//                     ERR_POST_X_ONCE(10, Warning<<
+//                                     "CObjectIStreamAsnBinary: UTF8String data for VisibleString member "<<GetStackTraceASN()<<", ASN.1 specification may need an update");
+//                 }
 // ```
-// NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:455-459
-// ```c++
-// inline
-// bool GoodVisibleChar(char c)
-// {
-//     return c >= ' ' && c <= '~';
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:307-311
-// ```c++
-// NCBI_PARAM_ENUM_DECL(EFixNonPrint, SERIAL, WRONG_CHARS_READ);
-// NCBI_PARAM_ENUM_DEF(EFixNonPrint, SERIAL, WRONG_CHARS_READ, eFNP_ReplaceAndWarn);
-// ```
-// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1898
-// ```c++
-// char ReplaceVisibleChar(char c, EFixNonPrint fix_method,
-//     const CObjectStack* io, const CTempString& str, char subst)
-// {
-//     ...
-//     if ( fix_method != eFNP_Replace ) {
-//         ...
-//         case eFNP_ReplaceAndWarn:
-//             ERR_POST_X(7, message);
-//             break;
-//     ...
-//     return subst;
-// }
-// ```
-/// A `VisibleString` is read with the default `eFNP_ReplaceAndWarn`: every byte outside
-/// `' '..='~'` becomes `m_NonPrintSubst` (`'#'`, objistr.cpp:463), and NCBI posts a diagnostic
-/// per byte (`Error: (803.7) [makeblastdb] Blast-db-mask-info.algo-options` / `Bad char [0x9]
-/// in string at line 1` / the chunk); a UTF8String tag for a VisibleString posts a warning once
-/// (`Warning: (803.10) ... UTF8String data for VisibleString member`). Both leave the status
-/// at 0. LOSAT does not write those lines, so the reader refuses such a string
-/// ([`Rd::read_str`]); this function is the value NCBI stores, which the refusal does not need
-/// but the tests compare.
-pub(super) fn fix_visible_chars(s: &mut [u8]) {
-    for c in s {
-        if !(b' '..=b'~').contains(c) {
-            *c = b'#';
+impl MaskDiagnostic {
+    /// The lines NCBI's application `program` posts (without the final newline).
+    pub(crate) fn text(&self, program: &str) -> Vec<u8> {
+        match self {
+            MaskDiagnostic::BadChar(message) => {
+                let mut text = format!("Error: (803.7) [{program}] ").into_bytes();
+                text.extend_from_slice(message);
+                text
+            }
+            MaskDiagnostic::Utf8Tag(trace) => format!(
+                "Warning: (803.10) [{program}] CObjectIStreamAsnBinary: UTF8String data for VisibleString member {trace}, ASN.1 specification may need an update"
+            )
+            .into_bytes(),
         }
     }
 }
@@ -188,18 +187,15 @@ pub(super) fn fix_visible_chars(s: &mut [u8]) {
 /// The deepest nesting of object frames that LOSAT follows (NCBI's stack is only limited by memory).
 const MAX_DEPTH: usize = 400;
 
-/// What `Seq-loc` reading found, besides the value.
-struct Collected {
-    /// The first variant of a `Seq-loc` that LOSAT does not model; it is raised after the whole
-    /// object has been read, so that an error NCBI raises later in the object comes first.
-    unsupported: Option<String>,
-}
-
 /// The state of one `CObjectIStream`: the primitives, and the number of object frames.
 pub(super) struct Rd<I: Input> {
     pub(super) inp: I,
     depth: usize,
-    collected: Collected,
+    /// The names of `GetStackTraceASN`: the root type, then a name per class-member and
+    /// choice-variant frame (the member or variant being read) and `E` per array-element frame.
+    trace: Vec<&'static str>,
+    /// What NCBI posted while the object was read, in order.
+    pub(super) diagnostics: Vec<MaskDiagnostic>,
 }
 
 impl<I: Input> Rd<I> {
@@ -207,8 +203,47 @@ impl<I: Input> Rd<I> {
         Rd {
             inp,
             depth: 0,
-            collected: Collected { unsupported: None },
+            trace: Vec::new(),
+            diagnostics: Vec::new(),
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:80-119
+    // ```c++
+    // string CObjectStack::GetStackTraceASN(void) const
+    // {
+    //     ...
+    //     string stack = FetchFrameFromBottom(0).HasTypeInfo() ?
+    //         FetchFrameFromBottom(0).m_TypeInfo->GetName() : "?";
+    //     for ( size_t i = 1; i < GetStackDepth(); ++i ) {
+    //         const TFrame& frame = FetchFrameFromBottom(i);
+    //         switch ( frame.m_FrameType ) {
+    //         case TFrame::eFrameClassMember:
+    //         case TFrame::eFrameChoiceVariant:
+    //             {
+    //                 ...
+    //                     const CMemberId& id = *frame.m_MemberId;
+    //                     stack += '.';
+    //                     if ( !id.GetName().empty() ) {
+    //                         stack += id.GetName();
+    //                     ...
+    //         case TFrame::eFrameArrayElement:
+    //             stack += ".E";
+    //             break;
+    //         default:
+    //             break;
+    // ```
+    /// `GetStackTraceASN`.
+    fn stack_trace(&self) -> String {
+        self.trace.join(".")
+    }
+
+    /// `read` with `name` on the trace (a member, a variant or `E`).
+    fn named<T>(&mut self, name: &'static str, read: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
+        self.trace.push(name);
+        let result = read(self);
+        self.trace.pop();
+        result
     }
 
     // NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:189-199
@@ -343,7 +378,7 @@ impl<I: Input> Rd<I> {
                             return format_err(format!("member {} expected", m.name));
                         }
                     }
-                    read(s, index)?;
+                    s.named(def.members[index].name, |s| read(s, index))?;
                     pos = index + 1;
                     s.inp.end_member()?;
                 }
@@ -388,7 +423,7 @@ impl<I: Input> Rd<I> {
             s.inp.begin_choice()?;
             let value = s.frame(|s| {
                 let index = s.inp.begin_variant(def)?;
-                let value = read(s, index)?;
+                let value = s.named(def.variants[index].name, |s| read(s, index))?;
                 s.inp.end_variant()?;
                 Ok(value)
             })?;
@@ -429,7 +464,7 @@ impl<I: Input> Rd<I> {
             s.inp.begin_container(set)?;
             s.frame(|s| {
                 while s.inp.begin_element()? {
-                    read(s)?;
+                    s.named("E", &mut read)?;
                 }
                 Ok(())
             })?;
@@ -437,26 +472,21 @@ impl<I: Input> Rd<I> {
         })
     }
 
-    /// A `VisibleString` member `name`. A byte outside `' '..='~'`, or the tag of a UTF8String
-    /// in a binary file, is read (NCBI stores `'#'` for the byte), but the object is then refused
-    /// as [`Fail::Unsupported`] once it has been read to its end, so that an error NCBI raises
-    /// later in the object comes first: NCBI's diagnostics for it are not reproduced.
-    fn read_str(&mut self, name: &'static str) -> R<Vec<u8>> {
-        let (mut s, utf8_tag) = self.inp.read_string()?;
-        if utf8_tag {
-            self.collected.unsupported.get_or_insert_with(|| {
-                format!("a UTF8String tag for the VisibleString member `{name}` (NCBI warns and reads it)")
-            });
+    /// A `VisibleString`, with each byte outside `' '..='~'` stored as `#`; what NCBI posts for
+    /// it goes to `diagnostics` with the trace of the frames.
+    fn read_str(&mut self) -> R<Vec<u8>> {
+        let mut notes = Vec::new();
+        let result = self.inp.read_string(&mut notes);
+        if !notes.is_empty() {
+            let trace = self.stack_trace();
+            for note in notes {
+                self.diagnostics.push(match note {
+                    StringNote::Utf8Tag => MaskDiagnostic::Utf8Tag(trace.clone()),
+                    StringNote::Bad(bad) => MaskDiagnostic::BadChar(bad.message(&trace)),
+                });
+            }
         }
-        if let Some(&byte) = s.iter().find(|c| !(b' '..=b'~').contains(c)) {
-            self.collected.unsupported.get_or_insert_with(|| {
-                format!(
-                    "byte 0x{byte:02x} in the VisibleString member `{name}` (NCBI replaces it with '#' and logs it)"
-                )
-            });
-        }
-        fix_visible_chars(&mut s);
-        Ok(s)
+        result
     }
 
     /// Reads a value of type `ty` and appends a canonical encoding of it to `out`: two values
@@ -464,12 +494,7 @@ impl<I: Input> Rd<I> {
     /// them, apart from members that are left out in one and stated with their `DEFAULT` in the
     /// other (those differ here). The encoding is self-delimiting (every item states its kind,
     /// a string its length, a list its count).
-    pub(super) fn read_value(
-        &mut self,
-        ty: &'static Ty,
-        name: &'static str,
-        out: &mut Vec<u8>,
-    ) -> R<()> {
+    pub(super) fn read_value(&mut self, ty: &'static Ty, out: &mut Vec<u8>) -> R<()> {
         match ty {
             Ty::Int32 => {
                 let v = self.inp.read_i32()?;
@@ -492,7 +517,7 @@ impl<I: Input> Rd<I> {
                 out.push(u8::from(v));
             }
             Ty::Str => {
-                let v = self.read_str(name)?;
+                let v = self.read_str()?;
                 out.push(b's');
                 out.extend_from_slice(&(v.len() as u64).to_le_bytes());
                 out.extend_from_slice(&v);
@@ -515,7 +540,7 @@ impl<I: Input> Rd<I> {
                     }
                     out.push(1);
                     next = index + 1;
-                    s.read_value(def.members[index].ty, def.members[index].name, out)
+                    s.read_value(def.members[index].ty, out)
                 })?;
                 for _ in next..def.members.len() {
                     out.push(0);
@@ -525,7 +550,7 @@ impl<I: Input> Rd<I> {
                 out.push(b'C');
                 self.read_choice(def, |s, index| {
                     out.push(index as u8);
-                    s.read_value(def.variants[index].ty, def.variants[index].name, out)
+                    s.read_value(def.variants[index].ty, out)
                 })?;
             }
             Ty::SeqOf(element) | Ty::SetOf(element) => {
@@ -535,7 +560,7 @@ impl<I: Input> Rd<I> {
                 let mut count = 0u64;
                 self.read_container(matches!(ty, Ty::SetOf(_)), |s| {
                     count += 1;
-                    s.read_value(element, name, out)
+                    s.read_value(element, out)
                 })?;
                 out[count_at..count_at + 8].copy_from_slice(&count.to_le_bytes());
             }
@@ -550,7 +575,7 @@ impl<I: Input> Rd<I> {
     fn read_seq_id(&mut self) -> R<ParsedSeqId> {
         self.read_choice(&SEQ_ID, |s, index| {
             Ok(match index {
-                0 => ParsedSeqId::Local(s.read_object_id("local")?),
+                0 => ParsedSeqId::Local(s.read_object_id()?),
                 1 => ParsedSeqId::Gibbsq(s.inp.read_i32()?),
                 2 => ParsedSeqId::Gibbmt(s.inp.read_i32()?),
                 3 => ParsedSeqId::Giim(s.read_giimport_id()?),
@@ -575,7 +600,7 @@ impl<I: Input> Rd<I> {
     }
 
     /// An `Object-id` (`T_OBJECT_ID`).
-    fn read_object_id(&mut self, name: &'static str) -> R<ObjectId> {
+    fn read_object_id(&mut self) -> R<ObjectId> {
         let Ty::Choice(def) = &T_OBJECT_ID else {
             unreachable!("Object-id is a CHOICE")
         };
@@ -583,7 +608,7 @@ impl<I: Input> Rd<I> {
             Ok(if index == OBJECT_ID_ID {
                 ObjectId::Id(s.inp.read_i32()?)
             } else {
-                ObjectId::Str(s.read_str(name)?)
+                ObjectId::Str(s.read_str()?)
             })
         })
     }
@@ -592,8 +617,8 @@ impl<I: Input> Rd<I> {
         let (mut db, mut tag) = (None, None);
         self.read_class(&DBTAG, |s, index| {
             match index {
-                0 => db = Some(s.read_str("db")?),
-                _ => tag = Some(s.read_object_id("tag")?),
+                0 => db = Some(s.read_str()?),
+                _ => tag = Some(s.read_object_id()?),
             }
             Ok(())
         })?;
@@ -607,9 +632,9 @@ impl<I: Input> Rd<I> {
         let mut id = TextseqId::default();
         self.read_class(&TEXTSEQ_ID, |s, index| {
             match index {
-                0 => id.name = Some(s.read_str("name")?),
-                1 => id.accession = Some(s.read_str("accession")?),
-                2 => id.release = Some(s.read_str("release")?),
+                0 => id.name = Some(s.read_str()?),
+                1 => id.accession = Some(s.read_str()?),
+                2 => id.release = Some(s.read_str()?),
                 _ => id.version = Some(s.inp.read_i32()?),
             }
             Ok(())
@@ -622,8 +647,8 @@ impl<I: Input> Rd<I> {
         self.read_class(&GIIMPORT_ID, |s, index| {
             match index {
                 0 => id = Some(s.inp.read_i32()?),
-                1 => db = Some(s.read_str("db")?),
-                _ => release = Some(s.read_str("release")?),
+                1 => db = Some(s.read_str()?),
+                _ => release = Some(s.read_str()?),
             }
             Ok(())
         })?;
@@ -652,17 +677,17 @@ impl<I: Input> Rd<I> {
         let (mut country, mut id, mut doc_type) = (None, None, None);
         self.read_class(&ID_PAT, |s, index| {
             match index {
-                0 => country = Some(s.read_str("country")?),
+                0 => country = Some(s.read_str()?),
                 1 => {
                     id = Some(s.read_choice(&ID_PAT_ID, |s, variant| {
                         Ok(if variant == 0 {
-                            PatentNumber::Number(s.read_str("number")?)
+                            PatentNumber::Number(s.read_str()?)
                         } else {
-                            PatentNumber::AppNumber(s.read_str("app-number")?)
+                            PatentNumber::AppNumber(s.read_str()?)
                         })
                     })?);
                 }
-                _ => doc_type = Some(s.read_str("doc-type")?),
+                _ => doc_type = Some(s.read_str()?),
             }
             Ok(())
         })?;
@@ -680,10 +705,10 @@ impl<I: Input> Rd<I> {
         let (mut mol, mut chain, mut rel, mut chain_id) = (None, None, None, None);
         self.read_class(&PDB_SEQ_ID, |s, index| {
             match index {
-                0 => mol = Some(s.read_str("mol")?),
+                0 => mol = Some(s.read_str()?),
                 1 => chain = Some(s.inp.read_i32()?),
                 2 => rel = Some(s.read_date()?),
-                _ => chain_id = Some(s.read_str("chain-id")?),
+                _ => chain_id = Some(s.read_str()?),
             }
             Ok(())
         })?;
@@ -701,7 +726,7 @@ impl<I: Input> Rd<I> {
     fn read_date(&mut self) -> R<Date> {
         self.read_choice(&DATE, |s, variant| {
             if variant == 0 {
-                return Ok(Date::Str(s.read_str("str")?));
+                return Ok(Date::Str(s.read_str()?));
             }
             let mut std = DateStd {
                 year: 0,
@@ -718,7 +743,7 @@ impl<I: Input> Rd<I> {
                     0 => year = Some(s.inp.read_i32()?),
                     1 => std.month = Some(s.inp.read_i32()?),
                     2 => std.day = Some(s.inp.read_i32()?),
-                    3 => std.season = Some(s.read_str("season")?),
+                    3 => std.season = Some(s.read_str()?),
                     4 => std.hour = Some(s.inp.read_i32()?),
                     5 => std.minute = Some(s.inp.read_i32()?),
                     _ => std.second = Some(s.inp.read_i32()?),
@@ -752,11 +777,7 @@ impl<I: Input> Rd<I> {
                 _ => {
                     // fuzz-from, fuzz-to: read, not used.
                     scratch.clear();
-                    s.read_value(
-                        SEQ_INTERVAL.members[index].ty,
-                        SEQ_INTERVAL.members[index].name,
-                        &mut scratch,
-                    )?;
+                    s.read_value(SEQ_INTERVAL.members[index].ty, &mut scratch)?;
                 }
             }
             Ok(())
@@ -779,11 +800,7 @@ impl<I: Input> Rd<I> {
                 _ => {
                     // fuzz: read, not used.
                     scratch.clear();
-                    s.read_value(
-                        SEQ_POINT.members[index].ty,
-                        SEQ_POINT.members[index].name,
-                        &mut scratch,
-                    )?;
+                    s.read_value(SEQ_POINT.members[index].ty, &mut scratch)?;
                 }
             }
             Ok(())
@@ -958,11 +975,7 @@ impl<I: Input> Rd<I> {
                             _ => {
                                 // fuzz: read, not used.
                                 scratch.clear();
-                                s.read_value(
-                                    PACKED_SEQPNT.members[member].ty,
-                                    PACKED_SEQPNT.members[member].name,
-                                    &mut scratch,
-                                )?;
+                                s.read_value(PACKED_SEQPNT.members[member].ty, &mut scratch)?;
                             }
                         }
                         Ok(())
@@ -993,11 +1006,7 @@ impl<I: Input> Rd<I> {
                 _ => {
                     // `feat`: read; `x_CheckId` fails, so the Seq-loc has no Seq-id.
                     let mut scratch = Vec::new();
-                    s.read_value(
-                        SEQ_LOC.variants[index].ty,
-                        SEQ_LOC.variants[index].name,
-                        &mut scratch,
-                    )?;
+                    s.read_value(SEQ_LOC.variants[index].ty, &mut scratch)?;
                     *id = Err(());
                 }
             }
@@ -1048,7 +1057,7 @@ impl<I: Input> Rd<I> {
                 match index {
                     0 => algo_id = s.inp.read_i32()?,
                     1 => algo_program = s.inp.read_enum(&BLAST_FILTER_PROGRAM)?,
-                    2 => algo_options = s.read_str("algo-options")?,
+                    2 => algo_options = s.read_str()?,
                     _ => masks = Some(s.read_mask_list_members()?),
                 }
                 Ok(())
@@ -1117,9 +1126,14 @@ impl<I: Input> Rd<I> {
     //     END_OBJECT_FRAME();
     // }
     // ```
-    fn read_top(&mut self, type_name: &str, read: impl FnOnce(&mut Self) -> R<()>) -> R<()> {
+    fn read_top(
+        &mut self,
+        type_name: &'static str,
+        read: impl FnOnce(&mut Self) -> R<()>,
+    ) -> R<()> {
         self.depth = 0;
-        self.collected.unsupported = None;
+        self.trace.clear();
+        self.trace.push(type_name);
         if let Some(name) = self.frame(|s| s.inp.read_file_header())? {
             if !name.is_empty() && name != type_name.as_bytes() {
                 return format_err(format!(
@@ -1128,11 +1142,7 @@ impl<I: Input> Rd<I> {
                 ));
             }
         }
-        self.frame(read)?;
-        match self.collected.unsupported.take() {
-            Some(what) => Err(Fail::Unsupported(what)),
-            None => Ok(()),
-        }
+        self.frame(read)
     }
 }
 
@@ -1188,6 +1198,8 @@ pub(crate) struct MaskFileReader {
     source: Source,
     /// Set by the first error or end of file (NCBI stops reading the file there).
     state: State,
+    /// What NCBI posted while it read the objects so far (`take_diagnostics`).
+    diagnostics: Vec<MaskDiagnostic>,
 }
 
 impl fmt::Debug for MaskFileReader {
@@ -1271,6 +1283,7 @@ impl MaskFileReader {
             path: path.to_path_buf(),
             source,
             state: State::Open,
+            diagnostics: Vec::new(),
         })
     }
 
@@ -1300,16 +1313,25 @@ impl MaskFileReader {
         match &mut self.source {
             Source::Text(rd) => {
                 rd.inp.new_object();
-                text(rd)
+                let result = text(rd);
+                self.diagnostics.append(&mut rd.diagnostics);
+                result
             }
             Source::Binary { data, offset } => {
                 let start = (*offset).min(data.len());
                 let mut rd = Rd::new(BerIn::new(&data[start..]));
                 let result = binary(&mut rd);
                 *offset = start + rd.inp.offset();
+                self.diagnostics.append(&mut rd.diagnostics);
                 result
             }
         }
+    }
+
+    /// What NCBI's reader posted (standard error) while it read the objects returned since the
+    /// last call, and the one that failed: `next_info` and `next_list` read on after them.
+    pub(crate) fn take_diagnostics(&mut self) -> Vec<MaskDiagnostic> {
+        std::mem::take(&mut self.diagnostics)
     }
 
     fn stopped(&self) -> MaskFileError {

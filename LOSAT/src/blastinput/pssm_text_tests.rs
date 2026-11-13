@@ -323,7 +323,7 @@ fn skipped_members_are_named_and_an_empty_descr_is_an_error() {
     let skips = |text: &str| {
         read_pssm_with_parameters_and_skips(text.as_bytes())
             .unwrap()
-            .1
+            .skipped
     };
     assert!(skips(SMALL_PSSM).is_empty());
     let edited = SMALL_PSSM
@@ -336,9 +336,9 @@ fn skipped_members_are_named_and_an_empty_descr_is_an_error() {
             "      gapExtend 1\n    }\n  }",
             "      gapExtend 1\n    },\n    constraints {\n      nblocks 0,\n      blocks {\n      },\n      loops {\n      }\n    }\n  }",
         );
-    let (value, skipped) = read_pssm_with_parameters_and_skips(edited.as_bytes()).unwrap();
-    assert_eq!(skipped, ["Seqdesc", "topology", "constraints"]);
-    assert_eq!(value, small_pssm(b"a \"quoted\" title"));
+    let read = read_pssm_with_parameters_and_skips(edited.as_bytes()).unwrap();
+    assert_eq!(read.skipped, ["Seqdesc", "topology", "constraints"]);
+    assert_eq!(read.pssm, small_pssm(b"a \"quoted\" title"));
     let annot = SMALL_PSSM.replace(
         "        seq-data ncbistdaa '0C'H\n      }\n",
         "        seq-data ncbistdaa '0C'H\n      },\n      annot {\n        {\n          data ftable {\n          }\n        }\n      }\n",
@@ -500,4 +500,52 @@ fn pssm_files_of_a_directory_read_and_write_back() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
     assert!(!paths.is_empty());
+}
+
+/// The bytes of VisibleStrings that NCBI's reader stores as `#`, with the line and chunk that its
+/// message shows (psiblast 2.17.0 `-in_pssm`, status 0: `Error: (803.7) [psiblast]
+/// PssmWithParameters.pssm.query.seq.descr.E.title` / `Bad char [0xC3] in string at line 12` /
+/// `rnd\xc3\xa9random`, then the same for 0xA9; the identifier of `ps5_rnd_ident_utf8`:
+/// `PssmWithParameters.pssm.identifier.str`, line 4, `my\xc3\xa9`).
+#[test]
+fn a_bad_byte_of_a_pssm_is_noted_as_ncbi_posts_it() {
+    use crate::report::serial::visible::Position;
+    for (name, line, chunk, trace) in [
+        (
+            "pssm/ps4_rnd_ctrl.asn.gz",
+            12,
+            &b"rnd\xc3\xa9random"[..],
+            "PssmWithParameters.pssm.query.seq.descr.E.title",
+        ),
+        (
+            "pssm/ps5_rnd_ident_utf8.asn.gz",
+            4,
+            &b"my\xc3\xa9"[..],
+            "PssmWithParameters.pssm.identifier.str",
+        ),
+    ] {
+        let read = read_pssm_with_parameters_and_skips(&gunzip(name)).unwrap();
+        let messages: Vec<Vec<u8>> = read
+            .bad_chars
+            .iter()
+            .map(|bad| bad.message(trace))
+            .collect();
+        let expected: Vec<Vec<u8>> = ["C3", "A9"]
+            .iter()
+            .map(|byte| {
+                let mut message =
+                    format!("{trace}\nBad char [0x{byte}] in string at line {line}\n").into_bytes();
+                message.extend_from_slice(chunk);
+                message
+            })
+            .collect();
+        assert_eq!(messages, expected, "{name}");
+        assert!(read
+            .bad_chars
+            .iter()
+            .all(|bad| bad.at == Position::Line(line)));
+    }
+    let read = read_pssm_with_parameters_and_skips(&gunzip("pssm/ps4_rnd_ctrl.asn.gz")).unwrap();
+    let titles = read.pssm.pssm.query.unwrap().titles.unwrap();
+    assert_eq!(titles, [b"rnd##random".to_vec()]);
 }

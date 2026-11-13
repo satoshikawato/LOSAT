@@ -603,19 +603,6 @@ pub(super) fn read_expected(parse_dir: &Path) -> BTreeMap<String, Expected> {
     runs
 }
 
-/// Files that makeblastdb reads and LOSAT does not (`MaskFileError::Unsupported`): LOSAT's
-/// outcome is its own refusal (status 1, "losat makeblastdb: mask data that LOSAT does not read: ..."),
-/// whatever NCBI did with them. A new file that LOSAT refuses must be added here. (Every Seq-loc
-/// alternative is read: `h_unsupported_*`, `b_small_whole` and the `*_seqloc_*` files equal NCBI.)
-const LOSAT_UNSUPPORTED: [&str; 3] = [
-    // NCBI replaces a byte that is not printable in a `VisibleString` with '#' and logs it, and
-    // warns about a UTF8String tag for a VisibleString; those lines are its only standard error.
-    // LOSAT does not write them, so it refuses the string.
-    "h_string_nonprint.asnt",
-    "h_utf8_in_options.asnt",
-    "b_utf8_options.asnb",
-];
-
 /// Files with which NCBI ends in `std::bad_alloc` (status 4, "BLAST ran out of memory"): a string
 /// whose length cannot be allocated. Whether an allocation of a given size fails depends on the
 /// host, so LOSAT does not tell these from the other damaged files and ends with status 255.
@@ -631,8 +618,6 @@ pub(super) enum Class {
     OutOfMemory,
     /// A missing continuation (`more TRUE` and the end of the file): status 0, no database.
     NoDatabase,
-    /// LOSAT refuses a file that NCBI reads.
-    Unsupported,
     /// Status, standard error and database equal NCBI's.
     Equal,
 }
@@ -650,13 +635,9 @@ pub(super) fn classify(file: &str, run: &Expected) -> Class {
         Class::OutOfMemory
     } else if run.rc == 0 && run.no_db {
         Class::NoDatabase
-    } else if LOSAT_UNSUPPORTED.contains(&file) {
-        Class::Unsupported
     } else {
         assert!(
-            !run.stderr.contains("NCBI C++ Exception")
-                && !run.stderr.contains("(803.")
-                && matches!(run.rc, 0 | 1),
+            !run.stderr.contains("NCBI C++ Exception") && matches!(run.rc, 0 | 1),
             "{file}: a new kind of outcome: status {}, {}",
             run.rc,
             run.stderr
@@ -738,14 +719,6 @@ fn every_mask_parse_file_runs_end_to_end() {
                 ends_alike();
                 no_files();
             }
-            Class::Unsupported => {
-                assert_eq!(run.status, 1, "{file}: {stderr}");
-                assert!(
-                    stderr.starts_with("losat makeblastdb: mask data that LOSAT does not read: "),
-                    "{file}: {stderr}"
-                );
-                no_files();
-            }
             Class::Equal => {
                 assert_eq!(run.status, ncbi.rc, "{file}: {stderr}");
                 assert_eq!(stderr, ncbi.stderr, "{file}: standard error");
@@ -765,12 +738,11 @@ fn every_mask_parse_file_runs_end_to_end() {
     assert_eq!(
         tally,
         [
-            ("Equal".to_string(), 109),
+            ("Equal".to_string(), 122),
             ("NoDatabase".to_string(), 3),
             ("OutOfMemory".to_string(), 1),
             ("Serial".to_string(), 39),
             ("UnknownEncoding".to_string(), 7),
-            ("Unsupported".to_string(), 3),
         ]
     );
 }

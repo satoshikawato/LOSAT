@@ -13,7 +13,7 @@
 
 use std::io::Read;
 
-use super::reader::{format_err, Fail, Input, R};
+use super::reader::{format_err, Fail, Input, StringNote, R};
 use super::schema::{ChoiceDef, ClassDef, EnumDef};
 use crate::report::serial::asn_text_reader::{
     AsnSource, AsnTextError, AsnTextErrorKind, MemberId, Reader, StreamSource,
@@ -282,8 +282,10 @@ impl<S: AsnSource> Input for TextIn<S> {
         Ok(self.r.null()?)
     }
 
-    fn read_string(&mut self) -> R<(Vec<u8>, bool)> {
-        Ok((self.r.string_as_read()?, false))
+    fn read_string(&mut self, notes: &mut Vec<StringNote>) -> R<Vec<u8>> {
+        let s = self.r.string();
+        notes.extend(self.r.take_bad_chars().into_iter().map(StringNote::Bad));
+        Ok(s?)
     }
 
     fn read_enum(&mut self, def: &'static EnumDef) -> R<i32> {

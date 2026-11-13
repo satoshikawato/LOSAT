@@ -26,6 +26,7 @@ pub mod json;
 pub mod pssm;
 pub mod real;
 pub mod seqalign;
+pub(crate) mod visible;
 pub mod xml;
 
 pub use seqalign::SerialFormat;

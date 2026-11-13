@@ -39,8 +39,14 @@ struct Run {
 }
 
 fn unescape(field: &str) -> String {
+    // The standard error of NCBI's programs is bytes; these tests only compare it with ASCII.
+    String::from_utf8_lossy(&unescape_bytes(field)).into_owned()
+}
+
+/// A field of `expected.tsv` as the bytes it stands for.
+fn unescape_bytes(field: &str) -> Vec<u8> {
     if field == "\\e" {
-        return String::new();
+        return Vec::new();
     }
     let bytes = field.as_bytes();
     let mut out = Vec::new();
@@ -66,8 +72,7 @@ fn unescape(field: &str) -> String {
         }
         i += 2;
     }
-    // The standard error of NCBI's programs is bytes; the tests only compare it with ASCII.
-    String::from_utf8_lossy(&out).into_owned()
+    out
 }
 
 fn read_expected() -> BTreeMap<String, Run> {
@@ -472,15 +477,6 @@ fn outcome(run: &Run) -> Outcome {
     }
 }
 
-/// Files that makeblastdb reads and LOSAT does not.
-const UNSUPPORTED: [&str; 3] = [
-    // NCBI replaces a byte that is not printable in a VisibleString with '#' and logs it, and
-    // warns about a UTF8String tag for a VisibleString; LOSAT does not write those lines
-    "h_string_nonprint.asnt",
-    "h_utf8_in_options.asnt",
-    "b_utf8_options.asnb",
-];
-
 #[test]
 fn every_file_is_read_as_makeblastdb_reads_it() {
     let expected = read_expected();
@@ -520,12 +516,6 @@ fn every_file_is_read_as_makeblastdb_reads_it() {
                     "{file}: {result:?}"
                 );
             }
-            Outcome::Accepted if UNSUPPORTED.contains(&file.as_str()) => {
-                assert!(
-                    matches!(result, Err(MaskFileError::Unsupported(_))),
-                    "{file}: {result:?}"
-                );
-            }
             Outcome::Accepted => {
                 result.unwrap_or_else(|e| panic!("{file}: {e}"));
             }
@@ -540,27 +530,62 @@ fn every_file_is_read_as_makeblastdb_reads_it() {
     }
 }
 
+/// The diagnostics that the reader hands out for every file are the first lines of makeblastdb's
+/// standard error, byte for byte, and no other line of it comes from the serial reader (`(803.`):
+/// the byte stored as `#` with its stack trace, line or byte and chunk (`Bad char`), and the
+/// UTF8String warning once per run. The objects are read as `x_ProcessMaskData` reads them: up to
+/// the first error, or the first mask without a Seq-id ("Cannot get masked range Seq-id").
 #[test]
-fn unsupported_files_name_what_is_not_read() {
-    for (file, what) in [
-        (
-            "h_string_nonprint.asnt",
-            "byte 0x09 in the VisibleString member `algo-options`",
-        ),
-        (
-            "h_utf8_in_options.asnt",
-            "byte 0xc3 in the VisibleString member `algo-options`",
-        ),
-        (
-            "b_utf8_options.asnb",
-            "a UTF8String tag for the VisibleString member `algo-options`",
-        ),
-    ] {
-        let Err(MaskFileError::Unsupported(text)) = open_all(&parse_dir().join(file)) else {
-            panic!("{file}");
-        };
-        assert!(text.contains(what), "{file}: {text}");
+fn diagnostics_equal_what_makeblastdb_posts() {
+    let text = String::from_utf8(read_file(&parse_dir().join("expected.tsv"))).unwrap();
+    let mut posting = 0;
+    for line in text.lines().filter(|l| l.starts_with("RUN\t")) {
+        let f: Vec<&str> = line.split('\t').collect();
+        let (file, ncbi) = (f[1], unescape_bytes(f[5]));
+        let mut posted = Vec::new();
+        if let Ok(mut reader) = MaskFileReader::open(&parse_dir().join(file)) {
+            let mut warned = false;
+            let mut post = |reader: &mut MaskFileReader| {
+                for diagnostic in reader.take_diagnostics() {
+                    if matches!(diagnostic, MaskDiagnostic::Utf8Tag(_)) {
+                        if warned {
+                            continue;
+                        }
+                        warned = true;
+                    }
+                    posted.extend_from_slice(&diagnostic.text("makeblastdb"));
+                    posted.push(b'\n');
+                }
+            };
+            let complete = |list: &MaskList| list.masks.iter().all(|mask| mask.id.is_some());
+            loop {
+                let next = reader.next_info();
+                post(&mut reader);
+                let Ok(Some(info)) = next else { break };
+                let (mut more, mut go_on) = (info.masks.more, complete(&info.masks));
+                while go_on && more {
+                    let next = reader.next_list();
+                    post(&mut reader);
+                    (more, go_on) = match &next {
+                        Ok(list) => (list.more, complete(list)),
+                        Err(_) => (false, false),
+                    };
+                }
+                if !go_on {
+                    break;
+                }
+            }
+        }
+        assert!(
+            ncbi.starts_with(&posted),
+            "{file}: {}",
+            String::from_utf8_lossy(&posted)
+        );
+        let rest = String::from_utf8_lossy(&ncbi[posted.len()..]).into_owned();
+        assert!(!rest.contains("(803."), "{file}: {rest}");
+        posting += usize::from(!posted.is_empty());
     }
+    assert_eq!(posting, 13);
 }
 
 #[test]
@@ -1138,8 +1163,14 @@ fn text_edits_never_panic() {
 #[test]
 fn visible_strings_replace_what_is_not_printable() {
     let mut s = *b"a\tb\xe9 \x7f~\x00";
-    super::reader::fix_visible_chars(&mut s);
+    let mut notes = Vec::new();
+    crate::report::serial::visible::fix_visible_chars(
+        &mut s,
+        crate::report::serial::visible::Position::Byte(0),
+        &mut notes,
+    );
     assert_eq!(&s, b"a#b# #~#");
+    assert_eq!(notes.len(), 4);
 }
 
 /// The options of the first object, against what `blastdbcmd -info` prints for the database that
@@ -1153,7 +1184,7 @@ fn algorithm_options_equal_what_blastdbcmd_prints() {
         }
         let objects = open_all(&parse_dir().join(&file));
         if matches!(objects, Err(MaskFileError::Unsupported(_))) {
-            continue; // NCBI's text has '#' for bytes that LOSAT refuses
+            continue; // what LOSAT does not read
         }
         let options = String::from_utf8(objects.unwrap()[0].0.algo_options.clone()).unwrap();
         // The table prints an empty string as "default options used".
@@ -1186,13 +1217,6 @@ fn an_error_is_final() {
             Err(MaskFileError::Malformed { .. })
         ));
     }
-    // a refusal as well
-    let mut r = MaskFileReader::open(&parse_dir().join("h_string_nonprint.asnt")).unwrap();
-    assert!(matches!(r.next_info(), Err(MaskFileError::Unsupported(_))));
-    assert!(matches!(
-        r.next_info(),
-        Err(MaskFileError::Malformed { .. })
-    ));
     // a missing continuation
     let mut r =
         MaskFileReader::open(&parse_dir().join("h_more_true_no_continuation.asnt")).unwrap();

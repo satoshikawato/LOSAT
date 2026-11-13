@@ -38,6 +38,7 @@ use super::model::{
     Date, DateStd, Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId,
     PdbSeqId, TextseqId,
 };
+use crate::report::serial::visible::{good_visible_char, SUBST};
 
 // NCBI reference (598d8ae6): c++/include/serial/impl/objstrasnb.hpp:71-130
 // ```c++
@@ -441,16 +442,18 @@ impl<'a> Reader<'a> {
 // (`SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_READING` is 0, objistr.hpp:1163).
 // NCBI also writes a warning for each such string; this reader reports none.
 // makeblastdb stores titles already repaired this way.
+// (`report::serial::visible` has the rule and the messages, which the readers of mask files
+// post.)
 pub(crate) fn fix_visible_chars(value: &[u8]) -> Vec<u8> {
     value
         .iter()
-        .map(|&c| if (b' '..=b'~').contains(&c) { c } else { b'#' })
+        .map(|&c| if good_visible_char(c) { c } else { SUBST })
         .collect()
 }
 
 /// The number of bytes of a stored VisibleString that `fix_visible_chars` replaces.
 pub(crate) fn replaced_bytes(value: &[u8]) -> usize {
-    value.iter().filter(|c| !(b' '..=b'~').contains(c)).count()
+    value.iter().filter(|&&c| !good_visible_char(c)).count()
 }
 
 /// The `taxid` of a definition line as LOSAT keeps it: NCBI's `TTaxId` is an `int`; a value

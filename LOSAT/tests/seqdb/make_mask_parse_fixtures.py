@@ -266,6 +266,26 @@ def hand_cases():
     c["bom_before_object"] = "\xef\xbb\xbf" + ok
     c["long_comment_before_object"] = "-- " + "x" * 9000 + "\n" + ok
     c["comment_mostly_punctuation"] = "-- " + "#" * 400 + "\n" + ok
+    # Bytes that NCBI stores as '#' in a VisibleString, with an error naming the reader's stack
+    # trace, the line and the chunk of the string being read (ReplaceVisibleChar): in a Seq-id, in
+    # a second object (its lines count from where the first ended), in chunks (128 bytes, a
+    # doubled quote, a line end), after white space that the reader of a number skips without
+    # counting lines, in the strings of other Seq-ids, in a continuation, and in a second object
+    # that starts on the line where the first ended.
+    c["bad_char_seq_id"] = obj('packed-int { { from 5, to 14,  id local str "a\tb" } }')
+    c["bad_char_second_object"] = ok + (
+        "Blast-db-mask-info ::= {\n algo-id 0, algo-program windowmasker, algo-options \"q\tr\", "
+        "masks { masks { packed-int { { from 5, to 14,  id local id 3 } } }, more FALSE } }\n")
+    c["bad_char_chunks"] = obj(f"packed-int {{ {iv(5, 14)} }}",
+                               options='"' + "A" * 130 + '\x01B""\x02C\nD\x03E"')
+    c["bad_char_after_vertical_tab"] = ok.replace("algo-id 0", "algo-id\x0b\n\n 0").replace('"x"', '"\x7f"')
+    c["bad_char_seq_id_strings"] = obj(
+        'mix { int { from 5, to 14, id general { db "d\tb", tag str "t\tg" } }, packed-int { { from 1, to 2, '
+        'id genbank { name "n\tm", accession "A\t1" } } } }')
+    c["bad_char_continuation"] = obj(f"packed-int {{ {iv(5, 14)} }}", more="TRUE") + (
+        'Blast-mask-list ::= { masks { packed-int { { from 20, to 24, id local str "c\td" } } }, more FALSE }\n')
+    c["bad_char_second_object_same_line"] = ok.replace("{ algo-id", "{\n algo-id").replace(
+        '"x", masks', '"x",\n masks').rstrip("\n") + " " + ok.replace('"x"', '"u\tv"')
     # Files that makeblastdb takes for neither format ("Unknown encoding for mask data in ...").
     c["not_asn_fasta.fna"] = ">seq1 not a mask file\nACGTACGTACGT\nACGT\n"
     c["not_asn_text.txt"] = "hello\n"
@@ -341,6 +361,15 @@ def damaged_binary(dust):
     c["two_objects"] = dust + dust
     c["definite_top_long_form"] = b"\x30\x82" + (len(dust) - 4).to_bytes(2, "big") + dust[2:-2]
     c["utf8_options"] = dust.replace(b"\x1a\x1d", b"\x0c\x1d", 1)
+    # Bytes outside the visible range in the options ("at byte N", the string as it is fixed), in
+    # one object and in two; a UTF8String tag in two objects (one warning per process).
+    assert dust[0x12:0x14] == b"\x1a\x1d"
+    bad = bytearray(dust)
+    bad[0x14] = 0x09
+    bad[0x16] = 0xE9
+    c["bad_chars_options"] = bytes(bad)
+    c["bad_chars_two_objects"] = bytes(bad) + bytes(bad)
+    c["utf8_options_two_objects"] = c["utf8_options"] * 2
     c["bad_options_tag"] = dust.replace(b"\x1a\x1d", b"\x13\x1d", 1)
     c["wrong_first_tag"] = b"\x31" + dust[1:]
     c["swapped_members"] = dust.replace(b"\xa0\x80\x02\x01\x02\x00\x00\xa1\x80\x02\x01\x0a\x00\x00",

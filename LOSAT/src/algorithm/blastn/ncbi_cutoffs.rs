@@ -10,11 +10,6 @@
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::stats::KarlinParams;
 
-/// ln(2) constant used in NCBI BLAST
-/// Reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h
-/// #define NCBIMATH_LN2 0.69314718055994530941723212145818
-pub(crate) const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
-
 /// Default gap trigger bit score for nucleotide searches
 /// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:140
 /// #define BLAST_GAP_TRIGGER_NUCL 27.0
@@ -29,28 +24,9 @@ pub const CUTOFF_E_BLASTN: f64 = 0.05;
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4049
 const K_SMALL_FLOAT: f64 = 1.0e-297;
 
-/// Calculate gap_trigger raw score from bit score using UNGAPPED Karlin params.
-///
-/// NCBI reference (verbatim from blast_parameters.c:343-344):
-/// ```c
-/// gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 +
-///                          kbp->logK) / kbp->Lambda);
-/// ```
-///
-/// CRITICAL: Uses UNGAPPED params (kbp_std), NOT gapped params (kbp_gap).
-///
-/// # Arguments
-/// * `gap_trigger_bits` - Gap trigger in bits (NCBI default: 27.0 for blastn)
-/// * `ungapped_params` - UNGAPPED Karlin-Altschul parameters (kbp_std)
-///
-/// # Returns
-/// gap_trigger (raw score)
-pub fn gap_trigger_raw_score(gap_trigger_bits: f64, ungapped_params: &KarlinParams) -> i32 {
-    // NCBI: gap_trigger = (Int4)((gap_trigger_bits * NCBIMATH_LN2 + logK) / Lambda)
-    let log_k = ungapped_params.k.ln();
-    let numerator = gap_trigger_bits * NCBIMATH_LN2 + log_k;
-    (numerator / ungapped_params.lambda) as i32
-}
+/// The gap trigger's raw score from its bits and the UNGAPPED Karlin params (kbp_std): every
+/// program's one conversion (blast_parameters.c:343-344; NCBI's default for blastn is 27 bits).
+pub use crate::algorithm::tblastx::ncbi_cutoffs::gap_trigger_raw_score;
 
 /// Calculate cutoff_score_max from E-value using GAPPED Karlin params.
 ///

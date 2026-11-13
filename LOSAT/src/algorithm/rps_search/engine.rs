@@ -396,8 +396,10 @@ impl RpsRun<'_> {
             )
             .checked_mul(int_scale)
             .ok_or_else(|| scale_overflow(scale, self.program))?;
-        let gap_trigger = ((self.gap_trigger_bits * std::f64::consts::LN_2 + query.kbp_std.k.ln())
-            / query.kbp_std.lambda) as i32;
+        let gap_trigger = crate::algorithm::tblastx::ncbi_cutoffs::gap_trigger_raw_score(
+            self.gap_trigger_bits,
+            &query.kbp_std,
+        );
         Ok(RpsCutoffs {
             x_dropoff,
             word_cutoff: gap_trigger

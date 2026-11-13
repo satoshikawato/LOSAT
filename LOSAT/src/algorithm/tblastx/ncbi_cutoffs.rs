@@ -81,8 +81,9 @@ pub fn x_drop_raw_score(
 ///
 /// # Returns
 /// Raw score threshold for gap trigger (truncated to integer; a value past `Int4`, such as one of
-/// psiblast's `-gap_trigger 1e300` or `nan`, is converted as the x86-64 build of NCBI converts it,
-/// to `INT_MIN`: `core::blast_util::ncbi_int4_from_double`, as the X-drops are in `core::x_drop`)
+/// psiblast's `-gap_trigger 1e300`, `-1e300` or `-inf`, is converted as the x86-64 build of NCBI
+/// converts it, to `INT_MIN`: `core::blast_util::ncbi_int4_from_double`, as the X-drops are in
+/// `core::x_drop`)
 pub fn gap_trigger_raw_score(bit_trigger: f64, ungapped_params: &KarlinParams) -> i32 {
     // NCBI: gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
     // Note: kbp->logK = ln(K), so we use ungapped_params.k.ln()

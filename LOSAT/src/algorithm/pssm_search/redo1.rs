@@ -167,9 +167,9 @@ impl<'a> RedoRun<'a> {
     /// costs, `s_GetAlignParams`) and the query's data, from the scaled gapped block `karlin`
     /// (Lambda over the scaling factor, the K of the redo's copy) with its `log_k`, the search's
     /// unscaled gap costs, the final gapped X-drop of the search in bits (`-xdrop_gap_final` or the
-    /// protein default) and in raw score, and the PSSM the redo starts from (the matrix of NCBI's thread-local copy, which each adjustment
-    /// overwrites). psiblast's run starts from the file's PSSM; RPS-BLAST's from zeros, one run
-    /// for each profile.
+    /// protein default) and in raw score, and the PSSM the redo starts from (the matrix of NCBI's
+    /// thread-local copy, which each adjustment overwrites). psiblast's run starts from the file's
+    /// PSSM; RPS-BLAST's from zeros, one run for each profile.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2117-2133
     /// ```c

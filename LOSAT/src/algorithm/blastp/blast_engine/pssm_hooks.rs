@@ -201,7 +201,8 @@ fn psi_gapped_x_dropoffs(args: &ResolvedBlastpArgs, karlin: &PsiKarlin) -> (i32,
 /// (`sbp->kbp`), the gap trigger from `kbp_std`, the hit-saving cutoff and the gapped X-drops
 /// from `kbp_gap_psi` (`sbp->kbp_gap`). The X-drops and the gap trigger in bits are the search's
 /// (`-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final`, `-gap_trigger` or the defaults,
-/// `ResolvedBlastpArgs`), converted as blastp's are (`core::x_drop`); a gapped X-drop that NCBI's
+/// `ResolvedBlastpArgs`), converted as blastp's are (the X-drops in `core::x_drop`, the gap trigger
+/// in `tblastx::ncbi_cutoffs::gap_trigger_raw_score`); a gapped X-drop that NCBI's
 /// kernels cannot size with the PSSM's Lambda is refused before the search, as blastp refuses it
 /// with the matrix's (`core::x_drop::check_gapped_x_dropoffs`). With `-culling_limit` the
 /// subjects' lists go to the culling writer `culling` in place of the collector, as blastp's do.

@@ -1848,8 +1848,9 @@ impl<R: Read> FastaReader<R> {
         text: &[u8],
         warn: Warn<'_>,
     ) -> Result<(), ReadError> {
-        if let Some(message) = seq_data_in_title_warning(text, self.config.protein) {
-            let problem = if self.config.protein {
+        if let Some((message, protein)) = seq_data_in_title_warning(text, Some(self.config.protein))
+        {
+            let problem = if protein {
                 Problem::UnexpectedAminoAcids
             } else {
                 Problem::UnexpectedNucResidues
@@ -2334,18 +2335,30 @@ fn post_line_warning(problem: Problem, message: &[u8], warn: Warn<'_>) -> Result
 ///                 << "accidentally put in the title line?",
 /// ```
 /// Exactly one of `fAssumeNuc` and `fAssumeProt` is set, so exactly one test runs.
-pub(crate) fn seq_data_in_title_warning(text: &[u8], protein: bool) -> Option<&'static [u8]> {
+///
+/// `assumed_protein` is `Some(true)` for `fAssumeProt`, `Some(false)` for `fAssumeNuc` and
+/// `None` for neither (convert2blastmask's reader), which makes both checks: the amino acid
+/// check goes on from where the nucleotide check stopped, at a byte that is no unambiguous
+/// nucleotide, and the bytes after it are letters, so it is the check of the last 50 bytes.
+/// The warning and whether it is the amino acid one.
+pub(crate) fn seq_data_in_title_warning(
+    text: &[u8],
+    assumed_protein: Option<bool>,
+) -> Option<(&'static [u8], bool)> {
     let length = text.len();
-    if !protein {
-        if length > 20
-            && text[length - 20..]
-                .iter()
-                .all(|byte| matches!(byte, b'A' | b'C' | b'G' | b'T' | b'a' | b'c' | b'g' | b't'))
-        {
-            return Some(b"FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?");
-        }
-    } else if length > 50 && text[length - 50..].iter().all(u8::is_ascii_alphabetic) {
-        return Some(b"FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?");
+    if assumed_protein != Some(true)
+        && length > 20
+        && text[length - 20..]
+            .iter()
+            .all(|byte| matches!(byte, b'A' | b'C' | b'G' | b'T' | b'a' | b'c' | b'g' | b't'))
+    {
+        return Some((b"FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?", false));
+    }
+    if assumed_protein != Some(false)
+        && length > 50
+        && text[length - 50..].iter().all(u8::is_ascii_alphabetic)
+    {
+        return Some((b"FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?", true));
     }
     None
 }

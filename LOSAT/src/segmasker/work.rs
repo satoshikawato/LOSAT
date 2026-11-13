@@ -288,7 +288,7 @@ fn writer(outfmt: &str, window: i32, locut: f64, hicut: f64) -> MaskWriter {
             cpp_default_double(locut),
             cpp_default_double(hicut)
         );
-        MaskWriter::mask_info(serial, 1, FilterProgram::Seg, parameters.into_bytes())
+        MaskWriter::mask_info(Some(serial), 1, FilterProgram::Seg, parameters.into_bytes())
     };
     match outfmt {
         "interval" => MaskWriter::Interval,

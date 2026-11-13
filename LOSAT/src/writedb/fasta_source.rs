@@ -198,6 +198,14 @@ impl<R: Read> FastaBioseqSource<R> {
                 self.reader = None;
                 return Err(SourceError::out_of_memory());
             }
+            Err(ReadError::Ncbi(exception)) => {
+                // Only convert2blastmask's reader throws other exceptions.
+                self.reader = None;
+                return Err(SourceError {
+                    message: exception.get_msg().to_string(),
+                    out_of_memory: false,
+                });
+            }
             Err(ReadError::Parse(error)) => {
                 self.reader = None;
                 let message = error.message;
@@ -211,7 +219,7 @@ impl<R: Read> FastaBioseqSource<R> {
                 });
             }
         };
-        let is_aa = reader.is_protein();
+        let is_aa = record.is_aa;
         // With `-parse_seqids` the definition lines depend on the ids that
         // `AddSequences` edits first: the writer builds them (`writedb::deflines`).
         let (title, parsed) = if reader.parses_ids() {

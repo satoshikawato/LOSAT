@@ -13,6 +13,8 @@
 //!   cases of `tests/seqdb/mask_ids`, with `-parse_seqids`, in the default format version 5.
 //! * `the_command_line_reads_the_options_as_makeblastdb_does`: a few answers of `x_ProcessMaskData`
 //!   to its options (the rest are in `tests_e2e`).
+//! * `errors_of_makeblastdb_come_before_the_refusal_of_masks_ordered_by_address`: the 5 cases of
+//!   `tests/seqdb/mask_order` in format versions 5 and 4 (`expected/<case>.v<N>.{rc,stderr,stdout,files}`).
 //!
 //! The mask and input files are named by absolute paths (a test cannot change the directory of the
 //! process); the directory is cut off the messages, which then are those of a run in the directory
@@ -407,6 +409,83 @@ fn a_sample_of_the_mask_ids_cases_runs_through_the_command_line() {
             );
         }
     }
+}
+
+/// The runs of `tests/seqdb/mask_order` (review 2 of M4a-1, probes t1, t1b, t3): masks of
+/// `gi|5` and `gb|AY000005.1|` (one packed number) that NCBI writes in the order of the addresses
+/// of their handles, and an error of makeblastdb that does not depend on that order later in the
+/// run (a range of the same sequence or of a later algorithm past the end, a later sequence, a
+/// later input file without sequences). NCBI's order never reaches a file there, so LOSAT gives
+/// makeblastdb's exit status, messages, log and files. Where nothing else fails (`tie`), LOSAT
+/// refuses at the close, after the log of the whole build, and leaves the files of NCBI's failed
+/// build of the same input (`oob_later_sequence`).
+#[test]
+fn errors_of_makeblastdb_come_before_the_refusal_of_masks_ordered_by_address() {
+    let dir = seqdb_fixtures().join("mask_order");
+    let expected_dir = dir.join("expected");
+    let (mut compared, mut refused) = (0, 0);
+    for line in read(&dir, "cases.tsv").lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let (name, inputs, masks) = (fields[0], fields[1], fields[2]);
+        for version in ["5", "4"] {
+            let stem = format!("{name}.v{version}");
+            let expected = |extension: &str| read(&expected_dir, &format!("{stem}.{extension}"));
+            let tmp = TempDir::new("mask-order");
+            let in_files: Vec<_> = inputs.split(' ').map(|file| dir.join(file)).collect();
+            let words: Vec<String> = [
+                "-in",
+                &in_words(&in_files),
+                "-dbtype",
+                "nucl",
+                "-parse_seqids",
+                "-title",
+                "in.fna",
+                "-mask_data",
+                &mask_words(&dir, masks),
+                "-out",
+                &tmp.base("db"),
+                "-blastdb_version",
+                version,
+            ]
+            .map(str::to_string)
+            .to_vec();
+            let run = run_words(&words, "Oct 20, 2026  1:00 PM", &[&dir]);
+            let left: String = files_named(&tmp.0, "db.")
+                .iter()
+                .map(|file| format!("{file}\n"))
+                .collect();
+            let context = format!("{stem}: {}", run.stderr);
+            assert_eq!(run.stdout, expected("stdout"), "{stem}: standard output");
+            if name == "tie" {
+                // NCBI builds it, in the order of the addresses.
+                assert_eq!(expected("rc"), "0\n");
+                assert_eq!(run.status, 1, "{context}");
+                assert_eq!(
+                    run.stderr,
+                    "losat makeblastdb: the masks of the Seq-ids gi|5 and gb|AY000005.1| of the \
+                     sequence gi|5 are written in an order that NCBI takes from the memory \
+                     addresses of their handles (equal packed numbers); LOSAT does not write this \
+                     database\n",
+                    "{stem}"
+                );
+                assert_eq!(
+                    left,
+                    read(
+                        &expected_dir,
+                        &format!("oob_later_sequence.v{version}.files")
+                    ),
+                    "{stem}: files left"
+                );
+                refused += 1;
+            } else {
+                assert_eq!(format!("{}\n", run.status), expected("rc"), "{context}");
+                assert_eq!(run.stderr, expected("stderr"), "{stem}: standard error");
+                assert_eq!(left, expected("files"), "{stem}: files left");
+                compared += 1;
+            }
+        }
+    }
+    assert_eq!((compared, refused), (8, 2));
 }
 
 #[test]

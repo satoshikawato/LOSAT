@@ -29,10 +29,13 @@
 //! included; `giim` Seq-ids find their masks in the order of the mask files, as NCBI's Giim tree.
 //!
 //! What is refused (`WriteDbError::Unsupported`: "losat makeblastdb: ...", status 1, naming the
-//! Seq-ids; `range_set` has the rule and NCBI's lines): only what NCBI orders by memory addresses,
-//! ranges of two different handles with the same `m_Packed` written on one strand of a sequence
-//! in an order that matters (`CSeq_id_Handle::operator<` falls back to the addresses of the infos,
-//! seq_id_handle.hpp:193-207; two `giim` handles of one number are such a pair). The environment
+//! Seq-ids and the sequence; `range_set` has the rule and NCBI's lines): only what NCBI orders by
+//! memory addresses, ranges of two different handles with the same `m_Packed` written on one
+//! strand of a sequence in an order that matters (`CSeq_id_Handle::operator<` falls back to the
+//! addresses of the infos, seq_id_handle.hpp:193-207; two `giim` handles of one number are such a
+//! pair). That order shows only in the files of a build that succeeds, so the refusal comes at the
+//! close of such a build (`BuildDatabase::end_build`), after every error of NCBI that the rest of
+//! the run gives, and leaves the files that an error of NCBI's build there leaves. The environment
 //! variables `OBJECTS_PACK_TEXTID` and `OBJECTS_PACK_GENERAL` (seq_id_tree.cpp:692-707) change the
 //! handles and are refused at the start of the program (`blastinput::ncbi_environment`).
 //!

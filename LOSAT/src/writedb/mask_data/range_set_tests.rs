@@ -19,20 +19,34 @@ fn plain(ranges: &[(u32, u32)]) -> Vec<MaskPart> {
     ranges.iter().map(|&(a, b)| iv(a, b, None)).collect()
 }
 
-/// The offsets of the sequence with `ids` for algorithm 30 after `masks` are inserted in order.
+/// The offsets of the sequence with `ids` for algorithm 30 after `masks` are inserted in order,
+/// and the Seq-ids named when NCBI's order of them is the addresses' (`address_ordered`).
+fn looked_up(
+    masks: &[(ParsedSeqId, Vec<MaskPart>)],
+    ids: &[ParsedSeqId],
+) -> (Vec<(u32, u32)>, Option<String>) {
+    let mut set = MaskedRangeSet::new();
+    for (id, parts) in masks {
+        set.insert(30, id.clone(), parts.clone()).unwrap();
+    }
+    let found = set.get_ranges(ids);
+    let offsets = found
+        .ranges
+        .first()
+        .map(|r| r.offsets.clone())
+        .unwrap_or_default();
+    (offsets, found.address_ordered)
+}
+
+/// `looked_up`'s offsets where NCBI's order is decided, else the Seq-ids it names.
 fn offsets(
     masks: &[(ParsedSeqId, Vec<MaskPart>)],
     ids: &[ParsedSeqId],
-) -> Result<Vec<(u32, u32)>, WriteDbError> {
-    let mut set = MaskedRangeSet::new();
-    for (id, parts) in masks {
-        set.insert(30, id.clone(), parts.clone())?;
+) -> Result<Vec<(u32, u32)>, String> {
+    match looked_up(masks, ids) {
+        (offsets, None) => Ok(offsets),
+        (_, Some(seq_ids)) => Err(seq_ids),
     }
-    Ok(set
-        .get_ranges(ids)?
-        .first()
-        .map(|r| r.offsets.clone())
-        .unwrap_or_default())
 }
 
 fn parse_ranges(text: &str) -> Vec<Range> {
@@ -49,7 +63,8 @@ fn parse_ranges(text: &str) -> Vec<Range> {
 
 /// `stl_sort` and its heap fallback leave the ranges in the order of libstdc++ (`std::sort`,
 /// `std::partial_sort` over all of them), equivalent empty ranges included
-/// (`tests/seqdb/stl_sort/README.md`).
+/// (`tests/seqdb/stl_sort/README.md`). The last two cases reach introsort's depth limit, so
+/// `stl_sort` heap-sorts 97 and 123 of their ranges, empty ones among them.
 #[test]
 fn stl_sort_gives_libstdcxx_s_permutations() {
     let text = include_str!("../../../tests/seqdb/stl_sort/cases.txt");
@@ -75,7 +90,7 @@ fn stl_sort_gives_libstdcxx_s_permutations() {
         assert_eq!(heap, parse_ranges(triple[2].strip_prefix("HEAP").unwrap()));
         cases += 1;
     }
-    assert_eq!(cases, 6);
+    assert_eq!(cases, 8);
 }
 
 /// Empty ranges (`to < from`, `to` = 4294967295) are merged into the next range or written as an
@@ -171,16 +186,19 @@ fn handles_that_the_address_orders_are_refused_only_on_one_strand() {
         (gb.clone(), vec![iv(30, 40, Some(2))]),
     ];
     assert_eq!(offsets(&p4, &ids).unwrap(), [(10, 21), (30, 41)]);
-    // Both on the plus strand (cases.tsv n59/n60: the order follows the addresses).
+    // Both on the plus strand (cases.tsv n59/n60: the order follows the addresses): noted, and
+    // written in LOSAT's order (the refusal comes at the close of the build).
     let tie = [
         (gi.clone(), plain(&[(10, 40)])),
         (gb.clone(), plain(&[(50, 60)])),
     ];
-    let error = offsets(&tie, &ids).unwrap_err();
-    assert!(matches!(error, WriteDbError::Unsupported(_)), "{error:?}");
-    let text = error.to_string();
-    assert!(text.starts_with("losat makeblastdb: "), "{text}");
-    assert!(text.contains("gi|5 and gb|AY000005.1|"), "{text}");
+    assert_eq!(
+        looked_up(&tie, &ids),
+        (
+            vec![(10, 41), (50, 61)],
+            Some("gi|5 and gb|AY000005.1|".to_string())
+        )
+    );
     // The same ranges from both: either order writes the same.
     let same = [
         (gi.clone(), plain(&[(10, 40)])),
@@ -228,8 +246,13 @@ fn giim_handles_follow_the_order_of_the_masks() {
         one(giim(Some("x")), &[(10, 40)]),
         one(giim(None), &[(50, 60)]),
     ];
-    let error = offsets(&n41, &seq).unwrap_err();
-    assert!(matches!(error, WriteDbError::Unsupported(_)), "{error:?}");
+    assert_eq!(
+        looked_up(&n41, &seq),
+        (
+            vec![(10, 41), (50, 61)],
+            Some("gim|7 and gim|7".to_string())
+        )
+    );
     // n65: the same range in both: either address order writes NCBI's 10-41;10-41;.
     let n65 = [
         one(giim(Some("x")), &[(10, 40)]),
@@ -243,15 +266,15 @@ fn giim_handles_follow_the_order_of_the_masks() {
         one(giim(None), &[(10, 40)]),
         one(giim(Some("y")), &[(70, 80)]),
     ];
-    let error = offsets(&n66, &seq).unwrap_err();
-    assert!(matches!(error, WriteDbError::Unsupported(_)), "{error:?}");
+    assert!(offsets(&n66, &seq).is_err());
     // n44: two algorithms: each finds its own mask under the first handle.
     let mut set = MaskedRangeSet::new();
     set.insert(11, giim(Some("x")), plain(&[(10, 40)])).unwrap();
     set.insert(12, giim(None), plain(&[(50, 60)])).unwrap();
-    let ranges = set.get_ranges(&seq).unwrap();
-    assert_eq!(ranges[0].offsets, [(10, 41)]);
-    assert_eq!(ranges[1].offsets, [(50, 61)]);
+    let found = set.get_ranges(&seq);
+    assert_eq!(found.address_ordered, None);
+    assert_eq!(found.ranges[0].offsets, [(10, 41)]);
+    assert_eq!(found.ranges[1].offsets, [(50, 61)]);
 }
 
 /// A negative algorithm id is LOSAT's refusal (NCBI's vector cannot take it).

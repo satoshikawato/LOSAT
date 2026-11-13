@@ -135,18 +135,20 @@ pub(super) fn ncbi_split(s: &str) -> Vec<&str> {
 // ```
 /// The named values of `Blast-filter-program`, with their names as NCBI prints them: the one
 /// table of LOSAT (the mask writers of the masking tools, makeblastdb's mask reader and
-/// registry, and this reader of the column).
-pub(crate) const FILTER_PROGRAMS: [(&str, i32); 7] = [
-    ("not-set", 0),
-    ("dust", 10),
-    ("seg", 20),
-    ("windowmasker", 30),
-    ("repeat", 40),
-    ("other", 100),
-    ("max", 255),
-];
+/// registry, and this reader of the column), made from [`FilterProgram`], so a name or value
+/// belongs to its variant whatever the order of the variants.
+pub(crate) const FILTER_PROGRAMS: [(&str, i32); FilterProgram::ALL.len()] = {
+    let mut table = [("", 0); FilterProgram::ALL.len()];
+    let mut i = 0;
+    while i < table.len() {
+        let program = FilterProgram::ALL[i];
+        table[i] = (program.name(), program.value());
+        i += 1;
+    }
+    table
+};
 
-/// A named value of `Blast-filter-program`, in the order of [`FILTER_PROGRAMS`].
+/// A named value of `Blast-filter-program`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FilterProgram {
     NotSet,
@@ -158,13 +160,51 @@ pub(crate) enum FilterProgram {
     Max,
 }
 
+// Every variant is in `FilterProgram::ALL`, once, in the order of the enum: the discriminant of
+// the last one gives the count, and each position holds the variant of that discriminant.
+const _: () = {
+    assert!(FilterProgram::ALL.len() == FilterProgram::Max as usize + 1);
+    let mut i = 0;
+    while i < FilterProgram::ALL.len() {
+        assert!(FilterProgram::ALL[i] as usize == i);
+        i += 1;
+    }
+};
+
 impl FilterProgram {
+    /// Every variant, in blastdb.asn's order (the rows of [`FILTER_PROGRAMS`]).
+    pub(crate) const ALL: [FilterProgram; 7] = [
+        FilterProgram::NotSet,
+        FilterProgram::Dust,
+        FilterProgram::Seg,
+        FilterProgram::Windowmasker,
+        FilterProgram::Repeat,
+        FilterProgram::Other,
+        FilterProgram::Max,
+    ];
+
     pub(crate) const fn name(self) -> &'static str {
-        FILTER_PROGRAMS[self as usize].0
+        match self {
+            FilterProgram::NotSet => "not-set",
+            FilterProgram::Dust => "dust",
+            FilterProgram::Seg => "seg",
+            FilterProgram::Windowmasker => "windowmasker",
+            FilterProgram::Repeat => "repeat",
+            FilterProgram::Other => "other",
+            FilterProgram::Max => "max",
+        }
     }
 
     pub(crate) const fn value(self) -> i32 {
-        FILTER_PROGRAMS[self as usize].1
+        match self {
+            FilterProgram::NotSet => 0,
+            FilterProgram::Dust => 10,
+            FilterProgram::Seg => 20,
+            FilterProgram::Windowmasker => 30,
+            FilterProgram::Repeat => 40,
+            FilterProgram::Other => 100,
+            FilterProgram::Max => 255,
+        }
     }
 }
 

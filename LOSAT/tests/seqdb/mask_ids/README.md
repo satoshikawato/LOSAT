@@ -13,8 +13,9 @@ of `seqid::mask_handle` that reproduce it.
   (or a few) in the Seq-loc of each.
 - Fates: `match` = LOSAT gives NCBI's answer; `refuse` = NCBI's answer depends on memory addresses
   (two handles with the same packed number write different ranges on one strand: `giim` handles in
-  n41, n42, n66, `gi`/`gb` in n59, n60, `lcl`/`gnl` in n61, n62) and LOSAT stops with its refusal
-  (status 1) that names the Seq-ids; `env:...` = NCBI's answer needs
+  n41, n42, n66, `gi`/`gb` in n59, n60, `lcl`/`gnl` in n61, n62) and LOSAT ends the build with its
+  refusal at the close (status 1), naming the Seq-ids and the sequence (`../mask_order` has the
+  errors of makeblastdb that come first); `env:...` = NCBI's answer needs
   `OBJECTS_PACK_TEXTID=0` or `OBJECTS_PACK_GENERAL=0`, which LOSAT refuses (not run).
 - The answer is `NOMATCH` (makeblastdb exits 0 and prints "No sequences matched any of the masks
   provided.") or the sequences that have a mask: `oid|ranges of each algorithm`, joined by a space; a

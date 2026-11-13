@@ -1352,20 +1352,23 @@ mod tests {
     }
 
     // NCBI's unit-test PSSMs: one of frequency ratios only whose query has a gi and a swissprot
-    // Seq-id (refused for its ids) and one without a query (NCBI's application stops with a C++
-    // exception); both refused before the search.
+    // Seq-id, read (line RG Q1b; NCBI BLAST+ 2.17.0 psiblast: `Query= P01013 Gene X protein
+    // (Ovalbumin-related)`, the warning label `129295`, the first id), and one without a query
+    // (NCBI's application stops with a C++ exception), refused before the search.
     #[test]
-    fn ncbis_unit_test_pssms_are_refused() {
+    fn ncbis_unit_test_pssms_are_read_or_refused() {
         let read = |name: &str| {
             crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(name)).unwrap()
         };
-        let error = psi_search_of(read("pssm/pssm_freq_ratios.asn.gz"))
-            .unwrap_err()
-            .to_string();
-        assert!(
-            error.contains("whose Seq-id is not one local id"),
-            "{error}"
-        );
+        let search = psi_search_of(read("pssm/pssm_freq_ratios.asn.gz")).unwrap();
+        for parse_deflines in [false, true] {
+            let query = search.query_record(parse_deflines);
+            assert_eq!(
+                &*query.query_line(),
+                b"P01013 Gene X protein (Ovalbumin-related)"
+            );
+            assert_eq!(query.warning_id(), b"129295");
+        }
         let error = psi_search_of(read("pssm/pssm_zero_fratios.asn.gz"))
             .unwrap_err()
             .to_string();

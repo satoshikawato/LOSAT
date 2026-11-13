@@ -44,16 +44,6 @@ pub(crate) struct Tool {
     pub(crate) post_prefix: Option<&'static str>,
 }
 
-impl Tool {
-    /// LOSAT's refusal of the option `word`.
-    pub(crate) fn unsupported_option(&self, word: &str) -> String {
-        format!(
-            "the NCBI BLAST+ option {word} is not supported by LOSAT's {}",
-            self.refusal_name
-        )
-    }
-}
-
 /// `Tool::dependencies` of a program that sets none.
 pub(crate) fn no_dependencies() -> Vec<(&'static str, Dep, &'static str)> {
     Vec::new()
@@ -299,7 +289,7 @@ pub(crate) type Body = fn(
 /// argument error prints the usage and a line of `=` on stderr and NCBI's report of the
 /// exception as diagnostics. LOSAT's refusals come where NCBI would start the work they stand
 /// for, before anything is written: `-conffile` without the command line's application start
-/// (which loads its file), `-xmlhelp` where the reader takes it, and `-dryrun` without that start; with it, `-dryrun`
+/// (which loads its file), `-xmlhelp` where the reader takes it without that start, and `-dryrun` without it; with it, `-dryrun`
 /// ends the run with exit status 0 after the arguments and the settings. Then `body` runs.
 pub(crate) fn run_with(
     tool: &'static Tool,
@@ -381,6 +371,18 @@ pub(crate) fn run_with(
         Err(ArgsError::Help) => {
             let _ = out.write_all(tool.help.as_bytes());
             return 0;
+        }
+        // NCBI's XML, which the command line's entry writes; the library API writes no XML
+        // (`cli::xml_help_refusal`, line RG DECISIONS E2x-1). The reader refuses no argument
+        // of NCBI's by name, so the XML is NCBI's whole (`ncbi_xmlhelp::print`).
+        Err(ArgsError::XmlHelp) => {
+            match start.and_then(|_| crate::ncbi_xmlhelp::print(tool.program, |_| false)) {
+                Some(xml) => {
+                    let _ = out.write_all(xml.as_bytes());
+                    return 0;
+                }
+                None => return diag.refuse(&crate::cli::xml_help_refusal(tool.refusal_name)),
+            }
         }
         // `eNoValue` (which prints no usage) is not raised by the reader.
         Err(ArgsError::Invalid(error)) => return diag.report_arg_exception(&error, None),

@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.19
+- Version: 1.20
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -33,7 +33,9 @@
   Owner-delegated, the same standing instruction); 1.19 2026-11-13 (the full versions run in every
   program; a failed write of a version or help is dropped as NCBI's, and exception 10 covers a
   closed pipe there; line RG item E3, RG DECISIONS E3-1 to E3-4, Owner-delegated, the same
-  standing instruction)
+  standing instruction); 1.20 2026-11-14 (`-xmlhelp` runs on the command line of every program:
+  NCBI's XML without the arguments that LOSAT refuses by name, exception 1; line RG item E2x,
+  the Owner's choice of 2026-11-13, RG DECISIONS E2x-1)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -60,7 +62,11 @@ BLAST+.
    (unknown option, missing value, a value that does not parse, a value outside a
    declared range such as `-word_size 3`) prints LOSAT's parser message and exits with
    code 2; NCBI prints its USAGE text and the `CArgException` and exits with code 1.
-   `-help`, `-help-full` (since version 1.17) and `-h` print LOSAT's help text. Errors that NCBI raises after parsing the
+   `-help`, `-help-full` (since version 1.17) and `-h` print LOSAT's help text. `-xmlhelp`
+   (since version 1.20) prints NCBI BLAST+ 2.17.0's XML of the program's arguments without the
+   arguments that LOSAT refuses by name and the dependencies that name them: the definitions of
+   the arguments that LOSAT runs are NCBI's (the Owner's choice of 2026-11-13, RG DECISIONS
+   E2x-1). Errors that NCBI raises after parsing the
    arguments (`BLAST query/options error: ...`, input errors such as a missing
    `-subject`, engine errors) are not covered and must match NCBI.
 2. **Thread count with `-subject`.** LOSAT searches with the requested `-num_threads`.
@@ -264,7 +270,11 @@ BLAST+.
   (`ncbiapp.cpp:685-697`; NCBI's makeblastdb adds its hidden `-randomize`, which LOSAT refuses, so
   LOSAT's text has no hidden option to add). The reader stops at `-h`, `-help` and `-help-full` as
   NCBI's (`ncbiargs.cpp:2840-2852`): an argument after one is not read. `-xmlhelp` (in an option's
-  place) and the full versions stay refused, in makeblastdb too (line RG item E2). The library API
+  place) and the full versions stay refused, in makeblastdb too (line RG item E2); since version
+  1.20 `-xmlhelp` is not refused on the command line (exception 1): it stops the reader as `-help`
+  does and prints NCBI's XML without the arguments refused by name (`ncbiapp.cpp:685-690`,
+  `ncbiargs.cpp:3870-3950`), and the library API and the Web engine refuse it, in every program
+  (line RG item E2x). The library API
   answers `-help-full` as `-help` (the help text in its error), and the Web app and ABI v1's BLASTX
   and TBLASTN refuse it with their other help words. Since version 1.19 the full versions are no
   longer refused: every program prints `-version-full`, `-version-full-xml` and

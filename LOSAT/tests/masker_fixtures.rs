@@ -172,8 +172,9 @@ fn convert2blastmask_gives_ncbis_bytes() {
 
 // `run_dustmasker` and `run_segmasker` are the command line's run without its application start,
 // which reads the file of `-conffile` and ends `-dryrun` (`ncbi_app::run_with`): the library
-// refuses those two words, as `run_blastdbcmd` does. The example ends every failure with exit
-// status 1. The rows of `program`'s table whose run through the library differs.
+// refuses those two words, as `run_blastdbcmd` does, and `-xmlhelp`, whose XML only the command
+// line writes (line RG DECISIONS E2x-1). The example ends every failure with exit status 1. The
+// rows of `program`'s table whose run through the library differs.
 fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Vec<String> {
     let example = example_binary("library_command_line");
     let mut differ = Vec::new();
@@ -186,6 +187,15 @@ fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Ve
                 .any(|given| given == word || given.starts_with(&format!("{word}=")))
         });
         let expected = match word {
+            None if case.words.iter().any(|given| given == "-xmlhelp") => {
+                refused += 1;
+                let text = format!(
+                    "Error: the NCBI C++ Toolkit option -xmlhelp runs on the command line of \
+                     LOSAT's {refusal_name} only: the library API and the Web engine do not write \
+                     NCBI's XML description of the arguments\n"
+                );
+                (Vec::new(), text.into_bytes(), 1)
+            }
             Some(word) => {
                 refused += 1;
                 let text = format!(

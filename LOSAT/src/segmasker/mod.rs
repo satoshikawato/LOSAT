@@ -297,16 +297,16 @@ mod tests {
         );
     }
 
-    // NCBI's toolkit option that LOSAT's segmasker refuses, as dustmasker and blastdbcmd do.
+    // The library run refuses `-xmlhelp`, which the command line answers with NCBI's XML, as
+    // dustmasker's and blastdbcmd's (line RG DECISIONS E2x-1).
     #[test]
-    fn toolkit_options_are_refused_as_dustmasker_refuses_them() {
+    fn the_library_refuses_xmlhelp_as_dustmasker_does() {
         assert_eq!(
             run_words(&["-xmlhelp"], b""),
             (
                 1,
                 String::new(),
-                "Error: the NCBI BLAST+ option -xmlhelp is not supported by LOSAT's SEGMASKER\n"
-                    .to_string()
+                format!("Error: {}\n", crate::cli::xml_help_refusal("SEGMASKER"))
             )
         );
     }

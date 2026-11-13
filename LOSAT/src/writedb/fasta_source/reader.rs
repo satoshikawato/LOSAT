@@ -697,6 +697,8 @@ struct RecordState {
     /// `Guessed`): `Some(true)` for a protein, `Some(false)` for a nucleotide, set by
     /// `ParseDefLine` from the ids (`xSetSeqMol`); `None` while it is not set.
     mol: Option<bool>,
+    /// `CBioseq::IsAa()` of the record that `assemble_seq` assembled last (`Record::is_aa`).
+    is_aa: bool,
     /// `m_MaskRangeStart` (`kInvalidSeqPos` is `None`).
     mask_start: Option<u32>,
     /// `CMaskFromFasta::m_mask`.
@@ -780,6 +782,7 @@ impl<R: Read> FastaReader<R> {
                 local_id: 0,
                 bad_positions: Vec::new(),
                 mol: None,
+                is_aa: false,
                 mask_start: None,
                 masks: Vec::new(),
             },
@@ -1032,14 +1035,14 @@ impl<R: Read> FastaReader<R> {
             )));
         }
 
-        let (inst, is_aa) = state.assemble_seq(self.lines.line_number(), warn)?;
+        let inst = state.assemble_seq(self.lines.line_number(), warn)?;
         Ok(Record {
             local_id: state.local_id,
             ids: std::mem::take(&mut state.ids),
             hist_old_id: state.hist_old_id.take(),
             defline_field: std::mem::take(&mut state.defline_field),
             title_descr: state.title_descr.take(),
-            is_aa,
+            is_aa: state.is_aa,
             inst,
         })
     }
@@ -1585,8 +1588,25 @@ impl RecordState {
         line_number: u64,
         warn: ReaderWarn<'_>,
     ) -> Result<(), ReadError> {
+        if self.flags.mask_from_fasta {
+            self.parse_data_line_of::<true>(s, raw_length, line_number, warn)
+        } else {
+            self.parse_data_line_of::<false>(s, raw_length, line_number, warn)
+        }
+    }
+
+    /// `parse_data_line` with `ReaderFlags::mask_from_fasta` as `MASK_FROM_FASTA`, so that the
+    /// other readers' lines take no step of convert2blastmask's masks.
+    #[inline(always)]
+    fn parse_data_line_of<const MASK_FROM_FASTA: bool>(
+        &mut self,
+        s: &[u8],
+        raw_length: usize,
+        line_number: u64,
+        warn: ReaderWarn<'_>,
+    ) -> Result<(), ReadError> {
         // `CMaskFromFasta::ParseDataLine`: an interval line is read as the residue `A`.
-        let s = if self.flags.mask_from_fasta && s[0].is_ascii_digit() {
+        let s = if MASK_FROM_FASTA && s[0].is_ascii_digit() {
             self.parse_interval(s)?;
             &b"A"[..]
         } else {
@@ -1615,7 +1635,9 @@ impl RecordState {
                 SPACE => {}
                 COMMENT => break,
                 GAP => {
-                    self.close_mask();
+                    if MASK_FROM_FASTA {
+                        self.close_mask();
+                    }
                     let run = 1 + s[pos + 1..]
                         .iter()
                         .position(|&byte| byte != c)
@@ -1633,7 +1655,7 @@ impl RecordState {
                         .iter()
                         .position(|&byte| actions[byte as usize] < RESIDUE_MIN)
                         .unwrap_or(s.len() - pos - 1);
-                    if self.flags.mask_from_fasta {
+                    if MASK_FROM_FASTA {
                         self.mask_run(&s[pos..pos + run]);
                     }
                     self.seq_data
@@ -2314,7 +2336,7 @@ impl RecordState {
         &mut self,
         line_number: u64,
         warn: ReaderWarn<'_>,
-    ) -> Result<(SeqInst, bool), ReadError> {
+    ) -> Result<SeqInst, ReadError> {
         self.close_gap(false, self.seq_data.len(), 0);
         self.close_mask();
         let is_aa = match self.flags.molecule {
@@ -2322,6 +2344,7 @@ impl RecordState {
             Molecule::Nucleotide => false,
             Molecule::Guessed => self.assign_mol_type(line_number)?,
         };
+        self.is_aa = is_aa;
 
         let titles = std::mem::take(&mut self.titles);
         for title in &titles {
@@ -2333,12 +2356,9 @@ impl RecordState {
         let length = self.seq_data.len() as u64 + self.total_gap_length;
         let seq_pos_length = u64::from(length as u32);
         if self.flags.build_db_length_limit && seq_pos_length > i32::MAX as u64 {
-            return Ok((
-                SeqInst::TooLong {
-                    length: seq_pos_length,
-                },
-                is_aa,
-            ));
+            return Ok(SeqInst::TooLong {
+                length: seq_pos_length,
+            });
         }
         if length != seq_pos_length {
             // The gaps stay a delta when they are parsed, or when their sum wraps to 0 (the
@@ -2353,14 +2373,11 @@ impl RecordState {
                 }
                 _ => PastSeqPosForm::Residues,
             };
-            return Ok((
-                SeqInst::PastSeqPos {
-                    length,
-                    seq_pos_length,
-                    form,
-                },
-                is_aa,
-            ));
+            return Ok(SeqInst::PastSeqPos {
+                length,
+                seq_pos_length,
+                form,
+            });
         }
 
         if !self.flags.parse_gaps && self.total_gap_length > 0 {
@@ -2393,11 +2410,11 @@ impl RecordState {
                     line_number,
                 )));
             }
-            return Ok((SeqInst::Virtual, is_aa));
+            return Ok(SeqInst::Virtual);
         }
         if is_aa {
             let seq_data = SeqData::Ncbieaa(std::mem::take(&mut self.seq_data));
-            return Ok((SeqInst::Raw { length, seq_data }, is_aa));
+            return Ok(SeqInst::Raw { length, seq_data });
         }
 
         let mut pieces = Vec::new();
@@ -2435,17 +2452,14 @@ impl RecordState {
                 },
                 DeltaSeq::LocNull | DeltaSeq::Gap { .. } => SeqData::Other,
             };
-            return Ok((SeqInst::Raw { length, seq_data }, is_aa));
+            return Ok(SeqInst::Raw { length, seq_data });
         }
         let residues = std::mem::take(&mut self.seq_data);
-        Ok((
-            SeqInst::Delta {
-                length,
-                residues,
-                pieces,
-            },
-            is_aa,
-        ))
+        Ok(SeqInst::Delta {
+            length,
+            residues,
+            pieces,
+        })
     }
 
     /// `ParseTitle`: the reader's warning about residues at the end of a title, and the

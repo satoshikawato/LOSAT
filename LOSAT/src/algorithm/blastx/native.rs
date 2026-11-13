@@ -401,11 +401,7 @@ fn run_inner(
     // NCBI sets up a query batch (`ApplicationSettings::matrix_file`): the first batch is refused
     // then (`query_setup::matrix_error_message`), and a run without a batch reads no file.
     if let Ok(options) = &mut resolution {
-        if options.unknown_matrix {
-            options.matrix_file = settings
-                .matrix_file(&options.matrix)
-                .map_err(anyhow::Error::msg)?;
-        }
+        options.find_matrix_file(&settings.matrix_search)?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3157-3165
     // ```c++

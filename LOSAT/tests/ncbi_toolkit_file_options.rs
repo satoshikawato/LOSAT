@@ -574,3 +574,62 @@ fn losats_refusals_stay_on_the_terminal() {
         .contains("not supported by LOSAT"));
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// No NCBI counterpart: LOSAT refuses the settings that change NCBI's output (here
+/// `BL2SEQ_LEGACY` and `DIAG_POST_LEVEL` in the environment, `[BLAST] LONG_SEQID` in the
+/// `-conffile` file) after the start, before the run, dry run or not. A library call with
+/// `-logfile`, `-conffile` or `-dryrun` runs the start at its beginning and refuses them alike:
+/// its error is the command line's text after `Error: `, and its `-logfile` file is the command
+/// line's (line RG item E1w-2).
+#[test]
+fn the_librarys_start_refuses_what_the_command_line_refuses() {
+    let dir = scratch("librefusal");
+    fs::write(dir.join("c.ini"), "[BLAST]\nLONG_SEQID=1\n").unwrap();
+    let log = dir.join("log.txt");
+    for (program, search) in SEARCHES {
+        for (extra, envs) in [
+            (&["-logfile", "log.txt"][..], &[("BL2SEQ_LEGACY", "1")][..]),
+            (&["-logfile", "log.txt"], &[("DIAG_POST_LEVEL", "Info")]),
+            (&["-conffile", "c.ini"], &[]),
+        ] {
+            for dry in [&[][..], &["-dryrun"]] {
+                let mut words = vec![program];
+                words.extend(search);
+                words.extend(["-outfmt", "6"]);
+                words.extend_from_slice(extra);
+                words.extend_from_slice(dry);
+                let _ = fs::remove_file(&log);
+                let cli = run_in(&dir, &words, envs);
+                let cli_log = fs::read(&log).ok();
+                let refused = cli.status.code() == Some(1);
+                // Without `-dryrun` each is refused; a dry run refuses the settings that the start
+                // reads (`DIAG_POST_LEVEL`, `LONG_SEQID`), not `BL2SEQ_LEGACY`, which the run
+                // reads (line RG DECISIONS E1b-6).
+                assert!(refused || !dry.is_empty(), "{words:?} {envs:?}: {cli:?}");
+                assert!(cli.stdout.is_empty(), "{words:?} {envs:?}: {cli:?}");
+                assert!(
+                    !refused || text(&cli.stderr).starts_with("Error: "),
+                    "{cli:?}"
+                );
+                let _ = fs::remove_file(&log);
+                let library = library_in(&dir, &words, envs);
+                let library_stderr = if refused {
+                    format!("Error: {}", text(&library.stderr))
+                } else {
+                    text(&library.stderr)
+                };
+                assert_eq!(
+                    (
+                        library.status.code(),
+                        library_stderr,
+                        text(&library.stdout),
+                        fs::read(&log).ok()
+                    ),
+                    (cli.status.code(), text(&cli.stderr), String::new(), cli_log),
+                    "{words:?} {envs:?}: the library"
+                );
+            }
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
+}

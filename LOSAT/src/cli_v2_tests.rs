@@ -2129,11 +2129,33 @@ fn toolkit_file_options_need_an_application_start() {
         ] {
             assert!(
                 error.to_string().contains(&format!(
-                    "the NCBI C++ Toolkit option {word} runs on the command line of LOSAT's makeblastdb only: the library API and the Web engine do not write NCBI's version text"
+                    "the NCBI C++ Toolkit option {word} runs on the command line and in the library API of LOSAT's makeblastdb only: the Web engine does not write NCBI's version text"
                 )),
                 "{error}"
             );
         }
+    }
+    // The programs that the library API does not run: the refusals name the command line alone.
+    for (program, upper) in [("rpsblast", "RPSBLAST"), ("rpstblastn", "RPSTBLASTN")] {
+        let refused = |word: &'static str| {
+            try_parse_from::<Cli, _, _>(["losat", program, "-query", "q.fa", "-db", "d", word])
+                .unwrap_err()
+                .to_string()
+        };
+        let error = refused("-dryrun");
+        assert!(
+            error.contains(&format!(
+                "the NCBI C++ Toolkit option -dryrun runs on the command line of LOSAT's {upper} only: the Web engine runs no NCBI application start, which reads it"
+            )),
+            "{program}: {error}"
+        );
+        let error = refused("-version");
+        assert!(
+            error.contains(&format!(
+                "the NCBI C++ Toolkit option -version runs on the command line of LOSAT's {upper} only: the Web engine does not write NCBI's version text"
+            )),
+            "{program}: {error}"
+        );
     }
 }
 

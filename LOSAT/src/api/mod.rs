@@ -83,16 +83,24 @@
 //!   words below.
 //! - `-logfile`, `-conffile` and `-dryrun` work as on the command line: a call whose argv has one
 //!   runs NCBI's application start first (as does a call that reads NCBI's settings, when it
-//!   first reads them). The start's messages about the registry files come in the diagnostics,
-//!   the `-logfile` file gets what the command line writes there (with tblastx, the messages of
-//!   its run too), and a start that ends the command line's program is an [`Error::Search`] with
-//!   its text. With `-dryrun` ([`Search::dry_run`]) a call ends after the start and the settings:
-//!   no record or `-outfmt` value is read, no report is written. The versions and `-xmlhelp`,
-//!   whose texts only the command line writes, are refused ([`validate`]); the tools print the
-//!   versions. [`validate`] parses the argv without the start, which runs with each search: an
-//!   argv whose start ends the command line's program before its arguments are read (a missing
-//!   `-conffile` file) and that the parser refuses too (two `-conffile`) gets the parser's error
-//!   there.
+//!   first reads them). The start's messages about the registry files go where the command line
+//!   writes them (the call's diagnostics stand for its standard error), the `-logfile` file gets
+//!   what the command line writes there (with tblastx, the messages and the errors of its run
+//!   too), and a start that ends the command line's program is an [`Error::Search`] with its
+//!   text. The registry and environment settings that the command line refuses after its start
+//!   are the call's [`Error::Search`] then, with the command line's text after `Error: `. With
+//!   `-dryrun` ([`Search::dry_run`]) a call ends after the start, the settings and the parse of
+//!   the argv with the call's kind of subject (`-subject_loc` with a database fails as without
+//!   `-dryrun`): no record or `-outfmt` value is read, no report is written. The versions and
+//!   `-xmlhelp`, whose texts only the command line writes, are refused ([`validate`]); the tools
+//!   print the versions. [`validate`] parses the argv without the start, which runs with each
+//!   search: an argv that the parser refuses makes no `-logfile` file (the command line's start
+//!   has made it before its parser's error), and one whose start ends the command line's program
+//!   before its arguments are read (a missing `-conffile` file) and that the parser refuses too
+//!   (two `-conffile`) gets the parser's error there. As any error of [`run_collect`] and
+//!   [`run_batches`], one of the start carries its message alone: the start's messages before it
+//!   (a usage report's) were in the call's diagnostics, which an error does not return; [`run`]
+//!   has written them to its writer.
 //! - [`run_batches`] searches one of NCBI's query batches at a time: the host reports progress
 //!   between batches and stops the search by not asking for the next one. Inside a batch only
 //!   the host can stop it, by ending the thread or the process.

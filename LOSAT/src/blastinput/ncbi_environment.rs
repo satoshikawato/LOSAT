@@ -1446,10 +1446,17 @@ impl ApplicationSettings {
     ///             return candidate.GetPath();
     /// ```
     pub fn matrix_file(&self, name: &str) -> Result<Option<PathBuf>, String> {
-        Ok(
-            find_matrix_file(name, &self.matrix_search, &Path::is_file, &Path::is_dir)?
-                .filter(|file| std::fs::File::open(file).is_ok()),
-        )
+        self.matrix_search.file(name)
+    }
+}
+
+impl MatrixSearch {
+    /// `ApplicationSettings::matrix_file` with these settings: the file that NCBI reads for the
+    /// matrix `name`, which a search of the library looks up with the settings of its start
+    /// (`api::start::CallStart::settings`), as the command line does with its own.
+    pub fn file(&self, name: &str) -> Result<Option<PathBuf>, String> {
+        Ok(find_matrix_file(name, self, &Path::is_file, &Path::is_dir)?
+            .filter(|file| std::fs::File::open(file).is_ok()))
     }
 }
 
@@ -1812,7 +1819,7 @@ pub enum DiagTarget {
 
 impl DiagTarget {
     /// Writes `text` where the diagnostics go (`stderr` for `cerr`).
-    pub fn write_text<W: Write + ?Sized>(&mut self, text: &[u8], stderr: &mut W) {
+    pub fn write_text(&mut self, text: &[u8], stderr: &mut dyn Write) {
         match self {
             DiagTarget::File(file) => {
                 let _ = file.write_all(text);
@@ -1940,12 +1947,12 @@ fn replace_standard_error(_file: std::fs::File) -> Result<(), String> {
 
 /// No NCBI counterpart: a `DiagTarget` as a stream, each write going where the diagnostics go
 /// (`DiagTarget::write_text`; `stderr` stands for `cerr`).
-pub struct DiagStream<'a, W: Write + ?Sized = dyn Write> {
+pub struct DiagStream<'a> {
     pub target: &'a mut DiagTarget,
-    pub stderr: &'a mut W,
+    pub stderr: &'a mut dyn Write,
 }
 
-impl<W: Write + ?Sized> Write for DiagStream<'_, W> {
+impl Write for DiagStream<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.target.write_text(buf, self.stderr);
         Ok(buf.len())
@@ -2065,7 +2072,8 @@ pub enum Preparsed<S> {
     /// or `-conffile=FILE` (`conf_arg`, which NCBI loads in place of `<program>.ini`), and
     /// whether there was `-dryrun` (NCBI reads the arguments, then runs nothing: the command
     /// line's entry, `cli::main_entry`; rpsbproc runs its own `DryRun` after its `Init`,
-    /// `rpsbproc::dry_run`; the library API and the Web engine refuse it).
+    /// `rpsbproc::dry_run`; a call of the library API ends after its start,
+    /// `api::start::CallStart::dry_run`; the Web engine refuses it).
     Words {
         words: Vec<S>,
         conffile: Option<OsString>,

@@ -223,7 +223,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         .iter()
         .map(|record| record.seq().len())
         .collect();
-    if start.dry_run()? {
+    if start.dry_run(search, inputs)? {
         let log = start.take_log();
         return Ok(Batches {
             search,
@@ -340,20 +340,32 @@ impl Batches<'_> {
         };
         let mut collected: Option<Arc<Vec<PairwiseHit>>> = None;
         let mut report = io::sink();
+        // The batch's messages are gathered, so that a later batch's repeat of the run's own
+        // messages is cut before they go where the run's messages go (`RunLog::route`: tblastx's
+        // `-logfile` file), on the way of a failure too.
         let result = {
             let mut on_hits = |hits| collected = Some(hits);
-            let mut sink = self.log.diagnostics(&mut diagnostics);
+            let mut sink = self.log.sink(&mut diagnostics, false);
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: "6",
                     sink: OutputSink::Writer(&mut report),
                 }],
-                diagnostics: &mut *sink,
+                diagnostics: &mut sink,
                 hits: Some(&mut on_hits),
                 observer: Some(&mut observer),
             };
             run_local(command, inputs, &mut outputs, &mut self.start)
         };
+        // The run's own messages come once, with the first batch, after the start's.
+        let mut bytes = diagnostics.bytes;
+        if self.searched_one {
+            bytes.drain(..observer.queries_begin.unwrap_or(0));
+        }
+        let mut bytes = self.log.route(bytes);
+        if !self.searched_one {
+            bytes.splice(0..0, std::mem::take(&mut self.start_messages));
+        }
         result.map_err(|error| self.log.failed(&error))?;
         let ordinals = ordinals.as_deref();
         let mut hsps = match &collected {
@@ -377,13 +389,6 @@ impl Batches<'_> {
             if let Some(slot) = query_stats.get_mut(query_ordinal(ordinals, q_idx)) {
                 *slot = *stats;
             }
-        }
-        // The run's own messages come once, with the first batch, after the start's.
-        let mut bytes = diagnostics.bytes;
-        if self.searched_one {
-            bytes.drain(..observer.queries_begin.unwrap_or(0));
-        } else {
-            bytes.splice(0..0, std::mem::take(&mut self.start_messages));
         }
         if let (BatchSizes::Blastn(sizes), Some(extensions)) =
             (&mut self.sizes, observer.extensions)

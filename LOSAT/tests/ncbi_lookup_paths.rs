@@ -12,6 +12,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use crate::library_examples::example_binary;
+
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 const INPUTS: &str = "tests/fasta/outfmt11";
 
@@ -164,6 +166,7 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
                     && stderr.contains(&format!("not supported by LOSAT's {program}")),
                 "{program} {at}: {stderr}"
             );
+            check_library(&with_query, &dir, &envs, &output, program);
             // No query, no batch: NCBI reads no matrix (an empty pipe: the report without
             // queries).
             let mut empty = args.clone();
@@ -187,9 +190,44 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
                 stderr.starts_with("BLAST engine error: Error: Unknown error code -1"),
                 "{program} {envs:?}: {stderr}"
             );
+            check_library(&with_query, &at, &envs, &output, program);
         }
     }
     let _ = fs::remove_dir_all(&dir);
+}
+
+/// The library API's search of the same words (`examples/library_command_line`, line RG item
+/// E1w-2): a search of records with a `-matrix` that NCBI's tables do not have runs the
+/// application start and looks the file up with its settings, as the command line does
+/// (`TblastxArgs::find_matrix_file`, `ResolvedOptions::find_matrix_file`). Its error is the
+/// command line's text (the example writes a failure's message, status 1; TBLASTX's refusal
+/// without the command line's `Error: `), and BLASTX's prolog is the same.
+fn check_library(args: &[&str], dir: &Path, envs: &[(&str, &str)], cli: &Output, program: &str) {
+    let library = run_in(
+        &example_binary("library_command_line"),
+        args,
+        dir,
+        envs,
+        b"",
+    );
+    let stderr = String::from_utf8_lossy(&library.stderr).into_owned();
+    let stderr = match program {
+        "TBLASTX" if cli.status.code() == Some(1) => format!("Error: {stderr}"),
+        _ => stderr,
+    };
+    assert_eq!(
+        (
+            library.status.code(),
+            stderr,
+            String::from_utf8_lossy(&library.stdout)
+        ),
+        (
+            Some(1),
+            String::from_utf8_lossy(&cli.stderr).into_owned(),
+            String::from_utf8_lossy(&cli.stdout)
+        ),
+        "{program} {args:?} {envs:?}: the library"
+    );
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1650-1652 (a file found that

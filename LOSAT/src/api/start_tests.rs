@@ -104,7 +104,7 @@ fn a_records_search_without_the_words_starts_nothing() {
     let call = CallStart::new(&search, &mut diagnostics).unwrap();
     assert!(call.settings.is_none());
     assert!(call.log.is_none());
-    assert_eq!(call.dry_run(), Ok(false));
+    assert_eq!(call.dry_run(&search, Inputs::new(&[], &[])), Ok(false));
     assert!(diagnostics.is_empty());
     // With one of the words the start runs at once, and its settings are kept for the call.
     let dir = scratch("nostart");
@@ -400,6 +400,185 @@ fn the_conffile_is_loaded_as_on_the_command_line() {
     assert_eq!(
         std::fs::read_to_string(&log).unwrap(),
         format!("{critical}\n")
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// No NCBI counterpart: LOSAT refuses the settings that change NCBI's output
+// (`ApplicationStart::settings`) after the start, before the program runs (`cli::main_entry`'s
+// `start.settings()?`), dry run or not. A library call that runs the start at its beginning
+// refuses them the same way (`CallStart::new`); the command line's text is this error's after
+// `Error: ` (`tests/ncbi_toolkit_file_options.rs`).
+#[test]
+fn a_started_call_refuses_the_settings_that_the_command_line_refuses() {
+    let dir = scratch("refused");
+    let (query, subject) = proteins();
+    let inputs = Inputs::new(&query, &subject);
+    let conffile = dir.join("c.ini");
+    std::fs::write(&conffile, "[BLAST]\nLONG_SEQID=1\n").unwrap();
+    let with = |extra: &[&str]| {
+        let mut argv = vec!["-conffile", path_text(&conffile)];
+        argv.extend_from_slice(extra);
+        validate(Program::Blastp, &argv).unwrap()
+    };
+    let refused = run_collect(&with(&["-dryrun"]), inputs, &["6"]).unwrap_err();
+    assert!(
+        matches!(&refused, Error::Search(reason) if reason.contains("[BLAST] LONG_SEQID")),
+        "{refused:?}"
+    );
+    let search = with(&[]);
+    assert_eq!(run_collect(&search, inputs, &["6"]), Err(refused.clone()));
+    let mut diagnostics = Vec::<u8>::new();
+    assert_eq!(
+        run(
+            &search,
+            inputs,
+            &mut [("6", &mut Vec::<u8>::new())],
+            &mut diagnostics
+        ),
+        Err(refused.clone())
+    );
+    let out = dir.join("out.txt");
+    assert_eq!(
+        run_to_file(&search, inputs, "6", &out, &mut diagnostics),
+        Err(refused.clone())
+    );
+    assert!(!out.exists());
+    assert_eq!(run_batches(&search, inputs).err(), Some(refused));
+    assert!(diagnostics.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2377-2381 (`-subject_loc`
+// excludes `-db`, quoted at `blastp::args`). README: a dry run reports an error in its arguments as
+// without `-dryrun`; `validate` parses with one kind of subject, each call with its own
+// (`Search::command`).
+#[test]
+fn a_dry_run_parses_with_the_kind_of_its_subject() {
+    let dir = scratch("drykind");
+    let (query, subject) = proteins();
+    let database = Inputs::database(&query, "nr");
+    let refused = run_collect(
+        &validate(Program::Blastp, &["-subject_loc", "1-10"]).unwrap(),
+        database,
+        &["6"],
+    )
+    .unwrap_err();
+    assert!(matches!(refused, Error::Argv(_)), "{refused:?}");
+    let search = validate(Program::Blastp, &["-subject_loc", "1-10", "-dryrun"]).unwrap();
+    assert_eq!(
+        run_collect(&search, database, &["6"]).err(),
+        Some(refused.clone())
+    );
+    let mut diagnostics = Vec::<u8>::new();
+    assert_eq!(
+        run(
+            &search,
+            database,
+            &mut [("6", &mut Vec::<u8>::new())],
+            &mut diagnostics
+        ),
+        Err(refused.clone())
+    );
+    let out = dir.join("out.txt");
+    assert_eq!(
+        run_to_file(&search, database, "6", &out, &mut diagnostics),
+        Err(refused.clone())
+    );
+    assert_eq!(run_batches(&search, database).err(), Some(refused));
+    assert!(diagnostics.is_empty() && !out.exists());
+    // The words hold with records.
+    let records = Inputs::new(&query, &subject);
+    let outcome = run_collect(&search, records, &["6"]).unwrap();
+    assert!(outcome.reports[0].bytes.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:93-95 (quoted at
+// `ncbi_environment::run_messages_follow_log`): tblastx's errors go where its diagnostics go, an
+// `-out` that cannot be made too (`losat tblastx ... -out nodir/o.txt -logfile log.txt` writes
+// its argument error to `log.txt`); blastn's go to its standard error, the error here.
+#[test]
+fn an_out_file_that_cannot_be_made_is_an_error_of_the_run() {
+    let dir = scratch("outlog");
+    let (query, subject) = nucleotides();
+    let inputs = Inputs::new(&query, &subject);
+    let log = dir.join("log.txt");
+    let out = dir.join("nodir").join("out.txt");
+    let native = crate::cli::inaccessible("out", &out);
+    let message = native
+        .downcast_ref::<crate::cli::NativeError>()
+        .unwrap()
+        .message
+        .clone();
+    for (program, logged) in [(Program::Tblastx, message.as_str()), (Program::Blastn, "")] {
+        std::fs::write(&log, "").unwrap();
+        let search = validate(program, &["-logfile", path_text(&log)]).unwrap();
+        let mut diagnostics = Vec::<u8>::new();
+        assert_eq!(
+            run_to_file(&search, inputs, "6", &out, &mut diagnostics),
+            Err(Error::search(&native)),
+            "{program}"
+        );
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), logged, "{program}");
+        assert!(diagnostics.is_empty(), "{program}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:93-95 (quoted at
+// `ncbi_environment::run_messages_follow_log`): the command line's one run writes its own
+// messages (here `-max_target_seqs 1`'s warning) once, to tblastx's `-logfile` file; the library's
+// batches, each a run of its own, write them once too, in the file or with the first batch.
+#[test]
+fn the_batches_write_the_run_s_messages_once() {
+    let dir = scratch("batchlog");
+    // Two queries of 10,200 letters: a TBLASTX batch ends with the record that brings it to
+    // 10,002 letters, so each query is a batch.
+    let mut seed = 12345u32;
+    let long: Vec<u8> = (0..10_200)
+        .map(|_| {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12345);
+            b"ACGT"[(seed >> 16) as usize % 4]
+        })
+        .collect();
+    let query = vec![
+        FastaRecord::new("Query_1", b"q1", &long[..]),
+        FastaRecord::new("Query_2", b"q2", &long[..]),
+    ];
+    let subject = vec![FastaRecord::new("Subject_1", b"s", NUCLEOTIDES)];
+    let inputs = Inputs::new(&query, &subject);
+    let warning = few_matches("tblastx");
+    let log = dir.join("log.txt");
+    let logged = validate(
+        Program::Tblastx,
+        &["-max_target_seqs", "1", "-logfile", path_text(&log)],
+    )
+    .unwrap();
+    let batches: Vec<_> = run_batches(&logged, inputs)
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(batches.len(), 2);
+    assert!(batches.iter().all(|batch| batch.diagnostics.is_empty()));
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), warning);
+    // `run_collect`'s one search writes the same.
+    std::fs::remove_file(&log).unwrap();
+    let outcome = run_collect(&logged, inputs, &["6"]).unwrap();
+    assert!(outcome.diagnostics.is_empty());
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), warning);
+    // Without `-logfile`: with the first batch.
+    let plain = validate(Program::Tblastx, &["-max_target_seqs", "1"]).unwrap();
+    let batches: Vec<_> = run_batches(&plain, inputs)
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        batches
+            .iter()
+            .map(|batch| String::from_utf8_lossy(&batch.diagnostics).into_owned())
+            .collect::<Vec<_>>(),
+        [warning, String::new()]
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

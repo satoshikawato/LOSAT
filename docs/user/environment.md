@@ -99,8 +99,11 @@ progress and dry run line to the standard error stream; its `-dryrun` runs its o
 the line of its status). rpsbproc reads `.ncbirc` once, when its configuration is loaded (it has no usage
 report), and LOSAT refuses a `.ncbirc` with a syntax error there: NCBI's rpsbproc reports it with the name
 of a source file of its own build. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
-UTF-16, or a malformed line that is not UTF-8. LOSAT's library runs no program start and refuses
-a file that NCBI BLAST+ reports.
+UTF-16, or a malformed line that is not UTF-8. LOSAT's library runs the same start in a call whose
+arguments have `-logfile`, `-conffile` or `-dryrun`, and in a call that reads NCBI's settings (a
+database search, blastn's `-window_masker_taxid`, the organism report of outfmt 18): its messages
+go where the command line writes them, and a start that stops the command line's program is the
+call's error.
 
 ## Variables that change a search or a report
 

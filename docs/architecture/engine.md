@@ -543,8 +543,9 @@ The engine reads its environment in three layers:
 
 1. NCBI's application layer: at the start of every program, the command line's entry makes the
    program's application start (`blastinput::ncbi_environment::ApplicationStart`), a value that it
-   gives to the argument reader and the program's run; the library API reads the same settings
-   without a start (`library_application_settings`). Both read the whole environment and NCBI's
+   gives to the argument reader and the program's run; a call of the library API makes one
+   (`api::start::CallStart`) at its beginning when its arguments have `-logfile`, `-conffile` or
+   `-dryrun`, else when it first reads NCBI's settings. Both read the whole environment and NCBI's
    configuration files (`.ncbirc`, `<program>.ini`), take `[BLAST] BLASTDB` and refuse the
    variables and entries that would change NCBI's output in a way LOSAT does not reproduce.
 2. NCBI's program variables (`BLASTDB`, `BATCH_SIZE`, `CHUNK_SIZE`, ...), read where NCBI reads

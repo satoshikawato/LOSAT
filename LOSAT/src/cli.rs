@@ -1186,9 +1186,35 @@ fn toolkit_file_word_error(program: &str, word: &str) -> clap::Error {
 pub(crate) fn toolkit_file_word_refusal(program: &str, word: &str) -> String {
     let name = toolkit_option_name(word);
     let shown = refusal_program_name(program);
+    let places = match library_part(program) {
+        LibraryPart::Search | LibraryPart::Tool => "the command line and in the library API",
+        LibraryPart::Absent => "the command line",
+    };
     format!(
-        "the NCBI C++ Toolkit option -{name} runs on the command line and in the library API of LOSAT's {shown} only: the Web engine runs no NCBI application start, which reads it"
+        "the NCBI C++ Toolkit option -{name} runs on {places} of LOSAT's {shown} only: the Web engine runs no NCBI application start, which reads it"
     )
+}
+
+/// What LOSAT's library API runs of the command line's `program`.
+enum LibraryPart {
+    /// A search (`api::Program`), whose results are reports: it prints no version.
+    Search,
+    /// A tool (`api::run_makeblastdb`), which prints the versions to its output.
+    Tool,
+    /// Nothing: rpsblast, rpstblastn and rpsbproc.
+    Absent,
+}
+
+/// The part of the library API that runs `program` (`LibraryPart`). The other tools of the
+/// library (`api::run_blastdbcmd` and the maskers) have a parser of their own (`ncbi_app`).
+fn library_part(program: &str) -> LibraryPart {
+    if program == "makeblastdb" {
+        LibraryPart::Tool
+    } else if crate::api::Program::parse(program).is_ok() {
+        LibraryPart::Search
+    } else {
+        LibraryPart::Absent
+    }
 }
 
 /// The name of the toolkit option `word` (`-conffile=FILE` is `conffile`).
@@ -1201,7 +1227,7 @@ fn toolkit_option_name(word: &str) -> &str {
 // (ncbiapp.cpp:926-1001, quoted at `ncbi_environment::preparse`). The library API of the search
 // programs returns reports, and the Web engine shows them: neither has a place for the text
 // (line RG DECISIONS E3-2; the library's tools print it to their output, `ncbi_app::run_with`,
-// `api::run_makeblastdb`).
+// `api::run_makeblastdb`, so their refusal names the Web engine alone).
 /// LOSAT's refusal of the version word `word` (`-version` or a full version) in `program` where
 /// the parser's caller prints no version: the library API of the search programs and the Web
 /// engine.
@@ -1213,8 +1239,16 @@ fn version_word_error(program: &str, word: &str) -> clap::Error {
 pub(crate) fn version_word_refusal(program: &str, word: &str) -> String {
     let name = toolkit_option_name(word);
     let shown = refusal_program_name(program);
+    let (places, refusers) = match library_part(program) {
+        LibraryPart::Search => ("the command line", "the library API and the Web engine do"),
+        LibraryPart::Tool => (
+            "the command line and in the library API",
+            "the Web engine does",
+        ),
+        LibraryPart::Absent => ("the command line", "the Web engine does"),
+    };
     format!(
-        "the NCBI C++ Toolkit option -{name} runs on the command line of LOSAT's {shown} only: the library API and the Web engine do not write NCBI's version text"
+        "the NCBI C++ Toolkit option -{name} runs on {places} of LOSAT's {shown} only: {refusers} not write NCBI's version text"
     )
 }
 

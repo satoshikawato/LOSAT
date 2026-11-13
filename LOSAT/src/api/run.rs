@@ -42,7 +42,7 @@ use super::local_blast::{
 };
 use super::program::Program;
 use super::search::Search;
-use super::start::{CallStart, RunLog};
+use super::start::{CallStart, RunSink};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::{
     parse_optional_range, record_interval, RangeRole, RecordInterval, SequenceRange,
@@ -751,12 +751,23 @@ pub(super) fn run_local(
             run_local_blastn(args, query, subject, outputs)
         }
         Commands::Tblastx(mut args) => {
+            // The file of a `-matrix` that NCBI's tables do not have, first, as the command
+            // line's `run` looks it up (with the call's settings; `TblastxArgs::find_matrix_file`).
+            if args.scoring_matrix() == crate::algorithm::tblastx::args::TblastxMatrix::Unknown {
+                let settings = start.settings(&mut *outputs.diagnostics)?;
+                args.find_matrix_file(&settings.matrix_search)?;
+            }
             args.subject_taxdb = subject_taxdb("tblastx", outputs, start)?;
             args.tabular_taxdb = args.subject_taxdb.as_ref().map(|_| true);
             run_local_tblastx(args, query, subject, outputs)
         }
         Commands::Blastx(mut args) => {
             args.subject_taxdb = subject_taxdb("blastx", outputs, start)?;
+            // The file of a `-matrix` that NCBI's tables do not have, looked up after the options
+            // are resolved, as on the command line (`ResolvedOptions::find_matrix_file`).
+            if args.unknown_matrix_name() {
+                args.matrix_search = Some(start.settings(&mut *outputs.diagnostics)?.matrix_search);
+            }
             run_local_blastx(args, query, subject, outputs)
         }
         Commands::Psiblast(args) => {
@@ -871,7 +882,7 @@ pub fn run(
     diagnostics: &mut (dyn Write + Send),
 ) -> Result<(), Error> {
     let mut start = CallStart::new(search, &mut *diagnostics)?;
-    if start.dry_run()? {
+    if start.dry_run(search, inputs)? {
         return Ok(());
     }
     let formats: Vec<&str> = reports.iter().map(|(outfmt, _)| *outfmt).collect();
@@ -884,17 +895,15 @@ pub fn run(
     with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
         for (ordinal, group) in groups.iter().enumerate() {
             let command = search.command(inputs)?;
+            // The warnings of the first search include the reader's and the queries' warnings
+            // that the next searches repeat; the command line writes them once.
+            let mut repeated = Vec::new();
+            let mut sink = if ordinal == 0 {
+                log.sink(&mut *diagnostics, true)
+            } else {
+                log.sink(&mut repeated, false)
+            };
             let result = {
-                // The warnings of the first search include the reader's and the queries'
-                // warnings that the next searches repeat; the command line writes them once.
-                let mut repeated = Vec::new();
-                let mut first;
-                let sink: &mut (dyn Write + Send) = if ordinal == 0 {
-                    first = log.diagnostics(&mut *diagnostics);
-                    &mut *first
-                } else {
-                    &mut repeated
-                };
                 let mut outputs = ReportOutputs {
                     formats: group
                         .iter()
@@ -905,13 +914,13 @@ pub fn run(
                             ),
                         })
                         .collect(),
-                    diagnostics: sink,
+                    diagnostics: &mut sink,
                     hits: None,
                     observer: None,
                 };
                 run_local(command, inputs, &mut outputs, &mut start)
             };
-            result.map_err(|error| log.failed(&error))?;
+            result.map_err(|error| sink.failed(&error))?;
         }
         Ok(())
     })
@@ -949,7 +958,7 @@ pub fn run_to_file(
     }
     let mut start = CallStart::new(search, &mut *diagnostics)?;
     // The command line's dry run does not make the `-out` file (line RG item E1b).
-    if start.dry_run()? {
+    if start.dry_run(search, inputs)? {
         return Ok(());
     }
     let threads = {
@@ -958,25 +967,27 @@ pub fn run_to_file(
     };
     let mut command = search.command(inputs)?;
     set_output_file(&mut command, path);
-    let file =
-        File::create(path).map_err(|_| Error::search(&crate::cli::inaccessible("out", path)))?;
-    let mut file = BufWriter::new(file);
+    // tblastx writes the error of an `-out` it cannot make to its `-logfile` file, as its other
+    // errors (`RunLog::failed`).
     let mut log = start.take_log();
+    let file =
+        File::create(path).map_err(|_| log.failed(&crate::cli::inaccessible("out", path)))?;
+    let mut file = BufWriter::new(file);
     with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
+        let mut sink = log.sink(&mut *diagnostics, true);
         let result = {
-            let mut sink = log.diagnostics(&mut *diagnostics);
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt,
                     sink: OutputSink::Writer(&mut file),
                 }],
-                diagnostics: &mut *sink,
+                diagnostics: &mut sink,
                 hits: None,
                 observer: None,
             };
             run_local(command, inputs, &mut outputs, &mut start)
         };
-        result.map_err(|error| log.failed(&error))
+        result.map_err(|error| sink.failed(&error))
     })?;
     file.flush()
         .map_err(|error| Error::search(&anyhow::Error::from(error)))
@@ -1018,8 +1029,8 @@ fn collect_one(
     inputs: Inputs<'_>,
     formats: &[&str],
     positions: &[usize],
-    diagnostics: &mut (dyn Write + Send),
-    (start, log): (&mut CallStart, &mut RunLog),
+    start: &mut CallStart,
+    mut sink: RunSink<'_>,
 ) -> Result<Searched, Error> {
     let command = search.command(inputs)?;
     let query_range = query_range_of(&command);
@@ -1030,7 +1041,6 @@ fn collect_one(
     let mut collected: Option<Arc<Vec<PairwiseHit>>> = None;
     let result = {
         let mut on_hits = |hits| collected = Some(hits);
-        let mut sink = log.diagnostics(diagnostics);
         let mut outputs = ReportOutputs {
             formats: positions
                 .iter()
@@ -1040,13 +1050,13 @@ fn collect_one(
                     sink: OutputSink::Writer(writer),
                 })
                 .collect(),
-            diagnostics: &mut *sink,
+            diagnostics: &mut sink,
             hits: Some(&mut on_hits),
             observer: Some(&mut recorder),
         };
         run_local(command, inputs, &mut outputs, start)
     };
-    result.map_err(|error| log.failed(&error))?;
+    result.map_err(|error| sink.failed(&error))?;
     if let Some((hsp, _)) = recorder.open.iter().flatten().next() {
         recorder.fault(format!("HSP {hsp} started but did not end"));
     }
@@ -1225,7 +1235,7 @@ pub fn run_collect(
 ) -> Result<Outcome, Error> {
     let mut diagnostics: Vec<u8> = Vec::new();
     let mut start = CallStart::new(search, &mut diagnostics)?;
-    if start.dry_run()? {
+    if start.dry_run(search, inputs)? {
         return Ok(Outcome {
             reports: formats
                 .iter()
@@ -1250,21 +1260,15 @@ pub fn run_collect(
         for (ordinal, group) in groups.iter().enumerate() {
             // The warnings of the first search include the reader's and the queries' warnings
             // that the next searches repeat; the command line writes them once (the next
-            // searches' do not go to the `-logfile` file either).
-            let mut scratch = Vec::new();
-            let mut no_log = RunLog::none();
-            let (sink, log): (&mut (dyn Write + Send), _) = if ordinal == 0 {
-                (&mut diagnostics, &mut log)
+            // searches' do not go to the `-logfile` file either; a failure does, as in `run`).
+            let mut repeated = Vec::new();
+            let sink = if ordinal == 0 {
+                log.sink(&mut diagnostics, true)
             } else {
-                (&mut scratch, &mut no_log)
+                log.sink(&mut repeated, false)
             };
             searched.push(collect_one(
-                search,
-                inputs,
-                formats,
-                group,
-                sink,
-                (&mut start, log),
+                search, inputs, formats, group, &mut start, sink,
             )?);
         }
         Ok(())

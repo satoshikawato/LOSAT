@@ -13,10 +13,11 @@ use std::ffi::OsStr;
 use std::io::Write;
 
 use super::error::Error;
+use super::input::Inputs;
 use super::search::Search;
 use crate::blastinput::ncbi_environment::{
     diag_target, log_file, run_messages_follow_log, ApplicationSettings, ApplicationStart,
-    DiagStream, DiagTarget,
+    DiagTarget,
 };
 
 /// A start whose `-logfile` file is open (`open`), before its configuration load (`load`).
@@ -113,8 +114,13 @@ pub(crate) struct CallStart {
 }
 
 impl CallStart {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707 (quoted at
+    // `cli::main_entry`: the BLAST programs keep the default `DryRun`, which returns 0 after the
+    // arguments have passed their definitions)
     /// The start of a call of `search`: run now, with its messages on `diagnostics`, when the
-    /// argv has `-logfile`, `-conffile` or `-dryrun`.
+    /// argv has `-logfile`, `-conffile` or `-dryrun`. Settings that LOSAT refuses
+    /// (`ApplicationStart::settings`) are the call's error then, dry run or not, as the command
+    /// line refuses them after its start (`cli::main_entry`'s `start.settings()?`).
     pub(super) fn new(search: &Search, diagnostics: &mut dyn Write) -> Result<CallStart, Error> {
         let program = search.program().name();
         let mut call = CallStart {
@@ -125,6 +131,9 @@ impl CallStart {
         };
         if search.starts() {
             let started = begin(program, search.argv(), diagnostics)?;
+            if let Err(reason) = &started.settings {
+                return Err(Error::Search(reason.clone()));
+            }
             call.settings = Some(started.settings);
             if run_messages_follow_log(program) {
                 call.log = Some(started.target);
@@ -133,21 +142,16 @@ impl CallStart {
         Ok(call)
     }
 
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707 (quoted at
-    // `cli::main_entry`: the BLAST programs keep the default `DryRun`, which returns 0 after the
-    // arguments have passed their definitions)
-    /// Whether the call is a dry run, which ends here: the start has run and the arguments have
-    /// passed the parser (`validate`), and LOSAT refuses the settings it refuses in a run, as the
-    /// command line's dry run does. Neither the records nor `-outfmt` are read (NCBI reads them in
-    /// `Run`).
-    pub(super) fn dry_run(&self) -> Result<bool, Error> {
+    /// Whether the call is a dry run, which ends here: the start has run (`CallStart::new`) and
+    /// the arguments have passed the parser with the kind of the call's subject
+    /// (`Search::command`: `-subject_loc` with a database fails as without `-dryrun`). Neither
+    /// the records nor `-outfmt` are read (NCBI reads them in `Run`).
+    pub(super) fn dry_run(&self, search: &Search, inputs: Inputs<'_>) -> Result<bool, Error> {
         if !self.dry_run {
             return Ok(false);
         }
-        match &self.settings {
-            Some(Err(reason)) => Err(Error::Search(reason.clone())),
-            Some(Ok(_)) | None => Ok(true),
-        }
+        search.command(inputs)?;
+        Ok(true)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:345-347
@@ -185,27 +189,40 @@ impl CallStart {
     }
 }
 
-/// The `-logfile` target of a run whose messages go there (`CallStart::take_log`), or none.
+/// The `-logfile` target of a run whose messages go there (`CallStart::take_log`: tblastx's), or
+/// none.
 pub(super) struct RunLog(Option<DiagTarget>);
 
 impl RunLog {
-    /// No target: the run's messages go to its diagnostics.
-    pub(super) fn none() -> RunLog {
-        RunLog(None)
-    }
-
-    /// The writer of the run's messages: `diagnostics`, or the `-logfile` target (`cerr` is
-    /// `diagnostics`).
-    pub(super) fn diagnostics<'a>(
+    /// The writer of one search's messages. With `to_log` they go where the run's messages go
+    /// (the `-logfile` target; `cerr` is `diagnostics`); without, to `diagnostics` alone: the
+    /// messages of a later search of the call, which repeat the first's and which the command line
+    /// writes once (`run`, `run_collect`), or messages gathered to be cut and then written with
+    /// `RunLog::route` (`run_batches`). A failure goes to the target either way
+    /// (`RunSink::failed`).
+    pub(super) fn sink<'a>(
         &'a mut self,
         diagnostics: &'a mut (dyn Write + Send),
-    ) -> Box<dyn Write + Send + 'a> {
+        to_log: bool,
+    ) -> RunSink<'a> {
+        RunSink {
+            log: self,
+            diagnostics,
+            to_log,
+        }
+    }
+
+    /// Writes `messages`, gathered from a search, where the run's messages go, and gives back what
+    /// goes to the call's diagnostics: all of it without a target or for `cerr`, nothing for the
+    /// file of `-logfile` or no output.
+    pub(super) fn route(&mut self, messages: Vec<u8>) -> Vec<u8> {
         match &mut self.0 {
-            Some(target) => Box::new(DiagStream {
-                target,
-                stderr: diagnostics,
-            }),
-            None => Box::new(diagnostics),
+            Some(target) => {
+                let mut rest = Vec::new();
+                target.write_text(&messages, &mut rest);
+                rest
+            }
+            None => messages,
         }
     }
 
@@ -219,6 +236,36 @@ impl RunLog {
             let _ = file.write_all(native.message.as_bytes());
         }
         Error::search(error)
+    }
+}
+
+/// The messages of one search of a call (`RunLog::sink`).
+pub(super) struct RunSink<'a> {
+    log: &'a mut RunLog,
+    diagnostics: &'a mut (dyn Write + Send),
+    to_log: bool,
+}
+
+impl RunSink<'_> {
+    /// `RunLog::failed`.
+    pub(super) fn failed(&mut self, error: &anyhow::Error) -> Error {
+        self.log.failed(error)
+    }
+}
+
+impl Write for RunSink<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match (&mut self.log.0, self.to_log) {
+            (Some(target), true) => {
+                target.write_text(buf, &mut *self.diagnostics);
+                Ok(buf.len())
+            }
+            _ => self.diagnostics.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.diagnostics.flush()
     }
 }
 

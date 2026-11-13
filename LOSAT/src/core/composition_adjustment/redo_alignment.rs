@@ -509,6 +509,15 @@ pub struct BlastRedoAlignParams {
     pub query_is_translated: bool,
     pub subject_is_translated: bool,
     pub cutoff_score: i32,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1040
+    // ```c
+    //         params->do_link_hsps = do_link_hsps;
+    // ```
+    /// `do_link_hsps`: the search links HSPs with sum statistics (`hitParams->do_sum_stats`), so
+    /// the redo keeps alignments by `cutoff_score` and BLASTP's evaluation links them
+    /// (`blastp::kappa`, psiblast's `-sum_stats true`). BLASTX and TBLASTN link in their own
+    /// evaluations.
+    pub do_link_hsps: bool,
 }
 
 impl BlastRedoAlignParams {
@@ -3479,6 +3488,7 @@ mod tests {
                     query_is_translated: false,
                     subject_is_translated: true,
                     cutoff_score: 1,
+                    do_link_hsps: false,
                 };
                 for window in &windows {
                     let query_index = usize::try_from(window.query_range.context).unwrap();
@@ -3726,6 +3736,7 @@ mod tests {
             query_is_translated: false,
             subject_is_translated: true,
             cutoff_score: 320,
+            do_link_hsps: false,
         };
         let callbacks = BlastRedoAlignCallbacks {
             calc_lambda: None,
@@ -3951,6 +3962,7 @@ mod tests {
             query_is_translated: false,
             subject_is_translated: false,
             cutoff_score: 1,
+            do_link_hsps: false,
         };
         fn test_get_range<'seq>(
             _matching_seq: &BlastCompoMatchingSequence<'seq>,

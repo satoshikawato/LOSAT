@@ -621,6 +621,7 @@ pub(super) fn final_hsp(
         }
     }
     BlastpHsp {
+        num: 1,
         identity: if length > 0 {
             (num_ident as f64 * 100.0) / (length as f64)
         } else {

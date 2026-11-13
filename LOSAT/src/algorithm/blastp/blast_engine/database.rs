@@ -2702,6 +2702,7 @@ mod tests {
 
     fn test_hsp(s_idx: u32, raw_score: i32) -> BlastpHsp {
         BlastpHsp {
+            num: 1,
             identity: 100.0,
             length: 10,
             mismatch: 0,

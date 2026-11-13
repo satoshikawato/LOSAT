@@ -1434,6 +1434,113 @@ fn blastp_word_cutoff_score_for_context(
     gap_trigger.min(hit_cutoff_score)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:949-976
+// ```c
+//       /* If using sum statistics, use a modified cutoff score
+//          if that turns out smaller */
+//       if (params->link_hsp_params && gapped_calculation) {
+//
+//          double evalue_hsp = 1.0;
+//          Int4 concat_qlen =
+//              query_info->contexts[query_info->last_context].query_offset +
+//              query_info->contexts[query_info->last_context].query_length;
+//          Int4 avg_qlen = concat_qlen / (query_info->last_context + 1);
+//          Int8 searchsp = (Int8)MIN(avg_qlen, avg_subject_length) *
+//                          (Int8)avg_subject_length;
+// ...
+//          for (context = query_info->first_context;
+//                              context <= query_info->last_context; ++context) {
+//             Int4 new_cutoff = 1;
+//
+//             if (!(query_info->contexts[context].is_valid))
+//                 continue;
+//
+//             kbp = kbp_array[context];
+//             ASSERT(s_BlastKarlinBlkIsValid(kbp));
+//             BLAST_Cutoffs(&new_cutoff, &evalue_hsp, kbp, searchsp,
+//                        TRUE, params->link_hsp_params->gap_decay_rate);
+//             params->cutoffs[context].cutoff_score = MIN(new_cutoff,
+//                                     params->cutoffs[context].cutoff_score);
+//          }
+//       }
+// ```
+/// The sum statistics' cutoff score of a context (`BLAST_Cutoffs` with the gap decay, from an
+/// e-value of 1 in the search space of the average query and subject lengths); `BLAST_Cutoffs`
+/// keeps the `new_cutoff` of 1 when its score is lower (blast_stat.c:4108-4129).
+pub(super) fn sum_stats_hit_cutoff(
+    contexts: &[QueryContext],
+    avg_subject_length: i32,
+    gapped_params: &KarlinParams,
+) -> i32 {
+    let concat_qlen = contexts
+        .last()
+        .map(|ctx| ctx.frame_base + ctx.aa_len as i32)
+        .unwrap_or(0);
+    let avg_qlen = concat_qlen / contexts.len().max(1) as i32;
+    crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_sum_stats(
+        avg_qlen,
+        avg_subject_length,
+        crate::core::link_hsps::BLAST_GAP_DECAY_RATE_GAPPED,
+        gapped_params,
+    )
+    .max(1)
+}
+
+/// psiblast's `-sum_stats true` in a search with the matrix (round 1): the lowered cutoff of the
+/// HSPs the search keeps and the linking parameters of the preliminary stage.
+pub(super) struct BlastpSumStats {
+    /// The sum statistics' cutoff (`sum_stats_hit_cutoff`).
+    hit_cutoff: i32,
+    /// The preliminary stage's linking parameters (`cutoff_small_gap` = the words' smallest
+    /// cutoff, `word_params->cutoff_score_min`).
+    pub(super) preliminary: crate::core::link_hsps::EvenGapLinkParams,
+}
+
+impl BlastpSumStats {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:396-416
+    // ```c
+    //       if (new_cutoff < cutoff_min) {
+    //          cutoff_min = new_cutoff;
+    //       }
+    // ...
+    //    parameters->cutoff_score_min = cutoff_min;
+    // ```
+    pub(super) fn new(
+        contexts: &[QueryContext],
+        avg_subject_length: i32,
+        gapped_params: &KarlinParams,
+        word_cutoff_scores: &[i32],
+    ) -> Self {
+        let word_cutoff_score_min = contexts
+            .iter()
+            .zip(word_cutoff_scores)
+            .filter(|(ctx, _)| ctx.is_valid)
+            .map(|(_, &cutoff)| cutoff)
+            .min()
+            .unwrap_or(i32::MAX);
+        Self {
+            hit_cutoff: sum_stats_hit_cutoff(contexts, avg_subject_length, gapped_params),
+            preliminary: crate::core::link_hsps::EvenGapLinkParams::preliminary(
+                word_cutoff_score_min,
+            ),
+        }
+    }
+
+    /// `cutoff_score = MIN(new_cutoff, cutoff_score)` for each valid context.
+    pub(super) fn lower_hit_cutoffs(
+        &self,
+        contexts: &[QueryContext],
+        mut cutoffs: Vec<i32>,
+    ) -> Vec<i32> {
+        for (cutoff, ctx) in cutoffs.iter_mut().zip(contexts) {
+            if ctx.is_valid {
+                *cutoff = (*cutoff).min(self.hit_cutoff);
+            }
+        }
+        cutoffs
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:969-983
 // ```c
 // if (sbp->gbp) {
@@ -1522,8 +1629,22 @@ fn x_build_compact_preliminary_hsp_list<'h>(
     subject_length: usize,
     karlin_params: &KarlinParams,
     gumbel_params: Option<&BlastGumbelBlk>,
-    search_space: f64,
+    search_space: &crate::stats::search_space::SearchSpace,
+    link: Option<&crate::core::link_hsps::EvenGapLinkParams>,
 ) -> BlastpHspList<XPrelimHsp> {
+    if let Some(link) = link {
+        return x_link_compact_preliminary_hsp_list(
+            preliminary_hits,
+            oid,
+            query_index,
+            query_length,
+            subject_length,
+            karlin_params,
+            search_space,
+            link,
+        );
+    }
+    let search_space = search_space.effective_space;
     let hsps: Vec<XPrelimHsp> = match gumbel_params {
         Some(gumbel_params) => preliminary_hits
             .map(|hit| XPrelimHsp {
@@ -1555,6 +1676,81 @@ fn x_build_compact_preliminary_hsp_list<'h>(
     hsp_list
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873
+// ```c
+//     if (hit_params->link_hsp_params) {
+//         status = BLAST_LinkHsps(program_number, hsp_list_out, query_info,
+//                   subject->length, gap_align->sbp, hit_params->link_hsp_params,
+//                   score_options->gapped_calculation);
+// ```
+// With sum statistics the preliminary list of a subject takes the e-values of the linked sets
+// (`core::link_hsps`) in the place of `Blast_HSPListGetEvalues`, and is sorted by score
+// (`BLAST_LinkHsps` ends with `Blast_HSPListSortByScore`). NCBI links the subject's list of all
+// queries; the linking never joins HSPs of different contexts and the sort is a total order, so
+// each query's list is the same.
+#[allow(clippy::too_many_arguments)]
+fn x_link_compact_preliminary_hsp_list<'h>(
+    preliminary_hits: impl ExactSizeIterator<Item = &'h BlastpPreliminaryHsp>,
+    oid: u32,
+    query_index: u32,
+    query_length: usize,
+    subject_length: usize,
+    karlin_params: &KarlinParams,
+    search_space: &crate::stats::search_space::SearchSpace,
+    link: &crate::core::link_hsps::EvenGapLinkParams,
+) -> BlastpHspList<XPrelimHsp> {
+    let hits: Vec<BlastpPreliminaryHsp> = preliminary_hits.copied().collect();
+    let link_hsps: Vec<crate::core::link_hsps::LinkHsp> = hits
+        .iter()
+        .map(|hit| crate::core::link_hsps::LinkHsp {
+            context: 0,
+            query_offset: hit.query_start,
+            query_end: hit.query_end,
+            subject_offset: hit.subject_start,
+            subject_end: hit.subject_end,
+            score: hit.raw_score,
+        })
+        .collect();
+    let context = blastp_link_context(karlin_params, query_length, search_space);
+    let hsps: Vec<XPrelimHsp> = crate::core::link_hsps::even_gap_link_hsps(
+        &link_hsps,
+        &[context],
+        subject_length as i32,
+        link,
+    )
+    .into_iter()
+    .map(|linked| XPrelimHsp {
+        hsp: hits[linked.index],
+        e_value: linked.evalue,
+    })
+    .collect();
+    let mut hsp_list = BlastpHspList {
+        oid,
+        query_index,
+        hsps,
+        best_evalue: f64::MAX,
+    };
+    super::hsp::sort_hsplist_by_score(&mut hsp_list);
+    super::hsp::update_best_evalue(&mut hsp_list);
+    hsp_list
+}
+
+/// The context of a query as the linking reads it: the gapped Karlin block (`kbp_gap`), the
+/// query's length and its length adjustment and effective search space (`query_info->contexts`).
+pub(super) fn blastp_link_context(
+    karlin_params: &KarlinParams,
+    query_length: usize,
+    search_space: &crate::stats::search_space::SearchSpace,
+) -> crate::core::link_hsps::LinkContext {
+    crate::core::link_hsps::LinkContext {
+        lambda: karlin_params.lambda,
+        log_k: karlin_params.k.ln(),
+        query_length: query_length as i32,
+        length_adjustment: search_space.length_adjustment as i32,
+        eff_searchsp: search_space.effective_space as i64,
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:151-178
 // ```c
 // Blast_HSPInit(Int4 query_start, Int4 query_end, Int4 subject_start,
@@ -1575,6 +1771,7 @@ fn x_build_compact_preliminary_hsp_list<'h>(
 // ```
 pub(super) fn blastp_hsp_from_preliminary(hit: &BlastpPreliminaryHsp, e_value: f64) -> BlastpHsp {
     BlastpHsp {
+        num: 1,
         identity: 0.0,
         length: usize::try_from(hit.query_end - hit.query_start)
             .expect("preliminary blastp HSP query span must be non-negative"),
@@ -3639,7 +3836,7 @@ fn subject_stored_gap_columns(subject: &[u8], hit: &Hit) -> Vec<u32> {
 
 #[allow(clippy::too_many_arguments)]
 fn build_pairwise_hits(
-    hits: Vec<(Hit, u8, usize)>,
+    hits: Vec<(Hit, u8, usize, i32)>,
     query_contexts: &[QueryContext],
     subjects: &[EncodedProtein],
     matrix: ScoringMatrix,
@@ -3648,7 +3845,13 @@ fn build_pairwise_hits(
     shown_subjects: ShownSubjects<'_>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<Vec<PairwiseHit>> {
-    let row = |(mut hit, comp_adjustment_method, seqalign_num_ident): (Hit, u8, usize)| -> Result<PairwiseHit> {
+    let row = |(mut hit, comp_adjustment_method, seqalign_num_ident, num): (
+        Hit,
+        u8,
+        usize,
+        i32,
+    )|
+     -> Result<PairwiseHit> {
         let q_idx = hit.q_idx as usize;
         let s_idx = hit.s_idx as usize;
         let query = query_nomask_sequence(&query_contexts[q_idx]);
@@ -3779,9 +3982,14 @@ fn build_pairwise_hits(
             }),
             // NCBI core/blast_kappa.c:332-342: the HSP's composition adjustment.
             comp_adjust_method: Some(comp_adjustment_method),
-            // NCBI showalign.cpp:3595-3598: this optional Stage E field is
-            // consumed only by the TBLASTN writer; BLASTP keeps its writer.
-            sum_n: None,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1180-1182
+            // ```c++
+            //     if (hsp->num > 1)
+            //         scores.push_back(s_MakeScore("sum_n", 0.0, hsp->num));
+            // ```
+            // The linked set's size with psiblast's `-sum_stats true` (`Expect(n)` of the
+            // alignment, showalign.cpp:3595-3598); an HSP outside a set has no "sum_n" score.
+            sum_n: (num > 1).then_some(num),
             subject_stored_gaps,
             // The Seq-align's `num_ident` (`collect_hits_and_methods_from_hit_lists`): the
             // engine's, which `hit.num_ident` holds unless the display recount replaced it
@@ -9600,6 +9808,7 @@ fn run_resolved_in_pool(
             )
         })
         .collect();
+    // The words' cutoffs read `cutoff_score_max`, which sum statistics do not lower.
     let word_cutoff_scores: Vec<i32> = hit_cutoff_scores
         .iter()
         .zip(contexts.iter())
@@ -9607,6 +9816,43 @@ fn run_resolved_in_pool(
             blastp_word_cutoff_score_for_context(hit_cutoff_score, ctx, args.gap_trigger_bits)
         })
         .collect();
+    // psiblast's `-sum_stats true`: the cutoff of the HSPs a search keeps (`cutoff_score`) is
+    // lowered to the sum statistics' cutoff where that is smaller, and the preliminary stage links
+    // the HSPs of each subject (`BlastpSumStats`).
+    let sum_stats = args.sum_stats.then(|| {
+        BlastpSumStats::new(
+            &contexts,
+            cutoff_subject_length,
+            &gapped_params,
+            &word_cutoff_scores,
+        )
+    });
+    let hit_cutoff_scores: Vec<i32> = match &sum_stats {
+        Some(sum_stats) => sum_stats.lower_hit_cutoffs(&contexts, hit_cutoff_scores),
+        None => hit_cutoff_scores,
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:978-990
+    // ```c
+    //       /* scale up the computed cutoffs, and find the smallest one */
+    //       for (context = query_info->first_context;
+    //                              context <= query_info->last_context; ++context) {
+    //
+    //          if (query_info->contexts[context].is_valid) {
+    // ...
+    //             cutoff_min = MIN(cutoff_min,
+    //                              params->cutoffs[context].cutoff_score);
+    //          }
+    //       }
+    //       params->cutoff_score_min = cutoff_min;
+    // ```
+    // `hit_params->cutoff_score_min`, which the redo reads with sum statistics.
+    let hit_cutoff_score_min = contexts
+        .iter()
+        .zip(&hit_cutoff_scores)
+        .filter(|(ctx, _)| ctx.is_valid)
+        .map(|(_, &cutoff)| cutoff)
+        .min()
+        .unwrap_or(i32::MAX);
 
     // NCBI computes the size in its `int` (`blastn/hsp.rs` `get_prelim_hitlist_size`): a
     // -max_target_seqs from 2^31 - 24 wraps to 2..48; a size that is not positive (NCBI
@@ -10904,6 +11150,7 @@ fn run_resolved_in_pool(
                 gapped_gumbel.as_ref(),
                 &search_spaces,
                 prelim_evalue,
+                sum_stats.as_ref().map(|sum_stats| &sum_stats.preliminary),
                 subject_result,
             );
         } else {
@@ -10935,7 +11182,8 @@ fn run_resolved_in_pool(
                     subject.aa_len,
                     &gapped_params,
                     gapped_gumbel.as_ref(),
-                    search_spaces[q_idx].effective_space,
+                    &search_spaces[q_idx],
+                    sum_stats.as_ref().map(|sum_stats| &sum_stats.preliminary),
                 );
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1523-1539
                 // ```c
@@ -11534,6 +11782,9 @@ fn run_resolved_in_pool(
             search_spaces: &search_spaces,
             expect_value: args.evalue,
             hitlist_size: args.traceback_hitlist_size(),
+            link: args
+                .sum_stats
+                .then(crate::core::link_hsps::EvenGapLinkParams::traceback),
         };
         Some(ordinary.run(
             &mut preliminary_hit_lists,
@@ -11558,7 +11809,7 @@ fn run_resolved_in_pool(
         let local_scaling_factor =
             blastp_local_scaling_factor(args.comp_based_stats.mode, args.scoring.matrix);
         let scaled_gapped_lambda = gapped_params.lambda / local_scaling_factor;
-        let do_link_hsps = false;
+        let do_link_hsps = args.sum_stats;
         let matrix_info = initial_matrix_info
             .get_or_init(|| {
                 build_matrix_info(
@@ -11636,7 +11887,12 @@ fn run_resolved_in_pool(
             ccat_query_length: contexts[q_idx].aa_len as i32,
             query_is_translated: false,
             subject_is_translated: false,
-            cutoff_score: blastp_redo_cutoff_score(do_link_hsps, 0, local_scaling_factor),
+            cutoff_score: blastp_redo_cutoff_score(
+                do_link_hsps,
+                hit_cutoff_score_min,
+                local_scaling_factor,
+            ),
+            do_link_hsps,
             // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:382-406
             // ```c
             // Nearly identical alignments are computed with exact subjects,
@@ -13116,7 +13372,7 @@ fn run_resolved_in_pool(
         let first = window.start.min(end);
         let mut hits =
             collect_hits_and_methods_from_hit_lists(&hit_lists[first..end], first, &engine_counts);
-        for (hit, _, _) in hits.iter_mut() {
+        for (hit, _, _, _) in hits.iter_mut() {
             let q_shift = ranges.query_input.placements.offset(hit.q_idx as usize);
             let s_shift = ranges.subject_placements.offset(hit.s_idx as usize);
             hit.q_start -= q_shift;
@@ -14812,6 +15068,7 @@ mod tests {
             app: BlastpApp::Blastp,
             inclusion_ethresh: None,
             gap_trigger: None,
+            sum_stats: false,
             first_query_ordinal: 0,
             psiblast_pssm: None,
             formatting: Default::default(),
@@ -15034,6 +15291,7 @@ mod tests {
     // ```
     fn make_local_match_hsp(preliminary_hsp: &BlastpPreliminaryHsp) -> BlastpHsp {
         BlastpHsp {
+            num: 1,
             identity: 0.0,
             length: usize::try_from(preliminary_hsp.query_end - preliminary_hsp.query_start)
                 .expect("NCBI BLAST preliminary query span must be non-negative"),

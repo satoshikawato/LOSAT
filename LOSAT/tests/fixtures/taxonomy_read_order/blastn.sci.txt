@@ -1,0 +1,9 @@
+qn	Homo sapiens
+qn	Homo sapiens
+qn	Homo sapiens
+qn	Homo sapiens
+Error: [blastn] Error: Offset error at end of taxdb file.
+Error: [blastn] Error: Offset error at end of taxdb file.
+qn	N/A
+Error: [blastn] Error: Offset error at end of taxdb file.
+qn	N/A

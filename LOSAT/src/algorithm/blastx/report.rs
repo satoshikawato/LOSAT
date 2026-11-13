@@ -1021,6 +1021,16 @@ impl ShownSubjects<'_> {
             ShownSubjects::Fasta { .. } => &[],
         }
     }
+
+    /// The texts of the subjects that the query `ordinal`'s report reads one by one, which its
+    /// writer places where it reads each (`ReportedSubjects::query_reads`); empty otherwise.
+    pub(crate) fn query_reads(&self, ordinal: usize) -> &crate::report::query_warnings::QueryReads {
+        static NONE: crate::report::query_warnings::QueryReads = Vec::new();
+        match self {
+            ShownSubjects::Database { reported, .. } => reported.query_reads(ordinal),
+            ShownSubjects::Fasta { .. } => &NONE,
+        }
+    }
 }
 
 /// The records of a subject set whose ids `-parse_deflines` read, by subject index: as subjects
@@ -1308,6 +1318,11 @@ pub(super) fn render_queries_with(
             // ```
             stderr.write_all(&query_warning(options, query, batch.search_skipped))?;
             stderr.write_all(shown.query_fetches(batch.query_ordinal + qidx))?;
+            // The texts of the subjects that the query's rows read one by one, written where they
+            // read each (`ReadCursor`, the query's only).
+            let mut reads = crate::report::query_warnings::ReadCursor::new(std::slice::from_ref(
+                shown.query_reads(batch.query_ordinal + qidx),
+            ));
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:779-783
             // ```c++
             //               m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader)
@@ -1443,9 +1458,21 @@ pub(super) fn render_queries_with(
                     let shown_subject = ShownSubject {
                         ids: shown.subject_ids(subject, list.oid),
                     };
+                    let mut read = false;
                     for hsp in &list.hsps {
                         if !has_seqalign(hsp, options.gapped) {
                             continue;
+                        }
+                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+                        // ```c++
+                        //        		const CBioseq_Handle& subject_bh =
+                        //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+                        // ```
+                        // The subject's first row loads it where the query's batch did not
+                        // prefetch it: the texts of its taxonomy lookups follow the rows before it.
+                        if let (Some(reads), false) = (reads.as_mut(), read) {
+                            read = true;
+                            reads.subject_read(0, list.oid as u32, &mut *writer, &mut *stderr)?;
                         }
                         let a = alignment(batch, hsp, subject, query, &code, options.scoring)?;
                         let values: Vec<_> = options
@@ -1464,6 +1491,10 @@ pub(super) fn render_queries_with(
                         }
                         next_hsp += 1;
                     }
+                }
+                // A text whose read the rows did not place comes after them.
+                if let Some(reads) = reads.as_mut() {
+                    reads.before_query(1, &mut *writer, &mut *stderr)?;
                 }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
                 // ```c++
@@ -1526,6 +1557,9 @@ fn write_pairwise(
     let mut valid = Vec::new();
     let mut skipped = Vec::new();
     let mut warnings = Vec::new();
+    // The texts of the subjects that each query's report reads one by one, which the writer
+    // places where it reads each (`ShownSubjects::query_reads`).
+    let mut reads = Vec::new();
     for batch in batches {
         for qidx in 0..batch.queries.len() {
             let absolute = batch.query_ordinal + qidx;
@@ -1575,6 +1609,7 @@ fn write_pairwise(
             let mut query_warnings = query_warning(options, query, batch.search_skipped);
             query_warnings.extend_from_slice(shown.query_fetches(batch.query_ordinal + qidx));
             warnings.push(query_warnings);
+            reads.push(shown.query_reads(batch.query_ordinal + qidx).clone());
             valid.push(first.is_some());
             skipped.push(batch.search_skipped);
         }
@@ -1634,6 +1669,7 @@ fn write_pairwise(
         writer,
         stderr,
         &warnings,
+        &reads,
         &config,
         &qinfo,
         &valid,

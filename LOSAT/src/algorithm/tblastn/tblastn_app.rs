@@ -1875,6 +1875,9 @@ fn search(
             .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings)
         });
         let filtered_empty = database.is_some_and(|database| database.filtered_empty());
+        // The texts of the subjects that the reports of the queries whose batch's prefetch is
+        // off read one by one, by query, where the first format places them (`places_reads`).
+        let mut subject_reads = crate::report::query_warnings::SubjectReads::default();
         let mut query_warning_lines: Vec<Vec<u8>> = queries
             .iter()
             .zip(&query_validity)
@@ -2008,6 +2011,21 @@ fn search(
                     .formats
                     .first()
                     .and_then(|format| super::tabular::tabular_spec(format.outfmt));
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+                // ```c++
+                //        		const CBioseq_Handle& subject_bh =
+                //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+                // ```
+                // Whether the first format's writer writes the texts of the subjects that a
+                // query's report reads one by one where it reads each
+                // (`QueryWarnings::subject_read`): outfmt 0 (description lines and alignment
+                // headings), 5 (`Hit`s) and the tabular rows.
+                let places_reads = outputs.formats.first().is_some_and(|format| {
+                    matches!(
+                        super::stage_e_report::format_number(format.outfmt),
+                        0 | 5 | 6 | 7 | 10 | 20
+                    )
+                });
                 let plural_names =
                     taxdb_found && first_spec.as_ref().is_some_and(|spec| spec.checks_taxdb());
                 let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList]| {
@@ -2050,8 +2068,23 @@ fn search(
                                 .iter()
                                 .any(|list| super::database::reads_subject(list, rows))
                             {
-                                let messages = database.prefetch_messages(reported, shown, rows)?;
-                                query_warning_lines[query].extend(messages);
+                                // The first format writes the texts where it reads each subject
+                                // (`places_subject_reads`), else before the report.
+                                if places_reads {
+                                    subject_reads.set(
+                                        query,
+                                        database.subject_read_texts(
+                                            reported,
+                                            shown,
+                                            rows,
+                                            plural_names,
+                                        )?,
+                                    );
+                                } else {
+                                    let messages =
+                                        database.prefetch_messages(reported, shown, rows)?;
+                                    query_warning_lines[query].extend(messages);
+                                }
                             }
                             rows_open(shown)?;
                         }
@@ -2193,6 +2226,7 @@ fn search(
             seg.as_ref(),
             resolved.lcase_masking,
             &query_warning_lines,
+            subject_reads.queries(),
             &super::stage_e_report::ReportRanges {
                 queries: &query_input.placements,
                 subjects: subject_placements,

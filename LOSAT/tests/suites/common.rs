@@ -110,6 +110,8 @@ mod seq_id_first_line;
 mod seqalign_samples;
 #[path = "../suite_layout.rs"]
 mod suite_layout;
+#[path = "../taxonomy_read_order.rs"]
+mod taxonomy_read_order;
 #[path = "../web_v1_search_space.rs"]
 mod web_v1_search_space;
 #[path = "../x_reach_directory.rs"]

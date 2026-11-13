@@ -5071,6 +5071,23 @@ fn x_extra_dispatch(
     None
 }
 
+// No NCBI counterpart: whether a call of `xdrop_align` that the 16-bit lanes hold has recorded the
+// reference side of `LOSAT_X_DP32` (`x_dp32_mark_ref`). The side is recorded once per process, so
+// such a call tests this flag and calls nothing.
+static X_DP32_REF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// No NCBI counterpart: records the reference side of `LOSAT_X_DP32` (`x_reach!`: a call the 16-bit
+/// lanes hold, which the switch leaves to the 8-bit and 16-bit dispatch) while the switch is on, the
+/// first time such a call comes.
+#[cold]
+#[inline(never)]
+fn x_dp32_mark_ref() {
+    if x_dp32() {
+        crate::utils::xreach::x_reach!("LOSAT_X_DP32", false);
+    }
+    X_DP32_REF.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// No NCBI counterpart: `LOSAT_X_DP32`'s own path (`x_dp32`, `x_reach!`), for a call whose X-drop
 /// the 16-bit lanes cannot hold (`fits_16bit`; the calls the scalar ports took before). The X-drop
 /// is clamped (`x_drop_for_lanes`: `min(x_drop, R)`, which gives every result `x_drop` gives, the
@@ -5098,8 +5115,8 @@ fn xdrop_align_past16(
     crate::utils::xreach::x_reach!("LOSAT_X_DP32", true);
     let x_drop = x_drop_for_lanes(scores, len1, len2, gap_open, gap_extend, x_drop);
     if fits_16bit(gap_open, gap_extend, x_drop) {
-        // the 8-bit and 16-bit dispatch; it marks the reference side too (`x_reach!` below), as
-        // every call on those lanes does
+        // the 8-bit and 16-bit dispatch (which may record the reference side, `x_dp32_mark_ref`,
+        // as a call on those lanes does)
         return xdrop_align(
             q,
             s,
@@ -5151,7 +5168,8 @@ fn xdrop_align_past16(
 ///
 /// No NCBI counterpart: with `LOSAT_X_DP32` on (`x_dp32`), a call whose X-drop the 16-bit lanes
 /// cannot hold goes to `xdrop_align_past16` (the clamp, then these lanes or the 32-bit lanes);
-/// every other call is the reference side of the switch and runs the dispatch below, unchanged.
+/// every other call is the reference side of the switch (recorded once, `x_dp32_mark_ref`) and runs
+/// the dispatch below, unchanged.
 /// `=0`: every call runs the dispatch below, whose kernels decline such an X-drop at their first
 /// test, so the scalar port runs it, as before.
 pub(crate) fn xdrop_align(
@@ -5167,9 +5185,8 @@ pub(crate) fn xdrop_align(
     check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
-    let past16 = !fits_16bit(gap_open, gap_extend, x_drop);
-    if x_dp32() {
-        if past16 {
+    if !fits_16bit(gap_open, gap_extend, x_drop) {
+        if x_dp32() {
             return xdrop_align_past16(
                 q,
                 s,
@@ -5184,7 +5201,8 @@ pub(crate) fn xdrop_align(
                 sc,
             );
         }
-        crate::utils::xreach::x_reach!("LOSAT_X_DP32", false);
+    } else if !X_DP32_REF.load(std::sync::atomic::Ordering::Relaxed) {
+        x_dp32_mark_ref();
     }
     // EXPERIMENT (256-bit and 128-bit kernels, LOSAT_X_DPCAPTURE): see `x_extra_dispatch`. This
     // is one read of a value set once; when the dispatch returns None the code below runs.

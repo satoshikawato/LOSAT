@@ -603,12 +603,34 @@ pub(crate) fn sort_hsplist_by_score<H: HitListHsp>(list: &mut BlastpHspList<H>) 
 // ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1760-1811 (quoted at
 // `core::link_hsps`)
+/// An HSP that takes its linked set's values from the linking (`BLAST_LinkHsps`).
+pub(crate) trait LinkedHspValues: HitListHsp {
+    fn take_linked(&mut self, linked: &crate::core::link_hsps::LinkedHsp);
+}
+
+impl LinkedHspValues for BlastpHsp {
+    #[inline]
+    fn take_linked(&mut self, linked: &crate::core::link_hsps::LinkedHsp) {
+        self.e_value = linked.evalue;
+        self.num = linked.num;
+    }
+}
+
+impl LinkedHspValues for crate::algorithm::blastp::x_prelim_compact::XPrelimHsp {
+    /// The preliminary HSP keeps no set size: every later linking starts from 1
+    /// (`BLAST_LinkHsps`, link_hsps.c:1774-1776), and nothing reads it before.
+    #[inline]
+    fn take_linked(&mut self, linked: &crate::core::link_hsps::LinkedHsp) {
+        self.e_value = linked.evalue;
+    }
+}
+
 /// `BLAST_LinkHsps` on a subject's list of one query (psiblast's `-sum_stats true`): every HSP takes
-/// its linked set's e-value and size (`num`), in the list the linking builds, which is then sorted
-/// by score, and the best e-value is updated. `context` is the query's (`core::link_hsps::
-/// LinkContext`); `subject_length` the subject's length in letters.
-pub(crate) fn link_hsp_list(
-    list: &mut BlastpHspList,
+/// its linked set's e-value and size (`LinkedHspValues`), in the list the linking builds, which is
+/// then sorted by score, and the best e-value is updated. `context` is the query's
+/// (`core::link_hsps::LinkContext`); `subject_length` the subject's length in letters.
+pub(crate) fn link_hsp_list<H: LinkedHspValues>(
+    list: &mut BlastpHspList<H>,
     context: crate::core::link_hsps::LinkContext,
     subject_length: i32,
     params: &crate::core::link_hsps::EvenGapLinkParams,
@@ -616,22 +638,25 @@ pub(crate) fn link_hsp_list(
     if list.hsps.is_empty() {
         return;
     }
-    // `BlastHSP`'s 0-based offsets and exclusive ends (`HitListHsp::offsets`).
+    // `BlastHSP`'s 0-based offsets and exclusive ends (`HitListHsp::offsets`: 1-based starts).
     let link_hsps: Vec<crate::core::link_hsps::LinkHsp> = list
         .hsps
         .iter()
-        .map(|hsp| crate::core::link_hsps::LinkHsp {
-            context: 0,
-            query_offset: hsp.q_start as i32 - 1,
-            query_end: hsp.q_end as i32,
-            subject_offset: hsp.s_start.min(hsp.s_end) as i32 - 1,
-            subject_end: hsp.s_start.max(hsp.s_end) as i32,
-            score: hsp.raw_score,
+        .map(|hsp| {
+            let (q_start, q_end, s_start, s_end) = hsp.offsets();
+            crate::core::link_hsps::LinkHsp {
+                context: 0,
+                query_offset: q_start as i32 - 1,
+                query_end: q_end as i32,
+                subject_offset: s_start.min(s_end) as i32 - 1,
+                subject_end: s_start.max(s_end) as i32,
+                score: hsp.raw_score(),
+            }
         })
         .collect();
     let linked =
         crate::core::link_hsps::even_gap_link_hsps(&link_hsps, &[context], subject_length, params);
-    let mut hsps: Vec<Option<BlastpHsp>> = std::mem::take(&mut list.hsps)
+    let mut hsps: Vec<Option<H>> = std::mem::take(&mut list.hsps)
         .into_iter()
         .map(Some)
         .collect();
@@ -641,8 +666,7 @@ pub(crate) fn link_hsp_list(
             let mut hsp = hsps[linked.index]
                 .take()
                 .expect("the linking lists every HSP once");
-            hsp.e_value = linked.evalue;
-            hsp.num = linked.num;
+            hsp.take_linked(&linked);
             hsp
         })
         .collect();

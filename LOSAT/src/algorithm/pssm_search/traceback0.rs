@@ -30,13 +30,14 @@ use super::rows::PssmRows;
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use crate::algorithm::blastp::gapalign::{adjust_subject_range, BlastpPreliminaryHsp};
 use crate::algorithm::blastp::hsp::{
-    reap_hsplist_by_evalue, BlastpHitList, BlastpHsp, BlastpHspList,
+    link_hsp_list, reap_hsplist_by_evalue, BlastpHitList, BlastpHsp, BlastpHspList,
 };
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::blastp::x_redo_subjects::XRedoSubjects;
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
+use crate::core::link_hsps::{EvenGapLinkParams, LinkContext};
 use crate::stats::KarlinParams;
 use crate::utils::matrix::standard_score;
 
@@ -61,6 +62,10 @@ pub(crate) struct PssmTraceback0<'a, R: PssmRows> {
     pub(crate) stats: EvalueStats<'a>,
     pub(crate) expect_value: f64,
     pub(crate) hitlist_size: usize,
+    /// psiblast's `-sum_stats true`: the traceback's linking parameters
+    /// (`EvenGapLinkParams::traceback`) and the query's context as the linking reads it
+    /// (`kbp_gap_psi`); `None` without sum statistics.
+    pub(crate) link: Option<(EvenGapLinkParams, LinkContext)>,
 }
 
 /// A preliminary list of the query and one subject, full or compact.
@@ -228,11 +233,20 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
         Ok((!hsp_list.hsps.is_empty()).then_some(hsp_list))
     }
 
-    /// `s_HSPListPostTracebackUpdate` (no linking, no RPS, a scale factor of 1): the e-values from
+    /// `s_HSPListPostTracebackUpdate` (no RPS, a scale factor of 1): the e-values from
     /// `kbp_gap_psi` (Spouge's finite-size correction with the query's and the subject's
     /// lengths, or without the Gumbel block the context's search space, `EvalueStats::e_value`),
-    /// the e-value reap, the bit scores.
+    /// or with psiblast's `-sum_stats true` the linked sets' e-values (large gaps only), the
+    /// e-value reap, the bit scores.
     ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:213-216
+    /// ```c
+    ///    /* Relink and rereap the HSP list, if needed. */
+    ///    if (hit_params->link_hsp_params) {
+    ///       BLAST_LinkHsps(program_number, hsp_list, query_info, subject_length,
+    ///                      sbp, hit_params->link_hsp_params, kGapped);
+    ///    } else {
+    /// ```
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:229-250
     /// ```c
     ///       Blast_HSPListGetEvalues(program_number, query_info, subject_length,
@@ -247,14 +261,21 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
     ///    Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
     /// ```
     fn post_traceback_update(&self, hsp_list: &mut BlastpHspList, subject_length: usize) {
-        let query_length = self.context.aa_len as i32;
-        for hsp in &mut hsp_list.hsps {
-            hsp.e_value = self.stats.e_value(
-                hsp.raw_score,
-                self.karlin,
-                query_length,
-                subject_length as i32,
-            );
+        match &self.link {
+            Some((params, context)) => {
+                link_hsp_list(hsp_list, *context, subject_length as i32, params);
+            }
+            None => {
+                let query_length = self.context.aa_len as i32;
+                for hsp in &mut hsp_list.hsps {
+                    hsp.e_value = self.stats.e_value(
+                        hsp.raw_score,
+                        self.karlin,
+                        query_length,
+                        subject_length as i32,
+                    );
+                }
+            }
         }
         reap_hsplist_by_evalue(hsp_list, self.expect_value);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1926-1928

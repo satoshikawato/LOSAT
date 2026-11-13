@@ -1699,39 +1699,23 @@ fn x_link_compact_preliminary_hsp_list<'h>(
     search_space: &crate::stats::search_space::SearchSpace,
     link: &crate::core::link_hsps::EvenGapLinkParams,
 ) -> BlastpHspList<XPrelimHsp> {
-    let hits: Vec<BlastpPreliminaryHsp> = preliminary_hits.copied().collect();
-    let link_hsps: Vec<crate::core::link_hsps::LinkHsp> = hits
-        .iter()
-        .map(|hit| crate::core::link_hsps::LinkHsp {
-            context: 0,
-            query_offset: hit.query_start,
-            query_end: hit.query_end,
-            subject_offset: hit.subject_start,
-            subject_end: hit.subject_end,
-            score: hit.raw_score,
-        })
-        .collect();
-    let context = blastp_link_context(karlin_params, query_length, search_space);
-    let hsps: Vec<XPrelimHsp> = crate::core::link_hsps::even_gap_link_hsps(
-        &link_hsps,
-        &[context],
-        subject_length as i32,
-        link,
-    )
-    .into_iter()
-    .map(|linked| XPrelimHsp {
-        hsp: hits[linked.index],
-        e_value: linked.evalue,
-    })
-    .collect();
     let mut hsp_list = BlastpHspList {
         oid,
         query_index,
-        hsps,
+        hsps: preliminary_hits
+            .map(|hit| XPrelimHsp {
+                hsp: *hit,
+                e_value: f64::MAX,
+            })
+            .collect(),
         best_evalue: f64::MAX,
     };
-    super::hsp::sort_hsplist_by_score(&mut hsp_list);
-    super::hsp::update_best_evalue(&mut hsp_list);
+    super::hsp::link_hsp_list(
+        &mut hsp_list,
+        blastp_link_context(karlin_params, query_length, search_space),
+        subject_length as i32,
+        link,
+    );
     hsp_list
 }
 
@@ -11322,6 +11306,7 @@ fn run_resolved_in_pool(
                 gapped_params: &gapped_params,
                 gumbel: gapped_gumbel.as_ref(),
                 exact_search_spaces: &exact_search_spaces,
+                search_spaces: &search_spaces,
                 cutoff_subject_length,
                 prelim_evalue,
                 window,
@@ -11765,6 +11750,8 @@ fn run_resolved_in_pool(
             &gapped_params,
             gapped_gumbel.as_ref(),
             &exact_search_spaces,
+            &search_spaces,
+            (cutoff_subject_length, prelim_evalue),
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
             blastp_parallel_pool,

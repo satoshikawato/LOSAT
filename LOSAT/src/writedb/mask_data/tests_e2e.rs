@@ -32,21 +32,21 @@ use crate::writedb::writer::{DbVersion, Indices};
 use crate::writedb::WriteDbError;
 
 /// What makeblastdb is given: the FASTA files, and the options `x_ProcessMaskData` reads.
-struct Case {
-    name: String,
-    protein: bool,
+pub(super) struct Case {
+    pub(super) name: String,
+    pub(super) protein: bool,
     /// The FASTA files in the order of `-in`.
-    inputs: Vec<PathBuf>,
+    pub(super) inputs: Vec<PathBuf>,
     /// `-mask_data`, `-mask_id`, `-mask_desc`: the option values as the command line has them.
-    mask_data: Option<String>,
-    mask_id: Option<String>,
-    mask_desc: Option<String>,
+    pub(super) mask_data: Option<String>,
+    pub(super) mask_id: Option<String>,
+    pub(super) mask_desc: Option<String>,
     /// The directory the mask file names are looked up in.
-    root: PathBuf,
-    max_file_size: u64,
-    title: String,
+    pub(super) root: PathBuf,
+    pub(super) max_file_size: u64,
+    pub(super) title: String,
     /// `-blastdb_version`.
-    version: DbVersion,
+    pub(super) version: DbVersion,
 }
 
 impl Case {
@@ -63,14 +63,14 @@ impl Case {
 
 /// The result of a run: makeblastdb's exit status, the text on its standard error stream and
 /// the log (its standard output).
-struct Run {
-    status: i32,
-    stderr: Vec<u8>,
-    log: String,
+pub(super) struct Run {
+    pub(super) status: i32,
+    pub(super) stderr: Vec<u8>,
+    pub(super) log: String,
 }
 
 impl Run {
-    fn stderr_text(&self) -> String {
+    pub(super) fn stderr_text(&self) -> String {
         String::from_utf8_lossy(&self.stderr).into_owned()
     }
 
@@ -112,6 +112,17 @@ fn build(db: &mut BuildDatabase<'_>, case: &Case, warn: Warn<'_>) -> Result<(), 
 /// the destructor of the `CBuildDatabase`, in that order. `column_dates` are the dates of the
 /// column files of the volumes to reproduce (`None`: the clock).
 fn run_case(case: &Case, out_base: &str, index_date: &str, column_dates: &[Option<String>]) -> Run {
+    run_case_with(case, out_base, index_date, column_dates, Indices::default())
+}
+
+/// `run_case` with the indices of the build (`full`: `-parse_seqids`).
+pub(super) fn run_case_with(
+    case: &Case,
+    out_base: &str,
+    index_date: &str,
+    column_dates: &[Option<String>],
+    indices: Indices,
+) -> Run {
     let mut log = Vec::new();
     let mut messages = Vec::new();
     let status = {
@@ -128,7 +139,7 @@ fn run_case(case: &Case, out_base: &str, index_date: &str, column_dates: &[Optio
             &time_of(index_date),
             case.version,
             LINUX,
-            Indices::default(),
+            indices,
         )
         .unwrap();
         for (i, date) in column_dates.iter().enumerate() {
@@ -154,7 +165,8 @@ fn run_case(case: &Case, out_base: &str, index_date: &str, column_dates: &[Optio
     }
 }
 
-const DESTRUCTOR_MESSAGE: &str = "Error: [makeblastdb] No sequences matched any of the masks \
+pub(super) const DESTRUCTOR_MESSAGE: &str =
+    "Error: [makeblastdb] No sequences matched any of the masks \
      provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as \
      well as makeblastdb.\n";
 
@@ -593,14 +605,13 @@ fn read_expected(parse_dir: &Path) -> BTreeMap<String, Expected> {
 /// Files that makeblastdb reads and LOSAT does not (`MaskFileError::Unsupported`): LOSAT's
 /// outcome is its own refusal (status 1, "losat makeblastdb: mask data that LOSAT does not read: ..."),
 /// whatever NCBI did with them. A new file that LOSAT refuses must be added here.
-const LOSAT_UNSUPPORTED: [&str; 10] = [
+const LOSAT_UNSUPPORTED: [&str; 9] = [
     "h_unsupported_whole.asnt",
     "h_unsupported_pnt.asnt",
     "h_unsupported_mix.asnt",
     "h_unsupported_null.asnt",
     "h_unsupported_feat.asnt",
     "b_small_whole.asnb",
-    "h_different_other_ids.asnt",
     // NCBI replaces a byte that is not printable in a `VisibleString` with '#' and logs it, and
     // warns about a UTF8String tag for a VisibleString; those lines are its only standard error.
     // LOSAT does not write them, so it refuses the string.
@@ -758,12 +769,12 @@ fn every_mask_parse_file_runs_end_to_end() {
     assert_eq!(
         tally,
         [
-            ("Equal".to_string(), 68),
+            ("Equal".to_string(), 69),
             ("NoDatabase".to_string(), 3),
             ("OutOfMemory".to_string(), 1),
             ("Serial".to_string(), 39),
             ("UnknownEncoding".to_string(), 7),
-            ("Unsupported".to_string(), 10),
+            ("Unsupported".to_string(), 9),
         ]
     );
 }
@@ -1344,8 +1355,7 @@ fn the_message_of_a_run_without_matching_masks_is_ncbi_s() {
     // No mask data source: no message.
     db.post_destruction_diagnostics(&mut warn);
     assert!(!db.found_matching_masks());
-    db.set_mask_data_source(super::MaskedRangeSet::new())
-        .unwrap();
+    db.set_mask_data_source(super::MaskedRangeSet::new());
     db.post_destruction_diagnostics(&mut warn);
     assert_eq!(String::from_utf8_lossy(&messages), DESTRUCTOR_MESSAGE);
 }

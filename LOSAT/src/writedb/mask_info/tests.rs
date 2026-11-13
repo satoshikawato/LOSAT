@@ -9,6 +9,7 @@
 //! makeblastdb on files made by a fuzzer.
 
 use super::*;
+use crate::seqid::model::{Dbtag, IdPat, ObjectId, PatentNumber, PatentSeqId, PdbSeqId, TextseqId};
 use crate::writedb::WriteDbError;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -134,8 +135,8 @@ fn infos(path: &Path) -> Vec<MaskInfo> {
         .collect()
 }
 
-fn local(n: i32) -> Option<MaskSeqId> {
-    Some(MaskSeqId::LocalId(n))
+fn local(n: i32) -> Option<ParsedSeqId> {
+    Some(ParsedSeqId::Local(ObjectId::Id(n)))
 }
 
 fn interval(from: u32, to: u32) -> MaskInterval {
@@ -225,8 +226,8 @@ fn dump_list(list: &MaskList) -> String {
     for loc in &list.masks {
         out += " {";
         match &loc.id {
-            Some(MaskSeqId::LocalId(n)) => out += &format!("L{n}"),
-            Some(MaskSeqId::Other(b)) => out += &format!("O{}", b.len()),
+            Some(ParsedSeqId::Local(ObjectId::Id(n))) => out += &format!("L{n}"),
+            Some(other) => out += &format!("O{}", other.alternative()),
             None => out += "-",
         }
         for iv in &loc.intervals {
@@ -241,30 +242,32 @@ fn dump_list(list: &MaskList) -> String {
 }
 
 // ---------------------------------------------------------------------------------------------
-// canonical encodings of Seq-ids
+// Seq-ids
 
-fn canon_str(s: &str) -> Vec<u8> {
-    let mut v = vec![b's'];
-    v.extend((s.len() as u64).to_le_bytes());
-    v.extend(s.as_bytes());
-    v
+fn local_str(s: &str) -> ParsedSeqId {
+    ParsedSeqId::Local(ObjectId::Str(s.as_bytes().to_vec()))
 }
 
-/// `local str "<s>"` as `MaskSeqId::Other`: Seq-id variant 0, Object-id variant 1, the string.
-fn local_str(s: &str) -> MaskSeqId {
-    let mut v = vec![0, 1];
-    v.extend(canon_str(s));
-    MaskSeqId::Other(v)
+fn general_str(db: &str, tag: &str) -> ParsedSeqId {
+    ParsedSeqId::General(Dbtag {
+        db: db.as_bytes().to_vec(),
+        tag: ObjectId::Str(tag.as_bytes().to_vec()),
+    })
 }
 
-/// `general { db "<db>", tag str "<tag>" }`: Seq-id variant 10, a SEQUENCE of two members present,
-/// the second a CHOICE whose variant 1 is a string.
-fn general_str(db: &str, tag: &str) -> MaskSeqId {
-    let mut v = vec![10, b'S', 1];
-    v.extend(canon_str(db));
-    v.extend([1, b'C', 1]);
-    v.extend(canon_str(tag));
-    MaskSeqId::Other(v)
+fn textseq(
+    name: Option<&str>,
+    accession: Option<&str>,
+    release: Option<&str>,
+    version: Option<i32>,
+) -> TextseqId {
+    let bytes = |s: &str| s.as_bytes().to_vec();
+    TextseqId {
+        name: name.map(bytes),
+        accession: accession.map(bytes),
+        release: release.map(bytes),
+        version,
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -324,30 +327,56 @@ fn tool_output_values() {
 
 #[test]
 fn tool_outputs_with_parsed_seqids() {
+    // lcl|name1, gnl|mydb|tag1, ref|NC_000001.1|, gb|AB123456.1|ABC, emb|X12345.1|, ...: every
+    // Seq-id as the typed value, from the text and from the binary file alike
+    let expected = vec![
+        local_str("name1"),
+        general_str("mydb", "tag1"),
+        ParsedSeqId::Other(textseq(None, Some("NC_000001"), None, Some(1))),
+        ParsedSeqId::Genbank(textseq(Some("ABC"), Some("AB123456"), None, Some(1))),
+        ParsedSeqId::Embl(textseq(None, Some("X12345"), None, Some(1))),
+        ParsedSeqId::Ddbj(textseq(None, Some("AB000001"), None, Some(1))),
+        ParsedSeqId::Pdb(PdbSeqId {
+            mol: b"1ABC".to_vec(),
+            chain: Some(65),
+            rel: None,
+            chain_id: Some(b"A".to_vec()),
+        }),
+        ParsedSeqId::Patent(PatentSeqId {
+            seqid: 1,
+            cit: IdPat {
+                country: b"US".to_vec(),
+                id: PatentNumber::Number(b"RE33188".to_vec()),
+                doc_type: None,
+            },
+        }),
+        ParsedSeqId::Gi(12345),
+        ParsedSeqId::General(Dbtag {
+            db: b"db".to_vec(),
+            tag: ObjectId::Id(123),
+        }),
+        ParsedSeqId::Local(ObjectId::Id(123)),
+        ParsedSeqId::Swissprot(textseq(
+            Some("NAME_HUMAN"),
+            Some("P12345"),
+            Some("reviewed"),
+            None,
+        )),
+        ParsedSeqId::Pir(textseq(Some("A12345"), None, None, None)),
+        ParsedSeqId::Prf(textseq(Some("123456"), None, None, None)),
+        ParsedSeqId::Tpg(textseq(None, Some("BK000001"), None, Some(1))),
+        ParsedSeqId::Other(textseq(None, Some("NP_000001"), None, Some(2))),
+    ];
     for ext in ["asnt", "asnb"] {
         let dust = infos(&parse_dir().join(format!("dust_ps.{ext}")));
         let locs = &dust[0].masks.masks;
-        assert_eq!(locs.len(), 16, "{ext}");
-        // lcl|name1, gnl|mydb|tag1, ref|NC_000001.1|, ...
-        assert_eq!(locs[0].id, Some(local_str("name1")), "{ext}");
-        assert_eq!(locs[1].id, Some(general_str("mydb", "tag1")), "{ext}");
-        // lcl|123 is `local id 123`; the other Seq-ids are kept whole
-        assert_eq!(locs[10].id, local(123), "{ext}");
-        let others: Vec<_> = locs
-            .iter()
-            .filter(|l| matches!(l.id, Some(MaskSeqId::Other(_))))
-            .collect();
-        assert_eq!(others.len(), 15, "{ext}");
+        let ids: Vec<_> = locs.iter().map(|l| l.id.clone().unwrap()).collect();
+        assert_eq!(ids, expected, "{ext}");
         // Seq-ids of different kinds differ
-        let mut distinct: Vec<_> = others.iter().map(|l| l.id.clone()).collect();
-        distinct.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
+        let mut distinct = ids.clone();
+        distinct.sort();
         distinct.dedup();
-        assert_eq!(distinct.len(), 15, "{ext}");
-        // pdb|1ABC|A: `pdb { mol "1ABC", chain 65, chain-id "A" }` is the 7th defline
-        let Some(MaskSeqId::Other(pdb)) = &locs[6].id else {
-            panic!("pdb id");
-        };
-        assert_eq!(pdb[0], 14, "Seq-id variant pdb");
+        assert_eq!(distinct.len(), 16, "{ext}");
     }
 }
 
@@ -499,9 +528,7 @@ fn every_file_is_read_as_makeblastdb_reads_it() {
                     "{file}: {result:?}"
                 );
             }
-            Outcome::Accepted
-                if UNSUPPORTED.contains(&file.as_str()) || file == "h_different_other_ids.asnt" =>
-            {
+            Outcome::Accepted if UNSUPPORTED.contains(&file.as_str()) => {
                 assert!(
                     matches!(result, Err(MaskFileError::Unsupported(_))),
                     "{file}: {result:?}"
@@ -530,7 +557,6 @@ fn unsupported_files_name_what_is_not_read() {
         ("h_unsupported_null.asnt", "`null`"),
         ("h_unsupported_feat.asnt", "`feat`"),
         ("b_small_whole.asnb", "`whole`"),
-        ("h_different_other_ids.asnt", "different Seq-ids"),
         (
             "h_string_nonprint.asnt",
             "byte 0x09 in the VisibleString member `algo-options`",
@@ -563,26 +589,23 @@ fn seq_ids_of_one_seq_loc() {
     assert!(one("h_packed_empty.asnt")[0].intervals.is_empty());
     // a `local id` and another kind
     assert_eq!(one("h_local_and_other_id.asnt")[0].id, None);
+    // two different Seq-ids that are not `local id` (`gi 5`, `gi 6`) are two Seq-ids as well
+    assert_eq!(one("h_different_other_ids.asnt")[0].id, None);
     // the same `gi 5`, written with other spacing and a comment: equal
     let same = one("h_same_other_id_spacing.asnt");
-    assert!(matches!(same[0].id, Some(MaskSeqId::Other(_))));
+    assert_eq!(same[0].id, Some(ParsedSeqId::Gi(5)));
     assert_eq!(same[0].intervals, vec![interval(5, 14), interval(20, 29)]);
     // `local str "1"` is not `local id 1`
-    assert!(matches!(
-        one("h_local_str_1.asnt")[0].id,
-        Some(MaskSeqId::Other(_))
-    ));
+    assert_eq!(one("h_local_str_1.asnt")[0].id, Some(local_str("1")));
     // a negative `local id` is a number like any other
     assert_eq!(one("h_id_negative.asnt")[0].id, local(-3));
     // `int` and `packed-int` of one interval read alike
     assert_eq!(one("h_int_variant.asnt"), one("h_ok.asnt"));
     // the value of a stand-alone Seq-id does not depend on the encoding: gi 123456789012 in BER
-    let Some(MaskSeqId::Other(gi)) = &one("b_small_gi.asnb")[0].id else {
-        panic!("gi");
-    };
-    let mut expected = vec![11, b'i'];
-    expected.extend(123_456_789_012i64.to_le_bytes());
-    assert_eq!(gi, &expected);
+    assert_eq!(
+        one("b_small_gi.asnb")[0].id,
+        Some(ParsedSeqId::Gi(123_456_789_012))
+    );
 }
 
 #[test]

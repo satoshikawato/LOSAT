@@ -16,6 +16,26 @@
 //! * [`MaskWriter`]: the part of `CWriteDB_Impl` that registers algorithms
 //!   and builds the two blobs of a sequence; `WriteDb` holds one.
 //!
+//! Which sequence a mask reaches. A mask is stored under the `CSeq_id_Handle` of its Seq-id and a
+//! sequence looks up every Seq-id of its `Bioseq::GetId()` in order, as
+//! `CMaskedRangeSet::{Insert, GetRanges}` do (masked_range_set.cpp:39-106; build_db.cpp:499-502,
+//! 837-851). Two Seq-ids are one handle by the rules of `CSeq_id_Mapper` (seq_id_handle.cpp:113-116,
+//! seq_id_tree.cpp:244-275 and the tree of each alternative): `embl|AY100001.1|` masks
+//! `gb|AY100001.1|`, accessions and local string ids match without case, `local str "5"` does not
+//! match `lcl|5`; `seqid::mask_handle` has the table. With `-parse_seqids` a sequence has the
+//! Seq-ids of its defline (those of the other molecule type turned into `local str`,
+//! build_db.cpp:837-851), without it `local id N`. The ranges of several Seq-ids are combined as
+//! `CSeq_loc::Add(fMerge_All | fSort)` does (seq_loc.cpp:4547-4693).
+//!
+//! What is refused (an error through the mask-data error path that names the Seq-ids): the two
+//! cases whose NCBI result depends on memory addresses, a sequence with a `giim` Seq-id whose
+//! number a `giim` Seq-id of the masks has (seq_id_tree.cpp:2926-2941: the Giim tree's `x_FindInfo`
+//! tests `!gid.Equals(gid2)`), and the ranges of one sequence and algorithm that come from two
+//! handles with the same `m_Packed` (the order of `CSeq_id_Handle::operator<` falls back to the
+//! addresses of the infos, seq_id_handle.hpp:193-207). The environment variables
+//! `OBJECTS_PACK_TEXTID` and `OBJECTS_PACK_GENERAL` (seq_id_tree.cpp:692-707) change the handles
+//! and are refused at the start of the program (`blastinput::ncbi_environment`).
+//!
 //! A database written without mask data never creates any of these objects
 //! (a `MaskWriter` holds empty containers that do not allocate, and its
 //! blobs and column description stay `None`).
@@ -29,6 +49,8 @@ pub(crate) mod registry;
 mod tests;
 #[cfg(test)]
 mod tests_e2e;
+#[cfg(test)]
+mod tests_ids;
 
 use std::collections::BTreeMap;
 

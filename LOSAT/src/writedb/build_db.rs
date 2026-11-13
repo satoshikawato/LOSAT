@@ -11,7 +11,6 @@ use super::deflines;
 use super::dir_entry;
 use super::fasta_source::{FastaBioseqSource, Warn};
 use super::mask_data::{ranges_are_empty, MaskedRangeSet};
-use super::mask_info::MaskSeqId;
 use super::platform::Platform;
 use super::taxid_set::TaxIdSet;
 use super::time::LocalTime;
@@ -19,6 +18,8 @@ use super::writer::{DbVersion, Indices, WriteDb};
 use super::WriteDbError;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::seqdb::{SeqDbError, SeqType};
+use crate::seqid::model::ObjectId;
+use crate::seqid::ParsedSeqId;
 
 /// `CBuildDatabase` for a FASTA input without parsed Seq-ids.
 pub struct BuildDatabase<'a> {
@@ -927,22 +928,14 @@ impl<'a> BuildDatabase<'a> {
     //     m_MaskData.Reset(& ranges);
     // }
     // ```
-    // The masks are looked up by the `local id` of a sequence of a build without
-    // `-parse_seqids`; the Seq-ids of a build with it are not given to the lookup yet, so a
-    // set cannot be handed over to such a build.
+    // The masks are looked up by the Seq-ids of each sequence (`bs->GetId()`): with
+    // `-parse_seqids` the parsed ids, else its `local id` (`add_masks_for_seq_id`).
     /// `SetMaskDataSource`: the masked ranges of the sequences. makeblastdb calls it when
     /// the first mask file with masks has been read, and keeps adding to the set after that,
     /// so the caller hands the finished set over before the first sequence is added.
     #[allow(dead_code)]
-    pub fn set_mask_data_source(&mut self, ranges: MaskedRangeSet) -> Result<(), WriteDbError> {
-        if self.parse_ids {
-            return Err(WriteDbError::Other(
-                "mask data for a database built with -parse_seqids is not supported yet"
-                    .to_string(),
-            ));
-        }
+    pub fn set_mask_data_source(&mut self, ranges: MaskedRangeSet) {
         self.mask_data = Some(ranges);
-        Ok(())
     }
 
     /// The set that `set_mask_data_source` handed over, to add to. makeblastdb creates the
@@ -1121,26 +1114,40 @@ impl<'a> BuildDatabase<'a> {
                     self.output_db.post_extracted_deflines(&headers);
                     self.taxids.fix_tax_id(&mut headers);
                     if bioseq.seq_data.is_some() {
+                        // `bs->GetId()`: the ids after `AddSequences`' edit of the ones of the
+                        // other molecule type (`localize_other_molecule`, above).
+                        let ids = self
+                            .mask_data
+                            .is_some()
+                            .then(|| bioseq.parsed.as_ref().map(|parsed| parsed.ids.clone()))
+                            .flatten();
                         self.output_db.add_sequence(bioseq)?;
                         self.output_db.set_deflines(headers);
                         added = true;
+                        if let Some(ids) = ids {
+                            self.add_masks_for_seq_id(&ids)?;
+                        }
                     }
                 } else {
                     // The definition line without `-parse_seqids` gets the global taxid
                     // of `-taxid` (or 0); `-taxid_map` requires `-parse_seqids`.
                     self.output_db.extract_bioseq_deflines(&bioseq);
                     if bioseq.seq_data.is_some() {
-                        // The masks are looked up by the number of the sequence; one that
-                        // is no `local id` of 31 bits matches none.
-                        let mask_id = self
+                        // `bs->GetId()` is the `local id N` that `CFastaReader` numbers the
+                        // sequences by (`CSeqIdGenerator::GenerateID` without a prefix); a
+                        // number that is no `int` matches none.
+                        let ids: Vec<ParsedSeqId> = self
                             .mask_data
                             .is_some()
                             .then(|| bioseq.local_id.parse::<i32>().ok())
-                            .flatten();
+                            .flatten()
+                            .map(|number| ParsedSeqId::Local(ObjectId::Id(number)))
+                            .into_iter()
+                            .collect();
                         self.output_db.add_sequence(bioseq)?;
                         self.output_db.set_taxid(self.taxids.global_taxid());
                         added = true;
-                        self.add_masks_for_seq_id(mask_id)?;
+                        self.add_masks_for_seq_id(&ids)?;
                     }
                 }
             }
@@ -1192,16 +1199,11 @@ impl<'a> BuildDatabase<'a> {
     //     m_FoundMatchingMasks = true;
     // }
     // ```
-    // The Seq-ids of a sequence without `-parse_seqids` are its `local id` (`mask_id`, `None`
-    // when it has no 31-bit one: it matches nothing, but the other Seq-ids of masks are
-    // compared the same way).
-    fn add_masks_for_seq_id(&mut self, mask_id: Option<i32>) -> Result<(), WriteDbError> {
+    // The Seq-ids are `bs->GetId()`: the parsed ids of a sequence with `-parse_seqids`, its
+    // `local id` without it. A sequence with no 31-bit local id has none.
+    fn add_masks_for_seq_id(&mut self, ids: &[ParsedSeqId]) -> Result<(), WriteDbError> {
         let Some(mask_data) = self.mask_data.as_mut() else {
             return Ok(());
-        };
-        let ids: &[MaskSeqId] = match mask_id {
-            Some(n) => &[MaskSeqId::LocalId(n)],
-            None => &[],
         };
         let ranges = mask_data.get_ranges(ids)?;
         if ranges_are_empty(ranges) {

@@ -2,11 +2,29 @@
 //! (`CMaskedRangeSet`, `c++/src/app/blastdb/masked_range_set.cpp`), with the
 //! combination of several Seq-locs of one sequence (`CSeq_loc::Add` with
 //! `fMerge_All | fSort`).
+//!
+//! A mask finds a sequence the way NCBI's `map<CSeq_id_Handle, CConstRef<CSeq_loc>>` does: through
+//! the handle of its Seq-id, and a sequence looks its Seq-ids up in the order of its `GetId()`
+//! (`seqid::mask_handle` has the identity of handles: a mask for `embl|AY100001.1` masks
+//! `gb|AY100001.1|`, a local string id matches without case, `local str "5"` does not match
+//! `lcl|5`, ...). The ranges that several Seq-ids of one sequence find are combined with
+//! `CSeq_loc::Add`, which groups them by handle in the handle's order (`m_Packed - 1`, unsigned),
+//! sorts and merges each group, and writes the plus strand's groups before the minus strand's.
+//!
+//! LOSAT refuses (an error that names the Seq-ids, through the mask-data error path) the two
+//! cases whose result depends on NCBI's memory addresses: a sequence with a `giim` Seq-id whose
+//! number a `giim` Seq-id of the mask data has (NCBI's Giim tree finds the first stored handle of
+//! the number that is *not* `Equals`), and ranges of one sequence and algorithm that come from two
+//! different handles with the same `m_Packed` (NCBI orders those by the address of the handle's
+//! info).
 
-use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use crate::writedb::mask_info::{MaskInterval, MaskLoc, MaskSeqId};
+use crate::seqid::mask_handle::{
+    mask_handle_key, mask_handle_order, mask_handle_packed, Undecidable,
+};
+use crate::seqid::ParsedSeqId;
+use crate::writedb::mask_info::{MaskInterval, MaskLoc};
 use crate::writedb::WriteDbError;
 
 // NCBI reference (598d8ae6): c++/include/objects/blastdb/defline_extra.hpp:78-93
@@ -60,26 +78,86 @@ pub(crate) fn ranges_are_empty(ranges: &[MaskedRanges]) -> bool {
     ranges.iter().all(|r| r.offsets.is_empty())
 }
 
-/// `CMaskedRangeSet`: the Seq-loc of each (algorithm, sequence) and the
+/// `CMaskedRangeSet`: the Seq-loc of each (algorithm, handle) and the
 /// ranges of the algorithms that have any, in the order of their first
 /// `insert`.
 #[derive(Debug, Default)]
 pub(crate) struct MaskedRangeSet {
     /// `m_Ranges`.
     ranges: Vec<MaskedRanges>,
-    /// `m_Values`, by algorithm id: the Seq-loc of each sequence as the
-    /// intervals `CSeq_loc_CI` visits in it.
-    values: BTreeMap<i32, HashMap<MaskSeqId, Stored>>,
+    /// `m_Values`, by algorithm id.
+    values: BTreeMap<i32, AlgorithmLocs>,
+    /// The numbers of the `giim` Seq-ids of every mask inserted (NCBI's Giim tree is shared by
+    /// the algorithms): the handle of a sequence's `giim` id depends on them.
+    giim_numbers: BTreeSet<i32>,
 }
 
-/// The Seq-loc of an (algorithm, sequence): the intervals NCBI holds, or the
+/// The Seq-locs of one algorithm.
+#[derive(Debug, Default)]
+struct AlgorithmLocs {
+    /// `m_Values[algo_id]` has an entry (any `Insert` makes one, `giim` and `neither accession nor
+    /// name` Seq-ids included: `x_Set` creates the map element before it combines).
+    used: bool,
+    /// The handles that can be found again, by `mask_handle_key`.
+    by_handle: HashMap<Vec<u8>, Stored>,
+}
+
+/// The Seq-loc of an (algorithm, handle): the intervals NCBI holds, or the
 /// error of a combination that LOSAT does not port. NCBI combines Seq-locs
-/// for every Seq-id, including ones no sequence has, and finishes the run;
+/// for every handle, including ones no sequence has, and finishes the run;
 /// the error is therefore raised only when the sequence is looked up.
 #[derive(Debug)]
-enum Stored {
+struct Stored {
+    /// A number of the handle, unique among the handles of the algorithm: the groups of
+    /// ranges of one handle.
+    handle: usize,
+    /// `m_Packed` of the handle (`mask_handle_packed`).
+    packed: i64,
+    loc: StoredLoc,
+}
+
+#[derive(Debug)]
+enum StoredLoc {
     Intervals(Vec<MaskInterval>),
     Unsupported(String),
+}
+
+/// One interval of a combination, with the handle of its Seq-id.
+#[derive(Clone, Copy)]
+struct Piece {
+    handle: usize,
+    packed: i64,
+    interval: MaskInterval,
+}
+
+impl Stored {
+    /// The error of a Seq-loc that LOSAT did not combine.
+    fn refusal(&self) -> Result<(), WriteDbError> {
+        match &self.loc {
+            StoredLoc::Intervals(_) => Ok(()),
+            StoredLoc::Unsupported(message) => Err(WriteDbError::Other(message.clone())),
+        }
+    }
+
+    fn pieces(&self) -> Result<impl Iterator<Item = Piece> + '_, WriteDbError> {
+        match &self.loc {
+            StoredLoc::Intervals(intervals) => Ok(intervals.iter().map(|&interval| Piece {
+                handle: self.handle,
+                packed: self.packed,
+                interval,
+            })),
+            StoredLoc::Unsupported(message) => Err(WriteDbError::Other(message.clone())),
+        }
+    }
+}
+
+/// Why `add_locs` does not give a Seq-loc.
+enum AddError {
+    /// LOSAT does not port the combination.
+    Unsupported(String),
+    /// Two different handles with the same `m_Packed`: NCBI orders their ranges by the address of
+    /// the handles' infos.
+    Tie(usize, usize),
 }
 
 fn unsupported(message: &str) -> String {
@@ -351,66 +429,92 @@ fn is_reverse(strand: Option<u8>) -> bool {
 // that ends at 4294967295 and the one that covers the whole range are
 // handled by NCBI through `CRange`'s empty and whole cases; LOSAT does not
 // port those and stops.
-/// `CSeq_loc::Add(other, fMerge_All | fSort)` on the intervals of two
-/// Seq-locs of one Seq-id: the intervals of the result in the order
-/// `CSeq_loc_CI` visits them.
-fn add_locs(first: &[MaskInterval], second: &[MaskInterval]) -> Result<Vec<MaskInterval>, String> {
-    let mut plus: Vec<(u32, u32)> = Vec::new();
-    let mut minus: Vec<(u32, u32)> = Vec::new();
-    for iv in first.iter().chain(second) {
+/// `CSeq_loc::Add(other, fMerge_All | fSort)` on two Seq-locs: the intervals of the result in the
+/// order `CSeq_loc_CI` visits them, with their handles. They are grouped by handle (`x_MergeAndSort`:
+/// `map<CSeq_id_Handle_Wrapper, TRanges>`, ordered by `CSeq_id_Handle::operator<`), the ranges of
+/// each group sorted and merged, the groups of the plus-like strands written first, then those of
+/// the reverse strands. The groups of different handles are never merged with each other.
+fn add_locs(
+    first: impl Iterator<Item = Piece>,
+    second: impl Iterator<Item = Piece>,
+) -> Result<Vec<Piece>, AddError> {
+    // By the handle's place in `operator<`: (handle, packed, plus ranges, minus ranges).
+    type Group = (usize, i64, Vec<(u32, u32)>, Vec<(u32, u32)>);
+    let mut groups: BTreeMap<u64, Group> = BTreeMap::new();
+    for piece in first.chain(second) {
+        let iv = piece.interval;
         if iv.to < iv.from {
-            return Err(unsupported(&format!(
+            return Err(AddError::Unsupported(unsupported(&format!(
                 "cannot combine the empty range {}-{} with another Seq-loc of the sequence",
                 iv.from, iv.to
-            )));
+            ))));
         }
         if iv.to == u32::MAX || (iv.from == 0 && iv.to == u32::MAX - 1) {
-            return Err(unsupported(&format!(
+            return Err(AddError::Unsupported(unsupported(&format!(
                 "cannot combine the range {}-{} with another Seq-loc of the sequence",
                 iv.from, iv.to
-            )));
+            ))));
+        }
+        let group = groups
+            .entry(mask_handle_order(piece.packed))
+            .or_insert_with(|| (piece.handle, piece.packed, Vec::new(), Vec::new()));
+        if group.0 != piece.handle {
+            return Err(AddError::Tie(group.0, piece.handle));
         }
         if is_reverse(iv.strand) {
-            minus.push((iv.from, iv.to));
+            group.3.push((iv.from, iv.to));
         } else {
-            plus.push((iv.from, iv.to));
+            group.2.push((iv.from, iv.to));
         }
     }
-    let mut out = Vec::with_capacity(plus.len() + minus.len());
+    let mut out = Vec::new();
     // `CRange_Less`: by start, then by end.
-    plus.sort_unstable();
-    push_merged(&mut out, &plus, false);
+    for (handle, packed, plus, _) in groups.values_mut() {
+        plus.sort_unstable();
+        push_merged(&mut out, *handle, *packed, plus, false);
+    }
     // `CRange_ReverseLess`: by decreasing end, then by start.
-    minus.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    push_merged(&mut out, &minus, true);
+    for (handle, packed, _, minus) in groups.values_mut() {
+        minus.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        push_merged(&mut out, *handle, *packed, minus, true);
+    }
     Ok(out)
 }
 
-fn push_merged(out: &mut Vec<MaskInterval>, ranges: &[(u32, u32)], reverse: bool) {
+fn push_merged(
+    out: &mut Vec<Piece>,
+    handle: usize,
+    packed: i64,
+    ranges: &[(u32, u32)],
+    reverse: bool,
+) {
     let mut last: Option<(u32, u32)> = None;
     let strand = reverse.then_some(NA_STRAND_MINUS);
+    let mut push = |rg: (u32, u32)| {
+        out.push(Piece {
+            handle,
+            packed,
+            interval: MaskInterval {
+                from: rg.0,
+                to: rg.1,
+                strand,
+            },
+        });
+    };
     for &rg in ranges {
         match &mut last {
             Some(last_rg) => {
                 if merge_ranges(last_rg, rg, reverse) {
                     continue;
                 }
-                out.push(MaskInterval {
-                    from: last_rg.0,
-                    to: last_rg.1,
-                    strand,
-                });
+                push(*last_rg);
                 *last_rg = rg;
             }
             None => last = Some(rg),
         }
     }
     if let Some(last_rg) = last {
-        out.push(MaskInterval {
-            from: last_rg.0,
-            to: last_rg.1,
-            strand,
-        });
+        push(last_rg);
     }
 }
 
@@ -456,13 +560,13 @@ impl MaskedRangeSet {
     // unsorted, overlapping, with its intervals in the order `CSeq_loc_CI`
     // visits them (`loc.intervals`). Each later one is added to the stored
     // one with `CSeq_loc::Add`.
-    /// `Insert`: adds the Seq-loc `loc` of the sequence `id` for the algorithm
-    /// `algo_id`. Fails (LOSAT's own error) for a negative id, and for a
-    /// combination that LOSAT does not port (`add_locs`).
+    /// `Insert`: adds the Seq-loc `loc` of the Seq-id `id` for the algorithm
+    /// `algo_id`, under the Seq-id's handle. Fails (LOSAT's own error) for a negative
+    /// id, and for a combination that LOSAT does not port (`add_locs`).
     pub(crate) fn insert(
         &mut self,
         algo_id: i32,
-        id: &MaskSeqId,
+        id: &ParsedSeqId,
         loc: &MaskLoc,
     ) -> Result<(), WriteDbError> {
         if algo_id < 0 {
@@ -470,28 +574,60 @@ impl MaskedRangeSet {
                 "the algorithm id {algo_id} is negative"
             ))));
         }
-        let by_id = self.values.entry(algo_id).or_default();
-        if by_id.is_empty() {
+        let algorithm = self.values.entry(algo_id).or_default();
+        if !algorithm.used {
+            algorithm.used = true;
             self.ranges.push(MaskedRanges {
                 algorithm_id: algo_id,
                 offsets: Vec::new(),
             });
         }
-        match by_id.get_mut(id) {
+        let key = match mask_handle_key(id) {
+            Ok(Some(key)) => key,
+            // A Seq-id with neither accession nor name: a new handle that nothing finds again.
+            Ok(None) => return Ok(()),
+            // The handle of a `giim` id depends on the order of the ids made before it; a
+            // sequence that has such an id of the number is refused when it is looked up.
+            Err(Undecidable::Giim { id }) => {
+                self.giim_numbers.insert(id);
+                return Ok(());
+            }
+        };
+        let next_handle = algorithm.by_handle.len();
+        match algorithm.by_handle.get_mut(&key) {
             None => {
-                by_id.insert(id.clone(), Stored::Intervals(loc.intervals.clone()));
+                algorithm.by_handle.insert(
+                    key,
+                    Stored {
+                        handle: next_handle,
+                        packed: mask_handle_packed(id),
+                        loc: StoredLoc::Intervals(loc.intervals.clone()),
+                    },
+                );
             }
-            Some(entry @ Stored::Intervals(_)) => {
-                let Stored::Intervals(stored) = &*entry else {
-                    return Ok(());
+            // Every later Seq-loc of a refused one is combined with it: nothing to do.
+            Some(Stored {
+                loc: StoredLoc::Unsupported(_),
+                ..
+            }) => {}
+            Some(entry) => {
+                let new = Stored {
+                    handle: entry.handle,
+                    packed: entry.packed,
+                    loc: StoredLoc::Intervals(loc.intervals.clone()),
                 };
-                *entry = match add_locs(stored, &loc.intervals) {
-                    Ok(combined) => Stored::Intervals(combined),
-                    Err(message) => Stored::Unsupported(message),
+                let combined = add_locs(entry.pieces()?, new.pieces()?);
+                entry.loc = match combined {
+                    Ok(pieces) => {
+                        StoredLoc::Intervals(pieces.into_iter().map(|p| p.interval).collect())
+                    }
+                    Err(AddError::Unsupported(message)) => StoredLoc::Unsupported(message),
+                    // One handle: no two handles to order.
+                    Err(AddError::Tie(..)) => {
+                        StoredLoc::Unsupported(unsupported("two handles in one Seq-id"))
+                    }
                 };
             }
-            // Every later Seq-loc of it is combined with the refused one.
-            Some(Stored::Unsupported(_)) => {}
         }
         Ok(())
     }
@@ -534,39 +670,113 @@ impl MaskedRangeSet {
     // `GetToOpen` of a range ending at 4294967295 is 0 (a `TSeqPos` sum),
     // and a range whose end is before its start is passed on as it is
     // (checked by the writer).
-    /// `GetRanges`: the ranges of the sequence that has the Seq-ids `ids`,
-    /// one `MaskedRanges` for each algorithm that has any mask (in the order
+    /// `GetRanges`: the ranges of the sequence that has the Seq-ids `ids` (`bs->GetId()`), looked
+    /// up in that order: one `MaskedRanges` for each algorithm that has any mask (in the order
     /// of its first `insert`), with no offsets where the sequence has none.
     pub(crate) fn get_ranges(
         &mut self,
-        ids: &[MaskSeqId],
+        ids: &[ParsedSeqId],
     ) -> Result<&[MaskedRanges], WriteDbError> {
-        let Self { ranges, values } = self;
+        let Self {
+            ranges,
+            values,
+            giim_numbers,
+        } = self;
+        // The handle of each Seq-id; a `giim` id of a number that the masks have has none.
+        let mut keys = Vec::with_capacity(ids.len());
+        for id in ids {
+            keys.push(match mask_handle_key(id) {
+                Ok(key) => key,
+                Err(Undecidable::Giim { id: number }) if giim_numbers.contains(&number) => {
+                    return Err(WriteDbError::Other(unsupported(&format!(
+                        "the sequence has the Seq-id {} and the mask data have a giim Seq-id with the number \
+                         {number}: NCBI's handle for a giim Seq-id depends on the order in which the \
+                         Seq-ids were made",
+                        id_label(id)
+                    ))));
+                }
+                Err(Undecidable::Giim { .. }) => None,
+            });
+        }
         for algo in ranges.iter_mut() {
             algo.offsets.clear();
-            let Some(by_id) = values.get(&algo.algorithm_id) else {
+            let Some(locs) = values.get(&algo.algorithm_id) else {
                 continue;
             };
-            let mut oid_ranges: Option<Cow<'_, [MaskInterval]>> = None;
-            for id in ids {
-                if let Some(stored) = by_id.get(id) {
-                    let stored = match stored {
-                        Stored::Intervals(intervals) => intervals,
-                        Stored::Unsupported(message) => {
-                            return Err(WriteDbError::Other(message.clone()));
-                        }
-                    };
-                    oid_ranges = Some(match oid_ranges {
-                        None => Cow::Borrowed(stored.as_slice()),
-                        Some(l1) => Cow::Owned(add_locs(&l1, stored).map_err(WriteDbError::Other)?),
-                    });
-                }
+            let mut found: Option<Found<'_>> = None;
+            let mut found_by: Vec<(usize, &ParsedSeqId)> = Vec::new();
+            for (id, key) in ids.iter().zip(&keys) {
+                let Some(stored) = key.as_ref().and_then(|key| locs.by_handle.get(key)) else {
+                    continue;
+                };
+                found_by.push((stored.handle, id));
+                found = Some(match found {
+                    None => {
+                        // The first Seq-loc is taken as it is.
+                        stored.refusal()?;
+                        Found::One(stored)
+                    }
+                    Some(previous) => {
+                        let combined = match &previous {
+                            Found::One(one) => add_locs(one.pieces()?, stored.pieces()?),
+                            Found::Many(pieces) => {
+                                add_locs(pieces.iter().copied(), stored.pieces()?)
+                            }
+                        };
+                        Found::Many(combined.map_err(|error| match error {
+                            AddError::Unsupported(message) => WriteDbError::Other(message),
+                            AddError::Tie(a, b) => tie_error(&found_by, a, b),
+                        })?)
+                    }
+                });
             }
-            if let Some(loc) = oid_ranges {
-                algo.offsets
-                    .extend(loc.iter().map(|iv| (iv.from, iv.to.wrapping_add(1))));
+            match found {
+                None => {}
+                Some(Found::One(stored)) => {
+                    if let StoredLoc::Intervals(intervals) = &stored.loc {
+                        algo.offsets
+                            .extend(intervals.iter().map(|iv| (iv.from, iv.to.wrapping_add(1))));
+                    }
+                }
+                Some(Found::Many(pieces)) => algo.offsets.extend(
+                    pieces
+                        .iter()
+                        .map(|p| (p.interval.from, p.interval.to.wrapping_add(1))),
+                ),
             }
         }
         Ok(ranges)
     }
+}
+
+/// The Seq-loc that `GetRanges` has combined so far (`oid_ranges`).
+enum Found<'a> {
+    /// One stored Seq-loc, as it was given.
+    One(&'a Stored),
+    /// The result of `CSeq_loc::Add`.
+    Many(Vec<Piece>),
+}
+
+/// The Seq-id as `AsFastaString()` prints it.
+fn id_label(id: &ParsedSeqId) -> String {
+    let mut out = Vec::new();
+    crate::seqid::label::fasta(id, &mut out);
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The refusal of a tie between the handles numbered `a` and `b`, named by the Seq-ids of the
+/// sequence that found them.
+fn tie_error(found_by: &[(usize, &ParsedSeqId)], a: usize, b: usize) -> WriteDbError {
+    let name = |handle: usize| {
+        found_by
+            .iter()
+            .find(|(h, _)| *h == handle)
+            .map_or_else(String::new, |(_, id)| id_label(id))
+    };
+    WriteDbError::Other(unsupported(&format!(
+        "the masks of the Seq-ids {} and {} of one sequence combine in an order that NCBI takes \
+         from the memory addresses of the two handles (their packed numbers are equal)",
+        name(a),
+        name(b)
+    )))
 }

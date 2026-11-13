@@ -22,11 +22,15 @@ use std::path::{Path, PathBuf};
 use super::guess::guess_format;
 use super::schema::{
     ChoiceDef, ClassDef, EnumDef, Ty, BLAST_DB_MASK_INFO, BLAST_FILTER_PROGRAM, BLAST_MASK_LIST,
-    NA_STRAND, OBJECT_ID_ID, SEQ_ID, SEQ_ID_LOCAL, SEQ_INTERVAL, SEQ_INTERVAL_FROM,
-    SEQ_INTERVAL_ID, SEQ_INTERVAL_STRAND, SEQ_INTERVAL_TO, SEQ_LOC, SEQ_LOC_INT,
-    SEQ_LOC_PACKED_INT, T_OBJECT_ID,
+    DATE, DATE_STD, DBTAG, GIIMPORT_ID, ID_PAT, ID_PAT_ID, NA_STRAND, OBJECT_ID_ID, PATENT_SEQ_ID,
+    PDB_SEQ_ID, SEQ_ID, SEQ_INTERVAL, SEQ_INTERVAL_FROM, SEQ_INTERVAL_ID, SEQ_INTERVAL_STRAND,
+    SEQ_INTERVAL_TO, SEQ_LOC, SEQ_LOC_INT, SEQ_LOC_PACKED_INT, TEXTSEQ_ID, T_OBJECT_ID,
 };
-use super::{MaskInfo, MaskInterval, MaskList, MaskLoc, MaskSeqId};
+use super::{MaskInfo, MaskInterval, MaskList, MaskLoc};
+use crate::seqid::model::{
+    Date, DateStd, Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId,
+    PdbSeqId, TextseqId,
+};
 use crate::writedb::WriteDbError;
 
 /// The encoding of a mask file, as `CFormatGuess` finds it. Anything else is an error when the
@@ -536,45 +540,200 @@ impl<I: Input> Rd<I> {
         Ok(())
     }
 
-    /// A `Seq-id`: `local id N` is a [`MaskSeqId::LocalId`], any other value is read in full.
-    fn read_seq_id(&mut self) -> R<MaskSeqId> {
-        let mut canon = Vec::new();
-        let mut local = None;
+    /// A `Seq-id` of any alternative, as the value that NCBI's `CSeq_id` holds (`ParsedSeqId`: the
+    /// one Seq-id type of LOSAT; its members at a DEFAULT or OPTIONAL are `None` when the file does
+    /// not state them, as NCBI keeps their set flags). Text and binary files take the same path:
+    /// the frames and members are the reader's, the primitives the encoding's.
+    fn read_seq_id(&mut self) -> R<ParsedSeqId> {
         self.read_choice(&SEQ_ID, |s, index| {
-            canon.push(index as u8);
-            if index == SEQ_ID_LOCAL {
-                let Ty::Choice(object_id) = &T_OBJECT_ID else {
-                    unreachable!("Object-id is a CHOICE")
-                };
-                s.read_choice(object_id, |s, v| {
-                    if v == OBJECT_ID_ID {
-                        local = Some(s.inp.read_i32()?);
-                        Ok(())
-                    } else {
-                        canon.push(v as u8);
-                        s.read_value(
-                            object_id.variants[v].ty,
-                            object_id.variants[v].name,
-                            &mut canon,
-                        )
-                    }
-                })
+            Ok(match index {
+                0 => ParsedSeqId::Local(s.read_object_id("local")?),
+                1 => ParsedSeqId::Gibbsq(s.inp.read_i32()?),
+                2 => ParsedSeqId::Gibbmt(s.inp.read_i32()?),
+                3 => ParsedSeqId::Giim(s.read_giimport_id()?),
+                4 => ParsedSeqId::Genbank(s.read_textseq_id()?),
+                5 => ParsedSeqId::Embl(s.read_textseq_id()?),
+                6 => ParsedSeqId::Pir(s.read_textseq_id()?),
+                7 => ParsedSeqId::Swissprot(s.read_textseq_id()?),
+                8 => ParsedSeqId::Patent(s.read_patent_seq_id()?),
+                9 => ParsedSeqId::Other(s.read_textseq_id()?),
+                10 => ParsedSeqId::General(s.read_dbtag()?),
+                11 => ParsedSeqId::Gi(s.inp.read_i64()?),
+                12 => ParsedSeqId::Ddbj(s.read_textseq_id()?),
+                13 => ParsedSeqId::Prf(s.read_textseq_id()?),
+                14 => ParsedSeqId::Pdb(s.read_pdb_seq_id()?),
+                15 => ParsedSeqId::Tpg(s.read_textseq_id()?),
+                16 => ParsedSeqId::Tpe(s.read_textseq_id()?),
+                17 => ParsedSeqId::Tpd(s.read_textseq_id()?),
+                18 => ParsedSeqId::Gpipe(s.read_textseq_id()?),
+                _ => ParsedSeqId::NamedAnnotTrack(s.read_textseq_id()?),
+            })
+        })
+    }
+
+    /// An `Object-id` (`T_OBJECT_ID`).
+    fn read_object_id(&mut self, name: &'static str) -> R<ObjectId> {
+        let Ty::Choice(def) = &T_OBJECT_ID else {
+            unreachable!("Object-id is a CHOICE")
+        };
+        self.read_choice(def, |s, index| {
+            Ok(if index == OBJECT_ID_ID {
+                ObjectId::Id(s.inp.read_i32()?)
             } else {
-                s.read_value(
-                    SEQ_ID.variants[index].ty,
-                    SEQ_ID.variants[index].name,
-                    &mut canon,
-                )
+                ObjectId::Str(s.read_str(name)?)
+            })
+        })
+    }
+
+    fn read_dbtag(&mut self) -> R<Dbtag> {
+        let (mut db, mut tag) = (None, None);
+        self.read_class(&DBTAG, |s, index| {
+            match index {
+                0 => db = Some(s.read_str("db")?),
+                _ => tag = Some(s.read_object_id("tag")?),
             }
+            Ok(())
         })?;
-        Ok(match local {
-            Some(n) => MaskSeqId::LocalId(n),
-            None => MaskSeqId::Other(canon),
+        match (db, tag) {
+            (Some(db), Some(tag)) => Ok(Dbtag { db, tag }),
+            _ => format_err("member expected"),
+        }
+    }
+
+    fn read_textseq_id(&mut self) -> R<TextseqId> {
+        let mut id = TextseqId::default();
+        self.read_class(&TEXTSEQ_ID, |s, index| {
+            match index {
+                0 => id.name = Some(s.read_str("name")?),
+                1 => id.accession = Some(s.read_str("accession")?),
+                2 => id.release = Some(s.read_str("release")?),
+                _ => id.version = Some(s.inp.read_i32()?),
+            }
+            Ok(())
+        })?;
+        Ok(id)
+    }
+
+    fn read_giimport_id(&mut self) -> R<GiimportId> {
+        let (mut id, mut db, mut release) = (None, None, None);
+        self.read_class(&GIIMPORT_ID, |s, index| {
+            match index {
+                0 => id = Some(s.inp.read_i32()?),
+                1 => db = Some(s.read_str("db")?),
+                _ => release = Some(s.read_str("release")?),
+            }
+            Ok(())
+        })?;
+        match id {
+            Some(id) => Ok(GiimportId { id, db, release }),
+            None => format_err("member id expected"),
+        }
+    }
+
+    fn read_patent_seq_id(&mut self) -> R<PatentSeqId> {
+        let (mut seqid, mut cit) = (None, None);
+        self.read_class(&PATENT_SEQ_ID, |s, index| {
+            match index {
+                0 => seqid = Some(s.inp.read_i32()?),
+                _ => cit = Some(s.read_id_pat()?),
+            }
+            Ok(())
+        })?;
+        match (seqid, cit) {
+            (Some(seqid), Some(cit)) => Ok(PatentSeqId { seqid, cit }),
+            _ => format_err("member expected"),
+        }
+    }
+
+    fn read_id_pat(&mut self) -> R<IdPat> {
+        let (mut country, mut id, mut doc_type) = (None, None, None);
+        self.read_class(&ID_PAT, |s, index| {
+            match index {
+                0 => country = Some(s.read_str("country")?),
+                1 => {
+                    id = Some(s.read_choice(&ID_PAT_ID, |s, variant| {
+                        Ok(if variant == 0 {
+                            PatentNumber::Number(s.read_str("number")?)
+                        } else {
+                            PatentNumber::AppNumber(s.read_str("app-number")?)
+                        })
+                    })?);
+                }
+                _ => doc_type = Some(s.read_str("doc-type")?),
+            }
+            Ok(())
+        })?;
+        match (country, id) {
+            (Some(country), Some(id)) => Ok(IdPat {
+                country,
+                id,
+                doc_type,
+            }),
+            _ => format_err("member expected"),
+        }
+    }
+
+    fn read_pdb_seq_id(&mut self) -> R<PdbSeqId> {
+        let (mut mol, mut chain, mut rel, mut chain_id) = (None, None, None, None);
+        self.read_class(&PDB_SEQ_ID, |s, index| {
+            match index {
+                0 => mol = Some(s.read_str("mol")?),
+                1 => chain = Some(s.inp.read_i32()?),
+                2 => rel = Some(s.read_date()?),
+                _ => chain_id = Some(s.read_str("chain-id")?),
+            }
+            Ok(())
+        })?;
+        match mol {
+            Some(mol) => Ok(PdbSeqId {
+                mol,
+                chain,
+                rel,
+                chain_id,
+            }),
+            None => format_err("member mol expected"),
+        }
+    }
+
+    fn read_date(&mut self) -> R<Date> {
+        self.read_choice(&DATE, |s, variant| {
+            if variant == 0 {
+                return Ok(Date::Str(s.read_str("str")?));
+            }
+            let mut std = DateStd {
+                year: 0,
+                month: None,
+                day: None,
+                season: None,
+                hour: None,
+                minute: None,
+                second: None,
+            };
+            let mut year = None;
+            s.read_class(&DATE_STD, |s, index| {
+                match index {
+                    0 => year = Some(s.inp.read_i32()?),
+                    1 => std.month = Some(s.inp.read_i32()?),
+                    2 => std.day = Some(s.inp.read_i32()?),
+                    3 => std.season = Some(s.read_str("season")?),
+                    4 => std.hour = Some(s.inp.read_i32()?),
+                    5 => std.minute = Some(s.inp.read_i32()?),
+                    _ => std.second = Some(s.inp.read_i32()?),
+                }
+                Ok(())
+            })?;
+            match year {
+                Some(year) => {
+                    std.year = year;
+                    Ok(Date::Std(std))
+                }
+                None => format_err("member year expected"),
+            }
         })
     }
 
     /// A `Seq-interval`, and its Seq-id.
-    fn read_seq_interval(&mut self) -> R<(MaskInterval, MaskSeqId)> {
+    fn read_seq_interval(&mut self) -> R<(MaskInterval, ParsedSeqId)> {
         let (mut from, mut to, mut strand, mut id) = (0u32, 0u32, None, None);
         let mut scratch = Vec::new();
         self.read_class(&SEQ_INTERVAL, |s, index| {
@@ -661,26 +820,12 @@ impl<I: Input> Rd<I> {
     // }
     // ```
     /// `CSeq_loc::GetId()` over the Seq-ids of the intervals of one Seq-loc.
-    fn common_id(ids: Vec<MaskSeqId>) -> R<Option<MaskSeqId>> {
+    fn common_id(ids: Vec<ParsedSeqId>) -> Option<ParsedSeqId> {
         let mut ids = ids.into_iter();
-        let Some(first) = ids.next() else {
-            // An empty packed-int has no Seq-id.
-            return Ok(None);
-        };
-        for id in ids {
-            if id != first {
-                // `Equals` compares the values: two different `local id` or a `local id` and
-                // another kind of Seq-id are different; two others may still be equal for
-                // NCBI (a member at its DEFAULT), which LOSAT does not model.
-                return match (&first, &id) {
-                    (MaskSeqId::Other(_), MaskSeqId::Other(_)) => Err(Fail::Unsupported(
-                        "a Seq-loc with two different Seq-ids that are not both `local id`".into(),
-                    )),
-                    _ => Ok(None),
-                };
-            }
-        }
-        Ok(Some(first))
+        // An empty packed-int has no Seq-id.
+        let first = ids.next()?;
+        // `Equals` compares the values: the typed Seq-ids are equal exactly when it does.
+        ids.all(|id| id == first).then_some(first)
     }
 
     /// One `Seq-loc` of `masks`: `int` and `packed-int` are read into a [`MaskLoc`]; every other
@@ -692,7 +837,7 @@ impl<I: Input> Rd<I> {
                 SEQ_LOC_INT => {
                     let (interval, id) = s.read_seq_interval()?;
                     loc = Some(MaskLoc {
-                        id: Self::common_id(vec![id])?,
+                        id: Self::common_id(vec![id]),
                         intervals: vec![interval],
                     });
                 }
@@ -706,7 +851,7 @@ impl<I: Input> Rd<I> {
                         Ok(())
                     })?;
                     loc = Some(MaskLoc {
-                        id: Self::common_id(ids)?,
+                        id: Self::common_id(ids),
                         intervals,
                     });
                 }
@@ -850,6 +995,14 @@ impl<I: Input> Rd<I> {
             None => Ok(()),
         }
     }
+}
+
+/// One `Seq-id` of an ASN.1 binary value, read by the mask reader's builder, for the test that
+/// compares it with `seqid::ber::decode_seq_id` (DECISIONS 35).
+#[cfg(test)]
+pub(super) fn seq_id_from_binary(data: &[u8]) -> R<ParsedSeqId> {
+    let mut rd = Rd::new(super::ber::BerIn::new(data));
+    rd.frame(|s| s.read_seq_id())
 }
 
 /// Where the reader is in its file.

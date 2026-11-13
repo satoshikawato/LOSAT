@@ -398,13 +398,13 @@ static OBJECT_ID: ChoiceDef = ChoiceDef {
 pub(super) static T_OBJECT_ID: Ty = Ty::Choice(&OBJECT_ID);
 pub(super) const OBJECT_ID_ID: usize = 0;
 
-static DBTAG: ClassDef = ClassDef {
+pub(super) static DBTAG: ClassDef = ClassDef {
     name: "Dbtag",
     members: &[req("db", &T_STR), req("tag", &T_OBJECT_ID)],
 };
 static T_DBTAG: Ty = Ty::Class(&DBTAG);
 
-static DATE_STD: ClassDef = ClassDef {
+pub(super) static DATE_STD: ClassDef = ClassDef {
     name: "Date-std",
     members: &[
         req("year", &T_INT32),
@@ -417,7 +417,7 @@ static DATE_STD: ClassDef = ClassDef {
     ],
 };
 static T_DATE_STD: Ty = Ty::Class(&DATE_STD);
-static DATE: ChoiceDef = ChoiceDef {
+pub(super) static DATE: ChoiceDef = ChoiceDef {
     variants: &[var("str", &T_STR), var("std", &T_DATE_STD)],
 };
 static T_DATE: Ty = Ty::Choice(&DATE);
@@ -485,11 +485,11 @@ static T_DATE: Ty = Ty::Choice(&DATE);
 //         app-number VisibleString } ,    -- Patent Doc Appl Number
 //     doc-type VisibleString OPTIONAL }   -- Patent Doc Type
 // ```
-static ID_PAT_ID: ChoiceDef = ChoiceDef {
+pub(super) static ID_PAT_ID: ChoiceDef = ChoiceDef {
     variants: &[var("number", &T_STR), var("app-number", &T_STR)],
 };
 static T_ID_PAT_ID: Ty = Ty::Choice(&ID_PAT_ID);
-static ID_PAT: ClassDef = ClassDef {
+pub(super) static ID_PAT: ClassDef = ClassDef {
     name: "Id-pat",
     members: &[
         req("country", &T_STR),
@@ -498,12 +498,12 @@ static ID_PAT: ClassDef = ClassDef {
     ],
 };
 static T_ID_PAT: Ty = Ty::Class(&ID_PAT);
-static PATENT_SEQ_ID: ClassDef = ClassDef {
+pub(super) static PATENT_SEQ_ID: ClassDef = ClassDef {
     name: "Patent-seq-id",
     members: &[req("seqid", &T_INT32), req("cit", &T_ID_PAT)],
 };
 static T_PATENT_SEQ_ID: Ty = Ty::Class(&PATENT_SEQ_ID);
-static TEXTSEQ_ID: ClassDef = ClassDef {
+pub(super) static TEXTSEQ_ID: ClassDef = ClassDef {
     name: "Textseq-id",
     members: &[
         opt("name", &T_STR),
@@ -513,7 +513,7 @@ static TEXTSEQ_ID: ClassDef = ClassDef {
     ],
 };
 static T_TEXTSEQ_ID: Ty = Ty::Class(&TEXTSEQ_ID);
-static GIIMPORT_ID: ClassDef = ClassDef {
+pub(super) static GIIMPORT_ID: ClassDef = ClassDef {
     name: "Giimport-id",
     members: &[
         req("id", &T_INT32),
@@ -522,7 +522,7 @@ static GIIMPORT_ID: ClassDef = ClassDef {
     ],
 };
 static T_GIIMPORT_ID: Ty = Ty::Class(&GIIMPORT_ID);
-static PDB_SEQ_ID: ClassDef = ClassDef {
+pub(super) static PDB_SEQ_ID: ClassDef = ClassDef {
     name: "PDB-seq-id",
     members: &[
         req("mol", &T_STR),
@@ -558,4 +558,3 @@ pub(super) static SEQ_ID: ChoiceDef = ChoiceDef {
     ],
 };
 pub(super) static T_SEQ_ID: Ty = Ty::Choice(&SEQ_ID);
-pub(super) const SEQ_ID_LOCAL: usize = 0;

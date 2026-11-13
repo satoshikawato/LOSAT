@@ -12,6 +12,8 @@
 //!   `seqdb::header` shares for the ordinal ids of a database without parsed Seq-ids.
 //! - `label`: the printings (`fasta`, `content`, `format_label`, `bare`,
 //!   `seqid_list_string`, `first_gi`).
+//! - `mask_handle`: when two Seq-ids are one `CSeq_id_Handle` (what `makeblastdb -mask_data`
+//!   matches a mask to a sequence by).
 //! - `rank`: `text_score` (Score, WorstRank), `best_rank_score` and `find_best`.
 //! - `defline_set`: the definition lines of one sequence, the Seq-align id, the definition
 //!   line of the subject Bioseq and of the shown id, and the joins of the formats that show
@@ -27,6 +29,7 @@ pub mod ber;
 pub mod defline_set;
 pub mod id_scope;
 pub mod label;
+pub(crate) mod mask_handle;
 pub mod model;
 pub mod parse;
 pub mod rank;

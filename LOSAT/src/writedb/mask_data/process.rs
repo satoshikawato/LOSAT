@@ -582,7 +582,7 @@ pub(crate) fn process_mask_data(
             let mut masks = first_obj.masks;
             loop {
                 if db.mask_data_source_mut().is_none() && !masks.masks.is_empty() {
-                    db.set_mask_data_source(MaskedRangeSet::new())?;
+                    db.set_mask_data_source(MaskedRangeSet::new());
                 }
 
                 for mask in &masks.masks {

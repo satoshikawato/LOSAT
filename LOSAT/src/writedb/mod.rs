@@ -20,7 +20,11 @@
 //! `-parse_seqids`) put tax ids on the definition lines and into the version 5
 //! tax id files (`taxid_set`).
 //!
-//! Not written: mask data and OID masks (`losat makeblastdb` refuses their options,
+//! Mask data (`-mask_data`): the library writes the mask column of a volume (the files
+//! `.?aa`, `.?ab`, `.?ac`, version 4 and 5 alike) from the mask files that
+//! `mask_info` reads and `mask_data` turns into ranges per sequence, but
+//! `losat makeblastdb` does not offer `-mask_data` yet (it refuses that option and
+//! `-mask_id`, `-mask_desc`, `-gi_mask`, `-oid_masks`:
 //! `makeblastdb::UNSUPPORTED_OPTIONS`).
 
 pub mod bioseq;
@@ -38,6 +42,12 @@ pub(crate) mod isam;
 pub(crate) mod lmdb;
 pub mod local_offset;
 pub mod makeblastdb;
+// Nothing calls the mask writer before `losat makeblastdb` offers `-mask_data` (M4a phase 3);
+// the tests reach it.
+#[allow(dead_code)]
+pub(crate) mod mask_data;
+#[allow(dead_code)]
+pub(crate) mod mask_info;
 #[allow(dead_code)]
 pub(crate) mod mdb;
 pub(crate) mod metadata;

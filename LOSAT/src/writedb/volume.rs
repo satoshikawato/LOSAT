@@ -7,6 +7,7 @@ use super::files::{
 };
 use super::id_set::LabelSet;
 use super::isam::{GiIndex, IsamType, NumericIsam, PigIsam, StringIsam, StringIsamScratch};
+use super::mask_data::column::{Column, ColumnMeta};
 use super::WriteDbError;
 use crate::seqid::{label, ParsedSeqId};
 
@@ -56,7 +57,7 @@ struct VolumeIndices {
     label: Vec<u8>,
 }
 
-/// `CWriteDB_Volume` without columns and OID masks.
+/// `CWriteDB_Volume` without OID masks, and with the mask column as its only column.
 #[derive(Debug)]
 pub(crate) struct Volume {
     dbname: String,
@@ -71,6 +72,16 @@ pub(crate) struct Volume {
     /// `m_OID`: the number of sequences written to this volume.
     oid: u32,
     open: bool,
+    /// `m_Columns`: the mask column (`BlastDb/MaskData`) when the database has mask data.
+    mask_column: Option<Column>,
+}
+
+/// The two blobs of the mask column for one sequence (the offsets in big-endian and in
+/// little-endian byte order); empty for a sequence without mask data.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MaskBlobs<'a> {
+    pub(crate) blob: &'a [u8],
+    pub(crate) blob2: &'a [u8],
 }
 
 impl Volume {
@@ -211,7 +222,77 @@ impl Volume {
             indices,
             oid: 0,
             open: true,
+            mask_column: None,
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:505-554
+    // ```c++
+    // int CWriteDB_Volume::CreateColumn(const string      & title,
+    //                                   const TColumnMeta & meta,
+    //                                   Uint8               max_sz,
+    //                                   bool                mbo)
+    // {
+    //     int col_id = m_Columns.size();
+    //     ...
+    //     CRef<CWriteDB_Column> new_col
+    //         (new CWriteDB_Column(m_DbName,
+    //                              extn,
+    //                              extn2,
+    //                              m_Index,
+    //                              title,
+    //                              meta,
+    //                              max_sz));
+    //
+    //     /* For support of multiple byte orders */
+    //     if (mbo) new_col->AddByteOrder(m_DbName,
+    //                              extn3,
+    //                              m_Index,
+    //                              max_sz);
+    //
+    //     // If the OID is not zero, then add all the blank records for the
+    //     // prior OIDs to the new column.
+    //
+    //     CBlastDbBlob blank;
+    //
+    //     for(int j = 0; j < m_OID; j++) {
+    //         if (mbo) new_col->AddBlob(blank, blank);
+    //         else     new_col->AddBlob(blank);
+    //     }
+    //
+    //     m_Columns.push_back(new_col);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1206-1210
+    // ```c++
+    //             for(size_t i = 0; i < m_ColumnTitles.size(); i++) {
+    //                 m_Volume->CreateColumn(m_ColumnTitles[i],
+    //                                        m_ColumnMetas[i],
+    //                                        m_MaxFileSize);
+    //             }
+    // ```
+    // The mask column is the volume's only column (column 0, letter `a`) and
+    // `CWriteDB_Volume::CreateColumn`'s `mbo` is true by default. `date` is the creation
+    // date of the column's index file. The column files are the same in version 4 and
+    // version 5: the LMDB files of version 5 belong to the database, not to a volume.
+    pub(crate) fn create_mask_column(
+        &mut self,
+        meta: &ColumnMeta,
+        date: &[u8],
+        max_file_size: u64,
+    ) -> Result<(), WriteDbError> {
+        let mut column = Column::new(
+            &self.dbname,
+            self.protein,
+            self.index,
+            meta,
+            date,
+            max_file_size,
+        );
+        for _ in 0..self.oid {
+            column.add_blob(&[], &[])?;
+        }
+        self.mask_column = Some(column);
+        Ok(())
     }
 
     /// `GetOID`: the number the next sequence gets in this volume.
@@ -375,6 +456,7 @@ impl Volume {
         binhdr: &[u8],
         ids: &[ParsedSeqId],
         hash: u32,
+        mask: MaskBlobs<'_>,
     ) -> Result<bool, WriteDbError> {
         if seq.is_empty() || binhdr.is_empty() {
             return Err(WriteDbError::Creation(
@@ -395,6 +477,23 @@ impl Volume {
                 overfull = true;
             }
             if indices.hash.as_ref().is_some_and(|hash| !hash.can_fit(1)) {
+                overfull = true;
+            }
+        }
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:209-216
+        // ```c++
+        //     for(int blob_i = 0; blob_i < (int) blobs.size(); blob_i++) {
+        //         _ASSERT(blob_i / 2 < (int) m_Columns.size());
+        //
+        //         if (! m_Columns[blob_i / 2]->CanFit(blobs[blob_i]->Size())) {
+        //             overfull = true;
+        //             break;
+        //         }
+        //     }
+        // ```
+        // Both blobs of the mask column are checked, the first one first.
+        if let Some(column) = &self.mask_column {
+            if !(column.can_fit(mask.blob.len()) && column.can_fit(mask.blob2.len())) {
                 overfull = true;
             }
         }
@@ -437,6 +536,21 @@ impl Volume {
             if let Some(hash_isam) = &mut indices.hash {
                 hash_isam.add_hash(self.oid, hash)?;
             }
+        }
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:311-318
+        // ```c++
+        //     for(int col_i = 0; col_i < (int)m_Columns.size(); col_i++) {
+        //         _ASSERT(col_i * 2 < (int) blobs.size());
+        //         if (col_i == maskcol_id) {
+        //              m_Columns[col_i]->AddBlob(*blobs[col_i * 2], *blobs[col_i * 2 + 1]);
+        //         } else {
+        //              m_Columns[col_i]->AddBlob(*blobs[col_i * 2]);
+        //         }
+        //     }
+        // ```
+        // Every sequence adds its blobs to the column, empty ones too.
+        if let Some(column) = &mut self.mask_column {
+            column.add_blob(mask.blob, mask.blob2)?;
         }
         self.oid += 1;
         Ok(true)
@@ -489,6 +603,10 @@ impl Volume {
                     hash.close()?;
                 }
                 indices.id_set.clear();
+            }
+            // The columns are closed after the other files (writedb_volume.cpp:362-367).
+            if let Some(column) = &mut self.mask_column {
+                column.close()?;
             }
         }
         Ok(())
@@ -568,6 +686,9 @@ impl Volume {
                 hash.rename_single();
             }
         }
+        if let Some(column) = &mut self.mask_column {
+            column.rename_single();
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:419-428
@@ -628,6 +749,9 @@ impl Volume {
                 hash.rename_file_index(num_digits);
             }
         }
+        if let Some(column) = &mut self.mask_column {
+            column.rename_file_index(num_digits);
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:461-465
@@ -677,6 +801,9 @@ impl Volume {
                 hash.list_files(files);
             }
             files.push(indices.gi_index.filename().to_string());
+        }
+        if let Some(column) = &self.mask_column {
+            column.list_files(files);
         }
     }
 }

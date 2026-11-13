@@ -47,8 +47,9 @@ tests are in `LOSAT/src/seqdb/mask_tests.rs`:
   `-parse_seqids`: the masks name the sequences by their number, `local id N`).
 - `mask_wm.asnt`, `mask_wm_opts.asnt`, `mask_wm_colon.asnt`: hand-written windowmasker mask files
   (`Blast-db-mask-info` in ASN.1 text; the second states the option `-t_extend 3`, the third
-  `-x a:b`). The dust
-  and seg masks come from dustmasker and segmasker and are not kept.
+  `-x a:b`).
+- `mask_dust.asnb`, `mask_seg.asnb`: the dust and seg masks of the same databases, written by
+  dustmasker and segmasker (`-outfmt maskinfo_asn1_bin`, ASN.1 binary).
 - `db/mask_*`: databases written by makeblastdb 2.17.0 with mask data: `mask_nucl_v4`,
   `mask_nucl_v5` (needs its `.ndb`), `mask_nucl_mv` (an alias of two volumes), `mask_nucl_ids`
   (ids 100 and 101 from `-mask_id`, a description with `:`), `mask_nucl_z`, `mask_nucl_y`,
@@ -75,6 +76,28 @@ tests are in `LOSAT/src/seqdb/mask_tests.rs`:
   later by running it into a scratch directory and copying only their files, so that the dates
   of the other fixtures stay.
 
+Mask files (the input of `makeblastdb -mask_data`, read by `LOSAT/src/writedb/mask_info/`; the tests
+are in `mask_info/tests.rs`). `mask_parse/` has files that NCBI's tools write and files that
+exercise NCBI's reader, with `mask_parse/expected.tsv` recording what `makeblastdb` 2.17.0 does with
+each of them:
+
+- `mask_parse/{dust,seg,wm,c2m}.{asnt,asnb}`: dustmasker, segmasker, windowmasker and
+  convert2blastmask output (`-outfmt maskinfo_asn1_text` / `maskinfo_asn1_bin`) for the same input;
+  `*_ps.*` the same with `-parse_seqids` (Seq-ids of every kind: `local str`, `general`, `other`,
+  `genbank`, `pdb`, `patent`, `gi`, ...). Inputs: `mask_nucl.fna`, `mask_prot.faa`,
+  `mask_parse/{ids_nucl.fna,ids_prot.faa,lower_nucl.fna,wm_nucl.fna}`.
+- `mask_parse/h_*`: hand-written text files (comments, strings, two objects, `more TRUE` with a
+  continuation, empty `masks`, different Seq-ids in one Seq-loc, enumerations as numbers,
+  unsupported Seq-loc variants, files cut inside an object, garbage after the last object, files
+  that are neither text nor binary ASN.1, ...); `mask_parse/b_*`: damaged and hand-made binary files.
+- `mask_parse/expected.tsv`: per file the exit status and standard error of
+  `makeblastdb -in <fasta> -dbtype <type> -mask_data <file>` (no `-parse_seqids`), and the masks that
+  `blastdbcmd -outfmt '%o\t%m<algorithm>'` reads back from the database it wrote (`RUN`, `NODB`
+  and `MASK` rows; the last field of `RUN` is the algorithm's options as `blastdbcmd -info` prints them;
+  the header of the file explains them).
+- `make_mask_parse_fixtures.py` rebuilds these (`--ncbi-bin DIR --work DIR`); the tools and the
+  inputs are deterministic, so a rebuild changes nothing.
+
 `make_fixtures.py` rebuilds everything but `expected/search_path/`. NCBI BLAST+ is the comparison oracle only; the tests
 read the committed files and run no NCBI program. A rebuild changes the dates stored in the
 index files and in `expected/`.
@@ -96,3 +119,16 @@ the count and FNV-1a digest of the descendants that NCBI's recursive query gave 
 `lmdb/tx.{pin,psq,phr}` complete `tx` as a database (made from `tx.fa` with the taxid map `tx.map`; `tx_q.fa` holds
 one query per sequence): `src/seqdb/filter.rs` restricts it to each taxid set of `tx_oracle.txt` and compares the
 OIDs with NCBI's.
+
+## Mask-column writer fixtures (`mask_writer/`)
+
+`make_mask_writer_fixtures.py` (`--ncbi-bin DIR --work DIR`) builds the inputs and NCBI's outputs
+for the tests of the mask-column writer (`src/writedb/mask_data/tests_e2e.rs`, which reads the mask files with `process_mask_data`; the same file runs every file of `mask_parse/` end to end). Each row of
+`mask_writer/cases.tsv` is one makeblastdb 2.17.0 run (`-in` files, `-mask_data` files, `-mask_id`,
+`-mask_desc`, `-max_file_sz`); its database files are in `mask_writer/db/`, its exit status and
+standard error in `mask_writer/expected/<case>.rc` and `.stderr`, and what blastdbcmd reads back
+in `expected/<case>.algorithms.txt` and `.masks.tsv` (as for the reader fixtures above). The
+mask files are ASN.1 text: hand-written ones (`*.asnt`) and `dust.asnt` / `seg.asnt` from
+dustmasker / segmasker. The cases cover the combination of several Seq-locs of one sequence, the
+ids of algorithms, masks that match no sequence, ranges past the end of a sequence, and volumes
+without a masked sequence. A rebuild changes the dates stored in the index and column files.

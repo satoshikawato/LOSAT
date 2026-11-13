@@ -1453,7 +1453,7 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     // adoption/observer notification is replayed on the serial OID collector.
     // `db_length` is `BlastSeqSrcGetTotLen` (blast_engine.c:1407), not the statistics' total:
     // `Subjects::total_length`.
-    let prepared_link = if !options.gapped && options.sum_stats {
+    let prepared_link = if super::linking::ungapped_link_cutoffs(options) {
         Some(super::linking::ungapped_link_params(
             batch,
             params,

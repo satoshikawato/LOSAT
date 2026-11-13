@@ -105,6 +105,22 @@ pub fn link_parameters(options: &ResolvedOptions) -> Option<LinkParameters> {
         gap_decay_rate: if options.gapped { 0.1 } else { 0.5 },
     })
 }
+
+/// Whether the search computes the linking cutoffs of each subject (`CalculateLinkHSPCutoffs`,
+/// `ungapped_link_params`): an ungapped search that links. With `-ungapped`, a search links
+/// exactly when `-sum_stats` is on (`link_parameters`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
+/// ```c
+///       if (hit_params->link_hsp_params && !kNucleotide &&
+///           !gapped_calculation) {
+///           CalculateLinkHSPCutoffs(program_number, query_info, sbp,
+///             hit_params->link_hsp_params, word_params, db_length,
+///             seq_arg.seq->length);
+/// ```
+pub(crate) fn ungapped_link_cutoffs(options: &ResolvedOptions) -> bool {
+    !options.gapped && link_parameters(options).is_some()
+}
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1765-1789
 // ```c++
 // {

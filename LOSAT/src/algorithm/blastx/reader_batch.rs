@@ -247,7 +247,7 @@ pub(crate) fn prepare_unit(
     let params = score_block_for(&prepared, options.scoring);
     prepared.reader_shape = Some(Arc::clone(layout));
     let kappa = options.composition != 0 && options.gapped;
-    let ungapped_link = !options.gapped && options.sum_stats;
+    let ungapped_link = super::linking::ungapped_link_cutoffs(options);
     let (mut word_cutoff_min, mut redo_cutoff_min) = (None, None);
     if (kappa || ungapped_link)
         && params.iter().any(|p| p.valid)

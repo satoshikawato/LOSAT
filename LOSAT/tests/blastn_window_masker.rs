@@ -27,6 +27,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Once;
 
+mod temp_support;
+use temp_support::TempFile;
+
 fn engine() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -302,8 +305,9 @@ fn runs_here(case: &Case) -> bool {
 }
 
 /// `losat blastn` from LOSAT/ without the variables that change NCBI's batches, reports, registry
-/// or WindowMasker directory (a case sets its own).
-fn blastn() -> Command {
+/// or WindowMasker directory (a case sets its own), and the worker log of the run (removed when the
+/// caller drops it, kept when the test panics).
+fn blastn() -> (Command, TempFile) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     command.current_dir(engine()).arg("blastn");
     for (name, _) in std::env::vars_os() {
@@ -329,18 +333,19 @@ fn blastn() -> Command {
         }
     }
     // The --all-features build's diagnostic probe needs its log at 2 threads and more.
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_winmask_blastn_worker.log"),
-    );
-    command
+    let log = TempFile::keep_on_failure("losat_winmask_blastn_worker", "worker.log");
+    command.env("LOSAT_BLASTX_WORKER_LOG", &log);
+    (command, log)
 }
 
 fn check(threads: &str) {
     make_counts();
     let mut failures = Vec::new();
+    // The worker logs of the runs, kept until the failures are asserted.
+    let mut logs = Vec::new();
     for case in cases().iter().filter(|case| runs_here(case)) {
-        let mut command = blastn();
+        let (mut command, log) = blastn();
+        logs.push(log);
         command.args(&case.args).args(["-num_threads", threads]);
         command.envs(case.env.iter().map(|(key, value)| (key, value)));
         let output = command.output().expect("run losat");
@@ -388,7 +393,8 @@ fn the_cases_give_ncbis_bytes_at_one_and_four_threads() {
 fn counts_that_ncbi_reads_undefined_are_refused_before_any_output() {
     make_counts();
     for (taxid, text) in [("48", "units of 17 letters"), ("60", "does not set bc")] {
-        let output = blastn()
+        let (mut command, _log) = blastn();
+        let output = command
             .env("WINDOW_MASKER_PATH", "target/winmask_blastn/taxid")
             .args([
                 "-query",

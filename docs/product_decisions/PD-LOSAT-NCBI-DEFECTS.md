@@ -30,8 +30,8 @@
   line PS item PS16c);
   1.17 2026-11-13 (the explicit rejections of `losat rpsbproc` in the XML input, rule 3, line PS
   item PS16d);
-  1.18 2026-11-14 (the explicit rejections of TBLASTN's one-hit gapped start past NCBI's buffers,
-  rule 3, line RG item X2)
+  1.18 2026-11-14 (the explicit rejections of TBLASTN's one-hit gapped start past NCBI's buffers
+  and of the endless split it can cause, rule 3, line RG item X2)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -535,6 +535,16 @@ of exception 9 (PS16a) did.
     frames 1, 2, 3, -1, -2, -3 into `2*(nucl_length+1)+2` bytes and leaves the last one unset,
     `blast_util.c:1058,1063,1098-1101`);
   - with `-in_pssm`, past the PSSM's last position (`pssm->data` holds one row per position).
+
+  It also refuses a result of such a gapped start that NCBI does not finish: two gapped starts
+  past the end of their chunk of the frame (the window of a chunk that is not the frame's last),
+  whose HSPs start past the preliminary interval tree's `s_max` (the chunk's length + 1,
+  `blast_gapalign.c:3829-3830`) in one subject subtree. `BlastIntervalTreeAddHSP` sends both
+  right at every node, splits the node `[s_max, s_max]` into `[s_max + 1, s_max]`, whose middle is
+  `s_max` again, and repeats that split while its node pool doubles (`blast_itree.c:57-112,
+  603-793`), so the search never returns. LOSAT stops where that first inverted node would be
+  made; ranges inside the tree's bounds never make one, and only this word finder's HSPs leave
+  them.
 
   BLASTP's approved exception 3 (version 1.3), which reads such letters as the sentinel, is not
   extended to TBLASTN.

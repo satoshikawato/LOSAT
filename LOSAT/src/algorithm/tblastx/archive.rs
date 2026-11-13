@@ -347,7 +347,10 @@ fn for_each_batch(
             ka_blocks,
             search_space,
             length_adjustment,
-            searched_space: searched.then_some(stats.context0_search_space),
+            searched_space: searched.then_some(crate::report::archive::SearchedContext0 {
+                space: stats.context0_search_space,
+                query_length: stats.context0_aa_len,
+            }),
             ..*request
         };
         each(span, &batch)

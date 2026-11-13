@@ -207,9 +207,10 @@ impl std::error::Error for RpsBatchError {}
 /// The database's length and number of sequences for the effective lengths of the frames: the
 /// whole profile database's (every volume's search reads the totals, `x_AdjustDbSize` without
 /// `-dbsize`); the database is protein, so the length is not divided by 3.
-fn database_lengths(database: &BlastxDatabase) -> (i64, i64) {
+fn database_lengths(database: &BlastxDatabase) -> (i64, i32) {
     let pairwise = database.pairwise_database();
-    (pairwise.total_letters as i64, pairwise.num_sequences as i64)
+    // NCBI's `Int4` number of sequences of the statistics (`stats::setup::calc_eff_lengths`).
+    (pairwise.total_letters, pairwise.num_sequences as i32)
 }
 
 impl TranslatedRpsSearch {
@@ -248,7 +249,7 @@ impl TranslatedRpsSearch {
         database: &BlastxDatabase,
         volumes: &RpsVolumeSet<'_>,
         setup: &RpsVolumeSetup,
-        (db_length, db_count): (i64, i64),
+        (db_length, db_count): (i64, i32),
         pool: &crate::utils::threading::SearchPool<'_>,
     ) -> Result<BatchResults> {
         let prepared =
@@ -302,7 +303,7 @@ impl TranslatedRpsSearch {
                 options.effective_search_space,
                 volumes.order.len(),
             ) {
-                let num_seqs = i64::from(volume.num_oids());
+                let num_seqs = volume.num_oids() as i32;
                 effective_lengths(&prepared, parameters, options, db_length, num_seqs, None)
                     .map_err(RpsBatchError::Setup)?;
                 // The merged result keeps the first volume's statistics (in path order), which

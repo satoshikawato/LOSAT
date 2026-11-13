@@ -772,7 +772,8 @@ mod tests {
                     min_subject_length: (subject_nt_length / 3) as i32,
                     composition_based_stats: 2,
                 },
-            );
+            )
+            .unwrap();
             let query_lengths: Vec<_> = query_contexts
                 .iter()
                 .map(|&(length, _)| length as i32)
@@ -923,7 +924,8 @@ mod tests {
                 min_subject_length: 2_125,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         let query_lengths = [120, 70, 120];
         for (link_event, reap_event) in [(3, 5), (6, 8)] {
             let before_prefix = format!("D_HSP\t{link_event}\tlink_before\t");
@@ -1206,7 +1208,8 @@ mod tests {
                 min_subject_length: 120,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         assert!(params_trace.contains("D_PARAM_CONTEXT\t0\t25\t25\n"));
         assert_eq!(
             (

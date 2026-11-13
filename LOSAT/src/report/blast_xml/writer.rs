@@ -96,7 +96,15 @@ fn write_header(out: &mut Vec<u8>, run: &XmlRun<'_>, first: &XmlQuery<'_>) -> Op
 fn write_statistics<E: Encoder>(enc: &mut E, run: &XmlRun<'_>, stats: &XmlStats) {
     enc.member("stat", 5);
     enc.begin_sequence("Statistics");
-    int_member(enc, "db-num", 0, run.db_num);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:116-119
+    // ```c++
+    // 		ITERATE(vector<CBlastFormatUtil::SDbInfo>, i, dbInfo) {
+    // 			m_NumSequences += i->number_seqs;
+    // 			m_NumBases += i->total_length;
+    // 		}
+    // ```
+    // `m_NumSequences` is an `int`: the `Int8` sum fits it (`XmlRun::db_num`).
+    int_member(enc, "db-num", 0, run.db_num as i32);
     enc.member("db-len", 1);
     enc.big_int(run.db_len);
     enc.end_member();

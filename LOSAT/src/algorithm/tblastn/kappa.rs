@@ -798,7 +798,8 @@ mod tests {
                 min_subject_length: (subject_nt.len() / 3) as i32,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         assert_eq!(parameters.lengths[0].eff_searchsp, 15225);
         let seg = SegParams::default();
         let search_query: Vec<_> = query_fasta
@@ -1067,7 +1068,8 @@ mod tests {
                 min_subject_length: 120,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899;
         // ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3595
         // ```c
@@ -1463,7 +1465,8 @@ mod tests {
                 min_subject_length: 2_125,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899;
         // ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3595
         // ```c
@@ -2244,7 +2247,8 @@ mod tests {
                 min_subject_length: 120,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         assert_eq!(parameters.cutoffs[0].word_cutoff, 18);
         assert_eq!(parameters.cutoffs[0].hit_cutoff, 18);
         assert_eq!(parameters.cutoffs[0].word_xdrop, 16);

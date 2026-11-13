@@ -92,7 +92,7 @@ fn write_statistics<E: Encoder>(enc: &mut E, run: &XmlRun<'_>, params: &Xml2Run,
     enc.begin_sequence("Statistics");
     if params.target == Xml2Target::Database {
         enc.member("db-num", 0);
-        enc.big_int(i64::from(run.db_num));
+        enc.big_int(run.db_num);
         enc.end_member();
         enc.member("db-len", 1);
         enc.big_int(run.db_len);

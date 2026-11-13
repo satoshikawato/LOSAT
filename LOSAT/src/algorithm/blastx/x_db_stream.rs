@@ -223,15 +223,9 @@ impl<'a> XStreamDb<'a> {
         self.db.included_length()
     }
 
-    /// The total length and the number of sequences of the statistics
-    /// (`SeqDb::statistics_numbers`).
-    pub(crate) fn statistics_numbers(&self) -> (u64, u32) {
-        self.db.statistics_numbers()
-    }
-
-    /// `BlastSeqSrcGetAvgSeqLen` (`SeqDb::average_length`).
-    pub(crate) fn average_length(&self) -> i32 {
-        self.db.average_length()
+    /// The numbers of the statistics, with NCBI's types (`SeqDb::statistics`).
+    pub(crate) fn statistics(&self) -> crate::seqdb::DbStatistics {
+        self.db.statistics()
     }
 
     pub(crate) fn longest(&self) -> usize {

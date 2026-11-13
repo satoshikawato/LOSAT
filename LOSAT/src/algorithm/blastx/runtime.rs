@@ -514,7 +514,8 @@ pub(crate) fn x_search_unit_in_pool<'a>(
         subjects,
         x_cursor: subjects.x_cursor(),
         x_residues: subjects.x_residue_pass(),
-        db_length: subjects.numbers()?.total,
+        // The Gumbel block's length of the e-values (`SubjectNumbers::gumbel_total`).
+        db_length: subjects.numbers()?.gumbel_total,
         ordinal: 0,
         stream: None,
         chunk: None,
@@ -564,7 +565,8 @@ pub(crate) fn search_internal_observed<'a>(
         subjects,
         x_cursor: subjects.x_cursor(),
         x_residues: subjects.x_residue_pass(),
-        db_length: subjects.numbers()?.total,
+        // The Gumbel block's length of the e-values (`SubjectNumbers::gumbel_total`).
+        db_length: subjects.numbers()?.gumbel_total,
         ordinal: 0,
         stream: None,
         chunk: None,
@@ -2482,8 +2484,13 @@ impl PreliminarySink for Runtime<'_> {
         //        larger than the final hit list size */
         //     s_BlastPruneExtraHits(results, hit_params->options->hitlist_size);
         // ```
-        for query in &mut queries {
-            query.lists.sort_by(super::results::compare_list);
+        // Not where `BlastSeqSrcGetTotLen` (`Subjects::total_length`) is 0 or negative: the lists
+        // keep the traceback's order, by OID through `update_observed` (and the composition
+        // heap's reversed order with composition-based statistics), NCBI's one-thread order.
+        if self.subjects.total_length()? > 0 {
+            for query in &mut queries {
+                query.lists.sort_by(super::results::compare_list);
+            }
         }
         for (q, query) in queries.iter().enumerate() {
             self.observer.targets("IN", q, &query.lists);

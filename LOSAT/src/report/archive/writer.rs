@@ -72,8 +72,19 @@ pub struct BatchArchive<'a> {
     /// `search-stats`: the effective search space (written twice) and the length adjustment.
     pub search_space: i64,
     pub length_adjustment: i64,
-    /// The batch's `EffectiveSearchSpace` option when the batch was searched.
-    pub searched_space: Option<i64>,
+    /// The batch's context 0 when the batch was searched, which its `EffectiveSearchSpace`
+    /// option reads (`RequestLength::space`).
+    pub searched_space: Option<SearchedContext0>,
+}
+
+/// What the `EffectiveSearchSpace` option of a searched batch reads of the batch's context 0
+/// (`RequestLength::space`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SearchedContext0 {
+    /// The search's effective search space of the context (`-searchsp` in an invalid one too).
+    pub space: i64,
+    /// The context's query length, 0 for an invalid context.
+    pub query_length: i64,
 }
 
 /// The encoder, the sink and the first I/O error: the documents are written by calls that

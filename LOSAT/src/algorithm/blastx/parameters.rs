@@ -8,10 +8,9 @@ use crate::stats::karlin_calc::{
     apply_check_ideal, compute_aa_composition, compute_karlin_params_ungapped,
     compute_score_freq_profile_for_matrix, compute_std_aa_composition,
 };
-use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
 use crate::stats::spouge::{blast_spouge_etos, lookup_protein_gumbel_params, BlastGumbelBlk};
 use crate::stats::{lookup_protein_params, KarlinParams};
-use anyhow::{ensure, Result};
+use anyhow::{bail, ensure, Result};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2743-2754
 // ```c++
@@ -313,90 +312,52 @@ pub fn gumbel_block(options: &ResolvedOptions, db_length: i64) -> Option<BlastGu
 //       query_info->contexts[index].eff_searchsp = effective_search_space;
 //       query_info->contexts[index].length_adjustment = length_adjustment;
 // ```
-/// LOSAT's refusal of a search whose effective search space overflows NCBI's `Int8`
-/// (`db_length` letters of the database, or of `-dbsize`, against a context of
-/// `query_length` residues): NCBI's arithmetic overflows there (as BLASTP's `-dbsize`).
-#[derive(Debug)]
-pub struct SearchSpaceOverflow {
-    pub db_length: i64,
-    pub query_length: usize,
-    /// The program of the refusal (`args::ProgramName::upper`).
-    pub program: &'static str,
-}
-
-impl std::fmt::Display for SearchSpaceOverflow {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "a database length of {} letters with a query of {} letters overflows NCBI BLAST+'s 64-bit effective search space, which is not supported by LOSAT's {}",
-            self.db_length, self.query_length, self.program
-        )
-    }
-}
-
-impl std::error::Error for SearchSpaceOverflow {}
+/// LOSAT's refusal of a search whose effective search space overflows NCBI's `Int8` (the shared
+/// one of `stats::setup::calc_eff_lengths`).
+pub(crate) use crate::stats::setup::SearchSpaceOverflow;
 
 pub fn effective_lengths(
     batch: &PreparedQueryBatch,
     parameters: &mut [ContextParameters],
     options: &ResolvedOptions,
     db_length: i64,
-    db_count: i64,
+    db_count: i32,
     fixed_spaces: Option<&[i64]>,
 ) -> Result<()> {
     ensure!(
         parameters.len() == batch.contexts.len(),
         "one statistical block per BLASTX context"
     );
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-720
-    // ```c
-    //    /* use overriding value from effective lengths options or the real value
-    //       from effective lengths parameters. */
-    //    if (eff_len_options->db_length > 0)
-    //       db_length = eff_len_options->db_length;
-    //    else
-    // ```
-    // `db_length` is the real total; `-dbsize` above 0 replaces it here (never divided by
-    // 3: BLASTX's subject is not translated).
-    let db_length = if options.db_length > 0 {
-        options.db_length
-    } else {
-        db_length
-    };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-732
-    // ```c
-    //    if (db_length == 0 &&
-    //        !BlastEffectiveLengthsOptions_IsSearchSpaceSet(eff_len_options)) {
-    //       return 0;
-    //    }
-    // ```
     let options_space = options.effective_search_space;
-    if db_length == 0 && fixed_spaces.is_none() && options_space == 0 {
+    // `stats::setup::eff_lengths_database`: BLASTX's subject is not translated.
+    let Some((db_length, db_count)) = crate::stats::setup::eff_lengths_database(
+        db_length,
+        db_count,
+        options.db_length,
+        fixed_spaces.is_some() || options_space != 0,
+        false,
+    ) else {
         return Ok(());
-    }
+    };
     let gapped = gapped_karlin(options);
     for (i, (c, p)) in batch.contexts.iter().zip(parameters).enumerate() {
+        let space = fixed_spaces.map_or(options_space, |spaces| spaces[i]);
         if !p.valid {
             p.length_adjustment = 0;
-            p.search_space = fixed_spaces.map_or(options_space, |spaces| spaces[i]);
+            p.search_space = space;
             continue;
         }
         let ka = if options.gapped { gapped } else { p.ungapped };
-        let adj = compute_length_adjustment_ncbi(c.length as i64, db_length, db_count, &ka)
-            .length_adjustment;
-        p.length_adjustment = i32::try_from(adj)?;
-        p.search_space = match fixed_spaces {
-            Some(spaces) => spaces[i],
-            None if options_space != 0 => options_space,
-            None => (db_length - db_count * adj)
-                .max(1)
-                .checked_mul(c.length as i64 - adj)
-                .ok_or_else(|| SearchSpaceOverflow {
-                    db_length,
-                    query_length: c.length,
-                    program: options.program().upper,
-                })?,
-        };
+        let lengths = crate::stats::setup::calc_eff_lengths(
+            c.length as i64,
+            db_length,
+            db_count,
+            &ka,
+            space,
+            options.program().upper,
+        )?;
+        p.length_adjustment = lengths.length_adjustment;
+        p.search_space = lengths.eff_searchsp;
     }
     Ok(())
 }
@@ -567,9 +528,14 @@ pub struct SubjectNumbers {
     /// The total length of the statistics (blast_setup.c:908-911): `STATS_TOTLEN` or
     /// `BlastSeqSrcGetTotLen` (`SeqDb::statistics_numbers`), the sum of a FASTA set's records.
     pub total: i64,
-    /// The number of sequences of the statistics (blast_setup.c:925-928): `STATS_NSEQ` or
-    /// `GetNumSeqs`, 0 for an alias file's `NSEQ 0`; a FASTA set's records.
-    pub count: i64,
+    /// The number of sequences of the statistics (blast_setup.c:925-928), NCBI's `Int4`:
+    /// `STATS_NSEQ` or `GetNumSeqs`, 0 for an alias file's `NSEQ 0` and negative for a negative
+    /// one; a FASTA set's records.
+    pub count: i32,
+    /// The Gumbel block's database length before `-dbsize` (blast_setup.c:913-920): a
+    /// database's total before the fallback to OID 0 (`DbStatistics::gumbel_db_length`, 0 or
+    /// negative for an alias file's `LENGTH` of 0 or of 2^63 or more), a FASTA set's total.
+    pub gumbel_total: i64,
     /// `BlastSeqSrcGetMinSeqLen` (blast_setup.c:969-973): a database's `GetMinLength`
     /// (`SeqDb::min_length`), a FASTA set's shortest record raised to `BLAST_SEQSRC_MINLENGTH`.
     pub shortest: usize,
@@ -586,6 +552,7 @@ impl SubjectNumbers {
         Self {
             total: length as i64,
             count: 1,
+            gumbel_total: length as i64,
             shortest: length.max(super::subjects::BLAST_SEQSRC_MINLENGTH),
             average: length as i32,
         }
@@ -602,6 +569,7 @@ pub fn subject_parameters(
     let SubjectNumbers {
         total: db_length,
         count: db_count,
+        gumbel_total,
         shortest,
         average,
     } = numbers;
@@ -640,12 +608,18 @@ pub fn subject_parameters(
             "BLASTX",
         ));
     }
-    let n = if gumbel_block_used {
-        i32::try_from(shortest)?
-    } else {
-        i32::try_from(db_length / db_count.max(1))?
+    let Some(n) = crate::stats::setup::setup_subject_length(
+        db_length,
+        db_count,
+        gumbel_block_used.then_some((i32::try_from(shortest).unwrap_or(i32::MAX), false)),
+    ) else {
+        bail!("The average subject length is too short");
     };
-    ensure!(n > 0, "The average subject length is too short");
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:759-760 (quoted at
+    // `stats::setup::hit_saving_parameters_fail`)
+    if crate::stats::setup::hit_saving_parameters_fail(options.sum_stats, options.gapped, n) {
+        bail!(crate::stats::setup::HIT_SAVING_PARAMETERS_ERROR);
+    }
     effective_lengths(
         batch,
         parameters,
@@ -655,7 +629,7 @@ pub fn subject_parameters(
         fixed_spaces,
     )?;
     let gapped = gapped_karlin(options);
-    let gumbel = gumbel_block(options, db_length);
+    let gumbel = gumbel_block(options, gumbel_total);
     let decay = if options.sum_stats
         && (!options.gapped
             || options.max_intron_length == 0

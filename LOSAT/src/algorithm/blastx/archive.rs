@@ -571,6 +571,8 @@ struct FirstContext {
     length_adjustment: i64,
     /// The search space of the first query's context 0 (the option); 0 when it is not valid.
     context0_space: i64,
+    /// That context's query length, 0 when it is not valid (`archive::RequestLength::space`).
+    context0_length: i64,
 }
 
 fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstContext {
@@ -582,6 +584,11 @@ fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstCon
         length_adjustment: valid.map_or(0, |parameters| i64::from(parameters.length_adjustment)),
         // An invalid context keeps `-searchsp`, else 0 (`effective_lengths`).
         context0_space: parameters[0].search_space,
+        context0_length: if parameters[0].valid {
+            batch.prepared.contexts[0].length as i64
+        } else {
+            0
+        },
     }
 }
 
@@ -794,6 +801,7 @@ fn with_batch(
             search_space: 0,
             length_adjustment: 0,
             context0_space: 0,
+            context0_length: 0,
         });
     let searched = call.batches.iter().any(|batch| !batch.search_skipped);
     let ka_blocks = match &first.karlin {
@@ -843,7 +851,10 @@ fn with_batch(
         ka_blocks,
         search_space: first.search_space,
         length_adjustment: first.length_adjustment,
-        searched_space: searched.then_some(first.context0_space),
+        searched_space: searched.then_some(crate::report::archive::SearchedContext0 {
+            space: first.context0_space,
+            query_length: first.context0_length,
+        }),
     };
     each(&batch)
 }

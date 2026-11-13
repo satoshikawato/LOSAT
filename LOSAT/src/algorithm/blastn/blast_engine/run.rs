@@ -5780,7 +5780,7 @@ struct BlastnReportInputs<'a> {
     formatting: crate::blastinput::report_counts::FormattingArgs,
     /// `-culling_limit` (0: no culling), read when the hit lists are finished.
     culling_limit: i32,
-    db_num_seqs: usize,
+    db_num_seqs: i32,
     db_len_total: usize,
     /// The `Database:` lines of a database search's outfmt 0 report.
     database: Option<&'a PairwiseDatabase>,
@@ -5853,8 +5853,9 @@ impl BlastnReportInputs<'_> {
     /// The number of sequences the reports print: the database's own (with a taxid list, the
     /// whole database's: `SeqDb::printed_num_seqs`), or the subject set's.
     fn shown_num_seqs(&self) -> usize {
-        self.database
-            .map_or(self.db_num_seqs, |database| database.num_sequences as usize)
+        self.database.map_or(self.db_num_seqs as usize, |database| {
+            database.num_sequences as usize
+        })
     }
 
     /// The total length the reports print (as `shown_num_seqs`).
@@ -5991,12 +5992,19 @@ fn archive_first_context(
     first: usize,
 ) -> Result<archive::FirstContext> {
     let context0_space = report.query_eff_searchsp[2 * first];
+    // Context 0 is the plus strand (`-strand minus` leaves it invalid: no Karlin block).
+    let context0_length = if report.context_karlin[2 * first].is_some() {
+        query_lengths[first] as i64
+    } else {
+        0
+    };
     let Some(blocks) = report.context_karlin[2 * first + report.first_context] else {
         return Ok(archive::FirstContext {
             karlin: None,
             search_space: 0,
             length_adjustment: 0,
             context0_space,
+            context0_length,
         });
     };
     let search_space = report.query_eff_searchsp[2 * first + report.first_context];
@@ -6012,6 +6020,7 @@ fn archive_first_context(
         search_space,
         length_adjustment,
         context0_space,
+        context0_length,
     })
 }
 
@@ -6184,7 +6193,13 @@ fn finish_query_hit_list(
     subject_besthit: bool,
     culling_limit: i32,
     ungapped: bool,
+    sorts_results: bool,
 ) {
+    // A database whose `BlastSeqSrcGetTotLen` is not positive keeps the traceback's order
+    // (`HitList::into_traceback_order`), which the post-traceback steps below then read.
+    if !sorts_results {
+        hit_list.into_traceback_order(hitlist_size);
+    }
     // NCBI's culling pipe is the first thing the traceback does with the consolidated results
     // (`-culling_limit`; the mask level of 101, the default, is no step).
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:1721-1723,1763-1766
@@ -6269,7 +6284,9 @@ fn finish_query_hit_list(
     //    }
     // }
     // ```
-    hit_list.sort_by_evalue();
+    if sorts_results {
+        hit_list.sort_by_evalue();
+    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:877-892
     // ```c
     // static void s_BlastPruneExtraHits(BlastHSPResults* results, Int4 hitlist_size)
@@ -6404,6 +6421,9 @@ fn post_process_hits_and_write(
                 subject_besthit,
                 report.culling_limit,
                 report.ungapped,
+                // A FASTA subject set (NCBI's `dbscan` source totals its records): a set
+                // without letters finds no hit.
+                true,
             );
             drop_hsps_of_score_zero(hit_list);
         }
@@ -7050,16 +7070,8 @@ fn post_process_hits_and_write(
                     gap_extend: report.gap_extend,
                     reward_penalty: Some((report.reward, report.penalty)),
                     filter: &filter,
-                    db_num: if is_database {
-                        report.shown_num_seqs() as i32
-                    } else {
-                        0
-                    },
-                    db_len: if is_database {
-                        report.shown_total_letters() as i64
-                    } else {
-                        0
-                    },
+                    db_num: report.database.map_or(0, |database| database.num_sequences),
+                    db_len: report.database.map_or(0, |database| database.total_letters),
                     positives: None,
                     mask_char: b'N',
                 },
@@ -7802,11 +7814,20 @@ fn open_search_database(
                 args.strategy.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
-                database.statistics_length_is_empty(),
+                &database.statistics(),
+                false,
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
                 "BLASTN",
             )?;
+            let shown = database.pairwise_database();
+            for format in &outputs.formats {
+                crate::algorithm::common::database::check_report_sums(
+                    &shown,
+                    crate::blastinput::app::parse_formatting_string(format.outfmt)?.number,
+                    "BLASTN",
+                )?;
+            }
             Some(database)
         }
         None => None,
@@ -9223,7 +9244,7 @@ impl<'a> SubjectSource<'a> {
     /// sequences (`SeqDb::num_seqs`; the statistics' number, `metadata`, can be another).
     pub(super) fn num_subjects(self) -> usize {
         match self {
-            SubjectSource::Prepared(prepared) => prepared.metadata.db_num_seqs,
+            SubjectSource::Prepared(prepared) => prepared.metadata.db_num_seqs as usize,
             SubjectSource::Database(database) => database.num_subjects(),
         }
     }
@@ -9262,7 +9283,8 @@ impl<'a> SubjectSource<'a> {
 /// counts, and for a database the lines of `GetBlastDbInfo` (`PairwiseDatabase`).
 struct ShownSubjects {
     name: String,
-    num_seqs: usize,
+    /// The statistics' number of sequences, NCBI's `Int4` (`SubjectMetadata::db_num_seqs`).
+    num_seqs: i32,
     total_letters: usize,
     database: Option<PairwiseDatabase>,
     /// Whether `taxdb.bti` is on NCBI's search path, for the custom tabular reports
@@ -10225,6 +10247,7 @@ fn run_in_pool(
                         args.subject_besthit,
                         args.culling_limit_value(),
                         args.ungapped,
+                        database.sorts_results(),
                     );
                 }
             }
@@ -10860,7 +10883,8 @@ fn write_format_prolog(
             crate::NCBI_BLAST_VERSION,
             megablast,
             &shown.name,
-            shown.num_seqs,
+            // Printed for a subject set only (a database prints `database`).
+            shown.num_seqs as usize,
             shown.total_letters,
             shown.database.as_ref(),
         )?;
@@ -11407,31 +11431,12 @@ fn reborrow_outputs<'o, 'r>(outputs: &'o mut BatchOutputs<'_, 'r>) -> BatchOutpu
 fn context_lengths(
     query_len: i64,
     db_len: i64,
-    db_num_seqs: i64,
+    db_num_seqs: i32,
     gapped: &KarlinParams,
 ) -> Result<(i64, i64)> {
-    let result = compute_length_adjustment_ncbi(query_len, db_len, db_num_seqs, gapped);
-    let length_adjustment = result.length_adjustment;
-    // NCBI's `Int8` arithmetic, which overflows where the database length (a
-    // `-dbsize`, or the total of a large database) times the query length passes
-    // 2^63 (never for a subject set without `-dbsize`: its total and the query
-    // lengths are below 2^31); LOSAT rejects such a search instead of reproducing
-    // the overflow.
-    let overflow = || {
-        anyhow::anyhow!(
-            "a database length of {db_len} letters with a query of {query_len} letters overflows NCBI BLAST+'s 64-bit effective search space, which is not supported by LOSAT's BLASTN"
-        )
-    };
-    let effective_db_length = db_num_seqs
-        .checked_mul(length_adjustment)
-        .and_then(|adjusted| db_len.checked_sub(adjusted))
-        .ok_or_else(overflow)?
-        .max(1);
-    let effective_query_length = (query_len - length_adjustment).max(1);
-    let effective_search_space = effective_db_length
-        .checked_mul(effective_query_length)
-        .ok_or_else(overflow)?;
-    Ok((length_adjustment, effective_search_space))
+    let lengths =
+        crate::stats::setup::calc_eff_lengths(query_len, db_len, db_num_seqs, gapped, 0, "BLASTN")?;
+    Ok((i64::from(lengths.length_adjustment), lengths.eff_searchsp))
 }
 
 /// LOSAT's rejection of an error of the masks of `-window_masker_db` or `-window_masker_taxid`

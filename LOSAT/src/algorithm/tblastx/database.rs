@@ -191,14 +191,18 @@ impl TblastxDatabase {
     //     return seqdb.GetTotalLength();
     // }
     // ```
-    /// The numbers of the database that the statistics read (the total fits an `Int8`,
-    /// `open`), with `-dbsize`.
+    /// The numbers of the database that the statistics read (`SeqDb::statistics`: the setup's
+    /// total and NCBI's `Int4` count, `BlastSeqSrcGetTotLen` for the linking, the average subject
+    /// length), with `-dbsize`.
     pub(crate) fn numbers(&self, dbsize: Option<i64>) -> SubjectSetNumbers {
-        let (total, count) = self.db.statistics_numbers();
+        let statistics = self.db.statistics();
         SubjectSetNumbers {
-            total: i64::try_from(total).expect("checked when opened"),
-            count: i64::from(count),
-            link_total: i64::try_from(self.db.total_length()).expect("checked when opened"),
+            total: statistics.setup_total,
+            count: i64::from(statistics.setup_count),
+            // NCBI's `Int8` of `GetTotalLength`: negative for a `LENGTH` of 2^63 or more, which
+            // takes the subject's own branch of the link cutoffs (blast_engine.c:1451-1456).
+            link_total: statistics.engine_db_length,
+            average: Some(statistics.average),
             dbsize,
             searchsp: None,
         }
@@ -209,10 +213,10 @@ impl TblastxDatabase {
         self.db.filtered_empty()
     }
 
-    /// Whether the total length of the statistics is not positive (`SeqDb::
-    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
-    pub(crate) fn statistics_length_is_empty(&self) -> bool {
-        self.db.statistics_length_is_empty()
+    /// The numbers the statistics read, with NCBI's types (`SeqDb::statistics`); the BLAST
+    /// archive's database length reads them too.
+    pub(crate) fn statistics(&self) -> crate::seqdb::DbStatistics {
+        self.db.statistics()
     }
 
     /// The taxids of the search's list (`SeqDb::list_taxids`).

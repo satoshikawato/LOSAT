@@ -62,6 +62,9 @@ pub(super) struct OrdinaryTraceback<'a> {
     pub(super) search_spaces: &'a [crate::stats::search_space::SearchSpace],
     pub(super) expect_value: f64,
     pub(super) hitlist_size: usize,
+    /// Whether NCBI sorts the results at the end of the traceback (`DbStatistics::sorts_results`):
+    /// otherwise the hit lists keep the order in which the lists come, by OID (`run`).
+    pub(super) sorts_results: bool,
 }
 
 impl OrdinaryTraceback<'_> {
@@ -115,7 +118,14 @@ impl OrdinaryTraceback<'_> {
                 );
             }
         }
-        let traced = self.trace_lists(work, pool)?;
+        let mut traced = self.trace_lists(work, pool)?;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:591-608 (quoted
+        // at `HitList::into_traceback_order` of BLASTN): the traceback reads the preliminary
+        // lists by OID. Where the results are sorted at the end, the order of insertion changes
+        // nothing (the comparison is total); where they are not, it is the report's order.
+        if !self.sorts_results {
+            traced.sort_by_key(|(_, list)| list.as_ref().map_or(u32::MAX, |list| list.oid));
+        }
         let mut hit_lists: Vec<Option<BlastpHitList>> = std::iter::repeat_with(|| None)
             .take(preliminary_hit_lists.len())
             .collect();

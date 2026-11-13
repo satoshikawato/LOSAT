@@ -1272,6 +1272,14 @@ alias file of a `-db` with another database or volume (a search reads the listed
 `-seqidlist` every listed OID, and the statistics count NCBI's loop over the list, which can pass the first listed OID and the
 OID at the range's end). Frozen with the release build on the developer machine (2026-11-13).
 
+Rows `db.cnt.*` (D1a-3 part 1, `remaining-gaps-20261112/D/SURVEY_D1a3.md`, `remaining-gaps-20261112/D/fixtures/make_d1a3_fixtures.py`):
+`dbcounts/` holds alias files `<name>.pal` over `../taxfilter/tfp` and `<name>.nal` over `../taxfilter/tfn`, each with
+`TITLE t` and one key: `neg1` `LENGTH 9223372036854775809`, `negm1` `LENGTH 18446744073709551615`, `l2p63` `LENGTH
+9223372036854775808` (negative as NCBI's `Int8`), `l4295` `LENGTH 4294967296000000000` (NCBI's commas lose a digit),
+`l4294` `LENGTH 4294967295999999999`, `l5e18` `LENGTH 5000000000000000000`, `nsm5` `NSEQ -5`, `ns2p31` `NSEQ 2147483648`,
+`nsm1` `NSEQ 4294967295` (-1 as NCBI's `int`), `ns2e9` `NSEQ 2000000000`, and `avg2p32` (`NSEQ 23` / `16` with `LENGTH`
+23 x 2^32 / 16 x 2^32: an average whose `Int4` is 0). Frozen with the release build on the developer machine (2026-11-14).
+
 ## psiblast's id options (line RG, series Q, Q1)
 
 - `q1_sq1` (protein, version 5): `makeblastdb -in tests/fasta/psiblast/q1_subj_q1.faa -dbtype prot -parse_seqids

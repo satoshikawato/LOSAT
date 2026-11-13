@@ -541,7 +541,9 @@ fn check(
     // `db - n x a` (at least 1) times the effective query length `q - a` (at least 1), with the
     // length adjustment `a` between 0 and the smaller root of `n a^2 - (q n + db) a + c`, which is
     // at most `2 c / (q n + db) <= 2 q` (`compute_length_adjustment_ncbi`, `c <= q db`). So
-    // `(db + n (2 q + 1)) (2 q + 1)` bounds every product that can overflow there.
+    // `(db + n (2 q + 1)) (2 q + 1)` bounds every product that can overflow there; a negative
+    // `n` (an alias file's `NSEQ`, NCBI's `Int4`) adds `|n| a` to the database length, so the
+    // bound takes `|n|`.
     let metadata = source.metadata();
     let db_length = if args.db_length() > 0 {
         i128::from(args.db_length())
@@ -549,7 +551,9 @@ fn check(
         metadata.db_len_total as i128
     };
     let factor = 2 * lengths.iter().copied().max().unwrap_or(0) as i128 + 1;
-    if (db_length.abs() + metadata.db_num_seqs as i128 * factor) * factor > i128::from(i64::MAX) {
+    if (db_length.abs() + i128::from(metadata.db_num_seqs.unsigned_abs()) * factor) * factor
+        > i128::from(i64::MAX)
+    {
         return Err(Off::SearchSpace);
     }
     if archive_title {

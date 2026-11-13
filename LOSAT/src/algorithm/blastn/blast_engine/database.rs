@@ -400,6 +400,7 @@ impl BlastnDatabase {
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;
         let (total, num_seqs) = db.statistics_numbers();
+        // The setup's total is not negative (`DbStatistics::setup_total`).
         let db_len_total = usize::try_from(total)
             .ok()
             .filter(|&letters| i64::try_from(letters).is_ok())
@@ -410,7 +411,7 @@ impl BlastnDatabase {
             })?;
         let metadata = SubjectMetadata {
             db_len_total,
-            db_num_seqs: num_seqs as usize,
+            db_num_seqs: num_seqs,
         };
         Ok(Self {
             db,
@@ -676,10 +677,10 @@ impl BlastnDatabase {
         self.db.average_length()
     }
 
-    /// Whether the total length of the statistics is not positive (`SeqDb::
-    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
-    pub(super) fn statistics_length_is_empty(&self) -> bool {
-        self.db.statistics_length_is_empty()
+    /// The numbers the statistics read, with NCBI's types (`SeqDb::statistics`); the BLAST
+    /// archive's database length reads them too.
+    pub(super) fn statistics(&self) -> crate::seqdb::DbStatistics {
+        self.db.statistics()
     }
 
     /// The taxids of the search's list (`SeqDb::list_taxids`).
@@ -691,6 +692,12 @@ impl BlastnDatabase {
     /// the schedules count; the statistics' number (`metadata`) can be another.
     pub(super) fn num_subjects(&self) -> usize {
         self.db.num_seqs() as usize
+    }
+
+    /// Whether NCBI's traceback sorts the results by e-value at its end
+    /// (`DbStatistics::sorts_results`).
+    pub(super) fn sorts_results(&self) -> bool {
+        self.db.statistics().sorts_results()
     }
 
     /// The number of sequences and the total length that the statistics read
@@ -2440,7 +2447,7 @@ mod tests {
         BlastnDatabase {
             metadata: SubjectMetadata {
                 db_len_total: db.total_length() as usize,
-                db_num_seqs: db.num_seqs() as usize,
+                db_num_seqs: db.num_seqs() as i32,
             },
             db,
             name: name.to_string(),

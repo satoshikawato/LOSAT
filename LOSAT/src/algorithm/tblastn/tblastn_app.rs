@@ -663,11 +663,20 @@ fn open_search_database(
                 args.strategy.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
-                database.statistics_length_is_empty(),
+                &database.statistics(),
+                true,
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
                 "TBLASTN",
             )?;
+            let shown = database.pairwise_database();
+            for format in &outputs.formats {
+                crate::algorithm::common::database::check_report_sums(
+                    &shown,
+                    crate::blastinput::app::parse_formatting_string(format.outfmt)?.number,
+                    "TBLASTN",
+                )?;
+            }
             Some(database)
         }
         None => None,
@@ -1539,7 +1548,14 @@ fn search(
             Some(database) => {
                 let read = if database.first_oid_read_fails() {
                     Err(PreliminaryReadError("Database memory map file error").into())
-                } else if !subject_set.old_fsc && database.numbers().min_length as u32 / 3 == 0 {
+                } else if !subject_set.old_fsc
+                    && crate::stats::setup::setup_subject_length(
+                        0,
+                        1,
+                        Some((database.numbers().min_length, true)),
+                    )
+                    .is_none()
+                {
                     Err(PreliminaryReadError("The average subject length is too short").into())
                 } else {
                     database.x_stream(resolved.num_threads).map(|stream| {
@@ -1771,7 +1787,9 @@ fn search(
                             query.len(),
                         );
                     }
-                    hitlist.sort_by_evalue_for_positive_totlen();
+                    if subject_set.sorts_results() {
+                        hitlist.sort_by_evalue_for_positive_totlen();
+                    }
                 }
             }
             // `-db`: the definition lines of the batch's final hit lists are read where NCBI

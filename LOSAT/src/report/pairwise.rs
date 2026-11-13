@@ -295,10 +295,12 @@ pub struct DatabaseInfo {
     pub definition: Vec<u8>,
     /// `date`.
     pub date: String,
-    /// `number_seqs`.
-    pub num_sequences: u64,
-    /// `total_length`.
-    pub total_letters: u64,
+    /// `number_seqs`: NCBI's `int` of `GetNumSeqs` (negative for an alias file's negative
+    /// `NSEQ`, or one of 2^31 or more).
+    pub num_sequences: i32,
+    /// `total_length`: NCBI's `Int8` of `GetTotalLength` (negative for an alias file's `LENGTH`
+    /// of 2^63 or more).
+    pub total_letters: i64,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:511-523
@@ -326,10 +328,11 @@ pub struct DatabaseInfo {
 pub struct PairwiseDatabase {
     /// The definitions of the databases joined with `"; "`.
     pub definition: Vec<u8>,
-    /// The sum of their numbers of sequences.
-    pub num_sequences: u64,
-    /// The sum of their total lengths.
-    pub total_letters: u64,
+    /// The sum of their numbers of sequences, NCBI's `Int8` (`tot_num_seqs`).
+    pub num_sequences: i64,
+    /// The sum of their total lengths, NCBI's `Int8` (`tot_length`). A sum that overflows the
+    /// `Int8` is refused before a report is written (`common::database::check_report_sums`).
+    pub total_letters: i64,
     /// The databases in the order of the list, a name given twice twice: the blocks of the
     /// epilog.
     pub databases: Vec<DatabaseInfo>,
@@ -349,12 +352,12 @@ impl PairwiseDatabase {
             definition,
             num_sequences: databases
                 .iter()
-                .map(|database| database.num_sequences)
-                .sum(),
+                .map(|database| i64::from(database.num_sequences))
+                .fold(0, i64::wrapping_add),
             total_letters: databases
                 .iter()
                 .map(|database| database.total_letters)
-                .sum(),
+                .fold(0, i64::wrapping_add),
             databases,
         }
     }
@@ -1511,20 +1514,6 @@ fn write_spaces<W: Write>(writer: &mut W, count: usize) -> io::Result<()> {
 }
 
 #[inline]
-fn format_count_with_commas(value: i64) -> String {
-    let digits = value.to_string();
-    let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
-    let len = digits.len();
-    for (index, ch) in digits.chars().enumerate() {
-        if index > 0 && (len - index).is_multiple_of(3) {
-            formatted.push(',');
-        }
-        formatted.push(ch);
-    }
-    formatted
-}
-
-#[inline]
 fn ensure_trailing_period(text: &str) -> String {
     if text.ends_with('.') {
         text.to_string()
@@ -1985,8 +1974,8 @@ fn write_blast_database_header<W: Write>(
     writeln!(
         writer,
         "           {} sequences; {} total letters",
-        format_count_with_commas(i64::try_from(database.num_sequences).unwrap_or(i64::MAX)),
-        format_count_with_commas(i64::try_from(database.total_letters).unwrap_or(i64::MAX))
+        crate::ncbi_str::int8_with_commas(database.num_sequences),
+        crate::ncbi_str::int8_with_commas(database.total_letters)
     )?;
     writeln!(writer)
 }
@@ -2039,12 +2028,12 @@ fn write_final_database_block<W: Write>(
         writeln!(
             writer,
             "  Number of letters in database: {}",
-            format_count_with_commas(i64::try_from(database.total_letters).unwrap_or(i64::MAX))
+            crate::ncbi_str::int8_with_commas(database.total_letters)
         )?;
         writeln!(
             writer,
             "  Number of sequences in database:  {}",
-            format_count_with_commas(i64::try_from(database.num_sequences).unwrap_or(i64::MAX))
+            crate::ncbi_str::int_with_commas(database.num_sequences)
         )?;
         writeln!(writer)?;
     }
@@ -2089,8 +2078,8 @@ fn write_blastp_database_header_spacing<W: Write>(
     writeln!(
         writer,
         "           {} sequences; {} total letters",
-        format_count_with_commas(i64::try_from(database_num_sequences).unwrap_or(0)),
-        format_count_with_commas(i64::try_from(database_total_letters).unwrap_or(0))
+        crate::ncbi_str::int8_with_commas(i64::try_from(database_num_sequences).unwrap_or(0)),
+        crate::ncbi_str::int8_with_commas(i64::try_from(database_total_letters).unwrap_or(0))
     )?;
     for _ in 0..trailing {
         writeln!(writer)?;
@@ -2341,12 +2330,12 @@ fn write_final_database_report<W: Write>(
     writeln!(
         writer,
         "  Number of letters in database: {}",
-        format_count_with_commas(i64::try_from(database_total_letters).unwrap_or(0))
+        crate::ncbi_str::int8_with_commas(i64::try_from(database_total_letters).unwrap_or(0))
     )?;
     writeln!(
         writer,
         "  Number of sequences in database:  {}",
-        format_count_with_commas(i64::try_from(database_num_sequences).unwrap_or(0))
+        crate::ncbi_str::int_with_commas(i32::try_from(database_num_sequences).unwrap_or(0))
     )?;
     writeln!(writer)?;
     writeln!(writer)?;
@@ -6271,12 +6260,12 @@ pub fn write_blastx_epilog(
         writeln!(
             writer,
             "  Number of letters in database: {}",
-            format_count_with_commas(report.database_total_letters as i64)
+            crate::ncbi_str::int8_with_commas(report.database_total_letters as i64)
         )?;
         writeln!(
             writer,
             "  Number of sequences in database:  {}",
-            format_count_with_commas(report.database_num_sequences as i64)
+            crate::ncbi_str::int_with_commas(report.database_num_sequences as i32)
         )?;
         writeln!(writer)?;
         writeln!(writer)?;

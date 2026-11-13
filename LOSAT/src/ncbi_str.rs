@@ -1184,8 +1184,163 @@ pub(crate) fn truncate_spaces(str: &[u8]) -> &[u8] {
     &str[beg..end]
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1841-1850
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1952-1993
 // ```c++
+// #define PRINT_INT8_CHUNK 1000000000
+// #define PRINT_INT8_CHUNK_SIZE 9
+//
+// /// @internal
+// static char* s_PrintBase10Uint8(char*                   pos,
+//                                 Uint8                   value,
+//                                 NStr::TNumToStringFlags flags)
+// {
+//     if ( (flags & NStr::fWithCommas) ) {
+//         int cnt = -1;
+// #ifdef PRINT_INT8_CHUNK
+//         // while n doesn't fit in Uint4 process the number
+//         // by 9-digit chunks within 32-bit Uint4
+//         while ( value & ~Uint8(Uint4(~0)) ) {
+//             Uint4 chunk = Uint4(value);
+//             value /= PRINT_INT8_CHUNK;
+//             chunk -= PRINT_INT8_CHUNK*Uint4(value);
+//             char* end = pos - PRINT_INT8_CHUNK_SIZE - 2; // 9-digit chunk should have 2 commas
+//             do {
+//                 if (++cnt == 3) {
+//                     *--pos = ',';
+//                     cnt = 0;
+//                 }
+//                 *--pos = '0' + chunk % 10;
+//                 chunk /= 10;
+//             } while ( pos != end );
+//         }
+//         // process all remaining digits in 32-bit number
+//         Uint4 chunk = Uint4(value);
+//         do {
+//             if (++cnt == 3) {
+//                 *--pos = ',';
+//                 cnt = 0;
+//             }
+//             *--pos = '0' + chunk % 10;
+//             chunk /= 10;
+//         } while ( chunk );
+// ```
+// Each chunk after the first takes 11 characters, while its 9 digits need 3 commas once the
+// count of the chunk before has run on (the comment's "2 commas" holds for the first chunk
+// only): from the second chunk on, a chunk loses its top digit or digits, so a value of
+// 4,294,967,296,000,000,000 (2^32 * 10^9) or more prints with digits lost (NCBI BLAST+
+// 2.17.0: LENGTH 4294967296000000000 prints `494,967,296,000,000,000`; line RG D1a-3, probe
+// p5_pr_L4295e15). The loop of the last characters is reproduced as it runs: it ends where the
+// chunk's 11 characters end.
+/// NCBI's `s_PrintBase10Uint8` with `NStr::fWithCommas`: `value` in decimal with commas, as
+/// the text of `NStr::UInt8ToString` (and of `Int8ToString` after the sign).
+fn print_base10_uint8_with_commas(mut value: u64) -> Vec<u8> {
+    const PRINT_INT8_CHUNK: u64 = 1_000_000_000;
+    const PRINT_INT8_CHUNK_SIZE: usize = 9;
+    // NCBI's buffer is 64 characters (`CHAR_BIT * sizeof(value)`); the text fills it from the end.
+    let mut buffer = [0u8; 64];
+    let mut pos = buffer.len();
+    let mut cnt: i32 = -1;
+    let mut put = |pos: &mut usize, digit: u8, cnt: &mut i32| {
+        *cnt += 1;
+        if *cnt == 3 {
+            *pos -= 1;
+            buffer[*pos] = b',';
+            *cnt = 0;
+        }
+        *pos -= 1;
+        buffer[*pos] = digit;
+    };
+    while value & !u64::from(u32::MAX) != 0 {
+        let mut chunk = value as u32;
+        value /= PRINT_INT8_CHUNK;
+        chunk = chunk.wrapping_sub((PRINT_INT8_CHUNK as u32).wrapping_mul(value as u32));
+        let end = pos - PRINT_INT8_CHUNK_SIZE - 2;
+        loop {
+            put(&mut pos, b'0' + (chunk % 10) as u8, &mut cnt);
+            chunk /= 10;
+            // A step writes one or two characters; the count of each chunk's start makes the
+            // 11 characters end on a digit, so `pos` meets `end` (an overshoot cannot occur).
+            if pos <= end {
+                break;
+            }
+        }
+    }
+    let mut chunk = value as u32;
+    loop {
+        put(&mut pos, b'0' + (chunk % 10) as u8, &mut cnt);
+        chunk /= 10;
+        if chunk == 0 {
+            break;
+        }
+    }
+    buffer[pos..].to_vec()
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2055-2069
+// ```c++
+// void NStr::UInt8ToString(string& out_str, Uint8 value,
+//                          TNumToStringFlags flags, int base)
+// {
+//     ...
+//     if (base == 10) {
+//         const SIZE_TYPE kBufSize = CHAR_BIT  * sizeof(value);
+//         char  buffer[kBufSize];
+//
+//         char* pos = s_PrintBase10Uint8(buffer + kBufSize, value, flags);
+//         if ( flags & fWithSign ) {
+//             *--pos = '+';
+//         }
+//         out_str.assign(pos, buffer + kBufSize - pos);
+// ```
+/// `NStr::UInt8ToString(n, NStr::fWithCommas)`: `n` in decimal with a comma between groups of
+/// three digits, with NCBI's loss of digits from 4,294,967,296,000,000,000
+/// (`print_base10_uint8_with_commas`).
+pub(crate) fn with_commas(n: u64) -> String {
+    String::from_utf8(print_base10_uint8_with_commas(n)).expect("digits and commas")
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2031-2048
+// ```c++
+// void NStr::Int8ToString(string& out_str, Int8 svalue,
+//                         TNumToStringFlags flags, int base)
+// {
+//     ...
+//     if (base == 10) {
+//         const SIZE_TYPE kBufSize = CHAR_BIT * sizeof(value);
+//         char  buffer[kBufSize];
+//
+//         value = static_cast<Uint8>(svalue<0?-svalue:svalue);
+//         char* pos = s_PrintBase10Uint8(buffer + kBufSize, value, flags);
+//         if (svalue < 0)
+//             *--pos = '-';
+// ```
+// `-svalue` of INT64_MIN overflows; GCC's wrapped result, cast to `Uint8`, is 2^63, its magnitude
+// (`unsigned_abs`), so the text is the value's under either reading (probe p5_neg_2p63 of line
+// RG D1a-3: `-923,372,036,854,775,808`).
+/// `NStr::Int8ToString(n, NStr::fWithCommas)`: the sign, then the magnitude as
+/// [`with_commas`] prints it.
+pub(crate) fn int8_with_commas(n: i64) -> String {
+    let digits = print_base10_uint8_with_commas(n.unsigned_abs());
+    let mut text = String::with_capacity(digits.len() + 1);
+    if n < 0 {
+        text.push('-');
+    }
+    text.push_str(std::str::from_utf8(&digits).expect("digits and commas"));
+    text
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1825-1862, 1867-1878
+// ```c++
+// static void s_SignedBase10ToString(string&                 out_str,
+//                                    unsigned long           value,
+//                                    long                    svalue,
+//                                    NStr::TNumToStringFlags flags,
+//                                    int                     base)
+// {
+//     ...
+//     if (svalue < 0) {
+// 	    value = static_cast<unsigned long>(-svalue);
+//     }
 //     if ((flags & NStr::fWithCommas)) {
 //         int cnt = -1;
 //         do {
@@ -1196,23 +1351,97 @@ pub(crate) fn truncate_spaces(str: &[u8]) -> &[u8] {
 //             *--pos = '0' + value % 10;
 //             value /= 10;
 //         } while (value);
+//     }
+//     ...
+//     if (svalue < 0)
+//         *--pos = '-';
+// ...
+// void NStr::IntToString(string& out_str, int svalue,
+//                        TNumToStringFlags flags, int base)
+// {
+//     ...
+//     unsigned int value = static_cast<unsigned int>(svalue);
+//     if ( base == 10  ) {
+//         s_SignedBase10ToString(out_str, value, svalue, flags, base);
 // ```
-/// `n` in decimal with a comma between groups of three digits (`NStr::fWithCommas`).
-pub(crate) fn with_commas(n: u64) -> String {
-    let digits = n.to_string();
-    let mut text = String::with_capacity(digits.len() + digits.len() / 3);
-    for (at, digit) in digits.chars().enumerate() {
-        if at > 0 && (digits.len() - at).is_multiple_of(3) {
-            text.push(',');
-        }
-        text.push(digit);
+// The `int` is widened to `long` before it is negated: INT_MIN prints whole
+// (`-2,147,483,648`, probe p5_pr_N2p31 of line RG D1a-3), and every magnitude of an `int` is
+// below 2^32, where the digits are whole.
+/// `NStr::IntToString(n, NStr::fWithCommas)`: the sign, then the magnitude with commas.
+pub(crate) fn int_with_commas(n: i32) -> String {
+    let digits = print_base10_uint8_with_commas(u64::from(n.unsigned_abs()));
+    let mut text = String::with_capacity(digits.len() + 1);
+    if n < 0 {
+        text.push('-');
     }
+    text.push_str(std::str::from_utf8(&digits).expect("digits and commas"));
     text
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI BLAST+ 2.17.0, probes of line RG D1a-3 (outfmt 0 prolog and epilog, blastdbcmd
+    // `-info`) and the copy of `s_PrintBase10Uint8` in D/logs/survey_d1a3/sim/commas.c.
+    #[test]
+    fn commas_lose_digits_where_ncbis_chunks_do() {
+        assert_eq!(with_commas(0), "0");
+        assert_eq!(with_commas(999), "999");
+        assert_eq!(with_commas(1_000), "1,000");
+        assert_eq!(with_commas(186_063_409), "186,063,409");
+        assert_eq!(with_commas(u64::from(u32::MAX)), "4,294,967,295");
+        assert_eq!(with_commas(1 << 32), "4,294,967,296");
+        assert_eq!(
+            with_commas(1_000_000_000_000_000_000),
+            "1,000,000,000,000,000,000"
+        );
+        // p5_pr_L4294e15#0: the last value printed whole.
+        assert_eq!(
+            with_commas(4_294_967_295_999_999_999),
+            "4,294,967,295,999,999,999"
+        );
+        // p5_pr_L4295e15#0 and #6.
+        assert_eq!(
+            with_commas(4_294_967_296_000_000_000),
+            "494,967,296,000,000,000"
+        );
+        // p5_neg_m1#28 (blastdbcmd, `UInt8ToString` of 2^64 - 1).
+        assert_eq!(with_commas(u64::MAX), "1,846,744,073,709,551,615");
+        // p5_pr_Lmax#0.
+        assert_eq!(int8_with_commas(i64::MAX), "923,372,036,854,775,807");
+        // p5_neg_2p63#16 and p5_neg_2p63p1#16.
+        assert_eq!(int8_with_commas(i64::MIN), "-923,372,036,854,775,808");
+        assert_eq!(int8_with_commas(i64::MIN + 1), "-923,372,036,854,775,807");
+        // p5_neg_m1#16 and p5_pr_sum2#0 (two names of 5e18: the Int8 sum wraps).
+        assert_eq!(int8_with_commas(-1), "-1");
+        assert_eq!(
+            int8_with_commas(10_000_000_000_000_000_000u64 as i64),
+            "-846,744,073,709,551,616"
+        );
+        // p5_pr_sum2#0 (one name of 5e18 in the epilog).
+        assert_eq!(
+            int8_with_commas(5_000_000_000_000_000_000),
+            "500,000,000,000,000,000"
+        );
+        assert_eq!(
+            int8_with_commas(13_000_000_000_000_000_000u64 as i64),
+            "-546,744,073,709,551,616"
+        );
+        assert_eq!(
+            with_commas(12_345_678_901_234_567_890),
+            "1,245,678,901,234,567,890"
+        );
+        assert_eq!(with_commas(4_294_967_296_999), "4,294,967,296,999");
+        assert_eq!(int8_with_commas(-1_294_967_296), "-1,294,967,296");
+        assert_eq!(int8_with_commas(4_000_000_000), "4,000,000,000");
+        // p5_pr_Nm5#0, p5_pr_N2p31#0, p5_pr_N3g#0.
+        assert_eq!(int_with_commas(-5), "-5");
+        assert_eq!(int_with_commas(i32::MIN), "-2,147,483,648");
+        assert_eq!(int_with_commas(-1_294_967_296), "-1,294,967,296");
+        assert_eq!(int_with_commas(0), "0");
+        assert_eq!(int_with_commas(23), "23");
+    }
 
     /// The message, the line and the position of an error.
     fn failure(e: NcbiException) -> (String, u32, String) {

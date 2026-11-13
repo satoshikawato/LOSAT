@@ -1915,7 +1915,7 @@ pub(crate) fn final_hit_order(
     for ((q_idx, oid), hsps) in pairs {
         lists.add(q_idx, oid, hsps, filters);
     }
-    lists.finish(filters)
+    lists.finish(filters, true)
 }
 
 /// The final HSP list of a run with `-culling_limit` (`culling_limit` > 0) in NCBI's order:

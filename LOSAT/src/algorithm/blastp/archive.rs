@@ -208,6 +208,8 @@ pub(crate) struct FirstContext {
     /// The `EffectiveSearchSpace` option: that of the first query's context, `-searchsp` in an
     /// invalid one too.
     pub context0_space: i64,
+    /// That context's query length, 0 for an invalid one (`archive::RequestLength::space`).
+    pub context0_length: i64,
 }
 
 /// The Seq-aligns of one batch of a call (the elements of outfmt 8, without the Seq-annot).
@@ -385,7 +387,10 @@ pub(crate) fn for_each_batch(
             ka_blocks,
             search_space: context.search_space,
             length_adjustment: context.length_adjustment,
-            searched_space: searched.then_some(context.context0_space),
+            searched_space: searched.then_some(crate::report::archive::SearchedContext0 {
+                space: context.context0_space,
+                query_length: context.context0_length,
+            }),
         };
         each(span, &batch)?;
     }
@@ -469,6 +474,7 @@ pub(crate) fn write_blastp_failed_strategy(
         search_space: 0,
         length_adjustment: 0,
         context0_space: 0,
+        context0_length: 0,
     };
     write_blastp_strategy(strategy, &call, &no_context)
 }

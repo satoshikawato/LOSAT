@@ -1200,6 +1200,45 @@ impl<L: HitListEntry> HitList<L> {
     //    hit_list->hsplist_count = MIN(hit_list->hsplist_count, hitlist_size);
     // }
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1700-1707, 1768-1772
+    // ```c
+    //                 if (hsp_list->hspcnt == 0) {
+    //                     hsp_list = Blast_HSPListFree(hsp_list);
+    //                 }
+    //                 else {
+    //                     Blast_HSPResultsInsertHSPList(thread_data->tld[tid]->results, hsp_list,
+    //                                   hit_params->options->hitlist_size);
+    //                 }
+    //     ...
+    //     /* Re-sort the hit lists according to their best e-values, because they
+    //        could have changed. Only do this for a database search. */
+    //     if (BlastSeqSrcGetTotLen(seq_src) > 0) {
+    //         Blast_HSPResultsSortByEvalue(results);
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:591-608 (the traceback
+    // reads the preliminary lists by OID, `BlastHSPStreamBatchRead`) and
+    // c++/src/algo/blast/core/blast_traceback_mt_priv.c:173-188 (one thread's hit list is moved
+    // to the results as it is).
+    /// The hit list as NCBI's one-thread traceback leaves it where it does not sort the results
+    /// at the end (`DbStatistics::sorts_results`: a database length of 0, or of 2^63 or more):
+    /// the lists that kept HSPs, inserted in the order of their OIDs into a hit list of
+    /// `hitlist_size` (`Blast_HitListUpdate`: the order of insertion, then the heap's order once
+    /// a list comes to a full hit list). The output of every thread count is this order (Owner
+    /// 2026-10-13: NCBI's `-num_threads 1` bytes; NCBI's own order differs with threads, probe
+    /// p5_L0#41 of line RG D1a-3).
+    pub fn into_traceback_order(&mut self, hitlist_size: usize) {
+        let mut lists = std::mem::take(&mut self.hsplist_array);
+        lists.retain(|list| list.hsp_count() > 0);
+        // One list per subject of a query: the OIDs are distinct.
+        lists.sort_by_key(|list| list.oid());
+        let mut rebuilt = Self::new(hitlist_size);
+        for list in lists {
+            rebuilt.update(list);
+        }
+        *self = rebuilt;
+    }
+
     pub fn prune_by_size(&mut self, hitlist_size: usize) {
         if hitlist_size == 0 {
             self.hsplist_array.clear();
@@ -1700,6 +1739,38 @@ mod tests {
         assert!(hit_list.heapified);
         hit_list.sort_by_evalue();
         assert_eq!(list_oids(&hit_list), vec![9, 8, 7]);
+    }
+
+    // NCBI 2.17.0 blastp -comp_based_stats 0 over `LENGTH 0` (probe p5_L0#57 of line RG D1a-3):
+    // without the final sort, a full hit list keeps the heap's order of the lists inserted by OID.
+    // Here: lists come in any order; the traceback order inserts them by OID into a hit list of
+    // 3 (the fourth list heapifies it, worst first), and drops the lists without HSPs.
+    #[test]
+    fn traceback_order_inserts_by_oid_then_keeps_the_heap() {
+        let mut hit_list = BlastnHitList::new(10);
+        for (oid, score) in [(4, 40), (1, 10), (3, 30), (0, 50), (2, 20)] {
+            hit_list.update(make_list(oid, &[(10f64.powi(-score), score)]));
+        }
+        hit_list.update(BlastnHspList {
+            oid: 5,
+            query_index: 0,
+            hsps: Vec::new(),
+            best_evalue: 0.0,
+        });
+        let mut fits = hit_list.clone();
+        fits.into_traceback_order(10);
+        assert_eq!(list_oids(&fits), vec![0, 1, 2, 3, 4]);
+        hit_list.into_traceback_order(3);
+        assert!(hit_list.heapified);
+        // OIDs 0, 1, 2 come first; 3 replaces the root (OID 1, score 10), the heap of 0, 3, 2
+        // has 2 (score 20) at its root; 4 replaces it.
+        let mut reference = BlastnHitList::new(3);
+        for oid in 0..5 {
+            let score = [50, 10, 20, 30, 40][oid as usize];
+            reference.update(make_list(oid, &[(10f64.powi(-score), score)]));
+        }
+        assert_eq!(list_oids(&hit_list), list_oids(&reference));
+        assert_eq!(hit_list.hsplist_array[0].oid, 3);
     }
 
     // LOSAT_X_BNHLGROW (on unless `0`): the array doubles from 4 as lists come and never holds

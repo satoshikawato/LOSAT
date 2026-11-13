@@ -703,9 +703,15 @@ fn run_inner(
                 strategy.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
-                database.statistics_length_is_empty(),
+                &database.statistics(),
+                false,
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
+                program.upper,
+            )?;
+            crate::algorithm::common::database::check_report_sums(
+                &database.pairwise_database(),
+                crate::blastinput::app::parse_formatting_string(&args.outfmt)?.number,
                 program.upper,
             )?;
             Some(database)

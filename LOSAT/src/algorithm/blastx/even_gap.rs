@@ -1388,6 +1388,7 @@ mod cutoff_boundary_tests {
                 super::super::parameters::SubjectNumbers {
                     total: db,
                     count: 1,
+                    gumbel_total: db,
                     shortest: (length as usize).max(10),
                     average: db as i32,
                 },

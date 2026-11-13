@@ -63,8 +63,8 @@ struct State {
     last_search_space: Option<i64>,
     /// The `TaxidList` or `NegativeTaxidList` program option (`set_database_filter`).
     database_list: Option<Param>,
-    /// A list kept no sequence and `-searchsp` is not given (`set_database_filter`).
-    empty_database: bool,
+    /// How the `EffectiveSearchSpace` option of a searched batch is made (`set_database_filter`).
+    request_length: super::RequestLength,
 }
 
 struct Shared {
@@ -210,7 +210,7 @@ impl StrategyExport {
                 sink,
                 last_search_space: None,
                 database_list: None,
-                empty_database: false,
+                request_length: super::RequestLength::Search,
             }),
         })))
     }
@@ -240,10 +240,10 @@ impl StrategyExport {
     }
 
     /// `ArchiveHandle::set_database_filter` for the strategy's requests.
-    pub fn set_database_filter(&self, list: Option<Param>, empty_database: bool) {
+    pub fn set_database_filter(&self, list: Option<Param>, request_length: super::RequestLength) {
         self.with_state(|state| {
             state.database_list = list;
-            state.empty_database = empty_database;
+            state.request_length = request_length;
         });
     }
 
@@ -269,12 +269,8 @@ impl StrategyExport {
             // The file is complete after every request: the command line's exit does not run
             // destructors.
             let flushed = state.sink.flush();
-            if batch.searched_space.is_some() {
-                state.last_search_space = if state.empty_database {
-                    Some(0)
-                } else {
-                    batch.searched_space
-                };
+            if let Some(context0) = batch.searched_space {
+                state.last_search_space = Some(state.request_length.space(context0));
             }
             written?;
             flushed?;
@@ -310,6 +306,10 @@ mod tests {
         subjects: &'a [BioseqInput<'a>],
         searched_space: Option<i64>,
     ) -> BatchArchive<'a> {
+        let searched_space = searched_space.map(|space| super::super::SearchedContext0 {
+            space,
+            query_length: 142,
+        });
         BatchArchive {
             queries,
             subjects,
@@ -409,7 +409,7 @@ mod tests {
                 std::slice::from_ref(&mask),
             )
             .unwrap();
-        export.set_database_filter(None, true);
+        export.set_database_filter(None, super::super::RequestLength::Lengths(None));
         export
             .write_batch(&batch(&queries, &[], Some(77)), &[])
             .unwrap();

@@ -2986,7 +2986,8 @@ mod tests {
                 min_subject_length: (subject.len() / 3) as i32,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         let word_xdrop: Vec<_> = parameters.cutoffs.iter().map(|p| p.word_xdrop).collect();
         let word_cutoff: Vec<_> = parameters.cutoffs.iter().map(|p| p.word_cutoff).collect();
         let hit_cutoff: Vec<_> = parameters.cutoffs.iter().map(|p| p.hit_cutoff).collect();
@@ -3110,7 +3111,8 @@ mod tests {
                 min_subject_length: (subject.len() / 3) as i32,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         let word_xdrop = [parameters.cutoffs[0].word_xdrop];
         let word_cutoff = [parameters.cutoffs[0].word_cutoff];
         let gapped_cutoff = [parameters.cutoffs[0].hit_cutoff];

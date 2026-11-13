@@ -183,6 +183,8 @@ struct FirstContext {
     length_adjustment: i64,
     /// The `EffectiveSearchSpace` option: `-searchsp` in an invalid context too.
     context0_space: i64,
+    /// That context's query length, 0 for an invalid one (`archive::RequestLength::space`).
+    context0_length: i64,
 }
 
 /// The masked regions of each query as NCBI's `TMaskedQueryRegions` holds them (`Map`,
@@ -350,6 +352,7 @@ fn for_each_batch(
                 search_space: length.eff_searchsp,
                 length_adjustment: length.length_adjustment,
                 context0_space: length.eff_searchsp,
+                context0_length: data.queries[first].seq().len() as i64,
             }
         } else {
             FirstContext {
@@ -357,6 +360,7 @@ fn for_each_batch(
                 search_space: 0,
                 length_adjustment: 0,
                 context0_space: data.parameters.lengths[first].eff_searchsp,
+                context0_length: 0,
             }
         };
         let ka_blocks = match &context.karlin {
@@ -368,7 +372,10 @@ fn for_each_batch(
             ka_blocks,
             search_space: context.search_space,
             length_adjustment: context.length_adjustment,
-            searched_space: searched.then_some(context.context0_space),
+            searched_space: searched.then_some(crate::report::archive::SearchedContext0 {
+                space: context.context0_space,
+                query_length: context.context0_length,
+            }),
             ..*request
         };
         each(span, &batch)

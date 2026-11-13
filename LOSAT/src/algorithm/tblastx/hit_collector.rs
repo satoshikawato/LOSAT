@@ -178,15 +178,24 @@ impl QueryLists {
 
     /// The HSPs of every query with a hit list, in report order: per query, each list cut to
     /// `-max_hsps`, the lists sorted by e-value, each list's HSPs sorted by e-value.
-    pub(super) fn finish(self, filters: &HitFilters<'_>) -> Vec<TblastxHsp> {
+    /// The lists in report order: sorted by e-value (`sorts_results`), or in the traceback's order
+    /// where NCBI does not sort them (`HitList::into_traceback_order`: a database length of 0 or
+    /// of 2^63 or more; the preliminary list's heap order is not the traceback's).
+    pub(super) fn finish(self, filters: &HitFilters<'_>, sorts_results: bool) -> Vec<TblastxHsp> {
         let mut ordered = Vec::new();
+        let hitlist_size = self.hitlist_size;
         for mut hit_list in self.lists.into_iter().flatten() {
+            if !sorts_results {
+                hit_list.into_traceback_order(hitlist_size);
+            }
             if filters.max_hsps > 0 {
                 for list in &mut hit_list.hsplist_array {
                     trim_by_max_hsps(&mut list.hsps, filters.max_hsps);
                 }
             }
-            hit_list.sort_by_evalue();
+            if sorts_results {
+                hit_list.sort_by_evalue();
+            }
             for mut list in hit_list.hsplist_array {
                 HitListEntry::sort_by_evalue(&mut list);
                 ordered.extend(list.hsps);
@@ -218,6 +227,9 @@ pub(crate) struct HitCollector {
     query_lengths: Vec<usize>,
     /// `-evalue`: an HSP above it is removed before the lists.
     evalue_threshold: f64,
+    /// Whether NCBI's traceback sorts the results at its end (`BlastSeqSrcGetTotLen > 0`:
+    /// `SubjectSetNumbers::link_total`).
+    sorts_results: bool,
     /// The OID the lists take next, and the subjects past it that have come (`push`).
     next: usize,
     waiting: BTreeMap<usize, Vec<TblastxHsp>>,
@@ -225,7 +237,7 @@ pub(crate) struct HitCollector {
 
 impl HitCollector {
     /// The collector of a batch of `queries` searched with `args`.
-    pub(crate) fn new(args: &TblastxArgs, queries: &[FastaRecord]) -> Self {
+    pub(crate) fn new(args: &TblastxArgs, queries: &[FastaRecord], sorts_results: bool) -> Self {
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2960-2962,2978
         // ```c
         //     	if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
@@ -270,6 +282,15 @@ impl HitCollector {
             query_lengths,
             args.evalue,
         )
+        .sorting_results(sorts_results)
+    }
+
+    /// The collector with `sorts_results` (`HitCollector::sorts_results`).
+    pub(super) fn sorting_results(self, sorts_results: bool) -> Self {
+        Self {
+            sorts_results,
+            ..self
+        }
     }
 
     /// `new` with the options read: `-max_target_seqs`, `-culling_limit` (0: none), `-max_hsps`
@@ -296,6 +317,7 @@ impl HitCollector {
             query_cov_hsp_perc,
             query_lengths,
             evalue_threshold,
+            sorts_results: true,
             next: 0,
             waiting: BTreeMap::new(),
         }
@@ -377,7 +399,7 @@ impl HitCollector {
             query_lengths: &self.query_lengths,
         };
         match self.lists {
-            Lists::Collector(lists) => lists.finish(&filters),
+            Lists::Collector(lists) => lists.finish(&filters, self.sorts_results),
             Lists::Culling(hits) => report::culled_hit_order(
                 hits,
                 self.hitlist_size,

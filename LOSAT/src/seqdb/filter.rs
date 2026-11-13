@@ -3379,7 +3379,7 @@ mod tests {
                 other => panic!("{other}"),
             };
             let mut db = SeqDb::open(name.to_str().unwrap(), SeqType::Protein).unwrap();
-            let whole = (db.num_seqs(), db.total_length());
+            let whole = (db.num_seqs() as i32, db.total_length());
             let result = db.restrict_taxids(&list);
             if rest.first() == Some(&"Error:") {
                 let Err(SeqDbError::NotFound(text)) = result else {
@@ -3548,7 +3548,7 @@ mod tests {
         assert_eq!(db.num_seqs(), 1);
         assert_eq!(kept_ids(&db), [vec!["DAA10001.1".to_string()]]);
         assert!(db.total_length() > 0 && db.total_length() < whole.total_length());
-        assert_eq!(db.printed_num_seqs(), whole.num_seqs());
+        assert_eq!(db.printed_num_seqs(), whole.num_seqs() as i32);
 
         // Versionless accessions, a pdb chain, a general id as db:tag, an unknown id, a gi.
         let mut db = ids_db("prot_v5", SeqType::Protein);
@@ -3679,7 +3679,7 @@ mod tests {
                 SeqType::Protein => u64::from(db.protein_length(0).unwrap()),
                 SeqType::Nucleotide => db.nucleotide_length(0).unwrap() as u64,
             };
-            let whole = (db.total_length(), db.num_seqs());
+            let whole = (db.total_length() as i64, db.num_seqs() as i32);
             assert!(!db.filtered_empty());
             assert_eq!(db.statistics_numbers(), whole, "{name}");
             let mut warnings = Vec::new();
@@ -3690,7 +3690,7 @@ mod tests {
             .unwrap();
             assert!(db.filtered_empty(), "{name}");
             assert_eq!((db.num_seqs(), db.total_length()), (0, 0), "{name}");
-            assert_eq!(db.statistics_numbers(), (first, 1), "{name}");
+            assert_eq!(db.statistics_numbers(), (first as i64, 1), "{name}");
             assert_eq!(db.printed_num_seqs(), whole.1, "{name}");
             assert!(db.next_block(0, 1 << 20).is_none(), "{name}");
         }

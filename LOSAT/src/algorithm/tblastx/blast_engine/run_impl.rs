@@ -1440,11 +1440,20 @@ fn open_search_database(
                 args.strategy.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
-                database.statistics_length_is_empty(),
+                &database.statistics(),
+                true,
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
                 "TBLASTX",
             )?;
+            let shown = database.pairwise_database();
+            for format in &outputs.formats {
+                crate::algorithm::common::database::check_report_sums(
+                    &shown,
+                    crate::blastinput::app::parse_formatting_string(format.outfmt)?.number,
+                    "TBLASTX",
+                )?;
+            }
             Some(database)
         }
         None => None,
@@ -1951,6 +1960,7 @@ fn search(
                     total: stores.iter().map(|store| store.len() as i64).sum(),
                     count: records.len() as i64,
                     link_total: stores.iter().map(|store| store.len() as i64).sum(),
+                    average: None,
                     dbsize: args.dbsize,
                     searchsp: args.searchsp,
                 },
@@ -4657,7 +4667,11 @@ fn search_query_batch<S: TbxScore>(
         std::sync::Mutex::new(if use_channel {
             None
         } else {
-            Some(HitCollector::new(args, query_records))
+            Some(HitCollector::new(
+                args,
+                query_records,
+                numbers.link_total > 0,
+            ))
         });
 
     // The sizes of the diagonal table and the offset arrays, the batch's unit path (PAIRPAR,
@@ -4793,7 +4807,12 @@ fn search_query_batch<S: TbxScore>(
     let writer = if use_channel {
         let rx = rx_opt.take().expect("rx must be available for writer");
         // The writer thread (`subject_loop::spawn_writer`).
-        Some(subject_loop::spawn_writer(rx, args, query_records))
+        Some(subject_loop::spawn_writer(
+            rx,
+            args,
+            query_records,
+            numbers.link_total > 0,
+        ))
     } else {
         None
     };

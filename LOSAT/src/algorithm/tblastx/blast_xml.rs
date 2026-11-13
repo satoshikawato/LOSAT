@@ -134,7 +134,7 @@ pub(crate) fn query_stats(stats: &TblastxQueryStats, numbers: &SubjectSetNumbers
     let Some(karlin) = &stats.karlin else {
         return XmlStats::NONE;
     };
-    let lengths = numbers.context_lengths(stats.aa_len as i64, karlin);
+    let lengths = numbers.context_lengths(stats.aa_len as i64, karlin).ok();
     debug_assert_eq!(
         lengths.map(|lengths| lengths.eff_searchsp),
         Some(stats.eff_searchsp),
@@ -193,8 +193,8 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     let (db_name, db_num, db_len) = match &run.database {
         Some(database) => (
             database.name,
-            i32::try_from(database.pairwise.num_sequences)?,
-            i64::try_from(database.pairwise.total_letters)?,
+            database.pairwise.num_sequences,
+            database.pairwise.total_letters,
         ),
         None => ("", 0, 0),
     };
@@ -486,6 +486,7 @@ mod tests {
             total: 3_000,
             count: 3,
             link_total: 3_000,
+            average: None,
             dbsize: None,
             searchsp: None,
         };
@@ -506,6 +507,7 @@ mod tests {
                 total: 3_000,
                 count,
                 link_total: 3_000,
+                average: None,
                 dbsize,
                 searchsp: None,
             };
@@ -521,6 +523,7 @@ mod tests {
                 eff_searchsp: lengths.eff_searchsp,
                 aa_len: 130,
                 context0_search_space: 0,
+                context0_aa_len: 0,
                 seg_masks: Vec::new(),
             };
             let xml = query_stats(&stats, &numbers);

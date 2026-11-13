@@ -197,19 +197,25 @@ fn apply_list(
 }
 
 /// Tells the BLAST archive of the run (`archive`, `None` without one) and its search strategy
-/// export (`strategy`) what the database's list makes of their requests
-/// (`ArchiveHandle::set_database_filter`). `empty_length` is whether the
-/// total length of the statistics is not positive (`SeqDb::statistics_length_is_empty`: a list
-/// that kept no sequence, without `STATS_TOTLEN`). `dbsize` is whether `-dbsize` is given: the
+/// export (`strategy`) what the database's list and statistics make of their requests
+/// (`ArchiveHandle::set_database_filter`): `statistics` are the database's (`SeqDb::statistics`),
+/// `translated` whether its subjects are translated (TBLASTN, TBLASTX). The requests'
+/// `EffectiveSearchSpace` is the search's own value where the statistics' length before the
+/// fallback to OID 0 (`DbStatistics::gumbel_db_length`) is positive or `-searchsp` is given, else
+/// `BLAST_CalcEffLengths` with that length (`archive::RequestLength`: 0 for a list that kept no
+/// sequence without `STATS_TOTLEN`; the context's query length for an alias file's `LENGTH` of
+/// 2^63 or more). `dbsize` is whether `-dbsize` is given: the
 /// `EffectiveSearchSpace` option then counts the length adjustment with no sequence, while the
 /// searches read the length of OID 0 as one sequence (probes E14 and E17 of line DI-8): LOSAT
 /// refuses it (the strategy's requests after the first carry that option too).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn note_archive_database_filter(
     archive: Option<&crate::report::archive::ArchiveHandle>,
     strategy: Option<&crate::report::archive::strategy::StrategyExport>,
     filter: &crate::blastinput::db_filter::DbFilterArgs,
     list_taxids: &[i32],
-    empty_length: bool,
+    statistics: &crate::seqdb::DbStatistics,
+    translated: bool,
     searchsp: bool,
     dbsize: bool,
     program: &str,
@@ -217,7 +223,8 @@ pub(crate) fn note_archive_database_filter(
     if archive.is_none() && strategy.is_none() {
         return Ok(());
     }
-    if empty_length && dbsize {
+    let statistics_length = statistics.gumbel_db_length;
+    if statistics_length <= 0 && dbsize {
         let option = if archive.is_some() {
             "-outfmt 11"
         } else {
@@ -228,12 +235,22 @@ pub(crate) fn note_archive_database_filter(
         );
     }
     let list = filter.archive_parameter(list_taxids);
-    let empty_database = empty_length && !searchsp;
+    let request_length = if statistics_length > 0 || searchsp {
+        crate::report::archive::RequestLength::Search
+    } else {
+        crate::report::archive::RequestLength::Lengths(crate::stats::setup::eff_lengths_database(
+            statistics_length,
+            statistics.request_count,
+            0,
+            false,
+            translated,
+        ))
+    };
     if let Some(strategy) = strategy {
-        strategy.set_database_filter(list.clone(), empty_database);
+        strategy.set_database_filter(list.clone(), request_length);
     }
     if let Some(handle) = archive {
-        handle.set_database_filter(list, empty_database);
+        handle.set_database_filter(list, request_length);
     }
     Ok(())
 }
@@ -605,11 +622,89 @@ pub(crate) fn pairwise_database(db: &SeqDb) -> PairwiseDatabase {
                     record.title.clone()
                 },
                 date: record.date.clone(),
-                num_sequences: u64::from(record.num_seqs),
-                total_letters: record.total_length,
+                num_sequences: record.num_seqs,
+                // `SDbInfo::total_length` is an `Int8`: a `LENGTH` of 2^63 or more is negative.
+                total_letters: record.total_length as i64,
             })
             .collect(),
     )
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:513-522
+// ```c++
+//         Int8 tot_num_seqs = static_cast<Int8>(dbinfo->number_seqs);
+//         Int8 tot_length = dbinfo->total_length;
+//
+//         for (size_t i = 1; i < dbinfo_list.size(); i++) {
+//             db_titles += "; " + dbinfo_list[i].definition;
+//             tot_num_seqs += static_cast<Int8>(dbinfo_list[i].number_seqs);
+//             tot_length += dbinfo_list[i].total_length;
+//         }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:116-119 (`int
+// m_NumSequences`, `Int8 m_NumBases`) and c++/src/algo/blast/format/data4xml2format.cpp:166-169
+// (`Int8 m_NumSequences`, `Int8 m_NumBases`)
+// ```c++
+// 			m_NumSequences += i->number_seqs;
+// 			m_NumBases += i->total_length;
+// ```
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:1002-1010
+// ```c++
+// void COStreamBuffer::PutInt8(Int8 v)
+//     THROWS1((CIOException, bad_alloc))
+// {
+//     const size_t BSIZE = (sizeof(v)*CHAR_BIT) / 3 + 2;
+//     char b[BSIZE];
+//     Int8 n = v;
+//     if ( n < 0 ) {
+//         n = -n;
+//     }
+// ```
+// The sums are signed overflow where they pass their type (NCBI 2.17.0 prints them wrapped,
+// probes p5_pr_sum2 and p5b_sum_int of line RG D1a-3), and the serial XML writer's `-n` of
+// INT64_MIN is too (it writes `-0`, probes p5_neg_2p63 and p5b_neg_fmt): LOSAT refuses these
+// (DECISIONS D1a3-2 of line RG: Q2 = A, rule 3; Q1 waits for the Owner, refused until then).
+/// LOSAT's refusals of the database counts that the report of `outfmt` (NCBI's format number)
+/// would print where NCBI's arithmetic overflows, for the `-db` list's databases `database`:
+/// a sum of the total lengths past NCBI's `Int8` (the pairwise prolog of outfmt 0 to 4, BLAST
+/// XML 5, the XML2 and JSON documents 13 to 16), a sum of the numbers of sequences past NCBI's
+/// `int` (BLAST XML), and a summed length of exactly -2^63 in the serial XML of BLAST XML and
+/// XML2 (5, 14, 16).
+pub(crate) fn check_report_sums(
+    database: &PairwiseDatabase,
+    outfmt: i32,
+    program: &str,
+) -> Result<()> {
+    let sums_lengths = matches!(outfmt, 0..=5 | 13..=16);
+    let length_sum = database
+        .databases
+        .iter()
+        .try_fold(0i64, |sum, info| sum.checked_add(info.total_letters));
+    if sums_lengths && length_sum.is_none() {
+        return Err(refusal(
+            "the total lengths of the databases of the -db list (their alias files' LENGTH) sum to more than NCBI BLAST+'s 64-bit report count holds",
+            program,
+        ));
+    }
+    if outfmt == 5
+        && database
+            .databases
+            .iter()
+            .try_fold(0i32, |sum, info| sum.checked_add(info.num_sequences))
+            .is_none()
+    {
+        return Err(refusal(
+            "the numbers of sequences of the databases of the -db list (their alias files' NSEQ) sum to more than BLAST XML's 32-bit count holds",
+            program,
+        ));
+    }
+    if matches!(outfmt, 5 | 14 | 16) && length_sum == Some(i64::MIN) {
+        return Err(refusal(
+            "a total length of 9223372036854775808 letters (an alias file's LENGTH), which NCBI BLAST+'s XML writer prints as -0 (a signed overflow), in BLAST XML or XML2",
+            program,
+        ));
+    }
+    Ok(())
 }
 
 /// The stored title of a database sequence, as the reports read it (`stored_title`).
@@ -2552,6 +2647,58 @@ pub(crate) fn x_check_protein_stores(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Probes p5_pr_sum2, p5b_sum_int and p5_neg_2p63 of line RG D1a-3 (NCBI 2.17.0 prints the
+    // wrapped sums and `-0`): the report counts LOSAT refuses, by format.
+    #[test]
+    fn report_sums_past_ncbis_types_are_refused_for_the_formats_that_sum_them() {
+        let info = |num_sequences: i32, total_letters: i64| DatabaseInfo {
+            definition: b"t".to_vec(),
+            date: String::new(),
+            num_sequences,
+            total_letters,
+        };
+        let two = |a: DatabaseInfo, b: DatabaseInfo| PairwiseDatabase::new(vec![a, b]);
+        let lengths = two(
+            info(23, 5_000_000_000_000_000_000),
+            info(23, 5_000_000_000_000_000_000),
+        );
+        for outfmt in [0, 1, 4, 5, 13, 14, 15, 16] {
+            assert!(
+                check_report_sums(&lengths, outfmt, "BLASTP").is_err(),
+                "{outfmt}"
+            );
+        }
+        for outfmt in [6, 7, 8, 10, 11, 17] {
+            assert!(
+                check_report_sums(&lengths, outfmt, "BLASTP").is_ok(),
+                "{outfmt}"
+            );
+        }
+        let counts = two(info(2_000_000_000, 3263), info(2_000_000_000, 3263));
+        assert!(check_report_sums(&counts, 5, "BLASTP").is_err());
+        for outfmt in [0, 15, 16] {
+            assert!(
+                check_report_sums(&counts, outfmt, "BLASTP").is_ok(),
+                "{outfmt}"
+            );
+        }
+        // Two lengths of 2^64 - 1 (-1 as NCBI's Int8) sum to -2 without an overflow.
+        assert!(check_report_sums(&two(info(23, -1), info(23, -1)), 0, "BLASTP").is_ok());
+        let int64_min = PairwiseDatabase::new(vec![info(23, i64::MIN)]);
+        for outfmt in [5, 14, 16] {
+            assert!(
+                check_report_sums(&int64_min, outfmt, "BLASTP").is_err(),
+                "{outfmt}"
+            );
+        }
+        for outfmt in [0, 13, 15, 6] {
+            assert!(
+                check_report_sums(&int64_min, outfmt, "BLASTP").is_ok(),
+                "{outfmt}"
+            );
+        }
+    }
     use crate::utils::matrix::BLASTAA_SIZE;
 
     // Line DBID pfbatch: each batch's prefetch counts its own Seq-aligns against a positive

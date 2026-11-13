@@ -50,6 +50,7 @@ use options::OptionInputs;
 
 pub use writer::{
     write_archive, write_error_archive, AlignSource, ArchiveOut, BatchArchive, KaBlock,
+    SearchedContext0,
 };
 
 /// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes.
@@ -222,6 +223,62 @@ impl ArchiveRequest {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173 (quoted
+// at `ArchiveHandle::set_database_filter`) and c++/src/algo/blast/api/effsearchspace_calc.cpp:111-121
+// ```c++
+//     BlastEffectiveLengthsParametersNew(opts_memento->m_EffLenOpts,
+//                                        db_num_bases, db_num_seqs,
+//                                        &eff_len_params);
+//
+//     Int2 status =
+//         BLAST_CalcEffLengths(m_Program, opts_memento->m_ScoringOpts,
+//                              eff_len_params, sbp, m_QueryInfo, NULL);
+// ```
+// The request's `EffectiveSearchSpace` is `BLAST_CalcEffLengths` with the statistics' length and
+// count before the setup's fallback to OID 0 (`BLAST_GapAlignSetUp`, blast_setup.c:929-937): the
+// search's own value where the length is positive; nothing (0) for a length of 0 (blast_setup.c:
+// 729-732); for a negative one (an alias file's `LENGTH` of 2^63 or more), no length adjustment
+// (`BLAST_ComputeLengthAdjustment`'s `c < 0`, whatever the Karlin block) and an effective database
+// length of 1, so the context's query length (NCBI 2.17.0: blastp 142, blastn 577 with
+// `LENGTH 9223372036854775809`, probe run2 of line RG D1a-3, impl1).
+/// How the `EffectiveSearchSpace` option of a searched batch's request is made.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RequestLength {
+    /// The search's own value of the batch's context 0: a positive statistics length, or
+    /// `-searchsp`.
+    #[default]
+    Search,
+    /// `BLAST_CalcEffLengths` of context 0 with the database numbers that
+    /// `stats::setup::eff_lengths_database` gives for the statistics' length before the fallback
+    /// (`None`: it returns at once, the option is 0), a length that is not positive
+    /// (`note_archive_database_filter` refuses `-dbsize` there).
+    Lengths(Option<(i64, i32)>),
+}
+
+impl RequestLength {
+    /// The `EffectiveSearchSpace` option of a searched batch whose context 0 is `context0`.
+    pub fn space(self, context0: writer::SearchedContext0) -> i64 {
+        match self {
+            Self::Search => context0.space,
+            Self::Lengths(None) => 0,
+            Self::Lengths(Some(_)) if context0.query_length <= 0 => 0,
+            Self::Lengths(Some((db_length, num_seqs))) => {
+                debug_assert!(db_length <= 0, "a request length that is not positive");
+                // The Karlin block is not read for a database length that is not positive.
+                crate::stats::setup::calc_eff_lengths(
+                    context0.query_length,
+                    db_length,
+                    num_seqs,
+                    &crate::stats::KarlinParams::default(),
+                    0,
+                    "",
+                )
+                .map_or(0, |lengths| lengths.eff_searchsp)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct RunState {
     log: DiagLog,
@@ -229,8 +286,8 @@ struct RunState {
     last_search_space: Option<i64>,
     /// The `TaxidList` or `NegativeTaxidList` program option (`set_database_filter`).
     database_list: Option<options::Param>,
-    /// A list kept no sequence and `-searchsp` is not given (`set_database_filter`).
-    empty_database: bool,
+    /// How the `EffectiveSearchSpace` option of a searched batch is made (`set_database_filter`).
+    request_length: RequestLength,
     /// Whether the diagnostics that are written now are not the archive's (the warnings that
     /// another format of the same search writes, which a run of the archive alone does not).
     muted: bool,
@@ -402,14 +459,10 @@ impl ArchiveHandle {
     /// The `EffectiveSearchSpace` option of the next archive: the batch's own value when
     /// the batch was searched (kept for the batches after it), else the one of the last
     /// searched batch, which is absent before one.
-    pub fn search_space_option(&self, searched: Option<i64>) -> Option<i64> {
+    pub fn search_space_option(&self, searched: Option<writer::SearchedContext0>) -> Option<i64> {
         self.with_state(|state| {
-            if searched.is_some() {
-                state.last_search_space = if state.empty_database {
-                    Some(0)
-                } else {
-                    searched
-                };
+            if let Some(context0) = searched {
+                state.last_search_space = Some(state.request_length.space(context0));
             }
             state.last_search_space
         })
@@ -428,15 +481,13 @@ impl ArchiveHandle {
     //                                          num_seqs, total_length,
     //                                          full_data->m_ScoreBlk->GetPointer());
     // ```
-    /// What the database's list makes of the request: its `program-options` parameter
-    /// (`DbFilterArgs::archive_parameter`), and `empty_database` when a list kept no sequence
-    /// and `-searchsp` is not given. The `EffectiveSearchSpace` option is then 0
-    /// (`BLAST_CalcEffLengths` returns at once for a database length of 0, blast_setup.c:729-732),
-    /// though the statistics of the results read the length of OID 0 (`SeqDb::statistics_numbers`).
-    pub fn set_database_filter(&self, list: Option<options::Param>, empty_database: bool) {
+    /// What the database's list and statistics make of the request: its `program-options`
+    /// parameter (`DbFilterArgs::archive_parameter`), and how its `EffectiveSearchSpace` option
+    /// is made (`RequestLength`, `common::database::note_archive_database_filter`).
+    pub fn set_database_filter(&self, list: Option<options::Param>, request_length: RequestLength) {
         self.with_state(|state| {
             state.database_list = list;
-            state.empty_database = empty_database;
+            state.request_length = request_length;
         });
     }
 
@@ -747,10 +798,30 @@ mod tests {
             },
         );
         assert_eq!(handle.search_space_option(None), None);
-        assert_eq!(handle.search_space_option(Some(8738)), Some(8738));
+        let searched = |space| {
+            Some(writer::SearchedContext0 {
+                space,
+                query_length: 142,
+            })
+        };
+        assert_eq!(handle.search_space_option(searched(8738)), Some(8738));
         assert_eq!(handle.search_space_option(None), Some(8738));
-        assert_eq!(handle.search_space_option(Some(0)), Some(0));
+        assert_eq!(handle.search_space_option(searched(0)), Some(0));
         assert_eq!(handle.search_space_option(None), Some(0));
+        // A statistics length of 0, and a negative one (probe run2 of line RG D1a-3: the query's
+        // length, 142).
+        handle.set_database_filter(None, RequestLength::Lengths(None));
+        assert_eq!(handle.search_space_option(searched(8738)), Some(0));
+        handle.set_database_filter(None, RequestLength::Lengths(Some((i64::MIN + 1, 23))));
+        assert_eq!(handle.search_space_option(searched(15_876)), Some(142));
+        handle.set_database_filter(None, RequestLength::Lengths(Some((-1, -5))));
+        assert_eq!(
+            handle.search_space_option(Some(writer::SearchedContext0 {
+                space: 0,
+                query_length: 0,
+            })),
+            Some(0)
+        );
     }
 
     #[test]

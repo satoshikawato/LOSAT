@@ -40,7 +40,7 @@ use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
 use crate::seqdb::{BlockRange, SeqDb, SeqType, SequenceBlock};
 use crate::stats::search_space::SearchSpace;
-use crate::stats::{compute_length_adjustment_ncbi, KarlinParams};
+use crate::stats::KarlinParams;
 use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE};
 
 use super::{
@@ -194,9 +194,14 @@ impl BlastpDatabase {
         self.db.min_length()
     }
 
-    /// The total length the statistics read (`SeqDb::statistics_numbers`).
+    /// The numbers the statistics read, with NCBI's types (`SeqDb::statistics`).
+    pub(super) fn statistics(&self) -> crate::seqdb::DbStatistics {
+        self.db.statistics()
+    }
+
+    /// The total length the statistics' setup reads (`DbStatistics::setup_total`).
     pub(super) fn total_letters(&self) -> u64 {
-        self.db.statistics_numbers().0
+        self.statistics().setup_total as u64
     }
 
     /// The length of the included sequences (`SeqDb::included_length`), which the schedules read.
@@ -213,20 +218,15 @@ impl BlastpDatabase {
         self.db.filtered_empty()
     }
 
-    /// Whether the total length of the statistics is not positive (`SeqDb::
-    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
-    pub(super) fn statistics_length_is_empty(&self) -> bool {
-        self.db.statistics_length_is_empty()
-    }
-
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(super) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
     }
 
-    /// The number of sequences the statistics read (`SeqDb::statistics_numbers`).
-    pub(super) fn statistics_num_sequences(&self) -> u32 {
-        self.db.statistics_numbers().1
+    /// The number of sequences the statistics' setup reads (`DbStatistics::setup_count`), NCBI's
+    /// `Int4`.
+    pub(super) fn statistics_num_sequences(&self) -> i32 {
+        self.statistics().setup_count
     }
 
     /// LOSAT's refusal of statistics of 0 sequences for a search of `program` without the
@@ -312,42 +312,32 @@ impl BlastpDatabase {
 // ```
 /// The length adjustment and the effective search space of a query of `query_len`
 /// letters against a database of `db_length` letters (the real total, or `-dbsize`) and
-/// `db_num_seqs` sequences, in NCBI's `Int8`: the search space as the reports print it,
-/// and as the statistics read it (a `double`). A product that does not fit `Int8`, where
-/// NCBI's arithmetic overflows, is rejected (the refusal names `program`).
+/// `db_num_seqs` sequences (NCBI's `Int4`), in NCBI's `Int8` (`stats::setup::calc_eff_lengths`):
+/// the search space as the reports print it, and as the statistics read it (a `double`). A
+/// product that does not fit `Int8`, where NCBI's arithmetic overflows, is rejected (the refusal
+/// names `program`).
 pub(super) fn blastp_database_search_space(
     query_len: usize,
     db_length: i64,
-    db_num_seqs: i64,
+    db_num_seqs: i32,
     params: &KarlinParams,
     program: &str,
 ) -> Result<(SearchSpace, i64)> {
-    let overflow = || {
-        format!(
-            "a database length of {db_length} letters with a query of {query_len} letters overflows NCBI BLAST+'s 64-bit effective search space, which is not supported by LOSAT's {program}"
-        )
-    };
-    let query_length = i64::try_from(query_len).ok().with_context(overflow)?;
-    let length_adjustment =
-        compute_length_adjustment_ncbi(query_length, db_length, db_num_seqs, params)
-            .length_adjustment;
-    let mut effective_db_length = db_num_seqs
-        .checked_mul(length_adjustment)
-        .and_then(|adjusted| db_length.checked_sub(adjusted))
-        .with_context(overflow)?;
-    if effective_db_length <= 0 {
-        effective_db_length = 1;
-    }
-    let effective_query_length = query_length - length_adjustment;
-    let effective_search_space = effective_db_length
-        .checked_mul(effective_query_length)
-        .with_context(overflow)?;
+    let query_length = i64::try_from(query_len).unwrap_or(i64::MAX);
+    let lengths = crate::stats::setup::calc_eff_lengths(
+        query_length,
+        db_length,
+        db_num_seqs,
+        params,
+        0,
+        program,
+    )?;
     Ok((
         SearchSpace {
-            effective_space: effective_search_space as f64,
-            length_adjustment,
+            effective_space: lengths.eff_searchsp as f64,
+            length_adjustment: i64::from(lengths.length_adjustment),
         },
-        effective_search_space,
+        lengths.eff_searchsp,
     ))
 }
 

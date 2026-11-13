@@ -93,7 +93,9 @@ pub struct SubjectMetadata {
     // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
     // ```
     pub db_len_total: usize,
-    pub db_num_seqs: usize,
+    /// The statistics' number of sequences, NCBI's `Int4` (`DbStatistics::setup_count`: negative
+    /// for an alias file's negative `NSEQ`, or one of 2^31 or more).
+    pub db_num_seqs: i32,
 }
 
 /// Sequence data and metadata (`R`: the query records, `InputRecord`)
@@ -107,7 +109,9 @@ pub struct SequenceData<'a, R = FastaRecord> {
     // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
     // ```
     pub db_len_total: usize,
-    pub db_num_seqs: usize,
+    /// The statistics' number of sequences, NCBI's `Int4` (`DbStatistics::setup_count`: negative
+    /// for an alias file's negative `NSEQ`, or one of 2^31 or more).
+    pub db_num_seqs: i32,
 }
 
 /// The option values of a task, which the command line options replace (NCBI
@@ -873,7 +877,7 @@ pub fn subject_metadata_from_records<R: InputRecord>(
 ) -> SubjectMetadata {
     SubjectMetadata {
         db_len_total: (0..records.len()).map(length).sum(),
-        db_num_seqs: records.len(),
+        db_num_seqs: i32::try_from(records.len()).unwrap_or(i32::MAX),
     }
 }
 

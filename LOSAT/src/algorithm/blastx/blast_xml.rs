@@ -951,8 +951,8 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         ShownSubjects::Fasta { .. } => (String::new(), 0, 0),
         ShownSubjects::Database { name, pairwise, .. } => (
             name.to_string(),
-            i32::try_from(pairwise.num_sequences)?,
-            i64::try_from(pairwise.total_letters)?,
+            pairwise.num_sequences,
+            pairwise.total_letters,
         ),
     };
     check_database_name(&db_name)?;

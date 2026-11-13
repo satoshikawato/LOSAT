@@ -110,6 +110,7 @@ pub(super) fn spawn_writer(
     rx: std::sync::mpsc::Receiver<(usize, Vec<TblastxHsp>)>,
     args: &TblastxArgs,
     query_records: &[FastaRecord],
+    sorts_results: bool,
 ) -> std::thread::JoinHandle<Vec<TblastxHsp>> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
     // ```c
@@ -122,7 +123,7 @@ pub(super) fn spawn_writer(
     // The writer thread is NCBI's collector (tblastx/hit_collector.rs): it takes each
     // subject's message and returns the batch's hit lists in report order after the join,
     // for the one place that writes every output.
-    let mut collector = HitCollector::new(args, query_records);
+    let mut collector = HitCollector::new(args, query_records, sorts_results);
     std::thread::spawn(move || -> Vec<TblastxHsp> {
         while let Ok((s_idx, hits)) = rx.recv() {
             collector.push(s_idx, hits);

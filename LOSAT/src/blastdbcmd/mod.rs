@@ -28,7 +28,7 @@ use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{Cin, Ostream};
 use crate::ncbi_app::{Diag, Tool};
-use crate::ncbi_str::with_commas;
+use crate::ncbi_str::{int_with_commas, with_commas};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType, TaxidList};
 
 /// The name in LOSAT's refusals.
@@ -393,10 +393,11 @@ fn write_info_head(out: &mut Vec<u8>, db: &SeqDb) {
         out,
         "\t{} sequences; {} total {letters}\n\nDate: {}\tLongest sequence: {} {letters}\n\n\
          BLASTDB Version: {}\n",
-        with_commas(u64::from(db.printed_num_seqs())),
+        int_with_commas(db.printed_num_seqs()),
         with_commas(db.printed_total_length()),
         db.date(),
-        with_commas(u64::from(db.max_length())),
+        // `GetMaxLength` is NCBI's `int` of the index files' longest length.
+        int_with_commas(db.max_length() as i32),
         if db.is_version5() { "5" } else { "4" },
     );
 }

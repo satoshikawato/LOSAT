@@ -202,6 +202,8 @@ pub(crate) struct TblastxQueryStats {
     /// not valid: the `EffectiveSearchSpace` option of a BLAST archive (outfmt 11) takes the
     /// first context of the batch's first query, not its first valid one.
     pub context0_search_space: i64,
+    /// That context's length in residues, 0 when it is not valid (`archive::RequestLength::space`).
+    pub context0_aa_len: i64,
     /// The SEG intervals (residues of the frame, end exclusive) of each translated frame.
     pub seg_masks: Vec<(i8, Vec<(usize, usize)>)>,
 }

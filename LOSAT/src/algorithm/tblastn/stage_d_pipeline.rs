@@ -94,13 +94,19 @@ pub(super) struct LocalStageDProfile<'a> {
     pub pssm: Option<&'a crate::algorithm::pssm_search::PsiSearch>,
 }
 
-/// The numbers of a database (`-db`) as NCBI's search reads them from its sequence source:
-/// the total length (`BlastSeqSrcGetTotLen`, an `Int8`) and the number of sequences
-/// (`BlastSeqSrcGetNumSeqs`).
+/// The numbers of a database (`-db`) as NCBI's setup reads them from its sequence source
+/// (`SeqDb::statistics`): the total length and the number of sequences of the setup
+/// (`DbStatistics::setup_total`, `setup_count`: NCBI's `Int4`, negative for a negative `NSEQ`)
+/// and the Gumbel block's length in nucleotides (`gumbel_db_length`: the total before the
+/// fallback to OID 0, so 0 or negative for an alias file's `LENGTH` of 0 or of 2^63 or more).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct DatabaseNumbers {
     pub total_length: u64,
-    pub num_seqs: u64,
+    pub num_seqs: i32,
+    pub gumbel_db_length: i64,
+    /// `BlastSeqSrcGetTotLen` (`DbStatistics::engine_db_length`): only a positive one sorts the
+    /// results at the end of the traceback (`SubjectSetNumbers::sorts_results`).
+    pub engine_db_length: i64,
     /// `CSeqDB::GetMinLength` in nucleotides (`SeqDb::min_length`): the alias files'
     /// `MIN_SEQ_LENGTH` or `BLAST_SEQSRC_MINLENGTH` without a list, the scanned shortest length
     /// with one (line DI-8).
@@ -171,11 +177,19 @@ impl SubjectSetNumbers {
         }
     }
 
-    /// The number of sequences.
-    pub(super) fn num_seqs(&self, subjects: &SubjectLetters<'_>) -> usize {
+    /// Whether NCBI's traceback sorts the results by e-value at its end
+    /// (`DbStatistics::sorts_results`): a database's `BlastSeqSrcGetTotLen` is positive; a FASTA
+    /// set that finds hits has letters.
+    pub(super) fn sorts_results(&self) -> bool {
+        self.database
+            .is_none_or(|database| database.engine_db_length > 0)
+    }
+
+    /// The number of sequences, NCBI's `Int4`.
+    pub(super) fn num_seqs(&self, subjects: &SubjectLetters<'_>) -> i32 {
         match self.database {
-            Some(database) => database.num_seqs as usize,
-            None => subjects.count(),
+            Some(database) => database.num_seqs,
+            None => i32::try_from(subjects.count()).unwrap_or(i32::MAX),
         }
     }
 
@@ -188,11 +202,14 @@ impl SubjectSetNumbers {
         }
     }
 
-    /// The Gumbel block's database length in residues: a `-dbsize` other than 0, else the
-    /// total `total_nt`, divided by 3 (blast_setup.c:916-922; C's `Int8` division).
+    /// The Gumbel block's database length in residues: a `-dbsize` other than 0, else a
+    /// database's length before the fallback to OID 0 (`DatabaseNumbers::gumbel_db_length`) or
+    /// the total `total_nt` of a FASTA set, divided by 3 (blast_setup.c:916-922; C's `Int8`
+    /// division, toward 0).
     pub(super) fn gumbel_db_length(&self, total_nt: u64) -> i64 {
-        match self.dbsize {
-            Some(dbsize) if dbsize != 0 => dbsize / 3,
+        match (self.dbsize, self.database) {
+            (Some(dbsize), _) if dbsize != 0 => dbsize / 3,
+            (_, Some(database)) => database.gumbel_db_length / 3,
             _ => (total_nt / 3) as i64,
         }
     }
@@ -1073,6 +1090,13 @@ impl SetupEngineError {
     /// `-subject` of three empty records, or of `A`, `` and ``, with `-searchsp` or `OLD_FSC`
     /// (env parity probe f_probe of 2026-11-12).
     pub(crate) const SUBJECT_LENGTH_INVALID: Self = Self("The average subject length is too short");
+
+    /// `BlastHitSavingParametersNew`'s status 1 (`stats::setup::hit_saving_parameters_fail`):
+    /// sum statistics with a setup subject length that is not positive, the average of a negative
+    /// `NSEQ` without the Gumbel block (NCBI 2.17.0 `-searchsp` over `NSEQ 4294967295`, probe
+    /// run1 of line RG D1a-3).
+    pub(crate) const HIT_SAVING_PARAMETERS: Self =
+        Self(crate::stats::setup::HIT_SAVING_PARAMETERS_ERROR);
 }
 
 impl std::fmt::Display for SetupEngineError {
@@ -1203,10 +1227,11 @@ fn run_local_search_with_pool(
     // NCBI's engine error of the first searched batch (`tblastn_app.rs`).
     // Without a Gumbel block it is the average, in nucleotides (blast_setup.c:975). The block
     // itself decides, as `sbp->gbp` does in NCBI, here and in the average-length error below.
+    // `None`: the setup fails (`stats::setup::setup_subject_length`, below).
     let min_subject_length = if gumbel.is_none() {
-        total_nt / num_subjects.max(1)
+        crate::stats::setup::setup_subject_length(total_nt as i64, num_subjects, None)
     } else {
-        profile.subject_set.min_subject_length(&subjects)
+        Some(profile.subject_set.min_subject_length(&subjects) as i32)
     };
     let options_searchsp = profile.subject_set.searchsp;
     let QuerySetSetup {
@@ -1225,7 +1250,7 @@ fn run_local_search_with_pool(
             gumbel: gumbel.as_ref(),
             total_nt: stats_nt,
             num_subjects,
-            min_subject_length,
+            min_subject_length: min_subject_length.unwrap_or(0),
             compo_adjust_mode,
             do_sum_stats,
         },
@@ -1250,8 +1275,18 @@ fn run_local_search_with_pool(
     // below one letter, in nucleotides, fails the setup of a batch that NCBI searches (one with
     // a valid context): `tblastn_app::search` fails it with NCBI's engine error after the
     // reports of the batches before (`SetupEngineError::SUBJECT_LENGTH_INVALID`).
-    if gumbel.is_none() && valid_contexts.iter().any(|&valid| valid) && min_subject_length == 0 {
-        return Err(SetupEngineError::SUBJECT_LENGTH_INVALID.into());
+    if valid_contexts.iter().any(|&valid| valid) {
+        match min_subject_length {
+            None => return Err(SetupEngineError::SUBJECT_LENGTH_INVALID.into()),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:759-760
+            // (quoted at `stats::setup::hit_saving_parameters_fail`); TBLASTN is gapped.
+            Some(length)
+                if crate::stats::setup::hit_saving_parameters_fail(do_sum_stats, true, length) =>
+            {
+                return Err(SetupEngineError::HIT_SAVING_PARAMETERS.into())
+            }
+            Some(_) => {}
+        }
     }
     let batch_setup = LocalBatchSetup {
         parameters: parameters.clone(),
@@ -1366,7 +1401,7 @@ fn run_local_search_with_pool(
                 gumbel: gumbel.as_ref(),
                 total_nt: stats_nt,
                 num_subjects,
-                min_subject_length,
+                min_subject_length: min_subject_length.unwrap_or(0),
                 compo_adjust_mode,
                 do_sum_stats,
             },
@@ -1917,7 +1952,7 @@ fn run_local_search_with_pool(
             hitlist.update(list)?;
         }
         hitlist.reverse_order();
-        if total_nt > 0 {
+        if total_nt > 0 && profile.subject_set.sorts_results() {
             hitlist.sort_by_evalue_for_positive_totlen();
         }
         results.push(hitlist);
@@ -2479,8 +2514,10 @@ struct QuerySetInputs<'a> {
     /// The database length of the effective lengths in nucleotides
     /// (`SubjectSetNumbers::eff_length_nt`).
     total_nt: usize,
-    num_subjects: usize,
-    min_subject_length: usize,
+    num_subjects: i32,
+    /// The setup's subject length of the hit-saving parameters (`setup_subject_length`), 0
+    /// where the setup fails (`SetupEngineError::SUBJECT_LENGTH_INVALID`).
+    min_subject_length: i32,
     compo_adjust_mode: BlastCompoAdjustMode,
     do_sum_stats: bool,
 }
@@ -2717,7 +2754,7 @@ fn query_set_setup(
         eff_searchsp_override,
     };
     let call = LocalParameterCall::Initial {
-        min_subject_length: i32::try_from(inputs.min_subject_length)?,
+        min_subject_length: inputs.min_subject_length,
         composition_based_stats: inputs.compo_adjust_mode.ncbi_value(),
     };
     let (parameters, gapped_by_context) = match inputs.profile.pssm {
@@ -2730,7 +2767,7 @@ fn query_set_setup(
                 &ungapped_by_context,
                 options,
                 call,
-            ),
+            )?,
             gapped_by_context,
         ),
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:89-127 (quoted at
@@ -2781,7 +2818,7 @@ fn query_set_setup(
                 },
                 options,
                 call,
-            );
+            )?;
             (parameters, gapped_psi)
         }
     };
@@ -3639,8 +3676,12 @@ fn finish_local_mode0_no_sum_stats(
     // NCBI c++/src/algo/blast/core/blast_traceback.c:1763-1776:
     // if (BlastSeqSrcGetTotLen(seq_src) > 0)
     //     Blast_HSPResultsSortByEvalue(results);
-    for result in &mut results {
-        result.sort_by_evalue_for_positive_totlen();
+    // Otherwise the lists keep the order of their insertion above, by OID, then the heap's
+    // (`KappaResultHitList::update`): NCBI's one-thread traceback.
+    if profile.subject_set.sorts_results() {
+        for result in &mut results {
+            result.sort_by_evalue_for_positive_totlen();
+        }
     }
     Ok(results)
 }

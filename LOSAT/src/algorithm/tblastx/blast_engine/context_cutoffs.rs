@@ -19,7 +19,6 @@ use super::{
     gap_trigger_raw_score, ErrorAfterBatchReports, KarlinParams, QueryContext, QueryFrame,
     SubjectSetNumbers, Subjects, TblastxQueryStats, BLAST_GAP_DECAY_RATE, GAP_TRIGGER_BIT_SCORE,
 };
-use crate::algorithm::tblastx::subjects::SearchSpaceOverflow;
 use anyhow::{Context, Result};
 
 /// What `context_cutoffs` reads.
@@ -152,7 +151,9 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
             1,
         )
     };
-    if total_length / num_seqs <= 0 {
+    // `stats::setup::setup_subject_length`: `(Uint4)(Int4)(total / num_seqs) == 0` (a negative
+    // `NSEQ` passes; one of 2^31 fails).
+    if crate::stats::setup::setup_subject_length(total_length, num_seqs as i32, None).is_none() {
         return Err(ErrorAfterBatchReports(
             crate::cli::NativeError {
                 exit: 3,
@@ -175,7 +176,20 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
     // The word cutoff uses the average subject nucleotide length. With E = 1e-300 (step 3) its
     // score exceeds gap_trigger whatever the lengths (above 2,000 against about 40), so step 4
     // never takes it and no output depends on this average; it is computed as NCBI computes it.
-    let subject_len_nucl = db_length_nucl / db_num_seqs;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1372-1374
+    // ```c
+    //     if ((status = BlastInitialWordParametersNew(program_number,
+    //                       word_options, hit_params, lookup_wrap, sbp, query_info,
+    //                       BlastSeqSrcGetAvgSeqLen(seq_src), &word_params)) != 0)
+    // ```
+    // The word cutoffs read the sequence source's average (`Uint4 subj_length`,
+    // blast_parameters.c:283): a database's `GetTotalLength / MAX(1, GetNumSeqs)` as NCBI's
+    // `Int4` (`SubjectSetNumbers::average`, without the `STATS_*` keys and with a negative
+    // `NSEQ` read as 1), a FASTA set's total over its records.
+    let subject_len_nucl = match numbers.average {
+        Some(average) => i64::from(average as u32),
+        None => db_length_nucl / db_num_seqs,
+    };
     // NCBI: cutoff scores are stored per query context (no subject-frame dimension).
     // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:320-324
     // ```c
@@ -231,16 +245,10 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
         // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-847
         // =======================================================================
         // `-dbsize` replaces the database length here only (`SubjectSetNumbers`).
-        let eff_db_length_nucl = numbers.effective_length();
-        let eff_lengths = numbers
-            .context_lengths(
-                query_len_aa,
-                ctx_params, // tblastx uses per-context ungapped params (kbp_gap is NULL)
-            )
-            .ok_or(SearchSpaceOverflow {
-                db_length: eff_db_length_nucl,
-                query_length: ctx.aa_len,
-            })?;
+        let eff_lengths = numbers.context_lengths(
+            query_len_aa,
+            ctx_params, // tblastx uses per-context ungapped params (kbp_gap is NULL)
+        )?;
         let eff_searchsp = eff_lengths.eff_searchsp;
         length_adj_per_context.push(eff_lengths.length_adjustment);
         eff_searchsp_per_context.push(eff_searchsp);
@@ -348,6 +356,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
             eff_searchsp: 0,
             aa_len: 0,
             context0_search_space: 0,
+            context0_aa_len: 0,
             seg_masks: frames
                 .iter()
                 .map(|frame| (frame.frame, frame.seg_masks.clone()))
@@ -359,6 +368,9 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
         // Context 0 is the query's frame +1 (invalid contexts hold search space 0).
         if ctx.frame == 1 {
             stats.context0_search_space = eff_searchsp_per_context[ctx_idx];
+            if ctx.is_valid {
+                stats.context0_aa_len = ctx.aa_len as i64;
+            }
         }
         if ctx.is_valid && stats.karlin.is_none() {
             stats.karlin = Some(ctx.karlin_params);

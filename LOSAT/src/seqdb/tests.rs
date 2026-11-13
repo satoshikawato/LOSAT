@@ -707,12 +707,12 @@ fn alias_nseq_and_length_are_ncbis_walks() {
         );
         assert_eq!(
             (db.printed_num_seqs(), db.printed_total_length()),
-            (counts.0 as u32, counts.1),
+            (counts.0, counts.1),
             "{name}: the reports' counts"
         );
         assert_eq!(
             db.statistics_numbers(),
-            (counts.1, counts.0 as u32),
+            (counts.1 as i64, counts.0),
             "{name}"
         );
         assert_eq!(
@@ -794,20 +794,29 @@ fn alias_count_keys_follow_ncbis_walks() {
     // A repeated key takes the later value (seqdbalias.cpp:446-449).
     let db = open("DBLIST prot_v4\nNSEQ 10\nNSEQ 99\n").unwrap();
     assert_eq!(db.ncbi_num_seqs(), 99);
-    // Values NCBI reads in ways LOSAT does not reproduce yet (D1a-2) are refused.
-    for text in [
-        "DBLIST prot_v4\nNSEQ -1\n",
-        "DBLIST prot_v4\nNSEQ 2147483648\n",
-        "DBLIST prot_v4\nLENGTH 0\n",
-        "DBLIST prot_v4\nLENGTH 9223372036854775808\n",
-        "DBLIST prot_v4\nLENGTH 1000000000000000000\n",
-    ] {
-        let error = open(text).expect_err(text);
-        assert!(
-            matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("LOSAT does not read such alias files yet")),
-            "{text}: {error}"
-        );
-    }
+    // NCBI's `int` and `Int8` through the statistics (line RG D1a-3): a negative NSEQ, one of
+    // 2^31 (INT_MIN), a LENGTH of 2^63 or more (negative: the setup reads OID 0's length and one
+    // sequence, the Gumbel block the negative total, and the results are not sorted).
+    let db = open("DBLIST prot_v4\nNSEQ -1\n").unwrap();
+    assert_eq!(db.statistics_numbers(), (801, -1));
+    assert_eq!((db.printed_num_seqs(), db.average_length()), (-1, 801));
+    let db = open("DBLIST prot_v4\nNSEQ 2147483648\n").unwrap();
+    assert_eq!(db.statistics_numbers(), (801, i32::MIN));
+    let db = open("DBLIST prot_v4\nLENGTH 9223372036854775809\n").unwrap();
+    let statistics = db.statistics();
+    assert_eq!(statistics.setup_count, 1);
+    assert_eq!(statistics.gumbel_db_length, i64::MIN + 1);
+    assert_eq!(statistics.engine_db_length, i64::MIN + 1);
+    assert!(!statistics.per_subject() && !statistics.sorts_results());
+    assert_eq!(db.printed_total_length(), 9_223_372_036_854_775_809);
+    let db = open("DBLIST prot_v4\nLENGTH 4294967296000000000\n").unwrap();
+    assert!(db.statistics().sorts_results());
+    // NCBI's statistics of each subject (`LENGTH 0` over sequences) are refused until ported.
+    let error = open("DBLIST prot_v4\nLENGTH 0\n").expect_err("LENGTH 0");
+    assert!(
+        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("LOSAT does not read such alias files yet")),
+        "{error}"
+    );
     // FIRST_OID 2^31 is NCBI's INT_MAX (D1a-2 part 2): no OID listed, the range [10, 10), the
     // walks' counts.
     let db = open("DBLIST prot_v4\nFIRST_OID 2147483648\n").unwrap();

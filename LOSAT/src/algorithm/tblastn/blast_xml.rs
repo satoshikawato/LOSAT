@@ -104,7 +104,7 @@ pub(super) struct PreparedXml {
     gap_open: i32,
     gap_extend: i32,
     db_name: String,
-    db_num: i32,
+    db_num: i64,
     db_len: i64,
     /// By query, the texts of the queries whose reports the documents write: every query, or
     /// all but the last of a run that stops when the documents hold that report back
@@ -313,8 +313,8 @@ pub(super) fn prepare(
         ShownSubjects::Fasta { .. } => (String::new(), 0, 0),
         ShownSubjects::Database { name, pairwise, .. } => (
             name.to_string(),
-            i32::try_from(pairwise.num_sequences)?,
-            i64::try_from(pairwise.total_letters)?,
+            pairwise.num_sequences,
+            pairwise.total_letters,
         ),
     };
     let xml2_run = Xml2Run {

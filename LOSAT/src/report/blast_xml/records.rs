@@ -29,9 +29,12 @@ pub struct XmlRun<'a> {
     pub reward_penalty: Option<(i32, i32)>,
     /// `Parameters_filter` (`filter::filter_string`).
     pub filter: &'a [u8],
-    /// `Statistics_db-num` and `Statistics_db-len`: the database's sequences and letters; 0 and
-    /// 0 for `-subject`.
-    pub db_num: i32,
+    /// `Statistics_db-num` and `Statistics_db-len`: the database's sequences and letters (the
+    /// sums over the names of the `-db` list, `PairwiseDatabase`); 0 and 0 for `-subject`. The
+    /// number is the `Int8` sum that XML2 and JSON write (data4xml2format.hpp:215-217); BLAST
+    /// XML sums NCBI's `int` (data4xmlformat.hpp:276), equal where that sum does not overflow,
+    /// which LOSAT refuses (`common::database::check_report_sums`).
+    pub db_num: i64,
     pub db_len: i64,
     /// The positives table of the recount; `None` for BLASTN (a nucleotide search shows `|`).
     pub positives: Option<&'a FormattingMatrix>,

@@ -5428,11 +5428,20 @@ fn open_search_database(
                 args.strategy.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
-                database.statistics_length_is_empty(),
+                &database.statistics(),
+                false,
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
                 args.app.name(),
             )?;
+            let shown = database.pairwise_database();
+            for format in &outputs.formats {
+                crate::algorithm::common::database::check_report_sums(
+                    &shown,
+                    crate::blastinput::app::parse_formatting_string(format.outfmt)?.number,
+                    args.app.name(),
+                )?;
+            }
             Some(database)
         }
         None => None,
@@ -7381,16 +7390,23 @@ fn x_query_block_plan(
         }
     }
     let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
-    // The effective search space is at most the database length times the query length (the
-    // length adjustment is not negative), so no query's product can pass `Int8` when the
-    // longest one's does not.
+    // The effective search space is at most `(db + |n| q) q` for a database of `db` letters and
+    // `n` sequences (NCBI's `Int4`) and a query of `q` letters: the length adjustment `a` is
+    // between 0 and `q`, so the effective database length `db - n a` is at most `db` for `n >= 0`
+    // and `db + |n| q` for a negative `n` (an alias file's `NSEQ`), and the effective query length
+    // at most `q`. No query's product can pass `Int8` when that bound of the longest one does not.
     if subject_source.database().is_some() || args.dbsize > 0 {
-        let db_length = match subject_source.database() {
-            Some(database) if args.dbsize <= 0 => u128::from(database.total_letters()),
-            _ => args.dbsize.max(0) as u128,
+        let (db_length, num_seqs) = match subject_source.database() {
+            Some(database) if args.dbsize <= 0 => (
+                i128::from(database.total_letters()),
+                database.statistics_num_sequences(),
+            ),
+            Some(database) => (i128::from(args.dbsize), database.statistics_num_sequences()),
+            None => (i128::from(args.dbsize.max(0)), 1),
         };
-        let longest = lengths.iter().copied().max().unwrap_or(0) as u128;
-        if db_length * longest > i64::MAX as u128 {
+        let longest = lengths.iter().copied().max().unwrap_or(0) as i128;
+        let negative_seqs = i128::from(num_seqs.min(0).unsigned_abs());
+        if (db_length + negative_seqs * longest) * longest > i64::MAX as i128 {
             return None;
         }
     }
@@ -9350,11 +9366,20 @@ fn run_resolved_in_pool(
     //               dbl/3 : dbl;
     //       }
     // ```
-    // `-dbsize` (any value but 0) replaces the total length in the Gumbel block.
+    // `-dbsize` (any value but 0) replaces the total length in the Gumbel block. A database's
+    // length is the setup's total before its fallback to the length of OID 0
+    // (`DbStatistics::gumbel_db_length`): 0 for a `LENGTH` of 0, negative for one of 2^63 or
+    // more, where every Spouge e-value is negative (written 0; line RG D1a-3).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772 (quoted at
+    // `DbStatistics::sorts_results`): whether the traceback sorts the results at its end. A
+    // FASTA subject set that finds hits has letters.
+    let sorts_results = database.is_none_or(|database| database.statistics().sorts_results());
     let gumbel_db_length = if args.dbsize != 0 {
         args.dbsize
     } else {
-        total_db_len as i64
+        database.map_or(total_db_len as i64, |database| {
+            database.statistics().gumbel_db_length
+        })
     };
     let gapped_gumbel = if !args.old_fsc {
         Some(
@@ -9389,11 +9414,12 @@ fn run_resolved_in_pool(
     // A subject set of no letters at all (every record empty) is not a database search to
     // NCBI: it counts one sequence, whatever the number of records (visible only with
     // `-dbsize`, the effective search space of the XML statistics and the outfmt 0 footer).
-    let num_subjects = match database {
+    // NCBI's `Int4`: negative for an alias file's negative `NSEQ` or one of 2^31 or more.
+    let num_subjects: i32 = match database {
         None if total_db_len == 0 => 1,
-        None => subjects.len().max(1),
+        None => i32::try_from(subjects.len().max(1)).unwrap_or(i32::MAX),
         Some(database) => rps_hooks::dbsize_volume_num_seqs(&args, database)
-            .unwrap_or(database.statistics_num_sequences() as usize),
+            .map_or_else(|| database.statistics_num_sequences(), |count| count as i32),
     };
     // Without the Gumbel block (`-searchsp`, `OLD_FSC`) NCBI's shortest subject length is the
     // statistics' average (blast_setup.c:975 below), which divides by their number of sequences.
@@ -9441,9 +9467,19 @@ fn run_resolved_in_pool(
     // `-subject` of the letters `M`, ``, `` with `-searchsp` or `OLD_FSC`: exit 3). After a first
     // batch of invalid queries only, which NCBI does not search, the error follows the reports of
     // the batches before the first searched one (`unsearched_batches_then_engine_error`).
-    if args.old_fsc
-        && contexts.iter().any(|ctx| ctx.is_valid)
-        && total_db_len / num_subjects.max(1) == 0
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:128-136
+    // (quoted at `hit_cutoff_scores` below): the Gumbel block's shortest length.
+    let cutoff_subject_length = match database {
+        None => blastp_preliminary_cutoff_subject_length(subjects),
+        Some(database) => database.cutoff_subject_length(),
+    };
+    if contexts.iter().any(|ctx| ctx.is_valid)
+        && crate::stats::setup::setup_subject_length(
+            total_db_len as i64,
+            num_subjects,
+            (!args.old_fsc).then_some((cutoff_subject_length, false)),
+        )
+        .is_none()
     {
         return Err(preliminary_search_error(
             &args,
@@ -9496,13 +9532,17 @@ fn run_resolved_in_pool(
                 return Ok(SearchSpace {
                     effective_space: options_searchsp as f64,
                     length_adjustment: if ctx.aa_len > 0 {
-                        crate::stats::length_adjustment::compute_length_adjustment_ncbi(
-                            ctx.aa_len as i64,
-                            eff_db_length,
-                            num_subjects as i64,
-                            &gapped_params,
+                        i64::from(
+                            crate::stats::setup::calc_eff_lengths(
+                                ctx.aa_len as i64,
+                                eff_db_length,
+                                num_subjects,
+                                &gapped_params,
+                                options_searchsp,
+                                args.app.name(),
+                            )?
+                            .length_adjustment,
                         )
-                        .length_adjustment
                     } else {
                         0
                     },
@@ -9519,7 +9559,7 @@ fn run_resolved_in_pool(
                 let (space, exact) = database::blastp_database_search_space(
                     ctx.aa_len,
                     eff_db_length,
-                    num_subjects as i64,
+                    num_subjects,
                     &gapped_params,
                     args.app.name(),
                 )?;
@@ -9530,7 +9570,7 @@ fn run_resolved_in_pool(
             Ok(SearchSpace::for_database_search(
                 ctx.aa_len,
                 total_db_len,
-                num_subjects,
+                num_subjects as usize,
                 &gapped_params,
                 true,
             ))
@@ -9582,10 +9622,6 @@ fn run_resolved_in_pool(
     // reader), whatever its sequences are, unless a list made NCBI scan its totals (then
     // the scanned shortest length, line DI-8); a FASTA subject set answers its real minimum,
     // raised to 10.
-    let cutoff_subject_length = match database {
-        None => blastp_preliminary_cutoff_subject_length(subjects),
-        Some(database) => database.cutoff_subject_length(),
-    };
     let hit_cutoff_scores: Vec<i32> = contexts
         .iter()
         .enumerate()
@@ -11535,6 +11571,7 @@ fn run_resolved_in_pool(
             search_spaces: &search_spaces,
             expect_value: args.evalue,
             hitlist_size: args.traceback_hitlist_size(),
+            sorts_results,
         };
         Some(ordinary.run(
             &mut preliminary_hit_lists,
@@ -12678,7 +12715,13 @@ fn run_resolved_in_pool(
             // (rpsblast over several volumes: the merged lists keep `s_MergeAlignSet`'s order
             // and the formatter cuts them, `psiblast_hits_found` below.)
             if !rps_multi_volume {
-                hit_list.sort_by_evalue();
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772
+                // (quoted at `DbStatistics::sorts_results`): not for a database length of 0 or of
+                // 2^63 or more, whose lists keep the traceback's order (by OID with
+                // `-comp_based_stats 0`, the composition heap's otherwise).
+                if sorts_results {
+                    hit_list.sort_by_evalue();
+                }
                 hit_list.prune_by_size(args.traceback_hitlist_size());
             }
         }
@@ -13685,6 +13728,7 @@ fn run_resolved_in_pool(
                 search_space: 0,
                 length_adjustment: 0,
                 context0_space: args.searchsp.unwrap_or(0),
+                context0_length: 0,
             };
         }
         let search_space = exact_search_spaces[first]
@@ -13697,6 +13741,7 @@ fn run_resolved_in_pool(
             search_space,
             length_adjustment: search_spaces[first].length_adjustment,
             context0_space: search_space,
+            context0_length: contexts[first].aa_len as i64,
         }
     };
     // The queries of the call's batches, as the archive and the search strategy take them.
@@ -14052,16 +14097,12 @@ fn run_resolved_in_pool(
                         gap_extend: args.scoring.gap_extend,
                         reward_penalty: None,
                         filter: &filter,
-                        db_num: if database.is_some() {
-                            shown_num_sequences as i32
-                        } else {
-                            0
-                        },
-                        db_len: if database.is_some() {
-                            shown_total_letters as i64
-                        } else {
-                            0
-                        },
+                        db_num: shown_database
+                            .as_ref()
+                            .map_or(0, |shown| shown.num_sequences),
+                        db_len: shown_database
+                            .as_ref()
+                            .map_or(0, |shown| shown.total_letters),
                         positives: Some(&positives),
                         mask_char: b'X',
                     },

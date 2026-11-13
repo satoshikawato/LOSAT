@@ -401,7 +401,8 @@ pub(super) fn batch_lookup_tables(inputs: &LookupInputs<'_>) -> (LookupTables, u
 pub(super) struct CutoffInputs<'a> {
     pub(super) subjects: SubjectSource<'a>,
     pub(super) db_len_total: usize,
-    pub(super) db_num_seqs: usize,
+    /// NCBI's `Int4` (`SubjectMetadata::db_num_seqs`).
+    pub(super) db_num_seqs: i32,
     pub(super) query_contexts: &'a [QueryContext],
     pub(super) context_valid: &'a [bool],
     pub(super) query_eff_searchsp: &'a [i64],

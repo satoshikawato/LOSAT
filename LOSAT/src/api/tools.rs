@@ -91,7 +91,7 @@ fn outcome(status: i32, diagnostics: Vec<u8>) -> Result<(), Error> {
 /// standard output goes to `output` (`-out` is a file, as there), what it writes to standard
 /// error to `diagnostics`. A failure is an error whose message is that text (an argv that NCBI's
 /// argument reader refuses too). `-conffile` and `-dryrun`, which the command line's NCBI
-/// application start reads, are refused.
+/// application start reads, and `-xmlhelp`, whose XML only the command line writes, are refused.
 pub fn run_blastdbcmd(
     argv: &[&str],
     input: &mut dyn Read,
@@ -113,7 +113,8 @@ pub fn run_blastdbcmd(
 /// (`-out` is a file, as there), what it writes to standard error to `diagnostics`. A failure
 /// is an error whose message is that text (an argv that NCBI's argument reader refuses too: its
 /// usage and report, as the command line prints them). `-conffile` and `-dryrun`, which the
-/// command line's NCBI application start reads, are refused.
+/// command line's NCBI application start reads, and `-xmlhelp`, whose XML only the command line
+/// writes, are refused.
 pub fn run_dustmasker(
     argv: &[&str],
     input: &mut dyn Read,
@@ -134,7 +135,7 @@ pub fn run_dustmasker(
 /// input (`-in -`, and without `-in`), what it writes to standard output goes to `output` (`-out`
 /// is a file, as there), what it writes to standard error to `diagnostics`, and a failure is an
 /// error whose message is that text. `-conffile` and `-dryrun`, which the command line's NCBI
-/// application start reads, are refused.
+/// application start reads, and `-xmlhelp`, whose XML only the command line writes, are refused.
 pub fn run_segmasker(
     argv: &[&str],
     input: &mut dyn Read,

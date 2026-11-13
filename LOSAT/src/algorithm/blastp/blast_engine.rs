@@ -2488,7 +2488,7 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // LOSAT's limits, checked where NCBI starts the search: the options that NCBI runs and
     // LOSAT's blastp engine does not implement.
     if args.ungapped {
-        bail!("-ungapped (an ungapped search) is not supported by LOSAT's {program}");
+        bail!("{}", crate::cli::run_refusal(program, "ungapped"));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
     // ```c
@@ -2522,7 +2522,7 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // const string kArgUseSWTraceback(\"use_sw_tback\");
     // ```
     if args.use_sw_tback {
-        bail!("-use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's {program}");
+        bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1389-1392
     // ```c

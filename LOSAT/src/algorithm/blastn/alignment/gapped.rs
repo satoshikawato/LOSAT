@@ -1113,8 +1113,8 @@ fn blast_align_packed_nucl_with_scratch(
     // ```
     // Dispatch point of the SIMD X-drop (score only, packed subject,
     // s_BlastAlignPackedNucl). `blast_align_packed_nucl_scalar` below ports this loop. The
-    // SIMD kernel runs the same recurrence on 16 (8-bit) or 8 (16-bit) cells of a row at a
-    // time. Its argument (head of `utils/xdrop_simd.rs`) is that only cells below the
+    // SIMD kernel runs the same recurrence on 16 (8-bit), 8 (16-bit) or 4 (32-bit) cells of a
+    // row at a time. Its argument (head of `utils/xdrop_simd.rs`) is that only cells below the
     // X-drop cutoff can differ from the scalar loop, and those cells are never read. A call
     // that does not fit the lanes returns None and runs the scalar path. The xstats counters
     // only count work.
@@ -3181,6 +3181,32 @@ mod tests {
         let (large, scratch) = run(1_100_000_000);
         assert_eq!(large, saturated);
         assert_eq!(scratch.dp_mem.len(), 1000);
+        // No NCBI counterpart: the vector kernels run this X-drop as the clamp's `R`
+        // (`xdrop_simd::x_drop_for_lanes`, `LOSAT_X_DP32`) and leave the scalar port's count as it
+        // was; the scalar port itself, which answers without them (other targets,
+        // `LOSAT_X_DP32=0`) and for the calls they decline, keeps NCBI's count with only the
+        // sequences' cells (below).
+        if crate::utils::xdrop_simd::x_kernels_run() && crate::utils::xdrop_simd::x_dp32() {
+            assert_eq!(scratch.dp_mem_alloc, 1000);
+        }
+        let run_scalar = |x_drop: i32| {
+            let mut scratch = super::GapAlignScratch::new();
+            let out = super::extend_gapped_one_direction_with_traceback_scalar(
+                &q,
+                &s,
+                2,
+                -3,
+                &matrix,
+                5,
+                2,
+                x_drop,
+                &mut scratch,
+            );
+            (out, scratch)
+        };
+        let (large, scratch) = run_scalar(1_100_000_000);
+        assert_eq!(large, saturated);
+        assert_eq!(scratch.dp_mem.len(), 1000);
         assert!(scratch.dp_mem_alloc > 500_000_000);
         assert!(scratch.trace_rows.iter().all(|row| row.len() <= n + 2));
         assert!(scratch
@@ -3219,5 +3245,131 @@ mod tests {
         let subject = blastna("ACGTACGT");
         let start = blast_get_start_for_gapped_alignment_nucl(&query, &subject, 0, 10, 0, 8, 0, 0);
         assert_eq!(start, (4, 4));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2986-3003
+    // ```c
+    //         score_left = s_BlastAlignPackedNucl(query, subject, q_length, s_length,
+    //                               &(gap_align->query_start), &(gap_align->subject_start),
+    //                               gap_align, score_params, TRUE, x_dropoff);
+    // ...
+    //         score_right = s_BlastAlignPackedNucl(query+q_length-1,
+    //            subject+(s_length+3)/COMPRESSION_RATIO - 1,
+    //            query_blk->length-q_length,
+    // ```
+    // Both sides of `LOSAT_X_DP32` in one process: with X-drops past the 16-bit lanes (50,000, 1e6
+    // and 2^31 - 300) and scores large enough for the 32-bit lanes on short sequences (reward
+    // 1,000, penalty -1,500, gap costs 2,500 / 1,000), the dispatched extensions (the packed
+    // score-only `s_BlastAlignPackedNucl`, left and right of the seed as
+    // `extend_gapped_heuristic_with_scratch` calls them, and the traceback `ALIGN_EX` forward:
+    // the 32-bit lanes) give what the scalar ports give (`blast_align_packed_nucl_scalar`,
+    // `extend_gapped_one_direction_with_traceback_scalar`: what `LOSAT_X_DP32=0` runs).
+    #[test]
+    fn wide_lanes_give_the_scalar_ports_results() {
+        let matrix = super::build_blastna_matrix(1000, -1500);
+        let (gap_open, gap_extend) = (2500, 1000);
+        let mut state = 0x9E37_79B9u32;
+        let mut next = move |n: u32| {
+            state = state.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            (state >> 8) % n
+        };
+        let runs = crate::utils::xdrop_simd::X32_RUNS.with(|n| n.get());
+        for case in 0..12 {
+            let len = 80 + next(400) as usize;
+            let q: Vec<u8> = (0..len).map(|_| next(4) as u8).collect();
+            let mut s = Vec::with_capacity(len + 8);
+            for (i, &c) in q.iter().enumerate() {
+                match next(50) {
+                    0 => s.extend([c, next(4) as u8]),
+                    1 if i > 0 => {}
+                    2..=5 => s.push(next(4) as u8),
+                    _ => s.push(c),
+                }
+            }
+            // NCBI2NA: four bases a byte, the first in the high bits
+            let mut packed = vec![0u8; s.len() / 4 + 1];
+            for (k, &b) in s.iter().enumerate() {
+                packed[k / 4] |= b << (2 * (3 - k % 4));
+            }
+            let (qs, ss) = (len / 2, (len / 2).min(s.len() - 8));
+            let adjustment = super::COMPRESSION_RATIO - (ss % super::COMPRESSION_RATIO);
+            let (q_length, s_length) = (qs + adjustment, ss + adjustment);
+            for x_drop in [50_000, 1_000_000, i32::MAX - 300] {
+                let packed_calls = [
+                    (q_length, s_length, 0, true, 0),
+                    (
+                        q.len() - q_length,
+                        s.len() - s_length,
+                        q_length as isize - 1,
+                        false,
+                        ((s_length + 3) / super::COMPRESSION_RATIO) as isize - 1,
+                    ),
+                ];
+                for (query_len, subject_len, query_offset, reverse, byte_offset) in packed_calls {
+                    let (mut a, mut b) =
+                        (super::GapAlignScratch::new(), super::GapAlignScratch::new());
+                    let got = super::blast_align_packed_nucl_with_scratch(
+                        &q,
+                        &packed,
+                        query_len,
+                        subject_len,
+                        query_offset,
+                        &matrix,
+                        gap_open,
+                        gap_extend,
+                        x_drop,
+                        reverse,
+                        byte_offset,
+                        &mut a,
+                    );
+                    let want = super::blast_align_packed_nucl_scalar(
+                        &q,
+                        &packed,
+                        query_len,
+                        subject_len,
+                        query_offset,
+                        &matrix,
+                        gap_open,
+                        gap_extend,
+                        x_drop,
+                        reverse,
+                        byte_offset,
+                        &mut b,
+                    );
+                    assert_eq!(
+                        got, want,
+                        "case {case} x {x_drop} reverse {reverse}: score only"
+                    );
+                }
+                let (mut a, mut b) = (super::GapAlignScratch::new(), super::GapAlignScratch::new());
+                let got = super::extend_gapped_one_direction_with_traceback_with_scratch(
+                    &q[qs..],
+                    &s[ss..],
+                    1000,
+                    -1500,
+                    &matrix,
+                    gap_open,
+                    gap_extend,
+                    x_drop,
+                    &mut a,
+                );
+                let want = super::extend_gapped_one_direction_with_traceback_scalar(
+                    &q[qs..],
+                    &s[ss..],
+                    1000,
+                    -1500,
+                    &matrix,
+                    gap_open,
+                    gap_extend,
+                    x_drop,
+                    &mut b,
+                );
+                assert_eq!(got, want, "case {case} x {x_drop}: traceback");
+            }
+        }
+        if crate::utils::xdrop_simd::x_kernels_run() && crate::utils::xdrop_simd::x_dp32() {
+            let runs = crate::utils::xdrop_simd::X32_RUNS.with(|n| n.get()) - runs;
+            assert!(runs > 80, "the 32-bit lanes ran {runs} times");
+        }
     }
 }

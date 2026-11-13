@@ -60,6 +60,8 @@ function fixtures(): Map<string, Fixture[]> {
     const program = row['program']!;
     const contract = row['contract'] ?? '';
     if (!PROGRAMS.has(program) || (contract !== '' && contract !== 'approved_db_gencode_deviation')) continue;
+    // LOSAT Web reads FASTA inputs only: a PSSM query (-in_pssm, the manifest's `pssm-gz:` cells) is the CLI's.
+    if (row['query']!.startsWith('pssm-gz:')) continue;
     if ((row['extra_args'] ?? '').includes("'") || (row['extra_args'] ?? '').includes('"')) continue;
     const words = [...(row['task'] ? ['-task', row['task']] : []), ...(row['extra_args'] ?? '').split(/\s+/).filter((w) => w !== '')];
     if (words.includes('-outfmt') || words.includes('-out')) continue;

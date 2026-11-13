@@ -63,6 +63,8 @@ fn db_gencode_controls_local_subject_search_translation() {
         query_loc: None,
         subject_loc: None,
         archive: None,
+        export_search_strategy: None,
+        strategy: None,
         tabular_taxdb: None,
         subject_taxdb: None,
         first_query_ordinal: 0,

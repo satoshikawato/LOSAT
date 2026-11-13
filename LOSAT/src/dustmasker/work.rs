@@ -192,7 +192,12 @@ fn writer(options: &Options<'_>) -> Result<MaskWriter, Failure> {
             "window={}; level={}; linker={}",
             options.window, options.level, options.linker
         );
-        MaskWriter::mask_info(serial, 2, FilterProgram::Dust, parameters.into_bytes())
+        MaskWriter::mask_info(
+            Some(serial),
+            2,
+            FilterProgram::Dust,
+            parameters.into_bytes(),
+        )
     };
     Ok(match options.outfmt {
         "interval" => MaskWriter::Interval,

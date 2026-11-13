@@ -2,9 +2,9 @@
 //! 2025-05-13 on `ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/rpsbproc/`), which reads the ASN.1 text
 //! archives of `rpsblast -outfmt 11` and the CDD annotation data and writes the conserved domain
 //! hits of each query. LOSAT gives the domain hits (`-t doms`, with `-m rep`, `std` or `full`
-//! and `-f`) and the sites and motifs (`-t feats`, `-t both`, the default) of protein queries;
-//! nucleotide queries (rpstblastn's archives; item PS16c) and the deprecated XML input (item
-//! PS16d) are refused explicitly.
+//! and `-f`) and the sites and motifs (`-t feats`, `-t both`, the default) of protein queries
+//! (rpsblast's archives) and of nucleotide queries (rpstblastn's archives, per reading frame);
+//! the deprecated XML input (item PS16d) is refused explicitly.
 //!
 //! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1853-1871
 //! ```c++
@@ -27,6 +27,8 @@ mod archive;
 mod args;
 mod data;
 mod domains;
+mod frames;
+mod nucleotide;
 mod prosite;
 mod query;
 mod segset;
@@ -1482,8 +1484,8 @@ fn value_variant(value: &ParamValue) -> &'static str {
 // }
 // ```
 // The `request` and `results` members are mandatory in the module, so an object that reads has
-// both (main:886-896 are not reached). The refusals that a session's request decides (a
-// translated search, a nucleotide query: item PS16c) come before anything of that session.
+// both (main:886-896 are not reached). The refusals that a session's request decides come
+// before anything of that session.
 fn run_sessions<R: Read>(
     report: &mut Report,
     header: &[u8],
@@ -1510,21 +1512,7 @@ fn run_sessions<R: Read>(
             Err(refusal) => return Outcome::refused(refusal.message),
         };
         if let RequestBody::QueueSearch(search) = &archive.body {
-            if search.program == b"tblastn" {
-                return Outcome::refused(
-                    "an archive of rpstblastn (program tblastn, nucleotide queries) is not supported by LOSAT's rpsbproc (item PS16c)".to_string(),
-                );
-            }
             if let Queries::BioseqSet(entries) = &search.queries {
-                if entries
-                    .iter()
-                    .any(|entry| matches!(entry, SeqEntry::Seq(query) if query.mol != 3))
-                {
-                    return Outcome::refused(
-                        "a nucleotide query is not supported by LOSAT's rpsbproc (item PS16c)"
-                            .to_string(),
-                    );
-                }
                 // `SEQ_ID_PREFER_ACCESSION_OVER_GI` and `SEQ_ID_AVOID_GI` change the rank of a gi
                 // (`ApplicationSettings::seq_id_rank_variable`, Seq_id.cpp:3064-3174), so the
                 // label of a query with a gi among its ids (`query_accession`).
@@ -1564,6 +1552,7 @@ fn run_sessions<R: Read>(
                     }
                     Outcome::Exit(report_exception(&mut report.diag, &exception, false))
                 }
+                ProcessError::Std(what) => std_exception(report, what.as_bytes()),
                 ProcessError::Unsupported(message) => {
                     if report.stopped() {
                         return Outcome::Exit(E_OK);
@@ -1679,18 +1668,7 @@ fn run_sessions<R: Read>(
                             // (ncbiapp.cpp:730-734; probe 3 of PS16b and review oracles R6, R20,
                             // R21: the line below with `what()` as bytes, exit 3, the report
                             // ends before the site's line).
-                            PrintError::Exception(what) => {
-                                report.before_post();
-                                if report.failed.is_some() {
-                                    return Outcome::Exit(E_OK);
-                                }
-                                let mut message = b"Application's execution failed: ".to_vec();
-                                message.extend_from_slice(&what);
-                                report
-                                    .diag
-                                    .post_bytes(&err_post_x_bytes(CORELIB_APP, 7, &message));
-                                Outcome::Exit(3)
-                            }
+                            PrintError::Exception(what) => std_exception(report, &what),
                             PrintError::Unsupported(message) => {
                                 if report.stopped() {
                                     return Outcome::Exit(E_OK);
@@ -1712,6 +1690,22 @@ fn run_sessions<R: Read>(
     report.line(&[b"ENDDATA"]);
     report.progress(&format!("All done, {queries_done} queries processed\n"));
     Outcome::Exit(E_OK)
+}
+
+/// A `std::exception` that leaves `Run`: `CNcbiApplication` reports its `what()` (ncbiapp.cpp:
+/// 730-734; PS16b probe 3 and review oracles R6, R20, R21: the line below with `what()` as
+/// bytes, exit 3, the report ends where the exception was thrown).
+fn std_exception(report: &mut Report, what: &[u8]) -> Outcome {
+    report.before_post();
+    if report.failed.is_some() {
+        return Outcome::Exit(E_OK);
+    }
+    let mut message = b"Application's execution failed: ".to_vec();
+    message.extend_from_slice(what);
+    report
+        .diag
+        .post_bytes(&err_post_x_bytes(CORELIB_APP, 7, &message));
+    Outcome::Exit(3)
 }
 
 /// `PrintDomQuery` of a protein query with `-t doms`.
@@ -1821,18 +1815,73 @@ fn print_dom_query(
     motif_state: &mut MotifState,
 ) -> Result<(), PrintError> {
     let length = query.length.to_string();
+    let kind: &[u8] = if query.is_na {
+        b"\tNucleotide\t"
+    } else {
+        b"\tPeptide\t"
+    };
     report.line(&[
         b"QUERY\t",
         &query.accession,
-        b"\tPeptide\t",
+        kind,
         length.as_bytes(),
         b"\t",
         &query.title,
     ]);
+    if query.is_na {
+        nucleotide::print_frames(
+            report,
+            query,
+            session,
+            data,
+            mode,
+            show_families,
+            target,
+            motif_state,
+        )?;
+    } else {
+        print_protein(
+            report,
+            query,
+            session,
+            data,
+            mode,
+            show_families,
+            target,
+            motif_state,
+        )?;
+    }
+    report.line(&[b"ENDQUERY"]);
+    if report.quiet {
+        return Ok(());
+    }
+    report.before_cerr();
+    if report.failed.is_some() {
+        return Ok(());
+    }
+    let mut stderr = std::io::stderr().lock();
+    let _ = stderr.write_all(b"End processing Query ");
+    let _ = stderr.write_all(&query.title);
+    let _ = stderr.write_all(b"\n");
+    Ok(())
+}
+
+/// The DOMAINS, SUPERFAMILIES, SITES and MOTIFS parts of a protein query.
+#[allow(clippy::too_many_arguments)]
+fn print_protein(
+    report: &mut Report,
+    query: &DomQuery,
+    session: &str,
+    data: &CddData,
+    mode: DataMode,
+    show_families: bool,
+    target: TargetData,
+    motif_state: &mut MotifState,
+) -> Result<(), PrintError> {
     let records = if target == TargetData::Feats {
         Vec::new()
     } else {
-        domain_records(&query.index, &query.aligns, data, mode)
+        domain_records(&query.frames[0], &query.aligns, data, mode)
     };
     if !records.is_empty() {
         let mut families: std::collections::BTreeMap<u32, Record> = Default::default();
@@ -1888,18 +1937,6 @@ fn print_dom_query(
     if target != TargetData::Doms {
         print_features(report, query, session, data, mode, motif_state)?;
     }
-    report.line(&[b"ENDQUERY"]);
-    if report.quiet {
-        return Ok(());
-    }
-    report.before_cerr();
-    if report.failed.is_some() {
-        return Ok(());
-    }
-    let mut stderr = std::io::stderr().lock();
-    let _ = stderr.write_all(b"End processing Query ");
-    let _ = stderr.write_all(&query.title);
-    let _ = stderr.write_all(b"\n");
     Ok(())
 }
 
@@ -1949,9 +1986,15 @@ fn motif_error(error: MotifError, data: &CddData, site: &data::Site) -> PrintErr
 /// the terminating 0 at its size; beyond that, and before 0, NCBI reads bytes outside the
 /// string (undefined), which LOSAT refuses.
 fn upper_residue(query: &DomQuery, res: i64) -> Result<u8, PrintError> {
-    let len = query.residues.len() as i64;
+    upper_at(&query.residues, res)
+}
+
+/// `(char)toupper(text[res])` of a `std::string` (the query's residues or the translation of
+/// one of its frames).
+fn upper_at(text: &[u8], res: i64) -> Result<u8, PrintError> {
+    let len = text.len() as i64;
     if (0..len).contains(&res) {
-        Ok(query.residues[res as usize].to_ascii_uppercase())
+        Ok(text[res as usize].to_ascii_uppercase())
     } else if res == len {
         Ok(0)
     } else {
@@ -2163,7 +2206,7 @@ fn print_features(
     mode: DataMode,
     motif_state: &mut MotifState,
 ) -> Result<(), PrintError> {
-    let records: Vec<FeatureRecord> = feature_records(&query.index, &query.aligns, data, mode);
+    let records: Vec<FeatureRecord> = feature_records(&query.frames[0], &query.aligns, data, mode);
     let Some(first) = records.first() else {
         return Ok(());
     };
@@ -2297,7 +2340,8 @@ fn print_site(
     if !mostly_mapped(&featsegs, site) {
         return Ok(());
     }
-    let mapped_positions = translated_pos_map(&featsegs);
+    let mapped_positions = translated_pos_map(&featsegs, align, query.length)
+        .map_err(|what| PrintError::Exception(what.into_bytes()))?;
     if motif_state
         .motif_check(data, site, &mapped_positions, &query.residues)
         .map_err(|error| motif_error(error, data, site))?

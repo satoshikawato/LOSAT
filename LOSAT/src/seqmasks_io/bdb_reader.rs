@@ -40,7 +40,7 @@ pub(crate) enum BdbError {
     Ncbi(NcbiException),
     /// LOSAT's refusal: a whole message (`algorithm::common::database::refusal`), or a noun
     /// phrase (`Unsupported`) that the program completes with "is not supported by LOSAT's
-    /// <program>".
+    /// `<program>`".
     Refused(String),
     Unsupported(String),
 }

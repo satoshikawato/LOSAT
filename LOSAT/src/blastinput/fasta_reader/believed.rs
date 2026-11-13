@@ -238,7 +238,7 @@ pub(crate) fn parse_believed_defline(
         ReaderWarning::Line(line) => warn(line),
         ReaderWarning::SeqId(warning) => post_seq_id_warning_of(&name, warning, &mut *warn),
     };
-    let ids = process_ids(id_string, protein, true, line_number, &mut warn_named)
+    let ids = process_ids(id_string, protein, true, true, line_number, &mut warn_named)
         .map_err(|error| error.message)?;
     Ok(BelievedDefline {
         title_search: pos,

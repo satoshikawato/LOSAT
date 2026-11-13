@@ -20,7 +20,8 @@ fn fixtures() -> PathBuf {
 
 /// A directory of its own for one test (the tests of a binary run in parallel) holding a copy
 /// of the fixture's `arch/` and `data/` and of the files of `root/` (a copy, not a link:
-/// Windows), removed at the end.
+/// Windows; a gzip-compressed archive `arch/<name>.asn.gz` unpacked to `arch/<name>.asn`), removed
+/// at the end.
 struct RunDir(PathBuf);
 
 impl RunDir {
@@ -45,13 +46,26 @@ impl RunDir {
     }
 }
 
-/// Copies the files of `from` into `to` (made if missing).
+/// Copies the files of `from` into `to` (made if missing); a file named `*.asn.gz` is unpacked
+/// to `*.asn` (the archives of nucleotide queries are stored compressed, README.md).
 fn copy_files(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();
     for entry in fs::read_dir(from).unwrap() {
         let entry = entry.unwrap();
-        if entry.file_type().unwrap().is_file() {
-            fs::copy(entry.path(), to.join(entry.file_name())).unwrap();
+        if !entry.file_type().unwrap().is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        match name.to_str().and_then(|name| name.strip_suffix(".asn.gz")) {
+            Some(stem) => {
+                let mut reader =
+                    flate2::read::GzDecoder::new(fs::File::open(entry.path()).unwrap());
+                let mut out = fs::File::create(to.join(format!("{stem}.asn"))).unwrap();
+                std::io::copy(&mut reader, &mut out).unwrap();
+            }
+            None => {
+                fs::copy(entry.path(), to.join(&name)).unwrap();
+            }
         }
     }
 }
@@ -211,7 +225,7 @@ fn compare_rows(stem: &str, usage: &str) -> usize {
 
 #[test]
 fn rpsbproc_gives_ncbis_bytes() {
-    assert_eq!(compare_rows("compare", "compare"), 183);
+    assert_eq!(compare_rows("compare", "compare"), 230);
 }
 
 // The rows of `use` `linux`: `-logfile /dev/stdout` writes the diagnostics into the pipe of the
@@ -256,7 +270,7 @@ fn rpsbproc_refuses_what_it_does_not_give() {
         assert_same(&expected, &case, &out, &err, status);
         refused += 1;
     }
-    assert_eq!(refused, 5);
+    assert_eq!(refused, 9);
 }
 
 // The command line outside NCBI's report (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): `-version`

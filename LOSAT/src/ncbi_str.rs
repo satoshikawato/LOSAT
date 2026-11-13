@@ -1184,6 +1184,32 @@ pub(crate) fn truncate_spaces(str: &[u8]) -> &[u8] {
     &str[beg..end]
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1841-1850
+// ```c++
+//     if ((flags & NStr::fWithCommas)) {
+//         int cnt = -1;
+//         do {
+//             if (++cnt == 3) {
+//                 *--pos = ',';
+//                 cnt = 0;
+//             }
+//             *--pos = '0' + value % 10;
+//             value /= 10;
+//         } while (value);
+// ```
+/// `n` in decimal with a comma between groups of three digits (`NStr::fWithCommas`).
+pub(crate) fn with_commas(n: u64) -> String {
+    let digits = n.to_string();
+    let mut text = String::with_capacity(digits.len() + digits.len() / 3);
+    for (at, digit) in digits.chars().enumerate() {
+        if at > 0 && (digits.len() - at).is_multiple_of(3) {
+            text.push(',');
+        }
+        text.push(digit);
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -32,6 +32,7 @@ impl<R: Read> SequenceSource for FastaSource<R> {
                 MaskReadError::Ncbi(exception) => Failure::Ncbi(exception),
                 MaskReadError::Read(error) => read_failure(error),
                 MaskReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
+                MaskReadError::Refused(what) => Failure::Refused(super::work::unsupported(&what)),
             })?;
         Ok(record.map(|record| Record {
             ids: record.ids,

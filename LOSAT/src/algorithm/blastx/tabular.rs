@@ -373,6 +373,8 @@ pub(super) fn write_blastx_tabular(
         ShownSubjects::Fasta { .. } => None,
     };
     let counts_by_fields = COUNTS_FIELDS.iter().any(|field| spec.has(*field));
+    // Which rows read their subject (`TabularSpec::subject_fetch`).
+    let fetch = spec.subject_fetch(crate::blastinput::app::Program::Blastx);
     let no_taxonomy = TabularTaxonomy::default();
     let mut query_ranges: Vec<(u64, u64)> = Vec::new();
     let mut next_hsp = first_hsp;
@@ -387,6 +389,11 @@ pub(super) fn write_blastx_tabular(
             // ```
             stderr.write_all(&query_warning(options, query, batch.search_skipped))?;
             stderr.write_all(shown.query_fetches(batch.query_ordinal + qidx))?;
+            // The texts of the subjects that the query's rows read one by one, written where they
+            // read each (`ReadCursor`, the query's only).
+            let mut reads = crate::report::query_warnings::ReadCursor::new(std::slice::from_ref(
+                shown.query_reads(batch.query_ordinal + qidx),
+            ));
             // NCBI makes a formatter for each query's report, and it warns when the field list
             // asks for a plural name of the taxonomy database that it cannot find
             // (tabular.cpp:139-158, `x_CheckTaxDB`).
@@ -520,6 +527,27 @@ pub(super) fn write_blastx_tabular(
                         qcovus: -1,
                     };
                     for hsp in shown_hsps() {
+                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+                        // ```c++
+                        //        		const CBioseq_Handle& subject_bh =
+                        //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+                        // ```
+                        // A row that reads the subject (`TabularSpec::subject_fetch`, by the
+                        // engine's identities for `nident` alone) loads it first where the
+                        // query's batch did not prefetch it: the texts of its taxonomy lookups
+                        // follow the rows before it, before those of the row's own lookups.
+                        if let Some(reads) = reads.as_mut() {
+                            if fetch.reads(hsp.identity) {
+                                writer.write_all(&buf)?;
+                                buf.clear();
+                                reads.subject_read(
+                                    0,
+                                    list.oid as u32,
+                                    &mut *writer,
+                                    &mut *stderr,
+                                )?;
+                            }
+                        }
                         // The texts of the row's lookups of the taxonomy database
                         // (`x_SetTaxInfoAll`, `x_SetTaxInfo`) follow the rows before it.
                         if let Some(names) = names {
@@ -593,6 +621,10 @@ pub(super) fn write_blastx_tabular(
                     }
                 }
                 writer.write_all(&buf)?;
+                // A text whose read the rows did not place comes after them.
+                if let Some(reads) = reads.as_mut() {
+                    reads.before_query(1, &mut *writer, &mut *stderr)?;
+                }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
                 // ```c++
                 // CBlastTabularInfo::~CBlastTabularInfo()

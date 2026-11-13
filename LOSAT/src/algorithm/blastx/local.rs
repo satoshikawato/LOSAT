@@ -414,7 +414,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     // refuse, and the batches are not checked again (`titles_may_refuse`).
     let titles_may_refuse = archive.is_some()
         && batch_size > 0
-        && (archive::batches_may_refuse(&resolved[0], &mut |deliver| {
+        && (archive::batches_may_refuse(&resolved[0], true, false, &mut |deliver| {
             reader_batches(
                 query_records,
                 lowercase,
@@ -669,6 +669,8 @@ fn write_run(
                 queries,
                 database.is_none().then_some(subjects),
                 queries_before == 0,
+                true,
+                false,
             )?;
         }
         let hits = match made_hits {
@@ -748,12 +750,14 @@ fn write_run(
                 archive::write_blastx_archive(
                     &archive::ArchiveCall {
                         handle,
-                        options,
-                        queries,
+                        batch: archive::CallBatch {
+                            options,
+                            queries,
+                            subject_records,
+                            batches: results,
+                        },
                         subjects: call_subjects,
                         names,
-                        subject_records,
-                        batches: results,
                     },
                     writer,
                 )
@@ -825,6 +829,8 @@ fn write_run(
         &mut **diagnostics,
         search_error,
         &mut render,
+        // The library and LOSAT Web write no search strategy (`api::search::file_options`).
+        &mut |_, _| Ok(()),
     )
     .map_err(input_error)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:297-297
@@ -942,6 +948,7 @@ fn search_database(
     .showing_gis(args.show_gis);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
+        None,
         &args.db_filter,
         database.list_taxids(),
         database.statistics_length_is_empty(),

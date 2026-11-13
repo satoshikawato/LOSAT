@@ -209,6 +209,13 @@ pub trait HitWrite {
         hit: &XmlHit<'_>,
         hsps: &mut dyn FnMut(&mut HspSink<'_>) -> Result<()>,
     ) -> Result<()>;
+
+    /// Where the next `Hit` starts in the query's output, for a document that writes each `Hit`
+    /// as it is made (outfmt 5, `HitSink::position`); `None` for one that writes the query's
+    /// report as a whole.
+    fn position(&self) -> Option<usize> {
+        None
+    }
 }
 
 /// The HSP-level call of a structured writer behind `HspSink`.
@@ -315,6 +322,24 @@ impl<'a> HitSink<'a> {
         Self { inner }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:493-500
+    // ```c++
+    //         if (new_hit) {
+    //             new_hit->SetNum(index);
+    //             ++index;
+    //             if( !incremental_output ) hits.push_back(new_hit);
+    // 	    else
+    // 	    {
+    // 		CNcbiOstrstream  one_hit_os;
+    // ```
+    /// Where the next `Hit` starts in the query's output (the output's length), for a document
+    /// that writes each `Hit` as NCBI makes it (BLAST XML: NCBI loads the `Hit`'s subject after
+    /// the `Hit`s before it are written, `QueryWarnings::subject_read`); `None` for the XML2 and
+    /// JSON documents, which NCBI writes as a whole.
+    pub fn position(&self) -> Option<usize> {
+        self.inner.position()
+    }
+
     /// Writes one `Hit` (a subject with its HSPs, in NCBI's Seq-align order): `hsps` hands the
     /// HSPs one by one to the `HspSink`.
     pub fn hit<F>(&mut self, hit: &XmlHit<'_>, hsps: F) -> Result<()>
@@ -355,6 +380,10 @@ struct Xml5Hits<'a, 'o> {
 }
 
 impl HitWrite for Xml5Hits<'_, '_> {
+    fn position(&self) -> Option<usize> {
+        Some(self.iteration.written())
+    }
+
     fn hit(
         &mut self,
         hit: &XmlHit<'_>,

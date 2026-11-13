@@ -249,10 +249,13 @@
 //! - each output's bytes are those of the one-output case above: what is not per query (the prolog,
 //!   the epilog, the counts of outfmt 7 and 5) is set per block for every output alike
 //!   (`BlastpReports`), each output's writer writes only to its own sink, and with several outputs
-//!   the sinks are the caller's writers, unbuffered (a stream that two outputs share would get each
-//!   block's formats in turn, so several outputs need writers; one output may also be standard
-//!   output or a file, as above). The checks of the refusals that depend on the hits are made for
-//!   every kind of report among the outputs before the first block. The warnings go with the first
+//!   the sinks are the caller's writers, unbuffered. Several outputs need writers: the search of
+//!   all queries writes each output's whole report in turn, so two outputs on standard output would
+//!   get each block's formats in turn, two outputs to one file would write over each other, and a
+//!   file that cannot be created would stop the run after the first block's part of the outputs
+//!   before it (`x_query_block_plan`); one output may also be standard output or a file, as
+//!   above. The checks of the refusals that depend on the hits are made for every kind of report
+//!   among the outputs before the first block. The warnings go with the first
 //!   output, query by query, in every block.
 //! - the final list of all queries is the blocks' lists one after the other: it is ordered by query,
 //!   then by subject, then by HSP (`hsp.rs`'s final sort), and a query's list does not depend on the

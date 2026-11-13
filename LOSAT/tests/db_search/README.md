@@ -72,6 +72,9 @@ FASTA files:
   pseudo-random generator), whose HSPs with that query form linked sets: two parts far apart (`split2`), close
   (`split2_close`) and in reverse order (`reversed2`), three parts (`split3`), overlapping parts (`overlap`), two weak
   parts (`weak2`), one part (`single`) and one part three times (`tandem`).
+- `q3b_long.faa` (rows `db.ps.q3b.long.*` and `db.oldfsc.blastp.split.6`): one protein of 21,000 random letters (a fixed
+  pseudo-random generator) with `LOSAT/tests/fasta/psiblast/tk.faa` planted at 500, 9,800, 14,000 and 20,500 (cut at the
+  end), a query that NCBI splits into chunks of 10,000 that overlap by 100.
 
 Databases (all `-blastdb_version 4`, no `-parse_seqids`; only `.pin .psq .phr` are kept, the `.pjs` file
 makeblastdb also writes was deleted). Run from `LOSAT/`:

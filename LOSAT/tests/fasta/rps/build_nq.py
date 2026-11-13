@@ -23,6 +23,10 @@ No NCBI counterpart: test inputs. Usage: python3 build_nq.py [OUT_DIR] (default:
   without a valid frame, twice; nwin.fna has an empty record early and, in later batches, a record
   with hyphens, one whose title ends with 25 nucleotides and one with the invalid residue J (the
   reader's warnings).
+- nfirst.fna (series PR, item PS12s, review B1 and S1): a record of 210 N (with `BATCH_SIZE` 200 a
+  first batch of its own without a valid frame), the records w45-w50 of nwin.fna (two of them hit),
+  and `p_tgg`, 20 TGGTGTTGC repeats (frames whose Lambda is below the ideal one: a large
+  `-xdrop_ungap` leaves 32 bits for them first).
 """
 
 import random
@@ -46,9 +50,13 @@ def reverse_complement(text: str) -> str:
 
 
 def read_fasta(path: Path) -> list[tuple[str, str]]:
+    return parse_fasta(path.read_text())
+
+
+def parse_fasta(text: str) -> list[tuple[str, str]]:
     records: list[tuple[str, str]] = []
     title, letters = None, []
-    for line in path.read_text().splitlines():
+    for line in text.splitlines():
         if line.startswith(">"):
             if title is not None:
                 records.append((title, "".join(letters)))
@@ -150,14 +158,23 @@ def nwin(proteins: list[tuple[str, str]], count: int, seed: int, n_run: int) -> 
     return fasta(records)
 
 
+def nfirst(window: str) -> str:
+    records = parse_fasta(window)
+    start = next(i for i, (title, _) in enumerate(records) if title.startswith("w45 "))
+    tgg = ("p_tgg", "TGGTGTTGC" * 20)
+    return fasta([("n0 nrun", "N" * 210)] + records[start : start + 6] + [tgg])
+
+
 def main() -> int:
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE
     proteins = read_fasta(HERE / "q40.faa")
     (out / "nq.fna").write_text(nq(proteins))
     (out / "nedge.fna").write_text(nedge(proteins))
     (out / "odd.fna").write_text(">e1\nACGT\n>e2\n\n>e3\nNNNN\n")
-    (out / "nwin.fna").write_text(nwin(proteins, 130, 12, 210))
+    window = nwin(proteins, 130, 12, 210)
+    (out / "nwin.fna").write_text(window)
     (out / "nwin0.fna").write_text(nwin(proteins, 36, 13, 110))
+    (out / "nfirst.fna").write_text(nfirst(window))
     return 0
 
 

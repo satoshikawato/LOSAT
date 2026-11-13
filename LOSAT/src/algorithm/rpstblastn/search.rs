@@ -332,6 +332,10 @@ impl TranslatedRpsSearch {
                     error: anyhow::Error| {
             states.truncate(batch);
             outcome[batch] = Some(Err(error));
+            // A later batch that failed before is not reached (NCBI's loop ends here).
+            for later in &mut outcome[batch + 1..] {
+                *later = None;
+            }
         };
         for (batch, prepared) in prepare_batches(batches, options, pool)
             .into_iter()
@@ -516,17 +520,19 @@ impl TranslatedRpsSearch {
             drop(files);
             let traced = match traced {
                 Ok(traced) => traced,
-                // The volume's refusal: the first batch that searches it meets it.
+                // The volume's refusal: the first batch that searches it meets it. The batches
+                // before it (without a valid frame) still set up the later volumes, whose NCBI
+                // errors they meet first (review of PS12s, B1).
                 Err(refusal) => {
                     fail(&mut states, &mut outcome, searching[0], refusal);
-                    break;
+                    continue;
                 }
             };
-            let mut traced = traced.into_iter();
-            for (&batch, &count) in searching.iter().zip(&spans) {
-                let queries: Vec<Result<_>> = traced.by_ref().take(count).collect();
-                // The first error in query order (the queries search at the same time).
-                let lists = match queries.into_iter().collect::<Result<Vec<_>>>() {
+            // Each batch's lists, or its error in NCBI's order: the first refusal of its queries'
+            // cutoffs, the volume's refusal after them, then the first error of its queries'
+            // searches in query order (`RpsVolumeResults::batches`).
+            for (&batch, lists) in searching.iter().zip(traced.batches(&spans)) {
+                let lists = match lists {
                     Ok(lists) => lists,
                     Err(error) => {
                         fail(&mut states, &mut outcome, batch, error);
@@ -692,7 +698,7 @@ fn prepare_batches(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if pool.enabled() && pool.threads() > 1 && batches.len() > 1 {
+    if pool.enabled() && pool.threads() > 1 {
         use rayon::prelude::*;
         return pool.install(|| {
             batches
@@ -1228,5 +1234,158 @@ mod tests {
             first,
             (vec!["w0".into()], Some("batch 1 failed".to_string()))
         );
+    }
+
+    /// The files of the fixture database `name` (tests/db_search/rps/NAME.*.gz) inflated into a
+    /// directory of this test but those whose names end with one of `left_out`, and the database
+    /// opened.
+    fn rps_database(
+        name: &str,
+        left_out: &[&str],
+        test: &str,
+    ) -> (std::path::PathBuf, BlastxDatabase) {
+        use std::io::Read;
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/rps");
+        let dir = std::env::temp_dir().join(format!("losat-rpstbn-{test}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for entry in std::fs::read_dir(&fixtures).unwrap() {
+            let file = entry.unwrap().file_name().into_string().unwrap();
+            let Some(inflated) = file.strip_suffix(".gz") else {
+                continue;
+            };
+            let Some(extension) = inflated.strip_prefix(name) else {
+                continue;
+            };
+            if !extension.starts_with('.') || left_out.contains(&extension) {
+                continue;
+            }
+            let mut bytes = Vec::new();
+            flate2::read::GzDecoder::new(std::fs::read(fixtures.join(&file)).unwrap().as_slice())
+                .read_to_end(&mut bytes)
+                .unwrap();
+            std::fs::write(dir.join(inflated), bytes).unwrap();
+        }
+        let database = BlastxDatabase::open(
+            dir.join(name).to_str().unwrap(),
+            &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
+        )
+        .unwrap();
+        (dir, database)
+    }
+
+    /// `search_window` of `batches` with the RPS options `search` on `database`, serially.
+    fn window_errors(
+        search: &TranslatedRpsSearch,
+        database: &BlastxDatabase,
+        batches: &[&[FastaRecord]],
+    ) -> Vec<Option<std::result::Result<(), String>>> {
+        let options = options(&[]);
+        let volumes = RpsVolumeSet::of(database.x_seqdb());
+        let setup = RpsVolumeSetup::new(PROGRAM, options.window_size);
+        search
+            .search_window(
+                batches,
+                &options,
+                database,
+                &volumes,
+                &setup,
+                database_lengths(database),
+                &crate::utils::threading::SearchPool::x_serial(),
+                &RpsWorkers::new(1),
+            )
+            .into_iter()
+            .map(|outcome| outcome.map(|result| result.map(|_| ()).map_err(|e| e.to_string())))
+            .collect()
+    }
+
+    /// The record `w45` of nwin.fna (build_nq.py: a back-translated window of a profile's
+    /// fragment, which hits `rps_mini`).
+    fn hit_record() -> FastaRecord {
+        let text = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/rps/nwin.fna"),
+        )
+        .unwrap();
+        let block = text
+            .split('>')
+            .find(|block| block.starts_with("w45 "))
+            .unwrap();
+        let letters: String = block.lines().skip(1).collect();
+        record("w45", letters.as_bytes())
+    }
+
+    // B1 of the review of PS12s: a volume's refusal met by a later batch of the window does not
+    // end the volume loop for the batches before it (without a valid frame), which set up every
+    // volume as NCBI's loop of one batch at a time does and meet NCBI's error of a later volume's
+    // missing file first (rpsblast_local.cpp:384-399: one `CLocalBlast` per volume, whose set-up
+    // maps the RPS files; probe e1 of the review: NCBI rc 3).
+    #[test]
+    fn a_volumes_refusal_leaves_the_earlier_batches_to_meet_later_volumes() {
+        let (dir, database) = rps_database("rps_mini3v", &[".01.loo"], "b1");
+        let mut search = TranslatedRpsSearch {
+            search: RpsSearch::default(),
+            ungapped: false,
+            use_sw_tback: false,
+            comp_based_stats: "0".to_string(),
+            several_volumes: true,
+        };
+        search.search.x_drop_gapped_bits = Some(1e9);
+        let n_only = [record("n", &[b'N'; 210])];
+        let valid = [hit_record()];
+        let outcome = window_errors(&search, &database, &[&n_only, &valid]);
+        let Some(Err(error)) = &outcome[0] else {
+            panic!("{outcome:?}");
+        };
+        assert!(
+            error.contains("Cannot memory map RPS-BLAST database file")
+                && error.contains("rps_mini3v.01.loo"),
+            "{error}"
+        );
+        assert!(outcome[1].is_none(), "{outcome:?}");
+        // With every file the X-drop's refusal is the valid batch's, after the first batch's
+        // results.
+        let (whole_dir, whole) = rps_database("rps_mini3v", &[], "b1w");
+        let outcome = window_errors(&search, &whole, &[&n_only, &valid]);
+        assert!(matches!(outcome[0], Some(Ok(()))), "{outcome:?}");
+        assert!(
+            matches!(&outcome[1], Some(Err(error)) if error.contains("an -xdrop_gap of 1000000000.0 bits")),
+            "{outcome:?}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(whole_dir);
+    }
+
+    // S1 of the review of PS12s: in a batch, a query's refusal of its cutoffs comes before an
+    // earlier query's search error (base's and NCBI's order, blast_engine.c:1372-1374). `w45`'s
+    // traceback reads the consensus letters, whose file is missing (NCBI's error); `p_tgg`'s frames
+    // have a Lambda whose ungapped X-drop of 9e6 bits leaves 32 bits (LOSAT's refusal).
+    #[test]
+    fn a_batchs_cutoff_refusal_comes_before_an_earlier_querys_search_error() {
+        let (dir, database) = rps_database("rps_mini", &[".psq"], "s1");
+        let mut search = TranslatedRpsSearch {
+            search: RpsSearch::default(),
+            ungapped: false,
+            use_sw_tback: false,
+            comp_based_stats: "0".to_string(),
+            several_volumes: false,
+        };
+        search.search.x_drop_ungapped_bits = Some(9e6);
+        let repeat = b"TGGTGTTGC".repeat(20);
+        let both = [hit_record(), record("p_tgg", &repeat)];
+        let outcome = window_errors(&search, &database, &[&both]);
+        assert!(
+            matches!(&outcome[0], Some(Err(error)) if error.contains("an -xdrop_ungap of 9000000.0 bits")),
+            "{outcome:?}"
+        );
+        // In batches of their own the hit record's batch fails first, with NCBI's error.
+        let hit = [hit_record()];
+        let tgg = [record("p_tgg", &repeat)];
+        let outcome = window_errors(&search, &database, &[&hit, &tgg]);
+        assert!(
+            matches!(&outcome[0], Some(Err(error)) if error.contains("rps_mini.psq")),
+            "{outcome:?}"
+        );
+        assert!(outcome[1].is_none(), "{outcome:?}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

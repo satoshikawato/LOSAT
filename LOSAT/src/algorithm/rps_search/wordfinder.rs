@@ -622,6 +622,37 @@ mod tests {
         assert!(!fresh.is_empty());
         assert_eq!(run(&[&other]), fresh);
         assert_eq!(run(&[&other, &query, &other]), fresh);
+        // NCBI's clear at `INT4_MAX / 4` (`RpsDiagTable::exit`) on a kept table (D3 of PS12s): a
+        // worker's offset reaches it after about 536 M letters of frames. A table whose offset is
+        // just below it searches `other` (its entries then hold values past the limit), the offset
+        // passes the limit, `query` still gets a fresh table's hits, and its exit clears the table
+        // (every entry `-window`, the offset the window), after which `query` gets them again.
+        let mut scratch = RpsWordScratch {
+            diag: RpsDiagTable::new(),
+            buckets: RpsBuckets::new(rows.len()),
+        };
+        scratch.diag.reset_for(rows.len() as i32, 40);
+        scratch.diag.offset = i32::MAX / 4 - 5;
+        let mut ignored = Vec::new();
+        word_finder(&params, &mut scratch, &other, &mut ignored);
+        assert!(scratch.diag.offset >= i32::MAX / 4);
+        assert!(scratch
+            .diag
+            .array
+            .iter()
+            .any(|entry| entry.last_hit() > i32::MAX / 4));
+        let mut hits = Vec::new();
+        word_finder(&params, &mut scratch, &query, &mut hits);
+        assert_eq!(hits, fresh);
+        assert_eq!(scratch.diag.offset, 40);
+        assert!(scratch
+            .diag
+            .array
+            .iter()
+            .all(|entry| (entry.last_hit(), entry.flag()) == (-40, false)));
+        let mut hits = Vec::new();
+        word_finder(&params, &mut scratch, &query, &mut hits);
+        assert_eq!(hits, fresh);
     }
 
     // D3 of PS12s: a worker's table kept from one volume to the next of the same table length

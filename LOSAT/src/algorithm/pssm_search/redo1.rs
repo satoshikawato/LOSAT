@@ -39,7 +39,6 @@ use crate::algorithm::blastp::hsp::{
 };
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::blastp::x_redo_subjects::XRedoSubjects;
-use crate::algorithm::tblastx::constants::X_DROP_GAPPED_FINAL;
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::common::GapEditOp;
 use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
@@ -100,6 +99,9 @@ pub(crate) struct PssmRedo1<'a> {
     pub(crate) karlin: &'a KarlinParams,
     /// `extendParams->gap_x_dropoff_final`, the final gapped X-drop of the search (raw score).
     pub(crate) x_drop_final: i32,
+    /// `options->gap_x_dropoff_final`, the final gapped X-drop in bits (`-xdrop_gap_final` or the
+    /// protein default), which the redo converts at its own Lambda (`RedoRun::new`).
+    pub(crate) x_drop_final_bits: f64,
     /// `sbp->gbp` (the redo's copies of the score block have it when the search has it:
     /// blast_stat.c:921-923 and blast_kappa.c:2865-2867) and the context's effective search
     /// space.
@@ -164,8 +166,8 @@ impl<'a> RedoRun<'a> {
     /// The values of the search that the redo scales (`s_RescaleSearch` on `kbp_gap` and the gap
     /// costs, `s_GetAlignParams`) and the query's data, from the scaled gapped block `karlin`
     /// (Lambda over the scaling factor, the K of the redo's copy) with its `log_k`, the search's
-    /// unscaled gap costs, the final gapped X-drop of the search (raw score) and the PSSM the
-    /// redo starts from (the matrix of NCBI's thread-local copy, which each adjustment
+    /// unscaled gap costs, the final gapped X-drop of the search in bits (`-xdrop_gap_final` or the
+    /// protein default) and in raw score, and the PSSM the redo starts from (the matrix of NCBI's thread-local copy, which each adjustment
     /// overwrites). psiblast's run starts from the file's PSSM; RPS-BLAST's from zeros, one run
     /// for each profile.
     ///
@@ -213,7 +215,7 @@ impl<'a> RedoRun<'a> {
         karlin: KarlinParams,
         log_k: f64,
         gap_costs: (i32, i32),
-        x_drop_final: i32,
+        (x_drop_final_bits, x_drop_final): (f64, i32),
         matrix: QueryPssm,
         scratch: PssmGapScratch,
     ) -> Self {
@@ -246,8 +248,7 @@ impl<'a> RedoRun<'a> {
             log_k,
             gap_open: blast_nint(gap_costs.0 as f64 * SCALING_FACTOR),
             gap_extend: blast_nint(gap_costs.1 as f64 * SCALING_FACTOR),
-            x_dropoff: (X_DROP_GAPPED_FINAL as f64 * std::f64::consts::LN_2 / lambda)
-                .max(x_drop_final as f64) as i32,
+            x_dropoff: crate::core::x_drop::redo_x_dropoff(x_drop_final_bits, lambda, x_drop_final),
             near_identical_cutoff: (NEAR_IDENTICAL_BITS_PER_POSITION * std::f64::consts::LN_2)
                 / lambda,
             matrix,
@@ -255,18 +256,6 @@ impl<'a> RedoRun<'a> {
             bound_check: false,
             bound_exceeded: None,
         }
-    }
-
-    /// The redo's X-drop from the search's final X-drop in bits `bits`
-    /// (`options->gap_x_dropoff_final`) in place of the protein default that `new` reads:
-    /// RPS-BLAST's `-xdrop_gap_final`. `x_drop_final` is the search's final X-drop (raw score), as
-    /// `new` takes it; the caller has checked that the conversion is defined (`x_dropoff_of`).
-    ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2381-2383 (quoted at
-    /// `new`)
-    pub(crate) fn with_final_x_drop_bits(mut self, bits: f64, x_drop_final: i32) -> Self {
-        self.x_dropoff = Self::x_dropoff_of(bits, self.karlin.lambda, x_drop_final) as i32;
-        self
     }
 
     /// `MAX(gap_x_dropoff_final * NCBIMATH_LN2 / min_lambda, extendParams->gap_x_dropoff_final)`
@@ -470,7 +459,7 @@ impl PssmRedo1<'_> {
             },
             self.info.gapped_k.ln(),
             (self.gap_open, self.gap_extend),
-            self.x_drop_final,
+            (self.x_drop_final_bits, self.x_drop_final),
             self.pssm.clone(),
             PssmGapScratch::new(),
         )

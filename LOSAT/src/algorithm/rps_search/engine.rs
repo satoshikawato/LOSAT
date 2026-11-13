@@ -489,7 +489,7 @@ impl RpsRun<'_> {
         if !redo && !kernel_x_drop_fits(x_drop_final, gap_open, gap_extend) {
             return Err(final_overflow());
         }
-        // The redo converts its X-drop at its own Lambda (`RedoRun::with_final_x_drop_bits`);
+        // The redo converts its X-drop at its own Lambda (`RedoRun::new`);
         // it is checked here, before any search.
         if redo {
             int4_of(RedoRun::x_dropoff_of(

@@ -3,7 +3,7 @@
 // Every message of the Engine worker carries the runtime generation it belongs to; the main
 // thread drops messages of an older one.
 import type { RecordKey } from '../../domain/dataset';
-import type { CountsRecord } from '../../domain/run';
+import type { CountsUse } from '../../domain/counts';
 import type { EnginePhase } from '../../ports/engine';
 import type { OutputStream } from '../../ports/run-output';
 import type { ReactorArtifact } from '../reactor/artifact';
@@ -129,7 +129,7 @@ export interface WorkerRunResult {
   /** Whether the search used the subject that the instance held (plan §4.6 R1). */
   readonly subjectRetained: boolean;
   /** What the run did with its WindowMasker counts file, when it had one. */
-  readonly windowMasker?: CountsRecord;
+  readonly windowMasker?: CountsUse;
   /** The bytes of the counts file that the instance holds after the run (the renewal's high-water mark allows for them); absent when it holds none. */
   readonly countsBytes?: number;
 }

@@ -11,7 +11,7 @@
 import { recordMismatch, type RecordKey } from '../../domain/dataset';
 import { InputMismatchError, type EnginePhase } from '../../ports/engine';
 import { OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output';
-import type { CountsRecord } from '../../domain/run';
+import type { CountsUse } from '../../domain/counts';
 import { EngineCallError, FILE_WINDOW_MASKER_COUNTS, ROLE_QUERY, ROLE_SUBJECT, type ChunkBuffer, type FileInfo } from '../reactor/abi';
 import type { ReactorArtifact } from '../reactor/artifact';
 import { instantiateSerial, instantiateThreadedMain, type ReactorInstance } from '../reactor/instance';
@@ -121,7 +121,7 @@ export class EngineRuntime {
     // held together with the inputs of this run, and a replaced one is not held with its
     // successor. Its calls into the instance are uses of their own, with the file's chunks read
     // between them.
-    let windowMasker: CountsRecord | undefined;
+    let windowMasker: CountsUse | undefined;
     try {
       windowMasker = await this.counts(loaded, request, use);
     } catch (error) {
@@ -145,7 +145,7 @@ export class EngineRuntime {
     request: WorkerRun,
     fallbackReason: string | undefined,
     phase: (phase: EnginePhase) => void,
-    windowMasker: CountsRecord | undefined,
+    windowMasker: CountsUse | undefined,
   ): WorkerRunResult {
     const threads = loaded.path === 'threaded' ? request.threads : 1;
     const argv = [...request.argv, '-num_threads', String(threads)];
@@ -281,7 +281,7 @@ export class EngineRuntime {
    * it. A file is given to the engine in the 'preparing' phase only. Returns what the search did
    * with the file, if it has one.
    */
-  private async counts(loaded: Loaded, request: WorkerRun, use: InstanceUse | undefined): Promise<CountsRecord | undefined> {
+  private async counts(loaded: Loaded, request: WorkerRun, use: InstanceUse | undefined): Promise<CountsUse | undefined> {
     const wanted = request.windowMasker;
     if (request.program !== 'blastn') {
       this.releaseCounts(loaded, use);

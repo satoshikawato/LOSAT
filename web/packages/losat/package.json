@@ -1,0 +1,25 @@
+{
+  "name": "losat",
+  "version": "0.2.0",
+  "description": "LOSAT's local sequence search in the browser: the host of its two WebAssembly reactors (ABI v2).",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/satoshikawato/LOSAT.git",
+    "directory": "web/packages/losat"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./domain": "./src/domain/index.ts",
+    "./ports": "./src/ports/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "check": "npm run typecheck && npm run lint"
+  },
+  "dependencies": {
+    "@bjorn3/browser_wasi_shim": "0.4.2"
+  }
+}

@@ -1,4 +1,4 @@
-// The two engine modules of a build (docs/web/abi_v2.md §2). build/reactors.ts copies
+// The two engine modules of a build (docs/web/abi_v2.md §2). web/app/build/reactors.ts copies
 // them into the build and provides this description as `virtual:losat-engine`.
 
 export interface ReactorAsset {

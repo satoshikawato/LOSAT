@@ -4,8 +4,8 @@
 // cookies, no referrer. The answers to an unknown accession, measured on 2026-11-03
 // (losat-baselines/web-fetch-20261103): NCBI efetch 200 with "Error: …" (nuccore) or 400
 // (protein), ENA 404 (400 for a RefSeq accession), UniProt 400, GenBase 200 with no body.
+import type { SequenceKind } from 'losat/domain';
 import type { FetchSourceId } from '../../domain/accession';
-import type { SequenceKind } from '../../domain/programs';
 import type { AccessionFetcher, FetchRequest, FetchResult } from '../../ports/fetch';
 
 /** NCBI takes 3 requests a second without an API key (E-utilities usage guidelines). */

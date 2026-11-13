@@ -3,19 +3,21 @@
 // contract suites against the real implementations, and the runtime checks (cancel,
 // renewal, the serial fallback).
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
+import { sha256Hex, WasmEngine, type RenewalLimits, type RuntimeEnd } from 'losat';
+import type { InputRole, OutputFormat, ProgramId } from 'losat/domain';
+import type { EngineGateway, EngineInput, OutputStream, RuntimeInfo } from 'losat/ports';
 import type { RunView } from '../../../src/application/coordinator';
 import { createApp, type App } from '../../../src/composition';
 import { buildArgv } from '../../../src/domain/argv';
-import type { OutputFormat } from '../../../src/domain/output-format';
-import { fastaParser, programById, type InputRole, type ProgramId } from '../../../src/domain/programs';
+import { fastaParser, programById } from '../../../src/domain/programs';
 import { isTerminal, type RunRecord, type RunStatus } from '../../../src/domain/run';
-import { sha256Hex } from '../../../src/infra/browser/platform';
 import { startDataWorker } from '../../../src/infra/data-worker/gateway';
-import { WasmEngine, type RuntimeEnd } from '../../../src/infra/engine-worker/gateway';
-import type { RenewalLimits } from '../../../src/infra/engine-worker/policy';
-import { HOLD_USE_CHANNEL, STOP_AT_OUTPUT_CHANNEL, type EngineEvent, type WorkerTestCommand } from '../../../src/infra/engine-worker/protocol';
-import type { EngineGateway, EngineInput, RuntimeInfo } from '../../../src/ports/engine';
-import type { OutputStream } from '../../../src/ports/run-output';
+import {
+  HOLD_USE_CHANNEL,
+  STOP_AT_OUTPUT_CHANNEL,
+  type EngineEvent,
+  type WorkerTestCommand,
+} from '../../../../packages/losat/src/infra/engine-worker/protocol';
 import { runCases, type CaseResult } from '../../contract/contract';
 import { ENGINE_INPUT_CASES } from '../../contract/engine-input.contract';
 import { RUN_OUTPUT_CASES, type RemoteWriter } from '../../contract/run-output.contract';
@@ -591,7 +593,7 @@ export async function engineInput(env: {
 /** The run output contract with the writer in the real Engine worker (test hooks). */
 export async function runOutputEngine(): Promise<{ backend: string; results: CaseResult[] }> {
   const data = startDataWorker();
-  const worker = new Worker(new URL('../../../src/infra/engine-worker/engine-worker.ts', import.meta.url), {
+  const worker = new Worker(new URL('../../../../packages/losat/src/infra/engine-worker/engine-worker.ts', import.meta.url), {
     type: 'module',
     name: 'losat-engine',
   });

@@ -1,5 +1,5 @@
 // Loading and instantiating the engine modules (docs/web/abi_v2.md §2-§3).
-import { sha256Hex } from '../browser/platform';
+import { sha256Hex } from '../digest';
 import { ReactorAbi, type AbiExports } from './abi';
 import { inspectReactor, type ReactorArtifact } from './artifact';
 import type { ReactorAsset } from './assets';

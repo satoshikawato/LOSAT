@@ -82,7 +82,7 @@ const END_WAITS_MS = 1_000;
  * round. It stops early only when nothing changed in the table and no thread was woken for
  * `deadlineMs` (a cell that stays set without a waiter, after an overflow of the main thread's
  * stack into the cells). The web build serves the threaded module only with the guard's waits
- * (build/reactors.ts); a memory whose buffer is not shared or too small for the cells is left as
+ * (web/app/build/reactors.ts); a memory whose buffer is not shared or too small for the cells is left as
  * it is.
  */
 export function endWaits(memory: WebAssembly.Memory, deadlineMs = END_WAITS_MS): void {

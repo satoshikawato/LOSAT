@@ -1,7 +1,7 @@
 // Run output channel (plan §3.1): the engine sends the outputs of one run straight to the
 // Data worker over the MessagePort that `DataGateway.openRun` returns, so the outputs do
 // not pass through the main thread. The engine side writes with RunOutputWriter
-// (src/infra/run-output/writer.ts); tests/contract/run-output.contract.ts is the contract.
+// (src/infra/run-output/writer.ts); web/app/tests/contract/run-output.contract.ts is the contract.
 import type { RunOutput } from '../domain/output-format';
 
 export const HITS_STREAM = 1;

@@ -5,7 +5,7 @@
 //
 // The real implementation is the adapter's serial reactor inside the Data worker (S09);
 // the development build and the tests use the FakeScanner. Every implementation must pass
-// tests/contract/record-scanner.contract.ts.
+// web/app/tests/contract/record-scanner.contract.ts.
 import type { FastaParserKind, IndexedRecord } from '../domain/dataset';
 
 /** The ABI v2 *scan* response. */

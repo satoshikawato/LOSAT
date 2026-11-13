@@ -9,7 +9,7 @@
 // thread workers, or that renewal, before the search that would start them. `describe` and
 // `validate` go to the Data worker's serial reactor, which can answer while a search runs
 // (src/infra/reactor/control.ts).
-import type { CountsSnapshot } from '../../domain/run';
+import type { CountsFile } from '../../domain/counts';
 import {
   InputMismatchError,
   RunCancelledError,
@@ -354,11 +354,11 @@ export function inputKey(program: string, input: EngineInput): string {
 }
 
 /** The key of a counts file: its name, size and last-modified time (the SHA-256 is known only after the engine read it). */
-export function countsKey(counts: CountsSnapshot): string {
+export function countsKey(counts: CountsFile): string {
   return JSON.stringify([counts.name, counts.size, counts.lastModified]);
 }
 
-function workerCounts(counts: CountsSnapshot): WorkerCounts {
+function workerCounts(counts: CountsFile): WorkerCounts {
   return { name: counts.name, blob: counts.file, key: countsKey(counts) };
 }
 
@@ -366,7 +366,7 @@ function workerInput(program: string, input: EngineInput): WorkerInput {
   return { bytes: input.bytes, records: input.records, key: inputKey(program, input) };
 }
 
-/** Rebuilds an error of the worker with its name and message (as src/infra/data-worker/rpc.ts). */
+/** Rebuilds an error of the worker with its name and message (as web/app/src/infra/data-worker/rpc.ts). */
 function toError(error: WorkerError): Error {
   if (error.name === 'InputMismatchError' && error.role !== undefined && error.detail !== undefined) {
     return new InputMismatchError(error.role, error.detail);

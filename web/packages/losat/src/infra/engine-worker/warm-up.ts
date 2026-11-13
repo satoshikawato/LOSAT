@@ -10,9 +10,8 @@
 // 17-55 ms). Longer searches gain less or nothing: what remains is the time until the
 // optimizing compiler's code of their hot functions is ready, which the small sequences do
 // not reach.
-import { WINDOW_MASKER_TAXID_FLAG } from '../../domain/counts';
-import { programById, type ProgramId, type SequenceKind } from '../../domain/programs';
-import { REGION_FLAG } from '../../domain/region';
+import { REGION_FLAG, WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG } from '../../domain/options';
+import { PROGRAM_INPUTS, type ProgramId, type SequenceKind } from '../../domain/programs';
 import { ROLE_QUERY, ROLE_SUBJECT, type ReactorAbi } from '../reactor/abi';
 
 /**
@@ -20,7 +19,7 @@ import { ROLE_QUERY, ROLE_SUBJECT, type ReactorAbi } from '../reactor/abi';
  * of -window_masker_db, or of the taxonomy ID of -window_masker_taxid, which the instance may not
  * hold yet): the warm-up leaves them out.
  */
-const INPUT_OPTIONS: ReadonlySet<string> = new Set([...Object.values(REGION_FLAG), '-window_masker_db', WINDOW_MASKER_TAXID_FLAG]);
+const INPUT_OPTIONS: ReadonlySet<string> = new Set([...Object.values(REGION_FLAG), WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG]);
 
 // The standard genetic code, codons in TCAG order.
 const BASES = 'TCAG';
@@ -62,8 +61,8 @@ const fasta = (dna: string, kind: SequenceKind) => encoder.encode(`>warm-up\n${k
 
 /** The built-in query and subject of `program`, nucleotide or protein as the program reads them. */
 export function warmUpInputs(program: ProgramId): { readonly query: Uint8Array; readonly subject: Uint8Array } {
-  const descriptor = programById(program);
-  return { query: fasta(QUERY, descriptor.query), subject: fasta(SUBJECT, descriptor.subject) };
+  const inputs = PROGRAM_INPUTS[program];
+  return { query: fasta(QUERY, inputs.query), subject: fasta(SUBJECT, inputs.subject) };
 }
 
 /**

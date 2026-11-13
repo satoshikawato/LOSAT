@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { toProgramDescription } from 'losat';
+import { CUSTOM_OUTPUT, type ProgramId } from 'losat/domain';
 import {
   buildArgv,
   commandWords,
@@ -13,9 +15,7 @@ import {
   splitOptions,
   toShellCommand,
 } from '../../src/domain/argv';
-import { CUSTOM_OUTPUT } from '../../src/domain/output-format';
-import { PROGRAMS, type ProgramId } from '../../src/domain/programs';
-import { toProgramDescription } from '../../src/infra/reactor/control';
+import { PROGRAMS } from '../../src/domain/programs';
 
 describe('buildArgv', () => {
   it('puts the program and input names first, then parameters in the given order', () => {

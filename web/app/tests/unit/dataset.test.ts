@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  includedRecords,
-  normalizeExclusion,
-  recordMismatch,
-  recordName,
-  type DatasetRecord,
-  type DatasetRevision,
-} from '../../src/domain/dataset';
+import { recordMismatch } from 'losat/domain';
+import { includedRecords, normalizeExclusion, recordName, type DatasetRecord, type DatasetRevision } from '../../src/domain/dataset';
 
 const record = (index: number, id: string): DatasetRecord => ({
   index,

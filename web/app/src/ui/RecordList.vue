@@ -2,8 +2,8 @@
 // The records of a source, with a box to include or leave out each one. Only the rows in
 // view are drawn, so a source of many records stays responsive.
 import { computed, onMounted, onUnmounted, ref } from 'vue';
+import type { InputRole, SequenceKind } from 'losat/domain';
 import type { DraftSource, SearchDraft } from '../application/draft';
-import type { InputRole, SequenceKind } from '../domain/programs';
 import { looksLikeOtherKind } from '../domain/sequence-kind';
 import { formatCount } from './format';
 

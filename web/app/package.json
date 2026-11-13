@@ -15,10 +15,10 @@
     "lint": "eslint .",
     "test": "vitest run",
     "e2e": "playwright test",
-    "check": "npm run typecheck && npm run lint && npm run test && npm run build"
+    "check": "npm run check -w losat && npm run typecheck && npm run lint && npm run test && npm run build"
   },
   "dependencies": {
-    "@bjorn3/browser_wasi_shim": "0.4.2",
+    "losat": "0.2.0",
     "vue": "3.5.44"
   },
   "devDependencies": {

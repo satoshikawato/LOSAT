@@ -25,13 +25,13 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { instantiateSerial } from 'losat';
+import type { HspRecord } from 'losat/ports';
 import { findReactors } from '../../build/reactors';
 import { hspTable } from '../../src/domain/hsp-table';
 import { splitOutfmt6Row } from '../../src/domain/outfmt6';
 import { buildResultIndex } from '../../src/domain/result-index';
-import { ROLE_QUERY, ROLE_SUBJECT, type ReactorAbi } from '../../src/infra/reactor/abi';
-import { instantiateSerial } from '../../src/infra/reactor/instance';
-import type { HspRecord } from '../../src/ports/engine';
+import { ROLE_QUERY, ROLE_SUBJECT, type ReactorAbi } from '../../../packages/losat/src/infra/reactor/abi';
 
 const ENGINE = resolve(import.meta.dirname, '../../../../LOSAT');
 const PROGRAMS = new Set(['blastn', 'blastp', 'tblastn', 'tblastx']);

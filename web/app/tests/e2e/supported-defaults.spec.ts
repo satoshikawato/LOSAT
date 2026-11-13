@@ -3,7 +3,7 @@
 // option set has NCBI's records in outfmt 0, 6 and 7 (build/verification.ts; the def7.* rows of
 // LOSAT/tests/outfmt0_manifest.tsv), and V-BR ran each program at every thread count that Auto
 // can choose (engine.spec.ts). Auto reads the processors from navigator.hardwareConcurrency in
-// the page (infra/engine-worker/gateway.ts), which the tests set, so that its count is the same
+// the page (web/packages/losat/src/infra/engine-worker/gateway.ts), which the tests set, so that its count is the same
 // on every machine: 6 of 12 processors below 1 MB of input, 32 of 64 from 1 MB.
 import { expect, type Page } from '@playwright/test';
 import { test } from './support/test';

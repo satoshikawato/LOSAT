@@ -56,7 +56,7 @@ async function moduleOf(source: ModuleSource) {
 }
 
 // Test builds: a page arms the next search of this worker to stop its instance at its first
-// output, as a trap in the engine would (tests/e2e/harness/engine.ts, stopDuringSearch).
+// output, as a trap in the engine would (web/app/tests/e2e/harness/engine.ts, stopDuringSearch).
 let stopAtOutput = false;
 if (__LOSAT_TEST_HOOKS__) {
   const arming = new BroadcastChannel(STOP_AT_OUTPUT_CHANNEL);
@@ -74,7 +74,7 @@ function stopIfArmed(): void {
 }
 
 // Test builds: a page arms the next use of the threaded instance to hold at its start until the
-// Gateway ends the runtime, so that a test ends it during the use (tests/e2e/harness/engine.ts,
+// Gateway ends the runtime, so that a test ends it during the use (web/app/tests/e2e/harness/engine.ts,
 // cancelDuringWarmUp). The worker cannot take a message while it holds; the mark of the use
 // count can be read (instance-use.ts).
 let holdUse = false;
@@ -153,7 +153,7 @@ async function run(command: WorkerRun): Promise<void> {
 }
 
 // Test builds drive the worker's run output writer directly, so that the run output
-// contract (tests/contract/run-output.contract.ts) runs with the writer in this worker.
+// contract (web/app/tests/contract/run-output.contract.ts) runs with the writer in this worker.
 const testWriters = new Map<number, { readonly writer: RunOutputWriter; readonly port: MessagePort }>();
 
 function test(command: WorkerTestCommand): void {

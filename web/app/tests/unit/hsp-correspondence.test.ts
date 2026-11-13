@@ -60,8 +60,9 @@ function fixtures(): Map<string, Fixture[]> {
     const program = row['program']!;
     const contract = row['contract'] ?? '';
     if (!PROGRAMS.has(program) || (contract !== '' && contract !== 'approved_db_gencode_deviation')) continue;
-    // LOSAT Web reads FASTA inputs only: a PSSM query (-in_pssm, the manifest's `pssm-gz:` cells) is the CLI's.
-    if (row['query']!.startsWith('pssm-gz:')) continue;
+    // LOSAT Web reads FASTA inputs only: a PSSM query (-in_pssm, the manifest's `pssm:` and `pssm-gz:`
+    // cells) is the CLI's.
+    if (/^pssm(-gz)?:/.test(row['query']!)) continue;
     if ((row['extra_args'] ?? '').includes("'") || (row['extra_args'] ?? '').includes('"')) continue;
     const words = [...(row['task'] ? ['-task', row['task']] : []), ...(row['extra_args'] ?? '').split(/\s+/).filter((w) => w !== '')];
     if (words.includes('-outfmt') || words.includes('-out')) continue;
@@ -189,12 +190,23 @@ function expectFrozen(fixture: Fixture, outputs: Outputs): 'bytes' | 'database' 
 }
 
 /** The first and last coordinates of the alignment lines that start with `label`. */
-function alignmentEnds(section: string, label: 'Query' | 'Sbjct'): [number, number] {
+/**
+ * The first and last coordinates of the label's lines of one section. With -line_length 1 NCBI writes
+ * the first Query line without its start (`Query       T`, the frozen bytes of the t1.*.ll1 rows); the
+ * start is then undefined and only the end can be compared.
+ */
+function alignmentEnds(section: string, label: 'Query' | 'Sbjct'): [number | undefined, number] {
   const lines = section.split('\n').filter((line) => line.startsWith(`${label} `));
   const parse = (line: string) => line.trim().split(/\s+/);
   const first = parse(lines[0]!);
   const last = parse(lines.at(-1)!);
-  return [Number(first[1]), Number(last.at(-1))];
+  const start = /^\d+$/.test(first[1] ?? '') ? Number(first[1]) : undefined;
+  return [start, Number(last.at(-1))];
+}
+
+/** The record's coordinates as the section shows them: the start only where the section writes it. */
+function shownEnds(ends: [number | undefined, number], start: number, end: number): [number | undefined, number] {
+  return [ends[0] === undefined ? undefined : start, end];
 }
 
 /** The raw score, the first and last coordinates of one HSP section of outfmt 0, as a comparable text. */
@@ -268,6 +280,9 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
   expect(at, `${fixture.id}: the rows end with the text`).toBe(out6.length);
 
   // outfmt 0: sections in the order of the records; headings before their subjects' sections.
+  // -sorthits and -sorthsps sort the pairwise output only (NCBI: "Not applicable for outfmt > 4";
+  // blast_format.cpp:1523-1530), so with them the sections follow that order, not the records'.
+  const sortsPairwise = fixture.words.includes('-sorthits') || fixture.words.includes('-sorthsps');
   let previousEnd = 0;
   const headings = new Map<string, readonly [number, number] | null>();
   let sections = 0;
@@ -283,7 +298,7 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
     }
     sections++;
     const [start, end] = record.out0;
-    expect(start, `${where(record)} section order`).toBeGreaterThanOrEqual(previousEnd);
+    if (!sortsPairwise) expect(start, `${where(record)} section order`).toBeGreaterThanOrEqual(previousEnd);
     const [hStart, hEnd] = record.out0_subject!;
     expect(hEnd, `${where(record)} heading before section`).toBeLessThanOrEqual(start);
     const heading = decoder.decode(out0.subarray(hStart, hEnd));
@@ -297,8 +312,10 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
     const section = decoder.decode(out0.subarray(start, end));
     expect(section.startsWith(' Score ='), `${where(record)} section text`).toBe(true);
     expect(section, `${where(record)} section raw score`).toContain(`bits (${record.raw_score}),`);
-    expect(alignmentEnds(section, 'Query'), `${where(record)} Query lines`).toEqual([record.q_start, record.q_end]);
-    expect(alignmentEnds(section, 'Sbjct'), `${where(record)} Sbjct lines`).toEqual([record.s_start, record.s_end]);
+    const queryEnds = alignmentEnds(section, 'Query');
+    const subjectEnds = alignmentEnds(section, 'Sbjct');
+    expect(queryEnds, `${where(record)} Query lines`).toEqual(shownEnds(queryEnds, record.q_start, record.q_end));
+    expect(subjectEnds, `${where(record)} Sbjct lines`).toEqual(shownEnds(subjectEnds, record.s_start, record.s_end));
     previousEnd = end;
   }
   // The text has as many sections and subject headings as the records point to: no section or

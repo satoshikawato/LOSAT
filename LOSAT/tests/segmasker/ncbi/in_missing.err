@@ -1,3 +1,0 @@
-NCBI C++ Exception:
-    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbiargs.cpp", line 618: Error: (CArgException::eNoFile) Argument "in". File is not accessible:  `in/nonexistent.fa'
-

@@ -12,8 +12,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::blastdbcmd_info::ncbi_paths_on_windows;
 use crate::library_examples::example_binary;
+use crate::ncbi_windows_paths::ncbi_paths_on_windows;
 
 /// The fixtures of `program`.
 fn fixtures(program: &str) -> PathBuf {
@@ -118,35 +118,54 @@ fn run_binary(binary: &Path, program: &str, case: &Case) -> Streams {
     (output.stdout, output.stderr, output.status.code().unwrap())
 }
 
-/// NCBI's stdout, stderr and exit status for `case` of `program`. NCBI's bytes come from Linux;
-/// on Windows they are the ones NCBI's code writes there:
+/// NCBI's stdout, stderr and exit status for `case` of `program`. NCBI's bytes come from Linux.
+/// Where NCBI's code does otherwise on Windows, the row expects what it does there (the rest of
+/// the text is the Linux build's, which LOSAT writes on every platform):
 /// - a directory does not open as a file (`CArg_InputFile::x_Open`: the `ifstream::open` of
 ///   MSVC's library fails on a directory, `is_open()` is false, the exception
 ///   `CArgException::eNoFile`), so `-in` naming one is "File is not accessible" as a file that
-///   does not exist, the row `in_missing` with the name of `case` (segmasker and
-///   convert2blastmask open `-in` first; dustmasker opens `-out` first, and the interval writer
-///   of its directory row writes nothing before a record); on Linux the directory opens and its
-///   first read fails;
+///   does not exist: the row `MISSING_INPUT` of the program with the name of `case`
+///   (segmasker and convert2blastmask open `-in` first; dustmasker opens `-out` first, and the
+///   interval writer of its directory row writes nothing before a record; the test
+///   `the_rows_that_read_a_directory_are_the_ones_ncbi_read_as_one` checks that the standard
+///   output is the same); on Linux the directory opens and its first read fails;
 /// - the paths of the database messages and the search path (`ncbi_paths_on_windows`).
 fn expected(program: &str, case: &Case) -> Streams {
     if cfg!(windows) {
         if let Some(directory) = input_directory(program, case) {
-            let missing = cases(program)
-                .into_iter()
-                .find(|row| row.name == "in_missing")
-                .unwrap();
-            let missing_name = input(&missing).unwrap().to_string();
+            let (missing, missing_name) = missing_input(program);
             let named = |bytes: Vec<u8>| -> Vec<u8> {
                 String::from_utf8(bytes)
                     .unwrap()
                     .replace(&format!("`{missing_name}'"), &format!("`{directory}'"))
                     .into_bytes()
             };
-            let (out, err, status) = expected_row(program, "in_missing");
+            let (out, err, status) = expected_row(program, missing);
             return (named(out), named(err), status);
         }
     }
     expected_row(program, &case.name)
+}
+
+/// The row of each program's table whose `-in` names a file that does not exist.
+const MISSING_INPUT: [(&str, &str); 3] = [
+    ("dustmasker", "noin_file"),
+    ("segmasker", "noin_file"),
+    ("convert2blastmask", "in_missing"),
+];
+
+/// The name of `program`'s row `MISSING_INPUT` and the file its `-in` names.
+fn missing_input(program: &str) -> (&'static str, String) {
+    let (_, row) = MISSING_INPUT
+        .into_iter()
+        .find(|(name, _)| *name == program)
+        .expect("a masking program of MISSING_INPUT");
+    let case = cases(program)
+        .into_iter()
+        .find(|case| case.name == row)
+        .expect("the row of MISSING_INPUT in the table");
+    let name = input(&case).expect("the -in of the row").to_string();
+    (row, name)
 }
 
 /// The value of `-in` in `case`.
@@ -156,8 +175,8 @@ fn input(case: &Case) -> Option<&str> {
 }
 
 /// The value of `-in` in `case` when it names a directory that the program opens as a file: the
-/// FASTA input (`-infmt blastdb` opens no file of that name), a name that is not blank (Windows
-/// reads `tests/<program>/ ` as the directory itself).
+/// FASTA input (`-infmt blastdb` opens no file of that name), a name that is not blank (an
+/// empty name joins to the fixture directory itself, and so does `" "` on Windows).
 fn input_directory<'a>(program: &str, case: &'a Case) -> Option<&'a str> {
     let database = case
         .words
@@ -201,8 +220,8 @@ fn expected_row(program: &str, name: &str) -> Streams {
 }
 
 /// Whether `case` runs on this platform: a row that writes its output to a device file runs
-/// where the file is, `/dev/full` on Linux, `/dev/null` on Unix (`-logfile /dev/null` is NCBI's
-/// name for no log file, `CDiagContext::SetLogFile`, on every platform).
+/// where the file is, `/dev/full` on Linux, `/dev/null` on Unix (`-logfile /dev/null` means no
+/// log file on every platform: NCBI's `SetLogFile` compares the name, corelib/ncbidiag.cpp:7594).
 fn runs_here(case: &Case) -> bool {
     let out = case
         .words
@@ -362,13 +381,17 @@ fn convert2blastmask_through_the_library_gives_the_command_line_s_bytes() {
     );
 }
 
-// The rows that Windows answers as `in_missing` (`expected`) are the ones whose `-in` NCBI read as
-// a directory on Linux.
+// The rows that Windows answers as a missing file (`expected`) are the ones whose `-in` NCBI
+// read as a directory on Linux, and their standard output on Linux is that of the missing file
+// (a writer that wrote something before the failed read, or as the program ended, would write it
+// on Windows too, where the row would need its own standard output).
 #[test]
 fn the_rows_that_read_a_directory_are_the_ones_ncbi_read_as_one() {
     for program in ["dustmasker", "segmasker", "convert2blastmask"] {
+        let (missing, _) = missing_input(program);
+        let (missing_out, _, _) = expected_row(program, missing);
         for case in cases(program) {
-            let (_, err, _) = expected_row(program, &case.name);
+            let (out, err, _) = expected_row(program, &case.name);
             let read_a_directory = String::from_utf8_lossy(&err)
                 .contains("basic_filebuf::xsgetn error reading the file: Is a directory");
             assert_eq!(
@@ -377,6 +400,9 @@ fn the_rows_that_read_a_directory_are_the_ones_ncbi_read_as_one() {
                 "{program} {}",
                 case.name
             );
+            if read_a_directory {
+                assert_eq!(out, missing_out, "{program} {}: standard output", case.name);
+            }
         }
     }
 }

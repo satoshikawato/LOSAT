@@ -792,9 +792,9 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// With `ReaderFlags::mask_from_fasta`, `CMaskFromFasta::GetMask()` of the record that
-    /// `read_one_seq` read last (after an error, what it had read of that record): the intervals of its lower case letters and of its
-    /// interval lines (0-based, inclusive), in the order in which they were closed or read;
-    /// empty otherwise. The intervals stay with the reader (not in `Record`) so that the
+    /// `read_one_seq` read last (after an error, what it had read of that record): the
+    /// intervals of its lower case letters and of its interval lines (0-based, inclusive), in
+    /// the order in which they were closed or read; empty otherwise. The intervals stay with the reader (not in `Record`) so that the
     /// records of the other programs, which never have any, are not made larger.
     pub(crate) fn take_masks(&mut self) -> Vec<(u32, u32)> {
         std::mem::take(&mut self.state.masks)

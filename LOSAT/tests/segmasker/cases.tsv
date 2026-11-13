@@ -408,8 +408,6 @@ help_help	-help
 help_noargs_extra	extra_positional
 ps_flag_value	-in in/basic.fa -parse_seqids true
 dup_opt	-in in/basic.fa -window 10 -window 20
-# in_missing: NCBI BLAST+ 2.17.0, the official Linux x64 release (local oracle), 2026-11-14, ad-RG-K-9 (line RG item K3d). On Windows, where a directory does not open as a file, the rows with -in naming a directory expect its bytes for that name (masker_fixtures.rs).
-in_missing	-in in/nonexistent.fa
 in_dir	-in in
 in_dir_mask	-in in -outfmt maskinfo_asn1_text
 out_dash	-in in/basic.fa -out -

@@ -1247,7 +1247,8 @@ pub struct WindowMaskerRegistry {
     pub posts_once: bool,
 }
 
-/// The NCBI application settings that LOSAT reproduces (`check_ncbi_application_settings`).
+/// The NCBI application settings that LOSAT reproduces: the command line's from its application
+/// start (`ApplicationStart::settings`), the library's from `library_application_settings`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApplicationSettings {
     /// `SDataLoaderConfig::UseDataLoaders()` of the query and subject readers: whether
@@ -2136,10 +2137,10 @@ pub enum Preparsed<S> {
 /// one is printed, line RG item E3), `-dryrun` and `-conffile`. A `-logfile` or `-conffile`
 /// without a value is dropped. `-dryrun` ends the run after the arguments (`cli::main_entry`;
 /// rpsbproc's after its `Init`, `rpsbproc::dry_run`); the file of the last `-conffile` is the
-/// application start's configuration (`start_application`, line RG item E1).
+/// application start's configuration (`ApplicationStart::of_process`, line RG item E1).
 /// `words` are the arguments after the program's name. This is the one reading of these words:
 /// the command line's entry (the versions, before the configuration load, and the words that
-/// the argument reader gets, `cli::try_parse_from`), `start_application`,
+/// the argument reader gets, `cli::try_parse_from_start`), `ApplicationStart::of_process`,
 /// `cli::ncbi_version_request` and `ncbi_app` read them here, and `log_file` is NCBI's first scan
 /// of `-logfile`.
 pub fn preparse<S: AsRef<OsStr> + Clone>(words: &[S]) -> Preparsed<S> {
@@ -2193,7 +2194,7 @@ pub fn preparse<S: AsRef<OsStr> + Clone>(words: &[S]) -> Preparsed<S> {
 }
 
 /// What NCBI's application start writes about the registry files, and the settings it leaves
-/// (`start_application`). NCBI reads the system-wide file (`.ncbirc`) twice: when the
+/// (`ApplicationStart::of_process`). NCBI reads the system-wide file (`.ncbirc`) twice: when the
 /// program's usage report is made (`CBlastUsageReport`, a member of every BLAST+ application,
 /// before `AppMain`; `usage_report`) and when the application loads its configuration
 /// (`<program>.ini`, then `.ncbirc`, after the `-logfile`, `-version` and `-conffile` words and
@@ -2266,7 +2267,7 @@ pub struct ApplicationStart {
     /// A registry file that the start writes a message about, for LOSAT's library, which runs
     /// no application start and refuses it (`library_settings`).
     library_note: Option<String>,
-    /// What `check_ncbi_application_settings` gives after the start.
+    /// The settings after the start (`settings`).
     settings: Result<ApplicationSettings, String>,
 }
 
@@ -2282,22 +2283,16 @@ enum ConfigLoad {
     NotFound(String),
 }
 
-/// The application start of this process: made once by the command line's entry for an NCBI
-/// program (`start_application`), as NCBI's application starts once.
-static APPLICATION_START: std::sync::OnceLock<ApplicationStart> = std::sync::OnceLock::new();
-
-/// The application start of `program` in this process, made the first time and then kept: what
-/// the command line's entry writes before the program's arguments are read
-/// (`ApplicationStart`), and the settings that `check_ncbi_application_settings` gives after
-/// it.
-///
-/// `words` are the arguments after the program's name: the file of their last `-conffile`
-/// (`preparse`) is loaded in place of `<program>.ini`.
-pub fn start_application<S: AsRef<OsStr> + Clone>(
-    program: &str,
-    words: &[S],
-) -> &'static ApplicationStart {
-    APPLICATION_START.get_or_init(|| {
+impl ApplicationStart {
+    /// The application start of `program` in this process (its environment, its registry files
+    /// and its facts, `ProcessFacts`): what the command line's entry writes before the program's
+    /// arguments are read, and the settings that it leaves (`settings`). The entry makes one
+    /// and gives it to what reads after it (the argument reader, `cli::try_parse_from_start`; the
+    /// program's run), as NCBI's application starts once.
+    ///
+    /// `words` are the arguments after the program's name: the file of their last `-conffile`
+    /// (`preparse`) is loaded in place of `<program>.ini`.
+    pub fn of_process<S: AsRef<OsStr> + Clone>(program: &str, words: &[S]) -> ApplicationStart {
         let conffile = match preparse(words) {
             Preparsed::Words { conffile, .. } => conffile,
             Preparsed::Version(_) => None,
@@ -2309,16 +2304,19 @@ pub fn start_application<S: AsRef<OsStr> + Clone>(
             &|name: &str| std::env::var_os(name),
             &ProcessFacts::of_this_process(),
         )
-    })
-}
+    }
 
-/// The application start of this process, when the command line's entry made one
-/// (`start_application`).
-pub fn application_start_of_process() -> Option<&'static ApplicationStart> {
-    APPLICATION_START.get()
-}
+    /// The program whose start this is.
+    pub fn program(&self) -> &str {
+        &self.program
+    }
 
-impl ApplicationStart {
+    /// The NCBI application settings that LOSAT reproduces after the start, or LOSAT's refusal
+    /// of them (`library_application_settings` describes them).
+    pub fn settings(&self) -> Result<ApplicationSettings, String> {
+        self.settings.clone()
+    }
+
     /// The usage report's messages, which go to `cerr` at once, or LOSAT's refusal there: a
     /// registry file that LOSAT does not read as NCBI does, a `[BLAST] BLAST_USAGE_REPORT` that
     /// is not a Boolean (NCBI aborts), or a refused environment variable when there are
@@ -2481,7 +2479,7 @@ fn replays_to_stderr(program: &str) -> bool {
 /// 	}
 /// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1634-1648 (`IncludeNcbircIfAllowed`,
-/// quoted at `check_ncbi_application_settings`)
+/// quoted at `library_application_settings`)
 fn usage_report_reads_ncbirc(program: &str, env: &dyn Fn(&str) -> Option<OsString>) -> bool {
     has_usage_report(program)
         && usage_report_variable(env) != Some(Some(false))
@@ -2542,7 +2540,7 @@ fn usage_report_variable(env: &dyn Fn(&str) -> Option<OsString>) -> Option<Optio
 }
 
 /// Whether the environment turns `.ncbirc` off for every registry (`IncludeNcbircIfAllowed`,
-/// quoted at `check_ncbi_application_settings`): `NCBI_DONT_USE_NCBIRC`, or
+/// quoted at `library_application_settings`): `NCBI_DONT_USE_NCBIRC`, or
 /// `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC` (the environment's layer of `[NCBI] DONT_USE_NCBIRC`),
 /// set with any value.
 fn ncbirc_turned_off(env: &dyn Fn(&str) -> Option<OsString>) -> bool {
@@ -2656,10 +2654,10 @@ fn window_masker_path_of(
 /// entry `[BLAST] BLASTDB` of the database search path, and the directory of
 /// `-window_masker_taxid` (`window_masker_path_of`).
 ///
-/// After the command line's entry has started `program`'s application (`start_application`),
-/// these are the settings of that start, which has written what NCBI writes about the files.
-/// Without it (LOSAT's library: `api`), a registry file that NCBI's start writes a message
-/// about (a syntax error) is refused as well (`ApplicationStart::library_settings`).
+/// The command line's entry has these from its application start (`ApplicationStart::settings`),
+/// which has written what NCBI writes about the files. LOSAT's library (`api`) runs no start and
+/// reads them here, of this process: a registry file that NCBI's start writes a message about
+/// (a syntax error) is refused as well (`ApplicationStart::library_settings`).
 ///
 /// NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1254-1259
 /// ```c
@@ -2691,21 +2689,17 @@ fn window_masker_path_of(
 ///             return x_FindRegistry(CDirEntry::MakePath(dir, '.' + base, ext)
 ///                                   + "rc", eName_AsIs);
 /// ```
-pub fn check_ncbi_application_settings(program: &str) -> Result<ApplicationSettings, String> {
-    match APPLICATION_START.get() {
-        Some(start) if start.program == program => start.settings.clone(),
-        _ => application_settings(
-            program,
-            std::env::vars_os(),
-            &|name: &str| std::env::var_os(name),
-            &ProcessFacts::of_this_process(),
-        ),
-    }
+pub fn library_application_settings(program: &str) -> Result<ApplicationSettings, String> {
+    application_settings(
+        program,
+        std::env::vars_os(),
+        &|name: &str| std::env::var_os(name),
+        &ProcessFacts::of_this_process(),
+    )
 }
 
-/// `check_ncbi_application_settings` without an application start (LOSAT's library), over the
-/// environment `variables` (all of them) and `env` (one of them by name), and the facts of the
-/// process (`ProcessFacts`).
+/// `library_application_settings` over the environment `variables` (all of them) and `env` (one
+/// of them by name), and the facts of the process (`ProcessFacts`).
 fn application_settings(
     program: &str,
     variables: impl Iterator<Item = (OsString, OsString)>,
@@ -2760,7 +2754,7 @@ fn application_settings(
 /// 		bool enable = NStr::StringToBool(registry->Get("BLAST", "BLAST_USAGE_REPORT"));
 /// ```
 /// The environment layer of `HasEntry("NCBI", "DONT_USE_NCBIRC")` (`IncludeNcbircIfAllowed`,
-/// quoted at `check_ncbi_application_settings`) is `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC`, set with
+/// quoted at `library_application_settings`) is `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC`, set with
 /// any value.
 fn application_start(
     program: &str,

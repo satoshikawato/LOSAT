@@ -5135,7 +5135,7 @@ fn extend_preliminary_blastp_hit(
 }
 
 /// `settings` are the NCBI application settings that LOSAT reproduces
-/// (`ncbi_environment::check_ncbi_application_settings`): the readers of the query and the
+/// (`ncbi_environment::ApplicationSettings`): the readers of the query and the
 /// subjects use their data loaders (`ReaderConfig`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:67-72

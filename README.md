@@ -555,7 +555,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 **makeblastdb**
 - `-randomize`, `-mask_data`, `-mask_id`, `-mask_desc`, `-gi_mask`, `-gi_mask_name`, `-oid_masks`, `-metadata_output_prefix`.
 - `-input_type blastdb`, `asn1_txt` and `asn1_bin` (`fasta` works).
-- A FASTA record of 4,294,967,296 letters or more, counting the letters of its `>?` gap lines, whose length modulo 2^32 is 2,147,483,647 or less (NCBI counts the length of a record in 32 bits, which wrap there; with a larger remainder NCBI's error for a sequence longer than 2,147,483,647 bases comes as in NCBI).
+- A FASTA record of 4,294,967,296 letters or more, counting the letters of its gaps, whose sequence NCBI builds from all those letters (NCBI counts the length of a record in 32 bits, which wrap there, and allocates the letters of the gaps). What NCBI does with such a record without building it comes as in NCBI: the error for a sequence longer than 2,147,483,647 bases when the length modulo 2^32 is above that, the record skipped when that remainder is 0, when it has a gi above 4294967295 or when it starts with a gap of unknown length, and the error for a protein whose `>?` lines sum to a multiple of 2^32.
 
 **Programs LOSAT does not provide**
 - `deltablast`, `makeprofiledb`, `blast_formatter`, `blastdb_aliastool`, `windowmasker`, `blast_formatter_vdb`, `blast_vdb_cmd`, `blastdbcheck`, `blastn_vdb`, `tblastn_vdb`, `makembindex`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh`, `cleanup-blastdb-volumes.py`.

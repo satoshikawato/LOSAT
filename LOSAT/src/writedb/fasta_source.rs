@@ -26,8 +26,10 @@ pub(crate) use title::fasta_reader_fasta;
 
 use std::io::Read;
 
-use super::bioseq::{Bioseq, ParsedIds, SeqData};
-use reader::{DeltaSeq, FastaReader, ReadError, ReaderFlags, ReaderWarning, SeqInst};
+use super::bioseq::{Bioseq, ParsedIds, PastSeqPos, SeqData};
+use reader::{
+    DeltaSeq, FastaReader, PastSeqPosForm, ReadError, ReaderFlags, ReaderWarning, SeqInst,
+};
 
 /// An error that ends the reading: its message and how makeblastdb reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,9 +47,6 @@ pub enum SourceErrorKind {
     /// makeblastdb prints the message alone, "BLAST ran out of memory", and exits with its
     /// status for that.
     OutOfMemory,
-    /// LOSAT's refusal (`WriteDbError::Other`): a record past NCBI's 32-bit length
-    /// (`reader::SeqInst::PastSeqPos`).
-    Refused,
 }
 
 impl SourceError {
@@ -176,8 +175,7 @@ impl<R: Read> FastaBioseqSource<R> {
     /// record above 2,147,483,647 residues is returned with its length and no sequence
     /// data: NCBI stops at that length, before `x_EditAndAddBioseq`. NCBI counts in 32
     /// bits: a record of 4,294,967,296 residues or more (gaps included) has the length of
-    /// its count modulo 2^32, and one that this length does not stop is refused
-    /// (`reader::SeqInst::PastSeqPos`).
+    /// its count modulo 2^32 (`reader::SeqInst::PastSeqPos`, `Bioseq::past_seq_pos`).
     ///
     /// A failed read of the input ends the reading with "Read error" and the system's
     /// message (LOSAT's text: NCBI's line reader throws a `CIOException` "Read error").
@@ -254,19 +252,35 @@ impl<R: Read> FastaBioseqSource<R> {
                 }
             }
         };
-        if let SeqInst::PastSeqPos { length } = record.inst {
-            self.reader = None;
-            return Err(SourceError {
-                message: format!(
-                    "{} is not supported by LOSAT's makeblastdb",
-                    reader::past_seq_pos_refusal(length)
-                ),
-                kind: SourceErrorKind::Refused,
-            });
-        }
-        let Ok((length, seq_data)) = fix_bioseq_deltas(record.inst) else {
-            self.reader = None;
-            return Err(SourceError::out_of_memory());
+        // A record past NCBI's 32-bit length comes with NCBI's (wrapped) length and no data:
+        // `AddSequences` skips it or stops at its length first, as any record
+        // (`CBuildDatabase::add_sequences`), and `s_FixBioseqDeltas` then throws for a protein
+        // delta, returns a delta that starts with `Seq-loc null` unchanged (no data), or
+        // builds the data, which LOSAT refuses (`PastSeqPos::Refused`).
+        let (length, seq_data, past_seq_pos) = match record.inst {
+            SeqInst::PastSeqPos {
+                length,
+                seq_pos_length,
+                form,
+            } => {
+                let past = match form {
+                    PastSeqPosForm::Delta | PastSeqPosForm::DeltaFromNull if is_aa => {
+                        Some(PastSeqPos::ProteinDelta)
+                    }
+                    PastSeqPosForm::DeltaFromNull => None,
+                    PastSeqPosForm::Delta | PastSeqPosForm::Residues => {
+                        Some(PastSeqPos::Refused { length })
+                    }
+                };
+                (seq_pos_length, None, past)
+            }
+            inst => {
+                let Ok((length, seq_data)) = fix_bioseq_deltas(inst) else {
+                    self.reader = None;
+                    return Err(SourceError::out_of_memory());
+                };
+                (length, seq_data, None)
+            }
         };
         Ok(Some(Bioseq {
             local_id: record.local_id.to_string(),
@@ -275,6 +289,7 @@ impl<R: Read> FastaBioseqSource<R> {
             length,
             seq_data,
             parsed,
+            past_seq_pos,
         }))
     }
 }
@@ -463,8 +478,9 @@ fn fix_bioseq_deltas(
 ) -> Result<(u64, Option<SeqData>), std::collections::TryReserveError> {
     Ok(match inst {
         SeqInst::Virtual => (0, None),
-        // `next_bioseq` refuses a record past NCBI's `TSeqPos` before.
-        SeqInst::TooLong { length } | SeqInst::PastSeqPos { length } => (length, None),
+        SeqInst::TooLong { length } => (length, None),
+        // `next_bioseq` hands a record past NCBI's `TSeqPos` over without calling this.
+        SeqInst::PastSeqPos { seq_pos_length, .. } => (seq_pos_length, None),
         SeqInst::Raw { length, seq_data } => (length, Some(seq_data)),
         SeqInst::Delta {
             length,

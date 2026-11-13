@@ -60,7 +60,8 @@
 #![allow(clippy::too_many_arguments)]
 
 use super::{
-    x_greedy_cell_slow, XGreedyRowCold, XGreedyRowState, FENCE_SENTRY, X_GREEDY_BLOCK, X_NO_CELL,
+    x_greedy_cell_slow, x_past_seq1_end, XGreedyRowCold, XGreedyRowState, FENCE_SENTRY,
+    X_GREEDY_BLOCK, X_NO_CELL,
 };
 use crate::algorithm::blastn::constants::INVALID_OFFSET;
 
@@ -212,6 +213,17 @@ unsafe fn x_greedy_row_fused<const REVERSE: bool>(
                 -1
             };
             if index < 0 {
+                // A diagonal past the end of `seq1` (`x_past_seq1_end`).
+                let seq1_index = seq2_index + block_first + i as i32;
+                if x_past_seq1_end::<REVERSE>(seq2, len1, len2, seq1_index, seq2_index) {
+                    *current.add(cell) = seq2_index;
+                    let extent = seq1_index + seq2_index;
+                    if extent > curr_extent {
+                        curr_extent = extent;
+                        best_cell = cell;
+                    }
+                    continue;
+                }
                 cold.diag_lower = diag_lower;
                 cold.curr_extent = curr_extent;
                 cold.best_cell = best_cell;

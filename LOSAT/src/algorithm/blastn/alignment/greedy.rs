@@ -2660,6 +2660,44 @@ struct XGreedyRowCold {
 
 const X_NO_CELL: usize = usize::MAX;
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:352-361
+/// ```c
+///             while (seq1_index < len1 && seq2_index < len2 &&
+///                    seq1[seq1_index] < 4 &&
+///                    seq1[seq1_index] == seq2[seq2_index]) {
+/// ...
+///             if (seq2_index < len2 && seq2[seq2_index] == FENCE_SENTRY) {
+///                 ASSERT(fence_hit);
+///                 *fence_hit = TRUE;
+/// ```
+/// Whether a kept diagonal lies past the end of `seq1` (`seq1_index > len1`, reached from a
+/// neighbour's offset plus one) inside `seq2`, without the fence sentry at `seq2_index`. Such a
+/// diagonal has no slide: `s_FindFirstMismatch` returns 0 at once, and of the updates after it only
+/// `last_seq2_off[d][k] = seq2_index` and the extent can change (the seed needs a run longer than
+/// the longest, the end tests need `seq2_index == len2` or `seq1_index == len1`). The row loops
+/// handle it inline, as the C loop does, instead of sending it to their out-of-line cell; with an
+/// X-drop that drops no diagonal, most diagonals of the late distances are such diagonals.
+///
+/// SAFETY: `seq2` readable for `len2` bytes.
+#[inline(always)]
+pub(super) unsafe fn x_past_seq1_end<const REVERSE: bool>(
+    seq2: *const u8,
+    len1: i32,
+    len2: i32,
+    seq1_index: i32,
+    seq2_index: i32,
+) -> bool {
+    if seq1_index <= len1 || !(0..len2).contains(&seq2_index) {
+        return false;
+    }
+    let at = if REVERSE {
+        len2 - 1 - seq2_index
+    } else {
+        seq2_index
+    };
+    *seq2.add(at as usize) != FENCE_SENTRY
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:571-614
 /// ```c
 ///             index = s_FindFirstMismatch(seq1, seq2, len1, len2,
@@ -2936,6 +2974,17 @@ unsafe fn x_greedy_row_impl<const REVERSE: bool>(
             }
             let index = *slide.add(i);
             if index < 0 {
+                // A diagonal past the end of `seq1` (`x_past_seq1_end`).
+                let seq1_index = seq2_index + block_first + i as i32;
+                if x_past_seq1_end::<REVERSE>(seq2, len1, len2, seq1_index, seq2_index) {
+                    *current.add(cell) = seq2_index;
+                    let extent = seq1_index + seq2_index;
+                    if extent > curr_extent {
+                        curr_extent = extent;
+                        best_cell = cell;
+                    }
+                    continue;
+                }
                 cold.diag_lower = diag_lower;
                 cold.curr_extent = curr_extent;
                 cold.best_cell = best_cell;

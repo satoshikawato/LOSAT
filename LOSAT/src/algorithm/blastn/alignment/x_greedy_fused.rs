@@ -75,7 +75,7 @@
 
 #![allow(clippy::too_many_arguments)]
 
-use super::{x_first_mismatch, GreedyNonAffineMem, GreedySeed, FENCE_SENTRY};
+use super::{x_first_mismatch, x_past_seq1_end, GreedyNonAffineMem, GreedySeed, FENCE_SENTRY};
 use crate::algorithm::blastn::constants::INVALID_OFFSET;
 #[cfg(test)]
 use std::cell::Cell;
@@ -566,6 +566,18 @@ unsafe fn x_fused_loop<const REVERSE: bool, const WIDE: bool>(
                     k += 1;
                     continue;
                 }
+            }
+            // A diagonal past the end of `seq1` (`x_past_seq1_end`).
+            if x_past_seq1_end::<REVERSE>(seq2, len1, len2, seq1_index, seq2_index) {
+                diag_upper = k;
+                *current.add(k as usize) = seq2_index;
+                let extent = seq1_index + seq2_index;
+                if extent > curr_extent {
+                    curr_extent = extent;
+                    curr_diag = k;
+                }
+                k += 1;
+                continue;
             }
             let next = x_cell_cold::<REVERSE>(
                 seq1,

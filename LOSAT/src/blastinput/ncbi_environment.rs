@@ -2422,7 +2422,7 @@ impl ApplicationStart {
 /// malformed file: the report once, exit status 2; dustmasker writes it twice; fixtures
 /// `conf_malformed`).
 fn replays_collected(program: &str) -> bool {
-    program != "segmasker"
+    !matches!(program, "segmasker" | "convert2blastmask")
 }
 
 fn replays_to_stderr(program: &str) -> bool {

@@ -147,6 +147,18 @@ fn run_main_entry() -> Result<()> {
     if argv.get(1).is_some_and(|word| word == "segmasker") {
         std::process::exit(crate::segmasker::run(&argv[2..]));
     }
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263
+    // ```c++
+    // int main(int argc, const char* argv[])
+    // {
+    //     // Execute main application function
+    //     return CConvert2BlastMaskApplication().AppMain(argc, argv);
+    // }
+    // ```
+    // `losat convert2blastmask` too.
+    if argv.get(1).is_some_and(|word| word == "convert2blastmask") {
+        std::process::exit(crate::convert2blastmask::run(&argv[2..]));
+    }
     // No NCBI counterpart: makes those names (`cli::install_shims`). Read before clap, as the
     // top level has no options of its own.
     if argv

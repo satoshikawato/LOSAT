@@ -377,6 +377,37 @@ fn the_error_of_a_record_without_residues() {
     );
 }
 
+/// A record of 4,294,967,296 letters or more, counting its gaps, is refused (NCBI's length is
+/// a 32-bit `TSeqPos`; line RG DECISIONS K3-6), with nothing allocated for its gaps; the
+/// records before it are read.
+#[test]
+fn a_record_past_32_bits_is_refused() {
+    for (input, protein, length) in [
+        (
+            &b">a\nACGT\n>b\nA\n>?4294967295\n"[..],
+            false,
+            4_294_967_296u64,
+        ),
+        (
+            &b">a\nACGT\n>b\nAC\n>?4294967295\n>?1\nA\n"[..],
+            false,
+            4_294_967_299,
+        ),
+        (
+            &b">a\nMKV\n>b\nM\n>?4294967295\n>?4294967295\nKK\n"[..],
+            true,
+            8_589_934_593,
+        ),
+    ] {
+        let read = run(input, protein, false);
+        assert_eq!(read.records.len(), 1);
+        let Some(MaskReadError::Refused(what)) = &read.error else {
+            panic!("{:?}", read.error)
+        };
+        assert!(what.contains(&format!("({length};")), "{what}");
+    }
+}
+
 struct FailingRead<'a>(&'a [u8]);
 
 impl Read for FailingRead<'_> {

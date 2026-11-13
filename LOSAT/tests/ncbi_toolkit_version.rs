@@ -1,7 +1,8 @@
 //! The NCBI C++ Toolkit options `-version-full`, `-version-full-xml` and `-version-full-json` of
 //! every program (line RG item E3), against NCBI BLAST+ 2.17.0, the official Linux x64 release and
 //! bioconda's build for rpstblastn, dustmasker and segmasker, and NCBI's rpsbproc 0.5.1 (probes of
-//! 2026-11-13, `remaining-gaps-20261112/E/SURVEY_E3.md`, run with `env -i` in a fresh directory):
+//! 2026-11-13, `remaining-gaps-20261112/E/SURVEY_E3.md`, run with `env -i` in a fresh directory;
+//! convert2blastmask, which line RG item K3 added during E3, on the official release's binary):
 //! the application prints the first version word before `--` (in an option's value too, before
 //! the configuration is loaded and the arguments are read) and exits 0. The forms are NCBI's, the
 //! values LOSAT's (`ncbi_version::print`, RG DECISIONS E3-1): NCBI's first line (`blastn: 2.17.0+`,
@@ -64,7 +65,7 @@ fn run_in(dir: &Path, program: &str, words: &[&str]) -> Output {
 
 /// The programs, NCBI's version of each (the first line of its `-version-full`, probes `vf`, and
 /// the numbers of its XML and JSON `version_info`), and an option of each that takes a value.
-const PROGRAMS: [(&str, &str, [&str; 3], &str); 13] = [
+const PROGRAMS: [(&str, &str, [&str; 3], &str); 14] = [
     ("blastn", "2.17.0+", ["2", "17", "0"], "-out"),
     ("blastp", "2.17.0+", ["2", "17", "0"], "-out"),
     ("blastx", "2.17.0+", ["2", "17", "0"], "-out"),
@@ -78,6 +79,7 @@ const PROGRAMS: [(&str, &str, [&str; 3], &str); 13] = [
     ("blastdbcmd", "2.17.0+", ["2", "17", "0"], "-out"),
     ("dustmasker", "1.0.0", ["1", "0", "0"], "-out"),
     ("segmasker", "1.0.0", ["1", "0", "0"], "-out"),
+    ("convert2blastmask", "2.17.0+", ["2", "17", "0"], "-out"),
 ];
 
 /// LOSAT's package: its version, and its numbers in the XML and JSON.

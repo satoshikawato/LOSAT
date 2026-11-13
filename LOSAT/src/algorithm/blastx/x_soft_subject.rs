@@ -68,7 +68,7 @@ fn scan_ranges(record: &FastaRecord) -> Vec<(i32, i32)> {
 }
 
 /// The word finder of a subject with `ranges` (`seed::word_finder_over`), with each batch of word
-/// hits added to `seeds` when the diagnostic stages trace them.
+/// hits added to `seeds` when it is given (the tests).
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]

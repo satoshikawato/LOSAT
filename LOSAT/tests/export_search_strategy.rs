@@ -1,5 +1,6 @@
-//! `-export_search_strategy FILE` of blastn, blastp, blastx, tblastn and tblastx against the bytes
-//! that NCBI BLAST+ 2.17.0 `-num_threads 1` writes (line RG, item F1): the strategy file (one
+//! `-export_search_strategy FILE` of blastn, blastp, blastx, tblastn and tblastx (line RG, item F1),
+//! and of psiblast with a FASTA query, rpsblast and rpstblastn (item F1b-1), against the bytes
+//! that NCBI BLAST+ 2.17.0 `-num_threads 1` writes: the strategy file (one
 //! `Blast4-request` per query batch, written before the batch's search), the standard output, the
 //! standard error and the exit status, with `-subject` and `-db`, several batches (`BATCH_SIZE`;
 //! from the second request on, `EffectiveSearchSpace` is the batch before's), `-searchsp`,
@@ -11,15 +12,21 @@
 //! errors (the file is made after the argument parser and before the other options are read: an
 //! error after it leaves the file empty, the parser's errors leave an existing file alone).
 //! The first batch's request alone when NCBI fails to format that batch in BLAST XML (a matrix
-//! name its XML data does not know). The rows that LOSAT refuses (DECISIONS 15, 21 and 26 of line
-//! RG; tblastn `-in_pssm`, item F1b) check the refusal. blastp's query blocks and the `0` side of
+//! name its XML data does not know). psiblast's request of each query (before its rounds, with the
+//! search space of the query before; `Web_StepNumber`), rpsblast's and rpstblastn's (the profile
+//! database's length and `.aux` costs in the requests after the first; `-mt_mode 1` at 4 and 8
+//! threads writes NCBI's `-num_threads 1` file, DECISIONS F1b-2). The rows that LOSAT refuses
+//! (DECISIONS 15, 21 and 26 of line RG; `-in_pssm` of tblastn and psiblast, item F1b-2) check the
+//! refusal. blastp's query blocks and the `0` side of
 //! the default-on switches that the strategy's paths cross write the same files.
 //!
 //! The cases are the rows of `tests/fixtures/strategy/cases.tsv` (its header says what the
 //! columns mean); the frozen bytes are `tests/fixtures/strategy/<name>.ss`, `.out` and `.err`,
 //! written by NCBI's program run from a copy of `LOSAT/` (the RG-F1 freeze script
-//! `remaining-gaps-20261112/F/f1/freeze_strategy.py` of the line's records, on ws `env_blast`
-//! 2.17.0). Every row runs at 1, 4 and 8 threads.
+//! `remaining-gaps-20261112/F/f1/freeze_strategy.py` of the line's records, NCBI BLAST+ 2.17.0).
+//! Every row runs at 1, 4 and 8 threads. An env value `{rps:NAMES[-EXT]}` is a folder of the
+//! run's own with the profile databases NAMES (`+`-separated) of `tests/db_search/rps` inflated,
+//! without their files of extension EXT (`rps_databases`); NCBI's messages name it `{RPS}`.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -109,7 +116,57 @@ fn unix_separators(text: &str) -> String {
     out
 }
 
+/// `{rps:NAMES[-EXT]}`: the profile databases NAMES (separated by `+`) of `tests/db_search/rps`,
+/// their `NAME.*.gz` files inflated into `dir/rpsdb` without those of extension EXT (`-aux`: no
+/// `.aux` file). The folder's path.
+fn rps_databases(spec: &str, dir: &Path) -> PathBuf {
+    use std::io::Read;
+    let (names, drop) = match spec.split_once('-') {
+        Some((names, extension)) => (names, Some(format!(".{extension}"))),
+        None => (spec, None),
+    };
+    let target = dir.join("rpsdb");
+    std::fs::create_dir_all(&target).unwrap();
+    let source = engine().join("tests/db_search/rps");
+    for entry in std::fs::read_dir(&source).unwrap() {
+        let file = entry.unwrap().file_name().to_string_lossy().into_owned();
+        let Some(stem) = file.strip_suffix(".gz") else {
+            continue;
+        };
+        if !names
+            .split('+')
+            .any(|name| stem.starts_with(&format!("{name}.")))
+            || drop
+                .as_deref()
+                .is_some_and(|extension| stem.ends_with(extension))
+        {
+            continue;
+        }
+        let mut bytes = Vec::new();
+        flate2::read::GzDecoder::new(std::fs::File::open(source.join(&file)).unwrap())
+            .read_to_end(&mut bytes)
+            .unwrap();
+        std::fs::write(target.join(stem), bytes).unwrap();
+    }
+    target
+}
+
+/// The value of an env cell in the run's folder `dir` (`rps_databases`).
+fn env_value(value: &str, dir: &Path) -> String {
+    match value
+        .strip_prefix("{rps:")
+        .and_then(|spec| spec.strip_suffix('}'))
+    {
+        Some(spec) => rps_databases(spec, dir)
+            .to_str()
+            .expect("UTF-8 path")
+            .to_string(),
+        None => value.to_string(),
+    }
+}
+
 fn run(case: &Case, ss: &Path, extra_env: &[(&str, &str)], threads: &str) -> Output {
+    let dir = ss.parent().expect("the run's folder");
     let ss = ss.to_str().expect("UTF-8 path");
     let mut command = Command::new(BIN);
     command
@@ -129,7 +186,7 @@ fn run(case: &Case, ss: &Path, extra_env: &[(&str, &str)], threads: &str) -> Out
         }
     }
     for (name, value) in &case.env {
-        command.env(name, value);
+        command.env(name, env_value(value, dir));
     }
     for (name, value) in extra_env {
         command.env(name, value);
@@ -194,6 +251,13 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str, label: &str) {
                     crate::outfmt11_blastx::first_difference(&output.stdout, &want_out)
                 );
                 let engine = engine();
+                let rps = dir.join("rpsdb");
+                let mut stderr = stderr;
+                for form in [std::fs::canonicalize(&rps).unwrap_or_default(), rps] {
+                    if !form.as_os_str().is_empty() {
+                        stderr = stderr.replace(form.to_str().unwrap(), "{RPS}");
+                    }
+                }
                 let stderr = stderr.replace(engine.to_str().unwrap(), "{ENGINE}");
                 let stderr = if cfg!(windows) {
                     unix_separators(&stderr)

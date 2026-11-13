@@ -257,3 +257,62 @@ tblastn.sub.title.stop.f0	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/title
 blastp.db.nohr.nh.title.batches	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/nh_title_blastp.faa -db tests/db_search/nophr -evalue 1e-5 -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
 blastp.db.nosq.allx.title	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/allx_title_bp.faa -db tests/db_search/arch_sprot_nopsq -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
 blastp.db.nosq.title.f0	blastp	-	-query tests/fasta/strategy/title1_bp.faa -db tests/db_search/arch_sprot_nopsq -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
+psiblast.db.itdef	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.it2	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.it0	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -num_iterations 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.sub.it2	psiblast	-	-query tests/fasta/psiblast/tk.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.three.it1	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.three.it2	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.three.it0	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.sub.three.it2	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.two.it2.cbs3	psiblast	-	-query tests/fasta/psiblast/two.faa -db tests/db_search/paja -num_iterations 2 -comp_based_stats 3 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.three.it2.ssp	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -searchsp 1000000 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.three.ssp0	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -searchsp 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.three.it2.b1	psiblast	BATCH_SIZE=1	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.opts1	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -evalue 1e-3 -word_size 2 -threshold 12 -window_size 30 -xdrop_ungap 8 -xdrop_gap 16 -xdrop_gap_final 26 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.opts2	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -num_iterations 2 -inclusion_ethresh 0.01 -pseudocount 2 -gap_trigger 20 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.opts3	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -max_hsps 3 -culling_limit 2 -qcov_hsp_perc 10 -sum_stats true -matrix BLOSUM62 -gapopen 9 -gapextend 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.opts4	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -matrix BLOSUM45 -comp_based_stats 0 -seg 1%201.5%201.8 -soft_masking true -dbsize 1000000 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.tf.taxids	psiblast	BLASTDB=tests/db_search/taxfilter	-query tests/db_search/taxfilter/q.faa -db tfp -num_iterations 2 -inclusion_ethresh 1e-90 -taxids 40674 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.lcm.it2	psiblast	-	-query tests/fasta/psiblast/lc.faa -db tests/db_search/paja -lcase_masking -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.sub.lcm	psiblast	-	-query tests/fasta/psiblast/lc.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -lcase_masking -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.qloc	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -query_loc 20-200 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.nopsq	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/arch_sprot_nopsq -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
+psiblast.db.nopsq.three.it2	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/arch_sprot_nopsq -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
+psiblast.db.nohr.three	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/nophr -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
+psiblast.db.nohr.three.it2	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/nophr -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
+psiblast.db.e_pol.it1	psiblast	-	-query tests/fasta/psiblast/tk_e_pol.faa -db tests/db_search/paja -num_iterations 1 -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+psiblast.db.x_pol.it1	psiblast	-	-query tests/fasta/psiblast/tk_x_pol.faa -db tests/db_search/paja -num_iterations 1 -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+psiblast.db.e_pol.it2	psiblast	-	-query tests/fasta/psiblast/tk_e_pol.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+psiblast.db.x_pol.it2	psiblast	-	-query tests/fasta/psiblast/tk_x_pol.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+psiblast.db.x_pol.savepssm	psiblast	-	-query tests/fasta/psiblast/tk_x_pol.faa -db tests/db_search/paja -save_pssm_after_last_round -out_pssm {ss}.pssm -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+psiblast.db.three.savepssm	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -save_pssm_after_last_round -out_pssm {ss}.pssm -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.gaps	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -gapopen 99 -gapextend 99 -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
+psiblast.db.badopt.pre	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss} -evalue abc	parser	2	old	-
+psiblast.db.in_pssm	psiblast	-	-in_pssm tests/fixtures/pssm/ps4_tk_paja.asn.gz -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	refuse	1	-	-export_search_strategy with -in_pssm is not supported by LOSAT's PSIBLAST
+psiblast.sub.in_pssm	psiblast	-	-in_pssm tests/fixtures/pssm/ps4_tk_paja.asn.gz -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 6 -export_search_strategy {ss}	refuse	1	-	-export_search_strategy with -in_pssm is not supported by LOSAT's PSIBLAST
+rpsblast.q40	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.q40.b2000	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=2000	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.q40.cbs0	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/q40.faa -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.q40.ssp	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/q40.faa -db rps_mini -searchsp 1000000 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.q40.opts	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/q40.faa -db rps_mini -evalue 1e-2 -seg yes -soft_masking true -xdrop_ungap 10 -xdrop_gap 20 -xdrop_gap_final 30 -window_size 30 -max_hsps 2 -max_target_seqs 3 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.q40.mt1	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/q40.faa -db rps_mini -mt_mode 1 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.mask.lcm	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/mask.faa -db rps_mini -lcase_masking -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.allx.b10	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=10	-query tests/fasta/strategy/rps_allx_tk.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.nofreq	rpsblast	BLASTDB={rps:rps_mini-freq}	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.noaux	rpsblast	BLASTDB={rps:rps_mini-aux}	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+rpsblast.3v.q40	rpsblast	BLASTDB={rps:rps_mini3v}	-query tests/fasta/rps/q40.faa -db rps_mini3v -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.3v.q40.b2000	rpsblast	BLASTDB={rps:rps_mini3v},BATCH_SIZE=2000	-query tests/fasta/rps/q40.faa -db rps_mini3v -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.3v.q40.ssp	rpsblast	BLASTDB={rps:rps_mini3v}	-query tests/fasta/rps/q40.faa -db rps_mini3v -searchsp 1000000 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.mix2.q40	rpsblast	BLASTDB={rps:rps_mini+rps_mini3v}	-query tests/fasta/rps/q40.faa -db rps_mini%20rps_mini3v -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.badopt.pre	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 6 -export_search_strategy {ss} -evalue abc	parser	2	old	-
+rpstblastn.nq	rpstblastn	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/nq.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpstblastn.nq.b2000	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=2000	-query tests/fasta/rps/nq.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpstblastn.nq.opts	rpstblastn	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/nq.fna -db rps_mini -query_gencode 2 -evalue 1e-2 -seg yes -soft_masking true -xdrop_ungap 10 -xdrop_gap 20 -xdrop_gap_final 30 -window_size 30 -max_hsps 2 -max_target_seqs 3 -qcov_hsp_perc 10 -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpstblastn.nq.strand.minus	rpstblastn	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/nq.fna -db rps_mini -strand minus -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpstblastn.nq.mt1	rpstblastn	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/nq.fna -db rps_mini -mt_mode 1 -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpstblastn.lcm.b2000	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=2000	-query tests/fasta/strategy/nq4_lc.fna -db rps_mini -lcase_masking -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpstblastn.3v.nq.b2000	rpstblastn	BLASTDB={rps:rps_mini3v},BATCH_SIZE=2000	-query tests/fasta/rps/nq.fna -db rps_mini3v -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpstblastn.bound1	rpstblastn	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/bound1.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpstblastn.noaux	rpstblastn	BLASTDB={rps:rps_mini-aux}	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+rpstblastn.badopt.pre	rpstblastn	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss} -evalue abc	parser	2	old	-

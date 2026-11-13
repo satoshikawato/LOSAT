@@ -8366,8 +8366,13 @@ fn search_split_query_batches(
                 .collect();
             let mut chunk_lists = Vec::new();
             let part_input = seq_range::QueryInput::whole(&parts);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:171-181
+            // (quoted at `stats::setup::preliminary_option_space`): the chunk reads the options'
+            // spaces of the whole batch by its own context index.
+            let mut chunk_args = args.clone();
+            chunk_args.chunk_batch_lengths = Some(query_lengths[range.clone()].into());
             let searched = run_resolved_in_pool(
-                args.clone(),
+                chunk_args,
                 &parts,
                 subject_source,
                 "",
@@ -9647,16 +9652,32 @@ fn run_resolved_in_pool(
     let statistics = database.map(|database| database.statistics());
     // RPS-BLAST's engine has no loop over subjects (blast_engine.c:1384-1393).
     let per_subject = args.rps_search.is_none() && statistics.is_some_and(|s| s.per_subject());
-    let preliminary_option_spaces: Option<Vec<i64>> = match statistics {
-        Some(statistics) if statistics.gumbel_db_length <= 0 || per_subject => Some(
+    // A query chunk's search (`ResolvedBlastpArgs::chunk_batch_lengths`) reads the whole batch's
+    // spaces by its own context index; where the batch's query is valid (a chunk's part of an
+    // invalid query is invalid too, its letters being the query's), with the batch query's length.
+    let (option_total, option_count) = statistics
+        .map_or((total_db_len as i64, num_subjects), |statistics| {
+            (statistics.gumbel_db_length, statistics.request_count)
+        });
+    let chunk_lengths = args.chunk_batch_lengths.as_deref();
+    let preliminary_option_spaces: Option<Vec<i64>> = if option_total <= 0 && statistics.is_some()
+        || per_subject
+        || chunk_lengths.is_some()
+    {
+        Some(
             contexts
                 .iter()
-                .map(|ctx| {
-                    let query_length = if ctx.is_valid { ctx.aa_len as i64 } else { 0 };
+                .enumerate()
+                .map(|(ctx_idx, ctx)| {
+                    let query_length = match chunk_lengths {
+                        Some(lengths) => lengths.get(ctx_idx).map_or(0, |&length| length as i64),
+                        None if ctx.is_valid => ctx.aa_len as i64,
+                        None => 0,
+                    };
                     crate::stats::setup::preliminary_option_space(
                         query_length,
-                        statistics.gumbel_db_length,
-                        statistics.request_count,
+                        option_total,
+                        option_count,
                         args.dbsize,
                         options_searchsp,
                         false,
@@ -9665,14 +9686,20 @@ fn run_resolved_in_pool(
                     )
                 })
                 .collect::<Result<_, _>>()?,
-        ),
-        _ => None,
+        )
+    } else {
+        None
     };
     // The preliminary stage's own spaces where they differ from the setup's (a total length that
     // is not positive): the setup's computation with the option spaces.
     let preliminary_spaces: Option<(Vec<SearchSpace>, Vec<Option<i64>>)> =
-        match (&preliminary_option_spaces, statistics) {
-            (Some(option_spaces), Some(statistics)) if statistics.gumbel_db_length <= 0 => {
+        match &preliminary_option_spaces {
+            // `BLAST_CalcEffLengths` returns before the contexts for a length of 0 without an
+            // option space (blast_setup.c:729-732): the setup's spaces stay.
+            Some(option_spaces)
+                if (option_total <= 0 && statistics.is_some() || chunk_lengths.is_some())
+                    && (eff_db_length != 0 || option_spaces.iter().any(|&space| space != 0)) =>
+            {
                 let mut spaces = search_spaces.clone();
                 let mut exact = exact_search_spaces.clone();
                 for (ctx_idx, ctx) in contexts.iter().enumerate() {

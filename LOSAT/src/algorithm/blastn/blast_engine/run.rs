@@ -6716,7 +6716,7 @@ fn post_process_hits_and_write(
         // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
         //     : m_FormatType(format_type), ..., m_Outfile(outfile),
         // ```
-        let mut writer = format.sink.open()?;
+        let mut writer = format.sink.ostream()?;
         if output_format == BlastnOutputFormat::Pairwise {
             let (queries, pairwise_report) = pairwise_data
                 .as_ref()
@@ -7165,7 +7165,7 @@ fn post_process_hits_and_write(
                 format_warnings.as_mut(),
             )?;
         }
-        writer.flush()?;
+        std::io::Write::flush(&mut writer)?;
     }
     // Without an output format the warnings are written all at once.
     if let Some(handle) = report.archive {
@@ -7242,7 +7242,7 @@ fn write_custom_tabular(
     subject_title: &str,
     subject_ids: &[Arc<[u8]>],
     unsearched: &[bool],
-    writer: &mut dyn std::io::Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
     probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
@@ -7498,7 +7498,7 @@ pub fn run(
     // database is opened after every option handler has run (`search_cli`). With `-subject` it
     // reads the subjects here, before the query and the output are opened.
     let archive = args.archive.clone();
-    let mut stderr = crate::cli::CliStderr;
+    let mut stderr = crate::cli::CliStderr::process();
     let mut archive_tee;
     let diagnostics: &mut (dyn std::io::Write + Send) = match &archive {
         Some(handle) => {
@@ -10582,9 +10582,11 @@ fn run_in_pool(
         // Karlin-Altschul parameters.
         // A structured format (outfmt 8, 12) writes no result warnings
         // (`ReportFormat::writes_query_warnings`); the warnings go with the first format.
-        let result_warnings = output_formats
+        let result_warnings = outputs
+            .formats
             .first()
-            .is_none_or(|format| format.writes_query_warnings());
+            .and_then(crate::api::local_blast::FormatOutput::report_format)
+            .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings);
         let filtered_empty = match source {
             SubjectSource::Database(database) => database.filtered_empty(),
             _ => false,

@@ -73,7 +73,8 @@ fn report(
 ) -> (Vec<u8>, Vec<Step>) {
     let (steps, text) = organism_report(hsps, subjects, &mut lookups(names)).unwrap();
     let mut out = Vec::new();
-    text.insert_into(&mut out).unwrap();
+    text.insert_into(&mut crate::cli::NcbiOstream::new(Box::new(&mut out)))
+        .unwrap();
     (out, steps)
 }
 
@@ -480,7 +481,7 @@ fn the_texts_of_a_subjects_read_come_before_its_lookups() {
     report
         .write_query(
             0,
-            &mut merged.clone(),
+            &mut crate::cli::NcbiOstream::new(Box::new(merged.clone())),
             &mut merged.clone(),
             Some((&mut cursor, 0)),
             b"q",

@@ -121,6 +121,8 @@ pub(crate) mod ncbi_app;
 pub(crate) mod ncbi_exception;
 // NCBI corelib/ncbistr.cpp: the number conversions of `NStr`.
 pub(crate) mod ncbi_str;
+// NCBI corelib/version.cpp: what `-version` and the full versions print (`CVersionAPI`).
+pub(crate) mod ncbi_version;
 // NCBI's rpsbproc 0.5.1 (RpsbProc/src/rpsbproc_main.cpp of the 2025-05-13 package): the CDD
 // domain annotation of rpsblast's archives.
 pub(crate) mod rpsbproc;

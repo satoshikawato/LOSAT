@@ -27,7 +27,8 @@ pub(crate) struct Tool {
     pub(crate) program: &'static str,
     /// The program's name in LOSAT's refusals (`BLASTDBCMD`).
     pub(crate) refusal_name: &'static str,
-    /// The version that `-version` prints (`GetFullVersion`).
+    /// The version that `-version` and the full versions print (`CVersionInfo::Print` of
+    /// `GetFullVersion`: `2.17.0+`, `1.0.0`; `ncbi_version::print`).
     pub(crate) version: &'static str,
     /// NCBI's `-help` text (`CArgDescriptions::PrintUsage` of the descriptions with the details),
     /// frozen. Its part before `OPTIONAL ARGUMENTS` is the usage that `-h` and the argument
@@ -285,14 +286,14 @@ pub(crate) type Body = fn(
 /// errors on `err`; the exit status.
 ///
 /// The order is NCBI's: the diagnostic file of `-logfile` is opened first (append; stderr when
-/// it cannot be opened), then `-version` is read, then the configuration is loaded (its
+/// it cannot be opened), then `-version` and the full versions are read (the first one is
+/// printed, in the library API too, `ncbi_version::print`), then the configuration is loaded (its
 /// messages go where the diagnostics go; a `<program>.ini` that NCBI reports as malformed ends
 /// the run with exit status 2: g_reg probes `o2`, `inibad_null`), then the arguments; an
 /// argument error prints the usage and a line of `=` on stderr and NCBI's report of the
 /// exception as diagnostics. LOSAT's refusals come where NCBI would start the work they stand
 /// for, before anything is written: `-conffile` without the command line's application start
-/// (which loads its file) and the full versions where NCBI reads them,
-/// `-xmlhelp` where the reader takes it, and `-dryrun` without that start; with it, `-dryrun`
+/// (which loads its file), `-xmlhelp` where the reader takes it, and `-dryrun` without that start; with it, `-dryrun`
 /// ends the run with exit status 0 after the arguments and the settings. Then `body` runs.
 pub(crate) fn run_with(
     tool: &'static Tool,
@@ -328,18 +329,13 @@ pub(crate) fn run_with(
         start.write_log_setup(&mut diag.target);
     }
     let (words, dryrun) = match preparse(&words) {
-        Preparsed::Version => {
-            let _ = write!(
-                out,
-                "{}: {}\n Package: LOSAT {}, output compatible with blast {}\n",
-                tool.program,
-                tool.version,
-                env!("CARGO_PKG_VERSION"),
-                crate::NCBI_BLAST_RELEASE
+        // `-version` and the full versions (`ncbi_version::print`, line RG item E3).
+        Preparsed::Version(request) => {
+            let _ = out.write_all(
+                crate::ncbi_version::print(request, tool.program, tool.version).as_bytes(),
             );
             return 0;
         }
-        Preparsed::Refused(word) => return diag.refuse(&tool.unsupported_option(word)),
         // The file of `-conffile` is the configuration of the command line's application start
         // (`start_application`); the library API runs none (`cli::toolkit_file_word_refusal`).
         Preparsed::Words {

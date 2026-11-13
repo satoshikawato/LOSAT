@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.17
+- Version: 1.18
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -28,7 +28,10 @@
   rpsbproc 0.5.1, line RG item E1c, the ask of 2026-11-12); 1.16 2026-11-13 (`losat segmasker`
   in the scope and in exception 10; line RG, item K2, RG DECISIONS K2-5; Owner-delegated, the
   same standing instruction); 1.17 2026-11-13 (`-help-full` runs in every program as `-help`, and
-  the reader stops at a help flag as NCBI's; line RG item E2, the ask of 2026-11-12)
+  the reader stops at a help flag as NCBI's; line RG item E2, the ask of 2026-11-12); 1.18
+  2026-11-13 (the full versions run in every program; a failed write of a version or help is
+  dropped as NCBI's; line RG item E3, RG DECISIONS E3-1 to E3-4, Owner-delegated, the same
+  standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -252,7 +255,23 @@ BLAST+.
   NCBI's (`ncbiargs.cpp:2840-2852`): an argument after one is not read. `-xmlhelp` (in an option's
   place) and the full versions stay refused, in makeblastdb too (line RG item E2). The library API
   answers `-help-full` as `-help` (the help text in its error), and the Web app and ABI v1's BLASTX
-  and TBLASTN refuse it with their other help words.
+  and TBLASTN refuse it with their other help words. Since version 1.18 the full versions are no
+  longer refused: every program prints `-version-full`, `-version-full-xml` and
+  `-version-full-json` where NCBI's application reads them (`ncbiapp.cpp:980-997`, before `--`, in
+  an option's value too, before the configuration and the arguments), in NCBI's forms
+  (`version.cpp:728-884`) with NCBI's first line and the application's version, and LOSAT's
+  package as in `-version`: the text's `Package:` line names LOSAT, the XML and JSON package is
+  `LOSAT` with its version, and the values that NCBI's build writes about itself
+  (`Package-Config`'s configure line, `Build-Signature`, the build dates and revisions,
+  `Stable-Components-Version`, `Production-Version`, `Built-As`, rpsbproc's toolkit component)
+  are not written; the keys NCBI writes whenever there is a package stay, empty (line RG
+  DECISIONS E3-1). The library API and the Web engine refuse the versions, `-version` too, as
+  they refuse `-logfile`, `-conffile` and `-dryrun`, but in blastdbcmd, dustmasker and segmasker,
+  whose library runs print them as their `-version` (E3-2). A failed write of a program's
+  version, help or argument error (`-version > /dev/full`) is dropped, as NCBI's `cout` drops it
+  (exit status 0 for a version or a help), where LOSAT's earlier write panicked (exit status
+  134); a closed pipe ends it with exit status 0, where NCBI's programs are ended by SIGPIPE, for
+  the reason of exception 10; rpsbproc keeps exception 9 (E3-3).
 - **FASTA input that NCBI's `CFastaReader` reads differently**: the explicit rejections
   stay (TD-12) until a dedicated session before S17 ports the `CFastaReader` functions
   on the path, together with the adapter's index scan (plan §10).

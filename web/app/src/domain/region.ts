@@ -6,15 +6,12 @@
 // in every mode and role, as NCBI does ("start cannot be larger than stop", and "range cannot be
 // empty" for one letter), and a drag never makes them (WA-IN-07). Any other rule is the
 // engine's, whose `validate` gives NCBI's message.
-import type { InputRole } from './programs';
 
 /** The two fields as the user typed them. */
 export interface RegionText {
   readonly start: string;
   readonly stop: string;
 }
-
-export const REGION_FLAG: Readonly<Record<InputRole, string>> = { query: '-query_loc', subject: '-subject_loc' };
 
 const DIGITS = /^[0-9]+$/;
 

@@ -10,7 +10,7 @@ use super::data::{dom_acc_type, CddData, TOTALSIGS};
 use super::frames::{minus_pr_to_plus_na, plus_pr_to_plus_na, plus_rf_idx_to_minus, RF_SIZE};
 use super::segset::SegSet;
 use super::sites::ResiduePos;
-use crate::utils::std_sort::std_sort;
+use crate::utils::std_sort::{try_std_sort, OutOfRange};
 
 /// `TDomSeqAlignment::GAP_THRESHOLD`.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:1203-1205
@@ -84,15 +84,27 @@ pub(crate) struct DomAlign {
 impl DomAlign {
     /// A hit without segments (`TSeqAlignment::Reset` and the start of `ParseAlignSegs`).
     fn empty(align: &Align, pssm_id: u32) -> Self {
+        Self::new(
+            pssm_id,
+            i32::MAX,
+            0,
+            align.e_value.unwrap_or(0.0),
+            align.bit_score.unwrap_or(0.0),
+        )
+    }
+
+    /// A hit of the range `from`..`to` without segments, of a protein query (the alignment
+    /// type and the reading frame of `TDomSeqAlignment`'s constructor).
+    pub(crate) fn new(pssm_id: u32, from: i32, to: i32, e_value: f64, bit_score: f64) -> Self {
         DomAlign {
             pssm_id,
-            from: i32::MAX,
-            to: 0,
+            from,
+            to,
             m_starts: Vec::new(),
             s_starts: Vec::new(),
             lens: Vec::new(),
-            e_value: align.e_value.unwrap_or(0.0),
-            bit_score: align.bit_score.unwrap_or(0.0),
+            e_value,
+            bit_score,
             region: 0,
             n_missing: 0.0,
             c_missing: 0.0,
@@ -639,8 +651,21 @@ struct Facility {
 // 1) are not made since 2018-04-04 (the commented lines above), so the output's `Multidom` type
 // is never printed.
 // (`m_uiLength - (sstart + len)` is `unsigned int` arithmetic stored in an `int`; the ratios
-// divide doubles, so a model of length 0 gives an infinity or a NaN as NCBI's does.)
-pub(crate) fn calculate(aligns: &mut [DomAlign], selected: &[usize], data: &CddData) -> AlignIndex {
+// divide doubles, so a model of length 0 gives an infinity or a NaN as NCBI's does. A NaN E-value
+// or bit score makes `TDomAlignOrderByEValue` no strict weak order (`order_by_e_value`): libstdc++'s
+// sort, which `try_std_sort` follows step by step, is then still defined while it reads inside the
+// vector, and LOSAT gives its order. The comparison stays irreflexive and asymmetric with a NaN, so
+// the median-of-three and partition sentinels of `__unguarded_partition` hold; the walk of the
+// final insertion sort past the first 16 has a sentinel left of it in every part made by a
+// partition, but not inside a part that the depth limit hands to the heap sort. Where a loop would
+// read outside the vector (`OutOfRange`), NCBI's result is its undefined read: refused, `Err` with
+// the refusal. PS16d review S3-3; the permutations against libstdc++ 13 in
+// `utils::std_sort` tests.)
+pub(crate) fn calculate(
+    aligns: &mut [DomAlign],
+    selected: &[usize],
+    data: &CddData,
+) -> Result<AlignIndex, String> {
     let mut index = AlignIndex::default();
     let mut gap_sets: Vec<SegSet> = Vec::new();
     let mut non_multi: Vec<Facility> = Vec::new();
@@ -773,16 +798,10 @@ pub(crate) fn calculate(aligns: &mut [DomAlign], selected: &[usize], data: &CddD
     // 			dst.m_vecSortedIndice.emplace_back(iter->ulIdx);
     // 		}
     // ```
-    std_sort(&mut non_multi, &mut |a: &Facility, b: &Facility| {
-        let (a, b) = (&aligns[a.align], &aligns[b.align]);
-        if a.e_value < b.e_value {
-            true
-        } else if a.e_value > b.e_value {
-            false
-        } else {
-            a.bit_score > b.bit_score
-        }
-    });
+    try_std_sort(&mut non_multi, &mut |a: &Facility, b: &Facility| {
+        order_by_e_value(&aligns[a.align], &aligns[b.align])
+    })
+    .map_err(sort_out_of_range)?;
     let segs_of = |facility: &Facility, aligns: &[DomAlign], gap_sets: &[SegSet]| {
         let mut segs = SegSet::new();
         segs.add(
@@ -919,16 +938,10 @@ pub(crate) fn calculate(aligns: &mut [DomAlign], selected: &[usize], data: &CddD
     // (`m_uiLength - 1` is `unsigned int`, converted to `SeqPos_t` by `AddSeg`: a model of length
     // 0 gives -1, an empty range.)
     if !structural.is_empty() {
-        std_sort(&mut structural, &mut |a: &Facility, b: &Facility| {
-            let (a, b) = (&aligns[a.align], &aligns[b.align]);
-            if a.e_value < b.e_value {
-                true
-            } else if a.e_value > b.e_value {
-                false
-            } else {
-                a.bit_score > b.bit_score
-            }
-        });
+        try_std_sort(&mut structural, &mut |a: &Facility, b: &Facility| {
+            order_by_e_value(&aligns[a.align], &aligns[b.align])
+        })
+        .map_err(sort_out_of_range)?;
         let mut covered = SegSet::new();
         for facility in &structural {
             let mut sd_segs = SegSet::new();
@@ -949,7 +962,36 @@ pub(crate) fn calculate(aligns: &mut [DomAlign], selected: &[usize], data: &CddD
             }
         }
     }
-    index
+    Ok(index)
+}
+
+/// `TDomAlignOrderByEValue`: the E-value ascending, then the bit score descending (with C++'s
+/// comparisons of doubles: a NaN is neither less nor greater).
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_base.hpp:62-70
+// ```c++
+// 	struct TDomAlignOrderByEValue
+// 	{
+// 		bool operator () (const TDomAlignFacility &p1, const TDomAlignFacility &p2)
+// 		{
+// 			if (p1.pAlign->m_dEValue < p2.pAlign->m_dEValue) return true;
+// 			else if (p1.pAlign->m_dEValue > p2.pAlign->m_dEValue) return false;
+// 			else return (p1.pAlign->m_dBitScore > p2.pAlign->m_dBitScore);
+// 		}
+// 	};
+// ```
+fn order_by_e_value(a: &DomAlign, b: &DomAlign) -> bool {
+    if a.e_value < b.e_value {
+        true
+    } else if a.e_value > b.e_value {
+        false
+    } else {
+        a.bit_score > b.bit_score
+    }
+}
+
+/// The refusal of a sort of hits that would read outside NCBI's vector (`try_std_sort`).
+fn sort_out_of_range(_: OutOfRange) -> String {
+    "hits whose NaN E-values or bit scores make NCBI's std::sort of them read outside its vector (undefined) are not supported by LOSAT's rpsbproc".to_string()
 }
 
 /// `CCdAlignProcessor::SortReadingFrames`: the indices of the alignments of each reading frame

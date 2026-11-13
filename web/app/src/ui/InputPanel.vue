@@ -5,6 +5,7 @@
 // inputs with their records, and Combined / Separate. A file dropped anywhere on the block is
 // opened.
 import { computed, nextTick, ref, watch } from 'vue';
+import type { InputRole } from 'losat/domain';
 import type { DraftState, SearchDraft } from '../application/draft';
 import { groupSite, raceChoice } from '../application/source-race';
 import {
@@ -20,7 +21,7 @@ import {
   type FetchSourceId,
 } from '../domain/accession';
 import { sectionsAt, writtenValue } from '../domain/parameters';
-import { programById, residueUnit, sequenceKind, type InputRole } from '../domain/programs';
+import { programById, residueUnit, sequenceKind } from '../domain/programs';
 import HelpTip from './HelpTip.vue';
 import LosatLoader from './LosatLoader.vue';
 import ParameterField from './ParameterField.vue';

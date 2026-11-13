@@ -6,18 +6,29 @@
 // - the run registry: staged runs, whose outputs arrive over a MessagePort from the
 //   engine, and committed runs. Staged and committed runs use the same blocks; the
 //   registry, not a move of files, says which runs are committed (plan §2.3).
+import { RunOutputReceiver } from 'losat';
 import {
-  includedRecords,
-  normalizeExclusion,
-  recordKey,
-  type DatasetRevision,
+  CUSTOM_OUTPUT,
+  OUTPUT_FORMATS,
   type FastaParserKind,
   type IndexedRecord,
+  type InputRole,
+  type ProgramId,
   type RecordKey,
-} from '../../domain/dataset';
+  type RunOutput,
+} from 'losat/domain';
+import {
+  DIAGNOSTICS_STREAM,
+  HITS_STREAM,
+  type FileInflater,
+  type HspRecord,
+  type InputCheck,
+  type InputChecker,
+  type OutputStream,
+  type RecordScanner,
+} from 'losat/ports';
+import { includedRecords, normalizeExclusion, recordKey, type DatasetRevision } from '../../domain/dataset';
 import { hspTable, type HspTable } from '../../domain/hsp-table';
-import { CUSTOM_OUTPUT, OUTPUT_FORMATS, type RunOutput } from '../../domain/output-format';
-import type { InputRole, ProgramId } from '../../domain/programs';
 import type {
   CleanupState,
   DataGateway,
@@ -27,12 +38,6 @@ import type {
   StorageInfo,
   StoredResultsCheck,
 } from '../../ports/data';
-import type { HspRecord } from '../../ports/engine';
-import type { FileInflater } from '../../ports/inflate';
-import type { InputCheck, InputChecker } from '../../ports/input-check';
-import { DIAGNOSTICS_STREAM, HITS_STREAM, type OutputStream } from '../../ports/run-output';
-import type { RecordScanner } from '../../ports/scan';
-import { RunOutputReceiver } from '../run-output/receiver';
 import { concatBytes } from '../bytes';
 import { asStorageFull, isStorageFull, isStorageRemoved, type BlockStore, type BlockWriter } from './block-store';
 import { inflateFile } from './inflate';

@@ -5,11 +5,12 @@
 // (outfmt 9, and the ZIP archive of the files of 13 and 14) is exported, not shown. An output that cannot be read, or an export that is not
 // saved, says why (application/outputs.ts).
 import { computed, onMounted, onUnmounted, ref, useId, watch } from 'vue';
+import { CUSTOM_OUTPUT, type RunOutput } from 'losat/domain';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputReader } from '../application/outputs';
 import { toShellCommand } from '../domain/argv';
 import { outputChunks } from '../domain/output-chunks';
-import { CUSTOM_OUTPUT, isBinaryOutput, outfmtOf, runOutputs, type RunOutput } from '../domain/output-format';
+import { isBinaryOutput, outfmtOf, runOutputs } from '../domain/output-format';
 import { vScrollFocus } from './scroll-focus';
 import TabList from './TabList.vue';
 import { useStore } from './useStore';

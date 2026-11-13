@@ -3,12 +3,13 @@
 // was queued (RunSnapshot), what happened when it ran (RunRecord), the CLI command of each
 // output (with that of its own -outfmt, W10), and the warnings that the CLI writes to standard error.
 import { computed } from 'vue';
+import { CUSTOM_OUTPUT } from 'losat/domain';
 import type { RunView } from '../application/coordinator';
 import { optionGrammar, type LoadedRun } from '../application/results';
 import { commandWords } from '../domain/argv';
 import { COUNTS_FILE } from '../domain/counts';
 import { dateOf } from '../domain/download-sentences';
-import { CUSTOM_OUTPUT, customOutfmt } from '../domain/output-format';
+import { customOutfmt } from '../domain/output-format';
 import { programById } from '../domain/programs';
 import CommandText from './CommandText.vue';
 import { formatBytes, formatCount, formatDateTime, formatDuration, formatMillis } from './format';

@@ -257,7 +257,7 @@ impl<R: Read> MaskFastaReader<R> {
             }
             Err(ReadError::Ncbi(exception)) => {
                 self.reader = None;
-                Err(MaskReadError::Ncbi(exception))
+                Err(MaskReadError::Ncbi(*exception))
             }
             Err(ReadError::OutOfMemory) => {
                 self.reader = None;

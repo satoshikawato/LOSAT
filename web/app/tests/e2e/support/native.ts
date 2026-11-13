@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { OutputFormat } from '../../../src/domain/output-format';
+import type { OutputFormat } from 'losat/domain';
 import type { SearchCase } from '../harness/engine';
 import { REPOSITORY } from './harness-server';
 

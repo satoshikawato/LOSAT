@@ -641,8 +641,18 @@ fn exit_rpsbproc(outcome: crate::rpsbproc::Outcome) {
 }
 
 /// No NCBI counterpart: an error of LOSAT's argument parser (`cli::try_parse_from`) or one of its
-/// refusals, written as clap writes it, and its exit status.
+/// refusals, written as clap writes it, and its exit status. The help that stopped the parser is
+/// written as its error's text is, but the XML of `-xmlhelp`, which `cli::xml_help_text` writes
+/// (NCBI's `PrintUsageXml(cout)`, exit status 0: ncbiapp.cpp:685-697, quoted at `ncbi_xmlhelp`).
 fn exit_on_parse_error(error: &clap::Error, argv_is_rpsbproc: bool) -> ! {
+    if let Some(text) = crate::cli::xml_help_program(error).and_then(crate::cli::xml_help_text) {
+        if argv_is_rpsbproc {
+            crate::rpsbproc::write_stdout(&text);
+        } else {
+            write_dropping_errors(&mut std::io::stdout(), &text);
+        }
+        std::process::exit(0);
+    }
     // rpsbproc's arguments are not the single-dash words of the BLAST programs.
     let message = if argv_is_rpsbproc {
         crate::cli::render_rpsbproc_message(error)

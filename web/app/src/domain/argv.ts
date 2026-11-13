@@ -1,7 +1,7 @@
 // Search conditions are represented only as a LOSAT CLI argv (plan §5.3). The same argv
 // is validated and run by the engine, shown as the CLI command, and stored in sessions.
-import { CUSTOM_OUTPUT, FILES_OUT, isFilesOutput, OUTFMT_FLAG, outfmtOption, type RunOutput } from './output-format';
-import type { ProgramId } from './programs';
+import { CUSTOM_OUTPUT, type ProgramId, type RunOutput } from 'losat/domain';
+import { FILES_OUT, isFilesOutput, OUTFMT_FLAG, outfmtOption } from './output-format';
 
 /**
  * Flags that the application manages itself; users cannot set them. A run writes outfmt 0, 6
@@ -9,8 +9,8 @@ import type { ProgramId } from './programs';
  */
 export const RESERVED_FLAGS: readonly string[] = Object.freeze(['-query', '-subject', '-out', '-num_threads']);
 
-/** The words with which the CLI prints its help instead of searching (BLAST+'s `-h`, `-help` and `-help-full`). */
-const HELP_WORDS: readonly string[] = Object.freeze(['-h', '-help', '-help-full', '--help']);
+/** The words with which the CLI prints its help instead of searching (BLAST+'s `-h`, `-help`, `-help-full` and `-xmlhelp`). */
+const HELP_WORDS: readonly string[] = Object.freeze(['-h', '-help', '-help-full', '-xmlhelp', '--help']);
 
 /** The CLI's database options: `-db` and the filters of a database search. */
 export const DATABASE_FLAGS: readonly string[] = Object.freeze([

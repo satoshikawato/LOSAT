@@ -529,10 +529,12 @@ pub(super) fn write_tblastn_strategy(
 }
 
 /// Writes the search strategy's request of the batch of the queries `span` of `queries`, whose
-/// search fails (a sequence or header file of the database that cannot be read): NCBI writes a
-/// batch's request before its search (tblastn_app.cpp:280), so the file holds that batch's request
-/// after those of the batches before (NCBI BLAST+ 2.17.0, probe 4 of RG-F1), and no request
-/// follows it. `subject_records` are the `-subject` records (`None` for `-db`).
+/// search fails (a sequence or header file of the database that cannot be read) or whose results
+/// NCBI cannot format (the first batch's, with a matrix name that NCBI's XML data does not know):
+/// NCBI writes a batch's request before its search (tblastn_app.cpp:280), so the file holds that
+/// batch's request after those of the batches before (NCBI BLAST+ 2.17.0, probes 4 and 7 of
+/// RG-F1), and no request follows it. `subject_records` are the `-subject` records (`None` for
+/// `-db`).
 pub(super) fn write_tblastn_failed_strategy(
     strategy: &StrategyExport,
     queries: &[FastaRecord],

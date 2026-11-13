@@ -13635,11 +13635,25 @@ fn run_resolved_in_pool(
     if let Some(strategy) = args.strategy.as_ref() {
         let masks = query_record_masks(&query_frames, &ranges.query_input.placements);
         let spans = batch_spans();
+        // NCBI fails when it formats the first batch's results in BLAST XML with a matrix name
+        // that its XML data does not know ("unsupported score matrix", the format loop below):
+        // the file then holds the first batch's request alone (probe 7 of RG-F1, `-matrix
+        // blosum62` with outfmt 5 and 16).
+        let xml_matrix_fails = !query_records.is_empty()
+            && format_plans
+                .iter()
+                .any(|plan| matches!(plan, BlastpReport::Xml | BlastpReport::Xml2(_)))
+            && crate::report::blast_xml::matrix::FormattingMatrix::new(&args.matrix_name).is_none();
+        let spans = if xml_matrix_fails {
+            &spans[..spans.len().min(1)]
+        } else {
+            &spans[..]
+        };
         super::archive::write_blastp_strategy(
             strategy,
             &super::archive::CallBatches {
                 masks: &masks,
-                spans: &spans,
+                spans,
                 ..call_batches
             },
             &first_context,

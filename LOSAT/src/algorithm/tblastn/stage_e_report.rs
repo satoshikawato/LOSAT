@@ -241,6 +241,22 @@ pub(super) fn render(
         if let Err(error) =
             super::blast_xml::unsupported_matrix(matrix_name, !query_records.is_empty())
         {
+            // NCBI wrote the first batch's search strategy request before its search
+            // (tblastn_app.cpp:280) and fails when it formats that batch: the file holds that
+            // request alone, whatever the number of batches (probe 7 of RG-F1, `-matrix blosum62`
+            // with outfmt 5 and 16).
+            if let Some(render) = archive {
+                if let (Some(strategy), Some(first)) = (render.strategy, render.spans.first()) {
+                    super::archive::write_tblastn_failed_strategy(
+                        strategy,
+                        query_records,
+                        matches!(shown, ShownSubjects::Fasta { .. }).then_some(subject_records),
+                        ranges.queries,
+                        mask_lowercase,
+                        first.clone(),
+                    )?;
+                }
+            }
             for format in outputs.formats.iter_mut() {
                 if let Some(kind) = xml2_kind(format.outfmt) {
                     let mut writer = format.sink.open()?;

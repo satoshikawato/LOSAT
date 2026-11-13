@@ -117,6 +117,29 @@ impl TblastnArgs {
             .export_search_strategy
             .as_deref()
             .map(|path| {
+                // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:281-287,298-302
+                // ```c++
+                //         if (pssm.NotEmpty())
+                //         {
+                //             _ASSERT(queries.Empty());
+                //             if(num_iters != 0)
+                //             	retval.Reset(new blast::CExportStrategy(pssm, opts_hndl, search_db, client_id, num_iters));
+                //             else
+                //             	retval.Reset(new blast::CExportStrategy(pssm, opts_hndl, search_db, client_id));
+                // ...
+                //         if (pssm.NotEmpty())
+                //         {
+                //             NCBI_THROW(CInputException, eInvalidInput,
+                //                        "Remote PSI-BL2SEQ is not supported");
+                // ```
+                // A PSSM search's request is the PSSM one (program `blastp`, service `psi`, the
+                // whole `PssmWithParameters`; with `-subject` NCBI stops with that error after
+                // the prolog): item F1b of line RG, with psiblast's.
+                if args.in_pssm.is_some() {
+                    anyhow::bail!(
+                        "-export_search_strategy with -in_pssm is not supported by LOSAT's TBLASTN yet (NCBI writes a PSI-BLAST request with -db and stops with \"Remote PSI-BL2SEQ is not supported\" with -subject)"
+                    );
+                }
                 crate::blastinput::input_files::check_utf8_file_name(
                     path,
                     "export_search_strategy",

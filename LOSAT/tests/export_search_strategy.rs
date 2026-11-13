@@ -10,7 +10,10 @@
 //! without letters; tblastx `-matrix BLOSUM99`, whose gap costs are 0 and 0), and the order of the
 //! errors (the file is made after the argument parser and before the other options are read: an
 //! error after it leaves the file empty, the parser's errors leave an existing file alone).
-//! The rows that LOSAT refuses (DECISIONS 15, 21 and 26 of line RG) check the refusal.
+//! The first batch's request alone when NCBI fails to format that batch in BLAST XML (a matrix
+//! name its XML data does not know). The rows that LOSAT refuses (DECISIONS 15, 21 and 26 of line
+//! RG; tblastn `-in_pssm`, item F1b) check the refusal. blastp's query blocks and the `0` side of
+//! the default-on switches that the strategy's paths cross write the same files.
 //!
 //! The cases are the rows of `tests/fixtures/strategy/cases.tsv` (its header says what the
 //! columns mean); the frozen bytes are `tests/fixtures/strategy/<name>.ss`, `.out` and `.err`,
@@ -229,6 +232,53 @@ fn blastp_query_blocks_do_not_change_the_strategy_file() {
                 case.name
             );
             check(case, &[("LOSAT_X_BPQBLOCK", "0")], threads, "qblock0");
+        }
+    }
+    // NCBI fails when it formats the first batch in BLAST XML: the file holds the first batch's
+    // request alone, in or out of the blocks.
+    let xml = cases
+        .iter()
+        .find(|case| case.name == "blastp.sub.xmlmatrix.batches")
+        .expect("row blastp.sub.xmlmatrix.batches");
+    for block in ["1", "0"] {
+        check(
+            xml,
+            &[("LOSAT_X_BPQBLOCK", block)],
+            "1",
+            &format!("xmlqblock{block}"),
+        );
+    }
+}
+
+/// The default-on switches that the strategy's paths cross, at their `0` side (the paths they
+/// replaced, which give the same bytes): blastx's flow of batches (`LOSAT_X_BXFLOW`), blastn's
+/// streamed report and query reading (`LOSAT_X_RPTSTREAM`, `LOSAT_X_QSTREAM`, `LOSAT_X_BNQPACK`),
+/// and the packed `-subject` stores of tblastn and tblastx (`LOSAT_X_TBNSTORE`,
+/// `LOSAT_X_TBXSTORE`).
+#[test]
+fn switches_off_write_the_same_strategy_files() {
+    let off: &[(&str, &str)] = &[
+        ("blastx", "LOSAT_X_BXFLOW"),
+        ("blastn", "LOSAT_X_RPTSTREAM"),
+        ("blastn", "LOSAT_X_QSTREAM"),
+        ("blastn", "LOSAT_X_BNQPACK"),
+        ("tblastn", "LOSAT_X_TBNSTORE"),
+        ("tblastx", "LOSAT_X_TBXSTORE"),
+    ];
+    let cases = cases();
+    for &(program, switch) in off {
+        let rows = cases
+            .iter()
+            .filter(|case| case.program == program && case.check == "ncbi");
+        for case in rows {
+            for threads in ["1", "4"] {
+                check(
+                    case,
+                    &[(switch, "0")],
+                    threads,
+                    &format!("{switch}_{threads}"),
+                );
+            }
         }
     }
 }

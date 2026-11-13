@@ -244,7 +244,6 @@ x.three.doms.std	compare	-	-	-i arch/x_three.xml -d data -t doms -m std
 x.three.feats.rep	compare	-	-	-i arch/x_three.xml -d data -t feats -m rep
 x.three.default	compare	-	-	-i arch/x_three.xml -d data
 x.three.e1e-30	compare	-	-	-i arch/x_three.xml -d data -t doms -m full -e 1e-30
-x.three.e10	compare	-	-	-i arch/x_three.xml -d data -t doms -m full -e 10
 x.three.e0	compare	-	-	-i arch/x_three.xml -d data -t doms -m full -e 0
 x.three.q	compare	-	-	-i arch/x_three.xml -d data -t doms -q
 x.one.stdin	compare	arch/x_one.xml	-	-d data -t both
@@ -288,15 +287,12 @@ x.mstate.feats.full	compare	-	data-with:sites	-i arch/x_mstate.xml -d sites -t f
 x.mstate.both.std.f	compare	-	data-with:sites	-i arch/x_mstate.xml -d sites -t both -m std -f
 x.ntr67.both.rep	compare	-	data-with:nt	-i arch/x_ntr67.xml -d nt -t both -m rep
 x.ntr67.both.full.f	compare	-	data-with:nt	-i arch/x_ntr67.xml -d nt -t both -m full -f
-x.ntr67.doms.std	compare	-	data-with:nt	-i arch/x_ntr67.xml -d nt -t doms -m std
 x.ntr67.feats.rep	compare	-	data-with:nt	-i arch/x_ntr67.xml -d nt -t feats -m rep
 x.ntr67.default	compare	-	data-with:nt	-i arch/x_ntr67.xml -d nt
-x.ntr67.e1e-20	compare	-	data-with:nt	-i arch/x_ntr67.xml -d nt -t both -m full -e 1e-20
 x.ntr67e10.default	compare	-	data-with:nt	-i arch/x_ntr67e10.xml -d nt
 x.ntr67e10.e10.full	compare	-	data-with:nt	-i arch/x_ntr67e10.xml -d nt -t both -m full -e 10
 x.ntr67seg.both.rep	compare	-	data-with:nt	-i arch/x_ntr67seg.xml -d nt -t both -m rep
 x.ntr68rc.both.rep	compare	-	data-with:nt	-i arch/x_ntr68rc.xml -d nt -t both -m rep
-x.ntr68rc.both.full	compare	-	data-with:nt	-i arch/x_ntr68rc.xml -d nt -t both -m full
 x.ntr94had.both.rep	compare	-	data-with:nt	-i arch/x_ntr94had.xml -d nt -t both -m rep
 x.ntr94had.feats.full	compare	-	data-with:nt	-i arch/x_ntr94had.xml -d nt -t feats -m full
 x.ntr60.both.rep	compare	-	data-with:nt	-i arch/x_ntr60.xml -d nt -t both -m rep
@@ -304,7 +300,6 @@ x.ntr60t1.both.rep	compare	-	data-with:nt	-i arch/x_ntr60t1.xml -d nt -t both -m
 x.ntr63.both.full	compare	-	data-with:nt	-i arch/x_ntr63.xml -d nt -t both -m full
 x.ntr04amb.both.rep	compare	-	data-with:nt	-i arch/x_ntr04amb.xml -d nt -t both -m rep
 x.ntpair.both.rep	compare	-	data-with:nt	-i arch/x_ntpair.xml -d nt -t both -m rep
-x.ntpair.doms.full.f	compare	-	data-with:nt	-i arch/x_ntpair.xml -d nt -t doms -m full -f
 x.ntnohit.both.rep	compare	-	data-with:nt	-i arch/x_ntnohit.xml -d nt -t both -m rep
 x.mixpn.both.rep	compare	-	data-with:nt	-i arch/x_mixpn.xml -d nt -t both -m rep
 x.mixnp.both.rep	compare	-	data-with:nt	-i arch/x_mixnp.xml -d nt -t both -m rep

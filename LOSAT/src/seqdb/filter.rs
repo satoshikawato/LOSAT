@@ -2072,12 +2072,23 @@ impl SeqDb {
         self.oid_list_set_up.store(true, Ordering::Relaxed);
     }
 
+    /// Whether NCBI's OID list was built before this call, which builds it (a call that reads
+    /// the list: [`SeqDb::check_or_find_oid`], [`SeqDb::oid_walk`]). A load and a store, as
+    /// only one thread (blastdbcmd's) sets the list up.
+    fn oid_list_was_set_up(&self) -> bool {
+        let set_up = self.oid_list_set_up.load(Ordering::Relaxed);
+        if !set_up {
+            self.set_up_oid_list();
+        }
+        set_up
+    }
+
     /// `x_CheckOrFindOID(next)` (`OidFilter::check_or_find`; without an OID list every OID of
     /// the volumes passes): whether `next`, moved to the first OID from it on that NCBI's list
     /// holds, passes NCBI's checks of the iteration range. Sets the list up
     /// ([`SeqDb::set_up_oid_list`]).
     pub fn check_or_find_oid(&self, next: &mut u32) -> bool {
-        let set_up = self.oid_list_set_up.swap(true, Ordering::Relaxed);
+        let set_up = self.oid_list_was_set_up();
         match &self.filter {
             Some(filter) => filter.check_or_find(next, set_up),
             None => *next < self.num_oids(),
@@ -2086,7 +2097,10 @@ impl SeqDb {
 
     /// Whether the database includes `oid` ([`SeqDb::num_seqs`]: NCBI's list holds it, inside
     /// the iteration range): `x_CheckOrFindOID(oid2) && oid2 == oid` once NCBI's list is set up,
-    /// as it is for the lookups after a search ([`SeqDb::check_oid`] at any time).
+    /// as it is for the lookups after a search ([`SeqDb::check_oid`] at any time). Every NCBI
+    /// caller of this answer (`SeqidToOids`, seqdbimpl.cpp:1388) sets the list up first; a
+    /// lookup that NCBI makes before (`AccessionsToOids`, `TaxIdsToOids`) takes
+    /// [`SeqDb::check_oid`], whose first check is the stale one.
     pub fn includes_oid(&self, oid: u32) -> bool {
         match &self.filter {
             Some(filter) => filter.contains(oid),
@@ -2106,7 +2120,7 @@ impl SeqDb {
     /// (`OidFilter::walk`; without an OID list every OID of the volumes). The loop sets the list
     /// up ([`SeqDb::set_up_oid_list`]).
     pub fn oid_walk(&self) -> impl Iterator<Item = u32> + '_ {
-        let set_up = self.oid_list_set_up.swap(true, Ordering::Relaxed);
+        let set_up = self.oid_list_was_set_up();
         let (filter, walk) = match &self.filter {
             Some(filter) => (Some(&**filter), Some(filter.walk(set_up))),
             None => (None, None),

@@ -1431,10 +1431,9 @@ impl SeqDb {
     /// [`SeqDb::open_search_in`], the errors of the walks of the alias files' counts that NCBI's
     /// constructor makes (those of [`SeqDb::check_alias_values`] without a list), and
     /// `include_every_oid`. LOSAT's refusals of the values that only a search reads
-    /// differently are not made, as such a reader reads none of them: an OID range with another
-    /// name of the same `-db`, a `FIRST_OID` or `LAST_OID` of 2^31 or more, a negative `NSEQ`,
-    /// a `LENGTH` of 0 (NCBI 2.17.0 dustmasker reads them as it reads the database without the
-    /// alias file: review 2 of line RG item K1, F5).
+    /// differently are not made, as such a reader reads none of them: a negative `NSEQ`, a
+    /// `LENGTH` of 0 or of 2^63 or more (NCBI 2.17.0 dustmasker reads them as it reads the
+    /// database without the alias file: review 2 of line RG item K1, F5).
     pub fn open_every_oid_in(
         name: &str,
         seqtype: SeqType,
@@ -1695,7 +1694,11 @@ impl SeqDb {
                 self.counts.num_seqs
             ));
         }
-        if !self.list_applied && self.statistics_per_subject() {
+        // A total of 2^63 or more is negative as NCBI's Int8: NCBI's search reads that negative
+        // `db_length` the usual way (blast_setup.c:925-935, the cutoffs of blast_engine.c:1454),
+        // not per subject; LOSAT's statistics take no negative total (line RG D1a-3).
+        let negative_total = (self.counts.total_length as i64) < 0 && self.num_seqs > 0;
+        if !self.list_applied && (self.statistics_per_subject() || negative_total) {
             return refuse(&format!(
                 "the total length of the alias files (LENGTH) is {} as NCBI's Int8 while the \
                  database includes sequences",
@@ -1725,11 +1728,15 @@ impl SeqDb {
     // `OidFilter::walk` stops before the listed OIDs that the search reads: line RG D1a-2,
     // survey A, the iteration range of the only alias file of a `-db`).
     /// Whether NCBI's search computes the statistics of each subject on its own: `GetTotalLength`
-    /// is not positive as NCBI's `Int8` while the search reads sequences. LOSAT's database
-    /// searches do not (an alias file's `LENGTH 0` is refused by [`SeqDb::check_alias_values`],
-    /// a list's scan by the search's opener).
+    /// is 0 while the search reads sequences. LOSAT's database searches do not (an alias file's
+    /// `LENGTH 0` is refused by [`SeqDb::check_alias_values`], a list's scan by the search's
+    /// opener). Every included sequence counts as read here, while NCBI's TBLASTN and TBLASTX
+    /// skip the subjects shorter than `min_subj_seq_length` before this check
+    /// (blast_engine.c:1429): a database whose searched subjects are all that short is refused
+    /// though NCBI searches it the usual way, until the statistics of each subject are ported
+    /// (line RG D1a-3, which removes this refusal).
     pub fn statistics_per_subject(&self) -> bool {
-        self.counts.total_length as i64 <= 0 && self.num_seqs > 0
+        self.counts.total_length == 0 && self.num_seqs > 0
     }
 
     /// The first exception of the walks of `keys`, in that order.

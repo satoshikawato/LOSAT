@@ -9,8 +9,9 @@
 //! `extend_two_hit_blosum62` (and `x_ungapped_fast::two_hit`), another matrix's through
 //! `extend_two_hit_table` (`seed.rs` `bx_two_hit`).
 //!
-//! Why the result is the reference's. The extension is `x_ungapped_sent::two_hit_in::<1, u8>`,
-//! whose statements are blastp's; what differs is where the sentinels are.
+//! Why the result is the reference's. The extension is `x_ungapped_sent::two_hit_in::<1, u8, W>`,
+//! whose statements are blastp's; what differs is where the sentinels are, and `W`, the word size
+//! (2, 3 or 4; below).
 //! * The query is the batch's buffer (`PreparedQueryBatch::sequence_start`): the six frames of each
 //!   query, each between two sentinels (code 0), the reference's query being the buffer without its
 //!   first byte (it keeps the last sentinel). The subject is its residues between two sentinels,
@@ -23,12 +24,42 @@
 //! * Left walk: the reference walks `min(q_off, s_off) + 1` steps; the position one step further is
 //!   the first byte of a buffer, a sentinel, which stops the walk without changing its result (the
 //!   argument of `x_ungapped_sent.rs`).
-//! * Checks: the word size 3, a two-hit window, every code of the query batch below 32, at most
+//! * Checks: the word size 2 to 4, a two-hit window, every code of the query batch below 32, at most
 //!   `i32::MAX / 16` letters and the sentinels at both ends, once per batch ([`query_fits`]); the
 //!   subject's codes and sentinels once per batch and subject (`XSentSubject::new`); the X-drop of
 //!   each candidate's context in `1..=127` (on each candidate: the X-drops are the contexts'
 //!   parameters, which the batch does not hold; a candidate outside takes the reference, out of
 //!   line). A batch or a subject that fails a check runs the reference.
+//!
+//! The word size (item SC9b-1 of line NP). `W` is a const of the walk's instance (`two_hit::<_, W>`,
+//! `two_hit_in::<1, u8, W>`) for the word sizes 2, 3 and 4, and the seed loops (`x_seed_diag.rs`,
+//! `x_seed_scan.rs`) take the instance `options.word_size` names once per subject, never per
+//! candidate; the loops' own statements still read the run-time word size, so the instance for 3
+//! is the loop of the word size 3 before this item. `W` appears in four places of the extension,
+//! and in none of them does the argument above or its arguments for the sentinel stop depend on
+//! its value:
+//! * The reference's word loop (aa_ungapped.c:1106-1118, `for (i = 0; i < word_size; i++)`) is
+//!   `W` steps from 0 without a stop, with `score > left_score` for its best (the first of equal
+//!   scores): the walk's keys give that on `W` steps (`key > best`; a tie keeps the earlier step
+//!   for any `W < 2^32`, as for the walks), and its `right_d` is the best's length, 0 when no
+//!   step scores above 0. The word is inside both sequences by the reference wrapper's early
+//!   return (`q_right_off + W > qlen`, the same test).
+//! * The right walk starts in the buffer. With the subject and the query ending in the sentinel
+//!   that the reference keeps (`TAIL` 1), the word may end on it, and then the right walk starts
+//!   at `q_right_off + right_d`, which must not pass it. The word's last letter being a sentinel,
+//!   its step adds the key `(-128 << 32) - 1`, which is below the key before it, and the best is
+//!   at least that key (it is the largest key so far, 0 before the first step): a sentinel step
+//!   is never the best, so `right_d < W` and the start is at the sentinel at most. That does not
+//!   depend on `W` or on the other letters of the word (sentinels inside it included; the keys
+//!   are blastp's, with -128 for a sentinel against every code, both ways).
+//! * The two walks read distinct positions: the left walk those before `q_right_off` (already
+//!   moved by `right_d`) and the right walk those at and after it; the word loop's key only
+//!   decides `right_d`, its score is not added to a walk's. So the walks' scores stay below
+//!   `M * len` for the largest score `M` (11, or at most 31 for another matrix), the word loop's
+//!   below `M * W`, and `M * (len + 4)` bounds all of them for `W <= 4` (the bound of
+//!   `x_ungapped_sent.rs`, whose `+ 3` was the word of 3).
+//! * The reference (the candidate outside `1..=127`, the shadow) is called with the same `W`
+//!   ([`XSent::two_hit`] passes it on to `extend_two_hit`'s `word_size`).
 //!
 //! Another matrix than BLOSUM62 (item SC6b of line NP, `XSent<MatrixBx>`, [`query_fits_of`]) takes
 //! the same walks with the keys of its byte table (blastp's `x_ungapped_sent::keys_of`, item SC2c),
@@ -51,8 +82,10 @@ use std::sync::OnceLock;
 
 /// Codes below this index the table (`q << 5 | s`).
 const CODES: u8 = 32;
-/// The only word size this path takes.
-const WORD_SIZE: i32 = 3;
+/// The smallest and the largest word size this path takes (module header, item SC9b-1); the
+/// word sizes above them, the compressed tables of 5 to 7, run the reference.
+const MIN_WORD_SIZE: i32 = 2;
+const MAX_WORD_SIZE: i32 = 4;
 /// Largest X-drop the sentinel stop is exact for (`x_ungapped_sent.rs`).
 const MAX_DROPOFF: i32 = 127;
 /// Longest query batch on the path (no score of a walk wraps, `x_ungapped_sent.rs`).
@@ -95,12 +128,19 @@ pub(crate) fn on() -> bool {
 }
 
 /// Whether a query batch is on the path (computed once per batch, `query_setup.rs`): the switch
-/// is on, the word size is 3 (not 2 or 4, nor the compressed table of 5 to 7), the search has a two-hit
+/// is on, the word size is 2, 3 or 4 (not the compressed table of 5 to 7), the search has a two-hit
 /// window (not `-window_size 0`'s one-hit extension), and the buffer has a sentinel at each end,
 /// at most `i32::MAX / 16` letters and no code >= 32.
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
 pub(crate) fn query_fits(buffer: &[u8], word_size: i32, window_size: i32) -> bool {
-    on() && word_size == WORD_SIZE && window_size > 0 && query_on_path(buffer)
+    on() && word_size_on_path(word_size) && window_size > 0 && query_on_path(buffer)
+}
+
+/// Whether the walks have an instance for the word size (`two_hit::<_, W>`, module header).
+// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
+#[inline(always)]
+fn word_size_on_path(word_size: i32) -> bool {
+    (MIN_WORD_SIZE..=MAX_WORD_SIZE).contains(&word_size)
 }
 
 /// [`query_fits`] for another matrix than BLOSUM62 (module header): also its keys exist, and the
@@ -112,7 +152,7 @@ pub(crate) fn query_fits_of(
     word_size: i32,
     window_size: i32,
 ) -> bool {
-    on() && word_size == WORD_SIZE
+    on() && word_size_on_path(word_size)
         && window_size > 0
         && keys_of(matrix).is_some()
         && query_on_path_within(buffer, MAX_QUERY_LEN_OF)
@@ -134,6 +174,32 @@ fn query_on_path_within(buffer: &[u8], max_len: usize) -> bool {
         && buffer[buffer.len() - 1] == 0
         && buffer.iter().fold(0u8, |a, &c| a | c) < CODES
 }
+
+/// Runs `$body` with the const `$w` set to the word size `$word` (2, 3 or 4), the instance of the
+/// walks (`two_hit::<_, W>`) that a seed loop takes for a subject: the seed loops use it once per
+/// subject, outside their candidate loops (module header, item SC9b-1). A word size that
+/// [`query_fits`] does not take cannot reach it (`XSent` exists only for a batch that passed).
+// No NCBI counterpart: chooses between instances of one LOSAT code path with the same result.
+macro_rules! by_word_size {
+    ($word:expr, $w:ident => $body:expr) => {
+        match $word {
+            2 => {
+                const $w: usize = 2;
+                $body
+            }
+            3 => {
+                const $w: usize = 3;
+                $body
+            }
+            4 => {
+                const $w: usize = 4;
+                $body
+            }
+            word => unreachable!("word size {word} is not on the sentinel walks' path"),
+        }
+    };
+}
+pub(crate) use by_word_size;
 
 static SHADOW_SUBJECTS: AtomicU64 = AtomicU64::new(0);
 static SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
@@ -229,12 +295,13 @@ impl<'a, S: BxScoring> XSent<'a, S> {
     }
 
     /// `extend_two_hit_blosum62(query, subject, ..)` (with another matrix, `extend_two_hit` with it)
-    /// for the reference's sequences (the buffers without their first byte) and word size 3: the
+    /// for the reference's sequences (the buffers without their first byte) and the word size `W`
+    /// (2 to 4; the caller's instance for `options.word_size`, chosen once per subject): the
     /// sentinel walks for an X-drop in `1..=127`, the reference otherwise; with `SHADOW` both,
     /// compared (a difference stops the run).
     // NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit` (module header).
     #[inline(always)]
-    pub(crate) fn two_hit<const SHADOW: bool>(
+    pub(crate) fn two_hit<const SHADOW: bool, const W: usize>(
         &self,
         s_left_off: usize,
         s_right_off: usize,
@@ -242,12 +309,13 @@ impl<'a, S: BxScoring> XSent<'a, S> {
         dropoff: i32,
     ) -> Option<BlastpTwoHitUngappedResult> {
         if !(1..=MAX_DROPOFF).contains(&dropoff) {
-            return self.reference(s_left_off, s_right_off, q_right_off, dropoff);
+            return self.reference::<W>(s_left_off, s_right_off, q_right_off, dropoff);
         }
         // SAFETY: the dropoff is in 1..=127 (above); the query buffer passed `query_fits` and
-        // the subject buffer `XSentSubject::new` (sentinels at both ends, the lengths).
+        // the subject buffer `XSentSubject::new` (sentinels at both ends, the lengths); `W` is
+        // the word size that `query_fits` took, 2 to 4.
         let got = unsafe {
-            two_hit_in::<1, u8>(
+            two_hit_in::<1, u8, W>(
                 self.keys,
                 self.query,
                 self.subject.with_sentinels(),
@@ -258,7 +326,7 @@ impl<'a, S: BxScoring> XSent<'a, S> {
             )
         };
         if SHADOW {
-            let expected = self.reference(s_left_off, s_right_off, q_right_off, dropoff);
+            let expected = self.reference::<W>(s_left_off, s_right_off, q_right_off, dropoff);
             assert_eq!(
                 got, expected,
                 "[X_SHADOW] BXUNGAPSENT two-hit mismatch: s_left_off={s_left_off} s_right_off={s_right_off} q_right_off={q_right_off} dropoff={dropoff}"
@@ -269,11 +337,12 @@ impl<'a, S: BxScoring> XSent<'a, S> {
     }
 
     /// `extend_two_hit_blosum62` (another matrix: `extend_two_hit` with it) on the reference's
-    /// sequences, out of line (a candidate whose X-drop is above 127, and the shadow's comparison).
+    /// sequences and the word size `W`, out of line (a candidate whose X-drop is above 127, and the
+    /// shadow's comparison).
     // NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
     #[cold]
     #[inline(never)]
-    fn reference(
+    fn reference<const W: usize>(
         &self,
         s_left_off: usize,
         s_right_off: usize,
@@ -289,7 +358,7 @@ impl<'a, S: BxScoring> XSent<'a, S> {
                 s_right_off,
                 q_right_off,
                 dropoff,
-                WORD_SIZE as usize,
+                W,
             );
         }
         extend_two_hit_blosum62(
@@ -299,7 +368,7 @@ impl<'a, S: BxScoring> XSent<'a, S> {
             s_right_off,
             q_right_off,
             dropoff,
-            WORD_SIZE as usize,
+            W,
         )
     }
 
@@ -374,7 +443,18 @@ mod tests {
     /// reference).
     #[test]
     fn two_hit_is_the_reference_on_blastx_buffers() {
-        two_hit_is_the_reference_with(ScoringMatrix::Blosum62);
+        two_hit_is_the_reference_with::<3>(ScoringMatrix::Blosum62);
+    }
+
+    /// [`two_hit_is_the_reference_on_blastx_buffers`] for the word sizes 2 and 4 (item SC9b-1):
+    /// the words of 2 and 4 letters at the ends of both sequences, over inner and last sentinels,
+    /// BLOSUM62 and PAM30 (the largest scores of the matrices).
+    #[test]
+    fn two_hit_of_word_sizes_2_and_4_is_the_reference() {
+        for matrix in [ScoringMatrix::Blosum62, ScoringMatrix::Pam30] {
+            two_hit_is_the_reference_with::<2>(matrix);
+            two_hit_is_the_reference_with::<4>(matrix);
+        }
     }
 
     /// [`two_hit_is_the_reference_on_blastx_buffers`] with every other matrix (item SC6b): all of
@@ -387,17 +467,30 @@ mod tests {
                 continue;
             }
             assert!(keys_of(matrix).is_some(), "{matrix:?} has keys");
-            assert_eq!(query_fits_of(matrix, &[0, 3, 0], 3, 40), on(), "{matrix:?}");
+            for word in [2, 3, 4] {
+                assert_eq!(
+                    query_fits_of(matrix, &[0, 3, 0], word, 40),
+                    on(),
+                    "{matrix:?} word {word}"
+                );
+            }
+            for word in [1, 5, 6, 7] {
+                assert!(
+                    !query_fits_of(matrix, &[0, 3, 0], word, 40),
+                    "{matrix:?} word {word}"
+                );
+            }
             assert!(
                 !query_fits_of(matrix, &[0, 3, 0], 3, 0),
                 "{matrix:?} one-hit"
             );
-            two_hit_is_the_reference_with(matrix);
+            two_hit_is_the_reference_with::<3>(matrix);
         }
     }
 
-    fn two_hit_is_the_reference_with(matrix: ScoringMatrix) {
-        let mut rng = Rng(0x9e37_79b9_7f4a_7c15 ^ matrix as u64);
+    /// The path with the word size `W` against `extend_two_hit` with the same word size.
+    fn two_hit_is_the_reference_with<const W: usize>(matrix: ScoringMatrix) {
+        let mut rng = Rng(0x9e37_79b9_7f4a_7c15 ^ matrix as u64 ^ ((W as u64) << 40));
         let mut compared = 0u64;
         for round in 0..400 {
             let slen = rng.below(if round % 8 == 0 { 4 } else { 120 }) as usize;
@@ -417,15 +510,15 @@ mod tests {
                 let s = rng.below(s_ref.len() as u64 + 2) as usize;
                 let s_left = rng.below(s as u64 + 4) as usize;
                 let dropoff = [1, 7, 16, 40, 127, 128, 300][rng.below(7) as usize];
-                let want = extend_two_hit(matrix, q_ref, s_ref, s_left, s, q, dropoff, 3);
+                let want = extend_two_hit(matrix, q_ref, s_ref, s_left, s, q, dropoff, W);
                 let got = match (&blosum62, &other) {
-                    (Some(sent), _) => sent.two_hit::<false>(s_left, s, q, dropoff),
-                    (_, Some(sent)) => sent.two_hit::<false>(s_left, s, q, dropoff),
+                    (Some(sent), _) => sent.two_hit::<false, W>(s_left, s, q, dropoff),
+                    (_, Some(sent)) => sent.two_hit::<false, W>(s_left, s, q, dropoff),
                     _ => unreachable!(),
                 };
                 assert_eq!(
                     got, want,
-                    "{matrix:?} round {round}: s_left={s_left} s={s} q={q} dropoff={dropoff}"
+                    "{matrix:?} W={W} round {round}: s_left={s_left} s={s} q={q} dropoff={dropoff}"
                 );
                 compared += u64::from(want.is_some());
             }
@@ -437,6 +530,8 @@ mod tests {
     /// the word size and the window).
     #[test]
     fn query_on_path_checks_the_buffer() {
+        assert!(word_size_on_path(2) && word_size_on_path(3) && word_size_on_path(4));
+        assert!(!word_size_on_path(1) && !word_size_on_path(5) && !word_size_on_path(7));
         assert!(query_on_path(&[0, 3, 4, 0, 5, 0]));
         assert!(query_on_path(&[0, 0]));
         assert!(!query_on_path(&[0]));

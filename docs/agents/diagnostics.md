@@ -7244,7 +7244,10 @@ Scheduling (each value computed by one thread with the original function; order 
   LOSAT Web's ABI v2 yet.)
 - `LOSAT_X_BXUNGAPSENT=1` (BLASTX, speed; in the strict set from the pull request that added it, 2026-10-23;
   `=0` turns it off) the two-hit ungapped extension of BLASTX's seed loops, the fused loop of `LOSAT_X_BXDIAG`
-  and the direct loop (BXSCAN, graduated), for word size 3, with the walks of blastp's `LOSAT_X_BPUNGAPSENT`
+  and the direct loop (BXSCAN, graduated), for word size 2 to 4 (word size 3 until item SC9b-1 of line NP,
+  2026-11-13: the walk is generic over the word length with a const, `two_hit_in::<TAIL, Q, W>`, and the seed
+  loops take the instance of `-word_size` once per subject, never per candidate; the argument for `W` is in
+  `blastx/x_ungap_sent.rs`'s header), with the walks of blastp's `LOSAT_X_BPUNGAPSENT`
   (`blastx/x_ungap_sent.rs`, exactness argument in its header; the extension is
   `blastp/x_ungapped_sent.rs`'s `two_hit_in`): no bound test in the walks, the extension inlined into a
   closure (fused loop) or a loop instance (direct loop) of its own. The six-frame query buffer has a sentinel
@@ -7255,7 +7258,7 @@ Scheduling (each value computed by one thread with the original function; order 
   the same best, length and stop. The checks of BPUNGAP's walks are made once: the word size, the window,
   residue codes below 32 and the sentinels per query batch, codes and sentinels per subject; the X-drop
   (1..=127) per candidate (the X-drops are the contexts' parameters). Off the path (the reference
-  extension): a word size other than 3 (`-word_size 5`), `-window_size 0` (one-hit), a query batch of more
+  extension): a word size above 4 (`-word_size 5`, the compressed table), `-window_size 0` (one-hit), a query batch of more
   than `i32::MAX / 16` letters (another matrix: `i32::MAX / 32`), a candidate whose context's X-drop is
   outside 1..=127, and the searches where `word_finder` runs (the diagnostic stages that trace the seeds).
   Another matrix than BLOSUM62 (item SC6b of line NP, 2026-11-11) takes the same walks with the keys of its

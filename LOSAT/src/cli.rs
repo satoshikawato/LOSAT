@@ -898,7 +898,7 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
         );
     }
     // makeblastdb reads the toolkit's words with its own branch of `try_parse_from`, and refuses
-    // the words left as the others do (`-xmlhelp`; a full version in the library API).
+    // the word left as the others do (`-xmlhelp`).
     if let Some(program) = TOOLKIT_PROGRAMS
         .iter()
         .chain(&["makeblastdb"])

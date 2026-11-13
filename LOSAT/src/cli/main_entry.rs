@@ -527,7 +527,7 @@ fn run_main_entry() -> Result<()> {
         Commands::Rpstblastn(args) => {
             // NCBI's `-help` and `-h` texts, which its reader writes before the application runs.
             if let Some(text) = args.ncbi_help_text() {
-                write_dropping_errors(&mut std::io::stdout(), &text);
+                write_dropping_errors(&mut std::io::stdout(), text);
                 return Ok(());
             }
             // rpstblastn is an NCBI application as blastx: its application layer reads its

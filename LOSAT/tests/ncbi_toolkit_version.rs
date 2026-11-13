@@ -173,7 +173,10 @@ fn the_full_versions_are_ncbi_s_forms_with_losat_s_values() {
             (&["-version", "-version-full"][..], "-version"),
             (&["-version-full", "-version"], "-version-full"),
             (&["-version-full", "-version-full-xml"], "-version-full"),
-            (&["-version-full-json", "-version-full"], "-version-full-json"),
+            (
+                &["-version-full-json", "-version-full"],
+                "-version-full-json",
+            ),
         ] {
             let output = run_in(&dir, program, words);
             assert_eq!(
@@ -241,6 +244,8 @@ fn the_full_versions_come_before_the_configuration() {
 // NCBI writes the version to `cout` and never checks it: a full disk drops it, exit status 0
 // (probes `vf_devfull`, `vx_devfull`, `ver_devfull`). rpsbproc's failed write of its version is
 // LOSAT's exception 9 (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES): exit status 4 with its message.
+// `/dev/full` is Linux's.
+#[cfg(target_os = "linux")]
 #[test]
 fn a_full_disk_drops_the_version_as_ncbi_does() {
     let dir = scratch("full");

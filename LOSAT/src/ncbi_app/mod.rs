@@ -287,7 +287,8 @@ pub(crate) type Body = fn(
 ///
 /// The order is NCBI's: the diagnostic file of `-logfile` is opened first (append; stderr when
 /// it cannot be opened), then `-version` and the full versions are read (the first one is
-/// printed, in the library API too, `ncbi_version::print`), then the configuration is loaded (its
+/// printed, in the library API too, whatever the bytes of the other words, `ncbi_version::print`;
+/// a word that is not UTF-8 is refused after them), then the configuration is loaded (its
 /// messages go where the diagnostics go; a `<program>.ini` that NCBI reports as malformed ends
 /// the run with exit status 2: g_reg probes `o2`, `inibad_null`), then the arguments; an
 /// argument error prints the usage and a line of `=` on stderr and NCBI's report of the
@@ -303,6 +304,29 @@ pub(crate) fn run_with(
     err: &mut dyn Write,
     body: Body,
 ) -> i32 {
+    // NCBI's application start (`ncbi_environment::ApplicationStart`), which the command line's
+    // entry has made: the file of `-logfile` gets the usage report's messages when NCBI opens it,
+    // before `-version`.
+    let mut target = diag_target(log_file(words));
+    let start = application_start_of_process();
+    if let Some(start) = start {
+        start.write_log_setup(&mut target);
+    }
+    let (words, conffile, dryrun) = match preparse(words) {
+        // `-version` and the full versions (`ncbi_version::print`, line RG item E3), before the
+        // arguments are read, whatever their bytes.
+        Preparsed::Version(request) => {
+            let _ = out.write_all(
+                crate::ncbi_version::print(request, tool.program, tool.version).as_bytes(),
+            );
+            return 0;
+        }
+        Preparsed::Words {
+            words,
+            conffile,
+            dryrun,
+        } => (words, conffile, dryrun),
+    };
     let Some(words) = words
         .iter()
         .map(|word| word.to_str().map(str::to_string))
@@ -317,44 +341,25 @@ pub(crate) fn run_with(
         return 1;
     };
     let mut diag = Diag {
-        target: diag_target(log_file(&words)),
+        target,
         stderr: err,
         tool,
     };
-    // NCBI's application start (`ncbi_environment::ApplicationStart`), which the command line's
-    // entry has made: the file of `-logfile` gets the usage report's messages when NCBI opens it,
-    // before `-version`.
-    let start = application_start_of_process();
-    if let Some(start) = start {
-        start.write_log_setup(&mut diag.target);
+    // The file of `-conffile` is the configuration of the command line's application start
+    // (`start_application`); the library API runs none (`cli::toolkit_file_word_refusal`).
+    if conffile.is_some() && start.is_none() {
+        return diag.refuse(&crate::cli::toolkit_file_word_refusal(
+            tool.program,
+            "-conffile",
+        ));
     }
-    let (words, dryrun) = match preparse(&words) {
-        // `-version` and the full versions (`ncbi_version::print`, line RG item E3).
-        Preparsed::Version(request) => {
-            let _ = out.write_all(
-                crate::ncbi_version::print(request, tool.program, tool.version).as_bytes(),
-            );
-            return 0;
-        }
-        // The file of `-conffile` is the configuration of the command line's application start
-        // (`start_application`); the library API runs none (`cli::toolkit_file_word_refusal`).
-        Preparsed::Words {
-            conffile: Some(_), ..
-        } if start.is_none() => {
-            return diag.refuse(&crate::cli::toolkit_file_word_refusal(
-                tool.program,
-                "-conffile",
-            ))
-        }
-        // So is `-dryrun`, which the command line's entry ends after the arguments.
-        Preparsed::Words { dryrun: true, .. } if start.is_none() => {
-            return diag.refuse(&crate::cli::toolkit_file_word_refusal(
-                tool.program,
-                "-dryrun",
-            ))
-        }
-        Preparsed::Words { words, dryrun, .. } => (words, dryrun),
-    };
+    // So is `-dryrun`, which the command line's entry ends after the arguments.
+    if dryrun && start.is_none() {
+        return diag.refuse(&crate::cli::toolkit_file_word_refusal(
+            tool.program,
+            "-dryrun",
+        ));
+    }
     if let Some(start) = start {
         match start.write_config_load(&mut diag.target, diag.stderr) {
             Ok(None) => {}
@@ -400,6 +405,76 @@ pub(crate) fn run_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI prints the versions before it reads the arguments, whatever their bytes (review 1 F4 of
+    // line RG item E3: NCBI BLAST+ 2.17.0 `blastdbcmd -out $'\xff' -version-full`, rc 0); a word
+    // that is not UTF-8 is refused otherwise.
+    #[cfg(unix)]
+    #[test]
+    fn the_versions_come_before_the_refusal_of_a_word_that_is_not_utf8() {
+        use std::os::unix::ffi::OsStringExt;
+        static TOOL: Tool = Tool {
+            program: "p",
+            refusal_name: "P",
+            version: "1.0.0",
+            help: "USAGE\n  p [-h]\n\nOPTIONAL ARGUMENTS\n -h\n",
+            descs: &[],
+            dependencies: no_dependencies,
+            post_prefix: None,
+        };
+        fn body(
+            _: &Args,
+            _: &ApplicationSettings,
+            _: &mut files::Cin<'_>,
+            _: &mut dyn Write,
+            _: &mut Diag,
+        ) -> i32 {
+            unreachable!("the run")
+        }
+        let run = |words: Vec<OsString>| {
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let status = run_with(
+                &TOOL,
+                &words,
+                &mut std::io::empty(),
+                &mut out,
+                &mut err,
+                body,
+            );
+            (
+                status,
+                String::from_utf8(out).unwrap(),
+                String::from_utf8(err).unwrap(),
+            )
+        };
+        let bytes = OsString::from_vec(vec![0xff]);
+        for (word, request) in [
+            ("-version", crate::ncbi_version::VersionRequest::Version),
+            (
+                "-version-full-json",
+                crate::ncbi_version::VersionRequest::FullJson,
+            ),
+        ] {
+            assert_eq!(
+                run(vec!["-out".into(), bytes.clone(), word.into()]),
+                (
+                    0,
+                    crate::ncbi_version::print(request, "p", "1.0.0"),
+                    String::new()
+                )
+            );
+        }
+        assert_eq!(
+            run(vec!["-out".into(), bytes]),
+            (
+                1,
+                String::new(),
+                "Error: a word of the command line is not UTF-8; NCBI BLAST+ reads its bytes, \
+                 which is not supported by LOSAT's P\n"
+                    .to_string()
+            )
+        );
+    }
 
     #[test]
     fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {

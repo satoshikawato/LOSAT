@@ -30,8 +30,8 @@
   same standing instruction); 1.17 2026-11-13 (`-help-full` runs in every program as `-help`, and
   the reader stops at a help flag as NCBI's; line RG item E2, the ask of 2026-11-12); 1.18
   2026-11-13 (the full versions run in every program; a failed write of a version or help is
-  dropped as NCBI's; line RG item E3, RG DECISIONS E3-1 to E3-4, Owner-delegated, the same
-  standing instruction)
+  dropped as NCBI's, and exception 10 covers a closed pipe there; line RG item E3, RG DECISIONS
+  E3-1 to E3-4, Owner-delegated, the same standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -176,7 +176,7 @@ BLAST+.
    (`LOSAT/src/rpsbproc/mod.rs`, `Report`). Release-notes sentence: If `losat rpsbproc` cannot
    write its report, it stops with `rpsbproc failed to write output` (exit status 4), where
    NCBI's rpsbproc 0.5.1 drops the writes and continues with exit status 0.
-10. **Closed pipe in blastdbcmd's, dustmasker's and segmasker's output** (version 1.13,
+10. **Closed pipe in blastdbcmd's, dustmasker's and segmasker's output, and in every program's version and help** (version 1.13,
    2026-11-13, Owner-delegated; line RG, item K1, RG DECISIONS K1-8; version 1.14 the same day,
    item K1b, K1b-3 and K1b-5; version 1.16 the same day, segmasker, item K2, K2-5). A write of
    NCBI's blastdbcmd 2.17.0, dustmasker 1.0.0 or segmasker 1.0.0 to a pipe whose
@@ -187,6 +187,11 @@ BLAST+.
    As NCBI's `cerr` is tied to `cout`, the programs flush their output before each line of
    diagnostics, so the closed pipe is met before the line (and with `2>&1` the lines come after
    the output written before them, as NCBI's do).
+   Since version 1.18 (line RG item E3, RG DECISIONS E3-3) the same holds for the version, help
+   and argument-error texts of every other program but rpsbproc (exception 9): a closed pipe
+   drops the text and the program ends with its exit status (0 for a version or a help), where
+   NCBI's is ended by SIGPIPE (`cli::main_entry::write_dropping_errors`); a full disk is dropped
+   as NCBI drops it.
    On Windows, where NCBI's write fails without a signal, a closed pipe is a failed write like
    a full disk. A failed write that is not a closed pipe (`-out /dev/full`) is NCBI's: where
    NCBI writes to the `ostream` itself (dustmasker's `interval`, `acclist` and `fasta`,
@@ -270,8 +275,7 @@ BLAST+.
   whose library runs print them as their `-version` (E3-2). A failed write of a program's
   version, help or argument error (`-version > /dev/full`) is dropped, as NCBI's `cout` drops it
   (exit status 0 for a version or a help), where LOSAT's earlier write panicked (exit status
-  134); a closed pipe ends it with exit status 0, where NCBI's programs are ended by SIGPIPE, for
-  the reason of exception 10; rpsbproc keeps exception 9 (E3-3).
+  134); a closed pipe there is exception 10; rpsbproc keeps exception 9 (E3-3).
 - **FASTA input that NCBI's `CFastaReader` reads differently**: the explicit rejections
   stay (TD-12) until a dedicated session before S17 ports the `CFastaReader` functions
   on the path, together with the adapter's index scan (plan §10).

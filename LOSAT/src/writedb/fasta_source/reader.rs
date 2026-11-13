@@ -989,7 +989,7 @@ impl<R: Read> FastaReader<R> {
             self.lines.next_line();
             let line_number = self.lines.line_number();
             let raw = self.lines.line();
-            // `NStr::TruncateSpaces_Unsafe(line)` (`eTrunc_Both`).
+            // `NStr::TruncateSpaces_Unsafe(line)` (`eTrunc_Both`, fasta.cpp:376).
             let line = truncate_spaces(raw);
             if line.is_empty() || matches!(line[0], b'!' | b'#' | b';') {
                 continue;
@@ -2532,7 +2532,7 @@ impl RecordState {
                 warn,
             );
         }
-        // `NStr::TruncateSpacesInPlace(processed_title)` (`eTrunc_Both`).
+        // `NStr::TruncateSpacesInPlace(processed_title)` (`eTrunc_Both`, fasta.cpp:2038).
         let processed_title = truncate_spaces(text);
         if !processed_title.is_empty() {
             self.title_descr = Some(processed_title.to_vec());

@@ -1,7 +1,8 @@
 //! `NStr::StringToDouble(str)` with its default flags (corelib/ncbistr.cpp), which rpsbproc's
 //! data loader calls (`NStr::StringToNumeric<double>`, ncbistr.hpp:3632-3637) for the bit score
-//! thresholds of `bitscore_specific.txt`, the BLAST programs' argument readers for the SEG locut
-//! and hicut (`blastinput::app::read_seg_option`) and the constraints of the integer arguments
+//! thresholds of `bitscore_specific.txt`, the BLAST programs' argument readers for the test of the
+//! SEG locut and hicut (`blastinput::app::read_seg_option`, which reads their values with
+//! `value_parsers::ncbi_string_to_double`) and the constraints of the integer arguments
 //! (`blastinput::value_parsers`), and glibc's `strtod` that it reads the number with.
 //!
 //! Also `NStr::StringToDouble(str, NStr::fDecimalPosixOrLocal)`, which NCBI's argument reader

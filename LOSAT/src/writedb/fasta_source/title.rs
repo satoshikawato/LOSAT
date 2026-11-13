@@ -100,9 +100,9 @@ const TAB_REPLACEMENT: &[u8] = b"   ";
 /// the `t`, and the first backslash then escapes the first of the three spaces. A ctrl-A
 /// becomes one space. Every other byte comes back as it was read.
 ///
-/// No escape fails: a backslash that starts an escape is one that
-/// `ncbi_str::printable_string` wrote, followed by a letter, a quote, `?`, a backslash or octal digits, or it is the
-/// backslash left of a replaced `\\t`, followed by a space.
+/// No escape fails: a backslash that starts an escape is one that `ncbi_str::printable_string`
+/// wrote, followed by a letter, a quote, `?`, a backslash or octal digits, or it is the backslash
+/// left of a replaced `\\t`, followed by a space.
 pub(super) fn fasta_reader_title(defline_field: &[u8]) -> Result<Option<Vec<u8>>, &'static str> {
     let fasta = fasta_reader_fasta(defline_field)?;
     if fasta.is_empty() {

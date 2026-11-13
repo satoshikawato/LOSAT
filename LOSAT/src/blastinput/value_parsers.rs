@@ -1081,6 +1081,79 @@ mod tests {
         }
     }
 
+    // LOSAT's messages for the integers NCBI cannot convert (`s_StringToInt8`, then the range of
+    // `int` for `CArg_Integer`): a byte after `0x` that is not a hexadecimal digit is tested before
+    // the base 16 overflow.
+    #[test]
+    fn integer_arguments_name_what_failed() {
+        for value in ["0x10000000000000000g", "9223372036854775808", "abc", "0x5g"] {
+            assert_eq!(
+                ncbi_int8(value),
+                Err("expected an integer".to_string()),
+                "{value}"
+            );
+        }
+        assert_eq!(
+            ncbi_int8("0x8000000000000000"),
+            Err("Integer value is out of range".to_string())
+        );
+        for value in [
+            "2147483648",
+            "0x80000000",
+            "-2147483649",
+            "0x8000000000000000",
+        ] {
+            assert_eq!(
+                ncbi_integer(value),
+                Err("Integer value is out of range".to_string()),
+                "{value}"
+            );
+        }
+        assert_eq!(
+            ncbi_integer("9223372036854775808"),
+            Err("expected an integer".to_string())
+        );
+    }
+
+    // `CArgAllowGeneticCodeInteger::Verify` (`NStr::StringToInt(value)`, blast_args.cpp:998-1007):
+    // LOSAT says "invalid" for what is not a number of 0 to 255 written without a minus sign and
+    // "unsupported" for a number of that range that is not one of NCBI's codes.
+    #[test]
+    fn genetic_codes_are_read_as_ncbi_reads_them() {
+        for (value, expected) in [("1", 1), ("+5", 5), ("005", 5), ("33", 33), ("255", 255)] {
+            assert_eq!(genetic_code_number(value), Some(expected), "{value}");
+        }
+        for value in [
+            "-0",
+            "-5",
+            "256",
+            "2147483648",
+            "",
+            " 5",
+            "5 ",
+            "5.0",
+            "0x",
+            "0x5",
+        ] {
+            assert_eq!(genetic_code_number(value), None, "{value:?}");
+            assert_eq!(
+                genetic_code(value),
+                Err("invalid genetic code".to_string()),
+                "{value:?}"
+            );
+        }
+        for value in ["0", "7", "8", "17", "32", "34", "255"] {
+            assert_eq!(
+                genetic_code(value),
+                Err("unsupported genetic code".to_string()),
+                "{value}"
+            );
+        }
+        for (value, expected) in [("+5", 5), ("005", 5), ("11", 11), ("33", 33)] {
+            assert_eq!(genetic_code(value), Ok(expected), "{value}");
+        }
+    }
+
     #[test]
     fn reals_follow_ncbi_first_character_rule() {
         for (value, expected) in [("1e-5", 1e-5), (".5", 0.5), ("+2", 2.0), ("-0", 0.0)] {

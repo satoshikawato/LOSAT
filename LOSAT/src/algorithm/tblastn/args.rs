@@ -1074,6 +1074,37 @@ mod tests {
 
     use crate::cli::{try_parse_from, Cli, Commands};
 
+    // TBLASTN's `-query_gencode` and `-db_gencode`: `genetic_code_number`, then the codes LOSAT
+    // builds (32 included, Stage A); "invalid genetic code ID" for what is not a number of 0 to
+    // 255 written without a minus sign.
+    #[test]
+    fn tblastn_genetic_codes_are_read_as_ncbi_reads_them() {
+        for value in [
+            "-0",
+            "-5",
+            "256",
+            "2147483648",
+            "",
+            " 5",
+            "5 ",
+            "5.0",
+            "0x",
+            "0x5",
+        ] {
+            assert_eq!(
+                tblastn_genetic_code(value),
+                Err("invalid genetic code ID".to_string()),
+                "{value:?}"
+            );
+        }
+        for (value, expected) in [("+5", 5), ("005", 5), ("11", 11), ("33", 33)] {
+            assert_eq!(tblastn_genetic_code(value), Ok(expected), "{value}");
+        }
+        for value in ["0", "7", "8", "255"] {
+            assert!(tblastn_genetic_code(value).is_err(), "{value}");
+        }
+    }
+
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942
     // arg_desc.AddFlag(kArgUseLCaseMasking,
     //     "Use lower case filtering in query and subject sequence(s)?", true);

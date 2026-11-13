@@ -90,10 +90,11 @@ impl TblastxDatabase {
         // TBLASTX has no Gumbel block: NCBI's average subject length divides by the statistics'
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;
-        let total = db.total_length();
+        // The statistics' setup total (`DbStatistics::setup_total`: not negative, below 2^63; a
+        // `LENGTH` of 2^63 or more is NCBI's negative `Int8`, read as such) as the engine holds it.
+        let total = db.statistics().setup_total;
         usize::try_from(total)
             .ok()
-            .filter(|&letters| i64::try_from(letters).is_ok())
             .with_context(|| {
                 format!(
                     "a database of {total} letters is not supported by LOSAT's TBLASTX on this platform"

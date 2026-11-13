@@ -5434,6 +5434,12 @@ fn open_search_database(
                 args.dbsize.is_some_and(|size| size > 0),
                 args.app.name(),
             )?;
+            crate::algorithm::common::database::check_negative_length_spaces(
+                &database.statistics(),
+                !resolved.old_fsc,
+                args.searchsp.is_some_and(|space| space != 0),
+                args.app.name(),
+            )?;
             let shown = database.pairwise_database();
             for format in &outputs.formats {
                 crate::algorithm::common::database::check_report_sums(

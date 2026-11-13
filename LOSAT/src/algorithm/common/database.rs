@@ -630,6 +630,42 @@ pub(crate) fn pairwise_database(db: &SeqDb) -> PairwiseDatabase {
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220
+// ```c++
+//     CEffectiveSearchSpacesMemento eff_memento(m_Options);
+//     SplitQuery_SetEffectiveSearchSpace(m_Options, m_QueryFactory,
+//                                        m_InternalData);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:778-780 (quoted at
+// `stats::setup::calc_eff_lengths`): `s_GetEffectiveSearchSpaceForContext` reads those spaces.
+// The preliminary stage of every search sets the options' search spaces from the statistics'
+// length and count before the fallback to OID 0 (`archive::RequestLength`), which its setup then
+// takes over its own (the memento restores them for the traceback, whose setup and the reports
+// read the fallback's). For a negative length (an alias file's `LENGTH` of 2^63 or more) each
+// context's preliminary space is its query length: NCBI 2.17.0 tblastx, blastx and blastn
+// `-ungapped` print e-values of that space and keep more hits (probes p5_neg_2p63#6, #13, #15 of
+// line RG D1a-3), and blastn's preliminary cutoffs read it. With the Gumbel block the preliminary
+// cutoffs and e-values of single HSPs read no search space (Spouge), and the probes of BLASTP,
+// PSI-BLAST, BLASTX and TBLASTN with it agree with NCBI's bytes.
+/// LOSAT's refusal of a statistics length that is negative (`DbStatistics::gumbel_db_length`)
+/// for a search without the Gumbel block (`gumbel_block`) and without `-searchsp` (`searchsp`;
+/// it sets the options' spaces, which NCBI then keeps): LOSAT's searches do not hold the
+/// preliminary stage's search spaces apart from the setup's yet.
+pub(crate) fn check_negative_length_spaces(
+    statistics: &crate::seqdb::DbStatistics,
+    gumbel_block: bool,
+    searchsp: bool,
+    program: &str,
+) -> Result<()> {
+    if statistics.gumbel_db_length < 0 && !gumbel_block && !searchsp {
+        return Err(refusal(
+            "an alias file's LENGTH of 2^63 or more (a negative total length) in a search without the Gumbel block and without -searchsp, whose preliminary stage NCBI BLAST+ runs with search spaces of that negative length",
+            program,
+        ));
+    }
+    Ok(())
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:513-522
 // ```c++
 //         Int8 tot_num_seqs = static_cast<Int8>(dbinfo->number_seqs);

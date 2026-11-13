@@ -7820,6 +7820,12 @@ fn open_search_database(
                 args.dbsize.is_some_and(|size| size > 0),
                 "BLASTN",
             )?;
+            crate::algorithm::common::database::check_negative_length_spaces(
+                &database.statistics(),
+                false,
+                args.searchsp.is_some_and(|space| space != 0),
+                "BLASTN",
+            )?;
             let shown = database.pairwise_database();
             for format in &outputs.formats {
                 crate::algorithm::common::database::check_report_sums(

@@ -709,6 +709,13 @@ fn run_inner(
                 args.dbsize.is_some_and(|size| size > 0),
                 program.upper,
             )?;
+            crate::algorithm::common::database::check_negative_length_spaces(
+                &database.statistics(),
+                !args.ungapped
+                    && !(args.searchsp.is_some() || crate::blastinput::app::old_fsc_environment()),
+                args.searchsp.is_some_and(|space| space != 0),
+                program.upper,
+            )?;
             crate::algorithm::common::database::check_report_sums(
                 &database.pairwise_database(),
                 crate::blastinput::app::parse_formatting_string(&args.outfmt)?.number,

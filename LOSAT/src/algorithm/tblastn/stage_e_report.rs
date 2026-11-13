@@ -1231,9 +1231,11 @@ fn write_pairwise(
             subject_records.len(),
             subject_letters.lengths().sum::<usize>(),
         ),
+        // A database's lines print `pairwise` itself (NCBI's signed counts); these numbers serve
+        // a FASTA set's lines only.
         ShownSubjects::Database { pairwise, .. } => (
-            usize::try_from(pairwise.num_sequences)?,
-            usize::try_from(pairwise.total_letters)?,
+            usize::try_from(pairwise.num_sequences).unwrap_or(usize::MAX),
+            usize::try_from(pairwise.total_letters).unwrap_or(usize::MAX),
         ),
     };
     // The Gumbel block's database length takes `-dbsize` (`SubjectSetNumbers`).

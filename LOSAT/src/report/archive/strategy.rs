@@ -132,10 +132,16 @@ pub fn create_strategy_file(path: &Path, out: Option<&Path>, label: &str) -> Res
 #[cfg(unix)]
 fn is_same_as_output(file: &std::fs::File, _path: &Path, out: Option<&Path>) -> bool {
     use std::os::fd::AsFd;
-    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
     let Ok(own) = file.metadata() else {
         return false;
     };
+    // The null device: what NCBI writes there is lost whatever the order of the writes.
+    if own.file_type().is_char_device()
+        && std::fs::metadata("/dev/null").is_ok_and(|null| null.rdev() == own.rdev())
+    {
+        return false;
+    }
     let same = |other: std::io::Result<std::fs::Metadata>| {
         other.is_ok_and(|other| other.dev() == own.dev() && other.ino() == own.ino())
     };
@@ -458,6 +464,16 @@ mod tests {
                 "Command line argument error: Argument \"export_search_strategy\". File is not accessible:  `{}'\n",
                 missing.display()
             )
+        );
+        // The null device as the strategy file and as `-out`: nothing written there is kept.
+        #[cfg(unix)]
+        drop(
+            create_strategy_file(
+                Path::new("/dev/null"),
+                Some(Path::new("/dev/null")),
+                "BLASTP",
+            )
+            .unwrap(),
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }

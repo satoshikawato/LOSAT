@@ -12,6 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::blastdbcmd_info::ncbi_paths_on_windows;
 use crate::library_examples::example_binary;
 
 /// The fixtures of `program`.
@@ -82,15 +83,18 @@ fn cases(program: &str) -> Vec<Case> {
     cases
 }
 
+/// Stdout, stderr and exit status of a run.
+type Streams = (Vec<u8>, Vec<u8>, i32);
+
 /// One run of `losat <program>` for `case` in `tests/<program>`: stdout, stderr, exit status.
 /// No LOSAT, NCBI or BLAST variable, no registry file (`NCBI_CONFIG_PATH` names the fixture
 /// directory, which has none).
-fn run(program: &str, case: &Case) -> (Vec<u8>, Vec<u8>, i32) {
+fn run(program: &str, case: &Case) -> Streams {
     run_binary(Path::new(env!("CARGO_BIN_EXE_losat")), program, case)
 }
 
 /// `run` of `binary <program>` (the command line, or the library's example).
-fn run_binary(binary: &Path, program: &str, case: &Case) -> (Vec<u8>, Vec<u8>, i32) {
+fn run_binary(binary: &Path, program: &str, case: &Case) -> Streams {
     let dir = fixtures(program);
     let mut command = Command::new(binary);
     for (name, _) in std::env::vars_os() {
@@ -114,8 +118,50 @@ fn run_binary(binary: &Path, program: &str, case: &Case) -> (Vec<u8>, Vec<u8>, i
     (output.stdout, output.stderr, output.status.code().unwrap())
 }
 
-/// NCBI's stdout, stderr and exit status for the row `name` of `program`.
-fn expected(program: &str, name: &str) -> (Vec<u8>, Vec<u8>, i32) {
+/// NCBI's stdout, stderr and exit status for `case` of `program`. NCBI's bytes come from Linux;
+/// on Windows they are the ones NCBI's code writes there:
+/// - a directory does not open as a file (`CArg_InputFile::x_Open`: the `ifstream::open` of
+///   MSVC's library fails on a directory, `is_open()` is false, the exception
+///   `CArgException::eNoFile`), so `-in` naming one is "File is not accessible" as a file that
+///   does not exist, the row `in_missing` with the name of `case` (segmasker and
+///   convert2blastmask open `-in` first; dustmasker opens `-out` first, and the interval writer
+///   of its directory row writes nothing before a record); on Linux the directory opens and its
+///   first read fails;
+/// - the paths of the database messages and the search path (`ncbi_paths_on_windows`).
+fn expected(program: &str, case: &Case) -> Streams {
+    if cfg!(windows) {
+        if let Some(directory) = input_directory(program, case) {
+            let missing = cases(program)
+                .into_iter()
+                .find(|row| row.name == "in_missing")
+                .unwrap();
+            let missing_name = input(&missing).unwrap().to_string();
+            let named = |bytes: Vec<u8>| -> Vec<u8> {
+                String::from_utf8(bytes)
+                    .unwrap()
+                    .replace(&format!("`{missing_name}'"), &format!("`{directory}'"))
+                    .into_bytes()
+            };
+            let (out, err, status) = expected_row(program, "in_missing");
+            return (named(out), named(err), status);
+        }
+    }
+    expected_row(program, &case.name)
+}
+
+/// The value of `-in` in `case`.
+fn input(case: &Case) -> Option<&str> {
+    let at = case.words.iter().position(|word| word == "-in")?;
+    case.words.get(at + 1).map(String::as_str)
+}
+
+/// The value of `-in` in `case` when it names a directory.
+fn input_directory<'a>(program: &str, case: &'a Case) -> Option<&'a str> {
+    input(case).filter(|name| fixtures(program).join(name).is_dir())
+}
+
+/// NCBI's stdout, stderr and exit status for the row `name` of `program`, as frozen.
+fn expected_row(program: &str, name: &str) -> Streams {
     let file = |extension: &str| {
         fixtures(program)
             .join("ncbi")
@@ -124,11 +170,14 @@ fn expected(program: &str, name: &str) -> (Vec<u8>, Vec<u8>, i32) {
     let status = fs::read_to_string(file("rc")).unwrap();
     // The database rows name the probe's directory in NCBI's search path; here it is this one.
     let here = |bytes: Vec<u8>| -> Vec<u8> {
+        let text = String::from_utf8_lossy(&bytes);
+        let text = if cfg!(windows) {
+            ncbi_paths_on_windows(&text, &["@CWD@"])
+        } else {
+            text.into_owned()
+        };
         let dir = fixtures(program);
-        let dir = dir.to_string_lossy();
-        String::from_utf8_lossy(&bytes)
-            .replace("@CWD@", &dir)
-            .into_bytes()
+        text.replace("@CWD@", &dir.to_string_lossy()).into_bytes()
     };
     let err = fs::read(file("err")).unwrap();
     let err = if err.windows(5).any(|w| w == b"@CWD@") {
@@ -143,13 +192,64 @@ fn expected(program: &str, name: &str) -> (Vec<u8>, Vec<u8>, i32) {
     )
 }
 
+/// Whether `case` runs on this platform: a row that writes its output to a device file runs
+/// where the file is, `/dev/full` on Linux, `/dev/null` on Unix (`-logfile /dev/null` is NCBI's
+/// name for no log file, `CDiagContext::SetLogFile`, on every platform).
+fn runs_here(case: &Case) -> bool {
+    let out = case
+        .words
+        .iter()
+        .position(|word| word == "-out")
+        .and_then(|at| case.words.get(at + 1))
+        .map(String::as_str);
+    match out {
+        Some("/dev/full") => cfg!(target_os = "linux"),
+        Some("/dev/null") => cfg!(unix),
+        _ => true,
+    }
+}
+
+/// The rows of `program` that run here (`runs_here`).
+fn cases_here(program: &str) -> Vec<Case> {
+    cases(program).into_iter().filter(runs_here).collect()
+}
+
+/// `rows`, the rows that differ, each with what LOSAT and NCBI wrote (the start of each stream),
+/// for the message of a failed test.
+fn describe(rows: &[(String, Streams, Streams)]) -> String {
+    let start = |bytes: &[u8]| {
+        let text = String::from_utf8_lossy(bytes);
+        text.chars().take(600).collect::<String>()
+    };
+    let mut text = String::new();
+    for (name, got, want) in rows {
+        text.push_str(&format!(
+            "\n--- {name}: LOSAT status {}, NCBI {}\nLOSAT stdout: {:?}\nNCBI stdout:  {:?}\n\
+             LOSAT stderr: {:?}\nNCBI stderr:  {:?}\n",
+            got.2,
+            want.2,
+            start(&got.0),
+            start(&want.0),
+            start(&got.1),
+            start(&want.1),
+        ));
+    }
+    text
+}
+
 /// The rows of `program`'s table whose run differs from NCBI's.
 fn rows_that_differ(program: &str) -> Vec<String> {
-    cases(program)
-        .iter()
-        .filter(|case| run(program, case) != expected(program, &case.name))
-        .map(|case| case.name.clone())
-        .collect()
+    let mut differ = Vec::new();
+    for case in cases_here(program) {
+        let (got, want) = (run(program, &case), expected(program, &case));
+        if got != want {
+            differ.push((case.name.clone(), got, want));
+        }
+    }
+    if !differ.is_empty() {
+        eprintln!("{}", describe(&differ));
+    }
+    differ.into_iter().map(|(name, _, _)| name).collect()
 }
 
 #[test]
@@ -178,7 +278,7 @@ fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Ve
     let example = example_binary("library_command_line");
     let mut differ = Vec::new();
     let mut refused = 0;
-    for case in cases(program) {
+    for case in cases_here(program) {
         let (out, err, status) = run_binary(&example, program, &case);
         let word = ["-conffile", "-dryrun"].into_iter().find(|word| {
             case.words
@@ -196,16 +296,20 @@ fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Ve
                 (Vec::new(), text.into_bytes(), 1)
             }
             None => {
-                let (out, err, status) = expected(program, &case.name);
+                let (out, err, status) = expected(program, &case);
                 (out, err, i32::from(status != 0))
             }
         };
-        if (out, err, status) != expected {
-            differ.push(case.name.clone());
+        let got = (out, err, status);
+        if got != expected {
+            differ.push((case.name.clone(), got, expected));
         }
     }
     assert!(refused > 0);
-    differ
+    if !differ.is_empty() {
+        eprintln!("{}", describe(&differ));
+    }
+    differ.into_iter().map(|(name, _, _)| name).collect()
 }
 
 #[test]

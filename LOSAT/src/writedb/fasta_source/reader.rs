@@ -451,25 +451,44 @@ pub(crate) enum SeqInst {
     TooLong { length: u64 },
     /// A record of 4,294,967,296 residues or more, counting the letters of its gaps, that
     /// makeblastdb's length check does not stop. NCBI counts a record's length in a `TSeqPos`
-    /// (`GetCurrentPos`, `m_TotalGapLength`, `SGap::m_uLen`), which wraps there, and goes on
-    /// with a `Seq-inst` whose length is the wrapped one: with `>?` lines that sum to a
-    /// multiple of 2^32 the gaps are kept without `fParseGaps` (dustmasker, NCBI BLAST+
-    /// 2.17.0: "Invalid sequence length"; segmasker: `CSeqVector_CI::GetSeqData: cannot get
-    /// seq-data in range`; makeblastdb, protein: "Protein delta sequences are not
-    /// supported."), and otherwise the residues and the run of `N` or `X` are cut at the
-    /// wrapped length or allocated whole. LOSAT does not build it (no allocation for the
-    /// gaps): the programs that read the residues refuse it, and convert2blastmask, which
-    /// reads only the masks, writes them (their positions wrap as NCBI's,
-    /// `RecordState::current_pos_with_gaps`). `length` is the record's, counted on.
-    PastSeqPos { length: u64 },
+    /// (`GetCurrentPos`, `m_TotalGapLength`, `SGap::m_uLen`, `m_CurrentGapLength`), which wraps
+    /// there, and goes on with a `Seq-inst` of the wrapped length, `seq_pos_length`, whose data
+    /// is longer (`form`). LOSAT does not build it (no allocation for the gaps).
+    /// convert2blastmask, which reads only the masks, writes them (their positions wrap as
+    /// NCBI's, `RecordState::current_pos_with_gaps`); makeblastdb follows NCBI where NCBI
+    /// skips the record or stops before it builds the data (`fasta_source::next_bioseq`) and
+    /// refuses it where NCBI builds it; dustmasker and segmasker refuse it (NCBI's object
+    /// manager reads the first `seq_pos_length` letters, the gaps as `N` or `X`, after
+    /// allocating the substituted run when the gaps are not kept; a kept gap of 4294967295,
+    /// `kInvalidSeqPos`, is its error instead: not ported yet, line RG series K). `length` is the
+    /// record's, counted on.
+    PastSeqPos {
+        length: u64,
+        seq_pos_length: u64,
+        form: PastSeqPosForm,
+    },
+}
+
+/// The `Seq-inst` that NCBI's `AssembleSeq` makes of a `SeqInst::PastSeqPos` record.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum PastSeqPosForm {
+    /// No gap is kept (no gaps, or runs of `N` or `X` substituted for them): `repr raw`, or
+    /// a delta of literals only, over the residues.
+    Residues,
+    /// The gaps are kept (`fParseGaps`, or `>?` lines whose lengths sum to a multiple of 2^32,
+    /// so that `m_TotalGapLength` is 0): `repr delta`, whose first piece is a literal.
+    Delta,
+    /// As `Delta`, with a gap of unknown length (`Seq-loc null`, a lone hyphen) first.
+    DeltaFromNull,
 }
 
 /// What LOSAT refuses in a program that reads the residues of a `SeqInst::PastSeqPos` record
-/// (the text before "is not supported by LOSAT's <program>").
-pub(crate) fn past_seq_pos_refusal(length: u64) -> String {
+/// `id` of `length` letters (the text before "is not supported by LOSAT's <program>").
+pub(crate) fn past_seq_pos_refusal(id: &str, length: u64) -> String {
     format!(
         "a FASTA record of 4,294,967,296 letters or more, counting the letters of its gaps \
-         ({length}; NCBI counts the length of a record in 32 bits, which wrap there),"
+         ({id}: {} letters; NCBI counts the length of a record in 32 bits, which wrap there),",
+        crate::ncbi_str::with_commas(length)
     )
 }
 
@@ -659,9 +678,9 @@ struct RecordState {
     /// `m_Gaps`.
     gaps: Vec<Gap>,
     /// `m_CurrentGapLength`: the hyphens read since the last residue (their character,
-    /// `m_CurrentGapChar`, is always `-`).
-    current_gap_length: u64,
-    /// `m_TotalGapLength`.
+    /// `m_CurrentGapChar`, is always `-`), a `TSeqPos` (a run of 2^32 hyphens is none).
+    current_gap_length: u32,
+    /// `m_TotalGapLength`, counted on (NCBI's `TSeqPos` wraps at 2^32: `assemble_seq`).
     total_gap_length: u64,
     /// `m_CurrentSeqTitles`.
     titles: Vec<LineText>,
@@ -1593,7 +1612,8 @@ impl RecordState {
                         .iter()
                         .position(|&byte| byte != c)
                         .unwrap_or(s.len() - pos - 1);
-                    self.current_gap_length += run as u64;
+                    // `m_CurrentGapLength += pos2 - pos`, a `TSeqPos`.
+                    self.current_gap_length = self.current_gap_length.wrapping_add(run as u32);
                     pos += run - 1;
                 }
                 BAD => self.bad_positions.push(pos as u32),
@@ -1683,7 +1703,9 @@ impl RecordState {
         for (i, byte) in run.iter().enumerate() {
             let pos = base.wrapping_add(i as u32);
             if byte.is_ascii_lowercase() {
-                if self.mask_start.is_none() {
+                // `m_MaskRangeStart` is `kInvalidSeqPos` (4294967295) while no interval is
+                // open: one opened there stays closed (`x_OpenMask` stores that value).
+                if self.mask_start.is_none() && pos != u32::MAX {
                     self.mask_start = Some(pos);
                 }
             } else if let Some(start) = self.mask_start.take() {
@@ -1914,7 +1936,7 @@ impl RecordState {
         if self.current_gap_length == 0 {
             return;
         }
-        let mut len = self.current_gap_length;
+        let mut len = u64::from(self.current_gap_length);
         let pos = self.seq_data.len();
         if len == 1
             && (seq_data_length == pos
@@ -2315,7 +2337,26 @@ impl RecordState {
             ));
         }
         if length != seq_pos_length {
-            return Ok((SeqInst::PastSeqPos { length }, is_aa));
+            // The gaps stay a delta when they are parsed, or when their sum wraps to 0 (the
+            // `m_TotalGapLength > 0` test of the substitution below).
+            let form = match self.gaps.first() {
+                Some(first) if self.flags.parse_gaps || self.total_gap_length as u32 == 0 => {
+                    if first.position == 0 && first.length == 0 {
+                        PastSeqPosForm::DeltaFromNull
+                    } else {
+                        PastSeqPosForm::Delta
+                    }
+                }
+                _ => PastSeqPosForm::Residues,
+            };
+            return Ok((
+                SeqInst::PastSeqPos {
+                    length,
+                    seq_pos_length,
+                    form,
+                },
+                is_aa,
+            ));
         }
 
         if !self.flags.parse_gaps && self.total_gap_length > 0 {

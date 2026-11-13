@@ -992,16 +992,13 @@ fn numeric_values_are_validated_before_io() {
         unreachable!("blastn")
     };
     assert_eq!(args.gap_open, Some(0));
-    // NCBI's other blastn tasks and options are rejected explicitly (AGENTS.md rule 2).
-    for extra in [&["-task", "rmblastn"][..], &["-version"]] {
-        let mut words = vec!["-outfmt", "6"];
-        words.extend_from_slice(extra);
-        let error = crate::cli::render_message(&parse("blastn", &words).unwrap_err());
-        assert!(
-            error.contains("not supported by LOSAT's BLASTN"),
-            "{extra:?}: {error}"
-        );
-    }
+    // NCBI's other blastn tasks are rejected explicitly (AGENTS.md rule 2). (`-version` is the
+    // command line's, which the parser's callers refuse by name: line RG item E3,
+    // `version_words_in_an_option_value_are_read_as_ncbi_reads_them`.)
+    let error = crate::cli::render_message(
+        &parse("blastn", &["-outfmt", "6", "-task", "rmblastn"]).unwrap_err(),
+    );
+    assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
     // `-ungapped` is NCBI's flag (blast_args.cpp:917) and LOSAT's BLASTN searches with it (O4a).
     let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-ungapped"])
         .unwrap()
@@ -1567,9 +1564,7 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("blastp", &["-gilist", "ids.gil"]),
         ("blastp", &["-db_soft_mask", "21"]),
         ("blastp", &["-db_hard_mask", "21"]),
-        ("blastp", &["-version"]),
         ("blastp", &["-xmlhelp"]),
-        ("tblastn", &["-version-full"]),
         ("tblastx", &["-xmlhelp"]),
     ] {
         let error = crate::cli::render_message(&parse(program, words).unwrap_err());
@@ -1900,24 +1895,41 @@ fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
 }
 
 #[test]
-fn toolkit_words_in_an_option_value_are_rejected_as_options() {
+fn version_words_in_an_option_value_are_read_as_ncbi_reads_them() {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001: the application reads
     // -version, -version-full*, -dryrun, -logfile and -conffile anywhere before `--`, also
-    // in an option's value (`-out -version` prints the version). LOSAT rejects the full
-    // versions (D9) in that place too, instead of writing a file named "-version". The parser refuses
-    // `-version` (the Web engine's); the command line prints it before parsing
-    // (`ncbi_version_request_reads_the_word_before_the_arguments`).
+    // in an option's value (`-out -version` prints the version). The command line prints the
+    // versions before parsing (`ncbi_version_request_reads_the_word_before_the_arguments`); the
+    // parser's callers without the command line's application start (the library API and the
+    // Web engine) refuse them by name in that place too, instead of writing a file named
+    // "-version" (line RG item E3). `-version=1` is an unknown option, as in NCBI
+    // (`Unknown argument: "version"`, exit status 1; LOSAT's parser error, exception 1).
     for (program, upper) in [
         ("blastn", "BLASTN"),
         ("blastp", "BLASTP"),
         ("tblastn", "TBLASTN"),
         ("tblastx", "TBLASTX"),
     ] {
-        for words in [&["-out", "-version"][..], &["-evalue", "-version-full"]] {
+        for words in [
+            &["-out", "-version"][..],
+            &["-evalue", "-version-full"],
+            &["-version-full-xml"],
+            &["-out", "o.txt", "-version-full-json"],
+        ] {
             let error = parse(program, words).unwrap_err().to_string();
             assert!(
-                error.contains(&format!("is not supported by LOSAT's {upper}")),
+                error.contains(&format!(
+                    "the NCBI C++ Toolkit option {} runs on the command line of LOSAT's {upper} only",
+                    words.last().unwrap()
+                )),
                 "{program} {words:?}: {error}"
+            );
+        }
+        for word in ["-version=1", "-version-full=1"] {
+            let error = parse(program, &[word]).unwrap_err().to_string();
+            assert!(
+                error.contains(&format!("unknown option or argument '{word}'")),
+                "{program} {word}: {error}"
             );
         }
         assert!(parse(program, &["-out", "o.txt"]).is_ok(), "{program}");
@@ -1985,6 +1997,21 @@ fn toolkit_file_options_need_the_command_lines_application_start() {
     );
     assert!(makedb(&["-conffile"]).is_ok());
     assert!(makedb(&["-logfile"]).is_ok());
+    // So do the versions, which the command line prints before parsing (line RG item E3).
+    for word in [
+        "-version",
+        "-version-full",
+        "-version-full-xml",
+        "-version-full-json",
+    ] {
+        let error = makedb(&["-title", word]).unwrap_err().to_string();
+        assert!(
+            error.contains(&format!(
+                "the NCBI C++ Toolkit option {word} runs on the command line of LOSAT's makeblastdb only"
+            )),
+            "{error}"
+        );
+    }
 }
 
 #[test]
@@ -2259,8 +2286,37 @@ fn ncbi_version_request_reads_the_word_before_the_arguments() {
     assert!(version(&["losat", "blastn", "-logfile", "-version"]).is_none());
     assert!(version(&["losat", "makeblastdb", "-conffile", "-version"]).is_none());
     assert!(version(&["losat", "blastn", "-logfile=x", "-version"]).is_some());
-    assert!(version(&["losat", "blastn", "-version-full"]).is_none());
     assert!(version(&["losat", "blastn", "-version=1"]).is_none());
+    assert!(version(&["losat", "blastn", "-version-full=1"]).is_none());
+    // The full versions (line RG item E3, `ncbi_version::print`): the first version word is
+    // printed.
+    let full = version(&[
+        "losat",
+        "blastn",
+        "-evalue",
+        "x",
+        "-version-full",
+        "-version",
+    ])
+    .unwrap();
+    assert!(
+        full.starts_with("blastn: 2.17.0+\n Package: LOSAT ")
+            && full.ends_with(
+                ", output compatible with blast 2.17.0\n Package-Config:  \n GI-64bit:  TRUE\n"
+            ),
+        "{full}"
+    );
+    assert!(version(&["losat", "makeblastdb", "-title", "-version-full-xml"])
+        .unwrap()
+        .contains("<appname>makeblastdb</appname>\n<version_info major=\"2\" minor=\"17\" patch_level=\"0\"/>\n"));
+    assert!(version(&["losat", "rpsbproc", "-version-full-json", "-version"])
+        .unwrap()
+        .contains("\"appname\": \"rpsbproc\",\n    \"version_info\": {\"major\": 0, \"minor\": 5, \"patch_level\": 1},\n"));
+    assert!(version(&["losat", "rpstblastn", "-version-full"])
+        .unwrap()
+        .starts_with("rpstblastn: 2.17.0+\n"));
+    assert!(version(&["losat", "blastn", "--", "-version-full"]).is_none());
+    assert!(version(&["losat", "blastn", "-logfile", "-version-full"]).is_none());
     assert!(version(&["losat", "-version"]).is_none());
     assert!(version(&["losat", "--version"]).is_none());
     assert!(version(&["losat", "nosuch", "-version"]).is_none());

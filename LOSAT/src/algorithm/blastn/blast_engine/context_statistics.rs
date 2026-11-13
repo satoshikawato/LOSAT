@@ -316,8 +316,9 @@ fn effective_search_spaces<const UNGAPPED: bool>(
     // }
     // ```
     // A database without sequences (makeblastdb builds none; a volume whose index holds
-    // none) has a total length of 0, so the setup above asks its reader for the length of
-    // ordinal id 0, which it does not have: NCBI's search stage reports the reader's error
+    // none) has a total length of 0 (unless an alias file's LENGTH or STATS_TOTLEN gives one:
+    // `SeqDb::first_oid_read_fails`), so the setup above asks its reader for the length of
+    // OID 0, which it does not have: NCBI's search stage reports the reader's error
     // as a database file that cannot be read (local_blast.cpp:240-251). Shown with the
     // oracle (campaign dbsearch-20261012, `$BUILD_ROOT/dbsearch/db4/smoke/empty`: the
     // nucleotide fixture's index with no sequence): the outfmt 0 prolog, then `BLAST engine
@@ -331,7 +332,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
     let check_subjects = any_valid_context && !split;
     if check_subjects {
         if let SubjectSource::Database(database) = subjects {
-            if database.num_oids() == 0 {
+            if database.first_oid_read_fails() {
                 return Err(database_search_error(
                     database::PreliminaryReadError("Database memory map file error").into(),
                     first_batch,

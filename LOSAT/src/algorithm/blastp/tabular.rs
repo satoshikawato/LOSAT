@@ -925,6 +925,7 @@ mod tests {
         let before = [b"Warning: q1\n".to_vec()];
         let mut warnings = QueryWarnings::new(&before, &mut err);
         write_blastp_tabular(&tab, hit_lists, &mut out, Some(&mut warnings), None, None).unwrap();
+        drop(warnings);
         (
             String::from_utf8(out).unwrap(),
             String::from_utf8(err).unwrap(),

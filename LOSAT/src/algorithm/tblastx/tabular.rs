@@ -419,7 +419,7 @@ pub(super) fn write_tblastx_tabular(
                 // prefetch it: the texts of its taxonomy lookups follow the rows before it
                 // (`QueryWarnings::subject_read`), before those of the row's own lookups.
                 if let Some(warnings) = warnings.as_deref_mut() {
-                    if warnings.reads_with_texts(q_idx) && fetch.reads(engine_ident as usize) {
+                    if warnings.reads_with_texts(q_idx) && fetch.reads(engine_ident) {
                         writer.write_all(&buf)?;
                         buf.clear();
                         warnings.subject_read(q_idx, hit.s_idx, &mut *writer)?;

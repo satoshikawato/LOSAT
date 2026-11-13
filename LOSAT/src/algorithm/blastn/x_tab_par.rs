@@ -607,6 +607,9 @@ mod tests {
             ),
         }
         .unwrap();
+        // The warnings end (`QueryWarnings`'s drop writes any read's text not placed) before the
+        // sink is read.
+        drop(warnings);
         drop((report, sink));
         Arc::try_unwrap(log).unwrap().into_inner().unwrap()
     }

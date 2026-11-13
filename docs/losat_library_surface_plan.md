@@ -165,7 +165,7 @@ ABI v2 §7 を基にするが、入力の渡し方が違う。
 | 内容 | 出どころ |
 |---|---|
 | `losat-web-serial.wasm`、`losat-web-threads.wasm` | `web/adapter/tools/build_reactors.py`（同一性の記録つき） |
-| ABI v2 のホスト側 | `web/app/src/infra/reactor/abi.ts`（`losat_web2_*` の呼び出し）、`infra/reactor/wasi.ts`（WASI shim。npm の `@bjorn3/browser_wasi_shim` に依存）、`infra/engine-worker/*`（worker、`thread-host.ts`）、`ports/engine.ts`（型と `EngineGateway`）。アプリが使う層と同じものを package にし、重複させない（切り出し方は LIB-4 で決める。`web/AGENTS.md` の規則の下） |
+| ABI v2 のホスト側 | （LIB-4 で `web/packages/losat/src/` へ移した、§15。以下は移す前の場所）`web/app/src/infra/reactor/abi.ts`（`losat_web2_*` の呼び出し）、`infra/reactor/wasi.ts`（WASI shim。npm の `@bjorn3/browser_wasi_shim` に依存）、`infra/engine-worker/*`（worker、`thread-host.ts`）、`ports/engine.ts`（型と `EngineGateway`）。アプリが使う層と同じものを package にし、重複させない（切り出し方は LIB-4 で決める。`web/AGENTS.md` の規則の下） |
 | 型 | `HspRecord`、`ProgramDescription`、`ValidationResult`（`engine.ts` に既にある） |
 | README | cross-origin isolation（COOP / COEP）が threads 版に必須、メモリの候補（ABI v2 §3）、`abi_version` |
 

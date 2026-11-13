@@ -1,15 +1,10 @@
+import { PROGRAM_INPUTS, WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type InputRole, type ProgramId, type SequenceKind } from 'losat/domain';
 // Program descriptors: the only place that lists what differs between programs in the UI
 // (plan §2.1 "O"). A descriptor says which engine options the search form shows, in which
 // section, where on the screen and under which label; the sections and labels are those of
 // NCBI BLAST's two-sequence page (docs/web/ncbi_ui_mapping.md §1). Defaults, choices and
 // help text come from the engine (`describe`), not from here (plan §5.3, DW-4); a field whose
 // flag the engine does not describe is not shown.
-import { WINDOW_MASKER_TAXID_FLAG } from './counts';
-import type { FastaParserKind } from './dataset';
-
-export type ProgramId = 'blastn' | 'blastp' | 'blastx' | 'tblastn' | 'tblastx';
-export type SequenceKind = 'nucleotide' | 'protein';
-export type InputRole = 'query' | 'subject';
 
 /**
  * How the form edits an option's value. Every kind writes the text as the user chose it
@@ -36,9 +31,6 @@ export type InputRole = 'query' | 'subject';
  *   and the ID as typed once it is.
  */
 export type FieldKind = 'text' | 'choice' | 'radio' | 'boolean' | 'flag' | 'gencode' | 'filter' | 'file' | 'taxid';
-
-/** BLASTN's option for the WindowMasker unit counts file, the one field of the form with the kind `file`. */
-export const WINDOW_MASKER_FLAG = '-window_masker_db';
 
 export interface ParameterField {
   readonly flag: string;
@@ -326,8 +318,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       blastn: 'optimized for somewhat similar sequences',
       'blastn-short': 'optimized for short sequences',
     },
-    query: 'nucleotide',
-    subject: 'nucleotide',
+    ...PROGRAM_INPUTS.blastn,
     sections: [
       {
         title: 'Task Selection',
@@ -422,8 +413,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     summary: 'BLASTP mode searches protein subjects using a protein query.',
     searches: 'protein subjects',
     taskNotes: { blastp: 'protein-protein BLAST', 'blastp-fast': 'Quick BLASTP', 'blastp-short': 'optimized for short sequences' },
-    query: 'protein',
-    subject: 'protein',
+    ...PROGRAM_INPUTS.blastp,
     sections: [
       {
         title: 'Task Selection',
@@ -475,8 +465,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     summary: 'BLASTX mode searches protein subjects using a translated nucleotide query.',
     searches: 'protein subjects',
     queryNote: 'translated nucleotide query',
-    query: 'nucleotide',
-    subject: 'protein',
+    ...PROGRAM_INPUTS.blastx,
     sections: [
       { title: 'Task Selection', placement: 'program', fields: [{ flag: '-task', label: 'Algorithm', kind: 'radio' }] },
       { title: 'Genetic code', placement: 'query', fields: [{ flag: '-query_gencode', label: 'Genetic code', kind: 'gencode' }] },
@@ -519,8 +508,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     summary: 'TBLASTN mode searches translated nucleotide subjects using a protein query.',
     searches: 'translated nucleotide subjects',
     queryNote: 'protein query',
-    query: 'protein',
-    subject: 'nucleotide',
+    ...PROGRAM_INPUTS.tblastn,
     sections: [
       { title: 'Task Selection', placement: 'program', fields: [{ flag: '-task', label: 'Algorithm', kind: 'radio' }] },
       { title: 'Genetic code', placement: 'subject', fields: [{ flag: '-db_gencode', label: 'Genetic code', kind: 'gencode' }] },
@@ -561,8 +549,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     summary: 'TBLASTX mode searches translated nucleotide subjects using a translated nucleotide query.',
     searches: 'translated nucleotide subjects',
     queryNote: 'translated nucleotide query',
-    query: 'nucleotide',
-    subject: 'nucleotide',
+    ...PROGRAM_INPUTS.tblastx,
     sections: [
       { title: 'Genetic code', placement: 'query', fields: [{ flag: '-query_gencode', label: 'Genetic code', kind: 'gencode' }] },
       { title: 'Genetic code', placement: 'subject', fields: [{ flag: '-db_gencode', label: 'Genetic code', kind: 'gencode' }] },

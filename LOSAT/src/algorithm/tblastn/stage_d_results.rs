@@ -358,19 +358,32 @@ fn refresh_best_evalue(list: &mut LinkedHspList) {
 // if (evalue1 < 1.0e-180 && evalue2 < 1.0e-180) return 0;
 // if ((retval = s_EvalueComp(h1->evalue, h2->evalue)) != 0) return retval;
 // return ScoreCompareHSPs(v1, v2);
-fn sort_hsps_by_evalue(list: &mut KappaResultList) {
-    let compare = |a: &LinkedHsp, b: &LinkedHsp| {
-        let evalue = if a.evalue < 1.0e-180 && b.evalue < 1.0e-180 {
-            Ordering::Equal
-        } else if a.evalue < b.evalue {
-            Ordering::Less
-        } else if a.evalue > b.evalue {
-            Ordering::Greater
-        } else {
-            Ordering::Equal
-        };
-        evalue.then_with(|| score_compare(&a.hsp, &b.hsp))
+/// The order of a list's HSPs in the reports (`sort_hsps_by_evalue`, `evalue_order`).
+fn compare_report_hsps(a: &LinkedHsp, b: &LinkedHsp) -> Ordering {
+    let evalue = if a.evalue < 1.0e-180 && b.evalue < 1.0e-180 {
+        Ordering::Equal
+    } else if a.evalue < b.evalue {
+        Ordering::Less
+    } else if a.evalue > b.evalue {
+        Ordering::Greater
+    } else {
+        Ordering::Equal
     };
+    evalue.then_with(|| score_compare(&a.hsp, &b.hsp))
+}
+
+/// The indices of `list`'s HSPs (and payloads) in the order `sort_hsps_by_evalue` puts them
+/// (`KappaResultHitList::sort_hsps_for_report`, before the reports), without moving them: the
+/// same stable sort by `compare_report_hsps`.
+pub(super) fn evalue_order(list: &KappaResultList) -> Vec<usize> {
+    let hsps = &list.hsps.hsps;
+    let mut order: Vec<usize> = (0..hsps.len()).collect();
+    order.sort_by(|&a, &b| compare_report_hsps(&hsps[a], &hsps[b]));
+    order
+}
+
+fn sort_hsps_by_evalue(list: &mut KappaResultList) {
+    let compare = compare_report_hsps;
     if list.payloads.is_empty() {
         list.hsps.hsps.sort_by(compare);
     } else {

@@ -1,0 +1,20 @@
+
+
+Building a new DB, current time: <T>
+New DB name:   <OUT>
+New DB title:  mask writer fixture
+Sequence type: Nucleotide
+Keep MBits: T
+Maximum file size: 3000000000B
+Mask file: wm_o1.asnt
+Mask file: dd0.asnt
+Mask file: seg_d.asnt
+Mask file: rep_d.asnt
+Mask file: rep_o.asnt
+Mask file: oth_d.asnt
+Mask file: oth_o.asnt
+Mask file: wm_d.asnt
+Mask file: wm_o2.asnt
+Adding sequences from FASTA; added 8 sequences in <S> seconds.
+
+

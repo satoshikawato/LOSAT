@@ -74,7 +74,7 @@ pub fn read_pssm_with_parameters_and_skips(
 ) -> Result<(PssmWithParameters, Vec<&'static str>)> {
     let mut reader = Reader::new(SliceSource::new(text), "PSSM", "PSSM reader");
     let c = reader.skip_white_space()?;
-    let id = reader.scan_end_of_id(is_first_id_char(c));
+    let id = reader.scan_end_of_id(is_first_id_char(c))?;
     let id = reader.src.text(id);
     if id != b"PssmWithParameters" {
         return Err(reader.error(format!(

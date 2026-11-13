@@ -2,7 +2,7 @@
 // engine wrote it, and its export. The stored results can go while they are shown (the browser
 // clears the site's data): a read or an export that fails says why where the output is, and once
 // the read of the format chosen has failed, the text of the format shown before goes (WA2-BR-01).
-import type { RunOutput } from '../domain/output-format';
+import type { RunOutput } from 'losat/domain';
 import type { Coordinator, RunView } from './coordinator';
 import { unreadableResults } from './results';
 import { Store } from './store';

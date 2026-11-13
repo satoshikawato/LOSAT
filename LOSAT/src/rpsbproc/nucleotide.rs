@@ -332,7 +332,29 @@ fn print_features(
             .first()
             .is_some_and(|record| !data.domains[record.domain].is_struct_dom)
     });
-    let translations = translations(&query.residues)?;
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1370-1379
+    // ```c++
+    // 				const _TOfflDomQuery * p_ofl_q = dynamic_cast< const _TOfflDomQuery * > (&q);
+    // 				string __dimTranslated[READINGFRAME::TOTAL_RFS];
+    //
+    // 				const string *dimTranslated = __dimTranslated;
+    // 				if (nullptr == p_ofl_q)	//not _TOfflDomQuery
+    // 				{
+    // 					TranslateAll(q.m_strSeqData, q.m_iGenCode, __dimTranslated);
+    // 				}
+    // 				else
+    // 					dimTranslated = p_ofl_q->m_dimTranslated;
+    // ```
+    // (A query of the XML input is a `_TOfflDomQuery`: its frames' residues are those that its
+    // alignments wrote, `offline::OfflineQuery`.)
+    let translated;
+    let translations: &[Vec<u8>; 6] = match &query.translated {
+        Some(frames) => frames,
+        None => {
+            translated = translations(&query.residues)?;
+            &translated
+        }
+    };
     if has_regular {
         report.line(&[b"SITES"]);
     }

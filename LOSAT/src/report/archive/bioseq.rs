@@ -20,7 +20,7 @@ use crate::report::seqid::SeqId;
 use crate::report::serial::encoder::Encoder;
 
 /// A record to write as a Bioseq.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct BioseqInput<'a> {
     /// `Query_N` or `Subject_N`.
     pub id: &'a str,
@@ -28,8 +28,9 @@ pub struct BioseqInput<'a> {
     pub ids: Option<&'a [crate::seqid::ParsedSeqId]>,
     /// With `-parse_deflines` and an id that is not local: the query as a Seq-loc.
     pub seq_loc: Option<QuerySeqLoc<'a>>,
-    /// The defline line as read, with its `>` and without the line end.
-    pub defline: &'a [u8],
+    /// The defline line as read, with its `>` and without the line end (`>` and the title for a
+    /// record that kept none).
+    pub defline: std::borrow::Cow<'a, [u8]>,
     /// The title (the defline after the `>` up to the first control byte, trimmed).
     pub title: &'a [u8],
     /// The letters as the reader keeps them (lower case where the lower-case mask covers
@@ -197,7 +198,7 @@ pub fn write_bioseq<E: Encoder>(enc: &mut E, bioseq: &BioseqInput<'_>) {
     //         desc->SetUser().AddField("DefLine", NStr::PrintableString(s));
     // ```
     // The default mode `fNewLine_Quote` writes a line feed as `\n` (ncbistr.hpp:2730).
-    enc.visible_str(&crate::ncbi_str::printable_string(bioseq.defline));
+    enc.visible_str(&crate::ncbi_str::printable_string(&bioseq.defline));
     enc.end_variant();
     enc.end_member();
     enc.end_sequence();
@@ -282,7 +283,7 @@ mod tests {
             id: "Query_1",
             ids: None,
             seq_loc: None,
-            defline: b">a\nb",
+            defline: std::borrow::Cow::Borrowed(b">a\nb"),
             title: b"a",
             letters: b"MKV",
             protein: true,

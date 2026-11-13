@@ -16,6 +16,7 @@ use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::encoder::{Encoder, SerialError};
 use crate::report::serial::xml::XmlEncoder;
+use crate::seqdb::mask::FilterProgram;
 use crate::seqid::label::bioseq_fasta;
 use crate::seqid::ParsedSeqId;
 
@@ -36,43 +37,6 @@ pub(crate) enum Serial {
     AsnBinary,
     AsnText,
     Xml,
-}
-
-/// `Blast-filter-program` (blastdb.asn), an INTEGER with named values.
-///
-/// NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.asn:51-59
-/// ```text
-/// Blast-filter-program ::= INTEGER {
-///     not-set             (0),
-///     dust                (10),
-///     seg                 (20),
-///     windowmasker        (30),
-///     repeat              (40),
-///     other               (100),
-///     max                 (255)
-/// }
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum FilterProgram {
-    NotSet,
-    Dust,
-    Seg,
-    Windowmasker,
-    Repeat,
-    Other,
-}
-
-impl FilterProgram {
-    fn name_and_value(self) -> (&'static str, i32) {
-        match self {
-            FilterProgram::NotSet => ("not-set", 0),
-            FilterProgram::Dust => ("dust", 10),
-            FilterProgram::Seg => ("seg", 20),
-            FilterProgram::Windowmasker => ("windowmasker", 30),
-            FilterProgram::Repeat => ("repeat", 40),
-            FilterProgram::Other => ("other", 100),
-        }
-    }
 }
 
 /// Whether the writer of `outfmt` writes through NCBI's serial stream (`CObjectOStream`: the
@@ -178,7 +142,7 @@ impl MaskWriter {
                 // ```
                 let mut text = id_to_string(seq, parsed_id)?;
                 text.push(b'\n');
-                text.extend_from_slice(&interval_lines(mask));
+                interval_lines(mask, &mut text);
                 out.write_all(&text)?;
             }
             MaskWriter::Tabular => {
@@ -330,7 +294,9 @@ impl MaskInfoWriter {
             return Ok(());
         }
         if self.serial.is_none() {
-            out.write_all(&interval_lines(mask))?;
+            let mut text = Vec::new();
+            interval_lines(mask, &mut text);
+            out.write_all(&text)?;
             return Ok(());
         }
         self.masks.push((id.clone(), mask.to_vec()));
@@ -349,12 +315,12 @@ impl MaskInfoWriter {
 ///     }
 /// }
 /// ```
-fn interval_lines(mask: &[(u32, u32)]) -> Vec<u8> {
-    let mut text = Vec::new();
+/// The lines are added to `text`.
+fn interval_lines(mask: &[(u32, u32)], text: &mut Vec<u8>) {
     for &(from, to) in mask {
-        text.extend_from_slice(format!("{from} - {to}\n").as_bytes());
+        // Writing to a `Vec<u8>` does not fail.
+        let _ = writeln!(text, "{from} - {to}");
     }
-    text
 }
 
 /// `bsh.GetSeqId()`: the first Seq-id of the sequence.
@@ -410,8 +376,7 @@ fn encode<E: Encoder>(enc: &mut E, document: &Document<'_>) -> Option<SerialErro
             enc.end_member();
             enc.member("algo-program", 1);
             enc.begin_named("Blast-filter-program");
-            let (name, value) = writer.program.name_and_value();
-            enc.named_int(name, value);
+            enc.named_int(writer.program.name(), writer.program.value());
             enc.end_named();
             enc.end_member();
             enc.member("algo-options", 2);

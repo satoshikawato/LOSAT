@@ -243,6 +243,7 @@ pub fn redo_params(
         } else {
             1
         },
+        do_link_hsps: do_link,
     })
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1896-1913

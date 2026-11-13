@@ -1,0 +1,15 @@
+Blast-db-mask-info ::= {
+  algo-id 0,
+  algo-program dust,
+  algo-options "opt1",
+  masks {
+    masks {
+    packed-int {
+      { from 50, to 60, id genbank { accession "AY200002", version 1 } },
+      { from 10, to 40, id genbank { accession "AY200002", version 1 } },
+      { from 30, to 45, id genbank { accession "AY200002", version 1 } }
+    }
+    },
+    more FALSE
+  }
+}

@@ -85,7 +85,7 @@ pub(crate) struct ReaderFlags {
     /// The reader of convert2blastmask (`CMaskFromFasta`, a subclass): it keeps the masked
     /// intervals of each record (`SaveMask` before each record makes `m_CurrentMask`, so lower
     /// case letters open intervals) and reads a data line that starts with a digit as an
-    /// interval (`Record::masks`).
+    /// interval (`FastaReader::take_masks`).
     pub(crate) mask_from_fasta: bool,
     /// `fParseGaps`: a hyphen of a nucleotide sequence is a gap, and `>?` lines stay gaps.
     pub(crate) parse_gaps: bool,
@@ -396,7 +396,7 @@ pub(crate) enum ReadError {
     Parse(ParseError),
     /// Another exception of NCBI's thrown while a record is read: the `CStringException` of
     /// an interval line of `CMaskFromFasta` (`ReaderFlags::mask_from_fasta`).
-    Ncbi(NcbiException),
+    Ncbi(Box<NcbiException>),
     /// An allocation whose size the input states could not be made
     /// (`std::bad_alloc` in NCBI, which no reader catches).
     OutOfMemory,
@@ -508,10 +508,6 @@ pub(crate) struct Record {
     /// `AssignMolType` found.
     pub(crate) is_aa: bool,
     pub(crate) inst: SeqInst,
-    /// With `ReaderFlags::mask_from_fasta`, `CMaskFromFasta::GetMask()`: the intervals of the
-    /// record's lower case letters and of its interval lines (0-based, inclusive), in the order
-    /// in which they were closed or read; empty otherwise.
-    pub(crate) masks: Vec<(u32, u32)>,
 }
 
 /// The title of a definition line (`SLineTextAndLoc`; its line number is used for the
@@ -793,6 +789,15 @@ impl<R: Read> FastaReader<R> {
         self.state.flags.parse_ids
     }
 
+    /// With `ReaderFlags::mask_from_fasta`, `CMaskFromFasta::GetMask()` of the record that
+    /// `read_one_seq` read last (after an error, what it had read of that record): the
+    /// intervals of its lower case letters and of its interval lines (0-based, inclusive), in
+    /// the order in which they were closed or read; empty otherwise. The intervals stay with the reader (not in `Record`) so that the
+    /// records of the other programs, which never have any, are not made larger.
+    pub(crate) fn take_masks(&mut self) -> Vec<(u32, u32)> {
+        std::mem::take(&mut self.state.masks)
+    }
+
     /// `GetLineReader().AtEOF()`.
     pub(crate) fn at_eof(&self) -> bool {
         self.lines.at_eof()
@@ -943,6 +948,20 @@ impl<R: Read> FastaReader<R> {
     /// none. Without `fDLOptional` data before a definition line is the `eNoDefline`
     /// error. `CBadResiduesException` comes only with `fValidate`, which is not set.
     pub(crate) fn read_one_seq(&mut self, warn: ReaderWarn<'_>) -> Result<Record, ReadError> {
+        if self.state.flags.mask_from_fasta {
+            self.read_one_seq_of::<true>(warn)
+        } else {
+            self.read_one_seq_of::<false>(warn)
+        }
+    }
+
+    /// `read_one_seq` with `ReaderFlags::mask_from_fasta` as `MASK_FROM_FASTA`: the records of
+    /// the other readers take no step of convert2blastmask's masks but `close_mask`, which has
+    /// nothing open to close for them (one choice per record).
+    fn read_one_seq_of<const MASK_FROM_FASTA: bool>(
+        &mut self,
+        warn: ReaderWarn<'_>,
+    ) -> Result<Record, ReadError> {
         let state = &mut self.state;
         state.seq_data.clear();
         state.gaps.clear();
@@ -1007,13 +1026,15 @@ impl<R: Read> FastaReader<R> {
             }
             let raw_length = raw.len();
             match line.strip_prefix(b">?_") {
-                Some(rest) => state.parse_data_line(
+                Some(rest) => state.parse_data_line::<MASK_FROM_FASTA>(
                     &[b">".as_slice(), rest].concat(),
                     raw_length,
                     line_number,
                     warn,
                 )?,
-                None => state.parse_data_line(line, raw_length, line_number, warn)?,
+                None => {
+                    state.parse_data_line::<MASK_FROM_FASTA>(line, raw_length, line_number, warn)?
+                }
             }
         }
 
@@ -1035,7 +1056,6 @@ impl<R: Read> FastaReader<R> {
             title_descr: state.title_descr.take(),
             is_aa,
             inst,
-            masks: std::mem::take(&mut state.masks),
         })
     }
 }
@@ -1414,6 +1434,7 @@ impl RecordState {
     /// `bIgnoreHyphens` is false: a hyphen counts as good. `bIsNuc` is true for nucleotide
     /// input (`fAssumeNuc | fForceType`). The warning about ambiguous nucleotides is an
     /// ignored problem of makeblastdb.
+    #[inline(always)]
     fn check_data_line(
         &self,
         s: &[u8],
@@ -1573,16 +1594,20 @@ impl RecordState {
     /// length while the line is read; `x_CloseGap` reads that length (`close_gap`). The
     /// fast copy of `fSkipCheck` is not taken (no `fSkipCheck`). `x_NucOrProt()` is empty:
     /// the molecule is set only in `AssembleSeq`.
-    fn parse_data_line(
+    fn parse_data_line<const MASK_FROM_FASTA: bool>(
         &mut self,
         s: &[u8],
         raw_length: usize,
         line_number: u64,
         warn: ReaderWarn<'_>,
     ) -> Result<(), ReadError> {
-        if self.flags.mask_from_fasta && s[0].is_ascii_digit() {
-            return self.parse_interval_line(s, raw_length, line_number, warn);
-        }
+        // `CMaskFromFasta::ParseDataLine`: an interval line is read as the residue `A`.
+        let s = if MASK_FROM_FASTA && s[0].is_ascii_digit() {
+            self.parse_interval(s)?;
+            &b"A"[..]
+        } else {
+            s
+        };
         if s.starts_with(b">?") {
             self.parse_gap_line(s, line_number, warn);
             return Ok(());
@@ -1606,7 +1631,9 @@ impl RecordState {
                 SPACE => {}
                 COMMENT => break,
                 GAP => {
-                    self.close_mask();
+                    if MASK_FROM_FASTA {
+                        self.close_mask();
+                    }
                     let run = 1 + s[pos + 1..]
                         .iter()
                         .position(|&byte| byte != c)
@@ -1624,7 +1651,7 @@ impl RecordState {
                         .iter()
                         .position(|&byte| actions[byte as usize] < RESIDUE_MIN)
                         .unwrap_or(s.len() - pos - 1);
-                    if self.flags.mask_from_fasta {
+                    if MASK_FROM_FASTA {
                         self.mask_run(&s[pos..pos + run]);
                     }
                     self.seq_data
@@ -1696,7 +1723,8 @@ impl RecordState {
     /// }
     /// ```
     /// `CMaskFromFasta` keeps its own copy of each interval (`x_OpenMask`, `x_CloseMask`,
-    /// quoted at `close_mask`).
+    /// quoted at `close_mask`). Only `parse_data_line::<true>` (convert2blastmask) calls it,
+    /// once for each run of residues, so it is not cold: the other readers' instance has no call.
     fn mask_run(&mut self, run: &[u8]) {
         let base = self.current_pos_with_gaps();
         for (i, byte) in run.iter().enumerate() {
@@ -1740,7 +1768,7 @@ impl RecordState {
     }
 
     /// `CMaskFromFasta::ParseDataLine` of a line that starts with a digit: the interval
-    /// `from - to`, and a residue `A` in its place.
+    /// `from - to` (`parse_data_line` then reads a residue `A` in its place).
     ///
     /// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:76-92
     /// ```c++
@@ -1768,21 +1796,18 @@ impl RecordState {
     /// (convert2blastmask 2.17.0: `1abc` reports `''`, `0x10 - 5` reports `'0x10'`). `s` is
     /// the line without its spaces at both ends (`ReadOneSeq`, quoted at
     /// `FastaReader::read_one_seq`).
-    fn parse_interval_line(
-        &mut self,
-        s: &[u8],
-        raw_length: usize,
-        line_number: u64,
-        warn: ReaderWarn<'_>,
-    ) -> Result<(), ReadError> {
+    #[cold]
+    fn parse_interval(&mut self, s: &[u8]) -> Result<(), ReadError> {
         let (s1, s2) = match s.iter().position(|&byte| byte == b'-') {
             Some(dash) => (&s[..dash], &s[dash + 1..]),
             None => (s, &[][..]),
         };
-        let to = string_to_uint(truncate_spaces(s2)).map_err(ReadError::Ncbi)?;
-        let from = string_to_uint(truncate_spaces(s1)).map_err(ReadError::Ncbi)?;
+        let to = string_to_uint(truncate_spaces(s2))
+            .map_err(|error| ReadError::Ncbi(Box::new(error)))?;
+        let from = string_to_uint(truncate_spaces(s1))
+            .map_err(|error| ReadError::Ncbi(Box::new(error)))?;
         self.masks.push((from, to));
-        self.parse_data_line(b"A", raw_length, line_number, warn)
+        Ok(())
     }
 
     /// `AssignMolType` without `fForceType`, `fAssumeNuc` or `fAssumeProt`: whether the record

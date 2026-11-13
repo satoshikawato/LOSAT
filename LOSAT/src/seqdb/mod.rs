@@ -602,7 +602,9 @@ pub struct SeqDb {
     printed_total_length: u64,
     /// The sum of the volumes' lengths (`CSeqDBVolSet::GetVolumeSetLength`).
     volume_set_length: u64,
-    /// `SeqDb::included_length` of a `filter`, made at its first use (none before).
+    /// `SeqDb::included_length` of a `filter`, made at its first use (none before). Only the
+    /// schedules of the parallel searches read it (`SeqDb::set_included_length`).
+    #[cfg(any(test, feature = "parallel"))]
     included_length: OnceLock<u64>,
     /// The length of OID 0 of the volumes, which the statistics read when their total length
     /// is not positive (`statistics_numbers`); `None` when it is.
@@ -1234,6 +1236,7 @@ impl SeqDb {
             printed_num_seqs: counts.num_seqs,
             printed_total_length: total_length,
             volume_set_length: total_length,
+            #[cfg(any(test, feature = "parallel"))]
             included_length: OnceLock::new(),
             first_oid_length: None,
             alias_totals: alias::AliasTotals::default(),
@@ -1343,7 +1346,7 @@ impl SeqDb {
             let filter = filter::OidFilter::new(words.clone(), num_oids);
             self.num_seqs = filter.count();
             self.filter = Some(Box::new(filter));
-            self.included_length = OnceLock::new();
+            self.set_included_length(None);
         }
         self.alias_mask = mask;
         self.alias_totals = totals;
@@ -1462,7 +1465,7 @@ impl SeqDb {
     fn include_every_oid(&mut self) {
         debug_assert!(!self.list_applied, "include_every_oid after a list");
         self.filter = None;
-        self.included_length = OnceLock::new();
+        self.set_included_length(None);
         self.num_seqs = self.num_oids();
     }
 

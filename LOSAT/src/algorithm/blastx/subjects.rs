@@ -186,6 +186,7 @@ impl<'a> Subjects<'a> {
     /// The length of the searched sequences: the sum of the records' lengths, or the length of
     /// the database's included sequences (`SeqDb::included_length`); `None` when it cannot be
     /// read.
+    #[cfg(feature = "parallel")]
     pub(crate) fn included_length(&self) -> Option<u64> {
         match self {
             Subjects::Fasta(records) => Some(

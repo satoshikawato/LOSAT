@@ -200,6 +200,10 @@ impl BlastpDatabase {
     }
 
     /// The length of the included sequences (`SeqDb::included_length`), which the schedules read.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     pub(super) fn included_letters(&self) -> Result<u64, crate::seqdb::SeqDbError> {
         self.db.included_length()
     }

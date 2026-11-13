@@ -12,7 +12,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use super::file::DbFile;
 use super::isam;
@@ -2617,7 +2617,7 @@ impl SeqDb {
         self.list_applied = true;
         self.filter = Some(Box::new(filter));
         // The scan is that of `included_length`.
-        self.included_length = OnceLock::from(total_length);
+        self.set_included_length(Some(total_length));
         self.update_first_oid_length()
     }
 
@@ -2697,6 +2697,7 @@ impl SeqDb {
     /// NCBI's scan of the included OIDs (`scan_totals`, made at the first call). NCBI's
     /// `GetTotalLength` ([`SeqDb::total_length`]) is the walk of the alias files' `LENGTH`
     /// without a list, which can differ from it (an OID range, a `LENGTH` key).
+    #[cfg(any(test, feature = "parallel"))]
     pub fn included_length(&self) -> Result<u64, SeqDbError> {
         let Some(filter) = &self.filter else {
             return Ok(self.volume_set_length);
@@ -2706,6 +2707,18 @@ impl SeqDb {
         }
         let (length, _, _) = self.scan_totals(filter)?;
         Ok(*self.included_length.get_or_init(|| length))
+    }
+
+    /// Keeps `length` as the length of the included sequences (`included_length`), or makes it
+    /// at the first call (`None`). Only the parallel searches' schedules read it.
+    pub(super) fn set_included_length(&mut self, length: Option<u64>) {
+        #[cfg(any(test, feature = "parallel"))]
+        {
+            self.included_length =
+                length.map_or_else(std::sync::OnceLock::new, std::sync::OnceLock::from);
+        }
+        #[cfg(not(any(test, feature = "parallel")))]
+        let _ = length;
     }
 
     /// NCBI's totals of the included OIDs: the total length, the longest length and the

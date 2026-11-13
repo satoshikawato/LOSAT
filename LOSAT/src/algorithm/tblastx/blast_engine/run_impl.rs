@@ -1446,12 +1446,6 @@ fn open_search_database(
                 args.dbsize.is_some_and(|size| size > 0),
                 "TBLASTX",
             )?;
-            crate::algorithm::common::database::check_negative_length_spaces(
-                &database.statistics(),
-                false,
-                args.searchsp.is_some_and(|space| space != 0),
-                "TBLASTX",
-            )?;
             let shown = database.pairwise_database();
             for format in &outputs.formats {
                 crate::algorithm::common::database::check_report_sums(
@@ -1969,6 +1963,7 @@ fn search(
                     average: None,
                     dbsize: args.dbsize,
                     searchsp: args.searchsp,
+                    statistics: None,
                 },
                 shown: ShownSubjects::Fasta {
                     records,
@@ -4791,6 +4786,7 @@ fn search_query_batch<S: TbxScore>(
         eff_searchsp_per_context,
         query_stats,
         linking_params_for_cutoff,
+        option_spaces,
     } = context_cutoffs::context_cutoffs(&context_cutoffs::CutoffInputs {
         contexts_ref,
         numbers,
@@ -4948,6 +4944,55 @@ fn search_query_batch<S: TbxScore>(
             }
         };
         let s_frames_report = &s_frames;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443
+        // ```c
+        //        if (db_length == 0) {
+        //            /* This is not a database search, hence need to recalculate and save
+        //             the effective search spaces and length adjustments for all
+        //             queries based on the length of the current single subject
+        //             sequence. */
+        //            if ((status = BLAST_OneSubjectUpdateParameters(program_number,
+        //                           seq_arg.seq->length, score_options, query_info,
+        //                           sbp, hit_params, word_params,
+        //                           eff_len_params)) != 0)
+        //               return status;
+        //       }
+        // ```
+        // Once per subject that passed the length check above: the values the rest of this
+        // closure reads are the subject's own (`context_cutoffs::subject_cutoffs`) or the batch's.
+        // An overflow of the search space fails the batch as a failed read does.
+        let x_subject_cutoffs;
+        let (cutoff_scores, cutoff_score_min, length_adj_per_context, eff_searchsp_per_context) =
+            match option_spaces.as_deref().filter(|_| numbers.per_subject()) {
+                Some(spaces) => {
+                    x_subject_cutoffs = match context_cutoffs::subject_cutoffs(
+                        contexts_ref,
+                        numbers,
+                        spaces,
+                        s_len as i64,
+                        evalue_threshold,
+                    ) {
+                        Ok(cutoffs) => cutoffs,
+                        Err(overflow) => {
+                            x_read_failure.fail(s_idx, overflow.into());
+                            emit_subject_hits(st, s_idx);
+                            return;
+                        }
+                    };
+                    (
+                        &x_subject_cutoffs.cutoff_scores,
+                        x_subject_cutoffs.cutoff_score_min,
+                        &x_subject_cutoffs.length_adj_per_context,
+                        &x_subject_cutoffs.eff_searchsp_per_context,
+                    )
+                }
+                None => (
+                    &cutoff_scores,
+                    cutoff_score_min,
+                    &length_adj_per_context,
+                    &eff_searchsp_per_context,
+                ),
+            };
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:772-775
         // ```c
         //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,

@@ -255,13 +255,46 @@ pub(crate) fn prepare_unit(
         && !subjects.is_empty()
     {
         let mut minima = params.clone();
-        let computed =
-            (|| subject_parameters(&prepared, &mut minima, options, subjects.numbers()?, None))();
+        // The word cutoffs are the preliminary stage's, with its option spaces where they differ
+        // from the setup's (`parameters::preliminary_spaces`); the redo reads the setup's.
+        let mut word_minima = None;
+        let computed = (|| {
+            let numbers = subjects.numbers()?;
+            subject_parameters(&prepared, &mut minima, options, numbers, None)?;
+            if ungapped_link {
+                if let Some(spaces) = super::parameters::preliminary_spaces(
+                    &prepared,
+                    &params,
+                    options,
+                    numbers,
+                    matches!(subjects, Subjects::Stream(_)),
+                )? {
+                    let mut preliminary = params.clone();
+                    subject_parameters(
+                        &prepared,
+                        &mut preliminary,
+                        options,
+                        numbers,
+                        Some(&spaces),
+                    )?;
+                    word_minima = Some(preliminary);
+                }
+            }
+            anyhow::Ok(())
+        })();
         match computed {
-            Ok(_) => {
+            Ok(()) => {
                 let valid = || minima.iter().filter(|p| p.valid);
                 word_cutoff_min = ungapped_link
-                    .then(|| valid().map(|p| p.word_cutoff).min())
+                    .then(|| {
+                        word_minima
+                            .as_ref()
+                            .unwrap_or(&minima)
+                            .iter()
+                            .filter(|p| p.valid)
+                            .map(|p| p.word_cutoff)
+                            .min()
+                    })
                     .flatten();
                 redo_cutoff_min = kappa.then(|| valid().map(|p| p.hit_cutoff).min()).flatten();
             }

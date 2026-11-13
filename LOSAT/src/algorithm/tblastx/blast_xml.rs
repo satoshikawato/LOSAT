@@ -489,6 +489,7 @@ mod tests {
             average: None,
             dbsize: None,
             searchsp: None,
+            statistics: None,
         };
         assert_eq!(
             query_stats(&TblastxQueryStats::default(), &numbers),
@@ -510,6 +511,7 @@ mod tests {
                 average: None,
                 dbsize,
                 searchsp: None,
+                statistics: None,
             };
             let lengths = try_compute_eff_lengths_tblastx(
                 130,

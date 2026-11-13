@@ -46,6 +46,9 @@ pub(super) struct ContextCutoffs {
     pub(super) eff_searchsp_per_context: Vec<i64>,
     pub(super) query_stats: Vec<TblastxQueryStats>,
     pub(super) linking_params_for_cutoff: KarlinParams,
+    /// The preliminary stage's option spaces of the contexts, where they differ from the setup's
+    /// or the statistics of each subject read them (`SubjectSetNumbers::preliminary_spaces`).
+    pub(super) option_spaces: Option<Vec<i64>>,
 }
 
 /// The average subject length check (an error after the reports of the batches before), then the
@@ -214,6 +217,19 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
     //   query_info->contexts[index].length_adjustment = length_adjustment;
     let mut length_adj_per_context: Vec<i64> = Vec::with_capacity(contexts_ref.len());
     let mut eff_searchsp_per_context: Vec<i64> = Vec::with_capacity(contexts_ref.len());
+    // The setup's search spaces, which the reports print (`query_stats` below).
+    let mut report_searchsp_per_context: Vec<i64> = Vec::with_capacity(contexts_ref.len());
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220 (quoted at
+    // `stats::setup::preliminary_option_space`): the preliminary stage's option spaces, which
+    // its setup reads in place of its own where they differ (`SubjectSetNumbers::
+    // preliminary_spaces_differ`), and the statistics of each subject read (`subject_cutoffs`).
+    let option_spaces = numbers.preliminary_spaces(contexts_ref.iter().map(|ctx| {
+        let query_length = if ctx.is_valid { ctx.aa_len as i64 } else { 0 };
+        (query_length, &ctx.karlin_params)
+    }))?;
+    let preliminary_spaces = option_spaces
+        .as_deref()
+        .filter(|_| numbers.preliminary_spaces_differ());
 
     for (ctx_idx, ctx) in contexts_ref.iter().enumerate() {
         // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:324-331;
@@ -224,7 +240,10 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
         if !ctx.is_valid || ctx.aa_len == 0 {
             cutoff_scores[ctx_idx] = i32::MAX;
             length_adj_per_context.push(0);
-            eff_searchsp_per_context.push(numbers.searchsp.unwrap_or(0));
+            eff_searchsp_per_context.push(
+                preliminary_spaces.map_or(numbers.searchsp.unwrap_or(0), |spaces| spaces[ctx_idx]),
+            );
+            report_searchsp_per_context.push(numbers.searchsp.unwrap_or(0));
             continue;
         }
         // NCBI: per-context kbp_std[context] is used throughout cutoff/length calcs.
@@ -249,6 +268,14 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
             query_len_aa,
             ctx_params, // tblastx uses per-context ungapped params (kbp_gap is NULL)
         )?;
+        report_searchsp_per_context.push(eff_lengths.eff_searchsp);
+        // The preliminary stage's lengths, with its option space where it differs.
+        let eff_lengths = match preliminary_spaces {
+            Some(spaces) => {
+                numbers.context_lengths_with(query_len_aa, ctx_params, spaces[ctx_idx])?
+            }
+            None => eff_lengths,
+        };
         let eff_searchsp = eff_lengths.eff_searchsp;
         length_adj_per_context.push(eff_lengths.length_adjustment);
         eff_searchsp_per_context.push(eff_searchsp);
@@ -367,14 +394,14 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
         let stats = &mut query_stats[ctx.q_idx as usize];
         // Context 0 is the query's frame +1 (invalid contexts hold search space 0).
         if ctx.frame == 1 {
-            stats.context0_search_space = eff_searchsp_per_context[ctx_idx];
+            stats.context0_search_space = report_searchsp_per_context[ctx_idx];
             if ctx.is_valid {
                 stats.context0_aa_len = ctx.aa_len as i64;
             }
         }
         if ctx.is_valid && stats.karlin.is_none() {
             stats.karlin = Some(ctx.karlin_params);
-            stats.eff_searchsp = eff_searchsp_per_context[ctx_idx];
+            stats.eff_searchsp = report_searchsp_per_context[ctx_idx];
             stats.aa_len = ctx.aa_len;
         }
     }
@@ -409,5 +436,69 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
         eff_searchsp_per_context,
         query_stats,
         linking_params_for_cutoff,
+        option_spaces,
     })
+}
+
+/// The cutoffs, length adjustments and search spaces of the batch's contexts for the subject of
+/// `subject_len_nucl` bases, where NCBI's preliminary search computes the statistics of each
+/// subject (`SubjectSetNumbers::per_subject`): `BLAST_OneSubjectUpdateParameters` with the
+/// preliminary stage's option spaces `option_spaces` (`ContextCutoffs::option_spaces`). The word
+/// cutoff of a context is `context_cutoffs`' with the subject's length in place of the average.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1001-1024 (quoted at
+/// `stats::setup::subject_eff_lengths`); c++/src/algo/blast/core/blast_parameters.c:279-419
+/// (`BlastInitialWordParametersUpdate`, `subj_length`) and :830-994
+/// (`BlastHitSavingParametersUpdate`: an ungapped search without the Gumbel block).
+pub(super) fn subject_cutoffs(
+    contexts_ref: &[QueryContext],
+    numbers: &SubjectSetNumbers,
+    option_spaces: &[i64],
+    subject_len_nucl: i64,
+    evalue_threshold: f64,
+) -> Result<SubjectCutoffs, crate::stats::setup::SearchSpaceOverflow> {
+    let mut cutoffs = SubjectCutoffs {
+        cutoff_scores: vec![i32::MAX; contexts_ref.len()],
+        cutoff_score_min: i32::MAX,
+        length_adj_per_context: vec![0; contexts_ref.len()],
+        eff_searchsp_per_context: option_spaces.to_vec(),
+    };
+    for (ctx_idx, ctx) in contexts_ref.iter().enumerate() {
+        if !ctx.is_valid || ctx.aa_len == 0 {
+            continue;
+        }
+        let ctx_params = &ctx.karlin_params;
+        let query_len_aa = ctx.aa_len as i64;
+        let eff_lengths = numbers.subject_context_lengths(
+            query_len_aa,
+            subject_len_nucl,
+            option_spaces[ctx_idx],
+            ctx_params,
+        )?;
+        let cutoff_score_max =
+            cutoff_score_max_for_tblastx(eff_lengths.eff_searchsp, evalue_threshold, ctx_params);
+        let cutoff = cutoff_score_for_update_tblastx(
+            query_len_aa,
+            subject_len_nucl,
+            gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ctx_params),
+            cutoff_score_max,
+            BLAST_GAP_DECAY_RATE,
+            ctx_params,
+            1.0,
+        );
+        cutoffs.cutoff_scores[ctx_idx] = cutoff;
+        cutoffs.cutoff_score_min = cutoffs.cutoff_score_min.min(cutoff);
+        cutoffs.length_adj_per_context[ctx_idx] = eff_lengths.length_adjustment;
+        cutoffs.eff_searchsp_per_context[ctx_idx] = eff_lengths.eff_searchsp;
+    }
+    Ok(cutoffs)
+}
+
+/// The values of `subject_cutoffs`, which the subject's search reads under the names of
+/// `ContextCutoffs`.
+pub(super) struct SubjectCutoffs {
+    pub(super) cutoff_scores: Vec<i32>,
+    pub(super) cutoff_score_min: i32,
+    pub(super) length_adj_per_context: Vec<i64>,
+    pub(super) eff_searchsp_per_context: Vec<i64>,
 }

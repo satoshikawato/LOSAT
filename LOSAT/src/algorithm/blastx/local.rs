@@ -957,14 +957,6 @@ fn search_database(
         args.dbsize.is_some_and(|size| size > 0),
         "BLASTX",
     )?;
-    crate::algorithm::common::database::check_negative_length_spaces(
-        &database.statistics(),
-        !(args.ungapped
-            || args.searchsp.is_some()
-            || crate::blastinput::app::old_fsc_environment()),
-        args.searchsp.is_some_and(|space| space != 0),
-        "BLASTX",
-    )?;
     let shown = database.pairwise_database();
     for format in &outputs.formats {
         crate::algorithm::common::database::check_report_sums(

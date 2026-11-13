@@ -6195,11 +6195,10 @@ fn finish_query_hit_list(
     ungapped: bool,
     sorts_results: bool,
 ) {
-    // A database whose `BlastSeqSrcGetTotLen` is not positive keeps the traceback's order
-    // (`HitList::put_in_traceback_order`), which the post-traceback steps below then read.
-    if !sorts_results {
-        hit_list.put_in_traceback_order(hitlist_size);
-    }
+    // A database whose `BlastSeqSrcGetTotLen` is not positive keeps the traceback's order, which
+    // the post-traceback steps below then read: the traceback saved the final lists in the order
+    // of their ordinal ids into a hit list of `hitlist_size` (`update_hitlists_with_subject_hits`,
+    // `Blast_HSPResultsInsertHSPList`), the order of NCBI's one thread.
     // NCBI's culling pipe is the first thing the traceback does with the consolidated results
     // (`-culling_limit`; the mask level of 101, the default, is no step).
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:1721-1723,1763-1766
@@ -7818,12 +7817,6 @@ fn open_search_database(
                 false,
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
-                "BLASTN",
-            )?;
-            crate::algorithm::common::database::check_negative_length_spaces(
-                &database.statistics(),
-                false,
-                args.searchsp.is_some_and(|space| space != 0),
                 "BLASTN",
             )?;
             let shown = database.pairwise_database();
@@ -12021,6 +12014,65 @@ fn search_query_batch<const UNGAPPED: bool>(
         },
         reborrow_outputs(&mut outputs),
     )?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220 (quoted at
+    // `stats::setup::preliminary_option_space`): the preliminary stage's option spaces of the
+    // batch's contexts, which its setup reads in place of its own where the statistics' total
+    // before the fallback to OID 0 is not positive, and which the statistics of each subject read
+    // (`DbStatistics::per_subject`, blast_engine.c:1434-1443). A query chunk has the batch's
+    // (`BatchStage::ChunkPrelim`): its own setup's spaces are already them.
+    let x_statistics = match subjects {
+        SubjectSource::Database(database) => Some(database.statistics()),
+        SubjectSource::Prepared(_) => None,
+    };
+    let per_subject = x_statistics.is_some_and(|statistics| statistics.per_subject());
+    let option_spaces: Option<Vec<i64>> = match (stage, x_statistics) {
+        (BatchStage::Search { .. }, Some(statistics))
+            if statistics.gumbel_db_length <= 0 || per_subject =>
+        {
+            Some(
+                query_contexts
+                    .iter()
+                    .zip(&search_karlin)
+                    .zip(&context_valid)
+                    .map(|((ctx, blocks), &valid)| {
+                        crate::stats::setup::preliminary_option_space(
+                            if valid { ctx.len as i64 } else { 0 },
+                            statistics.gumbel_db_length,
+                            statistics.request_count,
+                            args.db_length(),
+                            args.options_searchsp(),
+                            false,
+                            &blocks.gapped,
+                            "BLASTN",
+                        )
+                    })
+                    .collect::<Result<_, _>>()?,
+            )
+        }
+        (
+            BatchStage::ChunkPrelim {
+                batch_eff_searchsp, ..
+            },
+            _,
+        ) if per_subject => Some(batch_eff_searchsp.to_vec()),
+        _ => None,
+    };
+    // The preliminary stage's spaces where they differ from the setup's (`query_eff_searchsp`,
+    // which the traceback and the reports read): a context's option space when it is not 0.
+    let prelim_eff_searchsp: Option<Vec<i64>> = match (stage, &option_spaces, x_statistics) {
+        (BatchStage::Search { .. }, Some(spaces), Some(statistics))
+            if statistics.gumbel_db_length <= 0 =>
+        {
+            Some(
+                query_eff_searchsp
+                    .iter()
+                    .zip(spaces)
+                    .map(|(&setup, &option)| if option != 0 { option } else { setup })
+                    .collect(),
+            )
+        }
+        _ => None,
+    };
 
     // NCBI searches a batch of at least two query chunks chunk by chunk in its preliminary
     // stage, after it has set up the whole batch (the errors and warnings above are the
@@ -12048,7 +12100,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             &seq_data.query_masks,
             query_offsets,
             lower_case_before,
-            &query_eff_searchsp,
+            option_spaces.as_ref().unwrap_or(&query_eff_searchsp),
             &query_context_offsets,
             subjects,
             reborrow_outputs(&mut outputs),
@@ -12225,7 +12277,80 @@ fn search_query_batch<const UNGAPPED: bool>(
         x_dropoff_init: x_dropoff_init_ref,
         min_raw_gapped_score: config.min_raw_gapped_score,
         evalue_threshold,
+        subject_length: None,
     })?;
+    // The preliminary stage's cutoffs, of its own spaces where they differ (`prelim_eff_searchsp`).
+    let prelim_eff_searchsp_ref: &Vec<i64> =
+        prelim_eff_searchsp.as_ref().unwrap_or(&query_eff_searchsp);
+    let x_prelim_cutoffs_owned = match &prelim_eff_searchsp {
+        Some(spaces) => Some(batch_setup::batch_cutoffs::<UNGAPPED>(
+            &batch_setup::CutoffInputs {
+                subjects,
+                db_len_total: seq_data.db_len_total,
+                db_num_seqs: seq_data.db_num_seqs,
+                query_contexts: &query_contexts,
+                context_valid: context_valid_ref,
+                query_eff_searchsp: spaces,
+                search_karlin: search_karlin_ref,
+                x_dropoff_init: x_dropoff_init_ref,
+                min_raw_gapped_score: config.min_raw_gapped_score,
+                evalue_threshold,
+                subject_length: None,
+            },
+        )?),
+        None => None,
+    };
+    let x_prelim_cutoffs = x_prelim_cutoffs_owned.as_ref().unwrap_or(&x_batch_cutoffs);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1001-1024 (quoted at
+    // `stats::setup::subject_eff_lengths`)
+    // The statistics of one subject (`per_subject`): each context's effective search space for the
+    // subject's length with the option spaces `spaces` (the preliminary stage's, or the
+    // traceback's own: `-searchsp`, which the memento gives it back, prelim_stage.cpp:219), and
+    // the cutoffs of `BlastHitSavingParametersUpdate` and `BlastInitialWordParametersUpdate` (the
+    // X-drops keep their initial values). The traceback of a list reads the subject's hit-saving
+    // cutoffs (`Blast_HSPReevaluateWithAmbiguitiesGapped`, its `hit_params` being thread 0's in
+    // NCBI's one thread, blast_traceback.c:1598-1650) and the e-values of the setup's spaces.
+    let traceback_option_spaces = vec![args.options_searchsp(); query_contexts.len()];
+    let subject_space_overflow = crate::stats::setup::SubjectSpaceOverflow::default();
+    let subject_statistics =
+        |subject_length: usize, spaces: &[i64]| -> Result<(batch_setup::BatchCutoffs, Vec<i64>)> {
+            let subject_spaces: Vec<i64> = query_contexts
+                .iter()
+                .zip(search_karlin_ref)
+                .zip(context_valid_ref)
+                .zip(spaces)
+                .map(|(((ctx, blocks), &valid), &space)| {
+                    if !valid {
+                        return Ok(space);
+                    }
+                    Ok(crate::stats::setup::subject_eff_lengths(
+                        ctx.len as i64,
+                        subject_length as i64,
+                        seq_data.db_num_seqs,
+                        args.db_length(),
+                        space,
+                        false,
+                        &blocks.gapped,
+                        "BLASTN",
+                    )?
+                    .eff_searchsp)
+                })
+                .collect::<Result<_, crate::stats::setup::SearchSpaceOverflow>>()?;
+            let cutoffs = batch_setup::batch_cutoffs::<UNGAPPED>(&batch_setup::CutoffInputs {
+                subjects,
+                db_len_total: seq_data.db_len_total,
+                db_num_seqs: seq_data.db_num_seqs,
+                query_contexts: query_contexts_ref,
+                context_valid: context_valid_ref,
+                query_eff_searchsp: &subject_spaces,
+                search_karlin: search_karlin_ref,
+                x_dropoff_init: x_dropoff_init_ref,
+                min_raw_gapped_score: config.min_raw_gapped_score,
+                evalue_threshold,
+                subject_length: Some(subject_length as u64),
+            })?;
+            Ok((cutoffs, subject_spaces))
+        };
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
     // ```c
     // while (TRUE) {
@@ -12290,7 +12415,48 @@ fn search_query_batch<const UNGAPPED: bool>(
         }
         let queries = queries_ref;
         let query_contexts = query_contexts_ref;
-        let query_eff_searchsp = query_eff_searchsp_ref;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 and
+        // c++/src/algo/blast/core/blast_traceback.c:1598-1628 (the statistics of each subject,
+        // `subject_statistics`): once per subject, the preliminary stage reads the subject's own
+        // cutoffs and spaces, the traceback (`prelim_source`) the subject's hit-saving cutoffs and
+        // the setup's spaces; otherwise the preliminary stage's and the setup's.
+        let x_subject;
+        // An ungapped search has no traceback: the values of its preliminary stage stay
+        // (blast_traceback.c:1526, `perform_traceback`).
+        let traceback_stage = prelim_source.is_some() && !UNGAPPED;
+        let (x_cutoffs, query_eff_searchsp): (&batch_setup::BatchCutoffs, &Vec<i64>) =
+            match (per_subject, traceback_stage) {
+                (false, false) => (x_prelim_cutoffs, prelim_eff_searchsp_ref),
+                (false, true) => (&x_batch_cutoffs, query_eff_searchsp_ref),
+                (true, traceback) => {
+                    let spaces = if traceback {
+                        &traceback_option_spaces
+                    } else {
+                        option_spaces
+                            .as_ref()
+                            .expect("the statistics of each subject have their option spaces")
+                    };
+                    x_subject = match subject_statistics(subject.length, spaces) {
+                        Ok(statistics) => statistics,
+                        Err(error) => {
+                            if let Ok(overflow) =
+                                error.downcast::<crate::stats::setup::SearchSpaceOverflow>()
+                            {
+                                subject_space_overflow.note(overflow);
+                            }
+                            return;
+                        }
+                    };
+                    (
+                        &x_subject.0,
+                        if traceback {
+                            query_eff_searchsp_ref
+                        } else {
+                            &x_subject.1
+                        },
+                    )
+                }
+            };
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:493-526
         // ```c
@@ -12468,12 +12634,8 @@ fn search_query_batch<const UNGAPPED: bool>(
         // and GAPPED params (kbp_gap) for cutoff_score_max calculation
         // The values depend on the context only (the gapped calculation's branch above: gap_trigger
         // capped by cutoff_score_max), so the batch computes them once (`x_batch_cutoffs`).
-        let (cutoff_scores, hit_saving_cutoff_scores, x_dropoff_scores, reduced_cutoff_scores) = (
-            &x_batch_cutoffs.0,
-            &x_batch_cutoffs.1,
-            &x_batch_cutoffs.2,
-            &x_batch_cutoffs.3,
-        );
+        let (cutoff_scores, hit_saving_cutoff_scores, x_dropoff_scores, reduced_cutoff_scores) =
+            (&x_cutoffs.0, &x_cutoffs.1, &x_cutoffs.2, &x_cutoffs.3);
 
         // BLASTN debug: Log cutoff scores for this query-subject pair
         if blastn_debug {
@@ -15245,10 +15407,28 @@ fn search_query_batch<const UNGAPPED: bool>(
         });
     };
     let x_ungapped_database_stage =
-        |database: &database::BlastnDatabase, ordinal: u32, hits: &mut Vec<PrelimHit>| {
+        |database: &database::BlastnDatabase,
+         ordinal: u32,
+         subject_length: usize,
+         hits: &mut Vec<PrelimHit>| {
             if hits.is_empty() {
                 return Ok(());
             }
+            // The preliminary stage's word cutoffs and spaces (`Blast_HSPListReevaluateUngapped`
+            // and the e-values of an ungapped search, blast_engine.c:1492-1497): the subject's own
+            // for the statistics of each subject (`subject_statistics`).
+            let x_subject;
+            let (word_cutoffs, eff_spaces): (&Vec<i32>, &Vec<i64>) = if per_subject {
+                x_subject = subject_statistics(
+                    subject_length,
+                    option_spaces
+                        .as_ref()
+                        .expect("the statistics of each subject have their option spaces"),
+                )?;
+                (&x_subject.0 .0, &x_subject.1)
+            } else {
+                (&x_prelim_cutoffs.0, prelim_eff_searchsp_ref)
+            };
             database.with_blastna(ordinal, |s_blastna| {
                 ungapped_subject_stage(
                     hits,
@@ -15256,10 +15436,10 @@ fn search_query_batch<const UNGAPPED: bool>(
                     encoded_queries_blastna.as_slice(),
                     encoded_queries_nomask,
                     &score_matrix,
-                    &x_batch_cutoffs.0,
+                    word_cutoffs,
                     percent_identity,
                     |prelim| {
-                        let eff_searchsp = query_eff_searchsp_ref
+                        let eff_searchsp = eff_spaces
                             .get(prelim.context_idx as usize)
                             .copied()
                             .unwrap_or(0);
@@ -15300,7 +15480,8 @@ fn search_query_batch<const UNGAPPED: bool>(
                     &mut subject_hits,
                     &mut prelim_hits,
                 );
-                if let Err(error) = x_ungapped_database_stage($database, ordinal, &mut prelim_hits)
+                if let Err(error) =
+                    x_ungapped_database_stage($database, ordinal, subject.length, &mut prelim_hits)
                 {
                     let mut first = $error.lock().expect("the error cell is not poisoned");
                     if first
@@ -15517,6 +15698,8 @@ fn search_query_batch<const UNGAPPED: bool>(
             }
         },
     };
+    // An overflow of a subject's search space (`subject_statistics`) is LOSAT's refusal.
+    subject_space_overflow.check()?;
     if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
@@ -15615,6 +15798,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     if let Some(bar) = progress_bar.as_ref() {
         bar.finish();
     }
+    subject_space_overflow.check()?;
     let mut batch = batch_result(hit_lists, Vec::new());
     if let Some(timing) = timing.as_ref() {
         batch.timing = blastn_timing_text(timing.as_ref(), t_search_start, t_total);

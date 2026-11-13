@@ -1391,6 +1391,7 @@ mod cutoff_boundary_tests {
                     gumbel_total: db,
                     shortest: (length as usize).max(10),
                     average: db as i32,
+                    request_count: 1,
                 },
                 None,
             )

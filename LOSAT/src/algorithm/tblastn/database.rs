@@ -143,6 +143,7 @@ impl TblastnDatabase {
             gumbel_db_length: statistics.gumbel_db_length,
             engine_db_length: statistics.engine_db_length,
             min_length: statistics.min_length,
+            request_count: statistics.request_count,
         }
     }
 

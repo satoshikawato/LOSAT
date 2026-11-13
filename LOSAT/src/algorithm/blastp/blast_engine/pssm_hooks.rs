@@ -173,12 +173,24 @@ pub(super) struct PssmPrelimRun<'a> {
     pub(super) exact_search_spaces: &'a [Option<i64>],
     pub(super) cutoff_subject_length: i32,
     pub(super) prelim_evalue: f64,
+    /// The statistics of each subject (`DbStatistics::per_subject`), `None` for the setup's.
+    pub(super) per_subject: Option<PsiSubjectStatistics>,
     pub(super) window: i32,
     pub(super) diag_mask: i32,
     pub(super) offset_array_size: i32,
     pub(super) diag_array_size: i32,
     pub(super) total_query_span: i32,
     pub(super) prelim_hitlist_size: usize,
+}
+
+/// What the statistics of one subject read in a PSSM search (`BLAST_OneSubjectUpdateParameters`,
+/// `stats::setup::subject_eff_lengths`): the query's preliminary option space, the setup's number
+/// of sequences and `-dbsize`.
+#[derive(Clone, Copy)]
+pub(super) struct PsiSubjectStatistics {
+    pub(super) option_space: i64,
+    pub(super) setup_count: i32,
+    pub(super) dbsize: i64,
 }
 
 /// The preliminary and final gapped X-drops of a PSSM search (raw scores): the search's X-drops in
@@ -319,6 +331,7 @@ pub(super) fn pssm_prelim(
         prelim_evalue: run.prelim_evalue,
     };
     let diag_mask = run.diag_mask;
+    let subject_space_overflow = crate::stats::setup::SubjectSpaceOverflow::default();
     let process_subject = |scratch: &mut BlastpSubjectScratch,
                            s_idx: usize,
                            subject: BlastpSubjectRef<'_>,
@@ -329,6 +342,51 @@ pub(super) fn pssm_prelim(
         if subject.aa_len == 0 {
             return;
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 and
+        // c++/src/algo/blast/core/blast_setup.c:1010-1024 (quoted at `run_resolved_in_pool`'s
+        // `subject_parameters`): the statistics of each subject, with the subject's length in the
+        // hit-saving cutoff (no stretch of the e-value) and in the effective lengths.
+        let subject_prelim;
+        let prelim = match run.per_subject {
+            None => &prelim,
+            Some(statistics) => {
+                let lengths = match crate::stats::setup::subject_eff_lengths(
+                    ctx.aa_len as i64,
+                    subject.aa_len as i64,
+                    statistics.setup_count,
+                    statistics.dbsize,
+                    statistics.option_space,
+                    false,
+                    run.gapped_params,
+                    args.app.name(),
+                ) {
+                    Ok(lengths) => lengths,
+                    Err(overflow) => {
+                        subject_space_overflow.note(overflow);
+                        return;
+                    }
+                };
+                let stats = match run.gumbel {
+                    Some(gumbel) => EvalueStats::spouge(gumbel),
+                    None => EvalueStats::new(None, lengths.eff_searchsp),
+                };
+                let hit_cutoff = stats.hit_cutoff(
+                    args.evalue,
+                    &karlin.gapped,
+                    ctx.aa_len as i32,
+                    subject.aa_len as i32,
+                );
+                subject_prelim = PssmPrelim {
+                    word_cutoff: gap_trigger_raw_score(args.gap_trigger_bits, &ctx.karlin_params)
+                        .min(hit_cutoff),
+                    hit_cutoff,
+                    stats,
+                    prelim_evalue: args.evalue,
+                    ..prelim
+                };
+                &subject_prelim
+            }
+        };
         let list = PSSM_SCRATCH.with(|own| {
             prelim.search_subject(
                 &mut own.borrow_mut(),
@@ -361,7 +419,7 @@ pub(super) fn pssm_prelim(
             run.total_query_span,
         )
     };
-    match (database, culling) {
+    let searched = match (database, culling) {
         // The preliminary stage of a database: blocks of sequences in the order of their ordinal
         // ids (`database::search_blocks`, the deterministic merge of every thread count).
         (Some(database), None) => database::search_blocks(
@@ -407,7 +465,10 @@ pub(super) fn pssm_prelim(
             }
             Ok(())
         }
-    }
+    };
+    searched?;
+    subject_space_overflow.check()?;
+    Ok(())
 }
 
 /// The traceback of a PSSM search: mode 0's (`pssm_search::traceback0`), or the position-based

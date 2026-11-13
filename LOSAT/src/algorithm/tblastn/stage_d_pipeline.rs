@@ -29,9 +29,7 @@ use super::stage_d_linking::{
 use super::stage_d_results::{
     merge_query_chunk, KappaHspPayload, KappaResultHitList, KappaResultList, PrelimCulling,
 };
-use super::stage_d_stats::{
-    local_parameters_for_call, LocalParameterCall, LocalParameterOptions, LocalSubjectParameters,
-};
+use super::stage_d_stats::{LocalParameterCall, LocalParameterOptions, LocalSubjectParameters};
 use super::x_subject_store::{SubjectLetters, XPrelimSubject, XSearchSubject};
 use crate::algorithm::blastn::query_split::SplitSizes;
 use crate::algorithm::blastp::encoding::{
@@ -111,6 +109,9 @@ pub(super) struct DatabaseNumbers {
     /// `MIN_SEQ_LENGTH` or `BLAST_SEQSRC_MINLENGTH` without a list, the scanned shortest length
     /// with one (line DI-8).
     pub min_length: i32,
+    /// The number of sequences of the preliminary stage's option spaces
+    /// (`DbStatistics::request_count`).
+    pub request_count: i32,
 }
 
 /// The numbers of the subject set behind the statistics: a database's (`database`), or,
@@ -183,6 +184,24 @@ impl SubjectSetNumbers {
     pub(super) fn sorts_results(&self) -> bool {
         self.database
             .is_none_or(|database| database.engine_db_length > 0)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407, 1434 (quoted at
+    // `seqdb::DbStatistics`)
+    /// Whether NCBI's preliminary search computes the statistics of each subject on its own: a
+    /// database whose `BlastSeqSrcGetTotLen` is 0 (`DbStatistics::per_subject`); a FASTA set's
+    /// total is the sum of its records.
+    pub(super) fn per_subject(&self) -> bool {
+        self.database
+            .is_some_and(|database| database.engine_db_length == 0)
+    }
+
+    /// `-dbsize` in nucleotides when above 0, which the effective lengths read in place of the
+    /// database's (or a subject's) length (blast_setup.c:716-721).
+    pub(super) fn dbsize_nt(&self) -> Option<usize> {
+        self.dbsize
+            .filter(|&dbsize| dbsize > 0)
+            .and_then(|dbsize| usize::try_from(dbsize).ok())
     }
 
     /// The number of sequences, NCBI's `Int4`.
@@ -1243,6 +1262,7 @@ fn run_local_search_with_pool(
         valid_contexts,
         gapped_by_context,
         parameters,
+        recipe,
     } = query_set_setup(
         queries,
         QuerySetInputs {
@@ -1333,8 +1353,47 @@ fn run_local_search_with_pool(
     // composition redo and the traceback) is `search` of the common line (utils/xtiming.rs); a
     // guard, as the function has many returns. No NCBI counterpart.
     let _x_search_timer = XSearchTimer::start();
-    let link = parameters.link;
-    let cutoff_arrays = ContextCutoffArrays::of(&parameters);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220 (quoted at
+    // `stats::setup::preliminary_option_space`): the preliminary stage's option spaces, which its
+    // setup reads in place of its own where the statistics' total before the fallback to OID 0 is
+    // not positive, and which the statistics of each subject read
+    // (`SubjectSetNumbers::per_subject`, blast_engine.c:1434-1443).
+    let per_subject = profile.subject_set.per_subject();
+    let option_spaces: Option<Vec<i64>> = match profile.subject_set.database {
+        Some(database) if database.gumbel_db_length <= 0 || per_subject => Some(
+            recipe
+                .query_contexts
+                .iter()
+                .zip(&recipe.lengths)
+                .map(|(&(query_length, valid), ka)| {
+                    crate::stats::setup::preliminary_option_space(
+                        if valid { query_length as i64 } else { 0 },
+                        database.gumbel_db_length,
+                        database.request_count,
+                        profile.subject_set.dbsize.unwrap_or(0),
+                        options_searchsp.unwrap_or(0),
+                        true,
+                        ka,
+                        "TBLASTN",
+                    )
+                })
+                .collect::<Result<_, _>>()?,
+        ),
+        _ => None,
+    };
+    let preliminary_parameters = match (&option_spaces, profile.subject_set.database) {
+        (Some(spaces), Some(database)) if database.gumbel_db_length <= 0 => recipe.parameters(
+            stats_nt,
+            Some(spaces),
+            LocalParameterCall::Initial {
+                min_subject_length: min_subject_length.unwrap_or(0),
+                composition_based_stats: compo_adjust_mode.ncbi_value(),
+            },
+        )?,
+        _ => parameters.clone(),
+    };
+    let link = preliminary_parameters.link;
+    let cutoff_arrays = ContextCutoffArrays::of(&preliminary_parameters);
     // NCBI blast_parameters.c:455-458: the gapped X-drop from `kbp_gap` (a PSSM query's
     // `kbp_gap_psi`, `query_set_setup`).
     let search = preliminary_profile(
@@ -1379,13 +1438,19 @@ fn run_local_search_with_pool(
                 search,
                 link,
                 query_lengths: &query_lengths,
-                lengths: &parameters.lengths,
+                lengths: &preliminary_parameters.lengths,
                 gapped_by_context: &gapped_by_context,
                 gumbel: gumbel.as_ref(),
-                prelim_evalue: parameters.prelim_evalue,
+                prelim_evalue: preliminary_parameters.prelim_evalue,
                 prelim_size,
                 culling_limit: profile.culling_limit,
                 pssm: profile.pssm.map(|psi| &psi.pssm),
+                update: per_subject.then(|| SubjectUpdate {
+                    recipe: &recipe,
+                    option_spaces: option_spaces.as_deref().unwrap_or(&[]),
+                    dbsize_nt: profile.subject_set.dbsize_nt(),
+                    min_length: scoring.word_size * 3 + 2,
+                }),
             },
             subjects,
             pool,
@@ -1396,6 +1461,7 @@ fn run_local_search_with_pool(
             &chunks,
             protein_split,
             &parameters,
+            option_spaces.as_deref(),
             QuerySetInputs {
                 profile,
                 scoring,
@@ -2401,6 +2467,7 @@ fn split_preliminary_hitlists(
     chunks: &[ProteinQueryChunk],
     sizes: SplitSizes,
     batch_parameters: &LocalSubjectParameters,
+    option_spaces: Option<&[i64]>,
     inputs: QuerySetInputs<'_>,
     subjects: SubjectLetters<'_>,
     prelim_size: usize,
@@ -2416,11 +2483,17 @@ fn split_preliminary_hitlists(
         !protein_chunk_would_be_split(chunks, sizes),
         "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's TBLASTN"
     );
-    let batch_eff_searchsp: Vec<i64> = batch_parameters
-        .lengths
-        .iter()
-        .map(|length| length.eff_searchsp)
-        .collect();
+    // The options' spaces of the chunks (`SplitQuery_SetEffectiveSearchSpace`): the batch's own,
+    // or the preliminary stage's where they differ (`run_local_search_with_pool`).
+    let batch_eff_searchsp: Vec<i64> = match option_spaces {
+        Some(spaces) => spaces.to_vec(),
+        None => batch_parameters
+            .lengths
+            .iter()
+            .map(|length| length.eff_searchsp)
+            .collect(),
+    };
+    let per_subject = inputs.profile.subject_set.per_subject();
     let mut merged: Vec<Option<KappaResultHitList>> = (0..queries.len()).map(|_| None).collect();
     for chunk in chunks {
         // NCBI fails to make the query factory of a chunk without a query ("Empty
@@ -2477,6 +2550,12 @@ fn split_preliminary_hitlists(
                 prelim_size,
                 culling_limit: inputs.profile.culling_limit,
                 pssm: inputs.profile.pssm.map(|psi| &psi.pssm),
+                update: per_subject.then(|| SubjectUpdate {
+                    recipe: &setup.recipe,
+                    option_spaces: &batch_eff_searchsp,
+                    dbsize_nt: inputs.profile.subject_set.dbsize_nt(),
+                    min_length: inputs.scoring.word_size * 3 + 2,
+                }),
             },
             subjects,
             pool,
@@ -2525,12 +2604,57 @@ struct QuerySetInputs<'a> {
     do_sum_stats: bool,
 }
 
-struct QuerySetSetup {
+struct QuerySetSetup<'a> {
     working_frames: Vec<Vec<crate::algorithm::tblastx::translation::QueryFrame>>,
     contexts: Vec<crate::algorithm::tblastx::lookup::QueryContext>,
     valid_contexts: Vec<bool>,
     gapped_by_context: Vec<KarlinParams>,
     parameters: LocalSubjectParameters,
+    /// What the parameters of the query set are computed from, for the preliminary stage's own
+    /// (`LocalParameterRecipe::parameters`).
+    recipe: LocalParameterRecipe<'a>,
+}
+
+/// The inputs of `local_parameters_for_blocks` of a query set (`query_set_setup`): its contexts,
+/// their Karlin-Altschul blocks and the options, with which the setup's parameters, the preliminary
+/// stage's (its option spaces: `stats::setup::preliminary_option_space`) and those of each subject
+/// (`LocalParameterCall::Update`) are computed.
+struct LocalParameterRecipe<'a> {
+    query_contexts: Vec<(usize, bool)>,
+    gapped: Vec<KarlinParams>,
+    lengths: Vec<KarlinParams>,
+    ungapped: Vec<KarlinParams>,
+    x_dropoff: Vec<KarlinParams>,
+    num_subjects: i32,
+    options: LocalParameterOptions<'a>,
+}
+
+impl LocalParameterRecipe<'_> {
+    /// The parameters with the database length `db_nt` in nucleotides (the setup's total, `-dbsize`
+    /// or a subject's length), the options' spaces `option_spaces` and the call `call`.
+    fn parameters(
+        &self,
+        db_nt: usize,
+        option_spaces: Option<&[i64]>,
+        call: LocalParameterCall,
+    ) -> Result<LocalSubjectParameters, crate::stats::setup::SearchSpaceOverflow> {
+        super::stage_d_stats::local_parameters_for_blocks(
+            &self.query_contexts,
+            db_nt,
+            self.num_subjects,
+            super::stage_d_stats::LocalKarlinBlocks {
+                gapped: &self.gapped,
+                lengths: &self.lengths,
+                ungapped: &self.ungapped,
+                x_dropoff: &self.x_dropoff,
+            },
+            LocalParameterOptions {
+                eff_searchsp_override: option_spaces,
+                ..self.options
+            },
+            call,
+        )
+    }
 }
 
 // NCBI c++/src/algo/blast/core/blast_setup.c:614-654,964-1024:
@@ -2538,13 +2662,13 @@ struct QuerySetSetup {
 // BlastHitSavingParametersNew(...); the score block, effective lengths and cutoffs of a
 // query set. `eff_searchsp_override` is the options' effective search spaces that NCBI sets
 // from the whole batch before it searches a query chunk (`SplitQuery_SetEffectiveSearchSpace`).
-fn query_set_setup(
+fn query_set_setup<'a>(
     queries: &[Vec<u8>],
-    inputs: QuerySetInputs<'_>,
+    inputs: QuerySetInputs<'a>,
     eff_searchsp_override: Option<&[i64]>,
     marked: bool,
     pool: Option<&SearchPool<'_>>,
-) -> Result<QuerySetSetup> {
+) -> Result<QuerySetSetup<'a>> {
     // No NCBI counterpart (scheduling only): NCBI masks the queries of a batch and computes their
     // contexts' Karlin blocks one after the other on the thread that sets the batch up. Each reads
     // its own query alone, so a batch searched with a pool of two or more threads inside it (one
@@ -2754,25 +2878,22 @@ fn query_set_setup(
         word_xdrop_bits: inputs.scoring.word_xdrop_bits,
         scale_factor: 1.0,
         gumbel: inputs.gumbel,
-        eff_searchsp_override,
+        eff_searchsp_override: None,
     };
     let call = LocalParameterCall::Initial {
         min_subject_length: inputs.min_subject_length,
         composition_based_stats: inputs.compo_adjust_mode.ncbi_value(),
     };
-    let (parameters, gapped_by_context) = match inputs.profile.pssm {
-        None => (
-            local_parameters_for_call(
-                &query_contexts,
-                inputs.total_nt,
-                inputs.num_subjects,
-                &gapped_by_context,
-                &ungapped_by_context,
-                options,
-                call,
-            )?,
-            gapped_by_context,
-        ),
+    let recipe = match inputs.profile.pssm {
+        None => LocalParameterRecipe {
+            query_contexts,
+            gapped: gapped_by_context.clone(),
+            lengths: gapped_by_context,
+            ungapped: ungapped_by_context.clone(),
+            x_dropoff: ungapped_by_context,
+            num_subjects: inputs.num_subjects,
+            options,
+        },
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:89-127 (quoted at
         // `PsiSearch::ungapped_karlin` and `PsiSearch::gapped_karlin`)
         // A PSSM query's `kbp_psi` and `kbp_gap_psi`: the file's values, else `kbp_std`'s and
@@ -2801,36 +2922,32 @@ fn query_set_setup(
             {
                 return Err(SetupEngineError::NO_VALID_KARLIN_BLOCK.into());
             }
-            let gapped_psi: Vec<_> = gapped_by_context
-                .iter()
-                .map(|kbp| psi.gapped_karlin(kbp))
-                .collect();
-            let ungapped_psi: Vec<_> = ungapped_by_context
-                .iter()
-                .map(|kbp| psi.ungapped_karlin(kbp))
-                .collect();
-            let parameters = super::stage_d_stats::local_parameters_for_blocks(
-                &query_contexts,
-                inputs.total_nt,
-                inputs.num_subjects,
-                super::stage_d_stats::LocalKarlinBlocks {
-                    gapped: &gapped_psi,
-                    lengths: &gapped_by_context,
-                    ungapped: &ungapped_by_context,
-                    x_dropoff: &ungapped_psi,
-                },
+            LocalParameterRecipe {
+                query_contexts,
+                gapped: gapped_by_context
+                    .iter()
+                    .map(|kbp| psi.gapped_karlin(kbp))
+                    .collect(),
+                lengths: gapped_by_context,
+                x_dropoff: ungapped_by_context
+                    .iter()
+                    .map(|kbp| psi.ungapped_karlin(kbp))
+                    .collect(),
+                ungapped: ungapped_by_context,
+                num_subjects: inputs.num_subjects,
                 options,
-                call,
-            )?;
-            (parameters, gapped_psi)
+            }
         }
     };
+    let parameters = recipe.parameters(inputs.total_nt, eff_searchsp_override, call)?;
+    let gapped_by_context = recipe.gapped.clone();
     Ok(QuerySetSetup {
         working_frames,
         contexts,
         valid_contexts,
         gapped_by_context,
         parameters,
+        recipe,
     })
 }
 
@@ -2854,6 +2971,41 @@ struct PreliminaryInputs<'a> {
     /// `-in_pssm`: the PSSM's rows, the scores of the one query (`score::PssmScore`) and the
     /// source of its lookup table (`in_pssm::lookup_table`); `None` for a FASTA batch.
     pssm: Option<&'a crate::algorithm::pssm_search::rows::QueryPssm>,
+    /// The statistics of each subject (`SubjectSetNumbers::per_subject`), `None` for the query
+    /// set's.
+    update: Option<SubjectUpdate<'a>>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1429-1443
+// ```c
+//        if (seq_arg.seq->length < min_subj_seq_length) {
+//            BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
+//            continue;
+//        }
+//
+//        if (db_length == 0) {
+//            /* This is not a database search, hence need to recalculate and save
+//             the effective search spaces and length adjustments for all
+//             queries based on the length of the current single subject
+//             sequence. */
+//            if ((status = BLAST_OneSubjectUpdateParameters(program_number,
+//                           seq_arg.seq->length, score_options, query_info,
+//                           sbp, hit_params, word_params,
+//                           eff_len_params)) != 0)
+//               return status;
+//       }
+// ```
+/// What the statistics of each subject read (`PreliminaryInputs::update`): the query set's
+/// parameter inputs, the preliminary stage's option spaces of its contexts, `-dbsize` in
+/// nucleotides when above 0 (the effective lengths' database length in place of the subject's),
+/// and NCBI's shortest searched subject (`min_subj_seq_length`, word size * 3 + 2), which a shorter
+/// subject does not reach.
+#[derive(Clone, Copy)]
+struct SubjectUpdate<'a> {
+    recipe: &'a LocalParameterRecipe<'a>,
+    option_spaces: &'a [i64],
+    dbsize_nt: Option<usize>,
+    min_length: usize,
 }
 
 // Where the HSP lists of the subjects go as the owner of the search takes them in OID order:
@@ -3099,6 +3251,36 @@ fn run_preliminary_subjects_into(
         // Dispatch point: the call that runs the preliminary stage for one subject
         // (s_BlastSearchEngineCore). preliminary_protein_hsps_for_search runs the unit-wise stage.
         let x_pool = x_unit_pool(subject);
+        // The statistics of each subject that NCBI searches (`SubjectUpdate`): the query set's
+        // parameters with the subject's length in nucleotides (`LocalParameterCall::Update`).
+        let x_update;
+        let x_arrays;
+        let x_inputs;
+        let inputs = match inputs.update {
+            Some(update) if subject.len() >= update.min_length => {
+                x_update = update.recipe.parameters(
+                    update.dbsize_nt.unwrap_or(subject.len()),
+                    Some(update.option_spaces),
+                    LocalParameterCall::Update {
+                        subject_length: i32::try_from(subject.len())?,
+                    },
+                )?;
+                x_arrays = ContextCutoffArrays::of(&x_update);
+                x_inputs = PreliminaryInputs {
+                    search: PreliminaryProfile {
+                        word_cutoff: &x_arrays.word_cutoff,
+                        gapped_cutoff: &x_arrays.hit_cutoff,
+                        ..inputs.search
+                    },
+                    link: x_update.link,
+                    lengths: &x_update.lengths,
+                    prelim_evalue: x_update.prelim_evalue,
+                    ..*inputs
+                };
+                &x_inputs
+            }
+            _ => inputs,
+        };
         // Dispatch point: the scores of the batch's PSSM query (`-in_pssm`, the same for every
         // subject), else the matrix's.
         let preliminary = match inputs.pssm {

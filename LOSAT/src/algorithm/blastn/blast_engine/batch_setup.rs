@@ -411,6 +411,10 @@ pub(super) struct CutoffInputs<'a> {
     /// `-min_raw_gapped_score` (`TaskConfig::min_raw_gapped_score`).
     pub(super) min_raw_gapped_score: Option<i32>,
     pub(super) evalue_threshold: f64,
+    /// The subject length of the word cutoffs of an ungapped search: the subject's own where NCBI
+    /// computes the statistics of each subject (`BlastInitialWordParametersUpdate`'s `subj_length`,
+    /// blast_setup.c:1018-1021), `None` for the average of the subject set (blast_engine.c:1372-1374).
+    pub(super) subject_length: Option<u64>,
 }
 
 /// The cutoff scores, the hit-saving cutoff scores, the X-dropoffs and the reduced cutoff scores
@@ -436,6 +440,7 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
         x_dropoff_init: x_dropoff_init_ref,
         min_raw_gapped_score,
         evalue_threshold,
+        subject_length,
     } = inputs;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:336-377
     // ```c
@@ -458,7 +463,9 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
     // of a `-subject` set, so `BlastInitialWordParametersUpdate` runs once for the batch.
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1434-1445,
     // c++/src/algo/blast/api/seqsrc_multiseq.cpp:245-266, seqsrc_seqdb.cpp:203-209
-    let x_avg_subject_length: u64 = if UNGAPPED {
+    let x_avg_subject_length: u64 = if let (true, Some(length)) = (UNGAPPED, subject_length) {
+        length
+    } else if UNGAPPED {
         match subjects {
             // `BlastSeqSrcGetAvgSeqLen` reads `GetTotalLength` and `GetNumSeqs`, not the
             // statistics' `STATS_*` keys (`SeqDb::average_length`).

@@ -704,8 +704,6 @@ pub struct SeqDb {
     oid_list_set_up: AtomicBool,
     /// Whether a list was applied (`SeqDb::restrict`): NCBI's `CSeqDB` then scans the totals.
     list_applied: bool,
-    /// The name the database was opened with (`-db`), for LOSAT's refusals.
-    name: String,
     /// NCBI's OID list (the alias files' ranges, a list) and its iteration range, when there
     /// is one: ordinal id `i` is the `i`-th OID of the list inside the range.
     filter: Option<Box<filter::OidFilter>>,
@@ -1261,7 +1259,6 @@ impl SeqDb {
             alias_ranges: false,
             oid_list_set_up: AtomicBool::new(false),
             list_applied: false,
-            name: name.to_string(),
             filter: None,
             search_path: None,
             reports_show_gis: false,
@@ -1781,50 +1778,7 @@ impl SeqDb {
         } else {
             UNLISTED_WALK_KEYS
         };
-        self.walk_errors(keys)?;
-        // Values NCBI reads in ways LOSAT does not reproduce yet (line RG, item D1a-2): the
-        // statistics of each subject (`statistics_per_subject`). A negative `NSEQ`, one of 2^31
-        // or more and a `LENGTH` of 2^63 or more are NCBI's `int` and `Int8` through the
-        // statistics and the reports (`statistics`, line RG D1a-3).
-        if !self.list_applied && self.statistics_per_subject() {
-            return Err(SeqDbError::Unsupported {
-                path: PathBuf::from(self.alias_name()),
-                message: format!(
-                    "the total length of the alias files (LENGTH) is {} as NCBI's Int8 while the \
-                     database includes sequences; LOSAT does not read such alias files yet",
-                    self.counts.total_length as i64
-                ),
-            });
-        }
-        Ok(())
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443
-    // ```c
-    //        if (db_length == 0) {
-    //            /* This is not a database search, hence need to recalculate and save
-    //             the effective search spaces and length adjustments for all
-    //             queries based on the length of the current single subject
-    //             sequence. */
-    //            if ((status = BLAST_OneSubjectUpdateParameters(program_number,
-    //                           seq_arg.seq->length, score_options, query_info,
-    //                           sbp, hit_params, word_params,
-    //                           eff_len_options)) != 0)
-    // ```
-    // `db_length` is `BlastSeqSrcGetTotLen`, NCBI's `GetTotalLength` (`counts`): an alias file's
-    // `LENGTH 0`, or a list whose scan of the totals visits no sequence (the walk of
-    // `OidFilter::walk` stops before the listed OIDs that the search reads: line RG D1a-2,
-    // survey A, the iteration range of the only alias file of a `-db`).
-    /// Whether NCBI's search computes the statistics of each subject on its own: `GetTotalLength`
-    /// is 0 while the search reads sequences. LOSAT's database searches do not (an alias file's
-    /// `LENGTH 0` is refused by [`SeqDb::check_alias_values`], a list's scan by the search's
-    /// opener). Every included sequence counts as read here, while NCBI's TBLASTN and TBLASTX
-    /// skip the subjects shorter than `min_subj_seq_length` before this check
-    /// (blast_engine.c:1429): a database whose searched subjects are all that short is refused
-    /// though NCBI searches it the usual way, until the statistics of each subject are ported
-    /// (line RG D1a-3, which removes this refusal).
-    pub fn statistics_per_subject(&self) -> bool {
-        self.statistics().per_subject() && self.num_seqs > 0
+        self.walk_errors(keys)
     }
 
     /// The first exception of the walks of `keys`, in that order.
@@ -1833,11 +1787,6 @@ impl SeqDb {
             Some(exception) => Err(SeqDbError::Ncbi(exception.clone())),
             None => Ok(()),
         }
-    }
-
-    /// The name of the database for LOSAT's refusals of its alias files.
-    fn alias_name(&self) -> &str {
-        &self.name
     }
 
     /// Title of the database.

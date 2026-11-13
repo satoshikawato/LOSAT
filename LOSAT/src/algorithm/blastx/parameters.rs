@@ -543,6 +543,9 @@ pub struct SubjectNumbers {
     /// `GetTotalLength / MAX(1, GetNumSeqs)` (`SeqDb::average_length`, no `STATS_*` key), a
     /// FASTA set's total over its records.
     pub average: i32,
+    /// The number of sequences of the preliminary stage's option spaces (`STATS_NSEQ` or
+    /// `GetNumSeqs` without the fallback: `DbStatistics::request_count`), a FASTA set's records.
+    pub request_count: i32,
 }
 
 impl SubjectNumbers {
@@ -555,6 +558,7 @@ impl SubjectNumbers {
             gumbel_total: length as i64,
             shortest: length.max(super::subjects::BLAST_SEQSRC_MINLENGTH),
             average: length as i32,
+            request_count: 1,
         }
     }
 }
@@ -572,6 +576,7 @@ pub fn subject_parameters(
         gumbel_total,
         shortest,
         average,
+        request_count: _,
     } = numbers;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
     // ```c
@@ -628,8 +633,140 @@ pub fn subject_parameters(
         db_count,
         fixed_spaces,
     )?;
-    let gapped = gapped_karlin(options);
     let gumbel = gumbel_block(options, gumbel_total);
+    context_cutoffs(
+        batch,
+        parameters,
+        options,
+        gumbel.as_ref(),
+        n,
+        average,
+        options.composition > 1,
+    )?;
+    Ok(if options.gapped {
+        gapped_x_drops(options, &gapped_karlin(options)).0
+    } else {
+        0
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220 and
+// c++/src/algo/blast/api/split_query_aux_priv.cpp:155-181 (quoted at
+// `stats::setup::preliminary_option_space`)
+/// The option spaces that NCBI's preliminary stage sets for the contexts of the query batch
+/// `batch` (`SplitQuery_SetEffectiveSearchSpace`), where they differ from the setup's own spaces
+/// (`effective_lengths` of the batch): a database whose statistics' total before the fallback to
+/// OID 0 is not positive (`SubjectNumbers::gumbel_total`), without `-searchsp`. `None` otherwise,
+/// where the setup's spaces are the options' (`x_search_core`'s `spaces`).
+pub(crate) fn preliminary_spaces(
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    numbers: SubjectNumbers,
+    database: bool,
+) -> Result<Option<Vec<i64>>> {
+    if !database || numbers.gumbel_total > 0 || options.effective_search_space != 0 {
+        return Ok(None);
+    }
+    let gapped = gapped_karlin(options);
+    let spaces = batch
+        .contexts
+        .iter()
+        .zip(parameters)
+        .map(|(c, p)| {
+            let ka = if options.gapped { gapped } else { p.ungapped };
+            crate::stats::setup::preliminary_option_space(
+                if p.valid { c.length as i64 } else { 0 },
+                numbers.gumbel_total,
+                numbers.request_count,
+                options.db_length,
+                0,
+                false,
+                &ka,
+                options.program().upper,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(spaces))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1001-1024 (quoted at
+// `stats::setup::subject_eff_lengths`)
+// ```c
+//    eff_len_params->real_db_length = subject_length;
+//    if ((status = BLAST_CalcEffLengths(program_number, scoring_options,
+//                                 eff_len_params, sbp, query_info, NULL)) != 0)
+//       return status;
+//    /* Update cutoff scores in hit saving parameters */
+//    BlastHitSavingParametersUpdate(program_number, sbp, query_info, subject_length, 0, /* FIXME */
+//                                   hit_params);
+//
+//    if (word_params) {
+//       /* Update cutoff scores in initial word parameters */
+//       BlastInitialWordParametersUpdate(program_number, hit_params, sbp, query_info,
+//            subject_length, word_params);
+// ```
+/// The parameters of the contexts of a query chunk `batch` for the subject of `subject_length`
+/// residues, where NCBI's preliminary search computes the statistics of each subject
+/// (`Subjects::per_subject`, a database length of 0): the chunk's preliminary parameters
+/// `preliminary` with the effective lengths of the subject's length (`numbers.count` sequences,
+/// `-dbsize`, the options' spaces of the preliminary stage), the hit-saving and word cutoffs of
+/// the subject's length without the stretch of a composition-based statistics. The options' spaces
+/// are set where the preliminary stage set them (`-searchsp`, `-dbsize` or `STATS_TOTLEN`:
+/// `stats::setup::preliminary_option_space`), and then they are the chunk's preliminary spaces.
+pub(crate) fn subject_update(
+    batch: &PreparedQueryBatch,
+    preliminary: &[ContextParameters],
+    options: &ResolvedOptions,
+    numbers: SubjectNumbers,
+    subject_length: usize,
+) -> Result<Vec<ContextParameters>> {
+    let mut parameters = preliminary.to_vec();
+    let spaces_set =
+        options.effective_search_space != 0 || numbers.gumbel_total != 0 || options.db_length > 0;
+    let option_spaces: Vec<i64> = preliminary
+        .iter()
+        .map(|p| if spaces_set { p.search_space } else { 0 })
+        .collect();
+    effective_lengths(
+        batch,
+        &mut parameters,
+        options,
+        subject_length as i64,
+        numbers.count,
+        Some(&option_spaces),
+    )?;
+    let gumbel = gumbel_block(options, numbers.gumbel_total);
+    let length = i32::try_from(subject_length)?;
+    context_cutoffs(
+        batch,
+        &mut parameters,
+        options,
+        gumbel.as_ref(),
+        length,
+        length,
+        false,
+    )?;
+    Ok(parameters)
+}
+
+/// The cutoffs of each valid context (`BlastHitSavingParametersNew`/`Update`,
+/// `BlastInitialWordParametersNew`/`Update`, quoted above `SubjectNumbers`) after its effective
+/// lengths: the hit-saving cutoff from `evalue` (stretched 5 times for the Gumbel block with
+/// `stretch`, a composition-based statistics above 1) at the subject length `n` (Spouge's, and the
+/// sum statistics' search space), and the word cutoff, which an ungapped search computes at the
+/// subject length `average`. The setup passes the shortest or average subject length, the
+/// statistics of each subject the subject's own length and no stretch (`subject_update`).
+fn context_cutoffs(
+    batch: &PreparedQueryBatch,
+    parameters: &mut [ContextParameters],
+    options: &ResolvedOptions,
+    gumbel: Option<&BlastGumbelBlk>,
+    n: i32,
+    average: i32,
+    stretch: bool,
+) -> Result<()> {
+    let gapped = gapped_karlin(options);
     let decay = if options.sum_stats
         && (!options.gapped
             || options.max_intron_length == 0
@@ -651,9 +788,9 @@ pub fn subject_parameters(
             continue;
         }
         let ka = if options.gapped { gapped } else { p.ungapped };
-        p.hit_cutoff_max = if let Some(gbp) = gumbel.as_ref() {
+        p.hit_cutoff_max = if let Some(gbp) = gumbel {
             blast_spouge_etos(
-                if options.composition > 1 {
+                if stretch {
                     5.0 * options.evalue
                 } else {
                     options.evalue
@@ -691,11 +828,7 @@ pub fn subject_parameters(
             p.word_xdrop_init
         };
     }
-    Ok(if options.gapped {
-        gapped_x_drops(options, &gapped).0
-    } else {
-        0
-    })
+    Ok(())
 }
 
 /// The preliminary and final gapped X-drops in raw scores (`gap_x_dropoff`,

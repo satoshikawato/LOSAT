@@ -86,6 +86,7 @@ impl<'a> Subjects<'a> {
                     gumbel_total: statistics.gumbel_db_length,
                     shortest,
                     average: statistics.average,
+                    request_count: statistics.request_count,
                 }
             }
             Subjects::Fasta(_) | Subjects::Unreadable => {
@@ -97,12 +98,22 @@ impl<'a> Subjects<'a> {
                     gumbel_total: total,
                     shortest,
                     average: (total / count.max(1)) as i32,
+                    request_count: i32::try_from(count).unwrap_or(i32::MAX),
                 }
             }
         })
     }
 
     /// Whether the subjects are `Unreadable`.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407, 1434 (quoted at
+    // `seqdb::DbStatistics`)
+    /// Whether NCBI's preliminary search computes the statistics of each subject on its own: a
+    /// database whose `BlastSeqSrcGetTotLen` is 0 (`DbStatistics::per_subject`). A FASTA set's
+    /// total is the sum of its records (NCBI's "dbscan" mode).
+    pub(crate) fn per_subject(&self) -> bool {
+        matches!(self, Subjects::Stream(stream) if stream.db.statistics().per_subject())
+    }
+
     pub(crate) fn is_unreadable(&self) -> bool {
         matches!(self, Subjects::Unreadable)
     }

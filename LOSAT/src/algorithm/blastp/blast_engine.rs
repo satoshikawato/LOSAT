@@ -250,6 +250,15 @@ impl BlastpSubjectResult {
 //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
 // diag_table->offset = window_size;
 // ```
+/// The statistics of one subject that NCBI's preliminary search computes for a database length of
+/// 0 (`BLAST_OneSubjectUpdateParameters`, `run_resolved_in_pool`): each context's search space
+/// (the preliminary e-values without the Gumbel block), hit-saving cutoff and word cutoff.
+struct BlastpSubjectParameters {
+    search_spaces: Vec<SearchSpace>,
+    hit_cutoff_scores: Vec<i32>,
+    word_cutoff_scores: Vec<i32>,
+}
+
 struct BlastpSubjectScratch {
     offset_pairs: Vec<OffsetPair>,
     diag_array: Vec<DiagStruct>,
@@ -5434,12 +5443,6 @@ fn open_search_database(
                 args.dbsize.is_some_and(|size| size > 0),
                 args.app.name(),
             )?;
-            crate::algorithm::common::database::check_negative_length_spaces(
-                &database.statistics(),
-                !resolved.old_fsc,
-                args.searchsp.is_some_and(|space| space != 0),
-                args.app.name(),
-            )?;
             let shown = database.pairwise_database();
             for format in &outputs.formats {
                 crate::algorithm::common::database::check_report_sums(
@@ -9628,6 +9631,68 @@ fn run_resolved_in_pool(
     // reader), whatever its sequences are, unless a list made NCBI scan its totals (then
     // the scanned shortest length, line DI-8); a FASTA subject set answers its real minimum,
     // raised to 10.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220 (quoted at
+    // `stats::setup::preliminary_option_space`): the preliminary stage's setup reads the options'
+    // search spaces of the statistics before their fallback to OID 0, which differ from the
+    // setup's own only for a total length that is not positive, and which the statistics of each
+    // subject read too (`DbStatistics::per_subject`, blast_engine.c:1434-1443).
+    let statistics = database.map(|database| database.statistics());
+    // RPS-BLAST's engine has no loop over subjects (blast_engine.c:1384-1393).
+    let per_subject = args.rps_search.is_none() && statistics.is_some_and(|s| s.per_subject());
+    let preliminary_option_spaces: Option<Vec<i64>> = match statistics {
+        Some(statistics) if statistics.gumbel_db_length <= 0 || per_subject => Some(
+            contexts
+                .iter()
+                .map(|ctx| {
+                    let query_length = if ctx.is_valid { ctx.aa_len as i64 } else { 0 };
+                    crate::stats::setup::preliminary_option_space(
+                        query_length,
+                        statistics.gumbel_db_length,
+                        statistics.request_count,
+                        args.dbsize,
+                        options_searchsp,
+                        false,
+                        &gapped_params,
+                        args.app.name(),
+                    )
+                })
+                .collect::<Result<_, _>>()?,
+        ),
+        _ => None,
+    };
+    // The preliminary stage's own spaces where they differ from the setup's (a total length that
+    // is not positive): the setup's computation with the option spaces.
+    let preliminary_spaces: Option<(Vec<SearchSpace>, Vec<Option<i64>>)> =
+        match (&preliminary_option_spaces, statistics) {
+            (Some(option_spaces), Some(statistics)) if statistics.gumbel_db_length <= 0 => {
+                let mut spaces = search_spaces.clone();
+                let mut exact = exact_search_spaces.clone();
+                for (ctx_idx, ctx) in contexts.iter().enumerate() {
+                    if !ctx.is_valid || ctx.aa_len == 0 {
+                        continue;
+                    }
+                    let lengths = crate::stats::setup::calc_eff_lengths(
+                        ctx.aa_len as i64,
+                        eff_db_length,
+                        num_subjects,
+                        &gapped_params,
+                        option_spaces[ctx_idx],
+                        args.app.name(),
+                    )?;
+                    spaces[ctx_idx] = SearchSpace {
+                        effective_space: lengths.eff_searchsp as f64,
+                        length_adjustment: i64::from(lengths.length_adjustment),
+                    };
+                    exact[ctx_idx] = Some(lengths.eff_searchsp);
+                }
+                Some((spaces, exact))
+            }
+            _ => None,
+        };
+    let (preliminary_search_spaces, preliminary_exact_spaces) = match &preliminary_spaces {
+        Some((spaces, exact)) => (spaces, exact),
+        None => (&search_spaces, &exact_search_spaces),
+    };
     let hit_cutoff_scores: Vec<i32> = contexts
         .iter()
         .enumerate()
@@ -9639,7 +9704,7 @@ fn run_resolved_in_pool(
                 args.comp_based_stats.mode,
                 &gapped_params,
                 gapped_gumbel.as_ref(),
-                exact_search_spaces[context_idx].unwrap_or(0),
+                preliminary_exact_spaces[context_idx].unwrap_or(0),
             )
         })
         .collect();
@@ -9687,6 +9752,90 @@ fn run_resolved_in_pool(
         blastp_prelim_evalue(args.evalue, args.comp_based_stats.mode)
     } else {
         args.evalue
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1010-1024
+    // ```c
+    //    /* Update cutoff scores in hit saving parameters */
+    //    BlastHitSavingParametersUpdate(program_number, sbp, query_info, subject_length, 0, /* FIXME */
+    //                                   hit_params);
+    //
+    //    if (word_params) {
+    //       /* Update cutoff scores in initial word parameters */
+    //       BlastInitialWordParametersUpdate(program_number, hit_params, sbp, query_info,
+    //            subject_length, word_params);
+    //       /* Update the parameters for linking HSPs, if necessary. */
+    //       BlastLinkHSPParametersUpdate(word_params, hit_params, scoring_options->gapped_calculation);
+    //    }
+    // ```
+    // The statistics of one subject (`per_subject`): each context's effective lengths
+    // (`stats::setup::subject_eff_lengths`), the hit-saving cutoffs of `BlastHitSavingParametersUpdate`
+    // with the subject's length and a composition-based statistics of 0 (no stretch of the
+    // e-value: `params->prelim_evalue = evalue`, blast_parameters.c:868, 937-938), and the
+    // word cutoffs of `BlastInitialWordParametersUpdate` (gapped: the gap trigger, at most the
+    // hit-saving cutoff; the X-drops keep their initial values, `x_dropoff_init` is not 0).
+    // BLASTP links no HSPs. The traceback reads the setup's values (blast_traceback.c:1598-1650:
+    // the traceback of a list reads only the hit-saving cutoff of the complexity adjustment,
+    // which BLASTP does not run).
+    let subject_space_overflow = crate::stats::setup::SubjectSpaceOverflow::default();
+    let subject_parameters = |subject_length: usize| -> Result<
+        BlastpSubjectParameters,
+        crate::stats::setup::SearchSpaceOverflow,
+    > {
+        let option_spaces = preliminary_option_spaces
+            .as_deref()
+            .expect("the statistics of each subject have their preliminary option spaces");
+        let mut search_spaces = preliminary_search_spaces.clone();
+        let mut exact_spaces: Vec<i64> = preliminary_exact_spaces
+            .iter()
+            .map(|space| space.unwrap_or(0))
+            .collect();
+        for (ctx_idx, ctx) in contexts.iter().enumerate() {
+            if !ctx.is_valid || ctx.aa_len == 0 {
+                continue;
+            }
+            let lengths = crate::stats::setup::subject_eff_lengths(
+                ctx.aa_len as i64,
+                subject_length as i64,
+                num_subjects,
+                args.dbsize,
+                option_spaces[ctx_idx],
+                false,
+                &gapped_params,
+                args.app.name(),
+            )?;
+            search_spaces[ctx_idx] = SearchSpace {
+                effective_space: lengths.eff_searchsp as f64,
+                length_adjustment: i64::from(lengths.length_adjustment),
+            };
+            exact_spaces[ctx_idx] = lengths.eff_searchsp;
+        }
+        let hit_cutoff_scores: Vec<i32> = contexts
+            .iter()
+            .zip(exact_spaces.iter())
+            .map(|(ctx, &space)| {
+                blastp_hit_cutoff_score_for_context(
+                    ctx,
+                    args.evalue,
+                    subject_length as i32,
+                    BlastpCompositionMode::NoCompositionBasedStats,
+                    &gapped_params,
+                    gapped_gumbel.as_ref(),
+                    space,
+                )
+            })
+            .collect();
+        let word_cutoff_scores = hit_cutoff_scores
+            .iter()
+            .zip(contexts.iter())
+            .map(|(&hit_cutoff_score, ctx)| {
+                blastp_word_cutoff_score_for_context(hit_cutoff_score, ctx, args.gap_trigger_bits)
+            })
+            .collect();
+        Ok(BlastpSubjectParameters {
+            search_spaces,
+            hit_cutoff_scores,
+            word_cutoff_scores,
+        })
     };
     // `x_prelim_free.rs`.
     let mut x_prelim_freed = 0usize;
@@ -9795,6 +9944,45 @@ fn run_resolved_in_pool(
         if subject.aa_len == 0 {
             return;
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443
+        // ```c
+        //        if (db_length == 0) {
+        //            /* This is not a database search, hence need to recalculate and save
+        //             the effective search spaces and length adjustments for all
+        //             queries based on the length of the current single subject
+        //             sequence. */
+        //            if ((status = BLAST_OneSubjectUpdateParameters(program_number,
+        //                           seq_arg.seq->length, score_options, query_info,
+        //                           sbp, hit_params, word_params,
+        //                           eff_len_params)) != 0)
+        //               return status;
+        //       }
+        // ```
+        // Once per subject, before its scan: the values the rest of this kernel reads are the
+        // subject's own (`subject_parameters`) or the setup's.
+        let x_subject_parameters;
+        let (word_cutoff_scores, hit_cutoff_scores, search_spaces, prelim_evalue) = if per_subject {
+            x_subject_parameters = match subject_parameters(subject.aa_len) {
+                Ok(parameters) => parameters,
+                Err(overflow) => {
+                    subject_space_overflow.note(overflow);
+                    return;
+                }
+            };
+            (
+                &x_subject_parameters.word_cutoff_scores,
+                &x_subject_parameters.hit_cutoff_scores,
+                &x_subject_parameters.search_spaces,
+                args.evalue,
+            )
+        } else {
+            (
+                &word_cutoff_scores,
+                &hit_cutoff_scores,
+                preliminary_search_spaces,
+                prelim_evalue,
+            )
+        };
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:112-121
         // ```c
         // (*seq_blk)->sequence_start = (Uint1 *) buffer;
@@ -11115,9 +11303,16 @@ fn run_resolved_in_pool(
                 contexts: &contexts,
                 gapped_params: &gapped_params,
                 gumbel: gapped_gumbel.as_ref(),
-                exact_search_spaces: &exact_search_spaces,
+                exact_search_spaces: preliminary_exact_spaces,
                 cutoff_subject_length,
                 prelim_evalue,
+                per_subject: per_subject.then(|| pssm_hooks::PsiSubjectStatistics {
+                    option_space: preliminary_option_spaces
+                        .as_ref()
+                        .map_or(0, |spaces| spaces[0]),
+                    setup_count: num_subjects,
+                    dbsize: args.dbsize,
+                }),
                 window,
                 diag_mask,
                 offset_array_size,
@@ -11215,6 +11410,7 @@ fn run_resolved_in_pool(
                 Err(other) => other,
             }
         })?;
+        subject_space_overflow.check()?;
         if let Some(timing) = timing.as_ref() {
             BlastpTiming::record_call(
                 &timing.prelim_merge_sort_ns,

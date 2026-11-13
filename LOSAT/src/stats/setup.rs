@@ -167,6 +167,167 @@ pub(crate) fn calc_eff_lengths(
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220
+// ```c++
+//     CEffectiveSearchSpacesMemento eff_memento(m_Options);
+//     SplitQuery_SetEffectiveSearchSpace(m_Options, m_QueryFactory,
+//                                        m_InternalData);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:155-181
+// ```c++
+//     // If the effective search options have been set, we don't need to
+//     // recompute those...
+//     if (options->GetEffectiveSearchSpace() != 0) {
+//         return;
+//     }
+//
+//     const BlastSeqSrc* seqsrc = full_data->m_SeqSrc->GetPointer();
+//     Int8 total_length = BlastSeqSrcGetTotLenStats(seqsrc);
+//     if (total_length <= 0)
+//         total_length = BlastSeqSrcGetTotLen(seqsrc);
+//     Int4 num_seqs = BlastSeqSrcGetNumSeqsStats(seqsrc);
+//     if (num_seqs <= 0)
+//         num_seqs = BlastSeqSrcGetNumSeqs(seqsrc);
+//
+//     CEffectiveSearchSpaceCalculator calc(full_query_fact, *options,
+//                                          num_seqs, total_length,
+//                                          full_data->m_ScoreBlk->GetPointer());
+//     BlastQueryInfo* qinfo = full_data->m_QueryInfo;
+//     _ASSERT(qinfo);
+//
+//     vector<Int8> eff_searchsp;
+//     for (size_t index = 0; index <= (size_t)qinfo->last_context; index++) {
+//         eff_searchsp.push_back(calc.GetEffSearchSpaceForContext(index));
+//     }
+//     options->SetEffectiveSearchSpace(eff_searchsp);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/effsearchspace_calc.cpp:115-121
+// ```c++
+//     BlastEffectiveLengthsParametersNew(opts_memento->m_EffLenOpts,
+//                                        db_num_bases, db_num_seqs,
+//                                        &eff_len_params);
+//
+//     Int2 status =
+//         BLAST_CalcEffLengths(m_Program, opts_memento->m_ScoringOpts,
+//                              eff_len_params, sbp, m_QueryInfo, NULL);
+// ```
+// The calculator's query information is a new one of the whole query (its spaces start at 0),
+// and its setup has no fallback to the length of OID 0: with a total length of 0 (an alias
+// file's `LENGTH 0`, a list whose scan totals nothing) `BLAST_CalcEffLengths` returns before the
+// contexts (`eff_lengths_database`) unless `-dbsize` is given, and every option space is 0 (the
+// options then count as unset, `BlastEffectiveLengthsOptions_IsSearchSpaceSet`); with a negative
+// total (a `LENGTH` of 2^63 or more) the effective database length is 1 and a context's space is
+// its query length. The setups of the preliminary stage read these spaces in place of their own
+// (`s_GetEffectiveSearchSpaceForContext`, blast_setup.c:676-697 and 778-780), the memento gives
+// the traceback and the reports the options' own spaces back. With a positive total the spaces
+// are the setup's own (the same total, number and `-dbsize`).
+/// The search space that NCBI's preliminary stage sets in the options for a context of
+/// `query_length` letters of the whole query (`SplitQuery_SetEffectiveSearchSpace`): `searchsp`
+/// (`-searchsp`, the options' own) when it is not 0, else the effective search space of the
+/// statistics' total `statistics_total` and number `statistics_count` before their fallback to OID
+/// 0 (`DbStatistics::gumbel_db_length`, `request_count`) with `dbsize` (`-dbsize`), or 0 where
+/// `BLAST_CalcEffLengths` returns before the contexts. The setups of the preliminary stage and the
+/// statistics of each subject (`subject_eff_lengths`) take it as the context's option space
+/// (`calc_eff_lengths`' `options_searchsp`); an invalid or empty context has 0.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn preliminary_option_space(
+    query_length: i64,
+    statistics_total: i64,
+    statistics_count: i32,
+    dbsize: i64,
+    searchsp: i64,
+    translated_subject: bool,
+    ka: &KarlinParams,
+    program: &str,
+) -> Result<i64, SearchSpaceOverflow> {
+    if searchsp != 0 {
+        return Ok(searchsp);
+    }
+    if query_length <= 0 {
+        return Ok(0);
+    }
+    match eff_lengths_database(
+        statistics_total,
+        statistics_count,
+        dbsize,
+        false,
+        translated_subject,
+    ) {
+        None => Ok(0),
+        Some((db_length, num_seqs)) => {
+            Ok(calc_eff_lengths(query_length, db_length, num_seqs, ka, 0, program)?.eff_searchsp)
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1001-1014
+// ```c
+// Int2 BLAST_OneSubjectUpdateParameters(EBlastProgramType program_number,
+//                     Uint4 subject_length,
+//                     const BlastScoringOptions* scoring_options,
+//                     BlastQueryInfo* query_info,
+//                     const BlastScoreBlk* sbp,
+//                     BlastHitSavingParameters* hit_params,
+//                     BlastInitialWordParameters* word_params,
+//                     BlastEffectiveLengthsParameters* eff_len_params)
+// {
+//    Int2 status = 0;
+//    eff_len_params->real_db_length = subject_length;
+//    if ((status = BLAST_CalcEffLengths(program_number, scoring_options,
+//                                 eff_len_params, sbp, query_info, NULL)) != 0)
+//       return status;
+// ```
+// `real_num_seqs` stays the setup's number (`DbStatistics::setup_count`: 1 after the fallback to
+// OID 0, `STATS_NSEQ` with `STATS_TOTLEN`), and the options' spaces are the preliminary stage's
+// (`preliminary_option_space`). A subject that NCBI searches has letters (blast_engine.c:1429).
+/// The effective lengths of a valid context of `query_length` letters for the subject of
+/// `subject_length` letters (nucleotides for a translated subject) that NCBI's preliminary search
+/// computes the statistics of on its own (`BLAST_OneSubjectUpdateParameters`, a database length
+/// of 0: `DbStatistics::per_subject`): `setup_count` sequences, `dbsize` (`-dbsize`) in place of
+/// the subject's length, and the context's preliminary option space `option_space`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn subject_eff_lengths(
+    query_length: i64,
+    subject_length: i64,
+    setup_count: i32,
+    dbsize: i64,
+    option_space: i64,
+    translated_subject: bool,
+    ka: &KarlinParams,
+    program: &str,
+) -> Result<ContextEffLengths, SearchSpaceOverflow> {
+    let (db_length, num_seqs) = eff_lengths_database(
+        subject_length,
+        setup_count,
+        dbsize,
+        true,
+        translated_subject,
+    )
+    .expect("eff_lengths_database returns the lengths when the option spaces count as set");
+    calc_eff_lengths(query_length, db_length, num_seqs, ka, option_space, program)
+}
+
+/// The first overflow of NCBI's `Int8` search space that the statistics of a subject met in a
+/// subject loop that cannot return an error (`subject_eff_lengths`): the loop notes it, and the
+/// search returns it (LOSAT's refusal, `SearchSpaceOverflow`) after the loop.
+#[derive(Debug, Default)]
+pub(crate) struct SubjectSpaceOverflow(std::sync::OnceLock<SearchSpaceOverflow>);
+
+impl SubjectSpaceOverflow {
+    /// Notes `overflow` unless one was noted before.
+    pub(crate) fn note(&self, overflow: SearchSpaceOverflow) {
+        let _ = self.0.set(overflow);
+    }
+
+    /// The overflow that the loop noted, as the search's error.
+    pub(crate) fn check(&self) -> Result<(), SearchSpaceOverflow> {
+        match self.0.get() {
+            Some(overflow) => Err(overflow.clone()),
+            None => Ok(()),
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:900-904, 969-980
 // ```c
 //    Uint4 max_subject_length;

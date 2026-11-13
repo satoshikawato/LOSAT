@@ -84,13 +84,17 @@ pub(super) struct LocalParameterOptions<'a> {
 // BlastHitSavingParametersNew(..., min_subject_length,
 //                              (*ext_params)->options->compositionBasedStats, ...);
 // BlastHitSavingParametersUpdate(..., subject_length, 0, hit_params);
-// Only the initial call is ported here: NCBI makes the update only when `db_length == 0`
-// (blast_engine.c:1433-1443), and nothing in LOSAT builds it.
+// The update is NCBI's statistics of each subject (`db_length == 0`, blast_engine.c:1433-1443):
+// the subject's length in nucleotides and a composition-based statistics of 0 (no stretch of the
+// e-value).
 #[derive(Clone, Copy)]
 pub(super) enum LocalParameterCall {
     Initial {
         min_subject_length: i32,
         composition_based_stats: i32,
+    },
+    Update {
+        subject_length: i32,
     },
 }
 
@@ -313,13 +317,13 @@ pub(super) fn local_parameters_for_blocks(
     )?;
     // NCBI c++/src/algo/blast/core/blast_setup.c:964-985,1011-1024:
     // initial creation passes min_subject_length and compositionBasedStats;
-    // the conditional update passes subject_length and literal zero (not ported; see
-    // `LocalParameterCall`).
+    // the conditional update passes subject_length and literal zero (`LocalParameterCall`).
     let (hit_subject_length, composition_based_stats) = match call {
         LocalParameterCall::Initial {
             min_subject_length,
             composition_based_stats,
         } => (min_subject_length, composition_based_stats),
+        LocalParameterCall::Update { subject_length } => (subject_length, 0),
     };
     let mut link = if options.do_sum_stats {
         // NCBI c++/src/algo/blast/core/blast_parameters.c:774-815;

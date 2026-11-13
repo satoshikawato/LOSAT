@@ -206,6 +206,7 @@ impl TblastxDatabase {
             average: Some(statistics.average),
             dbsize,
             searchsp: None,
+            statistics: Some(statistics),
         }
     }
 

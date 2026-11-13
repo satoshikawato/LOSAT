@@ -571,7 +571,19 @@ fn x_search_core(
         for (context, p) in full.contexts.iter_mut().zip(&full_params) {
             context.is_valid = p.valid;
         }
-        let spaces: Vec<_> = full_params.iter().map(|p| p.search_space).collect();
+        // The options' spaces that each chunk's setup reads (`SplitQuery_SetEffectiveSearchSpace`):
+        // the batch's own, unless the statistics' total before the fallback to OID 0 is not
+        // positive (`parameters::preliminary_spaces`).
+        let spaces: Vec<_> = match super::parameters::preliminary_spaces(
+            &full,
+            &full_params,
+            options,
+            numbers,
+            matches!(subjects, Subjects::Stream(_)),
+        )? {
+            Some(spaces) => spaces,
+            None => full_params.iter().map(|p| p.search_space).collect(),
+        };
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-222
         // ```c++
         //     CEffectiveSearchSpacesMemento eff_memento(m_Options);
@@ -683,11 +695,15 @@ fn x_search_core(
                     let batch = &chunk.prepared;
                     let mut kept = results.into_iter().peekable();
                     for oid in 0..subjects.len() {
-                        let computed = match kept.next_if(|(kept_oid, _)| *kept_oid == oid) {
+                        let mut computed = match kept.next_if(|(kept_oid, _)| *kept_oid == oid) {
                             Some((_, computed)) => computed,
                             None => SubjectComputation::empty(),
                         };
-                        sink.subject_start(oid, batch, &params, computed.prepared_link)?;
+                        // The statistics of each subject (`compute_subject_any`), or the chunk's.
+                        let subject_params = computed.subject_parameters.take();
+                        let params_used: &[ContextParameters] =
+                            subject_params.as_deref().unwrap_or(&params);
+                        sink.subject_start(oid, batch, params_used, computed.prepared_link)?;
                         for (h, contained) in &computed.containment {
                             sink.containment(h, *contained);
                         }
@@ -695,7 +711,7 @@ fn x_search_core(
                         if options.gapped && !raw.is_empty() {
                             sink.preliminary_purge(oid, &raw, &purged)?;
                         }
-                        sink.subject(oid, &purged, batch, &params)?;
+                        sink.subject(oid, &purged, batch, params_used)?;
                     }
                     sink.chunk_end(chunk, is_split)?;
                 }
@@ -1060,7 +1076,7 @@ fn x_search_core(
                 super::x_timing::batch(XBatch::ScanPar, x_t);
                 let x_t_replay = super::x_timing::lap();
                 for &oid in &wave {
-                    let computed = if let Some(computed) = scheduled.next() {
+                    let mut computed = if let Some(computed) = scheduled.next() {
                         computed?
                     } else {
                         let x_t = super::x_timing::lap();
@@ -1083,7 +1099,11 @@ fn x_search_core(
                         super::x_timing::batch(XBatch::ScanInline, x_t);
                         computed?
                     };
-                    sink.subject_start(oid, batch, &params, computed.prepared_link)?;
+                    // The statistics of each subject (`compute_subject_any`), or the chunk's.
+                    let subject_params = computed.subject_parameters.take();
+                    let params_used: &[ContextParameters] =
+                        subject_params.as_deref().unwrap_or(&params);
+                    sink.subject_start(oid, batch, params_used, computed.prepared_link)?;
                     for (h, contained) in &computed.containment {
                         sink.containment(h, *contained);
                     }
@@ -1130,7 +1150,7 @@ fn x_search_core(
                     if options.gapped && !raw.is_empty() {
                         sink.preliminary_purge(oid, &raw, &purged)?;
                     }
-                    sink.subject(oid, &purged, batch, &params)?;
+                    sink.subject(oid, &purged, batch, params_used)?;
                 }
                 super::x_timing::batch(XBatch::Replay, x_t_replay);
             }
@@ -1276,6 +1296,9 @@ struct SubjectComputation {
     purged: Vec<PreliminaryHsp>,
     containment: Vec<(PreliminaryHsp, bool)>,
     prepared_link: Option<([i32; 2], f64)>,
+    /// The parameters of the subject's own statistics (`compute_subject_any`), which the sink
+    /// reads in place of the chunk's; `None` for the chunk's.
+    subject_parameters: Option<Vec<ContextParameters>>,
 }
 
 #[cfg(feature = "parallel")]
@@ -1288,6 +1311,7 @@ impl SubjectComputation {
             purged: Vec::new(),
             containment: Vec::new(),
             prepared_link: None,
+            subject_parameters: None,
         }
     }
 
@@ -1382,7 +1406,23 @@ fn compute_subject_any(
     oid: usize,
     x_containment: bool,
 ) -> Result<SubjectComputation> {
-    if options.scoring == crate::config::ScoringMatrix::Blosum62 {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1428-1443 (quoted above
+    // `search_preliminary`): a subject that NCBI searches (BLASTX's subject is not translated: it
+    // has a residue) gets its own statistics when the database length is 0, before its scan
+    // (`parameters::subject_update`); the sink reads them too (`SubjectComputation`).
+    let subject_parameters = if subjects.per_subject() && subjects.length(oid) > 0 {
+        Some(super::parameters::subject_update(
+            batch,
+            params,
+            options,
+            subjects.numbers()?,
+            subjects.length(oid),
+        )?)
+    } else {
+        None
+    };
+    let params = subject_parameters.as_deref().unwrap_or(params);
+    let mut computed = if options.scoring == crate::config::ScoringMatrix::Blosum62 {
         compute_subject(
             subjects,
             batch,
@@ -1406,7 +1446,9 @@ fn compute_subject_any(
             oid,
             x_containment,
         )
-    }
+    }?;
+    computed.subject_parameters = subject_parameters;
+    Ok(computed)
 }
 
 /// The body of [`compute_subject`] with the matrix of `scoring`: BLOSUM62's stages are today's
@@ -1608,6 +1650,7 @@ fn compute_subject_with<S: super::seed::BxScoring>(
         purged,
         containment,
         prepared_link,
+        subject_parameters: None,
     })
 }
 

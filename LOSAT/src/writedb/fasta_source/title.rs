@@ -3,188 +3,7 @@
 //! object as `NStr::PrintableString` writes it, and `x_GetFastaReaderDeflines` reads it
 //! back (`c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp`, `c++/src/corelib/ncbistr.cpp`).
 
-use std::borrow::Cow;
-
 use crate::ncbi_str::parse_escapes;
-
-/// `NStr::PrintableString(str)` with its default mode (`fNewLine_Quote |
-/// fNonAscii_Passthru`, which are 0) and `eLanguage_C`.
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3732-3845
-/// ```c++
-/// static string s_PrintableString(const CTempString    str,
-///                                 NStr::TPrintableMode mode,
-///                                 ELanguage            lang)
-/// {
-///     unique_ptr<CNcbiOstrstream> out;
-///     SIZE_TYPE i, j = 0;
-///
-///     for (i = 0;  i < str.size();  ++i) {
-///         bool octal = false;
-///         char c = str[i];
-///         switch (c) {
-///         case '\a':
-///             if (lang == eLanguage_C)
-///                 c = 'a';
-///             else
-///                 octal = true;
-///             break;
-///         case '\b':
-///             c = 'b';
-///             break;
-///         case '\f':
-///             c = 'f';
-///             break;
-///         case '\r':
-///             c = 'r';
-///             break;
-///         case '\t':
-///             c = 't';
-///             break;
-///         case '\v':
-///             c = 'v';
-///             break;
-///         case '\n':
-///             if (!(mode & NStr::fNewLine_Passthru))
-///                 c = 'n';
-///             /*FALLTHRU*/
-///         case '\\':
-///         case '\'':
-///         case '"':
-///             break;
-///         case '&':
-///             if (lang == eLanguage_Javascript)
-///                 break;
-///             continue;
-///         case '?':
-///             if (lang == eLanguage_C) {
-///                 if (i  &&  str[i - 1] == '?')
-///                     break;
-///                 if (i < str.size() - 1  &&  str[i + 1] == '?')
-///                     break;
-///             }
-///             continue;
-///         default:
-///             if (!isascii((unsigned char) c)) {
-///                 if (mode & NStr::fNonAscii_Quote) {
-///                     octal = true;
-///                     break;
-///                 }
-///             }
-///             if (!isprint((unsigned char) c)) {
-///                 octal = true;
-///                 break;
-///             }
-///             continue;
-///         }
-///         if (!out.get()) {
-///             out.reset(new CNcbiOstrstream);
-///         }
-///         if (i > j) {
-///             out->write(str.data() + j, i - j);
-///         }
-///         out->put('\\');
-///         if (c == '\n') {
-///             out->write("n\\\n", 3);
-///         } else if (octal) {
-///             bool reduce;
-///             if (!(mode & NStr::fPrintable_Full)) {
-///                 reduce = (i == str.size() - 1  ||
-///                           str[i + 1] < '0' || '7' < str[i + 1] ? true : false);
-///             } else {
-///                 reduce = false;
-///             }
-///             unsigned char v;
-///             char val[3];
-///             int k = 0;
-///             v =  (unsigned char) c >> 6;
-///             if (v  ||  !reduce) {
-///                 val[k++] = char('0' + v);
-///                 reduce = false;
-///             }
-///             v = ((unsigned char) c >> 3) & 7;
-///             if (v  ||  !reduce) {
-///                 val[k++] = char('0' + v);
-///             }
-///             v =  (unsigned char) c       & 7;
-///             val[k++] = char('0' + v);
-///             out->write(val, k);
-///         } else {
-///             out->put(c);
-///         }
-///         j = i + 1;
-///     }
-///     if (j  &&  i > j) {
-///         _ASSERT(out.get());
-///         out->write(str.data() + j, i - j);
-///     }
-///     if (out.get()) {
-///         // Return encoded string
-///         return CNcbiOstrstreamToString(*out);
-///     }
-///
-///     // All characters are good - return (a copy of) the original string
-///     return str;
-/// }
-/// ```
-/// `isprint` is the "C" locale's (0x20 to 0x7E); a locale that prints more bytes would
-/// leave them as they are, and `parse_escapes` reads either form as the same byte. The
-/// `c == '\n'` branch after the backslash needs `fNewLine_Passthru` (without it `c` is
-/// already `n`).
-pub(super) fn printable_string(str: &[u8]) -> Cow<'_, [u8]> {
-    let mut out: Option<Vec<u8>> = None;
-    let mut j = 0;
-    for (i, &byte) in str.iter().enumerate() {
-        let mut octal = false;
-        let mut c = byte;
-        match byte {
-            0x07 => c = b'a',
-            0x08 => c = b'b',
-            0x0c => c = b'f',
-            b'\r' => c = b'r',
-            b'\t' => c = b't',
-            0x0b => c = b'v',
-            b'\n' => c = b'n',
-            b'\\' | b'\'' | b'"' => {}
-            b'&' => continue,
-            b'?' => {
-                let after_one = i > 0 && str[i - 1] == b'?';
-                let before_one = i + 1 < str.len() && str[i + 1] == b'?';
-                if !after_one && !before_one {
-                    continue;
-                }
-            }
-            0x20..=0x7e => continue,
-            _ => octal = true,
-        }
-        let out = out.get_or_insert_with(|| Vec::with_capacity(str.len() + 8));
-        out.extend_from_slice(&str[j..i]);
-        out.push(b'\\');
-        if octal {
-            let mut reduce = i == str.len() - 1 || !(b'0'..=b'7').contains(&str[i + 1]);
-            let v = c >> 6;
-            if v != 0 || !reduce {
-                out.push(b'0' + v);
-                reduce = false;
-            }
-            let v = (c >> 3) & 7;
-            if v != 0 || !reduce {
-                out.push(b'0' + v);
-            }
-            out.push(b'0' + (c & 7));
-        } else {
-            out.push(c);
-        }
-        j = i + 1;
-    }
-    match out {
-        Some(mut out) => {
-            out.extend_from_slice(&str[j..]);
-            Cow::Owned(out)
-        }
-        None => Cow::Borrowed(str),
-    }
-}
 
 /// `NStr::Replace` and `NStr::ReplaceInPlace`: every occurrence of `search`, from the
 /// left, without reading the replacement again.
@@ -225,7 +44,7 @@ fn replace(src: &[u8], search: &[u8], replacement: &[u8]) -> Vec<u8> {
 /// The `fasta` string of `x_GetFastaReaderDeflines`: the `DefLine` field with `\t` replaced
 /// by three spaces, then its escapes read (`fasta_reader_title` quotes the lines) by
 /// `NStr::ParseEscapes` (`ncbi_str::parse_escapes`). The field that `CFastaReader` writes
-/// (`printable_string`) has no escape that fails.
+/// (`ncbi_str::printable_string`) has no escape that fails.
 pub(crate) fn fasta_reader_fasta(defline_field: &[u8]) -> Result<Vec<u8>, &'static str> {
     parse_escapes(&replace(defline_field, b"\\t", TAB_REPLACEMENT))
 }
@@ -239,8 +58,8 @@ pub(crate) fn fasta_reader_fasta(defline_field: &[u8]) -> Result<Vec<u8>, &'stat
 const TAB_REPLACEMENT: &[u8] = b"   ";
 
 /// The title of `x_GetFastaReaderDeflines` without `parse_ids`, from the `DefLine` field
-/// of the `CFastaReader` user object (`printable_string` of the definition line with its
-/// `>`); `None` when the field is empty (no definition line from the user object).
+/// of the `CFastaReader` user object (`ncbi_str::printable_string` of the definition line
+/// with its `>`); `None` when the field is empty (no definition line from the user object).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1752-1760,1766-1767,1782-1798
 /// ```c++
@@ -281,8 +100,8 @@ const TAB_REPLACEMENT: &[u8] = b"   ";
 /// the `t`, and the first backslash then escapes the first of the three spaces. A ctrl-A
 /// becomes one space. Every other byte comes back as it was read.
 ///
-/// No escape fails: a backslash that starts an escape is one that `printable_string`
-/// wrote, followed by a letter, a quote, `?`, a backslash or octal digits, or it is the
+/// No escape fails: a backslash that starts an escape is one that
+/// `ncbi_str::printable_string` wrote, followed by a letter, a quote, `?`, a backslash or octal digits, or it is the
 /// backslash left of a replaced `\\t`, followed by a space.
 pub(super) fn fasta_reader_title(defline_field: &[u8]) -> Result<Option<Vec<u8>>, &'static str> {
     let fasta = fasta_reader_fasta(defline_field)?;
@@ -296,38 +115,12 @@ pub(super) fn fasta_reader_title(defline_field: &[u8]) -> Result<Option<Vec<u8>>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ncbi_str::printable_string;
 
     fn title(defline: &[u8]) -> Vec<u8> {
         fasta_reader_title(&printable_string(defline))
             .unwrap()
             .unwrap()
-    }
-
-    #[test]
-    fn printable_string_escapes() {
-        assert_eq!(&*printable_string(b">plain title 1"), b">plain title 1");
-        assert!(matches!(printable_string(b">a&b?c"), Cow::Borrowed(_)));
-        assert_eq!(&*printable_string(b">a\tb"), b">a\\tb");
-        assert_eq!(&*printable_string(b">a\\b"), b">a\\\\b");
-        assert_eq!(&*printable_string(b">a'b\"c"), b">a\\'b\\\"c");
-        assert_eq!(&*printable_string(b">a??b?"), b">a\\?\\?b?");
-        assert_eq!(
-            &*printable_string(b"\x07\x08\x0c\r\x0b\n"),
-            b"\\a\\b\\f\\r\\v\\n"
-        );
-        // Octal: as few digits as the next byte allows.
-        assert_eq!(&*printable_string(b"\x01z"), b"\\1z");
-        assert_eq!(&*printable_string(b"\x011"), b"\\0011");
-        assert_eq!(&*printable_string(b"\x00"), b"\\0");
-        assert_eq!(&*printable_string(b"\x1f8"), b"\\378");
-        assert_eq!(&*printable_string(b"\x7f\x80\xff"), b"\\177\\200\\377");
-        assert_eq!(&*printable_string(b"\x09\x0a"), b"\\t\\n");
-    }
-
-    #[test]
-    fn parse_escapes_reads_printable_string_back() {
-        let all: Vec<u8> = (0..=255u8).chain([b'1', b'?', b'?', 0, b'7']).collect();
-        assert_eq!(parse_escapes(&printable_string(&all)).unwrap(), all);
     }
 
     /// Titles as makeblastdb stores them (the header file of the databases of the probe

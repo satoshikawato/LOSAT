@@ -197,7 +197,7 @@ pub fn write_bioseq<E: Encoder>(enc: &mut E, bioseq: &BioseqInput<'_>) {
     //         desc->SetUser().AddField("DefLine", NStr::PrintableString(s));
     // ```
     // The default mode `fNewLine_Quote` writes a line feed as `\n` (ncbistr.hpp:2730).
-    enc.visible_str(crate::ncbi_str::printable_string(bioseq.defline).as_bytes());
+    enc.visible_str(&crate::ncbi_str::printable_string(bioseq.defline));
     enc.end_variant();
     enc.end_member();
     enc.end_sequence();

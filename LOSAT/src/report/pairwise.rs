@@ -4,12 +4,11 @@
 //!
 //! Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp
 
-use super::outfmt6::{
-    format_bitscore_ncbi, format_evalue_ncbi, format_total_bitscore_ncbi, truncate_spaces,
-};
+use super::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi, format_total_bitscore_ncbi};
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::common::Hit;
 use crate::config::ScoringMatrix;
+use crate::ncbi_str::truncate_spaces;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
 // ```c++

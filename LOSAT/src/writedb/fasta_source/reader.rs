@@ -13,7 +13,7 @@ use std::io::Read;
 use super::defline_ids;
 use super::line_reader::BufferedLineReader;
 use super::pack::{self, Coding, Segment};
-use super::title::printable_string;
+use crate::ncbi_str::printable_string;
 use crate::blastinput::fasta_reader::reader::{
     canonicalize_string, convert_bad_indexes_to_string, gap_type_info, linkage_evidence_value,
     seq_data_in_title_warning, GapType, LinkEvid, Problem, LINKAGE_UNSPECIFIED,

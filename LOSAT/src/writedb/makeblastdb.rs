@@ -514,17 +514,17 @@ pub fn check_registry_settings(
             "{reason} ([BLAST] MAX_SEQID_LENGTH changes the Seq-ids NCBI makeblastdb parses \
              with -parse_seqids)"
         )),
-        Ok(Some(value)) if string_to_uint(value).is_some_and(|limit| limit != 0) => Err(format!(
-            "the registry entry [BLAST] MAX_SEQID_LENGTH ({value}), which changes the Seq-ids \
-             NCBI makeblastdb parses with -parse_seqids, is not supported by LOSAT's makeblastdb"
-        )),
+        // `NStr::StringToUInt(value)` with no flags: no limit where it throws.
+        Ok(Some(value))
+            if crate::ncbi_str::string_to_uint(value.as_bytes()).is_ok_and(|limit| limit != 0) =>
+        {
+            Err(format!(
+                "the registry entry [BLAST] MAX_SEQID_LENGTH ({value}), which changes the Seq-ids \
+                 NCBI makeblastdb parses with -parse_seqids, is not supported by LOSAT's makeblastdb"
+            ))
+        }
         Ok(_) => Ok(()),
     }
-}
-
-/// `NStr::StringToUInt(value)` with no flags: `None` where it throws.
-fn string_to_uint(value: &str) -> Option<u32> {
-    crate::ncbi_str::string_to_uint(value.as_bytes()).ok()
 }
 
 /// The checks of the arguments that LOSAT makes first: what LOSAT does not

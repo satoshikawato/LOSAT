@@ -167,35 +167,18 @@ fn score_gapped_chunk<S: super::score::TbnScore>(
                 s_start,
                 matrix,
             ),
-            Err(_) => {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3405-3413
-                // ```c
-                //     hsp_end = q_start + HSP_MAX_WINDOW;
-                //     query_var = query + q_start;
-                //     subject_var = subject + s_start;
-                // ```
-                // The window's bytes in NCBI's buffers, or the refusal of a window past them
-                // (`XOneHitBuffers`).
-                let Some(buffers) = one_hit else {
-                    bail!(
-                        "TBLASTN: an initial HSP of negative length outside the one-hit word finder (internal error)"
-                    );
-                };
-                let (query_window, subject_window) = buffers.windows(
-                    usize::try_from(context_offset)? + q_start,
-                    frame,
-                    chunk,
-                    subject_frame,
-                    s_start,
-                )?;
-                score.gapped_start_int4(
-                    &query_window,
-                    &subject_window,
-                    q_start,
-                    hit.length,
-                    matrix,
-                )?
-            }
+            Err(_) => x_gapped_start_negative(
+                score,
+                one_hit,
+                usize::try_from(context_offset)? + q_start,
+                frame,
+                chunk,
+                subject_frame,
+                q_start,
+                s_start,
+                hit.length,
+                matrix,
+            )?,
         };
         let s_gapped_start = i64::from(hit.s_seed) + i64::try_from(q_gapped_start)?
             - i64::from(hit.q_seed - u32::try_from(context_offset)?);
@@ -453,6 +436,41 @@ impl<'a> XOneHitBuffers<'a> {
         }
         Ok((query_window, subject_window))
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3405-3413
+// ```c
+//     hsp_end = q_start + HSP_MAX_WINDOW;
+//     query_var = query + q_start;
+//     subject_var = subject + s_start;
+// ```
+/// The gapped start of a one-hit HSP of negative `length` at `q_start` (`q_abs` in the query
+/// batch) and `s_start` of `chunk`: the window's bytes in NCBI's buffers (`XOneHitBuffers`), or the
+/// refusal of a window past them. Out of line, so that the gapped stage of the other HSPs keeps its
+/// code.
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_gapped_start_negative<S: super::score::TbnScore>(
+    score: S,
+    one_hit: Option<&XOneHitBuffers<'_>>,
+    q_abs: usize,
+    frame: &QueryFrame,
+    chunk: TranslatedChunk,
+    subject_frame: &[u8],
+    q_start: usize,
+    s_start: usize,
+    length: i32,
+    matrix: ScoringMatrix,
+) -> Result<usize> {
+    let Some(buffers) = one_hit else {
+        bail!(
+            "TBLASTN: an initial HSP of negative length outside the one-hit word finder (internal error)"
+        );
+    };
+    let (query_window, subject_window) =
+        buffers.windows(q_abs, frame, chunk, subject_frame, s_start)?;
+    score.gapped_start_int4(&query_window, &subject_window, q_start, length, matrix)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4251-4258,4266-4281,4295,4342-4345

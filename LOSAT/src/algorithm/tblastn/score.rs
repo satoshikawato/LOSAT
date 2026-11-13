@@ -27,7 +27,6 @@ use crate::algorithm::blastp::extension::{
 };
 use crate::algorithm::blastp::gapalign::{
     blast_gapped_alignment_with_traceback_in_window, blastp_get_start_for_gapped_alignment,
-    blastp_get_start_for_gapped_alignment_int4_length,
     blastp_score_only_gapped_alignment_with_scratch, BlastpGapAlignResult,
     BlastpGappedAlignmentMode, BlastpScoreOnlyGappedAlignment, GapAlignScratch,
 };
@@ -35,9 +34,10 @@ use crate::algorithm::pssm_search::gapalign::{
     pssm_gapped_alignment_with_traceback, pssm_get_offsets_for_gapped_alignment,
     pssm_get_start_for_gapped_alignment, pssm_score_only_gapped_alignment, PssmGapScratch,
 };
-use crate::algorithm::pssm_search::rows::QueryPssm;
+use crate::algorithm::pssm_search::rows::{PssmRows, QueryPssm};
 use crate::algorithm::pssm_search::ungapped::{pssm_extend_one_hit, pssm_extend_two_hit};
 use crate::config::ScoringMatrix;
+use crate::utils::matrix::{standard_score, BLASTAA_SIZE};
 use anyhow::Result;
 
 /// The score source of the stage functions of a TBLASTN search: the matrix (`MatrixScore`) or the
@@ -230,13 +230,30 @@ impl TbnScore for MatrixScore {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3394,3401,3419-3420
-    // (quoted at `blastp::gapalign::blastp_get_start_for_gapped_alignment_int4_length`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1054,1083 and
+    // c++/src/algo/blast/core/blast_gapalign.c:3394,3401,3405-3413,3419-3420,3435-3437
     // ```c
+    //     init_hit_width = q_right_off - q_left_off + 1;
+    //     *hsp_len = left_disp + right_disp + init_hit_width;
+    // ...
     //    const BlastScoreBlk* sbp, Uint4 q_start, Uint4 q_length,
     //     if (q_length <= HSP_MAX_WINDOW) {
+    //     hsp_end = q_start + HSP_MAX_WINDOW;
+    // ...
+    //             score += sbp->matrix->data[*query_var][*subject_var];
+    // ...
     //     hsp_end = q_start + MIN(q_length, s_length);
+    //     for (index1=q_start + HSP_MAX_WINDOW; index1<hsp_end; index1++) {
+    // ...
+    //        max_offset -= HSP_MAX_WINDOW/2;
+    //     else
+    //        max_offset = q_start;
     // ```
+    // A negative Int4 length read as Uint4 is above HSP_MAX_WINDOW, and q_start + MIN(q_length,
+    // s_length) wraps back to q_start + length, so only the first window is scored: its sum over
+    // the bytes NCBI reads gives q_start + 5 when above 0, else q_start. BLASTP's own function for
+    // this (`blastp::blast_engine`) reads its sequences with the letters past them as the sentinel
+    // (PD-LOSAT-NCBI-DEFECTS 1.3 item 3) and stays where BLASTP's gapped stage inlines it.
     fn gapped_start_int4(
         self,
         query_window: &[u8; 11],
@@ -245,17 +262,18 @@ impl TbnScore for MatrixScore {
         length: i32,
         matrix: ScoringMatrix,
     ) -> Result<usize> {
-        // The window's first letters are those of `q_start` and `s_start`: the offset found in it
-        // is added to `q_start`.
-        Ok(q_start
-            + blastp_get_start_for_gapped_alignment_int4_length(
-                query_window,
-                subject_window,
-                0,
-                length,
-                0,
-                matrix,
-            ))
+        const HSP_MAX_WINDOW: usize = 11;
+        debug_assert!(length < 0);
+        let score: i32 = query_window
+            .iter()
+            .zip(subject_window)
+            .map(|(&q, &s)| standard_score(matrix, q, s))
+            .sum();
+        Ok(if score > 0 {
+            q_start + HSP_MAX_WINDOW - 1 - HSP_MAX_WINDOW / 2
+        } else {
+            q_start
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4171-4189,4257-4258,4295
@@ -584,7 +602,7 @@ impl<'a> TbnScore for PssmScore<'a> {
         _matrix: ScoringMatrix,
     ) -> Option<BlastpOneHitUngappedResult> {
         Some(pssm_extend_one_hit(
-            self.0,
+            &XOneHitRows(self.0),
             subject,
             i32::try_from(s_off).ok()?,
             i32::try_from(q_off).ok()?,
@@ -687,6 +705,23 @@ impl<'a> TbnScore for PssmScore<'a> {
             score: traced.score,
             edit_script: traced.edit_script,
         })
+    }
+}
+
+/// No NCBI counterpart: a type of its own for the PSSM's rows in TBLASTN's one-hit word finder
+/// (`PssmScore::one_hit`), so that `pssm_extend_one_hit` is compiled for it apart from BLASTP's PSSM
+/// stage, which calls it for `QueryPssm` and keeps its code; the rows read are `QueryPssm`'s.
+struct XOneHitRows<'a>(&'a QueryPssm);
+
+impl PssmRows for XOneHitRows<'_> {
+    #[inline(always)]
+    fn row(&self, pos: usize) -> &[i32; BLASTAA_SIZE] {
+        self.0.row(pos)
+    }
+
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.0.len()
     }
 }
 

@@ -4389,6 +4389,14 @@ impl Drop for XEndBatch<'_> {
     }
 }
 
+// No NCBI counterpart: a call boundary; it computes no value NCBI computes.
+/// Calls `f` in a function of its own that is never inlined, so that a closure that calls it
+/// (`search_query_batch`'s chunk scan for `-window_size 0`) does not take `f`'s code.
+#[inline(never)]
+fn x_out_of_line<R>(f: impl FnOnce() -> R) -> R {
+    f()
+}
+
 /// Searches one query batch against the subjects and returns its hits and query statistics: the
 /// set-up of the batch (the flags, the queries' frames, the lookup table: `batch_setup.rs`; the
 /// diagonal table, the offset arrays and the seed release: `seed_tables.rs`; the cutoffs, length
@@ -6704,16 +6712,19 @@ fn search_query_batch<S: TbxScore>(
                               scan_chunk_size: Option<usize>,
                               sc: S|
              -> TblastxChunkScanResult {
-                // The one-hit word finder (`-window_size 0`) has a loop of its own.
+                // The one-hit word finder (`-window_size 0`) has a loop of its own, compiled out of
+                // line (`x_out_of_line`) so that this closure keeps the two-hit scan's code.
                 if window == 0 {
-                    return scan_chunk_one_hit(
-                        chunk,
-                        offset_pairs,
-                        diag_array,
-                        diag_offset,
-                        scan_chunk_size,
-                        sc,
-                    );
+                    return x_out_of_line(|| {
+                        scan_chunk_one_hit(
+                            chunk,
+                            offset_pairs,
+                            diag_array,
+                            diag_offset,
+                            scan_chunk_size,
+                            sc,
+                        )
+                    });
                 }
                 // The debug/trace paths exist only in the reference loop.
                 let x_debugging = scan_debug_range.is_some() || trace_hsp_target().is_some();

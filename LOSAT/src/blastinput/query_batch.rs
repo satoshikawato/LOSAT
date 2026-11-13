@@ -441,6 +441,11 @@ pub(crate) struct QueryBatches {
     /// What stops the run at the batch after them: the messages that NCBI writes as it
     /// reads that batch, and its error.
     pub(crate) stop: Option<(Vec<u8>, anyhow::Error)>,
+    /// The searched queries of that batch when NCBI's set-up of its search fails (`batch_error`:
+    /// every query without letters): NCBI made the batch's query factory, so its search strategy
+    /// request is written (`SaveSearchStrategy` before `CLocalBlast::Run`, blastp_app.cpp:259-276).
+    /// `None` when the reading or an empty batch stops the run (no request).
+    pub(crate) stop_batch: Option<std::ops::Range<usize>>,
     /// Under `-parse_deflines`, the scopes of those batches' queries (`QueryScopes`).
     pub(crate) query_scopes: Option<QueryScopes>,
     /// LOSAT's refusal of two queries of one scope with one id, in the first batch that has them
@@ -458,6 +463,18 @@ impl QueryBatches {
             .starts
             .partition_point(|&(_, searched)| searched <= query);
         self.starts[after.saturating_sub(1)]
+    }
+
+    /// The searched queries of the batch of the searched query `query`.
+    pub(crate) fn searched_span(&self, query: usize) -> std::ops::Range<usize> {
+        let after = self
+            .starts
+            .partition_point(|&(_, searched)| searched <= query);
+        let end = self
+            .starts
+            .get(after)
+            .map_or(self.searched_done, |&(_, searched)| searched);
+        self.start_of(query).1..end
     }
 }
 
@@ -674,8 +691,10 @@ fn read_batches(
                 .into(),
             );
         }
+        let mut stop_batch = None;
         if stop_error.is_none() {
             stop_error = batch_error(&searched[start..end]);
+            stop_batch = stop_error.is_some().then_some(start..end);
         }
         if let Some(error) = stop_error {
             return QueryBatches {
@@ -684,6 +703,7 @@ fn read_batches(
                 searched_done: start,
                 starts,
                 stop: Some((batch_warnings, error)),
+                stop_batch,
                 query_scopes,
                 query_refusal: None,
             };
@@ -698,6 +718,7 @@ fn read_batches(
                     searched_done: start,
                     starts,
                     stop: None,
+                    stop_batch: None,
                     query_scopes,
                     query_refusal: Some(refusal),
                 };
@@ -713,6 +734,7 @@ fn read_batches(
         searched_done: searched.len(),
         starts,
         stop: None,
+        stop_batch: None,
         query_scopes,
         query_refusal: None,
     }

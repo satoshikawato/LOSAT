@@ -32,6 +32,8 @@ mod db_taxid_root;
 mod default_bundle;
 #[path = "../entry_names.rs"]
 mod entry_names;
+#[path = "../export_search_strategy.rs"]
+mod export_search_strategy;
 #[path = "../library_api.rs"]
 mod library_api;
 #[path = "../library_examples.rs"]
@@ -110,6 +112,8 @@ mod seq_id_first_line;
 mod seqalign_samples;
 #[path = "../suite_layout.rs"]
 mod suite_layout;
+#[path = "../taxonomy_read_order.rs"]
+mod taxonomy_read_order;
 #[path = "../web_v1_search_space.rs"]
 mod web_v1_search_space;
 #[path = "../x_reach_directory.rs"]

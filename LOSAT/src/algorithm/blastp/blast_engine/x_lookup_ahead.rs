@@ -1671,6 +1671,8 @@ mod tests {
             subject_loc: None,
             outfmt: "6".to_string(),
             archive: None,
+            export_search_strategy: None,
+            strategy: None,
             app: BlastpApp::Blastp,
             inclusion_ethresh: None,
             gap_trigger: None,

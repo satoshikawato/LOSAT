@@ -701,7 +701,6 @@ const UNPORTED_BLASTN_ARGS: &[&str] = &[
     "db_hard_mask",
     "db_soft_mask",
     "entrez_query",
-    "export_search_strategy",
     "filtering_db",
     "gilist",
     "html",
@@ -734,7 +733,6 @@ const UNPORTED_BLASTP_ARGS: &[&str] = &[
     "db_hard_mask",
     "db_soft_mask",
     "entrez_query",
-    "export_search_strategy",
     "gilist",
     "html",
     "import_search_strategy",
@@ -766,10 +764,13 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 // ```
 /// psiblast's NCBI arguments that LOSAT does not run: the MSA inputs (series PS6; the ASCII and
 /// ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
-/// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), and the arguments that blastp's engine
-/// does not run either (`is_unported_blastp_arg`; psiblast has no database masks and no
-/// `-mt_mode`). `-sum_stats true` is refused with the options (`PsiblastArgs::into_blastp_args`).
+/// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), the search strategy file (item F1b of line
+/// RG), and the arguments that blastp's engine does not run either (`is_unported_blastp_arg`;
+/// psiblast has no database masks and no `-mt_mode`). `-sum_stats true` is refused with the
+/// options (`PsiblastArgs::into_blastp_args`).
 const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
+    // Line RG-F1 ported it to BLASTP's search, not to PSIBLAST's (item F1b).
+    "export_search_strategy",
     "ignore_msa_master",
     "in_msa",
     "msa_master_idx",
@@ -1219,7 +1220,6 @@ const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "db_hard_mask",
     "db_soft_mask",
     "entrez_query",
-    "export_search_strategy",
     "gilist",
     "html",
     "import_search_strategy",
@@ -1252,7 +1252,6 @@ const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "db_hard_mask",
     "db_soft_mask",
     "entrez_query",
-    "export_search_strategy",
     "gilist",
     "html",
     "import_search_strategy",
@@ -1290,7 +1289,6 @@ const UNPORTED_BLASTX_ARGS: &[&str] = &[
     "best_hit_overhang",
     "best_hit_score_edge",
     "import_search_strategy",
-    "export_search_strategy",
     "remote",
     "use_sw_tback",
 ];

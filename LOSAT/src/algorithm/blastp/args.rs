@@ -422,6 +422,17 @@ pub struct BlastpArgs {
     pub mt_mode: Option<u8>,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
+    /// ```c++
+    ///     arg_desc.AddOptionalKey(kArgOutputSearchStrategy,
+    ///                             "filename",
+    ///                             "File name to record the search strategy used",
+    ///                             CArgDescriptions::eOutputFile);
+    /// ```
+    /// The search strategy file (`report::archive::strategy`), created by `run` before the other
+    /// options are read.
+    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     // An omitted value keeps the default hit list size (500) and NCBI's numbers of
     // descriptions and alignments of the pairwise report (500, 250).
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]
@@ -590,6 +601,10 @@ pub struct BlastpArgs {
     /// reads the arguments (`archive::handle_for`).
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// The run's search strategy export (`-export_search_strategy`), made by `run`
+    /// (`archive::strategy_for`).
+    #[arg(skip)]
+    pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// The application whose search this is: psiblast's command line sets it
     /// (`algorithm/psiblast`).
     #[arg(skip)]
@@ -860,6 +875,8 @@ pub struct ResolvedBlastpArgs {
     pub outfmt: String,
     /// The run's BLAST archive (outfmt 11), shared by the blocks and batches of the run.
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// The run's search strategy export (`BlastpArgs::strategy`), shared as the archive is.
+    pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// The application whose search this is (`BlastpArgs::app`).
     pub app: BlastpApp,
     /// The inclusion threshold (`psi_options->inclusion_ethresh`): psiblast's
@@ -1454,6 +1471,7 @@ impl BlastpArgs {
             query_range,
             outfmt: self.outfmt.clone(),
             archive: self.archive.clone(),
+            strategy: self.strategy.clone(),
             first_query_ordinal: self.first_query_ordinal,
             psi_pssm,
             psi_search,

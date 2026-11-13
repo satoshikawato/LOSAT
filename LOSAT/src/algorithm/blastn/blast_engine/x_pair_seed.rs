@@ -255,8 +255,14 @@ impl Cut {
         run: &'r [u32],
         out: &O,
     ) -> Result<&'r [u32], (usize, &'r [u32])> {
-        let skip = self.skip.replace(0) as usize;
-        let run = &run[skip..];
+        // (a skip only at the word a piece starts at, so the store is out of the loop's way)
+        let skip = self.skip.get() as usize;
+        let run = if skip == 0 {
+            run
+        } else {
+            self.skip.set(0);
+            &run[skip..]
+        };
         if run.len() <= out.room() {
             Ok(run)
         } else {
@@ -629,11 +635,14 @@ fn scan_strip_csr<
         }
     };
     let mut ring: H::Ring<'_, (usize, u64)> = csr.ring();
+    // (a cut stops only in `emit`, so only a word that let one out can have stopped it)
     let mut on_kmer = |kmer_start: usize, current_lut_kmer: u64| {
         if !PV || two_stage.has_hits(current_lut_kmer) {
-            ring.push((kmer_start, current_lut_kmer), |w| w.1 as usize, &mut emit);
+            let left = ring.push((kmer_start, current_lut_kmer), |w| w.1 as usize, &mut emit);
+            !PIECE || !left || cut.go()
+        } else {
+            true
         }
-        !PIECE || cut.go()
     };
     scan_kernel(
         x.search_seq_packed,

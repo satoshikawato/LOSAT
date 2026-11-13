@@ -198,14 +198,15 @@ fn scan_strip_na<O: SeedOut>(x: &NaInputs<'_>, job: &StripJob, out: &mut O) {
     scan_strip_na_from::<O, false>(x, job, Resume::at(job.start), out);
 }
 
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1414-1416
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:76-79
 /// ```c
-///     while (q_off) {
-///         offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-///         offset_pairs[i++].qs_offsets.s_off = s_off;
+///     for(i=0;i<num_hits;i++) {
+///         offset_pairs[i].qs_offsets.q_off = lookup_pos[i];
+///         offset_pairs[i].qs_offsets.s_off = s_off;
+///     }
 /// ```
-/// One lookup hit of the word at subject offset `kmer_start` (`q_off_1`, the 1-based query
-/// offset; 0 is no hit and is skipped) as a `Seed` with the context of its query offset. A
+/// One lookup hit of the word at subject offset `kmer_start` as a `Seed` with the context of its
+/// query offset (`q_off_1`: the table's 1-based query offset, 0 for no hit, which is skipped). A
 /// function, not a closure of `scan_strip_na_from`: called from the run loop and from the
 /// piece's cut (`Cut::run_cold`), a closure stayed a call per pair (as `seed_of_pair` in the
 /// strips kernels of `x_pair_seed.rs`; blastn-short at 16 threads, +3.2 % instructions over the

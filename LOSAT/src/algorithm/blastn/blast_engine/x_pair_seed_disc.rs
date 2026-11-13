@@ -374,9 +374,10 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
         disc.second_template_type,
         disc.template_length as i32,
         [start as i32, job.end as i32],
+        // (a cut stops only in `emit`, so only a word that let one out can have stopped it)
         &mut |s_off, index, _index2| {
-            ring.push((s_off, index), |w| w.1 as usize, &mut emit);
-            !PIECE || cut.go()
+            let left = ring.push((s_off, index), |w| w.1 as usize, &mut emit);
+            !PIECE || !left || cut.go()
         },
     );
     // (a stopped scan drops the words still in the ring: the next piece scans them again)

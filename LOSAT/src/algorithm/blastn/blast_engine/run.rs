@@ -13186,7 +13186,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                                         (s_off, s_range, index),
                                         |w| w.2 as usize,
                                         &mut x_on_word_csr,
-                                    )
+                                    );
                                 },
                             );
                             ring.flush(&mut x_on_word_csr);

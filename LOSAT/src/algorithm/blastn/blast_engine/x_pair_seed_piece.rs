@@ -108,7 +108,7 @@ const EMPTY: Chain = Chain {
     fill: BLOCK as u16,
 };
 
-/// A partition's lane of an arena: its next block and the end of its lane (`Links::take`).
+/// A lane of an arena: its next free block and its end (`Links::take`).
 #[derive(Clone, Copy)]
 struct Lane {
     next: u16,
@@ -117,11 +117,13 @@ struct Lane {
 
 /// No NCBI counterpart (scheduling only): the chains of a slot's piece: its blocks of `BLOCK`
 /// seeds (`used` of them taken), each partition's blocks linked in its order (`next`, its first
-/// and last block in `chains`). A partition takes the blocks of its lane first (`lanes`: the
-/// arena's first `parts` runs of equal length, one per partition), then the blocks after the
-/// lanes (`over`), then the last free block of another partition's lane (`steal`), so that a
-/// partition's seeds of a piece lie in one run of blocks unless it has more than its share, and
-/// any `PIECE_SEEDS` seeds still fit. (Blocks taken in the order of the pushes, the partitions'
+/// and last block in `chains`). A partition takes the blocks of its lane (`lanes`: the arena's
+/// first `parts` runs of equal length, one per partition, and the blocks after them, no
+/// partition's) in order; once its lane is used up, the largest free run of another lane becomes
+/// its lane (the whole of the blocks after the lanes, the upper half of another partition's).
+/// So a partition's seeds of a piece lie in one run of blocks while it has no more than its
+/// share, and in a few long runs when it has most of them, and any `piece_seeds` seeds still fit.
+/// (Blocks taken in the order of the pushes, the partitions'
 /// blocks interleaved, made the fold read each partition's seeds in blocks scattered over the
 /// arena: the hardware prefetches of the neighbouring blocks of other partitions and the pages
 /// of the scattered blocks took the fold +6 % cycles at the same instructions, L2 misses +22 %;
@@ -132,8 +134,6 @@ pub(super) struct Links {
     next: Vec<u16>,
     chains: Vec<Chain>,
     lanes: Vec<Lane>,
-    over: u16,
-    steal: u16,
     used: u16,
 }
 
@@ -149,7 +149,7 @@ impl Links {
             lane.next += 1;
             lane.next - 1
         } else {
-            self.take_other()
+            self.take_other(p)
         };
         self.used += 1;
         b
@@ -170,32 +170,43 @@ impl Links {
             next: (p * lane) as u16,
             end: ((p + 1) * lane) as u16,
         }));
-        self.over = (parts * lane) as u16;
-        self.steal = 0;
+        self.lanes.push(Lane {
+            next: (parts * lane) as u16,
+            end: blocks as u16,
+        });
         self.used = 0;
     }
 
-    /// `take` once partition p's lane is used up.
+    /// `take` once partition p's lane is used up: the largest free run of another lane (the
+    /// blocks after the partitions' lanes first when as large) becomes p's lane, the whole of it
+    /// when it is no partition's, else its upper half, and p takes its first block.
     #[cold]
     #[inline(never)]
-    fn take_other(&mut self) -> u16 {
-        if usize::from(self.over) < self.next.len() {
-            self.over += 1;
-            return self.over - 1;
-        }
-        let parts = self.lanes.len();
-        for i in 0..parts {
-            let q = (usize::from(self.steal) + i) % parts;
-            let lane = &mut self.lanes[q];
-            if lane.next < lane.end {
-                lane.end -= 1;
-                self.steal = q as u16;
-                return lane.end;
-            }
-        }
-        // (a piece takes at most `PIECE_SEEDS` seeds, `Cut`, and a partition's last block is the
-        // only one not full, so the arena's `PIECE_SEEDS / BLOCK + parts` blocks hold them)
-        panic!("LOSAT_X_SEEDPIECE: a full arena");
+    fn take_other(&mut self, p: usize) -> u16 {
+        let none = self.lanes.len() - 1;
+        let (q, free) = self
+            .lanes
+            .iter()
+            .enumerate()
+            .map(|(q, lane)| (q, lane.end - lane.next))
+            .max_by_key(|&(q, free)| (free, q == none))
+            .expect("LOSAT_X_SEEDPIECE: an arena's lanes");
+        // (a piece takes at most `piece_seeds` seeds, `Cut`, and a partition's last block is the
+        // only one not full, so the arena's `piece_seeds.div_ceil(BLOCK) + parts` blocks hold them)
+        assert!(free > 0, "LOSAT_X_SEEDPIECE: a full arena");
+        debug_assert_ne!(q, p);
+        let lane = self.lanes[q];
+        let first = if q == none {
+            lane.next
+        } else {
+            lane.next + free / 2
+        };
+        self.lanes[q].end = first;
+        self.lanes[p] = Lane {
+            next: first + 1,
+            end: lane.end,
+        };
+        first
     }
 
     /// (tests) whether a stage used the slot.
@@ -215,11 +226,14 @@ impl Links {
 ///
 /// Each buffer is one allocation whose capacity is above glibc's ceiling of the mmap threshold
 /// (`utils/x_mapped.rs` `x_unthresholded_capacity`), not initialized: glibc maps it, its free
-/// leaves the threshold as it is, and only the pages of the blocks pieces wrote are resident; a
-/// dropped store's buffers wait for the next store (`KEPT`). (An arena allocated by itself, 266-328 KiB of seeds, was mapped and its free raised glibc's
-/// threshold to its size, so that later blocks of up to that size came from the arenas of the
-/// heap and stayed resident there: BLASTN cDNA x genome -subject at 16 threads, peak x1.13-1.15
-/// of the strips stage, x1.04 with the threshold held at 128 KiB, line EB s14u / s14w.)
+/// leaves the threshold as it is, and only the pages of the blocks pieces wrote are resident.
+/// (A store kept from one query batch to the next, its scratch's life, held the union of the
+/// pages every batch wrote: BLASTN cDNA x genome -subject at 16 threads, peak x1.13 of the strips
+/// stage against x0.90 for one store per batch, line EB s15j.) (An arena allocated by itself,
+/// 266-328 KiB of seeds, was mapped and its free raised glibc's threshold to its size, so that
+/// later blocks of up to that size came from the arenas of the heap and stayed resident there:
+/// BLASTN cDNA x genome -subject at 16 threads, peak x1.13-1.15 of the strips stage, x1.04 with
+/// the threshold held at 128 KiB, line EB s14u / s14w.)
 #[derive(Default)]
 pub(super) struct Store {
     seeds: Vec<MaybeUninit<Seed>>,
@@ -228,40 +242,9 @@ pub(super) struct Store {
     len: usize,
 }
 
-/// No NCBI counterpart (scheduling only): the buffers of a dropped `Store` (`KEPT`).
-struct StoreBufs {
-    seeds: Vec<MaybeUninit<Seed>>,
-    pos: Vec<MaybeUninit<u32>>,
-    len: usize,
-}
-
-/// No NCBI counterpart (scheduling only): the buffers of the `Store`s dropped so far, for the
-/// next stores' first stages (`Store::slots`), as glibc keeps the heap's freed blocks for the
-/// next allocations. A scratch lives for one query batch (`run.rs` `SubjectScratch`), and the
-/// pages of a mapped buffer go back to the system when it is freed, so each batch's stages wrote
-/// the store's pages anew (BLASTN cDNA x genome -subject at 16 threads: 66,000 page faults more
-/// than the strips stage, whose buffers come from the heap; line EB s15). A store takes one when
-/// it has none, of its layout if one is there, so it holds no more buffers than were alive at
-/// once.
-static KEPT: Mutex<Vec<StoreBufs>> = Mutex::new(Vec::new());
-
-impl Drop for Store {
-    fn drop(&mut self) {
-        if self.len == 0 {
-            return;
-        }
-        let bufs = StoreBufs {
-            seeds: std::mem::take(&mut self.seeds),
-            pos: std::mem::take(&mut self.pos),
-            len: self.len,
-        };
-        lock(&KEPT).push(bufs);
-    }
-}
-
 impl Store {
     /// The regions of `slots` slots of `len` seeds each (the buffers allocated anew when they
-    /// are too small; a store without buffers first takes those of one dropped before, `KEPT`).
+    /// are too small).
     #[allow(clippy::type_complexity)]
     fn slots(
         &mut self,
@@ -269,20 +252,6 @@ impl Store {
         len: usize,
     ) -> impl Iterator<Item = (&mut [MaybeUninit<Seed>], &mut [MaybeUninit<u32>])> {
         let need = slots * len;
-        if self.len == 0 {
-            let mut kept = lock(&KEPT);
-            let at = kept.iter().rposition(|b| b.len == len);
-            let bufs = match at {
-                Some(at) => Some(kept.swap_remove(at)),
-                None => kept.pop(),
-            };
-            drop(kept);
-            if let Some(b) = bufs {
-                self.seeds = b.seeds;
-                self.pos = b.pos;
-                self.len = b.len;
-            }
-        }
         // (a stage of another layout allocates anew, so that the pages the regions of the old one
         // touched are not kept; one of the same layout with more slots takes the capacity the
         // buffers have, above glibc's ceiling)
@@ -970,7 +939,8 @@ mod tests {
 
     /// `Links::take` hands out distinct blocks of the arena for any cut of a piece's seeds by
     /// partition (the pushes of `PieceSink::push`: a block when the partition's last one is full),
-    /// up to `piece_seeds` seeds, and a partition within its share keeps its seeds in its lane.
+    /// up to `piece_seeds` seeds; a partition within its share keeps its seeds in its lane, and
+    /// one with all of them in a few runs (a halving per lane it takes from).
     #[test]
     fn take_gives_each_block_once_and_lanes_to_shares() {
         let mut rng = 0x9e37_79b9_7f4a_7c15u64;
@@ -1018,8 +988,18 @@ mod tests {
                         usize::from(links.used),
                         taken.iter().filter(|&&t| t).count()
                     );
-                    // round robin: every partition's share in its own lane, one run of blocks
                     let lane = piece_seeds / BLOCK / parts;
+                    // all to one partition: its lane, the blocks after the lanes, and halvings of
+                    // the other lanes
+                    if cut == 0 {
+                        let runs = 1 + mine[0].windows(2).filter(|w| w[1] != w[0] + 1).count();
+                        let halvings = (usize::BITS - lane.leading_zeros()) as usize + 1;
+                        assert!(
+                            runs <= 2 + (parts - 1) * halvings,
+                            "{parts} {piece_seeds}: {runs} runs"
+                        );
+                    }
+                    // round robin: every partition's share in its own lane, one run of blocks
                     if cut == 1 && piece_seeds % (BLOCK * parts) == 0 {
                         for (p, bs) in mine.iter().enumerate() {
                             let want: Vec<u16> =

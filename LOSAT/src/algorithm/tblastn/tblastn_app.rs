@@ -1982,7 +1982,7 @@ fn search(
             if outputs.formats.first().is_some_and(|format| {
                 crate::algorithm::common::database::prefetches_subjects(Some(
                     match super::stage_e_report::format_number(format.outfmt) {
-                        10 | 20 => 6,
+                        10 | 18 | 20 => 6,
                         number => number,
                     },
                 ))

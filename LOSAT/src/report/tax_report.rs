@@ -191,7 +191,7 @@ impl Text {
     }
 
     fn write_to(&self, out: &mut dyn Write) -> io::Result<()> {
-        const BLANK: [u8; 1 << 16] = [b' '; 1 << 16];
+        static BLANK: [u8; 1 << 16] = [b' '; 1 << 16];
         for seg in &self.0 {
             match seg {
                 Seg::Bytes(bytes) => out.write_all(bytes)?,
@@ -562,6 +562,9 @@ pub struct TaxLookups<'a> {
     /// The names of `[TAX_BROWSER] BLASTFMTUTIL`'s URL (`<@taxBrowserURL@>`), read where a name
     /// holds the token.
     browser_url: Vec<u8>,
+    /// What one read of `./.ncbirc` by the report posts (`read_ncbirc`); the report of each query
+    /// reads it twice.
+    registry_posts: Vec<u8>,
 }
 
 impl<'a> TaxLookups<'a> {
@@ -572,9 +575,14 @@ impl<'a> TaxLookups<'a> {
     /// `./.ncbirc` that NCBI's report cannot read (it reads the file for every query).
     pub fn new(names: Option<&'a TabularNames>, program: &str) -> Result<Self> {
         let registry = read_ncbirc(program)?;
+        let registry_posts = registry.as_ref().map_or_else(Vec::new, |read| {
+            registry_posts(read, &program.to_ascii_lowercase())
+        });
         let mut browser_url = Vec::new();
         if let Some(names) = names {
-            for found in names.found() {
+            let mut found: Vec<&TaxNames> = names.found().collect();
+            found.sort_by_key(|names| names.taxid);
+            for found in found {
                 let line = organism_line(found);
                 if line.contains(b"<@bl_taxid@>") {
                     return Err(TaxReportRefusal(format!(
@@ -588,7 +596,11 @@ impl<'a> TaxLookups<'a> {
                 }
             }
         }
-        Ok(TaxLookups { names, browser_url })
+        Ok(TaxLookups {
+            names,
+            browser_url,
+            registry_posts,
+        })
     }
 
     /// What `GetTaxInfo(taxid)` finds (`None`: it throws), and the text it writes to standard
@@ -604,8 +616,10 @@ impl<'a> TaxLookups<'a> {
 /// `./.ncbirc` as NCBI's organism report reads it (`CTaxFormat::x_InitTaxFormat` and
 /// `CAlignFormatUtil::GetProtocol` read the file of the current directory each time a report is
 /// made, with a registry of their own): `None` without the file. LOSAT refuses a file whose read
-/// throws (NCBI's report then fails), writes a message (a stream that fails, an entry set again,
-/// which NCBI writes at each report) or reads other files (`[NCBI] .Inherits`).
+/// throws (NCBI's report then fails: a syntax error, NCBI BLAST+ 2.17.0 exit 255 after the first
+/// query's `Query=` block, probe `T/t2/probe_rc`) and one that reads other files (`[NCBI]
+/// .Inherits`, which LOSAT's registry reads refuse elsewhere too); the messages of a read that
+/// does not throw are NCBI's posts of each report (`registry_posts`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:171-177
 /// ```c++
@@ -627,17 +641,44 @@ fn read_ncbirc(program: &str) -> Result<Option<crate::blastinput::ncbi_registry:
             "the registry file ./.ncbirc {what}, which NCBI BLAST+'s organism report (outfmt 18) reads for each query; this is not supported by LOSAT's {program}"
         )))
     };
-    let read = read_registry(&bytes, Layer::Application).map_err(|reason| refused(&reason))?;
-    if read.error.is_some() || read.stream_failed {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1615-1625
+    // ```c++
+    // CNcbiRegistry::CNcbiRegistry(CNcbiIstream& is, TFlags flags,
+    //                              const string& path)
+    // ...
+    //     x_Init();
+    //     m_FileRegistry->Read(is, flags & ~(fWithNcbirc | fCaseFlags));
+    //     LoadBaseRegistries(flags, 0, path);
+    //     IncludeNcbircIfAllowed(flags & ~fCaseFlags);
+    // ```
+    // One `Read` of the stream into a file layer (the byte order mark checked once), as the
+    // system-wide `.ncbirc` is read; flags 0 include no other `.ncbirc`.
+    let read = read_registry(&bytes, Layer::SystemWide).map_err(|reason| refused(&reason))?;
+    if read.error.is_some() {
         return Err(refused("cannot be read as a registry"));
-    }
-    if !read.repeated.is_empty() {
-        return Err(refused("sets an entry more than once"));
     }
     if read.last_value("NCBI", ".Inherits").is_some() {
         return Err(refused("sets [NCBI] .Inherits"));
     }
     Ok(Some(read))
+}
+
+/// What one read of `./.ncbirc` (`read`) posts while `program` runs: a warning of each entry
+/// that sets an entry again, then the error of a stream that failed (`IRWRegistry::Read`, as the
+/// registry of `-window_masker_taxid` posts them, `ncbi_environment::window_masker_ncbirc`). NCBI
+/// BLAST+ 2.17.0 (probe `T/t2/probe_rc`, `rep` and `bom`): two of each per query of outfmt 18,
+/// `Warning: (110.8) [blastp] Found multiple [FOO] a settings; using the one from line 3` and
+/// `Error: (110.4) [blastp] Error reading the registry after line 1: `.
+fn registry_posts(read: &crate::blastinput::ncbi_registry::RegistryRead, program: &str) -> Vec<u8> {
+    use crate::blastinput::ncbi_registry::{repeated_entry_post, running_error_reading_post};
+    let mut posts = String::new();
+    for repeated in &read.repeated {
+        posts.push_str(&repeated_entry_post(repeated, program));
+    }
+    if read.stream_failed {
+        posts.push_str(&running_error_reading_post(program));
+    }
+    posts.into_bytes()
 }
 
 /// `m_TaxBrowserURL`: `[TAX_BROWSER] BLASTFMTUTIL` of `./.ncbirc` (`registry`), else NCBI's URL,
@@ -829,6 +870,21 @@ pub fn write_query(
     // (`AcknowledgeBlastQuery` with `kFormatLineLength`, 68: outfmt 0's `Query=` block).
     let mut out = out;
     crate::report::pairwise::write_blastp_query_header(&mut out, title, length)?;
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:165-172
+    // ```c++
+    //     m_Protocol = CAlignFormatUtil::GetProtocol();
+    //     ...
+    //     m_ConfigFile = new CNcbiIfstream(".ncbirc");
+    //     m_Reg = new CNcbiRegistry(*m_ConfigFile);
+    // ```
+    // The report's two reads of `./.ncbirc` post before its lookups.
+    if !lookups.registry_posts.is_empty() {
+        out.flush()?;
+        for _ in 0..2 {
+            diagnostics.write_all(&lookups.registry_posts)?;
+        }
+        diagnostics.flush()?;
+    }
     organism_report(diagnostics, out, hsps, subjects, lookups)?.write_to(out)
 }
 

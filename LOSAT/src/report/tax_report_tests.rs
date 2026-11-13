@@ -378,7 +378,7 @@ fn the_tax_browser_url_reads_ncbirc_as_ncbi() {
         tax_browser_url(None),
         b"https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi".to_vec()
     );
-    let read = read_registry(b"[BLASTFMTUTIL]\nPROTOCOL=http:\n", Layer::Application).unwrap();
+    let read = read_registry(b"[BLASTFMTUTIL]\nPROTOCOL=http:\n", Layer::SystemWide).unwrap();
     assert_eq!(
         tax_browser_url(Some(&read)),
         b"http://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi".to_vec()
@@ -386,7 +386,7 @@ fn the_tax_browser_url_reads_ncbirc_as_ncbi() {
     // An empty value is no entry (`HasEntry`, `Get(...).empty()`).
     let read = read_registry(
         b"[BLASTFMTUTIL]\nPROTOCOL=\n[TAX_BROWSER]\nBLASTFMTUTIL=\n",
-        Layer::Application,
+        Layer::SystemWide,
     )
     .unwrap();
     assert_eq!(
@@ -395,7 +395,7 @@ fn the_tax_browser_url_reads_ncbirc_as_ncbi() {
     );
     let read = read_registry(
         b"[TAX_BROWSER]\nBLASTFMTUTIL=<@protocol@>//x/<@rid@>\n",
-        Layer::Application,
+        Layer::SystemWide,
     )
     .unwrap();
     assert_eq!(tax_browser_url(Some(&read)), b"https://x/<@rid@>".to_vec());
@@ -414,4 +414,22 @@ fn crate_test_taxdb(rows: &[(i32, &[u8])]) -> (Vec<u8>, Vec<u8>) {
         data.extend(*record);
     }
     (index, data)
+}
+
+#[test]
+fn a_registry_read_posts_as_ncbi() {
+    // NCBI BLAST+ 2.17.0 (probe `T/t2/probe_rc`, `rep` and `bom`): the posts of one read; each
+    // query's report reads `./.ncbirc` twice.
+    use crate::blastinput::ncbi_registry::{read_registry, Layer};
+    let read = read_registry(b"[FOO]\na=1\na=2\n", Layer::SystemWide).unwrap();
+    assert_eq!(
+        registry_posts(&read, "blastp"),
+        b"Warning: (110.8) [blastp] Found multiple [FOO] a settings; using the one from line 3\n"
+            .to_vec()
+    );
+    let read = read_registry(b"\xef", Layer::SystemWide).unwrap();
+    assert_eq!(
+        registry_posts(&read, "blastp"),
+        b"Error: (110.4) [blastp] Error reading the registry after line 1: \n".to_vec()
+    );
 }

@@ -1219,10 +1219,11 @@ mod tests {
                 .collect();
             // 11 (the BLAST archive): every program (OF8a parts 1 and 2: BLASTN, BLASTP; OF8b
             // parts 1 to 3: BLASTX, TBLASTN, TBLASTX).
-            // 10 and 20 with the shared tabular writer (line CLI C2: every program).
+            // 10 and 20 with the shared tabular writer (line CLI C2: every program); 18, the
+            // organism report (line RG T2: every program).
             let expected: &[i32] = match program {
-                Program::Blastn => &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20],
-                _ => &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 20],
+                Program::Blastn => &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20],
+                _ => &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20],
             };
             assert_eq!(written, expected, "{program:?}");
         }

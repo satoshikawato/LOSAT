@@ -478,7 +478,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 **Output**
 - `-outfmt 1`, `2`, `3` and `4`: all five programs.
 - `-html`: all five programs.
-- `-outfmt 18` with a taxonomy database that names a taxid with the text `<@bl_taxid@>` (NCBI BLAST+ writes an uninitialised number there), with a `./.ncbirc` that NCBI's organism report cannot read without an error or a message (a syntax error, an entry set twice, `[NCBI] .Inherits`), and with a database sequence whose empty title NCBI makes from its taxids and the taxonomy database (as outfmt `0` refuses it): all five programs.
+- `-outfmt 18` with a taxonomy database that names a taxid with the text `<@bl_taxid@>` (NCBI BLAST+ writes an uninitialised number there), with a `./.ncbirc` that has a syntax error (NCBI's report stops there with an exception) or `[NCBI] .Inherits` (NCBI's report reads the files it names), and with a database sequence whose empty title NCBI makes from its taxids and the taxonomy database (as outfmt `0` refuses it): all five programs.
 - `-sorthits` with a description table that lists every subject and whose last subject alone has a total score above 99999 bits: all five programs. NCBI BLAST+ 2.17.0 pads that row with spaces without end, so it never finishes the report and has no output to use there either; LOSAT writes what NCBI writes before that table (the earlier queries' reports and the query's first lines) and then stops with the error.
 
 **Scoring and search settings**

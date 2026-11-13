@@ -4874,11 +4874,11 @@ fn search_query_batch<S: TbxScore>(
         // short to search gets none, and a subject whose read failed is not searched: either
         // leaves here.
         let subject_prep::SubjectFrames {
+            x_letter_frames_later,
+            mut x_kept,
             s_len,
             s_frames,
             s_frames_preliminary_owned,
-            mut x_kept,
-            x_letter_frames_later,
         } = match subject_prep::subject_frames(subjects, s_idx, &db_code, wordsize) {
             Ok(Some(made)) => made,
             Ok(None) => {

@@ -32,6 +32,8 @@ mod db_taxid_root;
 mod default_bundle;
 #[path = "../entry_names.rs"]
 mod entry_names;
+#[path = "../export_search_strategy.rs"]
+mod export_search_strategy;
 #[path = "../library_api.rs"]
 mod library_api;
 #[path = "../library_examples.rs"]

@@ -20,6 +20,15 @@ outcome.query_stats[0].eff_space  # what fixed the E-values of the first query
 outcome.diagnostics               # what the command line writes to its standard error
 ```
 
+## Installation
+
+pylosat is not on PyPI yet. Build a wheel here with [maturin](https://www.maturin.rs/)
+(`maturin build --release`) and install it with `pip`, or take one from a run of the workflow
+[`Python wheels`](../.github/workflows/python-wheels.yml). It builds a wheel for each platform of
+LOSAT's release binaries (Linux x86_64 and aarch64, macOS arm64 and x86_64, Windows x64), each for
+CPython 3.10 and later, installs it and checks one search against the command line's output. A
+run keeps its wheels for 7 days.
+
 ## Options
 
 `Search` takes the program and the command line's options, each as a keyword without its dash:

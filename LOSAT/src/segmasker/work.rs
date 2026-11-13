@@ -288,7 +288,7 @@ fn writer(outfmt: &str, window: i32, locut: f64, hicut: f64) -> MaskWriter {
             cpp_default_double(locut),
             cpp_default_double(hicut)
         );
-        MaskWriter::mask_info(serial, 1, FilterProgram::Seg, parameters.into_bytes())
+        MaskWriter::mask_info(Some(serial), 1, FilterProgram::Seg, parameters.into_bytes())
     };
     match outfmt {
         "interval" => MaskWriter::Interval,
@@ -401,6 +401,7 @@ impl Source<'_> {
                         MaskReadError::Ncbi(exception) => Failure::Caught(exception),
                         MaskReadError::Read(error) => read_failure(error),
                         MaskReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
+                        MaskReadError::Refused(what) => Failure::Refused(unsupported(&what)),
                     })?;
                 Ok(record.map(|record| Record {
                     ids: record.ids,

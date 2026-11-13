@@ -65,14 +65,14 @@
 //!    ascending. A range also takes, by table, the least and greatest offset of its sources with a
 //!    target.
 //! 3. The tables, all of them at once, by stripe (the stripes side by side): (a) each stripe counts
-//!    the appends to each of its cells in each table, count_t[w] = sum of |E_t(s)| over the s with
+//!    the appends to each of its cells in each table, `count_t[w]` = sum of |E_t(s)| over the s with
 //!    w in T(s) (the reference's chain length), from every range's lists for the stripe, and sums
 //!    each table's overflow size, longest count and used cells in the stripe; (b) each table's
 //!    cells and overflow go to the stripes in cell order (`BlastAaLookupFinalize` assigns the
 //!    overflow cursors in ascending cell order, and a compacted table keeps its cells in index
 //!    order); (c) each stripe, from its counts of (a) (zeroed by the stripe there, kept since),
 //!    writes its cells (`num_used`, the pv bit, the cursor of an overflow cell; a cell without
-//!    entries all zero, as after the C `calloc`), turns count_t[w] into the first position of cell
+//!    entries all zero, as after the C `calloc`), turns `count_t[w]` into the first position of cell
 //!    w, then walks the lists as (a) did and appends, for each s with w in T(s), E_t(s) at the
 //!    position of w in table t, advanced by the offsets written.
 //!
@@ -81,7 +81,7 @@
 //! A cell is one stripe's, and the stripe appends to it in the order of the ranges, each range's
 //! sources ascending, so cell w of table t holds, for s ascending with w in T(s), E_t(s) in order:
 //! the chain of x_pair_lut.rs item 5. The positions of a cell are written once each (a cell's run
-//! starts at its first position and takes count_t[w] offsets), and the cells' runs of the overflow
+//! starts at its first position and takes `count_t[w]` offsets), and the cells' runs of the overflow
 //! are disjoint. `num_used`, the pv bits, the inline entries or the overflow cursor, the overflow
 //! array and `longest_chain` are `BlastAaLookupFinalize`'s function of these chains; the compaction
 //! keeps the cells with entries in index order (`x_scan_bf::x_compact`) with the rank of the

@@ -1235,6 +1235,29 @@ impl ListedTitles<'_> {
         )
     }
 
+    /// [`Self::prefetch_messages`] by subject (`shared::subject_read_texts`): the text of the
+    /// first read of each subject of rank `ranks` that writes one, with its rank.
+    pub(super) fn subject_read_texts(
+        &self,
+        database: &BlastpDatabase,
+        ranks: impl IntoIterator<Item = usize>,
+        rows_open: bool,
+    ) -> Result<Vec<(u32, Vec<u8>)>> {
+        shared::subject_read_texts(
+            &database.db,
+            &database.taxdb,
+            ranks.into_iter().map(|rank| {
+                (
+                    rank as u32,
+                    self.listed.ordinals[rank],
+                    self.parsed_subject(rank),
+                )
+            }),
+            rows_open,
+            self.program,
+        )
+    }
+
     /// NCBI's prefetch of a query batch's subjects of ranks `ranks` on standard error
     /// (`shared::batch_prefetch`): the taxonomy texts of `prefetch_messages`, then the warning
     /// where the prefetch fails at a subject whose lookup fails (a protein has no strand).

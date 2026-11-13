@@ -1,11 +1,12 @@
-//! `losat dustmasker` and `losat segmasker` against NCBI BLAST+ 2.17.0 dustmasker 1.0.0 and
-//! segmasker 1.0.0: each row of `tests/<program>/cases.tsv` (its arguments as shell words, run in
-//! `tests/<program>`; `< file` is the standard input) gives NCBI's standard output, standard
-//! error and exit status, frozen in `tests/<program>/ncbi/<name>.{out,err,rc}` (probes of line
-//! RG, items K1 and K2, 2026-11-12 and 11-13 on ws). A name the table repeats is compared on its
-//! last row, whose output the probe kept. NCBI is not run here. Every row runs through the
-//! library API too (`LOSAT::api::run_dustmasker`, `run_segmasker`, by
-//! `examples/library_command_line`), with the same bytes.
+//! `losat dustmasker`, `losat segmasker` and `losat convert2blastmask` against NCBI BLAST+
+//! 2.17.0 dustmasker 1.0.0, segmasker 1.0.0 and convert2blastmask: each row of
+//! `tests/<program>/cases.tsv` (its arguments as shell words, run in `tests/<program>`; `< file`
+//! is the standard input) gives NCBI's standard output, standard error and exit status, frozen
+//! in `tests/<program>/ncbi/<name>.{out,err,rc}` (probes of line RG, items K1, K2 and K3,
+//! 2026-11-12 and 11-13, on ws and the local official release). A name the table repeats is
+//! compared on its last row, whose output the probe kept. NCBI is not run here. Every row runs
+//! through the library API too (`LOSAT::api::run_dustmasker`, `run_segmasker`,
+//! `run_convert2blastmask`, by `examples/library_command_line`), with the same bytes.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -34,14 +35,16 @@ struct Case {
 fn shell_words(line: &str) -> (Vec<String>, Option<String>) {
     let mut words = Vec::new();
     let mut word: Option<String> = None;
-    let mut quoted = false;
+    // The open quote: inside `"..."` a `'` is a letter, inside `'...'` a `"`.
+    let mut quote: Option<char> = None;
     for c in line.chars() {
-        match c {
-            '"' => {
-                quoted = !quoted;
+        match (quote, c) {
+            (None, '"' | '\'') => {
+                quote = Some(c);
                 word.get_or_insert_with(String::new);
             }
-            ' ' | '\t' if !quoted => {
+            (Some(open), _) if c == open => quote = None,
+            (None, ' ' | '\t') => {
                 if let Some(done) = word.take() {
                     words.push(done);
                 }
@@ -49,7 +52,7 @@ fn shell_words(line: &str) -> (Vec<String>, Option<String>) {
             _ => word.get_or_insert_with(String::new).push(c),
         }
     }
-    assert!(!quoted, "unbalanced quotes: {line}");
+    assert!(quote.is_none(), "unbalanced quotes: {line}");
     words.extend(word);
     let mut stdin = None;
     if let Some(at) = words.iter().position(|word| word == "<") {
@@ -161,6 +164,12 @@ fn segmasker_gives_ncbis_bytes() {
     assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
 }
 
+#[test]
+fn convert2blastmask_gives_ncbis_bytes() {
+    let differ = rows_that_differ("convert2blastmask");
+    assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
+}
+
 // `run_dustmasker` and `run_segmasker` are the command line's run without its application start,
 // which reads the file of `-conffile` and ends `-dryrun` (`ncbi_app::run_with`): the library
 // refuses those two words, as `run_blastdbcmd` does. The example ends every failure with exit
@@ -218,6 +227,15 @@ fn segmasker_through_the_library_gives_the_command_line_s_bytes() {
 }
 
 #[test]
+fn convert2blastmask_through_the_library_gives_the_command_line_s_bytes() {
+    let differ = rows_that_differ_through_the_library("convert2blastmask", "CONVERT2BLASTMASK");
+    assert!(
+        differ.is_empty(),
+        "rows that differ through the library: {differ:?}"
+    );
+}
+
+#[test]
 fn the_shell_words_of_the_table_are_read_as_the_shell_reads_them() {
     let words = |line: &str| shell_words(line);
     assert_eq!(
@@ -235,6 +253,18 @@ fn the_shell_words_of_the_table_are_read_as_the_shell_reads_them() {
     assert_eq!(
         words("-outfmt \"\""),
         (vec!["-outfmt".to_string(), String::new()], None)
+    );
+    assert_eq!(
+        words("-masking_options 'a\"b' \"c'd\" ''"),
+        (
+            vec![
+                "-masking_options".to_string(),
+                "a\"b".into(),
+                "c'd".into(),
+                String::new()
+            ],
+            None
+        )
     );
     assert_eq!(
         words("-in - < in/basic.fa"),

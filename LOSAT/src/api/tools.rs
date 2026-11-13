@@ -1,6 +1,7 @@
 //! The tools of the command line besides the searches: `makeblastdb` builds a BLAST database,
 //! `blastdbcmd` reads one, `dustmasker` masks the low-complexity regions of nucleotide
-//! sequences and `segmasker` those of protein sequences. They take the command line's words,
+//! sequences and `segmasker` those of protein sequences, and `convert2blastmask` turns the lower
+//! case letters of FASTA input into masking information. They take the command line's words,
 //! read the caller's reader where the command line reads its standard input, and write what it
 //! writes, to the caller's writers; none touches the process's standard streams.
 //!
@@ -31,6 +32,14 @@
 //! {
 //!     // Execute main application function
 //!     return SegMaskerApplication().AppMain(argc, argv);
+//! }
+//! ```
+//! NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263
+//! ```c++
+//! int main(int argc, const char* argv[])
+//! {
+//!     // Execute main application function
+//!     return CConvert2BlastMaskApplication().AppMain(argc, argv);
 //! }
 //! ```
 #![warn(missing_docs, unused)]
@@ -138,6 +147,26 @@ pub fn run_segmasker(
         bytes: Vec::new(),
     };
     let status = crate::segmasker::run_with(&words, input, output, &mut recorded);
+    outcome(status, recorded.bytes)
+}
+
+/// Runs `convert2blastmask` with the words after the program name, as on the command line: as
+/// [`run_dustmasker`], for the lower case letters of FASTA input. `input` is what the command
+/// line reads as standard input (`-in -`, and without `-in`), what it writes to standard output
+/// goes to `output` (`-out` is a file, as there), what it writes to standard error to
+/// `diagnostics`, and a failure is an error whose message is that text.
+pub fn run_convert2blastmask(
+    argv: &[&str],
+    input: &mut dyn Read,
+    output: &mut dyn Write,
+    diagnostics: &mut dyn Write,
+) -> Result<(), Error> {
+    let words: Vec<OsString> = argv.iter().map(OsString::from).collect();
+    let mut recorded = Recorded {
+        writer: diagnostics,
+        bytes: Vec::new(),
+    };
+    let status = crate::convert2blastmask::run_with(&words, input, output, &mut recorded);
     outcome(status, recorded.bytes)
 }
 

@@ -179,12 +179,17 @@ jobs:
           exit "$status"
 
   # cargo test --all-features: the test binaries built once (`cargo nextest archive`), then run
-  # in three shards on three runners from that archive (`--partition count:k/3`: each test
+  # in four shards on four runners from that archive (`--partition count:k/4`: each test
   # binary's tests in turn to the shards). Four vCPUs shaped like a runner's (two cores and
   # their hyperthreads) stayed busy: the tests of all binaries packed by nextest ran only 10 %
   # faster than cargo test's one binary at a time (2026-10-22); the blastp integration tests
   # search a proteome pair dozens of times each. Until 2026-11 each of two shards built every
-  # test binary itself (9 min of a 15 to 34 min shard).
+  # test binary itself (9 min of a 15 to 34 min shard). In three shards (10 pull request runs,
+  # 2026-11-12/13) the longest ran its tests for 274 to 433 s and the shortest for 173 to 281 s:
+  # a few tests of 30 to 130 s fell unevenly. The same tests in four shards: 199 to 280 s in the
+  # longest, 122 s less on average (each shard's sum of its tests' times over 3.9 busy threads,
+  # which matches the three-shard steps to within 19 s); a split by the tests' times would take
+  # 8 to 31 s less than that.
   #
   # The archive holds the test binaries, the `losat` binary the integration tests run and the
   # examples some of them run (.github/nextest.toml). The shards extract it into LOSAT/target,
@@ -234,16 +239,16 @@ jobs:
           compression-level: 0
 
   rust-tests-run:
-    name: cargo test (${{ matrix.shard }}/3)
+    name: cargo test (${{ matrix.shard }}/4)
     needs: [rust-tests]
     runs-on: ubuntu-latest
-    # About twice the longest shard of 40 passing runs of the two-shard form (39.8 min,
-    # 2026-11-04) less its build; to be narrowed once this form has 40 runs.
-    timeout-minutes: 60
+    # About three times the longest shard of 65 passing runs of the three-shard form (8.7 min,
+    # 2026-11-12/13); a shard of four runs about three quarters of those tests.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # cargo runs cargo-nextest; the tests build nothing when the archive holds the examples.
@@ -258,12 +263,12 @@ jobs:
           name: nextest-archive
           path: ${{ runner.temp }}
       # target/tmp = CARGO_TARGET_TMPDIR, which cargo makes when it builds and the archive does not hold.
-      - name: cargo nextest run --all-features (shard ${{ matrix.shard }}/3)
+      - name: cargo nextest run --all-features (shard ${{ matrix.shard }}/4)
         run: |
           mkdir -p LOSAT/target/tmp
           cd LOSAT && cargo nextest run --config-file ../.github/nextest.toml \
             --archive-file ${{ runner.temp }}/tests.tar.zst --extract-to . --extract-overwrite \
-            --workspace-remap . --no-fail-fast --partition count:${{ matrix.shard }}/3
+            --workspace-remap . --no-fail-fast --partition count:${{ matrix.shard }}/4
         env:
           LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
 

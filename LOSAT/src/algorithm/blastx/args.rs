@@ -1527,7 +1527,7 @@ impl BlastxArgs {
     // ```
     /// Runs the search with the settings of the program's application start
     /// (`ApplicationStart::settings`).
-    pub fn run(
+    pub(crate) fn run(
         self,
         settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     ) -> Result<()> {

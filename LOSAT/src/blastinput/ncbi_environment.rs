@@ -1220,7 +1220,8 @@ pub struct WindowMaskerRegistry {
     pub posts_once: bool,
 }
 
-/// The NCBI application settings that LOSAT reproduces (`library_application_settings`).
+/// The NCBI application settings that LOSAT reproduces: the command line's from its application
+/// start (`ApplicationStart::settings`), the library's from `library_application_settings`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApplicationSettings {
     /// `SDataLoaderConfig::UseDataLoaders()` of the query and subject readers: whether
@@ -2112,7 +2113,7 @@ pub enum Preparsed<S> {
 /// application start's configuration (`ApplicationStart::of_process`, line RG item E1).
 /// `words` are the arguments after the program's name. This is the one reading of these words:
 /// the command line's entry (the versions, before the configuration load, and the words that
-/// the argument reader gets, `cli::try_parse_from`), `ApplicationStart::of_process`,
+/// the argument reader gets, `cli::try_parse_from_start`), `ApplicationStart::of_process`,
 /// `cli::ncbi_version_request` and `ncbi_app` read them here, and `log_file` is NCBI's first scan
 /// of `-logfile`.
 pub fn preparse<S: AsRef<OsStr> + Clone>(words: &[S]) -> Preparsed<S> {

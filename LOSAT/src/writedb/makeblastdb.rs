@@ -1302,8 +1302,8 @@ fn open_new_database(
     };
     // `CSeqDB` names its search path in the message of a database that is not there: the
     // current directory, `BLASTDB` and the registry entry `[BLAST] BLASTDB` (`registry_blastdb`,
-    // of the application settings that the callers of `run_with` read, and whose unreadable
-    // values they refused, before the build).
+    // of the application settings that the callers of `run_with` read before the build; a value
+    // that LOSAT does not read is left out).
     let search = SearchPath::from_environment(registry_blastdb).map_err(MakedbError::Database)?;
     let located = SeqDb::locate_one_name_metadata(new_db, seqtype, &search, &|_| {
         Some(title.as_bytes().to_vec())

@@ -23,7 +23,8 @@ use args::{ArgException, Args, ArgsError, Dep, Desc};
 /// A program run by NCBI's application and argument reader.
 pub(crate) struct Tool {
     /// The program's name (`GetProgramBasename`): the start of its `-version` line, its usage,
-    /// its `<program>.ini` and its settings (`ApplicationStart::settings`).
+    /// its `<program>.ini` and its settings (`ApplicationStart::settings` on the command line,
+    /// `library_application_settings` in the library API).
     pub(crate) program: &'static str,
     /// The program's name in LOSAT's refusals (`BLASTDBCMD`).
     pub(crate) refusal_name: &'static str,
@@ -256,13 +257,20 @@ pub(crate) fn run(
     let stderr = std::io::stderr();
     let mut out = stdout.lock();
     let mut err = stderr.lock();
+    debug_assert_eq!(
+        start.program(),
+        tool.program,
+        "the start of another program"
+    );
     let status = run_app(
         tool,
         words,
         (&mut std::io::stdin(), &mut out, &mut err),
         body,
-        Some(start),
-        Some(ncbi_xml),
+        Some(CommandLine {
+            start,
+            xml_help: ncbi_xml,
+        }),
     );
     let _ = out.flush();
     let _ = err.flush();
@@ -312,7 +320,15 @@ pub(crate) fn run_with(
     err: &mut dyn Write,
     body: Body,
 ) -> i32 {
-    run_app(tool, words, (input, out, err), body, None, None)
+    run_app(tool, words, (input, out, err), body, None)
+}
+
+/// What the command line's run of a tool has and the library API's has not (`run_app`).
+struct CommandLine<'a> {
+    /// The command line's application start of the tool.
+    start: &'a ApplicationStart,
+    /// The writer of NCBI's XML of `-xmlhelp` (`ncbi_xml`).
+    xml_help: fn(&str) -> Option<String>,
 }
 
 /// NCBI's XML of `program`'s arguments, whole: the readers of `ncbi_app` refuse no argument of
@@ -322,7 +338,7 @@ fn ncbi_xml(program: &str) -> Option<String> {
 }
 
 /// `run_with`, with the application start and the XML of `-xmlhelp` that the command line's `run`
-/// has (`start`, `xml_help`); the library API's run has neither and refuses the words that they
+/// has (`command_line`); the library API's run has neither and refuses the words that they
 /// stand for (`cli::toolkit_file_word_refusal`; `cli::xml_help_refusal`, line RG DECISIONS
 /// E2x-1), so the library does not carry the XML.
 fn run_app(
@@ -330,9 +346,9 @@ fn run_app(
     words: &[OsString],
     (input, out, err): (&mut dyn Read, &mut dyn Write, &mut dyn Write),
     body: Body,
-    start: Option<&ApplicationStart>,
-    xml_help: Option<fn(&str) -> Option<String>>,
+    command_line: Option<CommandLine<'_>>,
 ) -> i32 {
+    let start = command_line.as_ref().map(|line| line.start);
     // NCBI's application start (`ncbi_environment::ApplicationStart`), which the command line's
     // entry has made: the file of `-logfile` gets the usage report's messages when NCBI opens it,
     // before `-version`.
@@ -408,7 +424,10 @@ fn run_app(
         }
         // NCBI's XML, which the command line's run writes (`ncbi_xml`); the library API writes
         // none (`cli::xml_help_refusal`, line RG DECISIONS E2x-1).
-        Err(ArgsError::XmlHelp) => match xml_help.and_then(|xml| xml(tool.program)) {
+        Err(ArgsError::XmlHelp) => match command_line
+            .as_ref()
+            .and_then(|line| (line.xml_help)(tool.program))
+        {
             Some(xml) => {
                 let _ = out.write_all(xml.as_bytes());
                 return 0;

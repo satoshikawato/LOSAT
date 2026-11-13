@@ -251,8 +251,8 @@ pub enum Commands {
 // or a quoted filtering specification can never be interpreted as another key.
 /// Parses `argv` (`losat <program> <words>`) for a caller that runs no NCBI application start
 /// (the library API, the Web engine): the toolkit's words that the start reads (`-logfile`,
-/// `-conffile`, `-dryrun`, the versions) are refused (`toolkit_file_word_error`), and so is
-/// `-xmlhelp` (`xml_help_refusal`).
+/// `-conffile`, `-dryrun`, the versions) are refused (`toolkit_file_word_error`; makeblastdb
+/// keeps its own `-logfile` argument), and so is `-xmlhelp` (`xml_help_refusal`).
 pub fn try_parse_from<T, I, S>(argv: I) -> Result<T, clap::Error>
 where
     T: Parser + CommandFactory,
@@ -306,6 +306,13 @@ where
     S: Into<OsString>,
 {
     let mut tokens: Vec<OsString> = argv.into_iter().map(Into::into).collect();
+    if let Some(start) = start {
+        debug_assert_eq!(
+            tokens.get(1).and_then(|token| token.to_str()),
+            Some(start.program()),
+            "the start of another program"
+        );
+    }
     let command = with_toolkit_file_args(command);
     // NCBI's application reads its own toolkit words before the program's arguments; the
     // argument reader gets the words that are left (`ncbi_environment::preparse`).
@@ -1062,8 +1069,8 @@ where
     }
 }
 
-/// The NCBI applications whose words before the arguments `try_parse_from` reads
-/// (`ncbi_environment::preparse`).
+/// The NCBI applications whose words before the arguments the parser reads (`parse_command`,
+/// `ncbi_environment::preparse`).
 const TOOLKIT_PROGRAMS: &[&str] = &[
     "blastn",
     "blastp",
@@ -1174,7 +1181,7 @@ pub(crate) fn xml_help_refusal(shown: &str) -> String {
     )
 }
 
-/// The help request that `try_parse_from` returns where `-xmlhelp` stopped the reader of
+/// The help request that `try_parse_from_start` returns where `-xmlhelp` stopped the reader of
 /// `program`: a `DisplayHelp` error that names the program (`xml_help_program`).
 fn xml_help_request(program: String) -> clap::Error {
     use clap::error::{ContextKind, ContextValue};
@@ -1183,8 +1190,8 @@ fn xml_help_request(program: String) -> clap::Error {
     error
 }
 
-/// The program whose `-xmlhelp` the parser's `error` is (`try_parse_from`): the command line's
-/// entry prints its XML (`xml_help_text`) in place of the error, exit status 0.
+/// The program whose `-xmlhelp` the parser's `error` is (`try_parse_from_start`): the command
+/// line's entry prints its XML (`xml_help_text`) in place of the error, exit status 0.
 pub(crate) fn xml_help_program(error: &clap::Error) -> Option<&str> {
     use clap::error::{ContextKind, ContextValue};
     match error.get(ContextKind::Custom) {

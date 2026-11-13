@@ -1932,6 +1932,23 @@ fn version_words_in_an_option_value_are_read_as_ncbi_reads_them() {
     }
 }
 
+// No NCBI counterpart: the command line's entry makes the application start of the program that
+// `argv[1]` names when it is one of `ENTRY_NAMES`, and runs a parsed command with that start
+// (`cli::main_entry`, which holds the start of every command it parses).
+#[test]
+fn every_command_is_an_entry_name() {
+    use clap::CommandFactory;
+    let command = Cli::command();
+    for sub in command.get_subcommands() {
+        for name in std::iter::once(sub.get_name()).chain(sub.get_all_aliases()) {
+            assert!(
+                crate::cli::ENTRY_NAMES.contains(&name),
+                "the command {name} is not one of ENTRY_NAMES"
+            );
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (quoted at
 // `ncbi_environment::preparse`): `-logfile FILE` and `-conffile FILE` go to the argument reader
 // with their values, a last `-logfile` or `-conffile` without one is dropped. The command line's

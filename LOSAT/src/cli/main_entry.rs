@@ -104,14 +104,14 @@ fn run_main_entry() -> Result<()> {
     // (`ncbi_environment::ApplicationStart`), and its messages go to stderr at once, before
     // `-version` and before blastdbcmd's `-logfile` is read. The start of the others (dustmasker,
     // segmasker, rpsbproc) writes nothing here.
-    let program = argv
+    // The program's application start, made once here and given to what reads after it.
+    let start = argv
         .get(1)
         .and_then(|word| word.to_str())
-        .filter(|word| crate::cli::ENTRY_NAMES.contains(word));
-    // The program's application start, made once here and given to what reads after it.
-    let start = program.map(|program| {
-        crate::blastinput::ncbi_environment::ApplicationStart::of_process(program, &argv[2..])
-    });
+        .filter(|word| crate::cli::ENTRY_NAMES.contains(word))
+        .map(|program| {
+            crate::blastinput::ncbi_environment::ApplicationStart::of_process(program, &argv[2..])
+        });
     // The start of the program `name`, which the entry made above when `argv` names it.
     let started = |name: &str| start.as_ref().filter(|start| start.program() == name);
     if let Some(start) = &start {
@@ -200,7 +200,7 @@ fn run_main_entry() -> Result<()> {
     // The diagnostics go to the file of `-logfile`, which NCBI reads anywhere before `--`
     // (`ncbi_environment::log_file`), opened before `-version`: `blastn -version -logfile F`
     // makes F, with the usage report's messages.
-    let mut target = match program {
+    let mut target = match &start {
         Some(_) => {
             use crate::blastinput::ncbi_environment::{diag_target, log_file};
             diag_target(log_file(&argv[2..]))
@@ -234,7 +234,7 @@ fn run_main_entry() -> Result<()> {
             Err(reason) => return Err(anyhow::Error::msg(reason)),
         }
     }
-    let dryrun = program.is_some()
+    let dryrun = start.is_some()
         && matches!(
             crate::blastinput::ncbi_environment::preparse(&argv[2..]),
             crate::blastinput::ncbi_environment::Preparsed::Words { dryrun: true, .. }
@@ -366,7 +366,7 @@ fn run_main_entry() -> Result<()> {
             // ```
             // NCBI's application layer reads its environment and registry files before blastx's
             // own code runs; LOSAT rejects the settings that change the output first, before any
-            // option or file of the run (`native::run`).
+            // option or file of the run, and `native::run` runs with them.
             let run = start
                 .settings()
                 .map_err(anyhow::Error::msg)

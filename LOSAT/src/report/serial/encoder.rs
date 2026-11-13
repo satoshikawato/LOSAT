@@ -178,6 +178,18 @@ pub trait Encoder {
         let _ = (sink, all);
         Ok(())
     }
+    /// Hands the document's bytes before its byte `through` to `sink`, for an encoder that models
+    /// where NCBI's stream has handed its bytes to the output (`asn_text`: a message of a
+    /// replaced byte falls there among them, `visible::BadChars::posts_after`). The default hands
+    /// nothing.
+    fn flush_through(
+        &mut self,
+        sink: &mut dyn std::io::Write,
+        through: usize,
+    ) -> std::io::Result<()> {
+        let _ = (sink, through);
+        Ok(())
+    }
     /// A CHOICE value of the type `type_name` whose variant `name` (position `tag`) is a
     /// SEQUENCE OF VisibleString: the strings of `items` in order. The default is `variant`,
     /// a list of string elements and `end_variant`; the XML stream in its standard-XML mode

@@ -407,12 +407,10 @@ fn the_out_file_receives_the_archive() {
 }
 
 /// In the text and binary archives a title with a byte outside `0x20..=0x7E` (0x80 and above,
-/// and 0x7F) is written as `#` by NCBI, with a diagnostic per byte (in XML NCBI writes the byte,
-/// and so does LOSAT): LOSAT refuses it (query, `-subject` and a `-db` name)
-/// before the first byte, and a bad title in a batch that NCBI completes before a reader error
-/// too (the archive of that batch would be written before the error).
+/// and 0x7F) is written as `#`, with NCBI's message per byte (M4a-1b part 5; in XML NCBI writes the
+/// byte, and so does LOSAT), the query's and a `-subject` record's alike.
 #[test]
-fn non_ascii_titles_and_database_names_are_refused() {
+fn non_ascii_titles_are_written_with_their_messages() {
     let dir = std::env::temp_dir().join(format!("losat_outfmt11_tbn_title_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let plain_query = engine().join(input("arch_tbn_q.faa"));
@@ -445,19 +443,26 @@ fn non_ascii_titles_and_database_names_are_refused() {
             let mut full = args.clone();
             full.extend_from_slice(&["-outfmt", "11"]);
             let output = run(&[], &full, "1");
-            assert_ne!(output.status.code(), Some(0), "{role}");
-            assert!(output.stdout.is_empty(), "{role}: nothing is written");
             let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(stderr.contains("visible ASCII"), "{name} {role}: {stderr}");
-            assert!(stderr.contains("-outfmt 11"), "{name} {role}: {stderr}");
-            // The same title is fine in outfmt 8: only the archive refuses it.
+            assert_eq!(output.status.code(), Some(0), "{name} {role}: {stderr}");
+            let written = if name == "utf8" { "caf##" } else { "ti#tle" };
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains(written),
+                "{name} {role}"
+            );
+            assert!(
+                stderr.contains("Error: (803.7) [") && stderr.contains("Bad char ["),
+                "{name} {role}: {stderr}"
+            );
+            // The same title in outfmt 8, whose Seq-annot holds no title: no message.
             let mut plain_format = args.clone();
             plain_format.extend_from_slice(&["-outfmt", "8"]);
             let output = run(&[], &plain_format, "1");
             assert_eq!(output.status.code(), Some(0), "{name} {role}: outfmt 8");
         }
     }
-    // A bad title in the first batch and a reader error in the second (`BATCH_SIZE=150`).
+    // A bad title in the first batch and a reader error in the second (`BATCH_SIZE=150`): NCBI
+    // completes the first batch and writes its archive.
     let bad = dir.join("utf_bad.faa");
     std::fs::write(
         &bad,
@@ -482,26 +487,20 @@ fn non_ascii_titles_and_database_names_are_refused() {
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(1), "{format}: {stderr}");
+        // The run reaches the reader error; with the archive the first batch's archive is written
+        // before it, with `#` and NCBI's messages.
+        assert!(stderr.contains("CFastaReader"), "{format}: {stderr}");
         if format == "11" {
-            assert!(output.stdout.is_empty(), "{format}: nothing is written");
-            assert!(stderr.contains("visible ASCII"), "{format}: {stderr}");
-        } else {
-            // Without the archive the run reaches the reader error.
-            assert!(stderr.contains("CFastaReader"), "{format}: {stderr}");
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains("bq1 caf## title"),
+                "{format}: the first batch's archive"
+            );
+            let posted = stderr.find("Bad char [0xC3] in string at line ");
+            assert!(
+                posted.is_some() && posted < stderr.find("CFastaReader"),
+                "{format}: {stderr}"
+            );
         }
-    }
-    for database in ["caf\u{e9}", "d\u{7f}b"] {
-        let output = run(
-            &[],
-            &["-query", plain_query, "-db", database, "-outfmt", "11"],
-            "1",
-        );
-        assert_ne!(output.status.code(), Some(0), "{database:?}");
-        assert!(output.stdout.is_empty(), "{database:?}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("-db name"),
-            "{database:?}"
-        );
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

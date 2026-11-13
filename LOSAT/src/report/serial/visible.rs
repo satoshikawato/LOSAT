@@ -110,6 +110,10 @@ pub struct BadChars {
     shown: Shown,
     /// Each bad byte: its place in `bytes` and the stream's position at it.
     bad: Vec<(usize, Position)>,
+    /// For a writer that models NCBI's output buffer (`asn_text`), the bytes of the document
+    /// that NCBI's stream has handed to its output when it posts each message (one per entry of
+    /// `bad`); empty otherwise (the messages then come before the document).
+    after: Vec<usize>,
 }
 
 impl BadChars {
@@ -127,6 +131,7 @@ impl BadChars {
             bytes: bytes.to_vec(),
             shown,
             bad,
+            after: Vec::new(),
         })
     }
 
@@ -138,12 +143,20 @@ impl BadChars {
             bytes: original.to_vec(),
             shown: Shown::AsIs,
             bad: Vec::new(),
+            after: Vec::new(),
         }
     }
 
     /// The bad byte at `index` of the string, written at `at`.
     pub(crate) fn note(&mut self, index: usize, at: Position) {
         self.bad.push((index, at));
+    }
+
+    /// `note`, by a writer whose model of NCBI's buffer says that NCBI's stream has handed the
+    /// first `after` bytes of the document to its output when it posts the message.
+    pub(crate) fn note_after(&mut self, index: usize, at: Position, after: usize) {
+        self.bad.push((index, at));
+        self.after.push(after);
     }
 
     /// The number of bytes noted (one message each).
@@ -227,6 +240,20 @@ impl BadChars {
             bad_chars.post(program, out);
         }
     }
+}
+
+/// Each post of `BadChars::post_all` with the bytes of its document that come before it on a
+/// stream that both go to (`BadChars::note_after`; 0 where the writer has no model).
+pub(crate) fn posts_after(bad: &[BadChars], program: Option<&str>) -> Vec<(usize, Vec<u8>)> {
+    let mut posts = Vec::new();
+    for bad_chars in bad {
+        for k in 0..bad_chars.len() {
+            let mut text = Vec::new();
+            bad_chars.post_one(k, program, &mut text);
+            posts.push((bad_chars.after.get(k).copied().unwrap_or(0), text));
+        }
+    }
+    posts
 }
 
 /// Each post of `BadChars::post_all` on its own (one message of NCBI's diagnostic handler each).

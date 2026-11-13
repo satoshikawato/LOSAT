@@ -1976,14 +1976,19 @@ pub(crate) fn write_query_to(
 ) -> anyhow::Result<()> {
     buf.clear();
     let mut bad_chars = Vec::new();
-    let written = write_query(format, run, query, subjects, hsps, buf, &mut bad_chars)?;
-    if !bad_chars.is_empty() {
+    if !write_query(format, run, query, subjects, hsps, buf, &mut bad_chars)? {
+        return Ok(());
+    }
+    // Each message after the document's bytes that NCBI's stream has handed to its output then
+    // (`visible::posts_after`; the binary stream's are taken as before every byte).
+    let mut done = 0;
+    for (after, text) in super::visible::posts_after(&bad_chars, Some(app)) {
+        writer.write_all(&buf[done..after])?;
         writer.flush()?;
-        super::visible::write_posts(&bad_chars, Some(app), diagnostics)?;
+        diagnostics.write_all(&text)?;
+        done = after;
     }
-    if written {
-        writer.write_all(buf)?;
-    }
+    writer.write_all(&buf[done..])?;
     Ok(())
 }
 

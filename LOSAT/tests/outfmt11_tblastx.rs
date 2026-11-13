@@ -503,13 +503,12 @@ fn the_out_file_receives_the_archive() {
 }
 
 /// In the text and binary archives a title with a byte outside `0x20..=0x7E` (0x80 and above,
-/// and 0x7F) is written as `#` by NCBI, with a diagnostic per byte (in XML NCBI writes the byte,
-/// and so does LOSAT): LOSAT refuses it (query, `-subject` and a `-db` name)
-/// before the first byte, where NCBI would write that Bioseq: a query of a batch that NCBI
-/// completes (a batch before a reader error too), and the `-subject` records whenever a batch
-/// is completed. Where NCBI writes no Bioseq the `u8_*` cases above carry NCBI's bytes.
+/// and 0x7F) is written as `#` with NCBI's message per byte (M4a-1b part 5; in XML NCBI writes the
+/// byte, and so does LOSAT), where NCBI writes that Bioseq: a query of a batch that NCBI completes
+/// (a batch before a reader error too), and the `-subject` records whenever a batch is completed.
+/// Where NCBI writes no Bioseq the `u8_*` cases above carry NCBI's bytes.
 #[test]
-fn non_ascii_titles_and_database_names_are_refused() {
+fn non_ascii_titles_are_written_with_their_messages() {
     let plain_query = input("arch_tbx_q.fna");
     let plain_subject = input("arch_tbx_s.fna");
     let utf8_query = input("arch_tbx_q_utf8.fna");
@@ -547,48 +546,26 @@ fn non_ascii_titles_and_database_names_are_refused() {
     ] {
         let args = ["-query", query, "-subject", subject, "-outfmt", "11"];
         let output = run(env, &args, "1");
-        assert_ne!(output.status.code(), Some(0), "{role}");
-        assert!(output.stdout.is_empty(), "{role}: nothing is written");
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("visible ASCII"), "{role}: {stderr}");
-        assert!(stderr.contains("-outfmt 11"), "{role}: {stderr}");
-        // The same title is fine in outfmt 8 (or reaches the reader error): only the archive
-        // refuses it.
+        assert!(
+            stderr.contains("Error: (803.7) [tblastx] Blast4-archive.request.body.queue-search.")
+                && stderr.contains("Bad char ["),
+            "{role}: {stderr}"
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains('#'),
+            "{role}: the title is written with '#'"
+        );
+        assert!(
+            !stderr.contains("not supported by LOSAT"),
+            "{role}: {stderr}"
+        );
+        // The same title in outfmt 8, whose Seq-annot holds no title: no message.
         let args = ["-query", query, "-subject", subject, "-outfmt", "8"];
         let output = run(env, &args, "1");
         assert!(
-            !String::from_utf8_lossy(&output.stderr).contains("visible ASCII"),
+            !String::from_utf8_lossy(&output.stderr).contains("(803.7)"),
             "{role}: outfmt 8"
-        );
-    }
-    // With `-out` the refusal leaves no file that the run created (as for `tblastn`), and one
-    // that was there before stays (emptied, as for every other refusal after the open).
-    for (query, subject) in [(&utf8_query, &plain_subject), (&plain_query, &utf8_subject)] {
-        let out = del.join("refused.asn");
-        let _ = std::fs::remove_file(&out);
-        let out_arg = out.to_str().unwrap().to_string();
-        let args = [
-            "-query", query, "-subject", subject, "-outfmt", "11", "-out", &out_arg,
-        ];
-        let output = run(&[], &args, "1");
-        assert_ne!(output.status.code(), Some(0));
-        assert!(!out.exists(), "an empty -out file is left behind");
-        std::fs::write(&out, b"old").unwrap();
-        let output = run(&[], &args, "1");
-        assert_ne!(output.status.code(), Some(0));
-        assert!(out.exists(), "a file that was there is kept");
-    }
-    for database in ["caf\u{e9}", "d\u{7f}b"] {
-        let output = run(
-            &[],
-            &["-query", &plain_query, "-db", database, "-outfmt", "11"],
-            "1",
-        );
-        assert_ne!(output.status.code(), Some(0), "{database:?}");
-        assert!(output.stdout.is_empty(), "{database:?}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("-db name"),
-            "{database:?}"
         );
     }
     let _ = std::fs::remove_dir_all(&del);

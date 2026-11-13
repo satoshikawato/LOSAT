@@ -90,7 +90,19 @@ pub struct AsnTextEncoder<'b> {
     stack: ObjectStack,
     /// The strings written with bytes replaced by `#` (`take_bad_chars`).
     bad_chars: Vec<BadChars>,
+    /// NCBI's output buffer (`COStreamBuffer`): the bytes it holds, its size and the bytes of the
+    /// document it has handed to its stream (`ncbi_flushed`), which decide where NCBI's messages
+    /// of a replaced byte fall among the document's bytes on a stream that both go to (`reserve`).
+    ncbi_used: usize,
+    ncbi_size: usize,
+    ncbi_flushed: usize,
+    /// The bytes of the document handed to a sink (`flush_to`, `flush_through`).
+    drained: usize,
 }
+
+/// `KInitialBufferSize` (strbuffer.cpp:46) and the ASN.1 text stream's `SetBackLimit(80)`.
+const NCBI_BUFFER_SIZE: usize = 4096;
+const NCBI_BACK_LIMIT: usize = 80;
 
 impl<'b> AsnTextEncoder<'b> {
     /// An encoder that appends a document to `out`.
@@ -105,13 +117,83 @@ impl<'b> AsnTextEncoder<'b> {
             line: 1,
             stack: ObjectStack::default(),
             bad_chars: Vec::new(),
+            ncbi_used: 0,
+            ncbi_size: NCBI_BUFFER_SIZE,
+            ncbi_flushed: 0,
+            drained: 0,
         }
     }
 
-    /// `COStreamBuffer::PutString` / `PutChar`: bytes without an end of line.
+    /// `COStreamBuffer::Reserve(count)` / `Skip(count)` in NCBI's buffer, for the count bytes that
+    /// one call of NCBI's stream writes: when they do not fit, `DoReserve` hands every byte but the
+    /// back limit to the stream (`FlushBuffer(false)`) and grows the buffer if it is still too
+    /// small. The bytes are not written here.
+    // NCBI reference (598d8ae6): c++/include/util/strbuffer.inl:283-311
+    // ```c++
+    // char* COStreamBuffer::Skip(size_t count)
+    // {
+    //     char* pos = m_CurrentPos;
+    //     char* end = pos + count;
+    //     if ( end <= m_BufferEnd ) {
+    //         // enough space in buffer
+    //         m_CurrentPos = end;
+    //         m_LineLength += count;
+    //         return pos;
+    //     }
+    //     else {
+    //         return DoSkip(count);
+    //     }
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:880-932
+    // ```c++
+    //     size_t used = GetUsedSpace();
+    //     ...
+    //     else {
+    //         leave = m_BackLimit;
+    //         if ( used < leave )
+    //             return; // none to flush
+    //         count = used - leave;
+    //     }
+    //     if ( count != 0 ) {
+    //         if ( !m_Output.write(m_Buffer, count) ) {
+    //     ...
+    // char* COStreamBuffer::DoReserve(size_t count)
+    // {
+    //     FlushBuffer(false);
+    //     size_t usedSize = m_CurrentPos - m_Buffer;
+    //     size_t needSize = usedSize + count;
+    //     size_t bufferSize = m_BufferEnd - m_Buffer;
+    //     if ( bufferSize < needSize ) {
+    //         // realloc too small buffer
+    //         do {
+    //             bufferSize = BiggerBufferSize(bufferSize);
+    // ```
+    fn reserve(&mut self, count: usize) {
+        if self.ncbi_used + count > self.ncbi_size {
+            if self.ncbi_used >= NCBI_BACK_LIMIT {
+                self.ncbi_flushed += self.ncbi_used - NCBI_BACK_LIMIT;
+                self.ncbi_used = NCBI_BACK_LIMIT;
+            }
+            while self.ncbi_size < self.ncbi_used + count {
+                self.ncbi_size *= 2;
+            }
+        }
+        self.ncbi_used += count;
+    }
+
+    /// `COStreamBuffer::PutString` / `PutChar`: bytes without an end of line, one call of NCBI's
+    /// stream (one `Skip` of their count).
     fn put(&mut self, bytes: &[u8]) {
+        self.reserve(bytes.len());
         self.out.extend_from_slice(bytes);
         self.line_length += bytes.len();
+    }
+
+    /// Where NCBI's buffer starts in `out` (`m_Buffer`): the document's bytes before it are
+    /// with NCBI's stream.
+    fn ncbi_buffer_start(&self) -> usize {
+        self.start + (self.ncbi_flushed - self.drained)
     }
 
     /// `COStreamBuffer::PutEol(true)`: an end of line and the indentation.
@@ -145,10 +227,12 @@ impl<'b> AsnTextEncoder<'b> {
     /// }
     /// ```
     fn eol(&mut self) {
+        self.reserve(1);
         self.out.push(b'\n');
         self.line += 1;
         self.line_length = 0;
         let indent = self.indent;
+        self.reserve(indent);
         self.out.resize(self.out.len() + indent, b' ');
         self.line_length += indent;
     }
@@ -216,6 +300,7 @@ impl<'b> AsnTextEncoder<'b> {
     /// line holds `line_length` bytes or more.
     fn wrap_at_line_length(&mut self, line_length: usize) {
         if self.line_length >= line_length {
+            self.reserve(1);
             self.out.push(b'\n');
             self.line += 1;
             self.line_length = 0;
@@ -291,7 +376,9 @@ impl<'b> AsnTextEncoder<'b> {
     /// `isspace` is that of the C locale; the bytes of the stream are visible characters,
     /// spaces and ends of line.
     fn put_eol_at_word_end(&mut self, line_length: usize) {
-        let buffer = self.start;
+        // `Reserve(1)`, then the look back stops at NCBI's buffer start (`m_Buffer`).
+        self.reserve(1);
+        let buffer = self.ncbi_buffer_start();
         let mut line_pos = self.line_length;
         let mut pos = self.out.len();
         let mut good_place = false;
@@ -369,6 +456,9 @@ impl Encoder for AsnTextEncoder<'_> {
             self.stack.trace()
         );
         self.put(b"\n");
+        // `WriteSeparator`: `FlushBuffer()`, every byte to the stream.
+        self.ncbi_flushed += self.ncbi_used;
+        self.ncbi_used = 0;
     }
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:669-672
@@ -543,7 +633,10 @@ impl Encoder for AsnTextEncoder<'_> {
     /// }
     /// ```
     fn enumerated(&mut self, name: &str, _value: i32) {
-        self.put(name.as_bytes());
+        // `PutChar` of the first letter, then `PutString` of the rest.
+        let (first, rest) = name.as_bytes().split_at(1.min(name.len()));
+        self.put(first);
+        self.put(rest);
     }
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:127-131
@@ -554,8 +647,8 @@ impl Encoder for AsnTextEncoder<'_> {
     ///     WriteEnum(values,value,values.FindNameEx(value, values.IsInteger()));
     /// }
     /// ```
-    fn named_int(&mut self, name: &str, _value: i32) {
-        self.put(name.as_bytes());
+    fn named_int(&mut self, name: &str, value: i32) {
+        self.enumerated(name, value);
     }
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:140-146
@@ -628,7 +721,7 @@ impl Encoder for AsnTextEncoder<'_> {
             if !good_visible_char(byte) {
                 let stack = &self.stack;
                 bad.get_or_insert_with(|| BadChars::written(stack.trace(), value))
-                    .note(index, Position::Line(self.line));
+                    .note_after(index, Position::Line(self.line), self.ncbi_flushed);
                 byte = SUBST;
             }
             if self.line_length > STRING_WRAP {
@@ -649,7 +742,32 @@ impl Encoder for AsnTextEncoder<'_> {
     fn real(&mut self, value: f64) {
         let before = self.out.len();
         write_asn_text_double(value, self.out);
-        self.line_length += self.out.len() - before;
+        let written = self.out.len() - before;
+        self.line_length += written;
+        // NCBI's calls (objostrasn.cpp:176-226, `m_FastWriteDouble` true): one `PutString` of a
+        // constant, or `{ `, a `-`, the digits, `, 10, `, `PutInt4` of the exponent and ` }`.
+        let text = &self.out[before..];
+        let digits_end = text.windows(6).position(|w| w == b", 10, ");
+        match digits_end {
+            Some(comma)
+                if text.starts_with(b"{ ")
+                    && !text.starts_with(b"{ 0,")
+                    && !text.starts_with(b"{ -0,") =>
+            {
+                let sign = usize::from(text[2] == b'-');
+                let exponent = written - (comma + 6) - 2;
+                let digits = comma - 2 - sign;
+                self.reserve(2);
+                if sign == 1 {
+                    self.reserve(1);
+                }
+                self.reserve(digits);
+                self.reserve(6);
+                self.reserve(exponent);
+                self.reserve(2);
+            }
+            _ => self.reserve(written),
+        }
     }
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:868-895
@@ -698,7 +816,9 @@ impl Encoder for AsnTextEncoder<'_> {
         self.put(b"'");
         for &byte in value {
             self.wrap_at_line_length(OCTET_WRAP);
-            self.put(&[HEX[usize::from(byte >> 4)], HEX[usize::from(byte & 0xf)]]);
+            // Two `PutChar`s.
+            self.put(&[HEX[usize::from(byte >> 4)]]);
+            self.put(&[HEX[usize::from(byte & 0xf)]]);
         }
         self.wrap_at_line_length(OCTET_WRAP);
         self.put(b"'H");
@@ -718,23 +838,28 @@ impl Encoder for AsnTextEncoder<'_> {
     /// an end of line right before a place stops it from adding a second), and the buffer
     /// start of NCBI's stream only matters when the line is the first one.
     fn flush_to(&mut self, sink: &mut dyn std::io::Write, all: bool) -> std::io::Result<()> {
-        if all {
-            sink.write_all(&self.out[self.start..])?;
-            self.out.truncate(self.start);
-            return Ok(());
-        }
-        let Some(last_eol) = self.out[self.start..]
-            .iter()
-            .rposition(|&byte| byte == b'\n')
-        else {
-            return Ok(());
+        let through = if all {
+            self.drained + (self.out.len() - self.start)
+        } else {
+            self.ncbi_flushed
         };
-        let keep_from = self.start + last_eol;
-        if keep_from == self.start {
+        self.flush_through(sink, through)
+    }
+
+    /// Hands the document's bytes before its byte `through` to `sink` (no further than NCBI's
+    /// stream has them, `ncbi_flushed`, until the document is complete).
+    fn flush_through(
+        &mut self,
+        sink: &mut dyn std::io::Write,
+        through: usize,
+    ) -> std::io::Result<()> {
+        if through <= self.drained {
             return Ok(());
         }
-        sink.write_all(&self.out[self.start..keep_from])?;
-        self.out.drain(self.start..keep_from);
+        let end = self.start + (through - self.drained);
+        sink.write_all(&self.out[self.start..end])?;
+        self.out.drain(self.start..end);
+        self.drained = through;
         Ok(())
     }
 

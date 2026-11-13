@@ -362,11 +362,10 @@ fn the_out_file_receives_the_archive() {
 }
 
 /// In the text and binary archives a title with a byte outside `0x20..=0x7E` (0x80 and above,
-/// and 0x7F) is written as `#` by NCBI, with a diagnostic per byte (in XML NCBI writes the byte,
-/// and so does LOSAT): LOSAT refuses it (query, `-subject` and a `-db` name)
-/// before the first byte.
+/// and 0x7F) is written as `#`, with NCBI's message per byte (M4a-1b part 5; in XML NCBI writes the
+/// byte, and so does LOSAT), the query's and a `-subject` record's alike.
 #[test]
-fn non_ascii_titles_and_database_names_are_refused() {
+fn non_ascii_titles_are_written_with_their_messages() {
     let dir = std::env::temp_dir().join(format!("losat_outfmt11_title_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let plain = engine().join(input("arch_s.fna"));
@@ -391,32 +390,25 @@ fn non_ascii_titles_and_database_names_are_refused() {
             let mut full = args.clone();
             full.extend_from_slice(&["-outfmt", "11"]);
             let output = run(&[], &full, "1");
-            assert_ne!(output.status.code(), Some(0), "{role}");
-            assert!(output.stdout.is_empty(), "{role}: nothing is written");
             let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(stderr.contains("visible ASCII"), "{name} {role}: {stderr}");
-            assert!(stderr.contains("-outfmt 11"), "{name} {role}: {stderr}");
+            assert_eq!(output.status.code(), Some(0), "{name} {role}: {stderr}");
+            let written = if name == "utf8" { "caf##" } else { "ti#tle" };
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains(written),
+                "{name} {role}"
+            );
+            assert!(
+                stderr.contains("Error: (803.7) [") && stderr.contains("Bad char ["),
+                "{name} {role}: {stderr}"
+            );
         }
-        // The same title is fine in outfmt 8: only the archive refuses it.
+        // The same title in outfmt 8, whose Seq-annot holds no title: no message.
         let output = run(
             &[],
             &["-query", titled, "-subject", plain, "-outfmt", "8"],
             "1",
         );
         assert_eq!(output.status.code(), Some(0), "{name}");
-    }
-    for database in ["caf\u{e9}", "d\u{7f}b"] {
-        let output = run(
-            &[],
-            &["-query", plain, "-db", database, "-outfmt", "11"],
-            "1",
-        );
-        assert_ne!(output.status.code(), Some(0), "{database:?}");
-        assert!(output.stdout.is_empty(), "{database:?}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("-db name"),
-            "{database:?}"
-        );
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -467,24 +459,31 @@ fn a_utf8_window_masker_path_is_written_as_it_is_in_xml() {
             "threads {threads}"
         );
     }
-    // The text and binary archives cannot hold the bytes (NCBI writes `#` and a diagnostic per
-    // byte): refused before the first byte.
+    // The text and binary archives write `#` for each byte with NCBI's message (probe `wm11` of
+    // M4a-1b part 5: `Blast4-archive.request.body.queue-search.algorithm-options.E.value.string`).
     for format in ["", "bin"] {
         let output = run_in(&dir, &[("ARCHIVE_FORMAT", format)], &args, "1");
-        assert_ne!(output.status.code(), Some(0), "{format:?}");
-        assert!(output.stdout.is_empty(), "{format:?}: nothing is written");
         let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(0), "{format:?}: {stderr}");
         assert!(
-            stderr.contains("-window_masker_db path"),
+            stderr.contains(
+                "Error: (803.7) [blastn] Blast4-archive.request.body.queue-search.algorithm-options.E.value.string\nBad char [0xC3] in string at "
+            ),
             "{format:?}: {stderr}"
+        );
+        assert!(
+            output.stdout.windows(4).any(|w| w == b"wm##"),
+            "{format:?}: the path is written with '#'"
         );
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A control byte in the `-window_masker_db` path (other than TAB, LF and CR in XML) is
-/// written as `#` by NCBI with a diagnostic in every encoding: refused before the first byte,
-/// with nothing on standard output and an empty `-out` file.
+/// A control byte in the `-window_masker_db` path (other than TAB, LF and CR) in the XML archive
+/// is written as `#` by NCBI with a message that LOSAT does not write: refused before the first
+/// byte, with nothing on standard output and an empty `-out` file. In the text and binary archives
+/// the run goes on as NCBI's: no such counts file, NCBI's exception (status 255, probe `wmctl` of
+/// M4a-1b part 5).
 #[test]
 fn a_window_masker_path_with_a_control_byte_is_refused_before_the_first_byte() {
     let dir = std::env::temp_dir().join(format!("losat_outfmt11_wmctl_{}", std::process::id()));
@@ -511,6 +510,15 @@ fn a_window_masker_path_with_a_control_byte_is_refused_before_the_first_byte() {
             ];
             let output = run(&[("ARCHIVE_FORMAT", format)], &args, "1");
             let label = format!("ARCHIVE_FORMAT={format:?} {path:?}");
+            if format != "xml" {
+                assert_eq!(output.status.code(), Some(255), "{label}");
+                assert!(
+                    String::from_utf8_lossy(&output.stderr)
+                        .starts_with("Error: NCBI C++ Exception:"),
+                    "{label}"
+                );
+                continue;
+            }
             assert_ne!(output.status.code(), Some(0), "{label}");
             assert!(
                 output.stdout.is_empty(),

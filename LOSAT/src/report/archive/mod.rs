@@ -574,12 +574,24 @@ impl ArchiveHandle {
         if bad_chars.is_empty() {
             return Ok(());
         }
-        let muted = self.with_state(|state| std::mem::replace(&mut state.muted, true));
-        let written = crate::report::serial::visible::write_posts(
+        let mut text = Vec::new();
+        crate::report::serial::visible::BadChars::post_all(
             bad_chars,
             Some(self.0.request.program),
-            diagnostics,
+            &mut text,
         );
+        self.write_unsaved_text(diagnostics, &text)
+    }
+
+    /// Writes `text`, NCBI's messages that an archive posts as it is written, to `diagnostics`
+    /// without saving them (`write_unsaved_posts`).
+    pub fn write_unsaved_text(
+        &self,
+        diagnostics: &mut dyn Write,
+        text: &[u8],
+    ) -> std::io::Result<()> {
+        let muted = self.with_state(|state| std::mem::replace(&mut state.muted, true));
+        let written = diagnostics.write_all(text);
         self.with_state(|state| state.muted = muted);
         written
     }

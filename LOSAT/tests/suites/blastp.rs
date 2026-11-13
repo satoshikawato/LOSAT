@@ -13,6 +13,8 @@ mod blastp_db_wide;
 mod blastp_diag_batch;
 #[path = "../blastp_diag_defer.rs"]
 mod blastp_diag_defer;
+#[path = "../blastp_dp32.rs"]
+mod blastp_dp32;
 #[path = "../blastp_fast_fill_buckets.rs"]
 mod blastp_fast_fill_buckets;
 #[path = "../blastp_fast_scan_bf.rs"]

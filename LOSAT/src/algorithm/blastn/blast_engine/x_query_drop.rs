@@ -131,6 +131,8 @@ pub(super) struct Rule<'a> {
     pub query_range: bool,
     /// The caller takes the hits' records (`ReportOutputs::hits`, which hold the query rows).
     pub hit_records: bool,
+    /// The run writes the search strategy, whose requests hold the queries' letters.
+    pub strategy: bool,
 }
 
 impl Rule<'_> {
@@ -138,6 +140,7 @@ impl Rule<'_> {
     pub(super) fn acts(&self) -> bool {
         !self.query_range
             && !self.hit_records
+            && !self.strategy
             && !self
                 .formats
                 .iter()

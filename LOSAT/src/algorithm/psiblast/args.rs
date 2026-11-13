@@ -76,8 +76,8 @@ use crate::blastinput::value_parsers::*;
 // ASN.1 and ASCII PSSMs (`pssm.rs`); with `-in_pssm` the
 // query is a PSSM, searched with the PSSM's stages (`in_pssm.rs`, `algorithm::pssm_search`), in
 // rounds and with the PSSM files too (`in_pssm_files.rs`);
-// `-in_msa`, `-phi_pattern`, `-gap_trigger` and `-sum_stats` are refused by the parser
-// (`cli.rs` `is_unported_psiblast_arg`). The values are
+// `-in_msa` and `-phi_pattern` are refused by the parser (`cli.rs` `is_unported_psiblast_arg`).
+// The values are
 // read as NCBI's argument parser reads them (`value_parsers.rs`); the checks that NCBI makes
 // after reading them are blastp's (`BlastpArgs::check_options`, with psiblast's program).
 #[derive(Args, Debug, Clone)]
@@ -174,6 +174,24 @@ pub struct PsiblastArgs {
     // the Gumbel block (`ResolvedBlastpArgs::old_fsc`).
     #[arg(long, value_parser = nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
     pub searchsp: Option<i64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:240-245, 321-323
+    // ```c++
+    //     if (!m_SuppressSumStats) {
+    //         arg_desc.AddOptionalKey(kArgSumStats, "bool_value",
+    //                      	 	"Use sum statistics",
+    //                      	 	CArgDescriptions::eBoolean);
+    //     }
+    //     ...
+    //     if (args.Exist(kArgSumStats) && args[kArgSumStats]) {
+    //         opt.SetSumStatisticsMode(args[kArgSumStats].AsBoolean());
+    //     }
+    // ```
+    // psiblast's `CGenericSearchArgs` keeps it (psiblast_args.cpp:67; blastp suppresses it). A
+    // gapped protein search does not link HSPs by default (blast_options.c:1460-1471), so `false`
+    // is psiblast's search; `true` links the HSPs of each subject in every round
+    // (`BlastpArgs::sum_stats`, `core::link_hsps`).
+    #[arg(long, value_parser = ncbi_boolean, help = "Use sum statistics")]
+    pub sum_stats: Option<bool>,
     #[arg(long, value_parser = psiblast_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,
     #[arg(long, value_parser = psiblast_threshold, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 11, or the matrix's suggestion]")]
@@ -199,6 +217,51 @@ pub struct PsiblastArgs {
     pub max_hsps_per_subject: Option<usize>,
     #[arg(long = "qcov_hsp_perc", value_parser = psiblast_query_coverage, help = "Percent query coverage per hsp")]
     pub qcov_hsp_perc: Option<f64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3296-3301, 3338-3340
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgCullingLimit, "int_value",
+    //                      "If the query range of a hit is enveloped by that of at "
+    //                      "least this many higher-scoring hits, delete the hit",
+    //                      CArgDescriptions::eInteger);
+    //     arg_desc.SetConstraint(kArgCullingLimit,
+    //                new CArgAllowValuesGreaterThanOrEqual(kDfltArgCullingLimit));
+    //     ...
+    //     if (args[kArgCullingLimit]) {
+    //         opts.SetCullingLimit(args[kArgCullingLimit].AsInteger());
+    //     }
+    // ```
+    // psiblast's `CHspFilteringArgs` (psiblast_args.cpp:79), blastp's (`BlastpArgs::culling_limit`):
+    // every round culls, the PSSM rounds and `-in_pssm` too (`pssm_hooks::pssm_prelim`).
+    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit")]
+    pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-229, 276-286
+    // (quoted at `BlastpArgs::xdrop_ungap`)
+    // psiblast's `CGenericSearchArgs` (psiblast_args.cpp:67): blastp's X-drops in bits, which
+    // every round converts with its own Karlin-Altschul blocks (`pssm_hooks`).
+    #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = psiblast_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
+    pub xdrop_ungap: Option<f64>,
+    #[arg(long = "xdrop_gap", value_name = "float_value", value_parser = psiblast_real, help = "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]")]
+    pub xdrop_gap: Option<f64>,
+    #[arg(long = "xdrop_gap_final", value_name = "float_value", value_parser = psiblast_real, help = "X-dropoff value (in bits) for final gapped alignment [default: 25]")]
+    pub xdrop_gap_final: Option<f64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1058-1079
+    // ```c++
+    //     const double default_value = m_QueryIsProtein
+    //         ? BLAST_GAP_TRIGGER_PROT : BLAST_GAP_TRIGGER_NUCL;
+    //     arg_desc.AddDefaultKey(kArgGapTrigger, "float_value",
+    //                            "Number of bits to trigger gapping",
+    //                            CArgDescriptions::eDouble,
+    //                            NStr::DoubleToString(default_value));
+    //     ...
+    //     if (args[kArgGapTrigger]) {
+    //         opt.SetGapTrigger(args[kArgGapTrigger].AsDouble());
+    //     }
+    // ```
+    // psiblast's `CGapTriggerArgs` (psiblast_args.cpp:105; blastp has none): the cutoff of the
+    // ungapped alignments that a gapped extension starts from, in every round
+    // (`ResolvedBlastpArgs::gap_trigger_bits`).
+    #[arg(long = "gap_trigger", value_name = "float_value", default_value = "22", value_parser = psiblast_real, help = "Number of bits to trigger gapping")]
+    pub gap_trigger: f64,
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
     pub window_size: Option<i32>,
     #[arg(long, help = "Scoring matrix name [default: BLOSUM62]")]
@@ -497,13 +560,13 @@ impl PsiblastArgs {
             num_alignments: self.num_alignments,
             max_hsps_per_subject: self.max_hsps_per_subject,
             qcov_hsp_perc: self.qcov_hsp_perc,
-            // psiblast has no -culling_limit (rejected above).
-            culling_limit: None,
+            culling_limit: self.culling_limit,
             ungapped: false,
-            // psiblast's parser refuses the X-drops (`cli.rs` `is_unported_psiblast_arg`).
-            xdrop_ungap: None,
-            xdrop_gap: None,
-            xdrop_gap_final: None,
+            xdrop_ungap: self.xdrop_ungap,
+            xdrop_gap: self.xdrop_gap,
+            xdrop_gap_final: self.xdrop_gap_final,
+            gap_trigger: Some(self.gap_trigger),
+            sum_stats: self.sum_stats == Some(true),
             window_size: self.window_size,
             matrix: self.matrix,
             gap_open: self.gap_open,
@@ -516,7 +579,10 @@ impl PsiblastArgs {
             subject_loc: self.subject_loc,
             outfmt: self.outfmt,
             archive: None,
+            export_search_strategy: None,
+            strategy: None,
             app: BlastpApp::Psiblast,
+            subject_taxdb: None,
             inclusion_ethresh: Some(self.inclusion_ethresh),
             first_query_ordinal: self.first_query_ordinal,
             psiblast_pssm: Some(crate::algorithm::psiblast::pssm::PsiblastPssmOptions {
@@ -804,15 +870,53 @@ mod tests {
     }
 
     #[test]
+    fn the_x_drops_gap_trigger_culling_and_sum_stats_reach_blastps_search() {
+        let blastp = |extra: &[&str]| parse(extra).unwrap().into_blastp_args();
+        let args = blastp(&[
+            "-culling_limit",
+            "2",
+            "-xdrop_ungap",
+            "3.5",
+            "-xdrop_gap",
+            "1e9",
+            "-xdrop_gap_final",
+            "-1",
+            "-gap_trigger",
+            "-5",
+            "-sum_stats",
+            "false",
+        ])
+        .unwrap();
+        assert_eq!(args.culling_limit, Some(2));
+        assert_eq!(
+            (args.xdrop_ungap, args.xdrop_gap, args.xdrop_gap_final),
+            (Some(3.5), Some(1e9), Some(-1.0))
+        );
+        assert_eq!(args.gap_trigger, Some(-5.0));
+        // NCBI's default gap trigger of a protein search (BLAST_GAP_TRIGGER_PROT).
+        let args = blastp(&[]).unwrap();
+        assert_eq!(args.gap_trigger, Some(22.0));
+        assert_eq!(args.culling_limit, None);
+        assert!(!args.sum_stats);
+        // Sum statistics link the HSPs, in every spelling of NCBI's boolean.
+        for spelling in ["true", "T", "t", "1", "yes"] {
+            assert!(
+                blastp(&["-sum_stats", spelling]).unwrap().sum_stats,
+                "{spelling}"
+            );
+        }
+        assert!(!blastp(&["-sum_stats", "false"]).unwrap().sum_stats);
+        // NCBI's constraint of -culling_limit (0 or more).
+        assert!(parse(&["-culling_limit", "-1"]).is_err());
+    }
+
+    #[test]
     fn psiblasts_arguments_that_losat_does_not_run_are_named() {
         for (option, value) in [
             ("-in_msa", Some("x")),
             ("-msa_master_idx", Some("2")),
             ("-ignore_msa_master", None),
             ("-phi_pattern", Some("x")),
-            ("-gap_trigger", Some("22")),
-            ("-sum_stats", Some("false")),
-            ("-culling_limit", Some("1")),
             ("-html", None),
         ] {
             let mut extra = vec![option];

@@ -3,9 +3,9 @@
 // two position fields, and a bar that shows the record, on which a range can be chosen by
 // dragging. The region becomes -query_loc or -subject_loc start-stop.
 import { computed, nextTick, ref } from 'vue';
+import type { InputRole } from 'losat/domain';
 import type { SearchDraft } from '../application/draft';
 import type { DatasetRecord } from '../domain/dataset';
-import type { InputRole } from '../domain/programs';
 import { regionFromPositions, regionProblem, regionProblemFields, regionRange, swappedRegion, type RegionText } from '../domain/region';
 import { formatCount } from './format';
 import { refusedMark } from './refusal';

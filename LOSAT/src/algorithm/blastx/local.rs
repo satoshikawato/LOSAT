@@ -77,8 +77,12 @@ pub fn run_local(
     let (choices, resolutions) = read_options(&args, &requested, ids_read)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
-    let archive = archive::handle_for(&args, archive_requested)?
-        .map(|handle| outputs.with_archive_outfmt(handle));
+    let archive = archive::handle_for(
+        &args,
+        archive_requested,
+        &crate::report::archive::OptionsHandle::default(),
+    )?
+    .map(|handle| outputs.with_archive_outfmt(handle));
     match archive {
         Some(handle) => {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
@@ -414,7 +418,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     // refuse, and the batches are not checked again (`titles_may_refuse`).
     let titles_may_refuse = archive.is_some()
         && batch_size > 0
-        && (archive::batches_may_refuse(&resolved[0], &mut |deliver| {
+        && (archive::batches_may_refuse(&resolved[0], true, false, &mut |deliver| {
             reader_batches(
                 query_records,
                 lowercase,
@@ -582,7 +586,7 @@ fn write_run(
         report::write_prolog(writer, warnings, options, subjects, &shown).map_err(report_error)?;
         if let Some(document) = &mut documents[index] {
             let mut start = Vec::new();
-            document.start(&mut start);
+            document.document_mut().start(&mut start);
             writer.write_all(&start).map_err(output_error)?;
         }
         writer.flush().map_err(output_error)?;
@@ -748,12 +752,14 @@ fn write_run(
                 archive::write_blastx_archive(
                     &archive::ArchiveCall {
                         handle,
-                        options,
-                        queries,
+                        batch: archive::CallBatch {
+                            options,
+                            queries,
+                            requests: &archive::requests(subject_records),
+                            batches: results,
+                        },
                         subjects: call_subjects,
                         names,
-                        subject_records,
-                        batches: results,
                     },
                     writer,
                 )
@@ -825,6 +831,8 @@ fn write_run(
         &mut **diagnostics,
         search_error,
         &mut render,
+        // The library and LOSAT Web write no search strategy (`api::search::file_options`).
+        &mut |_, _| Ok(()),
     )
     .map_err(input_error)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:297-297
@@ -882,8 +890,12 @@ pub fn run_local_database(
     let requested = requested_formats(&args, outputs);
     let (choices, resolutions) = read_format_options(&args, &requested)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
-    let archive = archive::handle_for(&args, archive_requested)?
-        .map(|handle| outputs.with_archive_outfmt(handle));
+    let archive = archive::handle_for(
+        &args,
+        archive_requested,
+        &crate::report::archive::OptionsHandle::default(),
+    )?
+    .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     match archive {
         Some(handle) => {
@@ -942,6 +954,7 @@ fn search_database(
     .showing_gis(args.show_gis);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
+        None,
         &args.db_filter,
         database.list_taxids(),
         database.statistics_length_is_empty(),
@@ -952,7 +965,10 @@ fn search_database(
     for options in &mut resolved {
         options.query_range = query_range;
         options.filtered_empty = database.filtered_empty();
-        if options.tabular.is_some_and(|spec| spec.checks_taxdb()) {
+        if options
+            .tabular
+            .is_some_and(|spec| spec.looks_up_every_taxid())
+        {
             options.taxdb_found = database.taxdb_found();
         }
     }

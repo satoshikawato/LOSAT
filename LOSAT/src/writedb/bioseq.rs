@@ -81,6 +81,23 @@ pub struct Bioseq {
     /// definition lines are built from them (`deflines`), and `local_id` and `title` are
     /// not used.
     pub parsed: Option<ParsedIds>,
+    /// What `s_FixBioseqDeltas` meets in a record whose length NCBI counts past 32 bits
+    /// (`fasta_source::reader::SeqInst::PastSeqPos`), whose data LOSAT does not build; `None`
+    /// for every other record (and for one whose delta starts with a gap of unknown length,
+    /// which NCBI leaves without data: `seq_data` is `None`).
+    pub past_seq_pos: Option<PastSeqPos>,
+}
+
+/// See `Bioseq::past_seq_pos`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PastSeqPos {
+    /// A protein whose gaps stayed a delta: NCBI throws "Protein delta sequences are not
+    /// supported." (`CMultisourceException`).
+    ProteinDelta,
+    /// A sequence whose data NCBI builds from more letters than its length says (the
+    /// residues, a gap or a run of `X` of 4,294,967,296 letters or more): LOSAT refuses it.
+    /// `length` is the record's, counted on.
+    Refused { length: u64 },
 }
 
 /// The parts of a Bioseq of `CFastaReader` with `fRequireID | fParseRawID` that the

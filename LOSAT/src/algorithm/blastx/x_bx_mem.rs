@@ -56,13 +56,16 @@
 //!   subjects)` where that is more (the form of `LOSAT_X_BXCLUTCAP`), and a capped unit with this
 //!   table is left `ceil(threads / K)` threads also where its subjects are one task
 //!   (`ONE_TASK_SHARE` does not bound it, `one_task_bound`): the build of its table in that many
-//!   parts (`LOSAT_X_BXBUILDPAR`) is most of its work. A 10,002-base batch's 4-letter table holds
-//!   about 97 MB, and NCBI builds one table per query chunk; with a unit per thread, 50 cDNAs x
-//!   scer_pep at 8 threads held 820 MB (NCBI 241 MB). With K = 1 and the table built in 8 parts:
-//!   189 MB in 0.95 of the time; 800 cDNAs 463 MB (NCBI 1,491 MB) in 1.16 of the time (ws node 0,
-//!   3 rounds). A rule the Owner approved as a deadline fallback (2026-11-12,
-//!   `docs/decisions/SWITCH_APPROVALS.md`), until the table's memory is reduced in shape (line NP,
-//!   SC9b).
+//!   parts (`LOSAT_X_BXBUILDPAR`) is most of its work. A 10,002-base batch's 4-letter table and
+//!   its search hold about 90 MB (K = 8 less K = 1 over 7 units at 8 and 16 threads), and NCBI
+//!   builds one table per query chunk. With the table built by stripe of cells (line NP, SC9b-3;
+//!   ws node 1, 2 rounds, reports equal in every arm), 50 cDNAs x scer_pep at 8 / 16 / 32 threads:
+//!   K = 1 0.77 / 0.47 / 0.36 s and 148 / 154 / 174 MB, K = 8 0.79 / 0.41 / 0.27 s and 764 / 803 /
+//!   730 MB, NCBI 7.73 / 7.21 / 7.05 s and 237 / 234 / 230 MB; 800 cDNAs: K = 1 16.5 / 9.9 / 7.0 s
+//!   and 325 / 421 / 495 MB, K = 8 15.4 / 7.9 / 4.9 s and 1,088 / 1,207 / 1,232 MB, NCBI 48.2 /
+//!   27.8 / 33.8 s and 1,563 / 2,338 / 4,404 MB. A rule the Owner approved as a deadline fallback
+//!   (2026-11-12, `docs/decisions/SWITCH_APPROVALS.md`) and kept at K = 1 (Owner, 2026-11-13),
+//!   until the table's memory is reduced in shape (line NP, SC9b).
 //! - `LOSAT_X_BXCAPFILL[=f]` (built-in f = 4; acts only where `LOSAT_X_BXUNITCAP` caps): the capped
 //!   units keep the threads busy with few subjects too. A capped unit's subjects run as tasks of
 //!   `capped_subjects_per_task` subjects: f tasks for each of the `ceil(threads / K)` threads a unit
@@ -341,7 +344,7 @@ pub(crate) fn flow_unit_cap(
     unit_cap(threads, options, subjects, |cap| {
         super::x_subject_flow::subjects_per_task()
             .map(|most| capped_subjects_per_task(share(cap), subjects.len(), most))
-            .filter(|&k| super::x_subject_flow::fits(k, pool, false, options, subjects))
+            .filter(|&k| super::x_subject_flow::fits(k, pool, options, subjects))
             .map_or(0, |k| subjects.len().div_ceil(k))
     })
 }
@@ -695,7 +698,6 @@ pub(super) fn chunk_subjects_on_pool(
                     lookup,
                     table,
                     xdrop,
-                    false,
                     oid,
                     x_containment,
                 )?;

@@ -1,0 +1,62 @@
+# TBLASTX 2.17.0+
+# Query: qn1
+# Database: ids/txr_n
+# Fields: query id, subject id, evalue
+# 23 hits found
+qn1	gb|AAA00001.1|	2.38e-169
+qn1	gb|AAA00001.1|	1.74e-145
+qn1	gb|AAA00001.1|	5.75e-144
+qn1	gb|AAA00001.1|	5.75e-144
+qn1	gb|AAA00001.1|	7.58e-118
+qn1	gb|AAA00001.1|	7.58e-118
+qn1	gb|AAA00001.1|	2.27e-115
+qn1	gb|AAA00001.1|	2.27e-115
+qn1	gb|AAA00001.1|	1.02e-100
+qn1	gb|AAA00001.1|	1.02e-100
+qn1	gb|AAA00001.1|	1.02e-100
+Error: [tblastx] Error: Offset error at end of taxdb file.
+qn1	gb|BBB00001.1|	9.97e-135
+qn1	gb|BBB00001.1|	1.27e-112
+qn1	gb|BBB00001.1|	1.27e-112
+qn1	gb|BBB00001.1|	2.59e-110
+qn1	gb|BBB00001.1|	1.44e-92
+qn1	gb|BBB00001.1|	1.44e-92
+qn1	gb|BBB00001.1|	1.25e-80
+qn1	gb|BBB00001.1|	1.25e-80
+qn1	gb|BBB00001.1|	1.25e-80
+qn1	gb|BBB00001.1|	5.67e-58
+qn1	gb|BBB00001.1|	5.67e-58
+qn1	gb|BBB00001.1|	5.67e-58
+# TBLASTX 2.17.0+
+# Query: qn1b
+# Database: ids/txr_n
+# Fields: query id, subject id, evalue
+# 23 hits found
+qn1b	gb|AAA00001.1|	2.38e-169
+qn1b	gb|AAA00001.1|	1.74e-145
+qn1b	gb|AAA00001.1|	5.75e-144
+qn1b	gb|AAA00001.1|	5.75e-144
+qn1b	gb|AAA00001.1|	7.58e-118
+qn1b	gb|AAA00001.1|	7.58e-118
+qn1b	gb|AAA00001.1|	2.27e-115
+qn1b	gb|AAA00001.1|	2.27e-115
+qn1b	gb|AAA00001.1|	1.02e-100
+qn1b	gb|AAA00001.1|	1.02e-100
+qn1b	gb|AAA00001.1|	1.02e-100
+qn1b	gb|BBB00001.1|	9.97e-135
+qn1b	gb|BBB00001.1|	1.27e-112
+qn1b	gb|BBB00001.1|	1.27e-112
+qn1b	gb|BBB00001.1|	2.59e-110
+qn1b	gb|BBB00001.1|	1.44e-92
+qn1b	gb|BBB00001.1|	1.44e-92
+qn1b	gb|BBB00001.1|	1.25e-80
+qn1b	gb|BBB00001.1|	1.25e-80
+qn1b	gb|BBB00001.1|	1.25e-80
+qn1b	gb|BBB00001.1|	5.67e-58
+qn1b	gb|BBB00001.1|	5.67e-58
+qn1b	gb|BBB00001.1|	5.67e-58
+# TBLASTX 2.17.0+
+# Query: qn3 nohit
+# Database: ids/txr_n
+# 0 hits found
+# BLAST processed 3 queries

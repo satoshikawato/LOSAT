@@ -594,8 +594,6 @@ fn block_inputs() -> (TempFasta, PathBuf) {
 // its HSPs again from 0. Over queries that would make four blocks, the observer's ranges of
 // outfmt 0, 6 and 7 count the HSPs over the whole search and tile the outputs, and the outputs
 // are those of the call with writers alone.
-// (The decline of a call whose outputs are `OutputSink::File` sinks has no test: with it removed the
-// block search writes the same files, so no output tells the two paths apart.)
 #[test]
 fn an_observer_without_hit_records_numbers_the_hsps_over_the_whole_search() {
     let (query, subject) = block_inputs();
@@ -626,6 +624,69 @@ fn an_observer_without_hit_records_numbers_the_hsps_over_the_whole_search() {
     assert!(
         observed.outputs == plain.outputs,
         "the observer changes no output"
+    );
+}
+
+// No NCBI counterpart (NCBI has one output per run): the block search of blastp declines a call of
+// several outputs of which one is not a writer of the caller (`OutputSink::File`, `Stdout`;
+// `x_query_block_plan`). The search of all queries writes each output's whole report in turn and
+// creates its file just before; the block search opens every output once and writes them block by
+// block. Over queries that make several blocks, two outputs to one file leave the second report
+// whole (the blocks would write both through two handles of the file), and an output whose file
+// cannot be created stops the call after the first output's whole report (the blocks would stop
+// after the first block's part of it).
+#[test]
+fn several_file_outputs_are_written_one_after_the_other() {
+    let (query, subject) = block_inputs();
+    let (queries, subjects) = (queries(&query.0), subjects(&subject));
+    let args = || blastp_args(&query.0, &subject, &["-evalue", "0.001"]);
+    let whole = run_formats(&["6", "7"], false, |outputs| {
+        run_local_blastp(args(), &queries, &subjects, "", "", outputs)
+    });
+    assert!(
+        !whole.outputs[0].is_empty(),
+        "the fixture must produce hits"
+    );
+    let call = |first: &Path, second: &Path| {
+        let mut diagnostics = Vec::new();
+        let mut outputs = ReportOutputs {
+            formats: vec![
+                FormatOutput {
+                    outfmt: "6",
+                    sink: OutputSink::File(first),
+                },
+                FormatOutput {
+                    outfmt: "7",
+                    sink: OutputSink::File(second),
+                },
+            ],
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        run_local_blastp(args(), &queries, &subjects, "", "", &mut outputs)
+    };
+
+    // `TempFasta` removes the files when dropped, also when an assertion fails.
+    let shared = TempFasta(temp_path("blocks_shared_out.txt"));
+    call(&shared.0, &shared.0).expect("run_local");
+    let written = std::fs::read(&shared.0).expect("the file");
+    assert!(
+        written == whole.outputs[1],
+        "two outputs to one file leave the second report whole: {} bytes, not {}",
+        written.len(),
+        whole.outputs[1].len()
+    );
+
+    let first = TempFasta(temp_path("blocks_first_out.txt"));
+    let missing = temp_path("blocks_no_such_dir").join("out7.txt");
+    call(&first.0, &missing).expect_err("the second output's file cannot be created");
+    let written = std::fs::read(&first.0).expect("the first file");
+    assert!(
+        written == whole.outputs[0],
+        "the first report is whole when the second output fails: {} bytes, not {}",
+        written.len(),
+        whole.outputs[0].len()
     );
 }
 

@@ -2,8 +2,8 @@
 // each query grouped by subject in the engine's order, sorting and filtering with the
 // engine's values, the limits that a query may have reached, and the orientation of an
 // HSP. Nothing here computes or formats a BLAST value.
+import type { SequenceKind } from 'losat/domain';
 import type { HspTable } from './hsp-table';
-import type { SequenceKind } from './programs';
 
 export interface SubjectGroup {
   /** 0-based record index of the subject in the run's subject input. */
@@ -203,6 +203,12 @@ export interface HitLimits {
     readonly hitList?: number;
     readonly separate: boolean;
   };
+  /**
+   * -sorthits is given: outfmt 0 orders its hit list by that key (BLAST+'s description table and
+   * alignments), so the subjects whose alignments it shows are the first ones in that order, not
+   * the first ones in the engine's order ("#").
+   */
+  readonly sorted?: true;
 }
 
 /** The parts of the engine's description of an option that the limits read. */
@@ -270,6 +276,7 @@ export function hitLimits(words: readonly string[], described: readonly Describe
     ...(byAlignments ? { subjectFlag: '-num_alignments' as const } : {}),
     ...(maxHsps === undefined ? {} : { maxHsps }),
     ...(outfmt0 === undefined ? {} : { outfmt0 }),
+    ...(flagGiven(argv, '-sorthits') ? { sorted: true as const } : {}),
   };
 }
 

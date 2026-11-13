@@ -20,7 +20,7 @@
 
 use super::{
     blastn_trace, build_blastna_matrix, build_nucl_score_table, get_prelim_hitlist_size,
-    x_few_subj, x_pair_seed, x_qgroup_par, BlastnArgs, ContextKarlin, SequenceData, SubjectSource,
+    x_few_subj, x_pair_seed, x_qgroup_par, BlastnArgs, ContextKarlin, SubjectSource,
 };
 use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::algorithm::blastn::coordination::TaskConfig;
@@ -34,7 +34,6 @@ use indicatif::{ProgressBar, ProgressStyle};
 pub(super) struct SubjectEnvInputs<'a> {
     pub(super) args: &'a BlastnArgs,
     pub(super) config: &'a TaskConfig,
-    pub(super) seq_data: &'a SequenceData<'a>,
     pub(super) subjects: SubjectSource<'a>,
     /// The subjects as tasks of the pool, before LOSAT_X_BNFEWSUBJ's rule.
     pub(super) subjects_parallel: bool,
@@ -110,7 +109,6 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     let &SubjectEnvInputs {
         args,
         config,
-        seq_data,
         subjects,
         subjects_parallel,
         parallel_pool,
@@ -127,7 +125,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     // db_length = BlastSeqSrcGetTotLen(seq_src);
     // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
     // ```
-    let subject_count = seq_data.db_num_seqs as u64;
+    let subject_count = subjects.num_subjects() as u64;
     // The bar is the command line's (`BlastnArgs::progress_bar`): a search from memory
     // (`run_local`: the library API, the web entries) writes nothing to standard error.
     let progress_bar = if subjects_parallel && args.progress_bar {
@@ -274,7 +272,6 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
         use_parallel,
     } = subject_schedule(&ScheduleInputs {
         args,
-        seq_data,
         subjects,
         subjects_parallel,
         num_threads,
@@ -403,7 +400,6 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
 /// What `subject_schedule` reads.
 struct ScheduleInputs<'a> {
     args: &'a BlastnArgs,
-    seq_data: &'a SequenceData<'a>,
     subjects: SubjectSource<'a>,
     subjects_parallel: bool,
     num_threads: usize,
@@ -437,7 +433,6 @@ struct SubjectSchedule {
 fn subject_schedule(inputs: &ScheduleInputs<'_>) -> SubjectSchedule {
     let &ScheduleInputs {
         args,
-        seq_data,
         subjects,
         subjects_parallel,
         num_threads,
@@ -490,7 +485,12 @@ fn subject_schedule(inputs: &ScheduleInputs<'_>) -> SubjectSchedule {
     // TBlastThreads the_threads(GetNumberOfThreads());
     // (*thread)->Run(); (*thread)->Join(&result);
     let use_parallel = subjects_parallel && !x_serial_subjects;
-    crate::utils::threading::report_stage("blastn", "subjects", seq_data.db_num_seqs, use_parallel);
+    crate::utils::threading::report_stage(
+        "blastn",
+        "subjects",
+        subjects.num_subjects(),
+        use_parallel,
+    );
     SubjectSchedule {
         x_strips,
         x_kind,

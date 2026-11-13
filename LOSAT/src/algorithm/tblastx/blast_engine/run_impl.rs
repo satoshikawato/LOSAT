@@ -152,6 +152,18 @@ mod subject_report;
 // subject_link is).
 #[path = "subject_debug.rs"]
 mod subject_debug;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775 and :1429-1432 (the
+// translation of a subject and the test of its length).
+// The preliminary frames and the unit path of a subject (a child module, so that it uses the
+// private modules of this file).
+#[path = "subject_prep.rs"]
+mod subject_prep;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-593 and :844 (the chunk
+// loop of a subject frame and the append of the frame's list).
+// The chunks of a subject frame (a child module, so that it uses the private chunk helpers of
+// this file).
+#[path = "frame_chunks.rs"]
+mod frame_chunks;
 use x_search_timing::XStage;
 // Diagnostic (LOSAT_TIMING): the stage times of the two linking calls, two more `[TIMING]`
 // lines after those (see tblastx/x_link_timing.rs).
@@ -805,7 +817,7 @@ fn adjust_tblastx_chunk_subject_offsets(hits: &mut [UngappedHit], offset: usize)
 }
 
 /// `settings` are the NCBI application settings that LOSAT reproduces
-/// (`ncbi_environment::check_ncbi_application_settings`): the input readers use them once
+/// (`ncbi_environment::ApplicationSettings`): the input readers use them once
 /// the program reads with `fasta_reader` (steps S3-S8 of the port plan).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:67-72
@@ -853,7 +865,13 @@ pub fn run(
     // ```
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
     // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
-    // there too.
+    // there too. `GetExportSearchStrategyStream` comes first: it creates the search strategy
+    // file (`strategy::open_strategy_file`), which an error after it leaves empty.
+    let strategy_file = crate::report::archive::strategy::open_strategy_file(
+        args.export_search_strategy.as_deref(),
+        args.out.as_deref(),
+        "TBLASTX",
+    )?;
     let choice = crate::blastinput::app::parse_formatting_string(&args.outfmt)?;
     let format = crate::blastinput::app::report_format(
         &choice,
@@ -863,17 +881,39 @@ pub fn run(
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
     // before anything is read or written.
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
+    // The run's options handle, which its archive and its search strategy share.
+    let options = crate::report::archive::OptionsHandle::default();
     args.archive = super::super::archive::handle_for(
         &args,
         format == Some(crate::blastinput::app::ReportFormat::ArchiveFormat),
+        &options,
     )?
     .map(|handle| handle.with_outfmt_text(&args.outfmt));
+    // The search strategy's request, with the refusals of the archive's, and the archive's
+    // options handle.
+    args.strategy = strategy_file
+        .map(|file| {
+            crate::report::archive::strategy::StrategyExport::for_run(
+                file,
+                super::super::archive::option_inputs(&args),
+                choice.number,
+                crate::report::archive::strategy::HitlistArgs {
+                    max_target_seqs: args.max_target_seqs,
+                    num_descriptions: args.num_descriptions,
+                    num_alignments: args.num_alignments,
+                },
+                args.database_name(),
+                "TBLASTX",
+                &options,
+            )
+        })
+        .transpose()?;
     let archive = args.archive.clone();
     crate::utils::threading::validate_threads(args.num_threads)?;
     use crate::blastinput::input_files;
     // The diagnostics stream: with the archive it also saves what it writes as the messages of
     // the next archive.
-    let mut stderr = std::io::stderr();
+    let mut stderr = crate::cli::CliStderr;
     let mut archive_tee;
     let diagnostics: &mut (dyn std::io::Write + Send) = match &archive {
         Some(handle) => {
@@ -956,7 +996,9 @@ pub fn run(
     } else {
         args.outfmt.clone()
     };
-    let mut stream = cli_report_stream(out_file);
+    // The organism report's `-out` file is written as NCBI's buffer writes it.
+    let tax_report = format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
+    let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report);
     let result = {
         let mut outputs =
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
@@ -1020,7 +1062,7 @@ pub fn run(
     // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119).
     // For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
     // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if write_failed && pairwise {
+    if write_failed && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
             message: "BLAST failed to write output\n".to_string(),
@@ -1050,7 +1092,7 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = cli_report_stream(out_file);
+        let mut report = crate::cli::ReportStream::of_cli(out_file, false);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -1074,19 +1116,6 @@ fn open_out_file(args: &TblastxArgs) -> Result<Option<std::io::BufWriter<std::fs
             None => None,
         },
     )
-}
-
-/// The report stream of the command line: the `-out` file, or standard output.
-fn cli_report_stream(
-    out_file: Option<std::io::BufWriter<std::fs::File>>,
-) -> crate::cli::ReportStream {
-    crate::cli::ReportStream {
-        inner: match out_file {
-            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
-            None => crate::cli::report_standard_output(),
-        },
-        failed: false,
-    }
 }
 
 /// The subjects of `-subject` (after `-subject_loc`) as NCBI's option handlers read them, with
@@ -1148,7 +1177,7 @@ fn read_subject_set(
         &subject_path,
         subject_file,
         ReaderConfig::subject("TBLASTX", false, settings.data_loaders)
-            .with_defline(args.archive.is_some())
+            .with_defline(args.archive.is_some() || args.strategy.is_some())
             .with_parse_deflines(args.parse_deflines),
     );
     subject_source.set_id_scope(args.id_scope.clone());
@@ -1161,30 +1190,34 @@ fn read_subject_set(
     // ncbi4na code (the FASTA reader gives none: it reads `U` as `T`) or a record over `u32::MAX`
     // bases keeps every record's letters. The archive of `-subject` writes every subject's whole
     // letters (and its deflines) in every batch, which the packed stores do not keep (they hold
-    // the interval of a `-subject_loc` and no letters), so a run that writes it reads the records
-    // as the switch's `=0` side does (as TBLASTN's `x_tbn_store`). So does `-lcase_masking`: the
+    // the interval of a `-subject_loc` and no letters), so a run that writes it (or the search
+    // strategy's requests, which hold the same Bioseqs) reads the records as the switch's `=0`
+    // side does (as TBLASTN's `x_tbn_store`). So does `-lcase_masking`: the
     // scan reads the case of the letters (`x_soft_subject_calls`).
     let mut warn = |message: &[u8]| std::io::Write::write_all(&mut *diagnostics, message);
-    let (subjects, subject_placements, stores) =
-        if super::super::subjects::x_tbx_store() && args.archive.is_none() && !args.lcase_masking {
-            let (subjects, stores, placements) =
-                crate::blastinput::x_packed_subjects::x_read_packed_subjects(
-                    &mut subject_source,
-                    subject_range.as_ref(),
-                    &mut warn,
-                    args.num_threads,
-                    "TBLASTX",
-                )?;
-            crate::utils::xreach::x_reach!("LOSAT_X_TBXSTORE", stores.is_some());
-            (subjects, placements, stores)
-        } else {
-            let read_subject_records =
-                read_subjects(&mut subject_source, subject_range.as_ref(), &mut warn)?;
-            match cut_subjects(&read_subject_records, subject_range.as_ref())? {
-                Some((cut, placements)) => (cut, placements, None),
-                None => (read_subject_records, Placements::default(), None),
-            }
-        };
+    let (subjects, subject_placements, stores) = if super::super::subjects::x_tbx_store()
+        && args.archive.is_none()
+        && args.strategy.is_none()
+        && !args.lcase_masking
+    {
+        let (subjects, stores, placements) =
+            crate::blastinput::x_packed_subjects::x_read_packed_subjects(
+                &mut subject_source,
+                subject_range.as_ref(),
+                &mut warn,
+                args.num_threads,
+                "TBLASTX",
+            )?;
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXSTORE", stores.is_some());
+        (subjects, placements, stores)
+    } else {
+        let read_subject_records =
+            read_subjects(&mut subject_source, subject_range.as_ref(), &mut warn)?;
+        match cut_subjects(&read_subject_records, subject_range.as_ref())? {
+            Some((cut, placements)) => (cut, placements, None),
+            None => (read_subject_records, Placements::default(), None),
+        }
+    };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(subject_source);
     check_subjects_not_empty(&subjects)?;
@@ -1412,6 +1445,7 @@ fn open_search_database(
             .showing_gis(args.show_gis);
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
+                args.strategy.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
                 database.statistics_length_is_empty(),
@@ -1442,6 +1476,19 @@ fn open_search_database(
     }) {
         args.tabular_taxdb = Some(match database.as_ref() {
             Some(database) => database.taxdb_found(),
+            // The organism report's lookups open the run's own database.
+            None if outputs.formats.iter().any(|format| {
+                matches!(
+                    report::output_format(format.outfmt),
+                    report::TblastxOutputFormat::CustomTabular(spec)
+                        if spec.kind == crate::report::tabular::TabularKind::TaxReport
+                )
+            }) =>
+            {
+                args.subject_taxdb =
+                    crate::algorithm::common::database::SubjectTaxdb::of(settings, "TBLASTX")?;
+                args.subject_taxdb.is_some()
+            }
             None => crate::algorithm::common::database::subject_taxdb_found(settings, "TBLASTX")?,
         });
     }
@@ -1536,7 +1583,7 @@ fn search_cli(
         &args.query,
         query_file,
         ReaderConfig::query("TBLASTX", false, settings.data_loaders)
-            .with_defline(args.archive.is_some())
+            .with_defline(args.archive.is_some() || args.strategy.is_some())
             .with_parse_deflines(args.parse_deflines),
     );
     query_source.set_id_scope(args.id_scope.clone());
@@ -1618,8 +1665,12 @@ pub fn run_local(
         .iter()
         .any(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Archive);
     if archive_requested && args.archive.is_none() {
-        args.archive = super::super::archive::handle_for(&args, true)?
-            .map(|handle| outputs.with_archive_outfmt(handle));
+        args.archive = super::super::archive::handle_for(
+            &args,
+            true,
+            &crate::report::archive::OptionsHandle::default(),
+        )?
+        .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local(args, query_records, subject_records, view)
@@ -1688,8 +1739,12 @@ pub fn run_local_database(
         .formats
         .iter()
         .any(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Archive);
-    args.archive = super::super::archive::handle_for(&args, archive_requested)?
-        .map(|handle| outputs.with_archive_outfmt(handle));
+    args.archive = super::super::archive::handle_for(
+        &args,
+        archive_requested,
+        &crate::report::archive::OptionsHandle::default(),
+    )?
+    .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
     match args.archive.clone() {
         Some(handle) => {
@@ -1890,7 +1945,7 @@ fn search(
     let whole_subjects = Placements::default();
     let (stream, stores_error) = match &source {
         SubjectSource::Database(database) => {
-            let opened = if database.num_oids() == 0 {
+            let opened = if database.first_oid_read_fails() {
                 Err(crate::algorithm::common::database::PreliminaryReadError(
                     "Database memory map file error",
                 )
@@ -2012,6 +2067,10 @@ pub(crate) struct TblastxReportRun<'a> {
     /// The warnings written before each query's report (`QueryWarnings`): the reader's
     /// messages of the query's batch (before its first query) and the query's own.
     pub warnings: &'a [Vec<u8>],
+    /// The texts of the subjects that each query's report reads one by one (its batch's
+    /// prefetch off), by query, which the first format's writer places where it reads them
+    /// (`QueryWarnings::subject_read`).
+    pub query_reads: &'a [crate::report::query_warnings::QueryReads],
     /// The queries' input and ranges.
     pub ranges: &'a QueryRuns<'a>,
     /// Whether the reports end with the epilog (not when the search stops at a batch).
@@ -2154,6 +2213,49 @@ fn write_pairwise_prologs(
 // ```
 /// Writes the final hits (already filtered by e-value) to every requested format, and
 /// gives the caller the same final list (`ReportOutputs::hits`).
+/// The subjects of a call's Seq-aligns (the archive's).
+fn seqalign_subjects<'a>(
+    run: &'a TblastxReportRun<'_>,
+) -> crate::algorithm::tblastx::seqalign::SeqalignSubjects<'a> {
+    match &run.database {
+        Some(database) => crate::algorithm::tblastx::seqalign::SeqalignSubjects::Database {
+            ordinals: &database.reported.ordinals,
+            title: &database.pairwise.definition,
+            parsed: &database.reported.parsed,
+        },
+        None => crate::algorithm::tblastx::seqalign::SeqalignSubjects::Records {
+            records: run.subjects,
+            placements: run.ranges.subject_placements,
+        },
+    }
+}
+
+/// What the archive reads of a call's report data.
+fn archive_data<'a>(
+    run: &'a TblastxReportRun<'_>,
+    hits: &'a [TblastxHsp],
+    engine_counts: &'a [(u32, u32)],
+    subjects: &'a crate::algorithm::tblastx::seqalign::SeqalignSubjects<'a>,
+) -> crate::algorithm::tblastx::archive::ArchiveData<'a> {
+    crate::algorithm::tblastx::archive::ArchiveData {
+        queries: run.queries,
+        query_stats: run.query_stats,
+        searched: run.searched,
+        subject_records: match &run.database {
+            Some(_) => &[],
+            None => run.subjects,
+        },
+        hits,
+        engine: engine_counts,
+        subjects,
+        subject_letters: run.subject_letters,
+        query_placements: &run.ranges.input.placements,
+        numbers: run.numbers,
+        spans: run.archive_spans,
+        lcase_masking: run.args.lcase_masking,
+    }
+}
+
 fn write_tblastx_outputs(
     mut hits: Vec<TblastxHsp>,
     outputs: &mut ReportOutputs<'_>,
@@ -2336,13 +2438,20 @@ fn write_tblastx_outputs(
             || matches!(output_format, report::TblastxOutputFormat::Xml2(_))
             || matches!(
                 output_format,
-                report::TblastxOutputFormat::CustomTabular(spec) if spec.checks_taxdb()
+                report::TblastxOutputFormat::CustomTabular(spec) if spec.looks_up_every_taxid()
             ))
         .then(|| {
-            crate::report::query_warnings::QueryWarnings::new(
-                warning_lines.take().unwrap_or(&[]),
+            let first = warning_lines.take();
+            let warnings = crate::report::query_warnings::QueryWarnings::new(
+                first.unwrap_or(&[]),
                 &mut *outputs.diagnostics,
-            )
+            );
+            // The first format's writer also writes the texts of the subjects that the reports
+            // read one by one (`TblastxReportRun::query_reads`).
+            match first {
+                Some(_) => warnings.with_subject_reads(run.query_reads),
+                None => warnings,
+            }
         });
         // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
         // ```c
@@ -2563,38 +2672,10 @@ fn write_tblastx_outputs(
                     .archive
                     .as_ref()
                     .expect("a BLAST archive request has its handle");
-                let subjects = match &run.database {
-                    Some(database) => {
-                        crate::algorithm::tblastx::seqalign::SeqalignSubjects::Database {
-                            ordinals: &database.reported.ordinals,
-                            title: &database.pairwise.definition,
-                            parsed: &database.reported.parsed,
-                        }
-                    }
-                    None => crate::algorithm::tblastx::seqalign::SeqalignSubjects::Records {
-                        records: run.subjects,
-                        placements: run.ranges.subject_placements,
-                    },
-                };
+                let subjects = seqalign_subjects(run);
                 crate::algorithm::tblastx::archive::write_tblastx_archives(
                     handle,
-                    &crate::algorithm::tblastx::archive::ArchiveData {
-                        queries: run.queries,
-                        query_stats: run.query_stats,
-                        searched: run.searched,
-                        subject_records: match &run.database {
-                            Some(_) => &[],
-                            None => run.subjects,
-                        },
-                        hits: &hits,
-                        engine: &engine_counts,
-                        subjects: &subjects,
-                        subject_letters: run.subject_letters,
-                        query_placements: &run.ranges.input.placements,
-                        numbers: run.numbers,
-                        spans: run.archive_spans,
-                        lcase_masking: args.lcase_masking,
-                    },
+                    &archive_data(run, &hits, &engine_counts, &subjects),
                     warnings.as_mut(),
                     &mut writer,
                 )?
@@ -3015,6 +3096,7 @@ fn run_in_pool(
                 }),
         x_search_pool: parallel_pool,
         queries_written: std::cell::Cell::new(0),
+        reads: std::cell::RefCell::default(),
     };
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:176-178
     // ```c
@@ -3330,13 +3412,24 @@ fn run_batch_loop(
         .formats
         .first()
         .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
+    // Whether the first format writes the texts of the subjects that a query's report reads one
+    // by one where it reads each (`ReportFormat::places_subject_reads`).
+    let first_report = outputs
+        .formats
+        .first()
+        .and_then(crate::api::local_blast::FormatOutput::report_format);
+    let places_reads =
+        first_report.is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
+    // The pairwise report reads its subjects in the order of its `-sorthits`.
+    let pairwise = (first_report == Some(crate::blastinput::app::ReportFormat::Pairwise))
+        .then(|| args.formatting.report_sort());
     // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0 too,
     // which the prefetch does not: the rows of a batch with hits may open the taxonomy database
     // before a later batch's prefetch (`TaxdbRun::open_for_rows`).
     let plural_names = outputs.formats.first().is_some_and(|format| {
         matches!(
             report::output_format(format.outfmt),
-            report::TblastxOutputFormat::CustomTabular(spec) if spec.checks_taxdb()
+            report::TblastxOutputFormat::CustomTabular(spec) if spec.looks_up_every_taxid()
         )
     });
     // Which rows of the first format's report read the subjects' Bioseqs, which NCBI's
@@ -3353,6 +3446,17 @@ fn run_batch_loop(
                 _ => SubjectFetch::Every,
             }
         });
+    // The search strategy's requests of the batches (`-export_search_strategy`), with every
+    // `-subject` record.
+    let requests = args.strategy.as_ref().map(|_| {
+        super::super::archive::requests(
+            match &subjects.shown {
+                ShownSubjects::Fasta { records, .. } => Some(*records),
+                ShownSubjects::Database { .. } => None,
+            },
+            args.lcase_masking,
+        )
+    });
     // A batch is read from the input records (`input_start..input_end`); its searched
     // queries are `start..end` (all of them without `-query_loc`). A batch size counts the
     // whole records, and a record whose range starts past its end is skipped
@@ -3428,6 +3532,25 @@ fn run_batch_loop(
                 message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
             }
             .into());
+        }
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:178-181
+        // ```c++
+        //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+        //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+        //
+        //             SaveSearchStrategy(args, m_CmdLineArgs, queries, opts_hndl);
+        // ```
+        // The batch's search strategy request (`-export_search_strategy`): once its query factory
+        // is made, before its set-up and search, so every error of the batch from here on follows
+        // it (the file is apart from the reports). Its `EffectiveSearchSpace` option is the one
+        // the batch before left (`note_searched` below).
+        if let (Some(strategy), Some(requests)) = (args.strategy.as_ref(), requests.as_ref()) {
+            requests.write(
+                strategy,
+                start,
+                &query_records[start..end],
+                input.placements.get(start),
+            )?;
         }
         // The query splitter reads its environment variables for every batch, before the
         // queries are set up (`check_query_split_environment`); the first batch meets an
@@ -3550,7 +3673,7 @@ fn run_batch_loop(
             message.push('\n');
             return Err(crate::cli::NativeError { exit: 3, message }.into());
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:185-218 (the
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (the
         // BLAST XML report data of the first query that NCBI formats: the matrix of its
         // formatting table, found by the name as typed with `strcmp`)
         // ```c++
@@ -3563,19 +3686,13 @@ fn run_batch_loop(
         // ```
         // NCBI searches the first batch and writes nothing of it (the XML2 and JSON documents
         // only their start, `PrintProlog`); the search does not change the output.
-        if outputs
-            .formats
-            .iter()
-            .any(|format| report::output_format(format.outfmt).is_structured_xml())
-            && crate::report::blast_xml::matrix::FormattingMatrix::new(args.matrix_name()).is_none()
-        {
+        if crate::report::blast_xml::matrix::xml_formatting_fails(
+            outputs.formats.iter().map(|format| format.outfmt),
+            args.matrix_name(),
+        ) {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
             outputs.diagnostics.write_all(&batch_warnings)?;
-            return Err(crate::cli::NativeError {
-                exit: 3,
-                message: "BLAST engine error: unsupported score matrix\n".to_string(),
-            }
-            .into());
+            return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
         }
         warnings[start].extend_from_slice(&batch_warnings);
         let batch = match take(start..end) {
@@ -3584,6 +3701,17 @@ fn run_batch_loop(
                 // (LOSAT_X_TBXPIPE), in the batch order.
                 for line in &batch.x_timing {
                     eprintln!("{line}");
+                }
+                // The batch's set-up has written its `EffectiveSearchSpace` option, which the next
+                // batch's search strategy request holds.
+                if let Some(strategy) = args.strategy.as_ref() {
+                    strategy.note_searched(
+                        start..end,
+                        super::super::archive::batch_searched_space(
+                            batch.searched,
+                            &batch.queries[0],
+                        ),
+                    )?;
                 }
                 batch
             }
@@ -3793,14 +3921,32 @@ fn run_batch_loop(
                                         .collect()
                                 }
                             };
-                            query_fetches.push(if !shown.is_empty() {
+                            // The first format writes the texts where it reads each subject
+                            // (`ReportFormat::places_subject_reads`), else before the
+                            // report.
+                            query_fetches.push(if shown.is_empty() {
+                                Vec::new()
+                            } else if places_reads {
+                                let texts = super::super::database::subject_read_texts(
+                                    database,
+                                    shown,
+                                    &reports.titles.borrow(),
+                                    plural_names,
+                                    pairwise,
+                                )?;
+                                let mut reads = reports.reads.borrow_mut();
+                                let index = start + query as usize;
+                                if reads.len() <= index {
+                                    reads.resize_with(index + 1, Vec::new);
+                                }
+                                reads[index] = texts;
+                                Vec::new()
+                            } else {
                                 super::super::database::prefetch_messages(
                                     database,
                                     shown,
                                     &reports.titles.borrow(),
                                 )?
-                            } else {
-                                Vec::new()
                             });
                             if plural_names && from < to {
                                 database.open_for_tabular_rows()?;
@@ -3953,6 +4099,9 @@ struct BatchReports<'a> {
     /// The queries whose reports were written: those of the batches that the loop wrote when it
     /// took them (`report_stream`), which the next call follows.
     queries_written: std::cell::Cell<usize>,
+    /// The texts of the subjects that each query's report reads one by one (its batch's prefetch
+    /// off), by query, where the first format places them (`TblastxReportRun::query_reads`).
+    reads: std::cell::RefCell<Vec<crate::report::query_warnings::QueryReads>>,
 }
 
 impl BatchReports<'_> {
@@ -3972,6 +4121,15 @@ impl BatchReports<'_> {
         let t_output = crate::utils::xtiming::clock();
         let first = self.queries_written.get();
         let reported = first..first + done.searched.len();
+        // The texts of the reads of the reported queries (`BatchReports::reads`; a query after
+        // the last one that reads a subject has none).
+        let mut query_reads: Vec<crate::report::query_warnings::QueryReads> = {
+            let reads = self.reads.borrow();
+            reported
+                .clone()
+                .map(|query| reads.get(query).cloned().unwrap_or_default())
+                .collect()
+        };
         let queries = &self.query_runs.records[reported.clone()];
         // The queries' input and ranges, numbered from `first` as `done` (`report_stream`).
         let batch_input;
@@ -3992,6 +4150,8 @@ impl BatchReports<'_> {
         // completes and, with `-subject`, of every subject in each archive: a title it cannot
         // write is refused before the first byte, exactly where NCBI would write that Bioseq.
         // NCBI writes none of them when no batch is completed (an error archive or nothing).
+        // (The search strategy's requests check their titles where they are written,
+        // `run_batch_loop`.)
         if self.args.archive.is_some() && !reported.is_empty() {
             super::super::archive::check_titles(queries, "query")?;
             if let ShownSubjects::Fasta { records, .. } = self.subjects {
@@ -4061,6 +4221,12 @@ impl BatchReports<'_> {
                     shown,
                     &prefetch,
                 )?;
+                // The texts of the reads, made before the hits named the subjects by rank, by
+                // rank as the writers name them.
+                query_reads = crate::report::query_warnings::reads_by_rank(
+                    &query_reads,
+                    &reported_subjects.ordinals,
+                );
                 // The library's records name a database's sequences through this event.
                 if outputs.hits.is_some() {
                     if let Some(observer) = outputs.observer.as_deref_mut() {
@@ -4121,10 +4287,17 @@ impl BatchReports<'_> {
                 report::TblastxOutputFormat::CustomTabular(spec) => Some(spec),
                 _ => None,
             });
+        // A `-subject` search's organism report (outfmt 18) looks names up in the run's
+        // database.
         let tabular_names = match (&self.subjects, custom_tabular) {
             (ShownSubjects::Database { database, .. }, Some(spec)) => {
                 database.tabular_names(spec, &tabular_taxonomy)?
             }
+            (_, Some(_)) => self
+                .args
+                .subject_taxdb
+                .as_ref()
+                .map(|taxdb| taxdb.report_names("TBLASTX")),
             _ => None,
         };
         let written = write_tblastx_outputs(
@@ -4141,6 +4314,7 @@ impl BatchReports<'_> {
                 searched: &done.searched,
                 filtered_empty: self.filtered_empty,
                 warnings: &warnings[reported.clone()],
+                query_reads: &query_reads,
                 ranges,
                 epilog,
                 queries_before: first,
@@ -4162,7 +4336,9 @@ impl BatchReports<'_> {
     /// of the batches before (`done`; without the epilog), or, for the first batch, the
     /// outfmt 0 prolog of the sinks that write it with the reports (the others wrote it
     /// before the search, `write_pairwise_prologs`). Where the loop wrote the batches before
-    /// when it took them (`report_stream`), nothing remains.
+    /// when it took them (`report_stream`), nothing remains. (The failing batch's search strategy
+    /// request, when NCBI made its query factory, was written before its search,
+    /// `run_batch_loop`.)
     fn write_before_failed_batch(
         &self,
         outputs: &mut ReportOutputs<'_>,
@@ -4664,10 +4840,10 @@ fn search_query_batch<S: TbxScore>(
         // Dispatch point 2 of the seed release (per subject): the seed stage of
         // this subject holds the batch's lookup table through `x_seed_stage` and the unit path
         // through `x_units_stage`. `lookup_ref` borrows from the first and `x_pair_par_ref`
-        // from the second, so neither can be used after its stage has ended (`x_units_stage`
-        // at dispatch point 3, `x_seed_stage` at dispatch point 5). A stage that is dropped
-        // (the return just below) ends there. The run stops here if tables were already
-        // released.
+        // (`subject_prep::run_unit_path`, which takes the stage by value) from the second, so
+        // neither can be used after its stage has ended (`x_units_stage` at dispatch point 3,
+        // `x_seed_stage` at dispatch point 5). A stage that is dropped (the return just below)
+        // ends there. The run stops here if tables were already released.
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:503-505
         // ```c
@@ -4680,7 +4856,6 @@ fn search_query_batch<S: TbxScore>(
         let x_units_stage = x_seed_batch.units.enter(s_idx);
         let lookup_ref: &crate::algorithm::tblastx::lookup::BlastAaLookupTable =
             x_seed_stage.tables();
-        let x_pair_par_ref: Option<&x_pair_par::XPairPar<S>> = x_units_stage.tables().as_ref();
         // A subject after a read of the database that failed is not searched; it leaves through
         // the stages above, as a subject too short to search does.
         if x_read_failure.skips(s_idx) {
@@ -4699,55 +4874,25 @@ fn search_query_batch<S: TbxScore>(
         st.diag_offset = window;
         x_lap.lap(XStage::Enter);
 
-        // NCBI reference (translate all frames for subject sequences):
-        // ncbi-blast/c++/src/algo/blast/core/blast_util.c:1296-1308
-        // ```c
-        // for (context = 0; context < num_frames; ++context) {
-        //    int frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-        //    retval->translations[context] = (Uint1*) malloc(...);
-        //    BLAST_GetTranslation(subject_blk->sequence_start, nucl_seq_rev,
-        //       subject_blk->length, frame, retval->translations[context], gen_code_string);
-        // }
-        // ```
-        // Only the frames the preliminary stage translates are made here, in windows
-        // (`Subjects::x_preliminary_frames`). For a subject with ambiguous bases the frames of
-        // its letters (`s_frames`) are made after the seed stage, once the preliminary frames
-        // are freed, and only when HSPs are left for the re-evaluation (`x_letter_frames_later`,
-        // below); until then `s_frames` is empty and the HSP lists index the preliminary frames,
-        // which have the same number and lengths (`s_frames_listed`). For a subject without
-        // ambiguous bases both are the same frames.
-        let mut x_letter_frames_later = false;
-        // `-db`: the block of a short sequence with ambiguous bases, kept for the frames of its
-        // letters (`Subjects::x_letter_frames`).
-        let mut x_kept;
-        // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
-        // return word_length * 3 + 2;
-        // if (subject->length < min_subj_seq_length) { ... continue; }
-        // Statistics include all records, including ones too short to search: such a subject
-        // gets no frame and leaves here. A `-db` sequence's length is read with its block, in the
-        // frames' one look-up (it holds no length per sequence).
-        let s_len;
-        let (s_frames, s_frames_preliminary_owned) = {
-            let (length, frames, of_letters, kept) =
-                match subjects.x_preliminary_frames(s_idx, &db_code, (wordsize * 3 + 2) as usize) {
-                    Ok(Some(made)) => made,
-                    Ok(None) => {
-                        emit_subject_hits(st, s_idx);
-                        return;
-                    }
-                    Err(error) => {
-                        x_read_failure.fail(s_idx, error);
-                        emit_subject_hits(st, s_idx);
-                        return;
-                    }
-                };
-            s_len = length;
-            x_kept = kept;
-            if of_letters {
-                (frames, None)
-            } else {
-                x_letter_frames_later = true;
-                (Vec::new(), Some(frames))
+        // The preliminary frames of the subject (`subject_prep::subject_frames`). A subject too
+        // short to search gets none, and a subject whose read failed is not searched: either
+        // leaves here.
+        let subject_prep::SubjectFrames {
+            x_letter_frames_later,
+            mut x_kept,
+            s_len,
+            s_frames,
+            s_frames_preliminary_owned,
+        } = match subject_prep::subject_frames(subjects, s_idx, &db_code, wordsize) {
+            Ok(Some(made)) => made,
+            Ok(None) => {
+                emit_subject_hits(st, s_idx);
+                return;
+            }
+            Err(error) => {
+                x_read_failure.fail(s_idx, error);
+                emit_subject_hits(st, s_idx);
+                return;
             }
         };
         let s_frames_report = &s_frames;
@@ -4828,93 +4973,30 @@ fn search_query_batch<S: TbxScore>(
         // Reference: blast_engine.c:438 BlastHSPList* combined_hsp_list
         let mut combined_ungapped_hits: Vec<UngappedHit> = Vec::new();
 
-        // EXPERIMENT (PAIRPAR), dispatch point 2 (per subject): the unit path fills
-        // `combined_ungapped_hits` and the frame slice below becomes empty, so the reference
-        // frame loop (unchanged) runs zero times.
-        //
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805,835-844
-        // ```c
-        // for (context=first_context; context<=last_context; context++) {
-        // ...
-        //     status = s_BlastSearchEngineOneContext(program_number, query, query_info,
-        // ...
-        //     if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
-        // ```
-        // The unit path returns the list this frame loop builds (same calls, same order of
-        // the appended frame lists); see x_pair_par.rs for why it is the same list.
-        //
-        // Dispatch point 3 of the seed release (per subject): the unit path runs
-        // in two calls, the units (`run_subject_units`, the only reader of the group tables)
-        // and the merge of their lists (`merge_subject`, a function without `self`), and the
-        // units stage of this subject ends between them. What is still needed of the unit path
-        // is read before that: `x_pair_par_stub` for the assertion below. After
-        // `x_units_stage.end()` neither `x` nor `x_pair_par_ref` can be used. The batch's last
-        // units stage frees the unit path there, before the merge, where the seed stage's
-        // memory peaks.
-        //
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:561-562
-        // ```c
-        // BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-        //         hit_params->options, &hsp_list);
-        // ```
-        // NCBI converts and merges its init HSPs with the lookup table still allocated (freed
-        // with the search's internal data); that conversion reads no lookup table.
-        let x_pair_par_stub = x_pair_par_ref.is_some_and(|x| x.stub());
-        let s_frames_preliminary: &[QueryFrame] = match x_pair_par_ref {
-            Some(x) => {
-                let x_subject = x_pair_par::XSubject {
-                    s_frames_preliminary,
-                    s_frames: s_frames_listed,
-                    contexts: contexts_ref,
-                    cutoff_scores: &cutoff_scores,
-                    x_dropoff_per_context: &x_dropoff_per_context,
-                    window,
-                    wordsize,
-                    s_idx,
-                    s_len,
-                };
-                x_lap.lap(XStage::Prepare);
-                let x_units = x.run_subject_units(&x_subject, parallel_pool);
-                x_lap.lap(XStage::Units);
-                x_pipe_seed.units_done(x_units.records());
-                // EXPERIMENT (LOSAT_X_TBXBOARD): every unit of the batch taken: the next batch
-                // may build its tables (tblastx/x_batch_pipe.rs `XSeedEnd::units_taken`).
-                if let (Some((_, batch)), Some(seed_end)) = (x_board_batch.as_ref(), x_seed_end) {
-                    if batch.drained() {
-                        seed_end.units_taken();
-                    }
-                }
-                x_units_stage.end();
-                x_lap.lap(XStage::UnitsRelease);
-                let x_hits = x_pair_par::XPairPar::<S>::merge_subject(x_units, &x_subject);
-                x_lap.lap(XStage::Merge);
-                combined_ungapped_hits = x_hits;
-                &[]
-            }
-            None => {
-                x_lap.lap(XStage::Prepare);
-                x_units_stage.end();
-                x_lap.lap(XStage::UnitsRelease);
-                s_frames_preliminary
-            }
-        };
-        // EXPERIMENT (PAIRLUT): with the direct group tables the batch's `lookup` is a
-        // stub without entries, so a scan of it by the frame loop below would find no hit. The
-        // unit path above must have taken the subject (empty frame slice); anything else stops
-        // the run here.
-        //
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:503-505
-        // ```c
-        //     /* scan the subject sequence for hits */
-        //     hits = scansub(lookup_wrap, subject,
-        //                               offset_pairs, array_size, scan_range);
-        // ```
-        if x_pair_lut_is_stub {
-            assert!(
-                s_frames_preliminary.is_empty() && x_pair_par_stub,
-                "PAIRLUT: the reference frame loop would scan the stub lookup table (subject {s_idx})"
-            );
-        }
+        // EXPERIMENT (PAIRPAR), dispatch points 2 and 3 (per subject): the unit path, when the
+        // batch has one, takes the subject and fills `combined_ungapped_hits`, and the frame loop
+        // gets no frame; the units stage ends in it (`subject_prep::run_unit_path`).
+        let s_frames_preliminary: &[QueryFrame] = subject_prep::run_unit_path(
+            &subject_prep::UnitPathArgs {
+                s_frames_preliminary,
+                s_frames_listed,
+                contexts_ref,
+                cutoff_scores: &cutoff_scores,
+                x_dropoff_per_context: &x_dropoff_per_context,
+                window,
+                wordsize,
+                s_idx,
+                s_len,
+                parallel_pool,
+                x_board_batch: &x_board_batch,
+                x_seed_end,
+                x_pair_lut_is_stub,
+            },
+            x_units_stage,
+            &mut x_lap,
+            &mut x_pipe_seed,
+            &mut combined_ungapped_hits,
+        );
         // Dispatch point 4 of the seed release (per subject): the frame loop below
         // indexes the worker's diagonal table through a raw pointer with `diag_mask`. A worker
         // of a batch that the unit path takes has a table of zero cells, and the worker that ended
@@ -6318,250 +6400,46 @@ fn search_query_batch<S: TbxScore>(
                 }
             };
 
-            // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:492-505
-            // while (scan_range[1] <= scan_range[2]) { hits = scansub(...); }
-            if use_serial_scan_chunks {
-                loop {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
-                    // ```c
-                    // while (TRUE) {
-                    //    status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-                    //                                   dbseq_chunk_overlap);
-                    //    if (status == SUBJECT_SPLIT_DONE) break;
-                    //    BlastInitHitListReset(init_hitlist);
-                    //    aux_struct->WordFinder(..., init_hitlist, ...);
-                    //    BLAST_GetUngappedHSPList(..., &hsp_list);
-                    //    Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-                    //    status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, ...);
-                    // }
-                    // ```
-                    let chunk = match split_state.next_chunk(max_dbseq_len, DBSEQ_CHUNK_OVERLAP) {
-                        SubjectChunkStatus::Done => break,
-                        SubjectChunkStatus::Ok(chunk) => chunk,
-                    };
+            // The chunks of this frame, each scanned by `scan_chunk` and merged into the frame's
+            // list (`frame_chunks::search_frame_chunks`).
+            frame_chunks::search_frame_chunks(
+                &frame_chunks::ChunkDrive {
+                    use_serial_scan_chunks,
+                    use_parallel_chunks,
+                    num_threads,
+                    max_dbseq_len,
+                    #[cfg(all(
+                        feature = "parallel",
+                        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                    ))]
+                    window,
+                    #[cfg(all(
+                        feature = "parallel",
+                        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                    ))]
+                    diag_array_size,
+                    #[cfg(all(
+                        feature = "parallel",
+                        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                    ))]
+                    offset_pairs_len,
+                },
+                &mut split_state,
+                offset_pairs,
+                diag_array,
+                &mut diag_offset,
+                frame_chunks::ChunkSums {
+                    frame_ungapped_hits: &mut frame_ungapped_hits,
+                    stats_hsp_saved: &mut stats_hsp_saved,
+                    stats_hsp_filtered_by_cutoff: &mut stats_hsp_filtered_by_cutoff,
+                    stats_score_distribution: &mut stats_score_distribution,
+                },
+                &scan_chunk,
+                sc,
+            );
 
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:83-123
-                    // ```c
-                    // for (s = s_first; s <= s_last; s++) {
-                    //     ...
-                    //     offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
-                    // }
-                    // ```
-                    //
-                    // Experimental scan chunks split only the scan walk inside this
-                    // NCBI search unit. The reducer still extends against `subject`,
-                    // the full real chunk, and `Blast_ExtendWordExit` runs once below.
-                    let scan_size = tblastx_scan_chunk_size_for_run(chunk.length, num_threads);
-                    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:492-505
-                    // while (scan_range[1] <= scan_range[2]) { hits = scansub(...); }
-                    crate::utils::threading::report_stage(
-                        "tblastx",
-                        "serial_scan_chunks",
-                        chunk.length.div_ceil(scan_size),
-                        false,
-                    );
-                    let result = scan_chunk(
-                        chunk,
-                        offset_pairs,
-                        diag_array,
-                        &mut diag_offset,
-                        Some(scan_size),
-                        sc,
-                    );
-                    stats_hsp_saved += result.stats.hsp_saved;
-                    stats_hsp_filtered_by_cutoff += result.stats.hsp_filtered_by_cutoff;
-                    stats_score_distribution.extend(result.stats.score_distribution);
-                    if !result.hits.is_empty() {
-                        merge_tblastx_subject_chunk_hits(
-                            &mut frame_ungapped_hits,
-                            result.hits,
-                            result.chunk.offset,
-                            result.chunk.overlap,
-                        );
-                    }
-                }
-            } else if use_parallel_chunks {
-                #[cfg(all(
-                    feature = "parallel",
-                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                ))]
-                {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
-                    // ```c
-                    // while (TRUE) {
-                    //    status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-                    //                                   dbseq_chunk_overlap);
-                    //    if (status == SUBJECT_SPLIT_DONE) break;
-                    //    ...
-                    //    status = Blast_HSPListsMerge(...);
-                    // }
-                    // ```
-                    let mut chunks = Vec::new();
-                    loop {
-                        match split_state.next_chunk(max_dbseq_len, DBSEQ_CHUNK_OVERLAP) {
-                            SubjectChunkStatus::Done => break,
-                            SubjectChunkStatus::Ok(chunk) => chunks.push(chunk),
-                        }
-                    }
-                    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:452-584
-                    // status = s_GetNextSubjectChunk(subject, &backup, ...);
-                    crate::utils::threading::report_stage(
-                        "tblastx",
-                        "subject_chunks",
-                        chunks.len(),
-                        chunks.len() > 1,
-                    );
-                    if chunks.len() <= 1 {
-                        for chunk in chunks {
-                            let result = scan_chunk(
-                                chunk,
-                                offset_pairs,
-                                diag_array,
-                                &mut diag_offset,
-                                None,
-                                sc,
-                            );
-                            stats_hsp_saved += result.stats.hsp_saved;
-                            stats_hsp_filtered_by_cutoff += result.stats.hsp_filtered_by_cutoff;
-                            stats_score_distribution.extend(result.stats.score_distribution);
-                            if !result.hits.is_empty() {
-                                merge_tblastx_subject_chunk_hits(
-                                    &mut frame_ungapped_hits,
-                                    result.hits,
-                                    result.chunk.offset,
-                                    result.chunk.overlap,
-                                );
-                            }
-                        }
-                    } else {
-                        let mut chunk_results: Vec<TblastxChunkScanResult> =
-                            Vec::with_capacity(chunks.len());
-                        chunks
-                            .par_iter()
-                            .map_init(
-                                || {
-                                    (
-                                        vec![OffsetPair::default(); offset_pairs_len],
-                                        vec![DiagStruct::default(); diag_array_size as usize],
-                                        sc,
-                                    )
-                                },
-                                |state, chunk| {
-                                    let (offset_pairs, diag_array, sc) = state;
-                                    for diag in diag_array.iter_mut() {
-                                        *diag = DiagStruct::default();
-                                    }
-                                    let mut chunk_diag_offset = window;
-                                    scan_chunk(
-                                        *chunk,
-                                        offset_pairs,
-                                        diag_array,
-                                        &mut chunk_diag_offset,
-                                        None,
-                                        *sc,
-                                    )
-                                },
-                            )
-                            .collect_into_vec(&mut chunk_results);
-                        chunk_results.sort_by_key(|result| result.chunk.offset);
-                        for result in chunk_results {
-                            // Keep the canonical per-subject diagonal offset moving in the
-                            // same chunk order as NCBI before the next subject frame starts.
-                            // The experimental workers above use local diagonal tables; the
-                            // ordered merge below remains the NCBI `Blast_HSPListsMerge` path.
-                            // References: blast_engine.c:561-584, blast_extend.c:167-173.
-                            advance_tblastx_diag_offset(
-                                &mut diag_offset,
-                                diag_array,
-                                window,
-                                result.chunk.length,
-                            );
-                            stats_hsp_saved += result.stats.hsp_saved;
-                            stats_hsp_filtered_by_cutoff += result.stats.hsp_filtered_by_cutoff;
-                            stats_score_distribution.extend(result.stats.score_distribution);
-                            if !result.hits.is_empty() {
-                                merge_tblastx_subject_chunk_hits(
-                                    &mut frame_ungapped_hits,
-                                    result.hits,
-                                    result.chunk.offset,
-                                    result.chunk.overlap,
-                                );
-                            }
-                        }
-                    }
-                }
-                #[cfg(any(
-                    not(feature = "parallel"),
-                    all(target_arch = "wasm32", not(feature = "wasm-threads"))
-                ))]
-                {
-                    unreachable!("parallel chunk mode is disabled for this target");
-                }
-            } else {
-                loop {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
-                    // ```c
-                    // while (TRUE) {
-                    //    status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-                    //                                   dbseq_chunk_overlap);
-                    //    if (status == SUBJECT_SPLIT_DONE) break;
-                    //    BlastInitHitListReset(init_hitlist);
-                    //    aux_struct->WordFinder(..., init_hitlist, ...);
-                    //    BLAST_GetUngappedHSPList(..., &hsp_list);
-                    //    Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-                    //    status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, ...);
-                    // }
-                    // ```
-                    let chunk = match split_state.next_chunk(max_dbseq_len, DBSEQ_CHUNK_OVERLAP) {
-                        SubjectChunkStatus::Done => break,
-                        SubjectChunkStatus::Ok(chunk) => chunk,
-                    };
-
-                    // NCBI: BlastInitHitListReset(init_hitlist) - reset per chunk.
-                    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-                    let result =
-                        scan_chunk(chunk, offset_pairs, diag_array, &mut diag_offset, None, sc);
-                    stats_hsp_saved += result.stats.hsp_saved;
-                    stats_hsp_filtered_by_cutoff += result.stats.hsp_filtered_by_cutoff;
-                    stats_score_distribution.extend(result.stats.score_distribution);
-                    if !result.hits.is_empty() {
-                        merge_tblastx_subject_chunk_hits(
-                            &mut frame_ungapped_hits,
-                            result.hits,
-                            result.chunk.offset,
-                            result.chunk.overlap,
-                        );
-                    }
-                }
-            }
-
-            if !frame_ungapped_hits.is_empty() {
-                // NCBI: Blast_HSPListAppend merges per-frame subject HSP lists
-                // into the combined translated-subject list, then sorts the
-                // combined list by score through s_BlastHSPListsCombineByScore.
-                //
-                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:804-845
-                // ```c
-                // for (context=first_context; context<=last_context; context++) {
-                //     subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-                //     ...
-                //     Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
-                // }
-                // ```
-                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2758-2766
-                // ```c
-                // for (index=combined_hsp_list->hspcnt, index1=0;
-                //      index1<hsp_list->hspcnt; index1++) {
-                //    combined_hsp_list->hsp_array[index++] = hsp_list->hsp_array[index1];
-                // }
-                // combined_hsp_list->hspcnt = new_hspcnt;
-                // Blast_HSPListSortByScore(combined_hsp_list);
-                // ```
-                combined_ungapped_hits.extend(frame_ungapped_hits);
-                if !ungapped_hits_is_sorted_by_score_ncbi(&combined_ungapped_hits) {
-                    sort_ungapped_hits_by_score_ncbi(&mut combined_ungapped_hits);
-                }
-            }
+            // The frame's list joins the subject's (`frame_chunks::append_frame_hits`).
+            frame_chunks::append_frame_hits(&mut combined_ungapped_hits, frame_ungapped_hits);
         } // End of subject frame loop
         x_lap.lap(XStage::FrameLoop);
 

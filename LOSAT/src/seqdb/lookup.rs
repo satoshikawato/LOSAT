@@ -116,13 +116,10 @@ fn opened<T>(
 }
 
 impl IdLookup<'_> {
-    /// `x_CheckOrFindOID(oid) && oid == oid0`: an OID of the database that its list, if any,
-    /// includes.
+    /// `x_CheckOrFindOID(oid) && oid == oid0` once NCBI's OID list is set up (the search's
+    /// lookups of its reported Seq-ids, after the search): an OID the database includes.
     fn visible(&self, oid: u32) -> bool {
-        match &self.db.filter {
-            Some(filter) => filter.contains(oid),
-            None => oid < self.db.volume_starts[self.db.volumes.len()],
-        }
+        self.db.includes_oid(oid)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1237-1246
@@ -155,12 +152,16 @@ impl IdLookup<'_> {
     // ```
     /// Every OID of the key `acc` in a version 5 database: the LMDB files in the database's
     /// order, inside a file the order of LMDB's duplicates (`memcmp` of the 4 little-endian
-    /// bytes).
+    /// bytes). NCBI sets its OID list up first, so its check keeps the included OIDs.
     pub fn accession_to_oids(&self, acc: &[u8]) -> Result<Vec<u32>, SeqDbError> {
+        self.db.set_up_oid_list();
         let mut oids = Vec::new();
         for entry in &self.entries {
             for oid in entry.oids(acc)? {
-                if let Some(oid) = entry.database_oid(oid).filter(|&oid| self.visible(oid)) {
+                if let Some(oid) = entry
+                    .database_oid(oid)
+                    .filter(|&oid| self.db.check_oid(oid))
+                {
                     oids.push(oid);
                 }
             }
@@ -190,9 +191,10 @@ impl IdLookup<'_> {
     //     }
     // ```
     /// One OID for each of `accs` in a version 5 database (`None`: not found), the first
-    /// duplicate of the key in the last LMDB file that has it. On an error `oids` holds what
-    /// NCBI's vector holds at its exception: the answers of the LMDB files before the one that
-    /// failed, unfiltered.
+    /// duplicate of the key in the last LMDB file that has it, kept when NCBI's check keeps it
+    /// (`SeqDb::check_oid`: NCBI does not set its OID list up first, so the check of the first
+    /// OID found can be made before). On an error `oids` holds what NCBI's vector holds at its
+    /// exception: the answers of the LMDB files before the one that failed, unfiltered.
     pub fn accessions_to_oids(
         &self,
         accs: &[Vec<u8>],
@@ -200,7 +202,7 @@ impl IdLookup<'_> {
     ) -> Result<(), SeqDbError> {
         entries_accessions_to_oids(&self.entries, accs, oids)?;
         for slot in oids.iter_mut() {
-            if slot.is_some_and(|oid| !self.visible(oid)) {
+            if slot.is_some_and(|oid| !self.db.check_oid(oid)) {
                 *slot = None;
             }
         }
@@ -268,16 +270,20 @@ impl IdLookup<'_> {
     /// [`ID_OVERFLOWS`], after the lookup in the first volume.
     ///
     /// `gnl|BL_ORD_ID|n` is the one sequence `n` of the whole database (line BDC DECISIONS 12):
-    /// NCBI adds `n` to the start of every volume.
+    /// NCBI adds `n` to the start of every volume. NCBI sets its OID list up first, so its
+    /// check keeps the included OIDs.
     pub fn accession_to_oids_v4(
         &self,
         acc: &[u8],
         simplified: &SimplifiedAccession,
     ) -> Result<Option<Vec<u32>>, SeqDbError> {
+        self.db.set_up_oid_list();
         if simplified.id_type == SeqDbIdType::Oid {
             let oid = u32::try_from(simplified.num_id).ok();
             return Ok(Some(
-                oid.filter(|&oid| self.visible(oid)).into_iter().collect(),
+                oid.filter(|&oid| self.db.check_oid(oid))
+                    .into_iter()
+                    .collect(),
             ));
         }
         let mut oids = Vec::new();
@@ -291,7 +297,7 @@ impl IdLookup<'_> {
             for oid in vol_oids {
                 let Some(oid) = u32::try_from(i64::from(oid) + vol_start)
                     .ok()
-                    .filter(|&oid| self.visible(oid))
+                    .filter(|&oid| self.db.check_oid(oid))
                 else {
                     continue;
                 };
@@ -540,21 +546,56 @@ impl IdLookup<'_> {
         Ok(searched.then_some(None))
     }
 
-    /// The OID of the GI `gi`: the first volume whose file has it.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1190-1206
+    // ```c++
+    // bool CSeqDBImpl::GiToOidwFilterCheck(TGi gi, int & oid)
+    // {
+    //     CHECK_MARKER();
+    //     CSeqDBLockHold locked(m_Atlas);
+    //
+    //     for(int i = 0; i < m_VolSet.GetNumVols(); i++) {
+    //     	oid =-1;
+    //         if (m_VolSet.GetVol(i)->GiToOid(gi, oid, locked)) {
+    //            	oid += m_VolSet.GetVolOIDStart(i);
+    //             int oid0 = oid;
+    //             if (CheckOrFindOID(oid) && (oid==oid0)) {
+    //             	return true;
+    //             }
+    //         }
+    //     }
+    //     return false;
+    // }
+    // ```
+    // NCBI's callers in blastdbcmd (`x_GetOids`, `x_ProcessBatchEntry_NoDup`) read `oid`, not
+    // the answer: where the last volume holds the GI and the check does not keep its OID, `oid`
+    // is where `CheckOrFindOID` left it (the next OID of the list, the range's start, or the
+    // OID itself past the range's end), which blastdbcmd writes (cases A183-A190 of
+    // tests/blastdbcmd_alias_keys.rs). A volume without the GI leaves -1 (`x_IdentToOid`).
+    /// `GiToOidwFilterCheck(gi, oid)`: NCBI's `oid` when it is not negative. The OID of the GI in
+    /// the first volume whose file has it and whose OID NCBI's check keeps (`SeqDb::check_or_find_oid`;
+    /// NCBI does not set its OID list up first), else, when the last volume has the GI, the OID that
+    /// the check moved to.
     pub fn gi_to_oid(&self, gi: i64) -> Result<Option<u32>, SeqDbError> {
+        let mut left = None;
         for at in 0..self.db.volumes.len() {
+            left = None;
             let Some(isam) = self.gi_isam(at)? else {
                 continue;
             };
             let Some(oid) = isam.id_to_oid(gi)? else {
                 continue;
             };
-            let oid = i64::from(oid) + i64::from(self.db.volume_starts[at]);
-            if let Some(oid) = u32::try_from(oid).ok().filter(|&oid| self.visible(oid)) {
+            let Ok(found) = u32::try_from(i64::from(oid) + i64::from(self.db.volume_starts[at]))
+            else {
+                continue;
+            };
+            let mut oid = found;
+            if self.db.check_or_find_oid(&mut oid) && oid == found {
                 return Ok(Some(oid));
             }
+            left = Some(oid);
         }
-        Ok(None)
+        Ok(left)
     }
 }
 

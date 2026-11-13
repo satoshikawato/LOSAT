@@ -119,5 +119,6 @@ fn _pylosat(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(search::blastdbcmd, module)?)?;
     module.add_function(wrap_pyfunction!(search::dustmasker, module)?)?;
     module.add_function(wrap_pyfunction!(search::segmasker, module)?)?;
+    module.add_function(wrap_pyfunction!(search::convert2blastmask, module)?)?;
     Ok(())
 }

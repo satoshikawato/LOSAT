@@ -32,6 +32,363 @@ pub struct QueryWarnings<'a> {
     before: Before<'a>,
     /// Standard error (the CLI) or the caller's diagnostics.
     pub sink: &'a mut (dyn Write + Send),
+    /// The texts of the subjects that the reports read one by one (`with_subject_reads`), and
+    /// how many of them are written.
+    reads: Option<ReadCursor<'a>>,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+// ```c++
+//        		const CBioseq_Handle& subject_bh =
+//                 scope.GetBioseqHandle(align.GetSeq_id(1));
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1587-1589
+// ```c++
+//     try{
+//         const CBioseq_Handle& handle = m_ScopeRef->GetBioseqHandle(*id);
+//         x_FillDeflineAndId(handle, *id, use_this_seqid, sdl, blast_rank);
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1947-1955
+// ```c++
+//             CRef<CAlnVec> avRef = x_GetAlnVecForSeqalign(**iter);
+//     ...
+//                 try{
+//                     const CBioseq_Handle& handle = avRef->GetBioseqHandle(1);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:374-375
+// ```c++
+//     try {
+//         const CBioseq_Handle& kSubjBioseqHandle = scope->GetBioseqHandle(kSeqId);
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1465-1466
+// ```c++
+//     list< CRef<CSeqdesc> > tax =
+//         x_GetTaxonomy(oid, target_gi, target_seq_id);
+// ```
+/// The taxonomy texts of the subjects that the queries' reports read one by one, where
+/// `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off: NCBI's formatter loads a subject when a
+/// tabular row reads it, at its description line or, for one the description table does not
+/// show, at its alignment's heading, and at its BLAST XML `Hit`; the first load of a blob looks
+/// its taxids up (`x_GetTaxonomy`), and the posts of the lookup flush the report written before
+/// it. By query index, the subjects whose first read writes a text, in the order the report
+/// reads them, each with that text (made by the program's model of the reads,
+/// `algorithm::common::database::subject_read_texts`).
+#[derive(Debug, Default)]
+pub struct SubjectReads {
+    queries: Vec<QueryReads>,
+}
+
+/// The texts of one query's reads (`SubjectReads`): `(subject, text)` in the order of the
+/// reads, a subject named as the report's writer names it (its index in the hit lists).
+pub type QueryReads = Vec<(u32, Vec<u8>)>;
+
+impl SubjectReads {
+    /// Sets the texts of query `query`'s reads.
+    pub fn set(&mut self, query: usize, reads: QueryReads) {
+        if reads.is_empty() {
+            return;
+        }
+        if self.queries.len() <= query {
+            self.queries.resize_with(query + 1, Vec::new);
+        }
+        self.queries[query] = reads;
+    }
+
+    /// The texts of every query's reads, by query index (`QueryWarnings::with_subject_reads`).
+    pub fn queries(&self) -> &[QueryReads] {
+        &self.queries
+    }
+}
+
+/// `reads` (by query) with each subject named by its rank in `ordinals` (the reported subjects'
+/// ordinal ids, increasing): the name of the report writers of the programs that make the texts
+/// before their hit lists name the subjects by rank (BLASTN, TBLASTX). A subject that is not
+/// reported keeps no text.
+pub fn reads_by_rank(reads: &[QueryReads], ordinals: &[u32]) -> Vec<QueryReads> {
+    reads
+        .iter()
+        .map(|query| {
+            query
+                .iter()
+                .filter_map(|(ordinal, text)| {
+                    let rank = ordinals.binary_search(ordinal).ok()?;
+                    Some((rank as u32, text.clone()))
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// The texts of query `query`'s reads in `reads`, in order.
+fn reads_of(reads: &[QueryReads], query: usize) -> &[(u32, Vec<u8>)] {
+    reads.get(query).map_or(&[], Vec::as_slice)
+}
+
+/// Every text of the reads of the queries `queries` in `reads`, in order.
+pub fn read_texts(reads: &[QueryReads], queries: std::ops::Range<usize>) -> Vec<u8> {
+    queries
+        .flat_map(|query| reads_of(reads, query))
+        .flat_map(|(_, text)| text.iter().copied())
+        .collect()
+}
+
+/// A report writer's call where NCBI reads a subject (`QueryWarnings::subject_read`): the
+/// subject's index and the writer, flushed before a text is written or, for a writer that
+/// formats into a buffer, marked at the buffer's length.
+pub type SubjectReadHook<'r, W> = &'r mut dyn FnMut(u32, &mut W) -> io::Result<()>;
+
+/// A [`SubjectReadHook`] that writes nothing (the tests of the writers).
+#[cfg(test)]
+pub fn no_subject_reads<W>(_subject: u32, _writer: &mut W) -> io::Result<()> {
+    Ok(())
+}
+
+/// The writing of the texts of `SubjectReads` where the reports read the subjects: every text
+/// of the queries below `query` is written, and the first `next` of query `query`'s.
+pub struct ReadCursor<'a> {
+    reads: &'a [QueryReads],
+    query: usize,
+    next: usize,
+}
+
+impl<'a> ReadCursor<'a> {
+    /// The cursor of `reads` (by query index), or `None` where no read writes a text.
+    pub fn new(reads: &'a [QueryReads]) -> Option<Self> {
+        reads
+            .iter()
+            .any(|query| !query.is_empty())
+            .then_some(ReadCursor {
+                reads,
+                query: 0,
+                next: 0,
+            })
+    }
+
+    /// Whether the report of query `query` reads a subject that writes a text.
+    pub fn has_texts(&self, query: usize) -> bool {
+        !reads_of(self.reads, query).is_empty()
+    }
+
+    /// The report of query `query` reads subject `subject` here (a tabular row that reads it,
+    /// its description line, its alignment's heading, its BLAST XML `Hit`): the texts of the
+    /// query's reads up to its first are written to `sink`, after the report written so far
+    /// (`report`) is flushed, unless they are written already. A subject whose reads write no
+    /// text, or that the query's report read before, writes nothing.
+    pub fn subject_read(
+        &mut self,
+        query: usize,
+        subject: u32,
+        report: &mut dyn Write,
+        sink: &mut dyn Write,
+    ) -> io::Result<()> {
+        if query < self.query {
+            return Ok(());
+        }
+        let from = if query == self.query { self.next } else { 0 };
+        let reads = reads_of(self.reads, query);
+        let Some(found) = reads
+            .get(from..)
+            .and_then(|rest| rest.iter().position(|(read, _)| *read == subject))
+        else {
+            return Ok(());
+        };
+        let mut text = self.unwritten_before(query);
+        for (_, read) in &reads[from..=from + found] {
+            text.extend_from_slice(read);
+        }
+        self.next = from + found + 1;
+        write_after(report, sink, &text)
+    }
+
+    /// Writes to `sink` the texts of the reads of the queries below `query` that their reports
+    /// did not place (`subject_read`), after the report written so far (`report`) is flushed:
+    /// they come after those reports.
+    pub fn before_query(
+        &mut self,
+        query: usize,
+        report: &mut dyn Write,
+        sink: &mut dyn Write,
+    ) -> io::Result<()> {
+        let text = self.unwritten_before(query);
+        write_after(report, sink, &text)
+    }
+
+    /// The texts not written yet of every query (a report that ends without placing them).
+    fn unwritten(&mut self) -> Vec<u8> {
+        let queries = self.reads.len().max(self.query + 1);
+        self.unwritten_before(queries)
+    }
+
+    /// The texts not written yet of the queries below `query`, which count as written after
+    /// this; the cursor moves to the start of `query`'s.
+    fn unwritten_before(&mut self, query: usize) -> Vec<u8> {
+        if query <= self.query {
+            return Vec::new();
+        }
+        let mut text = Vec::new();
+        for (_, read) in reads_of(self.reads, self.query).iter().skip(self.next) {
+            text.extend_from_slice(read);
+        }
+        text.extend(read_texts(self.reads, self.query + 1..query));
+        (self.query, self.next) = (query, 0);
+        text
+    }
+}
+
+/// Writes the part `report` of query `query`'s report, formatted into a buffer, with the texts of
+/// the subjects it reads one by one at its `reads` (the buffer's length where the serial writer
+/// reads each, and the subject; `QueryWarnings::subject_read`): `write_hit_posts` of those marks
+/// alone (no texts of the writer's own).
+pub fn write_marked(
+    report: &[u8],
+    reads: &[(usize, u32)],
+    query: usize,
+    writer: &mut dyn Write,
+    warnings: Option<&mut QueryWarnings<'_>>,
+) -> io::Result<()> {
+    let posts = HitPosts {
+        every: true,
+        marks: reads.to_vec(),
+        ends: vec![0; reads.len()],
+        texts: Vec::new(),
+    };
+    write_hit_posts(report, &posts, query, writer, warnings)
+}
+
+/// The places in a query's report, formatted into a buffer, where NCBI loads a subject and posts
+/// texts: a structured report's `Hit` (BLAST XML, XML2, JSON; `HitSink::position`) or a tabular
+/// row's or pairwise line's read (`write_marked`). At each, the text of the subject's read in the
+/// program's model (`ReadCursor::subject_read`) and the texts that the report's writer makes there
+/// (the taxonomy database's messages of the XML2 and JSON documents' `Hit`s, `TaxdbPrinter`).
+/// NCBI posts them on `cerr`, which flushes the report written before them (`QueryWarnings`);
+/// `write` writes them so.
+#[derive(Debug, Default)]
+pub struct HitPosts {
+    /// Whether every `Hit` is marked (the model's reads of the query write texts); else only one
+    /// whose writer makes a text.
+    every: bool,
+    /// By marked `Hit`: its place in the query's output and its subject.
+    marks: Vec<(usize, u32)>,
+    /// By marked `Hit`: the end of its texts in `texts`.
+    ends: Vec<usize>,
+    texts: Vec<u8>,
+}
+
+impl HitPosts {
+    /// The posts of a query's `Hit`s; `every` where the model's reads of the query write texts
+    /// (`QueryWarnings::reads_with_texts`).
+    pub fn new(every: bool) -> Self {
+        Self {
+            every,
+            ..Self::default()
+        }
+    }
+
+    /// The `Hit` of subject `subject` loads it at `at` (`HitSink::position`); `post` writes the
+    /// texts that the writer makes there.
+    pub fn hit(
+        &mut self,
+        at: usize,
+        subject: u32,
+        post: impl FnOnce(&mut Vec<u8>) -> io::Result<()>,
+    ) -> io::Result<()> {
+        let from = self.texts.len();
+        post(&mut self.texts)?;
+        if self.every || self.texts.len() > from {
+            self.marks.push((at, subject));
+            self.ends.push(self.texts.len());
+        }
+        Ok(())
+    }
+
+    /// Writes `report`, the query's output, to `writer`, and at each marked `Hit`, after the
+    /// bytes before it: `read` of its subject (the model's text, to `sink`; `writer` is the
+    /// report) and the texts the writer made there, to `sink` after `writer` is flushed.
+    pub fn write(
+        &self,
+        report: &[u8],
+        writer: &mut dyn Write,
+        sink: &mut dyn Write,
+        mut read: impl FnMut(u32, &mut dyn Write, &mut dyn Write) -> io::Result<()>,
+    ) -> io::Result<()> {
+        let (mut index, mut from) = (0, 0);
+        write_at_marks(report, &self.marks, writer, |subject, writer| {
+            read(subject, writer, &mut *sink)?;
+            let end = self.ends[index];
+            index += 1;
+            let texts = &self.texts[from..end];
+            from = end;
+            write_after(writer, &mut *sink, texts)
+        })
+    }
+}
+
+/// Writes query `query`'s structured report `report` with the posts of its `Hit`s
+/// (`HitPosts::write`): the model's reads through the warnings' cursor
+/// (`QueryWarnings::subject_read`) and the writer's texts, both to the warnings' sink. Without
+/// warnings, the report alone.
+pub fn write_hit_posts(
+    report: &[u8],
+    hits: &HitPosts,
+    query: usize,
+    writer: &mut dyn Write,
+    warnings: Option<&mut QueryWarnings<'_>>,
+) -> io::Result<()> {
+    let Some(warnings) = warnings else {
+        return writer.write_all(report);
+    };
+    let QueryWarnings { reads, sink, .. } = warnings;
+    hits.write(
+        report,
+        writer,
+        &mut **sink,
+        |subject, writer, sink| match reads.as_mut() {
+            Some(cursor) => cursor.subject_read(query, subject, writer, sink),
+            None => Ok(()),
+        },
+    )
+}
+
+/// Writes `report`, a buffer, to `writer` with `read` of each subject at its place `marks` (the
+/// buffer's length where the serial writer reads it, and the subject), after the bytes before it.
+pub fn write_at_marks(
+    report: &[u8],
+    marks: &[(usize, u32)],
+    writer: &mut dyn Write,
+    mut read: impl FnMut(u32, &mut dyn Write) -> io::Result<()>,
+) -> io::Result<()> {
+    let mut written = 0;
+    for &(at, subject) in marks {
+        writer.write_all(&report[written..at])?;
+        written = at;
+        read(subject, writer)?;
+    }
+    writer.write_all(&report[written..])
+}
+
+/// Writes `text` to `sink` after `report` is flushed (nothing for an empty text).
+fn write_after(report: &mut dyn Write, sink: &mut dyn Write, text: &[u8]) -> io::Result<()> {
+    if text.is_empty() {
+        return Ok(());
+    }
+    report.flush()?;
+    sink.write_all(text)?;
+    sink.flush()
+}
+
+impl Drop for QueryWarnings<'_> {
+    /// The texts of the reads that the report did not place (a writer that stopped early, or a
+    /// read no writer marks) are written when the warnings end, so that standard error keeps
+    /// every text the reports' reads write.
+    fn drop(&mut self) {
+        if let Some(cursor) = self.reads.as_mut() {
+            let text = cursor.unwritten();
+            if !text.is_empty() {
+                let _ = self.sink.write_all(&text);
+                let _ = self.sink.flush();
+            }
+        }
+    }
 }
 
 /// What `QueryWarnings` writes before the report of each query, by query index.
@@ -52,6 +409,45 @@ impl<'a> QueryWarnings<'a> {
         Self {
             before: Before::Lines(before),
             sink,
+            reads: None,
+        }
+    }
+
+    /// These warnings with the texts of the subjects that the reports read one by one
+    /// (`SubjectReads`), which the report's writer places where it reads each subject
+    /// (`subject_read`). A text that the writer does not place is written after the query's
+    /// report, before the next query's warnings (`before_query`, `after_last_query`).
+    pub fn with_subject_reads(mut self, reads: &'a [QueryReads]) -> Self {
+        self.reads = ReadCursor::new(reads);
+        self
+    }
+
+    /// Whether the reports of query `query` read a subject that writes a text (a writer that
+    /// formats into buffers marks its reads only then, `subject_read`).
+    pub fn reads_with_texts(&self, query: usize) -> bool {
+        self.reads
+            .as_ref()
+            .is_some_and(|cursor| cursor.has_texts(query))
+    }
+
+    /// The texts of the subjects' reads (`with_subject_reads`; `None` without a read that writes
+    /// one) and the sink, apart: a writer that writes texts of its own to the sink between the
+    /// reads places them with the cursor (`tax_report::write_report`).
+    pub fn reads_and_sink(&mut self) -> (Option<&mut ReadCursor<'a>>, &mut (dyn Write + Send)) {
+        (self.reads.as_mut(), &mut *self.sink)
+    }
+
+    /// The report of query `query` reads subject `subject` here (`ReadCursor::subject_read`),
+    /// after the report written so far (`report`).
+    pub fn subject_read(
+        &mut self,
+        query: usize,
+        subject: u32,
+        report: &mut dyn Write,
+    ) -> io::Result<()> {
+        match self.reads.as_mut() {
+            Some(cursor) => cursor.subject_read(query, subject, report, &mut *self.sink),
+            None => Ok(()),
         }
     }
 
@@ -68,6 +464,7 @@ impl<'a> QueryWarnings<'a> {
                 archive,
             },
             sink,
+            reads: None,
         }
     }
 
@@ -91,6 +488,11 @@ impl<'a> QueryWarnings<'a> {
     /// Writes the warnings of query `index`, after the report written so far (`report`)
     /// is flushed; a failed flush returns before them.
     pub fn before_query(&mut self, index: usize, report: &mut dyn Write) -> io::Result<()> {
+        // The texts of the reads that the reports of the queries before it did not place
+        // (`subject_read`) come after those reports.
+        if let Some(cursor) = self.reads.as_mut() {
+            cursor.before_query(index, report, &mut *self.sink)?;
+        }
         match &self.before {
             Before::Lines(before) => match before.get(index) {
                 Some(warnings) if !warnings.is_empty() => {
@@ -533,5 +935,103 @@ mod tests {
                 "{defline:?}"
             );
         }
+    }
+
+    /// The report (`R:`) and the warnings' texts in the order written.
+    #[derive(Clone, Default)]
+    struct Log(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl Write for Log {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_texts_of_the_reads_follow_the_report_up_to_each_read() {
+        let reads: Vec<QueryReads> = vec![
+            vec![
+                (5, b"A\n".to_vec()),
+                (7, b"B\n".to_vec()),
+                (8, b"C\n".to_vec()),
+            ],
+            vec![(3, b"D\n".to_vec())],
+            vec![(4, b"E\n".to_vec())],
+        ];
+        let before = vec![b"W0\n".to_vec(), b"W1\n".to_vec(), b"W2\n".to_vec()];
+        let log = Log::default();
+        let (mut report, mut sink) = (log.clone(), log.clone());
+        let mut warnings = QueryWarnings::new(&before, &mut sink).with_subject_reads(&reads);
+        assert!(warnings.reads_with_texts(0) && !warnings.reads_with_texts(3));
+        warnings.before_query(0, &mut report).unwrap();
+        // A subject without a text writes nothing; a read writes the texts up to its own.
+        warnings.subject_read(0, 9, &mut report).unwrap();
+        report.write_all(b"R1\n").unwrap();
+        warnings.subject_read(0, 7, &mut report).unwrap();
+        report.write_all(b"R2\n").unwrap();
+        // Read before: nothing again.
+        warnings.subject_read(0, 5, &mut report).unwrap();
+        warnings.subject_read(0, 7, &mut report).unwrap();
+        // C is never read: it comes after query 0's report, before query 1's warnings.
+        warnings.before_query(1, &mut report).unwrap();
+        report.write_all(b"R3\n").unwrap();
+        warnings.subject_read(1, 3, &mut report).unwrap();
+        // Query 2's text, never read, comes after the last report.
+        warnings.before_query(2, &mut report).unwrap();
+        warnings.after_last_query(3, &mut report).unwrap();
+        drop(warnings);
+        let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(text, "W0\nR1\nA\nB\nR2\nC\nW1\nR3\nD\nW2\nE\n");
+    }
+
+    #[test]
+    fn the_posts_of_a_hit_follow_the_report_up_to_the_place_of_its_load() {
+        // XML2 and JSON: every `Hit` loads its subject at the report's start, after outfmt 15's
+        // separator; the report written before is flushed first (a buffered output stream).
+        let log = Log::default();
+        let mut report = io::BufWriter::with_capacity(1 << 16, log.clone());
+        let mut sink = log.clone();
+        report.write_all(b"{0}\n").unwrap();
+        let mut posts = HitPosts::new(false);
+        posts.hit(2, 1, |texts| texts.write_all(b"T1\n")).unwrap();
+        posts.hit(2, 2, |_| Ok(())).unwrap();
+        posts.hit(2, 3, |texts| texts.write_all(b"T3\n")).unwrap();
+        posts
+            .write(b",\n{1}\n", &mut report, &mut sink, |_, _, _| Ok(()))
+            .unwrap();
+        report.flush().unwrap();
+        let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(text, "{0}\n,\nT1\nT3\n{1}\n");
+        // BLAST XML: each `Hit` loads its subject at its own start; a query whose model's reads
+        // write texts marks every `Hit`, and a `Hit`'s read comes before the texts made there.
+        let reads: Vec<QueryReads> = vec![vec![(5, b"A\n".to_vec())]];
+        let log = Log::default();
+        let (mut report, mut sink) = (log.clone(), log.clone());
+        let mut warnings = QueryWarnings::new(&[], &mut sink).with_subject_reads(&reads);
+        let mut posts = HitPosts::new(warnings.reads_with_texts(0));
+        posts.hit(0, 5, |texts| texts.write_all(b"P5\n")).unwrap();
+        posts.hit(4, 6, |texts| texts.write_all(b"P6\n")).unwrap();
+        write_hit_posts(b"<H5><H6>", &posts, 0, &mut report, Some(&mut warnings)).unwrap();
+        drop(warnings);
+        let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(text, "A\nP5\n<H5>P6\n<H6>");
+        // Without warnings, the report alone.
+        let mut alone = Vec::new();
+        write_hit_posts(b"<H5><H6>", &posts, 0, &mut alone, None).unwrap();
+        assert_eq!(alone, b"<H5><H6>");
+    }
+
+    #[test]
+    fn a_query_without_texts_reads_nothing() {
+        let reads: Vec<QueryReads> = vec![Vec::new(), Vec::new()];
+        let mut sink = Vec::new();
+        let warnings = QueryWarnings::new(&[], &mut sink).with_subject_reads(&reads);
+        assert!(!warnings.reads_with_texts(0));
+        assert!(ReadCursor::new(&reads).is_none());
     }
 }

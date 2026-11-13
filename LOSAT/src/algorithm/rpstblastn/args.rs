@@ -174,8 +174,8 @@ pub struct RpstblastnArgs {
     #[arg(long = "use_sw_tback", default_value_t = false)]
     pub use_sw_tback: bool,
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834 (quoted at `USAGE`)
-    /// `-help` (`full`) or `-h` (`short`): NCBI's reader stops at them, the words before them
-    /// read first. The command line's reader sets this hidden argument there
+    /// `-help` or `-help-full` (`full`: NCBI 2.17.0 writes one text for both) or `-h` (`short`):
+    /// NCBI's reader stops at them, the words before them read first. The command line's reader sets this hidden argument there
     /// (`cli::try_parse_from_command`; no word of the user names it, `NCBI_HELP_ARG`), and the
     /// run writes NCBI's text (`ncbi_help_text`).
     #[arg(long = NCBI_HELP_ARG, hide = true, value_parser = ["full", "short"])]
@@ -253,6 +253,8 @@ impl RpstblastnArgs {
             xdrop_gap: None,
             xdrop_gap_final: None,
             out: self.out,
+            // rpstblastn refuses the search strategy options (`cli::is_unported_rpstblastn_arg`).
+            export_search_strategy: None,
             task: "blastx".to_string(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:60-67
             // ```c++
@@ -323,6 +325,7 @@ impl RpstblastnArgs {
             // search with composition-based statistics is BLASTX's (`resolve`).
             comp_based_stats: requested_cbs.to_string(),
             rpstblastn: Some(Arc::new(search)),
+            subject_taxdb: None,
         })
     }
 }

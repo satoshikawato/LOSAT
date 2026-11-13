@@ -367,7 +367,7 @@ fn unsupported_formats_fail_before_searching() {
     // NCBI blast_args.cpp:2845-2851: a custom specification of outfmt 0 is ignored, so
     // "0 qseqid" is outfmt 0. A delimiter that a field separates its entries with is NCBI's
     // error (blast_args.cpp:2753-2792, `s_ValidateCustomDelim`).
-    for outfmt in ["2", "18", "6 delim=; qseqid staxids"] {
+    for outfmt in ["2", "6 delim=; qseqid staxids"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![

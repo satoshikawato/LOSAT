@@ -212,12 +212,17 @@ impl FormatOutput<'_> {
             .or(out)
     }
 
+    /// The report of this output's `-outfmt` (`None` for a value that NCBI's reading refuses).
+    pub(crate) fn report_format(&self) -> Option<crate::blastinput::app::ReportFormat> {
+        use crate::blastinput::app::{parse_formatting_string, ReportFormat};
+        parse_formatting_string(self.outfmt)
+            .ok()
+            .and_then(|choice| ReportFormat::from_number(choice.number))
+    }
+
     /// Whether this output is the BLAST archive (outfmt 11).
     fn is_archive(&self) -> bool {
-        use crate::blastinput::app::{parse_formatting_string, ReportFormat};
-        parse_formatting_string(self.outfmt).is_ok_and(|choice| {
-            ReportFormat::from_number(choice.number) == Some(ReportFormat::ArchiveFormat)
-        })
+        self.report_format() == Some(crate::blastinput::app::ReportFormat::ArchiveFormat)
     }
 }
 

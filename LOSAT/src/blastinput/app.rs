@@ -298,6 +298,36 @@ impl ReportFormat {
                 | ArchiveFormat
         )
     }
+
+    /// Whether the report's writer, as the first format, writes the texts of the subjects that a
+    /// query's report reads one by one (where the batch's prefetch is off) where it reads each
+    /// (`QueryWarnings::subject_read`): outfmt 0 (description lines and alignment headings), 5
+    /// (`Hit`s), the tabular rows (6, 7, 10 and 20) and the organism report (18, at each
+    /// Seq-align it does not skip, `report::tax_report`); the others write them before the
+    /// query's report.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+    /// ```c++
+    ///        		const CBioseq_Handle& subject_bh =
+    ///                 scope.GetBioseqHandle(align.GetSeq_id(1));
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:997
+    /// ```c++
+    ///             const CBioseq_Handle& handle = m_Scope.GetBioseqHandle(*subid);
+    /// ```
+    pub fn places_subject_reads(self) -> bool {
+        use ReportFormat::*;
+        matches!(
+            self,
+            Pairwise
+                | Xml
+                | Tabular
+                | TabularWithComments
+                | CommaSeparatedValues
+                | TaxFormat
+                | CommaSeparatedValuesWithHeader
+        )
+    }
 }
 
 /// LOSAT's search programs, for what depends on the program in the reading of `-outfmt`.
@@ -376,7 +406,9 @@ impl Program {
             FlatQueryAnchoredNoIdentities => false,
             // 10 and 20 with the shared tabular writer (line CLI C2).
             CommaSeparatedValues => self.shared_tabular(),
-            TaxFormat => false,
+            // Line RG T2: the organism report, which reads the hit lists as the shared tabular
+            // writer does (`report::tax_report`).
+            TaxFormat => self.shared_tabular(),
             CommaSeparatedValuesWithHeader => self.shared_tabular(),
             // Line OF track S (structured formats): 5 for BLASTP and BLASTN (OF4a), BLASTX
             // (OF4b part 1), TBLASTN (OF4b part 3) and TBLASTX (OF4b part 4): every program;
@@ -462,11 +494,11 @@ impl Program {
 ///         exit_code = BLAST_UNKNOWN_ERROR;                                    \
 ///     }                                                                       \
 /// ```
-/// `NStr::TruncateSpaces` removes the characters of C's `isspace`; `NStr::StringToInt` is
-/// `ncbi_str::string_to_int` (its digits end at a NUL, as NCBI's do).
+/// `NStr::TruncateSpaces` (`eTrunc_Both`) is `ncbi_str::truncate_spaces_str`; `NStr::StringToInt`
+/// is `ncbi_str::string_to_int` (its digits end at a NUL, as NCBI's do).
 pub fn parse_formatting_string(spec: &str) -> anyhow::Result<FormatChoice> {
-    let is_space = |c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r');
-    let choice = spec.trim_matches(is_space);
+    use crate::ncbi_str::truncate_spaces_str;
+    let choice = truncate_spaces_str(spec);
     let (choice, custom) = choice.split_once(' ').unwrap_or((choice, ""));
     let mut custom = custom.to_string();
     let mut delimiter = String::new();
@@ -478,10 +510,7 @@ pub fn parse_formatting_string(spec: &str) -> anyhow::Result<FormatChoice> {
             ));
         };
         delimiter = value.to_string();
-        custom = custom
-            .replace(&token, "")
-            .trim_matches(is_space)
-            .to_string();
+        custom = truncate_spaces_str(&custom.replace(&token, "")).to_string();
     }
     let Ok(number) = crate::ncbi_str::string_to_int(choice.as_bytes(), 0) else {
         return Err(options_error(&format!(
@@ -723,17 +752,20 @@ pub fn read_seg_option(value: &str, program: &str) -> Result<SegSpec, SegOptionE
         ));
     }
     let invalid = || SegOptionError::Ncbi("Invalid input for filtering parameters");
-    let window = tokens[0].parse::<i32>().map_err(|_| invalid())?;
+    // `NStr::StringToInt(tokens[0])`, flags 0.
+    let window = crate::ncbi_str::string_to_int(tokens[0].as_bytes(), 0).map_err(|_| invalid())?;
     let mut cuts = [0.0; 2];
     for (cut, token) in cuts.iter_mut().zip(&tokens[1..]) {
-        use crate::blastinput::value_parsers::{
-            ncbi_string_to_double, strtod_reads_whole, NcbiDoubleError,
-        };
-        // NCBI reads the values with `strtod` and fails on one that it does not read to the
-        // end (`strtod_reads_whole`); LOSAT reads the finite decimal ones.
+        use crate::blastinput::value_parsers::{ncbi_string_to_double, NcbiDoubleError};
+        // NCBI reads the values with `NStr::StringToDouble(token)` (default flags,
+        // `ncbi_str::string_to_double`: `strtod`, which must end at the end of the token); LOSAT
+        // reads the finite decimal ones. Its first byte passed `ncbi_string_to_double`'s test,
+        // the same as `StringToDouble`'s.
         *cut = match ncbi_string_to_double(token) {
             Ok(number) if number.is_finite() => number,
-            Ok(_) | Err(NcbiDoubleError::Unsupported) if strtod_reads_whole(token) => {
+            Ok(_) | Err(NcbiDoubleError::Unsupported)
+                if crate::ncbi_str::string_to_double(token.as_bytes()).is_ok() =>
+            {
                 return Err(SegOptionError::Losat(anyhow::anyhow!(
                     "the SEG locut or hicut {token:?} (not a finite decimal number) is not supported by LOSAT's {program}"
                 )))
@@ -909,7 +941,7 @@ pub(crate) fn read_query_split_variable(
     variable: &str,
 ) -> anyhow::Result<Option<i32>> {
     match std::env::var_os(variable) {
-        Some(value) if !crate::blastinput::input_files::is_blank(value.as_encoded_bytes()) => {
+        Some(value) if !crate::ncbi_str::is_blank(value.as_encoded_bytes()) => {
             match crate::blastinput::query_batch::ncbi_string_to_int(&value) {
                 Some(number) => Ok(Some(number)),
                 None => anyhow::bail!(
@@ -1217,10 +1249,11 @@ mod tests {
                 .collect();
             // 11 (the BLAST archive): every program (OF8a parts 1 and 2: BLASTN, BLASTP; OF8b
             // parts 1 to 3: BLASTX, TBLASTN, TBLASTX).
-            // 10 and 20 with the shared tabular writer (line CLI C2: every program).
+            // 10 and 20 with the shared tabular writer (line CLI C2: every program); 18, the
+            // organism report (line RG T2: every program).
             let expected: &[i32] = match program {
-                Program::Blastn => &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20],
-                _ => &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 20],
+                Program::Blastn => &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20],
+                _ => &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20],
             };
             assert_eq!(written, expected, "{program:?}");
         }

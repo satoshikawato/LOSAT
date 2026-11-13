@@ -200,8 +200,8 @@ same request.
 | `blastn` | `LOSAT/src/web_api/v1_blastn.rs`; arguments `parse_blastn_args` (`LOSAT/src/web_api.rs:225`) | `6`, `7`. `0` fails with `unsupported BLASTN output format: 0`; a value with more than one word fails with `unsupported BLASTN custom outfmt specification` | `-task` (`megablast` or `blastn`), `-outfmt`, `-word_size`, `-num_threads`, `-evalue`, `-searchsp`, `-dbsize` |
 | `blastp` | `LOSAT/src/web_api/v1_blastp.rs`; arguments `parse_blastp_args` (`:548`) | the formats that BLASTP accepts, with field lists for the tabular ones (`check_web_v1_request`, `v1_blastp.rs:121`) | `-task`, `-outfmt`, `-evalue`, `-threshold`, `-word_size`, `-num_threads`, `-max_target_seqs`, `-max_hsps`, `-window_size`, `-matrix`, `-gapopen`, `-gapextend`, `-comp_based_stats`, `-seg`, `-ungapped`, `-use_sw_tback`, `-searchsp`, `-dbsize` |
 | `tblastx` | `LOSAT/src/web_api/v1_tblastx.rs`; arguments `parse_tblastx_args` (`:374`) | `6` only (`tblastx_v1_outfmt`, `LOSAT/src/blastinput/value_parsers.rs:1206`) | `-query_gencode`, `-db_gencode`, `-num_threads`, `-outfmt`, `-evalue`, `-searchsp`, `-dbsize` |
-| `blastx` | `LOSAT/src/algorithm/blastx/web.rs` | `0`, `6`, `7`, with field lists for `6` and `7` (`v1_outfmt`, `web.rs:68`) | the BLASTX options of the CLI's parser, except `-db`, `-query`, `-subject`, `-out`, `-help`, `--help`, `--version` (`web.rs:14-30`) |
-| `tblastn` | `LOSAT/src/algorithm/tblastn/web.rs` | the formats `losat tblastn` writes to standard output, read by the CLI's `-outfmt` parser with its errors (`13` and `14` fail as without `-out`) | the TBLASTN options of the CLI's parser, except `-db`, `-query`, `-subject`, `-out`, `-h`, `-help`, `--help`, `-version`, `--version` (`parse_args`) |
+| `blastx` | `LOSAT/src/algorithm/blastx/web.rs` | `0`, `6`, `7`, with field lists for `6` and `7` (`v1_outfmt`, `web.rs:76`) | the BLASTX options of the CLI's parser, except `-db`, `-query`, `-subject`, `-out`, `-h`, `-help`, `-help-full`, `-xmlhelp`, `--help`, `--version` (`web.rs:14-37`) |
+| `tblastn` | `LOSAT/src/algorithm/tblastn/web.rs` | the formats `losat tblastn` writes to standard output, read by the CLI's `-outfmt` parser with its errors (`13` and `14` fail as without `-out`) | the TBLASTN options of the CLI's parser, except `-db`, `-query`, `-subject`, `-out`, `-h`, `-help`, `-help-full`, `-xmlhelp`, `--help`, `-version`, `--version` (`parse_args`) |
 
 - For `blastn`, `blastp` and `tblastx` any other word fails with
   `unsupported <program> argument for web API: <word>` (`:352`, `:484`, `:746`). A flag
@@ -241,7 +241,7 @@ same request.
   the other environment variables that the CLI reads (`BATCH_SIZE`, `OLD_FSC`,
   `BLASTDB` for `taxdb.bti`, LOSAT's switches) are read from the module's environment
   as the CLI reads them; LOSAT Web, which calls ABI v2, gives the module an empty
-  environment (`web/app/src/infra/reactor/wasi.ts`), and a host of v1 gives its own. A run that succeeds returns what the CLI writes to standard
+  environment (`web/packages/losat/src/infra/reactor/wasi.ts`), and a host of v1 gives its own. A run that succeeds returns what the CLI writes to standard
   output. A run that fails returns only the error, which is what the CLI writes to
   standard error for its parser's errors (`cli::render_message`) and NCBI's
   (`BLAST query/options error: ...`, `BLAST engine error: ...`); for LOSAT's own errors

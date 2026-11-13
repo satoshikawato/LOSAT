@@ -164,6 +164,17 @@ pub struct BlastxArgs {
     // ```
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
+    /// ```c++
+    ///     arg_desc.AddOptionalKey(kArgOutputSearchStrategy,
+    ///                             "filename",
+    ///                             "File name to record the search strategy used",
+    ///                             CArgDescriptions::eOutputFile);
+    /// ```
+    /// The search strategy file (`report::archive::strategy`), created by `run` before the other
+    /// options are read.
+    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:99-100
     // ```c++
     //         arg_desc.AddDefaultKey(kTask, "task_name", "Task to execute",
@@ -453,6 +464,11 @@ pub struct BlastxArgs {
     /// BLASTX's search of the query batches; `None` in every BLASTX run.
     #[arg(skip)]
     pub(crate) rpstblastn: Option<std::sync::Arc<dyn RpsTblastnSearch>>,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), which a
+    /// library call (`api::run`) reads from the application settings, as the command line
+    /// does (`common::database::SubjectTaxdb`); `None` elsewhere. Not a public option.
+    #[arg(skip)]
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
 }
 
 /// The search of RPSTBLASTN's query batches (`rps_search::translated`, series PR item PS12a,
@@ -819,6 +835,9 @@ pub struct ResolvedOptions {
     /// `native::run` (`-db`: the database's search path, `-subject`: NCBI's). False otherwise,
     /// as Web reads it (DECISIONS 7 of line CLI C2).
     pub taxdb_found: bool,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), set with
+    /// `taxdb_found` (`common::database::SubjectTaxdb`); `None` otherwise.
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
     /// A list kept no sequence of the database (`SeqDb::filtered_empty`): the queries of the
     /// searched batches have `EMPTY_DATABASE_MESSAGE`.
     pub filtered_empty: bool,
@@ -1457,7 +1476,8 @@ impl BlastxArgs {
             outfmt,
             fields,
             tabular,
-            taxdb_found: false,
+            taxdb_found: self.subject_taxdb.is_some(),
+            subject_taxdb: self.subject_taxdb.clone(),
             filtered_empty: false,
             num_threads: self.num_threads,
             query_range: None,
@@ -1514,8 +1534,13 @@ impl BlastxArgs {
     //             	ITERATE(CSearchResultSet, result, *results) {
     //                	    formatter.PrintOneResultSet(**result, query_batch);
     // ```
-    pub fn run(self) -> Result<()> {
-        super::native::run(&self)
+    /// Runs the search with the settings of the program's application start
+    /// (`ApplicationStart::settings`).
+    pub(crate) fn run(
+        self,
+        settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    ) -> Result<()> {
+        super::native::run(&self, settings)
     }
 
     /// The program of the run's texts (`ProgramName`).

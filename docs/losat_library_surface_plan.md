@@ -165,7 +165,7 @@ ABI v2 §7 を基にするが、入力の渡し方が違う。
 | 内容 | 出どころ |
 |---|---|
 | `losat-web-serial.wasm`、`losat-web-threads.wasm` | `web/adapter/tools/build_reactors.py`（同一性の記録つき） |
-| ABI v2 のホスト側 | `web/app/src/infra/reactor/abi.ts`（`losat_web2_*` の呼び出し）、`infra/reactor/wasi.ts`（WASI shim。npm の `@bjorn3/browser_wasi_shim` に依存）、`infra/engine-worker/*`（worker、`thread-host.ts`）、`ports/engine.ts`（型と `EngineGateway`）。アプリが使う層と同じものを package にし、重複させない（切り出し方は LIB-4 で決める。`web/AGENTS.md` の規則の下） |
+| ABI v2 のホスト側 | （LIB-4 で `web/packages/losat/src/` へ移した、§15。以下は移す前の場所）`web/app/src/infra/reactor/abi.ts`（`losat_web2_*` の呼び出し）、`infra/reactor/wasi.ts`（WASI shim。npm の `@bjorn3/browser_wasi_shim` に依存）、`infra/engine-worker/*`（worker、`thread-host.ts`）、`ports/engine.ts`（型と `EngineGateway`）。アプリが使う層と同じものを package にし、重複させない（切り出し方は LIB-4 で決める。`web/AGENTS.md` の規則の下） |
 | 型 | `HspRecord`、`ProgramDescription`、`ValidationResult`（`engine.ts` に既にある） |
 | README | cross-origin isolation（COOP / COEP）が threads 版に必須、メモリの候補（ABI v2 §3）、`abi_version` |
 
@@ -420,6 +420,7 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 ### 12.4 残ること
 
 - 公開（段階 4）：wheel のマトリクス、release workflow、`cargo-semver-checks` と `cargo-public-api`。
+  → 2026-11-13 wheel のマトリクスは CI に入った（P-W1、`.github/workflows/python-wheels.yml`）：release の 5 つの runner と toolchain、release profile で abi3 の wheel を 1 つずつ作り、CPython 3.10 と 3.14 の新しい環境に入れて blastp の報告 1 件を凍結 hash と比べる。dispatch、main への push、毎週の dev、`python/` を変える PR（Linux x86_64 だけ）で走り、wheel は 7 日の artifact。PyPI への公開は保守者。
 - gbdraw の製品判断：`pylosat` を runtime に入れるか、その順番と記録の形。
 - `panic = "unwind"` の経路はテストしていない（公開の API から panic を起こす手段が無い）。release profile の build は通り、`python/tests` と gbdraw の比較はその build でも通る。
 
@@ -433,7 +434,7 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 |---|---|---|
 | 入力 | `Inputs::database(&query, name)`。`name` は `-db` の値（空白区切りの複数名も同じ）で、CLI と同じく `BLASTDB` の探索で開く | 開く処理は engine の中にあり、順番（リスト → オプション → 開く → `Query is Empty!`）が NCBI の順である。開いたものを渡す形は順番を呼び出し側に出す |
 | `validate` | `-subject` で解析し、失敗したら `-db` で解析する。`Search::command(inputs)` が入力の種類で解析し直す | argv は入力より先に検査する。`-subject_loc` と `-taxids` は片方の種類でしか解析を通らない |
-| 入口 | 各 program の `run_local_database(args, query, settings, outputs)`。`run_local` はブラウザの入口のままで、`-db` を拒否する | `settings` は CLI と同じ `check_ncbi_application_settings`。レコードの検索は NCBI の設定を読まない（§9）が、データベースは `BLASTDB` と `.ncbirc` で見つかる |
+| 入口 | 各 program の `run_local_database(args, query, settings, outputs)`。`run_local` はブラウザの入口のままで、`-db` を拒否する | `settings` は `library_application_settings`（CLI は起動の `ApplicationStart::settings`。2026-11-14 の RG E1w-1 で global の start を値にした）。レコードの検索は NCBI の設定を読まない（§9）が、データベースは `BLASTDB` と `.ncbirc` で見つかる |
 | 共有 | データベースを開く塊を `open_search_database` に切り出し、`search_cli` と共有する。BLASTX は `reported_batch`、`database_search_error`、`ReportedAsks` を `native.rs` に切り出す | 重ねて書くと CLI との差が生まれる |
 | BLASTX の複数形式 | `report_batches`：`-subject` と `-db` が同じ batch loop を通る。1 回の検索で全形式を書き、`for_batch` の引数は全形式の和（`ReportedAsks::or`） | CLI の `run_inner` は 1 形式で、ライブラリは 1 回の検索で全形式を書く |
 | HSP の subject | `FormatObserver::database_subjects`（`ReportedSubject`：OID、`saccver`、長さ）。`HspRecord::s_idx` は database の順序 ID（`gnl\|BL_ORD_ID\|n` の n） | engine の `Hit::s_idx` は報告の rank で、バッチごとに意味が変わる。ID は表形式の報告が拒否するときも検索を失敗させない（`library_subject`） |
@@ -486,7 +487,8 @@ BLASTX の `-parse_deflines` は `-subject` でも使えるようにした（`bl
 | `run_blastdbcmd(argv, input, output, diagnostics)` | NCBI の引数読み（`ncbi_app::args`）をそのまま使う `run_with`。`input` は CLI の標準入力（`-entry_batch -`、`-ipg_batch -`、`-taxidlist -`）、`output` は CLI の標準出力 |
 | `run_dustmasker(argv, input, output, diagnostics)` | blastdbcmd と同じ殻（`ncbi_app`）の `dustmasker::run_with`。`input` は CLI の標準入力（`-in -` と `-in` なし）、`output` は CLI の標準出力。`-conffile`・`-dryrun` は CLI の application start が読むので断る |
 | `run_segmasker(argv, input, output, diagnostics)` | `run_dustmasker` と同じ殻の `segmasker::run_with`（線 RG の K2）。標準入力・出力・`-conffile`・`-dryrun` の扱いは `run_dustmasker` と同じ |
-| 失敗 | `Error::Search` で、文言は CLI が標準エラーに書いたものそのまま（`diagnostics` にも書く）。`run_makeblastdb` の clap の parser の拒否は `Error::Argv`。`run_blastdbcmd`・`run_dustmasker`・`run_segmasker` は NCBI の引数読みの拒否も CLI と同じ usage と報告を書くので `Error::Search` |
+| `run_convert2blastmask(argv, input, output, diagnostics)` | `run_dustmasker` と同じ殻の `convert2blastmask::run_with`（線 RG の K3）。標準入力・出力・`-conffile`・`-dryrun` の扱いは `run_dustmasker` と同じ |
+| 失敗 | `Error::Search` で、文言は CLI が標準エラーに書いたものそのまま（`diagnostics` にも書く）。`run_makeblastdb` の clap の parser の拒否は `Error::Argv`。`run_blastdbcmd`・`run_dustmasker`・`run_segmasker`・`run_convert2blastmask` は NCBI の引数読みの拒否も CLI と同じ usage と報告を書くので `Error::Search` |
 
 CLI の `run_with` はもとから writer を取っていたので、`run_makeblastdb` と `run_blastdbcmd` を足した時は engine の変更は無かった。標準入力は 2026-11-13（線 RG の K1b）に共有の殻 `ncbi_app` の 1 か所（`files::Cin`）にし、CLI は process の stdin を、library は呼び手の reader を渡す。
 
@@ -513,7 +515,7 @@ binding は API が持つものを Python の形にするだけで、engine の�
 | P-S1 | crate の外から安全に呼べる `pub fn` が範囲外を読まないようにする（`#[doc(hidden)]` は呼び出しを止めない）。可視性を狭めるのが先で、テストが呼ぶ物は検査つきの `pub` と検査なしの `pub(crate)` に分ける | すぐ |
 | P-CI1 | 公開面の差分検査を CI に（§14.1） | すぐ |
 | P-R1 | crate 名を `losat` に（LIB-3、§4.1） | P-S1 と P-CI1 の後 |
-| P-V1〜P-V5 | `#[doc(hidden)] pub` の top-level module を段ごとに `pub(crate)` にし、外の crate が名指す物は狭い隠した façade 1 つに集める（保守者の決定 2026-11-07「すべて推奨通り」、DECISIONS 13）。P-V1 = 外の利用者の無い `sequence`、`seqid`、`web_api`（ABI v1 の export は同じ）。P-V2 = `tests/unit/**` を crate の中の試験へ。P-V3 = binary の本体（`main.rs`）を引数の無い関数 `main_entry`（定義は `cli/main_entry.rs`）へ移し、crate 直下で隠して再公開（`main.rs` は `LOSAT::main_entry()` を呼ぶだけで、隠した module を名指さない）。これは adapter 用の façade の外に残る隠した項目で、façade は adapter だけのもの（DECISIONS 13）。P-V3b = `common`、`stats`、`core`、`writedb`、`blastdbcmd` を `pub(crate)` に（P-V3 の後は crate の外に利用者がいない）と、それで見えた dead code の削除。P-V4 = adapter（web/adapter）は engine を `api` と隠した façade `web_adapter` 1 つ（`src/web_adapter.rs`、項目を 1 つずつ再公開）だけで名指す。`web/adapter/tests/engine_boundary.rs` が、ほかの名指しが無いこと、façade に glob と module が無いこと、façade の項目がみな adapter に使われていることを見る（DECISIONS 13 の 2 点目）。P-V5 = 残りの `algorithm`、`blastinput`、`cli`、`config`、`report`、`utils`、`seqdb` と `api::local_blast` を `pub(crate)` に。`LOSAT/tests` の試験は、binary と比べる物を `api` を通す形に書き直し、`api` に無い engine の項目を試す物を crate の中（`#[cfg(test)]`）へ移した（両方を試す物は assertion ごとに分けた）。それで見えた dead code は P-V3b と同じ規則で削除した（約 7,100 行）。crate の外から名指せるのは `api`、隠した `web_adapter`（adapter 用）と `main_entry`（binary 用）だけで、compiler がそれを守る | P-S1 の後 |
+| P-V1〜P-V5 | `#[doc(hidden)] pub` の top-level module を段ごとに `pub(crate)` にし、外の crate が名指す物は狭い隠した façade 1 つに集める（保守者の決定 2026-11-07「すべて推奨通り」、DECISIONS 13）。P-V1 = 外の利用者の無い `sequence`、`seqid`、`web_api`（ABI v1 の export は同じ）。P-V2 = `tests/unit/**` を crate の中の試験へ。P-V3 = binary の本体（`main.rs`）を引数の無い関数 `main_entry`（定義は `cli/main_entry.rs`）へ移し、crate 直下で隠して再公開（`main.rs` は `LOSAT::main_entry()` を呼ぶだけで、隠した module を名指さない）。これは adapter 用の façade の外に残る隠した項目で、façade は adapter だけのもの（DECISIONS 13）。P-V3b = `common`、`stats`、`core`、`writedb`、`blastdbcmd` を `pub(crate)` に（P-V3 の後は crate の外に利用者がいない）と、それで見えた dead code の削除。P-V4 = adapter（web/adapter）は engine を `api` と隠した façade `web_adapter` 1 つ（`src/web_adapter.rs`、項目を 1 つずつ再公開）だけで名指す。`web/adapter/tests/engine_boundary.rs` が、ほかの名指しが無いこと、façade に glob と module が無いこと、façade の項目がみな adapter に使われていることを見る（DECISIONS 13 の 2 点目）。P-V5 = 残りの `algorithm`、`blastinput`、`cli`、`config`、`report`、`utils`、`seqdb` と `api::local_blast` を `pub(crate)` に。`LOSAT/tests` の試験は、binary と比べる物を `api` を通す形に書き直し、`api` に無い engine の項目を試す物を crate の中（`#[cfg(test)]`）へ移した（両方を試す物は assertion ごとに分けた）。それで見えた dead code は P-V3b と同じ規則で削除した（約 7,100 行）。crate の外から名指せるのは `api`、隠した `web_adapter`（adapter 用）と `main_entry`（binary 用）だけで、compiler がそれを守る。P-V5b = P-V5 が crate の中に残した物: private item の rustdoc の警告 49 件を直し（CI の rust lint に `--document-private-items` の段を足す workflow の変更は別の PR）、`seqid` の試験専用の読み手（`DeflineSet::first_taxid` ほか）を消して台帳の試験を出荷の形（`ParsedSubject`、`TabularTaxonomy`、tabular の writer）で回し、BLASTX `search_core` の `diagnostics: bool`（試験だけが立てた）を畳み、blastp の block 探索が file か標準出力の sink を含む複数 output を断る理由を試験にした | P-S1 の後 |
 
 ### 14.1 公開面の検査（P-CI1、PR `ci/lib-public-api`）
 
@@ -525,3 +527,16 @@ binding は API が持つものを Python の形にするだけで、engine の�
 | toolchain | 両方 `nightly-2026-05-24`。cargo-public-api は stable を `nightly` に切り替え、rustdoc JSON の形式 57 だけを読む（形式 57 を書くのは 2025-11-22〜2026-06-23 の nightly）。cargo-semver-checks 0.51 は形式 57、60、61 を読み、1.92.0 の形式 56 は読めない。版の組は script と `ci.yml` の 2 か所にあり、`test_check_public_api.py` が一致を見る。script は何も入れない（無ければ入れ方を示して終わる） |
 
 見つかったこと：`api` が再公開する `FastaRecord` は、定義が `#[doc(hidden)]` の `blastinput` にあるため、rustdoc（HTML と JSON）から型ごと消える（`#[doc(inline)]` を付けても戻らない、2026-11-06 に確認）。一覧には `pub use LOSAT::api::FastaRecord` の 1 行だけで、`read_fasta` と `read_inputs` の型には `crate::blastinput::fasta_reader::FastaRecord` が出る。docs.rs では入力の型の説明が出ず、2 つの検査もその型の変更を見ない。P-D1（PR `fix/lib-fastarecord-docs`）で直した：定義（struct と `new`、`seq`、`title`）を crate 直下の private module `record` に移し、`api` と `blastinput::fasta_reader` の両方から再公開する。rustdoc は private module の項目の再公開を inline するので、`api::FastaRecord` の頁と一覧の行（4 つの field、3 つの method、derive と auto trait の impl）ができ、`read_fasta` と `read_inputs` の型は `LOSAT::api::FastaRecord` になる。engine の method（`#[doc(hidden)]` の impl）と `RecordSource` は隠しモジュールの `fasta_reader` に残る。`api` に定義して `blastinput` が import する形は、下位の module が `api` に依存するので取らなかった。
+
+## 15. npm の package `losat`（LIB-4、P-N1、2026-11-14）
+
+記録は `losat-baselines/library-20261031/`（DECISIONS 27）。§4.2 の「アプリが使う層と同じものを package にし、重複させない」をこの形にした。
+
+| 項目 | 形 |
+|---|---|
+| 置き場 | npm workspaces `web/package.json`（`packages/losat` と `app`）、lock は `web/package-lock.json` 1 つ。アプリは `"losat": "0.2.0"` で workspace の link を使い、package の source を import する |
+| 中身 | `web/packages/losat/src`：§4.2 の表の host（`infra/reactor`、`infra/engine-worker`、`ports/engine.ts`）と、host が使う ports（inflate、input-check、scan、run-output）、run output の writer と receiver、`sha256Hex`。domain は host が要る部分だけ（program の id と入力の種類、record の key と scan の型、出力形式、`describe` の解決済み既定値、入力を指す option 名、counts file の型）。form の表はアプリに残る |
+| 層 | package も `domain` → `ports` → `infra`（web/AGENTS.md 規則 5）。アプリの `domain` は `losat/domain` だけ、`ports`・`application`・`ui` は `losat/domain` と `losat/ports`、`losat`（package の infra）は `infra` と composition root だけが import する |
+| 入口 | `losat`（すべて）、`losat/domain`、`losat/ports`。内部（instance-use、protocol、thread host、memory keeper、runtime、warm-up）は出さない |
+| build（P-N1 の PR b） | `npm run build -w losat`（`LOSAT_WEB_REACTORS` が要る）が `dist/` を作る: tsc の JS と型（相対 import は `.js`、worker の URL も `.js`）、Engine worker の試験用の旗 `__LOSAT_TEST_HOOKS__` を `false` に（アプリの build の define と同じ。識別子だけを構文木で置き換える）、2 つの reactor（読み込みとガードは `build/reactors.ts`、アプリの build と同じ関数）と同一性の記録 `reactors/artifacts.json`、URL と digest の `losat/reactors`（`ENGINE_ASSETS`）、`abi.json`（package・engine の版と、serial reactor が返す `losat_web2_abi_version`）、公開用の `package.json`、README、LICENSE。版は `LOSAT/Cargo.toml` と同じでなければ build が止まる |
+| 関門 | web.yml の `v-abi` job: package を build して試験（`npm pack --dry-run` の中身が src の module ごとの JS と型・reactor・記録・README・LICENSE だけ、公開用の manifest、試験用の旗が残らない、ABI の表、reactor の digest、README の例が NCBI の凍結 bytes と同じ）、その `dist/reactors` で V-ABI quick、`npm pack` の tarball を artifact `npm-package`（7 日）に。`npm publish` は保守者（`dist/` で、または artifact の tarball で） |

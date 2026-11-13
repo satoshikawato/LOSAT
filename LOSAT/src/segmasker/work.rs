@@ -9,12 +9,13 @@ use crate::ncbi_app::files::{file_exception, open_input_file, Cin, Ostream};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{err_post_x, NcbiException};
 use crate::report::pairwise::cpp_default_double;
+use crate::seqdb::mask::FilterProgram;
 use crate::seqdb::SeqType;
 use crate::seqid::ParsedSeqId;
 use crate::seqmasks_io::bdb_reader::{iupacaa_letters, prints_title, BdbError, MaskBdbReader};
 use crate::seqmasks_io::fasta_reader::{MaskFastaReader, MaskReadError};
 use crate::seqmasks_io::run::{finish, serial_write_failure, write_failure, RunFailure};
-use crate::seqmasks_io::writer::{FilterProgram, MaskWriter, MaskedBioseq, Serial, WriteError};
+use crate::seqmasks_io::writer::{MaskWriter, MaskedBioseq, Serial, WriteError};
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 use crate::utils::seg::{SegMasker, SegParams};
 
@@ -288,7 +289,7 @@ fn writer(outfmt: &str, window: i32, locut: f64, hicut: f64) -> MaskWriter {
             cpp_default_double(locut),
             cpp_default_double(hicut)
         );
-        MaskWriter::mask_info(serial, 1, FilterProgram::Seg, parameters.into_bytes())
+        MaskWriter::mask_info(Some(serial), 1, FilterProgram::Seg, parameters.into_bytes())
     };
     match outfmt {
         "interval" => MaskWriter::Interval,
@@ -401,6 +402,7 @@ impl Source<'_> {
                         MaskReadError::Ncbi(exception) => Failure::Caught(exception),
                         MaskReadError::Read(error) => read_failure(error),
                         MaskReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
+                        MaskReadError::Refused(what) => Failure::Refused(unsupported(&what)),
                     })?;
                 Ok(record.map(|record| Record {
                     ids: record.ids,

@@ -24,17 +24,17 @@ use makeblastdb_fix_cases::{FixCase, FIX_CASES};
 
 /// The platform of every expected file here: makeblastdb 2.17.0 on Linux x86-64. The tests
 /// write its files on whatever platform they run on (`Platform`).
-const LINUX: Platform = Platform::LINUX_X86_64;
+pub(super) const LINUX: Platform = Platform::LINUX_X86_64;
 
-fn seqdb_fixtures() -> PathBuf {
+pub(super) fn seqdb_fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb")
 }
 
 /// A directory of this test run, removed when the value is dropped.
-struct TempDir(PathBuf);
+pub(super) struct TempDir(pub(super) PathBuf);
 
 impl TempDir {
-    fn new(label: &str) -> Self {
+    pub(super) fn new(label: &str) -> Self {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -48,7 +48,7 @@ impl TempDir {
         Self(dir)
     }
 
-    fn base(&self, name: &str) -> String {
+    pub(super) fn base(&self, name: &str) -> String {
         self.0.join(name).to_string_lossy().into_owned()
     }
 }
@@ -60,7 +60,7 @@ impl Drop for TempDir {
 }
 
 /// The creation date stored in an index file of makeblastdb.
-fn stored_date(index_file: &Path, seqtype: SeqType) -> String {
+pub(super) fn stored_date(index_file: &Path, seqtype: SeqType) -> String {
     let bytes = std::fs::read(index_file).unwrap();
     let index = crate::seqdb::index::IndexFile::parse(&bytes, seqtype, index_file).unwrap();
     let date: Vec<u8> = index.date.iter().copied().take_while(|&b| b != 0).collect();
@@ -69,7 +69,7 @@ fn stored_date(index_file: &Path, seqtype: SeqType) -> String {
 
 /// The local time that `LocalTime::index_date` formats as `date`
 /// ("Oct 12, 2026  3:22 PM").
-fn time_of(date: &str) -> LocalTime {
+pub(super) fn time_of(date: &str) -> LocalTime {
     let months = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
@@ -91,7 +91,7 @@ fn time_of(date: &str) -> LocalTime {
     time
 }
 
-fn files_named(dir: &Path, prefix: &str) -> Vec<String> {
+pub(super) fn files_named(dir: &Path, prefix: &str) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
@@ -167,6 +167,7 @@ fn protein_bioseqs(path: &Path) -> Vec<Bioseq> {
             // The reader hands over capital letters.
             seq_data: Some(SeqData::Ncbieaa(residues.to_ascii_uppercase())),
             parsed: None,
+            past_seq_pos: None,
         })
         .collect()
 }
@@ -465,7 +466,7 @@ fn an_existing_database_of_the_same_name_is_removed() {
 
 /// The log with the markers of `makeblastdb_app_cases.rs` in place of the
 /// build time, the output path and the seconds of the timed line.
-fn log_with_markers(log: &[u8]) -> Vec<u8> {
+pub(super) fn log_with_markers(log: &[u8]) -> Vec<u8> {
     let lines: Vec<Vec<u8>> = log
         .split(|&b| b == b'\n')
         .map(|line| {
@@ -487,7 +488,7 @@ fn log_with_markers(log: &[u8]) -> Vec<u8> {
     lines.join(&b'\n')
 }
 
-fn replace_bytes(text: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
+pub(super) fn replace_bytes(text: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     let mut rest = text;
     while let Some(at) = rest.windows(from.len()).position(|w| w == from) {
@@ -524,6 +525,9 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
             hash_index: false,
             taxid: None,
             taxid_map: None,
+            mask_data: None,
+            mask_id: None,
+            mask_desc: None,
         };
         // A run that writes no database stores no date; any time will do.
         let now = time_of(if case.date.is_empty() {
@@ -534,6 +538,7 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
+            None,
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -618,12 +623,16 @@ fn makedb_version(
         hash_index: false,
         taxid: None,
         taxid_map: None,
+        mask_data: None,
+        mask_id: None,
+        mask_desc: None,
     };
     let now = time_of("Oct 12, 2026  9:00 PM");
     let (mut log, mut messages) = (Vec::new(), Vec::new());
     let mut stdin = stdin;
     let status = run_with(
         &args,
+        None,
         Some(&now),
         LINUX,
         &mut stdin,
@@ -1343,6 +1352,7 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
             length: 2,
             seq_data: Some(SeqData::Ncbieaa(b"MK".to_vec())),
             parsed: None,
+            past_seq_pos: None,
         };
         db.extract_bioseq_deflines(&bioseq);
         db.add_sequence(bioseq).unwrap();
@@ -1374,7 +1384,7 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
 
 /// The parsed `losat makeblastdb` arguments of a makeblastdb command line (the
 /// words after the program's name).
-fn parse_makedb_words(words: &[String]) -> MakedbArgs {
+pub(super) fn parse_makedb_words(words: &[String]) -> MakedbArgs {
     use crate::cli::{Cli, Commands};
     let mut argv = vec!["losat".to_string(), "makeblastdb".to_string()];
     argv.extend(words.iter().cloned());
@@ -1453,6 +1463,7 @@ fn run_v5_case(case: &V5Case) {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
+            None,
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -1585,6 +1596,7 @@ fn an_input_file_that_cannot_be_opened_stops_the_build() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
+            None,
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -1641,6 +1653,7 @@ fn run_parse_case(case: &ParseCase) {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let status = run_with(
         &args,
+        None,
         Some(&now),
         LINUX,
         &mut std::io::empty(),
@@ -1742,7 +1755,15 @@ fn run_fix_case(case: &FixCase) {
     });
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let mut stdin = case.stdin;
-    let status = run_with(&args, Some(&now), LINUX, &mut stdin, &mut out, &mut err);
+    let status = run_with(
+        &args,
+        None,
+        Some(&now),
+        LINUX,
+        &mut stdin,
+        &mut out,
+        &mut err,
+    );
     let show = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
     let err = build_tree_masked(&v5_markers(&err, &dir));
     let out = v5_markers(&out, &dir);
@@ -1843,6 +1864,7 @@ fn parse_seqids_v5_run(label: &str, input: &str, extra: &[&str]) -> (i32, String
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let status = run_with(
         &args,
+        None,
         Some(&now),
         LINUX,
         &mut std::io::empty(),
@@ -1940,6 +1962,7 @@ fn s2_gate() {
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let status = run_with(
                 &args,
+                None,
                 Some(&now),
                 LINUX,
                 &mut std::io::empty(),
@@ -1982,6 +2005,7 @@ fn s3a_gate() {
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let status = run_with(
                 &args,
+                None,
                 Some(&now),
                 LINUX,
                 &mut std::io::empty(),
@@ -2024,6 +2048,7 @@ fn s3b_gate() {
                     };
                     run_with(
                         &args,
+                        None,
                         Some(&now),
                         LINUX,
                         &mut std::io::empty(),

@@ -489,3 +489,15 @@ def segmasker(*words: str, input: bytes | str = b"") -> ToolOutput:
     """
     data = input.encode() if isinstance(input, str) else bytes(input)
     return ToolOutput(*_pylosat.segmasker(list(words), data))
+
+
+def convert2blastmask(*words: str, input: bytes | str = b"") -> ToolOutput:
+    """Runs `convert2blastmask` with the command line's words, which turns the lower case
+    letters of FASTA input into the masking information that `makeblastdb -mask_data` reads.
+
+    `input` is what the command line reads as standard input (`-in -`, and without `-in`), so
+    sequences in memory can be converted. A failure raises `SearchError` with what the command
+    line writes to its standard error. The GIL is released.
+    """
+    data = input.encode() if isinstance(input, str) else bytes(input)
+    return ToolOutput(*_pylosat.convert2blastmask(list(words), data))

@@ -12,6 +12,7 @@ use super::ncbi_registry::{
     error_reading_post, last_value, read_registry, repeated_entry_post, running_error_reading_post,
     running_syntax_error_notice, syntax_error_notice, Layer, RegistryEntry, RegistryRead,
 };
+use crate::ncbi_str::string_to_bool;
 use crate::report::diag_log::{Posts, CRITICAL, ERROR, WARNING};
 
 /// Registry entries (section, name; case-insensitive) that change no output of a search with
@@ -69,6 +70,28 @@ const REJECTED_VARIABLES: &[&str] = &[
     "LOG_NOCREATE",
     "LOG_PERFLOGGING",
     "THREAD_STACK_SIZE",
+    // Not diagnostics: they change how NCBI's `CSeq_id_Mapper` matches Seq-ids, and with it which
+    // sequence a mask of `makeblastdb -mask_data` reaches (`seqid::mask_handle`); LOSAT
+    // implements the default (both on) and has its own message for them (`rejected_variable`).
+    //
+    // NCBI reference: ncbi-blast/c++/src/objects/seqloc/seq_id_tree.cpp:692-707
+    // ```c
+    // NCBI_PARAM_DECL(bool, OBJECTS, PACK_TEXTID);
+    // NCBI_PARAM_DEF_EX(bool, OBJECTS, PACK_TEXTID, true,
+    //                   eParam_NoThread, OBJECTS_PACK_TEXTID);
+    // ...
+    // NCBI_PARAM_DECL(bool, OBJECTS, PACK_GENERAL);
+    // NCBI_PARAM_DEF_EX(bool, OBJECTS, PACK_GENERAL, true,
+    //                   eParam_NoThread, OBJECTS_PACK_GENERAL);
+    // ```
+    // With `OBJECTS_PACK_TEXTID=0` a GenBank, EMBL or DDBJ accession no longer matches the same
+    // accession of another of the three; with `OBJECTS_PACK_GENERAL=0` the order of the ranges of
+    // two `general` ids changes. Refused at any value, NCBI's default 1 included: accepting it
+    // would mean porting how NCBI reads a bool parameter, for a setting nobody gives. The registry
+    // forms (`[OBJECTS] PACK_TEXTID` in a registry file, `NCBI_CONFIG__OBJECTS__PACK_TEXTID`) are
+    // not harmless entries, so they are refused like every entry LOSAT does not know.
+    "OBJECTS_PACK_TEXTID",
+    "OBJECTS_PACK_GENERAL",
 ];
 
 fn is_harmless_entry(section: &str, name: &str) -> bool {
@@ -89,45 +112,6 @@ fn is_harmless_entry(section: &str, name: &str) -> bool {
     HARMLESS_ENTRIES
         .iter()
         .any(|(s, n)| section.eq_ignore_ascii_case(s) && name.eq_ignore_ascii_case(n))
-}
-
-/// `NStr::StringToBool`.
-///
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbistr.cpp:2817-2838
-/// ```c
-/// bool NStr::StringToBool(const CTempString str)
-/// {
-///     if ( str == "1"  ||
-///          AStrEquiv(str, s_kTrueString,  PNocase())  ||
-///          AStrEquiv(str, s_kTString,     PNocase())  ||
-///          AStrEquiv(str, s_kYesString,   PNocase())  ||
-///          AStrEquiv(str, s_kYString,     PNocase())  ||
-///          AStrEquiv(str, s_kOnString,    PNocase()) ) {
-///         errno = 0;
-///         return true;
-///     }
-///     if ( str == "0"  ||
-///          AStrEquiv(str, s_kFalseString, PNocase())  ||
-///          AStrEquiv(str, s_kFString,     PNocase())  ||
-///          AStrEquiv(str, s_kNoString,    PNocase())  ||
-///          AStrEquiv(str, s_kNString,     PNocase())  ||
-///          AStrEquiv(str, s_kOffString,   PNocase()) ) {
-///         errno = 0;
-///         return false;
-///     }
-///     NCBI_THROW2(CStringException, eConvert,
-///                 "String cannot be converted to bool", 0);
-/// }
-/// ```
-pub fn ncbi_string_to_bool(value: &str) -> Option<bool> {
-    let is = |word: &str| value.eq_ignore_ascii_case(word);
-    if value == "1" || is("true") || is("t") || is("yes") || is("y") || is("on") {
-        Some(true)
-    } else if value == "0" || is("false") || is("f") || is("no") || is("n") || is("off") {
-        Some(false)
-    } else {
-        None
-    }
 }
 
 /// Why LOSAT rejects an environment variable, or `None`.
@@ -181,6 +165,11 @@ fn rejected_variable(name: &OsStr) -> Option<String> {
     if name.starts_with("NCBI_CONFIG_") {
         return Some(format!(
             "the environment variable {name}, which sets entries of NCBI BLAST+'s registry, is not supported by LOSAT"
+        ));
+    }
+    if name.starts_with("OBJECTS_PACK_") && REJECTED_VARIABLES.contains(&name) {
+        return Some(format!(
+            "the environment variable {name} is not supported by LOSAT: NCBI BLAST+ reads it to change how Seq-ids are matched (which sequences a mask of makeblastdb reaches); LOSAT does not read it, whatever its value"
         ));
     }
     if name.starts_with("DIAG_") || REJECTED_VARIABLES.contains(&name) {
@@ -1220,7 +1209,8 @@ pub struct WindowMaskerRegistry {
     pub posts_once: bool,
 }
 
-/// The NCBI application settings that LOSAT reproduces (`check_ncbi_application_settings`).
+/// The NCBI application settings that LOSAT reproduces: the command line's from its application
+/// start (`ApplicationStart::settings`), the library's from `library_application_settings`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApplicationSettings {
     /// `SDataLoaderConfig::UseDataLoaders()` of the query and subject readers: whether
@@ -2030,8 +2020,9 @@ pub fn log_file<S: AsRef<OsStr>>(words: &[S]) -> Option<&OsStr> {
 /// (`CNcbiApplicationAPI::AppMain`, `preparse`).
 #[derive(Debug, PartialEq, Eq)]
 pub enum Preparsed<S> {
-    /// `-version`: print the version, exit status 0.
-    Version,
+    /// `-version` or a full version (`-version-full`, `-version-full-xml`,
+    /// `-version-full-json`): print it, exit status 0 (`ncbi_version::print`).
+    Version(crate::ncbi_version::VersionRequest),
     /// The words left for the argument reader, the registry file of the last `-conffile FILE`
     /// or `-conffile=FILE` (`conf_arg`, which NCBI loads in place of `<program>.ini`), and
     /// whether there was `-dryrun` (NCBI reads the arguments, then runs nothing: the command
@@ -2042,8 +2033,6 @@ pub enum Preparsed<S> {
         conffile: Option<OsString>,
         dryrun: bool,
     },
-    /// A word LOSAT refuses where NCBI stops reading (`-version-full`, ...).
-    Refused(&'static str),
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1015
@@ -2105,17 +2094,16 @@ pub enum Preparsed<S> {
 //             }
 //         }
 // ```
-/// The words NCBI's application takes before its argument reader: `-version` anywhere before
-/// `--` (but not as the value of `-logfile` or `-conffile`), the full versions, `-dryrun` and
-/// `-conffile`. A `-logfile` or `-conffile` without a value is dropped. `-dryrun` ends the run
-/// after the arguments (`cli::main_entry`; rpsbproc's after its `Init`, `rpsbproc::dry_run`),
-/// LOSAT refuses the full versions (NCBI's build
-/// details); the file of the last
-/// `-conffile` is the application start's configuration (`start_application`, line RG item E1).
+/// The words NCBI's application takes before its argument reader: `-version` and the full
+/// versions anywhere before `--` (but not as the value of `-logfile` or `-conffile`; the first
+/// one is printed, line RG item E3), `-dryrun` and `-conffile`. A `-logfile` or `-conffile`
+/// without a value is dropped. `-dryrun` ends the run after the arguments (`cli::main_entry`;
+/// rpsbproc's after its `Init`, `rpsbproc::dry_run`); the file of the last `-conffile` is the
+/// application start's configuration (`ApplicationStart::of_process`, line RG item E1).
 /// `words` are the arguments after the program's name. This is the one reading of these words:
-/// the command line's entry (`-version`, the full versions before the configuration load, and
-/// the words that the argument reader gets, `cli::try_parse_from`), `start_application`,
-/// `cli::ncbi_version_request` and blastdbcmd read them here, and `log_file` is NCBI's first scan
+/// the command line's entry (the versions, before the configuration load, and the words that
+/// the argument reader gets, `cli::try_parse_from_start`), `ApplicationStart::of_process`,
+/// `cli::ncbi_version_request` and `ncbi_app` read them here, and `log_file` is NCBI's first scan
 /// of `-logfile`.
 pub fn preparse<S: AsRef<OsStr> + Clone>(words: &[S]) -> Preparsed<S> {
     let mut kept = Vec::with_capacity(words.len());
@@ -2144,12 +2132,11 @@ pub fn preparse<S: AsRef<OsStr> + Clone>(words: &[S]) -> Preparsed<S> {
                     }
                 }
             }
-            b"-version" => return Preparsed::Version,
-            b"-version-full" => return Preparsed::Refused("-version-full"),
-            b"-version-full-xml" => return Preparsed::Refused("-version-full-xml"),
-            b"-version-full-json" => return Preparsed::Refused("-version-full-json"),
             b"-dryrun" => dryrun = true,
             _ => {
+                if let Some(request) = crate::ncbi_version::VersionRequest::of_word(word) {
+                    return Preparsed::Version(request);
+                }
                 if let Some(name) = word.strip_prefix(b"-conffile=") {
                     // SAFETY: `name` is the rest of the word after an ASCII prefix, so it starts
                     // at a boundary of the platform's encoding and ends where the word ends.
@@ -2169,7 +2156,7 @@ pub fn preparse<S: AsRef<OsStr> + Clone>(words: &[S]) -> Preparsed<S> {
 }
 
 /// What NCBI's application start writes about the registry files, and the settings it leaves
-/// (`start_application`). NCBI reads the system-wide file (`.ncbirc`) twice: when the
+/// (`ApplicationStart::of_process`). NCBI reads the system-wide file (`.ncbirc`) twice: when the
 /// program's usage report is made (`CBlastUsageReport`, a member of every BLAST+ application,
 /// before `AppMain`; `usage_report`) and when the application loads its configuration
 /// (`<program>.ini`, then `.ncbirc`, after the `-logfile`, `-version` and `-conffile` words and
@@ -2242,7 +2229,7 @@ pub struct ApplicationStart {
     /// A registry file that the start writes a message about, for LOSAT's library, which runs
     /// no application start and refuses it (`library_settings`).
     library_note: Option<String>,
-    /// What `check_ncbi_application_settings` gives after the start.
+    /// The settings after the start (`settings`).
     settings: Result<ApplicationSettings, String>,
 }
 
@@ -2258,25 +2245,19 @@ enum ConfigLoad {
     NotFound(String),
 }
 
-/// The application start of this process: made once by the command line's entry for an NCBI
-/// program (`start_application`), as NCBI's application starts once.
-static APPLICATION_START: std::sync::OnceLock<ApplicationStart> = std::sync::OnceLock::new();
-
-/// The application start of `program` in this process, made the first time and then kept: what
-/// the command line's entry writes before the program's arguments are read
-/// (`ApplicationStart`), and the settings that `check_ncbi_application_settings` gives after
-/// it.
-///
-/// `words` are the arguments after the program's name: the file of their last `-conffile`
-/// (`preparse`) is loaded in place of `<program>.ini`.
-pub fn start_application<S: AsRef<OsStr> + Clone>(
-    program: &str,
-    words: &[S],
-) -> &'static ApplicationStart {
-    APPLICATION_START.get_or_init(|| {
+impl ApplicationStart {
+    /// The application start of `program` in this process (its environment, its registry files
+    /// and its facts, `ProcessFacts`): what the command line's entry writes before the program's
+    /// arguments are read, and the settings that it leaves (`settings`). The entry makes one
+    /// and gives it to what reads after it (the argument reader, `cli::try_parse_from_start`; the
+    /// program's run), as NCBI's application starts once.
+    ///
+    /// `words` are the arguments after the program's name: the file of their last `-conffile`
+    /// (`preparse`) is loaded in place of `<program>.ini`.
+    pub fn of_process<S: AsRef<OsStr> + Clone>(program: &str, words: &[S]) -> ApplicationStart {
         let conffile = match preparse(words) {
             Preparsed::Words { conffile, .. } => conffile,
-            Preparsed::Version | Preparsed::Refused(_) => None,
+            Preparsed::Version(_) => None,
         };
         application_start(
             program,
@@ -2285,16 +2266,19 @@ pub fn start_application<S: AsRef<OsStr> + Clone>(
             &|name: &str| std::env::var_os(name),
             &ProcessFacts::of_this_process(),
         )
-    })
-}
+    }
 
-/// The application start of this process, when the command line's entry made one
-/// (`start_application`).
-pub fn application_start_of_process() -> Option<&'static ApplicationStart> {
-    APPLICATION_START.get()
-}
+    /// The program whose start this is.
+    pub fn program(&self) -> &str {
+        &self.program
+    }
 
-impl ApplicationStart {
+    /// The NCBI application settings that LOSAT reproduces after the start, or LOSAT's refusal
+    /// of them (`library_application_settings` describes them).
+    pub fn settings(&self) -> Result<ApplicationSettings, String> {
+        self.settings.clone()
+    }
+
     /// The usage report's messages, which go to `cerr` at once, or LOSAT's refusal there: a
     /// registry file that LOSAT does not read as NCBI does, a `[BLAST] BLAST_USAGE_REPORT` that
     /// is not a Boolean (NCBI aborts), or a refused environment variable when there are
@@ -2425,7 +2409,7 @@ impl ApplicationStart {
 /// malformed file: the report once, exit status 2; dustmasker writes it twice; fixtures
 /// `conf_malformed`).
 fn replays_collected(program: &str) -> bool {
-    program != "segmasker"
+    !matches!(program, "segmasker" | "convert2blastmask")
 }
 
 fn replays_to_stderr(program: &str) -> bool {
@@ -2457,7 +2441,7 @@ fn replays_to_stderr(program: &str) -> bool {
 /// 	}
 /// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1634-1648 (`IncludeNcbircIfAllowed`,
-/// quoted at `check_ncbi_application_settings`)
+/// quoted at `library_application_settings`)
 fn usage_report_reads_ncbirc(program: &str, env: &dyn Fn(&str) -> Option<OsString>) -> bool {
     has_usage_report(program)
         && usage_report_variable(env) != Some(Some(false))
@@ -2514,11 +2498,11 @@ fn rpsbproc_registry_refusal(path: &Path) -> String {
 /// `BLAST_USAGE_REPORT` as `NStr::StringToBool` reads it (`usage_report_reads_ncbirc`): `None`
 /// when it is not set, `Some(None)` for a value that is not a Boolean (NCBI aborts).
 fn usage_report_variable(env: &dyn Fn(&str) -> Option<OsString>) -> Option<Option<bool>> {
-    env("BLAST_USAGE_REPORT").map(|value| ncbi_string_to_bool(&value.to_string_lossy()))
+    env("BLAST_USAGE_REPORT").map(|value| string_to_bool(&value.to_string_lossy()))
 }
 
 /// Whether the environment turns `.ncbirc` off for every registry (`IncludeNcbircIfAllowed`,
-/// quoted at `check_ncbi_application_settings`): `NCBI_DONT_USE_NCBIRC`, or
+/// quoted at `library_application_settings`): `NCBI_DONT_USE_NCBIRC`, or
 /// `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC` (the environment's layer of `[NCBI] DONT_USE_NCBIRC`),
 /// set with any value.
 fn ncbirc_turned_off(env: &dyn Fn(&str) -> Option<OsString>) -> bool {
@@ -2632,10 +2616,10 @@ fn window_masker_path_of(
 /// entry `[BLAST] BLASTDB` of the database search path, and the directory of
 /// `-window_masker_taxid` (`window_masker_path_of`).
 ///
-/// After the command line's entry has started `program`'s application (`start_application`),
-/// these are the settings of that start, which has written what NCBI writes about the files.
-/// Without it (LOSAT's library: `api`), a registry file that NCBI's start writes a message
-/// about (a syntax error) is refused as well (`ApplicationStart::library_settings`).
+/// The command line's entry has these from its application start (`ApplicationStart::settings`),
+/// which has written what NCBI writes about the files. LOSAT's library (`api`) runs no start and
+/// reads them here, of this process: a registry file that NCBI's start writes a message about
+/// (a syntax error) is refused as well (`ApplicationStart::library_settings`).
 ///
 /// NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1254-1259
 /// ```c
@@ -2667,21 +2651,17 @@ fn window_masker_path_of(
 ///             return x_FindRegistry(CDirEntry::MakePath(dir, '.' + base, ext)
 ///                                   + "rc", eName_AsIs);
 /// ```
-pub fn check_ncbi_application_settings(program: &str) -> Result<ApplicationSettings, String> {
-    match APPLICATION_START.get() {
-        Some(start) if start.program == program => start.settings.clone(),
-        _ => application_settings(
-            program,
-            std::env::vars_os(),
-            &|name: &str| std::env::var_os(name),
-            &ProcessFacts::of_this_process(),
-        ),
-    }
+pub fn library_application_settings(program: &str) -> Result<ApplicationSettings, String> {
+    application_settings(
+        program,
+        std::env::vars_os(),
+        &|name: &str| std::env::var_os(name),
+        &ProcessFacts::of_this_process(),
+    )
 }
 
-/// `check_ncbi_application_settings` without an application start (LOSAT's library), over the
-/// environment `variables` (all of them) and `env` (one of them by name), and the facts of the
-/// process (`ProcessFacts`).
+/// `library_application_settings` over the environment `variables` (all of them) and `env` (one
+/// of them by name), and the facts of the process (`ProcessFacts`).
 fn application_settings(
     program: &str,
     variables: impl Iterator<Item = (OsString, OsString)>,
@@ -2736,7 +2716,7 @@ fn application_settings(
 /// 		bool enable = NStr::StringToBool(registry->Get("BLAST", "BLAST_USAGE_REPORT"));
 /// ```
 /// The environment layer of `HasEntry("NCBI", "DONT_USE_NCBIRC")` (`IncludeNcbircIfAllowed`,
-/// quoted at `check_ncbi_application_settings`) is `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC`, set with
+/// quoted at `library_application_settings`) is `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC`, set with
 /// any value.
 fn application_start(
     program: &str,
@@ -2927,7 +2907,7 @@ fn usage_report_entry_refusal(
     env: &dyn Fn(&str) -> Option<OsString>,
     usage_read: Option<(&RegistryRead, &Path)>,
 ) -> Option<String> {
-    let not_a_boolean = |value: &str| ncbi_string_to_bool(value).is_none();
+    let not_a_boolean = |value: &str| string_to_bool(value).is_none();
     if let Some(value) = env("NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT") {
         let value = value.to_string_lossy();
         return not_a_boolean(&value).then(|| {
@@ -3052,6 +3032,14 @@ mod tests {
         assert!(reject("NCBI_CONFIG_LONG_SEQID__BLAST", "1").is_some());
         assert!(reject("NCBI_CONFIG_PATH", "/etc").is_none());
         assert!(reject("ABORT_ON_THROW", "1").is_some());
+        // NCBI's Seq-id matching parameters (seq_id_tree.cpp:692-707): their own message.
+        for name in ["OBJECTS_PACK_TEXTID", "OBJECTS_PACK_GENERAL"] {
+            let message = reject(name, "0").unwrap();
+            assert!(message.contains("Seq-ids are matched"), "{message}");
+            assert!(reject(name, "1").is_some(), "{name}");
+        }
+        assert!(reject("NCBI_CONFIG__OBJECTS__PACK_TEXTID", "0").is_some());
+        assert!(reject("NCBI_CONFIG__OBJECTS__PACK_GENERAL", "0").is_some());
         // `application_start` refuses a `BLAST_USAGE_REPORT` that is not a Boolean.
         assert!(reject("BLAST_USAGE_REPORT", "bogus").is_none());
         assert!(reject("BLAST_USAGE_REPORT", "false").is_none());
@@ -3079,11 +3067,19 @@ mod tests {
         assert!(!is_harmless_entry("BLAST", "LONG_SEQID"));
         assert!(!is_harmless_entry("DEBUG", "DIAG_POST_LEVEL"));
         assert!(!is_harmless_entry("NCBI", ".Inherits"));
+        assert!(!is_harmless_entry("OBJECTS", "PACK_TEXTID"));
+        assert!(!is_harmless_entry("OBJECTS", "PACK_GENERAL"));
         assert!(is_harmless_entry("blast", "blast_usage_report"));
         let other = read_registry(b"[BLAST]\nLONG_SEQID=1\n", Layer::SystemWide).unwrap();
         let refusal = check_registry_entries(Path::new("f"), &other.entries).unwrap_err();
         assert!(
             refusal.contains("the registry file f sets [BLAST] LONG_SEQID"),
+            "{refusal}"
+        );
+        let packed = read_registry(b"[OBJECTS]\nPACK_TEXTID=0\n", Layer::SystemWide).unwrap();
+        let refusal = check_registry_entries(Path::new("f"), &packed.entries).unwrap_err();
+        assert!(
+            refusal.contains("the registry file f sets [OBJECTS] PACK_TEXTID"),
             "{refusal}"
         );
     }
@@ -4071,23 +4067,6 @@ mod tests {
         std::fs::remove_dir(&dir).unwrap();
     }
 
-    #[test]
-    fn ncbis_booleans() {
-        for (text, value) in [
-            ("1", Some(true)),
-            ("TRUE", Some(true)),
-            ("t", Some(true)),
-            ("On", Some(true)),
-            ("0", Some(false)),
-            ("No", Some(false)),
-            ("off", Some(false)),
-            ("", None),
-            ("2", None),
-        ] {
-            assert_eq!(ncbi_string_to_bool(text), value, "{text:?}");
-        }
-    }
-
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:844-866 (quoted at `log_file`).
     #[test]
     fn the_log_file_is_the_last_one_before_the_delimiter() {
@@ -4556,10 +4535,13 @@ mod tests {
                 conffile,
                 dryrun,
             } => (words, conffile, dryrun),
-            Preparsed::Version => panic!("version"),
-            Preparsed::Refused(word) => panic!("refused {word}"),
+            Preparsed::Version(request) => panic!("version {request:?}"),
         };
-        assert_eq!(preparse(&words(&["-db", "-version"])), Preparsed::Version);
+        use crate::ncbi_version::VersionRequest;
+        assert_eq!(
+            preparse(&words(&["-db", "-version"])),
+            Preparsed::Version(VersionRequest::Version)
+        );
         // The value of `-logfile` or `-conffile` is not read as `-version`; a last `-logfile`
         // is dropped.
         assert_eq!(
@@ -4576,14 +4558,28 @@ mod tests {
         assert_eq!(kept(&["-conffile=x"]).1, Some("x".into()));
         assert_eq!(kept(&["-conffilex"]).1, None);
         assert_eq!(kept(&["-info", "-conffile"]).1, None);
+        // The first version word is the one printed (line RG item E3).
         assert_eq!(
             preparse(&words(&["-version-full", "-version"])),
-            Preparsed::Refused("-version-full")
+            Preparsed::Version(VersionRequest::Full)
+        );
+        assert_eq!(
+            preparse(&words(&["-out", "-version-full-json", "-version-full-xml"])),
+            Preparsed::Version(VersionRequest::FullJson)
+        );
+        assert_eq!(kept(&["-version-full=1"]).0, words(&["-version-full=1"]));
+        assert_eq!(
+            kept(&["--", "-version-full-xml"]).0,
+            words(&["--", "-version-full-xml"])
+        );
+        assert_eq!(
+            kept(&["-logfile", "-version-full"]).0,
+            words(&["-logfile", "-version-full"])
         );
         // `-version` comes before a `-conffile` NCBI would check after its scan.
         assert_eq!(
             preparse(&words(&["-conffile", "x", "-version"])),
-            Preparsed::Version
+            Preparsed::Version(VersionRequest::Version)
         );
         // The words of the command line's entry.
         let os = [OsString::from("-logfile"), OsString::from("-version")];

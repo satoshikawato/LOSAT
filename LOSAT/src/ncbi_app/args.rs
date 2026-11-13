@@ -30,6 +30,32 @@ pub(crate) enum Kind {
     OutputFile,
 }
 
+impl Kind {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2387-2400
+    // ```c++
+    //     static const char* s_TypeName[k_EType_Size] = {
+    //         "String",
+    //         "Boolean",
+    //         "Int8",
+    //         "Integer",
+    //         "IntId",
+    //         "Real",
+    //         "File_In",
+    //         "File_Out",
+    // ```
+    /// `CArgDescriptions::GetTypeName` of a key's type.
+    fn type_name(self) -> &'static str {
+        match self {
+            Kind::Flag => "Boolean",
+            Kind::Text => "String",
+            Kind::Integer => "Integer",
+            Kind::Double => "Real",
+            Kind::InputFile => "File_In",
+            Kind::OutputFile => "File_Out",
+        }
+    }
+}
+
 /// The number of an `eInteger` or `eDouble` key.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Number {
@@ -70,6 +96,8 @@ pub(crate) struct Desc {
     kind: Kind,
     default: Option<&'static str>,
     constraint: Option<Constraint>,
+    /// `AddKey`: the key must be given (`CArgDescMandatory`).
+    mandatory: bool,
 }
 
 /// `AddFlag(name, comment, true)`: a flag that its word sets (every flag of LOSAT's programs).
@@ -79,6 +107,7 @@ pub(crate) const fn flag(name: &'static str) -> Desc {
         kind: Kind::Flag,
         default: None,
         constraint: None,
+        mandatory: false,
     }
 }
 
@@ -95,6 +124,18 @@ pub(crate) const fn key(
         kind,
         default,
         constraint,
+        mandatory: false,
+    }
+}
+
+/// `AddKey(name, ..., kind)`: a key without a default that the command line must give.
+pub(crate) const fn mandatory_key(name: &'static str, kind: Kind) -> Desc {
+    Desc {
+        name,
+        kind,
+        default: None,
+        constraint: None,
+        mandatory: true,
     }
 }
 
@@ -234,6 +275,9 @@ pub(crate) enum ArgsError {
     Usage,
     /// `-help` (`CArgHelpException::eHelpFull`): the full description on stdout, exit status 0.
     Help,
+    /// `-xmlhelp` (`CArgHelpException::eHelpXml`): the description in XML on stdout, exit status
+    /// 0 (`ncbi_xmlhelp`).
+    XmlHelp,
     /// A `CArgException` of the reader.
     Invalid(ArgException),
     /// A value that NCBI's reader takes in a way LOSAT does not reproduce: LOSAT's refusal.
@@ -624,10 +668,8 @@ fn create_arg(
             // `-help-full` adds the hidden arguments, of which LOSAT's programs have none: the
             // text is that of `-help` (probe C05 of line BDC).
             "-help" | "-help-full" => return Err(ArgsError::Help),
-            // The help in XML.
-            "-xmlhelp" => {
-                return Err(ArgsError::Refused(tool.unsupported_option(arg1)));
-            }
+            // The help in XML (`ncbi_xmlhelp`).
+            "-xmlhelp" => return Err(ArgsError::XmlHelp),
             _ => {}
         }
         if eq_separator {
@@ -981,6 +1023,42 @@ fn post_check(
                 numbers.insert(desc.name, number);
             }
             values.insert(desc.name, Some(default.to_string()));
+        } else if desc.mandatory {
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1158-1173,1270-1275
+            // ```c++
+            // string CArgDescMandatory::GetUsageCommentAttr(void) const
+            // {
+            //     CArgDescriptions::EType type = GetType();
+            //     // Print type name
+            //     string str = CArgDescriptions::GetTypeName(type);
+            //     ...
+            //     // Print constraint info, if any
+            //     string constr = GetUsageConstraint();
+            //     if ( !constr.empty() ) {
+            //         str += ", ";
+            //         str += constr;
+            //     }
+            //     return str;
+            // }
+            // ...
+            // CArgValue* CArgDescMandatory::ProcessDefault(void) const
+            // {
+            //     NCBI_THROW(CArgException, eNoArg,
+            //                s_ArgExptMsg(GetName(), "Mandatory value is missing",
+            //                             GetUsageCommentAttr()));
+            // }
+            // ```
+            // (`x_PostCheck`, quoted above, asks each argument that is not given for its
+            // default in the order of the descriptions.)
+            let mut attr = desc.kind.type_name().to_string();
+            if let Some(constraint) = desc.constraint {
+                attr += ", ";
+                attr += &constraint.usage();
+            }
+            return Err(invalid(
+                "eNoArg",
+                arg_message(desc.name, "Mandatory value is missing", &attr),
+            ));
         }
     }
     Ok(())

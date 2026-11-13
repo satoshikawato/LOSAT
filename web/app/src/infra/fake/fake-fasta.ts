@@ -7,10 +7,10 @@
 // next after a CR in a file of LF line ends, or the reverse, and has buffer ends); it never
 // takes a first line for a Seq-id that NCBI's data loaders would fetch, nor refuses a record
 // over 2147483647 letters; and it always reports the checkpoints layout.
-import { recordKey, type FastaParserKind, type IndexedRecord, type RecordKey } from '../../domain/dataset';
-import { fastaParser, programById, type InputRole, type ProgramId } from '../../domain/programs';
-import type { InputCheck, InputChecker } from '../../ports/input-check';
-import type { RecordScanner, ScanResponse } from '../../ports/scan';
+import type { FastaParserKind, IndexedRecord, InputRole, ProgramId, RecordKey } from 'losat/domain';
+import type { InputCheck, InputChecker, RecordScanner, ScanResponse } from 'losat/ports';
+import { recordKey } from '../../domain/dataset';
+import { fastaParser, programById } from '../../domain/programs';
 import { concatBytes } from '../bytes';
 
 const GT = 0x3e;
@@ -190,7 +190,7 @@ function finish(builder: Builder, index: number, end: number): IndexedRecord {
 }
 
 /**
- * The input check of the development build (ports/input-check.ts). It is not the engine's:
+ * The input check of the development build (losat/ports: input-check.ts). It is not the engine's:
  * it accepts what the FakeScanner reads with the program's kind, except a record with `!`
  * in its sequence lines, which it refuses with a message shaped as the engine's (the
  * record's number and ID), so that the screen's handling of a refused record can be tried

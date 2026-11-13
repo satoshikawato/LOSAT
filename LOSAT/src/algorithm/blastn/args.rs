@@ -398,6 +398,17 @@ pub struct BlastnArgs {
     pub min_diag_separation: usize,
     #[arg(long, value_name = "PATH", value_parser = blastn_output_path())]
     pub out: Option<PathBuf>,
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
+    /// ```c++
+    ///     arg_desc.AddOptionalKey(kArgOutputSearchStrategy,
+    ///                             "filename",
+    ///                             "File name to record the search strategy used",
+    ///                             CArgDescriptions::eOutputFile);
+    /// ```
+    /// The search strategy file (`report::archive::strategy`), created by `run` before the other
+    /// options are read.
+    #[arg(long, value_name = "filename", value_parser = blastn_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:648-660,674-679
     // ```c
     //     arg_desc.AddOptionalKey(kArgMismatch, "penalty",
@@ -537,6 +548,11 @@ pub struct BlastnArgs {
     /// give no search path: not found). Not a public option.
     #[arg(skip)]
     pub tabular_taxdb: Option<bool>,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made by the
+    /// command line with `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere.
+    /// Not a public option.
+    #[arg(skip)]
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
     // ```c++
     //         arg_desc.AddDefaultKey(kArgStrand, "strand",
@@ -757,6 +773,10 @@ pub struct BlastnArgs {
     /// reads the arguments (`archive::handle_for`).
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// The run's search strategy export (`-export_search_strategy`), made by `run`
+    /// (`strategy::StrategyExport::for_run`).
+    #[arg(skip)]
+    pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
 
     /// The command line of the run as the SAM `@PG` line shows it: every argument followed by
     /// one space, raw bytes (`GetCmdlineArgs`); `None` where there is no command line (the

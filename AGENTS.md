@@ -72,11 +72,11 @@ authoritative, current guidance for agent behavior in LOSAT.
      (NCBI: SIGPIPE) with exit 4 and no message (exception 9). Errors raised after argument parsing, the outfmt 0 write
      failure ("BLAST failed to write output", exit 6), all other warnings, and
      every search result must still match NCBI. Non-UTF-8
-     file names, `.ncbirc` keys that change output, and the NCBI C++ Toolkit
-     words that LOSAT does not run (`-version-full*`, `-xmlhelp`, `-help-full`;
-     also in an option's value) are explicit rejections, not exceptions. `-version`, and on the
-     command line `-logfile`, `-conffile` and `-dryrun`, run as in NCBI
-     (README, NCBI C++ Toolkit options).
+     file names and `.ncbirc` keys that change output are explicit rejections, not
+     exceptions. `-version` and `-version-full*` (NCBI's forms, LOSAT's package),
+     `-help-full` (the text of `-help`), and on the command line `-xmlhelp` (NCBI's XML
+     without the options LOSAT refuses by name), `-logfile`, `-conffile` and `-dryrun`,
+     run as in NCBI (README, NCBI C++ Toolkit options).
    - Approved exceptions for NCBI defects (`PD-LOSAT-NCBI-DEFECTS`): where
      NCBI BLAST+ fails (a crash, a debug-only assumption, a read past a buffer)
      and LOSAT's result was shown to equal NCBI's output for a nearby input

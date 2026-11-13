@@ -2,6 +2,7 @@
 // sorting and filtering with engine values, the limits and the orientation, the
 // verification badge, and the ResultsBrowser's selection by HSP identity.
 import { describe, expect, it } from 'vitest';
+import type { HspRecord, ProgramDescription } from 'losat/ports';
 import type { AppState, RunView } from '../../src/application/coordinator';
 import { ResultsBrowser, type ResultsDeps } from '../../src/application/results';
 import { Store } from '../../src/application/store';
@@ -28,7 +29,6 @@ import {
   type VerificationTable,
 } from '../../src/domain/verification';
 import type { RunSnapshot } from '../../src/domain/run';
-import type { HspRecord, ProgramDescription } from '../../src/ports/engine';
 
 // --- a small run: two queries (the second without hits), three subjects ----------------------
 
@@ -260,6 +260,10 @@ describe('hitLimits', () => {
     expect(limits('-num_alignments=3')).toEqual(limits('-num_alignments', '3'));
     expect(limits('-num_descriptions=4', '-num_alignments=2').outfmt0).toEqual({ alignments: 2, hitList: 4, separate: true });
     expect(limits('-max_target_seqs=7')).toEqual({ maxTargetSeqs: 7 });
+    // -sorthits (any value, also 0) orders outfmt 0's hit list by its key, in either spelling.
+    expect(limits('-sorthits', '3')).toEqual({ maxTargetSeqs: 500, sorted: true });
+    expect(limits('-sorthits=0', '-num_alignments', '3').sorted).toBe(true);
+    expect(limits('-sorthsps', '1').sorted).toBeUndefined();
     expect(flagGiven(['blastp', '-num_alignments=3'], '-num_alignments')).toBe(true);
     expect(flagGiven(['blastp', '-num_alignments=3'], '-num_descriptions')).toBe(false);
     expect(flagGiven(['blastp', '-num_alignments', '3'], '-num_alignments')).toBe(true);

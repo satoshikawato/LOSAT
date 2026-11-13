@@ -1,6 +1,7 @@
 //! The tools of the command line besides the searches: `makeblastdb` builds a BLAST database,
 //! `blastdbcmd` reads one, `dustmasker` masks the low-complexity regions of nucleotide
-//! sequences and `segmasker` those of protein sequences. They take the command line's words,
+//! sequences and `segmasker` those of protein sequences, and `convert2blastmask` turns the lower
+//! case letters of FASTA input into masking information. They take the command line's words,
 //! read the caller's reader where the command line reads its standard input, and write what it
 //! writes, to the caller's writers; none touches the process's standard streams.
 //!
@@ -33,13 +34,21 @@
 //!     return SegMaskerApplication().AppMain(argc, argv);
 //! }
 //! ```
+//! NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263
+//! ```c++
+//! int main(int argc, const char* argv[])
+//! {
+//!     // Execute main application function
+//!     return CConvert2BlastMaskApplication().AppMain(argc, argv);
+//! }
+//! ```
 #![warn(missing_docs, unused)]
 
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
 
 use super::error::Error;
-use crate::blastinput::ncbi_environment::check_ncbi_application_settings;
+use crate::blastinput::ncbi_environment::library_application_settings;
 use crate::cli::{Cli, Commands};
 use crate::writedb::makeblastdb;
 use crate::writedb::time::LocalTime;
@@ -82,7 +91,7 @@ fn outcome(status: i32, diagnostics: Vec<u8>) -> Result<(), Error> {
 /// standard output goes to `output` (`-out` is a file, as there), what it writes to standard
 /// error to `diagnostics`. A failure is an error whose message is that text (an argv that NCBI's
 /// argument reader refuses too). `-conffile` and `-dryrun`, which the command line's NCBI
-/// application start reads, are refused.
+/// application start reads, and `-xmlhelp`, whose XML only the command line writes, are refused.
 pub fn run_blastdbcmd(
     argv: &[&str],
     input: &mut dyn Read,
@@ -104,7 +113,8 @@ pub fn run_blastdbcmd(
 /// (`-out` is a file, as there), what it writes to standard error to `diagnostics`. A failure
 /// is an error whose message is that text (an argv that NCBI's argument reader refuses too: its
 /// usage and report, as the command line prints them). `-conffile` and `-dryrun`, which the
-/// command line's NCBI application start reads, are refused.
+/// command line's NCBI application start reads, and `-xmlhelp`, whose XML only the command line
+/// writes, are refused.
 pub fn run_dustmasker(
     argv: &[&str],
     input: &mut dyn Read,
@@ -125,7 +135,7 @@ pub fn run_dustmasker(
 /// input (`-in -`, and without `-in`), what it writes to standard output goes to `output` (`-out`
 /// is a file, as there), what it writes to standard error to `diagnostics`, and a failure is an
 /// error whose message is that text. `-conffile` and `-dryrun`, which the command line's NCBI
-/// application start reads, are refused.
+/// application start reads, and `-xmlhelp`, whose XML only the command line writes, are refused.
 pub fn run_segmasker(
     argv: &[&str],
     input: &mut dyn Read,
@@ -138,6 +148,26 @@ pub fn run_segmasker(
         bytes: Vec::new(),
     };
     let status = crate::segmasker::run_with(&words, input, output, &mut recorded);
+    outcome(status, recorded.bytes)
+}
+
+/// Runs `convert2blastmask` with the words after the program name, as on the command line: as
+/// [`run_dustmasker`], for the lower case letters of FASTA input. `input` is what the command
+/// line reads as standard input (`-in -`, and without `-in`), what it writes to standard output
+/// goes to `output` (`-out` is a file, as there), what it writes to standard error to
+/// `diagnostics`, and a failure is an error whose message is that text.
+pub fn run_convert2blastmask(
+    argv: &[&str],
+    input: &mut dyn Read,
+    output: &mut dyn Write,
+    diagnostics: &mut dyn Write,
+) -> Result<(), Error> {
+    let words: Vec<OsString> = argv.iter().map(OsString::from).collect();
+    let mut recorded = Recorded {
+        writer: diagnostics,
+        bytes: Vec::new(),
+    };
+    let status = crate::convert2blastmask::run_with(&words, input, output, &mut recorded);
     outcome(status, recorded.bytes)
 }
 
@@ -181,7 +211,7 @@ pub fn run_makeblastdb(
     };
     // NCBI's application layer reads the environment and the registry files before `Run`, and
     // LOSAT rejects the settings that change the output (`cli/main_entry.rs`).
-    let settings = check_ncbi_application_settings("makeblastdb").map_err(Error::Search)?;
+    let settings = library_application_settings("makeblastdb").map_err(Error::Search)?;
     makeblastdb::check_registry_settings(
         &args,
         settings
@@ -199,6 +229,7 @@ pub fn run_makeblastdb(
     };
     let status = makeblastdb::run_with(
         &args,
+        makeblastdb::registry_blastdb(&settings),
         now.as_ref(),
         Platform::host(),
         input,

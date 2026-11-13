@@ -124,6 +124,10 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
     }
     let mut taxdb_printer = xml.taxdb_notes.printer();
     let mut buf: Vec<u8> = Vec::new();
+    // The document's start (`StructuredXml::start`), before the first query's warnings.
+    document.start(&mut buf);
+    writer.write_all(&buf)?;
+    buf.clear();
     for (q_idx, hit_list) in hit_lists.iter().enumerate() {
         // The query's warnings come before its document (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {
@@ -153,6 +157,15 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
         };
         let mut next_row = 0usize;
         let start = buf.len();
+        // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): the texts of the
+        // subjects that the query's report reads one by one (`QueryWarnings::subject_read`) and
+        // the taxonomy database's messages.
+        let mut posts = crate::report::query_warnings::HitPosts::new(
+            warnings
+                .as_deref()
+                .is_some_and(|warnings| warnings.reads_with_texts(q_idx)),
+        );
+        let posting = warnings.is_some();
         let written = document.query(&xml.run, &query, &mut buf, |sink| {
             let Some(hit_list) = hit_list else {
                 return Ok(());
@@ -171,9 +184,13 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                 let hit = XmlHit::of(subject, xml.subjects.length(s_idx));
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time.
-                if let Some(warnings) = warnings.as_deref_mut() {
-                    taxdb_printer.at_names(s_idx, subject, &mut *warnings.sink)?;
-                }
+                posts.hit(sink.position(), s_idx as u32, |texts| {
+                    if posting {
+                        taxdb_printer.at_names(s_idx, subject, texts)
+                    } else {
+                        Ok(())
+                    }
+                })?;
                 sink.hit(&hit, |hsps| {
                     for hsp in lists[range].iter().flat_map(|hsp_list| &hsp_list.hsps) {
                         let row = hit_rows
@@ -209,7 +226,13 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
             buf.truncate(start);
             return Err(error);
         }
-        writer.write_all(&buf)?;
+        crate::report::query_warnings::write_hit_posts(
+            &buf,
+            &posts,
+            q_idx,
+            writer,
+            warnings.as_deref_mut(),
+        )?;
         buf.clear();
     }
     if xml.epilog {

@@ -171,7 +171,7 @@ pub fn compute_std_aa_composition() -> [f64; BLASTAA_SIZE] {
 /// Stores probability distribution of alignment scores
 #[derive(Debug, Clone)]
 pub struct ScoreFreqProfile {
-    /// Score probabilities: sprob[score] = probability of score
+    /// Score probabilities: `sprob[score]` = probability of score
     /// Indexed by score value (negative scores are valid)
     sprob: Vec<f64>,
     /// Minimum score with non-zero probability

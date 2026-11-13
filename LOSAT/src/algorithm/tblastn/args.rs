@@ -125,6 +125,11 @@ pub struct TblastnArgs {
     pub task: String,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
+    /// (quoted at `BlastpArgs::export_search_strategy`). The search strategy file
+    /// (`report::archive::strategy`), created by `run` before the other options are read.
+    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     // An omitted value keeps the default of the task (10).
     #[arg(long, value_parser = tblastn_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,
@@ -326,12 +331,21 @@ pub struct TblastnArgs {
     /// reads the arguments (`archive::handle_for`).
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// The run's search strategy export (`-export_search_strategy`), made by `run`
+    /// (`strategy::StrategyExport::for_run`).
+    #[arg(skip)]
+    pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
     /// by the command line before the search where a tabular field list shows a name of the
     /// taxonomy database (`algorithm::tblastn::tabular`); `None` elsewhere (`run_local`'s callers
     /// give no search path: not found, DECISIONS 7 of line CLI C2). Not a public option.
     #[arg(skip)]
     pub tabular_taxdb: Option<bool>,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made by the
+    /// command line with `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere.
+    /// Not a public option.
+    #[arg(skip)]
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
     // ```c++
     //     int GetLocalIdCounterInitValue() const { return m_LocalIdCounter; }
@@ -352,8 +366,11 @@ pub struct TblastnArgs {
 // return (genetic_codes.find(val) != genetic_codes.end());
 // ```
 // Stage A product decision admits 32 from gc.prt:340-347 for TBLASTN only.
+/// `NStr::StringToInt(value)` of `CArgAllowGeneticCodeInteger` is
+/// `value_parsers::genetic_code_number` (LOSAT's "invalid" message for the values outside 0..=255).
 pub fn tblastn_genetic_code(value: &str) -> std::result::Result<u8, String> {
-    let id = value.parse::<u8>().map_err(|_| "invalid genetic code ID")?;
+    let id = crate::blastinput::value_parsers::genetic_code_number(value)
+        .ok_or("invalid genetic code ID")?;
     GeneticCode::try_from_id(id).map(|_| id)
 }
 
@@ -863,7 +880,7 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // IDENTITY with the compressed lookup table is refused where the search reaches its first
     // query batch (`check_identity_compressed_lookup_of`).
     if !args.gapped {
-        anyhow::bail!("-ungapped (an ungapped search) is not supported by LOSAT's TBLASTN");
+        anyhow::bail!("{}", crate::cli::run_refusal("TBLASTN", "ungapped"));
     }
     // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:774-815 (uneven gap
     // linking of the HSPs, `longest_intron`)
@@ -1061,6 +1078,37 @@ mod tests {
     use super::*;
 
     use crate::cli::{try_parse_from, Cli, Commands};
+
+    // TBLASTN's `-query_gencode` and `-db_gencode`: `genetic_code_number`, then the codes LOSAT
+    // builds (32 included, Stage A); "invalid genetic code ID" for what is not a number of 0 to
+    // 255 written without a minus sign.
+    #[test]
+    fn tblastn_genetic_codes_are_read_as_ncbi_reads_them() {
+        for value in [
+            "-0",
+            "-5",
+            "256",
+            "2147483648",
+            "",
+            " 5",
+            "5 ",
+            "5.0",
+            "0x",
+            "0x5",
+        ] {
+            assert_eq!(
+                tblastn_genetic_code(value),
+                Err("invalid genetic code ID".to_string()),
+                "{value:?}"
+            );
+        }
+        for (value, expected) in [("+5", 5), ("005", 5), ("11", 11), ("33", 33)] {
+            assert_eq!(tblastn_genetic_code(value), Ok(expected), "{value}");
+        }
+        for value in ["0", "7", "8", "255"] {
+            assert!(tblastn_genetic_code(value).is_err(), "{value}");
+        }
+    }
 
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942
     // arg_desc.AddFlag(kArgUseLCaseMasking,

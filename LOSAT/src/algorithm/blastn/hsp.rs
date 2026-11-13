@@ -199,14 +199,13 @@ impl BlastnOutputFormat {
     }
 
     /// Whether the format is one of the tabular formats (outfmt 6, 7, 10 and 20), which read the
-    /// tabular subject IDs.
+    /// tabular subject IDs (`report::tabular::writes_rows`: not the organism report).
     pub(crate) fn is_tabular(self) -> bool {
-        matches!(
-            self,
-            BlastnOutputFormat::Tabular
-                | BlastnOutputFormat::TabularWithComments
-                | BlastnOutputFormat::CustomTabular(_)
-        )
+        match self {
+            BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments => true,
+            BlastnOutputFormat::CustomTabular(spec) => spec.writes_rows(),
+            _ => false,
+        }
     }
 
     /// Whether the format is a table whose fields read the sequence that NCBI's formatter finds
@@ -1237,6 +1236,12 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
         }
+        // NCBI loads each subject that the query's batch did not prefetch at its first row
+        // (`QueryWarnings::subject_read`).
+        let mut read = |s_idx: u32, writer: &mut W| match warnings.as_deref_mut() {
+            Some(warnings) => warnings.subject_read(q_idx, s_idx, writer),
+            None => Ok(()),
+        };
         write_query_rows(
             writer,
             q_idx,
@@ -1250,6 +1255,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
             &config,
             &mut hsp_index,
             probe.as_deref_mut(),
+            &mut read,
         )?;
     }
     write_tabular_epilog(writer, output_format, epilog)
@@ -1283,6 +1289,7 @@ pub(crate) fn write_query_rows<W: Write>(
     config: &OutputConfig,
     hsp_index: &mut HspIndex,
     mut probe: Option<&mut FormatProbe<'_>>,
+    read: crate::report::query_warnings::SubjectReadHook<'_, W>,
 ) -> io::Result<()> {
     write_query_header(
         writer,
@@ -1298,6 +1305,15 @@ pub(crate) fn write_query_rows<W: Write>(
         None => return Ok(()),
     };
     for hsp_list in &hit_list.hsplist_array {
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+        // ```c++
+        //        		const CBioseq_Handle& subject_bh =
+        //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+        // ```
+        // Every row of BLASTN's tables reads its subject: the first loads it.
+        if !hsp_list.hsps.is_empty() {
+            read(hsp_list.oid, writer)?;
+        }
         write_hsp_rows(
             writer,
             &hsp_list.hsps,

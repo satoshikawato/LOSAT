@@ -531,9 +531,9 @@ fn run_query_pssm(
     alignments: &[PssmAlignment<'_>],
     subject: &dyn Fn(u32) -> Result<Option<Vec<u8>>>,
 ) -> Result<QueryPssm> {
-    let id = crate::report::serial::pssm::PssmSeqId::Local(
-        crate::report::serial::pssm::ObjectId::Str(b"Query_1".to_vec()),
-    );
+    let id = crate::seqid::ParsedSeqId::Local(crate::report::serial::pssm::ObjectId::Str(
+        b"Query_1".to_vec(),
+    ));
     run_query_pssm_of(
         request,
         inclusion_ethresh,
@@ -549,7 +549,7 @@ fn run_query_pssm_of(
     request: &PssmRequest,
     inclusion_ethresh: f64,
     letters: &[u8],
-    id: &crate::report::serial::pssm::PssmSeqId,
+    id: &crate::seqid::ParsedSeqId,
     alignments: &[PssmAlignment<'_>],
     subject: &dyn Fn(u32) -> Result<Option<Vec<u8>>>,
 ) -> Result<QueryPssm> {
@@ -589,7 +589,7 @@ fn a_pssm_query_read_with_parse_deflines_has_its_seq_align_id() {
     let plain = crate::blastinput::fasta_reader::FastaRecord::new("Query_3", b"t", TK_1_40);
     assert_eq!(
         fasta_query_id(&plain, 3),
-        crate::report::serial::pssm::PssmSeqId::Local(crate::report::serial::pssm::ObjectId::Str(
+        crate::seqid::ParsedSeqId::Local(crate::report::serial::pssm::ObjectId::Str(
             b"Query_3".to_vec()
         ))
     );
@@ -625,10 +625,7 @@ fn a_pssm_query_read_with_parse_deflines_has_its_seq_align_id() {
     ] {
         let record = believed_query(&format!(">{defline}\n{letters}\n"));
         let pssm_id = fasta_query_id(&record, 1);
-        assert!(
-            matches!(pssm_id, crate::report::serial::pssm::PssmSeqId::Parsed(_)),
-            "{defline}"
-        );
+        assert_eq!(&pssm_id, &record.believed().unwrap().best, "{defline}");
         let asn = run_query_pssm_of(&request, 0.002, TK_1_40, &pssm_id, &alignments, &subject)
             .unwrap()
             .asn

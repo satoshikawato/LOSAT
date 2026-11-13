@@ -178,29 +178,39 @@ jobs:
           done
           exit "$status"
 
-  # cargo test --all-features: the test binaries built once (`cargo nextest archive`), then run
-  # in four shards on four runners from that archive (`--partition count:k/4`: each test
-  # binary's tests in turn to the shards). Four vCPUs shaped like a runner's (two cores and
-  # their hyperthreads) stayed busy: the tests of all binaries packed by nextest ran only 10 %
-  # faster than cargo test's one binary at a time (2026-10-22); the blastp integration tests
-  # search a proteome pair dozens of times each. Until 2026-11 each of two shards built every
-  # test binary itself (9 min of a 15 to 34 min shard). In three shards (10 pull request runs,
-  # 2026-11-12/13) the longest ran its tests for 274 to 433 s and the shortest for 173 to 281 s:
-  # a few tests of 30 to 130 s fell unevenly. The same tests in four shards: 199 to 280 s in the
-  # longest, 122 s less on average (each shard's sum of its tests' times over 3.9 busy threads,
-  # which matches the three-shard steps to within 19 s); a split by the tests' times would take
-  # 8 to 31 s less than that.
+  # cargo test --all-features: the test binaries built in two parts on two runners (`cargo nextest
+  # archive`), then run from those archives in six shards (`--partition count:k/n`: each test
+  # binary's tests in turn to the shards). Four vCPUs shaped like a runner's (two cores and their
+  # hyperthreads) stayed busy: the tests of all binaries packed by nextest ran only 10 % faster
+  # than cargo test's one binary at a time (2026-10-22); the blastp integration tests search a
+  # proteome pair dozens of times each. Until 2026-11 each of two shards built every test binary
+  # itself (9 min of a 15 to 34 min shard).
   #
-  # The archive holds the test binaries, the `losat` binary the integration tests run and the
-  # examples some of them run (.github/nextest.toml). The shards extract it into LOSAT/target,
-  # the path it was built in: the tests name these files by compile-time paths
+  # The parts: `lib`, the crate's unit tests (`--lib`: one test binary, the whole crate compiled
+  # with cfg(test)); `rest`, the crate as a library, `losat`, the examples and the integration
+  # tests. Built together, with the dependencies in place, they took 441 s (cargo --timings,
+  # 2026-11-13): the unit tests' binary took all of them, sharing the four vCPUs with the library
+  # (263 s) and the integration tests; alone it took 272 s.
+  # Shards: over 11 runs (2026-11-12/13) the unit tests took 1,009 to 1,434 test-seconds and the
+  # rest 1,831 to 2,829; in two and four shards the longest shard takes 129 to 211 s (its sum of
+  # test times over 3.9 busy threads), where four shards of both took 199 to 341 s.
+  #
+  # The `rest` archive holds its test binaries, the `losat` binary the integration tests run and
+  # the examples some of them run (.github/nextest.toml). The shards extract an archive into
+  # LOSAT/target, the path it was built in: the tests name these files by compile-time paths
   # (`env!("CARGO_BIN_EXE_losat")`, `env!("CARGO_MANIFEST_DIR")`), the same on every runner.
-  # The job id stays `rust-tests` so that rust-cache keeps the dependencies' cache key.
+  # The job id stays `rust-tests` so that rust-cache keeps the dependencies' cache key; the key
+  # holds the job id and not the matrix, so both parts read the one cache (the parts build the
+  # same dependencies) and the `rest` part saves it.
   rust-tests:
-    name: cargo test (build)
+    name: cargo test (build ${{ matrix.part }})
     runs-on: ubuntu-latest
     # About twice the longest build of 60 passing runs (9.4 min, 2026-11-11) with a cold cache.
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [lib, rest]
     env:
       # Optimized test code; the test profile keeps the dev profile's debug assertions and
       # overflow checks. Set for the job, so that rust-cache's key (it hashes the CARGO_*
@@ -219,36 +229,58 @@ jobs:
         with:
           workspaces: LOSAT -> target
           cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' }}
+          save-if: ${{ (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && matrix.part == 'rest' }}
       - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
         with:
           tool: cargo-nextest@0.9.148
-      - name: cargo nextest archive --all-features
+      # The unit tests run no example: their archive is made without .github/nextest.toml, whose
+      # include of target/debug/examples (on-missing = error) is for the `rest` archive.
+      - name: cargo nextest archive --all-features --lib
+        if: matrix.part == 'lib'
         run: |
-          cd LOSAT && cargo nextest archive --locked --all-features \
+          cd LOSAT && cargo nextest archive --locked --all-features --lib \
+            --archive-file ${{ runner.temp }}/tests.tar.zst
+      # cargo test builds the examples as programs only when no target is named (named, as with
+      # `--examples`, they become test harnesses), so they are built first with the test profile:
+      # the same library build the integration tests then link, and target/debug/examples for the
+      # archive's include.
+      - name: cargo build --all-features --profile test --examples
+        if: matrix.part == 'rest'
+        run: cd LOSAT && cargo build --locked --all-features --profile test --examples
+      - name: cargo nextest archive --all-features --bins --test '*'
+        if: matrix.part == 'rest'
+        run: |
+          cd LOSAT && cargo nextest archive --locked --all-features --bins --test '*' \
             --config-file ../.github/nextest.toml --archive-file ${{ runner.temp }}/tests.tar.zst
       # nextest runs no doc tests. The crate has none yet (`running 0 tests`, 2026-11-04): the
       # step stays so that the first doc example is run without a change here.
       - name: cargo test --all-features --doc
+        if: matrix.part == 'rest'
         run: cd LOSAT && cargo test --locked --all-features --doc
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: nextest-archive
+          name: nextest-archive-${{ matrix.part }}
           path: ${{ runner.temp }}/tests.tar.zst
           retention-days: 1
           compression-level: 0
 
   rust-tests-run:
-    name: cargo test (${{ matrix.shard }}/4)
+    name: cargo test (${{ matrix.part }} ${{ matrix.shard }}/${{ matrix.shards }})
     needs: [rust-tests]
     runs-on: ubuntu-latest
     # About three times the longest shard of 65 passing runs of the three-shard form (8.7 min,
-    # 2026-11-12/13); a shard of four runs about three quarters of those tests.
+    # 2026-11-12/13); a shard here runs about a quarter of those tests.
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        include:
+          - { part: lib, shard: 1, shards: 2 }
+          - { part: lib, shard: 2, shards: 2 }
+          - { part: rest, shard: 1, shards: 4 }
+          - { part: rest, shard: 2, shards: 4 }
+          - { part: rest, shard: 3, shards: 4 }
+          - { part: rest, shard: 4, shards: 4 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # cargo runs cargo-nextest; the tests build nothing when the archive holds the examples.
@@ -260,15 +292,15 @@ jobs:
           tool: cargo-nextest@0.9.148
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: nextest-archive
+          name: nextest-archive-${{ matrix.part }}
           path: ${{ runner.temp }}
       # target/tmp = CARGO_TARGET_TMPDIR, which cargo makes when it builds and the archive does not hold.
-      - name: cargo nextest run --all-features (shard ${{ matrix.shard }}/4)
+      - name: cargo nextest run --all-features (${{ matrix.part }} ${{ matrix.shard }}/${{ matrix.shards }})
         run: |
           mkdir -p LOSAT/target/tmp
           cd LOSAT && cargo nextest run --config-file ../.github/nextest.toml \
             --archive-file ${{ runner.temp }}/tests.tar.zst --extract-to . --extract-overwrite \
-            --workspace-remap . --no-fail-fast --partition count:${{ matrix.shard }}/4
+            --workspace-remap . --no-fail-fast --partition count:${{ matrix.shard }}/${{ matrix.shards }}
         env:
           LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
 

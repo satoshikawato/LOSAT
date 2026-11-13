@@ -679,6 +679,15 @@ impl Volume {
         self.deflines_as(oid, false)
     }
 
+    /// `deflines` with every definition line of the stored header: the volume's `DeflineRule` is
+    /// not applied (`SeqDb::has_parsed_seqids`, which checks the stored first header of each
+    /// volume).
+    pub(super) fn stored_deflines(&self, oid: u32) -> Result<Vec<Defline>, SeqDbError> {
+        let record = self.header_bytes(oid)?;
+        let path = with_extension(&self.base, self.index.seqtype, "hr");
+        decode_deflines_as(&record, &path, oid, false)
+    }
+
     /// `deflines`, with the `taxid` of each definition line decoded when `want_taxid` (the
     /// decode of `defline_taxids`, which also gives the titles).
     pub fn deflines_as(&self, oid: u32, want_taxid: bool) -> Result<Vec<Defline>, SeqDbError> {

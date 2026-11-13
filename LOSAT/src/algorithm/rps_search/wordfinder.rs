@@ -14,7 +14,8 @@
 //! gets NCBI's hits whatever queries came before it.
 
 use super::scan::{
-    q_place, s_place, scan_subject, RpsBuckets, RpsHits, RpsReadCursor, RpsTable, MAX_SCAN_HITS,
+    q_place, s_place, scan_subject, RpsBlockPool, RpsBuckets, RpsHits, RpsReadCursor, RpsTable,
+    MAX_SCAN_HITS,
 };
 use super::RpsRows;
 use crate::algorithm::blastp::extension::BlastpUngappedData;
@@ -189,11 +190,12 @@ pub(crate) struct RpsWordScratch {
 }
 
 impl RpsWordScratch {
-    /// A scratch without a table or a block (sized by `prepare_for`).
-    pub(crate) fn new() -> Self {
+    /// A scratch without a table, its buckets' blocks from the run's `pool` (sized by
+    /// `prepare_for`).
+    pub(crate) fn new(pool: std::sync::Arc<RpsBlockPool>) -> Self {
         Self {
             diag: RpsDiagTable::new(),
-            buckets: RpsBuckets::new(0),
+            buckets: RpsBuckets::new(0, pool),
         }
     }
 
@@ -376,7 +378,11 @@ fn two_hit(
             let (q_base, s_base) = (q_base as i32, s_base as i32);
             let diag_base = q_base.wrapping_sub(s_base);
             let s_diag_offset = diag_offset.wrapping_add(s_base);
-            for &hit_entry in entries {
+            // An index loop (the slice iterator's step took six instructions per hit here).
+            let mut next = 0;
+            while next < entries.len() {
+                let hit_entry = entries[next];
+                next += 1;
                 let q = q_place(hit_entry) as i32;
                 let s = s_place(hit_entry) as i32;
                 let diag_coord = (q.wrapping_sub(s).wrapping_add(diag_base) & diag_mask) as usize;
@@ -501,7 +507,11 @@ fn one_hit(
             let (q_base, s_base) = (q_base as i32, s_base as i32);
             let diag_base = q_base.wrapping_sub(s_base);
             let s_diag_offset = diag_offset.wrapping_add(s_base);
-            for &hit_entry in entries {
+            // An index loop (the slice iterator's step took six instructions per hit here).
+            let mut next = 0;
+            while next < entries.len() {
+                let hit_entry = entries[next];
+                next += 1;
                 let q = q_place(hit_entry) as i32;
                 let s = s_place(hit_entry) as i32;
                 let diag_coord = (s.wrapping_sub(q).wrapping_sub(diag_base) & diag_mask) as usize;
@@ -591,7 +601,7 @@ mod tests {
         let hits_with_table = |length: i32| {
             let mut scratch = RpsWordScratch {
                 diag: RpsDiagTable::new(),
-                buckets: RpsBuckets::new(concat),
+                buckets: RpsBuckets::new(concat, Default::default()),
             };
             scratch.diag.reset_for(length, 40);
             let mut hits = Vec::new();
@@ -641,7 +651,7 @@ mod tests {
         let run = |before: &[&[u8]]| {
             let mut scratch = RpsWordScratch {
                 diag: RpsDiagTable::new(),
-                buckets: RpsBuckets::new(rows.len()),
+                buckets: RpsBuckets::new(rows.len(), Default::default()),
             };
             scratch.diag.reset_for(rows.len() as i32, 40);
             let mut ignored = Vec::new();
@@ -663,7 +673,7 @@ mod tests {
         // (every entry `-window`, the offset the window), after which `query` gets them again.
         let mut scratch = RpsWordScratch {
             diag: RpsDiagTable::new(),
-            buckets: RpsBuckets::new(rows.len()),
+            buckets: RpsBuckets::new(rows.len(), Default::default()),
         };
         scratch.diag.reset_for(rows.len() as i32, 40);
         scratch.diag.offset = i32::MAX / 4 - 5;
@@ -742,9 +752,14 @@ mod tests {
                 word_finder(params, scratch, q, &mut hits);
                 hits
             };
-        let fresh_b = hits(&mut RpsWordScratch::new(), &b, 900, &query_b);
+        let fresh_b = hits(
+            &mut RpsWordScratch::new(Default::default()),
+            &b,
+            900,
+            &query_b,
+        );
         assert!(!fresh_b.is_empty());
-        let mut scratch = RpsWordScratch::new();
+        let mut scratch = RpsWordScratch::new(Default::default());
         assert!(!hits(&mut scratch, &a, 984, &query_a).is_empty());
         assert_eq!(scratch.diag.array.len(), 1024);
         let kept = scratch.diag.array.as_ptr();

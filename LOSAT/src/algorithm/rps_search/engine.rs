@@ -39,7 +39,7 @@ use anyhow::Result;
 
 use super::prelim::{RpsPrelim, RpsPrelimScratch};
 use super::redo::RpsRedoParams;
-use super::scan::RpsTable;
+use super::scan::{RpsBlockPool, RpsTable};
 use super::traceback::{
     filter_results, formatter_identities, RpsTraceScratch, RpsTraceback, RpsTraced,
 };
@@ -924,32 +924,37 @@ struct RpsScratch {
 }
 
 impl RpsScratch {
-    fn new() -> Self {
+    /// A worker's scratch, its buckets' blocks from the run's `pool`.
+    fn new(pool: &std::sync::Arc<RpsBlockPool>) -> Self {
         Self {
-            prelim: RpsPrelimScratch::new(RpsWordScratch::new()),
+            prelim: RpsPrelimScratch::new(RpsWordScratch::new(pool.clone())),
             trace: RpsTraceScratch::new(),
         }
     }
 }
 
 /// The scratch of a run's workers (series PR, item PS12s, D3): one for each thread of the run's
-/// pool (`rayon::current_thread_index` inside the pool; the first for a search without a pool), kept from volume to
-/// volume and from query batch to query batch, where each search of a volume made its own
-/// (whose buckets grew again by doubling). A worker's diagonal table stays where the next
-/// volume's table has the same length, and its buckets' blocks stay
-/// (`RpsWordScratch::prepare_for`); a search's values do not depend on what its scratch held
-/// before (`wordfinder.rs`), so only the memory and its reuse change.
+/// pool (`rayon::current_thread_index` inside the pool; the first for a search without a pool),
+/// kept from volume to volume and from query batch to query batch, where each search of a volume
+/// made its own (whose buckets grew again by doubling). A worker's diagonal table stays where the
+/// next volume's table has the same length (`RpsWordScratch::prepare_for`); the buckets' blocks
+/// come from one pool of the run (`RpsBlockPool`, M2), to which each bucket gives its blocks back
+/// as soon as its hits are read. A search's values do not depend on what its scratch held before
+/// (`wordfinder.rs`), so only the memory and its reuse change.
 pub(crate) struct RpsWorkers {
     slots: Vec<std::sync::Mutex<RpsScratch>>,
+    pool: std::sync::Arc<RpsBlockPool>,
 }
 
 impl RpsWorkers {
     /// The scratch of a run of `threads` threads (empty until a worker searches).
     pub(crate) fn new(threads: usize) -> Self {
+        let pool = std::sync::Arc::new(RpsBlockPool::default());
         Self {
             slots: (0..threads.max(1))
-                .map(|_| std::sync::Mutex::new(RpsScratch::new()))
+                .map(|_| std::sync::Mutex::new(RpsScratch::new(&pool)))
                 .collect(),
+            pool,
         }
     }
 
@@ -960,7 +965,7 @@ impl RpsWorkers {
     fn with<T>(&self, slot: usize, work: impl FnOnce(&mut RpsScratch) -> T) -> T {
         match self.slots.get(slot).and_then(|slot| slot.try_lock().ok()) {
             Some(mut scratch) => work(&mut scratch),
-            None => work(&mut RpsScratch::new()),
+            None => work(&mut RpsScratch::new(&self.pool)),
         }
     }
 }

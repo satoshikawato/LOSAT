@@ -40,6 +40,46 @@ pub(crate) const BLOCK_ENTRIES: usize = 1024;
 /// One block of a bucket's entries.
 type Block = Box<[u32; BLOCK_ENTRIES]>;
 
+/// The blocks of a run's buckets that no bucket holds (series PR, item PS12s, M2): one pool for
+/// every worker of the run, so that the blocks a bucket gives back as soon as its hits are read
+/// (`RpsBuckets::next_block`) serve the scans of the other workers, and the run keeps the blocks
+/// its workers' buckets hold at the same time, not each worker's largest scan. A worker takes one
+/// block for 1,024 hits of a bucket and gives a bucket's blocks back together: a lock for a block,
+/// none for a hit.
+#[derive(Default)]
+pub(crate) struct RpsBlockPool {
+    free: std::sync::Mutex<Vec<Block>>,
+}
+
+impl RpsBlockPool {
+    /// A block of the pool (a new one when the pool has none).
+    fn take(&self) -> Block {
+        let block = self
+            .free
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .pop();
+        block.unwrap_or_else(|| Box::new([0; BLOCK_ENTRIES]))
+    }
+
+    /// `blocks` back in the pool.
+    fn give_back(&self, blocks: impl Iterator<Item = Block>) {
+        self.free
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend(blocks);
+    }
+
+    /// The blocks in the pool.
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.free
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
+    }
+}
+
 /// A bucket's block closed before its current one: its entries (the first `len`) and the segment
 /// of their query offsets.
 struct ClosedBlock {
@@ -57,8 +97,8 @@ struct BucketHead {
 }
 
 /// The buckets of a volume (`lookup->bucket_array`, `rows / RPS_BUCKET_SIZE + 1` of them), kept
-/// by a worker for its run (series PR, item PS12s, D4): a bucket is a list of fixed-size blocks,
-/// its hits in the order of the scan; the hits are read bucket by bucket, each in the order of
+/// by a worker for its run (series PR, item PS12s, D4): a bucket is a list of fixed-size blocks
+/// from the run's pool (`RpsBlockPool`, M2), its hits in the order of the scan; the hits are read bucket by bucket, each in the order of
 /// the scan (`next_block`), as NCBI reads its buckets, and each bucket's blocks but its current one go
 /// back to the pool of free blocks as soon as they are read.
 ///
@@ -85,18 +125,18 @@ pub(crate) struct RpsBuckets {
     chains: Vec<Vec<ClosedBlock>>,
     /// The query offsets' segment of the scan's current word (`entry_bits`).
     segment: u32,
-    /// The blocks that no bucket holds.
-    free: Vec<Block>,
+    /// The run's blocks that no bucket holds.
+    pool: std::sync::Arc<RpsBlockPool>,
 }
 
 impl RpsBuckets {
-    /// The buckets of a volume of `num_rows` concatenated rows, empty.
-    pub(crate) fn new(num_rows: usize) -> Self {
+    /// The buckets of a volume of `num_rows` concatenated rows, empty, their blocks from `pool`.
+    pub(crate) fn new(num_rows: usize, pool: std::sync::Arc<RpsBlockPool>) -> Self {
         let mut buckets = Self {
             heads: Vec::new(),
             chains: Vec::new(),
             segment: 0,
-            free: Vec::new(),
+            pool,
         };
         buckets.reset_for(num_rows);
         buckets
@@ -106,9 +146,9 @@ impl RpsBuckets {
     pub(crate) fn reset_for(&mut self, num_rows: usize) {
         let count = num_rows / RPS_BUCKET_SIZE + 1;
         self.clear();
-        while self.heads.len() > count {
-            let head = self.heads.pop().expect("a bucket above the count");
-            self.free.push(head.block);
+        if self.heads.len() > count {
+            self.pool
+                .give_back(self.heads.drain(count..).map(|head| head.block));
         }
         while self.heads.len() < count {
             let block = self.take();
@@ -124,18 +164,19 @@ impl RpsBuckets {
     /// Every bucket emptied, its closed blocks back in the pool.
     fn clear(&mut self) {
         for (head, chain) in self.heads.iter_mut().zip(&mut self.chains) {
-            self.free.extend(chain.drain(..).map(|closed| closed.block));
+            if !chain.is_empty() {
+                self.pool
+                    .give_back(chain.drain(..).map(|closed| closed.block));
+            }
             head.fill = 0;
             head.segment = 0;
         }
         self.segment = 0;
     }
 
-    /// A block of the pool (a new one when the pool has none).
+    /// A block of the run's pool.
     fn take(&mut self) -> Block {
-        self.free
-            .pop()
-            .unwrap_or_else(|| Box::new([0; BLOCK_ENTRIES]))
+        self.pool.take()
     }
 
     /// The bits that the entries of the hits of the word at the query offset `s_off` hold of it,
@@ -231,7 +272,8 @@ impl RpsBuckets {
             // The bucket is read: emptied, its closed blocks back in the pool.
             let chain = &mut self.chains[bucket];
             if !chain.is_empty() {
-                self.free.extend(chain.drain(..).map(|closed| closed.block));
+                self.pool
+                    .give_back(chain.drain(..).map(|closed| closed.block));
             }
             self.heads[bucket].fill = 0;
             cursor.bucket += 1;
@@ -285,7 +327,7 @@ impl RpsBuckets {
     /// The blocks the buckets hold or the pool keeps.
     #[cfg(test)]
     fn blocks(&self) -> usize {
-        self.heads.len() + self.chains.iter().map(Vec::len).sum::<usize>() + self.free.len()
+        self.heads.len() + self.chains.iter().map(Vec::len).sum::<usize>() + self.pool.len()
     }
 }
 
@@ -520,7 +562,7 @@ mod tests {
         table.set(word([1, 2, 3]), &[4100, 10]);
         table.set(word([2, 3, 1]), &[20, 2060, 30, 2050, 5000]);
         let subject = [1u8, 2, 3, 1, 2, 3];
-        let mut buckets = RpsBuckets::new(6000);
+        let mut buckets = RpsBuckets::new(6000, Default::default());
         let mut offset = 0;
         let hits = scan_subject(
             &table.view(),
@@ -544,7 +586,7 @@ mod tests {
         let mut table = Table::new();
         table.set(word([1, 1, 1]), &[2, 3, 4]);
         let subject = [1u8; 6];
-        let mut buckets = RpsBuckets::new(10);
+        let mut buckets = RpsBuckets::new(10, Default::default());
         let mut offset = 0;
         // Room for seven hits: two words (six hits), then the third does not fit.
         let first = scan_subject(&table.view(), &subject, &mut offset, &mut buckets, 7);
@@ -573,7 +615,7 @@ mod tests {
     #[test]
     fn blocks_read_the_hits_in_the_order_of_vectors_per_bucket() {
         let mut state = 12_345u64;
-        let mut buckets = RpsBuckets::new(0);
+        let mut buckets = RpsBuckets::new(0, Default::default());
         let mut largest = 0usize;
         let segment = 1u32 << SEGMENT_SHIFT;
         for (scan, &(rows, hits, first_s)) in [
@@ -646,7 +688,7 @@ mod tests {
             subject[start..start + 3].copy_from_slice(&[1, 2, 3]);
             subject[start + 3] = 1;
         }
-        let mut buckets = RpsBuckets::new(6000);
+        let mut buckets = RpsBuckets::new(6000, Default::default());
         let mut offset = 0;
         let hits = scan_subject(
             &table.view(),
@@ -676,5 +718,34 @@ mod tests {
         assert!(expected[0].iter().any(|&(_, s)| s as usize >= boundary));
         let read = buckets.drain();
         assert_eq!(read, expected.concat());
+    }
+
+    // M2 of PS12s: the buckets of two workers share one pool: the blocks one worker's buckets
+    // give back once read serve the other's scan, so the run holds the blocks its buckets hold
+    // at the same time.
+    #[test]
+    fn workers_share_the_blocks_given_back_once_read() {
+        let pool: std::sync::Arc<RpsBlockPool> = Default::default();
+        let mut a = RpsBuckets::new(5_000, pool.clone());
+        let mut b = RpsBuckets::new(5_000, pool.clone());
+        let fill = |buckets: &mut RpsBuckets| {
+            for s_off in 0..5 * BLOCK_ENTRIES as u32 {
+                let s_bits = buckets.entry_bits(s_off);
+                buckets.add(s_off % 3_000, s_bits);
+            }
+        };
+        let closed = |buckets: &RpsBuckets| buckets.chains.iter().map(Vec::len).sum::<usize>();
+        fill(&mut a);
+        let closed_a = closed(&a);
+        assert!(closed_a > 0);
+        assert_eq!(pool.len(), 0);
+        assert_eq!(a.drain().len(), 5 * BLOCK_ENTRIES);
+        assert_eq!(pool.len(), closed_a);
+        // The other worker's scan takes those blocks: no block more.
+        fill(&mut b);
+        assert_eq!(closed(&b), closed_a);
+        assert_eq!(pool.len(), 0);
+        assert_eq!(b.drain().len(), 5 * BLOCK_ENTRIES);
+        assert_eq!(pool.len(), closed_a);
     }
 }

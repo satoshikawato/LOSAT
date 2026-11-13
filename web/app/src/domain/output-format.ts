@@ -1,14 +1,7 @@
+import { CUSTOM_OUTPUT, OUTPUT_FORMATS, type RunOutput } from 'losat/domain';
 // The compatibility outputs that LOSAT Web stores and exports byte for byte: the formats that every
 // run writes, and the output of the argv's own -outfmt: any other format that the CLI writes, and
 // 6 or 7 with fields (WA2-OP-03 and W11, Owner 2026-11-05; docs/web/abi_v2.md §5, §7).
-export type OutputFormat = 0 | 6 | 7;
-export const OUTPUT_FORMATS: readonly OutputFormat[] = Object.freeze([0, 6, 7]);
-
-/** The output of the argv's own -outfmt (ABI stream 4). */
-export const CUSTOM_OUTPUT = 4;
-
-/** One stored output of a run: a format that every run writes, or CUSTOM_OUTPUT. */
-export type RunOutput = OutputFormat | typeof CUSTOM_OUTPUT;
 
 /** The flag whose value the engine reads as the CLI does (Additional options). */
 export const OUTFMT_FLAG = '-outfmt';

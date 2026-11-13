@@ -43,6 +43,7 @@ pub use args::RpsbprocArgs;
 use std::ffi::{OsStr, OsString};
 use std::io::{BufReader, Read, Write};
 
+use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_exception::{err_post_x, err_post_x_bytes, NcbiException};
 
 use archive::{ArchiveStream, ParamValue, Queries, RequestBody, SeqEntry, Subject};
@@ -578,7 +579,7 @@ fn program_paths() -> (OsString, OsString) {
 // 	}
 // ```
 // (The registry's `[datafiles]` names, main:535-566, are rejected with every other registry
-// entry that changes the output: `check_ncbi_application_settings`.)
+// entry that changes the output: `ApplicationStart::settings`.)
 fn find_data_path(diag: &mut Diagnostics, data_path: Option<&OsStr>) -> Option<OsString> {
     let found = |path: &OsStr| dir_exists(path) && file_exists(&join(path, "cddid.tbl"));
     match data_path {
@@ -811,9 +812,9 @@ fn header_tail(evalue: f64, mode: DataMode, show_families: bool, target: TargetD
 // `OBJECTS_SEQ_DESCR_ALLOW_EMPTY` lets an empty `Seq-descr` read; LOSAT rejects it with any value
 // when the input is an archive (`xml` false: a BlastOutput document has no `Seq-descr`).
 // The other parameters of the readers are registry entries (`NCBI_CONFIG__SERIAL__...`, which
-// `check_ncbi_application_settings` rejects) or change no result (`SERIAL_READ_MMAPBYTESOURCE`,
-// `SERIAL_DISABLE_DELAY_BUFFERS` and the binary ASN.1 ones); the gi parameters of the Seq-ids
-// are refused in `run_sessions`, where a query has a gi.
+// the application start rejects, `ApplicationStart::settings`) or change no result
+// (`SERIAL_READ_MMAPBYTESOURCE`, `SERIAL_DISABLE_DELAY_BUFFERS` and the binary ASN.1 ones); the
+// gi parameters of the Seq-ids are refused in `run_sessions`, where a query has a gi.
 fn reader_variable(
     variables: impl Iterator<Item = (OsString, OsString)>,
     xml: bool,
@@ -864,8 +865,14 @@ struct Ready {
 }
 
 /// Runs `losat rpsbproc` with `args` (NCBI's `Init` and `Run`), its diagnostics going to `diag`.
-pub fn run(args: RpsbprocArgs, mut diag: Diagnostics) -> Outcome {
-    match init(&args, &mut diag) {
+/// `settings` are those of rpsbproc's application start, or LOSAT's refusal of them
+/// (`ApplicationStart::settings`).
+pub fn run(
+    args: RpsbprocArgs,
+    settings: Result<ApplicationSettings, String>,
+    mut diag: Diagnostics,
+) -> Outcome {
+    match init(&args, settings, &mut diag) {
         Err(outcome) => outcome,
         Ok(Init::Failed(status)) => Outcome::Exit(status),
         Ok(Init::Ready(ready)) => run_ready(&args, *ready, diag),
@@ -896,8 +903,12 @@ pub fn run(args: RpsbprocArgs, mut diag: Diagnostics) -> Outcome {
 /// XML input;
 /// `-o out.txt` leaves an empty file; a missing `-i` file with an empty standard input fails
 /// with 5 (the input's), with an archive on it with 3.
-pub fn dry_run(args: RpsbprocArgs, mut diag: Diagnostics) -> Outcome {
-    let status = match init(&args, &mut diag) {
+pub fn dry_run(
+    args: RpsbprocArgs,
+    settings: Result<ApplicationSettings, String>,
+    mut diag: Diagnostics,
+) -> Outcome {
+    let status = match init(&args, settings, &mut diag) {
         Err(outcome) => return outcome,
         Ok(Init::Failed(status)) => status,
         Ok(Init::Ready(_)) => E_OK,
@@ -911,11 +922,16 @@ pub fn dry_run(args: RpsbprocArgs, mut diag: Diagnostics) -> Outcome {
 }
 
 /// rpsbproc's `Init` with `args`: LOSAT's checks of the names and the settings that NCBI's
-/// application reads before `DryRun` too, the program information, the input and output files,
-/// the data files and the report's header. `Err` with
+/// application reads before `DryRun` too (`settings`, those of the application start), the
+/// program information, the input and output files, the data files and the report's header.
+/// `Err` with
 /// how the program ends there, before `Run` or `DryRun`: LOSAT's refusal, or the report of an
 /// exception that leaves `Init` (exit status 2).
-fn init(args: &RpsbprocArgs, diag: &mut Diagnostics) -> Result<Init, Outcome> {
+fn init(
+    args: &RpsbprocArgs,
+    settings: Result<ApplicationSettings, String>,
+    diag: &mut Diagnostics,
+) -> Result<Init, Outcome> {
     // File names that are not UTF-8 are refused as the other programs refuse them (NCBI writes
     // their bytes in its messages and the report's header).
     for (role, name) in [
@@ -936,11 +952,10 @@ fn init(args: &RpsbprocArgs, diag: &mut Diagnostics) -> Result<Init, Outcome> {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044 (quoted at the BLAST
     // programs in `cli::main_entry`): the application layer reads its environment and its
     // registry files (`rpsbproc.ini`, `.ncbirc`) before `Init`.
-    let settings =
-        match crate::blastinput::ncbi_environment::check_ncbi_application_settings("rpsbproc") {
-            Ok(settings) => settings,
-            Err(reason) => return Err(Outcome::refused(reason)),
-        };
+    let settings = match settings {
+        Ok(settings) => settings,
+        Err(reason) => return Err(Outcome::refused(reason)),
+    };
     banner();
     let mut status = E_OK;
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:447-498

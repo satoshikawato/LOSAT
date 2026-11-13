@@ -9,12 +9,12 @@ import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { Worker as NodeWorker } from 'node:worker_threads';
 import { describe, expect, it } from 'vitest';
+import { instantiateSerial } from 'losat';
+import { OUTPUT_FORMATS } from 'losat/domain';
 import { findReactors } from '../../build/reactors';
-import { OUTPUT_FORMATS } from '../../src/domain/output-format';
-import { MemoryKeeper } from '../../src/infra/engine-worker/memory-keeper';
-import type { KeeperGrown } from '../../src/infra/engine-worker/protocol';
-import { ReactorAbi, ROLE_QUERY, ROLE_SUBJECT, type AbiExports } from '../../src/infra/reactor/abi';
-import { instantiateSerial } from '../../src/infra/reactor/instance';
+import { MemoryKeeper } from '../../../packages/losat/src/infra/engine-worker/memory-keeper';
+import type { KeeperGrown } from '../../../packages/losat/src/infra/engine-worker/protocol';
+import { ReactorAbi, ROLE_QUERY, ROLE_SUBJECT, type AbiExports } from '../../../packages/losat/src/infra/reactor/abi';
 import {
   candidateMaximums,
   createSharedMemory,
@@ -24,8 +24,8 @@ import {
   WAIT_TABLE_ADDRESS,
   WAIT_TABLE_SLOTS,
   WAITS_ENDING_ADDRESS,
-} from '../../src/infra/reactor/shared-memory';
-import { createWasi, unsignedImports } from '../../src/infra/reactor/wasi';
+} from '../../../packages/losat/src/infra/reactor/shared-memory';
+import { createWasi, unsignedImports } from '../../../packages/losat/src/infra/reactor/wasi';
 
 const PAGE = 65_536;
 const TWO_GIB = 2 ** 31;

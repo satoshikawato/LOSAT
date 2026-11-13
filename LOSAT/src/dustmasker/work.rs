@@ -5,11 +5,12 @@ use std::io::Write;
 
 use crate::ncbi_app::files::{open_input_file, Cin, Ostream};
 use crate::ncbi_exception::{err_post_x, NcbiException};
+use crate::seqdb::mask::FilterProgram;
 use crate::seqdb::SeqType;
 use crate::seqid::ParsedSeqId;
 use crate::seqmasks_io::bdb_reader::{prints_title, BdbError, MaskBdbReader};
 use crate::seqmasks_io::run::{finish, serial_write_failure, write_failure, RunFailure};
-use crate::seqmasks_io::writer::{FilterProgram, MaskWriter, MaskedBioseq, Serial, WriteError};
+use crate::seqmasks_io::writer::{MaskWriter, MaskedBioseq, Serial, WriteError};
 
 use super::masker::dust_masks_skip_ns;
 

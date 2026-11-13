@@ -1,8 +1,8 @@
+import type { SequenceKind } from 'losat/domain';
 // The application's estimate of whether a record is a nucleotide or a protein sequence
 // (plan §5.4). It is a warning only: the program and its inputs never change because of it
 // (design §3.1), and whether the engine can read a record is the engine's decision (the
 // input check). The estimate counts the letters of the index scan's `residue_counts`.
-import type { SequenceKind } from './programs';
 
 /** Nucleotide letters, A C G T U and N, as the share of all letters that marks a nucleotide sequence. */
 const NUCLEOTIDE_LETTERS = new Set(['A', 'C', 'G', 'T', 'U', 'N']);

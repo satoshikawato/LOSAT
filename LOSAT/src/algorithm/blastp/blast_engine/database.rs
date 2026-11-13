@@ -3084,6 +3084,9 @@ mod tests {
                 hash_index: false,
                 taxid: None,
                 taxid_map: None,
+                mask_data: None,
+                mask_id: None,
+                mask_desc: None,
             };
             let now = crate::writedb::time::LocalTime {
                 year: 2026,
@@ -3096,6 +3099,7 @@ mod tests {
             let (mut log, mut messages) = (Vec::new(), Vec::new());
             let status = crate::writedb::makeblastdb::run_with(
                 &args,
+                None,
                 Some(&now),
                 crate::writedb::Platform::host(),
                 &mut fasta.as_slice(),

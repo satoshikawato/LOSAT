@@ -7,9 +7,9 @@
 // (WA2-AX-03), and a button that cannot be pressed for a while is marked aria-disabled, so that it
 // keeps the focus (WA2-AX-04).
 import { computed, onBeforeUpdate, onUpdated, watch } from 'vue';
+import type { ProgramId } from 'losat/domain';
 import type { ExampleLoader } from '../application/examples';
 import { exampleById, exampleHost, examplesFor, type ExampleId, type ExampleSet } from '../domain/examples';
-import type { ProgramId } from '../domain/programs';
 import { announce } from './announcer';
 import { formatBytes } from './format';
 import HelpTip from './HelpTip.vue';

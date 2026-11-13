@@ -1,7 +1,7 @@
+import type { SequenceKind } from 'losat/domain';
 // Accessions typed in a paste box (line WF-1, docs/web/fetch_design.md §4): NCBI's box takes
 // "accession number(s) … or FASTA sequence(s)"; LOSAT fetches an accession's FASTA only when the
 // user asks (ports/fetch.ts) and writes it into the box.
-import type { SequenceKind } from './programs';
 
 export type FetchSourceId = 'ncbi' | 'ebi' | 'cncb';
 

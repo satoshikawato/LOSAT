@@ -805,7 +805,7 @@ fn adjust_tblastx_chunk_subject_offsets(hits: &mut [UngappedHit], offset: usize)
 }
 
 /// `settings` are the NCBI application settings that LOSAT reproduces
-/// (`ncbi_environment::check_ncbi_application_settings`): the input readers use them once
+/// (`ncbi_environment::ApplicationSettings`): the input readers use them once
 /// the program reads with `fasta_reader` (steps S3-S8 of the port plan).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:67-72

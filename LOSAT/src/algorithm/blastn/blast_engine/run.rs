@@ -7346,7 +7346,7 @@ fn write_custom_tabular(
 }
 
 /// `settings` are the NCBI application settings that LOSAT reproduces
-/// (`ncbi_environment::check_ncbi_application_settings`): the data loaders decide whether
+/// (`ncbi_environment::ApplicationSettings`): the data loaders decide whether
 /// the readers of the subjects and the queries try a first line as a Seq-id
 /// (`ReaderConfig`).
 ///

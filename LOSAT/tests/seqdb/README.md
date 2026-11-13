@@ -47,8 +47,9 @@ tests are in `LOSAT/src/seqdb/mask_tests.rs`:
   `-parse_seqids`: the masks name the sequences by their number, `local id N`).
 - `mask_wm.asnt`, `mask_wm_opts.asnt`, `mask_wm_colon.asnt`: hand-written windowmasker mask files
   (`Blast-db-mask-info` in ASN.1 text; the second states the option `-t_extend 3`, the third
-  `-x a:b`). The dust
-  and seg masks come from dustmasker and segmasker and are not kept.
+  `-x a:b`).
+- `mask_dust.asnb`, `mask_seg.asnb`: the dust and seg masks of the same databases, written by
+  dustmasker and segmasker (`-outfmt maskinfo_asn1_bin`, ASN.1 binary).
 - `db/mask_*`: databases written by makeblastdb 2.17.0 with mask data: `mask_nucl_v4`,
   `mask_nucl_v5` (needs its `.ndb`), `mask_nucl_mv` (an alias of two volumes), `mask_nucl_ids`
   (ids 100 and 101 from `-mask_id`, a description with `:`), `mask_nucl_z`, `mask_nucl_y`,
@@ -75,6 +76,32 @@ tests are in `LOSAT/src/seqdb/mask_tests.rs`:
   later by running it into a scratch directory and copying only their files, so that the dates
   of the other fixtures stay.
 
+Mask files (the input of `makeblastdb -mask_data`, read by `LOSAT/src/writedb/mask_info/`; the tests
+are in `mask_info/tests.rs`). `mask_parse/` has files that NCBI's tools write and files that
+exercise NCBI's reader, with `mask_parse/expected.tsv` recording what `makeblastdb` 2.17.0 does with
+each of them:
+
+- `mask_parse/{dust,seg,wm,c2m}.{asnt,asnb}`: dustmasker, segmasker, windowmasker and
+  convert2blastmask output (`-outfmt maskinfo_asn1_text` / `maskinfo_asn1_bin`) for the same input;
+  `*_ps.*` the same with `-parse_seqids` (Seq-ids of every kind: `local str`, `general`, `other`,
+  `genbank`, `pdb`, `patent`, `gi`, ...). Inputs: `mask_nucl.fna`, `mask_prot.faa`,
+  `mask_parse/{ids_nucl.fna,ids_prot.faa,lower_nucl.fna,wm_nucl.fna}`.
+- `mask_parse/h_*`: hand-written text files (comments, strings, two objects, `more TRUE` with a
+  continuation, empty `masks`, different Seq-ids in one Seq-loc, enumerations as numbers,
+  every Seq-loc alternative and the combination of several Seq-locs of one sequence with empty and
+  whole ranges (`h_seqloc_*`, `h_unsupported_*`), files cut inside an object, garbage after the
+  last object, files that are neither text nor binary ASN.1, ...); `mask_parse/b_*`: damaged and
+  hand-made binary files (`b_seqloc_*`: the Seq-loc alternatives in BER).
+- `mask_parse/expected.tsv`: per file the exit status and standard error of
+  `makeblastdb -in <fasta> -dbtype <type> -mask_data <file>` (no `-parse_seqids`), and the masks that
+  `blastdbcmd -outfmt '%o\t%m<algorithm>'` reads back from the database it wrote (`RUN`, `NODB`
+  and `MASK` rows; the last field of `RUN` is the algorithm's options as `blastdbcmd -info` prints them;
+  the header of the file explains them).
+- `make_mask_parse_fixtures.py` rebuilds these (`--ncbi-bin DIR --work DIR`); the tools and the
+  inputs are deterministic, so a rebuild changes nothing.
+- `stl_sort/cases.txt`: the permutations that libstdc++'s `std::sort` gives ranges under NCBI's
+  `CRange_Less` / `CRange_ReverseLess` (`stl_sort/README.md`), for the port of `CSeq_loc::Add`.
+
 `make_fixtures.py` rebuilds everything but `expected/search_path/`. NCBI BLAST+ is the comparison oracle only; the tests
 read the committed files and run no NCBI program. A rebuild changes the dates stored in the
 index files and in `expected/`.
@@ -96,3 +123,35 @@ the count and FNV-1a digest of the descendants that NCBI's recursive query gave 
 `lmdb/tx.{pin,psq,phr}` complete `tx` as a database (made from `tx.fa` with the taxid map `tx.map`; `tx_q.fa` holds
 one query per sequence): `src/seqdb/filter.rs` restricts it to each taxid set of `tx_oracle.txt` and compares the
 OIDs with NCBI's.
+
+## Mask-column writer fixtures (`mask_writer/`)
+
+`make_mask_writer_fixtures.py` (`--ncbi-bin DIR --work DIR`) builds the inputs and NCBI's outputs
+for the tests of the mask-column writer (`src/writedb/mask_data/tests_e2e.rs`, which reads the mask files with `process_mask_data`; the same file runs every file of `mask_parse/` end to end). Each row of
+`mask_writer/cases.tsv` is one makeblastdb 2.17.0 run (`-in` files, `-mask_data` files, `-mask_id`,
+`-mask_desc`, `-max_file_sz`); its database files are in `mask_writer/db/`, its exit status and
+standard error in `mask_writer/expected/<case>.rc` and `.stderr`, its log (standard output, with the
+build time, database path and seconds masked as `<T>`, `<OUT>`, `<S>`) in `.stdout`, and what blastdbcmd reads back
+in `expected/<case>.algorithms.txt` and `.masks.tsv` (as for the reader fixtures above). The
+mask files are ASN.1 text: hand-written ones (`*.asnt`) and `dust.asnt` / `seg.asnt` from
+dustmasker / segmasker. The cases cover the combination of several Seq-locs of one sequence, the
+ids of algorithms, masks that match no sequence, ranges past the end of a sequence, and volumes
+without a masked sequence. A rebuild changes the dates stored in the index and column files.
+`src/writedb/mask_data/tests_cli.rs` runs the cases through the command line (`makeblastdb::run_with`) and
+compares the exit status, the log and the standard error of each with NCBI's, and every file of the database.
+`mask_parse/expected_stdout.tsv` holds the log of each run of `mask_parse/expected.tsv` the same way.
+
+## Masks ordered by address, and the errors that come first (`mask_order/`)
+
+`make_mask_order_fixtures.py` (`--ncbi-bin DIR --work DIR`, 2026-11-14, makeblastdb 2.17.0 with
+`BLAST_USAGE_REPORT=false`) writes the inputs and NCBI's outputs of five runs on `in.fna`, whose first
+sequence has the Seq-ids `gi|5` and `gb|AY000005.1|` (one packed number): masks of both on the plus
+strand, which makeblastdb writes in the order of the memory addresses of their handles, and an error of
+makeblastdb that does not depend on that order (a range of the same sequence past its end, also of a
+second algorithm; a range of the next sequence past its end; a second input file without sequences),
+plus `tie`, the masks alone. Each row of `mask_order/cases.tsv` (name, `-in` files, `-mask_data` files)
+ran with `-dbtype nucl -parse_seqids -title in.fna -out db -blastdb_version 5` and `4`; its exit status,
+standard error, log (masked as above) and the names of the files `db.*` it left are in
+`mask_order/expected/<case>.v<N>.{rc,stderr,stdout,files}`. `src/writedb/mask_data/tests_cli.rs` runs
+them through the command line: LOSAT gives makeblastdb's outcome for the first four and refuses `tie`
+(which NCBI builds) at the close, leaving the files of the failed build of `oob_later_sequence`.

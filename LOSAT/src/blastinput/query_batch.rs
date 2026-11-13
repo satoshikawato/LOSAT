@@ -465,6 +465,16 @@ impl QueryBatches {
         self.starts[after.saturating_sub(1)]
     }
 
+    /// Where the searched queries of the run's first batch with a search strategy request end:
+    /// the first searched batch, else the batch whose set-up fails (`stop_batch`); `None` when
+    /// the run stops before it makes a query factory.
+    pub(crate) fn first_request_end(&self) -> Option<usize> {
+        match self.starts.first() {
+            Some(_) => Some(self.searched_span(0).end),
+            None => self.stop_batch.as_ref().map(|span| span.end),
+        }
+    }
+
     /// The searched queries of the batch of the searched query `query`.
     pub(crate) fn searched_span(&self, query: usize) -> std::ops::Range<usize> {
         let after = self

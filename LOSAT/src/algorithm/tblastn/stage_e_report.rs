@@ -245,22 +245,8 @@ pub(super) fn render(
         if let Err(error) =
             super::blast_xml::unsupported_matrix(matrix_name, !query_records.is_empty())
         {
-            // NCBI wrote the first batch's search strategy request before its search
-            // (tblastn_app.cpp:280) and fails when it formats that batch: the file holds that
-            // request alone, whatever the number of batches (probe 7 of RG-F1, `-matrix blosum62`
-            // with outfmt 5 and 16).
-            if let Some(render) = archive {
-                if let (Some(strategy), Some(first)) = (render.strategy, render.spans.first()) {
-                    super::archive::write_tblastn_failed_strategy(
-                        strategy,
-                        query_records,
-                        matches!(shown, ShownSubjects::Fasta { .. }).then_some(subject_records),
-                        ranges.queries,
-                        mask_lowercase,
-                        first.clone(),
-                    )?;
-                }
-            }
+            // (The search strategy's file holds the first batch's request alone: `search` stops
+            // the requests after it, `StrategyExport::stop_after`.)
             for format in outputs.formats.iter_mut() {
                 if let Some(kind) = xml2_kind(format.outfmt) {
                     let mut writer = format.sink.open()?;
@@ -383,7 +369,7 @@ pub(super) fn render(
             observer.query_stats(q_idx, stats);
         }
     }
-    // What the archive and the search strategy read of the report's data.
+    // What the archive reads of the report's data.
     let archive_data = || super::archive::ArchiveData {
         queries: query_records,
         subject_records,
@@ -403,25 +389,10 @@ pub(super) fn render(
         mask_lowercase,
         ranges,
     };
-    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:277-280
-    // ```c++
-    //                 query =  input->GetNextSeqBatch(*scope);
-    //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
-    //
-    //                 SaveSearchStrategy(args, m_CmdLineArgs, query_factory, m_OptsHndl);
-    // ```
-    // The search strategy's request of each batch (`-export_search_strategy`), which NCBI writes
-    // before the batch's search: the file is apart from the reports, and its documents are those
-    // of the batches the run reports.
-    if let Some(render) = archive {
-        if let Some(strategy) = render.strategy {
-            super::archive::write_tblastn_strategy(strategy, render, &archive_data())?;
-        }
-    }
     for (format_index, format) in outputs.formats.iter_mut().enumerate() {
         // The warnings that a format other than the archive writes are not the archive's
         // messages (a call with several formats, `run_local`).
-        if let Some(handle) = archive.and_then(|render| render.handle) {
+        if let Some(handle) = archive.map(|render| render.handle) {
             handle.set_muted(format_number(format.outfmt) != ARCHIVE_FORMAT);
         }
         let mut probe = observer
@@ -602,9 +573,7 @@ pub(super) fn render(
             ARCHIVE_FORMAT => {
                 let render = archive.expect("a BLAST archive request has its handle");
                 super::archive::write_tblastn_archives(
-                    render
-                        .handle
-                        .expect("a BLAST archive request has its handle"),
+                    render.handle,
                     render,
                     &archive_data(),
                     warnings.as_mut(),
@@ -617,7 +586,7 @@ pub(super) fn render(
     }
     // The messages that `search` writes after the formats (the stop messages) are the archive's
     // again, whichever format came last (as in blastn and blastp).
-    if let Some(handle) = archive.and_then(|render| render.handle) {
+    if let Some(handle) = archive.map(|render| render.handle) {
         handle.set_muted(false);
     }
     Ok(())

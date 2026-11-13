@@ -2661,7 +2661,9 @@ mod tests {
     use super::*;
 
     // Probes p5_pr_sum2, p5b_sum_int and p5_neg_2p63 of line RG D1a-3 (NCBI 2.17.0 prints the
-    // wrapped sums and `-0`): the report counts LOSAT refuses, by format.
+    // wrapped sums and `-0`): the report counts LOSAT refuses, by format; the prolog's (outfmt 0 to
+    // 4) at open (`check_report_sums`), the documents' when they are written (`report_sum_refusal`,
+    // after NCBI's own errors of the search: p5_pr_sum2#6).
     #[test]
     fn report_sums_past_ncbis_types_are_refused_for_the_formats_that_sum_them() {
         let info = |num_sequences: i32, total_letters: i64| DatabaseInfo {
@@ -2671,44 +2673,52 @@ mod tests {
             total_letters,
         };
         let two = |a: DatabaseInfo, b: DatabaseInfo| PairwiseDatabase::new(vec![a, b]);
+        let refused = |database: &PairwiseDatabase, outfmt: i32| {
+            report_sum_refusal(
+                database.num_sequences,
+                database.total_letters,
+                database.total_letters_overflow,
+                outfmt,
+            )
+            .is_some()
+        };
         let lengths = two(
             info(23, 5_000_000_000_000_000_000),
             info(23, 5_000_000_000_000_000_000),
         );
-        for outfmt in [0, 1, 4, 5, 13, 14, 15, 16] {
+        assert!(lengths.total_letters_overflow);
+        for outfmt in [0, 1, 4] {
             assert!(
                 check_report_sums(&lengths, outfmt, "BLASTP").is_err(),
                 "{outfmt}"
             );
         }
-        for outfmt in [6, 7, 8, 10, 11, 17] {
+        for outfmt in [5, 13, 14, 15, 16, 6, 7, 8, 10, 11, 17] {
             assert!(
                 check_report_sums(&lengths, outfmt, "BLASTP").is_ok(),
                 "{outfmt}"
             );
         }
+        for outfmt in [0, 1, 4, 5, 13, 14, 15, 16] {
+            assert!(refused(&lengths, outfmt), "{outfmt}");
+        }
+        for outfmt in [6, 7, 8, 10, 11, 17] {
+            assert!(!refused(&lengths, outfmt), "{outfmt}");
+        }
         let counts = two(info(2_000_000_000, 3263), info(2_000_000_000, 3263));
-        assert!(check_report_sums(&counts, 5, "BLASTP").is_err());
+        assert!(refused(&counts, 5));
+        assert!(check_report_sums(&counts, 5, "BLASTP").is_ok());
         for outfmt in [0, 15, 16] {
-            assert!(
-                check_report_sums(&counts, outfmt, "BLASTP").is_ok(),
-                "{outfmt}"
-            );
+            assert!(!refused(&counts, outfmt), "{outfmt}");
         }
         // Two lengths of 2^64 - 1 (-1 as NCBI's Int8) sum to -2 without an overflow.
         assert!(check_report_sums(&two(info(23, -1), info(23, -1)), 0, "BLASTP").is_ok());
         let int64_min = PairwiseDatabase::new(vec![info(23, i64::MIN)]);
         for outfmt in [5, 14, 16] {
-            assert!(
-                check_report_sums(&int64_min, outfmt, "BLASTP").is_err(),
-                "{outfmt}"
-            );
+            assert!(refused(&int64_min, outfmt), "{outfmt}");
         }
         for outfmt in [0, 13, 15, 6] {
-            assert!(
-                check_report_sums(&int64_min, outfmt, "BLASTP").is_ok(),
-                "{outfmt}"
-            );
+            assert!(!refused(&int64_min, outfmt), "{outfmt}");
         }
     }
     use crate::utils::matrix::BLASTAA_SIZE;

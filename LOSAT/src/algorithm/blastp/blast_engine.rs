@@ -10690,8 +10690,8 @@ fn run_resolved_in_pool(
             chain_blastp_init_hsps(
                 init_hsps,
                 &contexts,
-                &word_cutoff_scores,
-                &hit_cutoff_scores,
+                word_cutoff_scores,
+                hit_cutoff_scores,
                 args.scoring.gap_open,
                 args.scoring.gap_extend,
                 &mut scratch.chaining_keep,
@@ -10724,7 +10724,7 @@ fn run_resolved_in_pool(
                 &init_hsps,
                 &contexts,
                 context_lookup_bounds,
-                &hit_cutoff_scores,
+                hit_cutoff_scores,
                 query_ids.len(),
                 &mut scratch.restricted_align_found,
                 &mut restricted_align_array,
@@ -11141,7 +11141,7 @@ fn run_resolved_in_pool(
                 subject.aa_len,
                 &gapped_params,
                 gapped_gumbel.as_ref(),
-                &search_spaces,
+                search_spaces,
                 prelim_evalue,
                 subject_result,
             );

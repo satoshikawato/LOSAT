@@ -816,7 +816,10 @@ fn alias_count_keys_follow_ncbis_walks() {
     let db = open("DBLIST prot_v4\nLENGTH 0\n").unwrap();
     let statistics = db.statistics();
     assert!(statistics.per_subject() && !statistics.sorts_results());
-    assert_eq!((statistics.setup_count, statistics.gumbel_db_length), (1, 0));
+    assert_eq!(
+        (statistics.setup_count, statistics.gumbel_db_length),
+        (1, 0)
+    );
     assert_eq!(statistics.request_count, 10);
     // FIRST_OID 2^31 is NCBI's INT_MAX (D1a-2 part 2): no OID listed, the range [10, 10), the
     // walks' counts.

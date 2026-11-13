@@ -1554,8 +1554,8 @@ fn reported_header(
 /// With `-parse_deflines`, LOSAT's refusal of a reported database sequence whose Seq-align id is
 /// the id of a query of the scope `queries` (`query_batch::QueryScopes::of_query` of a query that
 /// reports it; a query whose ids the reports show: `-parse_deflines`, and the PSSM query of
-/// `-in_pssm` whose Seq-id is not one local id): NCBI's scope finds the query instead, so its reports show the query's title and
-/// letters for the database sequence (`dropin-survey-20261029/DI7/DECISIONS.md` 8). Every report
+/// `-in_pssm` whose Seq-id is not one local id): NCBI's scope finds the query instead, so its
+/// reports show the query's title and letters for the database sequence (`dropin-survey-20261029/DI7/DECISIONS.md` 8). Every report
 /// of a query batch asks for its own scope, also of a sequence whose header an earlier batch read.
 pub(crate) fn refuse_id_of_a_query(
     subject: &crate::report::db_subject::ParsedSubject,

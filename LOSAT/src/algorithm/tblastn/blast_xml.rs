@@ -450,6 +450,10 @@ impl PreparedXml {
         let mut x_window: Vec<u8> = Vec::new();
         let mut qrow = String::new();
         let mut srow = String::new();
+        // The document's start (`StructuredXml::start`), before the first query's warnings.
+        document.start(&mut buf);
+        writer.write_all(&buf)?;
+        buf.clear();
         for (q_idx, (query, hitlist)) in query_records.iter().zip(hitlists).enumerate() {
             // The query's warnings come before its document (`QueryWarnings`).
             if let Some(warnings) = warnings.as_deref_mut() {
@@ -495,13 +499,15 @@ impl PreparedXml {
                 searched: self.searched[q_idx],
                 masks: &masks,
             };
-            // Where NCBI loads the subject of each `Hit` (`HitSink::position`), for the texts
-            // of the subjects that the query's report reads one by one
-            // (`QueryWarnings::subject_read`).
-            let mut reads: Vec<(usize, u32)> = Vec::new();
-            let marks = warnings
-                .as_deref()
-                .is_some_and(|warnings| warnings.reads_with_texts(q_idx));
+            // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): the texts of
+            // the subjects that the query's report reads one by one
+            // (`QueryWarnings::subject_read`) and the taxonomy database's messages.
+            let mut posts = crate::report::query_warnings::HitPosts::new(
+                warnings
+                    .as_deref()
+                    .is_some_and(|warnings| warnings.reads_with_texts(q_idx)),
+            );
+            let posting = warnings.is_some();
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
                 let lists = hitlist.lists();
                 ensure!(
@@ -521,9 +527,6 @@ impl PreparedXml {
                 for range in hits {
                     let first = usize::try_from(lists[range.start].oid)
                         .context("negative TBLASTN subject OID")?;
-                    if let Some(at) = sink.position().filter(|_| marks) {
-                        reads.push((at, first as u32));
-                    }
                     let names = self.subject_names[first]
                         .as_ref()
                         .context("names of a subject with hits")?;
@@ -531,9 +534,13 @@ impl PreparedXml {
                     // NCBI's messages about the taxonomy database: opening and the volume's
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time (nothing for the other formats).
-                    if let Some(warnings) = warnings.as_deref_mut() {
-                        taxdb_printer.at_names(first, names, &mut *warnings.sink)?;
-                    }
+                    posts.hit(sink.position(), first as u32, |texts| {
+                        if posting {
+                            taxdb_printer.at_names(first, names, texts)
+                        } else {
+                            Ok(())
+                        }
+                    })?;
                     sink.hit(&hit, |hsps| {
                         for list in &lists[range] {
                             if list.hsps.hsps.is_empty() {
@@ -613,9 +620,9 @@ impl PreparedXml {
             });
             // A failed query leaves its partial bytes in `buf`, which the error return drops.
             written?;
-            crate::report::query_warnings::write_marked(
+            crate::report::query_warnings::write_hit_posts(
                 &buf,
-                &reads,
+                &posts,
                 q_idx,
                 writer,
                 warnings.as_deref_mut(),

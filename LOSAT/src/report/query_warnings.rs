@@ -253,6 +253,98 @@ pub fn write_marked(
     })
 }
 
+/// The `Hit`s of a query's structured report (BLAST XML, XML2, JSON) that post texts, each at the
+/// place in the query's output where NCBI loads its subject (`HitSink::position`): the text of the
+/// subject's read in the program's model (`ReadCursor::subject_read`) and the texts that the
+/// report's writer makes at the `Hit` (the taxonomy database's messages of the XML2 and JSON
+/// documents, `TaxdbPrinter`). NCBI posts them on `cerr`, which flushes the report written before
+/// them (`QueryWarnings`); `write` writes them so.
+#[derive(Debug, Default)]
+pub struct HitPosts {
+    /// Whether every `Hit` is marked (the model's reads of the query write texts); else only one
+    /// whose writer makes a text.
+    every: bool,
+    /// By marked `Hit`: its place in the query's output and its subject.
+    marks: Vec<(usize, u32)>,
+    /// By marked `Hit`: the end of its texts in `texts`.
+    ends: Vec<usize>,
+    texts: Vec<u8>,
+}
+
+impl HitPosts {
+    /// The posts of a query's `Hit`s; `every` where the model's reads of the query write texts
+    /// (`QueryWarnings::reads_with_texts`).
+    pub fn new(every: bool) -> Self {
+        Self {
+            every,
+            ..Self::default()
+        }
+    }
+
+    /// The `Hit` of subject `subject` loads it at `at` (`HitSink::position`); `post` writes the
+    /// texts that the writer makes there.
+    pub fn hit(
+        &mut self,
+        at: usize,
+        subject: u32,
+        post: impl FnOnce(&mut Vec<u8>) -> io::Result<()>,
+    ) -> io::Result<()> {
+        let from = self.texts.len();
+        post(&mut self.texts)?;
+        if self.every || self.texts.len() > from {
+            self.marks.push((at, subject));
+            self.ends.push(self.texts.len());
+        }
+        Ok(())
+    }
+
+    /// Writes `report`, the query's output, to `writer`, and at each marked `Hit`, after the
+    /// bytes before it: `read` of its subject (the model's text, to `sink`; `writer` is the
+    /// report) and the texts the writer made there, to `sink` after `writer` is flushed.
+    pub fn write(
+        &self,
+        report: &[u8],
+        writer: &mut dyn Write,
+        sink: &mut dyn Write,
+        mut read: impl FnMut(u32, &mut dyn Write, &mut dyn Write) -> io::Result<()>,
+    ) -> io::Result<()> {
+        let (mut index, mut from) = (0, 0);
+        write_at_marks(report, &self.marks, writer, |subject, writer| {
+            read(subject, writer, &mut *sink)?;
+            let end = self.ends[index];
+            index += 1;
+            let texts = &self.texts[from..end];
+            from = end;
+            write_after(writer, &mut *sink, texts)
+        })
+    }
+}
+
+/// Writes query `query`'s structured report `report` with the posts of its `Hit`s (`HitPosts::write`):
+/// the model's reads through the warnings' cursor (`QueryWarnings::subject_read`) and the
+/// writer's texts, both to the warnings' sink. Without warnings, the report alone.
+pub fn write_hit_posts(
+    report: &[u8],
+    hits: &HitPosts,
+    query: usize,
+    writer: &mut dyn Write,
+    warnings: Option<&mut QueryWarnings<'_>>,
+) -> io::Result<()> {
+    let Some(warnings) = warnings else {
+        return writer.write_all(report);
+    };
+    let QueryWarnings { reads, sink, .. } = warnings;
+    hits.write(
+        report,
+        writer,
+        &mut **sink,
+        |subject, writer, sink| match reads.as_mut() {
+            Some(cursor) => cursor.subject_read(query, subject, writer, sink),
+            None => Ok(()),
+        },
+    )
+}
+
 /// Writes `report`, a buffer, to `writer` with `read` of each subject at its place `marks` (the
 /// buffer's length where the serial writer reads it, and the subject), after the bytes before it.
 pub fn write_at_marks(
@@ -884,6 +976,43 @@ mod tests {
         drop(warnings);
         let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
         assert_eq!(text, "W0\nR1\nA\nB\nR2\nC\nW1\nR3\nD\nW2\nE\n");
+    }
+
+    #[test]
+    fn the_posts_of_a_hit_follow_the_report_up_to_the_place_of_its_load() {
+        // XML2 and JSON: every `Hit` loads its subject at the report's start, after outfmt 15's
+        // separator; the report written before is flushed first (a buffered output stream).
+        let log = Log::default();
+        let mut report = io::BufWriter::with_capacity(1 << 16, log.clone());
+        let mut sink = log.clone();
+        report.write_all(b"{0}\n").unwrap();
+        let mut posts = HitPosts::new(false);
+        posts.hit(2, 1, |texts| texts.write_all(b"T1\n")).unwrap();
+        posts.hit(2, 2, |_| Ok(())).unwrap();
+        posts.hit(2, 3, |texts| texts.write_all(b"T3\n")).unwrap();
+        posts
+            .write(b",\n{1}\n", &mut report, &mut sink, |_, _, _| Ok(()))
+            .unwrap();
+        report.flush().unwrap();
+        let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(text, "{0}\n,\nT1\nT3\n{1}\n");
+        // BLAST XML: each `Hit` loads its subject at its own start; a query whose model's reads
+        // write texts marks every `Hit`, and a `Hit`'s read comes before the texts made there.
+        let reads: Vec<QueryReads> = vec![vec![(5, b"A\n".to_vec())]];
+        let log = Log::default();
+        let (mut report, mut sink) = (log.clone(), log.clone());
+        let mut warnings = QueryWarnings::new(&[], &mut sink).with_subject_reads(&reads);
+        let mut posts = HitPosts::new(warnings.reads_with_texts(0));
+        posts.hit(0, 5, |texts| texts.write_all(b"P5\n")).unwrap();
+        posts.hit(4, 6, |texts| texts.write_all(b"P6\n")).unwrap();
+        write_hit_posts(b"<H5><H6>", &posts, 0, &mut report, Some(&mut warnings)).unwrap();
+        drop(warnings);
+        let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(text, "A\nP5\n<H5>P6\n<H6>");
+        // Without warnings, the report alone.
+        let mut alone = Vec::new();
+        write_hit_posts(b"<H5><H6>", &posts, 0, &mut alone, None).unwrap();
+        assert_eq!(alone, b"<H5><H6>");
     }
 
     #[test]

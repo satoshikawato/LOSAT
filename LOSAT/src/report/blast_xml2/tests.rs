@@ -11,6 +11,18 @@ use crate::report::serial::encoder::Encoder;
 use crate::report::serial::json::JsonEncoder;
 use crate::report::serial::xml::XmlEncoder;
 
+/// Hands `report`, already made, to the document's framing (`Xml2Document::report`).
+fn put<F: SideFiles>(
+    doc: &mut Xml2Document<F>,
+    report: &[u8],
+    out: &mut Vec<u8>,
+) -> anyhow::Result<()> {
+    doc.report(&mut Vec::new(), out, |_, made| {
+        made.extend_from_slice(report);
+        Ok(())
+    })
+}
+
 const KA: &str = "Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options";
 
 /// `blastp_sub_invalidonly_fmt16.out`: one query of an unsearched batch, two `-subject` records.
@@ -245,15 +257,22 @@ fn a_subject_report_is_held_until_the_epilog() {
 
 #[test]
 fn the_framing_joins_reports_and_ends_the_document() {
-    let report = |text: &str| text.as_bytes().to_vec();
     // 16: the declaration and root start tag, the reports (each `\n<BlastOutput2>` ...
     // `</BlastOutput2>\n`, an empty line between two), the end tag.
     let mut doc = Xml2Document::new(Xml2Kind::Single16, false);
     let mut out = Vec::new();
-    doc.report(&mut report("\n<BlastOutput2>a</BlastOutput2>\n"), &mut out)
-        .unwrap();
-    doc.report(&mut report("\n<BlastOutput2>b</BlastOutput2>\n"), &mut out)
-        .unwrap();
+    put(
+        &mut doc,
+        "\n<BlastOutput2>a</BlastOutput2>\n".as_bytes(),
+        &mut out,
+    )
+    .unwrap();
+    put(
+        &mut doc,
+        "\n<BlastOutput2>b</BlastOutput2>\n".as_bytes(),
+        &mut out,
+    )
+    .unwrap();
     doc.epilog(&mut out).unwrap();
     assert_eq!(
         String::from_utf8(out).unwrap(),
@@ -265,8 +284,8 @@ fn the_framing_joins_reports_and_ends_the_document() {
     // 15: `,\n` before the second report and later ones
     let mut doc = Xml2Document::new(Xml2Kind::Single15, false);
     let mut out = Vec::new();
-    doc.report(&mut report("{\n  a\n}\n"), &mut out).unwrap();
-    doc.report(&mut report("{\n  b\n}\n"), &mut out).unwrap();
+    put(&mut doc, b"{\n  a\n}\n", &mut out).unwrap();
+    put(&mut doc, b"{\n  b\n}\n", &mut out).unwrap();
     doc.epilog(&mut out).unwrap();
     assert_eq!(
         String::from_utf8(out).unwrap(),
@@ -308,16 +327,8 @@ fn a_document_started_early_writes_its_start_once() {
                     doc.start(&mut out);
                 }
                 let start = out.len();
-                doc.report(
-                    &mut b"\n<BlastOutput2>a</BlastOutput2>\n".to_vec(),
-                    &mut out,
-                )
-                .unwrap();
-                doc.report(
-                    &mut b"\n<BlastOutput2>b</BlastOutput2>\n".to_vec(),
-                    &mut out,
-                )
-                .unwrap();
+                put(&mut doc, b"\n<BlastOutput2>a</BlastOutput2>\n", &mut out).unwrap();
+                put(&mut doc, b"\n<BlastOutput2>b</BlastOutput2>\n", &mut out).unwrap();
                 doc.epilog(&mut out).unwrap();
                 (start, out)
             };
@@ -335,19 +346,80 @@ fn a_document_started_early_writes_its_start_once() {
 }
 
 #[test]
+fn a_report_is_made_after_the_bytes_written_before_it() {
+    // NCBI writes outfmt 15's separator before it makes a report's data, which loads the
+    // report's subjects (`Xml2Document::report`): `make` gets the place after the separator, and
+    // the report written now follows it. For a `-subject` run the report written now is the one
+    // held before.
+    let made_after = |kind: Xml2Kind, delayed: bool| {
+        let mut doc = Xml2Document::new(kind, delayed);
+        let mut out = Vec::new();
+        doc.start(&mut out);
+        let mut befores = Vec::new();
+        for n in 1..=3 {
+            let mut start = 0;
+            doc.report(&mut Vec::new(), &mut out, |at, made| {
+                start = at;
+                made.extend_from_slice(format!("{{{n}}}\n").as_bytes());
+                Ok(())
+            })
+            .unwrap();
+            befores.push(String::from_utf8(out[..start].to_vec()).unwrap());
+        }
+        befores
+    };
+    let head = String::from_utf8(framing::HEAD15.to_vec()).unwrap();
+    assert_eq!(
+        made_after(Xml2Kind::Single15, false),
+        [
+            head.clone(),
+            format!("{head}{{1}}\n,\n"),
+            format!("{head}{{1}}\n,\n{{2}}\n,\n")
+        ]
+    );
+    assert_eq!(
+        made_after(Xml2Kind::Single15, true),
+        [head.clone(), head.clone(), format!("{head}{{1}}\n,\n")]
+    );
+    let head = framing::header16();
+    assert_eq!(
+        made_after(Xml2Kind::Single16, false),
+        [
+            head.clone(),
+            format!("{head}{{1}}\n"),
+            format!("{head}{{1}}\n{{2}}\n")
+        ]
+    );
+    // A report that fails leaves the count unchanged: once its bytes are cut, the next report is
+    // framed as it would have been.
+    let mut doc = Xml2Document::new(Xml2Kind::Single15, false);
+    let mut out = Vec::new();
+    put(&mut doc, b"{1}\n", &mut out).unwrap();
+    let cut = out.len();
+    let failed = doc.report(&mut Vec::new(), &mut out, |_, made| {
+        made.extend_from_slice(b"{partial");
+        anyhow::bail!("a failed report")
+    });
+    assert!(failed.is_err());
+    out.truncate(cut);
+    put(&mut doc, b"{2}\n", &mut out).unwrap();
+    assert_eq!(out, b"{\n\"BlastOutput2\": [\n{1}\n,\n{2}\n");
+}
+
+#[test]
 fn a_delayed_document_writes_one_report_late_and_drops_the_last_on_a_failure() {
     let mut doc = Xml2Document::new(Xml2Kind::Single15, true);
     let mut out = Vec::new();
-    doc.report(&mut b"{1}\n".to_vec(), &mut out).unwrap();
+    put(&mut doc, b"{1}\n", &mut out).unwrap();
     assert_eq!(out, framing::HEAD15);
-    doc.report(&mut b"{2}\n".to_vec(), &mut out).unwrap();
+    put(&mut doc, b"{2}\n", &mut out).unwrap();
     assert_eq!(out, b"{\n\"BlastOutput2\": [\n{1}\n");
     // a failed batch: no epilog, `{2}` is never written
     let mut doc = Xml2Document::new(Xml2Kind::Single15, true);
     let mut out = Vec::new();
-    doc.report(&mut b"{1}\n".to_vec(), &mut out).unwrap();
-    doc.report(&mut b"{2}\n".to_vec(), &mut out).unwrap();
-    doc.report(&mut b"{3}\n".to_vec(), &mut out).unwrap();
+    put(&mut doc, b"{1}\n", &mut out).unwrap();
+    put(&mut doc, b"{2}\n", &mut out).unwrap();
+    put(&mut doc, b"{3}\n", &mut out).unwrap();
     assert_eq!(out, b"{\n\"BlastOutput2\": [\n{1}\n,\n{2}\n");
     // the epilog writes the held report
     doc.epilog(&mut out).unwrap();
@@ -364,14 +436,10 @@ fn a_report_that_is_never_written_is_not_made_and_writes_the_one_held_before() {
             (Xml2Document::new(kind, true), Xml2Document::new(kind, true));
         let (mut with_report, mut without) = (Vec::new(), Vec::new());
         for report in ["{1}\n", "{2}\n"] {
-            made.report(&mut report.as_bytes().to_vec(), &mut with_report)
-                .unwrap();
-            skipped
-                .report(&mut report.as_bytes().to_vec(), &mut without)
-                .unwrap();
+            put(&mut made, report.as_bytes(), &mut with_report).unwrap();
+            put(&mut skipped, report.as_bytes(), &mut without).unwrap();
         }
-        made.report(&mut b"{lost}\n".to_vec(), &mut with_report)
-            .unwrap();
+        put(&mut made, b"{lost}\n", &mut with_report).unwrap();
         skipped.unwritten(&mut without).unwrap();
         assert_eq!(without, with_report, "{kind:?}");
         // the run's only query: the start of the document alone
@@ -405,7 +473,7 @@ fn a_run_written_by_several_documents_in_turn_has_the_bytes_of_one() {
             let mut whole = Xml2Document::new(kind, delayed);
             let mut expected = Vec::new();
             for report in &reports {
-                whole.report(&mut report.clone(), &mut expected).unwrap();
+                put(&mut whole, report, &mut expected).unwrap();
             }
             whole.epilog(&mut expected).unwrap();
             for blocks in [vec![1, 4], vec![2, 2, 1], vec![1, 1, 1, 1, 1]] {
@@ -416,7 +484,7 @@ fn a_run_written_by_several_documents_in_turn_has_the_bytes_of_one() {
                     let mut doc = Xml2Document::new(kind, delayed);
                     doc.resume(carry);
                     for report in &reports[next..next + size] {
-                        doc.report(&mut report.clone(), &mut out).unwrap();
+                        put(&mut doc, report, &mut out).unwrap();
                     }
                     next += size;
                     if index + 1 == blocks.len() {
@@ -835,8 +903,7 @@ fn the_master_files_list_the_side_files_and_the_json_master_has_no_final_end_of_
         let mut document = Xml2Document::with_files(kind, false, files);
         let mut master = Vec::new();
         for n in 1..=reports {
-            document
-                .report(&mut format!("report {n}\n").into_bytes(), &mut master)
+            put(&mut document, format!("report {n}\n").as_bytes(), &mut master)
                 .unwrap();
         }
         // the reports go to the files, nothing to the master until the epilog
@@ -861,8 +928,8 @@ fn the_files_of_a_subject_run_are_written_one_report_late_and_a_lost_report_has_
         let stored = files.files.clone();
         let mut document = Xml2Document::with_files(Xml2Kind::Files14, delayed, files);
         let mut master = Vec::new();
-        document.report(&mut b"q1\n".to_vec(), &mut master).unwrap();
-        document.report(&mut b"q2\n".to_vec(), &mut master).unwrap();
+        put(&mut document, b"q1\n", &mut master).unwrap();
+        put(&mut document, b"q2\n", &mut master).unwrap();
         assert!(master.is_empty());
         assert_eq!(stored.borrow().len(), files_written, "delayed {delayed}");
     }
@@ -879,10 +946,8 @@ fn a_side_file_that_cannot_be_opened_is_ncbis_argument_error_and_earlier_files_s
     let stored = files.files.clone();
     let mut document = Xml2Document::with_files(Xml2Kind::Files13, false, files);
     let mut master = Vec::new();
-    document.report(&mut b"q1\n".to_vec(), &mut master).unwrap();
-    let error = document
-        .report(&mut b"q2\n".to_vec(), &mut master)
-        .unwrap_err();
+    put(&mut document, b"q1\n", &mut master).unwrap();
+    let error = put(&mut document, b"q2\n", &mut master).unwrap_err();
     let native = error.downcast::<crate::cli::NativeError>().unwrap();
     assert_eq!(native.exit, 1);
     assert_eq!(
@@ -896,16 +961,14 @@ fn a_side_file_that_cannot_be_opened_is_ncbis_argument_error_and_earlier_files_s
 #[test]
 fn no_files_means_no_side_file_for_a_caller_that_has_no_output_file() {
     let mut document = Xml2Document::for_run(Xml2Kind::Files14, false, None, None);
-    let error = document
-        .report(&mut b"q1\n".to_vec(), &mut Vec::new())
-        .unwrap_err();
+    let error = put(&mut document, b"q1\n", &mut Vec::new()).unwrap_err();
     assert!(error.downcast_ref::<crate::cli::NativeError>().is_some());
     // outfmt 15 and 16 have no side files, with or without a name
     for kind in [Xml2Kind::Single16, Xml2Kind::Single15] {
         let mut out = Vec::new();
         let mut document =
             Xml2Document::for_run(kind, false, Some(std::path::Path::new("o.out")), None);
-        document.report(&mut b"x\n".to_vec(), &mut out).unwrap();
+        put(&mut document, b"x\n", &mut out).unwrap();
         document.epilog(&mut out).unwrap();
         assert!(String::from_utf8(out).unwrap().contains("x\n"));
     }
@@ -955,8 +1018,8 @@ fn a_receiver_gets_the_side_files_that_the_master_lists() {
         let mut document =
             Xml2Document::for_run(kind, false, Some(std::path::Path::new("/nonexistent/o.out")), Some(&sink));
         let mut out = Vec::new();
-        document.report(&mut b"q1\n".to_vec(), &mut out).unwrap();
-        document.report(&mut b"q2\n".to_vec(), &mut out).unwrap();
+        put(&mut document, b"q1\n", &mut out).unwrap();
+        put(&mut document, b"q2\n", &mut out).unwrap();
         assert!(out.is_empty());
         document.epilog(&mut out).unwrap();
         assert_eq!(String::from_utf8(out).unwrap(), master);
@@ -973,7 +1036,7 @@ fn a_receiver_gets_the_side_files_that_the_master_lists() {
     let named = super::SideFileSink::new("d/Y.Json", received.clone());
     let mut document = Xml2Document::for_run(Xml2Kind::Files13, false, None, Some(&named));
     let mut out = Vec::new();
-    document.report(&mut b"q\n".to_vec(), &mut out).unwrap();
+    put(&mut document, b"q\n", &mut out).unwrap();
     document.epilog(&mut out).unwrap();
     assert_eq!(received.files.lock().unwrap()[0].0, b"d/Y_1.json");
     assert!(String::from_utf8(out)
@@ -984,7 +1047,7 @@ fn a_receiver_gets_the_side_files_that_the_master_lists() {
     for kind in [Xml2Kind::Single16, Xml2Kind::Single15] {
         let mut out = Vec::new();
         let mut document = Xml2Document::for_run(kind, false, None, Some(&sink));
-        document.report(&mut b"x\n".to_vec(), &mut out).unwrap();
+        put(&mut document, b"x\n", &mut out).unwrap();
         document.epilog(&mut out).unwrap();
         assert!(String::from_utf8(out).unwrap().contains("x\n"));
     }
@@ -1002,10 +1065,8 @@ fn a_receiver_that_fails_is_the_side_file_write_error() {
     let sink = super::SideFileSink::new("r", received.clone());
     let mut document = Xml2Document::for_run(Xml2Kind::Files13, false, None, Some(&sink));
     let mut master = Vec::new();
-    document.report(&mut b"q1\n".to_vec(), &mut master).unwrap();
-    let error = document
-        .report(&mut b"q2\n".to_vec(), &mut master)
-        .unwrap_err();
+    put(&mut document, b"q1\n", &mut master).unwrap();
+    let error = put(&mut document, b"q2\n", &mut master).unwrap_err();
     let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
     assert_eq!(
         (native.exit, native.message.as_str()),
@@ -1085,12 +1146,8 @@ fn side_files_on_the_file_system_are_truncated_and_numbered() {
     let out = dir.join("o.out");
     let mut document = Xml2Document::for_run(Xml2Kind::Files14, false, Some(&out), None);
     let mut master = Vec::new();
-    document
-        .report(&mut b"one\n".to_vec(), &mut master)
-        .unwrap();
-    document
-        .report(&mut b"two\n".to_vec(), &mut master)
-        .unwrap();
+    put(&mut document, b"one\n", &mut master).unwrap();
+    put(&mut document, b"two\n", &mut master).unwrap();
     document.epilog(&mut master).unwrap();
     assert_eq!(std::fs::read(dir.join("o.out_1.xml")).unwrap(), b"one\n");
     assert_eq!(std::fs::read(dir.join("o.out_2.xml")).unwrap(), b"two\n");
@@ -1103,12 +1160,8 @@ fn side_files_on_the_file_system_are_truncated_and_numbered() {
     let blocked = dir.join("p.out");
     std::fs::create_dir_all(dir.join("p.out_2.xml")).unwrap();
     let mut document = Xml2Document::for_run(Xml2Kind::Files14, false, Some(&blocked), None);
-    document
-        .report(&mut b"one\n".to_vec(), &mut Vec::new())
-        .unwrap();
-    let error = document
-        .report(&mut b"two\n".to_vec(), &mut Vec::new())
-        .unwrap_err();
+    put(&mut document, b"one\n", &mut Vec::new()).unwrap();
+    let error = put(&mut document, b"two\n", &mut Vec::new()).unwrap_err();
     assert!(error.downcast_ref::<crate::cli::NativeError>().is_some());
     assert_eq!(std::fs::read(dir.join("p.out_1.xml")).unwrap(), b"one\n");
     std::fs::remove_dir_all(&dir).unwrap();

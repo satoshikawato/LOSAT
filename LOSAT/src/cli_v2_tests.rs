@@ -992,16 +992,13 @@ fn numeric_values_are_validated_before_io() {
         unreachable!("blastn")
     };
     assert_eq!(args.gap_open, Some(0));
-    // NCBI's other blastn tasks and options are rejected explicitly (AGENTS.md rule 2).
-    for extra in [&["-task", "rmblastn"][..], &["-version"]] {
-        let mut words = vec!["-outfmt", "6"];
-        words.extend_from_slice(extra);
-        let error = crate::cli::render_message(&parse("blastn", &words).unwrap_err());
-        assert!(
-            error.contains("not supported by LOSAT's BLASTN"),
-            "{extra:?}: {error}"
-        );
-    }
+    // NCBI's other blastn tasks are rejected explicitly (AGENTS.md rule 2). (`-version` is the
+    // command line's, which the parser's callers refuse by name: line RG item E3,
+    // `version_words_in_an_option_value_are_read_as_ncbi_reads_them`.)
+    let error = crate::cli::render_message(
+        &parse("blastn", &["-outfmt", "6", "-task", "rmblastn"]).unwrap_err(),
+    );
+    assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
     // `-ungapped` is NCBI's flag (blast_args.cpp:917) and LOSAT's BLASTN searches with it (O4a).
     let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-ungapped"])
         .unwrap()

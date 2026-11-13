@@ -697,8 +697,6 @@ struct RecordState {
     /// `Guessed`): `Some(true)` for a protein, `Some(false)` for a nucleotide, set by
     /// `ParseDefLine` from the ids (`xSetSeqMol`); `None` while it is not set.
     mol: Option<bool>,
-    /// `CBioseq::IsAa()` of the record that `assemble_seq` assembled last (`Record::is_aa`).
-    is_aa: bool,
     /// `m_MaskRangeStart` (`kInvalidSeqPos` is `None`).
     mask_start: Option<u32>,
     /// `CMaskFromFasta::m_mask`.
@@ -782,7 +780,6 @@ impl<R: Read> FastaReader<R> {
                 local_id: 0,
                 bad_positions: Vec::new(),
                 mol: None,
-                is_aa: false,
                 mask_start: None,
                 masks: Vec::new(),
             },
@@ -1035,14 +1032,14 @@ impl<R: Read> FastaReader<R> {
             )));
         }
 
-        let inst = state.assemble_seq(self.lines.line_number(), warn)?;
+        let (inst, is_aa) = state.assemble_seq(self.lines.line_number(), warn)?;
         Ok(Record {
             local_id: state.local_id,
             ids: std::mem::take(&mut state.ids),
             hist_old_id: state.hist_old_id.take(),
             defline_field: std::mem::take(&mut state.defline_field),
             title_descr: state.title_descr.take(),
-            is_aa: state.is_aa,
+            is_aa,
             inst,
         })
     }
@@ -1422,6 +1419,7 @@ impl RecordState {
     /// `bIgnoreHyphens` is false: a hyphen counts as good. `bIsNuc` is true for nucleotide
     /// input (`fAssumeNuc | fForceType`). The warning about ambiguous nucleotides is an
     /// ignored problem of makeblastdb.
+    #[inline(always)]
     fn check_data_line(
         &self,
         s: &[u8],
@@ -2338,7 +2336,7 @@ impl RecordState {
         &mut self,
         line_number: u64,
         warn: ReaderWarn<'_>,
-    ) -> Result<SeqInst, ReadError> {
+    ) -> Result<(SeqInst, bool), ReadError> {
         self.close_gap(false, self.seq_data.len(), 0);
         self.close_mask();
         let is_aa = match self.flags.molecule {
@@ -2346,7 +2344,6 @@ impl RecordState {
             Molecule::Nucleotide => false,
             Molecule::Guessed => self.assign_mol_type(line_number)?,
         };
-        self.is_aa = is_aa;
 
         let titles = std::mem::take(&mut self.titles);
         for title in &titles {
@@ -2358,9 +2355,12 @@ impl RecordState {
         let length = self.seq_data.len() as u64 + self.total_gap_length;
         let seq_pos_length = u64::from(length as u32);
         if self.flags.build_db_length_limit && seq_pos_length > i32::MAX as u64 {
-            return Ok(SeqInst::TooLong {
-                length: seq_pos_length,
-            });
+            return Ok((
+                SeqInst::TooLong {
+                    length: seq_pos_length,
+                },
+                is_aa,
+            ));
         }
         if length != seq_pos_length {
             // The gaps stay a delta when they are parsed, or when their sum wraps to 0 (the
@@ -2375,11 +2375,14 @@ impl RecordState {
                 }
                 _ => PastSeqPosForm::Residues,
             };
-            return Ok(SeqInst::PastSeqPos {
-                length,
-                seq_pos_length,
-                form,
-            });
+            return Ok((
+                SeqInst::PastSeqPos {
+                    length,
+                    seq_pos_length,
+                    form,
+                },
+                is_aa,
+            ));
         }
 
         if !self.flags.parse_gaps && self.total_gap_length > 0 {
@@ -2412,11 +2415,11 @@ impl RecordState {
                     line_number,
                 )));
             }
-            return Ok(SeqInst::Virtual);
+            return Ok((SeqInst::Virtual, is_aa));
         }
         if is_aa {
             let seq_data = SeqData::Ncbieaa(std::mem::take(&mut self.seq_data));
-            return Ok(SeqInst::Raw { length, seq_data });
+            return Ok((SeqInst::Raw { length, seq_data }, is_aa));
         }
 
         let mut pieces = Vec::new();
@@ -2454,14 +2457,17 @@ impl RecordState {
                 },
                 DeltaSeq::LocNull | DeltaSeq::Gap { .. } => SeqData::Other,
             };
-            return Ok(SeqInst::Raw { length, seq_data });
+            return Ok((SeqInst::Raw { length, seq_data }, is_aa));
         }
         let residues = std::mem::take(&mut self.seq_data);
-        Ok(SeqInst::Delta {
-            length,
-            residues,
-            pieces,
-        })
+        Ok((
+            SeqInst::Delta {
+                length,
+                residues,
+                pieces,
+            },
+            is_aa,
+        ))
     }
 
     /// `ParseTitle`: the reader's warning about residues at the end of a title, and the

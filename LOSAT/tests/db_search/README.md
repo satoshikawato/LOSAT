@@ -487,16 +487,30 @@ without a title) and `ids/psubjb_a`, `ids/psubjb_t` (`psubjb.faa`, lcl|Subject_2
 9606, one database). NCBI generates the title of the copy it fetches, from its taxids where the taxonomy database names them,
 only in outfmt 0 and for the tabular word that replaces a `lcl|Subject_` id: LOSAT writes the other formats
 (`pdupe_at` and `ndupe_at` with `tests/seqdb/taxdb/good`, `psubj_at`, whose word is `unnamed` either way) and refuses
-those two where the word is printed (`psubjb_at`, whose word is taken after NCBI rewrites the end of the title), also
-for `nsubj_t` alone with the taxonomy database (NCBI's word is `Homo`, the organism's; not with `6 salltitles`, which
-prints no id).
+those two where the word is printed (`psubjb_at`, whose word is taken after NCBI rewrites the end of the title). Of
+`nsubj_t` alone with the taxonomy database LOSAT writes NCBI's word `Homo`, the organism's (line RG item T5; refused
+before).
 
 An empty title without parsed Seq-ids (line DBID H3; rows `db.id.bare.*`): `make_ids.py --emptytitle-only` writes
 `ids/nbare_t` and `ids/pbare_t` (`nbare.fna` and `pbare.faa`, the letters of `ndup.fna` and `pdup.faa` under `>` alone,
 without `-parse_seqids`, taxid 9606). The Bioseq that NCBI's formatters fetch has a source for the taxid, so outfmt 0
 makes the title from it where the taxonomy database names the taxid (`tests/seqdb/taxdb/good`: `unnamed protein
-product [Homo sapiens]`, `Homo sapiens`): LOSAT refuses that outfmt 0 and writes it without a taxonomy database or with
-`no_btd`, and the other formats (XML shows the stored title, the tabular id of a protein is `unnamed` either way).
+product [Homo sapiens]`, `Homo sapiens`), as LOSAT makes it (line RG item T5; refused before), and without a
+taxonomy database or with `no_btd` the title of a Bioseq without a name; the other formats show the stored title (XML)
+or the first word of the made one (the tabular id of a protein is `unnamed` either way).
+
+Titles made from the taxonomy database's names (line RG item T5; rows `db.t5.*`): `t5/make_t5.py` (run from `LOSAT/`
+with the directory of NCBI's makeblastdb) writes the taxonomy database `../seqdb/taxdb/t5` (`t5.tsv`: `uncultured
+bacterium`, `Bacillus sp.`, `  Spaced   name  `, `A &amp; B &lt;x&gt; &#65;`, `TPA: tpa organism`, `MAG uncultured
+thing`, a name with the byte 0x81, which NCBI cannot decode, and an empty scientific name) and in `t5/` one version 4
+database of one sequence without a title per taxid (`n_<taxid>`, `p_<taxid>`, the letters of `ids/ndup.fna` and
+`ids/pdup.faa`; 77777 is not in the taxonomy database), without `-parse_seqids`, and `np_<taxid>`, `pp_<taxid>` with
+it (`gb|AB0000nn.1|`), with the alias files `nall`, `pall` (every taxid), `nclean`, `pclean` (no name NCBI cannot
+decode), `ntab` (the named taxids: an empty nucleotide title has no subject id) and `npall`, `ppall`. NCBI makes each
+title from the name (`CDeflineGenerator`: a nucleotide's name without white space at its ends and its first letter
+upper-cased, a protein's `unnamed protein product [name]`; the heading drops a `TPA:` or `MAG` prefix, the description
+keeps it). The same databases serve `blastdbcmd -long_seqids` (`../blastdbcmd_discovery.rs`, cases `T501`-`T507`) and
+`dustmasker` and `segmasker` (`-conffile conf/t5.ini`, rows `db_t5_*`).
 
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title

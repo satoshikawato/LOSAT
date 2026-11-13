@@ -75,6 +75,7 @@ pub(crate) fn write_psiblast_round_report(
     query_titles: &[Arc<[u8]>],
     subject_titles: &[Arc<[u8]>],
     parsed_subjects: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    subject_sources: &[crate::report::defline::SourceTaxname],
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
     mut probe: Option<&mut FormatProbe<'_>>,
@@ -113,6 +114,7 @@ pub(crate) fn write_psiblast_round_report(
         report,
         database,
         parsed_subjects,
+        subject_sources,
         round,
     };
     let mut warnings = warnings;
@@ -155,6 +157,8 @@ struct RoundSections<'a> {
     report: &'a BlastpPairwiseReport,
     database: Option<&'a PairwiseDatabase>,
     parsed_subjects: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    /// The sources of the others' Bioseqs (`pairwise::stored_source`).
+    subject_sources: &'a [crate::report::defline::SourceTaxname],
     round: ReportRound<'a>,
 }
 
@@ -183,7 +187,12 @@ impl RoundSections<'_> {
             .subject_titles
             .get(&s_idx)
             .map_or(&[][..], Vec::as_slice);
-        database_description_label(title, self.parsed(s_idx), true)
+        database_description_label(
+            title,
+            super::stored_source(self.subject_sources, s_idx),
+            self.parsed(s_idx),
+            true,
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1474-1476
@@ -479,7 +488,10 @@ impl RoundSections<'_> {
         if self.database.is_some() || parsed.is_some() {
             let heading = match parsed {
                 Some(subject) => DatabaseHeading::parsed(subject, true, group.own_hsps(s_idx)),
-                None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
+                None => DatabaseHeading::Title(
+                    &group.subject_titles[&s_idx],
+                    super::stored_source(self.subject_sources, s_idx),
+                ),
             };
             return write_database_subject_alignments_part(
                 writer,

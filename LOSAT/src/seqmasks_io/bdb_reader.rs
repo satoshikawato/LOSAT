@@ -17,7 +17,7 @@
 //!   (`Refused`, a noun phrase that the program completes).
 
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::report::db_subject::bioseq_ids;
+use crate::report::db_subject::bioseq_facts;
 use crate::report::defline::bioseq_title_from_source;
 use crate::seqdb::alias::SearchPath;
 use crate::seqdb::{SeqDb, SeqDbError, SeqType};
@@ -29,6 +29,10 @@ pub(crate) struct BdbRecord {
     pub ids: Vec<ParsedSeqId>,
     /// The title (`CSeqDB::GetBioseq`'s title descriptor).
     pub title: Vec<u8>,
+    /// The name of the organism of the Bioseq's first source, from which `GenerateDefline` makes
+    /// an empty title (`report::defline::BioseqFacts::taxname`); looked up only for such a title
+    /// that the writer prints.
+    pub taxname: Option<std::sync::Arc<[u8]>>,
     /// IUPACna letters of a nucleotide, NCBIstdaa codes of a protein.
     pub residues: Vec<u8>,
 }
@@ -82,6 +86,9 @@ pub(crate) struct MaskBdbReader {
     title_printed: bool,
     /// The program's name in LOSAT's refusals.
     program: &'static str,
+    /// The taxonomy database of the search path (`CSeqDBTaxInfo`), opened at the first name asked
+    /// for.
+    taxdb: Option<crate::seqdb::taxdb::LazyTaxDb>,
 }
 
 /// Whether the writer of `outfmt` prints the title of a sequence (`CMaskWriter::IdToString`).
@@ -110,12 +117,16 @@ impl MaskBdbReader {
         // `GetNumOIDs`, not the OIDs that the alias files' ranges include.
         let db = SeqDb::open_every_oid_in(name, molecule, &path)
             .map_err(|error| database_error(error, program))?;
+        let taxdb = db
+            .search_path()
+            .map(|path| crate::seqdb::taxdb::LazyTaxDb::new(path.clone()));
         Ok(MaskBdbReader {
             db,
             molecule,
             oid: 0,
             title_printed,
             program,
+            taxdb,
         })
     }
 
@@ -146,17 +157,25 @@ impl MaskBdbReader {
             .unwrap_or_default();
         let title = set.bioseq_title();
         // NCBI makes the title of a sequence without one from its BioSource (the taxonomy
-        // names of a definition line with a taxid; seqdbvol.cpp:1055-1160).
+        // names of a definition line with a taxid; seqdbvol.cpp:1100-1188).
         let has_source = set
             .deflines
             .iter()
             .any(|defline| defline.taxid.is_some_and(|taxid| taxid > 0));
-        if self.title_printed && has_source && bioseq_title_from_source(&title, &bioseq_ids(&ids)) {
-            return Err(BdbError::Unsupported(format!(
-                "sequence {oid} of the database, which has no title and a taxid (NCBI makes its \
-                 title from the taxonomy),"
-            )));
-        }
+        let taxname = if self.title_printed
+            && has_source
+            && bioseq_title_from_source(&title, &bioseq_facts(&ids))
+        {
+            let taxids: Vec<i32> = set
+                .deflines
+                .iter()
+                .filter_map(|defline| defline.taxid)
+                .filter(|&taxid| taxid > 0)
+                .collect();
+            self.source_taxname(oid, &taxids)?
+        } else {
+            None
+        };
         let residues = match self.molecule {
             SeqType::Nucleotide => {
                 let length = self.db.nucleotide_length(oid).map_err(error)?;
@@ -174,8 +193,70 @@ impl MaskBdbReader {
         Ok(Some(BdbRecord {
             ids,
             title,
+            taxname,
             residues,
         }))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1126-1155
+    // ```c++
+    //     for(TBDLLConstIter iter = dl.begin(); iter != dl.end(); iter ++) {
+    //         TTaxId taxid = ZERO_TAX_ID;
+    //
+    //         if ((*iter)->CanGetTaxid()) {
+    //             taxid = (*iter)->GetTaxid();
+    //         }
+    //         if (taxid <= ZERO_TAX_ID) {
+    //             continue;
+    //         }
+    //         ...
+    //             try {
+    //                 found_taxid_in_taxonomy_blastdb = CSeqDBTaxInfo::GetTaxNames(taxid, tnames);
+    //             } catch (CSeqDBException &) {
+    //                 found_taxid_in_taxonomy_blastdb = false;
+    //             }
+    // ```
+    // `GetBioseq` looks up the taxid of each definition line, in the order of the definition
+    // lines (without a target id), and the first source names the organism
+    // (`report::defline::SourceTaxname::of_names`). The texts that a lookup writes (those of
+    // opening a damaged taxonomy database, the offset error) and a lookup that reads past the
+    // mapped end of `taxdb.btd` (NCBI reads unmapped memory) are LOSAT's refusals, as blastdbcmd's
+    // (`blastdbcmd::retrieve::Source::tax_names`).
+    /// The name of the organism of the first source of the sequence `oid`, whose definition lines
+    /// have the positive taxids `taxids` (in their order), from which NCBI makes its empty title.
+    fn source_taxname(
+        &self,
+        oid: u32,
+        taxids: &[i32],
+    ) -> Result<Option<std::sync::Arc<[u8]>>, BdbError> {
+        let Some(taxdb) = &self.taxdb else {
+            return Ok(None);
+        };
+        let mut first = None;
+        for (index, &taxid) in taxids.iter().enumerate() {
+            if taxids[..index].contains(&taxid) {
+                continue;
+            }
+            let mut messages = Vec::new();
+            let names = taxdb.names(taxid, &mut messages).map_err(|error| {
+                BdbError::Unsupported(format!(
+                    "sequence {oid} of the database, without a title and with the taxid {taxid}, \
+                     whose lookup in the taxonomy database fails ({error}),"
+                ))
+            })?;
+            if let Some(message) = messages.first() {
+                return Err(BdbError::Unsupported(format!(
+                    "sequence {oid} of the database, without a title and with the taxid {taxid}, \
+                     whose lookup in the taxonomy database writes a diagnostic ({message}),"
+                )));
+            }
+            if index == 0 {
+                first = crate::report::defline::SourceTaxname::of_names(names.as_ref())
+                    .name()
+                    .unwrap_or_default();
+            }
+        }
+        Ok(first)
     }
 }
 

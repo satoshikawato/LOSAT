@@ -5798,6 +5798,10 @@ struct BlastnReportInputs<'a> {
     /// their definition lines. Of a subject set, the records whose ids `-parse_deflines` read, by
     /// subject index (`db_subject::parsed_records`).
     database_parsed: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    /// The sources from which NCBI makes the empty stored titles of the other reported sequences
+    /// of a database search, by rank (`database::ReportedSubjects::sources`; empty without them
+    /// and for a subject set).
+    database_sources: &'a [crate::report::defline::SourceTaxname],
     /// Whether the hit lists were finished after each query batch's traceback (a database
     /// search, `run_in_pool`), not by `post_process_hits_and_write`.
     finished_hit_lists: bool,
@@ -5947,6 +5951,7 @@ fn blastn_pairwise_report(
         epilog: report.epilog,
         prolog: report.prolog,
         parsed_subjects: report.database_parsed.to_vec(),
+        subject_sources: report.database_sources.to_vec(),
     };
     Ok((queries, pairwise_report))
 }
@@ -7276,6 +7281,7 @@ fn write_custom_tabular(
             ordinals,
             records: report.subjects.records(),
             parsed: report.database_parsed,
+            sources: report.database_sources,
             lengths: &lengths,
             taxonomy: &taxonomy,
         },
@@ -7316,7 +7322,6 @@ fn write_custom_tabular(
             &subjects,
             report.subjects.records(),
             false,
-            report.tabular_taxdb_found,
             names.as_ref(),
             "BLASTN",
             &queries,
@@ -11299,6 +11304,9 @@ fn write_reports_untimed(
             .map_or(records_parsed.as_slice(), |reported| {
                 reported.parsed.as_slice()
             }),
+        database_sources: reported
+            .as_ref()
+            .map_or(&[][..], |reported| reported.sources.as_slice()),
         finished_hit_lists: reported.is_some(),
         epilog,
         prolog: outputs

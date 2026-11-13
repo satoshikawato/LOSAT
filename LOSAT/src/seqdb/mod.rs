@@ -2324,7 +2324,7 @@ impl SeqDb {
 
     /// The Blast-def-line `taxid` of each definition line of `ordinal`, 0 for none: read
     /// apart from `deflines`, for the XML2 and JSON formats, the prefetch's taxonomy lookups and
-    /// an empty stored title (`HeaderReader::stored_taxonomy_title`).
+    /// an empty stored title made from its source (`HeaderReader::stored_source`).
     pub fn defline_taxids(&self, ordinal: u32) -> Result<Vec<i32>, SeqDbError> {
         let at = self.find_volume(ordinal)?;
         self.volumes[at.volume].defline_taxids(at.vol_oid)

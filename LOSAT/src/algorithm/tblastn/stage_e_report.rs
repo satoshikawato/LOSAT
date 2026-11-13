@@ -97,6 +97,15 @@ impl ShownSubjects<'_> {
             Self::Database { reported, .. } => &reported.parsed,
         }
     }
+
+    /// The sources from which NCBI makes the empty stored titles of the reported database
+    /// sequences, by rank (empty for the records of a subject set, and where none has one).
+    pub(super) fn subject_sources(&self) -> &[crate::report::defline::SourceTaxname] {
+        match self {
+            Self::Fasta { .. } => &[],
+            Self::Database { reported, .. } => &reported.sources,
+        }
+    }
 }
 
 impl<'a> ShownSubjects<'a> {
@@ -1306,6 +1315,7 @@ fn write_pairwise(
         query_batch_skipped,
         &subject_titles,
         shown.parsed_subjects(),
+        shown.subject_sources(),
         &report,
         shown.pairwise_database(),
         probe,

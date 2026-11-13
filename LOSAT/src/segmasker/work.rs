@@ -210,6 +210,7 @@ fn run_masks(
             let seq = MaskedBioseq {
                 ids: &record.ids,
                 title: record.title.as_deref(),
+                taxname: record.taxname.as_ref(),
                 iupac: &record.iupacaa,
                 protein: true,
             };
@@ -312,6 +313,9 @@ fn writer(outfmt: &str, window: i32, locut: f64, hicut: f64) -> MaskWriter {
 struct Record {
     ids: Vec<ParsedSeqId>,
     title: Option<Vec<u8>>,
+    /// The name of a database sequence's source, from which its empty title is made
+    /// (`seqmasks_io::bdb_reader::BdbRecord::taxname`); none for a FASTA record.
+    taxname: Option<std::sync::Arc<[u8]>>,
     stdaa: Vec<u8>,
     iupacaa: Vec<u8>,
 }
@@ -407,6 +411,7 @@ impl Source<'_> {
                 Ok(record.map(|record| Record {
                     ids: record.ids,
                     title: record.title,
+                    taxname: None,
                     // IUPACaa letters: the 20 of SEG's alphabet have their NCBIstdaa codes, and
                     // every other letter is one SEG counts as bogus, as NCBIstdaa's `*` and `-`
                     // that the IUPACaa `X` stands for.
@@ -431,6 +436,7 @@ impl Source<'_> {
                 Ok(Some(Record {
                     ids: record.ids,
                     title: Some(record.title),
+                    taxname: record.taxname,
                     iupacaa: iupacaa_letters(&record.residues),
                     stdaa: record.residues,
                 }))

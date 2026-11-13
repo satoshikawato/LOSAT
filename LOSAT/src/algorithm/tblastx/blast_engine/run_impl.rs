@@ -2510,6 +2510,10 @@ fn write_tblastx_outputs(
                         Some(database) => database.reported.parsed.clone(),
                         None => records_parsed.clone(),
                     },
+                    subject_sources: match &run.database {
+                        Some(database) => database.reported.sources.clone(),
+                        None => Vec::new(),
+                    },
                 };
                 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:166-168
                 // ```c++

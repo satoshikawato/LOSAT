@@ -808,6 +808,7 @@ fn write_run(
                         run_subjects.push(library_subject(
                             run.database.x_seqdb(),
                             reported.stored_titles()[rank].as_ref(),
+                            crate::report::pairwise::stored_source(reported.sources(), rank as u32),
                             ordinal,
                             reported.parsed_subject(rank),
                             reported.records()[rank].sequence.len(),

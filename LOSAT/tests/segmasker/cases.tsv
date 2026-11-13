@@ -507,3 +507,7 @@ db_r21_fasta	-infmt blastdb -in db/r21 -outfmt fasta
 db_r100_fasta	-infmt blastdb -in db/r100 -outfmt fasta
 db_r100_int	-infmt blastdb -in db/r100
 db_r100_mask	-infmt blastdb -in db/r100 -outfmt maskinfo_asn1_text
+# Database sequences without a title whose taxid the taxonomy database names (line RG item T5): ../db_search/t5 (make_t5.py there), its taxonomy database ../seqdb/taxdb/t5 on the search path of conf/t5.ini. NCBI makes each title from the name (CDeflineGenerator::x_SetTitleFromProtein: unnamed protein product [<name>]). NCBI BLAST+ 2.17.0 (local oracle), 2026-11-14, ad-RG-T5-1.
+db_t5_fasta	-infmt blastdb -in ../db_search/t5/pclean -outfmt fasta -conffile conf/t5.ini
+db_t5_interval	-infmt blastdb -in ../db_search/t5/pclean -outfmt interval -conffile conf/t5.ini
+db_t5_fasta_ps	-infmt blastdb -in ../db_search/t5/ppall -outfmt fasta -parse_seqids -conffile conf/t5.ini

@@ -1,0 +1,88 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: pbare_t
+           1 sequences; 220 total letters
+
+
+
+Query= ndq query of the duplicated nucleotide record
+
+Length=660
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+unnamed protein product [Homo sapiens]                                466     7e-175
+
+
+>unnamed protein product [Homo sapiens]
+Length=220
+
+ Score = 466 bits (1199),  Expect = 7e-175, Method: Compositional matrix adjust.
+ Identities = 220/220 (100%), Positives = 220/220 (100%), Gaps = 0/220 (0%)
+ Frame = +1
+
+Query  1    MNQDKEFGQDAYVPTEFFDNGDCRSWSFHGWHTYDTLKGWIYECMPHEKRKEWAFLNAWH  180
+            MNQDKEFGQDAYVPTEFFDNGDCRSWSFHGWHTYDTLKGWIYECMPHEKRKEWAFLNAWH
+Sbjct  1    MNQDKEFGQDAYVPTEFFDNGDCRSWSFHGWHTYDTLKGWIYECMPHEKRKEWAFLNAWH  60
+
+Query  181  TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC  360
+            TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC
+Sbjct  61   TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC  120
+
+Query  361  HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM  540
+            HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM
+Sbjct  121  HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM  180
+
+Query  541  CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM  660
+            CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM
+Sbjct  181  CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM  220
+
+
+ Score = 19.6 bits (39),  Expect = 0.041, Method: Compositional matrix adjust.
+ Identities = 6/14 (43%), Positives = 11/14 (79%), Gaps = 0/14 (0%)
+ Frame = -1
+
+Query  54  KKFGRNISILTKFF  13
+           K+FG++  + T+FF
+Sbjct  5   KEFGQDAYVPTEFF  18
+
+
+ Score = 12.7 bits (21),  Expect = 8.1, Method: Compositional matrix adjust.
+ Identities = 4/7 (57%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+ Frame = -2
+
+Query  299  SPPPGGQ  279
+             PP GG+
+Sbjct  94   CPPGGGE  100
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 39204
+
+
+  Database: pbare_t
+    Posted date:  Nov 4, 2026  11:51 AM
+  Number of letters in database: 220
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

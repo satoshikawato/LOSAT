@@ -343,7 +343,7 @@ impl TaxDefline {
             title: generated_title(
                 title,
                 protein,
-                &crate::report::defline::BioseqIds::default(),
+                &crate::report::defline::BioseqFacts::default(),
             ),
             taxid: 0,
         }
@@ -351,9 +351,10 @@ impl TaxDefline {
 
     /// The definition line of the database sequence `ordinal` without parsed Seq-ids: the label
     /// of its `gnl|BL_ORD_ID|<ordinal>` id is the ordinal id, its title the stored one (`title`)
-    /// or, where that is empty, the Bioseq's generated title, which NCBI makes from the taxid and
-    /// the taxonomy database (`taxdb_found`) where it has them: LOSAT does not
-    /// (`TITLE_FROM_TAXONOMY`, refused where the report shows the title).
+    /// or, where that is empty, the Bioseq's generated title, which NCBI makes from the name of
+    /// its source (`source`, the taxonomy database's name of the taxid:
+    /// `report::defline::BioseqFacts::of_source`; refused where the report shows it for a source
+    /// that LOSAT refuses).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:962-971
     /// ```c++
@@ -372,23 +373,24 @@ impl TaxDefline {
     pub fn of_stored(
         ordinal: u32,
         title: &[u8],
+        source: &crate::report::defline::SourceTaxname,
         taxid: i32,
         protein: bool,
-        taxdb_found: bool,
     ) -> Self {
-        let ids = crate::report::defline::BioseqIds::default();
         let title = if !title.is_empty() {
             TaxTitle::Text(title.to_vec())
-        } else if taxid > 0
-            && taxdb_found
-            && crate::report::defline::bioseq_title_from_source(title, &ids)
-        {
-            TaxTitle::Refused {
-                reason: TITLE_FROM_TAXONOMY.into(),
-                shown_only: true,
-            }
         } else {
-            generated_title(title, protein, &ids)
+            match source.name() {
+                Ok(name) => generated_title(
+                    title,
+                    protein,
+                    &crate::report::defline::BioseqFacts::of_source(name),
+                ),
+                Err(reason) => TaxTitle::Refused {
+                    reason: format!("has {reason}"),
+                    shown_only: true,
+                },
+            }
         };
         TaxDefline {
             label: ordinal.to_string().into_bytes(),
@@ -398,9 +400,6 @@ impl TaxDefline {
     }
 }
 
-/// LOSAT's refusal of a generated title that NCBI makes from the taxonomy database's names.
-pub(crate) const TITLE_FROM_TAXONOMY: &str = "has an empty title that NCBI BLAST+'s organism report (outfmt 18) makes from its taxids and the taxonomy database";
-
 /// `CDeflineGenerator().GenerateDefline` (flags 0) of a Bioseq with the title `title` and the
 /// Seq-ids `ids`: the text; `Throws` where NCBI's `HtmlDecode` cannot guess the encoding (the
 /// report skips the subject there); refused where NCBI's `x_CleanAndCompress` reads past the end
@@ -409,7 +408,7 @@ pub(crate) const TITLE_FROM_TAXONOMY: &str = "has an empty title that NCBI BLAST
 pub(crate) fn generated_title(
     title: &[u8],
     protein: bool,
-    ids: &crate::report::defline::BioseqIds,
+    ids: &crate::report::defline::BioseqFacts,
 ) -> TaxTitle {
     match crate::report::defline::generate_bioseq_defline(title, protein, false, ids) {
         Ok(defline) if protein && defline.reads_past_end => TaxTitle::Refused {
@@ -465,10 +464,12 @@ impl std::error::Error for TaxReportRefusal {}
 pub enum TaxPlain<'a> {
     /// A `-subject` record: its local id `Subject_N` and title.
     Record { local_id: &'a [u8], title: &'a [u8] },
-    /// The database sequence `ordinal`: its stored title and taxid.
+    /// The database sequence `ordinal`: its stored title, the name of its source (from which
+    /// NCBI makes an empty title, `StoredTitle::source_name`) and its taxid.
     Stored {
         ordinal: u32,
         title: &'a [u8],
+        source: &'a crate::report::defline::SourceTaxname,
         taxid: i32,
     },
 }
@@ -484,10 +485,10 @@ pub struct TaxSource<'a> {
 
 impl TaxSource<'_> {
     /// The definition lines of the subject as the report shows them (`TaxDefline`), of a protein
-    /// (`protein`) or nucleotide subject; `taxdb_found`: whether `taxdb.bti` is on the search path.
-    fn deflines(&self, protein: bool, taxdb_found: bool) -> Vec<TaxDefline> {
+    /// (`protein`) or nucleotide subject.
+    fn deflines(&self, protein: bool) -> Vec<TaxDefline> {
         match (self.parsed, self.plain) {
-            (Some(subject), _) => subject.tax_deflines(protein, taxdb_found),
+            (Some(subject), _) => subject.tax_deflines(protein),
             (None, TaxPlain::Record { local_id, title }) => {
                 vec![TaxDefline::of_record(local_id, title, protein)]
             }
@@ -496,14 +497,11 @@ impl TaxSource<'_> {
                 TaxPlain::Stored {
                     ordinal,
                     title,
+                    source,
                     taxid,
                 },
             ) => vec![TaxDefline::of_stored(
-                ordinal,
-                title,
-                taxid,
-                protein,
-                taxdb_found,
+                ordinal, title, source, taxid, protein,
             )],
         }
     }
@@ -541,14 +539,13 @@ pub struct SubjectTable<'p> {
 impl<'p> SubjectTable<'p> {
     /// The table of the subjects of `queries`' HSPs: `parsed` are the parsed subjects by subject
     /// index (empty when none has parsed Seq-ids), `plain(index)` a subject as the adapter has it
-    /// (`TaxPlain`); the subjects are proteins where `protein`, and `taxdb_found` tells whether
-    /// `taxdb.bti` is on the search path. `program` names the program in LOSAT's refusals.
+    /// (`TaxPlain`); the subjects are proteins where `protein`. `program` names the program in
+    /// LOSAT's refusals.
     pub fn new<'a>(
         queries: &[TaxQuery<'_>],
         parsed: &'p [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
         plain: impl Fn(usize) -> TaxPlain<'a>,
         protein: bool,
-        taxdb_found: bool,
         program: &str,
     ) -> Self {
         let mut subjects = std::collections::HashMap::new();
@@ -558,7 +555,7 @@ impl<'p> SubjectTable<'p> {
                     parsed: parsed.get(hsp.subject).and_then(Option::as_deref),
                     plain: plain(hsp.subject),
                 };
-                (source.deflines(protein, taxdb_found), source.name())
+                (source.deflines(protein), source.name())
             });
         }
         SubjectTable {
@@ -1118,7 +1115,7 @@ pub fn write_report(
 
 /// The organism report of one query batch of a program's adapter (`algorithm::common::tabular`,
 /// BLASTP's, BLASTX's): the table of the subjects of `queries`' HSPs (`SubjectTable::new` of
-/// `parsed`, `plain`, `protein` and `taxdb_found`), the lookups of the run's database that
+/// `parsed`, `plain` and `protein`), the lookups of the run's database that
 /// `names` carries (`TaxLookups::new`) and the reports (`TaxReport::new`), all made before the
 /// batch's first byte. `program` names the program in LOSAT's refusals and NCBI's messages.
 #[allow(clippy::too_many_arguments)]
@@ -1127,11 +1124,10 @@ pub fn report_batch<'a>(
     parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
     plain: impl Fn(usize) -> TaxPlain<'a>,
     protein: bool,
-    taxdb_found: bool,
     names: Option<&TabularNames>,
     program: &str,
 ) -> Result<TaxReport> {
-    let table = SubjectTable::new(queries, parsed, plain, protein, taxdb_found, program);
+    let table = SubjectTable::new(queries, parsed, plain, protein, program);
     TaxReport::new(queries, &table, TaxLookups::new(names, program)?)
 }
 

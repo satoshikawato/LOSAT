@@ -34,6 +34,9 @@ pub(super) struct Options<'a> {
 pub(super) struct Record {
     pub ids: Vec<ParsedSeqId>,
     pub title: Option<Vec<u8>>,
+    /// The name of a database sequence's source, from which its empty title is made
+    /// (`seqmasks_io::bdb_reader::BdbRecord::taxname`); none for a FASTA record.
+    pub taxname: Option<std::sync::Arc<[u8]>>,
     pub iupac: Vec<u8>,
 }
 
@@ -280,6 +283,7 @@ fn masks_of_input(
         let seq = MaskedBioseq {
             ids: &record.ids,
             title: record.title.as_deref(),
+            taxname: record.taxname.as_ref(),
             iupac: &record.iupac,
             protein: false,
         };
@@ -366,6 +370,7 @@ impl SequenceSource for DatabaseSource {
         Ok(record.map(|record| Record {
             ids: record.ids,
             title: Some(record.title),
+            taxname: record.taxname,
             iupac: record.residues,
         }))
     }

@@ -108,13 +108,16 @@ pub(super) enum TabularSubjects<'a> {
     /// The reported sequences of a database: their tabular ids (`sseqid`, and `sacc` and
     /// `saccver` of a sequence with parsed Seq-ids; the default report's), ordinal ids, stored
     /// titles (the title of the first definition line of a sequence with parsed Seq-ids), parsed
-    /// Seq-ids (empty when none has them), lengths, and taxonomy (empty when no field shows it).
+    /// Seq-ids (empty when none has them), the sources from which NCBI makes the empty stored
+    /// titles of the others (empty when none has one), lengths, and taxonomy (empty when no field
+    /// shows it).
     Database {
         ids: &'a [Arc<[u8]>],
         accessions: &'a [Option<[Arc<[u8]>; 2]>],
         ordinals: &'a [u32],
         titles: &'a [Arc<[u8]>],
         parsed: &'a [Option<Arc<ParsedSubject>>],
+        sources: &'a [crate::report::defline::SourceTaxname],
         length: &'a dyn Fn(usize) -> usize,
         taxonomy: &'a [TabularTaxonomy],
     },
@@ -223,6 +226,7 @@ impl<'a> TabularSubjects<'a> {
                 parsed,
                 length,
                 taxonomy,
+                ..
             } => {
                 let id: &[u8] = ids.get(s_idx).map_or(&b""[..], |id| id.as_ref());
                 let (accession, accession_version): (&[u8], &[u8]) =
@@ -504,23 +508,17 @@ pub(super) fn write_blastp_tax_report(
         TabularSubjects::Database {
             ordinals,
             titles,
+            sources,
             taxonomy,
             ..
         } => TaxPlain::Stored {
             ordinal: ordinals.get(s_idx).copied().unwrap_or_default(),
             title: titles.get(s_idx).map_or(&[][..], |title| title),
+            source: crate::report::pairwise::stored_source(sources, s_idx as u32),
             taxid: taxonomy.get(s_idx).map_or(0, |taxonomy| taxonomy.taxid),
         },
     };
-    let report = report_batch(
-        &queries,
-        parsed,
-        plain,
-        true,
-        tab.taxdb_found,
-        tab.names,
-        tab.app.name(),
-    )?;
+    let report = report_batch(&queries, parsed, plain, true, tab.names, tab.app.name())?;
     write_report(writer, warnings, &queries, &report)?;
     Ok(())
 }

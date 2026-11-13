@@ -151,7 +151,7 @@ pub fn generate_defline(
     protein: bool,
     leave_prefix_suffix: bool,
 ) -> Result<Defline, UnknownEncoding> {
-    generate_bioseq_defline(title, protein, leave_prefix_suffix, &BioseqIds::default())
+    generate_bioseq_defline(title, protein, leave_prefix_suffix, &BioseqFacts::default())
 }
 
 /// What `CDeflineGenerator::x_SetFlags` takes from the Seq-ids of a Bioseq (none for a record
@@ -213,11 +213,39 @@ pub fn generate_defline(
 /// ```
 /// The other flags of `x_SetFlags` come from descriptors that the Bioseq of a database
 /// sequence does not have (MolInfo, user objects, GenBank and EMBL blocks), or change no title
-/// that a search writes. The source that a database Bioseq has for each definition line with a
-/// positive taxid is not modelled: the titles that depend on it are LOSAT's refusals
-/// (`ParsedSubject::title_from_taxonomy`, `ParsedSubject::title_suffix_adjusted`).
+/// that a search writes.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1004-1011
+/// ```c++
+///         case CSeqdesc::e_Source:
+///             {
+///             if ((needed_desc_choices & fSource) != 0) {
+///                 m_Source.Reset(&desc_it->GetSource());
+///                 // take first, then skip remainder
+///                 needed_desc_choices &= ~fSource;
+///             }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1264-1274
+/// ```c++
+/// void CDeflineGenerator::x_SetBioSrc (
+///     const CBioseq_Handle& bsh
+/// )
+///
+/// {
+///     if (m_Source.NotEmpty()) {
+///         // get organism name
+///         if (m_Source->IsSetTaxname()) {
+///             m_Taxname = m_Source->GetTaxname();
+///         }
+/// ```
+/// The Bioseq of a database sequence has a source for each definition line with a positive
+/// taxid (`CSeqDBVol::x_GetTaxonomy`, seqdbvol.cpp:1136-1180), whose Org-ref has only the taxid's
+/// dbtag and, where the taxonomy database names the taxid, its names: no genome, subsource or
+/// orgname (so no organelle, strain or metagenome source), and the Bioseq has no MolInfo (so it
+/// is complete) and no features. `taxname` is the name of the first source
+/// (`common::database::HeaderReader::source_taxname`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct BioseqIds {
+pub struct BioseqFacts {
     /// `m_ThirdParty`: a `tpg`, `tpe` or `tpd` id (the prefix `TPA: `).
     pub third_party: bool,
     /// `m_IsNC`, `m_IsNM` or `m_IsNR`: an accession of a RefSeq chromosome, mRNA or ncRNA,
@@ -228,12 +256,134 @@ pub struct BioseqIds {
     pub pdb: Option<(Vec<u8>, i32)>,
     /// `m_IsPatent`, `m_PatentSequence`, `m_PatentCountry` and `m_PatentNumber`.
     pub patent: Option<(i32, Vec<u8>, Vec<u8>)>,
+    /// `m_Taxname`: the scientific name of the Bioseq's first source, `None` without a source
+    /// or a name (never empty).
+    pub taxname: Option<std::sync::Arc<[u8]>>,
+    /// `m_LocalAnnotsOnly` (`fLocalAnnotsOnly`, set by blastdbcmd's `CFastaOstream` with
+    /// `fNoExpensiveOps`): an empty protein title is not `unnamed protein product`.
+    pub local_annots_only: bool,
 }
 
-/// `GenerateDefline` of a Bioseq with the title `title` and the Seq-ids `ids` (`BioseqIds`):
-/// `generate_defline` with the parts of the title that come from the Seq-ids, the generated
-/// title of a `pdb` or `patent` record without a title and the prefix `TPA: ` of a third-party
-/// record (alignment heading only, as the other prefixes).
+/// The name of the organism of a database sequence's first source (`BioseqFacts::taxname`), as
+/// the reader of the reported headers finds it (`common::database::HeaderReader::source_taxname`,
+/// asked only for a title that `GenerateDefline` makes from the source, where a taxonomy database
+/// opens).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SourceTaxname {
+    /// No name: the title is not made from the source, the Bioseq has no source, no taxonomy
+    /// database opens, or it gives no scientific name for the taxid. The title is made as of a
+    /// Bioseq without a source.
+    #[default]
+    Unnamed,
+    /// The scientific name of the taxid (not empty).
+    Named(std::sync::Arc<[u8]>),
+    /// The name `name` of a database sequence without parsed Seq-ids whose title NCBI cannot
+    /// make: `NStr::HtmlDecode` cannot guess its encoding and throws (`UnknownEncoding`), so the
+    /// outfmt 0 alignment heading names the sequence by `seq_id`, the `CSeq_id::GetSeqIdString`
+    /// of its `gnl|BL_ORD_ID|n` (`BL_ORD_ID:n`), in place of its alignments
+    /// (`report::pairwise::DatabaseHeading::skipped_id`). The other reports read it as `Named`.
+    Undecodable {
+        name: std::sync::Arc<[u8]>,
+        seq_id: std::sync::Arc<[u8]>,
+    },
+    /// LOSAT's refusal where a report shows the title, with what the sequence has (after
+    /// "database sequence N has"): a lookup of the taxid that reads past the mapped end of
+    /// `taxdb.btd` (NCBI BLAST+ reads unmapped memory), a definition line whose taxid does not
+    /// read, or a named RefSeq record whose title `x_SetTitleFromNC`, `x_SetTitleFromNM` or
+    /// `x_SetTitleFromNR` would make (not ported).
+    Refused(&'static str),
+}
+
+/// `SourceTaxname::Unnamed`, for a subject without a source.
+pub static UNNAMED_SOURCE: SourceTaxname = SourceTaxname::Unnamed;
+
+impl SourceTaxname {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1165-1169
+    // ```c++
+    //                 CRef<COrg_ref> org(new COrg_ref);
+    //                 if (found_taxid_in_taxonomy_blastdb) {
+    //                     org->SetTaxname().swap(tnames.scientific_name);
+    //                     org->SetCommon().swap(tnames.common_name);
+    //                 }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1271-1273
+    // ```c++
+    //         if (m_Source->IsSetTaxname()) {
+    //             m_Taxname = m_Source->GetTaxname();
+    //         }
+    // ```
+    /// The source of a Bioseq whose first source's taxid the taxonomy database gives `names`
+    /// (`None`: `GetTaxNames` returned false): its scientific name, none where that is empty (an
+    /// empty `m_Taxname` makes the title of a Bioseq without one).
+    pub fn of_names(names: Option<&crate::seqdb::taxdb::TaxNames>) -> SourceTaxname {
+        match names {
+            Some(names) if !names.scientific_name.is_empty() => {
+                SourceTaxname::Named(std::sync::Arc::from(names.scientific_name.as_slice()))
+            }
+            _ => SourceTaxname::Unnamed,
+        }
+    }
+
+    /// The name for `BioseqFacts::taxname`; `Err` with the reason of a refusal.
+    pub fn name(&self) -> Result<Option<std::sync::Arc<[u8]>>, &'static str> {
+        match self {
+            SourceTaxname::Unnamed => Ok(None),
+            SourceTaxname::Named(name) | SourceTaxname::Undecodable { name, .. } => {
+                Ok(Some(std::sync::Arc::clone(name)))
+            }
+            SourceTaxname::Refused(reason) => Err(reason),
+        }
+    }
+
+    /// The source of the database sequence without parsed Seq-ids whose Seq-id text is
+    /// `seq_id` (`SourceTaxname::Undecodable`, made where the title made from the name throws).
+    pub fn of_stored(self, seq_id: impl FnOnce() -> Vec<u8>) -> SourceTaxname {
+        match self {
+            SourceTaxname::Named(name)
+                if generate_bioseq_defline(
+                    b"",
+                    false,
+                    true,
+                    &BioseqFacts::of_source(Some(std::sync::Arc::clone(&name))),
+                )
+                .is_err() =>
+            {
+                SourceTaxname::Undecodable {
+                    name,
+                    seq_id: std::sync::Arc::from(seq_id()),
+                }
+            }
+            source => source,
+        }
+    }
+
+    /// The Seq-id text that the outfmt 0 alignment heading of a sequence whose title NCBI cannot
+    /// make names (`SourceTaxname::Undecodable`).
+    pub fn undecodable_id(&self) -> Option<&[u8]> {
+        match self {
+            SourceTaxname::Undecodable { seq_id, .. } => Some(seq_id),
+            _ => None,
+        }
+    }
+}
+
+impl BioseqFacts {
+    /// The facts of a database sequence without parsed Seq-ids (its one id is
+    /// `gnl|BL_ORD_ID|n`, which sets no flag) whose first source names the organism `taxname`.
+    pub fn of_source(taxname: Option<std::sync::Arc<[u8]>>) -> Self {
+        Self {
+            taxname,
+            ..Self::default()
+        }
+    }
+}
+
+/// `GenerateDefline` of a Bioseq with the title `title` and the facts `ids` (`BioseqFacts`):
+/// `generate_defline` with the parts of the title that come from the Seq-ids and the source, the
+/// generated title of a `pdb` or `patent` record without a title, of a record without a title
+/// from its source's name (`title_before_decoding_of`), the prefix `TPA: ` of a third-party
+/// record (alignment heading only, as the other prefixes), and the first letter of a nucleotide
+/// title made from nothing upper-cased.
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:4076-4092
 /// ```c++
@@ -261,7 +411,7 @@ pub fn generate_bioseq_defline(
     title: &[u8],
     protein: bool,
     leave_prefix_suffix: bool,
-    ids: &BioseqIds,
+    ids: &BioseqFacts,
 ) -> Result<Defline, UnknownEncoding> {
     let (mut decoded, _) = html_decode(&title_before_decoding_of(
         title,
@@ -273,7 +423,35 @@ pub fn generate_bioseq_defline(
     if !leave_prefix_suffix && ids.third_party {
         decoded.splice(0..0, b"TPA: ".iter().copied());
     }
-    let (text, reads_past_end) = clean_and_compress(&decoded, protein);
+    let (mut text, reads_past_end) = clean_and_compress(&decoded, protein);
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3934-3962
+    // ```c++
+    //     bool capitalize = true;
+    //     ...
+    //         size_t pos = m_MainTitle.find_last_not_of (".,;~ ");
+    //         if (pos != NPOS) {
+    //             m_MainTitle.erase (pos + 1);
+    //         }
+    //         if (! m_MainTitle.empty()) {
+    //             capitalize = false;
+    //         }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:4095-4099
+    // ```c++
+    //     if (! m_IsPDB && ! m_IsPatent && ! m_IsAA && ! m_IsSeg) {
+    //         if (!final.empty() && islower ((unsigned char) final[0]) && capitalize) {
+    //             final [0] = toupper ((unsigned char) final [0]);
+    //         }
+    //     }
+    // ```
+    // A title of punctuation is not erased, so `capitalize` stays true only for an empty one;
+    // the Bioseq of a database sequence is raw (`m_IsSeg` false). `islower` and `toupper` are
+    // the C locale's: ASCII only.
+    if title.is_empty() && !protein && ids.pdb.is_none() && ids.patent.is_none() {
+        if let Some(first) = text.first_mut() {
+            first.make_ascii_uppercase();
+        }
+    }
     Ok(Defline {
         text,
         reads_past_end,
@@ -286,7 +464,7 @@ pub fn generate_bioseq_defline(
 /// sequence's Bioseq has a source for each definition line with a taxid other than 0, with the
 /// names of the taxonomy database when NCBI finds one (seqdbvol.cpp:1055-1160): the title is
 /// then the organism's (`unnamed protein product [Homo sapiens]`).
-pub fn bioseq_title_from_source(title: &[u8], ids: &BioseqIds) -> bool {
+pub fn bioseq_title_from_source(title: &[u8], ids: &BioseqFacts) -> bool {
     // `trim_end_of` without a copy: the stored titles of every reported sequence are asked.
     let main_title = match title.iter().rposition(|byte| !b".,;~ ".contains(byte)) {
         Some(pos) => &title[..=pos],
@@ -338,7 +516,7 @@ pub fn bioseq_title_from_source(title: &[u8], ids: &BioseqIds) -> bool {
 // `m_Comment` are empty.
 /// The title that `x_SetTitleFromPDB` or `x_SetTitleFromPatent` makes for an empty one (empty
 /// for a `pdb` record without a chain, and for a record of neither kind).
-fn pdb_or_patent_title(ids: &BioseqIds) -> Vec<u8> {
+fn pdb_or_patent_title(ids: &BioseqFacts) -> Vec<u8> {
     if let Some((chain_id, chain)) = &ids.pdb {
         let mut title = b"Chain ".to_vec();
         if !chain_id.is_empty() {
@@ -525,10 +703,15 @@ pub(crate) use punctuation_title;
 /// }
 /// ```
 /// The Bioseq of a database sequence carries its stored title as its title descriptor
-/// (seqdbvol.cpp:1445-1463) and no source, so `GenerateDefline` reads the title as it
-/// reads the one of a FASTA record (`generate_defline`).
-pub fn database_subject_id(title: &[u8], protein: bool) -> Result<Vec<u8>, &'static str> {
-    let defline = generate_defline(title, protein, false)
+/// (seqdbvol.cpp:1445-1463) and the source of its taxid (`ids`, `BioseqFacts::of_source`), so
+/// `GenerateDefline` reads the title as it reads the one of a FASTA record, and makes an empty
+/// one from the source's name (`Homo` of `Homo sapiens`; `unnamed` of a protein).
+pub fn database_subject_id(
+    title: &[u8],
+    ids: &BioseqFacts,
+    protein: bool,
+) -> Result<Vec<u8>, &'static str> {
+    let defline = generate_bioseq_defline(title, protein, false, ids)
         .map_err(|UnknownEncoding| "in no encoding that NCBI BLAST+ recognises")?;
     if defline.reads_past_end {
         return Err(punctuation_title!());
@@ -557,9 +740,8 @@ fn contains(text: &[u8], pattern: &[u8]) -> bool {
 
 /// The title that `GenerateDefline` gives `NStr::HtmlDecode` (`m_MainTitle`, see the
 /// module), for the alignment heading (`leave_prefix_suffix` false) or the description
-/// table, of a Bioseq with the Seq-ids `ids`: an empty title of a `pdb` or
-/// `patent` record is generated from the id, and a RefSeq chromosome, mRNA or ncRNA protein
-/// keeps an empty one (`generate_bioseq_defline`).
+/// table, of a Bioseq with the facts `ids`: an empty title of a `pdb` or `patent` record is
+/// generated from the id, else from the source (`source_title`) (`generate_bioseq_defline`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3994-4022
 /// ```c++
@@ -590,15 +772,15 @@ fn title_before_decoding_of(
     title: &[u8],
     protein: bool,
     leave_prefix_suffix: bool,
-    ids: &BioseqIds,
+    ids: &BioseqFacts,
 ) -> Vec<u8> {
     let mut main_title = title.to_vec();
     trim_end_of(&mut main_title, b".,;~ ");
     if main_title.is_empty() {
         main_title = pdb_or_patent_title(ids);
     }
-    if main_title.is_empty() && protein && !ids.refseq_source_title {
-        main_title = UNNAMED_PROTEIN_PRODUCT.to_vec();
+    if main_title.is_empty() {
+        main_title = source_title(protein, ids);
     }
     if !leave_prefix_suffix {
         for prefix in TPA_PREFIXES {
@@ -612,6 +794,113 @@ fn title_before_decoding_of(
     }
     trim_leading_spaces(&mut main_title);
     main_title
+}
+
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1545-1550
+// ```c++
+// void CDeflineGenerator::x_SetTitleFromBioSrc (void)
+//
+// {
+//     CDefLineJoiner joiner;
+//
+//     joiner.Add("organism", m_Taxname, eHideType);
+// ```
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1598-1600
+// ```c++
+//     joiner.Join(&m_MainTitle);
+//     NStr::TruncateSpacesInPlace(m_MainTitle);
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:91-99 (`CDefLineJoiner::Add`)
+// ```c++
+//             if (eHideNone == hide && !name.empty()) {
+//                 m_Joiner.Add(" ").Add(name);
+//             }
+//             if (!value.empty()) {
+//                 m_Joiner.Add(" ").Add(value);
+//             }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3197-3234 (`NStr::TruncateSpacesInPlace`
+// with `eTrunc_Both`: the `isspace` bytes at both ends, of the C locale)
+// ```c++
+//         while ( isspace((unsigned char) str.data()[beg]) ) {
+//         ...
+//         while (isspace((unsigned char) str.data()[--end])) {
+// ```
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2508-2510, 2532-2541, 2572-2574
+// ```c++
+//     if (m_MainTitle.empty()  &&  !m_LocalAnnotsOnly) {
+//         m_MainTitle = "unnamed protein product";
+//         gene = x_GetGeneRefViaCDS (mapped_cds);
+//         ...
+//     }
+//     ...
+//     // strip trailing periods, commas, and spaces
+//     SIZE_TYPE pos = m_MainTitle.find_last_not_of (".,;~ ");
+//     if (pos != NPOS) {
+//         m_MainTitle.erase (pos + 1);
+//     }
+//
+//     if (! x_IsComplete() /* && m_MainTitle.find(", partial") == NPOS */) {
+//         m_MainTitle += ", partial";
+//     }
+//     ...
+//     } else if (! taxname.empty() /* && m_MainTitle.find(taxname) == NPOS */) {
+//         m_MainTitle += " [" + string(taxname) + "]";
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1603-1610, 1715-1716, 1763-1764
+// ```c++
+// void CDeflineGenerator::x_SetTitleFromNC (void)
+//
+// {
+//     if (m_MIBiomol != NCBI_BIOMOL(genomic) &&
+//          m_MIBiomol != NCBI_BIOMOL(other_genetic)) return;
+//
+//     // require taxname to be set
+//     if (m_Taxname.empty()) return;
+//     ...
+//     // require taxname to be set (x_SetTitleFromNM)
+//     if (m_Taxname.empty()) return;
+//     ...
+//     // require taxname to be set (x_SetTitleFromNR)
+//     if (m_Taxname.empty()) return;
+// ```
+// The Bioseq of a database sequence has no features, no MolInfo (so `x_IsComplete()` holds:
+// no `, partial`), no genome (no organelle), no CDS (so no source feature for `synthetic
+// construct` and the like) and no orgname (not cross-kingdom); of `x_SetTitleFromBioSrc`'s
+// parts only the organism remains. A RefSeq chromosome, mRNA or ncRNA record skips
+// `x_SetTitleFromProtein` for `x_SetTitleFromNC`, `x_SetTitleFromNM` or `x_SetTitleFromNR`,
+// which make nothing without a name, and then gets `x_SetTitleFromBioSrc` (create_defline.cpp:
+// 4033-4036); with a name, those functions are not ported: the callers refuse such a record
+// (`db_subject::ParsedSubject::with_source`).
+/// The title that `GenerateDefline` makes of the source of a Bioseq without a title (`ids`):
+/// a protein's is `unnamed protein product` (none with `local_annots_only`) and ` [<taxname>]`
+/// where the source names the organism, a nucleotide's (and a RefSeq chromosome's, mRNA's or
+/// ncRNA's) the name without white space at its ends.
+fn source_title(protein: bool, ids: &BioseqFacts) -> Vec<u8> {
+    let taxname = ids.taxname.as_deref().unwrap_or_default();
+    if protein && !ids.refseq_source_title {
+        let mut title = if ids.local_annots_only {
+            Vec::new()
+        } else {
+            UNNAMED_PROTEIN_PRODUCT.to_vec()
+        };
+        if !taxname.is_empty() {
+            title.extend_from_slice(b" [");
+            title.extend_from_slice(taxname);
+            title.push(b']');
+        }
+        return title;
+    }
+    // C `isspace` of the C locale: space, and tab to carriage return.
+    let space = |byte: &u8| matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r');
+    let start = taxname.iter().position(|byte| !space(byte));
+    let end = taxname.iter().rposition(|byte| !space(byte));
+    match (start, end) {
+        (Some(start), Some(end)) => taxname[start..=end].to_vec(),
+        _ => Vec::new(),
+    }
 }
 
 /// The entities of `NStr::HtmlDecode`, in NCBI's order.
@@ -1445,7 +1734,7 @@ mod tests {
             (",;,x y", ",;,x"),
         ] {
             assert_eq!(
-                database_subject_id(title.as_bytes(), true).as_deref(),
+                database_subject_id(title.as_bytes(), &BioseqFacts::default(), true).as_deref(),
                 Ok(id.as_bytes()),
                 "{title:?}"
             );
@@ -1457,20 +1746,22 @@ mod tests {
     // dies of SIGSEGV on the titles `, ,` and `; ;` (exit status 139): LOSAT names them.
     #[test]
     fn database_subject_id_names_the_titles_that_it_does_not_write() {
-        assert!(database_subject_id(b" ", true)
+        assert!(database_subject_id(b" ", &BioseqFacts::default(), true)
             .unwrap_err()
             .contains("makes no subject id"));
         for title in [", ,", "; ;"] {
             assert!(
-                database_subject_id(title.as_bytes(), true)
+                database_subject_id(title.as_bytes(), &BioseqFacts::default(), true)
                     .unwrap_err()
                     .contains("x_CleanAndCompress reads past the end"),
                 "{title:?}"
             );
         }
-        assert!(database_subject_id(b"caf\x81", true)
-            .unwrap_err()
-            .contains("in no encoding"));
+        assert!(
+            database_subject_id(b"caf\x81", &BioseqFacts::default(), true)
+                .unwrap_err()
+                .contains("in no encoding")
+        );
     }
 
     /// The title that the FASTA reader gives a record with the defline `defline`.
@@ -1705,7 +1996,7 @@ mod tests {
                 defline.as_bytes(),
                 false,
                 leave_prefix,
-                &BioseqIds::default(),
+                &BioseqFacts::default(),
             ))
             .is_ok_and(|(_, char_refs)| char_refs)
         })
@@ -1820,5 +2111,197 @@ mod tests {
         );
         assert_eq!(clean_and_compress(b"a. . [b", true).0, b"a.  [b");
         assert_eq!(replace_in_place(b"x. [. [", b". [", b" ["), b"x [ [");
+    }
+
+    /// The facts of a database sequence without parsed Seq-ids whose source names `taxname`.
+    fn named(taxname: &[u8]) -> BioseqFacts {
+        BioseqFacts::of_source(Some(std::sync::Arc::from(taxname)))
+    }
+
+    // NCBI BLAST+ 2.17.0 `-num_threads 1` on one-sequence databases without -parse_seqids, each
+    // without a title and with the taxid of one row of the probe's taxonomy database (line RG T5,
+    // `remaining-gaps-20261112/T/t5/out/ncbi`, `s.blastn.f0`, `s.blastp.f0`, `s.blastn.ids`,
+    // `c.*.long`): the outfmt 0 description (`fLeavePrefixSuffix`), the alignment heading (flags
+    // 0) and blastdbcmd's `-long_seqids` (`fLocalAnnotsOnly`) of the title made from the name.
+    #[test]
+    fn an_empty_title_is_made_from_the_name_of_the_source() {
+        let nucleotide: [(&[u8], &str, &str); 14] = [
+            (b"Homo sapiens", "Homo sapiens", "Homo sapiens"),
+            (
+                b"uncultured bacterium",
+                "Uncultured bacterium",
+                "Uncultured bacterium",
+            ),
+            (b"Bacillus sp.", "Bacillus sp.", "Bacillus sp."),
+            (b"  Spaced   name  ", "Spaced name", "Spaced name"),
+            (b"A &amp; B &lt;x&gt; &#65;", "A & B <x> A", "A & B <x> A"),
+            (b"TPA: tpa organism", "TPA: tpa organism", "Tpa organism"),
+            (
+                b"MAG uncultured thing",
+                "MAG uncultured thing",
+                "Uncultured thing",
+            ),
+            (b"Name ending ;,~ ", "Name ending", "Name ending"),
+            // One Latin-1 byte, decoded to UTF-8.
+            (
+                b"Caf\xe9 organism",
+                "Caf\u{e9} organism",
+                "Caf\u{e9} organism",
+            ),
+            (b"x", "X", "X"),
+            (
+                b"Odd ( spacing , here ) [strain]",
+                "Odd (spacing, here) [strain]",
+                "Odd (spacing, here) [strain]",
+            ),
+            (
+                b"synthetic construct",
+                "Synthetic construct",
+                "Synthetic construct",
+            ),
+            (b".", ".", "."),
+            (
+                "\u{e9}toile utf8".as_bytes(),
+                "\u{e9}toile utf8",
+                "\u{e9}toile utf8",
+            ),
+        ];
+        for (taxname, description, heading) in nucleotide {
+            let made = |leave| {
+                generate_bioseq_defline(b"", false, leave, &named(taxname))
+                    .unwrap()
+                    .text
+            };
+            assert_eq!(made(true), description.as_bytes(), "{taxname:?}");
+            assert_eq!(made(false), heading.as_bytes(), "{taxname:?}");
+        }
+        for (taxname, description, heading) in [
+            (
+                "Homo sapiens",
+                "unnamed protein product [Homo sapiens]",
+                "unnamed protein product [Homo sapiens]",
+            ),
+            (
+                "uncultured bacterium",
+                "unnamed protein product [uncultured bacterium]",
+                "unnamed protein product [uncultured bacterium]",
+            ),
+            (
+                "  Spaced   name  ",
+                "unnamed protein product [ Spaced name ]",
+                "unnamed protein product [ Spaced name ]",
+            ),
+            (
+                "Name ending ;,~ ",
+                "unnamed protein product [Name ending;, ~ ]",
+                "unnamed protein product [Name ending;, ~ ]",
+            ),
+            (
+                "TPA: tpa organism",
+                "unnamed protein product [TPA: tpa organism]",
+                "unnamed protein product [TPA: tpa organism]",
+            ),
+            (
+                "Odd ( spacing , here ) [strain]",
+                "unnamed protein product [Odd (spacing, here) [strain]]",
+                "unnamed protein product [Odd (spacing, here) [strain]]",
+            ),
+            (
+                "synthetic construct",
+                "unnamed protein product [synthetic construct]",
+                "unnamed protein product [synthetic construct]",
+            ),
+        ] {
+            let made = |leave| {
+                generate_bioseq_defline(b"", true, leave, &named(taxname.as_bytes()))
+                    .unwrap()
+                    .text
+            };
+            assert_eq!(made(true), description.as_bytes(), "{taxname:?}");
+            assert_eq!(made(false), heading.as_bytes(), "{taxname:?}");
+        }
+        // An unknown encoding throws (`Unknown`), as of a stored title.
+        assert_eq!(
+            generate_bioseq_defline(b"", false, true, &named(b"Bad \x81 name")),
+            Err(UnknownEncoding)
+        );
+        // Without a name: an empty nucleotide title, `unnamed protein product`.
+        assert!(
+            generate_bioseq_defline(b"", false, false, &BioseqFacts::default())
+                .unwrap()
+                .text
+                .is_empty()
+        );
+        // A stored title is not replaced, nor upper-cased.
+        for leave in [false, true] {
+            let made =
+                generate_bioseq_defline(b"lower title", false, leave, &named(b"Homo sapiens"));
+            assert_eq!(made.unwrap().text, b"lower title");
+        }
+        // blastdbcmd -long_seqids (`fLocalAnnotsOnly`): no `unnamed protein product`.
+        let local = |taxname: Option<&[u8]>, protein| {
+            let mut facts = BioseqFacts::of_source(taxname.map(std::sync::Arc::from));
+            facts.local_annots_only = true;
+            generate_bioseq_defline(b"", protein, false, &facts)
+                .unwrap()
+                .text
+        };
+        assert_eq!(local(Some(b"Homo sapiens"), true), b"[Homo sapiens]");
+        assert_eq!(local(Some(b"  Spaced   name  "), true), b"[ Spaced name ]");
+        assert_eq!(
+            local(Some(b"uncultured bacterium"), false),
+            b"Uncultured bacterium"
+        );
+        assert!(local(None, true).is_empty());
+        // A `pdb` record without a chain is made from the source but not upper-cased.
+        let mut pdb = named(b"x");
+        pdb.pdb = Some((Vec::new(), 0));
+        assert_eq!(
+            generate_bioseq_defline(b"", false, false, &pdb)
+                .unwrap()
+                .text,
+            b"x"
+        );
+    }
+
+    // NCBI reference: c++/src/corelib/ncbistr.cpp:3197-3234 (`TruncateSpacesInPlace`): the C
+    // `isspace` bytes of both ends, none in the middle.
+    #[test]
+    fn a_nucleotide_source_title_loses_white_space_at_its_ends() {
+        let facts = named(b"\t\n\x0b\x0c\r x \t y\r ");
+        assert_eq!(source_title(false, &facts), b"x \t y");
+        assert!(source_title(false, &named(b" \t ")).is_empty());
+        assert_eq!(
+            source_title(true, &named(b" x ")),
+            b"unnamed protein product [ x ]"
+        );
+        let mut refseq = named(b" x ");
+        refseq.refseq_source_title = true;
+        assert_eq!(source_title(true, &refseq), b"x");
+        assert!(source_title(
+            true,
+            &BioseqFacts {
+                refseq_source_title: true,
+                ..Default::default()
+            }
+        )
+        .is_empty());
+    }
+
+    // A name that NCBI's `HtmlDecode` cannot decode (probe of line RG T5, `t.100009.*.f0`): the
+    // description is `Unknown`, and the heading names the sequence by its Seq-id text.
+    #[test]
+    fn a_name_that_does_not_decode_keeps_the_seq_id_of_the_heading() {
+        let bad = SourceTaxname::Named(std::sync::Arc::from(&b"Bad \x81 name"[..]))
+            .of_stored(|| b"BL_ORD_ID:8".to_vec());
+        assert_eq!(bad.undecodable_id(), Some(&b"BL_ORD_ID:8"[..]));
+        assert_eq!(bad.name().unwrap().as_deref(), Some(&b"Bad \x81 name"[..]));
+        let good = SourceTaxname::Named(std::sync::Arc::from(&b"Homo sapiens"[..]))
+            .of_stored(|| unreachable!("a name that decodes keeps no id"));
+        assert_eq!(good.undecodable_id(), None);
+        assert_eq!(
+            SourceTaxname::Unnamed.of_stored(|| unreachable!()),
+            SourceTaxname::Unnamed
+        );
     }
 }

@@ -1,0 +1,154 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "window=64; level=20; linker=1",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id general {
+            db "BL_ORD_ID",
+            tag id 0
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id general {
+            db "BL_ORD_ID",
+            tag id 0
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id general {
+            db "BL_ORD_ID",
+            tag id 1
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id general {
+            db "BL_ORD_ID",
+            tag id 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id general {
+            db "BL_ORD_ID",
+            tag id 2
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id general {
+            db "BL_ORD_ID",
+            tag id 2
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id general {
+            db "BL_ORD_ID",
+            tag id 3
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id general {
+            db "BL_ORD_ID",
+            tag id 3
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id general {
+            db "BL_ORD_ID",
+            tag id 4
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id general {
+            db "BL_ORD_ID",
+            tag id 4
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id general {
+            db "BL_ORD_ID",
+            tag id 5
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id general {
+            db "BL_ORD_ID",
+            tag id 5
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id general {
+            db "BL_ORD_ID",
+            tag id 6
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id general {
+            db "BL_ORD_ID",
+            tag id 6
+          }
+        }
+      },
+      packed-int {
+        {
+          from 229,
+          to 236,
+          id general {
+            db "BL_ORD_ID",
+            tag id 7
+          }
+        },
+        {
+          from 512,
+          to 521,
+          id general {
+            db "BL_ORD_ID",
+            tag id 7
+          }
+        }
+      }
+    },
+    more FALSE
+  }
+}

@@ -82,13 +82,13 @@ pub fn xml_query_title(title: &[u8], protein: bool) -> Result<Vec<u8>, Refusal> 
 }
 
 /// `xml_query_title` of a query whose ids `-parse_deflines` read: the parts of the title that
-/// come from the Seq-ids (`GenerateDefline`, `report::defline::BioseqIds`).
+/// come from the Seq-ids (`GenerateDefline`, `report::defline::BioseqFacts`).
 fn believed_query_title(
     title: &[u8],
     protein: bool,
     believed: &crate::blastinput::fasta_reader::believed::BelievedIds,
 ) -> Result<Vec<u8>, Refusal> {
-    let ids = crate::report::db_subject::bioseq_ids(&believed.ids);
+    let ids = crate::report::db_subject::bioseq_facts(&believed.ids);
     let defline = crate::report::defline::generate_bioseq_defline(title, protein, false, &ids)
         .map_err(|_| Refusal::UnknownEncoding)?;
     if defline.reads_past_end {

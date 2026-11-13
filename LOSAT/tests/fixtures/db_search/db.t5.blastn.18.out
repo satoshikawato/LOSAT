@@ -1,0 +1,30 @@
+
+                                          Tax BLAST report                                          
+
+Query= ndq query of the duplicated nucleotide record
+
+Length=660
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                          (only common) [x]                                         
+ 7                                                                                     1219  0.0     
+
+                                     MAG uncultured thing () [x]                                     
+ 5         Uncultured thing                                                            1219  0.0     
+
+                                      TPA: tpa organism () [x]                                      
+ 4         Tpa organism                                                                1219  0.0     
+
+                                  A &amp; B &lt;x&gt; &#65; () [x]                                  
+ 3         A & B <x> A                                                                 1219  0.0     
+
+                                       Spaced   name   (sp) [x]                                     
+ 2         Spaced name                                                                 1219  0.0     
+
+                                    Bacillus sp. () [firmicutes]                                    
+ 1         Bacillus sp.                                                                1219  0.0     
+
+                                 uncultured bacterium () [bacteria]                                 
+ 0         Uncultured bacterium                                                        1219  0.0     

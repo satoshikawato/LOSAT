@@ -773,31 +773,68 @@ fn adjust_protein_title_suffix(title: &mut Vec<u8>, taxname: &[u8]) {
     title.push(b']');
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:540
+// ```c++
+//     	m_fasta.SetAllFlags(CFastaOstream::fKeepGTSigns|CFastaOstream::fNoExpensiveOps|CFastaOstream::fEnableGI);
+// ```
+// NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:2983-2985
+// ```c++
+//     if ((m_Flags & fNoExpensiveOps) != 0) {
+//         title_flags |= sequence::CDeflineGenerator::fNoExpensiveOps;
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/include/objmgr/util/create_defline.hpp:86-88
+// ```c++
+//         fLocalAnnotsOnly   = 1 <<  2, ///< Never use related sequences' annotations.
+//         ...
+//         fNoExpensiveOps    = fLocalAnnotsOnly,
+// ```
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:621
+// ```c++
+//     m_LocalAnnotsOnly = (flags & fLocalAnnotsOnly) != 0;
+// ```
+// The Bioseq's first source (`CSeqDBVol::x_GetTaxonomy`: one for each definition line with a
+// taxid above 0) names its organism where the taxonomy database gives the taxid a name: an empty
+// title is made from it (`report::defline::BioseqFacts`), without `unnamed protein product`
+// (`m_LocalAnnotsOnly`): `[Homo sapiens]` for a protein, `Homo sapiens` for a nucleotide (probe of
+// line RG T5, `T/t5/out/ncbi/c.*.long`).
 /// The title `CDeflineGenerator::GenerateDefline(fFastaFormat | fNoExpensiveOps)` makes of
 /// the Bioseq's title descriptor `title` (`report::defline::generate_bioseq_defline`, with
-/// the suffix adjustment of a protein with a source). `Err`: the Bioseqs whose title NCBI
-/// makes from parts LOSAT does not model (an empty title made from the source; a source
-/// without a name and a title ending in ` []`).
+/// the suffix adjustment of a protein with a source, and an empty title made from the name of
+/// the source). `Err`: the Bioseqs whose title NCBI makes from parts LOSAT does not model (a
+/// named RefSeq chromosome, mRNA or ncRNA without a title; a source without a name and a title
+/// ending in ` []`).
 fn generated_title(source: &Source, set: &DeflineSet, title: &[u8]) -> Result<Vec<u8>, Stop> {
     let ids = &set.deflines[0].ids;
-    let bioseq_ids = crate::report::db_subject::bioseq_ids(ids);
-    if bioseq_title_from_source(title, &bioseq_ids) {
-        return Err(Stop::Refused(format!(
-            "-long_seqids of a sequence without a title (NCBI makes one from its source) is \
-             not supported by LOSAT's {}",
-            super::PROGRAM
-        )));
-    }
+    let mut bioseq_facts = crate::report::db_subject::bioseq_facts(ids);
+    bioseq_facts.local_annots_only = true;
+    let from_source = bioseq_title_from_source(title, &bioseq_facts);
     let mut title = title.to_vec();
-    if source.protein {
-        // The first Source descriptor: the first definition line with a taxid above 0.
-        let taxid = set
-            .deflines
+    // The first Source descriptor: the first definition line with a taxid above 0.
+    let taxid = || {
+        set.deflines
             .iter()
             .filter_map(|defline| defline.taxid)
-            .find(|&taxid| taxid > 0);
-        if let Some(taxid) = taxid {
-            match source.tax_names(taxid)? {
+            .find(|&taxid| taxid > 0)
+    };
+    if let Some(taxid) = (from_source || source.protein).then(taxid).flatten() {
+        let names = source.tax_names(taxid)?;
+        if from_source {
+            let taxname = crate::report::defline::SourceTaxname::of_names(names.as_ref())
+                .name()
+                .unwrap_or_default();
+            if taxname.is_some() && bioseq_facts.refseq_source_title {
+                return Err(Stop::Refused(format!(
+                    "-long_seqids of a RefSeq chromosome, mRNA or ncRNA sequence without a title \
+                     whose taxid the taxonomy database names (NCBI makes its title with \
+                     x_SetTitleFromNC, x_SetTitleFromNM or x_SetTitleFromNR) is not supported by \
+                     LOSAT's {}",
+                    super::PROGRAM
+                )));
+            }
+            bioseq_facts.taxname = taxname;
+        } else {
+            match names {
                 Some(names) => adjust_protein_title_suffix(&mut title, &names.scientific_name),
                 None => {
                     let mut trimmed = title.clone();
@@ -814,7 +851,7 @@ fn generated_title(source: &Source, set: &DeflineSet, title: &[u8]) -> Result<Ve
         }
     }
     let defline =
-        generate_bioseq_defline(&title, source.protein, false, &bioseq_ids).map_err(|_| {
+        generate_bioseq_defline(&title, source.protein, false, &bioseq_facts).map_err(|_| {
             Stop::Refused(format!(
                 "a title whose encoding NCBI cannot tell is not supported by LOSAT's {}",
                 super::PROGRAM

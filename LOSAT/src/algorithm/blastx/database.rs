@@ -306,6 +306,9 @@ pub(crate) struct ReportedSubjects {
     /// ids and titles come from their definition lines (`report::db_subject`), and `titles`
     /// holds the title of their first definition line.
     parsed: Vec<Option<Arc<ParsedSubject>>>,
+    /// The sources from which NCBI makes the empty stored titles of the others, by rank
+    /// (`shared::StoredTitle::source`; empty when none has one).
+    sources: Vec<crate::report::defline::SourceTaxname>,
     /// `sacc` and `saccver` of the sequences with parsed Seq-ids by rank, with `tabular`
     /// (empty without them; the others' are their `sseqid`).
     tabular_accessions: Vec<Option<[String; 2]>>,
@@ -350,7 +353,7 @@ impl ReportedSubjects {
     /// query by query in hit-list order; NCBI's reader error stops the run at this batch
     /// (`HeaderReadError`), and a title LOSAT does not show as NCBI is its refusal
     /// (`check_reported_title`; with `tabular`, `tabular_subject_id`; with `pairwise`,
-    /// `check_shown_stored_title` and `check_shown_protein_title`). A sequence with parsed Seq-ids is read with every Seq-id
+    /// `StoredTitle::check_shown_source` and `check_shown_protein_title`). A sequence with parsed Seq-ids is read with every Seq-id
     /// (`shared::read_header`), with LOSAT's refusals of `ParsedSubject::fetched`, of
     /// `shared::check_shown_parsed_subject` (with `pairwise`), of `shared::refuse_joined_hits`
     /// (with `joined`: outfmt 0, 5 and 13 to 16) and of `ParsedSubject::tabular_ids` (with
@@ -387,6 +390,8 @@ impl ReportedSubjects {
         // up before it filters the HSPs); only the reported ones have their titles read.
         let mut listed: BTreeMap<usize, Option<Arc<[u8]>>> = BTreeMap::new();
         let mut parsed: BTreeMap<usize, Arc<ParsedSubject>> = BTreeMap::new();
+        // The sources of the empty stored titles that NCBI makes from them.
+        let mut sources: BTreeMap<usize, crate::report::defline::SourceTaxname> = BTreeMap::new();
         let headers = shared::HeaderReader::new(&database.db);
         for batch in batches.iter() {
             for (qidx, lists) in batch.queries.iter().enumerate() {
@@ -415,11 +420,10 @@ impl ReportedSubjects {
                                 database.program,
                             )?;
                             if pairwise {
-                                shared::check_shown_stored_title(
-                                    stored.taxonomy_title,
-                                    ordinal,
-                                    database.program,
-                                )?;
+                                stored.check_shown_source(ordinal, database.program)?;
+                            }
+                            if stored.source != crate::report::defline::SourceTaxname::Unnamed {
+                                sources.insert(list.oid, stored.source);
                             }
                             listed.insert(list.oid, Some(Arc::from(stored.title)));
                         }
@@ -454,8 +458,9 @@ impl ReportedSubjects {
             let ordinal = u32::try_from(oid)?;
             let shown = title.is_some();
             let title = title.clone().unwrap_or_else(|| Arc::from(&b""[..]));
+            let source = sources.remove(&oid).unwrap_or_default();
             if pairwise && shown && !parsed.contains_key(&oid) {
-                shared::check_shown_protein_title(&title, ordinal, database.program)?;
+                shared::check_shown_protein_title(&title, &source, ordinal, database.program)?;
             }
             if let Some(subject) = parsed.get(&oid) {
                 // The formats that read the subject's Bioseq; the Seq-annots and the archive
@@ -514,7 +519,7 @@ impl ReportedSubjects {
                 // An unreported subject's id is never written, nor an id of a table of fields
                 // that read nothing of the subject.
                 let id = if shown && tabular_reads {
-                    shared::tabular_subject_id(&title, ordinal, true, database.program)?
+                    shared::tabular_subject_id(&title, &source, ordinal, true, database.program)?
                 } else {
                     Vec::new()
                 };
@@ -537,6 +542,12 @@ impl ReportedSubjects {
                 warnings: Vec::new(),
                 source: None,
             });
+            shared::keep_source(
+                &mut reported.sources,
+                reported.ordinals.len(),
+                listed.len(),
+                source,
+            );
             reported.titles.push(title);
             reported.ordinals.push(ordinal);
         }
@@ -933,6 +944,12 @@ impl ReportedSubjects {
         &self.titles
     }
 
+    /// The sources from which NCBI makes the empty stored titles, by rank (empty when none has
+    /// one; `report::pairwise::stored_source`).
+    pub(crate) fn sources(&self) -> &[crate::report::defline::SourceTaxname] {
+        &self.sources
+    }
+
     /// The description-table labels by rank: the title as NCBI's defline generator makes it
     /// for the description table (as BLASTP's, BLASTN's and TBLASTN's `-db` reports).
     pub(crate) fn descriptions(&self) -> Vec<Arc<str>> {
@@ -942,6 +959,7 @@ impl ReportedSubjects {
             .map(|(rank, title)| {
                 let label = crate::report::pairwise::database_description_label(
                     title,
+                    crate::report::pairwise::stored_source(&self.sources, rank as u32),
                     self.parsed_subject(rank),
                     true,
                 );

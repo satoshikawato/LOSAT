@@ -9,7 +9,7 @@
 use std::io::{self, Write};
 
 use crate::report::archive::masks::write_ranges_seq_loc;
-use crate::report::db_subject::bioseq_ids;
+use crate::report::db_subject::bioseq_facts;
 use crate::report::defline::generate_bioseq_defline;
 use crate::report::seqid::SeqId;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
@@ -25,6 +25,9 @@ use crate::seqid::ParsedSeqId;
 pub(crate) struct MaskedBioseq<'a> {
     pub ids: &'a [ParsedSeqId],
     pub title: Option<&'a [u8]>,
+    /// The name of the organism of the Bioseq's first source (a database sequence's), from which
+    /// `GenerateDefline` makes an empty title (`report::defline::BioseqFacts::taxname`).
+    pub taxname: Option<&'a std::sync::Arc<[u8]>>,
     pub iupac: &'a [u8],
     /// Whether the sequence is a protein (`CDeflineGenerator` names a protein without a title
     /// `unnamed protein product`).
@@ -427,13 +430,13 @@ fn id_to_string(seq: &MaskedBioseq<'_>, parsed_id: bool) -> Result<Vec<u8>, Writ
         bioseq_fasta(seq.ids, false, &mut text);
         text.push(b' ');
     }
-    let defline = generate_bioseq_defline(
-        seq.title.unwrap_or_default(),
-        seq.protein,
-        false,
-        &bioseq_ids(seq.ids),
-    )
-    .map_err(|_| WriteError::Refused("a title whose encoding NCBI cannot tell".to_string()))?;
+    let mut facts = bioseq_facts(seq.ids);
+    facts.taxname = seq.taxname.cloned();
+    let defline =
+        generate_bioseq_defline(seq.title.unwrap_or_default(), seq.protein, false, &facts)
+            .map_err(|_| {
+                WriteError::Refused("a title whose encoding NCBI cannot tell".to_string())
+            })?;
     if defline.reads_past_end {
         return Err(WriteError::Refused(
             "a title on which NCBI's defline generator reads past its end".to_string(),

@@ -291,3 +291,9 @@ db_len0_acclist	-infmt blastdb -in db/len0 -outfmt acclist
 db_nseqneg_interval	-infmt blastdb -in db/nseqneg -outfmt interval
 db_firstbig_fasta	-infmt blastdb -in db/firstbig -outfmt fasta
 db_oidr_short_acclist	-infmt blastdb -in "db/oidr db/short" -outfmt acclist
+# Database sequences without a title whose taxid the taxonomy database names (line RG item T5): ../db_search/t5 (make_t5.py there), its taxonomy database ../seqdb/taxdb/t5 on the search path of conf/t5.ini. NCBI makes each title from the name (CDeflineGenerator::x_SetTitleFromBioSrc: the name without white space at its ends, its first letter upper-cased; an empty title for a taxid without a name). NCBI BLAST+ 2.17.0 (local oracle), 2026-11-14, ad-RG-T5-1.
+db_t5_fasta	-infmt blastdb -in ../db_search/t5/nclean -outfmt fasta -conffile conf/t5.ini
+db_t5_interval	-infmt blastdb -in ../db_search/t5/nclean -outfmt interval -conffile conf/t5.ini
+db_t5_acclist	-infmt blastdb -in ../db_search/t5/nclean -outfmt acclist -conffile conf/t5.ini
+db_t5_fasta_ps	-infmt blastdb -in ../db_search/t5/npall -outfmt fasta -parse_seqids -conffile conf/t5.ini
+db_t5_maskinfo	-infmt blastdb -in ../db_search/t5/nclean -outfmt maskinfo_asn1_text -conffile conf/t5.ini

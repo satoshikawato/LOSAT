@@ -171,6 +171,16 @@ const CASES: &[Case] = &[
     ("K11", Some("j/jtax5"), false, &["-db", "j/lst/p5", "-taxids", "10066", "-target_only", "-outfmt", "%o %a %T"], 0),
     ("K12", Some("j/jtax5"), false, &["-db", "j/lst/p5", "-taxids", "9604,10066"], 0),
     ("K13", Some("j/jtax5"), false, &["-db", "j/lst/p5", "-taxids", "1", "-outfmt", "%o %T"], 0),
+    // Line RG item T5: sequences without a title whose taxid `../seqdb/taxdb/t5` names
+    // (`../db_search/t5/make_t5.py`): `-long_seqids` makes the title from the name (a protein's
+    // `[name]`, without `unnamed protein product`), the short header keeps the empty title.
+    ("T501", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/nclean", "-entry", "all", "-long_seqids"], 0),
+    ("T502", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/pclean", "-entry", "all", "-long_seqids"], 0),
+    ("T503", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/npall", "-entry", "all", "-long_seqids"], 0),
+    ("T504", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/ppall", "-entry", "all", "-long_seqids"], 0),
+    ("T505", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/pclean", "-entry", "all"], 0),
+    ("T506", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/pclean", "-entry", "all", "-long_seqids", "-outfmt", "%f"], 0),
+    ("T507", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/nclean", "-entry", "all", "-long_seqids", "-target_only"], 0),
 ];
 
 /// The probe's cases that LOSAT refuses (one line naming LOSAT's BLASTDBCMD, exit status 1,

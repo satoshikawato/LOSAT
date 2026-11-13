@@ -956,7 +956,9 @@ pub fn run(
     } else {
         args.outfmt.clone()
     };
-    let mut stream = cli_report_stream(out_file);
+    // The organism report's `-out` file is written as NCBI's buffer writes it.
+    let tax_report = format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
+    let mut stream = cli_report_stream(out_file, tax_report);
     let result = {
         let mut outputs =
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
@@ -1020,7 +1022,7 @@ pub fn run(
     // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119).
     // For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
     // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if write_failed && pairwise {
+    if write_failed && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
             message: "BLAST failed to write output\n".to_string(),
@@ -1050,7 +1052,7 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = cli_report_stream(out_file);
+        let mut report = cli_report_stream(out_file, false);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -1079,10 +1081,12 @@ fn open_out_file(args: &TblastxArgs) -> Result<Option<std::io::BufWriter<std::fs
 /// The report stream of the command line: the `-out` file, or standard output.
 fn cli_report_stream(
     out_file: Option<std::io::BufWriter<std::fs::File>>,
+    tax_report: bool,
 ) -> crate::cli::ReportStream {
     crate::cli::ReportStream {
         inner: match out_file {
-            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
+            // The organism report's file as NCBI's buffer writes it (`cli::TaxReportFile`).
+            Some(file) => crate::cli::report_out_file(Box::new(file), tax_report.then_some(18)),
             None => crate::cli::report_standard_output(),
         },
         failed: false,
@@ -1442,6 +1446,19 @@ fn open_search_database(
     }) {
         args.tabular_taxdb = Some(match database.as_ref() {
             Some(database) => database.taxdb_found(),
+            // The organism report's lookups open the run's own database.
+            None if outputs.formats.iter().any(|format| {
+                matches!(
+                    report::output_format(format.outfmt),
+                    report::TblastxOutputFormat::CustomTabular(spec)
+                        if spec.kind == crate::report::tabular::TabularKind::TaxReport
+                )
+            }) =>
+            {
+                args.subject_taxdb =
+                    crate::algorithm::common::database::SubjectTaxdb::of(settings, "TBLASTX")?;
+                args.subject_taxdb.is_some()
+            }
             None => crate::algorithm::common::database::subject_taxdb_found(settings, "TBLASTX")?,
         });
     }
@@ -4121,10 +4138,17 @@ impl BatchReports<'_> {
                 report::TblastxOutputFormat::CustomTabular(spec) => Some(spec),
                 _ => None,
             });
+        // A `-subject` search's organism report (outfmt 18) looks names up in the run's
+        // database.
         let tabular_names = match (&self.subjects, custom_tabular) {
             (ShownSubjects::Database { database, .. }, Some(spec)) => {
                 database.tabular_names(spec, &tabular_taxonomy)?
             }
+            (_, Some(_)) => self
+                .args
+                .subject_taxdb
+                .as_ref()
+                .map(|taxdb| taxdb.report_names("TBLASTX")),
             _ => None,
         };
         let written = write_tblastx_outputs(

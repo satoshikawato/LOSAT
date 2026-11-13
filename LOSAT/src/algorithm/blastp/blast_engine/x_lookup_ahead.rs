@@ -1672,6 +1672,7 @@ mod tests {
             outfmt: "6".to_string(),
             archive: None,
             app: BlastpApp::Blastp,
+            subject_taxdb: None,
             inclusion_ethresh: None,
             first_query_ordinal: 0,
             psiblast_pssm: None,

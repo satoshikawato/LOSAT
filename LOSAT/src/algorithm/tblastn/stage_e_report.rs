@@ -292,17 +292,20 @@ pub(super) fn render(
     };
     // The tabular subject IDs, made before any format is written: a subject that NCBI
     // writes part of a row for and then stops at (RP-20) is rejected first
-    // (`tabular_subject_ids`). The tabular formats 6, 7, 10 and 20 show them.
-    let subject_ids = if outputs
-        .formats
-        .iter()
-        .any(|format| matches!(format_number(format.outfmt), 6 | 7 | 10 | 20))
-    {
+    // (`tabular_subject_ids`). The tabular formats 6, 7, 10 and 20 show them, not the organism
+    // report (`report::tabular::writes_rows`).
+    let shows_ids = |format: &crate::api::local_blast::FormatOutput<'_>| {
+        matches!(format_number(format.outfmt), 6 | 7 | 10 | 18 | 20)
+            && crate::report::tabular::writes_rows(
+                super::tabular::tabular_spec(format.outfmt).as_ref(),
+            )
+    };
+    let subject_ids = if outputs.formats.iter().any(shows_ids) {
         match shown {
             ShownSubjects::Fasta { .. } => tabular_subject_ids(hitlists, subject_records)?,
             ShownSubjects::Database { reported, .. } => {
                 reported.tabular_subject_ids(outputs.formats.iter().any(|format| {
-                    matches!(format_number(format.outfmt), 6 | 7 | 10 | 20)
+                    shows_ids(format)
                         && crate::report::tabular::reads_subject(
                             super::tabular::tabular_spec(format.outfmt).as_ref(),
                             crate::blastinput::app::Program::Tblastn,

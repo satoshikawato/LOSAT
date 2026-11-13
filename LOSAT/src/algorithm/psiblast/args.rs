@@ -517,6 +517,7 @@ impl PsiblastArgs {
             outfmt: self.outfmt,
             archive: None,
             app: BlastpApp::Psiblast,
+            subject_taxdb: None,
             inclusion_ethresh: Some(self.inclusion_ethresh),
             first_query_ordinal: self.first_query_ordinal,
             psiblast_pssm: Some(crate::algorithm::psiblast::pssm::PsiblastPssmOptions {

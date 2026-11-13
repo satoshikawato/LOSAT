@@ -459,9 +459,9 @@ pub(super) fn write_blastp_tabular(
 /// Writes the organism report (outfmt 18, `report::tax_report`) of every query of `hit_lists`
 /// (indexed by query) to `writer`, each query's warnings before its report: the caption, the
 /// `Query=` block of its title (`tab.query_titles`) with the length of its record
-/// (`record_lengths`), and the table of its reported HSPs in the hit lists' order. The definition
-/// lines of the reported subjects and the lookups of their taxids are made before the first byte,
-/// so that LOSAT's refusals come before it.
+/// (`record_lengths`), and the table of its reported HSPs in the hit lists' order. The report is
+/// made before the batch's first byte (`tax_report::report_batch`), so that LOSAT's refusals come
+/// before it; `tab.names` carries the run's taxonomy database.
 pub(super) fn write_blastp_tax_report(
     tab: &BlastpTabular<'_>,
     record_lengths: &[usize],
@@ -469,66 +469,12 @@ pub(super) fn write_blastp_tax_report(
     writer: &mut dyn Write,
     warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
-    use crate::report::tax_report::{
-        subject_deflines, SubjectTable, TaxHsp, TaxLookups, TaxQuery, TaxSource,
-    };
-    let program = tab.app.name();
+    use crate::report::tax_report::{report_batch, write_report, TaxHsp, TaxPlain, TaxQuery};
     let parsed = match &tab.subjects {
         TabularSubjects::Records { parsed, .. } | TabularSubjects::Database { parsed, .. } => {
             *parsed
         }
     };
-    let mut subjects = SubjectTable::new(parsed);
-    for hsp_list in hit_lists.iter().flatten().flat_map(reported) {
-        let Some(first) = hsp_list.hsps.first() else {
-            continue;
-        };
-        let s_idx = first.s_idx as usize;
-        let source = match &tab.subjects {
-            TabularSubjects::Records { records, .. } => match subjects.parsed(s_idx) {
-                Some(subject) => TaxSource::Parsed {
-                    subject,
-                    ordinal: None,
-                },
-                None => {
-                    let record = &records[s_idx];
-                    TaxSource::Record {
-                        local_id: record.local_id.as_bytes(),
-                        title: &record.title,
-                    }
-                }
-            },
-            TabularSubjects::Database {
-                ordinals,
-                titles,
-                taxonomy,
-                ..
-            } => {
-                let ordinal = ordinals.get(s_idx).copied().unwrap_or_default();
-                match subjects.parsed(s_idx) {
-                    Some(subject) => TaxSource::Parsed {
-                        subject,
-                        ordinal: Some(ordinal),
-                    },
-                    None => TaxSource::Stored {
-                        ordinal,
-                        title: titles.get(s_idx).map_or(&[][..], |title| title),
-                        taxid: taxonomy.get(s_idx).map_or(0, |taxonomy| taxonomy.taxid),
-                    },
-                }
-            }
-        };
-        subjects.add(s_idx, || {
-            subject_deflines(source, true, tab.taxdb_found, program)
-        })?;
-    }
-    let subject_names = match (&tab.subjects, tab.names) {
-        (TabularSubjects::Records { .. }, None) => {
-            crate::algorithm::common::database::subject_tax_names(tab.spec, program)?
-        }
-        _ => None,
-    };
-    let lookups = TaxLookups::new(tab.names.or(subject_names.as_ref()), program)?;
     let queries: Vec<TaxQuery<'_>> = hit_lists
         .iter()
         .enumerate()
@@ -550,7 +496,32 @@ pub(super) fn write_blastp_tax_report(
                 .collect(),
         })
         .collect();
-    crate::report::tax_report::write_report(writer, warnings, &queries, &subjects, &lookups)?;
+    let plain = |s_idx: usize| match &tab.subjects {
+        TabularSubjects::Records { records, .. } => TaxPlain::Record {
+            local_id: records[s_idx].local_id.as_bytes(),
+            title: &records[s_idx].title,
+        },
+        TabularSubjects::Database {
+            ordinals,
+            titles,
+            taxonomy,
+            ..
+        } => TaxPlain::Stored {
+            ordinal: ordinals.get(s_idx).copied().unwrap_or_default(),
+            title: titles.get(s_idx).map_or(&[][..], |title| title),
+            taxid: taxonomy.get(s_idx).map_or(0, |taxonomy| taxonomy.taxid),
+        },
+    };
+    let report = report_batch(
+        &queries,
+        parsed,
+        plain,
+        true,
+        tab.taxdb_found,
+        tab.names,
+        tab.app.name(),
+    )?;
+    write_report(writer, warnings, &queries, &report)?;
     Ok(())
 }
 

@@ -178,18 +178,6 @@ impl Text {
         out
     }
 
-    /// The length in bytes.
-    #[cfg(test)]
-    fn len(&self) -> u64 {
-        self.0
-            .iter()
-            .map(|seg| match seg {
-                Seg::Bytes(bytes) => bytes.len() as u64,
-                Seg::Spaces(count) => *count,
-            })
-            .sum()
-    }
-
     fn write_to(&self, out: &mut dyn Write) -> io::Result<()> {
         static BLANK: [u8; 1 << 16] = [b' '; 1 << 16];
         for seg in &self.0 {
@@ -294,13 +282,30 @@ fn add_spaces(value: &[u8], width: u64, place: Place, eol_start: bool, eol_end: 
     text
 }
 
+/// The title of a definition line as the report makes it (`x_FillTaxDispParams`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TaxTitle {
+    /// The stored title, or the generated one where the line has none.
+    Text(Vec<u8>),
+    /// `GenerateDefline` throws: `NStr::HtmlDecode` (create_defline.cpp:4066) cannot guess the
+    /// title's encoding (ncbistr.cpp:4528-4532). The report's `catch` (taxFormat.cpp:1033-1035)
+    /// then drops the rest of the HSP's subject before this line widens the columns
+    /// (`x_InitTextFormatInfo` comes after the title, taxFormat.cpp:926-927), and the subject is
+    /// not the previous id: its next HSP is read again.
+    Throws,
+    /// A title that LOSAT does not write as NCBI: refused where NCBI makes it (a line that the
+    /// report reaches), or with `shown_only` where NCBI shows it (a line whose taxid the taxonomy
+    /// database names; NCBI drops the row of any other line before it shows the title).
+    Refused { reason: String, shown_only: bool },
+}
+
 /// One definition line of a subject as the report shows it (`CTaxFormat::SSeqInfo`): the label
 /// (`CAlignFormatUtil::GetLabel` of its `WorstRank`-best Seq-id, without version), the title (the
 /// generated title of the subject's Bioseq where it has none) and the taxid (0 for none).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TaxDefline {
     pub label: Vec<u8>,
-    pub title: Vec<u8>,
+    pub title: TaxTitle,
     pub taxid: i32,
 }
 
@@ -322,23 +327,25 @@ impl TaxDefline {
     ///     ...
     ///     seqInfo->taxid = ZERO_TAX_ID;
     /// 	seqInfo->title = CDeflineGenerator().GenerateDefline(bsp_handle);
+    ///     if(m_DisplayOption == eText) x_InitTextFormatInfo(seqInfo);
     /// ```
-    pub fn of_record(local_id: &[u8], title: &[u8], protein: bool) -> Result<Self, String> {
-        Ok(TaxDefline {
+    pub fn of_record(local_id: &[u8], title: &[u8], protein: bool) -> Self {
+        TaxDefline {
             label: local_id.to_vec(),
             title: generated_title(
                 title,
                 protein,
                 &crate::report::defline::BioseqIds::default(),
-            )?,
+            ),
             taxid: 0,
-        })
+        }
     }
 
     /// The definition line of the database sequence `ordinal` without parsed Seq-ids: the label
     /// of its `gnl|BL_ORD_ID|<ordinal>` id is the ordinal id, its title the stored one (`title`)
-    /// or, where that is empty, the Bioseq's generated title. `Err` where NCBI makes that title
-    /// from the taxid and the taxonomy database (`taxdb_found`), which LOSAT does not.
+    /// or, where that is empty, the Bioseq's generated title, which NCBI makes from the taxid and
+    /// the taxonomy database (`taxdb_found`) where it has them: LOSAT does not
+    /// (`TITLE_FROM_TAXONOMY`, refused where the report shows the title).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:962-971
     /// ```c++
@@ -360,23 +367,26 @@ impl TaxDefline {
         taxid: i32,
         protein: bool,
         taxdb_found: bool,
-    ) -> Result<Self, String> {
+    ) -> Self {
         let ids = crate::report::defline::BioseqIds::default();
         let title = if !title.is_empty() {
-            title.to_vec()
+            TaxTitle::Text(title.to_vec())
         } else if taxid > 0
             && taxdb_found
             && crate::report::defline::bioseq_title_from_source(title, &ids)
         {
-            return Err(TITLE_FROM_TAXONOMY.into());
+            TaxTitle::Refused {
+                reason: TITLE_FROM_TAXONOMY.into(),
+                shown_only: true,
+            }
         } else {
-            generated_title(title, protein, &ids)?
+            generated_title(title, protein, &ids)
         };
-        Ok(TaxDefline {
+        TaxDefline {
             label: ordinal.to_string().into_bytes(),
             title,
             taxid,
-        })
+        }
     }
 }
 
@@ -384,19 +394,22 @@ impl TaxDefline {
 pub(crate) const TITLE_FROM_TAXONOMY: &str = "has an empty title that NCBI BLAST+'s organism report (outfmt 18) makes from its taxids and the taxonomy database";
 
 /// `CDeflineGenerator().GenerateDefline` (flags 0) of a Bioseq with the title `title` and the
-/// Seq-ids `ids`. `Err`: a protein title of punctuation that NCBI's `x_CleanAndCompress` reads
-/// past the end of (NCBI crashes; approved exception 2 of PD-LOSAT-NCBI-DEFECTS has a nucleotide
-/// title stop at the end of the string), and a title whose encoding NCBI's `HtmlDecode` cannot
-/// guess (NCBI's report then skips the subject).
+/// Seq-ids `ids`: the text; `Throws` where NCBI's `HtmlDecode` cannot guess the encoding (the
+/// report skips the subject there); refused where NCBI's `x_CleanAndCompress` reads past the end
+/// of a protein title of punctuation (NCBI crashes; approved exception 2 of
+/// PD-LOSAT-NCBI-DEFECTS has a nucleotide title stop at the end of the string).
 pub(crate) fn generated_title(
     title: &[u8],
     protein: bool,
     ids: &crate::report::defline::BioseqIds,
-) -> Result<Vec<u8>, String> {
+) -> TaxTitle {
     match crate::report::defline::generate_bioseq_defline(title, protein, false, ids) {
-        Ok(defline) if protein && defline.reads_past_end => Err("has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes)".into()),
-        Ok(defline) => Ok(defline.text),
-        Err(_) => Err("has a title whose encoding NCBI BLAST+'s HtmlDecode cannot guess (its organism report then skips the subject)".into()),
+        Ok(defline) if protein && defline.reads_past_end => TaxTitle::Refused {
+            reason: concat!("has a title ", crate::report::defline::punctuation_title!()).into(),
+            shown_only: false,
+        },
+        Ok(defline) => TaxTitle::Text(defline.text),
+        Err(_) => TaxTitle::Throws,
     }
 }
 
@@ -409,7 +422,7 @@ pub struct TaxHsp {
     pub bit_score: f64,
 }
 
-/// The subjects of a report, as a program's adapter gives them.
+/// The subjects of a report, as a program's adapter gives them (`SubjectTable`).
 pub trait TaxSubjects {
     /// The definition lines of `subject` that the report shows (those a positive list keeps,
     /// `CAlignFormatUtil::MatchSeqInSeqList`; one for a subject without `Blast-def-line`s).
@@ -420,10 +433,14 @@ pub trait TaxSubjects {
     fn same(&self, previous: usize, subject: usize) -> bool {
         previous == subject
     }
+
+    /// LOSAT's refusal of a title of `subject` (`TaxTitle::Refused`), which names it.
+    fn refused(&self, subject: usize, reason: &str) -> anyhow::Error;
 }
 
 /// LOSAT's refusal of an organism report that it does not write as NCBI (a title, a taxonomy
-/// name, a `./.ncbirc`), made before the report's first byte: no error of NCBI's engine.
+/// name, a `./.ncbirc`), made before the first byte of the report's query batch (each batch's
+/// report is made before it is written): no error of NCBI's engine.
 #[derive(Debug)]
 pub struct TaxReportRefusal(String);
 
@@ -435,18 +452,12 @@ impl std::fmt::Display for TaxReportRefusal {
 
 impl std::error::Error for TaxReportRefusal {}
 
-/// Where the definition lines of a subject come from (`subject_deflines`).
+/// A subject without parsed Seq-ids as the adapter has it (`TaxSource`).
 #[derive(Clone, Copy, Debug)]
-pub enum TaxSource<'a> {
-    /// A subject with parsed Seq-ids: the database sequence `ordinal`, or a `-subject` record read
-    /// under `-parse_deflines` (`ordinal` `None`).
-    Parsed {
-        subject: &'a crate::report::db_subject::ParsedSubject,
-        ordinal: Option<u32>,
-    },
-    /// A `-subject` record read without `-parse_deflines`: its local id `Subject_N` and title.
+pub enum TaxPlain<'a> {
+    /// A `-subject` record: its local id `Subject_N` and title.
     Record { local_id: &'a [u8], title: &'a [u8] },
-    /// The database sequence `ordinal` without parsed Seq-ids: its stored title and taxid.
+    /// The database sequence `ordinal`: its stored title and taxid.
     Stored {
         ordinal: u32,
         title: &'a [u8],
@@ -454,90 +465,112 @@ pub enum TaxSource<'a> {
     },
 }
 
-/// The definition lines of the subject `source` as the report shows them (`TaxDefline`), of a
-/// protein (`protein`) or nucleotide subject; `taxdb_found`: whether `taxdb.bti` is on the search
-/// path. A title that LOSAT does not write as NCBI is LOSAT's refusal (`program` names the
-/// program).
-pub fn subject_deflines(
-    source: TaxSource<'_>,
-    protein: bool,
-    taxdb_found: bool,
-    program: &str,
-) -> Result<Vec<TaxDefline>> {
-    let refused = |reason: String| {
-        anyhow::Error::new(TaxReportRefusal(match source {
-            TaxSource::Parsed {
-                ordinal: Some(ordinal),
-                ..
+/// Where the definition lines of a subject come from: its parsed Seq-ids where it has them (a
+/// database sequence's definition lines, or a `-subject` record read under `-parse_deflines`),
+/// else the record or stored sequence `plain`, which also names the subject in LOSAT's refusals.
+#[derive(Clone, Copy, Debug)]
+pub struct TaxSource<'a> {
+    pub parsed: Option<&'a crate::report::db_subject::ParsedSubject>,
+    pub plain: TaxPlain<'a>,
+}
+
+impl TaxSource<'_> {
+    /// The definition lines of the subject as the report shows them (`TaxDefline`), of a protein
+    /// (`protein`) or nucleotide subject; `taxdb_found`: whether `taxdb.bti` is on the search path.
+    fn deflines(&self, protein: bool, taxdb_found: bool) -> Vec<TaxDefline> {
+        match (self.parsed, self.plain) {
+            (Some(subject), _) => subject.tax_deflines(protein, taxdb_found),
+            (None, TaxPlain::Record { local_id, title }) => {
+                vec![TaxDefline::of_record(local_id, title, protein)]
             }
-            | TaxSource::Stored { ordinal, .. } => format!(
-                "database sequence {ordinal} {reason}; this is not supported by LOSAT's {program}"
-            ),
-            TaxSource::Parsed { subject, .. } => format!(
-                "the subject record {} {reason}, which is not supported by LOSAT's {program}",
-                String::from_utf8_lossy(&subject.alignment_fasta())
-            ),
-            TaxSource::Record { title, .. } => format!(
-                "the subject record {} {reason}, which is not supported by LOSAT's {program}",
-                String::from_utf8_lossy(title)
-            ),
-        }))
-    };
-    match source {
-        TaxSource::Parsed { subject, .. } => subject.tax_deflines(protein, taxdb_found),
-        TaxSource::Record { local_id, title } => {
-            TaxDefline::of_record(local_id, title, protein).map(|line| vec![line])
+            (
+                None,
+                TaxPlain::Stored {
+                    ordinal,
+                    title,
+                    taxid,
+                },
+            ) => vec![TaxDefline::of_stored(
+                ordinal,
+                title,
+                taxid,
+                protein,
+                taxdb_found,
+            )],
         }
-        TaxSource::Stored {
-            ordinal,
-            title,
-            taxid,
-        } => TaxDefline::of_stored(ordinal, title, taxid, protein, taxdb_found)
-            .map(|line| vec![line]),
     }
-    .map_err(refused)
+
+    /// How LOSAT's refusals name the subject.
+    fn name(&self) -> SubjectName {
+        match (self.parsed, self.plain) {
+            (_, TaxPlain::Stored { ordinal, .. }) => SubjectName::Database(ordinal),
+            (Some(subject), TaxPlain::Record { .. }) => SubjectName::Record(
+                String::from_utf8_lossy(&subject.alignment_fasta()).into_owned(),
+            ),
+            (None, TaxPlain::Record { title, .. }) => {
+                SubjectName::Record(String::from_utf8_lossy(title).into_owned())
+            }
+        }
+    }
+}
+
+/// How LOSAT's refusals name a subject (`TaxSource::name`).
+#[derive(Debug)]
+enum SubjectName {
+    Database(u32),
+    Record(String),
 }
 
 /// The subjects of a report by subject index (a subject set's index, a database's rank): their
-/// definition lines, made before the report's first byte, and the parsed subjects, whose Seq-align
-/// ids `Match` where they hold equal ids (`db_subject::joined_in_reports`).
+/// definition lines and names, and the parsed subjects, whose Seq-align ids `Match` where they
+/// hold equal ids (`db_subject::joined_in_reports`).
 pub struct SubjectTable<'p> {
-    lines: std::collections::HashMap<usize, Vec<TaxDefline>>,
+    subjects: std::collections::HashMap<usize, (Vec<TaxDefline>, SubjectName)>,
     parsed: &'p [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
+    program: String,
 }
 
 impl<'p> SubjectTable<'p> {
-    /// An empty table; `parsed` are the parsed subjects by subject index (empty when none).
-    pub fn new(
+    /// The table of the subjects of `queries`' HSPs: `parsed` are the parsed subjects by subject
+    /// index (empty when none has parsed Seq-ids), `plain(index)` a subject as the adapter has it
+    /// (`TaxPlain`); the subjects are proteins where `protein`, and `taxdb_found` tells whether
+    /// `taxdb.bti` is on the search path. `program` names the program in LOSAT's refusals.
+    pub fn new<'a>(
+        queries: &[TaxQuery<'_>],
         parsed: &'p [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
+        plain: impl Fn(usize) -> TaxPlain<'a>,
+        protein: bool,
+        taxdb_found: bool,
+        program: &str,
     ) -> Self {
+        let mut subjects = std::collections::HashMap::new();
+        for hsp in queries.iter().flat_map(|query| &query.hsps) {
+            subjects.entry(hsp.subject).or_insert_with(|| {
+                let source = TaxSource {
+                    parsed: parsed.get(hsp.subject).and_then(Option::as_deref),
+                    plain: plain(hsp.subject),
+                };
+                (source.deflines(protein, taxdb_found), source.name())
+            });
+        }
         SubjectTable {
-            lines: Default::default(),
+            subjects,
             parsed,
+            program: program.to_owned(),
         }
-    }
-
-    /// Adds the definition lines of `subject` by `make` unless it has them.
-    pub fn add(
-        &mut self,
-        subject: usize,
-        make: impl FnOnce() -> Result<Vec<TaxDefline>>,
-    ) -> Result<()> {
-        if let std::collections::hash_map::Entry::Vacant(entry) = self.lines.entry(subject) {
-            entry.insert(make()?);
-        }
-        Ok(())
     }
 
     /// The parsed subject of `subject`, if it has one.
-    pub fn parsed(&self, subject: usize) -> Option<&'p crate::report::db_subject::ParsedSubject> {
+    fn parsed(&self, subject: usize) -> Option<&'p crate::report::db_subject::ParsedSubject> {
         self.parsed.get(subject).and_then(Option::as_deref)
     }
 }
 
 impl TaxSubjects for SubjectTable<'_> {
     fn deflines(&self, subject: usize) -> &[TaxDefline] {
-        self.lines.get(&subject).map_or(&[], Vec::as_slice)
+        self.subjects
+            .get(&subject)
+            .map_or(&[], |(lines, _)| lines.as_slice())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:991-993
@@ -553,63 +586,166 @@ impl TaxSubjects for SubjectTable<'_> {
                 (Some(a), Some(b)) if crate::report::db_subject::joined_in_reports(a, b)
             )
     }
+
+    fn refused(&self, subject: usize, reason: &str) -> anyhow::Error {
+        let program = &self.program;
+        anyhow::Error::new(TaxReportRefusal(match self.subjects.get(&subject) {
+            Some((_, SubjectName::Database(ordinal))) => format!(
+                "database sequence {ordinal} {reason}; this is not supported by LOSAT's {program}"
+            ),
+            Some((_, SubjectName::Record(name))) => format!(
+                "the subject record {name} {reason}, which is not supported by LOSAT's {program}"
+            ),
+            None => format!("a subject {reason}; this is not supported by LOSAT's {program}"),
+        }))
+    }
 }
 
-/// The lookups of the report's taxids (`CSeqDB::GetTaxInfo`): what each finds, and the text it
-/// writes to standard error each time it is called.
-pub struct TaxLookups<'a> {
-    names: Option<&'a TabularNames>,
-    /// The names of `[TAX_BROWSER] BLASTFMTUTIL`'s URL (`<@taxBrowserURL@>`), read where a name
-    /// holds the token.
+/// The taxonomy database that a run's organism reports look names up in (`CSeqDB::GetTaxInfo`,
+/// the static `CTaxDBFileInfo` of `GetTaxNames`, opened at the first lookup: one per run in
+/// LOSAT, a `-db` run's `TaxdbRun` and a `-subject` run's `SubjectTaxdb`), handed to the report as
+/// `TabularNames::for_report`. The report asks it for the taxids that NCBI's report looks up,
+/// in NCBI's order, and nothing else (`TaxLookups`).
+#[derive(Clone)]
+pub struct TaxNamesDb {
+    taxdb: std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>,
+    /// The texts of an open of the database by the rows of an earlier query batch
+    /// (`TaxdbRun::open_for_rows`), which the run's first lookup of a report writes.
+    opened_before: Option<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
+    /// LOSAT's error of an open or a lookup that the reader refuses or cannot read, naming the
+    /// program (`common::database::taxdb_error`).
+    error: fn(crate::seqdb::SeqDbError, &str) -> anyhow::Error,
+}
+
+impl TaxNamesDb {
+    /// The lookups through `taxdb`; `opened_before` and `error` as the fields say.
+    pub(crate) fn new(
+        taxdb: std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>,
+        opened_before: Option<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
+        error: fn(crate::seqdb::SeqDbError, &str) -> anyhow::Error,
+    ) -> Self {
+        TaxNamesDb {
+            taxdb,
+            opened_before,
+            error,
+        }
+    }
+}
+
+impl std::fmt::Debug for TaxNamesDb {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TaxNamesDb")
+            .field("taxdb", &self.taxdb)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The lookups of one query batch's reports (`CSeqDB::GetTaxInfo`), made as NCBI's report makes
+/// them (`organism_report`): what each found, the text each writes to standard error each time
+/// it is called, the texts of opening the database, which the batch's first lookup writes where
+/// the run opened it then, and what the batch's reports read of `./.ncbirc`.
+pub struct TaxLookups {
+    /// The run's database; `None` without `taxdb.bti` on the search path: every lookup fails,
+    /// silently.
+    db: Option<TaxNamesDb>,
+    program: String,
+    /// The program's name in lower case, as NCBI's messages show it.
+    lower: String,
+    /// What each lookup of a taxid found (`None`: it threw) and the texts it writes.
+    answers: std::collections::HashMap<i32, (Option<TaxNames>, Vec<String>)>,
+    /// The texts of opening that the batch's first lookup writes.
+    open: Vec<String>,
+    /// Whether the batch has made a lookup.
+    looked_up: bool,
+    /// `<@taxBrowserURL@>` (`tax_browser_url`).
     browser_url: Vec<u8>,
     /// What one read of `./.ncbirc` by the report posts (`read_ncbirc`); the report of each query
     /// reads it twice.
     registry_posts: Vec<u8>,
 }
 
-impl<'a> TaxLookups<'a> {
-    /// The lookups of `names` (`None`: every lookup fails silently, no `taxdb.bti` on the search
-    /// path). LOSAT's refusals of the report come here, before its first byte: a name that holds
-    /// `<@bl_taxid@>` (NCBI writes an uninitialised `int` there) or `<@taxBrowserURL@>` with a
-    /// `./.ncbirc` that LOSAT does not read as NCBI's report does (`browser_url`), and a
-    /// `./.ncbirc` that NCBI's report cannot read (it reads the file for every query).
-    pub fn new(names: Option<&'a TabularNames>, program: &str) -> Result<Self> {
-        let registry = read_ncbirc(program)?;
-        let registry_posts = registry.as_ref().map_or_else(Vec::new, |read| {
-            registry_posts(read, &program.to_ascii_lowercase())
-        });
-        let mut browser_url = Vec::new();
-        if let Some(names) = names {
-            let mut found: Vec<&TaxNames> = names.found().collect();
-            found.sort_by_key(|names| names.taxid);
-            for found in found {
-                let line = organism_line(found);
-                if line.contains(b"<@bl_taxid@>") {
-                    return Err(TaxReportRefusal(format!(
-                        "the taxonomy database names taxid {} with the template token <@bl_taxid@>, which NCBI BLAST+'s organism report (outfmt 18) replaces with an uninitialised number; this is not supported by LOSAT's {program}",
-                        found.taxid
-                    ))
-                    .into());
-                }
-                if line.contains(b"<@taxBrowserURL@>") && browser_url.is_empty() {
-                    browser_url = tax_browser_url(registry.as_ref());
-                }
-            }
-        }
-        Ok(TaxLookups {
+impl TaxLookups {
+    /// The lookups of a batch through the run's database that `names` carries
+    /// (`TabularNames::for_report`; `None`: no `taxdb.bti` on the search path), with what the
+    /// reports read of `./.ncbirc`. LOSAT refuses a `./.ncbirc` that NCBI's report cannot read
+    /// (it reads the file for every query) before the batch's first byte.
+    pub fn new(names: Option<&TabularNames>, program: &str) -> Result<Self> {
+        Ok(Self::with_registry(
             names,
-            browser_url,
-            registry_posts,
-        })
+            program,
+            read_ncbirc(program)?.as_ref(),
+        ))
     }
 
-    /// What `GetTaxInfo(taxid)` finds (`None`: it throws), and the text it writes to standard
-    /// error.
-    fn look_up(&self, taxid: i32) -> (Option<&'a TaxNames>, Vec<u8>) {
-        match self.names {
-            Some(names) => (names.get(taxid), names.lookup_messages(taxid)),
-            None => (None, Vec::new()),
+    /// `new` with the read of `./.ncbirc` `registry` (`None`: no file).
+    fn with_registry(
+        names: Option<&TabularNames>,
+        program: &str,
+        registry: Option<&crate::blastinput::ncbi_registry::RegistryRead>,
+    ) -> Self {
+        let lower = program.to_ascii_lowercase();
+        TaxLookups {
+            db: names.and_then(TabularNames::report_db).cloned(),
+            program: program.to_owned(),
+            registry_posts: registry.map_or_else(Vec::new, |read| registry_posts(read, &lower)),
+            browser_url: tax_browser_url(registry),
+            lower,
+            answers: Default::default(),
+            open: Vec::new(),
+            looked_up: false,
         }
+    }
+
+    /// `GetTaxInfo(taxid)`: what it finds (`None`: it throws). The database is opened at the
+    /// run's first lookup (the texts of opening, with those of an open by earlier rows, go before
+    /// the batch's first lookup's), each taxid is read once per batch. An open or a lookup that
+    /// LOSAT's reader refuses is LOSAT's error (`TaxNamesDb::error`).
+    fn look_up(&mut self, taxid: i32) -> Result<Option<&TaxNames>> {
+        if !self.answers.contains_key(&taxid) {
+            let answer = match &self.db {
+                None => (None, Vec::new()),
+                Some(db) => {
+                    if !self.looked_up {
+                        if let Some(before) = &db.opened_before {
+                            self.open = std::mem::take(&mut *before.lock().expect("open texts"));
+                        }
+                        let opened = db
+                            .taxdb
+                            .open()
+                            .map_err(|error| (db.error)(error, &self.program))?;
+                        self.open.extend(opened);
+                    }
+                    let mut messages = Vec::new();
+                    let found = db
+                        .taxdb
+                        .names(taxid, &mut messages)
+                        .map_err(|error| (db.error)(error, &self.program))?;
+                    (found, messages)
+                }
+            };
+            self.answers.insert(taxid, answer);
+        }
+        self.looked_up = true;
+        Ok(self.answers[&taxid].0.as_ref())
+    }
+
+    /// The standard-error lines of one lookup of `taxid`, after the texts of opening where it is
+    /// the batch's first (`first`).
+    fn messages(&self, taxid: i32, first: bool) -> Vec<u8> {
+        let mut text = Vec::new();
+        let mut push = |line: &str| {
+            text.extend_from_slice(
+                crate::seqdb::taxdb::err_post_line(&self.lower, line).as_bytes(),
+            );
+            text.push(b'\n');
+        };
+        if first {
+            self.open.iter().for_each(|line| push(line));
+        }
+        if let Some((_, messages)) = self.answers.get(&taxid) {
+            messages.iter().for_each(|line| push(line));
+        }
+        text
     }
 }
 
@@ -758,10 +894,11 @@ struct Row<'s> {
     evalue: std::rc::Rc<[u8]>,
 }
 
-/// The rows of one taxid (`STaxInfo`), in the order of the HSPs.
-struct Group<'s, 'n> {
+/// The rows of one taxid (`STaxInfo`), in the order of the HSPs, under its organism line
+/// (`organism_line`).
+struct Group<'s> {
     taxid: i32,
-    names: &'n TaxNames,
+    line: Text,
     rows: Vec<Row<'s>>,
 }
 
@@ -809,15 +946,97 @@ pub struct TaxQuery<'a> {
     pub hsps: Vec<TaxHsp>,
 }
 
-/// Writes the reports of `queries` (`write_query`), each query's warnings before its report and
-/// the warnings after the last query at the end (`QueryWarnings`); the texts of the lookups go
-/// to the warnings' sink (none without it).
+/// The organism reports of one query batch, made before its first byte (`TaxReport::new`), so
+/// that LOSAT's refusals come before it: per query the taxids that its report looks up, in
+/// order, and its text.
+pub struct TaxReport {
+    lookups: TaxLookups,
+    queries: Vec<(Vec<i32>, Text)>,
+    /// Whether the batch's first lookup has written its texts (the texts of opening with it).
+    wrote_first: std::cell::Cell<bool>,
+}
+
+impl TaxReport {
+    /// The reports of the queries `queries` of a batch, of the subjects `subjects`, whose taxids
+    /// the lookups `lookups` look up (`organism_report`).
+    pub fn new(
+        queries: &[TaxQuery<'_>],
+        subjects: &dyn TaxSubjects,
+        mut lookups: TaxLookups,
+    ) -> Result<Self> {
+        let queries = queries
+            .iter()
+            .map(|query| organism_report(&query.hsps, subjects, &mut lookups))
+            .collect::<Result<_>>()?;
+        Ok(TaxReport {
+            lookups,
+            queries,
+            wrote_first: std::cell::Cell::new(false),
+        })
+    }
+
+    /// Writes the report of query `q_idx` (of the `queries` given to `new`): the caption, the
+    /// `Query=` block of its title `title` (outfmt 0's, `pairwise::write_blastp_query_header`)
+    /// with its record's length `length`, and its organism report; the texts of the report's reads
+    /// of `./.ncbirc` and of its lookups go to `diagnostics` (after `out` is flushed).
+    pub fn write_query(
+        &self,
+        q_idx: usize,
+        out: &mut dyn Write,
+        diagnostics: &mut dyn Write,
+        title: &[u8],
+        length: usize,
+    ) -> io::Result<()> {
+        add_spaces(
+            b"Tax BLAST report",
+            u64::from(LINE_LENGTH),
+            Place::Center,
+            true,
+            true,
+        )
+        .write_to(out)?;
+        out.write_all(b"\n")?;
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:729-746
+        // (`AcknowledgeBlastQuery` with `kFormatLineLength`, 68: outfmt 0's `Query=` block).
+        let mut out = out;
+        crate::report::pairwise::write_blastp_query_header(&mut out, title, length)?;
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:165-172
+        // ```c++
+        //     m_Protocol = CAlignFormatUtil::GetProtocol();
+        //     ...
+        //     m_ConfigFile = new CNcbiIfstream(".ncbirc");
+        //     m_Reg = new CNcbiRegistry(*m_ConfigFile);
+        // ```
+        // The report's two reads of `./.ncbirc` post before its lookups.
+        let lookups = &self.lookups;
+        if !lookups.registry_posts.is_empty() {
+            out.flush()?;
+            for _ in 0..2 {
+                diagnostics.write_all(&lookups.registry_posts)?;
+            }
+            diagnostics.flush()?;
+        }
+        let (taxids, text) = &self.queries[q_idx];
+        for &taxid in taxids {
+            let text = lookups.messages(taxid, !self.wrote_first.replace(true));
+            if !text.is_empty() {
+                out.flush()?;
+                diagnostics.write_all(&text)?;
+                diagnostics.flush()?;
+            }
+        }
+        text.write_to(out)
+    }
+}
+
+/// Writes the reports of `queries` (`TaxReport::write_query` of `report`), each query's warnings
+/// before its report and the warnings after the last query at the end (`QueryWarnings`); the
+/// texts of the lookups go to the warnings' sink (none without it).
 pub fn write_report(
     writer: &mut dyn Write,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
     queries: &[TaxQuery<'_>],
-    subjects: &dyn TaxSubjects,
-    lookups: &TaxLookups<'_>,
+    report: &TaxReport,
 ) -> io::Result<()> {
     let mut sink = io::sink();
     for (q_idx, query) in queries.iter().enumerate() {
@@ -828,15 +1047,7 @@ pub fn write_report(
             Some(warnings) => &mut *warnings.sink,
             None => &mut sink,
         };
-        write_query(
-            &mut *writer,
-            diagnostics,
-            query.title,
-            query.length,
-            &query.hsps,
-            subjects,
-            lookups,
-        )?;
+        report.write_query(q_idx, &mut *writer, diagnostics, query.title, query.length)?;
     }
     if let Some(warnings) = warnings {
         warnings.after_last_query(queries.len(), &mut *writer)?;
@@ -844,48 +1055,23 @@ pub fn write_report(
     Ok(())
 }
 
-/// Writes the report of one query: the caption, the `Query=` block of the title `title` (outfmt
-/// 0's, `pairwise::write_blastp_query_header`) with the length `length`, and the organism report of the
-/// HSPs `hsps` (report order) of the subjects `subjects`, whose taxids `lookups` looks up; the
-/// texts of the lookups go to `diagnostics` (after `out` is flushed).
-pub fn write_query(
-    out: &mut dyn Write,
-    diagnostics: &mut dyn Write,
-    title: &[u8],
-    length: usize,
-    hsps: &[TaxHsp],
-    subjects: &dyn TaxSubjects,
-    lookups: &TaxLookups<'_>,
-) -> io::Result<()> {
-    add_spaces(
-        b"Tax BLAST report",
-        u64::from(LINE_LENGTH),
-        Place::Center,
-        true,
-        true,
-    )
-    .write_to(out)?;
-    out.write_all(b"\n")?;
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:729-746
-    // (`AcknowledgeBlastQuery` with `kFormatLineLength`, 68: outfmt 0's `Query=` block).
-    let mut out = out;
-    crate::report::pairwise::write_blastp_query_header(&mut out, title, length)?;
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:165-172
-    // ```c++
-    //     m_Protocol = CAlignFormatUtil::GetProtocol();
-    //     ...
-    //     m_ConfigFile = new CNcbiIfstream(".ncbirc");
-    //     m_Reg = new CNcbiRegistry(*m_ConfigFile);
-    // ```
-    // The report's two reads of `./.ncbirc` post before its lookups.
-    if !lookups.registry_posts.is_empty() {
-        out.flush()?;
-        for _ in 0..2 {
-            diagnostics.write_all(&lookups.registry_posts)?;
-        }
-        diagnostics.flush()?;
-    }
-    organism_report(diagnostics, out, hsps, subjects, lookups)?.write_to(out)
+/// The organism report of one query batch of a program's adapter (`algorithm::common::tabular`,
+/// BLASTP's, BLASTX's): the table of the subjects of `queries`' HSPs (`SubjectTable::new` of
+/// `parsed`, `plain`, `protein` and `taxdb_found`), the lookups of the run's database that
+/// `names` carries (`TaxLookups::new`) and the reports (`TaxReport::new`), all made before the
+/// batch's first byte. `program` names the program in LOSAT's refusals and NCBI's messages.
+#[allow(clippy::too_many_arguments)]
+pub fn report_batch<'a>(
+    queries: &[TaxQuery<'_>],
+    parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
+    plain: impl Fn(usize) -> TaxPlain<'a>,
+    protein: bool,
+    taxdb_found: bool,
+    names: Option<&TabularNames>,
+    program: &str,
+) -> Result<TaxReport> {
+    let table = SubjectTable::new(queries, parsed, plain, protein, taxdb_found, program);
+    TaxReport::new(queries, &table, TaxLookups::new(names, program)?)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:979-1023
@@ -933,18 +1119,22 @@ pub fn write_query(
 //         SSeqDBTaxInfo taxInfo;
 //         CSeqDB::GetTaxInfo(taxid, taxInfo);
 // ```
-/// The organism report of `hsps` (`CTaxFormat::x_InitTaxInfoMap`, then `DisplayOrgReport`): a
-/// subject whose taxid lookup throws keeps its rows before that definition line, widens the
-/// columns, and is not the previous id, so its next HSP is read again.
+/// The organism report of `hsps` (`CTaxFormat::x_InitTaxInfoMap`, then `DisplayOrgReport`) and
+/// the taxids it looks up, in order (`lookups`: a taxid not yet in the query's map, at each
+/// definition line that reaches it). A title that throws drops the rest of its subject's HSP
+/// before it widens the columns; a lookup that throws drops it after; either way the subject is
+/// not the previous id, so its next HSP is read again. LOSAT's refusals: a title that it does not
+/// write as NCBI where NCBI makes it (or, `shown_only`, shows it), and an organism line that
+/// holds `<@bl_taxid@>` (NCBI writes an uninitialised `int` there).
 fn organism_report(
-    diagnostics: &mut dyn Write,
-    out: &mut dyn Write,
     hsps: &[TaxHsp],
     subjects: &dyn TaxSubjects,
-    lookups: &TaxLookups<'_>,
-) -> io::Result<Text> {
+    lookups: &mut TaxLookups,
+) -> Result<(Vec<i32>, Text)> {
     let mut widths = Widths::default();
-    let mut groups: Vec<Group<'_, '_>> = Vec::new();
+    let mut groups: Vec<Group<'_>> = Vec::new();
+    let mut group_of: std::collections::HashMap<i32, usize> = Default::default();
+    let mut looked_up = Vec::new();
     let mut previous: Option<usize> = None;
     for hsp in hsps {
         if previous.is_some_and(|previous| subjects.same(previous, hsp.subject)) {
@@ -959,39 +1149,61 @@ fn organism_report(
         let bit_score: std::rc::Rc<[u8]> = format_bitscore_ncbi(hsp.bit_score).into_bytes().into();
         let mut threw = false;
         for defline in subjects.deflines(hsp.subject) {
-            widths.take(&defline.label, &bit_score, &evalue);
-            let row = Row {
-                label: &defline.label,
-                title: &defline.title,
-                bit_score: bit_score.clone(),
-                evalue: evalue.clone(),
+            // The title, or the refusal of a title that the report shows.
+            let (title, refused_if_shown) = match &defline.title {
+                TaxTitle::Text(title) => (title.as_slice(), None),
+                TaxTitle::Throws => {
+                    threw = true;
+                    break;
+                }
+                TaxTitle::Refused {
+                    reason,
+                    shown_only: false,
+                } => return Err(subjects.refused(hsp.subject, reason)),
+                TaxTitle::Refused { reason, .. } => (&[][..], Some(reason)),
             };
-            match groups.iter_mut().find(|group| group.taxid == defline.taxid) {
-                Some(group) => group.rows.push(row),
+            widths.take(&defline.label, &bit_score, &evalue);
+            let index = match group_of.get(&defline.taxid) {
+                Some(&index) => index,
                 None => {
-                    let (found, text) = lookups.look_up(defline.taxid);
-                    if !text.is_empty() {
-                        out.flush()?;
-                        diagnostics.write_all(&text)?;
-                        diagnostics.flush()?;
-                    }
-                    let Some(names) = found else {
+                    looked_up.push(defline.taxid);
+                    let Some(names) = lookups.look_up(defline.taxid)? else {
                         threw = true;
                         break;
                     };
+                    let line = organism_line(names);
+                    if line.contains(b"<@bl_taxid@>") {
+                        return Err(TaxReportRefusal(format!(
+                            "the taxonomy database names taxid {} with the template token <@bl_taxid@>, which NCBI BLAST+'s organism report (outfmt 18) replaces with an uninitialised number; this is not supported by LOSAT's {}",
+                            defline.taxid, lookups.program
+                        ))
+                        .into());
+                    }
+                    group_of.insert(defline.taxid, groups.len());
                     groups.push(Group {
                         taxid: defline.taxid,
-                        names,
-                        rows: vec![row],
+                        line,
+                        rows: Vec::new(),
                     });
+                    groups.len() - 1
                 }
+            };
+            if let Some(reason) = refused_if_shown {
+                return Err(subjects.refused(hsp.subject, reason));
             }
+            groups[index].rows.push(Row {
+                label: &defline.label,
+                title,
+                bit_score: bit_score.clone(),
+                evalue: evalue.clone(),
+            });
         }
         if !threw {
             previous = Some(hsp.subject);
         }
     }
-    Ok(org_report_text(&groups, widths, &lookups.browser_url))
+    let text = org_report_text(&groups, widths, &lookups.browser_url);
+    Ok((looked_up, text))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:450-517 (`DisplayOrgReport`)
@@ -1034,7 +1246,7 @@ fn organism_report(
 // `x_InitTaxIdToSeqsMap` fills a map that only the HTML report shows.
 /// The text of the organism report of `groups` with the widths `widths`; `browser_url` replaces
 /// `<@taxBrowserURL@>`.
-fn org_report_text(groups: &[Group<'_, '_>], widths: Widths, browser_url: &[u8]) -> Text {
+fn org_report_text(groups: &[Group<'_>], widths: Widths, browser_url: &[u8]) -> Text {
     const DISABLED: &[u8] = b"disabled=\"disabled\"";
     let mut data = Text::default();
     for (i, group) in groups.iter().enumerate() {
@@ -1056,8 +1268,9 @@ fn org_report_text(groups: &[Group<'_, '_>], widths: Widths, browser_url: &[u8])
         //     }
         //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"depth",shift);
         // ```
-        // `<@bl_taxid@>` is refused before the report (`TaxLookups::new`); the line holds none.
-        let header = organism_line(group.names)
+        // `<@bl_taxid@>` is refused where the group is made (`organism_report`); the line holds none.
+        let header = group
+            .line
             .map_bytes("taxid", group.taxid.to_string().as_bytes())
             .map_bytes("taxBrowserURL", browser_url)
             .map_bytes("rid", b"0")

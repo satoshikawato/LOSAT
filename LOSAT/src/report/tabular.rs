@@ -369,6 +369,12 @@ pub fn reads_subject(spec: Option<&TabularSpec>, program: crate::blastinput::app
     spec.is_none_or(|spec| spec.reads_subject(program))
 }
 
+/// [`TabularSpec::writes_rows`] of a tabular report of `spec`, `None` for the default fields:
+/// the one rule by which the programs make (and refuse) the tabular subject ids of a report.
+pub fn writes_rows(spec: Option<&TabularSpec>) -> bool {
+    spec.is_none_or(TabularSpec::writes_rows)
+}
+
 /// Which rows of a tabular report read the subject's Bioseq in NCBI's formatter
 /// (`TabularSpec::subject_fetch`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -419,7 +425,8 @@ pub struct PrintedIds {
 }
 
 impl PrintedIds {
-    /// The ids of the report of `spec`, `None` for the default fields.
+    /// The ids of the report of `spec`, `None` for the default fields; none of the organism
+    /// report (`TabularSpec::writes_rows`).
     pub fn of(spec: Option<&TabularSpec>) -> Self {
         let Some(spec) = spec else {
             return Self {
@@ -427,6 +434,9 @@ impl PrintedIds {
                 all: false,
             };
         };
+        if !spec.writes_rows() {
+            return Self::default();
+        }
         Self {
             subject: spec.has_any(&[
                 TabularField::SubjectSeqId,
@@ -763,6 +773,16 @@ impl TabularSpec {
         ])
     }
 
+    /// Whether the report writes rows of fields: every tabular report but the organism report
+    /// (outfmt 18), whose table shows the labels and titles of the subjects' definition lines
+    /// (`report::tax_report`, taxFormat.cpp:935-976) and never a row's subject ids (`sseqid`,
+    /// `saccver`: `GetSeqIdList` and `s_ReplaceLocalId`, tabular.cpp:522-532), so that the
+    /// refusals of those ids (`PrintedIds`, the programs' tabular subject ids) do not apply to it.
+    /// The Bioseq reads (`subject_fetch`) and the taxonomy (`needs`) apply to both.
+    pub fn writes_rows(&self) -> bool {
+        self.kind != TabularKind::TaxReport
+    }
+
     /// Whether the report looks every taxid of its subjects up in the taxonomy database, 0 too:
     /// the plural names (`x_SetTaxInfoAll`, `checks_taxdb`) and the organism report (outfmt 18,
     /// `CTaxFormat::x_InitBlastDBTaxInfo`); its rows write the texts of those lookups.
@@ -947,6 +967,8 @@ pub struct TabularNames {
     /// What `GetTaxInfo` returned for each taxid (`None` when it threw), and the texts of its
     /// lookup, which every lookup of the taxid writes.
     answers: std::collections::HashMap<i32, (Option<crate::seqdb::taxdb::TaxNames>, Vec<String>)>,
+    /// The organism report's (outfmt 18) database, which it asks itself (`for_report`).
+    report: Option<crate::report::tax_report::TaxNamesDb>,
 }
 
 impl TabularNames {
@@ -964,18 +986,13 @@ impl TabularNames {
             open: Vec::new(),
             opened: std::cell::Cell::new(false),
             answers: Default::default(),
+            report: None,
         };
         let (plural, singular) = (spec.checks_taxdb(), spec.has_singular_names());
-        let report = spec.kind == TabularKind::TaxReport;
         let mut asked: Vec<i32> = Vec::new();
         for taxonomy in taxonomies {
-            if plural || report {
+            if plural {
                 asked.extend(&taxonomy.taxids);
-            }
-            // The organism report asks for the `taxid` of each definition line, 0 where it has
-            // none or where the line's other taxids (`links`) hid it in `taxids`.
-            if report {
-                asked.push(0);
             }
             if singular && taxonomy.taxid != 0 {
                 asked.push(taxonomy.taxid);
@@ -1010,37 +1027,27 @@ impl TabularNames {
     }
 
     /// What the lookup of `taxid` found (`None`: not found, or not looked up).
-    pub(crate) fn get(&self, taxid: i32) -> Option<&crate::seqdb::taxdb::TaxNames> {
+    fn get(&self, taxid: i32) -> Option<&crate::seqdb::taxdb::TaxNames> {
         self.answers
             .get(&taxid)
             .and_then(|(found, _)| found.as_ref())
     }
 
-    /// The names that the lookups found.
-    pub(crate) fn found(&self) -> impl Iterator<Item = &crate::seqdb::taxdb::TaxNames> {
-        self.answers
-            .values()
-            .filter_map(|(found, _)| found.as_ref())
+    /// The names of the organism report (outfmt 18), which looks each taxid up itself where NCBI's
+    /// report does (`report::tax_report::TaxLookups`) in the run's database `db`.
+    pub fn for_report(db: crate::report::tax_report::TaxNamesDb, program: &str) -> Self {
+        TabularNames {
+            program: program.to_ascii_lowercase(),
+            open: Vec::new(),
+            opened: std::cell::Cell::new(false),
+            answers: Default::default(),
+            report: Some(db),
+        }
     }
 
-    /// The standard-error lines of one lookup of `taxid` (`CSeqDB::GetTaxInfo` of the organism
-    /// report, `report::tax_report`), the texts of opening before the first lookup of the report
-    /// that has them.
-    pub(crate) fn lookup_messages(&self, taxid: i32) -> Vec<u8> {
-        let mut text = Vec::new();
-        let mut push = |line: &str| {
-            text.extend_from_slice(
-                crate::seqdb::taxdb::err_post_line(&self.program, line).as_bytes(),
-            );
-            text.push(b'\n');
-        };
-        if !self.opened.replace(true) {
-            self.open.iter().for_each(|line| push(line));
-        }
-        if let Some((_, messages)) = self.answers.get(&taxid) {
-            messages.iter().for_each(|line| push(line));
-        }
-        text
+    /// The organism report's database (`for_report`).
+    pub fn report_db(&self) -> Option<&crate::report::tax_report::TaxNamesDb> {
+        self.report.as_ref()
     }
 
     /// The standard-error lines of the lookups of one row of a subject of `taxonomy`, in NCBI's
@@ -2003,6 +2010,7 @@ mod tests {
             ]
             .into_iter()
             .collect(),
+            report: None,
         };
         let three = TabularTaxonomy {
             taxid: 9606,
@@ -2050,6 +2058,7 @@ mod tests {
             ]
             .into_iter()
             .collect(),
+            report: None,
         };
         let none = TabularTaxonomy::default();
         assert!(names.row_messages(&spec, &none).is_empty());

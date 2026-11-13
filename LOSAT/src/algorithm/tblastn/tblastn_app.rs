@@ -355,7 +355,9 @@ impl TblastnArgs {
             }
             RunIo::Memory { query, .. } => Input::Bytes(query),
         };
-        let mut stream = report_stream(&args, &io)?;
+        // The organism report's `-out` file is written as NCBI's buffer writes it.
+        let tax_report = format == Some(app::ReportFormat::TaxFormat);
+        let mut stream = report_stream(&args, &io, tax_report)?;
         let pairwise = format == Some(app::ReportFormat::Pairwise);
         // The format as the reports read it: the number and the custom fields, or the value as
         // given when it has a delimiter, which `normalized` drops and the custom tabular report
@@ -408,7 +410,7 @@ impl TblastnArgs {
         // ```
         // The outfmt 0 formatter's stream throws when a write fails; for outfmt 6/7 NCBI
         // aborts and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
-        if stream.failed && pairwise {
+        if stream.failed && (pairwise || tax_report) {
             return Err(crate::cli::NativeError {
                 exit: 6,
                 message: "BLAST failed to write output\n".to_string(),
@@ -519,7 +521,7 @@ fn write_run_error_archive(
     let Some(lines) = super::archive::error_lines(error, true) else {
         return;
     };
-    if let Ok(mut report) = report_stream(args, io) {
+    if let Ok(mut report) = report_stream(args, io, false) {
         let _ = write_error_archive(io, handle, error, &lines, &mut report);
         let _ = std::io::Write::flush(&mut report);
     }
@@ -545,9 +547,13 @@ fn write_error_archive(
 
 /// The report stream of a run: the `-out` file (created) or standard output, or the report
 /// in memory (`RunIo::Memory`).
-fn report_stream(args: &TblastnArgs, io: &RunIo<'_>) -> Result<crate::cli::ReportStream> {
+fn report_stream(
+    args: &TblastnArgs,
+    io: &RunIo<'_>,
+    tax_report: bool,
+) -> Result<crate::cli::ReportStream> {
     Ok(match io {
-        RunIo::Files => cli_report_stream(open_out_file(args)?),
+        RunIo::Files => cli_report_stream(open_out_file(args)?, tax_report),
         RunIo::Memory { report, .. } => crate::cli::ReportStream {
             inner: Box::new(MemoryReport(report.clone())),
             failed: false,
@@ -573,10 +579,12 @@ fn open_out_file(args: &TblastnArgs) -> Result<Option<std::io::BufWriter<std::fs
 /// The report stream of the command line: the `-out` file, or standard output.
 fn cli_report_stream(
     out_file: Option<std::io::BufWriter<std::fs::File>>,
+    tax_report: bool,
 ) -> crate::cli::ReportStream {
     crate::cli::ReportStream {
         inner: match out_file {
-            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
+            // The organism report's file as NCBI's buffer writes it (`cli::TaxReportFile`).
+            Some(file) => crate::cli::report_out_file(Box::new(file), tax_report.then_some(18)),
             None => crate::cli::report_standard_output(),
         },
         failed: false,
@@ -643,6 +651,16 @@ fn open_search_database(
     {
         args.tabular_taxdb = Some(match database.as_ref() {
             Some(database) => database.taxdb_found(),
+            // The organism report's lookups open the run's own database.
+            None if outputs.formats.iter().any(|format| {
+                super::tabular::tabular_spec(format.outfmt)
+                    .is_some_and(|spec| spec.kind == crate::report::tabular::TabularKind::TaxReport)
+            }) =>
+            {
+                args.subject_taxdb =
+                    crate::algorithm::common::database::SubjectTaxdb::of(settings, "TBLASTN")?;
+                args.subject_taxdb.is_some()
+            }
             None => crate::algorithm::common::database::subject_taxdb_found(settings, "TBLASTN")?,
         });
     }
@@ -2111,8 +2129,14 @@ fn search(
             }
             _ => Vec::new(),
         };
+        // A `-subject` search's organism report (outfmt 18) looks names up in the run's
+        // database.
         let names = match (tabular_specs.first(), database) {
             (Some(spec), Some(database)) => database.tabular_names(spec, &taxonomy)?,
+            (Some(_), None) => args
+                .subject_taxdb
+                .as_ref()
+                .map(|taxdb| taxdb.report_names("TBLASTN")),
             _ => None,
         };
         let tabular_inputs = super::tabular::TabularInputs {
@@ -2261,6 +2285,8 @@ fn parsed_shown(
             matches!(
                 super::stage_e_report::format_number(format.outfmt),
                 6 | 7 | 10 | 18 | 20
+            ) && crate::report::tabular::writes_rows(
+                super::tabular::tabular_spec(format.outfmt).as_ref(),
             ) && crate::report::tabular::reads_subject(
                 super::tabular::tabular_spec(format.outfmt).as_ref(),
                 crate::blastinput::app::Program::Tblastn,

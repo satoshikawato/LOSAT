@@ -648,7 +648,8 @@ pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usiz
 // NCBI's application layer reads its environment and registry files before its own code runs,
 // and a database is found by them (the `BLASTDB` search path); LOSAT rejects the settings that
 // change the output. A search of records reads neither, but for the directory of BLASTN's
-// `-window_masker_taxid`, which NCBI's library looks for itself.
+// `-window_masker_taxid` and the taxonomy database of the organism report (outfmt 18), which
+// NCBI's library looks for itself.
 /// One `run_local` call: the program's entry for the parsed arguments and `inputs`.
 pub(super) fn run_local(
     command: Commands,
@@ -688,10 +689,42 @@ pub(super) fn run_local(
             }
         };
     }
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
+    // ```c++
+    // bool CSeqDBTaxInfo::GetTaxNames(TTaxId           tax_id,
+    //                                 SSeqDBTaxInfo  & info  )
+    // {
+    // 	static CTaxDBFileInfo t;
+    // ```
+    // The organism report (outfmt 18) looks the taxonomy database up itself, through the search
+    // path of NCBI's databases: a search of records reads the application settings for it, as
+    // the command line does (`common::database::SubjectTaxdb`).
+    use crate::algorithm::common::database::SubjectTaxdb;
+    let subject_taxdb = |name: &str| -> anyhow::Result<Option<SubjectTaxdb>> {
+        let tax_report = outputs.formats.iter().any(|format| {
+            crate::blastinput::app::parse_formatting_string(format.outfmt)
+                .is_ok_and(|choice| choice.number == 18)
+        });
+        if !tax_report {
+            return Ok(None);
+        }
+        let settings = crate::blastinput::ncbi_environment::check_ncbi_application_settings(name)
+            .map_err(anyhow::Error::msg)?;
+        SubjectTaxdb::of(&settings, &name.to_ascii_uppercase())
+    };
     match command {
-        Commands::Blastp(args) => run_local_blastp(args, query, subject, "", "", outputs),
-        Commands::Tblastn(args) => run_local_tblastn(args, query, subject, outputs),
+        Commands::Blastp(mut args) => {
+            args.subject_taxdb = subject_taxdb("blastp")?;
+            run_local_blastp(args, query, subject, "", "", outputs)
+        }
+        Commands::Tblastn(mut args) => {
+            args.subject_taxdb = subject_taxdb("tblastn")?;
+            args.tabular_taxdb = args.subject_taxdb.as_ref().map(|_| true);
+            run_local_tblastn(args, query, subject, outputs)
+        }
         Commands::Blastn(mut args) => {
+            args.subject_taxdb = subject_taxdb("blastn")?;
+            args.tabular_taxdb = args.subject_taxdb.as_ref().map(|_| true);
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-448
             // ```c++
             //     if (args.Exist(kArgWindowMaskerDatabase) &&
@@ -723,8 +756,15 @@ pub(super) fn run_local(
             }
             run_local_blastn(args, query, subject, outputs)
         }
-        Commands::Tblastx(args) => run_local_tblastx(args, query, subject, outputs),
-        Commands::Blastx(args) => run_local_blastx(args, query, subject, outputs),
+        Commands::Tblastx(mut args) => {
+            args.subject_taxdb = subject_taxdb("tblastx")?;
+            args.tabular_taxdb = args.subject_taxdb.as_ref().map(|_| true);
+            run_local_tblastx(args, query, subject, outputs)
+        }
+        Commands::Blastx(mut args) => {
+            args.subject_taxdb = subject_taxdb("blastx")?;
+            run_local_blastx(args, query, subject, outputs)
+        }
         Commands::Psiblast(args) => {
             let args = psiblast_args(args, outputs)?;
             run_local_blastp(args, query, subject, "", "", outputs)

@@ -1400,6 +1400,100 @@ impl std::io::Write for ReportStream {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:317-323
+// ```c++
+// CBlastFormat::~CBlastFormat()
+// {
+//     try {
+//         m_Outfile.exceptions(m_OrigExceptionMask);
+//     } catch (...) {/*ignore exceptions*/}
+//     m_Outfile.flush();
+// }
+// ```
+// NCBI reference (GCC 13 libstdc++): include/c++/13/bits/fstream.tcc:766-778
+// (`basic_filebuf::xsputn`)
+// ```c++
+// 	  streamsize __bufavail = this->epptr() - this->pptr();
+//
+// 	  // Don't mistake 'uncommitted' mode buffered with unbuffered.
+// 	  if (!_M_writing && _M_buf_size > 1)
+// 	    __bufavail = _M_buf_size - 1;
+//
+// 	  if (__n >= __bufavail)
+// ```
+/// The `-out` file of the organism report (outfmt 18) as NCBI's `ofstream` writes it: its
+/// `basic_filebuf` of `BUFSIZ` (8192) bytes keeps the report until it holds 8191 bytes, NCBI's
+/// formatter never flushes it, and `~CBlastFormat` turns the stream's exceptions off before its
+/// last flush. So a write that fails where NCBI's first write to the file comes (a report of 8191
+/// bytes or more) is "BLAST failed to write output" (`ReportStream::failed`), and a report that
+/// fits is written when the run ends, a failure then unreported (NCBI BLAST+ 2.17.0, probe
+/// `T/t2/fix1` `f1.d5.*`: `-out /dev/full`, exit 0 for 2 KB, 6 for 90 KB). LOSAT's flushes of
+/// the report before its first write do nothing (no `cerr` is tied to a file).
+pub struct TaxReportFile<W: std::io::Write> {
+    inner: W,
+    held: Vec<u8>,
+    written: bool,
+}
+
+/// `BUFSIZ - 1`: the bytes that NCBI's file buffer keeps before its first write.
+const NCBI_FILE_HELD: usize = 8191;
+
+impl<W: std::io::Write> TaxReportFile<W> {
+    pub fn new(inner: W) -> Self {
+        TaxReportFile {
+            inner,
+            held: Vec::new(),
+            written: false,
+        }
+    }
+}
+
+impl<W: std::io::Write> std::io::Write for TaxReportFile<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.written {
+            return self.inner.write(buf);
+        }
+        self.held.extend_from_slice(buf);
+        if self.held.len() >= NCBI_FILE_HELD {
+            self.written = true;
+            let held = std::mem::take(&mut self.held);
+            self.inner.write_all(&held)?;
+            self.inner.flush()?;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.written {
+            self.inner.flush()
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl<W: std::io::Write> Drop for TaxReportFile<W> {
+    fn drop(&mut self) {
+        if !self.written {
+            let _ = self.inner.write_all(&self.held);
+            let _ = self.inner.flush();
+        }
+    }
+}
+
+/// The `-out` file `file` of a run whose report is `outfmt` (the command line's one format):
+/// the organism report's behind NCBI's file buffer (`TaxReportFile`), any other as it is.
+pub fn report_out_file(
+    file: Box<dyn std::io::Write + Send>,
+    outfmt: Option<i32>,
+) -> Box<dyn std::io::Write + Send> {
+    if outfmt == Some(18) {
+        Box::new(TaxReportFile::new(file))
+    } else {
+        file
+    }
+}
+
 /// Standard output as the report's stream (`ReportStream::inner`).
 ///
 /// NCBI writes the report to `cout`; when the process starts with its standard output

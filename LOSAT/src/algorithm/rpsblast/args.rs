@@ -387,6 +387,7 @@ impl RpsblastArgs {
             outfmt: self.outfmt,
             archive: None,
             app: BlastpApp::Rpsblast,
+            subject_taxdb: None,
             inclusion_ethresh: None,
             first_query_ordinal: 0,
             psiblast_pssm: None,

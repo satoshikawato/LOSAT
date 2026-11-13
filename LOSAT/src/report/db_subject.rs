@@ -1084,7 +1084,10 @@ impl ParsedSubject {
         // A nucleotide title stops at the end of the string (approved exception 2 of
         // PD-LOSAT-NCBI-DEFECTS for BLASTN, TBLASTN and TBLASTX).
         if protein && defline.reads_past_end {
-            return Err("has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes)");
+            return Err(concat!(
+                "a title ",
+                crate::report::defline::punctuation_title!()
+            ));
         }
         let end = defline
             .text
@@ -1474,17 +1477,22 @@ impl ParsedSubject {
     /// database sequence, each line that a positive list keeps (`heading_shows`) with the label of
     /// its `WorstRank`-best id without version, its title (the Bioseq's generated title where it
     /// has none) and its taxid; of a `-subject` record (no `Blast-def-line`), the Bioseq's
-    /// `WorstRank`-best id, its generated title and taxid 0 (`TaxDefline::of_record`). `Err` names
-    /// a generated title that LOSAT does not write as NCBI (those of the outfmt 0 heading, which
-    /// shows the same title, `common::database::check_shown_parsed_subject`); `taxdb_found`:
+    /// `WorstRank`-best id, its generated title and taxid 0 (`TaxDefline::of_record`). A generated
+    /// title that LOSAT does not write as NCBI is a `TaxTitle::Refused` (those of the outfmt 0
+    /// heading, which shows the same title, `common::database::check_shown_parsed_subject`; the
+    /// one made from the taxonomy database only where the report shows it); `taxdb_found`:
     /// whether `taxdb.bti` is on the search path (NCBI then names the organism in a title made
-    /// from the source).
+    /// from the source). NCBI BLAST+ 2.17.0 keeps the positive list in an ungapped search too
+    /// (probe `T/t2/fix1` `f1.d3.*.sl*`: tblastx and `blastn -ungapped` with `-seqidlist` show the
+    /// listed line alone for a subject of 2 to 5 HSPs).
     pub fn tax_deflines(
         &self,
         protein: bool,
         taxdb_found: bool,
-    ) -> Result<Vec<crate::report::tax_report::TaxDefline>, String> {
-        use crate::report::tax_report::{generated_title, TaxDefline, TITLE_FROM_TAXONOMY};
+    ) -> Vec<crate::report::tax_report::TaxDefline> {
+        use crate::report::tax_report::{
+            generated_title, TaxDefline, TaxTitle, TITLE_FROM_TAXONOMY,
+        };
         let label_of = |id: Option<&ParsedSeqId>| {
             let mut label = Vec::new();
             if let Some(id) = id {
@@ -1492,42 +1500,43 @@ impl ParsedSubject {
             }
             label
         };
-        let generated = || -> Result<Vec<u8>, String> {
+        let refused = |reason: &str, shown_only: bool| TaxTitle::Refused {
+            reason: reason.to_owned(),
+            shown_only,
+        };
+        let generated = || -> TaxTitle {
             if taxdb_found && self.title_from_taxonomy() {
-                return Err(TITLE_FROM_TAXONOMY.into());
+                return refused(TITLE_FROM_TAXONOMY, true);
             }
             if self.title_suffix_adjusted(protein) {
-                return Err("has a definition line without a title and a title ending in ']' that NCBI BLAST+ rewrites from the taxids (x_AdjustProteinTitleSuffix)".into());
+                return refused("has a definition line without a title and a title ending in ']' that NCBI BLAST+ rewrites from the taxids (x_AdjustProteinTitleSuffix)", false);
             }
-            self.generated_title_fetched()?;
+            if let Err(reason) = self.generated_title_fetched() {
+                return refused(&reason, false);
+            }
             let title = self.target().title.as_deref().unwrap_or_default();
             generated_title(title, protein, &self.bioseq_ids())
         };
         if self.record {
-            return Ok(vec![TaxDefline {
+            return vec![TaxDefline {
                 label: label_of(find_best(&self.target().ids, text_score)),
-                title: generated()?,
+                title: generated(),
                 taxid: 0,
-            }]);
+            }];
         }
-        let mut lines = Vec::new();
-        for defline in self
-            .set
+        self.set
             .deflines
             .iter()
             .filter(|defline| self.heading_shows(defline))
-        {
-            let title = match defline.title.as_deref() {
-                Some(title) if !title.is_empty() => title.to_vec(),
-                _ => generated()?,
-            };
-            lines.push(TaxDefline {
+            .map(|defline| TaxDefline {
                 label: label_of(defline.display_id()),
-                title,
+                title: match defline.title.as_deref() {
+                    Some(title) if !title.is_empty() => TaxTitle::Text(title.to_vec()),
+                    _ => generated(),
+                },
                 taxid: defline.taxid.unwrap_or(0),
-            });
-        }
-        Ok(lines)
+            })
+            .collect()
     }
 
     /// The FASTA form of the Seq-align id (`CSeq_id::AsFastaString`): the id of the `HitDescr`

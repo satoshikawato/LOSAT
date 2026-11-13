@@ -5841,6 +5841,8 @@ struct BlastnReportInputs<'a> {
     /// Whether `taxdb.bti` is on NCBI's search path, for the custom tabular reports
     /// (`ShownSubjects::tabular_taxdb_found`).
     tabular_taxdb_found: bool,
+    /// The taxonomy database of a `-subject` search's organism report (`BlastnArgs::subject_taxdb`).
+    subject_taxdb: Option<&'a crate::algorithm::common::database::SubjectTaxdb>,
 }
 
 impl BlastnReportInputs<'_> {
@@ -7220,9 +7222,12 @@ fn write_custom_tabular(
         ),
         _ => (Vec::new(), Vec::new()),
     };
+    // A `-subject` search's organism report looks names up in the run's database.
     let names = match report.database_reader {
         Some(database) => database.tabular_names(spec, &taxonomy)?,
-        None => None,
+        None => report
+            .subject_taxdb
+            .map(|taxdb| taxdb.report_names("BLASTN")),
     };
     let subjects = match report.database_ordinals {
         Some(ordinals) if report.database_reader.is_some() => TabularSubjects::Database {
@@ -7267,7 +7272,6 @@ fn write_custom_tabular(
             })
             .collect();
         return crate::algorithm::common::tabular::write_tax_report(
-            spec,
             &subjects,
             report.subjects.records(),
             false,
@@ -7489,7 +7493,12 @@ pub fn run(
     let out_file = open_out_file(&args)?;
     let outfmt = args.outfmt.clone();
     let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
-    let mut report = cli_report_stream(out_file);
+    let tax_report = output_formats.iter().any(|format| {
+        format
+            .tabular_spec()
+            .is_some_and(|spec| spec.kind == crate::report::tabular::TabularKind::TaxReport)
+    });
+    let mut report = cli_report_stream(out_file, tax_report);
     let result = {
         let mut outputs =
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut report), &mut *diagnostics);
@@ -7551,7 +7560,7 @@ pub fn run(
     // The outfmt 0 formatter's stream throws when a write fails (oracle: `-out /dev/full`,
     // exit 6). For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
     // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if report.failed && pairwise {
+    if report.failed && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
             message: "BLAST failed to write output\n".to_string(),
@@ -7584,7 +7593,7 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = cli_report_stream(out_file);
+        let mut report = cli_report_stream(out_file, false);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -7613,10 +7622,12 @@ fn open_out_file(args: &BlastnArgs) -> Result<Option<std::io::BufWriter<std::fs:
 /// The report stream of the command line: the `-out` file, or standard output.
 fn cli_report_stream(
     out_file: Option<std::io::BufWriter<std::fs::File>>,
+    tax_report: bool,
 ) -> crate::cli::ReportStream {
     crate::cli::ReportStream {
         inner: match out_file {
-            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
+            // The organism report's file as NCBI's buffer writes it (`cli::TaxReportFile`).
+            Some(file) => crate::cli::report_out_file(Box::new(file), tax_report.then_some(18)),
             None => crate::cli::report_standard_output(),
         },
         failed: false,
@@ -7801,6 +7812,17 @@ fn open_search_database(
     {
         args.tabular_taxdb = Some(match database.as_ref() {
             Some(database) => database.taxdb_found(),
+            // The organism report's lookups open the run's own database.
+            None if output_formats.iter().any(|format| {
+                format
+                    .tabular_spec()
+                    .is_some_and(|spec| spec.kind == crate::report::tabular::TabularKind::TaxReport)
+            }) =>
+            {
+                args.subject_taxdb =
+                    crate::algorithm::common::database::SubjectTaxdb::of(settings, "BLASTN")?;
+                args.subject_taxdb.is_some()
+            }
             None => super::super::tabular::subject_taxdb_found(settings)?,
         });
     }
@@ -11126,6 +11148,7 @@ fn write_reports_untimed(
         both_strands: args.strand == "both",
         minus_strand: QueryStrand::from_option(&args.strand) == QueryStrand::Minus,
         tabular_taxdb_found: subjects.shown.tabular_taxdb_found,
+        subject_taxdb: args.subject_taxdb.as_ref(),
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:482-496
     // ```c++

@@ -2795,7 +2795,7 @@ pub(crate) struct TaxdbRun {
     collision: std::sync::OnceLock<Option<(std::path::PathBuf, String)>>,
     /// The texts of opening the database when the rows of a tabular report opened it, kept for
     /// those rows ([`TaxdbRun::open_for_rows`], [`tabular_names`]).
-    rows_open: std::sync::Mutex<Vec<String>>,
+    rows_open: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 /// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_texts`]).
@@ -3536,15 +3536,18 @@ pub(crate) fn read_reported_taxonomy(
 ///    		if(resolved.empty())
 /// ```
 pub(crate) fn subject_taxdb_found(settings: &ApplicationSettings, program: &str) -> Result<bool> {
+    Ok(subject_search_path(settings, program)?
+        .resolve_file("taxdb.bti")
+        .is_some())
+}
+
+/// The search path of NCBI's databases of a `-subject` search (`subject_taxdb_found`).
+fn subject_search_path(settings: &ApplicationSettings, program: &str) -> Result<SearchPath> {
     let registry = match &settings.blastdb {
         Ok(value) => value.as_deref(),
         Err(reason) => bail!("{reason}; this is not supported by LOSAT's {program}"),
     };
-    let path =
-        SearchPath::from_environment(registry).map_err(|error| database_error(error, program))?;
-    let found = path.resolve_file("taxdb.bti").is_some();
-    SUBJECT_TAXDB.get_or_init(|| std::sync::Arc::new(crate::seqdb::taxdb::LazyTaxDb::new(path)));
-    Ok(found)
+    SearchPath::from_environment(registry).map_err(|error| database_error(error, program))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
@@ -3554,40 +3557,40 @@ pub(crate) fn subject_taxdb_found(settings: &ApplicationSettings, program: &str)
 // {
 // 	static CTaxDBFileInfo t;
 // ```
-/// The taxonomy database that the reports of the process's `-subject` searches look names up in
-/// (the organism report, outfmt 18): NCBI's `GetTaxNames` keeps one for the process, opened at
-/// the first lookup through the search path of NCBI's databases, which the first
-/// [`subject_taxdb_found`] of the process gives.
-static SUBJECT_TAXDB: std::sync::OnceLock<std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>> =
-    std::sync::OnceLock::new();
+/// The taxonomy database of a `-subject` search's organism report (outfmt 18): NCBI's
+/// `GetTaxNames` opens its static `CTaxDBFileInfo` through the search path of NCBI's databases at
+/// the report's first lookup. One per run, as a `-db` search's (`TaxdbRun`), made by the command
+/// line with `subject_taxdb_found` (`run_local`'s callers give no search path: none, DECISIONS 7
+/// of line CLI C2, every lookup fails).
+#[derive(Clone, Debug)]
+pub struct SubjectTaxdb(std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>);
 
-/// The lookups of the organism report (outfmt 18) of a `-subject` search, whose subjects have
-/// no `Blast-def-line` and so the taxid 0 (`report::tax_report`), in the process's taxonomy
-/// database ([`SUBJECT_TAXDB`]). A library call of a `-subject` search reads no application
-/// settings before it (`api::run`), so the first report that asks reads them here, as a library
-/// call of a `-db` search does. A database that LOSAT cannot read as NCBI does is refused as in
-/// [`tabular_names`].
-pub(crate) fn subject_tax_names(
-    spec: &crate::report::tabular::TabularSpec,
-    program: &str,
-) -> Result<Option<crate::report::tabular::TabularNames>> {
-    if SUBJECT_TAXDB.get().is_none() {
-        let settings = crate::blastinput::ncbi_environment::check_ncbi_application_settings(
-            &program.to_ascii_lowercase(),
-        )
-        .map_err(anyhow::Error::msg)?;
-        subject_taxdb_found(&settings, program)?;
+impl SubjectTaxdb {
+    /// The run's database where `taxdb.bti` is on the search path of `settings` (else `None`),
+    /// not opened before the report's first lookup. A registry value that LOSAT does not read as
+    /// NCBI is its refusal (`subject_taxdb_found`); `program` names it.
+    pub(crate) fn of(settings: &ApplicationSettings, program: &str) -> Result<Option<Self>> {
+        let path = subject_search_path(settings, program)?;
+        Ok(path.resolve_file("taxdb.bti").is_some().then(|| {
+            SubjectTaxdb(std::sync::Arc::new(crate::seqdb::taxdb::LazyTaxDb::new(
+                path,
+            )))
+        }))
     }
-    let Some(taxdb) = SUBJECT_TAXDB.get() else {
-        return Ok(None);
-    };
-    let zero = crate::report::tabular::TabularTaxonomy {
-        taxid: 0,
-        taxids: vec![0],
-    };
-    crate::report::tabular::TabularNames::look_up(spec, taxdb, [&zero], program)
-        .map(Some)
-        .map_err(|error| taxdb_error(error, program))
+
+    /// The names that the organism report of a query batch asks for in it
+    /// (`TabularNames::for_report`); a database that LOSAT cannot read as NCBI does is refused as
+    /// in [`tabular_names`].
+    pub(crate) fn report_names(&self, program: &str) -> crate::report::tabular::TabularNames {
+        crate::report::tabular::TabularNames::for_report(
+            crate::report::tax_report::TaxNamesDb::new(
+                std::sync::Arc::clone(&self.0),
+                None,
+                taxdb_error,
+            ),
+            program,
+        )
+    }
 }
 
 /// The names of the taxonomy database that the rows of a tabular report with a name field look
@@ -3608,6 +3611,18 @@ pub(crate) fn tabular_names<'t>(
     let Some(search_path) = db.search_path() else {
         return Ok(None);
     };
+    // The organism report (outfmt 18) looks each taxid up itself where NCBI's report does
+    // (`report::tax_report::TaxLookups`), the texts of an open by earlier rows first.
+    if spec.kind == crate::report::tabular::TabularKind::TaxReport {
+        return Ok(Some(crate::report::tabular::TabularNames::for_report(
+            crate::report::tax_report::TaxNamesDb::new(
+                run.taxdb(search_path),
+                Some(std::sync::Arc::clone(&run.rows_open)),
+                taxdb_error,
+            ),
+            program,
+        )));
+    }
     let names = crate::report::tabular::TabularNames::look_up(
         spec,
         &run.taxdb(search_path),

@@ -249,7 +249,6 @@ pub(super) fn write_tblastx_tabular(
                 });
         }
         return crate::algorithm::common::tabular::write_tax_report(
-            spec,
             &subjects,
             run.subjects,
             false,

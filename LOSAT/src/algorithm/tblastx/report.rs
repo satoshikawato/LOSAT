@@ -1596,12 +1596,13 @@ pub(crate) enum TblastxOutputFormat {
 
 impl TblastxOutputFormat {
     /// Whether the format is a table (outfmt 6, 7, 10 and 20), which reads the tabular subject
-    /// ids.
+    /// ids (`report::tabular::writes_rows`: not the organism report).
     pub(crate) fn is_tabular(self) -> bool {
-        matches!(
-            self,
-            Self::Tabular | Self::TabularWithComments | Self::CustomTabular(_)
-        )
+        match self {
+            Self::Tabular | Self::TabularWithComments => true,
+            Self::CustomTabular(spec) => spec.writes_rows(),
+            _ => false,
+        }
     }
 
     /// Whether the format is a table whose fields read the sequence that NCBI's formatter finds

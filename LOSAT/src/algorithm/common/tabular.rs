@@ -143,47 +143,30 @@ impl<'a> TabularSubjects<'a> {
         }
     }
 
-    /// Where the organism report (outfmt 18, `report::tax_report`) reads the definition lines
-    /// of subject `s_idx`; `records` are the records of a subject set (a database's are its own).
-    pub(crate) fn tax_source(
+    /// Subject `s_idx` without its parsed Seq-ids as the organism report (outfmt 18,
+    /// `report::tax_report`) reads it; `records` are the records of a subject set (a database's
+    /// are its own).
+    pub(crate) fn tax_plain(
         &self,
         s_idx: usize,
         records: &'a [FastaRecord],
-    ) -> crate::report::tax_report::TaxSource<'a> {
-        use crate::report::tax_report::TaxSource;
+    ) -> crate::report::tax_report::TaxPlain<'a> {
+        use crate::report::tax_report::TaxPlain;
         match *self {
-            TabularSubjects::Records { parsed, .. } => {
-                match parsed.get(s_idx).and_then(Option::as_deref) {
-                    Some(subject) => TaxSource::Parsed {
-                        subject,
-                        ordinal: None,
-                    },
-                    None => TaxSource::Record {
-                        local_id: records[s_idx].local_id.as_bytes(),
-                        title: &records[s_idx].title,
-                    },
-                }
-            }
+            TabularSubjects::Records { .. } => TaxPlain::Record {
+                local_id: records[s_idx].local_id.as_bytes(),
+                title: &records[s_idx].title,
+            },
             TabularSubjects::Database {
                 ordinals,
                 records,
-                parsed,
                 taxonomy,
                 ..
-            } => {
-                let ordinal = ordinals.get(s_idx).copied().unwrap_or_default();
-                match parsed.get(s_idx).and_then(Option::as_deref) {
-                    Some(subject) => TaxSource::Parsed {
-                        subject,
-                        ordinal: Some(ordinal),
-                    },
-                    None => TaxSource::Stored {
-                        ordinal,
-                        title: records.get(s_idx).map_or(&[][..], |record| &record.title),
-                        taxid: taxonomy.get(s_idx).map_or(0, |taxonomy| taxonomy.taxid),
-                    },
-                }
-            }
+            } => TaxPlain::Stored {
+                ordinal: ordinals.get(s_idx).copied().unwrap_or_default(),
+                title: records.get(s_idx).map_or(&[][..], |record| &record.title),
+                taxid: taxonomy.get(s_idx).map_or(0, |taxonomy| taxonomy.taxid),
+            },
         }
     }
 
@@ -419,13 +402,12 @@ pub(crate) fn write_tabular_prolog(
 /// Writes the organism report (outfmt 18, `report::tax_report`) of the queries `queries` (title,
 /// record length and HSPs in report order) of a program whose adapter has the shared subjects
 /// `subjects` (`records`: a subject set's records), each query's warnings before its report. The
-/// definition lines of the reported subjects and the lookups of their taxids (`names`, a `-db`
-/// search's; a `-subject` search's are the process's, `database::subject_tax_names`) are made
-/// before the first byte, so that LOSAT's refusals come before it. `protein`: the subjects are
-/// proteins; `taxdb_found`: whether `taxdb.bti` is on the search path.
+/// report is made before the batch's first byte (`tax_report::report_batch`), so that LOSAT's
+/// refusals come before it; `names` carries the run's taxonomy database (`None`: no `taxdb.bti`
+/// on the search path). `protein`: the subjects are proteins; `taxdb_found`: whether `taxdb.bti`
+/// is on the search path.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_tax_report(
-    spec: &TabularSpec,
     subjects: &TabularSubjects<'_>,
     records: &[FastaRecord],
     protein: bool,
@@ -436,25 +418,16 @@ pub(crate) fn write_tax_report(
     writer: &mut dyn Write,
     warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> Result<()> {
-    use crate::report::tax_report::{subject_deflines, SubjectTable, TaxLookups};
-    let mut table = SubjectTable::new(subjects.parsed());
-    for hsp in queries.iter().flat_map(|query| &query.hsps) {
-        table.add(hsp.subject, || {
-            subject_deflines(
-                subjects.tax_source(hsp.subject, records),
-                protein,
-                taxdb_found,
-                program,
-            )
-        })?;
-    }
-    let subject_names = match (subjects, names) {
-        (TabularSubjects::Records { .. }, None) => {
-            crate::algorithm::common::database::subject_tax_names(spec, program)?
-        }
-        _ => None,
-    };
-    let lookups = TaxLookups::new(names.or(subject_names.as_ref()), program)?;
-    crate::report::tax_report::write_report(writer, warnings, queries, &table, &lookups)?;
+    use crate::report::tax_report::{report_batch, write_report};
+    let report = report_batch(
+        queries,
+        subjects.parsed(),
+        |s_idx| subjects.tax_plain(s_idx, records),
+        protein,
+        taxdb_found,
+        names,
+        program,
+    )?;
+    write_report(writer, warnings, queries, &report)?;
     Ok(())
 }

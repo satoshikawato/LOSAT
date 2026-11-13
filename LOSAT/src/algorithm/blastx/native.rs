@@ -557,6 +557,10 @@ fn run_inner(
                 File::create(path).map_err(|_| inaccessible("out", path))?,
             ))),
             (None, Some(hold)) => Box::new(hold.writer(Box::new(io::stdout()))),
+            // The organism report's file as NCBI's buffer writes it (`cli::TaxReportFile`).
+            (Some(path), None) if choice.number == 18 => Box::new(crate::cli::TaxReportFile::new(
+                File::create(path).map_err(|_| inaccessible("out", path))?,
+            )),
             (Some(path), None) => {
                 Box::new(File::create(path).map_err(|_| inaccessible("out", path))?)
             }
@@ -706,6 +710,12 @@ fn run_inner(
     {
         options.taxdb_found = match &database {
             Some(database) => database.taxdb_found(),
+            // The organism report's lookups open the run's own database.
+            None if options.outfmt == 18 => {
+                options.subject_taxdb =
+                    crate::algorithm::common::database::SubjectTaxdb::of(&settings, "BLASTX")?;
+                options.subject_taxdb.is_some()
+            }
             None => crate::algorithm::common::database::subject_taxdb_found(&settings, "BLASTX")?,
         };
     }
@@ -1318,7 +1328,9 @@ pub(super) struct ReportedAsks {
 impl ReportedAsks {
     /// What the reports of `options.outfmt` ask.
     pub(super) fn of(options: &super::args::ResolvedOptions) -> Self {
-        let tabular = matches!(options.outfmt, 6 | 7 | 10 | 18 | 20);
+        // The organism report (18) makes no tabular subject ids (`report::tabular::writes_rows`).
+        let tabular = matches!(options.outfmt, 6 | 7 | 10 | 18 | 20)
+            && crate::report::tabular::writes_rows(options.tabular);
         Self {
             tabular,
             tabular_reads: tabular

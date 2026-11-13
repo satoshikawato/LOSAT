@@ -277,7 +277,6 @@ pub(super) fn write_tblastn_tabular(
             )
             .collect();
         return crate::algorithm::common::tabular::write_tax_report(
-            spec,
             &subjects,
             tab.subject_records,
             false,

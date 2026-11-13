@@ -2527,13 +2527,13 @@ impl BlastpReport {
     }
 
     /// Whether the report is tabular (outfmt 6, 7, 10 and 20), which reads the tabular subject
-    /// IDs.
+    /// IDs (`report::tabular::writes_rows`: not the organism report).
     fn is_tabular(self) -> bool {
-        matches!(
-            self,
-            BlastpReport::Text(OutputFormat::Tabular | OutputFormat::TabularWithComments)
-                | BlastpReport::CustomTabular(_)
-        )
+        match self {
+            BlastpReport::Text(OutputFormat::Tabular | OutputFormat::TabularWithComments) => true,
+            BlastpReport::CustomTabular(spec) => spec.writes_rows(),
+            _ => false,
+        }
     }
 
     /// The subject ids that the report prints (`PrintedIds`): none but in a table.
@@ -5054,6 +5054,8 @@ pub fn run(
     };
     let out_file = open_out_file(&args)?;
     let pairwise = format == Some(crate::blastinput::app::ReportFormat::Pairwise);
+    // The organism report's `-out` file is written as NCBI's buffer writes it.
+    let tax_report = format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
     // LOSAT's reports read the format number and the custom fields that NCBI keeps; blastp's
     // custom tabular report of a delimiter, which `normalized` drops, reads the value as given, as
     // NCBI does (`tabular::custom_tabular_spec`).
@@ -5086,7 +5088,7 @@ pub fn run(
     } else {
         choice.normalized()
     };
-    let mut stream = cli_report_stream(out_file);
+    let mut stream = cli_report_stream(out_file, tax_report);
     let result = {
         let mut outputs =
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
@@ -5131,9 +5133,10 @@ pub fn run(
     //         exit_code = BLAST_OUTPUT_ERROR;                                     \
     //     }                                                                       \
     // ```
-    // The outfmt 0 formatter's stream throws when a write fails; for outfmt 6/7 NCBI aborts
-    // and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
-    if stream.failed && pairwise {
+    // The outfmt 0 formatter's stream throws when a write fails, as the organism report's
+    // where NCBI writes it (`cli::TaxReportFile`); for outfmt 6/7 NCBI aborts and LOSAT reports
+    // the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
+    if stream.failed && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
             message: "BLAST failed to write output\n".to_string(),
@@ -5163,7 +5166,7 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = cli_report_stream(out_file);
+        let mut report = cli_report_stream(out_file, false);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -5189,13 +5192,15 @@ fn open_out_file(args: &BlastpArgs) -> Result<Option<std::io::BufWriter<std::fs:
     )
 }
 
-/// The report stream of the command line: the `-out` file, or standard output.
+/// The report stream of the command line: the `-out` file (`tax_report`: the organism report's,
+/// `cli::TaxReportFile`), or standard output.
 fn cli_report_stream(
     out_file: Option<std::io::BufWriter<std::fs::File>>,
+    tax_report: bool,
 ) -> crate::cli::ReportStream {
     crate::cli::ReportStream {
         inner: match out_file {
-            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
+            Some(file) => crate::cli::report_out_file(Box::new(file), tax_report.then_some(18)),
             None => crate::cli::report_standard_output(),
         },
         failed: false,
@@ -5413,8 +5418,20 @@ fn open_search_database(
             .filter_map(|format| super::tabular::custom_tabular_spec(format.outfmt))
             .any(|spec| spec.needs().taxonomy_names)
     {
-        resolved.subject_taxdb_found =
-            crate::algorithm::common::database::subject_taxdb_found(settings, args.app.name())?;
+        // The organism report's lookups open the run's own database.
+        if outputs
+            .formats
+            .iter()
+            .filter_map(|format| super::tabular::custom_tabular_spec(format.outfmt))
+            .any(|spec| spec.kind == crate::report::tabular::TabularKind::TaxReport)
+        {
+            resolved.subject_taxdb =
+                crate::algorithm::common::database::SubjectTaxdb::of(settings, args.app.name())?;
+            resolved.subject_taxdb_found = resolved.subject_taxdb.is_some();
+        } else {
+            resolved.subject_taxdb_found =
+                crate::algorithm::common::database::subject_taxdb_found(settings, args.app.name())?;
+        }
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -14153,9 +14170,14 @@ fn run_resolved_in_pool(
                     }
                     _ => Vec::new(),
                 };
+                // A `-subject` search's organism report (outfmt 18) looks names up in the run's
+                // database.
                 let names = match database {
                     Some(database) => database.tabular_names(spec, &taxonomy, args.app.name())?,
-                    None => None,
+                    None => args
+                        .subject_taxdb
+                        .as_ref()
+                        .map(|taxdb| taxdb.report_names(args.app.name())),
                 };
                 let tabular_subjects = match (listed_subjects.as_ref(), database) {
                     (Some(listed), Some(_)) => super::tabular::TabularSubjects::Database {
@@ -14608,6 +14630,7 @@ mod tests {
             outfmt: "6".to_string(),
             archive: None,
             app: BlastpApp::Blastp,
+            subject_taxdb: None,
             inclusion_ethresh: None,
             first_query_ordinal: 0,
             psiblast_pssm: None,

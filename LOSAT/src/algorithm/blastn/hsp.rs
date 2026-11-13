@@ -199,14 +199,13 @@ impl BlastnOutputFormat {
     }
 
     /// Whether the format is one of the tabular formats (outfmt 6, 7, 10 and 20), which read the
-    /// tabular subject IDs.
+    /// tabular subject IDs (`report::tabular::writes_rows`: not the organism report).
     pub(crate) fn is_tabular(self) -> bool {
-        matches!(
-            self,
-            BlastnOutputFormat::Tabular
-                | BlastnOutputFormat::TabularWithComments
-                | BlastnOutputFormat::CustomTabular(_)
-        )
+        match self {
+            BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments => true,
+            BlastnOutputFormat::CustomTabular(spec) => spec.writes_rows(),
+            _ => false,
+        }
     }
 
     /// Whether the format is a table whose fields read the sequence that NCBI's formatter finds

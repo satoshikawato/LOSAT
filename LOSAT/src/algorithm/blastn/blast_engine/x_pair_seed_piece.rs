@@ -38,9 +38,10 @@
 //! word's run as well, so no word makes a piece larger) and goes on from that word in a later
 //! piece, on any thread (the stop is data, `Resume`, parked with the strip), as NCBI's scan goes
 //! on from `scan_range[0]`. A piece is an arena of `PIECE_SEEDS / BLOCK + parts` blocks of
-//! `BLOCK` seeds, enough for `PIECE_SEEDS` seeds whatever partitions they go to; each partition's
-//! seeds of the piece are a chain of blocks in scan order, taken from a lane of the arena of its
-//! own while its share lasts (`Links`), so that they lie in one run. The arenas are a pool of
+//! `BLOCK` seeds (`k.div_ceil(BLOCK) + parts` for pieces of the switch's number `k`), enough for
+//! `PIECE_SEEDS` seeds whatever partitions they go to; each partition's seeds of the piece are a
+//! chain of blocks in scan order, taken from a lane of the arena of its own while its share lasts
+//! (`Links`), so that they mostly lie in one run. The arenas are a pool of
 //! `PIECES_PER_THREAD * threads + RESERVED` slots, allocated at their size once and kept in the
 //! subject scratch, so a stage holds at most that many pieces whatever the subject, the query or
 //! the density of the seeds (and arenas only for as many pieces as it had at once: a piece takes
@@ -121,13 +122,14 @@ struct Lane {
 /// first `parts` runs of equal length, one per partition, and the blocks after them, no
 /// partition's) in order; once its lane is used up, the largest free run of another lane becomes
 /// its lane (the whole of the blocks after the lanes, the upper half of another partition's).
-/// So a partition's seeds of a piece lie in one run of blocks while it has no more than its
-/// share, and in a few long runs when it has most of them, and any `piece_seeds` seeds still fit.
-/// (Blocks taken in the order of the pushes, the partitions'
-/// blocks interleaved, made the fold read each partition's seeds in blocks scattered over the
-/// arena: the hardware prefetches of the neighbouring blocks of other partitions and the pages
-/// of the scattered blocks took the fold +6 % cycles at the same instructions, L2 misses +22 %;
-/// dc-megablast cDNA x genome at 4 threads, +2.2 % over the strips stage, line EB s15d / s15e.)
+/// So a partition's seeds of a piece lie in one run of blocks while it has no more than its share
+/// (unless a partition with more took part of its lane first), and in a few long runs when it
+/// has most of them, and any `piece_seeds` seeds still fit. (Blocks taken in the order of the
+/// pushes, the partitions' blocks interleaved, made the fold read each partition's seeds in
+/// blocks scattered over the arena: the hardware prefetches of the neighbouring blocks of other
+/// partitions and the pages of the scattered blocks took the fold +6 % cycles at the same
+/// instructions, L2 misses +22 %; dc-megablast cDNA x genome at 4 threads, +2.2 % over the strips
+/// stage, line EB s15d / s15e.)
 /// Kept in the subject scratch from one stage to the next; the seeds are in the pool's `Store`.
 #[derive(Default)]
 pub(super) struct Links {
@@ -138,12 +140,13 @@ pub(super) struct Links {
 }
 
 impl Links {
-    /// A free block for partition p: the next one of its lane, else the next one after the
-    /// lanes, else the last free one of another lane.
+    /// A free block for partition p: the next one of its lane, else `take_other` (half of the
+    /// largest free run of another lane, or the whole of the blocks after the lanes).
     #[inline(always)]
     fn take(&mut self, p: usize) -> u16 {
-        debug_assert!(p < self.lanes.len());
-        // SAFETY: `p` is below `parts`, the number of lanes (`Arena::reset`, `PieceSink::push`).
+        debug_assert!(p + 1 < self.lanes.len());
+        // SAFETY: `p` is below `parts`, and there are `parts + 1` lanes (`Arena::reset`,
+        // `PieceSink::push`).
         let lane = unsafe { self.lanes.get_unchecked_mut(p) };
         let b = if lane.next < lane.end {
             lane.next += 1;
@@ -227,9 +230,10 @@ impl Links {
 /// Each buffer is one allocation whose capacity is above glibc's ceiling of the mmap threshold
 /// (`utils/x_mapped.rs` `x_unthresholded_capacity`), not initialized: glibc maps it, its free
 /// leaves the threshold as it is, and only the pages of the blocks pieces wrote are resident.
-/// (A store kept from one query batch to the next, its scratch's life, held the union of the
-/// pages every batch wrote: BLASTN cDNA x genome -subject at 16 threads, peak x1.13 of the strips
-/// stage against x0.90 for one store per batch, line EB s15j.) (An arena allocated by itself,
+/// (A store kept beyond its scratch, which lives for one query batch, held the union of the
+/// pages every batch wrote (a process-wide cache of dropped stores, 7373fb967): BLASTN cDNA x
+/// genome -subject at 16 threads, peak x1.13 of the strips stage against x0.90 for one store per
+/// batch, line EB s15j.) (An arena allocated by itself,
 /// 266-328 KiB of seeds, was mapped and its free raised glibc's threshold to its size, so that
 /// later blocks of up to that size came from the arenas of the heap and stayed resident there:
 /// BLASTN cDNA x genome -subject at 16 threads, peak x1.13-1.15 of the strips stage, x1.04 with
@@ -382,8 +386,8 @@ impl SeedOut for PieceSink<'_> {
         let p = self.table[bucket_of(&seed)] as usize;
         let a = &mut *self.links;
         debug_assert!(p < a.chains.len());
-        // SAFETY: the table holds `bucket % parts` and there are `parts` chains and lanes
-        // (`reset`).
+        // SAFETY: the table holds `bucket % parts`, and there are `parts` chains and `parts + 1`
+        // lanes (`reset`).
         if unsafe { a.chains.get_unchecked(p) }.fill as usize == BLOCK {
             // (a block of the arena, below `next.len()`: `take` panics when none is free, which
             // keeps the stores below in the arena whatever the caller does)

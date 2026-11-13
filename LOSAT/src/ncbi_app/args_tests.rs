@@ -163,10 +163,7 @@ fn defaults_and_flags_are_ncbi_s_values() {
 fn every_reader_knows_the_help_flags_and_the_file_arguments() {
     assert_eq!(parse_words(&["-h"]).unwrap_err(), ArgsError::Usage);
     assert_eq!(parse_words(&["-help-full"]).unwrap_err(), ArgsError::Help);
-    assert_eq!(
-        parse_words(&["-xmlhelp"]).unwrap_err(),
-        ArgsError::Refused("the NCBI BLAST+ option -xmlhelp is not supported by LOSAT's T".into())
-    );
+    assert_eq!(parse_words(&["-xmlhelp"]).unwrap_err(), ArgsError::XmlHelp);
     let args = parse_words(&["-logfile", "log.txt", "-conffile", "t.ini"]).unwrap();
     assert_eq!(args.value("logfile"), Some("log.txt"));
     assert_eq!(

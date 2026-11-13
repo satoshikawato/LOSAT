@@ -413,9 +413,7 @@ impl TranslatedRpsSearch {
         // DECISIONS 38 D3: every probed query (`out/u.*` of the design) segfaults after the
         // search, valgrind: a read at address 0 in `BLAST_ComputeTraceback_MT`.
         if self.ungapped {
-            bail!(
-                "-ungapped (NCBI BLAST+ 2.17.0's rpstblastn crashes after an ungapped search) is not supported by LOSAT's {PROGRAM}"
-            );
+            bail!("{}", crate::cli::run_refusal(PROGRAM, "ungapped"));
         }
         Ok(())
     }

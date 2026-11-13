@@ -6,8 +6,11 @@
 
 use std::io::Read;
 
-use super::stream::{input_space, trim_input_end, trim_input_space, trim_input_start, LineReader};
+use super::stream::LineReader;
 use super::{FastaRecord, ReadError, ReaderConfig};
+use crate::ncbi_str::{
+    is_blank, is_space, truncate_spaces, truncate_spaces_begin, truncate_spaces_end,
+};
 
 /// The kinds of reader problems (`ILineError::EProblem`) that LOSAT meets, for
 /// `PostWarning`'s list of ignored problems.
@@ -464,7 +467,7 @@ const CHECK_CLASSES: [CheckClass; 256] = {
         let byte = index as u8;
         table[index] = if byte.is_ascii_alphabetic() || byte == b'*' {
             CheckClass::Good
-        } else if byte == b'-' || input_space(byte) || byte.is_ascii_digit() {
+        } else if byte == b'-' || is_space(byte) || byte.is_ascii_digit() {
             CheckClass::Neutral
         } else if byte == b';' {
             CheckClass::Comment
@@ -895,7 +898,8 @@ impl<R: Read> FastaReader<R> {
             }
             self.lines.next_line();
             let raw = self.lines.take_line();
-            let line = trim_input_space(&raw);
+            // `NStr::TruncateSpaces_Unsafe(line)` (`eTrunc_Both`).
+            let line = truncate_spaces(&raw);
             if line.is_empty() || matches!(line[0], b'!' | b'#' | b';') {
                 self.lines.put_line(raw);
                 continue;
@@ -1016,15 +1020,15 @@ impl<R: Read> FastaReader<R> {
             self.defline.extend_from_slice(defline);
         }
         let len = defline.len();
-        if len > 1 && !defline[1..].iter().all(|&byte| input_space(byte)) {
+        if len > 1 && !is_blank(&defline[1..]) {
             let start = 1 + defline[1..]
                 .iter()
-                .position(|&byte| !input_space(byte))
+                .position(|&byte| !is_space(byte))
                 .unwrap_or(len - 1);
             let title_start = start
                 + defline[start..]
                     .iter()
-                    .position(|&byte| !input_space(byte))
+                    .position(|&byte| !is_space(byte))
                     .unwrap_or(len - start);
             if title_start < len {
                 let end = title_start
@@ -1076,7 +1080,7 @@ impl<R: Read> FastaReader<R> {
         })?;
         let len = defline.len();
         let mut title_start = parsed.title_search;
-        while title_start < len && input_space(defline[title_start]) {
+        while title_start < len && is_space(defline[title_start]) {
             title_start += 1;
         }
         if title_start < len {
@@ -1771,10 +1775,10 @@ impl<R: Read> FastaReader<R> {
     /// The long-title and modifier warnings are ignored problems.
     fn parse_title(&mut self, title: LineText, warn: Warn<'_>) -> Result<(), ReadError> {
         self.create_warnings_for_seq_data_in_title(&title.text, warn)?;
-        // `TruncateSpacesInPlace` on the title's own bytes.
+        // `TruncateSpacesInPlace` (`eTrunc_Both`) on the title's own bytes.
         let mut text = title.text;
-        text.truncate(trim_input_end(&text).len());
-        let leading = text.len() - trim_input_start(&text).len();
+        text.truncate(truncate_spaces_end(&text).len());
+        let leading = text.len() - truncate_spaces_begin(&text).len();
         text.drain(..leading);
         self.title = text;
         Ok(())
@@ -1965,20 +1969,17 @@ pub(crate) fn gap_line_size(
     line_number: u64,
     warn: Warn<'_>,
 ) -> Result<u32, ReadError> {
-    let mut remaining = trim_input_space(&line[2..]);
+    let mut remaining = truncate_spaces(&line[2..]);
     if let Some(rest) = remaining.strip_prefix(b"unk") {
-        remaining = trim_input_start(rest);
+        remaining = truncate_spaces_begin(rest);
     }
     let digits = remaining
         .iter()
         .position(|byte| !byte.is_ascii_digit())
         .unwrap_or(remaining.len());
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp (NStr::StringToUInt with
-    // fConvErr_NoThrow): an empty string or a value over UINT_MAX converts to 0.
-    let mut gap_size = std::str::from_utf8(&remaining[..digits])
-        .ok()
-        .and_then(|text| text.parse::<u32>().ok())
-        .unwrap_or(0);
+    // `NStr::StringToUInt(sDigits, NStr::fConvErr_NoThrow)`: 0 for an empty string or a value
+    // over UINT_MAX.
+    let mut gap_size = crate::ncbi_str::string_to_uint(&remaining[..digits]).unwrap_or(0);
     if gap_size == 0 {
         post_line_warning(
             Problem::NonPositiveLength,
@@ -1987,7 +1988,7 @@ pub(crate) fn gap_line_size(
         )?;
         gap_size = 1;
     }
-    remaining = trim_input_start(&remaining[digits..]);
+    remaining = truncate_spaces_begin(&remaining[digits..]);
     let mut mods: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
     while !remaining.is_empty() {
         let close = if remaining.starts_with(b"[") {
@@ -2012,10 +2013,10 @@ pub(crate) fn gap_line_size(
             )?;
             break;
         };
-        let key = trim_input_space(&remaining[1..equal]).to_vec();
-        let value = trim_input_space(&remaining[equal + 1..close]).to_vec();
+        let key = truncate_spaces(&remaining[1..equal]).to_vec();
+        let value = truncate_spaces(&remaining[equal + 1..close]).to_vec();
         mods.push((key, value));
-        remaining = trim_input_start(&remaining[close + 1..]);
+        remaining = truncate_spaces_begin(&remaining[close + 1..]);
     }
     // `multimap` iterates in key order (stable for equal keys).
     mods.sort_by(|left, right| left.0.cmp(&right.0));
@@ -2479,7 +2480,7 @@ fn fast_path_tables_match_their_definitions() {
         // CheckDataLine (fasta.cpp:730-750).
         let class = if byte.is_ascii_alphabetic() || byte == b'*' {
             "good"
-        } else if byte == b'-' || input_space(byte) || byte.is_ascii_digit() {
+        } else if byte == b'-' || is_space(byte) || byte.is_ascii_digit() {
             "neutral"
         } else if byte == b';' {
             "comment"

@@ -144,29 +144,12 @@ impl ArchiveEncoding {
 /// ```
 /// The conversion throws (and nothing is written) for text after the number, such as
 /// `11 qseqid`; the batches' archives accept such a text (`-outfmt "11 <spec>"`), only the
-/// error archive does not. `TruncateSpaces` strips `isspace` characters at both ends,
-/// `StringToInt` takes an optional sign and decimal digits (leading zeros allowed) that fit an
-/// `int`.
+/// error archive does not. `TruncateSpaces` (`eTrunc_Both`) and `StringToInt` (flags 0) are
+/// `ncbi_str::truncate_spaces` and `ncbi_str::string_to_int`.
 pub fn writes_error_archive(outfmt: &str) -> bool {
-    let is_space = |c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r');
-    let text = outfmt.trim_matches(is_space);
-    let (negative, digits) = match text.as_bytes().first() {
-        Some(b'+') => (false, &text[1..]),
-        Some(b'-') => (true, &text[1..]),
-        _ => (false, text),
-    };
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return false;
-    }
-    let mut value: i64 = 0;
-    for b in digits.bytes() {
-        value = value * 10 + i64::from(b - b'0');
-        if value > i64::from(i32::MAX) + 1 {
-            return false;
-        }
-    }
-    let value = if negative { -value } else { value };
-    value == i64::from(crate::blastinput::app::output_format::ARCHIVE_FORMAT)
+    use crate::ncbi_str::{string_to_int, truncate_spaces};
+    string_to_int(truncate_spaces(outfmt.as_bytes()), 0)
+        .is_ok_and(|value| value == crate::blastinput::app::output_format::ARCHIVE_FORMAT)
 }
 
 /// The `queue-search` request of a run, as the options handle and the arguments make it.

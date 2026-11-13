@@ -798,9 +798,7 @@ fn search_cli(
         Input::Bytes(bytes) => {
             let mut source = FastaInputSource::from_bytes(bytes, config);
             source.set_id_scope(args.id_scope.clone());
-            let empty = bytes
-                .iter()
-                .all(|&byte| crate::blastinput::fasta_reader::stream::input_space(byte));
+            let empty = crate::ncbi_str::is_blank(bytes);
             (QuerySource::Bytes(source), empty)
         }
     };

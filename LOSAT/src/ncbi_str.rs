@@ -1,19 +1,33 @@
 //! The functions of NCBI's `NStr` (`c++/src/corelib/ncbistr.cpp`) that LOSAT's ports call to
-//! convert numbers (makeblastdb, the database readers, blastdbcmd, the Seq-id parser, the taxid
-//! lists and rpsbproc's data loader `rpsbproc::data`): base 10, the flags each caller passes, and
-//! the `CStringException` each throws, with the place it is thrown from ([`ThrowSite`]); with them
-//! `NStr::PrintableString`, which their messages quote the string with,
-//! `NStr::StringToUInt8_DataSize` (`-max_file_sz`, module `data_size`) and `NStr::StringToDouble`
-//! with glibc's `strtod` (rpsbproc's bit score thresholds, module `double`). Also the string
-//! functions that more than one port calls: `NStr::ParseEscapes` (makeblastdb's titles and the
-//! registry reader) and `NStr::TruncateSpaces`.
+//! convert numbers (the argument readers of the BLAST programs, makeblastdb and its FASTA
+//! reader, the database readers, blastdbcmd, the Seq-id parser and its accession guide, the
+//! taxid lists and rpsbproc's data loader `rpsbproc::data`): base 10, the flags each caller
+//! passes, and the `CStringException` each throws, with the place it is thrown from
+//! ([`ThrowSite`]); with them `NStr::PrintableString`, which their messages quote the string
+//! with, `NStr::StringToUInt8_DataSize` (`-max_file_sz`, module `data_size`) and
+//! `NStr::StringToDouble` with glibc's `strtod` (rpsbproc's bit score thresholds and the
+//! constraints of the integer arguments, module `double`). Also the string functions that more
+//! than one port calls: `NStr::ParseEscapes` (makeblastdb's titles and the registry reader),
+//! `NStr::TruncateSpaces` (each `ETrunc`: the FASTA readers, the argument readers, the format
+//! guess), `NStr::IsBlank`, `NStr::StringToBool` and C's `isspace`.
 //!
 //! Not ported: `fConvErr_NoThrow` and the errno bookkeeping of `CS2N_Guard` (a caller that passes
 //! `fConvErr_NoThrow` takes NCBI's 0 for an error itself), the bases other than 10 (but 16 of
-//! `StringToInt8`, which the argument reader tries, `ncbi_app::args`), and the flags no caller
-//! passes (`fMandatorySign`, `fAllowCommas`, `fAllowLeadingSymbols` beyond its spaces).
-//! Also here: `NStr::StringToNonNegativeInt`. Copies of some of these functions remain elsewhere
-//! (`blastinput::value_parsers`, `writedb`, `report::outfmt6`), not yet folded here.
+//! `StringToInt8`, which the argument readers try, `ncbi_app::args` and
+//! `blastinput::value_parsers`), and the flags no caller passes (`fMandatorySign`,
+//! `fAllowCommas`, `fAllowLeadingSymbols` beyond its spaces).
+//! Also here: `NStr::StringToNonNegativeInt`.
+//!
+//! Conversions of their own remain where calling these would change what LOSAT does, each left
+//! for a fix of its own: `CArg_Double`'s `NStr::StringToDouble(value, fDecimalPosixOrLocal)`
+//! (`blastinput::value_parsers::ncbi_string_to_double`, which refuses the hexadecimal forms and
+//! an exponent mark without digits) and the SEG locut and hicut read with it
+//! (`blastinput::app::read_seg_option`), the `TruncateSpacesInPlace(input, eTrunc_Begin)` of the
+//! PSSM format guess (`algorithm::pssm_search::in_pssm`, `trim_ascii_start`, which keeps a
+//! vertical tab), the full `NStr::StringToDoublePosix` of the ASN.1 text reader
+//! (`report::serial::asn_text_reader`, beside the subset in `double`), and the
+//! `NStr::StringToInt8` of an object id (`seqid::defline_set::object_id_number`, different only
+//! for an embedded NUL). The parsers of the frozen web ABI v1 keep theirs.
 
 mod data_size;
 mod double;
@@ -43,9 +57,10 @@ pub(crate) const ALLOW_TRAILING_SPACES: Flags = 1 << 21;
 /// `NStr::fAllowTrailingSymbols`: any bytes after the number (white space included).
 pub(crate) const ALLOW_TRAILING_SYMBOLS: Flags = (1 << 22) | ALLOW_TRAILING_SPACES;
 
-/// `isspace` in the C locale.
-pub(crate) fn is_space(c: u8) -> bool {
-    c == b' ' || (b'\t'..=b'\r').contains(&c)
+/// `isspace` in the C locale: the space, `\t`, `\n`, `\v`, `\f` and `\r` (a `const fn` for the
+/// character tables built at compile time).
+pub(crate) const fn is_space(c: u8) -> bool {
+    matches!(c, b'\t'..=b'\r' | b' ')
 }
 
 /// `atoi` of glibc, which NCBI's Linux builds call: `(int) strtol(s, NULL, 10)` in the C locale
@@ -582,7 +597,8 @@ pub(crate) fn string_to_int8(s: &[u8], flags: Flags) -> Result<i64, NcbiExceptio
 // ```
 // `pos0` is set before the radix check: a `0x` with no digit after it is 0 (`pos != pos0`).
 /// `NStr::StringToInt8(str, flags, base)` in base 10 or 16 (`s_StringToInt8` of the argument
-/// reader tries 16 after 10, `ncbi_app::args`), `flags` as for [`string_to_int8`].
+/// readers tries 16 after 10: `ncbi_app::args`, `blastinput::value_parsers::ncbi_int8`), `flags`
+/// as for [`string_to_int8`].
 pub(crate) fn string_to_int8_base(s: &[u8], flags: Flags, base: u8) -> Result<i64, NcbiException> {
     debug_assert!(base == 10 || base == 16, "only bases 10 and 16 are ported");
     let at = |pos: usize| s.get(pos).copied().unwrap_or(0);
@@ -1165,18 +1181,98 @@ pub(crate) fn parse_escapes(str: &[u8]) -> Result<Vec<u8>, &'static str> {
 //         _ASSERT(beg <= end  &&  !isspace((unsigned char) str[end]));
 //         ++end;
 //     }
+//     _ASSERT(beg < end  &&  end <= length);
+//     if ( beg | (end - length) ) { // if either beg != 0 or end != length
+//         return str.substr(beg, end - beg);
+//     }
+//     else {
+//         return str;
+//     }
+// }
 // ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3187-3195
+// ```c++
+// CTempString NStr::TruncateSpaces_Unsafe(const CTempString str, ETrunc where)
+// {
+//     return s_TruncateSpaces(str, where, CTempString());
+// }
+//
+// void NStr::TruncateSpacesInPlace(CTempString& str, ETrunc where)
+// {
+//     str = s_TruncateSpaces(str, where, CTempString());
+// }
+// ```
+// `NStr::TruncateSpaces`, `TruncateSpaces_Unsafe` and `TruncateSpacesInPlace` cut the same bytes;
+// the three functions below are its `where`, as the slice of `str` that is left (empty when every
+// byte is a space).
 /// `NStr::TruncateSpaces(str)` (`eTrunc_Both`, as `TruncateSpacesInPlace`): `str` without the C
 /// `isspace` spaces at its ends.
 pub(crate) fn truncate_spaces(str: &[u8]) -> &[u8] {
-    let Some(beg) = str.iter().position(|&c| !is_space(c)) else {
-        return &[];
-    };
+    truncate_spaces_end(truncate_spaces_begin(str))
+}
+
+/// `NStr::TruncateSpaces(str, NStr::eTrunc_Begin)`: `str` without the C `isspace` spaces at its
+/// start.
+pub(crate) fn truncate_spaces_begin(str: &[u8]) -> &[u8] {
+    let beg = str.iter().position(|&c| !is_space(c)).unwrap_or(str.len());
+    &str[beg..]
+}
+
+/// `NStr::TruncateSpaces(str, NStr::eTrunc_End)`: `str` without the C `isspace` spaces at its
+/// end.
+pub(crate) fn truncate_spaces_end(str: &[u8]) -> &[u8] {
     let end = str
         .iter()
         .rposition(|&c| !is_space(c))
-        .map_or(beg, |end| end + 1);
+        .map_or(0, |end| end + 1);
+    &str[..end]
+}
+
+/// [`truncate_spaces`] of a `str` (`NStr::TruncateSpaces` of a `string`): the spaces are ASCII
+/// bytes, so what is left starts and ends at characters.
+pub(crate) fn truncate_spaces_str(str: &str) -> &str {
+    let beg = str.len() - truncate_spaces_begin(str.as_bytes()).len();
+    let end = truncate_spaces_end(str.as_bytes()).len().max(beg);
     &str[beg..end]
+}
+
+/// `NStr::StringToBool(str)`: `None` where NCBI throws.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2817-2839
+/// ```c
+/// bool NStr::StringToBool(const CTempString str)
+/// {
+///     if ( str == "1"  ||
+///          AStrEquiv(str, s_kTrueString,  PNocase())  ||
+///          AStrEquiv(str, s_kTString,     PNocase())  ||
+///          AStrEquiv(str, s_kYesString,   PNocase())  ||
+///          AStrEquiv(str, s_kYString,     PNocase())  ||
+///          AStrEquiv(str, s_kOnString,    PNocase()) ) {
+///         errno = 0;
+///         return true;
+///     }
+///     if ( str == "0"  ||
+///          AStrEquiv(str, s_kFalseString, PNocase())  ||
+///          AStrEquiv(str, s_kFString,     PNocase())  ||
+///          AStrEquiv(str, s_kNoString,    PNocase())  ||
+///          AStrEquiv(str, s_kNString,     PNocase())  ||
+///          AStrEquiv(str, s_kOffString,   PNocase()) ) {
+///         errno = 0;
+///         return false;
+///     }
+///     NCBI_THROW2(CStringException, eConvert,
+///                 "String cannot be converted to bool", 0);
+/// }
+/// ```
+pub(crate) fn string_to_bool(value: &str) -> Option<bool> {
+    let is = |word: &str| value.eq_ignore_ascii_case(word);
+    if value == "1" || is("true") || is("t") || is("yes") || is("y") || is("on") {
+        Some(true)
+    } else if value == "0" || is("false") || is("f") || is("no") || is("n") || is("off") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -1536,7 +1632,8 @@ mod tests {
     // kept in it).
     #[test]
     fn printable_string_escapes_as_ncbi() {
-        let printable = |text: &str| String::from_utf8(printable_string(text.as_bytes()).into_owned()).unwrap();
+        let printable =
+            |text: &str| String::from_utf8(printable_string(text.as_bytes()).into_owned()).unwrap();
         assert_eq!(printable("a'b\"c\\d"), "a\\'b\\\"c\\\\d");
         assert_eq!(printable("x\ty"), "x\\ty");
         assert_eq!(printable("1\n2"), "1\\n2");
@@ -1619,6 +1716,44 @@ mod tests {
         assert_eq!(truncate_spaces(b"\0 \xa0"), b"\0 \xa0");
         assert_eq!(truncate_spaces(b" \x0b\x0cid x\t\r "), b"id x");
         assert_eq!(truncate_spaces(b"\xa0id\xa0"), b"\xa0id\xa0");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3145-3180 (quoted at
+    // `truncate_spaces`): `eTrunc_Begin` and `eTrunc_End` cut one end each, and the `string` form
+    // cuts what the bytes' form cuts.
+    #[test]
+    fn truncate_spaces_cuts_one_end_for_begin_and_end() {
+        assert_eq!(truncate_spaces_begin(b""), b"");
+        assert_eq!(truncate_spaces_begin(b" \t\n\x0b\x0c\r"), b"");
+        assert_eq!(truncate_spaces_begin(b"\x0b a b\r\n"), b"a b\r\n");
+        assert_eq!(truncate_spaces_begin(b"\xa0 a"), b"\xa0 a");
+        assert_eq!(truncate_spaces_end(b""), b"");
+        assert_eq!(truncate_spaces_end(b" \t\n\x0b\x0c\r"), b"");
+        assert_eq!(truncate_spaces_end(b"\x0b a b\r\n"), b"\x0b a b");
+        assert_eq!(truncate_spaces_end(b"a \xa0"), b"a \xa0");
+        assert_eq!(truncate_spaces_str(""), "");
+        assert_eq!(truncate_spaces_str(" \t\n\x0b\x0c\r"), "");
+        assert_eq!(truncate_spaces_str("\x0b é b\r\n"), "é b");
+        assert_eq!(truncate_spaces_str("\u{a0}a\u{85}"), "\u{a0}a\u{85}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2817-2839 (quoted at
+    // `string_to_bool`).
+    #[test]
+    fn ncbis_booleans() {
+        for (text, value) in [
+            ("1", Some(true)),
+            ("TRUE", Some(true)),
+            ("t", Some(true)),
+            ("On", Some(true)),
+            ("0", Some(false)),
+            ("No", Some(false)),
+            ("off", Some(false)),
+            ("", None),
+            ("2", None),
+        ] {
+            assert_eq!(string_to_bool(text), value, "{text:?}");
+        }
     }
 
     // NCBI BLAST+ 2.17.0 (line NP M3d, `M/m3d/ws/run2.sh`): the parameters (base 0) and units

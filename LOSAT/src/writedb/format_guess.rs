@@ -47,11 +47,6 @@ const F_DIGIT: u8 = 1 << 5;
 const F_SPACE: u8 = 1 << 6;
 const F_INVALID: u8 = 1 << 7;
 
-/// C `isspace` in the "C" locale: space, `\t`, `\n`, `\v`, `\f`, `\r`.
-fn c_isspace(c: u8) -> bool {
-    matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
-}
-
 /// C `isprint` in the "C" locale.
 fn c_isprint(c: u8) -> bool {
     (0x20..=0x7e).contains(&c)
@@ -125,7 +120,7 @@ fn init_symbol_type_table() -> [u8; 256] {
         if b.is_ascii_digit() {
             *entry |= F_DIGIT;
         }
-        if c_isspace(b) {
+        if crate::ncbi_str::is_space(b) {
             *entry |= F_SPACE;
         }
     }
@@ -789,51 +784,6 @@ fn ensure_stats(data: &[u8]) -> Stats {
     stats
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3145-3180
-// ```c++
-// template <class TStr>
-// TStr s_TruncateSpaces(const TStr& str, NStr::ETrunc where,
-//                       const TStr& empty_str)
-// {
-//     SIZE_TYPE length = str.length();
-//     if (length == 0) {
-//         return empty_str;
-//     }
-//     SIZE_TYPE beg = 0;
-//     if (where == NStr::eTrunc_Begin  ||  where == NStr::eTrunc_Both) {
-//         _ASSERT(beg < length);
-//         while ( isspace((unsigned char) str[beg]) ) {
-//             if (++beg == length) {
-//                 return empty_str;
-//             }
-//         }
-//     }
-//     SIZE_TYPE end = length;
-//     if ( where == NStr::eTrunc_End  ||  where == NStr::eTrunc_Both ) {
-//         _ASSERT(beg < end);
-//         while (isspace((unsigned char) str[--end])) {
-//             if (beg == end) {
-//                 return empty_str;
-//             }
-//         }
-//         _ASSERT(beg <= end  &&  !isspace((unsigned char) str[end]));
-//         ++end;
-//     }
-//     _ASSERT(beg < end  &&  end <= length);
-//     if ( beg | (end - length) ) { // if either beg != 0 or end != length
-//         return str.substr(beg, end - beg);
-//     }
-//     else {
-//         return str;
-//     }
-// }
-// ```
-/// `NStr::TruncateSpaces_Unsafe(text, NStr::eTrunc_Begin)`: drops leading `isspace` bytes (all of them gives the empty string).
-fn truncate_spaces_begin(text: &[u8]) -> &[u8] {
-    let skip = text.iter().take_while(|&&c| c_isspace(c)).count();
-    &text[skip..]
-}
-
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1624-1637
 // ```c++
 // void SkipCommentAndBlank(CTempString &text)
@@ -897,7 +847,7 @@ fn truncate_spaces_begin(text: &[u8]) -> &[u8] {
 /// line end (`find_first_of` gives `npos`) makes `substr(npos)` the empty string.
 fn skip_comment_and_blank(mut text: &[u8]) -> &[u8] {
     loop {
-        text = truncate_spaces_begin(text);
+        text = crate::ncbi_str::truncate_spaces_begin(text);
         let first = text.first().copied().unwrap_or(0);
         if matches!(first, b';' | b'#' | b'!') {
             // `find_first_of(NEW_LINE_SYMBOLS, 1)`: search from index 1

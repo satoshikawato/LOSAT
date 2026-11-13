@@ -1,6 +1,8 @@
 //! `NStr::StringToDouble(str)` with its default flags (corelib/ncbistr.cpp), which rpsbproc's
 //! data loader calls (`NStr::StringToNumeric<double>`, ncbistr.hpp:3632-3637) for the bit score
-//! thresholds of `bitscore_specific.txt`, and glibc's `strtod` that it reads the number with.
+//! thresholds of `bitscore_specific.txt`, the BLAST programs' argument readers for the SEG locut
+//! and hicut (`blastinput::app::read_seg_option`) and the constraints of the integer arguments
+//! (`blastinput::value_parsers`), and glibc's `strtod` that it reads the number with.
 //!
 //! Also `NStr::StringToDouble(str, NStr::fDecimalPosixOrLocal)`, which NCBI's argument reader
 //! calls for an `eDouble` key (`CArg_Double`: segmasker's `-locut` and `-hicut`,
@@ -705,5 +707,41 @@ mod tests {
             rows += 1;
         }
         assert_eq!(rows, 360);
+    }
+
+    // glibc's `strtod` reads these to their end and stops before the end of these (the SEG
+    // locut and hicut of the argument reader, `blastinput::app::read_seg_option`, test
+    // `string_to_double` with it, which also needs a digit, a point or a sign first).
+    #[test]
+    fn strtod_reads_the_whole_of_these_only() {
+        let whole = |text: &str| {
+            let (_, used) = strtod_prefix(text.as_bytes());
+            used != 0 && used == text.len()
+        };
+        for text in [
+            "1",
+            "+1",
+            "-.5",
+            "5.",
+            "1e5",
+            "1E-5",
+            "0x10",
+            "0X1p3",
+            "0x.8p-1",
+            "0x1.",
+            "inf",
+            "+INFINITY",
+            "-nan",
+            "nan(x_1)",
+            "1e400",
+        ] {
+            assert!(whole(text), "{text}");
+        }
+        for text in [
+            "1e", "1e+", "2.5x", "2,2", ".", "+.", ".e1", "0x", "0x.", "0x1p", "1_0", "--5",
+            "2.5.5", "nan(", "nan(-)", "infx", "",
+        ] {
+            assert!(!whole(text), "{text}");
+        }
     }
 }

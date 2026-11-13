@@ -16,6 +16,7 @@ use crate::blastinput::fasta_reader::RecordSource;
 use crate::blastinput::seq_range::{
     record_interval, RecordInterval, RecordPlacement, SequenceRange,
 };
+use crate::ncbi_str::{is_space, truncate_spaces, truncate_spaces_begin, truncate_spaces_end};
 
 #[derive(Debug, Clone)]
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:619-631
@@ -612,7 +613,8 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         let line = if is_header {
             header
         } else {
-            trim_input_space(line)
+            // `NStr::TruncateSpaces_Unsafe(*++GetLineReader())` (`eTrunc_Both`, fasta.cpp:376).
+            truncate_spaces(line)
         };
         // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:399-408
         // ```c++
@@ -841,16 +843,18 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 )?),
                 None => None,
             };
+            // The `isspace` skip before the title (`eTrunc_Begin`), then
+            // `NStr::TruncateSpacesInPlace(processed_title)` at its end.
             let title_bytes = match &believed {
-                Some(defline) => trim_input_start(&line[defline.title_search..]),
-                None => trim_input_start(&line[1..]),
+                Some(defline) => truncate_spaces_begin(&line[defline.title_search..]),
+                None => truncate_spaces_begin(&line[1..]),
             };
             let end = title_bytes
                 .iter()
                 .skip(1)
                 .position(|&b| b < b' ')
                 .map_or(title_bytes.len(), |i| i + 1);
-            let title = String::from_utf8(trim_input_end(&title_bytes[..end]).to_vec())
+            let title = String::from_utf8(truncate_spaces_end(&title_bytes[..end]).to_vec())
                 .context("invalid UTF-8 FASTA title")?;
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1623-1677
             // ```c++
@@ -978,7 +982,12 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             if c == b';' {
                 break;
             }
-            if input_space(c) {
+            // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:930-931
+            // ```c++
+            //         case '\t': case '\n': case '\v': case '\f': case '\r': case ' ':
+            //             continue;
+            // ```
+            if is_space(c) {
                 continue;
             }
             if c == b'-' {
@@ -1281,7 +1290,7 @@ fn check_data_line(line: &[u8], number: usize) -> Result<()> {
             good += 1;
         } else if c == b';' {
             break;
-        } else if c != b'-' && !input_space(c) && !c.is_ascii_digit() {
+        } else if c != b'-' && !is_space(c) && !c.is_ascii_digit() {
             bad += 1;
         }
     }
@@ -1741,7 +1750,7 @@ pub(crate) fn stream_is_empty<R: Read + Seek>(stream: &mut FastaStream<R>) -> bo
     loop {
         match input.read(&mut byte) {
             Ok(0) | Err(_) => return true,
-            Ok(_) if input_space(byte[0]) => {}
+            Ok(_) if is_space(byte[0]) => {}
             Ok(_) => {
                 // IsIStreamEmpty restores position only after successful extraction.
                 // NCBI unconditionally clears seekg failure and restores orig_state.
@@ -2762,65 +2771,6 @@ fn read_fasta_stream<R: Read>(
         deliver(&[])?;
     }
     Ok(records)
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:930-931
-// ```c++
-//         case '\t': case '\n': case '\v': case '\f': case '\r': case ' ':
-//             continue;
-// ```
-fn input_space(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
-}
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3153-3161
-// ```c++
-//     SIZE_TYPE beg = 0;
-//     if (where == NStr::eTrunc_Begin  ||  where == NStr::eTrunc_Both) {
-//         _ASSERT(beg < length);
-//         while ( isspace((unsigned char) str[beg]) ) {
-//             if (++beg == length) {
-//                 return empty_str;
-//             }
-//         }
-//     }
-// ```
-fn trim_input_start(bytes: &[u8]) -> &[u8] {
-    let start = bytes
-        .iter()
-        .position(|&byte| !input_space(byte))
-        .unwrap_or(bytes.len());
-    &bytes[start..]
-}
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3162-3172
-// ```c++
-//     SIZE_TYPE end = length;
-//     if ( where == NStr::eTrunc_End  ||  where == NStr::eTrunc_Both ) {
-//         _ASSERT(beg < end);
-//         while (isspace((unsigned char) str[--end])) {
-//             if (beg == end) {
-//                 return empty_str;
-//             }
-//         }
-//         _ASSERT(beg <= end  &&  !isspace((unsigned char) str[end]));
-//         ++end;
-//     }
-// ```
-fn trim_input_end(bytes: &[u8]) -> &[u8] {
-    let end = bytes
-        .iter()
-        .rposition(|&byte| !input_space(byte))
-        .map_or(0, |p| p + 1);
-    &bytes[..end]
-}
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3187-3190
-// ```c++
-// CTempString NStr::TruncateSpaces_Unsafe(const CTempString str, ETrunc where)
-// {
-//     return s_TruncateSpaces(str, where, CTempString());
-// }
-// ```
-fn trim_input_space(bytes: &[u8]) -> &[u8] {
-    trim_input_end(trim_input_start(bytes))
 }
 
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104

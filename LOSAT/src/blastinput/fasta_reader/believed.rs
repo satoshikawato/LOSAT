@@ -195,9 +195,9 @@ pub(crate) fn parse_believed_defline(
     line_number: u64,
     warn: &mut dyn FnMut(&[u8]),
 ) -> Result<BelievedDefline, String> {
-    let space = crate::ncbi_str::is_space;
+    use crate::ncbi_str::{is_blank, is_space};
     let len = defline.len();
-    if len <= 1 || defline[1..].iter().all(|&byte| space(byte)) {
+    if len <= 1 || is_blank(&defline[1..]) {
         return Ok(BelievedDefline {
             title_search: len,
             ids: Vec::new(),
@@ -206,7 +206,7 @@ pub(crate) fn parse_believed_defline(
     }
     let start = 1 + defline[1..]
         .iter()
-        .position(|&byte| !space(byte))
+        .position(|&byte| !is_space(byte))
         .unwrap_or(len - 1);
     let mut pos = start;
     while pos < len && (defline[pos] as i8) > (b' ' as i8) {
@@ -214,7 +214,7 @@ pub(crate) fn parse_believed_defline(
     }
     let (range_len, _, _) = parse_range(&defline[start..pos]);
     let id_string = &defline[start..pos - range_len];
-    if id_string.iter().all(|&byte| space(byte)) {
+    if is_blank(id_string) {
         return Err("Unable to locate sequence id in definition line".to_string());
     }
     // A warning of the Seq-id parser names the application (`post_seq_id_warning_of`); the

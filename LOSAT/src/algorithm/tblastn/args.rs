@@ -352,8 +352,11 @@ pub struct TblastnArgs {
 // return (genetic_codes.find(val) != genetic_codes.end());
 // ```
 // Stage A product decision admits 32 from gc.prt:340-347 for TBLASTN only.
+/// `NStr::StringToInt(value)` of `CArgAllowGeneticCodeInteger` is
+/// `value_parsers::genetic_code_number` (LOSAT's "invalid" message for the values outside 0..=255).
 pub fn tblastn_genetic_code(value: &str) -> std::result::Result<u8, String> {
-    let id = value.parse::<u8>().map_err(|_| "invalid genetic code ID")?;
+    let id = crate::blastinput::value_parsers::genetic_code_number(value)
+        .ok_or("invalid genetic code ID")?;
     GeneticCode::try_from_id(id).map(|_| id)
 }
 

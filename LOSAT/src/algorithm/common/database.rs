@@ -649,47 +649,74 @@ pub(crate) fn pairwise_database(db: &SeqDb) -> PairwiseDatabase {
 // probes p5_pr_sum2 and p5b_sum_int of line RG D1a-3), and the serial XML writer's `-n` of
 // INT64_MIN is too (it writes `-0`, probes p5_neg_2p63 and p5b_neg_fmt): LOSAT refuses these
 // (DECISIONS D1a3-2 of line RG: Q2 = A, rule 3; Q1 waits for the Owner, refused until then).
-/// LOSAT's refusals of the database counts that the report of `outfmt` (NCBI's format number)
-/// would print where NCBI's arithmetic overflows, for the `-db` list's databases `database`:
-/// a sum of the total lengths past NCBI's `Int8` (the pairwise prolog of outfmt 0 to 4, BLAST
-/// XML 5, the XML2 and JSON documents 13 to 16), a sum of the numbers of sequences past NCBI's
-/// `int` (BLAST XML), and a summed length of exactly -2^63 in the serial XML of BLAST XML and
-/// XML2 (5, 14, 16).
+/// What LOSAT refuses of the database counts that the report of `outfmt` (NCBI's format number)
+/// would print where NCBI's arithmetic overflows (`num_sequences` and `total_letters` are the
+/// `PairwiseDatabase` sums over the names of the `-db` list, `total_letters_overflow` whether the
+/// lengths' sum passes `Int8`): a sum of the total lengths past `Int8` (the pairwise prolog of
+/// outfmt 0 to 4, BLAST XML 5, the XML2 and JSON documents 13 to 16), a sum of the numbers of
+/// sequences past NCBI's `int` (BLAST XML), and a summed length of exactly -2^63 in the serial
+/// XML of BLAST XML and XML2 (5, 14, 16).
+pub(crate) fn report_sum_refusal(
+    num_sequences: i64,
+    total_letters: i64,
+    total_letters_overflow: bool,
+    outfmt: i32,
+) -> Option<&'static str> {
+    if matches!(outfmt, 0..=5 | 13..=16) && total_letters_overflow {
+        return Some(
+            "the total lengths of the databases of the -db list (their alias files' LENGTH) sum to more than NCBI BLAST+'s 64-bit report count holds",
+        );
+    }
+    if outfmt == 5 && i32::try_from(num_sequences).is_err() {
+        return Some(
+            "the numbers of sequences of the databases of the -db list (their alias files' NSEQ) sum to more than BLAST XML's 32-bit count holds",
+        );
+    }
+    if matches!(outfmt, 5 | 14 | 16) && !total_letters_overflow && total_letters == i64::MIN {
+        return Some(
+            "a total length of 9223372036854775808 letters (an alias file's LENGTH), which NCBI BLAST+'s XML writer prints as -0 (a signed overflow), in BLAST XML or XML2",
+        );
+    }
+    None
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-747
+// ```c++
+//     } else if (m_FormatType == CFormattingArgs::eXml) {
+//         CRef<CSearchResults> res(const_cast<CSearchResults*>(&results));
+//         res->TrimSeqAlign(m_HitlistSize);
+//         m_AccumulatedResults.push_back(res);
+//         ...
+//         	CCmdLineBlastXMLReportData report_data(m_AccumulatedQueries,
+//                                                    m_AccumulatedResults,
+//                                                    *m_Options, m_DbName, m_DbIsAA,
+//         ...
+//     	x_PrintXML2Report(results, queries);
+// ```
+// NCBI sums the counts of the pairwise prolog (outfmt 0 to 4) before it searches, those of the
+// XML and JSON documents when it formats a query's report: a search that fails before (an engine
+// error of the setup, "The average subject length is too short", probe p5_pr_sum2#6 of line RG
+// D1a-3) never reaches the documents' sums. The documents' refusals are LOSAT's report writers'
+// (`report::blast_xml::writer`, `report::blast_xml2::writer`).
+/// LOSAT's refusals of the counts of the pairwise prolog of `outfmt` (`report_sum_refusal` for
+/// outfmt 0 to 4, which NCBI writes before the search) for the `-db` list's databases `database`.
 pub(crate) fn check_report_sums(
     database: &PairwiseDatabase,
     outfmt: i32,
     program: &str,
 ) -> Result<()> {
-    let sums_lengths = matches!(outfmt, 0..=5 | 13..=16);
-    let length_sum = database
-        .databases
-        .iter()
-        .try_fold(0i64, |sum, info| sum.checked_add(info.total_letters));
-    if sums_lengths && length_sum.is_none() {
-        return Err(refusal(
-            "the total lengths of the databases of the -db list (their alias files' LENGTH) sum to more than NCBI BLAST+'s 64-bit report count holds",
-            program,
-        ));
+    if !(0..=4).contains(&outfmt) {
+        return Ok(());
     }
-    if outfmt == 5
-        && database
-            .databases
-            .iter()
-            .try_fold(0i32, |sum, info| sum.checked_add(info.num_sequences))
-            .is_none()
-    {
-        return Err(refusal(
-            "the numbers of sequences of the databases of the -db list (their alias files' NSEQ) sum to more than BLAST XML's 32-bit count holds",
-            program,
-        ));
+    match report_sum_refusal(
+        database.num_sequences,
+        database.total_letters,
+        database.total_letters_overflow,
+        outfmt,
+    ) {
+        Some(reason) => Err(refusal(reason, program)),
+        None => Ok(()),
     }
-    if matches!(outfmt, 5 | 14 | 16) && length_sum == Some(i64::MIN) {
-        return Err(refusal(
-            "a total length of 9223372036854775808 letters (an alias file's LENGTH), which NCBI BLAST+'s XML writer prints as -0 (a signed overflow), in BLAST XML or XML2",
-            program,
-        ));
-    }
-    Ok(())
 }
 
 /// The stored title of a database sequence, as the reports read it (`stored_title`).

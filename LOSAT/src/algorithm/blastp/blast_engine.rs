@@ -9434,6 +9434,14 @@ fn run_resolved_in_pool(
     // statistics' average (blast_setup.c:975 below), which divides by their number of sequences.
     if let Some(database) = database.filter(|_| args.old_fsc) {
         database.check_statistics_count(args.app.name())?;
+        // RPS-BLAST's first volume of none of the profiles (`rps_hooks::dbsize_volume_num_seqs`)
+        // gives the same division by 0: the same refusal (DECISIONS 14 of line RG), not a panic.
+        if num_subjects == 0 {
+            return Err(crate::algorithm::common::database::refusal(
+                crate::algorithm::common::database::STATISTICS_COUNT_ZERO,
+                args.app.name(),
+            ));
+        }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-721
     // ```c
@@ -14305,6 +14313,9 @@ fn run_resolved_in_pool(
                         db_len: shown_database
                             .as_ref()
                             .map_or(0, |shown| shown.total_letters),
+                        db_len_overflow: shown_database
+                            .as_ref()
+                            .is_some_and(|shown| shown.total_letters_overflow),
                         positives: Some(&positives),
                         mask_char: b'X',
                     },

@@ -192,13 +192,22 @@ where NCBI's arithmetic overflows: the total lengths of a `-db` list's databases
 and a summed length of exactly 2^63 in BLAST XML and XML2 (outfmt 5, 14, 16; NCBI writes `-0`;
 the Owner's question D1a3-2 of line RG may make it an exception). The requests of `-outfmt 11` and
 `-export_search_strategy` compute their `EffectiveSearchSpace` from the negative length as NCBI does
-(the query length of context 0; probe run2 of D1a-3). Refused until ported: a `LENGTH` of 2^63 or
-more in a search without the Gumbel block and without `-searchsp` (BLASTN, TBLASTX, BLASTX
-`-ungapped`, `OLD_FSC`), whose preliminary stage NCBI runs with the per-context search spaces of
-the negative length (`SplitQuery_SetEffectiveSearchSpace`, prelim_stage.cpp:219-220: each
-context's query length) while its traceback and reports read the setup's. Refused until the statistics of
-each subject are ported: `LENGTH` 0 while sequences are included; until item D1a-4: OID ranges,
-`STATS_NSEQ`, `STATS_TOTLEN` and `MIN_SEQ_LENGTH` in RPSBLAST databases. Refused for
+(the query length of context 0; probe run2 of D1a-3). The preliminary stage of every search reads
+NCBI's option spaces of the statistics before their fallback to OID 0
+(`SplitQuery_SetEffectiveSearchSpace`, prelim_stage.cpp:219-220; `stats::setup::
+preliminary_option_space`): for a negative length each context's query length, for a length of 0
+none (with `-dbsize` the spaces of `-dbsize` and the walk's count), while the traceback and the
+reports read the setup's. Where `GetTotalLength` is 0 (an alias file's `LENGTH 0`, also with
+`STATS_*`, or a list whose count visits no sequence) NCBI's preliminary search computes the
+statistics of each subject it searches (`BLAST_OneSubjectUpdateParameters`, blast_engine.c:1434-1443;
+TBLASTN and TBLASTX skip the shorter subjects first), and so does LOSAT in the six programs: the
+effective lengths, the hit-saving cutoffs without the composition-based stretch of the e-value, the
+word cutoffs and the link cutoffs of the subject's length; the e-values of the traceback and the
+reports' counts and spaces are the setup's (Spouge's database factor 1), and the order of the
+results is the one-thread traceback's. The overflowing sums of BLAST XML, XML2 and JSON are refused
+where NCBI formats them (after the search: its own errors of the search come first). Refused until
+item D1a-4: OID ranges, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH` and a `LENGTH` of 0 in RPSBLAST
+databases (NCBI's RPS search has no loop over subjects and opens each volume alone). Refused for
 good: a statistics count of 0 (an alias file's `NSEQ 0`, or its `LENGTH` or `STATS_TOTLEN` over
 volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without the Gumbel block
 (BLASTN, TBLASTX, and BLASTP, BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX

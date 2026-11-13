@@ -493,6 +493,25 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
         H: FnOnce(&mut HitSink<'_>) -> Result<()>,
     {
         self.report.clear();
+        // NCBI sums the database counts of the document when it formats a query's report
+        // (`common::database::check_report_sums`): LOSAT refuses the sums NCBI overflows here.
+        let outfmt = match self.document.kind() {
+            Xml2Kind::Files13 => 13,
+            Xml2Kind::Files14 => 14,
+            Xml2Kind::Single15 => 15,
+            Xml2Kind::Single16 => 16,
+        };
+        if let Some(reason) = crate::algorithm::common::database::report_sum_refusal(
+            run.db_num,
+            run.db_len,
+            run.db_len_overflow,
+            outfmt,
+        ) {
+            return Err(crate::algorithm::common::database::refusal(
+                reason,
+                &run.program.to_ascii_uppercase(),
+            ));
+        }
         let params = &self.params;
         let result = match self.document.kind() {
             Xml2Kind::Single16 => {

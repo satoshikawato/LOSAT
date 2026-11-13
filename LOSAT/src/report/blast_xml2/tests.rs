@@ -128,6 +128,7 @@ fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static [u8]) -> XmlR
         filter: b"F",
         db_num: 4,
         db_len: 5000,
+        db_len_overflow: false,
         positives: matrix,
         mask_char: b'X',
     }

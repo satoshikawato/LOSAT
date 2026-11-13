@@ -947,12 +947,13 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     let Some(positives) = FormattingMatrix::new(&options.matrix) else {
         anyhow::bail!("unsupported score matrix");
     };
-    let (db_name, db_num, db_len) = match shown {
-        ShownSubjects::Fasta { .. } => (String::new(), 0, 0),
+    let (db_name, db_num, db_len, db_len_overflow) = match shown {
+        ShownSubjects::Fasta { .. } => (String::new(), 0, 0, false),
         ShownSubjects::Database { name, pairwise, .. } => (
             name.to_string(),
             pairwise.num_sequences,
             pairwise.total_letters,
+            pairwise.total_letters_overflow,
         ),
     };
     check_database_name(&db_name)?;
@@ -975,6 +976,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         filter: &filter,
         db_num,
         db_len,
+        db_len_overflow,
         positives: Some(&positives),
         mask_char: b'X',
     };

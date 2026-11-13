@@ -331,8 +331,11 @@ pub struct PairwiseDatabase {
     /// The sum of their numbers of sequences, NCBI's `Int8` (`tot_num_seqs`).
     pub num_sequences: i64,
     /// The sum of their total lengths, NCBI's `Int8` (`tot_length`). A sum that overflows the
-    /// `Int8` is refused before a report is written (`common::database::check_report_sums`).
+    /// `Int8` (`total_letters_overflow`) is refused where NCBI's formatter would sum it
+    /// (`common::database::report_sum_refusal`).
     pub total_letters: i64,
+    /// Whether the sum of the total lengths passes NCBI's `Int8` (a signed overflow).
+    pub total_letters_overflow: bool,
     /// The databases in the order of the list, a name given twice twice: the blocks of the
     /// epilog.
     pub databases: Vec<DatabaseInfo>,
@@ -358,6 +361,12 @@ impl PairwiseDatabase {
                 .iter()
                 .map(|database| database.total_letters)
                 .fold(0, i64::wrapping_add),
+            total_letters_overflow: databases
+                .iter()
+                .try_fold(0i64, |sum, database| {
+                    sum.checked_add(database.total_letters)
+                })
+                .is_none(),
             databases,
         }
     }

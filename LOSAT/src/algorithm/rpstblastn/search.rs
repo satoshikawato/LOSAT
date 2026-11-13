@@ -91,6 +91,14 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         // structures; RPSTBLASTN never splits a query (`split_query_aux_priv.cpp:88`), so a value
         // it reads changes nothing, and one it cannot convert stops it (`CStringException`).
         crate::blastinput::app::read_query_split_variable(PROGRAM, "CHUNK_SIZE")?;
+        // A total length of 0 (an alias file's `LENGTH 0`): NCBI's RPS search has no loop over
+        // subjects (blast_engine.c:1384-1393) and opens each volume alone; refused as rpsblast
+        // refuses it (`blastp::blast_engine::rps_hooks::check_alias_keys`) until item D1a-4.
+        if database.x_seqdb().statistics().per_subject() {
+            bail!(
+                "an alias file's LENGTH 0 over an RPS-BLAST database; this database is not supported by LOSAT's {PROGRAM}"
+            );
+        }
         // LOSAT's refusals of the volumes' files come before the first byte, as rpsblast's do;
         // NCBI's own errors of the files stay where NCBI's search of a batch raises them
         // (`search_batch`), and the options' refusals below wait for the files to open.

@@ -106,6 +106,7 @@ pub(super) struct PreparedXml {
     db_name: String,
     db_num: i64,
     db_len: i64,
+    db_len_overflow: bool,
     /// By query, the texts of the queries whose reports the documents write: every query, or
     /// all but the last of a run that stops when the documents hold that report back
     /// (`written_queries`).
@@ -309,12 +310,13 @@ pub(super) fn prepare(
         subject_lengths[oid] =
             i32::try_from(ranges.subjects.length(oid, subject_letters.length(oid)))?;
     }
-    let (db_name, db_num, db_len) = match shown {
-        ShownSubjects::Fasta { .. } => (String::new(), 0, 0),
+    let (db_name, db_num, db_len, db_len_overflow) = match shown {
+        ShownSubjects::Fasta { .. } => (String::new(), 0, 0, false),
         ShownSubjects::Database { name, pairwise, .. } => (
             name.to_string(),
             pairwise.num_sequences,
             pairwise.total_letters,
+            pairwise.total_letters_overflow,
         ),
     };
     let xml2_run = Xml2Run {
@@ -345,6 +347,7 @@ pub(super) fn prepare(
         db_name,
         db_num,
         db_len,
+        db_len_overflow,
         texts,
         stats,
         subject_names,
@@ -440,6 +443,7 @@ impl PreparedXml {
             filter: &self.filter,
             db_num: self.db_num,
             db_len: self.db_len,
+            db_len_overflow: self.db_len_overflow,
             positives: Some(positives),
             mask_char: b'X',
         };

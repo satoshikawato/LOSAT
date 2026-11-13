@@ -36,6 +36,9 @@ pub struct XmlRun<'a> {
     /// which LOSAT refuses (`common::database::check_report_sums`).
     pub db_num: i64,
     pub db_len: i64,
+    /// Whether the sum of `db_len` passes NCBI's `Int8` (`PairwiseDatabase::total_letters_overflow`),
+    /// which LOSAT refuses when it writes a document (`common::database::report_sum_refusal`).
+    pub db_len_overflow: bool,
     /// The positives table of the recount; `None` for BLASTN (a nucleotide search shows `|`).
     pub positives: Option<&'a FormattingMatrix>,
     /// The letter of a masked query position: `N` for BLASTN, `X` otherwise

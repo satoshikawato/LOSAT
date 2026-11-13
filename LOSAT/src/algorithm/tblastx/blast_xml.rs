@@ -190,13 +190,14 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
 ) -> Result<()> {
     let args = run.args;
     let taxa = run.xml_taxa;
-    let (db_name, db_num, db_len) = match &run.database {
+    let (db_name, db_num, db_len, db_len_overflow) = match &run.database {
         Some(database) => (
             database.name,
             database.pairwise.num_sequences,
             database.pairwise.total_letters,
+            database.pairwise.total_letters_overflow,
         ),
-        None => ("", 0, 0),
+        None => ("", 0, 0, false),
     };
     names::check_database_name(PROGRAM, db_name)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2206-2208 (XML2
@@ -246,6 +247,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         filter: &filter,
         db_num,
         db_len,
+        db_len_overflow,
         positives: positives.as_ref(),
         mask_char: b'X',
     };

@@ -263,6 +263,19 @@ impl StructuredXml for BlastXmlWriter {
     where
         F: FnOnce(&mut HitSink<'_>) -> Result<()>,
     {
+        // NCBI sums the database counts of the document when it formats a query's report
+        // (`common::database::check_report_sums`): LOSAT refuses the sums NCBI overflows here.
+        if let Some(reason) = crate::algorithm::common::database::report_sum_refusal(
+            run.db_num,
+            run.db_len,
+            run.db_len_overflow,
+            5,
+        ) {
+            return Err(crate::algorithm::common::database::refusal(
+                reason,
+                &run.program.to_ascii_uppercase(),
+            ));
+        }
         if self.iterations == 0 {
             if let Some(error) = write_header(out, run, query) {
                 return Err(error.into());

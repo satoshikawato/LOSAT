@@ -7071,6 +7071,9 @@ fn post_process_hits_and_write(
                     filter: &filter,
                     db_num: report.database.map_or(0, |database| database.num_sequences),
                     db_len: report.database.map_or(0, |database| database.total_letters),
+                    db_len_overflow: report
+                        .database
+                        .is_some_and(|database| database.total_letters_overflow),
                     positives: None,
                     mask_char: b'N',
                 },

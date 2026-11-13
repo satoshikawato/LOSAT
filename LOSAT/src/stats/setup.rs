@@ -505,4 +505,75 @@ mod tests {
         assert_eq!(eff_lengths_database(30, 2, 0, false, true), Some((10, 2)));
         assert_eq!(eff_lengths_database(30, 2, 99, false, false), Some((99, 2)));
     }
+
+    // SURVEY_D1a3 §0.3 / impl2 of line RG D1a-3: the preliminary stage's option spaces
+    // (`SplitQuery_SetEffectiveSearchSpace`) and the statistics of one subject.
+    #[test]
+    fn preliminary_option_spaces_follow_ncbis_split_query_setup() {
+        let ka = KarlinParams {
+            lambda: 0.267,
+            k: 0.041,
+            h: 0.14,
+            alpha: 1.9,
+            beta: -30.0,
+        };
+        // -searchsp is the options' own.
+        assert_eq!(
+            preliminary_option_space(142, 0, 23, 0, 777, false, &ka, "BLASTP").unwrap(),
+            777
+        );
+        // A total of 0 without -dbsize: CalcEffLengths returns before the contexts.
+        assert_eq!(
+            preliminary_option_space(142, 0, 23, 0, 0, false, &ka, "BLASTP").unwrap(),
+            0
+        );
+        // With -dbsize the walk's count, not the setup's fallback of 1.
+        let dbsize =
+            preliminary_option_space(142, 0, 23, 100_000, 0, false, &ka, "BLASTP").unwrap();
+        assert_eq!(
+            dbsize,
+            calc_eff_lengths(142, 100_000, 23, &ka, 0, "BLASTP")
+                .unwrap()
+                .eff_searchsp
+        );
+        // A negative total: an effective length of 1, the context's query length.
+        assert_eq!(
+            preliminary_option_space(
+                142,
+                -9_223_372_036_854_775_807,
+                23,
+                0,
+                0,
+                false,
+                &ka,
+                "BLASTP"
+            )
+            .unwrap(),
+            142
+        );
+        // A positive total: the setup's own space; an empty context has none.
+        assert_eq!(
+            preliminary_option_space(142, 3263, 23, 0, 0, false, &ka, "BLASTP").unwrap(),
+            calc_eff_lengths(142, 3263, 23, &ka, 0, "BLASTP")
+                .unwrap()
+                .eff_searchsp
+        );
+        assert_eq!(
+            preliminary_option_space(0, 3263, 23, 0, 0, false, &ka, "BLASTP").unwrap(),
+            0
+        );
+        // One subject: its length (/3 translated) with the setup's count, an option space kept.
+        let subject = subject_eff_lengths(142, 300, 1, 0, 0, true, &ka, "TBLASTN").unwrap();
+        assert_eq!(
+            subject,
+            calc_eff_lengths(142, 100, 1, &ka, 0, "TBLASTN").unwrap()
+        );
+        let kept = subject_eff_lengths(142, 300, 7, 0, 481_440, false, &ka, "BLASTP").unwrap();
+        assert_eq!(kept.eff_searchsp, 481_440);
+        let fixed = subject_eff_lengths(142, 300, 1, 100_000, 0, false, &ka, "BLASTP").unwrap();
+        assert_eq!(
+            fixed,
+            calc_eff_lengths(142, 100_000, 1, &ka, 0, "BLASTP").unwrap()
+        );
+    }
 }

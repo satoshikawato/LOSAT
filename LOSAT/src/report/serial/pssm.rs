@@ -336,20 +336,6 @@ fn write_document<E: Encoder>(
     enc.end_document();
 }
 
-fn write_object_id<E: Encoder>(enc: &mut E, id: &ObjectId) {
-    match id {
-        ObjectId::Id(value) => {
-            enc.variant("Object-id", "id", 0);
-            enc.int(*value);
-        }
-        ObjectId::Str(value) => {
-            enc.variant("Object-id", "str", 1);
-            enc.visible_str(value);
-        }
-    }
-    enc.end_variant();
-}
-
 fn write_ints<E: Encoder>(enc: &mut E, values: &[i32]) {
     enc.begin_list(false);
     for &value in values {
@@ -377,7 +363,7 @@ fn write_pssm<E: Encoder>(enc: &mut E, pssm: &Pssm, karlin: Option<FinalKarlin>)
     }
     if let Some(identifier) = &pssm.identifier {
         enc.member("identifier", 1);
-        write_object_id(enc, identifier);
+        crate::report::seqid::write_object_id(enc, identifier);
         enc.end_member();
     }
     enc.member("numRows", 2);

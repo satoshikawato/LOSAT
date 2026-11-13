@@ -75,9 +75,11 @@ pub struct PsiSearch {
     pub(crate) stats: PssmStats,
     /// The query record as the reports show it without `-parse_deflines` (`query_record`).
     pub(crate) query: FastaRecord,
-    /// The Seq-id of a PSSM query whose one Seq-id is local, which `-parse_deflines` shows
-    /// (`query_record`); `None` for a FASTA query's later rounds.
-    pub(crate) local_seq_id: Option<crate::seqid::ParsedSeqId>,
+    /// The Seq-ids of the PSSM's query Bioseq of `-in_pssm` (at least one), the one owner of them:
+    /// the first is the id of the query's Seq-loc (psiblast_app.cpp:540, `GetFirstId()`), which
+    /// its Seq-aligns, the later rounds' PSSMs and the warnings take; the reports show them as
+    /// `query_record` makes them. Empty for a FASTA query's later rounds (`from_engine`).
+    pub(crate) query_ids: Vec<crate::seqid::ParsedSeqId>,
     pub(crate) validation_error: Option<String>,
     /// The warnings of `PsiBlastSetupScoreBlock` for the search's options (the frequency ratios
     /// all zero, the composition-based statistics reset to mode 1), which the query's warning
@@ -191,10 +193,34 @@ impl PsiSearch {
     /// takes `believe_query` of `-parse_deflines`, psiblast_app.cpp:482-484, tblastn_app.cpp; NCBI
     /// BLAST+ 2.17.0: `Query= Query_1 <title>`, `qseqid` `Query_1`).
     pub(crate) fn query_record(&self, parse_deflines: bool) -> FastaRecord {
-        match (&self.local_seq_id, parse_deflines) {
-            (Some(id), true) => self.query.clone().believing(vec![id.clone()]),
+        match (self.query_ids.as_slice(), parse_deflines) {
+            ([crate::seqid::ParsedSeqId::Local(_)], true) => {
+                self.query.clone().believing(self.query_ids.clone())
+            }
             _ => self.query.clone(),
         }
+    }
+
+    /// `query_record`, whose ids, when the reports show them, join the scope `scope` of the
+    /// `-subject` records that `-parse_deflines` reads, as a FASTA query's do (NCBI's scope holds
+    /// the PSSM's Bioseq, psiblast_app.cpp:537: a subject with one of its ids shows as the query, or
+    /// NCBI's tblastn fails; `IdScope::add_record` refuses it).
+    pub(crate) fn query_record_in(
+        &self,
+        parse_deflines: bool,
+        scope: Option<&crate::seqid::id_scope::IdScope>,
+        program: &str,
+    ) -> anyhow::Result<FastaRecord> {
+        let query = self.query_record(parse_deflines);
+        if let (Some(scope), Some(believed)) = (scope, query.believed()) {
+            scope.add_record(&believed.ids, None, "query", program)?;
+        }
+        Ok(query)
+    }
+
+    /// The id of the query's Seq-loc of `-in_pssm` (`query_ids`), `None` for a FASTA query.
+    pub(crate) fn query_seq_loc_id(&self) -> Option<&crate::seqid::ParsedSeqId> {
+        self.query_ids.first()
     }
 
     /// The PSSM search of a later round of the FASTA query `query` (psiblast's rounds,
@@ -244,7 +270,7 @@ impl PsiSearch {
                 h: stat(pssm.gapped.h),
             },
             query,
-            local_seq_id: None,
+            query_ids: Vec::new(),
             validation_error: None,
             setup_messages,
             warning_title: None,

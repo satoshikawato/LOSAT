@@ -63,7 +63,7 @@ impl BelievedIds {
 
     /// The ids `ids` (at least one) of a Bioseq that is the query as it is (the PSSM's of
     /// `-in_pssm`): its Seq-aligns and warnings take the first, of which NCBI makes the query's
-    /// Seq-loc (psiblast_app.cpp:539, `sl->SetWhole().Assign(*pssm->GetQuery().GetSeq().
+    /// Seq-loc (psiblast_app.cpp:540, `sl->SetWhole().Assign(*pssm->GetQuery().GetSeq().
     /// GetFirstId())`), where a FASTA query's Seq-loc takes `FindBestChoice` of the ids it read
     /// (`new`).
     pub(crate) fn of_bioseq(ids: Vec<ParsedSeqId>, strand: SeqLocStrand) -> Self {

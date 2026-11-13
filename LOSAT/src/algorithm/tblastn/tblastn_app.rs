@@ -724,11 +724,8 @@ fn search_cli(
         // `-parse_deflines` its ids join the scope of the `-subject` records as a FASTA query's do
         // (`IdScope::add_record`; NCBI BLAST+ 2.17.0 fails on a subject with the query's id), and
         // the database's sequences are checked as for a FASTA query (`QueryScopes`).
-        let query = psi.query_record(args.parse_deflines);
-        if let (Some(scope), Some(believed)) = (args.id_scope.as_deref(), query.believed()) {
-            scope.add_record(&believed.ids, None, "query", "TBLASTN")?;
-        }
-        let records = vec![query];
+        let records =
+            vec![psi.query_record_in(args.parse_deflines, args.id_scope.as_deref(), "TBLASTN")?];
         return search(
             &args,
             resolved,
@@ -1391,8 +1388,11 @@ fn search(
     }
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`); with
     // `-in_pssm`, of the PSSM's query when the reports show its ids (`PsiSearch::query_record`).
-    let believed_queries = args.parse_deflines
-        || (resolved.pssm.is_some() && input_records.iter().any(|q| q.believed().is_some()));
+    let believed_queries = crate::blastinput::query_batch::believed_queries(
+        args.parse_deflines,
+        resolved.pssm.is_some(),
+        input_records,
+    );
     let mut batches = crate::blastinput::query_batch::read_query_batches(
         input_records,
         &searched_queries,

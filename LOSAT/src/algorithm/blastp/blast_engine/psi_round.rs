@@ -278,7 +278,10 @@ fn run_queries(
                 state: state.clone(),
                 save_last: plan.save_last,
                 request: plan.request.clone(),
-                query_id: plan.input.as_ref().map(|input| input.id.clone()),
+                query_id: args
+                    .psi_search
+                    .as_deref()
+                    .and_then(|psi| psi.query_seq_loc_id().cloned()),
                 outcome: std::sync::Mutex::new(None),
             };
             // The reader's messages of the batch come with its first round.

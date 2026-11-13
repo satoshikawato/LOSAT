@@ -5486,11 +5486,11 @@ fn search_cli(
         // sequence with one of them as the PSSM's query (its title and letters), refused as for a
         // FASTA query (`IdScope::add_record` of the `-subject` records that `-parse_deflines`
         // reads; the database's, `query_batch::QueryScopes`).
-        let query = psi.query_record(resolved.parse_deflines);
-        if let (Some(scope), Some(believed)) = (args.id_scope.as_deref(), query.believed()) {
-            scope.add_record(&believed.ids, None, "query", args.app.name())?;
-        }
-        let records = vec![query];
+        let records = vec![psi.query_record_in(
+            resolved.parse_deflines,
+            args.id_scope.as_deref(),
+            args.app.name(),
+        )?];
         // The PSSM files of `-in_pssm`'s rounds (item PS5b), checked as a FASTA query's below.
         if let Some(request) = resolved
             .psi_rounds
@@ -6487,8 +6487,11 @@ fn search(
     }
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`); with
     // `-in_pssm`, of the PSSM's query when the reports show its ids (`PsiSearch::query_record`).
-    let believed_queries = args.parse_deflines
-        || (args.psi_search.is_some() && query_records.iter().any(|q| q.believed().is_some()));
+    let believed_queries = crate::blastinput::query_batch::believed_queries(
+        args.parse_deflines,
+        args.psi_search.is_some(),
+        query_records,
+    );
     let query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
         believed_queries,
         database.is_none(),

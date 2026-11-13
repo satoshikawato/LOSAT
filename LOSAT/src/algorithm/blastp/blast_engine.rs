@@ -11766,6 +11766,7 @@ fn run_resolved_in_pool(
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
             blastp_parallel_pool,
+            sorts_results,
         )?)
     } else if ordinary_traceback {
         let ordinary = traceback::OrdinaryTraceback {

@@ -177,8 +177,7 @@ impl QueryLists {
     }
 
     /// The HSPs of every query with a hit list, in report order: per query, each list cut to
-    /// `-max_hsps`, the lists sorted by e-value, each list's HSPs sorted by e-value.
-    /// The lists in report order: sorted by e-value (`sorts_results`), or in the traceback's order
+    /// `-max_hsps`, the lists sorted by e-value (`sorts_results`) or in the traceback's order
     /// where NCBI does not sort them (`HitList::put_in_traceback_order`: a database length of 0 or
     /// of 2^63 or more; the preliminary list's heap order is not the traceback's).
     pub(super) fn finish(self, filters: &HitFilters<'_>, sorts_results: bool) -> Vec<TblastxHsp> {
@@ -406,6 +405,7 @@ impl HitCollector {
                 self.culling_limit,
                 &self.query_lengths,
                 &filters,
+                self.sorts_results,
             ),
         }
     }
@@ -670,6 +670,7 @@ mod tests {
                 query_cov_hsp_perc: 0.0,
                 query_lengths: &query_lengths,
             },
+            true,
         );
         assert!(!want.is_empty());
         let collector =

@@ -1995,16 +1995,19 @@ pub(crate) fn final_hit_order(
 /// in OID order, with the merit `culling_max` (+3 above 1; in `i64`, where NCBI's `Int4`
 /// overflows near `INT4_MAX`, NCBI parity DECISIONS 17). The trees' HSPs then reach the hit list of the traceback in OID order, where
 /// the `-max_target_seqs` cut is made (`Blast_HitListUpdate`), and the pipe culls the kept
-/// lists again, sorted by e-value, with the merit `culling_limit`. The rest is
-/// `final_hit_order`'s: the lists sorted by e-value (their HSPs in score order) and each
-/// list's HSPs sorted by e-value. The trees belong to the query's contexts, so the
-/// queries are culled one after another.
+/// lists again, sorted by e-value, with the merit `culling_limit`. The pipe's lists come out in
+/// the rip order of its trees (hspfilter_culling.c:501-580); they are sorted by e-value only where
+/// NCBI sorts the results (`sorts_results`: a positive `BlastSeqSrcGetTotLen`,
+/// blast_traceback.c:1768-1772), then cut to `-max_target_seqs` (blast_traceback.c:1777), and each
+/// list's HSPs sorted by e-value. The trees belong to the query's contexts, so the queries are
+/// culled one after another.
 pub(crate) fn culled_hit_order(
     hits: Vec<TblastxHsp>,
     hitlist_size: usize,
     culling_limit: i32,
     query_lengths: &[usize],
     filters: &HitFilters<'_>,
+    sorts_results: bool,
 ) -> Vec<TblastxHsp> {
     use super::hsp_culling::{tblastx_context_lengths, CullingWriter};
     use crate::algorithm::blastn::hsp::{HitList, HitListEntry};
@@ -2066,7 +2069,11 @@ pub(crate) fn culled_hit_order(
             final_lists.hsplist_array.push(list);
         }
         final_lists.hsplist_count = final_lists.hsplist_array.len();
-        final_lists.sort_by_evalue();
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772 (quoted at
+        // `DbStatistics::sorts_results`)
+        if sorts_results {
+            final_lists.sort_by_evalue();
+        }
         final_lists.prune_by_size(hitlist_size);
         for mut list in final_lists.hsplist_array {
             HitListEntry::sort_by_evalue(&mut list);

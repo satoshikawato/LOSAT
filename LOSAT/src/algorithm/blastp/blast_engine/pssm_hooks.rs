@@ -494,6 +494,7 @@ pub(super) fn pssm_traceback(
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     pool: &crate::utils::threading::SearchPool<'_>,
+    sorts_results: bool,
 ) -> Result<Vec<Option<BlastpHitList>>> {
     let psi = args
         .psi_search
@@ -534,6 +535,7 @@ pub(super) fn pssm_traceback(
         stats,
         expect_value: args.evalue,
         hitlist_size: args.traceback_hitlist_size(),
+        sorts_results,
     }
     .run(preliminary_hit_lists, compact_hit_lists, pool)
 }

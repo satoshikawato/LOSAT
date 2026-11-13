@@ -756,14 +756,22 @@ Same values, faster computation:
   clamped lower score), and the scalar port runs that call. `=0` runs neither the clamp nor the 32-bit lanes.
   The rule (conditional, not a new rule: the path runs exactly where the scalar fallback ran,
   `docs/decisions/SWITCH_APPROVALS.md` (ii)) is marked per call (`x_reach!`: own path = an X-drop past the
-  16-bit lanes, which the switch clamps onto the 16-bit or 8-bit lanes or runs on the 32-bit lanes). The 8-bit and 16-bit kernels' machine code is unchanged (x86_64 objdump of every function against
-  dev e990a108f: only `xdrop_align` differs). Evidence: the random tests of `utils/xdrop_simd.rs`
+  16-bit lanes, which the switch clamps onto the 16-bit or 8-bit lanes or runs on the 32-bit lanes). The 8-bit
+  and 16-bit kernels' machine code is unchanged (x86_64 objdump of every function of the release binary
+  against dev 3733304a0: 4,502 functions the same, among them every 8/16-bit kernel, `walk`, `XTrace` and
+  `build_row_table`; `xdrop_align` (637 -> 619 instructions) and `fits_8bit` (`max_score` no longer inlined)
+  differ, 67 functions differ only in the `x_reach!` line number the new line moved by one, the rest are the
+  new 32-bit functions). Evidence: the random tests of `utils/xdrop_simd.rs`
   (`wide_lanes_*`, `x_drop_clamp_keeps_every_scalar_result`, X-drops up to 2^31 - 300) and the blastn / blastp
   tests that compare the dispatched extensions with their scalar ports in one process
   (`wide_lanes_give_the_scalar_ports_results`); `tests/blastn_dp32.rs` and `tests/blastp_dp32.rs` compare whole
-  reports with `=0`. Local one-thread timing of `blastn -task blastn -xdrop_gap_final 1e5`, 12 kb x 20 kb (the
-  same run, user seconds): NCBI 82.3, dev e990a108f 72.5, with the switch 22.8, all three reports equal;
-  `-xdrop_gap 1e5` 58.1 -> 17.3, dc-megablast `-xdrop_gap_final 1e5` 29.2 -> 10.0; max RSS 302 -> 265 MB.
+  reports with `=0`. One-thread timing on a quiet core of the workstation (node 1, the same run, user + system
+  seconds) of `blastn -task blastn -xdrop_gap_final 1e5`, 12 kb x 20 kb: NCBI 55.5, dev 3733304a0 39.5, with the
+  switch 18.8, all three reports equal; `-xdrop_gap 1e5` 36.0 -> 17.3 (NCBI 51.2), dc-megablast
+  `-xdrop_gap_final 1e6` 17.5 -> 7.4 (NCBI 22.5); max RSS 294 -> 258 MB (NCBI 273). The default path keeps
+  its time and max RSS (same-run A/B against dev of megablast, blastn, dc-megablast, blastp, blastx, tblastn
+  and tblastx: CPU x0.9988-x1.0023, user instructions x0.99994-x1.00082; blastx over 31 pairs x1.0001,
+  where dev against itself gives x0.9997).
 - `LOSAT_X_DPEMASK=1` (with the 256-bit AVX2 kernel, speed; in the strict set from the pull request that
   added it, 2026-10-19; `=0` returns to the previous kernel) the 8-bit
   256-bit X-drop kernel (`align8`: blastp's and the translated programs' score-only DP, blastn's

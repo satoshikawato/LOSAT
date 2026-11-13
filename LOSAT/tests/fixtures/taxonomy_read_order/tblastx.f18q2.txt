@@ -1,0 +1,58 @@
+
+                                          Tax BLAST report                                          
+
+Query= qn1
+
+Length=750
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ AAA00001  a_title                                                                     578   2e-169  
+
+                                          Tax BLAST report                                          
+
+Query= qn1b
+
+Length=750
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+Error: [tblastx] Error: Offset error at end of taxdb file.
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ AAA00001  a_title                                                                     578   2e-169  
+
+                                          Tax BLAST report                                          
+
+Query= qn3 nohit
+
+Length=750
+
+                                           Organism Report                                           
+Accession...  Description... Score... E-value... 

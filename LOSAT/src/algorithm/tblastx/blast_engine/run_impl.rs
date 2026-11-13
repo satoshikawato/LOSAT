@@ -901,7 +901,7 @@ pub fn run(
     use crate::blastinput::input_files;
     // The diagnostics stream: with the archive it also saves what it writes as the messages of
     // the next archive.
-    let mut stderr = std::io::stderr();
+    let mut stderr = crate::cli::CliStderr;
     let mut archive_tee;
     let diagnostics: &mut (dyn std::io::Write + Send) = match &archive {
         Some(handle) => {
@@ -984,7 +984,9 @@ pub fn run(
     } else {
         args.outfmt.clone()
     };
-    let mut stream = cli_report_stream(out_file);
+    // The organism report's `-out` file is written as NCBI's buffer writes it.
+    let tax_report = format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
+    let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report);
     let result = {
         let mut outputs =
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
@@ -1048,7 +1050,7 @@ pub fn run(
     // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119).
     // For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
     // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if write_failed && pairwise {
+    if write_failed && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
             message: "BLAST failed to write output\n".to_string(),
@@ -1078,7 +1080,7 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = cli_report_stream(out_file);
+        let mut report = crate::cli::ReportStream::of_cli(out_file, false);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -1102,19 +1104,6 @@ fn open_out_file(args: &TblastxArgs) -> Result<Option<std::io::BufWriter<std::fs
             None => None,
         },
     )
-}
-
-/// The report stream of the command line: the `-out` file, or standard output.
-fn cli_report_stream(
-    out_file: Option<std::io::BufWriter<std::fs::File>>,
-) -> crate::cli::ReportStream {
-    crate::cli::ReportStream {
-        inner: match out_file {
-            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
-            None => crate::cli::report_standard_output(),
-        },
-        failed: false,
-    }
 }
 
 /// The subjects of `-subject` (after `-subject_loc`) as NCBI's option handlers read them, with
@@ -1475,6 +1464,19 @@ fn open_search_database(
     }) {
         args.tabular_taxdb = Some(match database.as_ref() {
             Some(database) => database.taxdb_found(),
+            // The organism report's lookups open the run's own database.
+            None if outputs.formats.iter().any(|format| {
+                matches!(
+                    report::output_format(format.outfmt),
+                    report::TblastxOutputFormat::CustomTabular(spec)
+                        if spec.kind == crate::report::tabular::TabularKind::TaxReport
+                )
+            }) =>
+            {
+                args.subject_taxdb =
+                    crate::algorithm::common::database::SubjectTaxdb::of(settings, "TBLASTX")?;
+                args.subject_taxdb.is_some()
+            }
             None => crate::algorithm::common::database::subject_taxdb_found(settings, "TBLASTX")?,
         });
     }
@@ -2424,7 +2426,7 @@ fn write_tblastx_outputs(
             || matches!(output_format, report::TblastxOutputFormat::Xml2(_))
             || matches!(
                 output_format,
-                report::TblastxOutputFormat::CustomTabular(spec) if spec.checks_taxdb()
+                report::TblastxOutputFormat::CustomTabular(spec) if spec.looks_up_every_taxid()
             ))
         .then(|| {
             let first = warning_lines.take();
@@ -3399,21 +3401,15 @@ fn run_batch_loop(
         .first()
         .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
     // Whether the first format writes the texts of the subjects that a query's report reads one
-    // by one where it reads each (`TblastxOutputFormat::places_subject_reads`).
-    let places_reads = outputs
+    // by one where it reads each (`ReportFormat::places_subject_reads`).
+    let first_report = outputs
         .formats
         .first()
-        .is_some_and(|format| report::output_format(format.outfmt).places_subject_reads());
+        .and_then(crate::api::local_blast::FormatOutput::report_format);
+    let places_reads =
+        first_report.is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
     // The pairwise report reads its subjects in the order of its `-sorthits`.
-    let pairwise = outputs
-        .formats
-        .first()
-        .is_some_and(|format| {
-            matches!(
-                report::output_format(format.outfmt),
-                report::TblastxOutputFormat::Pairwise
-            )
-        })
+    let pairwise = (first_report == Some(crate::blastinput::app::ReportFormat::Pairwise))
         .then(|| args.formatting.report_sort());
     // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0 too,
     // which the prefetch does not: the rows of a batch with hits may open the taxonomy database
@@ -3421,7 +3417,7 @@ fn run_batch_loop(
     let plural_names = outputs.formats.first().is_some_and(|format| {
         matches!(
             report::output_format(format.outfmt),
-            report::TblastxOutputFormat::CustomTabular(spec) if spec.checks_taxdb()
+            report::TblastxOutputFormat::CustomTabular(spec) if spec.looks_up_every_taxid()
         )
     });
     // Which rows of the first format's report read the subjects' Bioseqs, which NCBI's
@@ -3914,7 +3910,7 @@ fn run_batch_loop(
                                 }
                             };
                             // The first format writes the texts where it reads each subject
-                            // (`TblastxOutputFormat::places_subject_reads`), else before the
+                            // (`ReportFormat::places_subject_reads`), else before the
                             // report.
                             query_fetches.push(if shown.is_empty() {
                                 Vec::new()
@@ -4279,10 +4275,17 @@ impl BatchReports<'_> {
                 report::TblastxOutputFormat::CustomTabular(spec) => Some(spec),
                 _ => None,
             });
+        // A `-subject` search's organism report (outfmt 18) looks names up in the run's
+        // database.
         let tabular_names = match (&self.subjects, custom_tabular) {
             (ShownSubjects::Database { database, .. }, Some(spec)) => {
                 database.tabular_names(spec, &tabular_taxonomy)?
             }
+            (_, Some(_)) => self
+                .args
+                .subject_taxdb
+                .as_ref()
+                .map(|taxdb| taxdb.report_names("TBLASTX")),
             _ => None,
         };
         let written = write_tblastx_outputs(

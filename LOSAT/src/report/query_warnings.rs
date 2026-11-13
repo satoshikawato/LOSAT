@@ -430,6 +430,13 @@ impl<'a> QueryWarnings<'a> {
             .is_some_and(|cursor| cursor.has_texts(query))
     }
 
+    /// The texts of the subjects' reads (`with_subject_reads`; `None` without a read that writes
+    /// one) and the sink, apart: a writer that writes texts of its own to the sink between the
+    /// reads places them with the cursor (`tax_report::write_report`).
+    pub fn reads_and_sink(&mut self) -> (Option<&mut ReadCursor<'a>>, &mut (dyn Write + Send)) {
+        (self.reads.as_mut(), &mut *self.sink)
+    }
+
     /// The report of query `query` reads subject `subject` here (`ReadCursor::subject_read`),
     /// after the report written so far (`report`).
     pub fn subject_read(

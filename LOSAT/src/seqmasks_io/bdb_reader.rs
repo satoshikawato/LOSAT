@@ -7,7 +7,7 @@
 //!
 //! - [`MaskBdbReader::open`]`(name, molecule, registry, title_printed, program)`:
 //!   `CMaskBDBReader(name, is_nucl)` (`new CSeqDB(name, eNucleotide or eProtein)`).
-//! - [`MaskBdbReader::next_record`]: `GetNextSequence`, `Ok(None)` after the last OID.
+//! - [`MaskBdbReader::next_record`]`()`: `GetNextSequence`, `Ok(None)` after the last OID.
 //! - [`BdbRecord`]: the Seq-ids of the first definition line, the title joined from all of them
 //!   (`CSeqDB::GetBioseq`), and the residues: IUPACna letters of a nucleotide
 //!   (`eCoding_Iupac`), NCBIstdaa codes of a protein (`eCoding_Ncbi`; [`iupacaa_letters`] gives
@@ -80,6 +80,8 @@ pub(crate) struct MaskBdbReader {
     /// Whether the writer prints the title (`interval`, `acclist`, `fasta`; the `seqloc_*` and
     /// `maskinfo_*` writers take only the Seq-id).
     title_printed: bool,
+    /// The program's name in LOSAT's refusals.
+    program: &'static str,
 }
 
 /// Whether the writer of `outfmt` prints the title of a sequence (`CMaskWriter::IdToString`).
@@ -96,7 +98,7 @@ impl MaskBdbReader {
         molecule: SeqType,
         registry: Result<Option<&str>, &str>,
         title_printed: bool,
-        program: &str,
+        program: &'static str,
     ) -> Result<Self, BdbError> {
         let registry = registry.map_err(|reason| {
             BdbError::Refused(
@@ -113,16 +115,18 @@ impl MaskBdbReader {
             molecule,
             oid: 0,
             title_printed,
+            program,
         })
     }
 
     /// `GetNextSequence`: the sequence of the next OID, `None` after the last.
-    pub(crate) fn next_record(&mut self, program: &str) -> Result<Option<BdbRecord>, BdbError> {
+    pub(crate) fn next_record(&mut self) -> Result<Option<BdbRecord>, BdbError> {
         if self.oid >= self.db.num_seqs() {
             return Ok(None);
         }
         let oid = self.oid;
         self.oid += 1;
+        let program = self.program;
         let error = |error| database_error(error, program);
         let set = self.db.defline_set(oid).map_err(error)?;
         if set
@@ -221,13 +225,107 @@ pub(crate) fn iupacaa_letters(stdaa: &[u8]) -> Vec<u8> {
 // ```
 // (`NCBI_THROW` is on line 320; its function is `BLASTDB::ncbi::CSeqDBAliasNode::x_ResolveNames`,
 // the module `BLASTDB` before it: segmasker 2.17.0's `e.what()`, fixture db_missing.)
-/// The place of NCBI's throw of a database that is not found.
-const DATABASE_NOT_FOUND: ThrowSite = ThrowSite {
-    file: "src/objtools/blast/seqdb_reader/seqdbalias.cpp",
-    line: 320,
-    kind: "CSeqDBException::eInvalid",
-    function: Some("BLASTDB::ncbi::CSeqDBAliasNode::x_ResolveNames"),
-};
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:740-752, 921-925
+// ```c++
+//     if (m_DBList.empty()) {
+//         ...
+//             situation = "passed to CSeqDB::CSeqDB().";
+//         ...
+//             situation = string("found in alias file [")
+//                 + this_name.GetBasePathS() + "].";
+//         ...
+//         NCBI_THROW(CSeqDBException,
+//                    eArgErr,
+//                    string("No database names were ") + situation);
+// ...
+//         oss << "Could not find volume or alias file ("
+//             << m_DBList[i].GetBasePathS() << ") referenced in alias file ("
+//             << this_name.GetBasePathS() << ").";
+//
+//         NCBI_THROW(CSeqDBException, eFileErr, oss.str());
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:155-164 (the
+// constructor of `new CSeqDB(dbname, seqtype)`)
+// ```c++
+// CSeqDB::CSeqDB(const string & dbname,
+//                ESeqType       seqtype,
+//                CSeqDBGiList * gi_list,
+//                bool           use_atlas_lock)
+//
+// {
+//     if (dbname.size() == 0) {
+//         NCBI_THROW(CSeqDBException,
+//                    eArgErr,
+//                    "Database name is required.");
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:124-128
+// ```c++
+//     if (! m_File.Open(CSeqDB_Path(m_FileName))) {
+//         //m_Atlas.Unlock(locked);
+//
+//         string msg = string("Error: File (") + m_FileName + ") not found.";
+//
+//         NCBI_THROW(CSeqDBException, eFileErr, msg);
+// ```
+// (Each of these texts has this one place in NCBI's database reader; segmasker 2.17.0 names the
+// lines 750, 925, 162 and 128 and these functions, fixtures db_alias_*, db_empty_name,
+// db_space_name; review of line RG item K2, L2.)
+/// The places of NCBI's throws of a database error, by the start of its text.
+const DATABASE_ERROR_SITES: [(&str, ThrowSite); 5] = [
+    (
+        "No alias or index file found for ",
+        seqdb_site(
+            SEQDBALIAS,
+            320,
+            "BLASTDB::ncbi::CSeqDBAliasNode::x_ResolveNames",
+        ),
+    ),
+    (
+        "Could not find volume or alias file (",
+        seqdb_site(
+            SEQDBALIAS,
+            925,
+            "BLASTDB::ncbi::CSeqDBAliasNode::x_ExpandAliases",
+        ),
+    ),
+    (
+        "No database names were ",
+        seqdb_site(
+            SEQDBALIAS,
+            750,
+            "BLASTDB::ncbi::CSeqDBAliasNode::x_ExpandAliases",
+        ),
+    ),
+    (
+        "Database name is required.",
+        seqdb_site(
+            "src/objtools/blast/seqdb_reader/seqdb.cpp",
+            162,
+            "BLASTDB::ncbi::CSeqDB::CSeqDB",
+        ),
+    ),
+    (
+        "Error: File (",
+        seqdb_site(
+            "src/objtools/blast/seqdb_reader/seqdbfile.cpp",
+            128,
+            "BLASTDB::ncbi::CSeqDBExtFile::CSeqDBExtFile",
+        ),
+    ),
+];
+
+/// NCBI's alias reader.
+const SEQDBALIAS: &str = "src/objtools/blast/seqdb_reader/seqdbalias.cpp";
+
+/// The place of a `CSeqDBException` (its codes are all reported as `eInvalid`).
+const fn seqdb_site(file: &'static str, line: u32, function: &'static str) -> ThrowSite {
+    ThrowSite {
+        file,
+        line,
+        kind: "CSeqDBException::eInvalid",
+        function: Some(function),
+    }
+}
 
 /// An error of the database reader: NCBI's exception (`SeqDbError::ncbi_exception`, or the
 /// `CSeqDBException` of `SeqDbError::ncbi_message`, with its place where LOSAT knows it), or
@@ -240,11 +338,13 @@ fn database_error(error: SeqDbError, program: &str) -> BdbError {
     }
     match error.ncbi_message() {
         Some(text) => {
-            let site = if text.starts_with("No alias or index file found for ") {
-                DATABASE_NOT_FOUND
-            } else {
-                ThrowSite::generated("CSeqDBException::eInvalid")
-            };
+            let site = DATABASE_ERROR_SITES
+                .iter()
+                .find(|(start, _)| text.starts_with(start))
+                .map_or(
+                    ThrowSite::generated("CSeqDBException::eInvalid"),
+                    |&(_, site)| site,
+                );
             BdbError::Ncbi(NcbiException::new(site, text))
         }
         None => BdbError::Refused(

@@ -495,3 +495,14 @@ logfile_null_ok	-in in/basic.fa -logfile /dev/null
 logfile_null_conf	-in in/basic.fa -conffile conf/malformed.ini -logfile /dev/null
 logfile_null_noheader	-in in/noheader.fa -logfile /dev/null
 help_full	-help-full
+# The review rows (review of line RG item K2, L2 and M1): alias files of a missing volume, without DBLIST and of itself, empty and blank names, and db/r100, a database whose .psq has the byte 100 for two X (db/r21: 21); the local oracle, 2026-11-13, ad-RG-K-4.
+db_alias_missing	-infmt blastdb -in db/alias_missing
+db_alias_missing_mask	-infmt blastdb -in db/alias_missing -outfmt maskinfo_asn1_text
+db_alias_nodblist	-infmt blastdb -in db/alias_nodblist
+db_alias_self	-infmt blastdb -in db/alias_self
+db_empty_name	-infmt blastdb -in ""
+db_space_name	-infmt blastdb -in " "
+db_r21_fasta	-infmt blastdb -in db/r21 -outfmt fasta
+db_r100_fasta	-infmt blastdb -in db/r100 -outfmt fasta
+db_r100_int	-infmt blastdb -in db/r100
+db_r100_mask	-infmt blastdb -in db/r100 -outfmt maskinfo_asn1_text

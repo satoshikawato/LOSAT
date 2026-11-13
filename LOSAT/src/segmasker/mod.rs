@@ -196,7 +196,9 @@ mod tests {
     // NCBI 2.17.0 segmasker on in/basic.fa of the fixtures, from the standard input.
     #[test]
     fn the_standard_input_is_masked() {
-        let input = b">seq1 low complexity test\nMKVLAAGIVALLLAAQQQQQQQQQQQQQQQQPPPPPPPPGSGSGSGSGSGSAEDKLMNVWY\nRTSHCFIPKLEDGHKLMNRSTVWY\n";
+        let input = b">seq1 low complexity test\n\
+            MKVLAAGIVALLLAAQQQQQQQQQQQQQQQQPPPPPPPPGSGSGSGSGSGSAEDKLMNVWY\n\
+            RTSHCFIPKLEDGHKLMNRSTVWY\n";
         assert_eq!(
             run_words(&[], input),
             (
@@ -215,8 +217,8 @@ mod tests {
             |line: &[&str]| -> Vec<String> { line.iter().map(|word| word.to_string()).collect() };
         let args = crate::ncbi_app::args::parse(&TOOL, &words(&[])).unwrap();
         assert_eq!(args.integer("window"), Some(12));
-        assert_eq!(args.double("locut"), Some(2.2));
-        assert_eq!(args.double("hicut"), Some(2.5));
+        assert_eq!(args.double("locut"), Some(Ok(2.2)));
+        assert_eq!(args.double("hicut"), Some(Ok(2.5)));
         assert_eq!(args.value("infmt"), Some("fasta"));
         assert_eq!(args.value("outfmt"), Some("interval"));
         let args = crate::ncbi_app::args::parse(
@@ -225,10 +227,51 @@ mod tests {
         )
         .unwrap();
         assert_eq!(args.integer("window"), Some(16));
-        assert_eq!(args.double("locut"), Some(2.0));
-        let hicut = args.double("hicut").unwrap();
+        assert_eq!(args.double("locut"), Some(Ok(2.0)));
+        let hicut = args.double("hicut").unwrap().unwrap();
         assert!(hicut.is_nan() && hicut.is_sign_negative());
         assert!(crate::ncbi_app::args::parse(&TOOL, &words(&["-locut", "2,2"])).is_err());
+    }
+
+    // A `-locut` that NCBI computes in extended precision is read as NCBI's reader reads it (the
+    // usage of `-h`, rc 0), and refused where `Run` reads it (review of line RG item K2, L1).
+    #[test]
+    fn an_extended_precision_value_is_refused_by_the_run() {
+        let value = "1.23456789012345678901e";
+        let (status, out, err) = run_words(&["-locut", value, "-h"], b"");
+        assert_eq!(
+            (status, out, err),
+            (0, crate::ncbi_app::short_usage(HELP), String::new())
+        );
+        assert_eq!(
+            run_words(&["-locut", value], b">a\nQ\n"),
+            (
+                1,
+                String::new(),
+                format!(
+                    "Error: the value '{value}' of -locut, which NCBI computes in extended \
+                     precision, is not supported by LOSAT's SEGMASKER\n"
+                )
+            )
+        );
+    }
+
+    // A database byte above 127 (tests/segmasker/db/r201: the byte 201 for two X) is undefined in
+    // NCBI's SEG, and 201 stops its window: refused (review of line RG item K2, M1).
+    #[test]
+    fn a_database_byte_above_127_is_refused() {
+        let db = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/segmasker/db/r201");
+        let db = db.to_str().unwrap();
+        assert_eq!(
+            run_words(&["-infmt", "blastdb", "-in", db], b""),
+            (
+                1,
+                String::new(),
+                "Error: a database residue byte 201, above 127 (NCBI's SEG reads it as a negative \
+                 char, and stops its window at 201), is not supported by LOSAT's SEGMASKER\n"
+                    .to_string()
+            )
+        );
     }
 
     // `-in` and `-out` that do not open: `Run` catches the `CArgException` and writes

@@ -2,10 +2,12 @@
 //! the masking programs (dustmasker, segmasker; windowmasker later).
 //!
 //! `fasta_reader` reads FASTA input (`CMaskFastaReader`), `bdb_reader` a BLAST database
-//! (`CMaskBDBReader`). A tool hands each sequence and its
+//! (`CMaskBDBReader`); `run` holds the parts of the programs' runs around them. A tool hands
+//! each sequence and its
 //! masked intervals to one [`writer::MaskWriter`], then finishes it (the `maskinfo_*` formats
 //! write their one object at the end).
 
 pub(crate) mod bdb_reader;
 pub(crate) mod fasta_reader;
+pub(crate) mod run;
 pub(crate) mod writer;

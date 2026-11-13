@@ -5,6 +5,7 @@
 //! batch, and `run` without reports looks for a signal between them (Ctrl-C).
 
 use std::borrow::Cow;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -205,6 +206,28 @@ pub fn run_to_file(
     .map_err(exception)
 }
 
+/// A tool of the library API (`api::run_makeblastdb` and the others).
+type Tool = fn(&[&str], &mut dyn Read, &mut dyn Write, &mut dyn Write) -> Result<(), api::Error>;
+
+/// `tool` with the command line's words and `input` as its standard input, without the GIL:
+/// what it writes to standard output and to standard error.
+fn run_tool<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+    tool: Tool,
+) -> PyResult<(Bound<'py, PyBytes>, String)> {
+    let (output, diagnostics) = py
+        .detach(|| {
+            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
+            let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
+            tool(&words, &mut &*input, &mut output, &mut diagnostics)?;
+            Ok((output, diagnostics))
+        })
+        .map_err(exception)?;
+    Ok((PyBytes::new(py, &output), diagnostics_text(&diagnostics)))
+}
+
 /// `makeblastdb` with the command line's words: `input` is its standard input. Returns what it
 /// writes to standard output and to standard error.
 #[pyfunction]
@@ -213,15 +236,7 @@ pub fn makeblastdb<'py>(
     argv: Vec<String>,
     input: PyBackedBytes,
 ) -> PyResult<(Bound<'py, PyBytes>, String)> {
-    let (output, diagnostics) = py
-        .detach(|| {
-            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
-            let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
-            api::run_makeblastdb(&words, &mut &*input, &mut output, &mut diagnostics)?;
-            Ok((output, diagnostics))
-        })
-        .map_err(exception)?;
-    Ok((PyBytes::new(py, &output), diagnostics_text(&diagnostics)))
+    run_tool(py, argv, input, api::run_makeblastdb)
 }
 
 /// `blastdbcmd` with the command line's words: `input` is its standard input (a batch file `-`).
@@ -232,15 +247,7 @@ pub fn blastdbcmd<'py>(
     argv: Vec<String>,
     input: PyBackedBytes,
 ) -> PyResult<(Bound<'py, PyBytes>, String)> {
-    let (output, diagnostics) = py
-        .detach(|| {
-            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
-            let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
-            api::run_blastdbcmd(&words, &mut &*input, &mut output, &mut diagnostics)?;
-            Ok((output, diagnostics))
-        })
-        .map_err(exception)?;
-    Ok((PyBytes::new(py, &output), diagnostics_text(&diagnostics)))
+    run_tool(py, argv, input, api::run_blastdbcmd)
 }
 
 /// `dustmasker` with the command line's words: `input` is its standard input (`-in -`, and
@@ -251,15 +258,7 @@ pub fn dustmasker<'py>(
     argv: Vec<String>,
     input: PyBackedBytes,
 ) -> PyResult<(Bound<'py, PyBytes>, String)> {
-    let (output, diagnostics) = py
-        .detach(|| {
-            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
-            let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
-            api::run_dustmasker(&words, &mut &*input, &mut output, &mut diagnostics)?;
-            Ok((output, diagnostics))
-        })
-        .map_err(exception)?;
-    Ok((PyBytes::new(py, &output), diagnostics_text(&diagnostics)))
+    run_tool(py, argv, input, api::run_dustmasker)
 }
 
 /// `segmasker` with the command line's words: `input` is its standard input (`-in -`, and
@@ -270,15 +269,7 @@ pub fn segmasker<'py>(
     argv: Vec<String>,
     input: PyBackedBytes,
 ) -> PyResult<(Bound<'py, PyBytes>, String)> {
-    let (output, diagnostics) = py
-        .detach(|| {
-            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
-            let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
-            api::run_segmasker(&words, &mut &*input, &mut output, &mut diagnostics)?;
-            Ok((output, diagnostics))
-        })
-        .map_err(exception)?;
-    Ok((PyBytes::new(py, &output), diagnostics_text(&diagnostics)))
+    run_tool(py, argv, input, api::run_segmasker)
 }
 
 /// `run` without reports.

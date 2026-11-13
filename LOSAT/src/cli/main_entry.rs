@@ -99,10 +99,11 @@ fn run_main_entry() -> Result<()> {
     // {
     // 	x_CheckBlastUsageEnv();
     // ```
-    // Every NCBI BLAST+ program's application but dustmasker's and segmasker's has a usage report, made with the
-    // application before `AppMain` runs; it reads `.ncbirc` (`ncbi_environment::ApplicationStart`),
-    // and its messages go to stderr at once, before `-version` and before blastdbcmd's `-logfile`
-    // is read. The start of the others (dustmasker, segmasker, rpsbproc) writes nothing here.
+    // Every NCBI BLAST+ program's application but dustmasker's and segmasker's has a usage
+    // report, made with the application before `AppMain` runs; it reads `.ncbirc`
+    // (`ncbi_environment::ApplicationStart`), and its messages go to stderr at once, before
+    // `-version` and before blastdbcmd's `-logfile` is read. The start of the others (dustmasker,
+    // segmasker, rpsbproc) writes nothing here.
     let program = argv
         .get(1)
         .and_then(|word| word.to_str())

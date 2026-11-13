@@ -1874,6 +1874,14 @@ mod tests {
                 masker.x_mask_sequence::<true>(&seq)
             };
             assert_eq!(fast, reference, "case {case}, length {len}");
+            // segmasker's SEG, without the merge (review of line RG item K2, N1).
+            if seq.len() >= masker.window {
+                assert_eq!(
+                    masker.x_mask_sequence::<false>(&seq),
+                    masker.mask_sequence_reference::<false>(&seq),
+                    "case {case}, length {len}, unmerged"
+                );
+            }
             masked += reference.len();
         }
         assert!(
@@ -1933,6 +1941,11 @@ mod tests {
                 masker.x_mask_sequence::<true>(window),
                 reference,
                 "window {begin}..{end}"
+            );
+            assert_eq!(
+                masker.x_mask_sequence::<false>(window),
+                masker.mask_sequence_reference::<false>(window),
+                "window {begin}..{end}, unmerged"
             );
             masked += reference.len();
         }

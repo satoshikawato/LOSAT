@@ -3,7 +3,7 @@
 
 use std::io::Read;
 
-use crate::seqmasks_io::fasta_reader::{ios_failure_what, MaskFastaReader, MaskReadError};
+use crate::seqmasks_io::fasta_reader::{MaskFastaReader, MaskReadError};
 
 use super::work::{Failure, Record, SequenceSource};
 
@@ -43,10 +43,5 @@ impl<R: Read> SequenceSource for FastaSource<R> {
 
 /// A failed read of `-in`: the `std::ios_base::failure` of NCBI's stream.
 fn read_failure(error: std::io::Error) -> Failure {
-    match ios_failure_what(&error) {
-        Some(what) => Failure::Std(what),
-        None => Failure::Refused(super::work::unsupported(&format!(
-            "an input that cannot be read ({error})"
-        ))),
-    }
+    crate::seqmasks_io::run::read_failure(error, super::PROGRAM)
 }

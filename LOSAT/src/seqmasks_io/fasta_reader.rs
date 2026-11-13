@@ -53,9 +53,9 @@ use crate::writedb::fasta_source::reader::{
 // (`what()` is the text, `: ` and the `strerror` of `errno`: `-in` naming a directory gives
 // `basic_filebuf::xsgetn error reading the file: Is a directory`, dustmasker and segmasker
 // fixtures `in_dir`.)
-/// The `what()` of the `std::ios_base::failure` that a failed read of the input (`MaskReadError::Read`)
-/// is in NCBI's stream; `None` for an error without an OS error code, whose text LOSAT does not
-/// know.
+/// The `what()` of the `std::ios_base::failure` that a failed read of the input
+/// (`MaskReadError::Read`) is in NCBI's stream; `None` for an error without an OS error code,
+/// whose text LOSAT does not know.
 pub(crate) fn ios_failure_what(error: &std::io::Error) -> Option<String> {
     let code = error.raw_os_error()?;
     let text = error.to_string();

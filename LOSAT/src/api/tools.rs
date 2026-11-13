@@ -1,8 +1,8 @@
 //! The tools of the command line besides the searches: `makeblastdb` builds a BLAST database,
 //! `blastdbcmd` reads one, `dustmasker` masks the low-complexity regions of nucleotide
-//! sequences and `segmasker` those of protein sequences. They take the command line's words, read the caller's reader where the command
-//! line reads its standard input, and write what it writes, to the caller's writers; none
-//! touches the process's standard streams.
+//! sequences and `segmasker` those of protein sequences. They take the command line's words,
+//! read the caller's reader where the command line reads its standard input, and write what it
+//! writes, to the caller's writers; none touches the process's standard streams.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1360-1363
 //! ```c++

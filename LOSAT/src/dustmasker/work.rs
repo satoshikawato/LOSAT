@@ -3,14 +3,13 @@
 
 use std::io::Write;
 
-use crate::ncbi_app::files::{ends_like_sigpipe, open_input_file, Cin, Ostream};
+use crate::ncbi_app::files::{open_input_file, Cin, Ostream};
 use crate::ncbi_exception::{err_post_x, NcbiException};
 use crate::seqdb::SeqType;
 use crate::seqid::ParsedSeqId;
 use crate::seqmasks_io::bdb_reader::{prints_title, BdbError, MaskBdbReader};
-use crate::seqmasks_io::writer::{
-    writes_serial_objects, FilterProgram, MaskWriter, MaskedBioseq, Serial, WriteError,
-};
+use crate::seqmasks_io::run::{finish, serial_write_failure, write_failure, RunFailure};
+use crate::seqmasks_io::writer::{FilterProgram, MaskWriter, MaskedBioseq, Serial, WriteError};
 
 use super::masker::dust_masks_skip_ns;
 
@@ -56,19 +55,31 @@ pub(super) enum Failure {
 
 impl From<WriteError> for Failure {
     fn from(error: WriteError) -> Self {
-        match error {
-            WriteError::Io(error) if ends_like_sigpipe(&error) => Failure::ClosedPipe,
-            WriteError::Io(error) => {
-                Failure::Refused(format!("writing the output failed: {error}"))
-            }
-            WriteError::Refused(what) => Failure::Refused(unsupported(&what)),
-        }
+        write_failure(error, super::PROGRAM)
+    }
+}
+
+impl RunFailure for Failure {
+    fn refused(message: String) -> Self {
+        Failure::Refused(message)
+    }
+
+    fn closed_pipe() -> Self {
+        Failure::ClosedPipe
+    }
+
+    fn std_exception(what: String) -> Self {
+        Failure::Std(what)
+    }
+
+    fn stops_writing(&self) -> bool {
+        matches!(self, Failure::Refused(_) | Failure::ClosedPipe)
     }
 }
 
 /// LOSAT's refusal of `what` (a noun phrase).
 pub(super) fn unsupported(what: &str) -> String {
-    format!("{what} is not supported by LOSAT's {}", super::PROGRAM)
+    crate::seqmasks_io::run::unsupported(what, super::PROGRAM)
 }
 
 /// `CMaskReader::GetNextSequence` of a source of sequences.
@@ -241,55 +252,8 @@ pub(super) fn run(
     // A failed write leaves NCBI's stream bad, and the text writers go on silently (exit 0):
     // `out` drops the bytes after the first failed write.
     let mut out = Ostream::new(out);
-    let mut result = masks_of_input(options, stdin, &mut writer, &mut out);
-    // A refusal of LOSAT's stops before NCBI's run would end, and a closed pipe ends it where
-    // SIGPIPE ends NCBI's: nothing more is written.
-    if !matches!(result, Err(Failure::Refused(_) | Failure::ClosedPipe)) {
-        if let Err(error) = writer.finish(&mut out) {
-            result = Err(error.into());
-        }
-    }
-    // NCBI's `cerr` is tied to `cout`: the output is flushed before the diagnostics of a
-    // failure, and a closed pipe ends the run there, without them.
-    let _ = out.flush();
-    if out.closed() {
-        return Err(Failure::ClosedPipe);
-    }
-    result?;
-    serial_write_failure(&out, options.outfmt)
-}
-
-// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:338-353
-// ```c++
-// void CObjectOStream::Close(void)
-// {
-//     if (m_Fail != fNotOpen) {
-//         try {
-//             DefaultFlush();
-//             ...
-//             m_Output.Close();
-//         }
-//         catch (CException& exc) {
-//             if ( InGoodState() )
-//                 RethrowError(fWriteError, "cannot close output stream",exc);
-//         }
-// ```
-/// LOSAT's refusal when the output `out` of a `seqloc_*` or `maskinfo_*` writer failed. Those
-/// write through NCBI's serial stream (`CObjectOStream`), which checks its writes: NCBI posts
-/// `cannot close output stream` for each object, then stops on `write fault` (exit status 3)
-/// at the next one, or aborts (134) for a `maskinfo` object larger than its 8 KiB buffer. The
-/// `interval`, `acclist` and `fasta` writers write to the `ostream` itself and go on silently,
-/// as here.
-fn serial_write_failure(out: &Ostream<'_>, outfmt: &str) -> Result<(), Failure> {
-    if out.closed() {
-        return Err(Failure::ClosedPipe);
-    }
-    if out.bad() && writes_serial_objects(outfmt) {
-        return Err(Failure::Refused(unsupported(&format!(
-            "a failed write of the -outfmt {outfmt} output (NCBI's serial stream reports it)"
-        ))));
-    }
-    Ok(())
+    let result = masks_of_input(options, stdin, &mut writer, &mut out);
+    finish(writer, &mut out, result, options.outfmt, super::PROGRAM)
 }
 
 fn masks_of_input(
@@ -314,7 +278,7 @@ fn masks_of_input(
             protein: false,
         };
         writer.print(&seq, &mask, options.parse_seqids, out)?;
-        serial_write_failure(out, options.outfmt)?;
+        serial_write_failure::<Failure>(out, options.outfmt, super::PROGRAM)?;
     }
     Ok(())
 }
@@ -392,10 +356,7 @@ fn database_failure(error: BdbError) -> Failure {
 
 impl SequenceSource for DatabaseSource {
     fn next_record(&mut self) -> Result<Option<Record>, Failure> {
-        let record = self
-            .reader
-            .next_record(super::PROGRAM)
-            .map_err(database_failure)?;
+        let record = self.reader.next_record().map_err(database_failure)?;
         Ok(record.map(|record| Record {
             ids: record.ids,
             title: Some(record.title),

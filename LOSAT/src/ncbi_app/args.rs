@@ -4,7 +4,8 @@
 //! has (the help flags, `-logfile`, `-conffile`), reads the words, and refuses every command line
 //! that NCBI's reader refuses with NCBI's text. The values are read as NCBI's `CArgs` gives them
 //! (`Args`): the text of a key, a flag, the integer of an `eInteger` key, the number of an
-//! `eDouble` key, and the streams of the file keys (`files::open_input_file`, `Args::output_file`, module `files`).
+//! `eDouble` key, and the streams of the file keys (`files::open_input_file`,
+//! `Args::output_file`, module `files`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
@@ -34,6 +35,10 @@ pub(crate) enum Kind {
 enum Number {
     Integer(i32),
     Double(f64),
+    /// An `eDouble` value that NCBI computes in x87 extended precision in a way LOSAT does not
+    /// reproduce (`ncbi_str::PosixOrLocalError::ExtendedPrecision`): NCBI's reader accepts it,
+    /// so LOSAT refuses it where the program reads it (`Args::double`).
+    ExtendedPrecision,
 }
 
 /// A constraint on a key's value (`CArgAllow`).
@@ -321,10 +326,17 @@ impl Args {
         }
     }
 
-    /// `AsDouble()` of the `eDouble` key `name`: given, or its default.
-    pub(crate) fn double(&self, name: &str) -> Option<f64> {
+    /// `AsDouble()` of the `eDouble` key `name`: given, or its default; `Err` with LOSAT's
+    /// refusal (a noun phrase that the program completes) of a value that NCBI computes in
+    /// extended precision. The arguments around it are read as NCBI reads them (an error of
+    /// another argument, `-h`, `-dryrun`), so the refusal waits for the program's `Run`.
+    pub(crate) fn double(&self, name: &str) -> Option<Result<f64, String>> {
         match self.numbers.get(name) {
-            Some(&Number::Double(number)) => Some(number),
+            Some(&Number::Double(number)) => Some(Ok(number)),
+            Some(Number::ExtendedPrecision) => Some(Err(format!(
+                "the value '{}' of -{name}, which NCBI computes in extended precision,",
+                self.value(name).unwrap_or_default()
+            ))),
             _ => None,
         }
     }
@@ -727,7 +739,7 @@ fn is_argument_name(name: &str) -> bool {
 fn process_value(tool: &Tool, desc: &Desc, value: &str) -> Result<Option<Number>, ArgsError> {
     let number = match desc.kind {
         Kind::Integer => Some(Number::Integer(integer_value(tool, desc, value)?)),
-        Kind::Double => Some(Number::Double(double_value(tool, desc, value)?)),
+        Kind::Double => Some(double_value(desc, value)?),
         Kind::Text | Kind::Flag | Kind::InputFile | Kind::OutputFile => None,
     };
     let allowed = match desc.constraint {
@@ -738,7 +750,7 @@ fn process_value(tool: &Tool, desc: &Desc, value: &str) -> Result<Option<Number>
         Some(Constraint::AtLeast(min)) => match number {
             Some(Number::Integer(number)) => i64::from(number) >= min,
             Some(Number::Double(number)) => number >= min as f64,
-            None => false,
+            Some(Number::ExtendedPrecision) | None => false,
         },
     };
     match desc.constraint {
@@ -850,25 +862,22 @@ fn integer_value(tool: &Tool, desc: &Desc, value: &str) -> Result<i32, ArgsError
 // ```
 // As for `CArg_Int8`, the conversion's exception is the predecessor (its text is the first
 // message: `Cannot convert string 'abc' to double (m_Pos = 0)`).
-/// The value of an `eDouble` key (`CArg_Double`). A value that NCBI computes in extended
-/// precision (`ncbi_str::PosixOrLocalError::ExtendedPrecision`: more than 18 digits or 15
-/// places before a final `e`) is LOSAT's refusal.
-fn double_value(tool: &Tool, desc: &Desc, value: &str) -> Result<f64, ArgsError> {
+/// The number of an `eDouble` key (`CArg_Double`); `Number::ExtendedPrecision` for a value that
+/// NCBI computes in extended precision (more than 18 significant digits or 15 places before a
+/// final `e`), which the program refuses when it reads it.
+fn double_value(desc: &Desc, value: &str) -> Result<Number, ArgsError> {
     use crate::ncbi_str::{string_to_double_posix_or_local, PosixOrLocalError};
-    string_to_double_posix_or_local(value.as_bytes()).map_err(|error| match error {
-        PosixOrLocalError::Ncbi(error) => ArgsError::Invalid(ArgException {
+    match string_to_double_posix_or_local(value.as_bytes()) {
+        Ok(number) => Ok(Number::Double(number)),
+        Err(PosixOrLocalError::ExtendedPrecision) => Ok(Number::ExtendedPrecision),
+        Err(PosixOrLocalError::Ncbi(error)) => Err(ArgsError::Invalid(ArgException {
             code: "eConvert",
             messages: vec![
                 error.text(),
                 arg_message(desc.name, "Argument cannot be converted", value),
             ],
-        }),
-        PosixOrLocalError::ExtendedPrecision => ArgsError::Refused(format!(
-            "the value '{value}' of -{}, which NCBI computes in extended precision, is not \
-             supported by LOSAT's {}",
-            desc.name, tool.refusal_name
-        )),
-    })
+        })),
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3162-3296

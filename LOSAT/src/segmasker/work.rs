@@ -5,17 +5,16 @@ use std::io::Write;
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::{ArgException, Args};
-use crate::ncbi_app::files::{ends_like_sigpipe, file_exception, open_input_file, Cin, Ostream};
+use crate::ncbi_app::files::{file_exception, open_input_file, Cin, Ostream};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{err_post_x, NcbiException};
 use crate::report::pairwise::cpp_default_double;
 use crate::seqdb::SeqType;
 use crate::seqid::ParsedSeqId;
 use crate::seqmasks_io::bdb_reader::{iupacaa_letters, prints_title, BdbError, MaskBdbReader};
-use crate::seqmasks_io::fasta_reader::{ios_failure_what, MaskFastaReader, MaskReadError};
-use crate::seqmasks_io::writer::{
-    writes_serial_objects, FilterProgram, MaskWriter, MaskedBioseq, Serial, WriteError,
-};
+use crate::seqmasks_io::fasta_reader::{MaskFastaReader, MaskReadError};
+use crate::seqmasks_io::run::{finish, serial_write_failure, write_failure, RunFailure};
+use crate::seqmasks_io::writer::{FilterProgram, MaskWriter, MaskedBioseq, Serial, WriteError};
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 use crate::utils::seg::{SegMasker, SegParams};
 
@@ -35,19 +34,31 @@ enum Failure {
 
 impl From<WriteError> for Failure {
     fn from(error: WriteError) -> Self {
-        match error {
-            WriteError::Io(error) if ends_like_sigpipe(&error) => Failure::ClosedPipe,
-            WriteError::Io(error) => {
-                Failure::Refused(format!("writing the output failed: {error}"))
-            }
-            WriteError::Refused(what) => Failure::Refused(unsupported(&what)),
-        }
+        write_failure(error, super::PROGRAM)
+    }
+}
+
+impl RunFailure for Failure {
+    fn refused(message: String) -> Self {
+        Failure::Refused(message)
+    }
+
+    fn closed_pipe() -> Self {
+        Failure::ClosedPipe
+    }
+
+    fn std_exception(what: String) -> Self {
+        Failure::Std(what)
+    }
+
+    fn stops_writing(&self) -> bool {
+        matches!(self, Failure::Refused(_) | Failure::ClosedPipe)
     }
 }
 
 /// LOSAT's refusal of `what` (a noun phrase).
 fn unsupported(what: &str) -> String {
-    format!("{what} is not supported by LOSAT's {}", super::PROGRAM)
+    crate::seqmasks_io::run::unsupported(what, super::PROGRAM)
 }
 
 /// A `CArgException` of `AsInputFile` or `AsOutputFile`, which `Run` catches.
@@ -159,9 +170,15 @@ fn run_masks(
     out: &mut dyn Write,
 ) -> Result<(), Failure> {
     let value = |name| args.value(name).expect("a key with a default");
-    let double = |name| args.double(name).expect("an eDouble key with a default");
+    // `CSegMasker masker(args["window"].AsInteger(), args["locut"].AsDouble(), ...)`: a value
+    // that NCBI computes in extended precision is refused here (`Args::double`).
+    let double = |name| {
+        args.double(name)
+            .expect("an eDouble key with a default")
+            .map_err(|what| Failure::Refused(unsupported(&what)))
+    };
     let window = args.integer("window").expect("-window has a default");
-    let (locut, hicut) = (double("locut"), double("hicut"));
+    let (locut, hicut) = (double("locut")?, double("hicut")?);
     let outfmt = value("outfmt");
     let parse_seqids = args.flag("parse_seqids");
     let masker = seg_masker(window, locut, hicut);
@@ -182,7 +199,7 @@ fn run_masks(
     // A failed write leaves NCBI's stream bad, and the text writers go on silently (exit 0):
     // `out` drops the bytes after the first failed write.
     let mut out = Ostream::new(&mut output);
-    let mut result = (|| {
+    let result = (|| {
         while let Some(record) = source.next_record()? {
             let masks = masker.seq_buffer_seg::<false>(&record.stdaa);
             let mask: Vec<(u32, u32)> = masks
@@ -196,23 +213,11 @@ fn run_masks(
                 protein: true,
             };
             writer.print(&seq, &mask, parse_seqids, &mut out)?;
-            serial_write_failure(&out, outfmt)?;
+            serial_write_failure::<Failure>(&out, outfmt, super::PROGRAM)?;
         }
         Ok(())
     })();
-    // A refusal of LOSAT's stops before NCBI's run would end, and a closed pipe ends it where
-    // SIGPIPE ends NCBI's: nothing more is written.
-    if !matches!(result, Err(Failure::Refused(_) | Failure::ClosedPipe)) {
-        if let Err(error) = writer.finish(&mut out) {
-            result = Err(error.into());
-        }
-    }
-    let _ = out.flush();
-    if out.closed() {
-        return Err(Failure::ClosedPipe);
-    }
-    result?;
-    serial_write_failure(&out, outfmt)
+    finish(writer, &mut out, result, outfmt, super::PROGRAM)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/segmask/segmask.cpp:40-52
@@ -300,20 +305,6 @@ fn writer(outfmt: &str, window: i32, locut: f64, hicut: f64) -> MaskWriter {
     }
 }
 
-/// LOSAT's refusal when the output `out` of a `seqloc_*` or `maskinfo_*` writer failed, as
-/// dustmasker's (`seqmasks_io::writer::writes_serial_objects`).
-fn serial_write_failure(out: &Ostream<'_>, outfmt: &str) -> Result<(), Failure> {
-    if out.closed() {
-        return Err(Failure::ClosedPipe);
-    }
-    if out.bad() && writes_serial_objects(outfmt) {
-        return Err(Failure::Refused(unsupported(&format!(
-            "a failed write of the -outfmt {outfmt} output (NCBI's serial stream reports it)"
-        ))));
-    }
-    Ok(())
-}
-
 /// One protein of the input (`CBioseq_Handle`): its Seq-ids, its title, its NCBIstdaa codes
 /// (`eCoding_Ncbi`, what SEG reads) and its IUPACaa letters (`eCoding_Iupac`, what the FASTA
 /// writer writes).
@@ -376,14 +367,27 @@ fn reader<'a>(
 
 /// A failed read of `-in`: the `std::ios_base::failure` of NCBI's stream, which leaves `Run`.
 fn read_failure(error: std::io::Error) -> Failure {
-    match ios_failure_what(&error) {
-        Some(what) => Failure::Std(what),
-        None => Failure::Refused(unsupported(&format!(
-            "an input that cannot be read ({error})"
-        ))),
-    }
+    crate::seqmasks_io::run::read_failure(error, super::PROGRAM)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1480-1503 (`s_CompOn`)
+// ```c
+// 	Int4 letter;
+// 	char* seq,* seqmax;
+// ...
+// 	while (seq < seqmax) {
+// 		letter = *seq++;
+// 		if (!alphaflag[letter])
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1683-1685 (`s_ShiftWin1`)
+// ```c
+//     if ((Uint1) win->seq[length] == FENCE_SENTRY) {
+//         return FALSE;
+//     }
+// ```
+// (`FENCE_SENTRY` is 201, blast_util.h:364.) A database byte of 128 or more indexes NCBI's table
+// before its start (undefined); makeblastdb writes 0 to 27, and 28 to 127 are bogus letters to
+// SEG in both. Review of line RG item K2, M1.
 impl Source<'_> {
     fn next_record(&mut self) -> Result<Option<Record>, Failure> {
         match self {
@@ -413,10 +417,16 @@ impl Source<'_> {
                 }))
             }
             Source::Database(reader) => {
-                let record = reader
-                    .next_record(super::PROGRAM)
-                    .map_err(database_failure)?;
-                Ok(record.map(|record| Record {
+                let Some(record) = reader.next_record().map_err(database_failure)? else {
+                    return Ok(None);
+                };
+                if let Some(&code) = record.residues.iter().find(|&&code| code >= 128) {
+                    return Err(Failure::Refused(unsupported(&format!(
+                        "a database residue byte {code}, above 127 (NCBI's SEG reads it as a \
+                         negative char, and stops its window at 201),"
+                    ))));
+                }
+                Ok(Some(Record {
                     ids: record.ids,
                     title: Some(record.title),
                     iupacaa: iupacaa_letters(&record.residues),

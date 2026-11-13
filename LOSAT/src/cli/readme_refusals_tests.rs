@@ -35,8 +35,16 @@ const FIVE_PROGRAMS: [&str; 5] = ["blastn", "blastp", "blastx", "tblastn", "tbla
 const OWN_PARAGRAPHS: [&str; 4] = ["psiblast", "rpsblast", "rpsbproc", "makeblastdb"];
 
 /// The programs that refuse the NCBI C++ Toolkit options by name (`unknown_option_error`).
-const TOOLKIT_PROGRAMS: [&str; 8] = [
-    "blastn", "blastp", "blastx", "tblastn", "tblastx", "psiblast", "rpsblast", "rpsbproc",
+const TOOLKIT_PROGRAMS: [&str; 9] = [
+    "blastn",
+    "blastp",
+    "blastx",
+    "tblastn",
+    "tblastx",
+    "psiblast",
+    "rpsblast",
+    "rpsbproc",
+    "makeblastdb",
 ];
 
 /// The executables in the `bin` directory of NCBI BLAST+ 2.17.0 (`ncbi-blast-2.17.0+-x64-linux`,

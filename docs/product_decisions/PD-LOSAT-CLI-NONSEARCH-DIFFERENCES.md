@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.16
+- Version: 1.17
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -27,7 +27,8 @@
   (`-logfile`, `-conffile` and `-dryrun` run on the command line of `losat rpsbproc` as in NCBI's
   rpsbproc 0.5.1, line RG item E1c, the ask of 2026-11-12); 1.16 2026-11-13 (`losat segmasker`
   in the scope and in exception 10; line RG, item K2, RG DECISIONS K2-5; Owner-delegated, the
-  same standing instruction)
+  same standing instruction); 1.17 2026-11-13 (`-help-full` runs in every program as `-help`, and
+  the reader stops at a help flag as NCBI's; line RG item E2, the ask of 2026-11-12)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -244,7 +245,12 @@ BLAST+.
   `Dryrun passed, ...` or `Dryrun failed, error subcode = N`, exit status N). LOSAT's refusals in
   that start (a file name, a registry or environment setting) stay with `-dryrun`; those of what
   only the run reads (the XML input, the archive) do not apply, as NCBI's `DryRun` reads no
-  archive (line RG DECISIONS E1c-2).
+  archive (line RG DECISIONS E1c-2). Since version 1.17 `-help-full` is no longer refused: every
+  program writes its `-help` text (exception 1), as NCBI's programs write the bytes of `-help`
+  (`ncbiapp.cpp:685-697`; NCBI's makeblastdb adds its hidden `-randomize`, which LOSAT refuses, so
+  LOSAT's text has no hidden option to add). The reader stops at `-h`, `-help` and `-help-full` as
+  NCBI's (`ncbiargs.cpp:2840-2852`): an argument after one is not read. `-xmlhelp` (in an option's
+  place) and the full versions stay refused, in makeblastdb too (line RG item E2).
 - **FASTA input that NCBI's `CFastaReader` reads differently**: the explicit rejections
   stay (TD-12) until a dedicated session before S17 ports the `CFastaReader` functions
   on the path, together with the adapter's index scan (plan §10).

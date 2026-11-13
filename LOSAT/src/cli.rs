@@ -351,11 +351,40 @@ where
             }
             continue;
         }
-        // NCBI's reader stops at its help flags (`CArgDescriptions::x_CheckAutoHelp`, the words
-        // before them read first); rpstblastn writes NCBI's texts and reads no word after them
-        // (`RpstblastnArgs::ncbi_help`).
-        let stops_at_help = scope.get_name() == "rpstblastn";
-        if matches!(text, "-help" | "--help") {
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3020-3023, 2840-2852
+        // ```c++
+        //     const CArgDesc& arg = **it;
+        //
+        //     if ( s_IsFlag(arg) ) {
+        //         x_CheckAutoHelp(arg1);
+        // ...
+        // void CArgDescriptions::x_CheckAutoHelp(const string& arg) const
+        // {
+        //     if (arg.compare(string("-") + s_AutoHelp) == 0) {
+        //         if (m_AutoHelp) {
+        //             NCBI_THROW(CArgHelpException,eHelp,kEmptyStr);
+        //         }
+        //     } else if (arg.compare(string("-") + s_AutoHelpFull) == 0) {
+        //         NCBI_THROW(CArgHelpException,eHelpFull,kEmptyStr);
+        //     } else if (arg.compare(string("-") + s_AutoHelpXml) == 0) {
+        //         NCBI_THROW(CArgHelpException,eHelpXml,kEmptyStr);
+        //     } else if (arg.compare(string("-") + s_AutoHelpShowAll) == 0) {
+        //         NCBI_THROW(CArgHelpException,eHelpShowAll,kEmptyStr);
+        //     }
+        // ```
+        // NCBI's reader stops at its help flags, the words before them read first: a word after
+        // one is never read (NCBI BLAST+ 2.17.0: `-help -bogus`, `-help ... -out` with no value
+        // and `-h -xmlhelp` print the help, exit status 0; line RG item E2). Every program of
+        // this parser follows NCBI's reader; rpstblastn writes NCBI's texts
+        // (`RpstblastnArgs::ncbi_help`). An option's value is not a flag (`-out -help` names a
+        // file).
+        // `-help-full` (`s_AutoHelpShowAll`) is `-help` with the hidden arguments. LOSAT's help
+        // lists the arguments LOSAT runs (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1), and
+        // none of them is hidden from NCBI's `-help` (NCBI's makeblastdb hides `-randomize`, which
+        // LOSAT refuses): its text is `-help`'s, as in NCBI's other programs (the same bytes, in
+        // every place, `E/SURVEY_E2.md`).
+        let stops_at_help = !std::ptr::eq(scope, &command);
+        if matches!(text, "-help" | "--help") || (stops_at_help && text == "-help-full") {
             translated.push("--help".into());
             if stops_at_help {
                 ncbi_help = ncbi_help.map(|(start, _)| (start, "full"));
@@ -900,8 +929,11 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
             format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's RPSTBLASTN"),
         );
     }
+    // makeblastdb reads the toolkit's words with its own branch of `try_parse_from`, and refuses
+    // the words left as the others do (`-xmlhelp`; a full version in the library API).
     if let Some(program) = TOOLKIT_PROGRAMS
         .iter()
+        .chain(&["makeblastdb"])
         .copied()
         .find(|program| scope.get_name() == *program)
         .filter(|_| is_ncbi_toolkit_arg(name))
@@ -1165,9 +1197,9 @@ fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
 // The standard options of an NCBI C++ Toolkit application, which NCBI's BLAST+ programs
 // accept without listing them in -help. `-logfile` and `-conffile` run in the BLAST programs and
 // makeblastdb (line RG item E1), `-dryrun` in them and blastdbcmd (item E1b), the three in
-// rpsbproc (item E1c, its own `DryRun`: `rpsbproc::dry_run`).
+// rpsbproc (item E1c, its own `DryRun`: `rpsbproc::dry_run`), `-help-full` in every program (item
+// E2, `try_parse_from`). The words left are refused by name, in makeblastdb too.
 const NCBI_TOOLKIT_ARGS: &[&str] = &[
-    "help-full",
     "xmlhelp",
     "version-full",
     "version-full-xml",

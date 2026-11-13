@@ -2293,6 +2293,18 @@ fn search(
             return Err(error);
         }
     }
+    // A batch whose set-up fails (every query without letters) has its search strategy request:
+    // NCBI made its query factory before the search (`QueryBatches::stop_batch`).
+    if let (Some(strategy), Some(span)) = (args.strategy.as_ref(), batches.stop_batch.clone()) {
+        super::archive::write_tblastn_failed_strategy(
+            strategy,
+            &searched_queries,
+            database.is_none().then_some(subject_records),
+            &query_input.placements,
+            resolved.lcase_masking,
+            span,
+        )?;
+    }
     if let Some((warnings, error)) = batches.stop {
         outputs.diagnostics.write_all(&warnings)?;
         return Err(error);

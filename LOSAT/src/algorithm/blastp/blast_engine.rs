@@ -7156,6 +7156,17 @@ fn search(
         // no query (an empty pipe, or `-query -` after `-subject -`).
         write_reports_without_queries(&args, subject_source, subject_label, outputs)?;
     }
+    // A batch whose set-up fails (every query without letters) has its search strategy request:
+    // NCBI made its query factory before the search (`QueryBatches::stop_batch`).
+    if let Some(span) = batches.stop_batch.clone() {
+        write_failed_batch_strategy(
+            &args,
+            &searched_queries,
+            &query_input.placements,
+            subject_source,
+            span,
+        )?;
+    }
     if let Some((warnings, error)) = batches.stop {
         outputs.diagnostics.write_all(&warnings)?;
         return Err(error);

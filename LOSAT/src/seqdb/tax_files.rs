@@ -306,6 +306,78 @@ pub fn acc_oids<R: ReadAt + ?Sized>(ndb: &Env<R>, acc: &[u8]) -> Result<Vec<u32>
         .collect()
 }
 
+// No NCBI counterpart: NCBI's lookup reads an accession key as given (`acc_oids`), and its scope
+// takes text Seq-ids that differ in the case of their letters for one
+// (`seqid::defline_set::scope_keys`); LOSAT lists the other keys to find the sequences that hold
+// such an id (`seqdb::lookup::SeqidLookup::case_folded_oids`).
+/// The OIDs of the keys of `acc2oid` other than `acc` that differ from it only in the case of
+/// ASCII letters at or after byte `from`, in key order, each key's in LMDB duplicate order
+/// (`acc_oids`). The keys are searched letter by letter: a letter of the other case is followed
+/// only where a key starts with what is built so far (`MDB_SET_RANGE`), so where no key differs
+/// in case the search costs one range lookup for each letter.
+pub fn acc_case_variant_oids<R: ReadAt + ?Sized>(
+    ndb: &Env<R>,
+    acc: &[u8],
+    from: usize,
+) -> Result<Vec<u32>, String> {
+    let db = ndb
+        .open_db(b"acc2oid")?
+        .ok_or_else(|| NO_ACCESSION_INFO.to_string())?;
+    let from = from.min(acc.len());
+    let mut keys = Vec::new();
+    let mut prefix = acc[..from].to_vec();
+    case_variants(ndb, &db, acc, &mut prefix, false, &mut keys)?;
+    let mut oids = Vec::new();
+    for key in keys {
+        for v in ndb.values(&db, &key)? {
+            oids.push(le_u32(&v, "acc2oid")?);
+        }
+    }
+    Ok(oids)
+}
+
+/// `acc_case_variant_oids`' search: extends `prefix` (a prefix of a variant of `acc`, `flipped`
+/// where a letter's case differs) by the next byte of `acc` in each case, and adds to `keys` each
+/// whole key that differs. On `acc`'s own letters (`flipped` false) no key is looked up: only the
+/// paths that leave them must exist.
+fn case_variants<R: ReadAt + ?Sized>(
+    ndb: &Env<R>,
+    db: &crate::seqdb::lmdb_read::Db,
+    acc: &[u8],
+    prefix: &mut Vec<u8>,
+    flipped: bool,
+    keys: &mut Vec<Vec<u8>>,
+) -> Result<(), String> {
+    let at = prefix.len();
+    let Some(&byte) = acc.get(at) else {
+        if flipped && ndb.first_key_at_least(db, prefix)?.as_deref() == Some(prefix.as_slice()) {
+            keys.push(prefix.clone());
+        }
+        return Ok(());
+    };
+    let other = if byte.is_ascii_uppercase() {
+        Some(byte.to_ascii_lowercase())
+    } else if byte.is_ascii_lowercase() {
+        Some(byte.to_ascii_uppercase())
+    } else {
+        None
+    };
+    let mut cases = vec![(byte, flipped)];
+    if let Some(other) = other {
+        cases.push((other, true));
+    }
+    // Key order is byte order: the upper-case letter's keys come first.
+    cases.sort_unstable();
+    for (byte, flipped) in cases {
+        prefix.push(byte);
+        if !flipped || ndb.has_key_starting_with(db, prefix)? {
+            case_variants(ndb, db, acc, prefix, flipped, keys)?;
+        }
+        prefix.pop();
+    }
+    Ok(())
+}
+
 /// Failure of a taxid lookup, with the pieces for NCBI's message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaxError {
@@ -1162,6 +1234,46 @@ mod tests {
         let f = File::open(format!("{FX}/mv.pdb")).unwrap();
         let env = Env::open(&f).unwrap();
         assert_eq!(acc_first_oid(&env, b"MVA00017.1").unwrap(), Some(17));
+    }
+
+    /// `acc_case_variant_oids`: the other keys that differ only in the case of letters (p5's
+    /// `lcl|myprot9` and the upper-case copy makeblastdb writes, OID 4), none for a key alone in
+    /// its letters, and none before byte `from`.
+    #[test]
+    fn accession_case_variants() {
+        let f = File::open(format!("{FX}/p5.pdb")).unwrap();
+        let env = Env::open(&f).unwrap();
+        assert_eq!(acc_case_variant_oids(&env, b"myprot9", 0).unwrap(), vec![4]);
+        assert_eq!(acc_case_variant_oids(&env, b"MYPROT9", 0).unwrap(), vec![4]);
+        assert_eq!(
+            acc_case_variant_oids(&env, b"MyProt9", 0).unwrap(),
+            vec![4, 4]
+        );
+        assert_eq!(
+            acc_case_variant_oids(&env, b"MyProt9", 2).unwrap(),
+            Vec::<u32>::new()
+        );
+        assert_eq!(acc_case_variant_oids(&env, b"MyProt9", 1).unwrap(), vec![4]);
+        assert_eq!(
+            acc_case_variant_oids(&env, b"aaa00001", 0).unwrap(),
+            vec![2, 3]
+        );
+        assert_eq!(
+            acc_case_variant_oids(&env, b"AAA00001", 0).unwrap(),
+            Vec::<u32>::new()
+        );
+        assert_eq!(
+            acc_case_variant_oids(&env, b"np_000002.1", 0).unwrap(),
+            vec![1]
+        );
+        assert_eq!(
+            acc_case_variant_oids(&env, b"zzz", 0).unwrap(),
+            Vec::<u32>::new()
+        );
+        assert_eq!(
+            acc_case_variant_oids(&env, b"", 0).unwrap(),
+            Vec::<u32>::new()
+        );
     }
 
     /// Every acc2oid key of the dump of `path` (`name` names the `expected` file).

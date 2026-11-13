@@ -1394,6 +1394,18 @@ impl LmdbEntry {
         tax_files::acc_oids(env, acc).map_err(|message| self.lookup_error(message))
     }
 
+    /// The OIDs of the other keys that differ from `acc` only in the case of letters at or after
+    /// byte `from` (`tax_files::acc_case_variant_oids`), in the LMDB file opened as `env`.
+    pub(super) fn case_variant_oids_in(
+        &self,
+        env: &Env<DbFile>,
+        acc: &[u8],
+        from: usize,
+    ) -> Result<Vec<u32>, SeqDbError> {
+        tax_files::acc_case_variant_oids(env, acc, from)
+            .map_err(|message| self.lookup_error(message))
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:153-157
     // ```c++
     // void CSeqDBLMDBEntry::AccessionsToOids(const vector<string>& accs, vector<TOid>& oids) const

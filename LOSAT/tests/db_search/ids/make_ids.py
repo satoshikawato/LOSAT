@@ -163,6 +163,14 @@ whose lookup writes the offset error of `tests/seqdb/taxdb/offset_last_past_end`
 put it before A with `-sorthits 3` only.
 `--taxrow-only` builds only these.
 
+Text Seq-ids that differ only in the case of their letters in two databases (line DBID pircase), version 5, made from
+the FASTA of the same names: `pcs_pir_y` (Y `pir||PIRNAME`, the best hit of `pcs_q.faa`) and `pcs_pir_a` (A
+`pir||pirname`, B `gb|BBB00001.1|`), `pcs_gb_y` and `pcs_gb_a` (the names alone `gb||locusy` and `gb||LOCUSY`), the
+control `pcs_ctl_y` and `pcs_ctl_a` (`pir||PIRNAME` and `pir||PIRNAMX`), and `pcs_ngb_y` and `pcs_ngb_a` (nucleotide,
+the proteins' back-translations, `gb||locusy` and `gb||LOCUSY`, query `pcs_q.fna`). NCBI's scope takes the two ids of a
+pair for one and writes the names of the one it reads first for both; the keys of a name and of a FASTA text are as
+written. `--pircase-only` builds only these.
+
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
 `pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
 through `pjoin_abc.pal` and `njoin_abc.nal`; `pjoin_bt.*` and `njoin_bt.*` from `pjoin_b.faa` and `njoin_b.fna` with
@@ -363,6 +371,16 @@ def build_taxrow(args: argparse.Namespace) -> None:
             check=True, stdout=subprocess.DEVNULL)
 
 
+def build_pircase(args: argparse.Namespace) -> None:
+    for name, extension in (("pcs_pir_y", "faa"), ("pcs_pir_a", "faa"), ("pcs_gb_y", "faa"), ("pcs_gb_a", "faa"),
+                            ("pcs_ctl_y", "faa"), ("pcs_ctl_a", "faa"), ("pcs_ngb_y", "fna"), ("pcs_ngb_a", "fna")):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / f"{name}.{extension}"),
+             "-dbtype", "nucl" if extension == "fna" else "prot", "-parse_seqids", "-blastdb_version", "5",
+             "-title", f"{name} (parsed Seq-ids)", "-out", str(args.out / name)],
+            check=True, stdout=subprocess.DEVNULL)
+
+
 def build_join(args: argparse.Namespace) -> None:
     for name, fasta, dbtype, taxid in (("pjoin_a", "pjoin_a.faa", "prot", None), ("pjoin_b", "pjoin_b.faa", "prot", None),
                                        ("pjoin_c", "pjoin_c.faa", "prot", None), ("pjoin_bt", "pjoin_b.faa", "prot", "9606"),
@@ -403,6 +421,7 @@ def main() -> int:
     ap.add_argument("--pssmrows-only", action="store_true", help="build only the databases of line DBID pssmrows")
     ap.add_argument("--pssmread-only", action="store_true", help="build only the databases of line DBID pssmread")
     ap.add_argument("--taxrow-only", action="store_true", help="build only the databases of line DBID taxrow")
+    ap.add_argument("--pircase-only", action="store_true", help="build only the databases of line DBID pircase")
     args = ap.parse_args()
     if args.weak_only:
         build_weak(args)
@@ -439,6 +458,9 @@ def main() -> int:
         return 0
     if args.taxrow_only:
         build_taxrow(args)
+        return 0
+    if args.pircase_only:
+        build_pircase(args)
         return 0
     variants = [r for r in records(SEQID / "variants.fa") if r[1:].split()[0] not in DROPPED_VARIANTS]
     all_records = (records(SEQID / "prot_ids.fa") + records(SEQID / "prot_extra.fa") + variants

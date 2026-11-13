@@ -737,20 +737,69 @@ impl SeqidLookup<'_> {
     // upper case, and for a `pdb` id its molecule and the molecule in upper case
     // (writedb_lmdb.cpp:136-150), where NCBI's lookup reads the key as given: `lcl|abc` does not
     // find `lcl|ABC`, which NCBI's scope takes for the same id (review 2 of line DBID N2b).
-    /// The OIDs of a version 5 database under the upper-case key of `seqid` (for a `pdb` id its
-    /// molecule in upper case), the search's list's OIDs only: every sequence that holds an id
-    /// that differs from `seqid` in case alone. Empty for version 4, whose string ISAM keys are in
-    /// lower case, and for the other ids.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:128-131
+    // ```c++
+    //     if(seqid->IsPir() || seqid->IsPrf()) {
+    //     	SKeyValuePair kv_pir;
+    //     	kv_pir.id = seqid->AsFastaString();
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:160-176
+    // ```c++
+    //     if(seqid->GetTextseq_Id() != NULL) {
+    //     	SKeyValuePair kv;
+    //     	kv.id = seqid->GetSeqIdString(false);
+    //     	kv.oid = oid;
+    //     	string id_v = seqid->GetSeqIdString(true);
+    //     	if( kv.id != id_v) {
+    //     		m_list.push_back(kv);
+    //     		SKeyValuePair kv_v;
+    //     		kv_v.id = id_v;
+    // ```
+    // A text Seq-id's key has no upper-case copy: an accession's is in upper case
+    // (`GetSeqIdString`, `seqid::label::content`), but a name alone and a `pir` or `prf` id's FASTA
+    // text are as written, and NCBI's scope takes `pir||pirname` and `pir||PIRNAME`, `gb||locusy`
+    // and `gb||LOCUSY` for one (`CSeq_id_Textseq_Tree::x_Equals`, seq_id_tree.cpp:1064-1095, quoted
+    // at `seqid::defline_set::scope_keys`): LOSAT looks up every other key that differs in the case
+    // of those letters (`tax_files::acc_case_variant_oids`; probe of line DBID pircase,
+    // `blastdb-ids-20261021/R/pircase`).
+    /// The OIDs of a version 5 database of every sequence that holds an id that differs from
+    /// `seqid` in case alone, the search's list's OIDs only: under the upper-case key of `seqid`
+    /// (for a `pdb` id its molecule in upper case), and for a text id of a name alone or a `pir` or
+    /// `prf` id under every other key of its key's letters in either case (not the `pir|` or `prf|`
+    /// before a FASTA text). Empty for version 4, whose string ISAM keys are in lower case, for a
+    /// text id with an accession, whose key is in upper case, and for the other ids.
     pub fn case_folded_oids(&self, seqid: &ParsedSeqId) -> Result<Vec<u32>, SeqDbError> {
-        let db = self.volumes.db;
-        let bl_ord_id = matches!(seqid, ParsedSeqId::General(tag) if tag.db == b"BL_ORD_ID");
-        if !db.is_version5()
-            || bl_ord_id
-            || !is_string_id(seqid)
-            || seqid.textseq().is_some()
-            || matches!(seqid, ParsedSeqId::Pir(_) | ParsedSeqId::Prf(_))
-        {
+        if !self.keys_in_lmdb(seqid) {
             return Ok(Vec::new());
+        }
+        let text_key = if matches!(seqid, ParsedSeqId::Pir(_) | ParsedSeqId::Prf(_)) {
+            let mut key = Vec::new();
+            label::fasta(seqid, &mut key);
+            Some((key, b"pir|".len()))
+        } else if let Some(text) = seqid.textseq() {
+            // The key of an accession is in upper case (`GetSeqIdString`), so the lookup finds
+            // every holder of it; that of a name alone is as written.
+            if text.accession.is_some() {
+                return Ok(Vec::new());
+            }
+            let mut key = Vec::new();
+            label::content(seqid, true, &mut key);
+            Some((key, 0))
+        } else {
+            None
+        };
+        if let Some((key, from)) = text_key {
+            let mut oids = Vec::new();
+            for (entry, env) in &self.envs {
+                let found = entry.case_variant_oids_in(env, &key, from)?;
+                oids.extend(
+                    found
+                        .into_iter()
+                        .filter_map(|oid| entry.database_oid(oid))
+                        .filter(|&oid| self.volumes.visible(oid)),
+                );
+            }
+            return Ok(oids);
         }
         let key = match seqid {
             ParsedSeqId::Pdb(pdb) => pdb.mol.to_ascii_uppercase(),

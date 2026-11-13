@@ -174,12 +174,6 @@ impl OutputSink<'_> {
         })
     }
 
-    /// Opens the sink as the stream of the format's report (`cli::NcbiOstream`, which the organism
-    /// report of outfmt 18 takes): `open`'s writer, passed on as it is.
-    pub(crate) fn ostream(&mut self) -> io::Result<crate::cli::NcbiOstream<'_>> {
-        self.open().map(crate::cli::NcbiOstream::new)
-    }
-
     /// The caller's receiver of the side files of outfmt 13 and 14 (`OutputSink::Files`).
     pub fn side_files(&self) -> Option<&crate::report::blast_xml2::SideFileSink> {
         match self {

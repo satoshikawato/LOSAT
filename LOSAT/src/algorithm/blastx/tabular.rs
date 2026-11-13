@@ -674,34 +674,36 @@ fn write_blastx_tax_report(
         })
         .collect();
     // The HSPs of each query that the tabular rows show (`write_blastx_tabular`).
-    let tax_queries: Vec<TaxQuery<'_>> = batches
-        .iter()
-        .flat_map(|batch| {
-            batch
-                .queries
-                .iter()
-                .enumerate()
-                .map(move |(qidx, lists)| (batch.query_ordinal + qidx, lists))
-        })
-        .zip(&titles)
-        .map(|((ordinal, lists), title)| TaxQuery {
-            title: title.as_bytes(),
-            length: queries[ordinal].placement().length,
-            hsps: lists[..lists.len().min(options.shown_lists())]
-                .iter()
-                .flat_map(|list| {
-                    list.hsps
-                        .iter()
-                        .filter(|hsp| has_seqalign(hsp, options.gapped))
-                        .map(move |hsp| TaxHsp {
-                            subject: list.oid,
-                            evalue: hsp.evalue,
-                            bit_score: hsp.bit_score,
-                        })
+    let tax_queries: Vec<TaxQuery<'_>> =
+        batches
+            .iter()
+            .flat_map(|batch| {
+                batch.queries.iter().enumerate().map(move |(qidx, lists)| {
+                    (batch.query_ordinal + qidx, lists, batch.search_skipped)
                 })
-                .collect(),
-        })
-        .collect();
+            })
+            .zip(&titles)
+            .map(|((ordinal, lists, skipped), title)| TaxQuery {
+                title: title.as_bytes(),
+                length: queries[ordinal].placement().length,
+                // A query of a batch that NCBI did not search has no Seq-align-set.
+                hsps: (!skipped).then(|| {
+                    lists[..lists.len().min(options.shown_lists())]
+                        .iter()
+                        .flat_map(|list| {
+                            list.hsps
+                                .iter()
+                                .filter(|hsp| has_seqalign(hsp, options.gapped))
+                                .map(move |hsp| TaxHsp {
+                                    subject: list.oid,
+                                    evalue: hsp.evalue,
+                                    bit_score: hsp.bit_score,
+                                })
+                        })
+                        .collect()
+                }),
+            })
+            .collect();
     let parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>] = match shown {
         ShownSubjects::Fasta { parsed, .. } => &parsed.subjects,
         ShownSubjects::Database { reported, .. } => reported.parsed(),

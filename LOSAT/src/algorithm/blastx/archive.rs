@@ -247,22 +247,33 @@ pub(crate) fn batches_may_refuse(
 
 /// No NCBI counterpart: the output streams of a run in which a later batch may still be refused,
 /// by the archive for a title (`batches_may_refuse`) or, in a library call, by a BLAST XML, XML2 or
-/// JSON document (`local::report_batches`), held in the order in which they are written: each write keeps
-/// its bytes with the index of its stream (`writer`), so that `release` writes them in that order
-/// (the archives of the batches and the messages between them, as a stream that both go to reads
-/// them from NCBI) and `discard` drops them. Outside `hold` the bytes pass through. Shared, so that
-/// the diagnostics stream behind the archive's message log (`report::archive::DiagTee`) can be one
-/// of its streams. The side files of an outfmt 13 or 14 document of the run follow it
-/// (`side_files`): held, written before the streams and dropped as they are.
+/// JSON document (`local::report_batches`), held in the order in which they are written: each write
+/// and each flush keeps its stream's index (`writer`, `Held`), so that `release` makes them in that
+/// order, as the run would have made them without the hold (the archives of the batches and the
+/// messages between them, as a stream that both go to reads them from NCBI; a buffered stream's
+/// bytes reach their device before the text written after them on another stream), and `discard`
+/// drops them. Outside `hold` the writes pass through. Shared, so that the diagnostics stream
+/// behind the archive's message log (`report::archive::DiagTee`) can be one of its streams. The
+/// side files of an outfmt 13 or 14 document of the run follow it (`side_files`): held, written
+/// before the streams and dropped as they are.
 pub(crate) struct ArchiveHold<S: Write>(std::sync::Arc<std::sync::Mutex<HoldState<S>>>);
 
 struct HoldState<S> {
     holding: bool,
     discarded: bool,
     sinks: Vec<S>,
-    held: Vec<(usize, Vec<u8>)>,
+    held: Vec<Held>,
     /// The side files of the run's outfmt 13 and 14 documents.
     sides: Vec<super::blast_xml::HeldSideFiles>,
+}
+
+/// What one stream of an `ArchiveHold` was given while held, between the writes of the others:
+/// `bytes`, then a flush where `flushed` (the writes of one stream with no flush between them
+/// are one `Held`).
+struct Held {
+    sink: usize,
+    bytes: Vec<u8>,
+    flushed: bool,
 }
 
 /// A stream of an `ArchiveHold`.
@@ -331,11 +342,13 @@ impl<S: Write> ArchiveHold<S> {
         }
     }
 
-    /// Writes what is held and passes the bytes on again: the side files first (in order), then
-    /// the streams in the order of their writes. A side file that cannot be opened stops the run
-    /// there, as NCBI's does (`Cannot open output file`, exit status 1): the side files before it
-    /// stay, and the streams and the side files of the later documents get nothing of what was
-    /// held.
+    /// Writes what is held and passes the writes on again: the side files first (in order), then
+    /// the streams' writes and flushes in their order, as the run without the hold made them. A
+    /// side file that cannot be opened stops the run there, as NCBI's does (`Cannot open output
+    /// file`, exit status 1): the side files before it stay, and the streams and the side files of
+    /// the later documents get nothing of what was held. A write or flush of a stream that fails
+    /// stops the release there with its error (as the run would have stopped at it), and nothing
+    /// held after it is written then or later.
     pub(crate) fn release(&self) -> Result<()> {
         let mut state = self.state();
         state.holding = false;
@@ -354,13 +367,20 @@ impl<S: Write> ArchiveHold<S> {
                 return Err(error);
             }
         }
-        for (sink, bytes) in held {
-            state.sinks[sink]
-                .write_all(&bytes)
-                .map_err(super::native::output_error)?;
-        }
-        for sink in &mut state.sinks {
-            sink.flush().map_err(super::native::output_error)?;
+        for Held {
+            sink,
+            bytes,
+            flushed,
+        } in held
+        {
+            let sink = &mut state.sinks[sink];
+            let written =
+                sink.write_all(&bytes)
+                    .and_then(|()| if flushed { sink.flush() } else { Ok(()) });
+            if let Err(error) = written {
+                state.discarded = true;
+                return Err(super::native::output_error(error));
+            }
         }
         Ok(())
     }
@@ -380,25 +400,29 @@ impl<S: Write> ArchiveHold<S> {
     /// writes its error archive, `error_lines`, and, in a library call that writes other formats
     /// too, a side file that cannot be opened or an output that cannot be written) follows the
     /// bytes of the batches before it, which NCBI wrote (released); LOSAT's refusal (the title of
-    /// the batch, or another) follows no byte (dropped).
-    pub(crate) fn end_with(&self, error: &anyhow::Error) {
+    /// the batch, or another) follows no byte (dropped). A write of the release that fails
+    /// (`release`) is the run's error in place of `error`: the run without the hold stopped there,
+    /// before it.
+    pub(crate) fn end_with(&self, error: &anyhow::Error) -> Result<()> {
         if error.is::<crate::cli::NativeError>() {
-            let _ = self.release();
+            self.release()
         } else {
             self.discard();
+            Ok(())
         }
     }
 
     /// The end of a run that stopped with `error` and held its output only for its BLAST XML, XML2
     /// or JSON documents: dropped after one of the refusals that such a hold is for
     /// (`blast_xml::drops_held_document`), written after any other error (the bytes of the batches
-    /// before it, as the run without a hold writes them), as the command line's document
-    /// (`blast_xml::HeldOutput`).
-    pub(crate) fn end_document_with(&self, error: &anyhow::Error) {
+    /// before it, as the run without a hold writes them, a write that fails then being the run's
+    /// error, as for `end_with`), as the command line's document (`blast_xml::HeldOutput`).
+    pub(crate) fn end_document_with(&self, error: &anyhow::Error) -> Result<()> {
         if super::blast_xml::drops_held_document(error) {
             self.discard();
+            Ok(())
         } else {
-            let _ = self.release();
+            self.release()
         }
     }
 }
@@ -411,8 +435,14 @@ impl<S: Write> Write for HoldWriter<S> {
         }
         if state.holding {
             match state.held.last_mut() {
-                Some((sink, held)) if *sink == self.sink => held.extend_from_slice(bytes),
-                _ => state.held.push((self.sink, bytes.to_vec())),
+                Some(held) if held.sink == self.sink && !held.flushed => {
+                    held.bytes.extend_from_slice(bytes)
+                }
+                _ => state.held.push(Held {
+                    sink: self.sink,
+                    bytes: bytes.to_vec(),
+                    flushed: false,
+                }),
             }
             return Ok(bytes.len());
         }
@@ -421,7 +451,18 @@ impl<S: Write> Write for HoldWriter<S> {
 
     fn flush(&mut self) -> std::io::Result<()> {
         let mut state = self.hold.state();
-        if state.discarded || state.holding {
+        if state.discarded {
+            return Ok(());
+        }
+        if state.holding {
+            match state.held.last_mut() {
+                Some(held) if held.sink == self.sink => held.flushed = true,
+                _ => state.held.push(Held {
+                    sink: self.sink,
+                    bytes: Vec::new(),
+                    flushed: true,
+                }),
+            }
             return Ok(());
         }
         state.sinks[self.sink].flush()
@@ -916,7 +957,7 @@ mod hold_tests {
     fn the_archives_hold_writes_after_ncbis_error_and_drops_after_any_refusal() {
         for ncbis in [ncbis_error(), side_file_error()] {
             let (hold, streams) = held_run();
-            hold.end_with(&ncbis);
+            hold.end_with(&ncbis).unwrap();
             assert_eq!(written(&streams), ALL, "{ncbis}");
         }
         for refusal in [
@@ -924,7 +965,7 @@ mod hold_tests {
             anyhow::anyhow!("this is not supported by LOSAT's BLASTX"),
         ] {
             let (hold, streams) = held_run();
-            hold.end_with(&refusal);
+            hold.end_with(&refusal).unwrap();
             assert_eq!(written(&streams), NOTHING, "{refusal}");
         }
     }
@@ -932,7 +973,7 @@ mod hold_tests {
     #[test]
     fn the_documents_hold_drops_after_their_refusal_and_writes_after_any_other_error() {
         let (hold, streams) = held_run();
-        hold.end_document_with(&document_refusal());
+        hold.end_document_with(&document_refusal()).unwrap();
         assert_eq!(written(&streams), NOTHING);
         // The taxonomy database's refusal of the prefetch (outfmt 5) is one of them.
         let (hold, streams) = held_run();
@@ -941,7 +982,7 @@ mod hold_tests {
                 path: "taxdb.btd".into(),
                 message: "the taxonomy record of taxid 9606 reaches past the mapped end".into(),
             });
-        hold.end_document_with(&prefetch);
+        hold.end_document_with(&prefetch).unwrap();
         assert_eq!(written(&streams), NOTHING);
         for other in [
             ncbis_error(),
@@ -949,7 +990,7 @@ mod hold_tests {
             anyhow::anyhow!("taxdb.btd: Input/output error; this database is not supported"),
         ] {
             let (hold, streams) = held_run();
-            hold.end_document_with(&other);
+            hold.end_document_with(&other).unwrap();
             assert_eq!(written(&streams), ALL, "{other}");
         }
     }
@@ -991,6 +1032,90 @@ mod hold_tests {
         );
         drop((first, blocked, last, stream, hold));
         assert_eq!([a.text(), files.text()], ["", "1:one;"].map(String::from));
+    }
+
+    /// A stream that fails every write (a full device).
+    struct Full;
+
+    impl Write for Full {
+        fn write(&mut self, _bytes: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("no space left"))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Standard output behind a buffer (`std::io::BufWriter`, as `cli::report_standard_output`)
+    /// and standard error unbuffered, both read from one pipe (`log`), given `report 1` and a
+    /// flush, the text `text 1`, `report 2` without a flush and `text 2`, through a hold that holds
+    /// (`held`) or not: the pipe after the last text and at the end.
+    fn through_one_pipe(held: bool) -> [String; 2] {
+        let log = Shared::default();
+        let hold: ArchiveHold<Box<dyn Write + Send>> = ArchiveHold::new();
+        let mut stdout = hold.writer(Box::new(std::io::BufWriter::new(log.clone())));
+        let mut stderr = hold.writer(Box::new(log.clone()));
+        if held {
+            hold.hold();
+        }
+        stdout.write_all(b"report 1 ").unwrap();
+        stdout.flush().unwrap();
+        stderr.write_all(b"text 1 ").unwrap();
+        stdout.write_all(b"report 2 ").unwrap();
+        stderr.write_all(b"text 2 ").unwrap();
+        if held {
+            hold.release().unwrap();
+        }
+        let after_texts = log.text();
+        drop((stdout, stderr, hold));
+        [after_texts, log.text()]
+    }
+
+    /// The release makes the writes and flushes of the run in their order (line RG T2 review 5
+    /// D1): a buffered stream's bytes flushed before a text on another stream reach the pipe
+    /// before it, those not flushed stay in its buffer, as without the hold.
+    #[test]
+    fn a_release_writes_and_flushes_as_the_run_without_the_hold() {
+        let unheld = through_one_pipe(false);
+        assert_eq!(
+            unheld,
+            [
+                "report 1 text 1 text 2 ",
+                "report 1 text 1 text 2 report 2 "
+            ]
+        );
+        assert_eq!(through_one_pipe(true), unheld);
+    }
+
+    /// A write of the release that fails stops it there: nothing held after it is written, then
+    /// or later, and the run ends with it in place of its own error (`end_with`,
+    /// `end_document_with`: "BLAST failed to write output", exit status 6).
+    #[test]
+    fn a_failing_write_of_the_release_ends_the_run() {
+        for document in [false, true] {
+            let log = Shared::default();
+            let hold: ArchiveHold<Box<dyn Write + Send>> = ArchiveHold::new();
+            let mut stdout = hold.writer(Box::new(Full));
+            let mut stderr = hold.writer(Box::new(log.clone()));
+            hold.hold();
+            stderr.write_all(b"text 0 ").unwrap();
+            stdout.write_all(b"report 1 ").unwrap();
+            stdout.flush().unwrap();
+            stderr.write_all(b"text 1 ").unwrap();
+            let error = match document {
+                false => hold.end_with(&ncbis_error()),
+                true => hold.end_document_with(&ncbis_error()),
+            }
+            .unwrap_err();
+            let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
+            assert_eq!(
+                (native.exit, native.message.as_str()),
+                (6, "BLAST failed to write output\n")
+            );
+            stderr.write_all(b"text 2 ").unwrap();
+            assert_eq!(log.text(), "text 0 ");
+        }
     }
 
     #[test]

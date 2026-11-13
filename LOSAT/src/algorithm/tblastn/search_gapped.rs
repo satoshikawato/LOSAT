@@ -509,7 +509,7 @@ fn x_add_one_hit_hsp(
     hsp: TreeHsp,
     context_offset: i32,
 ) -> Result<()> {
-    if !tree.try_add_hsp(hsp, context_offset, IndexMethod::QueryAndSubject) {
+    if !tree.try_add_hsp(hsp, context_offset) {
         bail!(
             "TBLASTN -window_size 0: two one-hit alignments of negative length whose gapped starts lie past the end of their subject chunk make NCBI BLAST+ split a node of its interval tree without end (it does not finish the search there), which LOSAT does not support"
         );

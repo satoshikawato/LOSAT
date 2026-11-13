@@ -259,6 +259,7 @@ const X_MAX_OVERFLOW: usize = 512;
 /// "true" only makes the unchanged walk run.
 /// A set of (query, subject) points that may report points it does not hold
 /// but never misses one it holds: a bit table with two bits per point.
+#[derive(Clone)]
 struct XPointSet {
     bits: Vec<u64>,
     points: usize,
@@ -342,6 +343,7 @@ const X_SALT_END: u64 = 0x9E37_79B9_7F4A_7C15;
 // The state of the side indexes, tied to the same query and subject ranges as the tree
 // (`q_min`, `s_min`) and emptied whenever the tree is emptied. It is derived from the
 // HSPs in the tree and holds nothing else.
+#[derive(Clone)]
 struct XTreeIndex {
     /// Whether the index is used at all (off while tracing is on).
     on: bool,
@@ -536,6 +538,7 @@ impl XTreeIndex {
 ///     Int4 s_max;
 /// } BlastIntervalTree;
 /// ```
+#[derive(Clone)]
 pub struct BlastIntervalTree {
     /// Array of nodes (index 0 is root for query-indexed tree)
     nodes: Vec<IntervalNode>,
@@ -1197,35 +1200,6 @@ impl BlastIntervalTree {
     /// For eQueryAndSubject mode, it first checks for common endpoints and
     /// removes worse HSPs before adding.
     pub fn add_hsp(&mut self, hsp: TreeHsp, query_context_offset: i32, index_method: IndexMethod) {
-        self.add_hsp_of::<false>(hsp, query_context_offset, index_method);
-    }
-
-    /// `add_hsp`, or `false` where NCBI's insertion would split a node into a node whose left end
-    /// lies past its right end (`s_IntervalNodeInit` on a node `[p, p]` to the right, a split that
-    /// `BlastIntervalTreeAddHSP` then repeats without end); the insertion stops there, and the
-    /// caller stops its search. Only a range that starts past the tree's upper bound leads there (a
-    /// node `[p, p]` is entered only by a range that holds `p`, and goes right only for a start
-    /// past `p`), which only TBLASTN's one-hit word finder gives (`search_gapped::x_add_one_hit_hsp`).
-    /// (Below the lower bound, a split to the left of `[p, p]` would repeat `[p, p]`; no caller's
-    /// ranges start below 0.)
-    pub fn try_add_hsp(
-        &mut self,
-        hsp: TreeHsp,
-        query_context_offset: i32,
-        index_method: IndexMethod,
-    ) -> bool {
-        self.add_hsp_of::<true>(hsp, query_context_offset, index_method)
-    }
-
-    /// `add_hsp` (`REFUSE_INVERTED` false) and `try_add_hsp` (true), whose result it returns
-    /// (always `true` for `add_hsp`).
-    #[inline(always)]
-    fn add_hsp_of<const REFUSE_INVERTED: bool>(
-        &mut self,
-        hsp: TreeHsp,
-        query_context_offset: i32,
-        index_method: IndexMethod,
-    ) -> bool {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:537-550
         // query_start = s_GetQueryStrandOffset(query_info, hsp->context);
         // if ( index_method == eQueryOnlyStrandIndifferent &&
@@ -1283,11 +1257,11 @@ impl BlastIntervalTree {
             // `interval_tree_has_hsp_endpoint` unless the point set shows it cannot find
             // anything.
             if self.x_has_hsp_endpoint(&hsp, query_start, IntervalDirection::Left, x_on) {
-                return true; // Better HSP with same endpoint already exists
+                return; // Better HSP with same endpoint already exists
             }
             // Check right endpoint
             if self.x_has_hsp_endpoint(&hsp, query_start, IntervalDirection::Right, x_on) {
-                return true; // Better HSP with same endpoint already exists
+                return; // Better HSP with same endpoint already exists
             }
         }
 
@@ -1343,14 +1317,14 @@ impl BlastIntervalTree {
         }
 
         // Start the insertion loop
-        self.add_hsp_internal::<REFUSE_INVERTED>(
+        self.add_hsp_internal(
             new_index,
             region_start,
             region_end,
             &hsp,
             false,
             index_method,
-        )
+        );
     }
 
     /// Legacy add_hsp without index_method (defaults to QueryAndSubject)
@@ -1361,9 +1335,7 @@ impl BlastIntervalTree {
 
     /// Internal helper for adding HSP after leaf node has been allocated
     /// NCBI reference: blast_itree.c:601-793
-    /// `false` (with `REFUSE_INVERTED` only) where a split would make an inverted node
-    /// (`try_add_hsp`).
-    fn add_hsp_internal<const REFUSE_INVERTED: bool>(
+    fn add_hsp_internal(
         &mut self,
         new_index: usize,
         region_start: i32,
@@ -1371,7 +1343,7 @@ impl BlastIntervalTree {
         hsp: &TreeHsp,
         mut index_subject_range: bool,
         index_method: IndexMethod,
-    ) -> bool {
+    ) {
         let mut root_index = 0usize;
         let mut current_region_start = region_start;
         let mut current_region_end = region_end;
@@ -1392,7 +1364,7 @@ impl BlastIntervalTree {
                 if leftptr == 0 {
                     // No left child - attach new leaf directly
                     self.nodes[root_index].leftptr = new_index as i32;
-                    return true;
+                    return;
                 }
 
                 // Check if existing node is a leaf or internal
@@ -1425,7 +1397,7 @@ impl BlastIntervalTree {
                 if rightptr == 0 {
                     // No right child - attach new leaf directly
                     self.nodes[root_index].rightptr = new_index as i32;
-                    return true;
+                    return;
                 }
 
                 // Check if existing node is a leaf or internal
@@ -1440,10 +1412,6 @@ impl BlastIntervalTree {
                 // Two leaves in same subtree - need to split
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:703-746
                 // NCBI continues the insertion loop after splitting; avoid recursion to match.
-                // (A split to the left keeps `leftend <= midpt`; only this one can invert.)
-                if REFUSE_INVERTED && self.x_right_split_inverts(root_index) {
-                    return false;
-                }
                 let mid_index = self.split_and_insert(
                     root_index,
                     rightptr as usize,
@@ -1466,7 +1434,7 @@ impl BlastIntervalTree {
                     // prepend the new node to the list of "midpoint" nodes
                     self.nodes[new_index].midptr = self.nodes[root_index].midptr;
                     self.nodes[root_index].midptr = new_index as i32;
-                    return true;
+                    return;
                 } else {
                     // NCBI reference: blast_itree.c:677-700
                     // Begin another tree at root_index, that indexes the subject range
@@ -1487,14 +1455,6 @@ impl BlastIntervalTree {
                 }
             }
         }
-    }
-
-    /// Whether the right child that `alloc_internal_node` would make under `parent_idx` has its left
-    /// end past its right end (`midpt + 1 > rightend`, blast_itree.c:106-108: a parent `[p, p]`).
-    fn x_right_split_inverts(&self, parent_idx: usize) -> bool {
-        let parent = &self.nodes[parent_idx];
-        (i64::from(parent.leftend) + i64::from(parent.rightend)) / 2 + 1
-            > i64::from(parent.rightend)
     }
 
     /// Handle the case where two leaves collide in the same subtree.
@@ -1608,6 +1568,148 @@ impl BlastIntervalTree {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:746
         // Return the new internal node so the caller can continue the loop.
         mid_index
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:102-109,603-793
+    // ```c
+    //     else {
+    //         new_node->leftend = (Int4) midpt + 1;
+    //         new_node->rightend = parent_node->rightend;
+    //     }
+    // ...
+    //         mid_index = s_IntervalNodeInit(tree, root_index, which_half, &retval);
+    // ```
+    /// `add_hsp` (eQueryAndSubject) of an HSP of TBLASTN's one-hit word finder, or `false`, the
+    /// tree unchanged, where NCBI's insertion would split a node `[p, p]` to the right into the
+    /// inverted node `[p + 1, p]` (whose middle is `p` again: `BlastIntervalTreeAddHSP` repeats
+    /// that split without end and never returns). Only a range that starts past the tree's
+    /// `s_max` leads there (a node `[p, p]` is entered only by a range that holds `p`, and goes
+    /// right only for a start past `p`), which only that word finder gives
+    /// (`tblastn::search_gapped::x_add_one_hit_hsp`). The insertion is first walked without
+    /// changing the tree (`x_insert_inverts`); only if that walk makes an inverted node are NCBI's
+    /// end-point checks, which run before the insertion and may drop the HSP or a leaf on its way
+    /// (end points only empty a slot), run on a copy of the tree and the walk repeated there.
+    /// `add_hsp` and the functions it calls keep their code.
+    pub fn try_add_hsp(&mut self, hsp: TreeHsp, query_context_offset: i32) -> bool {
+        if self.x_insert_inverts(&hsp, query_context_offset) {
+            let mut copy = self.clone();
+            let x_on = copy.x.usable;
+            let dropped =
+                copy.x_has_hsp_endpoint(&hsp, query_context_offset, IntervalDirection::Left, x_on)
+                    || copy.x_has_hsp_endpoint(
+                        &hsp,
+                        query_context_offset,
+                        IntervalDirection::Right,
+                        x_on,
+                    );
+            if !dropped && copy.x_insert_inverts(&hsp, query_context_offset) {
+                return false;
+            }
+        }
+        self.add_hsp(hsp, query_context_offset, IndexMethod::QueryAndSubject);
+        true
+    }
+
+    /// Whether the insertion loop of `add_hsp_internal` (eQueryAndSubject) would make an inverted
+    /// node for `hsp`, walked without changing the tree: the real nodes down to the first leaf
+    /// the HSP meets, then the nodes that the splits with that leaf would make (each holds only
+    /// that leaf, placed as `split_and_insert` places it). A split to the left of `[p, p]` would
+    /// repeat `[p, p]` without end too (a range that ends before the tree's lower bound, which no
+    /// caller gives); it counts as such a node.
+    fn x_insert_inverts(&self, hsp: &TreeHsp, query_context_offset: i32) -> bool {
+        #[derive(PartialEq)]
+        enum Side {
+            Left,
+            Right,
+            Mid,
+        }
+        let middle = |l: i32, r: i32| ((i64::from(l) + i64::from(r)) / 2) as i32;
+        let side = |start: i32, end: i32, m: i32| {
+            if end < m {
+                Side::Left
+            } else if start > m {
+                Side::Right
+            } else {
+                Side::Mid
+            }
+        };
+        let (mut start, mut end) = (
+            query_context_offset + hsp.query_offset,
+            query_context_offset + hsp.query_end,
+        );
+        let mut subject_level = false;
+        // The real nodes.
+        let mut root = 0usize;
+        let (mut l, mut r, old) = loop {
+            let node = &self.nodes[root];
+            let m = middle(node.leftend, node.rightend);
+            let (child, bounds) = match side(start, end, m) {
+                Side::Left => (node.leftptr, (node.leftend, m)),
+                Side::Right => (node.rightptr, (m + 1, node.rightend)),
+                Side::Mid => {
+                    if subject_level || node.midptr == 0 {
+                        // A midpoint list, or a new subject tree holding only this HSP.
+                        return false;
+                    }
+                    subject_level = true;
+                    (start, end) = (hsp.subject_offset, hsp.subject_end);
+                    root = node.midptr as usize;
+                    continue;
+                }
+            };
+            if child == 0 {
+                return false;
+            }
+            if self.nodes[child as usize].hsp.is_none() {
+                root = child as usize;
+                continue;
+            }
+            if (bounds.0, bounds.1) == (node.leftend, node.rightend) {
+                return true;
+            }
+            break (bounds.0, bounds.1, child as usize);
+        };
+        // The nodes of the splits with the leaf `old`.
+        let old_node = &self.nodes[old];
+        let Some(old_hsp) = old_node.hsp.as_ref() else {
+            return false;
+        };
+        loop {
+            if l > r {
+                return true;
+            }
+            let m = middle(l, r);
+            let (old_start, old_end) = if subject_level {
+                (old_hsp.subject_offset, old_hsp.subject_end)
+            } else {
+                (
+                    old_node.leftptr + old_hsp.query_offset,
+                    old_node.leftptr + old_hsp.query_end,
+                )
+            };
+            let placed = side(old_start, old_end, m);
+            let next = match side(start, end, m) {
+                Side::Left if placed == Side::Left => (l, m),
+                Side::Right if placed == Side::Right => (m + 1, r),
+                Side::Mid if !subject_level && placed == Side::Mid => {
+                    // Both in the new node's subject tree (`s_min..s_max`, the old leaf alone).
+                    subject_level = true;
+                    (start, end) = (hsp.subject_offset, hsp.subject_end);
+                    let sm = middle(self.s_min, self.s_max);
+                    let old_side = side(old_hsp.subject_offset, old_hsp.subject_end, sm);
+                    match side(start, end, sm) {
+                        Side::Left if old_side == Side::Left => (self.s_min, sm),
+                        Side::Right if old_side == Side::Right => (sm + 1, self.s_max),
+                        _ => return false,
+                    }
+                }
+                _ => return false,
+            };
+            if next == (l, r) {
+                return true;
+            }
+            (l, r) = next;
+        }
     }
 
     /// Return the tree HSP that envelops the input HSP, if any.
@@ -2218,6 +2320,41 @@ mod tests {
             unlinked > trials,
             "{unlinked} HSPs unlinked in {trials} trials"
         );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:102-109,603-793 (quoted at
+    // `try_add_hsp`)
+    // Ranges inside the tree's bounds never make an inverted node: `try_add_hsp` adds every one
+    // of them and builds the tree `add_hsp` builds. Two ranges past `s_max` in one subject subtree
+    // make one (NCBI's endless split); one alone is added.
+    #[test]
+    fn try_add_hsp_refuses_only_the_endless_split() {
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = |n: i32| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % n as u64) as i32
+        };
+        for round in 0..200 {
+            let (q_max, s_max) = (20 + next(200), 20 + next(300));
+            let mut plain = BlastIntervalTree::new(0, q_max + 1, 0, s_max + 1);
+            let mut tried = BlastIntervalTree::new(0, q_max + 1, 0, s_max + 1);
+            for _ in 0..(1 + next(60)) {
+                let (q0, s0) = (next(q_max), next(s_max));
+                let (q1, s1) = (q0 + next(q_max - q0 + 1), s0 + next(s_max - s0 + 1));
+                let hsp = make_tree_hsp(q0, q1, s0, s1, 1 + next(50), 1);
+                plain.add_hsp(hsp, 0, IndexMethod::QueryAndSubject);
+                assert!(tried.try_add_hsp(hsp, 0), "round {round}");
+            }
+            assert_eq!(plain.node_count(), tried.node_count(), "round {round}");
+        }
+        // Query 0..20 (middle 10), subject 0..31: [32, 33] and [32, 32] past `s_max` 31.
+        let mut tree = BlastIntervalTree::new(0, 21, 0, 31);
+        assert!(tree.try_add_hsp(make_tree_hsp(9, 10, 32, 33, 22, 1), 0));
+        let nodes = tree.node_count();
+        assert!(!tree.try_add_hsp(make_tree_hsp(10, 10, 32, 32, 11, 1), 0));
+        assert_eq!(tree.node_count(), nodes, "the tree is unchanged");
     }
 
     #[test]

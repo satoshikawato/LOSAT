@@ -447,7 +447,30 @@ pub(crate) enum SeqInst {
     },
     /// A record longer than 2,147,483,647 residues, which `CBuildDatabase::AddSequences`
     /// rejects by its length before it reads the sequence data: LOSAT does not build it.
+    /// `length` is NCBI's (`TSeqPos`, see `PastSeqPos`).
     TooLong { length: u64 },
+    /// A record of 4,294,967,296 residues or more, counting the letters of its gaps, that
+    /// makeblastdb's length check does not stop. NCBI counts a record's length in a `TSeqPos`
+    /// (`GetCurrentPos`, `m_TotalGapLength`, `SGap::m_uLen`), which wraps there, and goes on
+    /// with a `Seq-inst` whose length is the wrapped one: with `>?` lines that sum to a
+    /// multiple of 2^32 the gaps are kept without `fParseGaps` (dustmasker, NCBI BLAST+
+    /// 2.17.0: "Invalid sequence length"; segmasker: `CSeqVector_CI::GetSeqData: cannot get
+    /// seq-data in range`; makeblastdb, protein: "Protein delta sequences are not
+    /// supported."), and otherwise the residues and the run of `N` or `X` are cut at the
+    /// wrapped length or allocated whole. LOSAT does not build it (no allocation for the
+    /// gaps): the programs that read the residues refuse it, and convert2blastmask, which
+    /// reads only the masks, writes them (their positions wrap as NCBI's,
+    /// `RecordState::current_pos_with_gaps`). `length` is the record's, counted on.
+    PastSeqPos { length: u64 },
+}
+
+/// What LOSAT refuses in a program that reads the residues of a `SeqInst::PastSeqPos` record
+/// (the text before "is not supported by LOSAT's <program>").
+pub(crate) fn past_seq_pos_refusal(length: u64) -> String {
+    format!(
+        "a FASTA record of 4,294,967,296 letters or more, counting the letters of its gaps \
+         ({length}; NCBI counts the length of a record in 32 bits, which wrap there),"
+    )
 }
 
 /// A record as `CFastaReader::ReadOneSeq` returns it.
@@ -590,7 +613,8 @@ const RESIDUE_MIN: u8 = b'*';
 ///             break;
 ///         }
 /// ```
-/// `bIsNuc` is `fAssumeNuc` (`fForceType`). No caller sets `fLetterGaps` or
+/// `bIsNuc` is `fAssumeNuc` (`fForceType`), or without `fForceType` the nucleotide that the
+/// ids named (`RecordState::is_nuc`). No caller sets `fLetterGaps` or
 /// `fHyphensIgnoreAndWarn`: `bAllowLetterGaps` is false, and `bHyphensAreGaps` is
 /// `fParseGaps`, so a hyphen is a gap with `fParseGaps` (makeblastdb's nucleotide input)
 /// and a residue without it (makeblastdb's protein input, the mask reader's input).
@@ -1121,9 +1145,10 @@ impl RecordState {
     ///         seq_id->SetLocal().SetId(n);
     /// ```
     /// `defline` starts with `>` except for an empty line (`BufferedLineReader`'s module
-    /// comment), which returns before the test of its first character. The molecule is
-    /// not set here (`fForceType`); without `-parse_seqids` no range is parsed
-    /// (`fNoParseID`).
+    /// comment), which returns before the test of its first character. With `fForceType`
+    /// the molecule is not set here; without it (`Molecule::Guessed`) the ids set it
+    /// (`xSetSeqMol`, before a ranged id is replaced). Without `-parse_seqids` no range is
+    /// parsed (`fNoParseID`).
     fn parse_def_line(
         &mut self,
         defline: &[u8],
@@ -1604,89 +1629,6 @@ impl RecordState {
         Ok(())
     }
 
-    /// `CloseGap(atStartOfLine)`: ends the run of hyphens, if one is open.
-    /// `seq_data_length` is `m_SeqData.length()` (see `parse_data_line`; outside a data
-    /// line it is the number of residues), `line_length` the length of the reader's
-    /// current line.
-    ///
-    /// NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:284-289
-    /// ```c++
-    ///     void CloseGap(bool atStartOfLine=false, ILineErrorListener* pMessageListener = nullptr) {
-    ///         if (m_CurrentGapLength > 0) {
-    ///             x_CloseGap(m_CurrentGapLength, atStartOfLine, pMessageListener);
-    ///             m_CurrentGapLength = 0;
-    ///         }
-    ///     }
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1018-1077
-    /// ```c++
-    /// void CFastaReader::x_CloseGap(
-    ///     TSeqPos len, bool atStartOfLine, ILineErrorListener * /*pMessageListener*/)
-    /// {
-    ///     _ASSERT(len > 0  &&  TestFlag(fParseGaps));
-    ///
-    ///     if (m_CurrentGapLength < m_gapNmin)
-    ///     {
-    ///         // the run of N is too short to be assumed as a gap, put N as is.
-    ///         m_SeqData.resize(m_SeqData.size() + m_CurrentGapLength, 'X');
-    ///         memset(&m_SeqData.at(m_CurrentPos), m_CurrentGapChar, m_CurrentGapLength);
-    ///         m_CurrentPos += m_CurrentGapLength;
-    ///         return;
-    ///     }
-    ///
-    ///     if (TestFlag(fAligning)) {
-    ///         TSeqPos pos = GetCurrentPos(ePosWithGapsAndSegs);
-    ///         m_Starts[pos + m_Offset][m_Row] = CFastaAlignmentBuilder::kNoPos;
-    ///         m_Offset += len;
-    ///         m_Starts[pos + m_Offset][m_Row] = pos;
-    ///     } else {
-    ///         TSeqPos pos = GetCurrentPos(eRawPos);
-    ///         SGap::EKnownSize eKnownSize = SGap::eKnownSize_Yes;
-    ///         if (len == m_gap_Unknown_length)
-    ///         {
-    ///             eKnownSize = SGap::eKnownSize_No;
-    ///             //len = 0;
-    ///         }
-    ///         else
-    ///         {
-    ///             // Special case -- treat a lone hyphen at the end of a line as
-    ///             // a gap of unknown length.
-    ///             // (do NOT treat a lone 'N' or 'X' as unknown length)
-    ///             if (len == 1 && m_CurrentGapChar == '-' ) {
-    ///                 TSeqPos l = m_SeqData.length();
-    ///                 if ((l == pos) || (l == pos + (*GetLineReader()).length() && atStartOfLine)) {
-    ///                     //and it's not the first col of the line
-    ///                     len = 0;
-    ///                     eKnownSize = SGap::eKnownSize_No;
-    ///                 }
-    ///             }
-    ///         }
-    ///
-    ///         const auto cit = m_GapsizeToLinkageEvidence.find(len);
-    ///         const auto& gap_linkage_evidence =
-    ///             (cit != m_GapsizeToLinkageEvidence.end()) ?
-    ///             cit->second :
-    ///             m_DefaultLinkageEvidence;
-    ///
-    ///         TGapRef pGap( new SGap(
-    ///             pos, len,
-    ///             eKnownSize,
-    ///             LineNumber(),
-    ///             m_gap_type,
-    ///             gap_linkage_evidence));
-    ///
-    ///         m_Gaps.push_back(pGap);
-    ///         m_TotalGapLength += len;
-    ///         m_CurrentGapLength = 0;
-    ///     }
-    /// }
-    /// ```
-    /// `m_gapNmin` and `m_gap_Unknown_length` are 0 (`SetMinGaps` is not called), the
-    /// reader is not aligning, and the gap character is always `-`. So a lone hyphen is a
-    /// gap of unknown length (length 0) when it is closed by the end of the record or by
-    /// a `>?` line (`l == pos`), or by a residue that is the first byte of a line without
-    /// white space at its ends (the line's residues are not stored yet, so `l` is `pos`
-    /// plus the line's length); closed by any other residue it is a gap of one.
     /// `bIsNuc` of `ParseDataLine` and of `CheckDataLine`: `fAssumeNuc` (with `fForceType`),
     /// or, without `fForceType`, a `Seq-inst.mol` of `na` that the ids set (`ParseDefLine`).
     /// The two tests agree for every caller's flags (quoted at `check_data_line` and at the
@@ -1885,6 +1827,89 @@ impl RecordState {
         }
     }
 
+    /// `CloseGap(atStartOfLine)`: ends the run of hyphens, if one is open.
+    /// `seq_data_length` is `m_SeqData.length()` (see `parse_data_line`; outside a data
+    /// line it is the number of residues), `line_length` the length of the reader's
+    /// current line.
+    ///
+    /// NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:284-289
+    /// ```c++
+    ///     void CloseGap(bool atStartOfLine=false, ILineErrorListener* pMessageListener = nullptr) {
+    ///         if (m_CurrentGapLength > 0) {
+    ///             x_CloseGap(m_CurrentGapLength, atStartOfLine, pMessageListener);
+    ///             m_CurrentGapLength = 0;
+    ///         }
+    ///     }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1018-1077
+    /// ```c++
+    /// void CFastaReader::x_CloseGap(
+    ///     TSeqPos len, bool atStartOfLine, ILineErrorListener * /*pMessageListener*/)
+    /// {
+    ///     _ASSERT(len > 0  &&  TestFlag(fParseGaps));
+    ///
+    ///     if (m_CurrentGapLength < m_gapNmin)
+    ///     {
+    ///         // the run of N is too short to be assumed as a gap, put N as is.
+    ///         m_SeqData.resize(m_SeqData.size() + m_CurrentGapLength, 'X');
+    ///         memset(&m_SeqData.at(m_CurrentPos), m_CurrentGapChar, m_CurrentGapLength);
+    ///         m_CurrentPos += m_CurrentGapLength;
+    ///         return;
+    ///     }
+    ///
+    ///     if (TestFlag(fAligning)) {
+    ///         TSeqPos pos = GetCurrentPos(ePosWithGapsAndSegs);
+    ///         m_Starts[pos + m_Offset][m_Row] = CFastaAlignmentBuilder::kNoPos;
+    ///         m_Offset += len;
+    ///         m_Starts[pos + m_Offset][m_Row] = pos;
+    ///     } else {
+    ///         TSeqPos pos = GetCurrentPos(eRawPos);
+    ///         SGap::EKnownSize eKnownSize = SGap::eKnownSize_Yes;
+    ///         if (len == m_gap_Unknown_length)
+    ///         {
+    ///             eKnownSize = SGap::eKnownSize_No;
+    ///             //len = 0;
+    ///         }
+    ///         else
+    ///         {
+    ///             // Special case -- treat a lone hyphen at the end of a line as
+    ///             // a gap of unknown length.
+    ///             // (do NOT treat a lone 'N' or 'X' as unknown length)
+    ///             if (len == 1 && m_CurrentGapChar == '-' ) {
+    ///                 TSeqPos l = m_SeqData.length();
+    ///                 if ((l == pos) || (l == pos + (*GetLineReader()).length() && atStartOfLine)) {
+    ///                     //and it's not the first col of the line
+    ///                     len = 0;
+    ///                     eKnownSize = SGap::eKnownSize_No;
+    ///                 }
+    ///             }
+    ///         }
+    ///
+    ///         const auto cit = m_GapsizeToLinkageEvidence.find(len);
+    ///         const auto& gap_linkage_evidence =
+    ///             (cit != m_GapsizeToLinkageEvidence.end()) ?
+    ///             cit->second :
+    ///             m_DefaultLinkageEvidence;
+    ///
+    ///         TGapRef pGap( new SGap(
+    ///             pos, len,
+    ///             eKnownSize,
+    ///             LineNumber(),
+    ///             m_gap_type,
+    ///             gap_linkage_evidence));
+    ///
+    ///         m_Gaps.push_back(pGap);
+    ///         m_TotalGapLength += len;
+    ///         m_CurrentGapLength = 0;
+    ///     }
+    /// }
+    /// ```
+    /// `m_gapNmin` and `m_gap_Unknown_length` are 0 (`SetMinGaps` is not called), the
+    /// reader is not aligning, and the gap character is always `-`. So a lone hyphen is a
+    /// gap of unknown length (length 0) when it is closed by the end of the record or by
+    /// a `>?` line (`l == pos`), or by a residue that is the first byte of a line without
+    /// white space at its ends (the line's residues are not stored yet, so `l` is `pos`
+    /// plus the line's length); closed by any other residue it is a gap of one.
     fn close_gap(&mut self, at_start_of_line: bool, seq_data_length: usize, line_length: usize) {
         if self.current_gap_length == 0 {
             return;
@@ -2202,7 +2227,8 @@ impl RecordState {
     ///     }
     /// }
     /// ```
-    /// The molecule is the input's (`AssignMolType` with `fForceType`):
+    /// The molecule is the input's (`AssignMolType` with `fForceType`), or without it the
+    /// one that the ids named or the letters show (`assign_mol_type`):
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1569-1573
     /// ```c++
@@ -2240,7 +2266,8 @@ impl RecordState {
     /// `Seq-data` that the database writer cannot read (`SeqData::Other`).
     ///
     /// The run of `X` or `N` is as long as the `>?` lines say, up to 2,147,483,647 residues
-    /// for a few bytes of input (makeblastdb's limit; the mask reader has none). NCBI
+    /// for a few bytes of input (makeblastdb's limit; the mask reader's is 4,294,967,295,
+    /// past which the record is `SeqInst::PastSeqPos` and nothing is allocated). NCBI
     /// reserves the whole string at once and a failure is a `std::bad_alloc` (makeblastdb:
     /// "BLAST ran out of memory"); here it is the error of this function
     /// (`ReadError::OutOfMemory`), where an allocation that aborts the process would lose
@@ -2275,9 +2302,20 @@ impl RecordState {
             self.parse_title(&title.text, warn);
         }
 
+        // `GetCurrentPos(ePosWithGaps)` is a `TSeqPos`: NCBI's length of the record is
+        // `length` modulo 2^32, and makeblastdb tests that one (`SeqInst::PastSeqPos`).
         let length = self.seq_data.len() as u64 + self.total_gap_length;
-        if self.flags.build_db_length_limit && length > i32::MAX as u64 {
-            return Ok((SeqInst::TooLong { length }, is_aa));
+        let seq_pos_length = u64::from(length as u32);
+        if self.flags.build_db_length_limit && seq_pos_length > i32::MAX as u64 {
+            return Ok((
+                SeqInst::TooLong {
+                    length: seq_pos_length,
+                },
+                is_aa,
+            ));
+        }
+        if length != seq_pos_length {
+            return Ok((SeqInst::PastSeqPos { length }, is_aa));
         }
 
         if !self.flags.parse_gaps && self.total_gap_length > 0 {
@@ -2464,77 +2502,6 @@ impl RecordState {
     }
 }
 
-/// `CTitleParser::HasMods(title)`: whether the title has a modifier, `[name=value]`.
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/mod_reader.cpp:793-850
-/// ```c++
-/// bool CTitleParser::HasMods(const CTempString& title)
-/// {
-///     size_t start_pos = 0;
-///     while (start_pos < title.size()) {
-///         size_t lb_pos, end_pos, eq_pos;
-///         lb_pos = start_pos;
-///         if (x_FindBrackets(title, lb_pos, end_pos, eq_pos)) {
-///             if (eq_pos < end_pos) {
-///                 return true;
-///             }
-///             start_pos = end_pos+1;
-///         }
-///         else {
-///             return false;
-///         }
-///     }
-///     return false;
-/// }
-///
-///
-/// bool CTitleParser::x_FindBrackets(const CTempString& line, size_t& start, size_t& stop, size_t& eq_pos)
-/// { // Copied from CSourceModParser
-///     size_t i = start;
-///
-///     eq_pos = CTempString::npos;
-///     const char* s = line.data() + start;
-///
-///     int num_unmatched_left_brackets = 0;
-///     while (i < line.size())
-///     {
-///         switch (*s)
-///         {
-///         case '[':
-///             num_unmatched_left_brackets++;
-///             if (num_unmatched_left_brackets == 1)
-///             {
-///                 start = i;
-///             }
-///             break;
-///         case '=':
-///             if (num_unmatched_left_brackets > 0 && eq_pos == CTempString::npos) {
-///                 eq_pos = i;
-///             }
-///             break;
-///         case ']':
-///             if (num_unmatched_left_brackets == 1)
-///             {
-///                 stop = i;
-///                 return (eq_pos<stop);
-///             }
-///             else
-///             if (num_unmatched_left_brackets == 0) {
-///                 return false;
-///             }
-///             else
-///             {
-///                 num_unmatched_left_brackets--;
-///             }
-///         }
-///         i++; s++;
-///     }
-///     return false;
-/// };
-/// ```
-/// `x_FindBrackets` returns true only with `eq_pos < stop`, so `HasMods` is true at the
-/// first bracket pair that it finds: the first `]` that closes the outermost `[`, with an
-/// `=` after that `[`.
 /// `xSetSeqMol`: the molecule that the first id with one names (`IdentifyAccession`):
 /// `Some(true)` for a protein, `Some(false)` for a nucleotide.
 ///
@@ -2673,6 +2640,77 @@ fn sequence_type(data: &[u8]) -> Option<bool> {
     }
 }
 
+/// `CTitleParser::HasMods(title)`: whether the title has a modifier, `[name=value]`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/mod_reader.cpp:793-850
+/// ```c++
+/// bool CTitleParser::HasMods(const CTempString& title)
+/// {
+///     size_t start_pos = 0;
+///     while (start_pos < title.size()) {
+///         size_t lb_pos, end_pos, eq_pos;
+///         lb_pos = start_pos;
+///         if (x_FindBrackets(title, lb_pos, end_pos, eq_pos)) {
+///             if (eq_pos < end_pos) {
+///                 return true;
+///             }
+///             start_pos = end_pos+1;
+///         }
+///         else {
+///             return false;
+///         }
+///     }
+///     return false;
+/// }
+///
+///
+/// bool CTitleParser::x_FindBrackets(const CTempString& line, size_t& start, size_t& stop, size_t& eq_pos)
+/// { // Copied from CSourceModParser
+///     size_t i = start;
+///
+///     eq_pos = CTempString::npos;
+///     const char* s = line.data() + start;
+///
+///     int num_unmatched_left_brackets = 0;
+///     while (i < line.size())
+///     {
+///         switch (*s)
+///         {
+///         case '[':
+///             num_unmatched_left_brackets++;
+///             if (num_unmatched_left_brackets == 1)
+///             {
+///                 start = i;
+///             }
+///             break;
+///         case '=':
+///             if (num_unmatched_left_brackets > 0 && eq_pos == CTempString::npos) {
+///                 eq_pos = i;
+///             }
+///             break;
+///         case ']':
+///             if (num_unmatched_left_brackets == 1)
+///             {
+///                 stop = i;
+///                 return (eq_pos<stop);
+///             }
+///             else
+///             if (num_unmatched_left_brackets == 0) {
+///                 return false;
+///             }
+///             else
+///             {
+///                 num_unmatched_left_brackets--;
+///             }
+///         }
+///         i++; s++;
+///     }
+///     return false;
+/// };
+/// ```
+/// `x_FindBrackets` returns true only with `eq_pos < stop`, so `HasMods` is true at the
+/// first bracket pair that it finds: the first `]` that closes the outermost `[`, with an
+/// `=` after that `[`.
 fn title_has_mods(title: &[u8]) -> bool {
     let mut eq_pos = None;
     let mut unmatched = 0u32;

@@ -401,6 +401,7 @@ impl Source<'_> {
                         MaskReadError::Ncbi(exception) => Failure::Caught(exception),
                         MaskReadError::Read(error) => read_failure(error),
                         MaskReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
+                        MaskReadError::Refused(what) => Failure::Refused(unsupported(&what)),
                     })?;
                 Ok(record.map(|record| Record {
                     ids: record.ids,

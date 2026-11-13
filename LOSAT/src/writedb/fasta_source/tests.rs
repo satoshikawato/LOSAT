@@ -650,6 +650,39 @@ fn record_above_the_length_limit() {
     );
 }
 
+/// A record of 4,294,967,296 residues or more (gaps included) has NCBI's length modulo 2^32
+/// (a `TSeqPos`): makeblastdb's check of 2,147,483,647 tests that one (above), and a record
+/// that it does not stop is refused, with nothing allocated for its gaps (line RG DECISIONS
+/// K3-6).
+#[test]
+fn record_past_32_bits_is_refused() {
+    for (input, protein, length) in [
+        (&b">a\nA\n>?4294967295\n"[..], false, 4_294_967_296u64),
+        (&b">a\nM\n>?4294967295\n>?1\nK\n"[..], true, 4_294_967_298),
+        (
+            &b">a\nACGT\n>?4294967295\n>?4294967295\nAC\n"[..],
+            false,
+            8_589_934_596,
+        ),
+    ] {
+        let mut source = FastaBioseqSource::with_parse_ids(input, protein, false);
+        let error = source.next_bioseq(&mut |_| ()).unwrap_err();
+        assert_eq!(error.kind, SourceErrorKind::Refused);
+        assert!(
+            error.message.contains(&format!("({length};"))
+                && error
+                    .message
+                    .ends_with("is not supported by LOSAT's makeblastdb"),
+            "{}",
+            error.message
+        );
+        assert_eq!(source.next_bioseq(&mut |_| ()), Ok(None));
+    }
+    // NCBI's length 4,294,967,294 is above the limit: its error, as without the wrap.
+    let bioseq = one(b">a\n>?4294967295\n>?4294967295\n", false);
+    assert_eq!((bioseq.length, bioseq.seq_data), (4_294_967_294, None));
+}
+
 /// A reader that fails after its bytes.
 struct FailingRead<'a>(&'a [u8]);
 
@@ -674,7 +707,7 @@ fn read_error_ends_the_reading() {
         first,
         Err(SourceError {
             message: "Read error: the disk is gone".to_string(),
-            out_of_memory: false,
+            kind: SourceErrorKind::Creation,
         })
     );
     assert_eq!(source.next_bioseq(&mut |_| ()), Ok(None));
@@ -703,7 +736,7 @@ fn a_delta_that_cannot_be_allocated_is_an_error() {
     );
     assert!(fix_bioseq_deltas(delta(u64::MAX - 1)).is_err());
     let error = SourceError::out_of_memory();
-    assert!(error.out_of_memory);
+    assert_eq!(error.kind, SourceErrorKind::OutOfMemory);
     assert_eq!(error.message, "BLAST ran out of memory");
 }
 

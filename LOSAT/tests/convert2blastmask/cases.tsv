@@ -1,6 +1,7 @@
 # name<TAB>arguments (shell words, run in this directory; "< file" = stdin). NCBI BLAST+ 2.17.0 convert2blastmask, the official Linux x64 release (local oracle), 2026-11-13, ad-RG-K-6 (line RG item K3):
 # in/ made by remaining-gaps-20261112/K/k3/probe/gen_inputs.py; conf/malformed.ini is that of tests/segmasker. Run without LOSAT_, NCBI_ and BLAST variables but NCBI_CONFIG_PATH (this directory) and BLAST_USAGE_REPORT=false (NCBI only).
 # Not frozen: -version, -version-full and -xmlhelp (LOSAT prints its own version and refuses the others, as dustmasker), the -out /dev/full rows of the maskinfo formats (LOSAT refuses a failed write of the serial stream) and -masking_options with a byte outside the visible ASCII range in maskinfo_asn1_text and maskinfo_asn1_bin (NCBI writes # for it and posts an error; LOSAT refuses it, as in an archive).
+# gapwrap0_* and gapwrap1_* (>? lines that sum to 2^32 or more; RG DECISIONS K3-6): frozen on ws with its NCBI BLAST+ 2.17.0 (env_blast) under a 32 GiB address space, since NCBI allocates the run of N of gapwrap1 (4 GiB, 8.4 GB resident); in/gapwrap*.fa written by hand.
 ambig_int	-in in/ambig.fa -masking_algorithm dust -masking_options o -outfmt interval
 ambig_txt	-in in/ambig.fa -masking_algorithm dust -masking_options o
 ambig_ps	-in in/ambig.fa -masking_algorithm dust -masking_options o -parse_seqids
@@ -55,6 +56,10 @@ gap0_ps	-in in/gap0.fa -masking_algorithm dust -masking_options o -parse_seqids
 gapbad_int	-in in/gapbad.fa -masking_algorithm dust -masking_options o -outfmt interval
 gapbad_txt	-in in/gapbad.fa -masking_algorithm dust -masking_options o
 gapbad_ps	-in in/gapbad.fa -masking_algorithm dust -masking_options o -parse_seqids
+gapwrap0_int	-in in/gapwrap0.fa -masking_algorithm dust -masking_options o -outfmt interval
+gapwrap0_txt	-in in/gapwrap0.fa -masking_algorithm dust -masking_options o
+gapwrap1_int	-in in/gapwrap1.fa -masking_algorithm dust -masking_options o -outfmt interval
+gapwrap1_txt	-in in/gapwrap1.fa -masking_algorithm dust -masking_options o
 gaplc_int	-in in/gaplc.fa -masking_algorithm dust -masking_options o -outfmt interval
 gaplc_txt	-in in/gaplc.fa -masking_algorithm dust -masking_options o
 gaplc_ps	-in in/gaplc.fa -masking_algorithm dust -masking_options o -parse_seqids

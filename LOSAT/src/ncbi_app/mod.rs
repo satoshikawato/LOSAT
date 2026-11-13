@@ -30,8 +30,8 @@ pub(crate) struct Tool {
     /// The version that `-version` prints (`GetFullVersion`).
     pub(crate) version: &'static str,
     /// NCBI's `-help` text (`CArgDescriptions::PrintUsage` of the descriptions with the details),
-    /// frozen. Its part before `OPTIONAL ARGUMENTS` is the usage that `-h` and the argument
-    /// errors print (`short_usage`).
+    /// frozen. Its part before the details (`REQUIRED ARGUMENTS` or `OPTIONAL ARGUMENTS`) is
+    /// the usage that `-h` and the argument errors print (`short_usage`).
     pub(crate) help: &'static str,
     /// The program's arguments in the order its `Init` describes them; the reader adds those
     /// of every `CArgDescriptions` (`args::descs`).

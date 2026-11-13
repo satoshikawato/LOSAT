@@ -27,7 +27,7 @@ const PROGRAM: &str = "CONVERT2BLASTMASK";
 //     HideStdArgs(fHideLogfile | fHideConffile | fHideFullVersion | fHideXmlHelp | fHideDryRun);
 // ```
 /// The text of `convert2blastmask -help` (NCBI 2.17.0's, frozen): `-logfile`, `-conffile`,
-/// `-version-full`, `-xmlhelp` and `-dryrun` are hidden. Its part before `OPTIONAL ARGUMENTS`
+/// `-version-full`, `-xmlhelp` and `-dryrun` are hidden. Its part before `REQUIRED ARGUMENTS`
 /// is the usage that `-h` and the argument errors print.
 const HELP: &str = include_str!("help.txt");
 

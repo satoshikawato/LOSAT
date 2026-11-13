@@ -6685,13 +6685,16 @@ Scheduling (each value computed by one thread with the original function; order 
   built in parts (`LOSAT_X_BXBUILDPAR`; `blastx/x_bx_mem.rs`). The order of the report is the writing order of the units
   and of the subjects' tasks, as for `LOSAT_X_BXUNITCAP`, so reports do not change (`tests/blastx_unit_cap.rs`: 4
   threads with the switch on, `=0` and every BLASTX memory switch off, several batches, one subject task per batch, a
-  split query, both sides of the rule). A 10,002-base batch's 4-letter table holds about 97 MB (NCBI builds one per
-  query chunk); with a unit per thread 50 cDNAs x scer_pep at 8 threads held 820 MB (NCBI 241 MB). Experiment binary
-  746db9813 (ws node 0, 8 cores, 3 rounds, reports equal in every arm), 8 threads: 50 cDNAs K = 8 1.044 s 820 MB, K = 1
-  with the build on one thread 2.945 s 163 MB, K = 1 with the build in 8 parts 0.991 s 189 MB, K = 2 in 4 parts
-  0.890 s 286 MB (NCBI 9.32 s 241 MB); 800 cDNAs 18.28 s 1,222 MB / 64.7 s 397 MB / 21.27 s 463 MB / 18.74 s 558 MB
-  (NCBI 48.4 s 1,491 MB). A rule the Owner approved as a deadline fallback (2026-11-12,
-  `docs/decisions/SWITCH_APPROVALS.md`), until the table's memory is reduced in shape (line NP, SC9b).
+  split query, both sides of the rule). A 10,002-base batch's 4-letter table and its search hold about 90 MB (K = 8
+  less K = 1 over 7 units at 8 and 16 threads; NCBI builds one table per query chunk). With the table built by stripe
+  of cells (line NP, SC9b-3; release build, ws node 1, 32 cores, 2 rounds, reports equal in every arm and to NCBI's),
+  at 8 / 16 / 32 threads: 50 cDNAs x scer_pep K = 1 0.77 / 0.47 / 0.36 s and 148 / 154 / 174 MB, K = 8 (`=0`) 0.79 /
+  0.41 / 0.27 s and 764 / 803 / 730 MB, NCBI 7.73 / 7.21 / 7.05 s and 237 / 234 / 230 MB; 800 cDNAs K = 1 16.5 / 9.9 /
+  7.0 s and 325 / 421 / 495 MB, K = 8 15.4 / 7.9 / 4.9 s and 1,088 / 1,207 / 1,232 MB, NCBI 48.2 / 27.8 / 33.8 s and
+  1,563 / 2,338 / 4,404 MB; 800 cDNAs x `-subject` 50 yeast proteins K = 1 6.8 / 4.9 / 3.9 s and 301 / 329 / 338 MB,
+  K = 8 5.0 / 2.8 / 2.2 s and 706 / 893 / 1,236 MB (NCBI, one thread with `-subject`, 143 s and 386 MB). A rule the
+  Owner approved as a deadline fallback (2026-11-12, `docs/decisions/SWITCH_APPROVALS.md`) and kept at K = 1 (Owner,
+  2026-11-13), until the table's memory is reduced in shape (line NP, SC9b).
 - `LOSAT_X_BXCLUTPOOL=1` (BLASTX `-task blastx-fast` and `-word_size 5`, memory; in the strict set from the pull
   request that added it, 2026-11-01: on unless `=0` or `LOSAT_X_DEFAULT=0`): the flat compressed lookup tables are
   built on vectors kept between builds: a table's starts, hits and pv when the table is dropped

@@ -140,3 +140,18 @@ without a masked sequence. A rebuild changes the dates stored in the index and c
 `src/writedb/mask_data/tests_cli.rs` runs the cases through the command line (`makeblastdb::run_with`) and
 compares the exit status, the log and the standard error of each with NCBI's, and every file of the database.
 `mask_parse/expected_stdout.tsv` holds the log of each run of `mask_parse/expected.tsv` the same way.
+
+## Masks ordered by address, and the errors that come first (`mask_order/`)
+
+`make_mask_order_fixtures.py` (`--ncbi-bin DIR --work DIR`, 2026-11-14, makeblastdb 2.17.0 with
+`BLAST_USAGE_REPORT=false`) writes the inputs and NCBI's outputs of five runs on `in.fna`, whose first
+sequence has the Seq-ids `gi|5` and `gb|AY000005.1|` (one packed number): masks of both on the plus
+strand, which makeblastdb writes in the order of the memory addresses of their handles, and an error of
+makeblastdb that does not depend on that order (a range of the same sequence past its end, also of a
+second algorithm; a range of the next sequence past its end; a second input file without sequences),
+plus `tie`, the masks alone. Each row of `mask_order/cases.tsv` (name, `-in` files, `-mask_data` files)
+ran with `-dbtype nucl -parse_seqids -title in.fna -out db -blastdb_version 5` and `4`; its exit status,
+standard error, log (masked as above) and the names of the files `db.*` it left are in
+`mask_order/expected/<case>.v<N>.{rc,stderr,stdout,files}`. `src/writedb/mask_data/tests_cli.rs` runs
+them through the command line: LOSAT gives makeblastdb's outcome for the first four and refuses `tie`
+(which NCBI builds) at the close, leaving the files of the failed build of `oob_later_sequence`.

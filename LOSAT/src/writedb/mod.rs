@@ -89,8 +89,12 @@ pub enum WriteDbError {
     /// `CWriteDB_LMDB`), which occur only in the close and so become creation errors.
     Other(String),
     /// LOSAT's refusal of an input that makeblastdb reads, raised inside the build (mask data
-    /// whose ranges NCBI orders by memory addresses, `mask_data::range_set`): "losat
-    /// makeblastdb: " and the message, exit status 1, like `MakedbError::Unsupported`.
+    /// whose ranges NCBI orders by memory addresses, `mask_data::range_set`, at the close of a
+    /// build that would otherwise succeed; a mask column created after the first volume): "losat
+    /// makeblastdb: " and the message, exit status 1, like `MakedbError::Unsupported`. Both end
+    /// the build as an error of NCBI's build at that point does (`EndBuild(true)`: its files are
+    /// removed); a registration after the first volume (makeblastdb registers every algorithm
+    /// before the input) is refused before anything changes and leaves the build open.
     Unsupported(String),
     /// An allocation failed (`std::bad_alloc`): makeblastdb prints "BLAST ran
     /// out of memory".

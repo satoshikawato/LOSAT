@@ -147,11 +147,7 @@ pub(super) struct PreparedXml {
 /// (the matrix table is made from the name as typed, as BLASTP's.)
 pub(super) fn unsupported_matrix(matrix_name: &str, has_queries: bool) -> Result<()> {
     if FormattingMatrix::new(matrix_name).is_none() && has_queries {
-        return Err(crate::cli::NativeError {
-            exit: 3,
-            message: "BLAST engine error: unsupported score matrix\n".to_string(),
-        }
-        .into());
+        return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
     }
     Ok(())
 }
@@ -555,14 +551,8 @@ impl PreparedXml {
                                 // translated coordinates use three nucleotide letters per
                                 // residue and reverse strand endpoints run in descending order.
                                 let subject_len = i32::try_from(subject_seq.len())?;
-                                let (s_start, s_end) = if frame > 0 {
-                                    (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
-                                } else {
-                                    (
-                                        subject_len - 3 * hsp.s_start + frame + 1,
-                                        subject_len - 3 * hsp.s_end + frame + 2,
-                                    )
-                                };
+                                let (s_start, s_end) =
+                                    super::stage_e_report::subject_endpoints(hsp, subject_len);
                                 // The rows, without the lower case of the masks.
                                 aligned_sequences_into(
                                     query_letters,

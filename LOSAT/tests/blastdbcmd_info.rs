@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::ncbi_windows_paths::ncbi_paths_on_windows;
+
 /// `fs::canonicalize` without the `\\?\` prefix that Windows puts on its result: a verbatim path
 /// takes `/` as a character of a name (`{O}/B23.out` below is not a file of the directory then),
 /// and the product prints the paths it lists without the prefix.
@@ -82,54 +84,17 @@ fn expected(name: &str) -> Vec<u8> {
     native_paths(text, &tests)
 }
 
-/// The frozen text with `{R}` and `{T}` placed. NCBI's files come from Linux; on Windows the
-/// paths in them are the ones NCBI's code makes there (`SeqDB_ConvertOSPath`: the separator of
-/// the platform; the search path is split at `;`), so the rest of each placed path is written
-/// with `\`, so is the name in `database [name]`, and the `:` of the search path `[{R}::]` is `;`.
-#[cfg(not(windows))]
+/// The frozen text with `{R}` and `{T}` placed, its paths written as on the platform of the run
+/// (`ncbi_windows_paths::ncbi_paths_on_windows`).
 fn native_paths(text: String, tests: &Path) -> Vec<u8> {
+    let text = if cfg!(windows) {
+        ncbi_paths_on_windows(&text, &["{R}", "{T}"])
+    } else {
+        text
+    };
     text.replace("{T}", tests.to_str().unwrap())
         .replace("{R}", tests.join("blastdbcmd").to_str().unwrap())
         .into_bytes()
-}
-
-#[cfg(windows)]
-fn native_paths(text: String, tests: &Path) -> Vec<u8> {
-    let text = text.replace("{R}::]", "{R};;]");
-    // The database name of "No alias or index file found for ... database [name]" goes through
-    // the same conversion (`SeqDB_ConvertOSPath`).
-    let mut converted = String::new();
-    let mut rest = text.as_str();
-    while let Some(at) = rest.find("database [") {
-        let name_at = at + "database [".len();
-        converted.push_str(&rest[..name_at]);
-        let end = rest[name_at..]
-            .find(']')
-            .map_or(rest.len(), |n| name_at + n);
-        converted.push_str(&rest[name_at..end].replace('/', "\\"));
-        rest = &rest[end..];
-    }
-    converted.push_str(rest);
-    let text = converted;
-    let mut out = String::new();
-    let mut rest = text.as_str();
-    while let Some(at) = rest.find('{') {
-        out.push_str(&rest[..at]);
-        let root = match &rest[at..at + 3] {
-            "{R}" => tests.join("blastdbcmd"),
-            "{T}" => tests.to_path_buf(),
-            _ => unreachable!("a placeholder of the frozen files"),
-        };
-        out.push_str(root.to_str().unwrap());
-        rest = &rest[at + 3..];
-        let end = rest
-            .find(|c: char| !(c.is_ascii_alphanumeric() || "_./-".contains(c)))
-            .unwrap_or(rest.len());
-        out.push_str(&rest[..end].replace('/', "\\"));
-        rest = &rest[end..];
-    }
-    out.push_str(rest);
-    out.into_bytes()
 }
 
 /// The probe's cases that LOSAT answers as NCBI does: id, words, NCBI's exit status. The
@@ -316,28 +281,38 @@ fn out_and_logfile_take_what_ncbi_writes_there() {
     );
 }
 
-/// The probe's cases that LOSAT's BLASTDBCMD does not serve: the toolkit words LOSAT refuses
-/// (`-dryrun`, probe B22, runs since line RG item E1b: `tests/ncbi_toolkit_dryrun.rs`).
-const REFUSALS: &[(&str, &[&str])] = &[
-    ("B20", &["-db", "db/p5", "-info", "-version-full"]),
-    ("C06", &["-db", "db/p5", "-info", "-xmlhelp"]),
-];
-
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:980-985 (quoted at
+// `ncbi_version::print`). NCBI BLAST+ 2.17.0 (probe B20, line RG `E/e3/ncbi/blastdbcmd.vf_args`):
+// `-version-full` prints the full version and exits 0 before the arguments are read; LOSAT's has
+// NCBI's form with LOSAT's values (line RG item E3).
 #[test]
-fn what_blastdbcmd_does_not_serve_is_refused_without_output() {
-    let dir = TestDir::new("refuse");
-    for &(id, words) in REFUSALS {
-        let (stdout, stderr, code) = blastdbcmd(words, &dir.0);
-        let stderr = String::from_utf8_lossy(&stderr);
-        assert_eq!(stdout, b"", "{id} {words:?}");
-        assert_eq!(code, 1, "{id} {words:?}: {stderr}");
-        assert!(
-            stderr.starts_with("Error: ")
-                && stderr.ends_with("is not supported by LOSAT's BLASTDBCMD\n")
-                && stderr.lines().count() == 1,
-            "{id} {words:?}: {stderr}"
-        );
-    }
+fn a_full_version_is_printed_before_the_arguments() {
+    let dir = TestDir::new("vfull");
+    let (stdout, stderr, code) = blastdbcmd(&["-db", "db/p5", "-info", "-version-full"], &dir.0);
+    let stdout = String::from_utf8(stdout).unwrap();
+    assert_eq!((stderr, code), (Vec::new(), 0), "{stdout}");
+    assert!(
+        stdout.starts_with("blastdbcmd: 2.17.0+\n Package: LOSAT ")
+            && stdout.ends_with(
+                ", output compatible with blast 2.17.0\n Package-Config:  \n GI-64bit:  TRUE\n"
+            ),
+        "{stdout}"
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-690 (quoted at `ncbi_xmlhelp`).
+// NCBI BLAST+ 2.17.0 (probe C06, and line RG `E/e2/ncbi/blastdbcmd.xml_args`): `-xmlhelp` after
+// the arguments prints the XML of blastdbcmd's arguments and exits 0. The toolkit words that the
+// probe's LOSAT refused all run now (`-dryrun`, probe B22, since line RG item E1b:
+// `tests/ncbi_toolkit_dryrun.rs`; the full versions, probe B20, since item E3:
+// `a_full_version_is_printed_before_the_arguments`; `-xmlhelp` since item E2x): LOSAT's
+// blastdbcmd refuses no argument by name, so its XML is NCBI's.
+#[test]
+fn xmlhelp_prints_ncbis_xml() {
+    let dir = TestDir::new("xmlhelp");
+    let (stdout, stderr, code) = blastdbcmd(&["-db", "db/p5", "-info", "-xmlhelp"], &dir.0);
+    assert_eq!((stderr, code), (Vec::new(), 0));
+    assert!(stdout == include_bytes!("../src/ncbi_xmlhelp/blastdbcmd.xml"));
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1015-1022 (quoted at

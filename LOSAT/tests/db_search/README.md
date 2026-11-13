@@ -67,6 +67,14 @@ FASTA files:
   10000, overlap 100: [0, 10000) and [9900, 20600)); rows `db.split.*` against `LOSAT/tests/seqdb/db/prot_v4`.
 - `vol2.faa`: `A` (record p10 of `LOSAT/tests/seqdb/prot.faa`) and `B`, the same with every fifth letter
   replaced by `W` (`A` where it is `W`); `vol2_q.faa`: `A` as the query.
+- `q3b_chains.faa` (rows `db.ps.q3b.*` of psiblast `-sum_stats true`, line RG item Q3b): eight subjects made of parts
+  of `LOSAT/tests/fasta/psiblast/tk.faa` with some letters changed and random letters between them (a fixed
+  pseudo-random generator), whose HSPs with that query form linked sets: two parts far apart (`split2`), close
+  (`split2_close`) and in reverse order (`reversed2`), three parts (`split3`), overlapping parts (`overlap`), two weak
+  parts (`weak2`), one part (`single`) and one part three times (`tandem`).
+- `q3b_long.faa` (rows `db.ps.q3b.long.*` and `db.oldfsc.blastp.split.6`): one protein of 21,000 random letters (a fixed
+  pseudo-random generator) with `LOSAT/tests/fasta/psiblast/tk.faa` planted at 500, 9,800, 14,000 and 20,500 (cut at the
+  end), a query that NCBI splits into chunks of 10,000 that overlap by 100.
 
 Databases (all `-blastdb_version 4`, no `-parse_seqids`; only `.pin .psq .phr` are kept, the `.pjs` file
 makeblastdb also writes was deleted). Run from `LOSAT/`:
@@ -86,6 +94,8 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
     rm tests/db_search/vol2_nophr.01.phr
     makeblastdb -in tests/db_search/bxchunk.faa -dbtype prot -out tests/db_search/bxchunk \
         -title "proteins planted in bxchunk_q.fna" -blastdb_version 4
+    makeblastdb -in tests/db_search/q3b_chains.faa -dbtype prot -out tests/db_search/q3b_chains \
+        -title "subjects whose HSPs with tests/fasta/psiblast/tk.faa form linked sets" -blastdb_version 4
 
 `wm_s60k` (rows `db.wm.*`, line NP M2: `-window_masker_db`) is the subject `s60k.fa` of
 `LOSAT/tests/blastn_regression_fixtures.py`, with only `.nin .nsq .nhr` kept:
@@ -705,7 +715,10 @@ Where the reports read their subjects one by one (line DBID taxrow; `ids/txr_p` 
 `ids/txr_q.fna`, and B `gb|BBB00001.1|` taxid 99990; `ids/txr_q2.*` end with a query without hits): with `PRE_FETCH_SEQS_LIMIT=0` NCBI's formatter loads each subject when it formats it, so the offset error of
 `tests/seqdb/taxdb/offset_last_past_end` comes between A's and B's tabular rows, description lines and BLAST XML `Hit`s
 where both streams go to one file. `tests/taxonomy_read_order.rs` compares LOSAT's merged stream with NCBI 2.17.0's
-(`tests/fixtures/taxonomy_read_order`) in the six programs, with `ids/prd_txself` for a plural name's open.
+(`tests/fixtures/taxonomy_read_order`) in the six programs, with `ids/prd_txself` for a plural name's open, and
+`ids/txr_s` and `ids/txr_sn` (`make_ids.py --taxrow-only`; F `gb|FFF00001.1|` taxid 99990, a fragment of the query that
+`-sorthits 3` puts before A) for the order of the pairwise report's reads (line DBID taxrow2): `bad_magic`'s open comes
+before F's description line, where the sorted report reads first.
 
 Review 3 of pssmread (rows `db.id.prd3.*`; `ids/prd_np` and its version 4 copy `ids/prd_np_4` from `ids/prd_np.faa`, A and B
 without `-parse_seqids` and taxid 99990 by `-taxid 99990`, and `ids/prd_tc` from `ids/prd_tc.faa`, A taxid 99990 and B taxid

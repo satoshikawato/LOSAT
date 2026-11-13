@@ -477,10 +477,13 @@ of the masks provided."):
 - Ranges whose order NCBI takes from memory addresses: ranges of two different Seq-id handles
   with the same packed number (`gi|5` and `gb|AY000005.1|`; a local id and a `general` string
   tag; two `giim` handles of one number) written on one strand of one sequence and algorithm,
-  when the two orders write different ranges. The error names the Seq-ids. It comes when that
-  sequence is written, so the files are left as makeblastdb leaves them after an error of the
-  build there (none in version 4; `NAME.nos`, `NAME.not`, `NAME.ntf`, `NAME.nto` in version 5,
-  `.p..` for proteins).
+  when the two orders write different ranges. That order shows only in the files of a build that
+  succeeds, so the error comes at the end of such a build and names the Seq-ids and the sequence;
+  an error of makeblastdb that comes later in the run (a mask of the same sequence past its end, a
+  later sequence or input file that fails) is reported as makeblastdb reports it. The files are
+  left as makeblastdb leaves them after an error of its build at the last sequence (none in
+  version 4; `NAME.nos`, `NAME.not`, `NAME.ntf`, `NAME.nto` in version 5, `.p..` for proteins),
+  where the refusal of a mask string comes before the build and leaves none.
 
 A mask file that NCBI's reader rejects as damaged is no refusal: both programs stop, LOSAT with
 exit status 255 and `Error: mask data in '<file>': <LOSAT's text>` where NCBI prints an

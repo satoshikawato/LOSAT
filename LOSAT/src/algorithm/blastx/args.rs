@@ -1525,8 +1525,13 @@ impl BlastxArgs {
     //             	ITERATE(CSearchResultSet, result, *results) {
     //                	    formatter.PrintOneResultSet(**result, query_batch);
     // ```
-    pub fn run(self) -> Result<()> {
-        super::native::run(&self)
+    /// Runs the search with the settings of the program's application start
+    /// (`ApplicationStart::settings`).
+    pub(crate) fn run(
+        self,
+        settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    ) -> Result<()> {
+        super::native::run(&self, settings)
     }
 
     /// The program of the run's texts (`ProgramName`).

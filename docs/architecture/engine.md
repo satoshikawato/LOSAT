@@ -539,10 +539,12 @@ number.
 
 The engine reads its environment in three layers:
 
-1. NCBI's application layer: at the start of every program,
-   `blastinput::ncbi_environment::check_ncbi_application_settings` reads the whole environment and
-   NCBI's configuration files (`.ncbirc`, `<program>.ini`). It takes `[BLAST] BLASTDB` and refuses
-   the variables and entries that would change NCBI's output in a way LOSAT does not reproduce.
+1. NCBI's application layer: at the start of every program, the command line's entry makes the
+   program's application start (`blastinput::ncbi_environment::ApplicationStart`), a value that it
+   gives to the argument reader and the program's run; the library API reads the same settings
+   without a start (`library_application_settings`). Both read the whole environment and NCBI's
+   configuration files (`.ncbirc`, `<program>.ini`), take `[BLAST] BLASTDB` and refuse the
+   variables and entries that would change NCBI's output in a way LOSAT does not reproduce.
 2. NCBI's program variables (`BLASTDB`, `BATCH_SIZE`, `CHUNK_SIZE`, ...), read where NCBI reads
    them.
 3. LOSAT's own variables: the switches and the diagnostics above.

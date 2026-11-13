@@ -4,6 +4,7 @@
 
 use std::path::Path;
 
+use super::range_set::address_order_refusal;
 use super::registry::{
     FILTER_PROGRAM_DUST, FILTER_PROGRAM_OTHER, FILTER_PROGRAM_REPEAT, FILTER_PROGRAM_SEG,
     FILTER_PROGRAM_WINDOWMASKER,
@@ -68,9 +69,10 @@ fn combined(algo: i32, id: i32, locs: &[MaskLoc]) -> Result<Vec<(u32, u32)>, Wri
     for l in locs {
         set.insert(algo, lid(id), l.parts.clone())?;
     }
-    let ranges = set.get_ranges(&[lid(id)])?;
-    assert_eq!(ranges.len(), 1);
-    Ok(ranges[0].offsets.clone())
+    let found = set.get_ranges(&[lid(id)]);
+    assert_eq!(found.address_ordered, None);
+    assert_eq!(found.ranges.len(), 1);
+    Ok(found.ranges[0].offsets.clone())
 }
 
 /// What NCBI's makeblastdb stored (blastdbcmd `%m`) for the same Seq-locs:
@@ -209,10 +211,11 @@ fn reverse_strand_ranges_are_merged_apart_and_come_last() {
 }
 
 /// NCBI combines the Seq-locs of any Seq-id and only looks up those of the sequences it writes,
-/// so a combination whose order NCBI takes from memory addresses is an error only for a sequence
-/// that is looked up and has both Seq-ids.
+/// so a combination whose order NCBI takes from memory addresses is noted only for a sequence
+/// that is looked up and has both Seq-ids; its ranges are written in LOSAT's order (the refusal
+/// comes at the close of the build, `tests_cli`).
 #[test]
-fn a_refused_combination_is_an_error_only_when_it_is_looked_up() {
+fn a_refused_combination_is_noted_only_when_it_is_looked_up() {
     let mut set = MaskedRangeSet::new();
     let (gi, gb) = (
         ParsedSeqId::Gi(5),
@@ -227,17 +230,25 @@ fn a_refused_combination_is_an_error_only_when_it_is_looked_up() {
     set.insert(30, gb.clone(), loc_of(gb.clone(), &[(50, 60)]).parts)
         .unwrap();
     // Each id alone is decided.
+    for (id, offsets) in [(&gi, [(10, 41)]), (&gb, [(50, 61)])] {
+        let found = set.get_ranges(std::slice::from_ref(id));
+        assert_eq!(found.ranges[0].offsets, offsets);
+        assert_eq!(found.address_ordered, None);
+    }
+    // A sequence with both is noted (both packed numbers are 5, both on the plus strand); LOSAT
+    // writes the handles in the order their first ranges came, here that of the Seq-ids.
+    let found = set.get_ranges(&[gi.clone(), gb.clone()]);
+    assert_eq!(found.ranges[0].offsets, [(10, 41), (50, 61)]);
     assert_eq!(
-        set.get_ranges(std::slice::from_ref(&gi)).unwrap()[0].offsets,
-        [(10, 41)]
+        found.address_ordered.as_deref(),
+        Some("gi|5 and gb|AY000005.1|")
     );
+    let found = set.get_ranges(&[gb, gi]);
+    assert_eq!(found.ranges[0].offsets, [(50, 61), (10, 41)]);
     assert_eq!(
-        set.get_ranges(std::slice::from_ref(&gb)).unwrap()[0].offsets,
-        [(50, 61)]
+        found.address_ordered.as_deref(),
+        Some("gb|AY000005.1| and gi|5")
     );
-    // A sequence with both is refused (both packed numbers are 5, both on the plus strand).
-    let error = set.get_ranges(&[gi, gb]).unwrap_err();
-    assert!(matches!(error, WriteDbError::Unsupported(_)), "{error:?}");
 }
 
 #[test]
@@ -251,7 +262,7 @@ fn ranges_follow_the_first_insert_of_each_algorithm() {
         .unwrap();
     set.insert(31, id2.clone(), loc(2, &[(5, 6)]).parts)
         .unwrap();
-    let ranges = set.get_ranges(std::slice::from_ref(&id1)).unwrap().to_vec();
+    let ranges = set.get_ranges(std::slice::from_ref(&id1)).ranges.to_vec();
     assert_eq!(
         ranges,
         [
@@ -268,8 +279,8 @@ fn ranges_follow_the_first_insert_of_each_algorithm() {
     assert!(!ranges_are_empty(&ranges));
     // No id of the sequence, no ranges; a different kind of Seq-id never matches.
     let other = ParsedSeqId::Gi(7);
-    assert!(ranges_are_empty(set.get_ranges(&[other]).unwrap()));
-    assert!(ranges_are_empty(set.get_ranges(&[]).unwrap()));
+    assert!(ranges_are_empty(set.get_ranges(&[other]).ranges));
+    assert!(ranges_are_empty(set.get_ranges(&[]).ranges));
     // Several ids of one sequence with handles of different packed numbers (`gi|1`, `gi|2`):
     // their Seq-locs are added, in the order of the handles.
     let (g1, g2) = (ParsedSeqId::Gi(1), ParsedSeqId::Gi(2));
@@ -279,17 +290,23 @@ fn ranges_follow_the_first_insert_of_each_algorithm() {
         .unwrap();
     set.insert(31, g2.clone(), loc_of(g2.clone(), &[(5, 6)]).parts)
         .unwrap();
-    let both = set.get_ranges(&[g2.clone(), g1.clone()]).unwrap();
-    assert_eq!(both[0].offsets, [(1, 3), (5, 7)]);
-    assert_eq!(both[1].offsets, [(3, 5)]);
+    let both = set.get_ranges(&[g2.clone(), g1.clone()]);
+    assert_eq!(both.address_ordered, None);
+    assert_eq!(both.ranges[0].offsets, [(1, 3), (5, 7)]);
+    assert_eq!(both.ranges[1].offsets, [(3, 5)]);
     // Two handles with the same packed number (`lcl|1`, `lcl|2`: both 0): NCBI orders them by
-    // memory address, so LOSAT refuses to write them.
-    let error = set.get_ranges(&[id1, id2]).unwrap_err().to_string();
-    assert!(error.contains("lcl|1 and lcl|2"), "{error}");
-    assert!(
-        error.starts_with("losat makeblastdb: ")
-            && error.contains("LOSAT does not write this mask"),
-        "{error}"
+    // memory address. Algorithm 31 is the first that has both: it is the one named; every
+    // algorithm is still computed.
+    let found = set.get_ranges(&[id1, id2]);
+    assert_eq!(found.address_ordered.as_deref(), Some("lcl|1 and lcl|2"));
+    assert_eq!(found.ranges[0].offsets, [(1, 3), (5, 7)]);
+    assert_eq!(found.ranges[1].offsets, [(3, 5)]);
+    let error = address_order_refusal("lcl|1 and lcl|2", "lcl|1").to_string();
+    assert_eq!(
+        error,
+        "losat makeblastdb: the masks of the Seq-ids lcl|1 and lcl|2 of the sequence lcl|1 are \
+         written in an order that NCBI takes from the memory addresses of their handles (equal \
+         packed numbers); LOSAT does not write this database"
     );
 }
 

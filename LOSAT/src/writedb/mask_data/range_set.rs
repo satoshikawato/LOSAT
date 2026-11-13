@@ -37,6 +37,16 @@
 //! in an order that matters (the ranges written of one are not those of the other repeated,
 //! `note_ties`). One strand each is decided, as plus before minus (review probe p4).
 //!
+//! The refusal waits for the end of the build. `get_ranges` writes LOSAT's order (tied groups in
+//! the order of their first range) and names the Seq-ids of the first algorithm whose combination
+//! is tied (`SequenceMasks::address_ordered`); `BuildDatabase` keeps the first such note and raises
+//! it (`address_order_refusal`) only when the build would otherwise succeed, at its close. NCBI's
+//! order is visible only in the column files that a successful build keeps, so every error of
+//! NCBI that comes later in the run decides the outcome first: the bounds check of the same
+//! sequence over all its algorithms (`SetMaskData`, writedb_impl.cpp:1339-1386), and any error of
+//! a later sequence or file, after which `EndBuild(true)` removes the files (build_db.cpp:1415-1417).
+//! A refusal at the close leaves the files that such an error leaves (`BuildDatabase::end_build`).
+//!
 //! `giim` handles need no rule of their own: the first mask Seq-id of a number makes the first
 //! handle, which stays (a key of `m_Values`); a Seq-id that is not `Equals` to it finds that
 //! handle, one that is finds no handle and makes a new one, made from an equal Seq-id. So every
@@ -690,7 +700,8 @@ struct Part {
 struct Loc {
     ids: Vec<LocId>,
     parts: Vec<Part>,
-    /// Set when the ranges NCBI writes of this Seq-loc depend on memory addresses.
+    /// Set when the ranges NCBI writes of this Seq-loc depend on memory addresses: the Seq-ids
+    /// of the tied handles (`AsFastaString`, joined by " and ").
     written: Option<String>,
 }
 
@@ -1227,11 +1238,7 @@ fn note_ties(groups: &[Group], written: &[(usize, Vec<Part>)], out: &mut Loc) {
                     .all(|y| [x.as_slice(), y].concat() == [y.as_slice(), x].concat())
             });
             if !commute && out.written.is_none() {
-                out.written = Some(format!(
-                    "the masks of the Seq-ids {} of one sequence are written in an order that NCBI \
-                     takes from the memory addresses of their handles (equal packed numbers)",
-                    names()
-                ));
+                out.written = Some(names());
             }
         }
         i = j;
@@ -1379,15 +1386,15 @@ impl MaskedRangeSet {
     /// up in that order: one `MaskedRanges` for each algorithm that has any mask (in the order
     /// of its first `insert`), with no offsets where the sequence has none. A range whose end is
     /// before its start or beyond the sequence is passed on as it is (the writer checks it).
-    pub(crate) fn get_ranges(
-        &mut self,
-        ids: &[ParsedSeqId],
-    ) -> Result<&[MaskedRanges], WriteDbError> {
+    /// Every algorithm is computed; where NCBI's order is the addresses', LOSAT's is written and
+    /// the first such algorithm is named (`SequenceMasks::address_ordered`).
+    pub(crate) fn get_ranges(&mut self, ids: &[ParsedSeqId]) -> SequenceMasks<'_> {
         let Self {
             ranges,
             values,
             giim,
         } = self;
+        let mut address_ordered = None;
         // The handle of each Seq-id (`None`: one that no mask has).
         let keys: Vec<Option<HandleKey>> = ids
             .iter()
@@ -1413,16 +1420,39 @@ impl MaskedRangeSet {
                 });
             }
             if let Some(loc) = found {
-                if let Some(why) = &loc.written {
-                    return Err(WriteDbError::Unsupported(format!(
-                        "{why}; LOSAT does not write this mask"
-                    )));
+                if address_ordered.is_none() {
+                    address_ordered.clone_from(&loc.written);
                 }
                 algo.offsets.extend(loc.offsets());
             }
         }
-        Ok(ranges)
+        SequenceMasks {
+            ranges,
+            address_ordered,
+        }
     }
+}
+
+/// What `MaskedRangeSet::get_ranges` gives for one sequence.
+#[derive(Debug)]
+pub(crate) struct SequenceMasks<'a> {
+    /// `GetRanges`' vector: the offsets of each algorithm that has any mask.
+    pub(crate) ranges: &'a [MaskedRanges],
+    /// The Seq-ids (`AsFastaString`, joined by " and ") of the first algorithm whose ranges NCBI
+    /// writes in the order of the memory addresses of their handles; `ranges` has LOSAT's order
+    /// there. `None` when NCBI's order is decided for every algorithm.
+    pub(crate) address_ordered: Option<String>,
+}
+
+/// LOSAT's refusal of a build in which the masks of the Seq-ids `seq_ids` of the sequence
+/// `sequence` (its first Seq-id) are written in an order that NCBI takes from memory addresses
+/// (`SequenceMasks::address_ordered`): "losat makeblastdb: ...", exit status 1.
+pub(crate) fn address_order_refusal(seq_ids: &str, sequence: &str) -> WriteDbError {
+    WriteDbError::Unsupported(format!(
+        "the masks of the Seq-ids {seq_ids} of the sequence {sequence} are written in an order \
+         that NCBI takes from the memory addresses of their handles (equal packed numbers); LOSAT \
+         does not write this database"
+    ))
 }
 
 /// The Seq-id as `AsFastaString()` prints it.

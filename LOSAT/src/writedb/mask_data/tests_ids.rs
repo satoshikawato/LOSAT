@@ -12,8 +12,9 @@
 //!   matched any of the masks provided." and status 0);
 //! * `refuse`: NCBI's answer depends on memory addresses (two different handles with the same
 //!   `m_Packed`, `giim` handles among them, write different ranges on one strand; `range_set` has
-//!   the rule), and LOSAT stops with its refusal (status 1, "losat makeblastdb:
-//!   ...", no destructor message) that names the Seq-ids;
+//!   the rule), and LOSAT ends the build with its refusal (status 1, "losat makeblastdb:
+//!   ...", which names the Seq-ids and the sequence; no destructor message, the sequence was
+//!   given its masks) and leaves the files of a failed build of NCBI (no database file);
 //! * `env:...`: NCBI's answer needs `OBJECTS_PACK_TEXTID=0` or `OBJECTS_PACK_GENERAL=0` in the
 //!   environment, which LOSAT refuses (`blastinput::ncbi_environment`); not run here.
 
@@ -22,7 +23,7 @@ use std::path::PathBuf;
 
 use super::tests_e2e::{run_case_with, Case, DESTRUCTOR_MESSAGE};
 use crate::seqdb::{MaskRanges, SeqDb, SeqType};
-use crate::writedb::tests::{seqdb_fixtures, TempDir};
+use crate::writedb::tests::{files_named, seqdb_fixtures, TempDir};
 use crate::writedb::volume::Indices;
 use crate::writedb::writer::DbVersion;
 
@@ -134,11 +135,19 @@ fn masks_reach_the_sequences_that_ncbi_gives_them_to() {
             let context = format!("{} ({version:?}): {stderr}", row.name);
             match row.loss.as_str() {
                 "refuse" => {
-                    // The library's flow (the CLI drops the destructor message after a refusal:
-                    // `tests_cli`).
+                    // The library's flow: the refusal alone, at the close of the build.
                     assert_eq!(run.status, 1, "{context}");
                     assert!(stderr.starts_with("losat makeblastdb: "), "{context}");
                     assert!(stderr.contains("memory addresses"), "{context}");
+                    assert_eq!(stderr.lines().count(), 1, "{context}");
+                    let left = files_named(&tmp.0, "db.");
+                    assert!(
+                        left.iter().all(|file| {
+                            ["nos", "not", "ntf", "nto", "pos", "pot", "ptf", "pto"]
+                                .contains(&file.rsplit('.').next().unwrap())
+                        }),
+                        "{context}: {left:?}"
+                    );
                     *fates.entry("refused").or_default() += 1;
                 }
                 "match" if row.expected == "NOMATCH" => {
@@ -163,7 +172,7 @@ fn masks_reach_the_sequences_that_ncbi_gives_them_to() {
         }
     }
     println!("{fates:?}");
-    // 132 cases: 3 not run (environment), 6 refused, 51 without a match, the rest matched; each
+    // 134 cases: 3 not run (environment), 7 refused, 51 without a match, the rest matched; each
     // run twice (format versions 5 and 4).
     assert_eq!(fates["env"], 3);
     assert_eq!(fates["refused"], 2 * 7);

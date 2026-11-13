@@ -6,7 +6,8 @@
 // (ports/example.ts). The queries tell one story: Bacillus subtilis 168 against RefSeq and
 // Escherichia coli K-12 (fetched once from NCBI and UniProt on 2026-11-03; the recA CDS
 // translates to P16971).
-import { sequenceKind, programById, type ProgramId, type SequenceKind } from './programs';
+import type { ProgramId, SequenceKind } from 'losat/domain';
+import { programById, sequenceKind } from './programs';
 
 export type ExampleId = 'refseq-16s-bacteria' | 'refseq-its-fungi' | 'uniprot-ecoli-k12' | 'pdbaa' | 'ecoli-k12-genome';
 

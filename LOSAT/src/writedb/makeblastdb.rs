@@ -18,7 +18,7 @@ use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::blastinput::compressed::{compression_of_name, Compression};
 use crate::blastinput::ncbi_environment::{
-    check_ncbi_application_settings, diag_target, DiagStream, DiagTarget,
+    diag_target, ApplicationSettings, DiagStream, DiagTarget,
 };
 use crate::ncbi_str::string_to_uint8_data_size;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
@@ -531,8 +531,9 @@ pub fn check_environment(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Re
 // the reader's "not set"; the static `s_Max*` copies are read nowhere). A value it cannot
 // convert is ignored (`catch`), as is an empty one. LOSAT's FASTA reader keeps NCBI's default
 // limits (makedb-v5 DECISIONS 12), so it refuses the entry with `-parse_seqids` exactly when
-// makeblastdb would use it. `[BLAST] LONG_SEQID` is refused for every program by
-// `check_ncbi_application_settings` (it is not one of the entries that change nothing).
+// makeblastdb would use it. `[BLAST] LONG_SEQID` is refused for every program by the
+// application settings (`ApplicationStart::settings`; it is not one of the entries that change
+// nothing).
 /// Refuses `[BLAST] MAX_SEQID_LENGTH` (`max_seqid_length`, from
 /// `ApplicationSettings::max_seqid_length`: the value of the first layer that has the entry,
 /// `Err` for a file value LOSAT cannot read) for a build with `-parse_seqids` when makeblastdb
@@ -997,6 +998,7 @@ fn verify_input_files(names: &[&str], err: &mut dyn Write) -> Result<(), MakedbE
 #[allow(clippy::too_many_arguments)]
 fn build_database_with_log(
     args: &MakedbArgs,
+    registry_blastdb: Option<&str>,
     now: Option<&LocalTime>,
     platform: Platform,
     stdin: &mut dyn Read,
@@ -1157,6 +1159,7 @@ fn build_database_with_log(
         from_stdin.then_some(stdin_map),
         title,
         is_protein,
+        registry_blastdb,
         now,
         stdin,
         err,
@@ -1194,6 +1197,7 @@ fn add_input_and_close(
     from_stdin: Option<Option<bool>>,
     title: &str,
     is_protein: bool,
+    registry_blastdb: Option<&str>,
     now: &LocalTime,
     stdin: &mut dyn Read,
     err: &mut dyn Write,
@@ -1329,7 +1333,7 @@ fn add_input_and_close(
         db.end_build(false, &mut warn)
     };
     if closed? {
-        open_new_database(db, title, is_protein, now, err)?;
+        open_new_database(db, title, is_protein, registry_blastdb, now, err)?;
     }
     Ok(())
 }
@@ -1385,6 +1389,7 @@ fn open_new_database(
     db: &BuildDatabase<'_>,
     title: &str,
     is_protein: bool,
+    registry_blastdb: Option<&str>,
     now: &LocalTime,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
@@ -1395,14 +1400,10 @@ fn open_new_database(
         SeqType::Nucleotide
     };
     // `CSeqDB` names its search path in the message of a database that is not there: the
-    // current directory, `BLASTDB` and the registry entry `[BLAST] BLASTDB`. The registry was
-    // read, and its unreadable values refused, before the build (`check_ncbi_application_settings`
-    // in the callers of `run_with`).
-    let registry = check_ncbi_application_settings("makeblastdb")
-        .ok()
-        .and_then(|settings| settings.blastdb.ok().flatten());
-    let search =
-        SearchPath::from_environment(registry.as_deref()).map_err(MakedbError::Database)?;
+    // current directory, `BLASTDB` and the registry entry `[BLAST] BLASTDB` (`registry_blastdb`,
+    // of the application settings that the callers of `run_with` read before the build; a value
+    // that LOSAT does not read is left out).
+    let search = SearchPath::from_environment(registry_blastdb).map_err(MakedbError::Database)?;
     let located = SeqDb::locate_one_name_metadata(new_db, seqtype, &search, &|_| {
         Some(title.as_bytes().to_vec())
     })
@@ -1564,8 +1565,8 @@ fn add_fasta(
 // destination (`2>&1`) in the order of the events. The standard output of
 // the Rust library is line buffered whatever it is connected to; the log
 // goes to it without another buffer.
-/// Runs `losat makeblastdb` and returns the exit code.
-pub fn run(args: &MakedbArgs) -> i32 {
+/// Runs `losat makeblastdb` with the settings of its application start and returns the exit code.
+pub fn run(args: &MakedbArgs, settings: &ApplicationSettings) -> i32 {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let stderr = std::io::stderr();
@@ -1574,6 +1575,7 @@ pub fn run(args: &MakedbArgs) -> i32 {
     let now = LocalTime::now();
     let status = run_with(
         args,
+        registry_blastdb(settings),
         now.as_ref(),
         Platform::host(),
         &mut stdin.lock(),
@@ -1582,6 +1584,12 @@ pub fn run(args: &MakedbArgs) -> i32 {
     );
     let _ = out.flush();
     status
+}
+
+/// The registry entry `[BLAST] BLASTDB` of `settings` that `run_with` takes: `None` when the
+/// registry has no such entry or LOSAT does not read its value (`ApplicationSettings::blastdb`).
+pub(crate) fn registry_blastdb(settings: &ApplicationSettings) -> Option<&str> {
+    settings.blastdb.as_ref().ok().and_then(Option::as_deref)
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:843-871
@@ -1667,11 +1675,13 @@ pub fn run(args: &MakedbArgs) -> i32 {
 // nothing, exit status 1). LOSAT reads `-logfile` as an option of makeblastdb
 // only, not anywhere in the command line as NCBI's application does (for example
 // as the value of `-title`).
-/// One run with the given time, platform and streams: the build, then the error
+/// One run with the registry entry `[BLAST] BLASTDB` of the application settings
+/// (`registry_blastdb`) and the given time, platform and streams: the build, then the error
 /// message and the exit code of a failed build. With `-logfile` the log and the
 /// messages go where makeblastdb sends them instead of `out` and `err`.
 pub(crate) fn run_with(
     args: &MakedbArgs,
+    registry_blastdb: Option<&str>,
     now: Option<&LocalTime>,
     platform: Platform,
     stdin: &mut dyn Read,
@@ -1683,6 +1693,7 @@ pub(crate) fn run_with(
         None | Some("-") => {
             let result = build_database_with_log(
                 args,
+                registry_blastdb,
                 now,
                 platform,
                 stdin,
@@ -1718,6 +1729,7 @@ pub(crate) fn run_with(
             let mut log = &file;
             let result = build_database_with_log(
                 args,
+                registry_blastdb,
                 now,
                 platform,
                 stdin,
@@ -1734,6 +1746,7 @@ pub(crate) fn run_with(
             ));
             let result = build_database_with_log(
                 args,
+                registry_blastdb,
                 now,
                 platform,
                 stdin,

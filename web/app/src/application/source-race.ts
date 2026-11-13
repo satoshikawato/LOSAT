@@ -5,8 +5,8 @@
 // the order in the background. A source that has not answered within RACE_DEADLINE_MS counts as
 // failed. The order is kept for the tab, so later fetches of the kind ask one source only. A
 // race in which no source answered is not kept: the next Fetch races again.
+import type { SequenceKind } from 'losat/domain';
 import { FETCH_SOURCES, RACE_RECORDS, type FetchChoice, type FetchSourceId } from '../domain/accession';
-import type { SequenceKind } from '../domain/programs';
 import type { AccessionFetcher } from '../ports/fetch';
 
 /** Bytes of a race record's answer at most (the records are about 200 bytes). */

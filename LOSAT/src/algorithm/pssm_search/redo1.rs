@@ -49,6 +49,7 @@ use crate::core::composition_adjustment::redo_alignment::{
     build_query_word_hashes, test_near_identical, BlastCompoAlignment, BlastCompoSequenceData,
     EMatrixAdjustRule, MINIMUM_LENGTH_NEAR_IDENTICAL,
 };
+use crate::core::link_hsps::{link_in_place, EvenGapLinkParams, LinkContext, LinkHsp};
 use crate::stats::KarlinParams;
 use crate::utils::matrix::ncbistdaa;
 
@@ -111,6 +112,54 @@ pub(crate) struct PssmRedo1<'a> {
     pub(crate) hitlist_size: usize,
     /// `psiOptions->inclusion_ethresh`, the heaps' e-value cutoff.
     pub(crate) inclusion_ethresh: f64,
+    /// psiblast's `-sum_stats true` (`do_link_hsps`), `None` without sum statistics.
+    pub(crate) link: Option<RedoLink>,
+}
+
+/// psiblast's `-sum_stats true` in the redo (`do_link_hsps`): the redone alignments' cutoff and
+/// the linking of `s_HitlistEvaluateAndPurge` in the place of the e-values.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2453-2461
+/// ```c
+///     if (do_link_hsps) {
+///         ASSERT(hitParams->link_hsp_params != NULL);
+///         cutoff_s =
+///             (int) (hitParams->cutoff_score_min * context->localScalingFactor);
+///     } else {
+///         /* There is no cutoff score; we consider e-values instead */
+///         cutoff_s = 1;
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:410-414
+/// ```c
+///     if (hitParams->do_sum_stats) {
+///         status = BLAST_LinkHsps(program_number, hsp_list, queryInfo,
+///                                 subject_length, sbp,
+///                                 hitParams->link_hsp_params, TRUE);
+///     } else {
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RedoLink {
+    /// `params->cutoff_s`: the traceback's `cutoff_score_min` times the scaling factor,
+    /// truncated.
+    pub(crate) cutoff_s: i32,
+    /// The traceback's linking parameters (`EvenGapLinkParams::traceback`).
+    pub(crate) params: EvenGapLinkParams,
+    /// The query's context; the linking reads the Lambda and logK of the redo's scaled block
+    /// (`sbp->kbp_gap` of NCBI's copy, `RedoRun`) in the place of this one's.
+    pub(crate) context: LinkContext,
+}
+
+impl RedoLink {
+    /// The parameters of the redo of the search whose traceback cutoff is `cutoff_score_min`
+    /// (one context) and whose query context is `context`.
+    pub(crate) fn new(cutoff_score_min: i32, context: LinkContext) -> Self {
+        Self {
+            cutoff_s: (cutoff_score_min as f64 * SCALING_FACTOR) as i32,
+            params: EvenGapLinkParams::traceback(),
+            context,
+        }
+    }
 }
 
 /// The values of the search that the redo scales (`s_RescaleSearch`) and derives
@@ -156,10 +205,12 @@ struct Align {
     edit_script: Vec<GapEditOp>,
 }
 
-/// A redone HSP of a match's list (`BlastHSP`), before its identities are counted.
+/// A redone HSP of a match's list (`BlastHSP`), before its identities are counted: its e-value and
+/// the size of its linked set (`num`, 1 without sum statistics).
 struct Redone {
     align: Align,
     e_value: f64,
+    num: i32,
 }
 
 impl<'a> RedoRun<'a> {
@@ -481,6 +532,7 @@ impl PssmRedo1<'_> {
             query_length: self.context.aa_len as i32,
             rps_roles: false,
             matrix: self.matrix,
+            link: self.link,
         }
         .redo_match(run, oid, hsps, subject_read.residues()))
     }
@@ -498,6 +550,9 @@ pub(crate) struct RedoMatch<'a> {
     pub(crate) rps_roles: bool,
     /// The matrix of the search (`sbp->matrix`), for the positives.
     pub(crate) matrix: crate::config::ScoringMatrix,
+    /// psiblast's `-sum_stats true` (`RedoLink`); `None` without sum statistics and for
+    /// RPS-BLAST, which refuses it.
+    pub(crate) link: Option<RedoLink>,
 }
 
 impl RedoMatch<'_> {
@@ -544,6 +599,7 @@ impl RedoMatch<'_> {
             .map(|align| Redone {
                 align,
                 e_value: 0.0,
+                num: 1,
             })
             .collect();
         redone.sort_by(|a, b| score_compare(&a.align, &b.align));
@@ -576,17 +632,23 @@ impl RedoMatch<'_> {
         // blastx's, with `-comp_based_stats 2u`/`3u`).
         let query_length = self.query_length;
         let subject_length = subject.len() as i32;
-        let mut best_evalue = i32::MAX as f64;
-        for hsp in &mut redone {
-            // (RPS-BLAST's roles are swapped, `Blast_HSPListGetEvalues`: its `isRPS`.)
-            let (m, n) = if self.rps_roles {
-                (subject_length, query_length)
-            } else {
-                (query_length, subject_length)
-            };
-            hsp.e_value = self.stats.e_value(hsp.align.score, &run.karlin, m, n);
-            best_evalue = best_evalue.min(hsp.e_value);
-        }
+        let best_evalue = match &self.link {
+            Some(link) => link_redone(&mut redone, link, run, subject_length)?,
+            None => {
+                let mut best_evalue = i32::MAX as f64;
+                for hsp in &mut redone {
+                    // (RPS-BLAST's roles are swapped, `Blast_HSPListGetEvalues`: its `isRPS`.)
+                    let (m, n) = if self.rps_roles {
+                        (subject_length, query_length)
+                    } else {
+                        (query_length, subject_length)
+                    };
+                    hsp.e_value = self.stats.e_value(hsp.align.score, &run.karlin, m, n);
+                    best_evalue = best_evalue.min(hsp.e_value);
+                }
+                best_evalue
+            }
+        };
         redone.retain(|hsp| hsp.e_value <= self.expect_value);
         let first = redone.first()?;
         let best_score = first.align.score;
@@ -605,7 +667,12 @@ impl RedoMatch<'_> {
             hsps: Vec::with_capacity(redone.len()),
             best_evalue,
         };
-        for Redone { align, e_value } in redone {
+        for Redone {
+            align,
+            e_value,
+            num,
+        } in redone
+        {
             let score = blast_nint(align.score as f64 / SCALING_FACTOR);
             let traced = BlastpPreliminaryHsp {
                 query_start: align.query_start,
@@ -630,6 +697,7 @@ impl RedoMatch<'_> {
                 self.matrix,
             );
             hsp.e_value = e_value;
+            hsp.num = num;
             hsp.bit_score = (score as f64 * run.karlin.lambda * SCALING_FACTOR - run.log_k)
                 / std::f64::consts::LN_2;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:332-342
@@ -717,7 +785,8 @@ impl RedoMatch<'_> {
     ///             oldNearIdenticalStatus = nearIdenticalStatus;
     ///         } /* end for all alignments in this window */
     /// ```
-    /// `params->cutoff_s` is 1 (no sum statistics, blast_kappa.c:2453-2461).
+    /// `params->cutoff_s` is 1 without sum statistics, else `RedoLink::cutoff_s`
+    /// (blast_kappa.c:2453-2461).
     fn redo_one_match(
         &self,
         run: &mut RedoRun<'_>,
@@ -832,7 +901,7 @@ impl RedoMatch<'_> {
                         matrix_adjust_rule,
                         &subject_data,
                     );
-                    if new_align.score >= 1 {
+                    if new_align.score >= self.link.map_or(1, |link| link.cutoff_s) {
                         with_distinct_ends(new_align, &mut alignments, num_adjustments == 1);
                     }
                 }
@@ -969,6 +1038,68 @@ impl RedoMatch<'_> {
             edit_script: traced.edit_script,
         }
     }
+}
+
+/// `BLAST_LinkHsps` on a match's redone list (psiblast's `-sum_stats true`): every HSP takes its
+/// linked set's e-value and size, in the list the linking builds, sorted by score; the best
+/// e-value of the list, `None` for an empty list. The scores are the redo's scaled ones and the
+/// linking reads the redo's scaled Lambda and logK (`RedoLink::context`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1801-1811
+/// ```c
+///     /* Sort the HSP array by score */
+///     Blast_HSPListSortByScore(hsp_list);
+///
+///     /* Find and fill the best e-value */
+///     hsp_list->best_evalue = hsp_list->hsp_array[0]->evalue;
+///     for (index = 1; index < hsp_list->hspcnt; ++index) {
+///         if (hsp_list->hsp_array[index]->evalue < hsp_list->best_evalue)
+///             hsp_list->best_evalue = hsp_list->hsp_array[index]->evalue;
+///     }
+/// ```
+fn link_redone(
+    redone: &mut Vec<Redone>,
+    link: &RedoLink,
+    run: &RedoRun<'_>,
+    subject_length: i32,
+) -> Option<f64> {
+    if redone.is_empty() {
+        return None;
+    }
+    let context = LinkContext {
+        lambda: run.karlin.lambda,
+        log_k: run.log_k,
+        ..link.context
+    };
+    link_in_place(
+        redone,
+        |hsp| LinkHsp {
+            context: 0,
+            query_offset: hsp.align.query_start,
+            query_end: hsp.align.query_end,
+            subject_offset: hsp.align.match_start,
+            subject_end: hsp.align.match_end,
+            score: hsp.align.score,
+        },
+        &[context],
+        subject_length,
+        &link.params,
+        |hsp, linked| {
+            hsp.e_value = linked.evalue;
+            hsp.num = linked.num;
+        },
+    );
+    // `Blast_HSPListSortByScore`: glibc's `qsort`, a stable merge sort, when the list is not
+    // sorted (a stable sort of a sorted list keeps it).
+    redone.sort_by(|a, b| score_compare(&a.align, &b.align));
+    let best_evalue = redone[1..].iter().fold(redone[0].e_value, |best, hsp| {
+        if hsp.e_value < best {
+            hsp.e_value
+        } else {
+            best
+        }
+    });
+    Some(best_evalue)
 }
 
 /// `BLAST_Nint`.
@@ -1338,14 +1469,17 @@ mod tests {
             Redone {
                 align: align(100, (0, 50), (0, 50)),
                 e_value: 0.0,
+                num: 1,
             },
             Redone {
                 align: align(90, (10, 40), (10, 40)),
                 e_value: 0.0,
+                num: 1,
             },
             Redone {
                 align: align(80, (60, 70), (60, 70)),
                 e_value: 0.0,
+                num: 1,
             },
         ];
         reap_contained(&mut redone);

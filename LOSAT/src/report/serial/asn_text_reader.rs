@@ -28,6 +28,29 @@ use crate::utils::x87::X87;
 use std::io::Read;
 use std::ops::Range;
 
+/// `HUGE_VAL/HUGE_VAL`, the NaN of NCBI's readers of a REAL (`NOT-A-NUMBER` of ASN.1 text,
+/// `nan` of `NStr::StringToDoublePosix`) as NCBI's x86-64 Linux builds evaluate it: the processor's
+/// default NaN ("QNaN floating-point indefinite"), whose sign bit is set, so that an `ostream`
+/// prints it `-nan`. NCBI rpsbproc 0.5.1, both builds (PS16d review oracles O1 `x_nan` and `x_mnan`,
+/// `Parameters_expect` `nan` and `-nan`; O2 `a_nan`, an archive's E-value threshold
+/// `NOT-A-NUMBER`; O1 `s_doc2nan`, a kept `Hsp_evalue` `nan`): `-nan` on the SESSION and DOMAINS
+/// lines. (`StringToDoublePosix` gives it for `nan` whatever the sign before it.)
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:810-811
+// ```c++
+//         } else if (NStr::strncasecmp(tmp.data(),"NOT-A-NUMBER", 12) == 0) {
+// 	    return HUGE_VAL/HUGE_VAL; /* NCBI_FAKE_WARNING */
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1082-1087
+// ```c++
+//                 if ( !dot && (c == 'n' || c == 'N') &&
+//                      NStr::strncasecmp(ptr,"nan",3)==0) {
+//                     if (endptr) {
+//                         *endptr = (char*)(ptr+3);
+//                     }
+//                     return HUGE_VAL/HUGE_VAL; /* NCBI_FAKE_WARNING */
+// ```
+pub(crate) const NCBI_NAN: f64 = f64::from_bits(0xFFF8_0000_0000_0000);
+
 /// What kind of failure an `AsnTextError` is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AsnTextErrorKind {
@@ -1486,7 +1509,7 @@ impl<S: AsnSource> Reader<S> {
                 return Ok(f64::NEG_INFINITY);
             }
             if self.starts_with_ignore_case(start, b"NOT-A-NUMBER") {
-                return Ok(f64::NAN);
+                return Ok(NCBI_NAN);
             }
             return match string_to_double_posix(self.bytes(word), true) {
                 Ok((value, _)) => Ok(value),
@@ -2034,7 +2057,7 @@ pub(crate) fn string_to_double_posix(
                     rest.len() >= name.len() && rest[..name.len()].eq_ignore_ascii_case(name)
                 };
                 if !dot && (c == b'n' || c == b'N') && starts_with(b"nan") {
-                    return Ok((f64::NAN, ptr + 3));
+                    return Ok((NCBI_NAN, ptr + 3));
                 }
                 if (c == b'i' || c == b'I') && starts_with(b"inf") {
                     let mut end = ptr + 3;

@@ -1160,7 +1160,7 @@ fn align_ex_protein_score_only(
     // recurrence of Blast_SemiGappedAlign
     // (same max/gap updates, same X-drop test, same best-cell choice) in vector lanes and returns
     // (a_offset, b_offset, score).
-    // If the problem does not fit the 8/16-bit lanes (or the target has no vector kernel) it
+    // If the problem does not fit the 8/16/32-bit lanes (or the target has no vector kernel) it
     // returns None and the scalar port below runs.
     if crate::utils::xdrop_simd::KERNEL_COMPILED {
         use crate::utils::xdrop_simd::{xdrop_align, ColSeq, RowSeq};
@@ -4930,6 +4930,63 @@ mod tests {
         // `GapAlignScratch::new` holds NCBI's first 1000 cells, more than `N + 1`.
         assert_eq!(bounded_cells, 1000);
         assert_eq!(cells, 1000);
+        // No NCBI counterpart: the vector kernels run a huge X-drop as the clamp's `R`
+        // (`xdrop_simd::x_drop_for_lanes`) and do not touch `dp_mem_alloc`; the scalar port, which
+        // answers on targets without them and the calls they decline, keeps NCBI's count (below).
+        if crate::utils::xdrop_simd::KERNEL_COMPILED {
+            assert_eq!(alloc, 1000);
+        } else {
+            assert!(alloc >= huge as usize + 3, "{alloc}");
+        }
+        // The scalar ports themselves with the huge X-drop (the left extensions of the traceback
+        // and of the score-only alignment): NCBI's count, only the cells up to `N`, and the
+        // results of the X-drop the extension never reaches.
+        let scalar_traceback = |x_drop: i32| {
+            let mut scratch = GapAlignScratch::new();
+            let mut fence_hit = false;
+            let result = align_ex_protein_scalar(
+                &query,
+                &subject,
+                21,
+                21,
+                BlastpScoreMatrix::Standard(ScoringMatrix::Blosum62),
+                11,
+                1,
+                x_drop,
+                true,
+                &mut scratch,
+                &mut fence_hit,
+                false,
+            );
+            (result, scratch.dp_mem.len(), scratch.dp_mem_alloc)
+        };
+        let (bounded, _, _) = scalar_traceback(100_000);
+        let (unbounded, cells, alloc) = scalar_traceback(huge);
+        assert_eq!(unbounded, bounded);
+        assert_eq!(cells, 1000);
+        assert!(alloc >= huge as usize + 3, "{alloc}");
+        let scalar_score_only = |x_drop: i32| {
+            let mut scratch = GapAlignScratch::new();
+            let result = align_ex_protein_score_only_scalar(
+                &query,
+                0,
+                &subject,
+                0,
+                21,
+                21,
+                BlastpScoreMatrix::Standard(ScoringMatrix::Blosum62),
+                11,
+                1,
+                x_drop,
+                true,
+                &mut scratch,
+            );
+            (result, scratch.dp_mem.len(), scratch.dp_mem_alloc)
+        };
+        let (bounded, _, _) = scalar_score_only(100_000);
+        let (unbounded, cells, alloc) = scalar_score_only(huge);
+        assert_eq!(unbounded, bounded);
+        assert_eq!(cells, 1000);
         assert!(alloc >= huge as usize + 3, "{alloc}");
         for mode in [
             BlastpGappedAlignmentMode::Exact,
@@ -4949,7 +5006,15 @@ mod tests {
                 &mut scratch,
             );
             assert_eq!(scratch.dp_mem.len(), 1000);
-            assert!(scratch.dp_mem_alloc >= huge as usize + 3);
+            // the vector kernels (the exact mode's dispatch, `xdrop_align`) leave the count as
+            // it was, as above
+            if crate::utils::xdrop_simd::KERNEL_COMPILED
+                && matches!(mode, BlastpGappedAlignmentMode::Exact)
+            {
+                assert_eq!(scratch.dp_mem_alloc, 1000);
+            } else {
+                assert!(scratch.dp_mem_alloc >= huge as usize + 3);
+            }
             let bounded = blastp_score_only_gapped_alignment(
                 &query,
                 &subject,

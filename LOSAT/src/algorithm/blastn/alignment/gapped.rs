@@ -1113,8 +1113,8 @@ fn blast_align_packed_nucl_with_scratch(
     // ```
     // Dispatch point of the SIMD X-drop (score only, packed subject,
     // s_BlastAlignPackedNucl). `blast_align_packed_nucl_scalar` below ports this loop. The
-    // SIMD kernel runs the same recurrence on 16 (8-bit) or 8 (16-bit) cells of a row at a
-    // time. Its argument (head of `utils/xdrop_simd.rs`) is that only cells below the
+    // SIMD kernel runs the same recurrence on 16 (8-bit), 8 (16-bit) or 4 (32-bit) cells of a
+    // row at a time. Its argument (head of `utils/xdrop_simd.rs`) is that only cells below the
     // X-drop cutoff can differ from the scalar loop, and those cells are never read. A call
     // that does not fit the lanes returns None and runs the scalar path. The xstats counters
     // only count work.
@@ -3179,6 +3179,31 @@ mod tests {
         };
         let (saturated, _) = run(11_088);
         let (large, scratch) = run(1_100_000_000);
+        assert_eq!(large, saturated);
+        assert_eq!(scratch.dp_mem.len(), 1000);
+        // No NCBI counterpart: the vector kernels run this X-drop as the clamp's `R`
+        // (`xdrop_simd::x_drop_for_lanes`) and leave the scalar port's count as it was; the scalar
+        // port itself, which answers on targets without them and the calls they decline, keeps
+        // NCBI's count with only the sequences' cells (below).
+        if crate::utils::xdrop_simd::KERNEL_COMPILED {
+            assert_eq!(scratch.dp_mem_alloc, 1000);
+        }
+        let run_scalar = |x_drop: i32| {
+            let mut scratch = super::GapAlignScratch::new();
+            let out = super::extend_gapped_one_direction_with_traceback_scalar(
+                &q,
+                &s,
+                2,
+                -3,
+                &matrix,
+                5,
+                2,
+                x_drop,
+                &mut scratch,
+            );
+            (out, scratch)
+        };
+        let (large, scratch) = run_scalar(1_100_000_000);
         assert_eq!(large, saturated);
         assert_eq!(scratch.dp_mem.len(), 1000);
         assert!(scratch.dp_mem_alloc > 500_000_000);

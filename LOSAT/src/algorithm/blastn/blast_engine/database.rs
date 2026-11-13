@@ -393,10 +393,9 @@ impl BlastnDatabase {
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
-        // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
-        // NCBI's choice of its Seq-ids.
-        let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
-        shared::restrict_database(&mut db, name, list, diagnostics, PROGRAM)?;
+        // A database with parsed Seq-ids is read (line DBID, ID2b).
+        let parsed_seqids =
+            shared::restrict_database(&mut db, name, list, diagnostics, settings, PROGRAM)?;
         // BLASTN has no Gumbel block: NCBI's average subject length divides by the statistics'
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;
@@ -666,10 +665,10 @@ impl BlastnDatabase {
         self.db.filtered_empty()
     }
 
-    /// The OIDs of the volumes (`SeqDb::num_oids`): none is the database whose first query
-    /// batch fails, also with a list or an alias file's range or `NSEQ`.
-    pub(super) fn num_oids(&self) -> u32 {
-        self.db.num_oids()
+    /// Whether the first query batch with a valid context fails with NCBI's `Database memory map
+    /// file error` (`SeqDb::first_oid_read_fails`: no OID, and statistics that read OID 0).
+    pub(super) fn first_oid_read_fails(&self) -> bool {
+        self.db.first_oid_read_fails()
     }
 
     /// `BlastSeqSrcGetAvgSeqLen` (`SeqDb::average_length`).
@@ -686,6 +685,12 @@ impl BlastnDatabase {
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(super) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
+    }
+
+    /// The number of sequences the search reads: the included ones (`SeqDb::num_seqs`), which
+    /// the schedules count; the statistics' number (`metadata`) can be another.
+    pub(super) fn num_subjects(&self) -> usize {
+        self.db.num_seqs() as usize
     }
 
     /// The number of sequences and the total length that the statistics read

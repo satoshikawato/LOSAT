@@ -13,3 +13,10 @@
   members other than `repr`, `mol`, `length` and `seq-data`; the `constraints` and `annotatedSites` of the parameters).
 - `losat rpsbproc` refuses an archive with a byte outside the visible ASCII range in any VisibleString (a Seq-id's, a Dbtag's,
   a date's as well as a title's), naming its line and the part of the string read.
+- `losat psiblast -in_pssm` and `losat tblastn -in_pssm` read the query's residues as NCBI BLAST+ 2.17.0 does, coding by
+  coding (`iupacaa` has the 26 letters of either case but neither `*` nor `-`; `ncbieaa` the 26 capitals, `*` and `-`;
+  `ncbistdaa` the codes 0 to 27), and a residue that its coding does not have (a bad byte stored as `#` included) stops the
+  run as NCBI's does: `BLAST engine error: Warning: Invalid residues found at positions 26 ` (the first 20 positions, then
+  `,... (only first 20 shown)`), status 3, after the outfmt 0 prolog. A `*` in an `iupacaa` query was searched before; it is
+  an error as in NCBI. Still refused: a query with a gap letter, with lower-case `iupacaa` letters (NCBI's identity counts
+  compare the Bioseq's own characters) and with letters that do not match its `length`.

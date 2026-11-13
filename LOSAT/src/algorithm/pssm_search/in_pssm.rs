@@ -48,6 +48,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::config::ScoringMatrix;
 use crate::core::blast_util::{BLASTAA_SIZE, BLAST_SCORE_MIN};
 use crate::core::psi::{KarlinBlk, PsiScoreBlk};
+use crate::report::query_warnings::invalid_residues_error;
 use crate::report::serial::pssm::{ObjectId, PssmFinalData, PssmWithParameters, SeqData};
 use crate::seqid::ParsedSeqId;
 
@@ -435,6 +436,77 @@ fn validation_error(pssm: &PssmWithParameters) -> Option<String> {
     None
 }
 
+/// The query's residues as NCBI's `GetSequenceProtein` reads them, and the 0-based places of
+/// those that are no NCBIstdaa letter. NCBI's `CSeqVector` converts the Bioseq's coding to
+/// NCBIstdaa letter by letter, with the tables of its own (a byte missing from a table becomes
+/// 255), and `s_IsValidResidue` accepts a result below `BLASTAA_SIZE`. The returned letters have
+/// one place per residue, an invalid one shown as `X` (NCBI leaves it out and stops, so nothing
+/// reads it), the others the capital letters of the codes. The tables differ: `iupacaa` knows the 26 letters, either case, and neither `*`
+/// nor `-`; `ncbieaa` knows the 26 capital letters, `*` (25) and `-` (0); `ncbistdaa` is its own
+/// code (0 to 27).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:884-896
+/// ```c++
+///     for (i = 0; i < sv.size(); i++) {
+///         // Change unsupported residues to X
+///         if (sv[i] == AMINOACID_TO_NCBISTDAA[(int)'O']) {
+///             replaced_residues.push_back(i);
+///             *buf_var++ = AMINOACID_TO_NCBISTDAA[(int)'X'];
+///         } else if (!s_IsValidResidue(sv[i])) {
+///             invalid_residues.push_back(i);
+///         } else {
+///             *buf_var++ = sv[i];
+///         }
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1674-1783 (`CIupacaaToStdaa`,
+/// `CEaaToStdaa`: 255 for every byte but the letters, `*` and `-` named above), and
+/// sequtil_convert_imp.cpp:179-198 (the table each coding pair takes).
+fn query_residues(seq_data: Option<&SeqData>) -> (Vec<u8>, Vec<usize>) {
+    // The NCBIstdaa code of a capital letter, `*` or `-`: its place in the letter table.
+    let code_of = |letter: u8| {
+        NCBISTDAA_TO_AMINOACID
+            .iter()
+            .position(|&known| known == letter)
+    };
+    let codes: Vec<Option<u8>> = match seq_data {
+        Some(SeqData::Ncbistdaa(codes)) => codes
+            .iter()
+            .map(|&code| (usize::from(code) < BLASTAA_SIZE).then_some(code))
+            .collect(),
+        Some(SeqData::Iupacaa(text)) => text
+            .iter()
+            .map(|&c| {
+                c.is_ascii_alphabetic()
+                    .then(|| code_of(c.to_ascii_uppercase()))
+                    .flatten()
+                    .map(|code| code as u8)
+            })
+            .collect(),
+        Some(SeqData::Ncbieaa(text)) => text
+            .iter()
+            .map(|&c| {
+                (c.is_ascii_uppercase() || c == b'*' || c == b'-')
+                    .then(|| code_of(c))
+                    .flatten()
+                    .map(|code| code as u8)
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    let letters = codes
+        .iter()
+        .map(|code| code.map_or(b'X', |code| NCBISTDAA_TO_AMINOACID[usize::from(code)]))
+        .collect();
+    let invalid = codes
+        .iter()
+        .enumerate()
+        .filter(|(_, code)| code.is_none())
+        .map(|(position, _)| position)
+        .collect();
+    (letters, invalid)
+}
+
 /// The PSSM search of `pssm`: its query record, rows and values, or LOSAT's refusal.
 #[cfg(test)]
 pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
@@ -625,23 +697,28 @@ pub(crate) fn psi_search_and_object(
             query.inst.repr.0, query.inst.mol.0
         )));
     }
-    let letters: Vec<u8> = match query.inst.seq_data.as_ref() {
-        Some(SeqData::Ncbistdaa(codes)) => codes
-            .iter()
-            .map(|&code| NCBISTDAA_TO_AMINOACID.get(code as usize).copied())
-            .collect::<Option<Vec<u8>>>()
-            .unwrap_or_default(),
-        Some(SeqData::Iupacaa(text)) | Some(SeqData::Ncbieaa(text)) => text
-            .iter()
-            .map(|&c| NCBISTDAA_TO_AMINOACID.contains(&c).then_some(c))
-            .collect::<Option<Vec<u8>>>()
-            .unwrap_or_default(),
-        None => Vec::new(),
-    };
+    let (letters, invalid_residues) = query_residues(query.inst.seq_data.as_ref());
     let length = query.inst.length.unwrap_or(-1);
-    if letters.is_empty() || letters.len() as i64 != i64::from(length) || letters.contains(&b'-') {
+    if letters.is_empty() || letters.len() as i64 != i64::from(length) {
         return Err(reader.refuse(
-            "a PSSM query whose letters are missing, of another length than its Seq-inst, or with a gap or a byte outside NCBIstdaa",
+            "a PSSM query whose letters are missing or of another length than its Seq-inst (NCBI BLAST+ reads such a query past or short of its data)",
+        ));
+    }
+    // A gap letter (`-` of ncbieaa, code 0 of ncbistdaa) is a valid residue to NCBI, which searches
+    // with it as a letter of the query; LOSAT does not (the invalid residues, which NCBI reports
+    // first, are the search's stop, `invalid_residues`).
+    if invalid_residues.is_empty() && letters.contains(&b'-') {
+        return Err(reader.refuse("a PSSM query with a gap letter"));
+    }
+    // A lower-case iupacaa letter converts as its capital, but NCBI's reports count the identities
+    // of the Bioseq's own characters against the subject's (a lower-case query has none: probe
+    // `lower_iupac`, 0 of 9 where LOSAT counts 8), which LOSAT's report does not follow.
+    if invalid_residues.is_empty()
+        && matches!(query.inst.seq_data.as_ref(),
+            Some(SeqData::Iupacaa(text)) if text.iter().any(u8::is_ascii_lowercase))
+    {
+        return Err(reader.refuse(
+            "a PSSM query with lower-case iupacaa letters (NCBI's identity counts compare the Bioseq's own characters)",
         ));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:240-261
@@ -767,6 +844,14 @@ pub(crate) fn psi_search_and_object(
             // outfmt 0 prolog).
             Err(engine_error) => validation_error = Some(engine_error),
         }
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-651
+    // The query set-up (`SetupQueries_OMF`) comes after the checks and the scores above (the
+    // search object's, `CPsiBlastImpl`), and stops a search with no valid query.
+    // `-in_pssm` has the one query, so the search stops as the checks of the PSSM do, after
+    // the outfmt 0 prolog (`report::query_warnings::invalid_residues_error`).
+    if validation_error.is_none() {
+        validation_error = invalid_residues_error(&invalid_residues);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:110-112
     // ```c++
@@ -1588,6 +1673,73 @@ mod tests {
         data.scaling_factor = Some(2);
         data.scores[5] = i32::MAX;
         assert!(psi_search_of(scaled).unwrap().validation_error.is_some());
+    }
+
+    // The invalid residues of the PSSM's query (review F2 of M4a-1b; NCBI 2.17.0 probes s19-s23 and
+    // the `db.ps.inpssm.*` / `db.tbn.inpssm.*` rows): each coding converts with its own table, the
+    // positions are 0-based, and the search stops with the engine error of the query set-up.
+    #[test]
+    fn residues_that_the_codings_do_not_have_stop_the_search() {
+        let with_data = |data: SeqData| {
+            let mut pssm = rnd();
+            pssm.pssm.query.as_mut().unwrap().inst.seq_data = Some(data);
+            psi_search_of(pssm).unwrap()
+        };
+        let text = |bytes: &[u8]| bytes.to_vec();
+        let ok = b"ACDEFGHIKLMNPQRSTVWYACDEFGMAAA";
+        let at26 = |byte: u8| {
+            let mut letters = ok.to_vec();
+            letters[26] = byte;
+            letters
+        };
+        // `*` is no IUPACaa letter, but is NCBIeaa's (25) and NCBIstdaa's; `-` is NCBIeaa's gap
+        // (a valid residue to NCBI, refused by LOSAT); `#` is none; lower case is IUPACaa's only.
+        let error_of = |search: PsiSearch| search.validation_error.unwrap();
+        let positions_26 = "Warning: Invalid residues found at positions 26 ";
+        for bad in [b'*', b'#', b'\xE9', b'-'] {
+            assert_eq!(
+                error_of(with_data(SeqData::Iupacaa(at26(bad)))),
+                positions_26,
+                "iupacaa {bad:#x}"
+            );
+        }
+        for bad in [b'#', b'\xE9', b'a'] {
+            assert_eq!(
+                error_of(with_data(SeqData::Ncbieaa(at26(bad)))),
+                positions_26,
+                "ncbieaa {bad:#x}"
+            );
+        }
+        assert!(with_data(SeqData::Ncbieaa(at26(b'*')))
+            .validation_error
+            .is_none());
+        // Lower case converts as capitals (the search would run) but is refused, below.
+        let mut lower = rnd();
+        lower.pssm.query.as_mut().unwrap().inst.seq_data =
+            Some(SeqData::Iupacaa(text(&ok.to_ascii_lowercase())));
+        let error = psi_search_of(lower).unwrap_err().to_string();
+        assert!(error.contains("lower-case iupacaa"), "{error}");
+        // NCBIstdaa: codes below 28 are letters, anything else is invalid.
+        let mut codes: Vec<u8> = ok
+            .iter()
+            .map(|&c| NCBISTDAA_TO_AMINOACID.iter().position(|&l| l == c).unwrap() as u8)
+            .collect();
+        assert!(with_data(SeqData::Ncbistdaa(codes.clone()))
+            .validation_error
+            .is_none());
+        for code in [28, 30, 255] {
+            codes[26] = code;
+            assert_eq!(
+                error_of(with_data(SeqData::Ncbistdaa(codes.clone()))),
+                positions_26
+            );
+        }
+        // NCBI lists the first 20 and says so.
+        let many = with_data(SeqData::Ncbieaa(vec![b'#'; 30]));
+        assert_eq!(
+            error_of(many),
+            "Warning: Invalid residues found at positions 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,... (only first 20 shown) "
+        );
     }
 
     #[test]

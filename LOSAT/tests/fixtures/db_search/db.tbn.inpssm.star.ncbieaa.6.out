@@ -1,0 +1,7 @@
+rndrandom	m_plus	8.333	12	11	0	9	20	2991	2956	0.035	20.2
+rndrandom	m_plus	0.000	4	4	0	26	29	1536	1525	0.92	16.4
+rndrandom	v_slice	0.000	9	9	0	2	10	14503	14477	0.66	16.8
+rndrandom	v_slice	0.000	7	7	0	7	13	8786	8766	2.6	15.2
+rndrandom	v_slice	0.000	12	12	0	18	29	2524	2489	3.8	14.8
+rndrandom	v_slice	0.000	8	8	0	8	15	13370	13393	8.1	14.1
+rndrandom	m_minus	16.667	6	5	0	19	24	109	92	5.6	14.5

@@ -3079,7 +3079,15 @@ pub(crate) fn x_tbn_build_compressed_lookup(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
 ) -> Option<Result<XCompressedLookup, ()>> {
-    x_build_compressed_on(word_size, scaled_threshold, query, locations, tables, false)
+    x_build_compressed_on(
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        false,
+        1,
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310,1352-1354
@@ -3102,6 +3110,7 @@ pub(crate) fn x_tbn_build_compressed_lookup_of(
     query: &[u8],
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
+    parts: usize,
 ) -> Option<Result<XCompressedLookup, ()>> {
     let reference = || {
         try_build_compressed_lookup(
@@ -3132,16 +3141,27 @@ pub(crate) fn x_tbn_build_compressed_lookup_of(
     };
     let built = match bucket {
         XBucketBuild::Built(built) => built,
-        XBucketBuild::Declined => x_try_build_flat_of(
+        XBucketBuild::Declined => x_flat_in_parts(
             matrix,
             word_size,
             scaled_threshold,
             query,
             locations,
             tables,
-            NCBI_OVERFLOW_CELL_CAPACITY,
-            X_COUNT_CHUNK,
-        ),
+            parts,
+        )
+        .unwrap_or_else(|| {
+            x_try_build_flat_of(
+                matrix,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                NCBI_OVERFLOW_CELL_CAPACITY,
+                X_COUNT_CHUNK,
+            )
+        }),
     };
     match built? {
         XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
@@ -3222,6 +3242,7 @@ pub(crate) fn x_bp_build_compressed_lookup_of(
         query,
         locations,
         tables,
+        1,
     )
 }
 
@@ -3240,8 +3261,9 @@ pub(crate) fn x_bp_build_compressed_lookup_of(
 /// once per query batch by `blastx::seed`), so that the bucket fill's walk of the neighbouring
 /// words takes its length as a constant, as it did when 5 was the only one (item SC9 of line NP;
 /// 6 and 7 decline at its PV test and take the count-and-fill builder, with the length at run
-/// time). With `parts` above 1 (a unit under the cap, `LOSAT_X_BXBUILDPAR`) the same table is
-/// built by that many tasks of the pool the build runs on (`x_clut_par.rs`, item SC9b (2)).
+/// time). Where the bucket fill declines, a unit under the cap (`parts` above 1,
+/// `LOSAT_X_BXBUILDPAR`) builds the count-and-fill builder's table in that many parts
+/// (`x_flat_in_parts`, item SC9b (2)).
 #[inline(never)]
 pub(crate) fn x_bx_build_compressed_lookup<const WORD: usize>(
     scaled_threshold: i32,
@@ -3251,22 +3273,6 @@ pub(crate) fn x_bx_build_compressed_lookup<const WORD: usize>(
     parts: usize,
 ) -> Option<Result<XBxCompressedLookup, ()>> {
     let word_size = WORD;
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    if parts > 1 && x_bpclut_on() {
-        return x_bx_flat_in_parts(
-            ScoringMatrix::Blosum62,
-            word_size,
-            scaled_threshold,
-            query,
-            locations,
-            tables,
-            parts,
-        );
-    }
-    let _ = parts;
     if query.len() > X_U16_LETTERS {
         return x_build_compressed_on(
             word_size,
@@ -3275,6 +3281,7 @@ pub(crate) fn x_bx_build_compressed_lookup<const WORD: usize>(
             locations,
             tables,
             x_bx_clut_pool(),
+            parts,
         )
         .map(|built| {
             built.map(|table| match table {
@@ -3304,16 +3311,27 @@ pub(crate) fn x_bx_build_compressed_lookup<const WORD: usize>(
     };
     let built = match bucket {
         XBucketBuild::Built(built) => built,
-        XBucketBuild::Declined => x_try_build_flat_with_capacity(
+        XBucketBuild::Declined => x_flat_in_parts(
+            ScoringMatrix::Blosum62,
             word_size,
             scaled_threshold,
             query,
             locations,
             tables,
-            NCBI_OVERFLOW_CELL_CAPACITY,
-            X_COUNT_CHUNK,
-            0,
+            parts,
         )
+        .unwrap_or_else(|| {
+            x_try_build_flat_with_capacity(
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                NCBI_OVERFLOW_CELL_CAPACITY,
+                X_COUNT_CHUNK,
+                0,
+            )
+        })
         .map(|built| match built {
             XFlatBuild::Table(table) => XFlatBuild::Table(x_narrow_flat(table)),
             XFlatBuild::Refused => XFlatBuild::Refused,
@@ -3327,23 +3345,21 @@ pub(crate) fn x_bx_build_compressed_lookup<const WORD: usize>(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310,1352-1354 (see
-// `x_tbn_build_compressed_lookup_of`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
 // ```c
-//     new_alphabet = SCompressedAlphabetNew(sbp,
-//                                 lookup->compressed_alphabet_size,
-//                                 kMatrixScale);
-//     ...
 //     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
 //                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
 // ```
-/// BLASTX's compressed lookup table with the words of the search matrix `matrix`, any but BLOSUM62
-/// (items SC6 and SC9 of line NP): `x_tbn_build_compressed_lookup_of`'s table (`Int4` hits) on this
-/// thread, or, with `parts` above 1, the same table built by that many tasks of the pool the build
-/// runs on (`x_bx_flat_in_parts`, item SC9b (2), `u16` hits as BLOSUM62's). Out of line, so that
-/// BLOSUM62's build keeps its code.
-#[inline(never)]
-pub(crate) fn x_bx_build_compressed_lookup_of(
+// NCBI builds a query chunk's table on one thread before the search threads start
+// (c++/src/algo/blast/api/prelim_stage.cpp:145-188 starts them for the search).
+/// Item SC9b (2) of line NP: where the bucket fill declines (`-word_size` 6 and 7, or a table past
+/// the overflow capacity), the count-and-fill builder's table of `matrix`'s words built by `parts`
+/// tasks of the pool the build runs on (`x_clut_par::x_try_build_flat_in_parts`, the same table slot
+/// for slot): a BLASTX unit under the cap (`LOSAT_X_BXBUILDPAR`, `blastx/x_bx_mem.rs`). `None` where
+/// the count-and-fill builder runs on this thread: `parts` 1, or a build without threads.
+#[inline(always)]
+fn x_flat_in_parts(
     matrix: ScoringMatrix,
     word_size: usize,
     scaled_threshold: i32,
@@ -3351,13 +3367,13 @@ pub(crate) fn x_bx_build_compressed_lookup_of(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
     parts: usize,
-) -> Option<Result<XBxCompressedLookup, ()>> {
+) -> Option<Option<XFlatBuild>> {
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if parts > 1 && x_bpclut_on() {
-        return x_bx_flat_in_parts(
+    if parts > 1 {
+        return Some(x_clut_par::x_try_build_flat_in_parts(
             matrix,
             word_size,
             scaled_threshold,
@@ -3365,52 +3381,9 @@ pub(crate) fn x_bx_build_compressed_lookup_of(
             locations,
             tables,
             parts,
-        );
+        ));
     }
-    let _ = parts;
-    x_tbn_build_compressed_lookup_of(
-        matrix,
-        word_size,
-        scaled_threshold,
-        query,
-        locations,
-        tables,
-    )
-    .map(|built| {
-        built.map(|table| match table {
-            XCompressedLookup::Reference(table) => XBxCompressedLookup::Reference(table),
-            XCompressedLookup::Flat(table) => XBxCompressedLookup::Wide(table),
-        })
-    })
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-//     s_CompressedLookupFinalize(lookup);
-// ```
-/// Item SC9b (2) of line NP: BLASTX's flat compressed table of `matrix`'s words built by `parts`
-/// tasks of the pool the build runs on (`x_clut_par::x_try_build_flat_in_parts`, the table of the
-/// serial builders slot for slot), with `u16` offsets where the query has at most `X_U16_LETTERS`
-/// letters; the reference table where the parallel build passes its bound (`TooLarge`). A build
-/// without threads builds every table on one thread.
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-#[cold]
-#[inline(never)]
-fn x_bx_flat_in_parts(
-    matrix: ScoringMatrix,
-    word_size: usize,
-    scaled_threshold: i32,
-    query: &[u8],
-    locations: &[(i32, i32)],
-    tables: &[std::ops::Range<usize>],
-    parts: usize,
-) -> Option<Result<XBxCompressedLookup, ()>> {
-    match x_clut_par::x_try_build_flat_in_parts(
+    let _ = (
         matrix,
         word_size,
         scaled_threshold,
@@ -3418,32 +3391,8 @@ fn x_bx_flat_in_parts(
         locations,
         tables,
         parts,
-    )? {
-        XFlatBuild::Table(table) if query.len() > X_U16_LETTERS => {
-            Some(Ok(XBxCompressedLookup::Wide(table)))
-        }
-        XFlatBuild::Table(table) => Some(Ok(XBxCompressedLookup::Flat(x_narrow_flat(table)))),
-        XFlatBuild::Refused => Some(Err(())),
-        XFlatBuild::TooLarge if matrix == ScoringMatrix::Blosum62 => {
-            try_build_blosum62_compressed_lookup(
-                word_size,
-                scaled_threshold,
-                query,
-                locations,
-                tables,
-            )
-            .map(|built| built.map(XBxCompressedLookup::Reference))
-        }
-        XFlatBuild::TooLarge => try_build_compressed_lookup(
-            matrix,
-            word_size,
-            scaled_threshold,
-            query,
-            locations,
-            tables,
-        )
-        .map(|built| built.map(XBxCompressedLookup::Reference)),
-    }
+    );
+    None
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
@@ -3454,7 +3403,8 @@ fn x_bx_flat_in_parts(
 //     s_CompressedLookupFinalize(lookup);
 // ```
 /// `x_tbn_build_compressed_lookup`, with `pooled` the bucket fill on vectors kept between builds
-/// (`LOSAT_X_BXCLUTPOOL`).
+/// (`LOSAT_X_BXCLUTPOOL`) and, where the bucket fill declines, the count-and-fill builder's table in
+/// `parts` (`x_flat_in_parts`; 1: on this thread).
 fn x_build_compressed_on(
     word_size: usize,
     scaled_threshold: i32,
@@ -3462,6 +3412,7 @@ fn x_build_compressed_on(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
     pooled: bool,
+    parts: usize,
 ) -> Option<Result<XCompressedLookup, ()>> {
     let reference = || {
         try_build_blosum62_compressed_lookup(word_size, scaled_threshold, query, locations, tables)
@@ -3486,16 +3437,27 @@ fn x_build_compressed_on(
     };
     let built = match bucket {
         XBucketBuild::Built(built) => built,
-        XBucketBuild::Declined => x_try_build_flat_with_capacity(
+        XBucketBuild::Declined => x_flat_in_parts(
+            ScoringMatrix::Blosum62,
             word_size,
             scaled_threshold,
             query,
             locations,
             tables,
-            NCBI_OVERFLOW_CELL_CAPACITY,
-            X_COUNT_CHUNK,
-            0,
-        ),
+            parts,
+        )
+        .unwrap_or_else(|| {
+            x_try_build_flat_with_capacity(
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                NCBI_OVERFLOW_CELL_CAPACITY,
+                X_COUNT_CHUNK,
+                0,
+            )
+        }),
     };
     match built? {
         XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
@@ -4025,7 +3987,7 @@ mod tests {
                     {
                         let Some(Ok(XCompressedLookup::Flat(flat))) =
                             x_tbn_build_compressed_lookup_of(
-                                matrix, word, threshold, &query, &locations, &tables,
+                                matrix, word, threshold, &query, &locations, &tables, 1,
                             )
                         else {
                             panic!("{what}: no flat table")
@@ -4626,9 +4588,9 @@ mod tests {
         assert_eq!(got.longest_chain, want.longest_chain);
     }
 
-    // Item SC9b (2) of line NP: BLASTX's table built in parts on a pool (`x_bx_flat_in_parts`) is the
-    // one-part build's (the bucket fill, the count-and-fill builder, another matrix's builder), slot
-    // for slot, for each word size and for BLOSUM62 and another matrix, on segments of one table.
+    // Item SC9b (2) of line NP: BLASTX's table of a unit built in parts on a pool (`x_flat_in_parts`
+    // where the bucket fill declines) is the one-part build's, slot for slot, for each word size and
+    // for BLOSUM62 and another matrix, on segments of one table; also a query past `X_U16_LETTERS`.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -4672,9 +4634,17 @@ mod tests {
                 (ScoringMatrix::Blosum62, _) => {
                     x_bx_build_compressed_lookup::<7>(scaled, query, &segments, &tables, parts)
                 }
-                _ => x_bx_build_compressed_lookup_of(
+                _ => x_tbn_build_compressed_lookup_of(
                     matrix, word, scaled, query, &segments, &tables, parts,
-                ),
+                )
+                .map(|built| {
+                    built.map(|table| match table {
+                        XCompressedLookup::Reference(table) => {
+                            XBxCompressedLookup::Reference(table)
+                        }
+                        XCompressedLookup::Flat(table) => XBxCompressedLookup::Wide(table),
+                    })
+                }),
             }
         };
         let mut rng = XorShift(0x9E37_79B9_7F4A_7C15);
@@ -4695,6 +4665,22 @@ mod tests {
                 }
             }
         }
+        let long = random_subject(&mut rng, X_U16_LETTERS + 2_000, 0);
+        let all = [(0, long.len() as i32 - 2)];
+        let wide = |parts| {
+            fields(x_bx_build_compressed_lookup::<6>(
+                2100,
+                &long,
+                &all,
+                &[0..1],
+                parts,
+            ))
+        };
+        let want = wide(1);
+        assert!(
+            pool.install(|| wide(3)) == want,
+            "a query past X_U16_LETTERS in 3 parts"
+        );
     }
 
     // LOSAT_X_BXCLUTPOOL, `i32` offsets (BLASTX's query batches of more than `X_U16_LETTERS`

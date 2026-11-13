@@ -3084,6 +3084,9 @@ mod tests {
                 hash_index: false,
                 taxid: None,
                 taxid_map: None,
+                mask_data: None,
+                mask_id: None,
+                mask_desc: None,
             };
             let now = crate::writedb::time::LocalTime {
                 year: 2026,

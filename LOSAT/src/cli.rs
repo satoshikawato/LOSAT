@@ -935,6 +935,13 @@ fn named_refusal(program: &str, name: &str) -> Option<clap::Error> {
     // its refusal (AGENTS.md rule 2: explicit unsupported errors).
     if program == "makeblastdb" && crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS.contains(&name)
     {
+        // `-gi_mask` and `-gi_mask_name` make GI-indexed mask files (makeblastdb.cpp:279-288),
+        // which LOSAT's writer does not write yet (line NP, item M4c); `-mask_data` itself works.
+        if matches!(name, "gi_mask" | "gi_mask_name") {
+            return refusal(
+                "makeblastdb (it writes GI-indexed mask files, which LOSAT does not write yet; -mask_data, -mask_id and -mask_desc work)",
+            );
+        }
         return refusal("makeblastdb");
     }
     if program == "blastn" && is_unported_blastn_arg(name) {

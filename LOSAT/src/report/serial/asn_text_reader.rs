@@ -57,6 +57,11 @@ pub enum AsnTextErrorKind {
     Format,
     /// A form that NCBI reads and LOSAT's reader does not (an explicit LOSAT refusal).
     Unsupported,
+    /// The text ends where NCBI's input buffer needed one more byte (`PeekChar`, `GetChar`):
+    /// its `CEofException`, which NCBI's object stream turns into a `CSerialException` inside an
+    /// object, and passes on at the start of one (a reader of objects one after another takes it
+    /// as the end of the input there).
+    Eof,
 }
 
 /// A document that the reader cannot read: the line (from 1) where it stopped and why.
@@ -263,6 +268,12 @@ pub(crate) struct Reader<S: AsnSource> {
     pub(crate) refusal: Option<AsnTextError>,
 }
 
+/// What `ReadMemberId` read: a name, or the digits of a tag in brackets (`[3]`).
+pub(crate) enum MemberId {
+    Name(Range<usize>),
+    Tag(Range<usize>),
+}
+
 /// The members of a SEQUENCE as they are read: each name in turn, in the order of the module.
 pub(crate) struct Members {
     block_start: bool,
@@ -336,7 +347,20 @@ impl<S: AsnSource> Reader<S> {
     }
 
     fn end_of_text(&self) -> AsnTextError {
-        self.error(format!("unexpected end of the {}", self.document))
+        AsnTextError {
+            line: self.line,
+            message: format!("unexpected end of the {}", self.document),
+            kind: AsnTextErrorKind::Eof,
+        }
+    }
+
+    /// The byte at `pos + offset` (`PeekChar`): the end of the text is [`AsnTextErrorKind::Eof`].
+    #[inline]
+    pub(crate) fn peek_char(&mut self, offset: usize) -> Result<u8> {
+        match self.src.byte_at(self.pos + offset) {
+            Some(c) => Ok(c),
+            None => Err(self.end_of_text()),
+        }
     }
 
     /// The byte at `pos + offset`, 0 past the end (`PeekCharNoEOF`).
@@ -433,7 +457,7 @@ impl<S: AsnSource> Reader<S> {
                     self.pos += 1;
                     self.skip_end_of_line(c);
                 }
-                b'-' if self.peek_at(1) == b'-' => {
+                b'-' if self.peek_char(1)? == b'-' => {
                     self.pos += 2;
                     loop {
                         let Some(c) = self.src.byte_at(self.pos) else {
@@ -497,17 +521,17 @@ impl<S: AsnSource> Reader<S> {
     //     return CTempString();
     // }
     // ```
-    pub(crate) fn scan_end_of_id(&mut self, is_id: bool) -> Range<usize> {
+    pub(crate) fn scan_end_of_id(&mut self, is_id: bool) -> Result<Range<usize>> {
         if !is_id {
-            return self.pos..self.pos;
+            return Ok(self.pos..self.pos);
         }
         let mut i = 1;
         loop {
             let c = self.peek_at(i);
-            if !is_id_char(c) && (c != b'-' || !is_id_char(self.peek_at(i + 1))) {
+            if !is_id_char(c) && (c != b'-' || !is_id_char(self.peek_char(i + 1)?)) {
                 let start = self.pos;
                 self.pos += i;
-                return start..self.pos;
+                return Ok(start..self.pos);
             }
             i += 1;
         }
@@ -549,19 +573,25 @@ impl<S: AsnSource> Reader<S> {
     // ```
     // An id in brackets that starts with a digit names the member or variant by its tag
     // (`GetMemberIndex`, and `GetChoiceIndex` at :431-433), which depends on the tags NCBI's
-    // generated type information gives each member; LOSAT's readers know the members by name
-    // only, so that form is an explicit refusal.
+    // generated type information gives each member: `member_or_tag` returns it for a reader that
+    // knows them, and `member_id_range`, for the readers that know the members by name only,
+    // refuses that form explicitly.
     pub(crate) fn member_id_range(&mut self) -> Result<Range<usize>> {
+        match self.member_or_tag()? {
+            MemberId::Name(id) => Ok(id),
+            MemberId::Tag(_) => Err(self.not_supported("a member or variant named by its tag")),
+        }
+    }
+
+    /// `ReadMemberId(SkipWhiteSpace())`, a name or a tag (`member_id_range`).
+    pub(crate) fn member_or_tag(&mut self) -> Result<MemberId> {
         let c = self.skip_white_space()?;
         if c != b'[' {
-            return Ok(self.scan_end_of_id(c.is_ascii_lowercase()));
+            return Ok(MemberId::Name(self.scan_end_of_id(c.is_ascii_lowercase())?));
         }
         let mut i = 1;
         loop {
-            let Some(c) = self.src.byte_at(self.pos + i) else {
-                return Err(self.end_of_text());
-            };
-            match c {
+            match self.peek_char(i)? {
                 b'\r' | b'\n' => return Err(self.error("end of line: expected ']'")),
                 b']' => {
                     let id = self.pos + 1..self.pos + i;
@@ -571,13 +601,76 @@ impl<S: AsnSource> Reader<S> {
                         .first()
                         .is_some_and(u8::is_ascii_digit)
                     {
-                        return Err(self.not_supported("a member or variant named by its tag"));
+                        return Ok(MemberId::Tag(id));
                     }
-                    return Ok(id);
+                    return Ok(MemberId::Name(id));
                 }
                 _ => i += 1,
             }
         }
+    }
+
+    /// `ReadFileHeader`: the type name before `::=` (empty when there is none), the `::=` taken.
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:292-313,709-721
+    // ```c++
+    // CTempString CObjectIStreamAsn::ReadTypeId(char c)
+    // {
+    //     if ( c == '[' ) {
+    //         for ( size_t i = 1; ; ++i ) {
+    //             switch ( m_Input.PeekChar(i) ) {
+    //             case '\r':
+    //             case '\n':
+    //                 ThrowError(fFormatError, "end of line: expected ']'");
+    //                 break;
+    //             case ']':
+    //                 {
+    //                     const char* ptr = m_Input.GetCurrentPos();
+    //                     m_Input.SkipChars(i);
+    //                     return CTempString(ptr + 1, i - 2);
+    //                 }
+    //             }
+    //         }
+    //     }
+    //     else {
+    //         return ScanEndOfId(FirstIdChar(c));
+    //     }
+    // }
+    // ...
+    // string CObjectIStreamAsn::ReadFileHeader()
+    // {
+    //     CTempString id = ReadTypeId(SkipWhiteSpace());
+    //     string s(id);
+    //     if ( SkipWhiteSpace() == ':' &&
+    //          m_Input.PeekCharNoEOF(1) == ':' &&
+    //          m_Input.PeekCharNoEOF(2) == '=' ) {
+    //         m_Input.SkipChars(3);
+    //     }
+    //     else
+    //         ThrowError(fFormatError, "'::=' expected");
+    //     return s;
+    // }
+    // ```
+    // A type name in brackets stops before its `]` (`SkipChars(i)`), so the `::=` test that
+    // follows always fails.
+    pub(crate) fn file_header(&mut self) -> Result<Range<usize>> {
+        let c = self.skip_white_space()?;
+        let id = if c == b'[' {
+            let mut i = 1;
+            loop {
+                match self.peek_char(i)? {
+                    b'\r' | b'\n' => return Err(self.error("end of line: expected ']'")),
+                    b']' => return Err(self.error("'::=' expected")),
+                    _ => i += 1,
+                }
+            }
+        } else {
+            self.scan_end_of_id(is_first_id_char(c))?
+        };
+        if self.skip_white_space()? != b':' || self.peek_at(1) != b':' || self.peek_at(2) != b'=' {
+            return Err(self.error("'::=' expected"));
+        }
+        self.pos += 3;
+        Ok(id)
     }
 
     /// The variant of a CHOICE whose variants are `names` (in module order), as its position;
@@ -757,11 +850,12 @@ impl<S: AsnSource> Reader<S> {
     //             NumberOverflow();
     // ```
     pub(crate) fn integer(&mut self, min: i128, max: i128) -> Result<i128> {
-        let mut c = self.skip_white_space()?;
+        self.skip_white_space()?;
+        let mut c = self.skip_ws()?;
         let negative = c == b'-';
         if c == b'-' || c == b'+' {
             self.pos += 1;
-            c = self.peek_at(0);
+            c = self.peek_char(0)?;
         }
         if !c.is_ascii_digit() {
             return Err(self.error("bad number"));
@@ -783,6 +877,30 @@ impl<S: AsnSource> Reader<S> {
             return Err(self.error("number overflow"));
         }
         Ok(n)
+    }
+
+    /// `CIStreamBuffer::SkipWs` before the first byte of a number, which `GetInt4` and the other
+    /// readers of numbers call after `SkipWhiteSpace`: any C `isspace` byte (also `\v` and `\f`,
+    /// which `SkipWhiteSpace` stops at) is skipped, line ends uncounted, comments not seen. Returns
+    /// the next byte, not taken.
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:617-624
+    // ```c++
+    // char CIStreamBuffer::SkipWs(void)
+    // {
+    //     char c;
+    //     while (isspace((unsigned char)(c = GetChar())))
+    //     ;
+    //     return c;
+    // }
+    // ```
+    fn skip_ws(&mut self) -> Result<u8> {
+        loop {
+            let c = self.peek_char(0)?;
+            if !is_space(c) {
+                return Ok(c);
+            }
+            self.pos += 1;
+        }
     }
 
     pub(crate) fn int4(&mut self) -> Result<i32> {
@@ -828,10 +946,11 @@ impl<S: AsnSource> Reader<S> {
     //     return n;
     // ```
     pub(crate) fn uint4(&mut self) -> Result<u32> {
-        let mut c = self.skip_white_space()?;
+        self.skip_white_space()?;
+        let mut c = self.skip_ws()?;
         if c == b'+' {
             self.pos += 1;
-            c = self.peek_at(0);
+            c = self.peek_char(0)?;
         }
         if !c.is_ascii_digit() {
             return Err(self.error("bad number"));
@@ -941,18 +1060,42 @@ impl<S: AsnSource> Reader<S> {
         &mut self,
         values: &[(&'static str, i32)],
     ) -> Result<(&'static str, i32)> {
+        match self.enum_item(values)? {
+            Ok(item) => Ok(item),
+            Err(_) => Err(self.error("invalid enum value")),
+        }
+    }
+
+    /// `ReadEnum` of an INTEGER with the named values `values` (`IsInteger()`): a name, or any
+    /// number.
+    pub(crate) fn named_integer(&mut self, values: &[(&'static str, i32)]) -> Result<i32> {
+        Ok(match self.enum_item(values)? {
+            Ok((_, value)) => value,
+            Err(value) => value,
+        })
+    }
+
+    /// The item of `values` named or numbered by the text, or the number that is none of them
+    /// (a name that is none of them is an error).
+    fn enum_item(
+        &mut self,
+        values: &[(&'static str, i32)],
+    ) -> Result<std::result::Result<(&'static str, i32), i32>> {
         let c = self.skip_white_space()?;
-        let id = self.scan_end_of_id(c.is_ascii_lowercase());
-        let found = if id.is_empty() {
+        let id = self.scan_end_of_id(c.is_ascii_lowercase())?;
+        if id.is_empty() {
             let value = self.int4()?;
-            values.iter().find(|&&(_, number)| number == value)
-        } else {
-            let text = self.bytes(id);
-            values.iter().find(|&&(name, _)| name.as_bytes() == text)
-        };
-        found
-            .copied()
-            .ok_or_else(|| self.error("invalid enum value"))
+            return Ok(values
+                .iter()
+                .find(|&&(_, number)| number == value)
+                .copied()
+                .ok_or(value));
+        }
+        let text = self.bytes(id);
+        match values.iter().find(|&&(name, _)| name.as_bytes() == text) {
+            Some(&item) => Ok(Ok(item)),
+            None => Err(self.error("invalid enum value")),
+        }
     }
 
     /// `ReadStringValue`: a quoted string, its lines joined, `""` read as one quote.
@@ -1001,6 +1144,12 @@ impl<S: AsnSource> Reader<S> {
     // }
     // ```
     pub(crate) fn utf8_string(&mut self) -> Result<Vec<u8>> {
+        self.string_as_read()
+    }
+
+    /// A string with its bytes as they are in the text, for a reader that applies NCBI's rule
+    /// for a VisibleString itself.
+    pub(crate) fn string_as_read(&mut self) -> Result<Vec<u8>> {
         let mut out = Vec::new();
         self.string_value(&mut out, false)?;
         Ok(out)
@@ -1258,7 +1407,7 @@ impl<S: AsnSource> Reader<S> {
     pub(crate) fn real(&mut self) -> Result<f64> {
         if self.skip_white_space()? != b'{' {
             let start = self.pos;
-            let word = self.scan_end_of_id(true);
+            let word = self.scan_end_of_id(true)?;
             if self.starts_with_ignore_case(start, b"PLUS-INFINITY") {
                 return Ok(f64::INFINITY);
             }

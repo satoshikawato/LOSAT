@@ -476,9 +476,10 @@ pub(super) fn x_try_build_flat_in_pool_of(
 // NCBI builds a query chunk's table on one thread before the search threads start
 // (c++/src/algo/blast/api/prelim_stage.cpp:145-188 starts them for the search); here a BLASTX unit
 // builds it on the threads the unit cap leaves it, the same table (module header).
-/// Item SC9b (2) of line NP: BLASTX's flat table of a query batch with the words of `matrix`
-/// (`x_bx_build_compressed_lookup`, `x_bx_build_compressed_lookup_of`) built by `parts` tasks of the
-/// pool the build runs on (`LOSAT_X_BXBUILDPAR`, `blastx/x_bx_mem.rs`): the one-latch passes, without
+/// Item SC9b (2) of line NP: BLASTX's flat table of a query batch with the words of `matrix`, where
+/// the bucket fill declines (`x_clut_direct.rs` `x_flat_in_parts`), built by `parts` tasks of the pool
+/// the build runs on (`LOSAT_X_BXBUILDPAR`, `blastx/x_bx_mem.rs`): the one-latch passes
+/// (`x_one_latch_pass`, the stripes by `x_stripe_fill` as LOSAT_X_BPSTRIPEFILL chooses), without
 /// spare vectors, kept segments or extra tasks. `parts` is above 1.
 pub(super) fn x_try_build_flat_in_parts(
     matrix: ScoringMatrix,

@@ -4100,9 +4100,21 @@ fn blast_affine_greedy_align(
         let (match_lo, match_hi) = prior(d_match);
         let mut cur = last_seq2_off.take(d);
         let empty = AffineRow::default();
-        let row_open = if d_open >= 0 { last_seq2_off.row(d_open) } else { &empty };
-        let row_ext = if d_ext >= 0 { last_seq2_off.row(d_ext) } else { &empty };
-        let row_match = if d_match >= 0 { last_seq2_off.row(d_match) } else { &empty };
+        let row_open = if d_open >= 0 {
+            last_seq2_off.row(d_open)
+        } else {
+            &empty
+        };
+        let row_ext = if d_ext >= 0 {
+            last_seq2_off.row(d_ext)
+        } else {
+            &empty
+        };
+        let row_match = if d_match >= 0 {
+            last_seq2_off.row(d_match)
+        } else {
+            &empty
+        };
         let cur_lower = cur.lower;
 
         for k_val in tmp_diag_lower..=tmp_diag_upper {

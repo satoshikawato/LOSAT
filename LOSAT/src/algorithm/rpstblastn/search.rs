@@ -707,6 +707,7 @@ mod tests {
 
     fn hsp(frame: i32, score: i32, q: (usize, usize), s: (usize, usize)) -> BlastpHsp {
         BlastpHsp {
+            num: 1,
             identity: 50.0,
             length: q.1 - q.0 + 2,
             mismatch: 1,
@@ -798,6 +799,7 @@ mod tests {
             hsps: evalues
                 .iter()
                 .map(|&e| BlastpHsp {
+                    num: 1,
                     e_value: e,
                     ..hsp(1, 10, (1, 9), (1, 9))
                 })

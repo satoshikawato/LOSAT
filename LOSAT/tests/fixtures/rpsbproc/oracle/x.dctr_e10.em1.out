@@ -1,0 +1,29 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_dctr_e10.xml
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	-1
+#Redundancy:	Full
+#Data requested:	Domain hits
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSBLAST 2.17.0+	Cdd	BLOSUM62	10
+QUERY	Query_1	Peptide	176	NP_417964.1 putative DNA-binding transcriptional regulator DctR [Escherichia coli str. K-12 substr. MG1655]
+ENDQUERY
+ENDSESSION	1
+ENDDATA

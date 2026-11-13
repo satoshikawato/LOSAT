@@ -9,10 +9,11 @@ use crate::ncbi_app::args::{ArgException, Args};
 use crate::ncbi_app::files::{file_exception, open_input_file, Cin, Ostream};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{err_post_x, NcbiException};
+use crate::seqdb::mask::FilterProgram;
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 use crate::seqid::rank::{best_rank_score, find_best};
 use crate::seqmasks_io::run::{finish, serial_write_failure, write_failure, RunFailure};
-use crate::seqmasks_io::writer::{FilterProgram, MaskInfoWriter, MaskWriter, Serial, WriteError};
+use crate::seqmasks_io::writer::{MaskInfoWriter, MaskWriter, Serial, WriteError};
 use crate::writedb::fasta_source::reader::{FastaReader, ReadError, ReaderFlags};
 
 /// How a run stops early.

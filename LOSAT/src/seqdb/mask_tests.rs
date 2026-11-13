@@ -7,8 +7,31 @@
 
 use std::path::{Path, PathBuf};
 
-use super::mask::ncbi_split;
+use super::mask::{ncbi_split, FilterProgram, FILTER_PROGRAMS};
 use super::*;
+
+/// The table of `Blast-filter-program` is blastdb.asn's (blastdb.asn:51-59), each row the name and
+/// value of the variant at that position.
+#[test]
+fn the_filter_program_table_is_blastdb_asn_s() {
+    assert_eq!(
+        FILTER_PROGRAMS,
+        [
+            ("not-set", 0),
+            ("dust", 10),
+            ("seg", 20),
+            ("windowmasker", 30),
+            ("repeat", 40),
+            ("other", 100),
+            ("max", 255),
+        ]
+    );
+    for (program, row) in FilterProgram::ALL.iter().zip(FILTER_PROGRAMS) {
+        assert_eq!((program.name(), program.value()), row);
+    }
+    assert_eq!(FilterProgram::Windowmasker.name(), "windowmasker");
+    assert_eq!(FilterProgram::Other.value(), 100);
+}
 
 /// `GetMaskData(oid, algo)`: the masks of NCBI's OID `oid` (`SeqDb::locate_oid`).
 fn oid_mask_ranges(db: &SeqDb, oid: u32, algo: i32) -> Result<MaskRanges, SeqDbError> {

@@ -147,11 +147,7 @@ pub(super) struct PreparedXml {
 /// (the matrix table is made from the name as typed, as BLASTP's.)
 pub(super) fn unsupported_matrix(matrix_name: &str, has_queries: bool) -> Result<()> {
     if FormattingMatrix::new(matrix_name).is_none() && has_queries {
-        return Err(crate::cli::NativeError {
-            exit: 3,
-            message: "BLAST engine error: unsupported score matrix\n".to_string(),
-        }
-        .into());
+        return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
     }
     Ok(())
 }

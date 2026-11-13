@@ -3,8 +3,9 @@
 //! archives of `rpsblast -outfmt 11` and the CDD annotation data and writes the conserved domain
 //! hits of each query. LOSAT gives the domain hits (`-t doms`, with `-m rep`, `std` or `full`
 //! and `-f`) and the sites and motifs (`-t feats`, `-t both`, the default) of protein queries
-//! (rpsblast's archives) and of nucleotide queries (rpstblastn's archives, per reading frame);
-//! the deprecated XML input (item PS16d) is refused explicitly.
+//! (rpsblast's archives) and of nucleotide queries (rpstblastn's archives, per reading frame),
+//! and reads the BlastOutput XML of `-outfmt 5` too, which NCBI's rpsbproc reads as deprecated
+//! (`blastxml`, `offline`).
 //!
 //! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1853-1871
 //! ```c++
@@ -25,10 +26,12 @@
 
 mod archive;
 mod args;
+mod blastxml;
 mod data;
 mod domains;
 mod frames;
 mod nucleotide;
+mod offline;
 mod prosite;
 mod query;
 mod segset;
@@ -45,13 +48,16 @@ use crate::ncbi_exception::{err_post_x, err_post_x_bytes, NcbiException};
 
 use archive::{ArchiveStream, ParamValue, Queries, RequestBody, SeqEntry, Subject};
 use args::TargetData;
+use blastxml::XmlStream;
 use data::{CddData, DataError, DataFiles};
 use domains::{
     domain_records, feature_records, map_seg_set, translated_pos_map, DataMode, FeatureRecord,
     Record,
 };
 use prosite::{MapEnd, MatchError};
-use query::{check_masks, choice_selection, process_blast_results, DomQuery, ProcessError};
+use query::{
+    check_masks, choice_selection, process_blast_results, unassigned_member, DomQuery, ProcessError,
+};
 use segset::SegSet;
 use sites::{MotifError, MotifState};
 
@@ -920,18 +926,22 @@ fn header_tail(evalue: f64, mode: DataMode, show_families: bool, target: TargetD
 // the same way; `NO`, `NEVER`, `DEFVALUE` and `DEFVALUE_ALWAYS` turn the checks off: a missing
 // member is no longer a read error, and the getter of an unset member gives its default instead
 // of throwing `CUnassignedMember`. `YES`, `ALWAYS` and other values keep NCBI's default.)
-// `OBJECTS_SEQ_DESCR_ALLOW_EMPTY` lets an empty `Seq-descr` read; LOSAT rejects it with any value.
+// `OBJECTS_SEQ_DESCR_ALLOW_EMPTY` lets an empty `Seq-descr` read; LOSAT rejects it with any value
+// when the input is an archive (`xml` false: a BlastOutput document has no `Seq-descr`).
 // The other parameters of the readers are registry entries (`NCBI_CONFIG__SERIAL__...`, which
 // the application start rejects, `ApplicationStart::settings`) or change no result
 // (`SERIAL_READ_MMAPBYTESOURCE`, `SERIAL_DISABLE_DELAY_BUFFERS` and the binary ASN.1 ones); the
 // gi parameters of the Seq-ids are refused in `run_sessions`, where a query has a gi.
-fn reader_variable(variables: impl Iterator<Item = (OsString, OsString)>) -> Option<String> {
+fn reader_variable(
+    variables: impl Iterator<Item = (OsString, OsString)>,
+    xml: bool,
+) -> Option<String> {
     for (name, value) in variables {
         let (Some(name), value) = (name.to_str(), value.to_string_lossy()) else {
             continue;
         };
         let changes = match name {
-            "OBJECTS_SEQ_DESCR_ALLOW_EMPTY" => true,
+            "OBJECTS_SEQ_DESCR_ALLOW_EMPTY" => !xml,
             "SERIAL_VERIFY_DATA_READ" | "SERIAL_VERIFY_DATA_GET" => {
                 ["NO", "NEVER", "DEFVALUE", "DEFVALUE_ALWAYS"]
                     .iter()
@@ -941,7 +951,7 @@ fn reader_variable(variables: impl Iterator<Item = (OsString, OsString)>) -> Opt
         };
         if changes {
             return Some(format!(
-                "the environment variable {name}={value}, which changes how NCBI's object stream reads an archive, is not supported by LOSAT's rpsbproc"
+                "the environment variable {name}={value}, which changes how NCBI's object stream reads its input, is not supported by LOSAT's rpsbproc"
             ));
         }
     }
@@ -966,7 +976,7 @@ struct Ready {
     first: u8,
     out: Box<dyn Write>,
     data: CddData,
-    /// Whether the input is XML (`first` is `<`), which `Run` refuses.
+    /// Whether the input is XML (`first` is `<`): `Run` reads BlastOutput documents.
     xml: bool,
     seq_id_rank_variable: Option<&'static str>,
 }
@@ -1006,7 +1016,8 @@ pub fn run(
 /// leaves `Init` and LOSAT's refusals in `Init` (a file name, a setting that NCBI applies before
 /// `DryRun`) end the program as in a run. NCBI rpsbproc 0.5.1 (both builds; line RG
 /// `E/SURVEY_E1c.md`, probes `c_dry_*`): an archive that `Run` would reject or LOSAT's `Run`
-/// would refuse (`arch/lcl.asn`, a truncated one, the binary archive, the XML input) passes;
+/// would refuse (`arch/lcl.asn`, a truncated one, the binary archive) passes, and so does the
+/// XML input;
 /// `-o out.txt` leaves an empty file; a missing `-i` file with an empty standard input fails
 /// with 5 (the input's), with an archive on it with 3.
 pub fn dry_run(
@@ -1210,9 +1221,8 @@ fn init(
     let Some(first) = first else {
         return Ok(Init::Failed(E_INPUT_DATA_ERROR));
     };
-    // XML is refused only when NCBI's run would read it (`run_ready`): after a failed `-i`, `-o`
-    // or data load NCBI posts its warning and ends with the status (PS16a review oracle M4), and
-    // its `DryRun` passes it.
+    // The warning comes from `Init`: after a failed `-i`, `-o` or data load NCBI posts it and
+    // ends with the status (PS16a review oracle M4), and its `DryRun` posts it and passes.
     let xml = first == b'<';
     if xml {
         diag.post("Warning: XML format support is deprecated!");
@@ -1325,10 +1335,11 @@ fn init(
     })))
 }
 
-/// rpsbproc's `Run` after a successful `Init` (`ready`), its diagnostics going to `diag`. LOSAT
-/// refuses there what it does not read of the archive, before NCBI's `Run` reads it: the XML
-/// input and the environment variables that change how NCBI's object stream reads it
-/// (`reader_variable`). `DryRun` reads no archive (`dry_run`).
+/// rpsbproc's `Run` after a successful `Init` (`ready`), its diagnostics going to `diag`: the
+/// archives of the input (`run_sessions`), or its BlastOutput XML documents
+/// (`run_xml_sessions`). LOSAT refuses there, before NCBI's `Run` reads the input, the
+/// environment variables that change how NCBI's object stream reads it (`reader_variable`).
+/// `DryRun` reads no input (`dry_run`).
 fn run_ready(args: &RpsbprocArgs, ready: Ready, diag: Diagnostics) -> Outcome {
     let Ready {
         header,
@@ -1339,13 +1350,8 @@ fn run_ready(args: &RpsbprocArgs, ready: Ready, diag: Diagnostics) -> Outcome {
         xml,
         seq_id_rank_variable,
     } = ready;
-    if let Some(reason) = reader_variable(std::env::vars_os()) {
+    if let Some(reason) = reader_variable(std::env::vars_os(), xml) {
         return Outcome::refused(reason);
-    }
-    if xml {
-        return Outcome::refused(
-            "the XML input of rpsblast -outfmt 5 (which NCBI's rpsbproc reads as deprecated) is not supported by LOSAT's rpsbproc, which reads the ASN.1 text archives of -outfmt 11",
-        );
     }
     // `Ready` has the `-o` file when the run names one (`init` failed otherwise).
     let stream = if args.outfile.is_some() {
@@ -1354,16 +1360,29 @@ fn run_ready(args: &RpsbprocArgs, ready: Ready, diag: Diagnostics) -> Outcome {
         NcbiStream::cout()
     };
     let mut report = Report::new(out, stream, args.quiet, diag);
-    let outcome = run_sessions(
-        &mut report,
-        &header,
-        ArchiveStream::new(input, &[first]),
-        &data,
-        args.mode(),
-        args.show_families,
-        args.target(),
-        seq_id_rank_variable,
-    );
+    let outcome = if xml {
+        run_xml_sessions(
+            &mut report,
+            &header,
+            XmlStream::new(input, &[first]),
+            &data,
+            args.mode(),
+            args.show_families,
+            args.target(),
+            args.evalue,
+        )
+    } else {
+        run_sessions(
+            &mut report,
+            &header,
+            ArchiveStream::new(input, &[first]),
+            &data,
+            args.mode(),
+            args.show_families,
+            args.target(),
+            seq_id_rank_variable,
+        )
+    };
     // PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 9 (version 1.10): the first failed write of
     // the report stops LOSAT with this message and exit 4, rpsbproc's code of the output file
     // (`e_OutputFileOpenError`); NCBI prints nothing for it.
@@ -1566,24 +1585,6 @@ fn run_sessions<R: Read>(
             report.put(b'\t');
             report.write(ident);
         }
-        let process_failure = |report: &mut Report, error: ProcessError| -> Outcome {
-            match error {
-                ProcessError::Exception(exception) => {
-                    report.before_post();
-                    if report.failed.is_some() {
-                        return Outcome::Exit(E_OK);
-                    }
-                    Outcome::Exit(report_exception(&mut report.diag, &exception, false))
-                }
-                ProcessError::Std(what) => std_exception(report, what.as_bytes()),
-                ProcessError::Unsupported(message) => {
-                    if report.stopped() {
-                        return Outcome::Exit(E_OK);
-                    }
-                    Outcome::refused(message)
-                }
-            }
-        };
         // Each choice's tab is written before its getter, which may throw (C++17: the left
         // operand of `<<` is evaluated first; NCBI rpsbproc 0.5.1 on an archive whose subject is
         // `sequences`: `SESSION\t1\tblastp\t2.17.0+\t`, then the exception; line RG E1c review 1).
@@ -1686,19 +1687,7 @@ fn run_sessions<R: Read>(
                         target,
                         &mut motif_state,
                     ) {
-                        return match error {
-                            // A `std::exception` leaves `Run`: `CNcbiApplication` reports it
-                            // (ncbiapp.cpp:730-734; probe 3 of PS16b and review oracles R6, R20,
-                            // R21: the line below with `what()` as bytes, exit 3, the report
-                            // ends before the site's line).
-                            PrintError::Exception(what) => std_exception(report, &what),
-                            PrintError::Unsupported(message) => {
-                                if report.stopped() {
-                                    return Outcome::Exit(E_OK);
-                                }
-                                Outcome::refused(message)
-                            }
-                        };
+                        return print_failure(report, error);
                     }
                     queries_done += 1;
                     if report.stopped() {
@@ -1713,6 +1702,172 @@ fn run_sessions<R: Read>(
     report.line(&[b"ENDDATA"]);
     report.progress(&format!("All done, {queries_done} queries processed\n"));
     Outcome::Exit(E_OK)
+}
+
+/// The sessions of an XML input: one per BlastOutput document (`Run`'s XML loop), until one does
+/// not read. A document is read whole before its session line (NCBI reads it into one object):
+/// what it prints is its version, database, matrix and E-value threshold, and its queries.
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:744-778
+// ```c++
+// 		if (eSerial_Xml == m_sfmt)
+// 		{
+// 			//list<_TOfflDomQuery> qobjs;
+// 			while (m_istream->good())
+// 			{
+// 				CBlastOutput objBlastOutput;
+// 				try
+// 				{
+// 					ObjStreamIn<CBlastOutput> ((*m_istream), objBlastOutput, eSerial_Xml);
+// 				}
+// 				catch (...)
+// 				{
+// 					break;
+// 				}
+//
+// 				if (!m_silent) cerr << "RPSBlast session " << objCounter << " start..." << endl;
+// 				const CBlastOutput::TParam &params = objBlastOutput.GetParam();
+// 				(*m_ostream) << SESSIONSTART << DELIMIT << ++objCounter << DELIMIT << objBlastOutput.GetVersion() << DELIMIT << objBlastOutput.GetDb() << DELIMIT << params.GetMatrix() << DELIMIT << params.GetExpect() << endl;
+// 				if (!m_silent) cerr << "RPSBlast session " << objCounter << " start..." << endl;
+// 				const CBlastOutput::TIterations &rIters = objBlastOutput.GetIterations();
+//
+// 				vector<PssmId_t> missed;
+// 				for (CBlastOutput::TIterations::const_iterator iter = rIters.begin(), iterEnd = rIters.end(); iterEnd != iter; ++iter)
+// 				{
+// 					if (!m_silent) cerr << "Calculating...." << endl;
+//
+// 					_TOfflDomQuery cdqVal;
+//
+// 					// -- this already included calculation
+// 					proc.ParseBlastOutput(cdqVal, **iter, missed, m_evalue);
+// 					PrintDomQuery(cdqVal, objCounter);
+// 					++qCounter;
+// 				}
+// 				(*m_ostream) << SESSIONEND << DELIMIT << objCounter << endl;
+// 				if (!m_silent) cerr << "RPSBlast session " << objCounter << " done..." << endl;
+//
+// 			}
+// 		}
+// ```
+// (The `DATA` and `ENDDATA` lines and the last line on standard error are those of every input,
+// quoted at `run_sessions`. C++17 evaluates the left operand of `<<` first: the session line is
+// written up to the tab before the matrix when `GetMatrix` throws for a document without
+// `Parameters_matrix` (`CUnassignedMember`). `GetParam`, `GetVersion`, `GetDb`, `GetExpect` and
+// `GetIterations` get mandatory members, which every document read has. The motif positions of
+// `MotifCheck` are the run's one list.)
+#[allow(clippy::too_many_arguments)]
+fn run_xml_sessions<R: Read>(
+    report: &mut Report,
+    header: &[u8],
+    mut stream: XmlStream<R>,
+    data: &CddData,
+    mode: DataMode,
+    show_families: bool,
+    target: TargetData,
+    evcut: f64,
+) -> Outcome {
+    let mut motif_state = MotifState::default();
+    report.write(header);
+    report.line(&[b"DATA"]);
+    let mut session = 0usize;
+    let mut queries_done = 0usize;
+    loop {
+        if report.stopped() {
+            return Outcome::Exit(E_OK);
+        }
+        let document = match stream.next_document(evcut, data) {
+            Ok(Some(document)) => document,
+            Ok(None) => break,
+            Err(refusal) => return Outcome::refused(refusal),
+        };
+        report.progress(&format!("RPSBlast session {session} start..."));
+        session += 1;
+        let session_text = session.to_string();
+        report.write(b"SESSION");
+        report.put(b'\t');
+        report.write(session_text.as_bytes());
+        report.put(b'\t');
+        report.write(&document.version);
+        report.put(b'\t');
+        report.write(&document.db);
+        report.put(b'\t');
+        let Some(matrix) = &document.matrix else {
+            return process_failure(
+                report,
+                unassigned_member("NCBI-BlastOutput", "Parameters", "matrix"),
+            );
+        };
+        report.write(matrix);
+        report.put(b'\t');
+        report.write(format_g(document.expect).as_bytes());
+        report.write(b"\n");
+        report.progress(&format!("RPSBlast session {session} start..."));
+        for query in document.queries {
+            report.progress("Calculating....");
+            let query = match query {
+                Ok(query) => query,
+                Err(error) => return process_failure(report, error),
+            };
+            if let Err(error) = print_dom_query(
+                report,
+                &query,
+                &session_text,
+                data,
+                mode,
+                show_families,
+                target,
+                &mut motif_state,
+            ) {
+                return print_failure(report, error);
+            }
+            queries_done += 1;
+            if report.stopped() {
+                return Outcome::Exit(E_OK);
+            }
+        }
+        report.line(&[b"ENDSESSION\t", session_text.as_bytes()]);
+        report.progress(&format!("RPSBlast session {session} done..."));
+    }
+    report.line(&[b"ENDDATA"]);
+    report.progress(&format!("All done, {queries_done} queries processed\n"));
+    Outcome::Exit(E_OK)
+}
+
+/// How the run ends at an exception of `PrintDomQuery`: a `std::exception` that leaves `Run`
+/// (`CNcbiApplication` reports it, ncbiapp.cpp:730-734; probe 3 of PS16b and review oracles R6,
+/// R20, R21: the line below with `what()` as bytes, exit 3, the report ends before the site's
+/// line), or LOSAT's refusal.
+fn print_failure(report: &mut Report, error: PrintError) -> Outcome {
+    match error {
+        PrintError::Exception(what) => std_exception(report, &what),
+        PrintError::Unsupported(message) => {
+            if report.stopped() {
+                return Outcome::Exit(E_OK);
+            }
+            Outcome::refused(message)
+        }
+    }
+}
+
+/// How the run ends at an exception of a session (`ProcessError`): NCBI's report of a
+/// `CException` or of a `std::exception` that leaves `Run`, or LOSAT's refusal (after what the
+/// report has written; nothing more after a failed write).
+fn process_failure(report: &mut Report, error: ProcessError) -> Outcome {
+    match error {
+        ProcessError::Exception(exception) => {
+            report.before_post();
+            if report.failed.is_some() {
+                return Outcome::Exit(E_OK);
+            }
+            Outcome::Exit(report_exception(&mut report.diag, &exception, false))
+        }
+        ProcessError::Std(what) => std_exception(report, what.as_bytes()),
+        ProcessError::Unsupported(message) => {
+            if report.stopped() {
+                return Outcome::Exit(E_OK);
+            }
+            Outcome::refused(message)
+        }
+    }
 }
 
 /// A `std::exception` that leaves `Run`: `CNcbiApplication` reports its `what()` (ncbiapp.cpp:

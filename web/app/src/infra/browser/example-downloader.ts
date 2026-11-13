@@ -7,8 +7,8 @@
 // Data worker (WholeFileInflater, the path of a source named .gz: one decoder in the app, the
 // command line's; swebok-improve SW8 D2), and a body that something on the way already decoded is
 // kept as it is. Nothing is sent but the request for the file's URL.
+import { INFLATED_TOO_LARGE, type WholeFileInflater } from 'losat/ports';
 import type { DownloadProgress, DownloadRequest, DownloadResult, FileDownloader } from '../../ports/example';
-import { INFLATED_TOO_LARGE, type WholeFileInflater } from '../../ports/inflate';
 import { dateOf } from '../../domain/download-sentences';
 import { ask, contentLength, messageOf, PART_BYTES } from './http';
 

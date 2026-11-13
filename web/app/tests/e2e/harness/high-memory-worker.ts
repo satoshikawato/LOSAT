@@ -6,14 +6,12 @@
 // so that the search's allocations, its thread stacks and every pointer that crosses the
 // ABI and WASI are high. The page compares the two.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
-import { sha256Hex } from '../../../src/infra/browser/platform';
-import { InstanceUse } from '../../../src/infra/engine-worker/instance-use';
-import { ThreadHost } from '../../../src/infra/engine-worker/thread-host';
-import { ReactorAbi, ROLE_QUERY, ROLE_SUBJECT, type AbiExports } from '../../../src/infra/reactor/abi';
-import type { MemoryLimits } from '../../../src/infra/reactor/artifact';
-import { loadReactor } from '../../../src/infra/reactor/instance';
-import { createSharedMemory } from '../../../src/infra/reactor/shared-memory';
-import { createWasi } from '../../../src/infra/reactor/wasi';
+import { loadReactor, sha256Hex, type MemoryLimits } from 'losat';
+import { InstanceUse } from '../../../../packages/losat/src/infra/engine-worker/instance-use';
+import { ThreadHost } from '../../../../packages/losat/src/infra/engine-worker/thread-host';
+import { ReactorAbi, ROLE_QUERY, ROLE_SUBJECT, type AbiExports } from '../../../../packages/losat/src/infra/reactor/abi';
+import { createSharedMemory } from '../../../../packages/losat/src/infra/reactor/shared-memory';
+import { createWasi } from '../../../../packages/losat/src/infra/reactor/wasi';
 import type { HighMemoryCase, HighMemoryMode, HighMemoryRequest, HighMemoryResult } from './protocol';
 
 const PAGE = 65_536;

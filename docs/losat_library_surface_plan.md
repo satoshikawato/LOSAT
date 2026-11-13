@@ -165,7 +165,7 @@ ABI v2 §7 を基にするが、入力の渡し方が違う。
 | 内容 | 出どころ |
 |---|---|
 | `losat-web-serial.wasm`、`losat-web-threads.wasm` | `web/adapter/tools/build_reactors.py`（同一性の記録つき） |
-| ABI v2 のホスト側 | `web/app/src/infra/reactor/abi.ts`（`losat_web2_*` の呼び出し）、`infra/reactor/wasi.ts`（WASI shim。npm の `@bjorn3/browser_wasi_shim` に依存）、`infra/engine-worker/*`（worker、`thread-host.ts`）、`ports/engine.ts`（型と `EngineGateway`）。アプリが使う層と同じものを package にし、重複させない（切り出し方は LIB-4 で決める。`web/AGENTS.md` の規則の下） |
+| ABI v2 のホスト側 | （LIB-4 で `web/packages/losat/src/` へ移した、§15。以下は移す前の場所）`web/app/src/infra/reactor/abi.ts`（`losat_web2_*` の呼び出し）、`infra/reactor/wasi.ts`（WASI shim。npm の `@bjorn3/browser_wasi_shim` に依存）、`infra/engine-worker/*`（worker、`thread-host.ts`）、`ports/engine.ts`（型と `EngineGateway`）。アプリが使う層と同じものを package にし、重複させない（切り出し方は LIB-4 で決める。`web/AGENTS.md` の規則の下） |
 | 型 | `HspRecord`、`ProgramDescription`、`ValidationResult`（`engine.ts` に既にある） |
 | README | cross-origin isolation（COOP / COEP）が threads 版に必須、メモリの候補（ABI v2 §3）、`abi_version` |
 
@@ -527,3 +527,16 @@ binding は API が持つものを Python の形にするだけで、engine の�
 | toolchain | 両方 `nightly-2026-05-24`。cargo-public-api は stable を `nightly` に切り替え、rustdoc JSON の形式 57 だけを読む（形式 57 を書くのは 2025-11-22〜2026-06-23 の nightly）。cargo-semver-checks 0.51 は形式 57、60、61 を読み、1.92.0 の形式 56 は読めない。版の組は script と `ci.yml` の 2 か所にあり、`test_check_public_api.py` が一致を見る。script は何も入れない（無ければ入れ方を示して終わる） |
 
 見つかったこと：`api` が再公開する `FastaRecord` は、定義が `#[doc(hidden)]` の `blastinput` にあるため、rustdoc（HTML と JSON）から型ごと消える（`#[doc(inline)]` を付けても戻らない、2026-11-06 に確認）。一覧には `pub use LOSAT::api::FastaRecord` の 1 行だけで、`read_fasta` と `read_inputs` の型には `crate::blastinput::fasta_reader::FastaRecord` が出る。docs.rs では入力の型の説明が出ず、2 つの検査もその型の変更を見ない。P-D1（PR `fix/lib-fastarecord-docs`）で直した：定義（struct と `new`、`seq`、`title`）を crate 直下の private module `record` に移し、`api` と `blastinput::fasta_reader` の両方から再公開する。rustdoc は private module の項目の再公開を inline するので、`api::FastaRecord` の頁と一覧の行（4 つの field、3 つの method、derive と auto trait の impl）ができ、`read_fasta` と `read_inputs` の型は `LOSAT::api::FastaRecord` になる。engine の method（`#[doc(hidden)]` の impl）と `RecordSource` は隠しモジュールの `fasta_reader` に残る。`api` に定義して `blastinput` が import する形は、下位の module が `api` に依存するので取らなかった。
+
+## 15. npm の package `losat`（LIB-4、P-N1、2026-11-14）
+
+記録は `losat-baselines/library-20261031/`（DECISIONS 27）。§4.2 の「アプリが使う層と同じものを package にし、重複させない」をこの形にした。
+
+| 項目 | 形 |
+|---|---|
+| 置き場 | npm workspaces `web/package.json`（`packages/losat` と `app`）、lock は `web/package-lock.json` 1 つ。アプリは `"losat": "0.2.0"` で workspace の link を使い、package の source を import する |
+| 中身 | `web/packages/losat/src`：§4.2 の表の host（`infra/reactor`、`infra/engine-worker`、`ports/engine.ts`）と、host が使う ports（inflate、input-check、scan、run-output）、run output の writer と receiver、`sha256Hex`。domain は host が要る部分だけ（program の id と入力の種類、record の key と scan の型、出力形式、`describe` の解決済み既定値、入力を指す option 名、counts file の型）。form の表はアプリに残る |
+| 層 | package も `domain` → `ports` → `infra`（web/AGENTS.md 規則 5）。アプリの `domain` は `losat/domain` だけ、`ports`・`application`・`ui` は `losat/domain` と `losat/ports`、`losat`（package の infra）は `infra` と composition root だけが import する |
+| 入口 | `losat`（すべて）、`losat/domain`、`losat/ports`。内部（instance-use、protocol、thread host、memory keeper、runtime、warm-up）は出さない |
+| build（P-N1 の PR b） | `npm run build -w losat`（`LOSAT_WEB_REACTORS` が要る）が `dist/` を作る: tsc の JS と型（相対 import は `.js`、worker の URL も `.js`）、Engine worker の試験用の旗 `__LOSAT_TEST_HOOKS__` を `false` に（アプリの build の define と同じ。識別子だけを構文木で置き換える）、2 つの reactor（読み込みとガードは `build/reactors.ts`、アプリの build と同じ関数）と同一性の記録 `reactors/artifacts.json`、URL と digest の `losat/reactors`（`ENGINE_ASSETS`）、`abi.json`（package・engine の版と、serial reactor が返す `losat_web2_abi_version`）、公開用の `package.json`、README、LICENSE。版は `LOSAT/Cargo.toml` と同じでなければ build が止まる |
+| 関門 | web.yml の `v-abi` job: package を build して試験（`npm pack --dry-run` の中身が src の module ごとの JS と型・reactor・記録・README・LICENSE だけ、公開用の manifest、試験用の旗が残らない、ABI の表、reactor の digest、README の例が NCBI の凍結 bytes と同じ）、その `dist/reactors` で V-ABI quick、`npm pack` の tarball を artifact `npm-package`（7 日）に。`npm publish` は保守者（`dist/` で、または artifact の tarball で） |

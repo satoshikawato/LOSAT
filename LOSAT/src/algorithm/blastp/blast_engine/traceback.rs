@@ -62,6 +62,9 @@ pub(super) struct OrdinaryTraceback<'a> {
     pub(super) search_spaces: &'a [crate::stats::search_space::SearchSpace],
     pub(super) expect_value: f64,
     pub(super) hitlist_size: usize,
+    /// psiblast's `-sum_stats true`: the traceback's linking parameters
+    /// (`EvenGapLinkParams::traceback`), `None` without sum statistics.
+    pub(super) link: Option<crate::core::link_hsps::EvenGapLinkParams>,
 }
 
 impl OrdinaryTraceback<'_> {
@@ -349,9 +352,10 @@ impl OrdinaryTraceback<'_> {
         Ok((!hsp_list.hsps.is_empty()).then_some(hsp_list))
     }
 
-    /// `s_HSPListPostTracebackUpdate` for BLASTP (no linking, no RPS, a scale factor of 1):
-    /// the e-values from the unscaled `kbp_gap` (Spouge's finite-size correction with the
-    /// query's and the subject's lengths), the e-value reap, the bit scores.
+    /// `s_HSPListPostTracebackUpdate` for BLASTP (no RPS, a scale factor of 1): the e-values
+    /// from the unscaled `kbp_gap` (Spouge's finite-size correction with the query's and the
+    /// subject's lengths), or with psiblast's `-sum_stats true` the linked sets' e-values (large
+    /// gaps only), the e-value reap, the bit scores.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:229-250
     /// ```c
@@ -383,6 +387,46 @@ impl OrdinaryTraceback<'_> {
         ctx: &QueryContext,
         subject_length: usize,
     ) {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:213-216
+        // ```c
+        //    /* Relink and rereap the HSP list, if needed. */
+        //    if (hit_params->link_hsp_params) {
+        //       BLAST_LinkHsps(program_number, hsp_list, query_info, subject_length,
+        //                      sbp, hit_params->link_hsp_params, kGapped);
+        // ```
+        // psiblast's `-sum_stats true`: the linked sets' e-values (large gaps only,
+        // `EvenGapLinkParams::traceback`).
+        if let Some(link) = self.link.as_ref() {
+            crate::algorithm::blastp::hsp::link_hsp_list(
+                hsp_list,
+                super::blastp_link_context(
+                    self.karlin,
+                    ctx.aa_len,
+                    &self.search_spaces[hsp_list.query_index as usize],
+                ),
+                subject_length as i32,
+                link,
+            );
+        } else {
+            self.get_evalues(hsp_list, ctx, subject_length);
+        }
+        reap_hsplist_by_evalue(hsp_list, self.expect_value);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1926-1928
+        // ```c
+        //       hsp->bit_score =
+        //          (hsp->score*kbp[hsp->context]->Lambda -
+        //           kbp[hsp->context]->logK) / NCBIMATH_LN2;
+        // ```
+        let log_k = self.karlin.k.ln();
+        for hsp in &mut hsp_list.hsps {
+            hsp.bit_score =
+                (hsp.raw_score as f64 * self.karlin.lambda - log_k) / std::f64::consts::LN_2;
+        }
+    }
+
+    /// `Blast_HSPListGetEvalues` without linking: the e-values from the unscaled `kbp_gap`
+    /// (Spouge's finite-size correction with the query's and the subject's lengths).
+    fn get_evalues(&self, hsp_list: &mut BlastpHspList, ctx: &QueryContext, subject_length: usize) {
         match self.gumbel {
             Some(gumbel) => {
                 for hsp in &mut hsp_list.hsps {
@@ -403,18 +447,6 @@ impl OrdinaryTraceback<'_> {
                         * (-self.karlin.lambda * hsp.raw_score as f64 + self.karlin.k.ln()).exp();
                 }
             }
-        }
-        reap_hsplist_by_evalue(hsp_list, self.expect_value);
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1926-1928
-        // ```c
-        //       hsp->bit_score =
-        //          (hsp->score*kbp[hsp->context]->Lambda -
-        //           kbp[hsp->context]->logK) / NCBIMATH_LN2;
-        // ```
-        let log_k = self.karlin.k.ln();
-        for hsp in &mut hsp_list.hsps {
-            hsp.bit_score =
-                (hsp.raw_score as f64 * self.karlin.lambda - log_k) / std::f64::consts::LN_2;
         }
     }
 }
@@ -577,6 +609,7 @@ fn final_hsp(
         length += op_length(op);
     }
     BlastpHsp {
+        num: 1,
         identity: if length > 0 {
             (num_ident as f64 * 100.0) / (length as f64)
         } else {

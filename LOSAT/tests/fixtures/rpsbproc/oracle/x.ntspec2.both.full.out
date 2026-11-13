@@ -1,0 +1,98 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_ntspec2.xml
+#Output data file:	(stdout)
+#Annotation data at:	xnew
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSTBLASTN 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	5000	mg00006_25001-30000
+DOMAINS
+1	Query_1[1]	Specific	507824	2293	3204	0	559.527	NF008036	PRK10768	-	-
+1	Query_1[1]	Specific	239117	2302	3192	1.05848e-131	411.555	cd02651	nuc_hydro_IU_UC_XIUA	-	528963
+1	Query_1[1]	Specific	441560	2293	3195	2.45573e-116	369.868	COG1957	URH1	-	-
+1	Query_1[1]	Specific	514045	2305	3018	1.51882e-77	257.531	pfam01156	IU_nuc_hydro	-	-
+1	Query_1[1]	Non-specific	440271	4657	4998	1.50046e-70	241.464	COG0505	CarA	C	-
+1	Query_1[1]	Specific	198165	4657	4998	6.54528e-66	218.783	smart01097	CPSase_sm_chain	-	-
+1	Query_1[1]	Specific	513908	4669	4998	1.92561e-64	214.507	pfam00988	CPSase_sm_chain	-	-
+1	Query_1[1]	Non-specific	239116	2305	3159	5.57111e-63	217.529	cd02650	nuc_hydro_CaPnhB	-	528963
+1	Query_1[1]	Non-specific	238257	2305	3168	8.95918e-61	211.034	cd00455	nuc_hydro	-	528963
+1	Query_1[1]	Non-specific	273580	4663	4998	7.10337e-57	201.701	TIGR01368	CPSaseIIsmall	C	-
+1	Query_1[1]	Non-specific	239119	2302	3168	5.24549e-52	186.427	cd02653	nuc_hydro_3	-	528963
+1	Query_1[1]	Non-specific	178319	2305	3165	1.27479e-49	179.418	PLN02717	PLN02717	-	528963
+1	Query_1[1]	Non-specific	239115	2305	3174	1.99799e-49	178.607	cd02649	nuc_hydro_CeIAG	-	528963
+1	Query_1[1]	Non-specific	509059	4663	4998	9.3752e-46	169.686	NF009475	PRK12838	C	-
+1	Query_1[1]	Non-specific	214392	4651	4998	3.34788e-39	151.103	CHL00197	carA	C	-
+1	Query_1[1]	Non-specific	178370	4663	4998	5.86876e-37	145.507	PLN02771	PLN02771	C	-
+1	Query_1[1]	Non-specific	510731	826	999	3.08617e-32	123.665	NF011676	PRK15095	C	-
+1	Query_1[1]	Non-specific	239120	2305	3180	4.52974e-28	116.885	cd02654	nuc_hydro_CjNH	-	528963
+1	Query_1[1]	Non-specific	239113	2302	3111	9.5832e-26	109.815	cd02647	nuc_hydro_TvIAG	-	528963
+1	Query_1[1]	Non-specific	239114	2302	3102	1.95576e-22	101.5	cd02648	nuc_hydro_1	-	528963
+1	Query_1[1]	Specific	440668	838	999	8.95563e-13	67.0485	COG1047	SlpA	C	-
+1	Query_1[1]	Non-specific	439830	13	180	3.36772e-10	65.4866	COG0060	IleS	N	-
+1	Query_1[1]	Non-specific	513290	829	999	2.19895e-09	56.0643	pfam00254	FKBP_C	C	473184
+1	Query_1[1]	Non-specific	215452	61	177	2.31053e-08	59.3998	PLN02843	PLN02843	N	-
+1	Query_1[1]	Non-specific	239118	2608	3042	9.76381e-08	55.5841	cd02652	nuc_hydro_2	N	528963
+1	Query_1[1]	Non-specific	440311	832	999	1.51312e-07	51.336	COG0545	FkpA	C	-
+1	Query_1[1]	Specific	517437	82	171	1.35474e-06	46.1234	pfam06827	zf-FPG_IleRS	-	-
+1	Query_1[1]	Non-specific	140334	2608	2868	0.00189439	42.5422	PTZ00313	PTZ00313	NC	528963
+1	Query_1[2]	Non-specific	503273	1601	2197	3.73591e-127	399.578	NF002188	PRK01045.1-2	N	-
+1	Query_1[2]	Specific	129147	3386	4180	1.08076e-122	385.609	TIGR00036	dapB	-	-
+1	Query_1[2]	Specific	440058	3389	4177	1.56702e-118	373.683	COG0289	DapB	-	-
+1	Query_1[2]	Specific	440524	1601	2143	1.99225e-88	290.045	COG0761	IspH	N	-
+1	Query_1[2]	Non-specific	503275	1607	2203	5.46683e-84	278.722	NF002190	PRK01045.1-4	N	-
+1	Query_1[2]	Specific	260116	1601	2122	2.77841e-73	246.168	cd13944	lytB_ispH	N	530987
+1	Query_1[2]	Specific	514910	1601	2125	2.04012e-72	243.104	pfam02401	LYTB	N	-
+1	Query_1[2]	Non-specific	503274	1607	2209	7.98249e-72	243.29	NF002189	PRK01045.1-3	N	-
+1	Query_1[2]	Non-specific	272965	1604	2131	1.18363e-58	204.125	TIGR00216	ispH_lytB	N	530987
+1	Query_1[2]	Specific	516670	3770	4174	2.51456e-57	194.61	pfam05173	DapB_C	-	477943
+1	Query_1[2]	Non-specific	514008	3389	3760	4.10728e-42	150.467	pfam01113	DapB_N	-	-
+1	Query_1[2]	Specific	467611	3389	3757	7.40379e-38	139.231	cd02274	DHDPR_N	-	483953
+1	Query_1[2]	Non-specific	502667	1625	2137	9.17563e-32	133.921	NF000907	PRK00087	C	-
+1	Query_1[2]	Non-specific	215440	1751	2146	3.34437e-13	74.0731	PLN02821	PLN02821	N	530987
+1	Query_1[2]	Non-specific	467616	3389	3616	1.31323e-05	47.1506	cd24146	nat-AmDH_N_like	C	483953
+1	Query_1[2]	Non-specific	178374	3383	4177	8.07381e-05	46.5676	PLN02775	PLN02775	-	477943
+1	Query_1[2]	Non-specific	443017	3386	3580	0.000137323	46.3314	COG3804	COG3804	C	-
+1	Query_1[3]	Specific	272893	207	698	1.65272e-53	184.869	TIGR00077	lspA	-	529107
+1	Query_1[3]	Specific	440362	234	695	7.44986e-51	176.836	COG0597	LspA	-	-
+1	Query_1[3]	Specific	514127	249	677	1.12723e-36	135.684	pfam01252	Peptidase_A8	-	-
+1	Query_1[3]	Non-specific	510478	234	668	9.07931e-35	131.484	NF011366	PRK14785	-	-
+1	Query_1[3]	Non-specific	510477	264	665	2.85193e-12	66.4166	NF011365	PRK14784	-	-
+1	Query_1[3]	Non-specific	510482	237	665	8.13567e-11	63.1315	NF011370	PRK14789	C	-
+1	Query_1[3]	Non-specific	510470	252	647	8.91828e-10	59.5218	NF011357	PRK14775	-	-
+1	Query_1[3]	Non-specific	510469	258	665	1.03333e-07	53.8688	NF011356	PRK14774	-	-
+ENDDOMAINS
+SITES
+1	Query_1[1]	Specific	active site	D2320-2322,D2332-2334,D2335-2337,N2407-2409,V2530-2532,I2659-2661,N2761-2763,E2779-2781,N2785-2787,D2992-2994	10	0	239117
+1	Query_1[1]	Specific	tetramer interface	L2500-2502,S2692-2694,C2815-2817,E3061-3063,Q3067-3069,G3070-3072,T3079-3081	7	0	239117
+1	Query_1[2]	Specific	catalytic site	H1646-1648,E1652-1654,S1949-1951,N1955-1957	4	0	260116
+1	Query_1[2]	Specific	NAD(P) binding site	G3407-3409,A3410-3412,G3416-3418,R3419-3421,M3422-3424,L3482-3484,E3485-3487,R3488-3490,F3608-3610,T3611-3613,R3614-3616,E3620-3622,G3623-3625,G3677-3679,T3680-3682,T3683-3685,A3749-3751,A3752-3754,N3755-3757	21	0	467611
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

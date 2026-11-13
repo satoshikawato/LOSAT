@@ -830,8 +830,7 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 /// ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
 /// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), the search strategy file (item F1b of line
 /// RG), and the arguments that blastp's engine does not run either (`is_unported_blastp_arg`;
-/// psiblast has no database masks and no `-mt_mode`). `-sum_stats true` is refused with the
-/// options (`PsiblastArgs::into_blastp_args`).
+/// psiblast has no database masks and no `-mt_mode`).
 const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
     // Line RG-F1 ported it to BLASTP's search, not to PSIBLAST's (item F1b).
     "export_search_strategy",
@@ -974,6 +973,13 @@ fn named_refusal(program: &str, name: &str) -> Option<clap::Error> {
     // its refusal (AGENTS.md rule 2: explicit unsupported errors).
     if program == "makeblastdb" && crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS.contains(&name)
     {
+        // `-gi_mask` and `-gi_mask_name` make GI-indexed mask files (makeblastdb.cpp:279-288),
+        // which LOSAT's writer does not write yet (line NP, item M4c); `-mask_data` itself works.
+        if matches!(name, "gi_mask" | "gi_mask_name") {
+            return refusal(
+                "makeblastdb (it writes GI-indexed mask files, which LOSAT does not write yet; -mask_data, -mask_id and -mask_desc work)",
+            );
+        }
         return refusal("makeblastdb");
     }
     if program == "blastn" && is_unported_blastn_arg(name) {

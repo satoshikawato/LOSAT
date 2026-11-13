@@ -776,6 +776,16 @@ fn ncbi_percent_match(numerator: usize, denominator: usize) -> usize {
     }
 }
 
+/// The `Expect` label of an HSP's header: `Expect(n)` for an HSP of a linked set of n > 1 HSPs
+/// (`sum_n`, `BlastHSP::num`), else `Expect` (showalign.cpp:3593-3598, quoted at
+/// `write_hsp_info`).
+#[inline]
+fn expect_label(sum_n: Option<i32>) -> String {
+    sum_n
+        .filter(|&count| count > 1)
+        .map_or_else(|| "Expect".to_string(), |count| format!("Expect({count})"))
+}
+
 /// Write HSP score information
 ///
 /// Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp x_DisplayAlignInfo()
@@ -797,6 +807,17 @@ pub fn write_hsp_info<W: Write>(
     // NCBI: " Score = XXX bits (YYY),  Expect = Z.Ze-NN"
     let bit_score_str = format_bitscore_ncbi(h.bit_score);
     let evalue_str = format_evalue_ncbi(h.e_value);
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3593-3598
+    // ```c++
+    //             out<<" Score = "<<bit_score_buf<<" ";
+    //             out<<"bits ("<<aln_vec_info->score<<"),"<<"  ";
+    //             out<<"Expect";
+    //             if (aln_vec_info->sum_n > 0) {
+    //             out << "(" << aln_vec_info->sum_n << ")";
+    //             }
+    // ```
+    // An HSP of a linked set (psiblast's `-sum_stats true`) has its "sum_n" score, the set's size.
+    let expect = expect_label(hit.sum_n);
     // psiblast's first round has blastp's methods; rpsblast's redo marks its HSPs likewise.
     if matches!(config.program.as_str(), "blastp" | "psiblast" | "rpsblast") {
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3600-3603
@@ -813,14 +834,14 @@ pub fn write_hsp_info<W: Write>(
         };
         writeln!(
             writer,
-            " Score = {} bits ({}),  Expect = {}{}",
-            bit_score_str, h.raw_score, evalue_str, method
+            " Score = {} bits ({}),  {} = {}{}",
+            bit_score_str, h.raw_score, expect, evalue_str, method
         )?;
     } else {
         writeln!(
             writer,
-            " Score = {} bits ({}),  Expect = {}",
-            bit_score_str, h.raw_score, evalue_str
+            " Score = {} bits ({}),  {} = {}",
+            bit_score_str, h.raw_score, expect, evalue_str
         )?;
     }
 
@@ -5666,10 +5687,7 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
     // if (hsp->num > 1) scores.push_back(s_MakeScore("sum_n", ..., hsp->num));
     // NCBI c++/src/objtools/align_format/showalign.cpp:3595-3598:
     // if (aln_vec_info->sum_n > 0) out << "(" << aln_vec_info->sum_n << ")";
-    let expect = hit
-        .sum_n
-        .filter(|&count| count > 1)
-        .map_or_else(|| "Expect".to_string(), |count| format!("Expect({count})"));
+    let expect = expect_label(hit.sum_n);
     writeln!(
         writer,
         " Score = {} bits ({}),  {} = {}{}",

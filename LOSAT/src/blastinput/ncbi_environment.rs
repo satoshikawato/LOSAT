@@ -69,6 +69,28 @@ const REJECTED_VARIABLES: &[&str] = &[
     "LOG_NOCREATE",
     "LOG_PERFLOGGING",
     "THREAD_STACK_SIZE",
+    // Not diagnostics: they change how NCBI's `CSeq_id_Mapper` matches Seq-ids, and with it which
+    // sequence a mask of `makeblastdb -mask_data` reaches (`seqid::mask_handle`); LOSAT
+    // implements the default (both on) and has its own message for them (`rejected_variable`).
+    //
+    // NCBI reference: ncbi-blast/c++/src/objects/seqloc/seq_id_tree.cpp:692-707
+    // ```c
+    // NCBI_PARAM_DECL(bool, OBJECTS, PACK_TEXTID);
+    // NCBI_PARAM_DEF_EX(bool, OBJECTS, PACK_TEXTID, true,
+    //                   eParam_NoThread, OBJECTS_PACK_TEXTID);
+    // ...
+    // NCBI_PARAM_DECL(bool, OBJECTS, PACK_GENERAL);
+    // NCBI_PARAM_DEF_EX(bool, OBJECTS, PACK_GENERAL, true,
+    //                   eParam_NoThread, OBJECTS_PACK_GENERAL);
+    // ```
+    // With `OBJECTS_PACK_TEXTID=0` a GenBank, EMBL or DDBJ accession no longer matches the same
+    // accession of another of the three; with `OBJECTS_PACK_GENERAL=0` the order of the ranges of
+    // two `general` ids changes. Refused at any value, NCBI's default 1 included: accepting it
+    // would mean porting how NCBI reads a bool parameter, for a setting nobody gives. The registry
+    // forms (`[OBJECTS] PACK_TEXTID` in a registry file, `NCBI_CONFIG__OBJECTS__PACK_TEXTID`) are
+    // not harmless entries, so they are refused like every entry LOSAT does not know.
+    "OBJECTS_PACK_TEXTID",
+    "OBJECTS_PACK_GENERAL",
 ];
 
 fn is_harmless_entry(section: &str, name: &str) -> bool {
@@ -181,6 +203,11 @@ fn rejected_variable(name: &OsStr) -> Option<String> {
     if name.starts_with("NCBI_CONFIG_") {
         return Some(format!(
             "the environment variable {name}, which sets entries of NCBI BLAST+'s registry, is not supported by LOSAT"
+        ));
+    }
+    if name.starts_with("OBJECTS_PACK_") && REJECTED_VARIABLES.contains(&name) {
+        return Some(format!(
+            "the environment variable {name} is not supported by LOSAT: NCBI BLAST+ reads it to change how Seq-ids are matched (which sequences a mask of makeblastdb reaches); LOSAT does not read it, whatever its value"
         ));
     }
     if name.starts_with("DIAG_") || REJECTED_VARIABLES.contains(&name) {
@@ -3043,6 +3070,14 @@ mod tests {
         assert!(reject("NCBI_CONFIG_LONG_SEQID__BLAST", "1").is_some());
         assert!(reject("NCBI_CONFIG_PATH", "/etc").is_none());
         assert!(reject("ABORT_ON_THROW", "1").is_some());
+        // NCBI's Seq-id matching parameters (seq_id_tree.cpp:692-707): their own message.
+        for name in ["OBJECTS_PACK_TEXTID", "OBJECTS_PACK_GENERAL"] {
+            let message = reject(name, "0").unwrap();
+            assert!(message.contains("Seq-ids are matched"), "{message}");
+            assert!(reject(name, "1").is_some(), "{name}");
+        }
+        assert!(reject("NCBI_CONFIG__OBJECTS__PACK_TEXTID", "0").is_some());
+        assert!(reject("NCBI_CONFIG__OBJECTS__PACK_GENERAL", "0").is_some());
         // `application_start` refuses a `BLAST_USAGE_REPORT` that is not a Boolean.
         assert!(reject("BLAST_USAGE_REPORT", "bogus").is_none());
         assert!(reject("BLAST_USAGE_REPORT", "false").is_none());
@@ -3070,11 +3105,19 @@ mod tests {
         assert!(!is_harmless_entry("BLAST", "LONG_SEQID"));
         assert!(!is_harmless_entry("DEBUG", "DIAG_POST_LEVEL"));
         assert!(!is_harmless_entry("NCBI", ".Inherits"));
+        assert!(!is_harmless_entry("OBJECTS", "PACK_TEXTID"));
+        assert!(!is_harmless_entry("OBJECTS", "PACK_GENERAL"));
         assert!(is_harmless_entry("blast", "blast_usage_report"));
         let other = read_registry(b"[BLAST]\nLONG_SEQID=1\n", Layer::SystemWide).unwrap();
         let refusal = check_registry_entries(Path::new("f"), &other.entries).unwrap_err();
         assert!(
             refusal.contains("the registry file f sets [BLAST] LONG_SEQID"),
+            "{refusal}"
+        );
+        let packed = read_registry(b"[OBJECTS]\nPACK_TEXTID=0\n", Layer::SystemWide).unwrap();
+        let refusal = check_registry_entries(Path::new("f"), &packed.entries).unwrap_err();
+        assert!(
+            refusal.contains("the registry file f sets [OBJECTS] PACK_TEXTID"),
             "{refusal}"
         );
     }

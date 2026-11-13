@@ -97,6 +97,8 @@ const DONE: u32 = 1 << 31;
 /// One partition's seeds of a piece: the first and the last block of its chain and the seeds in
 /// the last one (`BLOCK` before its first seed, so that the first push takes a block).
 #[derive(Clone, Copy)]
+#[cfg_attr(test, derive(Debug, PartialEq))]
+#[repr(C)]
 struct Chain {
     head: u16,
     tail: u16,
@@ -111,6 +113,8 @@ const EMPTY: Chain = Chain {
 
 /// A lane of an arena: its next free block and its end (`Links::take`).
 #[derive(Clone, Copy)]
+#[cfg_attr(test, derive(Debug, PartialEq))]
+#[repr(C)]
 struct Lane {
     next: u16,
     end: u16,
@@ -131,12 +135,86 @@ struct Lane {
 /// instructions, L2 misses +22 %; dc-megablast cDNA x genome at 4 threads, +2.2 % over the strips
 /// stage, line EB s15d / s15e.)
 /// Kept in the subject scratch from one stage to the next; the seeds are in the pool's `Store`.
+/// Each of its buffers is on cache lines of its own (`Lined`): a participant writes the chains,
+/// lanes and links of the slot it fills while others read those of the slots they fold, and as
+/// small allocations of their own they shared lines with other slots' (BLASTN-short of 30,000
+/// short queries x 3 Mb at 16 threads: the scan's loads of a chain's fill and tail were 84 % of
+/// its loads served from another core's cache, which were x7 those of the strips stage, and the
+/// scan took x1.6 the memory-ordering machine clears, at the same instructions; +1.2 % cycles,
+/// line EB s18x).
 #[derive(Default)]
 pub(super) struct Links {
-    next: Vec<u16>,
-    chains: Vec<Chain>,
-    lanes: Vec<Lane>,
+    next: Lined<u16>,
+    chains: Lined<Chain>,
+    lanes: Lined<Lane>,
     used: u16,
+}
+
+/// A cache line of a `Lined` buffer.
+#[derive(Clone, Copy)]
+#[repr(C, align(64))]
+struct Line([u8; 64]);
+
+/// No NCBI counterpart (memory placement only): a buffer of `len` values of `T` on cache lines of
+/// its own: its allocation begins on a line and ends on one, so that no other allocation shares
+/// a line with it.
+struct Lined<T> {
+    lines: Vec<Line>,
+    len: usize,
+    _of: std::marker::PhantomData<T>,
+}
+
+/// The values a `Lined` buffer holds: plain data of 2-byte fields, any bytes a value.
+///
+/// # Safety
+/// `T` has no padding, an alignment of at most 64 and every bit pattern of its size is a value.
+unsafe trait Plain: Copy {}
+// SAFETY: a `u16`, and `repr(C)` structs of `u16` fields (no padding, alignment 2).
+unsafe impl Plain for u16 {}
+// SAFETY: as above.
+unsafe impl Plain for Chain {}
+// SAFETY: as above.
+unsafe impl Plain for Lane {}
+
+impl<T> Default for Lined<T> {
+    fn default() -> Self {
+        Lined {
+            lines: Vec::new(),
+            len: 0,
+            _of: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<T: Plain> Lined<T> {
+    /// `len` values (those it held where its lines are kept, zero bytes in new lines; the caller
+    /// sets the ones it reads); its lines allocated anew only when there are too few.
+    fn set_len(&mut self, len: usize) {
+        let lines = (len * std::mem::size_of::<T>()).div_ceil(std::mem::size_of::<Line>());
+        if self.lines.len() < lines {
+            self.lines = vec![Line([0; 64]); lines];
+        }
+        self.len = len;
+    }
+}
+
+impl<T: Plain> std::ops::Deref for Lined<T> {
+    type Target = [T];
+
+    #[inline(always)]
+    fn deref(&self) -> &[T] {
+        // SAFETY: `len` values of `T` fit in the lines (`set_len`), which are initialized bytes,
+        // aligned for `T`, and any bytes are a value of `T` (`Plain`).
+        unsafe { std::slice::from_raw_parts(self.lines.as_ptr().cast::<T>(), self.len) }
+    }
+}
+
+impl<T: Plain> std::ops::DerefMut for Lined<T> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut [T] {
+        // SAFETY: as above, and `&mut self` is the only reference to the lines.
+        unsafe { std::slice::from_raw_parts_mut(self.lines.as_mut_ptr().cast::<T>(), self.len) }
+    }
 }
 
 impl Links {
@@ -163,20 +241,23 @@ impl Links {
     /// blocks a piece fills, and the rest after them.
     fn reset(&mut self, parts: usize, piece_seeds: usize, blocks: usize) {
         if self.next.len() != blocks {
-            self.next = vec![NONE; blocks];
+            self.next.set_len(blocks);
+            self.next.fill(NONE);
         }
-        self.chains.clear();
-        self.chains.resize(parts, EMPTY);
+        self.chains.set_len(parts);
+        self.chains.fill(EMPTY);
         let lane = piece_seeds / BLOCK / parts;
-        self.lanes.clear();
-        self.lanes.extend((0..parts).map(|p| Lane {
-            next: (p * lane) as u16,
-            end: ((p + 1) * lane) as u16,
-        }));
-        self.lanes.push(Lane {
+        self.lanes.set_len(parts + 1);
+        for (p, at) in self.lanes[..parts].iter_mut().enumerate() {
+            *at = Lane {
+                next: (p * lane) as u16,
+                end: ((p + 1) * lane) as u16,
+            };
+        }
+        self.lanes[parts] = Lane {
             next: (parts * lane) as u16,
             end: blocks as u16,
-        });
+        };
         self.used = 0;
     }
 
@@ -529,10 +610,12 @@ where
     links.truncate(slots_n);
     links.resize_with(slots_n, Links::default);
     let mut store = std::mem::take(&mut scratch.store);
-    let pool: Vec<RwLock<Arena<'_>>> = store
+    // (each slot's lock and arena on lines of their own: a participant takes the write lock of
+    // the slot it fills while others take the read locks of their neighbours to fold them)
+    let pool: Vec<OwnLines<RwLock<Arena<'_>>>> = store
         .slots(slots_n, Arena::blocks(parts, piece_seeds) * BLOCK)
         .zip(links)
-        .map(|((seeds, pos), links)| RwLock::new(Arena { seeds, pos, links }))
+        .map(|((seeds, pos), links)| OwnLines(RwLock::new(Arena { seeds, pos, links })))
         .collect();
     let sched = Mutex::new(Sched {
         parked: Vec::new(),
@@ -549,7 +632,10 @@ where
     let low_parked = AtomicUsize::new(usize::MAX);
     let lanes: Vec<OwnLines<AtomicU64>> = (0..parts).map(|_| OwnLines(AtomicU64::new(0))).collect();
     let homes: Vec<AtomicBool> = (0..parts).map(|_| AtomicBool::new(false)).collect();
-    let strips: Vec<StripState> = (0..n).map(|_| StripState::default()).collect();
+    // (each strip's state on lines of its own: the participant that makes a piece of a strip
+    // writes its pieces and count while others read those of the strips they fold)
+    let strips: Vec<OwnLines<StripState>> =
+        (0..n).map(|_| OwnLines(StripState::default())).collect();
     // the pieces below it have gone back to the pool (every partition folded them)
     let freed = AtomicU64::new(0);
     let produced = AtomicU64::new(0);
@@ -576,7 +662,7 @@ where
                 let (fs, fk) = (strip_of(f), f as u32);
                 let (ms, mk) = (strip_of(min_next), min_next as u32);
                 for (i, strip) in strips.iter().enumerate().take((ms + 1).min(n)).skip(fs) {
-                    let pieces = lock(&strip.pieces);
+                    let pieces = lock(&strip.0.pieces);
                     let from = if i == fs { fk as usize } else { 0 };
                     let to = if i == ms { mk as usize } else { pieces.len() };
                     if from < to {
@@ -649,7 +735,7 @@ where
             (strip, from, k, slot)
         };
         let (next, k_end, empty) = {
-            let mut guard = write(&pool[slot as usize]);
+            let mut guard = write(&pool[slot as usize].0);
             let arena = &mut *guard;
             arena.reset(parts, piece_seeds);
             let mut sink = PieceSink {
@@ -664,7 +750,7 @@ where
             let k_end = sink.k;
             (next, k_end, arena.links.used == 0)
         };
-        let st = &strips[strip];
+        let st = &strips[strip].0;
         let count = if empty {
             // (a piece stops only when it is full, so an empty one ends its strip)
             debug_assert!(next.is_none());
@@ -726,7 +812,7 @@ where
             let ready = |v: u64| {
                 let i = strip_of(v);
                 i < n && {
-                    let published = strips[i].published.load(Ordering::Acquire);
+                    let published = strips[i].0.published.load(Ordering::Acquire);
                     v as u32 != published & !DONE || published & DONE != 0
                 }
             };
@@ -744,10 +830,10 @@ where
             let (mut folded, mut pieces) = (0u64, 0u64);
             while strip_of(v) < n {
                 let (i, k) = (strip_of(v), v as u32);
-                let published = strips[i].published.load(Ordering::Acquire);
+                let published = strips[i].0.published.load(Ordering::Acquire);
                 if k < published & !DONE {
-                    let slot = lock(&strips[i].pieces)[k as usize];
-                    let arena = read(&pool[slot as usize]);
+                    let slot = lock(&strips[i].0.pieces)[k as usize];
+                    let arena = read(&pool[slot as usize].0);
                     st.out.strip = i as u64;
                     let t0 = timed.then(std::time::Instant::now);
                     let pause0 = st.scan_pause_ns;
@@ -931,7 +1017,11 @@ where
     scratch.parts = states;
     scratch.arenas = pool
         .into_iter()
-        .map(|a| a.into_inner().unwrap_or_else(PoisonError::into_inner).links)
+        .map(|a| {
+            a.0.into_inner()
+                .unwrap_or_else(PoisonError::into_inner)
+                .links
+        })
         .collect();
     scratch.store = store;
     stats
@@ -939,7 +1029,36 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{Arena, Links, BLOCK, NONE};
+    use super::{Arena, Lane, Lined, Links, BLOCK, EMPTY, NONE};
+
+    /// A `Lined` buffer begins on a cache line and holds whole lines, for any length, keeps its
+    /// lines when it shrinks and grows within them, and holds the values set.
+    #[test]
+    fn lined_buffers_are_lines_of_their_own() {
+        fn check<T: super::Plain + PartialEq + std::fmt::Debug>(v: T, lens: &[usize]) {
+            let mut buf: Lined<T> = Lined::default();
+            assert!(buf.is_empty());
+            for &len in lens {
+                let before = buf.lines.as_ptr();
+                let had = buf.lines.len();
+                buf.set_len(len);
+                buf.fill(v);
+                assert_eq!(buf.len(), len);
+                assert_eq!(buf.as_ptr() as usize % 64, 0, "{len}");
+                assert!(
+                    buf.lines.len() * 64 >= len * std::mem::size_of::<T>(),
+                    "{len}"
+                );
+                if had * 64 >= len * std::mem::size_of::<T>() {
+                    assert_eq!(buf.lines.as_ptr(), before, "{len}: lines kept");
+                }
+                assert!(buf.iter().all(|x| *x == v), "{len}");
+            }
+        }
+        check(7u16, &[1, 31, 32, 33, 272, 16, 300]);
+        check(EMPTY, &[1, 10, 11, 16, 64, 3]);
+        check(Lane { next: 3, end: 9 }, &[1, 16, 17, 65, 2]);
+    }
 
     /// `Links::take` hands out distinct blocks of the arena for any cut of a piece's seeds by
     /// partition (the pushes of `PieceSink::push`: a block when the partition's last one is full),

@@ -28,7 +28,8 @@
 //! and builds the changed set in one pass over the old ranges (`merge`, `cross`, `clip`), which
 //! gives the same ranges in the same order with the same `ori_from`, in time linear in the sizes
 //! of the two sets as NCBI's list operations. `m_iFactor` is 1 in every set that PS16a's
-//! classification makes (it changes only for nucleotide queries, `Pr2NaConvert`).
+//! classification makes (`Pr2NaConvert` changes it for a nucleotide query's motifs, whose ends
+//! only are printed: `domains::pr2na_ends`).
 
 /// `TSeg_base`. Its positions are `SeqPos_t` (`int`) in NCBI; LOSAT keeps them in `i64`, so
 /// the sums of the set algebra (`from - 1`, `to + 1`, the total residues) do not overflow where
@@ -540,8 +541,9 @@ impl SegSet {
     // 	if (doConvert) Pr2NaConvert(segset);
     // }
     // ```
-    // (`Pr2NaConvert` changes a set only for a nucleotide query, item PS16c. NCBI changes the
-    // list in place; LOSAT writes the new ranges in order into a new list.)
+    // (rpsbproc calls it with `doConvert` false everywhere; the conversion of a nucleotide
+    // query's motifs is `domains::pr2na_ends`. NCBI changes the list in place; LOSAT writes the
+    // new ranges in order into a new list.)
     pub(crate) fn map_through(&mut self, m_starts: &[i32], s_starts: &[i32], lens: &[u32]) {
         if self.segs.is_empty() {
             return;

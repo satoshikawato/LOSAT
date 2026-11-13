@@ -1143,7 +1143,7 @@ fn read_believed_defline(
     // Two queries with one id are the scopes' of the query batches (`QueryScopes`, which the
     // search adds as the reader delivers the batches): NCBI's formatter empties the scope after
     // each batch against a database.
-    let refusal = refused_id(&ids, role, read.program.upper).or_else(|| {
+    let refusal = refused_id(&ids, role, "-parse_deflines", read.program.upper).or_else(|| {
         protein
             .then(|| duplicate_id(&ids, keys, role, read.program.upper))
             .flatten()

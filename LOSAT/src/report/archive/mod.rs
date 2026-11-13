@@ -33,6 +33,7 @@
 pub mod bioseq;
 pub mod masks;
 pub mod options;
+pub mod strategy;
 pub mod writer;
 
 use std::borrow::Cow;
@@ -166,6 +167,44 @@ pub struct ArchiveRequest {
     pub database: Option<Vec<u8>>,
 }
 
+impl ArchiveRequest {
+    /// The request of a run of `inputs.program` (`ArchiveHandle::for_program` has the
+    /// refusals): `option` is what asks for it, `-outfmt 11` or `-export_search_strategy`.
+    pub(crate) fn for_inputs(
+        encoding: ArchiveEncoding,
+        inputs: &OptionInputs,
+        database: Option<&str>,
+        label: &str,
+        option: &str,
+    ) -> anyhow::Result<Self> {
+        for (what, text) in [
+            ("-db name", database),
+            ("-window_masker_db path", inputs.window_masker_db.as_deref()),
+        ] {
+            if let Some(text) = text {
+                if !encoding.writes_text(text.as_bytes()) {
+                    anyhow::bail!(
+                        "a {what} with a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML) is not supported by LOSAT's {label} with {option}"
+                    );
+                }
+            }
+        }
+        let program = match inputs.program {
+            Program::Blastn => "blastn",
+            Program::Blastp => "blastp",
+            Program::Blastx => "blastx",
+            Program::Tblastn => "tblastn",
+            Program::Tblastx => "tblastx",
+        };
+        Ok(Self {
+            program,
+            service: options::service(inputs.program, &inputs.task),
+            algorithm: options::algorithm_options(inputs),
+            database: database.map(|name| name.as_bytes().to_vec()),
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct RunState {
     log: DiagLog,
@@ -237,33 +276,9 @@ impl ArchiveHandle {
         database: Option<&str>,
         label: &str,
     ) -> anyhow::Result<Self> {
-        for (what, text) in [
-            ("-db name", database),
-            ("-window_masker_db path", inputs.window_masker_db.as_deref()),
-        ] {
-            if let Some(text) = text {
-                if !encoding.writes_text(text.as_bytes()) {
-                    anyhow::bail!(
-                        "a {what} with a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML) is not supported by LOSAT's {label} with -outfmt 11"
-                    );
-                }
-            }
-        }
-        let program = match inputs.program {
-            Program::Blastn => "blastn",
-            Program::Blastp => "blastp",
-            Program::Blastx => "blastx",
-            Program::Tblastn => "tblastn",
-            Program::Tblastx => "tblastx",
-        };
         Ok(Self::new(
             encoding,
-            ArchiveRequest {
-                program,
-                service: options::service(inputs.program, &inputs.task),
-                algorithm: options::algorithm_options(inputs),
-                database: database.map(|name| name.as_bytes().to_vec()),
-            },
+            ArchiveRequest::for_inputs(encoding, inputs, database, label, "-outfmt 11")?,
         ))
     }
 
@@ -438,12 +453,59 @@ pub fn check_titles_for(
     role: &str,
     label: &str,
 ) -> anyhow::Result<()> {
+    check_titles_in(encoding, records, role, label, "-outfmt 11")
+}
+
+/// The encoding whose rule the titles of a run's requests follow, for a reader that checks
+/// record by record: ASN.1 text when the run writes a search strategy (whose refusals hold the
+/// archive's in every encoding, `ArchiveEncoding::writes_text`), else the archive's
+/// (`ArchiveEncoding::from_env`); `None` without either (`check_request_titles`).
+pub fn request_title_encoding(archive: bool, strategy: bool) -> Option<ArchiveEncoding> {
+    if strategy {
+        Some(ArchiveEncoding::Text)
+    } else {
+        archive.then(ArchiveEncoding::from_env)
+    }
+}
+
+/// `check_titles` for the requests of a run: the archive's (`archive`, in the environment's
+/// encoding) and the search strategy's (`strategy`, always ASN.1 text,
+/// `strategy::StrategyExport`).
+pub fn check_request_titles(
+    records: &[FastaRecord],
+    role: &str,
+    label: &str,
+    archive: bool,
+    strategy: bool,
+) -> anyhow::Result<()> {
+    if archive {
+        check_titles(records, role, label)?;
+    }
+    if strategy {
+        check_titles_in(
+            ArchiveEncoding::Text,
+            records,
+            role,
+            label,
+            "-export_search_strategy",
+        )?;
+    }
+    Ok(())
+}
+
+fn check_titles_in(
+    encoding: ArchiveEncoding,
+    records: &[FastaRecord],
+    role: &str,
+    label: &str,
+    option: &str,
+) -> anyhow::Result<()> {
     if let Some(record) = records
         .iter()
         .find(|record| !encoding.writes_text(&record.title))
     {
         return Err(anyhow::Error::new(TitleRefusal(format!(
-            "the title of the {role} {} has a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML), which is not supported by LOSAT's {label} with -outfmt 11",
+            "the title of the {role} {} has a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML), which is not supported by LOSAT's {label} with {option}",
             record.local_id
         ))));
     }

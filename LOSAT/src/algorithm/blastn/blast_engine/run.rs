@@ -116,7 +116,7 @@ use crate::report::pairwise::{
     write_blastn_pairwise_prolog, write_blastn_pairwise_report, BlastnPairwiseQuery,
     BlastnPairwiseReport, PairwiseConfig, PairwiseDatabase, PairwiseHit,
 };
-use crate::report::query_warnings::query_warning;
+use crate::report::query_warnings::{query_warning, QueryReads};
 use crate::sequence::packed_subject::PackedNucleotide;
 use crate::stats::KarlinParams;
 use crate::utils::dust::MaskedInterval;
@@ -5729,6 +5729,10 @@ struct SamTarget<'a> {
 /// final hit list.
 struct BlastnReportInputs<'a> {
     queries: &'a [FastaRecord],
+    /// The texts of the subjects that each query's report reads one by one (its batch's
+    /// prefetch off), by query, which the first format's writer places where it reads them
+    /// (`QueryWarnings::subject_read`).
+    query_reads: &'a [crate::report::query_warnings::QueryReads],
     /// The subject records and their letters (theirs, or their packed subjects': with
     /// LOSAT_X_BNSTORE a subject set's, with `-db` the reported sequences' stored data).
     subjects: SubjectLetters<'a>,
@@ -5835,6 +5839,8 @@ struct BlastnReportInputs<'a> {
     /// (`BatchResults::batches`).
     archive: Option<&'a crate::report::archive::ArchiveHandle>,
     batch_spans: &'a [std::ops::Range<usize>],
+    /// The run's search strategy export (`-export_search_strategy`).
+    strategy: Option<&'a crate::report::archive::strategy::StrategyExport>,
     /// Whether both strands of each query are searched (`-strand both`).
     both_strands: bool,
     minus_strand: bool,
@@ -5943,6 +5949,35 @@ fn blastn_pairwise_report(
         parsed_subjects: report.database_parsed.to_vec(),
     };
     Ok((queries, pairwise_report))
+}
+
+/// The queries of the call's batches as the archive and the search strategy take them
+/// (`archive::for_each_batch`).
+fn call_batches<'a>(
+    report: &'a BlastnReportInputs<'a>,
+    query_lengths: &'a [usize],
+    unsearched: &'a [bool],
+) -> archive::CallBatches<'a> {
+    archive::CallBatches {
+        queries: report.queries,
+        query_lengths,
+        query_placements: &report.ranges.queries.placements,
+        subject_records: report.database.is_none().then(|| {
+            report
+                .ranges
+                .subjects
+                .records
+                .unwrap_or_else(|| report.subjects.records())
+        }),
+        query_masks: report.query_masks,
+        dust_masks: report.archive_dust,
+        unsearched,
+        lcase_masking: report.lcase_masking,
+        window_masker: report.window_masker.is_some(),
+        both_strands: report.both_strands,
+        minus_strand: report.minus_strand,
+        spans: report.batch_spans,
+    }
 }
 
 /// The values of the first query of a batch (`first`, an index of the call) that the archive
@@ -6603,6 +6638,22 @@ fn post_process_hits_and_write(
             observer.query_stats(q_idx, stats);
         }
     }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:280-282
+    // ```c++
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    //
+    //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
+    // ```
+    // The search strategy's request of each batch (`-export_search_strategy`), which NCBI writes
+    // before the batch's search: the file is apart from the reports, and its documents are those
+    // of the batches the run reports.
+    if let Some(strategy) = report.strategy {
+        archive::write_blastn_strategy(
+            strategy,
+            &call_batches(report, query_lengths, &unsearched),
+            &|first| archive_first_context(report, query_lengths, first),
+        )?;
+    }
     // The warnings are written once, with the first format (`QueryWarnings`).
     let mut warning_lines = Some(query_warnings);
     // Every structured format of the call is XML2 or JSON: none writes the report that a
@@ -6635,11 +6686,18 @@ fn post_process_hits_and_write(
                 .tabular_spec()
                 .is_some_and(|spec| spec.checks_taxdb()))
         .then(|| {
-            crate::report::query_warnings::QueryWarnings::of_posts(
-                warning_lines.take().unwrap_or(&[]),
+            let first = warning_lines.take();
+            let warnings = crate::report::query_warnings::QueryWarnings::of_posts(
+                first.unwrap_or(&[]),
                 report.archive,
                 &mut *outputs.diagnostics,
-            )
+            );
+            // The first format's writer also writes the texts of the subjects that the reports
+            // read one by one (`BlastnReportInputs::query_reads`).
+            match first {
+                Some(_) => warnings.with_subject_reads(report.query_reads),
+                None => warnings,
+            }
         });
         // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
         let side_sink = format.sink.side_files().cloned();
@@ -6748,27 +6806,10 @@ fn post_process_hits_and_write(
             };
             let call = archive::ArchiveCall {
                 handle,
-                queries: report.queries,
-                query_lengths,
-                query_placements: &report.ranges.queries.placements,
-                subject_records: report.database.is_none().then(|| {
-                    report
-                        .ranges
-                        .subjects
-                        .records
-                        .unwrap_or_else(|| report.subjects.records())
-                }),
+                batches: call_batches(report, query_lengths, &unsearched),
                 subjects,
                 subject_placements: report.ranges.subjects.placements,
                 hit_lists: &hit_lists,
-                query_masks: report.query_masks,
-                dust_masks: report.archive_dust,
-                unsearched: &unsearched,
-                lcase_masking: report.lcase_masking,
-                window_masker: report.window_masker.is_some(),
-                both_strands: report.both_strands,
-                minus_strand: report.minus_strand,
-                spans: report.batch_spans,
             };
             archive::write_blastn_archives(
                 &call,
@@ -7300,7 +7341,21 @@ pub fn run(
     // ```
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
     // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
-    // there too (`cli_output_formats`).
+    // there too (`cli_output_formats`). `GetExportSearchStrategyStream` comes first: it creates
+    // the search strategy file (`strategy::create_strategy_file`), which an error after it
+    // leaves empty.
+    let strategy_file = args
+        .export_search_strategy
+        .as_deref()
+        .map(|path| {
+            check_utf8_file_name(path, "export_search_strategy", "BLASTN")?;
+            crate::report::archive::strategy::create_strategy_file(
+                path,
+                args.out.as_deref(),
+                "BLASTN",
+            )
+        })
+        .transpose()?;
     let output_formats = cli_output_formats(&args.outfmt, args.out.as_deref())?;
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot
     // write, before anything is read or written.
@@ -7308,6 +7363,13 @@ pub fn run(
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
     args.archive = archive::handle_for(&args, args.dust_filtering.as_deref(), archive_requested)?
         .map(|handle| handle.with_outfmt_text(&args.outfmt));
+    // The search strategy's request, with the refusals of the archive's.
+    args.strategy = strategy_file
+        .map(|file| {
+            let outfmt = app::parse_formatting_string(&args.outfmt)?.number;
+            archive::strategy_for(&args, args.dust_filtering.as_deref(), outfmt, file)
+        })
+        .transpose()?;
     // LOSAT's thread capability is checked before any input or output, as before.
     crate::utils::threading::validate_threads(args.num_threads)?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3631-3636
@@ -7400,7 +7462,12 @@ pub fn run(
     let cli_subjects = if args.db.is_some() {
         None
     } else {
-        match read_cli_subjects(&args, &settings, &mut *diagnostics, archive.is_some()) {
+        match read_cli_subjects(
+            &args,
+            &settings,
+            &mut *diagnostics,
+            archive.is_some() || args.strategy.is_some(),
+        ) {
             Ok(read) => Some(read),
             Err(error) => {
                 // NCBI reads the `-subject` file inside `Run`, after the diagnostics handler
@@ -7732,6 +7799,7 @@ fn open_search_database(
             .showing_gis(args.show_gis);
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
+                args.strategy.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
                 database.statistics_length_is_empty(),
@@ -7868,11 +7936,12 @@ fn search_cli(
         formats: &output_formats,
         query_range: query_range.is_some(),
         hit_records: outputs.hits.is_some(),
+        strategy: args.strategy.is_some(),
     }
     .acts();
     let x_store_acts = !x_opening.acts() && x_query_drop::on() && x_store_rule;
     let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders)
-        .with_defline(args.archive.is_some())
+        .with_defline(args.archive.is_some() || args.strategy.is_some())
         .with_parse_deflines(args.parse_deflines)
         .with_strand(&args.strand);
     let mut query_source = FastaInputSource::from_argument(&args.query, query_file, query_config);
@@ -7914,6 +7983,10 @@ fn search_cli(
             query_config,
             query_range.as_ref(),
             args.num_threads,
+            crate::report::archive::request_title_encoding(
+                args.archive.is_some(),
+                args.strategy.is_some(),
+            ),
         )?;
         (Vec::new(), end, store)
     } else if x_store_acts && x_query_drop::parts_on() {
@@ -9503,6 +9576,7 @@ fn run_in_pool(
             BatchResults {
                 hit_lists: Vec::new(),
                 warnings: &[],
+                reads: &[],
                 lengths: &[],
                 unsearched: Vec::new(),
                 query_masks: &[],
@@ -9546,7 +9620,8 @@ fn run_in_pool(
         query_input,
         &lengths,
         batching,
-        args.archive.is_some() && queries.archive_title(),
+        (args.archive.is_some() || args.strategy.is_some())
+            && queries.archive_title(args.archive.is_some(), args.strategy.is_some()),
     );
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
     // (`lookup::x_mb_lut_keep`), freed when the loop ends.
@@ -9562,6 +9637,9 @@ fn run_in_pool(
     let mut context_karlin = Vec::with_capacity(2 * lengths.len());
     // The warnings written before each query's report (`QueryWarnings`).
     let mut warnings: Vec<Posts> = vec![Posts::new(); lengths.len()];
+    // The texts of the subjects that each query's report reads one by one, by query, where the
+    // first format places them (`BlastnReportInputs::query_reads`).
+    let mut query_reads: Vec<QueryReads> = vec![Vec::new(); lengths.len()];
     // The handle of the BLAST archive, which saves each whole post of `warnings` as one message
     // (`Posts::write`).
     let archive = args.archive.clone();
@@ -9661,6 +9739,7 @@ fn run_in_pool(
                         BatchResults {
                             hit_lists,
                             warnings: &warnings[..start],
+                            reads: &query_reads[..start],
                             lengths: &lengths[..start],
                             unsearched,
                             query_masks: &query_masks,
@@ -9712,6 +9791,7 @@ fn run_in_pool(
                     BatchResults {
                         hit_lists,
                         warnings: &warnings[..start],
+                        reads: &query_reads[..start],
                         lengths: &lengths[..start],
                         unsearched,
                         query_masks: &query_masks,
@@ -9803,6 +9883,7 @@ fn run_in_pool(
                         BatchResults {
                             hit_lists,
                             warnings: &warnings[..start],
+                            reads: &query_reads[..start],
                             lengths: &lengths[..start],
                             unsearched,
                             query_masks: &query_masks,
@@ -9819,6 +9900,13 @@ fn run_in_pool(
                 } else {
                     before(outputs)?;
                 }
+                write_failed_batch_strategy(
+                    &args,
+                    batch_records.searched(),
+                    start,
+                    &report_ranges,
+                    source,
+                )?;
                 batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
                 masker_warnings.write(&mut *outputs.diagnostics, archive)?;
                 return Err(failure.into());
@@ -9884,6 +9972,7 @@ fn run_in_pool(
                     BatchResults {
                         hit_lists,
                         warnings: &warnings[..start],
+                        reads: &query_reads[..start],
                         lengths: &lengths[..start],
                         unsearched,
                         query_masks: &query_masks,
@@ -9900,6 +9989,13 @@ fn run_in_pool(
             } else {
                 before(outputs)?;
             }
+            write_failed_batch_strategy(
+                &args,
+                batch_records.searched(),
+                start,
+                &report_ranges,
+                source,
+            )?;
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
             let mut message = String::from("BLAST engine error: ");
             for _ in start..end {
@@ -10013,6 +10109,7 @@ fn run_in_pool(
                             BatchResults {
                                 hit_lists,
                                 warnings: &warnings[..start],
+                                reads: &query_reads[..start],
                                 lengths: &lengths[..start],
                                 unsearched,
                                 query_masks: &query_masks,
@@ -10031,6 +10128,13 @@ fn run_in_pool(
                     } else {
                         before(outputs)?;
                     }
+                    write_failed_batch_strategy(
+                        &args,
+                        batch_records.searched(),
+                        start,
+                        &report_ranges,
+                        source,
+                    )?;
                     // The failing batch was read (its title warnings) before its search.
                     warnings[start].write(&mut *outputs.diagnostics, archive)?;
                     return Err(error);
@@ -10042,6 +10146,17 @@ fn run_in_pool(
                 // traceback's of ambiguity data that it cannot decode, `x_rpt_stream`); the off
                 // path writes no report here.
                 Err(error) => {
+                    // NCBI's error of the first batch's search (`database_search_error`; not
+                    // LOSAT's refusal): the batch's search strategy request was written before it.
+                    if input_start == 0 && error.is::<crate::cli::NativeError>() {
+                        write_failed_batch_strategy(
+                            &args,
+                            batch_records.searched(),
+                            start,
+                            &report_ranges,
+                            source,
+                        )?;
+                    }
                     let written = if stream.acting() { start } else { 0 };
                     for query_warnings in &warnings[written..=start] {
                         query_warnings.write(&mut *outputs.diagnostics, archive)?;
@@ -10163,6 +10278,7 @@ fn run_in_pool(
                         BatchResults {
                             hit_lists,
                             warnings: &warnings[..start],
+                            reads: &query_reads[..start],
                             lengths: &lengths[..start],
                             unsearched,
                             query_masks: &query_masks,
@@ -10179,6 +10295,13 @@ fn run_in_pool(
                 } else {
                     before(outputs)?;
                 }
+                write_failed_batch_strategy(
+                    &args,
+                    batch_records.searched(),
+                    start,
+                    &report_ranges,
+                    source,
+                )?;
                 warnings[start].write(&mut *outputs.diagnostics, archive)?;
                 return Err(error);
             }
@@ -10244,6 +10367,23 @@ fn run_in_pool(
                 let seq_aligns_of = |hit_lists: &[Option<BlastnHitList>]| -> usize {
                     database::seq_aligns_of(hit_lists, !args.ungapped)
                 };
+                // A query's own fetches where the batch's prefetch is off: the texts of the
+                // subjects its report reads, kept by subject where the first format writes them
+                // where it reads each (`BlastnOutputFormat::places_subject_reads`), else returned
+                // for the query's warnings.
+                let places = output_formats
+                    .first()
+                    .is_some_and(|format| format.places_subject_reads());
+                let query_fetch = |query: usize,
+                                   shown: &[Option<BlastnHitList>],
+                                   reads: &mut [QueryReads]|
+                 -> Result<Vec<u8>> {
+                    if !places {
+                        return database.prefetch_messages(&titles, shown);
+                    }
+                    reads[query] = database.subject_read_texts(&titles, shown, plural_names)?;
+                    Ok(Vec::new())
+                };
                 let seq_aligns = seq_aligns_of(&batch_hit_lists);
                 // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                 // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
@@ -10272,10 +10412,11 @@ fn run_in_pool(
                         };
                         batch_hit_lists
                             .iter()
-                            .map(|hit_list| {
+                            .enumerate()
+                            .map(|(index, hit_list)| {
                                 let shown = std::slice::from_ref(hit_list);
                                 let messages = if fetches && seq_aligns_of(shown) > 0 {
-                                    database.prefetch_messages(&titles, shown)?
+                                    query_fetch(start + index, shown, &mut query_reads)?
                                 } else {
                                     Vec::new()
                                 };
@@ -10421,12 +10562,16 @@ fn run_in_pool(
         // reports and the reader's messages that come with them. It comes before the first byte:
         // the reports of the batches before are written after the loop where a query's title is
         // refused (`x_rpt_stream::Off::ArchiveTitle`), and the first batch's are the first.
-        if args.archive.is_some() {
-            archive::check_titles(batch_records.searched(), "query")?;
+        // The search strategy's requests are refused with them (`check_request_titles`).
+        let (archive, strategy) = (args.archive.is_some(), args.strategy.is_some());
+        if archive || strategy {
+            archive::check_request_titles(batch_records.searched(), "query", archive, strategy)?;
             if let (0, SubjectSource::Prepared(prepared)) = (start, source) {
-                archive::check_titles(
+                archive::check_request_titles(
                     subject_ranges.records.unwrap_or(prepared.records),
                     "subject",
+                    archive,
+                    strategy,
                 )?;
             }
         }
@@ -10478,6 +10623,7 @@ fn run_in_pool(
                     BatchResults {
                         hit_lists: batch_lists,
                         warnings: &warnings[start..end],
+                        reads: &query_reads[start..end],
                         lengths: &lengths[start..end],
                         unsearched: batch_unsearched,
                         query_masks: &batch_masks,
@@ -10494,6 +10640,9 @@ fn run_in_pool(
             // of the current batch).
             for query_warnings in &mut warnings[start..end] {
                 *query_warnings = Posts::new();
+            }
+            for reads in &mut query_reads[start..end] {
+                *reads = Vec::new();
             }
         }
         // EXPERIMENT (LOSAT_X_QSTREAM, LOSAT_X_BNQPACK): the batch's records are kept for a later
@@ -10528,6 +10677,7 @@ fn run_in_pool(
             BatchResults {
                 hit_lists,
                 warnings: &warnings,
+                reads: &query_reads,
                 lengths: &lengths,
                 unsearched,
                 query_masks: &query_masks,
@@ -10560,6 +10710,7 @@ fn run_in_pool(
             BatchResults {
                 hit_lists: Vec::new(),
                 warnings: &[],
+                reads: &[],
                 lengths: &[],
                 unsearched: Vec::new(),
                 query_masks: &[],
@@ -10725,6 +10876,9 @@ struct BatchResults<'a> {
     hit_lists: Vec<Option<BlastnHitList>>,
     /// The warnings written before each query's report (`QueryWarnings`).
     warnings: &'a [Posts],
+    /// The texts of the subjects that each query's report reads one by one
+    /// (`BlastnReportInputs::query_reads`).
+    reads: &'a [crate::report::query_warnings::QueryReads],
     lengths: &'a [usize],
     unsearched: Vec<bool>,
     query_masks: &'a [Vec<MaskedInterval>],
@@ -10735,6 +10889,62 @@ struct BatchResults<'a> {
     /// batch's prefetch counts its own Seq-aligns, `common::database::BatchPrefetch`); empty
     /// when the call is one batch.
     batches: &'a [std::ops::Range<usize>],
+}
+
+/// Writes the search strategy request (`-export_search_strategy`) of the failing batch, whose
+/// searched queries are `records` (the call's searched queries from `start`): NCBI writes it
+/// after making the batch's query factory and before its search (blastn_app.cpp:282), so a batch
+/// whose search fails (its setup, the masks of `-window_masker_db`, a sequence or header file of
+/// the database that cannot be read) has one, after those of the batches before (NCBI BLAST+
+/// 2.17.0, probe 4 of RG-F1). A batch that fails while it is read, or without a query, has none.
+fn write_failed_batch_strategy(
+    args: &BlastnArgs,
+    records: &[FastaRecord],
+    start: usize,
+    ranges: &ReportRanges<'_>,
+    source: SubjectSource<'_>,
+) -> Result<()> {
+    let Some(strategy) = args.strategy.as_ref() else {
+        return Ok(());
+    };
+    let placements = crate::blastinput::seq_range::Placements(
+        ranges
+            .queries
+            .placements
+            .0
+            .get(start..start + records.len())
+            .map_or_else(Vec::new, <[_]>::to_vec),
+    );
+    let prepared_records;
+    let subject_records = match source {
+        SubjectSource::Prepared(prepared) => {
+            prepared_records = prepared.letters();
+            Some(
+                ranges
+                    .subjects
+                    .records
+                    .unwrap_or_else(|| prepared_records.records()),
+            )
+        }
+        SubjectSource::Database(_) => None,
+    };
+    archive::write_blastn_failed_strategy(
+        strategy,
+        &archive::CallBatches {
+            queries: records,
+            query_lengths: &[],
+            query_placements: &placements,
+            subject_records,
+            query_masks: &[],
+            dust_masks: &[],
+            unsearched: &[],
+            lcase_masking: args.lcase_masking,
+            window_masker: false,
+            both_strands: args.strand == "both",
+            minus_strand: QueryStrand::from_option(&args.strand) == QueryStrand::Minus,
+            spans: &[],
+        },
+    )
 }
 
 /// Writes what NCBI has written when a query batch fails, before its error: the reports of
@@ -11016,7 +11226,16 @@ fn write_reports_untimed(
     } else {
         Vec::new()
     };
+    // The texts of the reads, made before the hit lists named the subjects by rank
+    // (`database::reported_subjects`), by rank as the writers name them.
+    let query_reads = match &reported {
+        Some(reported) => {
+            crate::report::query_warnings::reads_by_rank(results.reads, &reported.ordinals)
+        }
+        None => results.reads.to_vec(),
+    };
     let report_inputs = BlastnReportInputs {
+        query_reads: &query_reads,
         queries: query_records,
         subjects: subject_letters,
         ranges,
@@ -11088,6 +11307,7 @@ fn write_reports_untimed(
         },
         archive: args.archive.as_ref(),
         batch_spans: results.batches,
+        strategy: args.strategy.as_ref(),
         both_strands: args.strand == "both",
         minus_strand: QueryStrand::from_option(&args.strand) == QueryStrand::Minus,
         tabular_taxdb_found: subjects.shown.tabular_taxdb_found,

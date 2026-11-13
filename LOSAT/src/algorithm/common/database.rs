@@ -155,15 +155,17 @@ fn apply_list(
     restricted.map_err(|error| database_error(error, program))
 }
 
-/// Tells the BLAST archive of the run (`archive`, `None` without one) what the database's list
-/// makes of its request (`ArchiveHandle::set_database_filter`). `empty_length` is whether the
+/// Tells the BLAST archive of the run (`archive`, `None` without one) and its search strategy
+/// export (`strategy`) what the database's list makes of their requests
+/// (`ArchiveHandle::set_database_filter`). `empty_length` is whether the
 /// total length of the statistics is not positive (`SeqDb::statistics_length_is_empty`: a list
 /// that kept no sequence, without `STATS_TOTLEN`). `dbsize` is whether `-dbsize` is given: the
 /// `EffectiveSearchSpace` option then counts the length adjustment with no sequence, while the
 /// searches read the length of OID 0 as one sequence (probes E14 and E17 of line DI-8): LOSAT
-/// refuses it.
+/// refuses it (the strategy's requests after the first carry that option too).
 pub(crate) fn note_archive_database_filter(
     archive: Option<&crate::report::archive::ArchiveHandle>,
+    strategy: Option<&crate::report::archive::strategy::StrategyExport>,
     filter: &crate::blastinput::db_filter::DbFilterArgs,
     list_taxids: &[i32],
     empty_length: bool,
@@ -171,18 +173,27 @@ pub(crate) fn note_archive_database_filter(
     dbsize: bool,
     program: &str,
 ) -> Result<()> {
-    let Some(handle) = archive else {
+    if archive.is_none() && strategy.is_none() {
         return Ok(());
-    };
+    }
     if empty_length && dbsize {
+        let option = if archive.is_some() {
+            "-outfmt 11"
+        } else {
+            "-export_search_strategy"
+        };
         anyhow::bail!(
-            "-dbsize with -outfmt 11 and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
+            "-dbsize with {option} and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
         );
     }
-    handle.set_database_filter(
-        filter.archive_parameter(list_taxids),
-        empty_length && !searchsp,
-    );
+    let list = filter.archive_parameter(list_taxids);
+    let empty_database = empty_length && !searchsp;
+    if let Some(strategy) = strategy {
+        strategy.set_database_filter(list.clone(), empty_database);
+    }
+    if let Some(handle) = archive {
+        handle.set_database_filter(list, empty_database);
+    }
     Ok(())
 }
 
@@ -1553,8 +1564,9 @@ fn reported_header(
 
 /// With `-parse_deflines`, LOSAT's refusal of a reported database sequence whose Seq-align id is
 /// the id of a query of the scope `queries` (`query_batch::QueryScopes::of_query` of a query that
-/// reports it): NCBI's scope finds the query instead, so its reports show the query's title and
-/// letters for the database sequence (`dropin-survey-20261029/DI7/DECISIONS.md` 8). Every report
+/// reports it; a query whose ids the reports show: `-parse_deflines`, and the PSSM query of
+/// `-in_pssm` whose Seq-id is not one local id): NCBI's scope finds the query instead, so its
+/// reports show the query's title and letters for the database sequence (`dropin-survey-20261029/DI7/DECISIONS.md` 8). Every report
 /// of a query batch asks for its own scope, also of a sequence whose header an earlier batch read.
 pub(crate) fn refuse_id_of_a_query(
     subject: &crate::report::db_subject::ParsedSubject,
@@ -1566,8 +1578,9 @@ pub(crate) fn refuse_id_of_a_query(
     if queries.has_key(&keys.own) {
         return Err(parsed_refusal(
             ordinal,
-            "has the Seq-id of a query read with -parse_deflines in the query batch that reports \
-             it (in any with outfmt 5; NCBI BLAST+ shows the query for it)",
+            "has the Seq-id of a query read with -parse_deflines (or of the PSSM query of \
+             -in_pssm) in the query batch that reports it (in any with outfmt 5; NCBI BLAST+ shows \
+             the query for it)",
             program,
         ));
     }
@@ -1576,8 +1589,8 @@ pub(crate) fn refuse_id_of_a_query(
             ordinal,
             &format!(
                 "has the Seq-align id {}, which NCBI BLAST+'s scope can match weakly to the id \
-                 of a query read with -parse_deflines in the query batch that reports it (in any \
-                 with outfmt 5): an accession with a version for one without, a name with or \
+                 of a query read with -parse_deflines (or of the PSSM query of -in_pssm) in the \
+                 query batch that reports it (in any with outfmt 5): an accession with a version for one without, a name with or \
                  without an accession, a pir or prf accession as a name; NCBI BLAST+ then shows \
                  the query for it",
                 String::from_utf8_lossy(&subject.alignment_fasta())
@@ -3634,6 +3647,45 @@ pub(crate) fn prefetch_messages<'s>(
     subjects: impl IntoIterator<Item = (u32, Option<&'s crate::report::db_subject::ParsedSubject>)>,
     program: &str,
 ) -> Result<Vec<u8>> {
+    let reads = subject_read_texts(
+        db,
+        run,
+        subjects
+            .into_iter()
+            .map(|(ordinal, parsed)| (0, ordinal, parsed)),
+        false,
+        program,
+    )?;
+    Ok(reads.into_iter().flat_map(|(_, text)| text).collect())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:819-838
+// ```c++
+//     bool setSubjectTaxInfoAll = (x_IsFieldRequested(eSubjectTaxIds) ||
+//     						     x_IsFieldRequested(eSubjectSciNames) ||
+//     ...
+//     if(setSubjectIds || setSubjectTaxInfo || setSubjectTaxInfoAll || setSubjectTitle ||
+//        x_IsFieldRequested(eSubjectStrand) || setSubjectId)
+//     {
+//         try {
+//        		const CBioseq_Handle& subject_bh =
+//                 scope.GetBioseqHandle(align.GetSeq_id(1));
+// ```
+/// [`prefetch_messages`] of `subjects`, each `(key, ordinal, parsed Seq-ids)`, by subject: the
+/// text that the first read of each subject writes, with the subject's `key` (the name a report
+/// writer gives it), in the order of `subjects`; a subject whose read writes nothing has no
+/// entry. A query's report whose batch's prefetch is off writes each where it reads the subject
+/// (`report::query_warnings::SubjectReads`). `rows_open`: the report's rows look the plural
+/// names up (taxid 0 too, `TaxdbRun::open_for_rows`), each row after it loads its subject, so
+/// the first row opens the taxonomy database after the first subject's read, where that read
+/// did not.
+pub(crate) fn subject_read_texts<'s, K>(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    subjects: impl IntoIterator<Item = (K, u32, Option<&'s crate::report::db_subject::ParsedSubject>)>,
+    rows_open: bool,
+    program: &str,
+) -> Result<Vec<(K, Vec<u8>)>> {
     if !run.found(db) {
         return Ok(Vec::new());
     }
@@ -3643,12 +3695,13 @@ pub(crate) fn prefetch_messages<'s>(
     run.refuse_cache_collision(db, program)?;
     let taxdb = run.taxdb(search_path);
     let lower = program.to_ascii_lowercase();
-    let mut text = String::new();
+    let mut reads = Vec::new();
     let mut fetched: std::collections::HashSet<u32> = Default::default();
-    for (ordinal, parsed) in subjects {
+    for (key, ordinal, parsed) in subjects {
         if !fetched.insert(ordinal) {
             continue;
         }
+        let first = fetched.len() == 1;
         // A subject with parsed Seq-ids is read by its Seq-align id (`prefetch_reads`: the blob of
         // the sequence the scope gets, whose taxids its volume looks up). In
         // the formats that read the Bioseq, `ParsedSubject::fetched` refuses every subject that
@@ -3657,16 +3710,25 @@ pub(crate) fn prefetch_messages<'s>(
         // (`prefetched_ranks`). One without them is read by its ordinal id, its own blob.
         let blob = match parsed {
             Some(subject) => match prefetch_reads(db, ordinal, subject, true, program)? {
-                Ok(Some(blob)) => blob,
-                Ok(None) => continue,
+                Ok(Some(blob)) => Some(blob),
+                Ok(None) => None,
                 Err(reason) => return Err(parsed_refusal(ordinal, &reason, program)),
             },
-            None => ordinal,
+            None => Some(ordinal),
         };
-        let lookups = blob_taxids(db, ordinal, parsed, blob, program)?;
-        run.volume_lookups_of(db, &taxdb, blob, &lookups, &lower, &mut text, program)?;
+        if let Some(blob) = blob {
+            let lookups = blob_taxids(db, ordinal, parsed, blob, program)?;
+            let mut text = String::new();
+            run.volume_lookups_of(db, &taxdb, blob, &lookups, &lower, &mut text, program)?;
+            if !text.is_empty() {
+                reads.push((key, text.into_bytes()));
+            }
+        }
+        if first && rows_open {
+            run.open_for_rows(db, program)?;
+        }
     }
-    Ok(text.into_bytes())
+    Ok(reads)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513

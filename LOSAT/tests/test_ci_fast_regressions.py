@@ -487,6 +487,43 @@ class StartupTraceNoticeTests(unittest.TestCase):
         self.assertTrue(any("stderr without" in failure for failure in failures))
 
 
+class RunTasksTests(unittest.TestCase):
+    """`run_tasks`: the fixture scripts run `jobs` at a time; their failure lines come in the order of the tasks."""
+
+    @staticmethod
+    def task(name: str, code: str, log: Path | None = None) -> fast.Task:
+        return fast.Task(name, [sys.executable, "-c", code],
+                         lambda result: [] if result.returncode == 0 else [f"{name} exit {result.returncode}"], log=log)
+
+    def test_failures_in_task_order_logs_and_seconds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "b.tsv"
+            # `a` ends last but its failure comes first.
+            tasks = [self.task("a", "import time, sys; time.sleep(0.5); sys.exit(1)"),
+                     self.task("b", "import sys; print('b-out'); sys.stderr.write('b-err')", log),
+                     self.task("c", "import sys; sys.exit(2)")]
+            failures, seconds = fast.run_tasks(tasks, 3)
+            self.assertEqual(failures, ["a exit 1", "c exit 2"])
+            self.assertEqual(log.read_text(), "b-out\nb-err")
+            self.assertEqual(list(seconds), ["a", "b", "c"])
+
+    def test_the_tasks_run_at_once(self):
+        # Each task writes its flag, then waits (at most 60 s) for the other's: both pass only when they run
+        # at the same time.
+        with tempfile.TemporaryDirectory() as tmp:
+            def waiter(mine: str, other: str) -> str:
+                return (f"import pathlib, sys, time; d = pathlib.Path({tmp!r}); (d / {mine!r}).touch(); "
+                        f"end = time.time() + 60\n"
+                        f"while not (d / {other!r}).exists() and time.time() < end: time.sleep(0.05)\n"
+                        f"sys.exit(0 if (d / {other!r}).exists() else 1)")
+            failures, _ = fast.run_tasks([self.task("x", waiter("x", "y")), self.task("y", waiter("y", "x"))], 2)
+            self.assertEqual(failures, [])
+
+    def test_the_default_jobs_are_the_cpus_this_process_may_use(self):
+        expected = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 4
+        self.assertEqual(fast.default_jobs(), expected)
+
+
 STAND_IN_NCBI = '#!/bin/sh\nprintf "%s" "${BLAST_USAGE_REPORT-unset}"\n'
 
 

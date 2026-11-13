@@ -17,3 +17,19 @@ mfirst.asn	rpsblast -query q/mfirst.faa -db Cdd -evalue 0.01 -outfmt 11 -out arc
 gen2.asn	rpsblast -query q/gen2.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/gen2.asn
 motdom.asn	rpsblast -query q/motdom.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/motdom.asn
 sdsite.asn	rpsblast -query q/sdsite.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/sdsite.asn
+nt04amb.asn.gz	rpstblastn -query r04amb.fna -evalue 0.01 -db Cdd -outfmt 11 -out nt04amb.asn (then gzip -9n)
+nt49.asn.gz	rpstblastn -query r49.fna -evalue 0.01 -db Cdd -outfmt 11 -out nt49.asn (then gzip -9n)
+nt60.asn.gz	rpstblastn -query r60.fna -evalue 0.01 -db Cdd -outfmt 11 -out nt60.asn (then gzip -9n)
+nt60t1.asn.gz	rpstblastn -query r60t1.fna -evalue 0.01 -db Cdd -outfmt 11 -out nt60t1.asn (then gzip -9n)
+nt60t2.asn.gz	rpstblastn -query r60t2.fna -evalue 0.01 -db Cdd -outfmt 11 -out nt60t2.asn (then gzip -9n)
+nt63.asn.gz	rpstblastn -query r63.fna -evalue 0.01 -db Cdd -outfmt 11 -out nt63.asn (then gzip -9n)
+nt67.asn.gz	rpstblastn -query r67.fna -evalue 0.01 -db Cdd -outfmt 11 -out nt67.asn (then gzip -9n)
+nt67e10.asn.gz	rpstblastn -query r67.fna -db Cdd -outfmt 11 -out nt67e10.asn (then gzip -9n)
+nt67seg.asn.gz	rpstblastn -query r67.fna -evalue 0.01 -seg yes -db Cdd -outfmt 11 -out nt67seg.asn (then gzip -9n)
+nt68.asn.gz	rpstblastn -query r68.fna -evalue 0.01 -db Cdd -outfmt 11 -out nt68.asn (then gzip -9n)
+nt68rc.asn.gz	rpstblastn -query r68rc.fna -evalue 0.01 -db Cdd -outfmt 11 -out nt68rc.asn (then gzip -9n)
+nt94had.asn.gz	rpstblastn -query r94had.fna -evalue 0.01 -db Cdd -outfmt 11 -out nt94had.asn (then gzip -9n)
+ntnohit.asn.gz	rpstblastn -query c01.fna -evalue 0.01 -strand minus -db Cdd -outfmt 11 -out ntnohit.asn (then gzip -9n)
+ntpair.asn.gz	rpstblastn -query pair.fna -evalue 0.01 -db Cdd -outfmt 11 -out ntpair.asn (then gzip -9n)
+ntmix_p_n.asn.gz	cat mfirst.asn nt94had.asn (then gzip -9n)
+ntmix_n_p.asn.gz	cat nt94had.asn mfirst.asn (then gzip -9n)

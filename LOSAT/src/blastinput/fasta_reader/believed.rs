@@ -58,6 +58,20 @@ impl BelievedIds {
         let best = find_best(&ids, best_rank_score)
             .cloned()
             .expect("a defline parse gives at least one id");
+        Self::with_alignment_id(ids, best, strand)
+    }
+
+    /// The ids `ids` (at least one) of a Bioseq that is the query as it is (the PSSM's of
+    /// `-in_pssm`): its Seq-aligns and warnings take the first, of which NCBI makes the query's
+    /// Seq-loc (psiblast_app.cpp:540, `sl->SetWhole().Assign(*pssm->GetQuery().GetSeq().
+    /// GetFirstId())`), where a FASTA query's Seq-loc takes `FindBestChoice` of the ids it read
+    /// (`new`).
+    pub(crate) fn of_bioseq(ids: Vec<ParsedSeqId>, strand: SeqLocStrand) -> Self {
+        let first = ids.first().cloned().expect("a Bioseq with a Seq-id");
+        Self::with_alignment_id(ids, first, strand)
+    }
+
+    fn with_alignment_id(ids: Vec<ParsedSeqId>, best: ParsedSeqId, strand: SeqLocStrand) -> Self {
         let field = |kind| {
             let mut out = Vec::new();
             tabular_id(&ids, kind, &mut out);
@@ -224,7 +238,7 @@ pub(crate) fn parse_believed_defline(
         ReaderWarning::Line(line) => warn(line),
         ReaderWarning::SeqId(warning) => post_seq_id_warning_of(&name, warning, &mut *warn),
     };
-    let ids = process_ids(id_string, protein, true, line_number, &mut warn_named)
+    let ids = process_ids(id_string, protein, true, true, line_number, &mut warn_named)
         .map_err(|error| error.message)?;
     Ok(BelievedDefline {
         title_search: pos,
@@ -234,7 +248,13 @@ pub(crate) fn parse_believed_defline(
 }
 
 /// LOSAT's refusal of an id of a record, or `None`: a `gnl|BL_ORD_ID|n` id and a Geninfo import id.
-pub(crate) fn refused_id(ids: &[ParsedSeqId], role: &str, program: &str) -> Option<anyhow::Error> {
+/// `origin` names where the id comes from (`-parse_deflines`, or the PSSM of `-in_pssm`).
+pub(crate) fn refused_id(
+    ids: &[ParsedSeqId],
+    role: &str,
+    origin: &str,
+    program: &str,
+) -> Option<anyhow::Error> {
     let fasta = |id: &ParsedSeqId| {
         let mut out = Vec::new();
         label::fasta(id, &mut out);
@@ -243,7 +263,7 @@ pub(crate) fn refused_id(ids: &[ParsedSeqId], role: &str, program: &str) -> Opti
     for id in ids {
         if matches!(id, ParsedSeqId::General(Dbtag { db, .. }) if db.as_slice() == b"BL_ORD_ID") {
             return Some(anyhow::anyhow!(
-                "the {role} Seq-id {} of -parse_deflines names a database ordinal; this is not \
+                "the {role} Seq-id {} of {origin} names a database ordinal; this is not \
                  supported by LOSAT's {program}",
                 fasta(id)
             ));
@@ -253,7 +273,7 @@ pub(crate) fn refused_id(ids: &[ParsedSeqId], role: &str, program: &str) -> Opti
         // NCBI stops with `Cannot resolve gim|n` (probe of the review of DECISIONS 15).
         if matches!(id, ParsedSeqId::Giim(_)) {
             return Some(anyhow::anyhow!(
-                "the {role} Seq-id {} of -parse_deflines is a Geninfo import id, which NCBI BLAST+ \
+                "the {role} Seq-id {} of {origin} is a Geninfo import id, which NCBI BLAST+ \
                  cannot resolve; this is not supported by LOSAT's {program}",
                 fasta(id)
             ));

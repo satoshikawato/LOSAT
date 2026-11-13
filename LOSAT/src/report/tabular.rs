@@ -1235,6 +1235,19 @@ impl TabularWriter<'_> {
                 SubjectAccession => out.extend_from_slice(subject.accession),
                 SubjectAccessionVersion => out.extend_from_slice(subject.accession_version),
                 SubjectGi => push_num(out, subject.gi),
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:224-231
+                // ```c++
+                // void CBlastTabularInfo::x_PrintSubjectAllSeqIds(void)
+                // {
+                //     ITERATE(vector<list<CRef<CSeq_id> > >, iter, m_SubjectIds) {
+                //         if (iter != m_SubjectIds.begin())
+                //             m_Ostream << ";";
+                //         m_Ostream << s_GetSeqIdListString(*iter, eFullId);
+                //     }
+                // }
+                // ```
+                // `x_PrintSubjectAllGis` and `x_PrintSubjectAllAccessions` (tabular.cpp:238-264)
+                // are the same loop with `eGi` and `eAccession`.
                 SubjectAllSeqIds | SubjectAllGis | SubjectAllAccessions => {
                     if subject.all_ids.is_empty() {
                         match field {
@@ -1370,6 +1383,51 @@ impl TabularWriter<'_> {
                         out.extend_from_slice(&joined);
                     }
                 }
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:387-440
+                // ```c++
+                // void CBlastTabularInfo::x_PrintSubjectAllTitles ()
+                // {
+                // 	if(m_SubjectDefline.NotEmpty() && m_SubjectDefline->CanGet() &&
+                // 	   m_SubjectDefline->IsSet() && !m_SubjectDefline->Get().empty())
+                // 	{
+                // 		const list<CRef<CBlast_def_line> > & defline = m_SubjectDefline->Get();
+                // 		list<CRef<CBlast_def_line> >::const_iterator iter = defline.begin();
+                // 		for(; iter != defline.end(); ++iter)
+                // 		{
+                // 			if (iter != defline.begin())
+                // 						 m_Ostream << "<>";
+                //
+                // 			if((*iter)->IsSetTitle())
+                // 			{
+                // 				if((*iter)->GetTitle().empty())
+                // 					m_Ostream << NA;
+                // 				else
+                // 					m_Ostream << (*iter)->GetTitle();
+                // 			}
+                // 			else
+                // 				m_Ostream << NA;
+                // 		}
+                // 	}
+                // 	else
+                // 		m_Ostream << NA;
+                //
+                // }
+                //
+                // void CBlastTabularInfo::x_PrintSubjectTitle()
+                // ...
+                // 			if(defline.front()->IsSetTitle())
+                // 			{
+                // 				if(defline.front()->GetTitle().empty())
+                // 					m_Ostream << NA;
+                // 				else
+                // 					m_Ostream << defline.front()->GetTitle();
+                // 			}
+                // 			else
+                // 				m_Ostream << NA;
+                // ```
+                // `x_PrintSubjectTitle` is the `stitle` arm below, `x_PrintSubjectAllTitles` the
+                // `salltitles` arm after it. An absent title is empty in `titles`, so both read as
+                // `N/A`.
                 SubjectTitle => match subject.titles.and_then(|titles| titles.first()) {
                     Some(title) if !title.is_empty() => out.extend_from_slice(title),
                     _ => out.extend_from_slice(NA),

@@ -114,7 +114,7 @@ impl<E: Encoder> ArchiveOut<'_, E> {
         write(enc, &mut flush)
     }
 
-    fn finish(mut self) -> Result<()> {
+    pub(super) fn finish(mut self) -> Result<()> {
         if self.io_error.is_none() {
             if let Err(error) = self.enc.flush_to(self.sink, true) {
                 self.io_error = Some(error);
@@ -220,23 +220,35 @@ fn write_ka_block<E: Encoder>(enc: &mut E, block: &KaBlock) {
     enc.end_sequence();
 }
 
-fn write_search_archive<E: Encoder, A: AlignSource>(
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:352-364
+// ```c++
+// CRef<objects::CBlast4_request> CExportStrategy::GetSearchStrategy(void)
+// {
+// 	CRef<CBlast4_request> retval(new CBlast4_request);
+// 	if (!m_ClientId.empty())
+// 	{
+//         retval->SetIdent(m_ClientId);
+//     }
+//
+//     CRef<CBlast4_request_body> body(new CBlast4_request_body);
+//     body->SetQueue_search(*m_QueueSearchRequest);
+//     retval->SetBody(*body);
+//     return retval;
+// }
+// ```
+/// Writes the `body` member of a `Blast4-request`: the `queue-search` request of one query
+/// batch. The archive (`write_search_archive`) and the search strategy file
+/// (`strategy::write_strategy`) share it, as NCBI builds both with `CExportStrategy`.
+/// `lcase_masks` are the `LCaseMask` parameters and `search_space_option` the
+/// `EffectiveSearchSpace` option that the request has when it is written.
+fn write_request_body<E: Encoder>(
     out: &mut ArchiveOut<'_, E>,
     request: &super::ArchiveRequest,
     batch: &BatchArchive<'_>,
+    lcase_masks: &[MaskEntry],
     search_space_option: Option<i64>,
     database_list: Option<&Param>,
-    messages: &[Message],
-    aligns: &mut A,
-) -> Result<()> {
-    out.enc.begin_document("Blast4-archive");
-    out.enc.begin_sequence("Blast4-archive");
-    out.enc.member("request", 0);
-    out.enc.begin_sequence("Blast4-request");
-    out.enc.member("ident", 0);
-    // The request's `ident` is `CBlastVersion::Print()` (`crate::NCBI_BLAST_VERSION`).
-    out.enc.visible_str(crate::NCBI_BLAST_VERSION.as_bytes());
-    out.enc.end_member();
+) {
     out.enc.member("body", 1);
     out.enc.variant("Blast4-request-body", "queue-search", 8);
     out.enc.begin_sequence("Blast4-queue-search-request");
@@ -354,7 +366,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     out.enc.end_named();
     out.enc.end_member();
 
-    if batch.required.is_some() || !batch.lcase_masks.is_empty() || database_list.is_some() {
+    if batch.required.is_some() || !lcase_masks.is_empty() || database_list.is_some() {
         out.enc.member("program-options", 6);
         out.enc.begin_named("Blast4-parameters");
         out.enc.begin_list(false);
@@ -369,7 +381,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
                 );
             }
         }
-        for mask in batch.lcase_masks {
+        for mask in lcase_masks {
             out.enc.element();
             out.enc.begin_sequence("Blast4-parameter");
             out.enc.member("name", 0);
@@ -399,6 +411,33 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     out.enc.end_sequence();
     out.enc.end_variant();
     out.enc.end_member();
+}
+
+fn write_search_archive<E: Encoder, A: AlignSource>(
+    out: &mut ArchiveOut<'_, E>,
+    request: &super::ArchiveRequest,
+    batch: &BatchArchive<'_>,
+    search_space_option: Option<i64>,
+    database_list: Option<&Param>,
+    messages: &[Message],
+    aligns: &mut A,
+) -> Result<()> {
+    out.enc.begin_document("Blast4-archive");
+    out.enc.begin_sequence("Blast4-archive");
+    out.enc.member("request", 0);
+    out.enc.begin_sequence("Blast4-request");
+    out.enc.member("ident", 0);
+    // The request's `ident` is `CBlastVersion::Print()` (`crate::NCBI_BLAST_VERSION`).
+    out.enc.visible_str(crate::NCBI_BLAST_VERSION.as_bytes());
+    out.enc.end_member();
+    write_request_body(
+        out,
+        request,
+        batch,
+        batch.lcase_masks,
+        search_space_option,
+        database_list,
+    );
     out.enc.end_sequence();
     out.enc.end_member();
 
@@ -450,6 +489,43 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     out.enc.end_sequence();
     out.enc.end_document();
     Ok(())
+}
+
+/// Writes the `Blast4-request` of one query batch as a document of its own: the search strategy
+/// file's (`-export_search_strategy`). NCBI's applications give `CExportStrategy` no client id
+/// (blast_app_util.cpp:335-337), so the request has no `ident`.
+pub(super) fn write_strategy_document<E: Encoder>(
+    out: &mut ArchiveOut<'_, E>,
+    request: &super::ArchiveRequest,
+    batch: &BatchArchive<'_>,
+    lcase_masks: &[MaskEntry],
+    search_space_option: Option<i64>,
+    database_list: Option<&Param>,
+) {
+    out.enc.begin_document("Blast4-request");
+    out.enc.begin_sequence("Blast4-request");
+    write_request_body(
+        out,
+        request,
+        batch,
+        lcase_masks,
+        search_space_option,
+        database_list,
+    );
+    out.enc.end_sequence();
+    out.enc.end_document();
+}
+
+/// The text encoder over `sink` (the strategy file is always ASN.1 text).
+pub(super) fn text_out<'s, 'b>(
+    buf: &'b mut Vec<u8>,
+    sink: &'s mut dyn Write,
+) -> ArchiveOut<'s, AsnTextEncoder<'b>> {
+    ArchiveOut {
+        enc: AsnTextEncoder::new(buf),
+        sink,
+        io_error: None,
+    }
 }
 
 fn write_error_document<E: Encoder>(out: &mut ArchiveOut<'_, E>, messages: &[Message]) {

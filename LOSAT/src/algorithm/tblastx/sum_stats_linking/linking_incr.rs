@@ -203,7 +203,7 @@
 //! # Index 1 (large gaps, link_hsps.c:771-896)
 //!
 //! The candidates of H are the remaining HSPs before H with qo > qe(H) and
-//! so > se(H). Every pass sweeps the remaining HSPs with score > cutoff[1] by
+//! so > se(H). Every pass sweeps the remaining HSPs with score > `cutoff[1]` by
 //! decreasing `q_end_trim`: every candidate of H has qe >= qo > qe(H), so it
 //! has its value of this pass before H is visited, as in NCBI's list-order
 //! loop. "qo > qe(H)" is then a prefix of the HSPs by decreasing qo, which the
@@ -229,7 +229,7 @@
 //! The tree returns the largest candidate whatever its sum, NCBI the largest
 //! one above its start value: 0, or `sum - 1` of the previous choice. They
 //! agree because every candidate in the tree has a positive sum (an HSP with
-//! score > cutoff[1] has a sum of at least score - cutoff[1] > 0, the sums
+//! score > `cutoff[1]` has a sum of at least score - `cutoff[1]` > 0, the sums
 //! being exact), and the previous choice, when it remains, is itself a
 //! candidate above `sum - 1` ("What a search returns").
 //!
@@ -255,7 +255,7 @@
 //! add-back is clamped to the range of the key, which does not change what the
 //! kernel selects:
 //!
-//! - Only best[index] receives an add-back, and between two passes no other
+//! - Only `best[index]` receives an add-back, and between two passes no other
 //!   value grows. A value reaches the top only while its HSP is the maximum;
 //!   it then stays above every other value until the HSP is removed or the
 //!   next pass writes its pass value back, so no two values are at the top.

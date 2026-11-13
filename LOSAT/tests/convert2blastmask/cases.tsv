@@ -1,0 +1,268 @@
+# name<TAB>arguments (shell words, run in this directory; "< file" = stdin). NCBI BLAST+ 2.17.0 convert2blastmask, the official Linux x64 release (local oracle), 2026-11-13, ad-RG-K-6 (line RG item K3):
+# in/ made by remaining-gaps-20261112/K/k3/probe/gen_inputs.py; conf/malformed.ini is that of tests/segmasker. Run without LOSAT_, NCBI_ and BLAST variables but NCBI_CONFIG_PATH (this directory) and BLAST_USAGE_REPORT=false (NCBI only).
+# Not frozen: -version, -version-full and -xmlhelp (LOSAT prints its own version and refuses the others, as dustmasker), the -out /dev/full rows of the maskinfo formats (LOSAT refuses a failed write of the serial stream) and -masking_options with a byte outside the visible ASCII range in maskinfo_asn1_text and maskinfo_asn1_bin (NCBI writes # for it and posts an error; LOSAT refuses it, as in an archive).
+# gapinv_* (a lower case letter at position 4294967295, kInvalidSeqPos: no interval opens there; RG DECISIONS K3-8) frozen 2026-11-13 by ad-RG-K-7 with the local official release, in/gapinv.fa by hand (the F2 review's inv.fa). gapwrap0_* and gapwrap1_* (>? lines that sum to 2^32 or more; RG DECISIONS K3-6): frozen on ws with its NCBI BLAST+ 2.17.0 (env_blast) under a 32 GiB address space, since NCBI allocates the run of N of gapwrap1 (4 GiB, 8.4 GB resident); in/gapwrap*.fa written by hand.
+ambig_int	-in in/ambig.fa -masking_algorithm dust -masking_options o -outfmt interval
+ambig_txt	-in in/ambig.fa -masking_algorithm dust -masking_options o
+ambig_ps	-in in/ambig.fa -masking_algorithm dust -masking_options o -parse_seqids
+ambig2_int	-in in/ambig2.fa -masking_algorithm dust -masking_options o -outfmt interval
+ambig2_txt	-in in/ambig2.fa -masking_algorithm dust -masking_options o
+ambig2_ps	-in in/ambig2.fa -masking_algorithm dust -masking_options o -parse_seqids
+big_lower_int	-in in/big_lower.fa -masking_algorithm dust -masking_options o -outfmt interval
+big_lower_txt	-in in/big_lower.fa -masking_algorithm dust -masking_options o
+big_lower_ps	-in in/big_lower.fa -masking_algorithm dust -masking_options o -parse_seqids
+blank_int	-in in/blank.fa -masking_algorithm dust -masking_options o -outfmt interval
+blank_txt	-in in/blank.fa -masking_algorithm dust -masking_options o
+blank_ps	-in in/blank.fa -masking_algorithm dust -masking_options o -parse_seqids
+comment_int	-in in/comment.fa -masking_algorithm dust -masking_options o -outfmt interval
+comment_txt	-in in/comment.fa -masking_algorithm dust -masking_options o
+comment_ps	-in in/comment.fa -masking_algorithm dust -masking_options o -parse_seqids
+comment_only_int	-in in/comment_only.fa -masking_algorithm dust -masking_options o -outfmt interval
+comment_only_txt	-in in/comment_only.fa -masking_algorithm dust -masking_options o
+comment_only_ps	-in in/comment_only.fa -masking_algorithm dust -masking_options o -parse_seqids
+crlf_int	-in in/crlf.fa -masking_algorithm dust -masking_options o -outfmt interval
+crlf_txt	-in in/crlf.fa -masking_algorithm dust -masking_options o
+crlf_ps	-in in/crlf.fa -masking_algorithm dust -masking_options o -parse_seqids
+defline_empty_int	-in in/defline_empty.fa -masking_algorithm dust -masking_options o -outfmt interval
+defline_empty_txt	-in in/defline_empty.fa -masking_algorithm dust -masking_options o
+defline_empty_ps	-in in/defline_empty.fa -masking_algorithm dust -masking_options o -parse_seqids
+defline_space_int	-in in/defline_space.fa -masking_algorithm dust -masking_options o -outfmt interval
+defline_space_txt	-in in/defline_space.fa -masking_algorithm dust -masking_options o
+defline_space_ps	-in in/defline_space.fa -masking_algorithm dust -masking_options o -parse_seqids
+defonly_int	-in in/defonly.fa -masking_algorithm dust -masking_options o -outfmt interval
+defonly_txt	-in in/defonly.fa -masking_algorithm dust -masking_options o
+defonly_ps	-in in/defonly.fa -masking_algorithm dust -masking_options o -parse_seqids
+defonly2_int	-in in/defonly2.fa -masking_algorithm dust -masking_options o -outfmt interval
+defonly2_txt	-in in/defonly2.fa -masking_algorithm dust -masking_options o
+defonly2_ps	-in in/defonly2.fa -masking_algorithm dust -masking_options o -parse_seqids
+digits_in_seq_int	-in in/digits_in_seq.fa -masking_algorithm dust -masking_options o -outfmt interval
+digits_in_seq_txt	-in in/digits_in_seq.fa -masking_algorithm dust -masking_options o
+digits_in_seq_ps	-in in/digits_in_seq.fa -masking_algorithm dust -masking_options o -parse_seqids
+dup_int	-in in/dup.fa -masking_algorithm dust -masking_options o -outfmt interval
+dup_txt	-in in/dup.fa -masking_algorithm dust -masking_options o
+dup_ps	-in in/dup.fa -masking_algorithm dust -masking_options o -parse_seqids
+empty_int	-in in/empty.fa -masking_algorithm dust -masking_options o -outfmt interval
+empty_txt	-in in/empty.fa -masking_algorithm dust -masking_options o
+empty_ps	-in in/empty.fa -masking_algorithm dust -masking_options o -parse_seqids
+exotic_int	-in in/exotic.fa -masking_algorithm dust -masking_options o -outfmt interval
+exotic_txt	-in in/exotic.fa -masking_algorithm dust -masking_options o
+exotic_ps	-in in/exotic.fa -masking_algorithm dust -masking_options o -parse_seqids
+gap_int	-in in/gap.fa -masking_algorithm dust -masking_options o -outfmt interval
+gap_txt	-in in/gap.fa -masking_algorithm dust -masking_options o
+gap_ps	-in in/gap.fa -masking_algorithm dust -masking_options o -parse_seqids
+gap0_int	-in in/gap0.fa -masking_algorithm dust -masking_options o -outfmt interval
+gap0_txt	-in in/gap0.fa -masking_algorithm dust -masking_options o
+gap0_ps	-in in/gap0.fa -masking_algorithm dust -masking_options o -parse_seqids
+gapbad_int	-in in/gapbad.fa -masking_algorithm dust -masking_options o -outfmt interval
+gapbad_txt	-in in/gapbad.fa -masking_algorithm dust -masking_options o
+gapbad_ps	-in in/gapbad.fa -masking_algorithm dust -masking_options o -parse_seqids
+gapwrap0_int	-in in/gapwrap0.fa -masking_algorithm dust -masking_options o -outfmt interval
+gapwrap0_txt	-in in/gapwrap0.fa -masking_algorithm dust -masking_options o
+gapwrap1_int	-in in/gapwrap1.fa -masking_algorithm dust -masking_options o -outfmt interval
+gapwrap1_txt	-in in/gapwrap1.fa -masking_algorithm dust -masking_options o
+gapinv_int	-in in/gapinv.fa -masking_algorithm dust -masking_options o -outfmt interval
+gapinv_txt	-in in/gapinv.fa -masking_algorithm dust -masking_options o
+gaplc_int	-in in/gaplc.fa -masking_algorithm dust -masking_options o -outfmt interval
+gaplc_txt	-in in/gaplc.fa -masking_algorithm dust -masking_options o
+gaplc_ps	-in in/gaplc.fa -masking_algorithm dust -masking_options o -parse_seqids
+gapunk_int	-in in/gapunk.fa -masking_algorithm dust -masking_options o -outfmt interval
+gapunk_txt	-in in/gapunk.fa -masking_algorithm dust -masking_options o
+gapunk_ps	-in in/gapunk.fa -masking_algorithm dust -masking_options o -parse_seqids
+gt_inside_int	-in in/gt_inside.fa -masking_algorithm dust -masking_options o -outfmt interval
+gt_inside_txt	-in in/gt_inside.fa -masking_algorithm dust -masking_options o
+gt_inside_ps	-in in/gt_inside.fa -masking_algorithm dust -masking_options o -parse_seqids
+guess_window_int	-in in/guess_window.fa -masking_algorithm dust -masking_options o -outfmt interval
+guess_window_txt	-in in/guess_window.fa -masking_algorithm dust -masking_options o
+guess_window_ps	-in in/guess_window.fa -masking_algorithm dust -masking_options o -parse_seqids
+hibyte_int	-in in/hibyte.fa -masking_algorithm dust -masking_options o -outfmt interval
+hibyte_txt	-in in/hibyte.fa -masking_algorithm dust -masking_options o
+hibyte_ps	-in in/hibyte.fa -masking_algorithm dust -masking_options o -parse_seqids
+hyphen_int	-in in/hyphen.fa -masking_algorithm dust -masking_options o -outfmt interval
+hyphen_txt	-in in/hyphen.fa -masking_algorithm dust -masking_options o
+hyphen_ps	-in in/hyphen.fa -masking_algorithm dust -masking_options o -parse_seqids
+ids_int	-in in/ids.fa -masking_algorithm dust -masking_options o -outfmt interval
+ids_txt	-in in/ids.fa -masking_algorithm dust -masking_options o
+ids_ps	-in in/ids.fa -masking_algorithm dust -masking_options o -parse_seqids
+ids2_int	-in in/ids2.fa -masking_algorithm dust -masking_options o -outfmt interval
+ids2_txt	-in in/ids2.fa -masking_algorithm dust -masking_options o
+ids2_ps	-in in/ids2.fa -masking_algorithm dust -masking_options o -parse_seqids
+ids3_int	-in in/ids3.fa -masking_algorithm dust -masking_options o -outfmt interval
+ids3_txt	-in in/ids3.fa -masking_algorithm dust -masking_options o
+ids3_ps	-in in/ids3.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_int	-in in/iv.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_txt	-in in/iv.fa -masking_algorithm dust -masking_options o
+iv_ps	-in in/iv.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_big_int	-in in/iv_big.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_big_txt	-in in/iv_big.fa -masking_algorithm dust -masking_options o
+iv_big_ps	-in in/iv_big.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_err1_int	-in in/iv_err1.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_err1_txt	-in in/iv_err1.fa -masking_algorithm dust -masking_options o
+iv_err1_ps	-in in/iv_err1.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_err2_int	-in in/iv_err2.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_err2_txt	-in in/iv_err2.fa -masking_algorithm dust -masking_options o
+iv_err2_ps	-in in/iv_err2.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_err3_int	-in in/iv_err3.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_err3_txt	-in in/iv_err3.fa -masking_algorithm dust -masking_options o
+iv_err3_ps	-in in/iv_err3.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_err4_int	-in in/iv_err4.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_err4_txt	-in in/iv_err4.fa -masking_algorithm dust -masking_options o
+iv_err4_ps	-in in/iv_err4.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_err5_int	-in in/iv_err5.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_err5_txt	-in in/iv_err5.fa -masking_algorithm dust -masking_options o
+iv_err5_ps	-in in/iv_err5.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_lc_int	-in in/iv_lc.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_lc_txt	-in in/iv_lc.fa -masking_algorithm dust -masking_options o
+iv_lc_ps	-in in/iv_lc.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_lead0_int	-in in/iv_lead0.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_lead0_txt	-in in/iv_lead0.fa -masking_algorithm dust -masking_options o
+iv_lead0_ps	-in in/iv_lead0.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_mixed_int	-in in/iv_mixed.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_mixed_txt	-in in/iv_mixed.fa -masking_algorithm dust -masking_options o
+iv_mixed_ps	-in in/iv_mixed.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_multi_int	-in in/iv_multi.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_multi_txt	-in in/iv_multi.fa -masking_algorithm dust -masking_options o
+iv_multi_ps	-in in/iv_multi.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_neg_first_int	-in in/iv_neg_first.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_neg_first_txt	-in in/iv_neg_first.fa -masking_algorithm dust -masking_options o
+iv_neg_first_ps	-in in/iv_neg_first.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_over_int	-in in/iv_over.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_over_txt	-in in/iv_over.fa -masking_algorithm dust -masking_options o
+iv_over_ps	-in in/iv_over.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_plus_int	-in in/iv_plus.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_plus_txt	-in in/iv_plus.fa -masking_algorithm dust -masking_options o
+iv_plus_ps	-in in/iv_plus.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_rev_int	-in in/iv_rev.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_rev_txt	-in in/iv_rev.fa -masking_algorithm dust -masking_options o
+iv_rev_ps	-in in/iv_rev.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_sp_inside_int	-in in/iv_sp_inside.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_sp_inside_txt	-in in/iv_sp_inside.fa -masking_algorithm dust -masking_options o
+iv_sp_inside_ps	-in in/iv_sp_inside.fa -masking_algorithm dust -masking_options o -parse_seqids
+iv_tab_int	-in in/iv_tab.fa -masking_algorithm dust -masking_options o -outfmt interval
+iv_tab_txt	-in in/iv_tab.fa -masking_algorithm dust -masking_options o
+iv_tab_ps	-in in/iv_tab.fa -masking_algorithm dust -masking_options o -parse_seqids
+lc_int	-in in/lc.fa -masking_algorithm dust -masking_options o -outfmt interval
+lc_txt	-in in/lc.fa -masking_algorithm dust -masking_options o
+lc_ps	-in in/lc.fa -masking_algorithm dust -masking_options o -parse_seqids
+lead_space_int	-in in/lead_space.fa -masking_algorithm dust -masking_options o -outfmt interval
+lead_space_txt	-in in/lead_space.fa -masking_algorithm dust -masking_options o
+lead_space_ps	-in in/lead_space.fa -masking_algorithm dust -masking_options o -parse_seqids
+lowcase_nuc_n_int	-in in/lowcase_nuc_n.fa -masking_algorithm dust -masking_options o -outfmt interval
+lowcase_nuc_n_txt	-in in/lowcase_nuc_n.fa -masking_algorithm dust -masking_options o
+lowcase_nuc_n_ps	-in in/lowcase_nuc_n.fa -masking_algorithm dust -masking_options o -parse_seqids
+many_int	-in in/many.fa -masking_algorithm dust -masking_options o -outfmt interval
+many_txt	-in in/many.fa -masking_algorithm dust -masking_options o
+many_ps	-in in/many.fa -masking_algorithm dust -masking_options o -parse_seqids
+nodef_int	-in in/nodef.fa -masking_algorithm dust -masking_options o -outfmt interval
+nodef_txt	-in in/nodef.fa -masking_algorithm dust -masking_options o
+nodef_ps	-in in/nodef.fa -masking_algorithm dust -masking_options o -parse_seqids
+nomask_int	-in in/nomask.fa -masking_algorithm dust -masking_options o -outfmt interval
+nomask_txt	-in in/nomask.fa -masking_algorithm dust -masking_options o
+nomask_ps	-in in/nomask.fa -masking_algorithm dust -masking_options o -parse_seqids
+nucE_int	-in in/nucE.fa -masking_algorithm dust -masking_options o -outfmt interval
+nucE_txt	-in in/nucE.fa -masking_algorithm dust -masking_options o
+nucE_ps	-in in/nucE.fa -masking_algorithm dust -masking_options o -parse_seqids
+nucE2_int	-in in/nucE2.fa -masking_algorithm dust -masking_options o -outfmt interval
+nucE2_txt	-in in/nucE2.fa -masking_algorithm dust -masking_options o
+nucE2_ps	-in in/nucE2.fa -masking_algorithm dust -masking_options o -parse_seqids
+nul_int	-in in/nul.fa -masking_algorithm dust -masking_options o -outfmt interval
+nul_txt	-in in/nul.fa -masking_algorithm dust -masking_options o
+nul_ps	-in in/nul.fa -masking_algorithm dust -masking_options o -parse_seqids
+prot_int	-in in/prot.fa -masking_algorithm dust -masking_options o -outfmt interval
+prot_txt	-in in/prot.fa -masking_algorithm dust -masking_options o
+prot_ps	-in in/prot.fa -masking_algorithm dust -masking_options o -parse_seqids
+range_only_int	-in in/range_only.fa -masking_algorithm dust -masking_options o -outfmt interval
+range_only_txt	-in in/range_only.fa -masking_algorithm dust -masking_options o
+range_only_ps	-in in/range_only.fa -masking_algorithm dust -masking_options o -parse_seqids
+star_int	-in in/star.fa -masking_algorithm dust -masking_options o -outfmt interval
+star_txt	-in in/star.fa -masking_algorithm dust -masking_options o
+star_ps	-in in/star.fa -masking_algorithm dust -masking_options o -parse_seqids
+title_mods_int	-in in/title_mods.fa -masking_algorithm dust -masking_options o -outfmt interval
+title_mods_txt	-in in/title_mods.fa -masking_algorithm dust -masking_options o
+title_mods_ps	-in in/title_mods.fa -masking_algorithm dust -masking_options o -parse_seqids
+trailing_blank_int	-in in/trailing_blank.fa -masking_algorithm dust -masking_options o -outfmt interval
+trailing_blank_txt	-in in/trailing_blank.fa -masking_algorithm dust -masking_options o
+trailing_blank_ps	-in in/trailing_blank.fa -masking_algorithm dust -masking_options o -parse_seqids
+trailing_comment_int	-in in/trailing_comment.fa -masking_algorithm dust -masking_options o -outfmt interval
+trailing_comment_txt	-in in/trailing_comment.fa -masking_algorithm dust -masking_options o
+trailing_comment_ps	-in in/trailing_comment.fa -masking_algorithm dust -masking_options o -parse_seqids
+xlow_int	-in in/xlow.fa -masking_algorithm dust -masking_options o -outfmt interval
+xlow_txt	-in in/xlow.fa -masking_algorithm dust -masking_options o
+xlow_ps	-in in/xlow.fa -masking_algorithm dust -masking_options o -parse_seqids
+lc_xml	-in in/lc.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_xml
+lc_bin	-in in/lc.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_asn1_bin
+iv_xml	-in in/iv.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_xml
+iv_bin	-in in/iv.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_asn1_bin
+ids_xml	-in in/ids.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_xml
+ids_bin	-in in/ids.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_asn1_bin
+ids2_xml	-in in/ids2.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_xml
+ids2_bin	-in in/ids2.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_asn1_bin
+iv_big_xml	-in in/iv_big.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_xml
+iv_big_bin	-in in/iv_big.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_asn1_bin
+gap_xml	-in in/gap.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_xml
+gap_bin	-in in/gap.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_asn1_bin
+empty_xml	-in in/empty.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_xml
+empty_bin	-in in/empty.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_asn1_bin
+defonly2_xml	-in in/defonly2.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_xml
+defonly2_bin	-in in/defonly2.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_asn1_bin
+prot_xml	-in in/prot.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_xml
+prot_bin	-in in/prot.fa -masking_algorithm dust -masking_options o -outfmt maskinfo_asn1_bin
+ids_ps_int	-in in/ids.fa -masking_algorithm dust -masking_options o -parse_seqids -outfmt interval
+ids_ps_xml	-in in/ids.fa -masking_algorithm dust -masking_options o -parse_seqids -outfmt maskinfo_xml
+ids2_ps_int	-in in/ids2.fa -masking_algorithm dust -masking_options o -parse_seqids -outfmt interval
+ids2_ps_xml	-in in/ids2.fa -masking_algorithm dust -masking_options o -parse_seqids -outfmt maskinfo_xml
+ids3_ps_int	-in in/ids3.fa -masking_algorithm dust -masking_options o -parse_seqids -outfmt interval
+ids3_ps_xml	-in in/ids3.fa -masking_algorithm dust -masking_options o -parse_seqids -outfmt maskinfo_xml
+hibyte_ps_int	-in in/hibyte.fa -masking_algorithm dust -masking_options o -parse_seqids -outfmt interval
+hibyte_ps_xml	-in in/hibyte.fa -masking_algorithm dust -masking_options o -parse_seqids -outfmt maskinfo_xml
+range_only_ps_int	-in in/range_only.fa -masking_algorithm dust -masking_options o -parse_seqids -outfmt interval
+range_only_ps_xml	-in in/range_only.fa -masking_algorithm dust -masking_options o -parse_seqids -outfmt maskinfo_xml
+noalgo	-in in/lc.fa -masking_options o
+noopts	-in in/lc.fa -masking_algorithm dust
+noboth	-in in/lc.fa
+noargs	
+h	-h
+help	-help
+help_full	-help-full
+h_noalgo	-h -in in/lc.fa
+outfmt_bad	-in in/lc.fa -masking_algorithm dust -masking_options o -outfmt fasta
+outfmt_seqloc	-in in/lc.fa -masking_algorithm dust -masking_options o -outfmt seqloc_xml
+outfmt_case	-in in/lc.fa -masking_algorithm dust -masking_options o -outfmt INTERVAL
+unknown	-in in/lc.fa -masking_algorithm dust -masking_options o -foo
+twice	-in in/lc.fa -masking_algorithm dust -masking_options o -masking_algorithm seg
+extra	-in in/lc.fa -masking_algorithm dust -masking_options o extra
+eq_form	-in=in/lc.fa -masking_algorithm=seg -masking_options=x
+algo_notset	-in in/lc.fa -masking_algorithm NOT_SET -masking_options o
+algo_Dust	-in in/lc.fa -masking_algorithm Dust -masking_options o
+algo_seg	-in in/lc.fa -masking_algorithm SEG -masking_options o
+algo_wm	-in in/lc.fa -masking_algorithm WindowMasker -masking_options o
+algo_repeat	-in in/lc.fa -masking_algorithm repeat -masking_options o
+algo_other	-in in/lc.fa -masking_algorithm other -masking_options o
+algo_empty	-in in/lc.fa -masking_algorithm '' -masking_options o
+algo_foo	-in in/lc.fa -masking_algorithm foo -masking_options o
+algo_notset_space	-in in/lc.fa -masking_algorithm 'not set' -masking_options o
+algo_notset_xml	-in in/lc.fa -masking_algorithm not_set -masking_options o -outfmt maskinfo_xml
+algo_wm_bin	-in in/lc.fa -masking_algorithm windowmasker -masking_options o -outfmt maskinfo_asn1_bin
+algo_repeat_xml	-in in/lc.fa -masking_algorithm repeat -masking_options o -outfmt maskinfo_xml
+opt_quote	-in in/lc.fa -masking_algorithm dust -masking_options 'a"b""c'
+opt_quote_xml	-in in/lc.fa -masking_algorithm dust -masking_options '<a&b>"x' -outfmt maskinfo_xml
+opt_quote_bin	-in in/lc.fa -masking_algorithm dust -masking_options 'a"b' -outfmt maskinfo_asn1_bin
+opt_empty	-in in/lc.fa -masking_algorithm dust -masking_options ''
+opt_empty_xml	-in in/lc.fa -masking_algorithm dust -masking_options '' -outfmt maskinfo_xml
+opt_utf8_xml	-in in/lc.fa -masking_algorithm dust -masking_options 'é' -outfmt maskinfo_xml
+opt_long	-in in/lc.fa -masking_algorithm dust -masking_options 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+opt_spaces	-in in/lc.fa -masking_algorithm dust -masking_options '  -window 64 -level 20  '
+in_missing	-in in/nonexistent.fa -masking_algorithm dust -masking_options o
+in_dir	-in in -masking_algorithm dust -masking_options o
+out_bad	-in in/lc.fa -masking_algorithm dust -masking_options o -out /nonexistent/x.asn
+out_bad_noin	-in in/nonexistent.fa -masking_algorithm dust -masking_options o -out /nonexistent/x.asn
+out_bad_indir	-in in -masking_algorithm dust -masking_options o -out /nonexistent/x.asn
+out_null	-in in/lc.fa -masking_algorithm dust -masking_options o -out /dev/null
+out_full_int	-in in/lc.fa -masking_algorithm dust -masking_options o -out /dev/full -outfmt interval
+stdin_txt	-masking_algorithm dust -masking_options o < in/lc.fa
+stdin_dash	-in - -masking_algorithm dust -masking_options o -outfmt interval < in/iv_lc.fa
+stdin_empty	-masking_algorithm dust -masking_options o < in/empty.fa
+logfile_err	-in in/iv_err1.fa -masking_algorithm dust -masking_options o -logfile /dev/null
+logfile_argerr	-in in/lc.fa -masking_options o -logfile /dev/null
+logfile_ok	-in in/lc.fa -masking_algorithm dust -masking_options o -logfile /dev/null -outfmt interval
+conf_malformed	-conffile conf/malformed.ini -in in/lc.fa -masking_algorithm dust -masking_options o
+dryrun	-dryrun -in in/lc.fa -masking_algorithm dust -masking_options o

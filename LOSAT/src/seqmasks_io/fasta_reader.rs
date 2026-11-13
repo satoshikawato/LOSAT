@@ -25,7 +25,9 @@
 //! - [`MaskReadError`]: `Ncbi(NcbiException)`, a `CObjReaderParseException` (dustmasker
 //!   writes `e.report_default_ex(106, 16, "Application's execution failed")` and exits with
 //!   3; segmasker writes `e.what()` and a line feed and exits with 1); `Read(std::io::Error)`,
-//!   a failed read of the input; `OutOfMemory`, the `std::bad_alloc` of a gap line's length.
+//!   a failed read of the input; `OutOfMemory`, the `std::bad_alloc` of a gap line's length;
+//!   `Refused(what)`, a record past NCBI's 32-bit length (`SeqInst::PastSeqPos`), which LOSAT
+//!   refuses.
 //! - Warnings (`writedb::fasta_source::reader::ReaderWarning`, passed to a
 //!   `FnMut(ReaderWarning<'_>)`): `Line(message)`, which NCBI writes as the line `message`
 //!   (`LOG_POST`), and `SeqId(warning)`, which it writes as `Warning: (1306.<subcode>)
@@ -41,7 +43,8 @@ use crate::seqid::model::{ObjectId, ParsedSeqId};
 use crate::writedb::bioseq::SeqData;
 use crate::writedb::fasta_source::pack::{iupacna_to_ncbi2na, iupacna_to_ncbi4na, Coding};
 use crate::writedb::fasta_source::reader::{
-    DeltaSeq, ErrCode, FastaReader, ReadError, ReaderFlags, ReaderWarn, Record, SeqInst,
+    past_seq_pos_refusal, DeltaSeq, ErrCode, FastaReader, ReadError, ReaderFlags, ReaderWarn,
+    Record, SeqInst,
 };
 
 // NCBI reference: libstdc++'s `basic_filebuf::xsgetn` (GCC 14, the compiler of NCBI's 2.17.0
@@ -90,6 +93,9 @@ pub(crate) enum MaskReadError {
     /// The `std::bad_alloc` of a record whose `>?` lines state more residues than can be
     /// allocated.
     OutOfMemory,
+    /// What LOSAT refuses (the text before `is not supported by LOSAT's <program>`): a record
+    /// past NCBI's `TSeqPos` (`SeqInst::PastSeqPos`).
+    Refused(String),
 }
 
 /// `CMaskFastaReader`.
@@ -221,6 +227,24 @@ impl<R: Read> MaskFastaReader<R> {
         match result {
             Ok(record) => {
                 let parsed_ids = reader.parses_ids();
+                if let SeqInst::PastSeqPos { length, .. } = record.inst {
+                    self.reader = None;
+                    let record = mask_record(
+                        Record {
+                            inst: SeqInst::Virtual,
+                            ..record
+                        },
+                        parsed_ids,
+                    );
+                    let mut id = Vec::new();
+                    if let Some(first) = record.ids.first() {
+                        crate::seqid::label::fasta(first, &mut id);
+                    }
+                    return Err(MaskReadError::Refused(past_seq_pos_refusal(
+                        &String::from_utf8_lossy(&id),
+                        length,
+                    )));
+                }
                 Ok(Some(mask_record(record, parsed_ids)))
             }
             Err(ReadError::Parse(error)) if error.code == ErrCode::Eof => {
@@ -230,6 +254,10 @@ impl<R: Read> MaskFastaReader<R> {
             Err(ReadError::Parse(error)) => {
                 self.reader = None;
                 Err(MaskReadError::Ncbi(error.exception()))
+            }
+            Err(ReadError::Ncbi(exception)) => {
+                self.reader = None;
+                Err(MaskReadError::Ncbi(exception))
             }
             Err(ReadError::OutOfMemory) => {
                 self.reader = None;
@@ -271,7 +299,8 @@ fn mask_record(record: Record, parsed_ids: bool) -> MaskRecord {
 /// }
 /// ```
 /// A virtual sequence (`fDisableNoResidues`) and a record above makeblastdb's length limit do
-/// not come from this reader's flags.
+/// not come from this reader's flags, and a record past NCBI's `TSeqPos` is refused before
+/// (`MaskFastaReader::next`).
 fn iupac_letters(inst: SeqInst) -> Vec<u8> {
     match inst {
         SeqInst::Raw { length, seq_data } => match seq_data {
@@ -302,7 +331,7 @@ fn iupac_letters(inst: SeqInst) -> Vec<u8> {
             }
             letters
         }
-        SeqInst::Virtual | SeqInst::TooLong { .. } => Vec::new(),
+        SeqInst::Virtual | SeqInst::TooLong { .. } | SeqInst::PastSeqPos { .. } => Vec::new(),
     }
 }
 

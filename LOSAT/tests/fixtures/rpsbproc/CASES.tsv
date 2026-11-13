@@ -188,3 +188,54 @@ e1c_subj_out_log	compare	-	-	-i arch/bad/subj_sequences.asn -d data -o out.txt -
 e1c_mat_longdb_same	compare	-	-	-i arch/bad/matrix_integer_longdb.asn -d data -o log.txt -logfile log.txt
 e1c_mat_db8165_same	compare	-	-	-i arch/bad/matrix_integer_db8165.asn -d data -o log.txt -logfile log.txt
 linux_cout_longdb	linux	-	-	-i arch/bad/matrix_integer_longdb.asn -d data -logfile /dev/stdout
+nt67.both.rep	compare	-	data-with:nt	-i arch/nt67.asn -d nt -t both -m rep
+nt67.both.std	compare	-	data-with:nt	-i arch/nt67.asn -d nt -t both -m std
+nt67.both.full.f	compare	-	data-with:nt	-i arch/nt67.asn -d nt -t both -m full -f
+nt67.doms.rep	compare	-	data-with:nt	-i arch/nt67.asn -d nt -t doms -m rep
+nt67.doms.full.f	compare	-	data-with:nt	-i arch/nt67.asn -d nt -t doms -m full -f
+nt67.feats.rep	compare	-	data-with:nt	-i arch/nt67.asn -d nt -t feats -m rep
+nt67.feats.full	compare	-	data-with:nt	-i arch/nt67.asn -d nt -t feats -m full
+nt67.default	compare	-	data-with:nt	-i arch/nt67.asn -d nt
+nt67.prev.rep	compare	-	data-with:nt+ntprev	-i arch/nt67.asn -d ntprev -t both -m rep
+nt67.prev.full.f	compare	-	data-with:nt+ntprev	-i arch/nt67.asn -d ntprev -t both -m full -f
+nt63.both.rep	compare	-	data-with:nt	-i arch/nt63.asn -d nt -t both -m rep
+nt63.both.full.f	compare	-	data-with:nt	-i arch/nt63.asn -d nt -t both -m full -f
+nt68.both.rep	compare	-	data-with:nt	-i arch/nt68.asn -d nt -t both -m rep
+nt68.both.full.f	compare	-	data-with:nt	-i arch/nt68.asn -d nt -t both -m full -f
+nt68rc.both.rep	compare	-	data-with:nt	-i arch/nt68rc.asn -d nt -t both -m rep
+nt68rc.both.full.f	compare	-	data-with:nt	-i arch/nt68rc.asn -d nt -t both -m full -f
+nt60.both.rep	compare	-	data-with:nt	-i arch/nt60.asn -d nt -t both -m rep
+nt60.both.full.f	compare	-	data-with:nt	-i arch/nt60.asn -d nt -t both -m full -f
+nt60t1.both.rep	compare	-	data-with:nt	-i arch/nt60t1.asn -d nt -t both -m rep
+nt60t1.both.full.f	compare	-	data-with:nt	-i arch/nt60t1.asn -d nt -t both -m full -f
+nt60t2.both.rep	compare	-	data-with:nt	-i arch/nt60t2.asn -d nt -t both -m rep
+nt60t2.both.full.f	compare	-	data-with:nt	-i arch/nt60t2.asn -d nt -t both -m full -f
+nt04amb.both.rep	compare	-	data-with:nt	-i arch/nt04amb.asn -d nt -t both -m rep
+nt04amb.both.full.f	compare	-	data-with:nt	-i arch/nt04amb.asn -d nt -t both -m full -f
+nt67seg.both.rep	compare	-	data-with:nt	-i arch/nt67seg.asn -d nt -t both -m rep
+nt67seg.both.full.f	compare	-	data-with:nt	-i arch/nt67seg.asn -d nt -t both -m full -f
+nt67e10.both.rep	compare	-	data-with:nt	-i arch/nt67e10.asn -d nt -t both -m rep
+nt67e10.both.full.f	compare	-	data-with:nt	-i arch/nt67e10.asn -d nt -t both -m full -f
+ntpair.both.rep	compare	-	data-with:nt	-i arch/ntpair.asn -d nt -t both -m rep
+ntpair.both.full.f	compare	-	data-with:nt	-i arch/ntpair.asn -d nt -t both -m full -f
+ntnohit.both.rep	compare	-	data-with:nt	-i arch/ntnohit.asn -d nt -t both -m rep
+ntnohit.both.full.f	compare	-	data-with:nt	-i arch/ntnohit.asn -d nt -t both -m full -f
+nt49.both.rep	compare	-	data-with:nt	-i arch/nt49.asn -d nt -t both -m rep
+nt49.both.full.f	compare	-	data-with:nt	-i arch/nt49.asn -d nt -t both -m full -f
+ntmix_p_n.both.rep	compare	-	data-with:nt	-i arch/ntmix_p_n.asn -d nt -t both -m rep
+ntmix_p_n.both.full.f	compare	-	data-with:nt	-i arch/ntmix_p_n.asn -d nt -t both -m full -f
+ntmix_n_p.both.rep	compare	-	data-with:nt	-i arch/ntmix_n_p.asn -d nt -t both -m rep
+ntmix_n_p.both.full.f	compare	-	data-with:nt	-i arch/ntmix_n_p.asn -d nt -t both -m full -f
+nt49.prev.full	compare	-	data-with:nt+ntprev	-i arch/nt49.asn -d ntprev -t both -m full
+nt68.prev.full	compare	-	data-with:nt+ntprev	-i arch/nt68.asn -d ntprev -t both -m full
+nt68rc.prev.full	compare	-	data-with:nt+ntprev	-i arch/nt68rc.asn -d ntprev -t both -m full
+ntnohit.doms.rep	compare	-	data-with:nt	-i arch/ntnohit.asn -d nt -t doms -m rep
+nt94had.both.rep	compare	-	data-with:nt	-i arch/nt94had.asn -d nt -t both -m rep
+nt94had.both.full.f	compare	-	data-with:nt	-i arch/nt94had.asn -d nt -t both -m full -f
+ntnull1.both.rep	compare	-	data-with:nt	-i arch/ntnull1.asn -d nt -t both -m rep
+ntnull1.doms.std.f	compare	-	data-with:nt	-i arch/ntnull1.asn -d nt -t doms -m std -f
+ntshort2.doms	compare	-	data-with:nt	-i arch/ntshort2.asn -d nt -t doms
+refuse_ntshort2	refuse	-	data-with:nt	-i arch/ntshort2.asn -d nt -t both
+refuse_natoprot	refuse	-	-	-i arch/natoprot.asn -d data -t both -m std
+refuse_ntnoids1	refuse	-	data-with:nt	-i arch/ntnoids1.asn -d nt -t doms
+refuse_ntplusmax	refuse	-	data-with:nt	-i arch/ntplusmax.asn -d nt -t doms -m std

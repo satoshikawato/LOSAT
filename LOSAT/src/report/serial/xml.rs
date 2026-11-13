@@ -169,6 +169,11 @@ impl<'b> XmlEncoder<'b, false> {
     pub fn raw(&mut self, bytes: &[u8]) {
         self.out.extend_from_slice(bytes);
     }
+
+    /// The length of the output written so far, where the next `raw` bytes start.
+    pub fn written(&self) -> usize {
+        self.out.len()
+    }
 }
 
 impl<'b> XmlEncoder<'b, true> {

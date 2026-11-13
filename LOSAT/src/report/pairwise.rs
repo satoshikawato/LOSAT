@@ -1442,6 +1442,7 @@ fn ncbi_k_bits_for(ctoolkit_compatible: bool) -> &'static str {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_subject_summary_table_with_sum_n<W: Write>(
     writer: &mut W,
     subject_order: &[u32],
@@ -1450,6 +1451,7 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
     subject_ids: &[Arc<str>],
     show_sum_n: bool,
     columns: Option<SortColumns>,
+    read: super::query_warnings::SubjectReadHook<'_, W>,
 ) -> io::Result<()> {
     write_description_table(
         writer,
@@ -1474,6 +1476,7 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
             }
             label
         },
+        read,
     )
 }
 
@@ -2562,6 +2565,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         writer: &mut W,
         q_idx: usize,
         group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
+        read: super::query_warnings::SubjectReadHook<'_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1474-1476
@@ -2636,6 +2640,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                     .map_or(&[][..], Vec::as_slice);
                 database_description_label(title, parsed_subject(self.parsed_subjects, s_idx), true)
             },
+            read,
         )?;
         // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1520-1589
         // x_DisplayDeflines(aln_set, ...); ... display.DisplaySeqalign(m_Outfile);
@@ -2931,6 +2936,7 @@ pub struct BlastnPairwiseReport {
 // `eShowPercentIdent`) the header and the rows add the total score, the query cover and the
 // identity of the subject's best HSP. `m_MaxPercentIdentityLen` starts at the 9 letters of
 // "Max ident" and grows only for a percentage of more digits, which none has.
+#[allow(clippy::too_many_arguments)]
 fn write_description_table<W: Write>(
     writer: &mut W,
     described: &[u32],
@@ -2939,6 +2945,7 @@ fn write_description_table<W: Write>(
     show_sum_n: bool,
     columns: Option<SortColumns>,
     mut label_of: impl FnMut(u32) -> Vec<u8>,
+    read: super::query_warnings::SubjectReadHook<'_, W>,
 ) -> io::Result<()> {
     // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:513-514
     // ```c++
@@ -3069,6 +3076,15 @@ fn write_description_table<W: Write>(
     writeln!(writer)?;
     writeln!(writer)?;
     for (s_idx, best, total, sum_n, values) in &rows {
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1587-1589
+        // ```c++
+        //     try{
+        //         const CBioseq_Handle& handle = m_ScopeRef->GetBioseqHandle(*id);
+        //         x_FillDeflineAndId(handle, *id, use_this_seqid, sdl, blast_rank);
+        // ```
+        // Each line loads its subject (`x_GetDeflineInfo` of `x_DisplayDeflineTableBody`) after
+        // the lines before it are written (`QueryWarnings::subject_read`).
+        read(*s_idx, writer)?;
         let label = label_of(*s_idx);
         // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:915-918,930
         // ```c++
@@ -3312,6 +3328,7 @@ fn write_blastn_description_table<W: Write>(
     show_sum_n: bool,
     protein: bool,
     columns: Option<SortColumns>,
+    read: super::query_warnings::SubjectReadHook<'_, W>,
 ) -> io::Result<()> {
     write_description_table(
         writer,
@@ -3336,6 +3353,7 @@ fn write_blastn_description_table<W: Write>(
             let title = subject_titles.get(&s_idx).map_or(&[][..], Vec::as_slice);
             database_description_label(title, parsed_subject(parsed, s_idx), protein)
         },
+        read,
     )
 }
 
@@ -3701,6 +3719,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         writer: &mut W,
         q_idx: usize,
         group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
+        read: super::query_warnings::SubjectReadHook<'_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
         // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1489-1491
@@ -3743,6 +3762,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             false,
             false,
             self.config.sort_columns(query.query_length),
+            read,
         )?;
         writeln!(writer)
     }
@@ -4381,6 +4401,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         writer: &mut W,
         q_idx: usize,
         group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
+        read: super::query_warnings::SubjectReadHook<'_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
         // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1489-1491
@@ -4425,6 +4446,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             true,
             false,
             self.config.sort_columns(query.query_length),
+            read,
         )?;
         writeln!(writer)
     }
@@ -5533,6 +5555,14 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             subject_titles,
         } = &group;
         let described = &subject_order[..subject_order.len().min(report.num_descriptions)];
+        // NCBI loads each subject that the query's batch did not prefetch at its description
+        // line, or one the table does not show at its alignment's heading
+        // (`QueryWarnings::subject_read`).
+        let mut read =
+            |s_idx: u32, writer: &mut io::BufWriter<&mut W>| match warnings.as_deref_mut() {
+                Some(warnings) => warnings.subject_read(q_idx, s_idx, writer),
+                None => Ok(()),
+            };
         write_blastn_description_table(
             &mut writer,
             described,
@@ -5543,12 +5573,14 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             false,
             false,
             config.sort_columns(query.query_length),
+            &mut read,
         )?;
         writeln!(writer)?;
         // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1014-1040
         // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
         let aligned = &subject_order[..subject_order.len().min(report.num_alignments)];
         for &s_idx in aligned {
+            read(s_idx, &mut writer)?;
             // NCBI c++/src/objtools/align_format/showalign.cpp:3650-3668:
             // display leaves an extra blank line after each translated HSP.
             let write_hsp = |writer: &mut io::BufWriter<&mut W>, hit: &PairwiseHit| {
@@ -5942,6 +5974,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
     writer: &mut W,
     stderr: &mut dyn Write,
     warnings: &[Vec<u8>],
+    reads: &[super::query_warnings::QueryReads],
     config: &PairwiseConfig,
     queries: &[BlastpPairwiseQuery],
     query_validity: &[bool],
@@ -5965,7 +5998,14 @@ pub fn write_blastx_pairwise_report<W: Write>(
     for (index, hit) in hits.iter().enumerate() {
         by_query[hit.hit.q_idx as usize].push((first_hsp + index, hit));
     }
+    // The texts of the subjects that each query's report reads one by one, written where it
+    // reads each (`ReadCursor`): description lines and alignment headings.
+    let mut reads = super::query_warnings::ReadCursor::new(reads);
     for (qidx, query) in queries.iter().enumerate() {
+        // A text whose read the reports before did not place comes after them.
+        if let Some(reads) = reads.as_mut() {
+            reads.before_query(qidx, &mut writer, &mut *stderr)?;
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
         // ```c++
         //     if (results.HasWarnings()) {
@@ -6030,9 +6070,16 @@ pub fn write_blastx_pairwise_report<W: Write>(
                 subject_ids,
                 !options.gapped && options.sum_stats,
                 config.sort_columns(query.query_length),
+                &mut |s_idx, writer: &mut io::BufWriter<&mut W>| match reads.as_mut() {
+                    Some(reads) => reads.subject_read(qidx, s_idx, writer, &mut *stderr),
+                    None => Ok(()),
+                },
             )?;
             writeln!(writer)?;
             for oid in order.iter().take(options.num_alignments) {
+                if let Some(reads) = reads.as_mut() {
+                    reads.subject_read(qidx, *oid, &mut writer, &mut *stderr)?;
+                }
                 let shits = &grouped[oid];
                 let first = shits[0];
                 let hsp_indices = indices.get(oid).map_or(&[][..], Vec::as_slice);
@@ -6098,6 +6145,9 @@ pub fn write_blastx_pairwise_report<W: Write>(
             skipped[qidx],
             options.gapped,
         )?;
+    }
+    if let Some(reads) = reads.as_mut() {
+        reads.before_query(queries.len(), &mut writer, &mut *stderr)?;
     }
     writer.flush()
 }
@@ -6781,6 +6831,7 @@ mod tblastx_tests {
             true,
             false,
             None,
+            &mut crate::report::query_warnings::no_subject_reads,
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();
@@ -6845,6 +6896,7 @@ mod tblastx_tests {
             false,
             true,
             columns,
+            &mut crate::report::query_warnings::no_subject_reads,
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();
@@ -6891,6 +6943,7 @@ mod tblastx_tests {
             true,
             false,
             columns,
+            &mut crate::report::query_warnings::no_subject_reads,
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();
@@ -6932,6 +6985,7 @@ mod tblastx_tests {
             false,
             true,
             columns,
+            &mut crate::report::query_warnings::no_subject_reads,
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();
@@ -6978,6 +7032,7 @@ mod tblastx_tests {
                 false,
                 true,
                 columns,
+                &mut crate::report::query_warnings::no_subject_reads,
             )
             .map(|()| out)
         };
@@ -7027,6 +7082,7 @@ mod tblastx_tests {
                 &ids,
                 show_sum_n,
                 None,
+                &mut crate::report::query_warnings::no_subject_reads,
             )
             .unwrap();
             let text = String::from_utf8(out).unwrap();
@@ -7174,6 +7230,7 @@ mod tblastx_tests {
             false,
             false,
             None,
+            &mut crate::report::query_warnings::no_subject_reads,
         )
         .unwrap();
         let row = out.split(|&byte| byte == b'\n').nth(3).unwrap().to_vec();

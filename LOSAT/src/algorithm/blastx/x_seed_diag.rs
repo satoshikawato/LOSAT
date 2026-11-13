@@ -26,7 +26,7 @@
 //! reference's binary search.
 //!
 //! Where it acts: the two-hit stage (`-window_size` above 0) with the standard lookup table
-//! (`-word_size` 3, the default, and 2 and 4), when nothing traces the seeds; elsewhere the reference runs. `LOSAT_X_BXDIAG` is a
+//! (`-word_size` 3, the default, and 2 and 4); elsewhere the reference runs. `LOSAT_X_BXDIAG` is a
 //! switch of the strict set: on unless it is `0`. When it
 //! is not set (or empty) it acts only where the cell test is LOSAT_X_BXCROSS's (an x86-64 CPU with
 //! AVX2 and POPCNT), the cell test its rule was timed with; set to a value, it runs on any CPU. With

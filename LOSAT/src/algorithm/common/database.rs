@@ -155,15 +155,17 @@ fn apply_list(
     restricted.map_err(|error| database_error(error, program))
 }
 
-/// Tells the BLAST archive of the run (`archive`, `None` without one) what the database's list
-/// makes of its request (`ArchiveHandle::set_database_filter`). `empty_length` is whether the
+/// Tells the BLAST archive of the run (`archive`, `None` without one) and its search strategy
+/// export (`strategy`) what the database's list makes of their requests
+/// (`ArchiveHandle::set_database_filter`). `empty_length` is whether the
 /// total length of the statistics is not positive (`SeqDb::statistics_length_is_empty`: a list
 /// that kept no sequence, without `STATS_TOTLEN`). `dbsize` is whether `-dbsize` is given: the
 /// `EffectiveSearchSpace` option then counts the length adjustment with no sequence, while the
 /// searches read the length of OID 0 as one sequence (probes E14 and E17 of line DI-8): LOSAT
-/// refuses it.
+/// refuses it (the strategy's requests after the first carry that option too).
 pub(crate) fn note_archive_database_filter(
     archive: Option<&crate::report::archive::ArchiveHandle>,
+    strategy: Option<&crate::report::archive::strategy::StrategyExport>,
     filter: &crate::blastinput::db_filter::DbFilterArgs,
     list_taxids: &[i32],
     empty_length: bool,
@@ -171,18 +173,27 @@ pub(crate) fn note_archive_database_filter(
     dbsize: bool,
     program: &str,
 ) -> Result<()> {
-    let Some(handle) = archive else {
+    if archive.is_none() && strategy.is_none() {
         return Ok(());
-    };
+    }
     if empty_length && dbsize {
+        let option = if archive.is_some() {
+            "-outfmt 11"
+        } else {
+            "-export_search_strategy"
+        };
         anyhow::bail!(
-            "-dbsize with -outfmt 11 and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
+            "-dbsize with {option} and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
         );
     }
-    handle.set_database_filter(
-        filter.archive_parameter(list_taxids),
-        empty_length && !searchsp,
-    );
+    let list = filter.archive_parameter(list_taxids);
+    let empty_database = empty_length && !searchsp;
+    if let Some(strategy) = strategy {
+        strategy.set_database_filter(list.clone(), empty_database);
+    }
+    if let Some(handle) = archive {
+        handle.set_database_filter(list, empty_database);
+    }
     Ok(())
 }
 

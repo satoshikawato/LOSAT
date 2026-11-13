@@ -386,6 +386,8 @@ impl RpsblastArgs {
             subject_loc: None,
             outfmt: self.outfmt,
             archive: None,
+            export_search_strategy: None,
+            strategy: None,
             app: BlastpApp::Rpsblast,
             inclusion_ethresh: None,
             first_query_ordinal: 0,

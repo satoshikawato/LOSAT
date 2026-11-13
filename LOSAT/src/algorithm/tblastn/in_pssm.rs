@@ -79,7 +79,7 @@ pub(super) fn check_db_gencode(code: u8) -> Result<()> {
 
 /// The refusal of `-in_pssm` where the queries are given as records (`run_local`,
 /// `run_local_database`: the library API refuses the option first,
-/// `api::search::pssm_file_options`, and the Web's checks, `args::check_options`).
+/// `api::search::file_options`, and the Web's checks, `args::check_options`).
 pub(super) fn check_records_only(args: &TblastnArgs) -> Result<()> {
     if args.in_pssm.is_some() {
         bail!("-in_pssm (a PSSM query) is not supported by LOSAT's TBLASTN where the queries are given as records");

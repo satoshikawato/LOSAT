@@ -5071,33 +5071,18 @@ fn x_extra_dispatch(
     None
 }
 
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:736-741,766-770
-/// ```c
-/// Blast_SemiGappedAlign(const Uint1* A, const Uint1* B, Int4 M, Int4 N,
-///    Int4* a_offset, Int4* b_offset, Boolean score_only,
-///    GapPrelimEditBlock *edit_block, BlastGapAlignStruct* gap_align,
-///    const BlastScoringParameters* score_params,
-///    Int4 query_offset, Boolean reversed, Boolean reverse_sequence,
-///    Boolean * fence_hit)
-/// ...
-///     if (!score_only) {
-///         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
-/// ```
-/// Dispatch point of the vector kernels for all callers. `tb == false` stands for
-/// `score_only` (`Blast_SemiGappedAlign`, `s_BlastAlignPackedNucl`), `tb == true` for `ALIGN_EX`.
-/// It picks the 8-bit or 16-bit lanes (`xdrop_align_lanes`) or, for an X-drop the 16-bit lanes
-/// cannot hold even after the clamp at the head of this file, the 32-bit lanes (`align_32bit`).
-/// `None` means that the caller must run the scalar port of the C function; callers do so.
-///
-/// No NCBI counterpart: `LOSAT_X_DP32` (`x_dp32`) acts on a call whose X-drop the 16-bit lanes
-/// cannot hold (the calls the scalar ports took before; the switch's own path at `x_reach!`): it
-/// runs the call with the X-drop clamped (`x_drop_for_lanes`: `min(x_drop, R)`, which gives every
-/// result `x_drop` gives), on the 8-bit or 16-bit lanes when that fits them and on the 32-bit
-/// lanes when it does not. `=0` passes every call to `xdrop_align_lanes` as it is, so such a call
-/// returns None and the scalar port runs, as before. Never inlined, and the 8-bit and 16-bit
-/// dispatch is a function of its own, so that both compile as they did without the switch.
+/// No NCBI counterpart: `LOSAT_X_DP32`'s own path (`x_dp32`, `x_reach!`), for a call whose X-drop
+/// the 16-bit lanes cannot hold (`fits_16bit`; the calls the scalar ports took before). The X-drop
+/// is clamped (`x_drop_for_lanes`: `min(x_drop, R)`, which gives every result `x_drop` gives, the
+/// argument at the head of this file). A clamped X-drop the 16-bit lanes hold runs through
+/// `xdrop_align` again, so on the 8-bit or 16-bit lanes and their dispatch (`LOSAT_X_DPCAPTURE`
+/// records it there, with the clamped X-drop); one still past them runs on the 32-bit lanes
+/// (`align_32bit`; not recorded by `LOSAT_X_DPCAPTURE`, whose kernels decline such a call).
+/// Cold and never inlined: `xdrop_align` keeps the code it had without the switch, with one test
+/// in front.
+#[cold]
 #[inline(never)]
-pub(crate) fn xdrop_align(
+fn xdrop_align_past16(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -5110,47 +5095,12 @@ pub(crate) fn xdrop_align(
     check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
-    if x_dp32() {
-        let past16 = !fits_16bit(gap_open, gap_extend, x_drop);
-        crate::utils::xreach::x_reach!("LOSAT_X_DP32", past16);
-        let x_drop = x_drop_for_lanes(scores, len1, len2, gap_open, gap_extend, x_drop);
-        if !fits_16bit(gap_open, gap_extend, x_drop) {
-            // the experiment dispatch first, as for every call (its kernels decline this X-drop
-            // at their first test; LOSAT_X_DPCAPTURE records the call), then the 32-bit lanes
-            let on = x_extra_switches();
-            if on != 0 {
-                if let Some(r) = x_extra_dispatch(
-                    q,
-                    s,
-                    scores,
-                    len1,
-                    len2,
-                    gap_open,
-                    gap_extend,
-                    x_drop,
-                    tb,
-                    check_fence,
-                    sc,
-                    on,
-                ) {
-                    return r;
-                }
-            }
-            return align_32bit(
-                q,
-                s,
-                scores,
-                len1,
-                len2,
-                gap_open,
-                gap_extend,
-                x_drop,
-                tb,
-                check_fence,
-                sc,
-            );
-        }
-        return xdrop_align_lanes(
+    crate::utils::xreach::x_reach!("LOSAT_X_DP32", true);
+    let x_drop = x_drop_for_lanes(scores, len1, len2, gap_open, gap_extend, x_drop);
+    if fits_16bit(gap_open, gap_extend, x_drop) {
+        // the 8-bit and 16-bit dispatch; it marks the reference side too (`x_reach!` below), as
+        // every call on those lanes does
+        return xdrop_align(
             q,
             s,
             scores,
@@ -5164,7 +5114,7 @@ pub(crate) fn xdrop_align(
             sc,
         );
     }
-    xdrop_align_lanes(
+    align_32bit(
         q,
         s,
         scores,
@@ -5199,10 +5149,12 @@ pub(crate) fn xdrop_align(
 /// Score-only (`tb == false`) or traceback X-drop alignment.
 /// `None` means "not handled here": the caller must run the scalar kernel.
 ///
-/// No NCBI counterpart: the 8-bit and 16-bit dispatch, the whole of `xdrop_align` before
-/// `LOSAT_X_DP32`, unchanged (its code too: never inlined into the new `xdrop_align`).
-#[inline(never)]
-fn xdrop_align_lanes(
+/// No NCBI counterpart: with `LOSAT_X_DP32` on (`x_dp32`), a call whose X-drop the 16-bit lanes
+/// cannot hold goes to `xdrop_align_past16` (the clamp, then these lanes or the 32-bit lanes);
+/// every other call is the reference side of the switch and runs the dispatch below, unchanged.
+/// `=0`: every call runs the dispatch below, whose kernels decline such an X-drop at their first
+/// test, so the scalar port runs it, as before.
+pub(crate) fn xdrop_align(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -5215,6 +5167,25 @@ fn xdrop_align_lanes(
     check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
+    let past16 = !fits_16bit(gap_open, gap_extend, x_drop);
+    if x_dp32() {
+        if past16 {
+            return xdrop_align_past16(
+                q,
+                s,
+                scores,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                tb,
+                check_fence,
+                sc,
+            );
+        }
+        crate::utils::xreach::x_reach!("LOSAT_X_DP32", false);
+    }
     // EXPERIMENT (256-bit and 128-bit kernels, LOSAT_X_DPCAPTURE): see `x_extra_dispatch`. This
     // is one read of a value set once; when the dispatch returns None the code below runs.
     let on = x_extra_switches();

@@ -531,12 +531,6 @@ pub(super) fn render(
                     ranges,
                     warnings.as_mut(),
                 )?;
-                // A run that stops before its first report (a database whose sequences cannot
-                // be read) still writes the document's start, which NCBI writes before the
-                // search.
-                if query_records.is_empty() && !ranges.epilog {
-                    writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
-                }
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
             // ```c++

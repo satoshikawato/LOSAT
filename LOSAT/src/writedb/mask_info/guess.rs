@@ -11,7 +11,8 @@
 use std::io::Read;
 
 use super::MaskFileFormat;
-use crate::writedb::format_guess::{c_isspace, ensure_test_buffer, split_tokenize};
+use crate::ncbi_str::is_space;
+use crate::writedb::format_guess::{ensure_test_buffer, split_tokenize};
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:453-509
 // ```c++
@@ -118,7 +119,7 @@ pub(super) fn guess_format<R: Read>(input: &mut R) -> Option<(MaskFileFormat, Ve
 fn test_format_binary_asn(sample: &[u8]) -> bool {
     sample
         .iter()
-        .any(|&c| !(0x21..=0x7e).contains(&c) && !c_isspace(c) && c != 1)
+        .any(|&c| !(0x21..=0x7e).contains(&c) && !is_space(c) && c != 1)
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1678-1717
@@ -228,7 +229,7 @@ fn ensure_stats(sample: &[u8]) -> (usize, usize) {
     let (mut al_num, mut braces) = (0usize, 0usize);
     for line in split_tokenize(sample, |c| c == b'\r' || c == b'\n') {
         for &c in line.iter().chain(std::iter::once(&b'\n')) {
-            if c != 0 && (c.is_ascii_alphanumeric() || c_isspace(c)) {
+            if c != 0 && (c.is_ascii_alphanumeric() || is_space(c)) {
                 al_num += 1;
             } else if c == b'{' || c == b'}' {
                 braces += 1;

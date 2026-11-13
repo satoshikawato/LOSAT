@@ -150,6 +150,27 @@ pub trait StructuredXml {
     /// Appends the end of the document (the epilog), after the last query.
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()>;
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:361-369
+    // ```c++
+    //     if (m_FormatType >= CFormattingArgs::eXml) {
+    //     	if(m_FormatType == CFormattingArgs::eXml2_S) {
+    //     		BlastXML2_PrintHeader(&m_Outfile);
+    //     	}
+    //     	else if(m_FormatType == CFormattingArgs::eJson_S){
+    //     		BlastJSON_PrintHeader(&m_Outfile);
+    //     	}
+    //         return;
+    //     }
+    // ```
+    /// Appends what `PrintProlog` writes of the document, once: the start of the XML2 and JSON
+    /// documents of outfmt 16 and 15 (nothing for BLAST XML, whose header comes with its first
+    /// query, and for the side-file forms). NCBI writes it before it reads the first query
+    /// batch, so a program's report writes it before the warnings of its first query, after
+    /// its refusals of what NCBI could write (DECISIONS 20).
+    fn start(&mut self, out: &mut Vec<u8>) {
+        let _ = out;
+    }
+
     /// Whether the document holds each query's report back until the next query's arrives, so
     /// that a run that stops (no epilog) never writes the report of the last query it formats:
     /// the XML2 and JSON documents of a `-subject` search (`Xml2Document`). BLAST XML writes each
@@ -210,12 +231,11 @@ pub trait HitWrite {
         hsps: &mut dyn FnMut(&mut HspSink<'_>) -> Result<()>,
     ) -> Result<()>;
 
-    /// Where the next `Hit` starts in the query's output, for a document that writes each `Hit`
-    /// as it is made (outfmt 5, `HitSink::position`); `None` for one that writes the query's
-    /// report as a whole.
-    fn position(&self) -> Option<usize> {
-        None
-    }
+    /// Where NCBI loads the subject of the next `Hit`, in the query's output
+    /// (`HitSink::position`): where the `Hit` starts for a document that writes each `Hit` as it
+    /// is made (outfmt 5), the start of the query's report for one that makes the whole report
+    /// before it writes it (XML2 and JSON).
+    fn position(&self) -> usize;
 }
 
 /// The HSP-level call of a structured writer behind `HspSink`.
@@ -332,11 +352,13 @@ impl<'a> HitSink<'a> {
     // 	    {
     // 		CNcbiOstrstream  one_hit_os;
     // ```
-    /// Where the next `Hit` starts in the query's output (the output's length), for a document
-    /// that writes each `Hit` as NCBI makes it (BLAST XML: NCBI loads the `Hit`'s subject after
-    /// the `Hit`s before it are written, `QueryWarnings::subject_read`); `None` for the XML2 and
-    /// JSON documents, which NCBI writes as a whole.
-    pub fn position(&self) -> Option<usize> {
+    /// Where NCBI loads the subject of the next `Hit`, in the query's output: what NCBI posts
+    /// there (`report::query_warnings::HitPosts`) comes after the output before it. BLAST XML
+    /// writes each `Hit` as NCBI makes it, and NCBI loads a `Hit`'s subject after the `Hit`s
+    /// before it are written: the `Hit`'s start (the output's length). The XML2 and JSON
+    /// documents make the whole report, loading every `Hit`'s subject, before they write any of
+    /// it: the start of the report (`Xml2Document::report`).
+    pub fn position(&self) -> usize {
         self.inner.position()
     }
 
@@ -380,8 +402,8 @@ struct Xml5Hits<'a, 'o> {
 }
 
 impl HitWrite for Xml5Hits<'_, '_> {
-    fn position(&self) -> Option<usize> {
-        Some(self.iteration.written())
+    fn position(&self) -> usize {
+        self.iteration.written()
     }
 
     fn hit(

@@ -1083,7 +1083,7 @@ fn run_inner(
         .map_err(report_error)?;
     if let Some(xml2) = xml2.borrow_mut().as_mut() {
         let mut start = Vec::new();
-        xml2.start(&mut start);
+        xml2.document_mut().start(&mut start);
         writer.write_all(&start).map_err(output_error)?;
     }
     // NCBI writes the prolog out before it searches the first batch, so the warnings of the

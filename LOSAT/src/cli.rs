@@ -894,9 +894,18 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
     if scope.get_name() == "makeblastdb"
         && crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS.contains(&name)
     {
+        // `-gi_mask` and `-gi_mask_name` make GI-indexed mask files (makeblastdb.cpp:279-288),
+        // which LOSAT's writer does not write yet (line NP, item M4c); `-mask_data` itself works.
+        let reason = if matches!(name, "gi_mask" | "gi_mask_name") {
+            " (it writes GI-indexed mask files, which LOSAT does not write yet; -mask_data, -mask_id and -mask_desc work)"
+        } else {
+            ""
+        };
         return clap::Error::raw(
             ErrorKind::InvalidValue,
-            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's makeblastdb"),
+            format!(
+                "the NCBI BLAST+ option -{name} is not supported by LOSAT's makeblastdb{reason}"
+            ),
         );
     }
     if scope.get_name() == "blastn" && is_unported_blastn_arg(name) {

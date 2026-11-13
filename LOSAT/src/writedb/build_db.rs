@@ -885,7 +885,6 @@ impl<'a> BuildDatabase<'a> {
     // ```
     /// `RegisterMaskingAlgorithm(program, options, name)`: see
     /// [`WriteDb::register_mask_algorithm`].
-    #[allow(dead_code)]
     pub fn register_masking_algorithm(
         &mut self,
         program: i32,
@@ -910,7 +909,6 @@ impl<'a> BuildDatabase<'a> {
     // in makeblastdb.cpp:966 passes `id_list[i], desc_list[i], opts`).
     /// `RegisterMaskingAlgorithm(id, description, options)`: see
     /// [`WriteDb::register_mask_algorithm_id`].
-    #[allow(dead_code)]
     pub fn register_masking_algorithm_id(
         &mut self,
         id: &[u8],
@@ -933,7 +931,6 @@ impl<'a> BuildDatabase<'a> {
     /// `SetMaskDataSource`: the masked ranges of the sequences. makeblastdb calls it when
     /// the first mask file with masks has been read, and keeps adding to the set after that,
     /// so the caller hands the finished set over before the first sequence is added.
-    #[allow(dead_code)]
     pub fn set_mask_data_source(&mut self, ranges: MaskedRangeSet) {
         self.mask_data = Some(ranges);
     }
@@ -942,13 +939,12 @@ impl<'a> BuildDatabase<'a> {
     /// set when it reads the first mask list that is not empty, hands it over at once and
     /// goes on inserting; a caller that follows it calls
     /// `set_mask_data_source(MaskedRangeSet::new())` at that point and inserts through this.
-    #[allow(dead_code)]
     pub fn mask_data_source_mut(&mut self) -> Option<&mut MaskedRangeSet> {
         self.mask_data.as_mut()
     }
 
     /// `m_FoundMatchingMasks`: whether a sequence has been given mask data.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn found_matching_masks(&self) -> bool {
         self.found_matching_masks
     }
@@ -969,7 +965,6 @@ impl<'a> BuildDatabase<'a> {
     // build calls this at that point.
     /// The destructor's diagnostic: `warn` gets the message (without its final newline)
     /// when mask data were read and no sequence matched.
-    #[allow(dead_code)]
     pub fn post_destruction_diagnostics(&self, warn: Warn<'_>) {
         if self.mask_data.is_some() && !self.found_matching_masks {
             warn(

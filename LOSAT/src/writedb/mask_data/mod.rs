@@ -48,9 +48,13 @@ pub(crate) mod registry;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_cli;
+#[cfg(test)]
 mod tests_e2e;
 #[cfg(test)]
 mod tests_ids;
+#[cfg(test)]
+mod tests_ncbi_unit;
 
 use std::collections::BTreeMap;
 
@@ -431,6 +435,7 @@ impl MaskWriter {
     }
 
     /// Test hook: the creation date of the mask column of volume `index`.
+    #[cfg(test)]
     pub(crate) fn set_column_date(&mut self, index: usize, date: &[u8]) {
         self.dates.insert(index, date.to_vec());
     }

@@ -3,7 +3,7 @@
 //! segmasker and windowmasker write them with `-outfmt maskinfo_asn1_text`
 //! and `-outfmt maskinfo_asn1_bin`.
 //!
-//! Nothing on the command line calls this yet (`losat makeblastdb` refuses `-mask_data`).
+//! `losat makeblastdb -mask_data` reads them (`writedb::mask_data::process`), and
 //! `writedb::mask_data` turns these objects into the mask column of a database.
 //!
 //! [`MaskFileReader`] reads such a file as `makeblastdb` does: the format is guessed

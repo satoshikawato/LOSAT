@@ -28,6 +28,9 @@ Output files:
   db/<case>.*                  NCBI's database files of a successful case (.njs/.pjs not kept)
   expected/<case>.rc           makeblastdb's exit status
   expected/<case>.stderr       makeblastdb's standard error
+  expected/<case>.stdout       makeblastdb's log (standard output) with the build time as <T>, the
+                               database path as <OUT> and the seconds of each "Adding sequences"
+                               line as <S> (the CLI test compares it)
   expected/<case>.masks.tsv    blastdbcmd -entry all -outfmt "%o\t%m<algo>" for each algorithm
   expected/<case>.algorithms.txt   blastdbcmd -info's table of algorithms
 """
@@ -85,6 +88,20 @@ def fasta_records(path):
 
 def write_fasta(path, records):
     Path(path).write_text("".join(">" + r for r in records))
+
+
+def masked_log(text, name, work):
+    """makeblastdb's log with what changes from run to run replaced (see the module doc)."""
+    lines = []
+    for line in text.split("\n"):
+        if line.startswith("Building a new DB, current time: "):
+            line = "Building a new DB, current time: <T>"
+        elif line.startswith("New DB name:   "):
+            line = "New DB name:   <OUT>"
+        else:
+            line = re.sub(r"( sequences in )\S+( seconds\.)$", r"\1<S>\2", line)
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def run(cmd, cwd, check=True):
@@ -273,6 +290,7 @@ def main():
         result = run(cmd, work, check=False)
         (out / "expected" / f"{name}.rc").write_text(f"{result.returncode}\n")
         (out / "expected" / f"{name}.stderr").write_bytes(result.stderr)
+        (out / "expected" / f"{name}.stdout").write_text(masked_log(result.stdout.decode(), name, work))
         rows.append("\t".join([name, dbtype, inputs, masks, ids, descs, max_size, TITLE]) + "\n")
         files = sorted(p for p in work.iterdir() if p.name.startswith(name + ".") and
                        p.suffix[1:] in DB_EXTENSIONS)

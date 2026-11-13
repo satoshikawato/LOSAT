@@ -24,18 +24,18 @@ use crate::writedb::tests::{seqdb_fixtures, TempDir};
 use crate::writedb::volume::Indices;
 use crate::writedb::writer::DbVersion;
 
-struct Row {
-    name: String,
-    fasta: String,
-    protein: bool,
-    parse: bool,
-    files: String,
-    algorithms: Vec<i32>,
-    loss: String,
-    expected: String,
+pub(super) struct Row {
+    pub(super) name: String,
+    pub(super) fasta: String,
+    pub(super) protein: bool,
+    pub(super) parse: bool,
+    pub(super) files: String,
+    pub(super) algorithms: Vec<i32>,
+    pub(super) loss: String,
+    pub(super) expected: String,
 }
 
-fn rows() -> Vec<Row> {
+pub(super) fn rows() -> Vec<Row> {
     let text = std::fs::read_to_string(dir().join("cases.tsv")).unwrap();
     text.lines()
         .filter(|line| !line.starts_with('#'))
@@ -55,7 +55,7 @@ fn rows() -> Vec<Row> {
         .collect()
 }
 
-fn dir() -> PathBuf {
+pub(super) fn dir() -> PathBuf {
     seqdb_fixtures().join("mask_ids")
 }
 
@@ -69,7 +69,7 @@ fn printed(ranges: &MaskRanges) -> String {
 }
 
 /// The rows of the sequences that have a mask, `oid|ranges of each algorithm`, joined by a space.
-fn masked_rows(base: &str, protein: bool, algorithms: &[i32]) -> String {
+pub(super) fn masked_rows(base: &str, protein: bool, algorithms: &[i32]) -> String {
     let seqtype = if protein {
         SeqType::Protein
     } else {

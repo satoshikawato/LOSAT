@@ -19,8 +19,6 @@ use crate::writedb::WriteDbError;
 //     max                 (255)
 // }
 // ```
-/// `eBlast_filter_program_not_set`.
-pub(crate) const FILTER_PROGRAM_NOT_SET: i32 = 0;
 /// `eBlast_filter_program_dust`.
 pub(crate) const FILTER_PROGRAM_DUST: i32 = 10;
 /// `eBlast_filter_program_seg`.
@@ -50,10 +48,6 @@ fn exception(message: String) -> WriteDbError {
 }
 
 impl MaskInfoRegistry {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/mask_info_registry.hpp:66-68
     // ```c++
     //     bool IsRegistered(int algo_id) const {

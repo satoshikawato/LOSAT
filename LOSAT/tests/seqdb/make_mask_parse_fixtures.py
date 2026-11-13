@@ -24,6 +24,9 @@ Files written into `<out>/mask_parse/`:
   h_*.asnt                 hand-written text cases
   b_*.asnb                 damaged binary files (made from dust.asnb)
   expected.tsv             what makeblastdb does with each file
+  expected_stdout.tsv      `<file> <log>`: makeblastdb's log (standard output) of each RUN, escaped as
+                           below, with the build time as <T>, the database path as <OUT> and the
+                           seconds of an "Adding sequences" line as <S> (the CLI test compares it)
 
 expected.tsv: lines starting with '#' are comments. `RUN <file> <dbtype> <fasta> <rc> <stderr> <options>` is the
 exit status and the standard error (all of it) of
@@ -385,11 +388,26 @@ def algorithm_options(info):
     return [line[13 + 40:].rstrip(" ") for line in m.group(1).splitlines() if line.strip()]
 
 
+def masked_log(text):
+    """makeblastdb's log with the time, the path and the seconds replaced."""
+    lines = []
+    for line in text.split("\n"):
+        if line.startswith("Building a new DB, current time: "):
+            line = "Building a new DB, current time: <T>"
+        elif line.startswith("New DB name:   "):
+            line = "New DB name:   <OUT>"
+        else:
+            line = re.sub(r"( sequences in )\S+( seconds\.)$", r"\1<S>\2", line)
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def expected_rows(bin_dir, work, committed, files):
     """files: [(file name, fasta, dbtype)] with the mask files in `work/mask_parse`."""
     rows = ["# RUN\tfile\tdbtype\tfasta\trc\tstderr\toptions", "# NODB\tfile",
             "# MASK\tfile\talgorithm\toid\tranges"]
     runs = work / "runs"
+    stdout_rows = ["# file\tthe log of its RUN (standard output), with <T>, <OUT> and <S>"]
     for name, fasta, dbtype in files:
         run_dir = runs / name
         run_dir.mkdir(parents=True)
@@ -399,6 +417,7 @@ def expected_rows(bin_dir, work, committed, files):
         result = run([bin_dir / "makeblastdb", "-in", fasta, "-dbtype", dbtype, "-out", "db",
                       "-mask_data", name], run_dir, check=False)
         stderr = result.stderr.decode("latin-1")
+        stdout_rows.append(name + "\t" + escape(masked_log(result.stdout.decode("latin-1"))))
         run_row = ["RUN", name, dbtype, fasta, str(result.returncode), escape(stderr), escape("")]
         rows.append("\t".join(run_row))
         if result.returncode != 0:
@@ -417,7 +436,7 @@ def expected_rows(bin_dir, work, committed, files):
             for line in masks.splitlines():
                 oid, ranges = line.split("\t", 1)
                 rows.append("\t".join(["MASK", name, str(algo), oid, escape(ranges)]))
-    return rows
+    return rows, stdout_rows
 
 
 def main():
@@ -445,7 +464,7 @@ def main():
         file = f"b_{name}.asnb"
         (work / "mask_parse" / file).write_bytes(content)
         files.append((file, "mask_nucl.fna", "nucl"))
-    rows = expected_rows(bin_dir, work, out, files)
+    rows, stdout_rows = expected_rows(bin_dir, work, out, files)
 
     target = out / "mask_parse"
     target.mkdir(exist_ok=True)
@@ -455,6 +474,7 @@ def main():
     for name in keep:
         shutil.copyfile(work / name, target / name)
     (target / "expected.tsv").write_text("\n".join(rows) + "\n")
+    (target / "expected_stdout.tsv").write_text("\n".join(stdout_rows) + "\n")
 
 
 if __name__ == "__main__":

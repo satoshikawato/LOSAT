@@ -185,7 +185,7 @@ fn is_database_file(name: &str) -> bool {
 
 /// The names of the volumes of a database in `dir`: those the alias file
 /// lists, or the database itself.
-fn volume_bases(dir: &Path, name: &str, protein: bool) -> Vec<String> {
+pub(super) fn volume_bases(dir: &Path, name: &str, protein: bool) -> Vec<String> {
     let alias = dir.join(format!("{name}.{}al", if protein { 'p' } else { 'n' }));
     match std::fs::read_to_string(alias) {
         Ok(text) => text
@@ -199,7 +199,7 @@ fn volume_bases(dir: &Path, name: &str, protein: bool) -> Vec<String> {
     }
 }
 
-fn stored_title(index_file: &Path, seqtype: SeqType) -> String {
+pub(super) fn stored_title(index_file: &Path, seqtype: SeqType) -> String {
     let bytes = std::fs::read(index_file).unwrap();
     let index = crate::seqdb::index::IndexFile::parse(&bytes, seqtype, index_file).unwrap();
     String::from_utf8(index.title).unwrap()
@@ -209,7 +209,7 @@ fn stored_title(index_file: &Path, seqtype: SeqType) -> String {
 /// extension and the fixture has no other file. The fixtures keep only some of the files of
 /// a version 5 database (`DB_EXTENSIONS`: not the `.ptf`, `.pot` and `.pto` files), so those
 /// are the ones compared there; a version 4 database has no other file.
-fn assert_same_files(
+pub(super) fn assert_same_files(
     out_dir: &Path,
     name: &str,
     fixture_dir: &Path,
@@ -242,7 +242,7 @@ fn assert_same_files(
     }
 }
 
-fn ranges_text(result: &MaskRanges) -> String {
+pub(super) fn ranges_text(result: &MaskRanges) -> String {
     match result {
         MaskRanges::Ranges(ranges) if ranges.is_empty() => "none".to_string(),
         MaskRanges::Ranges(ranges) => ranges.iter().map(|(a, b)| format!("{a}-{b};")).collect(),
@@ -250,7 +250,7 @@ fn ranges_text(result: &MaskRanges) -> String {
     }
 }
 
-fn seqtype_of(protein: bool) -> SeqType {
+pub(super) fn seqtype_of(protein: bool) -> SeqType {
     if protein {
         SeqType::Protein
     } else {
@@ -260,7 +260,7 @@ fn seqtype_of(protein: bool) -> SeqType {
 
 /// The database `out_base` reads back as NCBI's blastdbcmd reads the
 /// fixture: the table of algorithms and the ranges of every sequence.
-fn assert_reads_back(out_base: &str, protein: bool, expected_dir: &Path, fixture: &str) {
+pub(super) fn assert_reads_back(out_base: &str, protein: bool, expected_dir: &Path, fixture: &str) {
     let db = SeqDb::open(out_base, seqtype_of(protein)).unwrap();
     let algorithms_file = expected_dir.join(format!("{fixture}.algorithms.txt"));
     let table = db.mask_algorithms().unwrap();
@@ -329,7 +329,7 @@ fn assert_rebuilds(case: &Case, fixture_dir: &Path, fixture: &str, expected_stde
     }
 }
 
-fn read(dir: &Path, name: &str) -> String {
+pub(super) fn read(dir: &Path, name: &str) -> String {
     std::fs::read_to_string(dir.join(name)).unwrap_or_else(|error| panic!("{name}: {error}"))
 }
 
@@ -448,7 +448,7 @@ fn the_writer_rebuilds_makeblastdb_s_masked_databases_byte_for_byte() {
 }
 
 /// The cases of `make_mask_writer_fixtures.py`.
-fn writer_cases() -> Vec<Case> {
+pub(super) fn writer_cases() -> Vec<Case> {
     let seqdb = seqdb_fixtures();
     let dir = seqdb.join("mask_writer");
     let table = read(&dir, "cases.tsv");
@@ -526,17 +526,17 @@ fn the_writer_matches_makeblastdb_on_the_cases_of_the_writer_fixtures() {
 // ---------------------------------------------------------------------
 
 /// What makeblastdb did with a file (`expected.tsv`).
-struct Expected {
-    dbtype: String,
-    fasta: String,
-    rc: i32,
-    stderr: String,
-    no_db: bool,
+pub(super) struct Expected {
+    pub(super) dbtype: String,
+    pub(super) fasta: String,
+    pub(super) rc: i32,
+    pub(super) stderr: String,
+    pub(super) no_db: bool,
     /// `MASK` rows: algorithm id -> oid -> ranges.
-    masks: BTreeMap<i32, BTreeMap<u32, String>>,
+    pub(super) masks: BTreeMap<i32, BTreeMap<u32, String>>,
 }
 
-fn unescape(field: &str) -> String {
+pub(super) fn unescape(field: &str) -> String {
     if field == "\\e" {
         return String::new();
     }
@@ -568,7 +568,7 @@ fn unescape(field: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn read_expected(parse_dir: &Path) -> BTreeMap<String, Expected> {
+pub(super) fn read_expected(parse_dir: &Path) -> BTreeMap<String, Expected> {
     let text = read(parse_dir, "expected.tsv");
     let mut runs: BTreeMap<String, Expected> = BTreeMap::new();
     for line in text.lines().filter(|l| !l.starts_with('#')) {
@@ -626,7 +626,7 @@ const LOSAT_UNSUPPORTED: [&str; 9] = [
 const NCBI_OUT_OF_MEMORY: [&str; 1] = ["b_length_huge.asnb"];
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-enum Class {
+pub(super) enum Class {
     /// "Unknown encoding for mask data in ..." (status 1): text and status equal NCBI's.
     UnknownEncoding,
     /// NCBI's serial reader throws (status 255): LOSAT's status, its own text.
@@ -641,7 +641,7 @@ enum Class {
     Equal,
 }
 
-fn classify(file: &str, run: &Expected) -> Class {
+pub(super) fn classify(file: &str, run: &Expected) -> Class {
     if run.rc == 1 && run.stderr.contains("Unknown encoding for mask data in '") {
         Class::UnknownEncoding
     } else if run.rc == 255 && run.stderr.starts_with("Error: NCBI C++ Exception:") {
@@ -782,7 +782,7 @@ fn every_mask_parse_file_runs_end_to_end() {
 /// The database that LOSAT wrote reads back as blastdbcmd read NCBI's: the algorithms it lists
 /// and the ranges of every sequence.
 /// Returns the number of rows compared.
-fn assert_database(out_base: &str, protein: bool, file: &str, ncbi: &Expected) -> usize {
+pub(super) fn assert_database(out_base: &str, protein: bool, file: &str, ncbi: &Expected) -> usize {
     let db = SeqDb::open(out_base, seqtype_of(protein))
         .unwrap_or_else(|error| panic!("{file}: {error}"));
     if ncbi.masks.is_empty() {
@@ -822,7 +822,7 @@ fn assert_database(out_base: &str, protein: bool, file: &str, ncbi: &Expected) -
 /// The directory the option cases look their mask files up in: `dust.asnt` and `wm.asnt`
 /// of `tests/seqdb/mask_writer`, a directory, a file that is not an ASN.1 file, an empty file
 /// and (on Unix) a link to nothing.
-fn option_root() -> TempDir {
+pub(super) fn option_root() -> TempDir {
     let tmp = TempDir::new("mask-options");
     let writer = seqdb_fixtures().join("mask_writer");
     for file in ["dust.asnt", "wm.asnt"] {

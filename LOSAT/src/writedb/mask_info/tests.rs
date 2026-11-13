@@ -28,7 +28,6 @@ fn read_file(path: &Path) -> Vec<u8> {
 
 /// What makeblastdb did with a file (`expected.tsv`).
 struct Run {
-    dbtype: String,
     fasta: String,
     rc: i32,
     stderr: String,
@@ -81,7 +80,6 @@ fn read_expected() -> BTreeMap<String, Run> {
                 runs.insert(
                     f[1].to_string(),
                     Run {
-                        dbtype: f[2].to_string(),
                         fasta: f[3].to_string(),
                         rc: f[4].parse().unwrap(),
                         stderr: unescape(f[5]),

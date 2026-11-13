@@ -1070,6 +1070,7 @@ impl MaskFileReader {
     /// Reads the file and guesses its format. The text of the error for a file in neither
     /// format is NCBI's. A file that cannot be opened or read is a failed stream for the format
     /// guess (`x_TestInput`), which answers `eUnknown`: the same error.
+    #[cfg(test)]
     pub(crate) fn open(path: &Path) -> Result<Self, MaskFileError> {
         Self::open_named(path, path)
     }
@@ -1103,6 +1104,7 @@ impl MaskFileReader {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn format(&self) -> MaskFileFormat {
         self.format
     }

@@ -990,7 +990,6 @@ impl WriteDb {
     /// filtering program `program` (a `Blast-filter-program` number) and returns its id.
     /// `name` is the name of the mask file for makeblastdb. The first registration creates
     /// the mask column.
-    #[allow(dead_code)]
     pub fn register_mask_algorithm(
         &mut self,
         program: i32,
@@ -1002,7 +1001,6 @@ impl WriteDb {
     }
 
     /// `RegisterMaskAlgorithm(id, description, options)`: the form of `makeblastdb -mask_id`.
-    #[allow(dead_code)]
     pub fn register_mask_algorithm_id(
         &mut self,
         id: &[u8],
@@ -1016,7 +1014,6 @@ impl WriteDb {
     /// `SetMaskData`: the masked ranges of the sequence added last (its mask blobs are
     /// written with it when it is published). The ranges are those
     /// `MaskedRangeSet::get_ranges` gives.
-    #[allow(dead_code)]
     pub fn set_mask_data(&mut self, ranges: &[MaskedRanges]) -> Result<(), WriteDbError> {
         // `x_ComputeSeqLength` of a sequence from a `CBioseq` is the length of its Seq-inst.
         let seq_length = self
@@ -1029,13 +1026,12 @@ impl WriteDb {
 
     /// Test hook: the date that the mask column of volume `index` stores instead of the
     /// time of its creation.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn set_column_date(&mut self, index: usize, date: &[u8]) {
         self.mask.set_column_date(index, date);
     }
 
     /// The date for a mask column when the clock cannot be read (the time of the build).
-    #[allow(dead_code)]
     pub fn set_column_date_fallback(&mut self, date: &[u8]) {
         self.mask.set_date_fallback(date);
     }

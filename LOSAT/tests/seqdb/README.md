@@ -126,9 +126,13 @@ OIDs with NCBI's.
 for the tests of the mask-column writer (`src/writedb/mask_data/tests_e2e.rs`, which reads the mask files with `process_mask_data`; the same file runs every file of `mask_parse/` end to end). Each row of
 `mask_writer/cases.tsv` is one makeblastdb 2.17.0 run (`-in` files, `-mask_data` files, `-mask_id`,
 `-mask_desc`, `-max_file_sz`); its database files are in `mask_writer/db/`, its exit status and
-standard error in `mask_writer/expected/<case>.rc` and `.stderr`, and what blastdbcmd reads back
+standard error in `mask_writer/expected/<case>.rc` and `.stderr`, its log (standard output, with the
+build time, database path and seconds masked as `<T>`, `<OUT>`, `<S>`) in `.stdout`, and what blastdbcmd reads back
 in `expected/<case>.algorithms.txt` and `.masks.tsv` (as for the reader fixtures above). The
 mask files are ASN.1 text: hand-written ones (`*.asnt`) and `dust.asnt` / `seg.asnt` from
 dustmasker / segmasker. The cases cover the combination of several Seq-locs of one sequence, the
 ids of algorithms, masks that match no sequence, ranges past the end of a sequence, and volumes
 without a masked sequence. A rebuild changes the dates stored in the index and column files.
+`src/writedb/mask_data/tests_cli.rs` runs the cases through the command line (`makeblastdb::run_with`) and
+compares the exit status, the log and the standard error of each with NCBI's, and every file of the database.
+`mask_parse/expected_stdout.tsv` holds the log of each run of `mask_parse/expected.tsv` the same way.

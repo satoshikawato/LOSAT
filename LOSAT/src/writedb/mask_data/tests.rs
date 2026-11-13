@@ -309,7 +309,7 @@ fn algo(registry: &mut MaskInfoRegistry, program: i32, options: &str, name: &str
 /// `make_mask_writer_fixtures.py`).
 #[test]
 fn the_registry_assigns_ids_as_ncbi_does() {
-    let mut r = MaskInfoRegistry::new();
+    let mut r = MaskInfoRegistry::default();
     assert!(!r.is_registered(10));
     assert_eq!(algo(&mut r, FILTER_PROGRAM_DUST, "", "d0"), "10");
     assert_eq!(algo(&mut r, FILTER_PROGRAM_DUST, "-a 1", "d1"), "11");
@@ -359,7 +359,7 @@ fn the_registry_assigns_ids_as_ncbi_does() {
 #[test]
 fn the_registry_runs_out_of_ids_in_each_range() {
     // dust: 10 for the defaults and 11 to 19 for others.
-    let mut r = MaskInfoRegistry::new();
+    let mut r = MaskInfoRegistry::default();
     for i in 0..10 {
         let options = if i == 0 {
             String::new()
@@ -377,7 +377,7 @@ fn the_registry_runs_out_of_ids_in_each_range() {
         "BLAST Database creation error: Too many IDs in range 11-20"
     );
     // repeat: 40 to 99.
-    let mut r = MaskInfoRegistry::new();
+    let mut r = MaskInfoRegistry::default();
     for i in 0..60 {
         assert_eq!(
             r.add_program(FILTER_PROGRAM_REPEAT, b"", format!("r{i}").as_bytes())
@@ -390,7 +390,7 @@ fn the_registry_runs_out_of_ids_in_each_range() {
         "BLAST Database creation error: Too many IDs in range 40-100"
     );
     // -mask_id: 100 to 254.
-    let mut r = MaskInfoRegistry::new();
+    let mut r = MaskInfoRegistry::default();
     for i in 0..155 {
         assert_eq!(r.add_id(format!("m{i}").as_bytes()).unwrap(), 100 + i);
     }

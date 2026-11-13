@@ -9,6 +9,7 @@ use clap::Args;
 use super::build_db::BuildDatabase;
 use super::data_size::uint8_to_string_data_size;
 use super::format_guess::appears_fasta;
+use super::mask_data::process::{process_mask_data, MaskDataOptions};
 use super::metadata::{db_files_metadata, last_updated, write_metadata_file, DbMetadata};
 use super::platform::Platform;
 use super::taxid_set::{TaxIdMapError, TaxIdSet};
@@ -94,7 +95,31 @@ use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 //              CArgDescriptions::eInputFile);
 //     arg_desc->SetDependency("taxid_map", CArgDescriptions::eRequires, "parse_seqids");
 // ```
-// LOSAT's parser checks the range of `-taxid`, the exclusion and the requirement; its errors
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:257-277
+// ```c++
+//     arg_desc->SetCurrentGroup("Sequence masking options");
+//     arg_desc->AddOptionalKey("mask_data", "mask_data_files",
+//                              "Comma-separated list of input files containing "
+//                              "masking data as produced by NCBI masking "
+//                              "applications (e.g. dustmasker, segmasker, "
+//                              "windowmasker)",
+//                              CArgDescriptions::eString);
+//
+//     arg_desc->AddOptionalKey("mask_id", "mask_algo_ids",
+//                              "Comma-separated list of strings to uniquely "
+//                              "identify the masking algorithm",
+//                              CArgDescriptions::eString);
+//
+//     arg_desc->AddOptionalKey("mask_desc", "mask_algo_descriptions",
+//                              "Comma-separated list of free form strings to "
+//                              "describe the masking algorithm details",
+//                              CArgDescriptions::eString);
+//
+//     arg_desc->SetDependency("mask_id", CArgDescriptions::eRequires, "mask_data");
+//     arg_desc->SetDependency("mask_desc", CArgDescriptions::eRequires, "mask_id");
+// ```
+// LOSAT's parser checks the range of `-taxid`, the exclusion and the requirements (`-taxid_map`
+// needs `-parse_seqids`, `-mask_id` needs `-mask_data`, `-mask_desc` needs `-mask_id`); its errors
 // are the parser's (exit status 2, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES) where NCBI's argument
 // reader prints its usage (exit status 1). `check_arguments` repeats the two dependencies for
 // the library. The options of makeblastdb that LOSAT does not support are not registered;
@@ -143,6 +168,16 @@ pub struct MakedbArgs {
     #[allow(rustdoc::invalid_html_tags, reason = "NCBI's help, printed by clap")]
     #[arg(long, value_name = "TaxIDMapFile", requires = "parse_seqids")]
     pub taxid_map: Option<String>,
+    /// Comma-separated list of input files containing masking data as produced by NCBI masking
+    /// applications (e.g. dustmasker, segmasker, windowmasker)
+    #[arg(long, value_name = "mask_data_files")]
+    pub mask_data: Option<String>,
+    /// Comma-separated list of strings to uniquely identify the masking algorithm
+    #[arg(long, value_name = "mask_algo_ids", requires = "mask_data")]
+    pub mask_id: Option<String>,
+    /// Comma-separated list of free form strings to describe the masking algorithm details
+    #[arg(long, value_name = "mask_algo_descriptions", requires = "mask_id")]
+    pub mask_desc: Option<String>,
     /// Option to parse seqid for FASTA input if set, for all other input types seqids are
     /// parsed automatically
     #[arg(long)]
@@ -151,12 +186,11 @@ pub struct MakedbArgs {
 
 /// The options of makeblastdb 2.17.0 that `losat makeblastdb` refuses
 /// (makeblastdb.cpp:246-333). `-h` and `-version` are served (`crate::cli`);
-/// `-logfile`, `-parse_seqids`, `-hash_index`, `-taxid` and `-taxid_map` are read.
-pub const UNSUPPORTED_OPTIONS: [&str; 8] = [
+/// `-logfile`, `-parse_seqids`, `-hash_index`, `-taxid`, `-taxid_map`, `-mask_data`, `-mask_id`
+/// and `-mask_desc` are read. `-gi_mask` and `-gi_mask_name` write GI-indexed mask files
+/// (item M4c), which LOSAT does not write yet.
+pub const UNSUPPORTED_OPTIONS: [&str; 5] = [
     "randomize",
-    "mask_data",
-    "mask_id",
-    "mask_desc",
     "gi_mask",
     "gi_mask_name",
     "metadata_output_prefix",
@@ -561,6 +595,29 @@ fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
     // ```
     // The parser checks these on the command line (`-taxid` has its range there); a caller of
     // the library that sets the fields is checked here with the parser's sentences.
+    // The same for the masking options: `-mask_id` requires `-mask_data`, `-mask_desc` requires
+    // `-mask_id` (makeblastdb.cpp:276-277, quoted at `MakedbArgs`).
+    for (name, given, needed, needed_given) in [
+        (
+            "mask_id",
+            args.mask_id.is_some(),
+            "mask_data",
+            args.mask_data.is_some(),
+        ),
+        (
+            "mask_desc",
+            args.mask_desc.is_some(),
+            "mask_id",
+            args.mask_id.is_some(),
+        ),
+    ] {
+        if given && !needed_given {
+            return Err(MakedbError::Argument(format!(
+                "Argument \"{needed}\". Must be specified, as it is required by argument:  \
+                 `{name}'"
+            )));
+        }
+    }
     if args.taxid_map.is_some() {
         if !args.parse_seqids {
             return Err(MakedbError::Argument(
@@ -933,9 +990,9 @@ fn verify_input_files(names: &[&str], err: &mut dyn Write) -> Result<(), MakedbE
 /// platform whose makeblastdb the files follow ([`Platform::host`] for a build).
 ///
 /// `logfile_error` is the error of a `-logfile` that could not be opened, raised where
-/// makeblastdb opens the file. `end_message` gets the message of `~CBuildDatabase`
-/// (`-taxid_map` matched no sequence), which makeblastdb posts after everything else,
-/// the error of the build included.
+/// makeblastdb opens the file. `end_messages` gets the messages of `~CBuildDatabase` (no
+/// sequence matched a mask, `-taxid_map` matched no sequence), which makeblastdb posts after
+/// everything else, the error of the build included.
 #[allow(clippy::too_many_arguments)]
 fn build_database_with_log(
     args: &MakedbArgs,
@@ -945,7 +1002,7 @@ fn build_database_with_log(
     out: &mut dyn Write,
     err: &mut dyn Write,
     logfile_error: Option<MakedbError>,
-    end_message: &mut Option<&'static str>,
+    end_messages: &mut Vec<String>,
 ) -> Result<(), MakedbError> {
     let version = check_arguments(args)?;
     let is_protein = args.dbtype == "prot";
@@ -1065,6 +1122,28 @@ fn build_database_with_log(
     if let Some(taxids) = taxids {
         db.set_taxids(taxids);
     }
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1288-1294
+    // ```c++
+    //     x_ProcessMaskData();
+    //     x_ProcessInputData(args[kInput].AsString(), is_protein);
+    // ```
+    // The mask files are read before the input is looked at. A failure ends the run at once
+    // (`CATCH_ALL`), and the destructor's messages follow it (`end_messages`).
+    let mask_options = MaskDataOptions {
+        mask_data: args.mask_data.as_deref(),
+        mask_id: args.mask_id.as_deref(),
+        mask_desc: args.mask_desc.as_deref(),
+        gi_mask_name: None,
+        root: None,
+    };
+    let masked = {
+        let mut warn = warn_to(err);
+        process_mask_data(&mut db, &mask_options, &mut warn)
+    };
+    if let Err(error) = masked {
+        *end_messages = destructor_messages(&db);
+        return error.into_makedb_error().map_or(Ok(()), Err);
+    }
     if names.is_empty() {
         return Err(unsupported(
             "-in names no input file; losat makeblastdb reads FASTA files or the standard input",
@@ -1081,8 +1160,19 @@ fn build_database_with_log(
         stdin,
         err,
     );
-    *end_message = db.taxid_message();
+    *end_messages = destructor_messages(&db);
     result
+}
+
+/// What `~CBuildDatabase` posts (build_db.cpp:1204-1213), in its order: the message about the
+/// masks, then the one about the taxids. Each entry is one message, without its final newline.
+fn destructor_messages(db: &BuildDatabase<'_>) -> Vec<String> {
+    let mut messages = Vec::new();
+    db.post_destruction_diagnostics(&mut |line: &[u8]| {
+        messages.push(String::from_utf8_lossy(line).into_owned());
+    });
+    messages.extend(db.taxid_message().map(str::to_string));
+    messages
 }
 
 /// The rest of `x_BuildDatabase`: the input files, `EndBuild` and the metadata file.
@@ -1579,7 +1669,7 @@ pub(crate) fn run_with(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
-    let mut end_message = None;
+    let mut end_messages = Vec::new();
     let name = match args.logfile.as_deref() {
         None | Some("-") => {
             let result = build_database_with_log(
@@ -1590,9 +1680,9 @@ pub(crate) fn run_with(
                 out,
                 err,
                 None,
-                &mut end_message,
+                &mut end_messages,
             );
-            return finish(result, end_message, err);
+            return finish(result, &end_messages, err);
         }
         Some(name) => name,
     };
@@ -1625,9 +1715,9 @@ pub(crate) fn run_with(
                 &mut log,
                 &mut diag,
                 None,
-                &mut end_message,
+                &mut end_messages,
             );
-            finish(result, end_message, &mut diag)
+            finish(result, &end_messages, &mut diag)
         }
         None => {
             let error = MakedbError::Argument(format!(
@@ -1641,16 +1731,16 @@ pub(crate) fn run_with(
                 out,
                 &mut diag,
                 Some(error),
-                &mut end_message,
+                &mut end_messages,
             );
-            finish(result, end_message, &mut diag)
+            finish(result, &end_messages, &mut diag)
         }
     }
 }
 
-/// The error message and the exit code of a build, then the message of
-/// `~CBuildDatabase` (`end_message`).
-fn finish(result: Result<(), MakedbError>, end_message: Option<&str>, err: &mut dyn Write) -> i32 {
+/// The error message and the exit code of a build, then the messages of
+/// `~CBuildDatabase` (`end_messages`).
+fn finish(result: Result<(), MakedbError>, end_messages: &[String], err: &mut dyn Write) -> i32 {
     let status = match result {
         Ok(()) => 0,
         Err(MakedbError::Build(WriteDbError::CreationBytes(message))) => {
@@ -1664,7 +1754,7 @@ fn finish(result: Result<(), MakedbError>, end_message: Option<&str>, err: &mut 
             error.exit_code()
         }
     };
-    if let Some(message) = end_message {
+    for message in end_messages {
         let _ = writeln!(err, "{message}");
     }
     status

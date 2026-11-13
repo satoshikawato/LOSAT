@@ -66,4 +66,14 @@ npm run check   # the package's typecheck and lint, then the app's typecheck, li
 npm run e2e     # Playwright against `vite preview` (production headers)
 ```
 
-Run both before committing changes under `web/app` or `web/packages/losat`.
+Run both before committing changes under `web/app` or `web/packages/losat`. The package's
+build (`dist/`, what `npm pack` and `npm publish` take) needs the reactors of
+`web/adapter/tools/build_reactors.py`:
+
+```bash
+cd web/packages/losat
+LOSAT_WEB_REACTORS=<output dir> npm run build
+npm test        # the packed files, the manifest, the ABI table, the README's example
+```
+
+Publishing the package is the maintainer's act.

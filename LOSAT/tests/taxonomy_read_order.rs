@@ -336,7 +336,8 @@ const CASES: &[(&str, &str, &str, &str, &str, &[&str], &str)] = &[
         "txr_q2.fna",
         &["-evalue", "1e-50"],
         "7 qseqid sseqid evalue",
-    ),    (
+    ),
+    (
         "blastp.s3",
         "bad_magic",
         "blastp",

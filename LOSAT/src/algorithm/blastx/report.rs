@@ -1824,6 +1824,16 @@ pub(super) fn pairwise_hits(
                         // and the subject's stored gap characters make.
                         seqalign_num_ident: hsp.identity,
                     });
+                    // The model of the reads sorts by `hsp_scores` of the batch's query length
+                    // without the rows (`ReportedSubjects::fetch_by_query`): the row's values
+                    // where the records' offsets move nothing.
+                    debug_assert!(
+                        query.placement().offset != 0
+                            || subject.placement().offset != 0
+                            || hsp_scores(hsp, batch.prepared.original_lengths[qidx]).ok()
+                                == hits.last().map(crate::report::hit_sort::HspScores::of),
+                        "BLASTX hsp_scores differs from its row"
+                    );
                 }
             }
         }

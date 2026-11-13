@@ -33,6 +33,8 @@ const entry = computed(() => props.state.hsps.find((hsp) => sameHsp(hsp.id, deta
 const limitGiven = computed(() => flagGiven(props.state.loaded?.run.snapshot.argv ?? [], '-max_target_seqs'));
 /** What outfmt 0 does with -num_descriptions / -num_alignments; undefined where neither is given. */
 const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
+/** -sorthits orders outfmt 0's hit list: its first subjects are not the first ones in the engine's order. */
+const sorted = computed(() => props.state.loaded?.limits.sorted === true);
 /** Outfmt 0's own search failed: stream 0 is empty next to the tabular records (its error is in the diagnostics). */
 const outfmt0Failed = computed(() => props.state.loaded?.outfmt0Failed === true);
 const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(count)} ${count === 1 ? one : many}`;
@@ -321,16 +323,23 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
             No outfmt 0 alignment is linked to this HSP. Its search has a hit list of its own<template v-if="outfmt0.hitList !== undefined">
               ({{ plural(outfmt0.hitList, 'subject') }} per query)</template
             >, because <span class="option-name">-num_descriptions</span> and <span class="option-name">-num_alignments</span> give it another size
-            than outfmt 6 and 7, and it shows the alignments of its first {{ alignedSubjects }}
+            than outfmt 6 and 7, and it shows the alignments of its first {{ alignedSubjects }}<template v-if="sorted">
+              in its order of <span class="option-name">-sorthits</span></template
+            >
             (<span class="option-name">-num_alignments</span>). Those can be other subjects, or another set of HSPs of a subject (which may
             include this one), than outfmt 6 and 7 keep. The outfmt 6 row below and outfmt 7 hold the HSP.
           </p>
           <p v-else class="notice" data-testid="detail-not-in-outfmt0">
-            outfmt 0 does not show this HSP. It shows the alignments of the first {{ state.outfmt0Subjects }} subjects of this query
+            outfmt 0 does not show this HSP. It shows the alignments of the first {{ state.outfmt0Subjects }} subjects of this query<template
+              v-if="sorted"
+            >
+              in its order of <span class="option-name">-sorthits</span></template
+            >
             (BLAST+'s <span class="option-name">-num_alignments</span>: <template v-if="outfmt0?.alignments !== undefined">{{ outfmt0.alignments }}</template
             ><template v-else>250</template
             ><template v-if="limitGiven">, here <span class="option-name">-max_target_seqs</span></template
-            >), and this subject comes after them. The outfmt 6 row below and outfmt 7 hold the HSP.
+            >), and this subject <template v-if="sorted">is not one of them</template><template v-else>comes after them</template>. The outfmt 6
+            row below and outfmt 7 hold the HSP.
           </p>
           <h5 class="row-label">outfmt 6 row</h5>
           <pre v-scroll-focus="'outfmt 6 row'" class="output row-text" data-testid="detail-row">{{ detail.row }}</pre>

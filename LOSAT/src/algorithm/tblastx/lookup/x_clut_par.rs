@@ -473,6 +473,58 @@ pub(super) fn x_try_build_flat_in_pool_of(
 //                                     query, locations);
 //     s_CompressedLookupFinalize(lookup);
 // ```
+// NCBI builds a query chunk's table on one thread before the search threads start
+// (c++/src/algo/blast/api/prelim_stage.cpp:145-188 starts them for the search); here a BLASTX unit
+// builds it on the threads the unit cap leaves it, the same table (module header).
+/// Item SC9b (2) of line NP: BLASTX's flat table of a query batch with the words of `matrix`
+/// (`x_bx_build_compressed_lookup`, `x_bx_build_compressed_lookup_of`) built by `parts` tasks of the
+/// pool the build runs on (`LOSAT_X_BXBUILDPAR`, `blastx/x_bx_mem.rs`): the one-latch passes, without
+/// spare vectors, kept segments or extra tasks. `parts` is above 1.
+pub(super) fn x_try_build_flat_in_parts(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    parts: usize,
+) -> Option<XFlatBuild> {
+    let cuts = XParallelCuts {
+        overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+        max_appends: None,
+        threads: parts,
+        chunk_sizes: &[],
+        stripe_shift: None,
+        appends_segment: X_APPENDS_SEGMENT,
+        piece_appends: X_PIECE_APPENDS,
+        segments: None,
+        passes: XPasses::OneLatch(None),
+        spare: None,
+        x_ahead: false,
+        stripe_fill: x_bpstripefill_on(),
+    };
+    if matrix == ScoringMatrix::Blosum62 {
+        x_try_build_flat_parallel_with(word_size, scaled_threshold, query, locations, tables, cuts)
+    } else {
+        x_try_build_flat_parallel_of(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            cuts,
+        )
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
+// `x_try_build_flat_in_pool`)
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
 /// Item SC2d (LOSAT_X_BPLKPAHEAD): the first part of `x_try_build_flat_in_pool` (of
 /// `x_try_build_flat_in_pool_of` for another search matrix `matrix`, item SC2d-2) for a build ahead
 /// of its block (`x_flat_args.x_ahead`, the switch's mode on): the one-latch appends pass with the

@@ -422,9 +422,10 @@ fn build_par_on() -> bool {
 /// a unit of `pool`'s search with `subjects` subjects: the threads a unit is left (`unit_share`:
 /// `ceil(threads / K)`, at most `ONE_TASK_SHARE` for a batch of one task, `one_task_bound`) for a
 /// unit the cap K holds (`capped`: a chunk of the capped chunk waves, or any chunk inside the
-/// capped batch flow), else 1 (the build on one thread). K is `LOSAT_X_BXUNITCAP`'s, and with the
-/// 4-letter table the K its search keeps to (`LOSAT_X_BXW4CAP`). `whole_batch`: the unit is a
-/// whole batch (not a chunk of a split query's waves).
+/// capped batch flow), else 1 (the build on one thread). K is the one the search keeps to
+/// (`search_cap_k`: `LOSAT_X_BXUNITCAP`'s, at most `LOSAT_X_BXCLUTCAP`'s with the compressed table
+/// and `LOSAT_X_BXW4CAP`'s with the 4-letter one). `whole_batch`: the unit is a whole batch (not a
+/// chunk of a split query's waves).
 pub(crate) fn build_parts(
     pool: &crate::utils::threading::SearchPool<'_>,
     options: &ResolvedOptions,
@@ -435,12 +436,9 @@ pub(crate) fn build_parts(
     if !build_par_on() {
         return 1;
     }
-    let k = if four_letter_table(options) {
-        search_cap_k(pool.threads(), options, subjects).map(|(k, _)| k)
-    } else {
-        cap_k()
-    };
-    let k = k.filter(|_| capped || in_capped_batch(pool));
+    let k = search_cap_k(pool.threads(), options, subjects)
+        .map(|(k, _)| k)
+        .filter(|_| capped || in_capped_batch(pool));
     let parts = k.map_or(1, |k| {
         unit_share(
             pool.threads(),

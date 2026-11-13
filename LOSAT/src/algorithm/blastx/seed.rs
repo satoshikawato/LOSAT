@@ -11,8 +11,8 @@ use crate::algorithm::tblastx::blast_aascan::x_blast_aa_scan_subject_cells;
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair as OffsetPair;
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-    x_bx_build_compressed_lookup, x_bx_clut_pool, x_give_back_flat, x_give_back_wide_flat,
-    XBxCompressedLookup, X_BLASTX,
+    x_bx_build_compressed_lookup, x_bx_build_compressed_lookup_of, x_bx_clut_pool,
+    x_give_back_flat, x_give_back_wide_flat, XBxCompressedLookup, X_BLASTX,
 };
 use crate::algorithm::tblastx::lookup::compressed::x_compressed_scaled_threshold;
 use crate::algorithm::tblastx::lookup::{
@@ -568,7 +568,8 @@ fn x_give_back_compressed(table: &mut XBxCompressedLookup) {
 /// EXPERIMENT (LOSAT_X_BPCLUT): the compressed table of a query batch (`-word_size` 5 to 7), flat as
 /// TBLASTN's with `u16` query offsets (`i32` past `X_U16_LETTERS` letters;
 /// `x_bx_build_compressed_lookup`, on vectors kept between builds with `LOSAT_X_BXCLUTPOOL`), on one
-/// thread. One table for the batch, so its one
+/// thread, or with `parts` above 1 on that many tasks of the pool it runs on
+/// (`LOSAT_X_BXBUILDPAR`, the same table). One table for the batch, so its one
 /// range is all the segments. Words that fill NCBI's overflow banks are refused, as BLASTP's
 /// (NCBI writes past its banks). Cold and not inlined, so that the standard table's build keeps
 /// its code.
@@ -579,14 +580,15 @@ fn x_compressed_lookup(
     segments: &[(i32, i32)],
     threshold: f64,
     word: i32,
+    parts: usize,
 ) -> Result<Lookup> {
     // The build of the word length, as a constant of its instance (`x_bx_build_compressed_lookup`).
     let scaled = x_compressed_scaled_threshold(threshold);
     let tables = [0..segments.len()];
     match word {
-        5 => x_bx_build_compressed_lookup::<5>(scaled, query, segments, &tables),
-        6 => x_bx_build_compressed_lookup::<6>(scaled, query, segments, &tables),
-        7 => x_bx_build_compressed_lookup::<7>(scaled, query, segments, &tables),
+        5 => x_bx_build_compressed_lookup::<5>(scaled, query, segments, &tables, parts),
+        6 => x_bx_build_compressed_lookup::<6>(scaled, query, segments, &tables, parts),
+        7 => x_bx_build_compressed_lookup::<7>(scaled, query, segments, &tables, parts),
         _ => None,
     }
     .ok_or_else(|| anyhow::anyhow!("unsupported BLASTX compressed lookup"))?
@@ -749,6 +751,7 @@ impl Lookup {
                 &batch.lookup_segments,
                 options.threshold,
                 options.word_size,
+                parts,
             )
             .map(BxLookup::Wide);
         }
@@ -815,8 +818,9 @@ impl Lookup {
     }
     /// [`Lookup::x_new_as`] with another matrix than BLOSUM62 (items SC6 and SC6b of line NP) or the
     /// standard table of another word size than 3 (`-word_size` 2 and 4, item SC9): the compressed
-    /// table of `-word_size` 5 to 7 with the matrix's scores (`x_tbn_build_compressed_lookup_of`, as
-    /// TBLASTN's, `Int4` hits, without the pool of kept vectors), the standard one as BLOSUM62's
+    /// table of `-word_size` 5 to 7 with the matrix's scores (`x_bx_build_compressed_lookup_of`: as
+    /// TBLASTN's, `Int4` hits, without the pool of kept vectors; built in `parts` as BLOSUM62's), the
+    /// standard one as BLOSUM62's
     /// (`build_ncbi_lookup_from_prepared_of`: the pool, `parts`, 16-bit hits from `narrow_cutoff`)
     /// with its scores and word length. Not inlined, so that BLOSUM62's builds keep their code.
     #[cold]
@@ -828,29 +832,22 @@ impl Lookup {
         parts: usize,
         narrow_cutoff: Option<u64>,
     ) -> Result<BxLookup> {
-        use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-            x_tbn_build_compressed_lookup_of, XCompressedLookup,
-        };
         let matrix = options.scoring;
         let query = batch.sequence_start[1..].to_vec();
         let word = usize::try_from(options.word_size)?;
         if options.compressed_lookup() {
             let segments = &batch.lookup_segments;
-            return x_tbn_build_compressed_lookup_of(
+            return x_bx_build_compressed_lookup_of(
                 matrix,
                 word,
                 x_compressed_scaled_threshold(options.threshold),
                 &query,
                 segments,
                 &[0..segments.len()],
+                parts,
             )
             .ok_or_else(|| anyhow::anyhow!("unsupported BLASTX compressed lookup"))?
-            .map(|table| {
-                BxLookup::Wide(Lookup::Compressed(match table {
-                    XCompressedLookup::Reference(table) => XBxCompressedLookup::Reference(table),
-                    XCompressedLookup::Flat(table) => XBxCompressedLookup::Wide(table),
-                }))
-            })
+            .map(|table| BxLookup::Wide(Lookup::Compressed(table)))
             .map_err(|()| {
                 anyhow::anyhow!(
                     "-threshold {} with the compressed lookup table of -word_size {word} is not supported by LOSAT's BLASTX: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",

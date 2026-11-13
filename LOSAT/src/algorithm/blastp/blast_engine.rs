@@ -6185,7 +6185,7 @@ fn psiblast_stop_at_invalid_query(
             .is_none_or(|psi| psi.ungapped_karlin_valid(&context.karlin_params))
     };
     // The PSSM query whose letters give no Karlin-Altschul parameters crashes NCBI before (below).
-    let empty_database = database.is_some_and(|database| database.num_oids() == 0)
+    let empty_database = database.is_some_and(|database| database.first_oid_read_fails())
         && contexts
             .first()
             .is_some_and(|context| args.psi_search.is_none() || context.is_valid);
@@ -9128,15 +9128,16 @@ fn run_resolved_in_pool(
     let t_search = crate::utils::xtiming::clock();
 
     // A database without sequences (makeblastdb builds none; a volume whose index holds
-    // no sequence): NCBI opens it, writes the outfmt 0 prolog, reads the first query
-    // batch and fails in that batch's preliminary search, where its reader cannot map
-    // the sequence file (fixture `LOSAT/tests/seqdb/db/empty`).
+    // no sequence) and without an alias file's LENGTH or STATS_TOTLEN
+    // (`SeqDb::first_oid_read_fails`): NCBI opens it, writes the outfmt 0 prolog, reads the
+    // first query batch and fails in that batch's preliminary search, where its reader cannot
+    // map the sequence file (fixture `LOSAT/tests/seqdb/db/empty`).
     // A first batch of invalid queries only is not searched: the batches up to the first one that
     // is are reported before the error (`unsearched_batches_then_engine_error`); a call of invalid
     // queries only searches no batch, and NCBI reports them (NCBI 2.17.0 blastp, an all-X query
     // and the empty database: exit 0).
     if let Some(database) = database.filter(|database| {
-        database.num_oids() == 0
+        database.first_oid_read_fails()
             && (chunk_prelim.is_some() || query_batch_skipped.iter().any(|skipped| !skipped))
     }) {
         return Err(preliminary_search_error(

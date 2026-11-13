@@ -119,16 +119,6 @@ pub(crate) fn restrict_database(
     // without it, before the search (`pairwise_database`), and meets the others there.
     db.check_alias_values()
         .map_err(|error| database_error(error, program))?;
-    // NCBI asks for the length of OID 0 only where the statistics' total is not positive
-    // (blast_setup.c:925-937, quoted at `SeqDb::statistics_numbers`): over volumes without
-    // sequences an alias file's `LENGTH` or `STATS_TOTLEN` makes NCBI search none instead of
-    // its `Database memory map file error`, which LOSAT does not follow (line RG, D1a-2).
-    if db.num_oids() == 0 && !db.statistics_length_is_empty() {
-        return Err(refusal(
-            "an alias file's LENGTH or STATS_TOTLEN over volumes without sequences",
-            program,
-        ));
-    }
     db.read_name_records(name)
         .map_err(|error| database_error(error, program))
 }
@@ -248,15 +238,17 @@ pub(crate) fn refusal(reason: &str, program: &str) -> anyhow::Error {
     anyhow::anyhow!("{reason}; this database is not supported by LOSAT's {program}")
 }
 
+/// What LOSAT refuses where the statistics read 0 sequences of a positive total length
+/// (`check_statistics_count`, and BLASTX's own check of its statistics).
+pub(crate) const STATISTICS_COUNT_ZERO: &str = "the statistics count 0 sequences of the database (an alias file's NSEQ 0, or its LENGTH or STATS_TOTLEN over volumes without sequences), by which NCBI BLAST+ divides its length";
+
 /// LOSAT's refusal of statistics that read 0 sequences of a positive total length
 /// (`SeqDb::statistics_count_is_zero`), for a search of `program` without the Gumbel block:
-/// NCBI BLAST+ 2.17.0 divides the total by 0 there and crashes (DECISIONS 14 of line RG).
+/// NCBI BLAST+ 2.17.0 divides the total by 0 there and crashes (DECISIONS 14 of line RG; an
+/// alias file's `LENGTH` 100 alone over a volume of no OID, probe p4c_dn_nB of D1a-2: SIGFPE).
 pub(crate) fn check_statistics_count(db: &SeqDb, program: &str) -> Result<()> {
     if db.statistics_count_is_zero() {
-        return Err(refusal(
-            "the statistics count 0 sequences of the database (an alias file's NSEQ 0), by which NCBI BLAST+ divides its length",
-            program,
-        ));
+        return Err(refusal(STATISTICS_COUNT_ZERO, program));
     }
     Ok(())
 }

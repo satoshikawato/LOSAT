@@ -1477,7 +1477,7 @@ fn search(
         // average subject length is too short`, exit status 3.
         let (database_stores, mut stores_error) = match database {
             Some(database) => {
-                let read = if database.num_oids() == 0 {
+                let read = if database.first_oid_read_fails() {
                     Err(PreliminaryReadError("Database memory map file error").into())
                 } else if !subject_set.old_fsc && database.numbers().min_length as u32 / 3 == 0 {
                     Err(PreliminaryReadError("The average subject length is too short").into())

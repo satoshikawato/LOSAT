@@ -157,10 +157,10 @@ impl TblastnDatabase {
         self.db.list_taxids()
     }
 
-    /// The OIDs of the volumes (`SeqDb::num_oids`): none is the database whose first query
-    /// batch fails, also with a list or an alias file's range or `NSEQ`.
-    pub(super) fn num_oids(&self) -> u32 {
-        self.db.num_oids()
+    /// Whether the first query batch with a valid context fails with NCBI's `Database memory map
+    /// file error` (`SeqDb::first_oid_read_fails`: no OID, and statistics that read OID 0).
+    pub(super) fn first_oid_read_fails(&self) -> bool {
+        self.db.first_oid_read_fails()
     }
 
     /// LOSAT's refusal of statistics of 0 sequences for a search without the Gumbel block

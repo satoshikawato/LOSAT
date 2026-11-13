@@ -1890,7 +1890,7 @@ fn search(
     let whole_subjects = Placements::default();
     let (stream, stores_error) = match &source {
         SubjectSource::Database(database) => {
-            let opened = if database.num_oids() == 0 {
+            let opened = if database.first_oid_read_fails() {
                 Err(crate::algorithm::common::database::PreliminaryReadError(
                     "Database memory map file error",
                 )

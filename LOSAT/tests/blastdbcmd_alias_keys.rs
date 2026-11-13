@@ -172,6 +172,16 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("A56", &["-db", "db/ak/m_r", "-ipg_batch", "in/ak_pig.txt", "-outfmt", "%o %a %l"], 1),
     ("A57", &["-db", "db/ak/m_r", "-ipg_batch", "in/ak_pigm.txt", "-outfmt", "%o %s"], 0),
     ("A58", &["-db", "db/ak/m_s", "-ipg_batch", "in/ak_pig.txt", "-outfmt", "%o %a"], 1),
+    // D1a-2: `LENGTH` and `STATS_TOTLEN` over volumes of no OID (`db/ak/ep`, a copy of
+    // `seqdb/db/empty`, and `db/ak/en`, a nucleotide index of no sequence): the alias file's
+    // counts, no sequence (probes p4c_dp, p4c_dn of D1a-2).
+    ("A59", &["-db", "db/ak/e_pB", "-dbtype", "prot", "-info"], 0),
+    ("A60", &["-db", "db/ak/e_pB", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o %a"], 0),
+    ("A61", &["-db", "db/ak/e_pA", "-dbtype", "prot", "-info"], 0),
+    ("A62", &["-db", "db/ak/e_nB", "-dbtype", "nucl", "-info"], 0),
+    ("A63", &["-db", "db/ak/e_nD", "-dbtype", "nucl", "-info"], 0),
+    ("A64", &["-db", "db/ak/en", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o %a"], 0),
+    ("A65", &["-db", "db/ak/e_nC", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o %a"], 0),
 ];
 
 /// The cases of probe p4c_c that LOSAT's BLASTDBCMD refuses: `-outfmt %d` and `%b` (the ASN.1

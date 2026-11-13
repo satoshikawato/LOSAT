@@ -22,7 +22,9 @@ machine) run in this directory on the alias files of `db/ak/` (`NSEQ`, `LENGTH`,
 `A33`-`A58` (D1a-2, 2026-11-13; `A37` and `A38` are LOSAT's refusals of `%d` and `%b`, not frozen) are the same
 build on `-ipg` and `-ipg_batch` (`in/ak_pig.txt`, `in/ak_pigm.txt`) through the ranges `db/ak/m_r`, `m_s` and `m_t`
 over `db/m/pmg`, whose PIGs' OIDs the ranges leave out (`A52`: approved difference 5, NCBI's header with the letters of
-its `%s` run): `make_d1a2_blastdbcmd.py`.
+its `%s` run): `make_d1a2_blastdbcmd.py`. `A59`-`A65` (D1a-2) are `-info` and `-entry all` on alias files with `NSEQ`,
+`LENGTH`, `STATS_NSEQ` and `STATS_TOTLEN` (`db/ak/e_*`) over volumes of no OID: `db/ak/ep` (a copy of `seqdb/db/empty`) and
+`db/ak/en` (a nucleotide index of no sequence).
 `U01`, `U03` and `U04` (line SW, SW8, 2026-11-08) are NCBI BLAST+ 2.17.0 blastdbcmd on the
 developer machine, run with the words of the tests from the `blastdbcmd` directory of a copy of
 this layout whose `seqdb/db` held the five files of `user-column-db`

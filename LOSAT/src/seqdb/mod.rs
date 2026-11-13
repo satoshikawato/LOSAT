@@ -1576,12 +1576,12 @@ impl SeqDb {
     // ```
     /// Whether NCBI warns that the database is empty (`GetNumSeqs` of the search is 0:
     /// `report::query_warnings::EMPTY_DATABASE_MESSAGE` for each query): a list that kept no
-    /// sequence of a database that has some, or an alias file's `NSEQ 0`. The search goes on
-    /// over the included OIDs, which a list that kept none leaves without any. A database
-    /// without any sequence, with or without a list, is not this: its first query batch fails
-    /// ([`SeqDb::num_oids`]).
+    /// sequence of a database that has some, an alias file's `NSEQ 0`, or its `LENGTH` or
+    /// `STATS_TOTLEN` over volumes without sequences. The search goes on over the included OIDs,
+    /// which may be none. Where the first query batch fails instead
+    /// ([`SeqDb::first_oid_read_fails`]), NCBI writes no warning.
     pub fn filtered_empty(&self) -> bool {
-        self.counts.num_seqs == 0 && self.num_oids() > 0
+        self.counts.num_seqs == 0 && !self.first_oid_read_fails()
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:905-938
@@ -1671,6 +1671,25 @@ impl SeqDb {
         self.statistics_total_length() <= 0
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:932-936 (at
+    // `statistics_numbers`)
+    // ```c
+    //           Int4 oid = 0;  /* Get length of first sequence. */
+    //           if ( (total_length = BlastSeqSrcGetSeqLen(seq_src, (void*) &oid)) < 0) {
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:240-251 (at
+    // `common::database::PreliminaryReadError`): the `CSeqDBException` of that read is
+    // `BLAST engine error: Database memory map file error` (exit status 3; psiblast's
+    // `BLAST Database error: OID not found`, exit status 2).
+    /// Whether the setup of the first query batch with a valid context fails: the statistics'
+    /// total is not positive ([`SeqDb::statistics_length_is_empty`]), so NCBI reads the length of
+    /// OID 0 (`GetSeqLength(0)`, which asks the volumes, not the list), and the volumes have no
+    /// OID. An alias file's `LENGTH` or `STATS_TOTLEN` over such volumes makes the total positive:
+    /// NCBI then reads no sequence and reports no hit (probes p4c_dp, p4c_dn of line RG D1a-2).
+    pub fn first_oid_read_fails(&self) -> bool {
+        self.statistics_length_is_empty() && self.num_oids() == 0
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-975
     // ```c
     //    if (sbp->gbp) {
@@ -1680,8 +1699,9 @@ impl SeqDb {
     //    }
     // ```
     /// Whether the statistics read 0 sequences of a positive total length
-    /// ([`SeqDb::statistics_numbers`]: an alias file's `NSEQ 0` without `STATS_NSEQ`, or a list
-    /// that kept no sequence under a `STATS_TOTLEN`). The programs without the Gumbel block
+    /// ([`SeqDb::statistics_numbers`]: an alias file's `NSEQ 0` without `STATS_NSEQ`, its `LENGTH`
+    /// or `STATS_TOTLEN` over volumes without sequences, or a list that kept no sequence under a
+    /// `STATS_TOTLEN`). The programs without the Gumbel block
     /// (BLASTN, TBLASTX, and the protein programs with `-ungapped`, `-searchsp` or `OLD_FSC`)
     /// divide the total by it, and NCBI BLAST+ 2.17.0 crashes (SIGFPE).
     pub fn statistics_count_is_zero(&self) -> bool {

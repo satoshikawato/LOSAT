@@ -1232,6 +1232,15 @@ bytes); the `db.ak.bp.err.*` rows (NCBI's `CStringException` texts, exit 255, wh
 `p_bad_nseq`, `p_bad_first`, `p_bad_min`, `p_bad_stlen`, `p_bad_two` without and with `-taxids`) with the release build on the
 developer machine.
 
+Rows `db.ak.*.e0*` (D1a-2, `remaining-gaps-20261112/D/fixtures/make_d1a2_fixtures.py`): alias files `e_p*` over the
+protein volume of no OID `../seqdb/db/empty` and `e_n*` over `aliaskeys/en` (a version 4 nucleotide index of no sequence)
+with `NSEQ 1` and `LENGTH 100` (A), `LENGTH 100` (B), `STATS_TOTLEN 100` (C), `STATS_NSEQ 1` and `STATS_TOTLEN 100` (D),
+`NSEQ 1` (F) and `NSEQ 1` and `STATS_TOTLEN 100` (G): NCBI reads the length of OID 0 only where the statistics' total is
+not positive (F: `Database memory map file error`, PSIBLAST `OID not found`); otherwise it searches no sequence, with each
+query's warning where `GetNumSeqs` is 0 (B, C, D); BLASTN and TBLASTX divide B's and C's 100 letters by 0 sequences
+(SIGFPE: LOSAT's refusal). Frozen with the release build on the developer machine (2026-11-13; the same bytes as the
+workstation's probes p4c_dp, p4c_dn).
+
 ## psiblast's id options (line RG, series Q, Q1)
 
 - `q1_sq1` (protein, version 5): `makeblastdb -in tests/fasta/psiblast/q1_subj_q1.faa -dbtype prot -parse_seqids

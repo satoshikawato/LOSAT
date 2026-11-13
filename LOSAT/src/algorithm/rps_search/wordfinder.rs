@@ -13,7 +13,9 @@
 //! does. A worker's table here follows the same rule for the queries it searches, so every query
 //! gets NCBI's hits whatever queries came before it.
 
-use super::scan::{scan_subject, RpsBuckets, RpsTable, MAX_SCAN_HITS};
+use super::scan::{
+    q_place, s_place, scan_subject, RpsBuckets, RpsHits, RpsReadCursor, RpsTable, MAX_SCAN_HITS,
+};
 use super::RpsRows;
 use crate::algorithm::blastp::extension::BlastpUngappedData;
 use crate::algorithm::pssm_search::ungapped::{pssm_extend_one_hit, pssm_extend_two_hit};
@@ -348,6 +350,9 @@ fn two_hit(
     let RpsWordScratch { diag, buckets } = scratch;
     let diag_offset = diag.offset;
     let diag_mask = diag.mask;
+    // The table's entries: `mask + 1` of them (`RpsDiagTable::reset_for`), so that a diagonal
+    // masked with `mask` is inside.
+    let table = &mut diag.array[..=diag_mask as usize];
     let last_offset = subject.len() as i32 - wordsize;
     let mut first_offset = 0i32;
     while first_offset <= last_offset {
@@ -358,31 +363,46 @@ fn two_hit(
             buckets,
             MAX_SCAN_HITS,
         );
-        for bucket in buckets.slices() {
-            for pair in bucket {
-                let query_offset = pair.q_off as i32;
-                let subject_offset = pair.s_off as i32;
-                let diag_coord = (query_offset.wrapping_sub(subject_offset) & diag_mask) as usize;
-                let entry = &mut diag.array[diag_coord];
+        let mut cursor = RpsReadCursor::default();
+        while let Some(RpsHits {
+            entries,
+            q_base,
+            s_base,
+        }) = buckets.next_block(&mut cursor)
+        {
+            // Each hit as its places in the block (`RpsHits`): `query_offset - subject_offset` is
+            // `q - s + diag_base` and `subject_offset + diag_offset` is `s + s_diag_offset`, the
+            // same 32-bit values; the extension reads the offsets whole.
+            let (q_base, s_base) = (q_base as i32, s_base as i32);
+            let diag_base = q_base.wrapping_sub(s_base);
+            let s_diag_offset = diag_offset.wrapping_add(s_base);
+            for &hit_entry in entries {
+                let q = q_place(hit_entry) as i32;
+                let s = s_place(hit_entry) as i32;
+                let diag_coord = (q.wrapping_sub(s).wrapping_add(diag_base) & diag_mask) as usize;
+                let entry = &mut table[diag_coord];
                 if entry.flag() {
-                    if subject_offset + diag_offset < entry.last_hit() {
+                    if s + s_diag_offset < entry.last_hit() {
                         continue;
                     }
-                    entry.set(subject_offset + diag_offset, false);
+                    entry.set(s + s_diag_offset, false);
                 } else {
-                    let last_hit = entry.last_hit() - diag_offset;
-                    let diff = subject_offset - last_hit;
+                    // `last_hit - diag_offset` less the segment's first offset.
+                    let last_hit = entry.last_hit() - s_diag_offset;
+                    let diff = s - last_hit;
                     if diff >= window {
-                        entry.set(subject_offset + diag_offset, entry.flag());
+                        entry.set(s + s_diag_offset, entry.flag());
                         continue;
                     }
                     if diff < wordsize {
                         continue;
                     }
+                    let query_offset = q_base + q;
+                    let subject_offset = s_base + s;
                     let hit = pssm_extend_two_hit(
                         &params.rows,
                         subject,
-                        last_hit + wordsize,
+                        s_base + last_hit + wordsize,
                         subject_offset,
                         query_offset,
                         params.dropoff,
@@ -398,7 +418,7 @@ fn two_hit(
                     if hit.right_extend {
                         entry.set(hit.s_last_off - (wordsize - 1) + diag_offset, true);
                     } else {
-                        entry.set(subject_offset + diag_offset, entry.flag());
+                        entry.set(s + s_diag_offset, entry.flag());
                     }
                 }
             }
@@ -458,6 +478,8 @@ fn one_hit(
     let RpsWordScratch { diag, buckets } = scratch;
     let diag_offset = diag.offset;
     let diag_mask = diag.mask;
+    // (`two_hit`.)
+    let table = &mut diag.array[..=diag_mask as usize];
     let last_offset = subject.len() as i32 - wordsize;
     let mut first_offset = 0i32;
     while first_offset <= last_offset {
@@ -468,14 +490,26 @@ fn one_hit(
             buckets,
             MAX_SCAN_HITS,
         );
-        for bucket in buckets.slices() {
-            for pair in bucket {
-                let query_offset = pair.q_off as i32;
-                let subject_offset = pair.s_off as i32;
-                let diag_coord = (subject_offset.wrapping_sub(query_offset) & diag_mask) as usize;
-                let entry = &mut diag.array[diag_coord];
-                let diff = subject_offset - (entry.last_hit() - diag_offset);
+        let mut cursor = RpsReadCursor::default();
+        while let Some(RpsHits {
+            entries,
+            q_base,
+            s_base,
+        }) = buckets.next_block(&mut cursor)
+        {
+            // (`two_hit`: `subject_offset - query_offset` is `s - q - diag_base`.)
+            let (q_base, s_base) = (q_base as i32, s_base as i32);
+            let diag_base = q_base.wrapping_sub(s_base);
+            let s_diag_offset = diag_offset.wrapping_add(s_base);
+            for &hit_entry in entries {
+                let q = q_place(hit_entry) as i32;
+                let s = s_place(hit_entry) as i32;
+                let diag_coord = (s.wrapping_sub(q).wrapping_sub(diag_base) & diag_mask) as usize;
+                let entry = &mut table[diag_coord];
+                let diff = s - (entry.last_hit() - s_diag_offset);
                 if diff >= 0 {
+                    let query_offset = q_base + q;
+                    let subject_offset = s_base + s;
                     let hit = pssm_extend_one_hit(
                         &params.rows,
                         subject,

@@ -1386,8 +1386,14 @@ fn cut_in_place_keeps_the_whole_letters_of_a_kept_source_as_cut_does() {
 // warnings' label `Query_1`); an integer local id shows as its digits.
 #[test]
 fn a_local_id_is_believed_as_parse_deflines_reads_one() {
+    use crate::seqid::model::{ObjectId, ParsedSeqId};
     for local in ["Query_1", "5"] {
-        let record = FastaRecord::new(local, b"a title", b"MKV").believing_local_id();
+        let id = match local.parse() {
+            Ok(number) => ObjectId::Id(number),
+            Err(_) => ObjectId::Str(local.as_bytes().to_vec()),
+        };
+        let record =
+            FastaRecord::new(local, b"a title", b"MKV").believing(vec![ParsedSeqId::Local(id)]);
         assert_eq!(record.local_id, local);
         assert_eq!(&*record.query_line(), format!("{local} a title").as_bytes());
         assert_eq!(record.shown_id(), local.as_bytes());

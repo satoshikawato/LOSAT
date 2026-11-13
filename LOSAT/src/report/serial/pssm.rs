@@ -82,18 +82,8 @@ pub struct Pssm {
     pub final_data: Option<PssmFinalData>,
 }
 
-/// `Object-id`.
-// NCBI reference (598d8ae6): c++/src/objects/general/general.asn:78-80
-// ```asn
-// Object-id ::= CHOICE {
-//     id INTEGER ,
-//     str VisibleString }
-// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ObjectId {
-    Id(i32),
-    Str(Vec<u8>),
-}
+/// `Object-id`: the Seq-id model's (`seqid::model`), which the PSSM's identifier shares.
+pub use crate::seqid::model::ObjectId;
 
 /// The PSSM's query: the `Seq-entry` `seq` variant, a Bioseq with its ids, the titles among its
 /// descriptors (`None`: no `descr` member, or one without a title) and its `Seq-inst`.
@@ -107,91 +97,12 @@ pub enum ObjectId {
 // ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct PssmQuery {
-    pub ids: Vec<PssmSeqId>,
+    /// The ids, read and written as every Seq-id of NCBI's ASN.1 text (`seqid::asn_text`,
+    /// `report::seqid::SeqId::Db`).
+    pub ids: Vec<crate::seqid::ParsedSeqId>,
     pub titles: Option<Vec<Vec<u8>>>,
     pub inst: SeqInst,
 }
-
-/// The `Seq-id` variants that the reader types (`local`, `gi`, the `Textseq-id` ones and
-/// `general`); the reader refuses the others.
-// NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:24-45
-// ```asn
-// Seq-id ::= CHOICE {
-//     local Object-id ,            -- local use
-//     gibbsq INTEGER ,             -- Geninfo backbone seqid
-//     gibbmt INTEGER ,             -- Geninfo backbone moltype
-//     giim Giimport-id ,           -- Geninfo import id
-//     genbank Textseq-id ,
-//     embl Textseq-id ,
-//     pir Textseq-id ,
-//     swissprot Textseq-id ,
-//     patent Patent-seq-id ,
-//     other Textseq-id ,           -- for historical reasons, 'other' = 'refseq'
-//     general Dbtag ,              -- for other databases
-//     gi INTEGER ,                 -- GenInfo Integrated Database
-//     ddbj Textseq-id ,            -- DDBJ
-//     prf Textseq-id ,             -- PRF SEQDB
-//     pdb PDB-seq-id ,             -- PDB sequence
-//     tpg Textseq-id ,             -- Third Party Annot/Seq Genbank
-//     tpe Textseq-id ,             -- Third Party Annot/Seq EMBL
-//     tpd Textseq-id ,             -- Third Party Annot/Seq DDBJ
-//     gpipe Textseq-id ,           -- Internal NCBI genome pipeline processing ID
-//     named-annot-track Textseq-id -- Internal named annotation tracking ID
-// }
-// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PssmSeqId {
-    Local(ObjectId),
-    Gi(i64),
-    /// A `Textseq-id` variant: its name and position in the CHOICE, and its members.
-    Textseq {
-        variant: &'static str,
-        tag: u8,
-        id: TextseqId,
-    },
-    /// `general`: a `Dbtag`.
-    General {
-        db: Vec<u8>,
-        tag: ObjectId,
-    },
-    /// A Seq-id that `-parse_deflines` read from a FASTA query's defline (the Seq-align id,
-    /// `BelievedIds::best`): written by the report's Seq-id writer (`report::seqid::SeqId::Db`),
-    /// never read.
-    Parsed(crate::seqid::ParsedSeqId),
-}
-
-/// `Textseq-id`.
-// NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:54-58
-// ```asn
-// Textseq-id ::= SEQUENCE {
-//     name VisibleString OPTIONAL ,
-//     accession VisibleString OPTIONAL ,
-//     release VisibleString OPTIONAL ,
-//     version INTEGER OPTIONAL }
-// ```
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TextseqId {
-    pub name: Option<Vec<u8>>,
-    pub accession: Option<Vec<u8>>,
-    pub release: Option<Vec<u8>>,
-    pub version: Option<i32>,
-}
-
-/// The `Seq-id` variants of `Textseq-id` type, with their positions in the CHOICE.
-pub const TEXTSEQ_VARIANTS: [(&str, u8); 12] = [
-    ("genbank", 4),
-    ("embl", 5),
-    ("pir", 6),
-    ("swissprot", 7),
-    ("other", 9),
-    ("ddbj", 12),
-    ("prf", 13),
-    ("tpg", 15),
-    ("tpe", 16),
-    ("tpd", 17),
-    ("gpipe", 18),
-    ("named-annot-track", 19),
-];
 
 /// `Seq-inst` without the members LOSAT does not keep.
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:262-297
@@ -425,20 +336,6 @@ fn write_document<E: Encoder>(
     enc.end_document();
 }
 
-fn write_object_id<E: Encoder>(enc: &mut E, id: &ObjectId) {
-    match id {
-        ObjectId::Id(value) => {
-            enc.variant("Object-id", "id", 0);
-            enc.int(*value);
-        }
-        ObjectId::Str(value) => {
-            enc.variant("Object-id", "str", 1);
-            enc.visible_str(value);
-        }
-    }
-    enc.end_variant();
-}
-
 fn write_ints<E: Encoder>(enc: &mut E, values: &[i32]) {
     enc.begin_list(false);
     for &value in values {
@@ -466,7 +363,7 @@ fn write_pssm<E: Encoder>(enc: &mut E, pssm: &Pssm, karlin: Option<FinalKarlin>)
     }
     if let Some(identifier) = &pssm.identifier {
         enc.member("identifier", 1);
-        write_object_id(enc, identifier);
+        crate::report::seqid::write_object_id(enc, identifier);
         enc.end_member();
     }
     enc.member("numRows", 2);
@@ -510,54 +407,6 @@ fn write_pssm<E: Encoder>(enc: &mut E, pssm: &Pssm, karlin: Option<FinalKarlin>)
     enc.end_sequence();
 }
 
-fn write_seq_id<E: Encoder>(enc: &mut E, id: &PssmSeqId) {
-    match id {
-        // The report's writer opens and closes its own variant.
-        PssmSeqId::Parsed(id) => return crate::report::seqid::SeqId::Db(id).write(enc),
-        PssmSeqId::Local(id) => {
-            enc.variant("Seq-id", "local", 0);
-            write_object_id(enc, id);
-        }
-        PssmSeqId::Gi(gi) => {
-            enc.variant("Seq-id", "gi", 11);
-            enc.big_int(*gi);
-        }
-        PssmSeqId::Textseq { variant, tag, id } => {
-            enc.variant("Seq-id", variant, *tag);
-            enc.begin_sequence("Textseq-id");
-            for (name, tag, value) in [
-                ("name", 0, &id.name),
-                ("accession", 1, &id.accession),
-                ("release", 2, &id.release),
-            ] {
-                if let Some(value) = value {
-                    enc.member(name, tag);
-                    enc.visible_str(value);
-                    enc.end_member();
-                }
-            }
-            if let Some(version) = id.version {
-                enc.member("version", 3);
-                enc.int(version);
-                enc.end_member();
-            }
-            enc.end_sequence();
-        }
-        PssmSeqId::General { db, tag } => {
-            enc.variant("Seq-id", "general", 10);
-            enc.begin_sequence("Dbtag");
-            enc.member("db", 0);
-            enc.visible_str(db);
-            enc.end_member();
-            enc.member("tag", 1);
-            write_object_id(enc, tag);
-            enc.end_member();
-            enc.end_sequence();
-        }
-    }
-    enc.end_variant();
-}
-
 /// The query's Bioseq (`CPsiBlastInputData::x_ExtractQueryForPssm` makes psiblast's).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:144-175
 // ```c++
@@ -586,7 +435,7 @@ fn write_query<E: Encoder>(enc: &mut E, query: &PssmQuery) {
     enc.begin_list(true);
     for id in &query.ids {
         enc.element();
-        write_seq_id(enc, id);
+        crate::report::seqid::SeqId::Db(id).write(enc);
     }
     enc.end_list();
     enc.end_member();

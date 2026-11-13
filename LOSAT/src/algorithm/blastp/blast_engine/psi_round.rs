@@ -278,7 +278,10 @@ fn run_queries(
                 state: state.clone(),
                 save_last: plan.save_last,
                 request: plan.request.clone(),
-                query_id: plan.input.as_ref().map(|input| input.id.clone()),
+                query_id: args
+                    .psi_search
+                    .as_deref()
+                    .and_then(|psi| psi.query_seq_loc_id().cloned()),
                 outcome: std::sync::Mutex::new(None),
             };
             // The reader's messages of the batch come with its first round.
@@ -830,7 +833,7 @@ fn next_pssm(
     // title is the input PSSM's, `""` without one), and its letters the round-1 query's, O as X
     // (`encode_protein_sequence` in `query_pssm`).
     let id = match &io.query_id {
-        Some(id) => crate::report::serial::pssm::PssmSeqId::Local(id.clone()),
+        Some(id) => id.clone(),
         None => crate::algorithm::psiblast::pssm::fasta_query_id(
             record,
             args.first_query_ordinal + ranges.x_ordinal_base + ordinal + 1,

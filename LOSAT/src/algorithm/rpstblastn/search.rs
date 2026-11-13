@@ -354,12 +354,16 @@ impl TranslatedRpsSearch {
                 options: &self.search,
                 program: PROGRAM,
             };
-            let traced = run.search_volume(
-                &files,
-                &Consensus::new(setup, volume, &files),
-                pool,
-                workers,
-            )?;
+            // The first error in query order (the queries search at the same time).
+            let traced = run
+                .search_volume(
+                    &files,
+                    &Consensus::new(setup, volume, &files),
+                    pool,
+                    workers,
+                )?
+                .into_iter()
+                .collect::<Result<Vec<_>>>()?;
             drop(run);
             drop(files);
             let mut lists: Vec<Option<BlastpHitList>> = traced

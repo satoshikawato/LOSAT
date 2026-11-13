@@ -591,12 +591,16 @@ pub(super) fn rps_search(
                 "-sum_stats true (NCBI BLAST+ 2.17.0's rpsblast links HSPs with the profiles' contexts as query indexes and reads past its arrays: its output depends on memory contents or it crashes) is not supported by LOSAT's RPSBLAST"
             );
         }
-        let traced = engine.search_volume(
-            &files,
-            &Consensus::new(&setup, volume, &files),
-            pool,
-            &workers,
-        )?;
+        // The first error in query order (the queries search at the same time).
+        let traced = engine
+            .search_volume(
+                &files,
+                &Consensus::new(&setup, volume, &files),
+                pool,
+                &workers,
+            )?
+            .into_iter()
+            .collect::<Result<Vec<_>>>()?;
         // The volume's mappings and per-volume data go before the next volume is opened (and
         // before its lists are merged): at most one volume's pages are resident.
         drop(engine);

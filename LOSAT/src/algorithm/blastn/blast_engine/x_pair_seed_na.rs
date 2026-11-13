@@ -198,6 +198,39 @@ fn scan_strip_na<O: SeedOut>(x: &NaInputs<'_>, job: &StripJob, out: &mut O) {
     scan_strip_na_from::<O, false>(x, job, Resume::at(job.start), out);
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1414-1416
+/// ```c
+///     while (q_off) {
+///         offset_pairs[i].qs_offsets.q_off   = q_off - 1;
+///         offset_pairs[i++].qs_offsets.s_off = s_off;
+/// ```
+/// One lookup hit of the word at subject offset `kmer_start` (`q_off_1`, the 1-based query
+/// offset; 0 is no hit and is skipped) as a `Seed` with the context of its query offset. A
+/// function, not a closure of `scan_strip_na_from`: called from the run loop and from the
+/// piece's cut (`Cut::run_cold`), a closure stayed a call per pair (as `seed_of_pair` in the
+/// strips kernels of `x_pair_seed.rs`; blastn-short at 16 threads, +3.2 % instructions over the
+/// strips stage, line EB s15b).
+#[inline(always)]
+fn seed_of_pair_na<O: SeedOut>(
+    x: &NaInputs<'_>,
+    q_off_1: u32,
+    kmer_start: usize,
+    s_range: usize,
+    out: &mut O,
+) {
+    if q_off_1 == 0 {
+        return;
+    }
+    let q_off0 = q_off_1 as usize - 1;
+    let context_idx = x.query_context_index.context_for_offset(q_off0);
+    out.push(Seed {
+        context: context_idx as u32,
+        q: q_off0 as u32,
+        s: kmer_start as u32,
+        s_range: s_range as u32,
+    });
+}
+
 /// `scan_strip_na` from the word at `from.s` (`job.start`, or where a piece stopped), passing over
 /// that word's first `from.skip` pairs. EXPERIMENT (LOSAT_X_SEEDPIECE): with `PIECE` the scan stops at
 /// the first pair `out` has no room for (`Cut`) and returns where it goes on; `None` when the
@@ -210,23 +243,6 @@ fn scan_strip_na_from<O: SeedOut, const PIECE: bool>(
 ) -> Option<Resume> {
     let s_range = job.s_range;
     let cut = Cut::new(&from);
-    let pair = |q_off_1: u32, kmer_start: usize, out: &mut O| {
-        if q_off_1 == 0 {
-            return;
-        }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1412
-        // ```c
-        // offset_pairs[i].qs_offsets.q_off = q_off - 1;
-        // ```
-        let q_off0 = q_off_1 as usize - 1;
-        let context_idx = x.query_context_index.context_for_offset(q_off0);
-        out.push(Seed {
-            context: context_idx as u32,
-            q: q_off0 as u32,
-            s: kmer_start as u32,
-            s_range: s_range as u32,
-        });
-    };
     let mut on_kmer = |kmer_start: usize, current_kmer: u64| {
         let mut run = x.hits(current_kmer);
         if PIECE {
@@ -234,14 +250,14 @@ fn scan_strip_na_from<O: SeedOut, const PIECE: bool>(
                 Ok(fit) => run = fit,
                 Err((skip, rest)) => {
                     cut.run_cold(kmer_start, skip, rest, out, |q_off_1, out| {
-                        pair(q_off_1, kmer_start, out)
+                        seed_of_pair_na(x, q_off_1, kmer_start, s_range, out)
                     });
                     return cut.go();
                 }
             }
         }
         for &q_off_1 in run {
-            pair(q_off_1, kmer_start, out);
+            seed_of_pair_na(x, q_off_1, kmer_start, s_range, out);
         }
         // (a run that fits never stops the cut; after a stop the scan has left)
         true

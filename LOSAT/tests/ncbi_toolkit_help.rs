@@ -158,7 +158,16 @@ fn argument_names(xml: &[u8]) -> Vec<String> {
 #[test]
 fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
     let dir = scratch("xml");
-    fs::write(dir.join("q.fa"), ">q\nACGT\n").unwrap();
+    fs::write(
+        dir.join("p.fa"),
+        ">p\nMKVLAAGIVALLLAAGCSSHKEEAPKAEETKPAEAPK\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("n.fa"),
+        ">n\nATGAAAGTGCTGGCGGCGGGCATTGTGGCGCTGCTGCTGGCGGCGGGCTGCAGCAGCCATAAA\n",
+    )
+    .unwrap();
     for (program, value_option) in PROGRAMS
         .iter()
         .copied()
@@ -186,17 +195,39 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
             assert!(text.starts_with("<?xml version=\"1.0\"?>\n<ncbi_application"));
             assert!(text.contains(&format!("<name>{program}</name>\n<version>")));
             assert!(text.ends_with("</arguments>\n</ncbi_application>\n"));
-            // Each argument left out is refused by name, each left is read.
+            // Each argument left out is refused by name: by the parser (`-name 1 -h`), or by the
+            // run of a search (blastp's and psiblast's `-use_sw_tback`, blastp's and tblastn's
+            // `-ungapped` with `-comp_based_stats 0`; rpstblastn's `-ungapped`, which needs a
+            // database, is in `cli::RUN_REFUSALS` with them). The arguments left in are read
+            // (`ncbi_xmlhelp_tests`).
             let kept = argument_names(&xml.stdout);
             for name in argument_names(&ncbi) {
                 if kept.contains(&name) {
                     continue;
                 }
-                let refused = run_in(&dir, program, &[&format!("-{name}"), "1", "-h"]);
-                let message = String::from_utf8_lossy(&refused.stderr);
+                let word = format!("-{name}");
+                let flag = ncbi_text.contains(&format!("<flag name=\"{name}\""));
+                let words = if flag {
+                    vec![&*word, "-h"]
+                } else {
+                    vec![&*word, "1", "-h"]
+                };
+                let refused = run_in(&dir, program, &words);
+                let mut message = String::from_utf8_lossy(&refused.stderr).into_owned();
+                let subject = if program == "tblastn" { "n.fa" } else { "p.fa" };
+                if refused.status.code() == Some(0) && program != "rpstblastn" {
+                    let search = ["-query", "p.fa", "-subject", subject, &word];
+                    let cbs = ["-comp_based_stats", "0"];
+                    let words = [&search[..], if name == "ungapped" { &cbs } else { &[] }].concat();
+                    message =
+                        String::from_utf8_lossy(&run_in(&dir, program, &words).stderr).into_owned();
+                }
                 assert!(
                     message.contains(&format!("-{name} is not supported by LOSAT's"))
-                        || message.contains(&format!("unsupported BLASTX option '-{name}'")),
+                        || message.contains(&format!("-{name} ("))
+                            && message.contains("is not supported by LOSAT's")
+                        || message.contains(&format!("unsupported BLASTX option '-{name}'"))
+                        || program == "rpstblastn" && name == "ungapped",
                     "{program} -{name}: {message}"
                 );
             }

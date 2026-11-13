@@ -250,7 +250,13 @@ pub(crate) fn run(tool: &'static Tool, words: &[OsString], body: Body) -> i32 {
     let stderr = std::io::stderr();
     let mut out = stdout.lock();
     let mut err = stderr.lock();
-    let status = run_with(tool, words, &mut std::io::stdin(), &mut out, &mut err, body);
+    let status = run_app(
+        tool,
+        words,
+        (&mut std::io::stdin(), &mut out, &mut err),
+        body,
+        Some(ncbi_xml),
+    );
     let _ = out.flush();
     let _ = err.flush();
     status
@@ -298,6 +304,25 @@ pub(crate) fn run_with(
     out: &mut dyn Write,
     err: &mut dyn Write,
     body: Body,
+) -> i32 {
+    run_app(tool, words, (input, out, err), body, None)
+}
+
+/// NCBI's XML of `program`'s arguments, whole: the readers of `ncbi_app` refuse no argument of
+/// NCBI's by name (`ncbi_xmlhelp_tests`).
+fn ncbi_xml(program: &str) -> Option<String> {
+    crate::ncbi_xmlhelp::print(program, |_| false)
+}
+
+/// `run_with`, with the XML of `-xmlhelp` that the command line's `run` writes (`xml_help`); the
+/// library API's run has none and refuses the word (`cli::xml_help_refusal`, line RG DECISIONS
+/// E2x-1), so the library does not carry the XML.
+fn run_app(
+    tool: &'static Tool,
+    words: &[OsString],
+    (input, out, err): (&mut dyn Read, &mut dyn Write, &mut dyn Write),
+    body: Body,
+    xml_help: Option<fn(&str) -> Option<String>>,
 ) -> i32 {
     // NCBI's application start (`ncbi_environment::ApplicationStart`), which the command line's
     // entry has made: the file of `-logfile` gets the usage report's messages when NCBI opens it,
@@ -372,18 +397,15 @@ pub(crate) fn run_with(
             let _ = out.write_all(tool.help.as_bytes());
             return 0;
         }
-        // NCBI's XML, which the command line's entry writes; the library API writes no XML
-        // (`cli::xml_help_refusal`, line RG DECISIONS E2x-1). The reader refuses no argument
-        // of NCBI's by name, so the XML is NCBI's whole (`ncbi_xmlhelp::print`).
-        Err(ArgsError::XmlHelp) => {
-            match start.and_then(|_| crate::ncbi_xmlhelp::print(tool.program, |_| false)) {
-                Some(xml) => {
-                    let _ = out.write_all(xml.as_bytes());
-                    return 0;
-                }
-                None => return diag.refuse(&crate::cli::xml_help_refusal(tool.refusal_name)),
+        // NCBI's XML, which the command line's run writes (`ncbi_xml`); the library API writes
+        // none (`cli::xml_help_refusal`, line RG DECISIONS E2x-1).
+        Err(ArgsError::XmlHelp) => match xml_help.and_then(|xml| xml(tool.program)) {
+            Some(xml) => {
+                let _ = out.write_all(xml.as_bytes());
+                return 0;
             }
-        }
+            None => return diag.refuse(&crate::cli::xml_help_refusal(tool.refusal_name)),
+        },
         // `eNoValue` (which prints no usage) is not raised by the reader.
         Err(ArgsError::Invalid(error)) => return diag.report_arg_exception(&error, None),
         Err(ArgsError::Refused(reason)) => return diag.refuse(&reason),

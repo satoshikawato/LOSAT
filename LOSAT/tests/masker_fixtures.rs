@@ -187,7 +187,12 @@ fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Ve
                 .any(|given| given == word || given.starts_with(&format!("{word}=")))
         });
         let expected = match word {
-            None if case.words.iter().any(|given| given == "-xmlhelp") => {
+            None if case
+                .words
+                .iter()
+                .find(|given| matches!(given.as_str(), "-h" | "-help" | "-help-full" | "-xmlhelp"))
+                .is_some_and(|given| given == "-xmlhelp") =>
+            {
                 refused += 1;
                 let text = format!(
                     "Error: the NCBI C++ Toolkit option -xmlhelp runs on the command line of \

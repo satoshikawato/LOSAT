@@ -392,14 +392,9 @@ where
         // `-xmlhelp` (`s_AutoHelpXml`) stops the reader as `-help` does, the words before it
         // read: the command line's entry prints the program's arguments in NCBI's XML
         // (`xml_help_program`, `ncbi_xmlhelp::print`; line RG item E2x). The library API and the
-        // Web engine, which write no help of NCBI's, refuse it (`xml_help_refusal`).
+        // Web engine, which write no help of NCBI's, refuse it there, after the words before it
+        // (`xml_help_refusal`).
         if stops_at_help && text == "-xmlhelp" {
-            if crate::blastinput::ncbi_environment::application_start_of_process().is_none() {
-                return Err(clap::Error::raw(
-                    ErrorKind::InvalidValue,
-                    xml_help_refusal(&refusal_program_name(scope.get_name())),
-                ));
-            }
             translated.push("--help".into());
             xml_help = Some(scope.get_name().to_string());
             break;
@@ -534,7 +529,16 @@ where
     let mut matches = match command.clone().try_get_matches_from(&translated) {
         // The words before `-xmlhelp` read, as before `-help`: the entry prints the XML.
         Err(error) if error.kind() == ErrorKind::DisplayHelp && xml_help.is_some() => {
-            return Err(xml_help_request(xml_help.unwrap_or_default()));
+            let program = xml_help.unwrap_or_default();
+            return Err(
+                match crate::blastinput::ncbi_environment::application_start_of_process() {
+                    Some(_) => xml_help_request(program),
+                    None => clap::Error::raw(
+                        ErrorKind::InvalidValue,
+                        xml_help_refusal(&refusal_program_name(&program)),
+                    ),
+                },
+            );
         }
         // The parser stopped at rpstblastn's help flag, the words before it read (NCBI's
         // order): the program writes NCBI's text (`RpstblastnArgs::ncbi_help_text`), and the
@@ -846,10 +850,52 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
 /// refuses NCBI's argument `-name` by name (`named_refusal`, for a name the program does not
 /// define): the arguments that its `-xmlhelp` leaves out of NCBI's XML (`xml_help_text`).
 fn refuses_option(scope: &clap::Command, name: &str) -> bool {
-    !scope
+    let program = scope.get_name();
+    (!scope
         .get_arguments()
         .any(|arg| arg.get_long() == Some(name))
-        && named_refusal(scope.get_name(), name).is_some()
+        && named_refusal(program, name).is_some())
+        || RUN_REFUSALS
+            .iter()
+            .any(|refusal| refusal.0 == program && refusal.1 == name)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918 (quoted at
+// blastp's check, `validate_requested_blastp_support`)
+// ```c++
+//     arg_desc.AddFlag(kArgUngapped, "Perform ungapped alignment only?", true);
+// ```
+/// NCBI's arguments that a program's parser reads, so that NCBI's own errors about them and the
+/// other arguments come first (blastp's `-ungapped` with composition-based statistics:
+/// `Composition-adjusted searched are not supported with an ungapped search`), and whose run LOSAT
+/// refuses whatever their value, by name, where NCBI starts the search: the program, the name and
+/// what the refusal says the argument is (`run_refusal`). `-xmlhelp` leaves them out of NCBI's XML
+/// as it leaves the parser's refusals (`refuses_option`).
+pub(crate) const RUN_REFUSALS: &[(&str, &str, &str)] = &[
+    ("blastp", "ungapped", "an ungapped search"),
+    ("blastp", "use_sw_tback", "the Smith-Waterman traceback"),
+    ("psiblast", "use_sw_tback", "the Smith-Waterman traceback"),
+    ("tblastn", "ungapped", "an ungapped search"),
+    (
+        "rpstblastn",
+        "ungapped",
+        "NCBI BLAST+ 2.17.0's rpstblastn crashes after an ungapped search",
+    ),
+];
+
+/// LOSAT's refusal of the run of `-name` in `program` (its name in LOSAT's refusals, `BLASTP`):
+/// the entry of `RUN_REFUSALS`.
+pub(crate) fn run_refusal(program: &str, name: &str) -> String {
+    let entry = RUN_REFUSALS
+        .iter()
+        .find(|refusal| refusal.0.eq_ignore_ascii_case(program) && refusal.1 == name);
+    debug_assert!(entry.is_some(), "{program} -{name} is not in RUN_REFUSALS");
+    match entry {
+        Some((_, _, what)) => {
+            format!("-{name} ({what}) is not supported by LOSAT's {program}")
+        }
+        None => format!("-{name} is not supported by LOSAT's {program}"),
+    }
 }
 
 /// LOSAT's refusal of NCBI's argument `-name`, which `program` does not define, by name; `None`
@@ -1085,9 +1131,10 @@ fn refusal_program_name(program: &str) -> String {
 }
 
 // No NCBI counterpart: NCBI has no library API. NCBI's application prints the XML of `-xmlhelp`
-// (ncbiapp.cpp:685-690, quoted at `ncbi_xmlhelp`); LOSAT's library and the Web engine write no
-// help of NCBI's (the library's `-help` is LOSAT's text in its error), and carry no XML
-// (line RG DECISIONS E2x-1, the Owner's choice of 2026-11-13).
+// (ncbiapp.cpp:685-690, quoted at `ncbi_xmlhelp`); LOSAT's library and the Web engine refuse it
+// (line RG DECISIONS E2x-1, the Owner's choice of 2026-11-13). Only the command line's entries
+// reach the XML (`xml_help_text`, `ncbi_app::run`), so the library and the Web engine do not carry
+// it (E2x-2).
 /// LOSAT's refusal of `-xmlhelp` where no command line's entry prints it: the library API and the
 /// Web engine of `shown` (`refusal_program_name`, `ncbi_app::Tool::refusal_name`).
 pub(crate) fn xml_help_refusal(shown: &str) -> String {

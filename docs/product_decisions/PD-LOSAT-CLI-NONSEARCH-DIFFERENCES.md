@@ -180,8 +180,8 @@ BLAST+.
    with exit code 0. Nothing is written to standard error after the failure (no progress
    line). A failed write to standard error (its reader has closed: NCBI's rpsbproc ends by
    SIGPIPE, exit status 141 from the shell, PS16a review oracle M1) ends LOSAT at once with exit
-   code 4 and no message; so does a failed write of rpsbproc's help or version, after the
-   message above. A successful run is identical to NCBI's. The function is `rpsbproc::run`
+   code 4 and no message; so does a failed write of rpsbproc's help (its text, or since version
+   1.20 its `-xmlhelp` XML) or version, after the message above. A successful run is identical to NCBI's. The function is `rpsbproc::run`
    (`LOSAT/src/rpsbproc/mod.rs`, `Report`). Release-notes sentence: If `losat rpsbproc` cannot
    write its report, it stops with `rpsbproc failed to write output` (exit status 4), where
    NCBI's rpsbproc 0.5.1 drops the writes and continues with exit status 0.

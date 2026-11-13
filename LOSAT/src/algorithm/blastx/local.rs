@@ -959,8 +959,9 @@ fn search_database(
     )?;
     crate::algorithm::common::database::check_negative_length_spaces(
         &database.statistics(),
-        !args.ungapped
-            && !(args.searchsp.is_some() || crate::blastinput::app::old_fsc_environment()),
+        !(args.ungapped
+            || args.searchsp.is_some()
+            || crate::blastinput::app::old_fsc_environment()),
         args.searchsp.is_some_and(|space| space != 0),
         "BLASTX",
     )?;

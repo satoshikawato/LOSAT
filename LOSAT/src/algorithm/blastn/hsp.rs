@@ -1227,7 +1227,7 @@ impl<L: HitListEntry> HitList<L> {
     /// a list comes to a full hit list). The output of every thread count is this order (Owner
     /// 2026-10-13: NCBI's `-num_threads 1` bytes; NCBI's own order differs with threads, probe
     /// p5_L0#41 of line RG D1a-3).
-    pub fn into_traceback_order(&mut self, hitlist_size: usize) {
+    pub fn put_in_traceback_order(&mut self, hitlist_size: usize) {
         let mut lists = std::mem::take(&mut self.hsplist_array);
         lists.retain(|list| list.hsp_count() > 0);
         // One list per subject of a query: the OIDs are distinct.
@@ -1758,9 +1758,9 @@ mod tests {
             best_evalue: 0.0,
         });
         let mut fits = hit_list.clone();
-        fits.into_traceback_order(10);
+        fits.put_in_traceback_order(10);
         assert_eq!(list_oids(&fits), vec![0, 1, 2, 3, 4]);
-        hit_list.into_traceback_order(3);
+        hit_list.put_in_traceback_order(3);
         assert!(hit_list.heapified);
         // OIDs 0, 1, 2 come first; 3 replaces the root (OID 1, score 10), the heap of 0, 3, 2
         // has 2 (score 20) at its root; 4 replaces it.

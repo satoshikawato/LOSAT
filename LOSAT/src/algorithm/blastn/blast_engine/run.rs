@@ -6196,9 +6196,9 @@ fn finish_query_hit_list(
     sorts_results: bool,
 ) {
     // A database whose `BlastSeqSrcGetTotLen` is not positive keeps the traceback's order
-    // (`HitList::into_traceback_order`), which the post-traceback steps below then read.
+    // (`HitList::put_in_traceback_order`), which the post-traceback steps below then read.
     if !sorts_results {
-        hit_list.into_traceback_order(hitlist_size);
+        hit_list.put_in_traceback_order(hitlist_size);
     }
     // NCBI's culling pipe is the first thing the traceback does with the consolidated results
     // (`-culling_limit`; the mask level of 101, the default, is no step).
@@ -8957,9 +8957,8 @@ impl QueryBatchSizes {
         name: &str,
         settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
     ) -> Result<Self> {
-        let total_length = database::BlastnDatabase::open(name, settings).map_or(0, |database| {
-            database.pairwise_database().total_letters as i64
-        });
+        let total_length = database::BlastnDatabase::open(name, settings)
+            .map_or(0, |database| database.pairwise_database().total_letters);
         Self::of_total_length(args, total_length)
     }
 
@@ -9566,7 +9565,7 @@ fn run_in_pool(
             .database
             .as_ref()
             .map_or(source.metadata().db_len_total as i64, |database| {
-                database.total_letters as i64
+                database.total_letters
             });
         if total_length > 0 {
             mixer.set_target_hits((total_length / 3000) as i32);

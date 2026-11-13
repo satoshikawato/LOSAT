@@ -120,7 +120,7 @@ impl OrdinaryTraceback<'_> {
         }
         let mut traced = self.trace_lists(work, pool)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:591-608 (quoted
-        // at `HitList::into_traceback_order` of BLASTN): the traceback reads the preliminary
+        // at `HitList::put_in_traceback_order` of BLASTN): the traceback reads the preliminary
         // lists by OID. Where the results are sorted at the end, the order of insertion changes
         // nothing (the comparison is total); where they are not, it is the report's order.
         if !self.sorts_results {

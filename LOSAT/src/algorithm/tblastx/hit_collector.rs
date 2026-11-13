@@ -179,14 +179,14 @@ impl QueryLists {
     /// The HSPs of every query with a hit list, in report order: per query, each list cut to
     /// `-max_hsps`, the lists sorted by e-value, each list's HSPs sorted by e-value.
     /// The lists in report order: sorted by e-value (`sorts_results`), or in the traceback's order
-    /// where NCBI does not sort them (`HitList::into_traceback_order`: a database length of 0 or
+    /// where NCBI does not sort them (`HitList::put_in_traceback_order`: a database length of 0 or
     /// of 2^63 or more; the preliminary list's heap order is not the traceback's).
     pub(super) fn finish(self, filters: &HitFilters<'_>, sorts_results: bool) -> Vec<TblastxHsp> {
         let mut ordered = Vec::new();
         let hitlist_size = self.hitlist_size;
         for mut hit_list in self.lists.into_iter().flatten() {
             if !sorts_results {
-                hit_list.into_traceback_order(hitlist_size);
+                hit_list.put_in_traceback_order(hitlist_size);
             }
             if filters.max_hsps > 0 {
                 for list in &mut hit_list.hsplist_array {

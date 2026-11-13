@@ -202,7 +202,7 @@ fn reported_ranks(hitlists: &[KappaResultHitList]) -> impl Iterator<Item = usize
 pub(super) fn write_tblastn_tabular(
     tab: &TblastnTabular<'_>,
     hitlists: &[KappaResultHitList],
-    writer: &mut dyn Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     mut warnings: Option<&mut QueryWarnings<'_>>,
     mut probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {

@@ -143,8 +143,8 @@ impl BlastnOutputFormat {
     // ```
     /// Whether the report's writer writes the texts of the subjects that a query's report reads
     /// one by one where it reads each (`QueryWarnings::subject_read`): outfmt 0 (description
-    /// lines and alignment headings), 5 (`Hit`s) and the tabular rows; the others write them
-    /// before the query's report.
+    /// lines and alignment headings), 5 (`Hit`s), the tabular rows and the organism report (18,
+    /// a `CustomTabular`, `report::tax_report`); the others write them before the query's report.
     pub(crate) fn places_subject_reads(self) -> bool {
         matches!(
             self,

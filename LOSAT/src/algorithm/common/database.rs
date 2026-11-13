@@ -4443,6 +4443,24 @@ fn loader_keeps(
         })
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+// ```c++
+//        		const CBioseq_Handle& subject_bh =
+//                 scope.GetBioseqHandle(align.GetSeq_id(1));
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:997
+// ```c++
+//             const CBioseq_Handle& handle = m_Scope.GetBioseqHandle(*subid);
+// ```
+/// Whether the writer of the first format `outfmt` (BLASTX's and TBLASTN's number) writes the
+/// texts of the subjects that a query's report reads one by one where it reads each
+/// (`QueryWarnings::subject_read`): outfmt 0 (description lines and alignment headings), 5
+/// (`Hit`s), the tabular rows (6, 7, 10 and 20) and the organism report (18, at each Seq-align it
+/// does not skip, `report::tax_report`); the others write them before the query's report.
+pub(crate) fn places_subject_reads(outfmt: i32) -> bool {
+    matches!(outfmt, 0 | 5 | 6 | 7 | 10 | 18 | 20)
+}
+
 /// Whether the batches of a `-db` search prefetch their reported subjects though the first format
 /// `outfmt` writes the Seq-align ids alone: outfmt 8, 9 and 12 with
 /// `PRE_FETCH_SEQS_LIMIT=2147483647` ([`prefetches_subjects`]; BLASTP's block search declines

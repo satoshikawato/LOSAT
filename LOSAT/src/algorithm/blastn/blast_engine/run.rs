@@ -7565,7 +7565,7 @@ pub fn run(
             .tabular_spec()
             .is_some_and(|spec| spec.kind == crate::report::tabular::TabularKind::TaxReport)
     });
-    let mut report = cli_report_stream(out_file, tax_report);
+    let mut report = crate::cli::ReportStream::of_cli(out_file, tax_report);
     let result = {
         let mut outputs =
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut report), &mut *diagnostics);
@@ -7660,7 +7660,7 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = cli_report_stream(out_file, false);
+        let mut report = crate::cli::ReportStream::of_cli(out_file, false);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -7684,22 +7684,6 @@ fn open_out_file(args: &BlastnArgs) -> Result<Option<std::io::BufWriter<std::fs:
             None => None,
         },
     )
-}
-
-/// The report stream of the command line: the `-out` file, or standard output.
-fn cli_report_stream(
-    out_file: Option<std::io::BufWriter<std::fs::File>>,
-    tax_report: bool,
-) -> crate::cli::ReportStream {
-    crate::cli::ReportStream {
-        // The organism report's file or standard output as NCBI's buffer writes it
-        // (`cli::NcbiReportBuffer`).
-        inner: crate::cli::report_destination(
-            out_file.map(|file| Box::new(file) as Box<dyn std::io::Write + Send>),
-            tax_report.then_some(18),
-        ),
-        failed: false,
-    }
 }
 
 struct CliSubjects {

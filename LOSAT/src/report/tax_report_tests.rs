@@ -65,16 +65,27 @@ fn hsp(subject: usize, evalue: f64, bit_score: f64) -> TaxHsp {
     }
 }
 
-/// The organism report (without the caption and the `Query=` block) and the taxids it looks up.
+/// The organism report (without the caption and the `Query=` block) and its reads and lookups.
 fn report(
     subjects: &Subjects,
     hsps: &[TaxHsp],
     names: Option<&TabularNames>,
-) -> (Vec<u8>, Vec<i32>) {
-    let (taxids, text) = organism_report(hsps, subjects, &mut lookups(names)).unwrap();
+) -> (Vec<u8>, Vec<Step>) {
+    let (steps, text) = organism_report(hsps, subjects, &mut lookups(names)).unwrap();
     let mut out = Vec::new();
     text.write_to(&mut out).unwrap();
-    (out, taxids)
+    (out, steps)
+}
+
+/// The taxids that `steps` look up, in order.
+fn looked_up(steps: &[Step]) -> Vec<i32> {
+    steps
+        .iter()
+        .filter_map(|step| match step {
+            Step::LookUp(taxid) => Some(*taxid),
+            Step::Read(_) => None,
+        })
+        .collect()
 }
 
 fn text(lines: &[&str]) -> Vec<u8> {
@@ -114,7 +125,7 @@ fn add_spaces_centres_cuts_and_pads_as_ncbi() {
 #[test]
 fn a_query_without_hsps_has_every_width_zero() {
     // probe `blastp.d.ids.t2`, query pq2.
-    let (out, taxids) = report(&Subjects(Vec::new()), &[], None);
+    let (out, steps) = report(&Subjects(Vec::new()), &[], None);
     assert_eq!(
         out,
         text(&[
@@ -126,7 +137,7 @@ fn a_query_without_hsps_has_every_width_zero() {
             "Accession...  Description... Score... E-value... \n",
         ])
     );
-    assert!(taxids.is_empty());
+    assert!(steps.is_empty());
 }
 
 #[test]
@@ -158,7 +169,7 @@ fn rows_group_by_taxid_in_first_seen_order_with_ncbi_widths() {
         hsp(5, 1e-45, 139.4),
         hsp(6, 2e-28, 94.04),
     ];
-    let (out, taxids) = report(&subjects, &hsps, names.as_ref());
+    let (out, steps) = report(&subjects, &hsps, names.as_ref());
     let want = text(&[
         "\n",
         &" ".repeat(43),
@@ -183,8 +194,16 @@ fn rows_group_by_taxid_in_first_seen_order_with_ncbi_widths() {
         String::from_utf8_lossy(&out),
         String::from_utf8_lossy(&want)
     );
-    // Each taxid once, in the order of the definition lines that reach it.
-    assert_eq!(taxids, [9606, 8888, 10090, 32630, 777, 4932, 12908]);
+    // Each taxid once, in the order of the definition lines that reach it, each after the read of
+    // its subject; the second HSP of subject 0 is skipped (the previous id), so it reads nothing.
+    assert_eq!(
+        looked_up(&steps),
+        [9606, 8888, 10090, 32630, 777, 4932, 12908]
+    );
+    assert_eq!(
+        steps.iter().step_by(2).copied().collect::<Vec<_>>(),
+        (0..7).map(Step::Read).collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -198,7 +217,7 @@ fn a_subject_whose_lookup_throws_feeds_every_hsp_and_keeps_earlier_rows() {
         line("md2_third_long_label_never_seen", "third", 10090),
     ]]);
     let names = names(Some("of18"));
-    let (out, taxids) = report(
+    let (out, steps) = report(
         &subjects,
         &[hsp(0, 1e-86, 243.4), hsp(0, 9.6, 11.9)],
         names.as_ref(),
@@ -218,8 +237,18 @@ fn a_subject_whose_lookup_throws_feeds_every_hsp_and_keeps_earlier_rows() {
         String::from_utf8_lossy(&out),
         String::from_utf8_lossy(&want)
     );
-    // Taxid 777 is looked up again at the next HSP; the third line's taxid never.
-    assert_eq!(taxids, [9606, 777, 777]);
+    // Taxid 777 is looked up again at the next HSP, after the subject is read again; the third
+    // line's taxid never.
+    assert_eq!(
+        steps,
+        [
+            Step::Read(0),
+            Step::LookUp(9606),
+            Step::LookUp(777),
+            Step::Read(0),
+            Step::LookUp(777)
+        ]
+    );
     // Without the database every lookup fails: no rows, every HSP widens the columns.
     let (out, _) = report(&subjects, &[hsp(0, 1e-86, 243.4), hsp(0, 9.6, 11.9)], None);
     assert!(
@@ -268,13 +297,13 @@ fn a_description_width_that_wraps_pads_with_ncbis_runs() {
     let title = "name-only swissprot id of 85 bytes";
     let subjects = Subjects(vec![vec![line(&label, title, 0)]]);
     let names = names(Some("of18"));
-    let (taxids, text) = organism_report(
+    let (steps, text) = organism_report(
         &[hsp(0, 7e-63, 180.3)],
         &subjects,
         &mut lookups(names.as_ref()),
     )
     .unwrap();
-    assert_eq!(taxids, [0]);
+    assert_eq!(steps, [Step::Read(0), Step::LookUp(0)]);
     let row = format!(" {label} {title}<SP*4294967262>180   7e-63   \n");
     assert_eq!(
         String::from_utf8(squeezed(&text)).unwrap(),
@@ -358,8 +387,8 @@ fn bl_taxid_in_a_name_is_refused() {
         },
         line("s1", "t", 8889),
     ]]);
-    let (out, taxids) = report(&unreached, &[hsp(0, 1e-5, 50.0)], Some(&names));
-    assert!(taxids.is_empty());
+    let (out, steps) = report(&unreached, &[hsp(0, 1e-5, 50.0)], Some(&names));
+    assert_eq!(steps, [Step::Read(0)]);
     assert!(out.ends_with(b"Accession...  Description... Score... E-value... \n"));
     let reached = Subjects(vec![vec![line("s1", "t", 8889)]]);
     let error = organism_report(&[hsp(0, 1e-5, 50.0)], &reached, &mut lookups(Some(&names)))
@@ -383,7 +412,7 @@ fn a_title_that_throws_drops_its_subject_before_it_widens() {
         vec![line("s2good", "two", 0)],
     ]);
     let names = names(Some("of18"));
-    let (out, taxids) = report(
+    let (out, steps) = report(
         &subjects,
         &[
             hsp(0, 0.0, 600.0),
@@ -406,7 +435,67 @@ fn a_title_that_throws_drops_its_subject_before_it_widens() {
         String::from_utf8_lossy(&out),
         String::from_utf8_lossy(&want)
     );
-    assert_eq!(taxids, [0]);
+    // Each HSP of the first subject reads it again.
+    assert_eq!(
+        steps,
+        [Step::Read(0), Step::Read(0), Step::Read(1), Step::LookUp(0)]
+    );
+}
+
+/// A writer into a buffer that other writers share: the merged stream of a test.
+#[derive(Clone, Default)]
+struct Merged(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+
+impl Write for Merged {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.borrow_mut().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn the_texts_of_a_subjects_read_come_before_its_lookups() {
+    // NCBI BLAST+ 2.17.0 with `PRE_FETCH_SEQS_LIMIT=0` (review 2 of T2, `T/t2/review2/ws/out/
+    // blastp.off.ncbi.txt`): after `Length=`, each subject's read (`GetBioseqHandle`) writes its
+    // text before the lookups of its lines (`GetTaxInfo`), all before `Organism Report`. Here A
+    // (9606) and B (99990, whose lookup in `offset_last_past_end` writes the offset error).
+    let subjects = Subjects(vec![
+        vec![line("AAA00001", "a_title", 9606)],
+        vec![line("BBB00001", "b_title", 99990)],
+    ]);
+    let names = names(Some("offset_last_past_end"));
+    let queries = [TaxQuery {
+        title: b"q",
+        length: 250,
+        hsps: vec![hsp(0, 3e-171, 461.0), hsp(1, 1e-3, 30.0)],
+    }];
+    let report = TaxReport::new(&queries, &subjects, lookups(names.as_ref())).unwrap();
+    let reads = vec![vec![(0, b"read A\n".to_vec()), (1, b"read B\n".to_vec())]];
+    let mut cursor = ReadCursor::new(&reads).unwrap();
+    let merged = Merged::default();
+    report
+        .write_query(
+            0,
+            &mut merged.clone(),
+            &mut merged.clone(),
+            Some((&mut cursor, 0)),
+            b"q",
+            250,
+        )
+        .unwrap();
+    let merged = String::from_utf8(merged.0.take()).unwrap();
+    let start = merged.find("Length=250\n").unwrap() + "Length=250\n".len();
+    let end = merged
+        .find(&format!("\n{}Organism Report", " ".repeat(43)))
+        .unwrap();
+    assert_eq!(
+        &merged[start..end],
+        "read A\nread B\nError: [blastp] Error: Offset error at end of taxdb file.\n"
+    );
 }
 
 #[test]

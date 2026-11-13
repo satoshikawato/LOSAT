@@ -600,7 +600,7 @@ fn report_stream(
     tax_report: bool,
 ) -> Result<crate::cli::ReportStream> {
     Ok(match io {
-        RunIo::Files => cli_report_stream(open_out_file(args)?, tax_report),
+        RunIo::Files => crate::cli::ReportStream::of_cli(open_out_file(args)?, tax_report),
         RunIo::Memory { report, .. } => crate::cli::ReportStream {
             inner: Box::new(MemoryReport(report.clone())),
             failed: false,
@@ -621,22 +621,6 @@ fn open_out_file(args: &TblastnArgs) -> Result<Option<std::io::BufWriter<std::fs
             None => None,
         },
     )
-}
-
-/// The report stream of the command line: the `-out` file, or standard output.
-fn cli_report_stream(
-    out_file: Option<std::io::BufWriter<std::fs::File>>,
-    tax_report: bool,
-) -> crate::cli::ReportStream {
-    crate::cli::ReportStream {
-        // The organism report's file or standard output as NCBI's buffer writes it
-        // (`cli::NcbiReportBuffer`).
-        inner: crate::cli::report_destination(
-            out_file.map(|file| Box::new(file) as Box<dyn std::io::Write + Send>),
-            tax_report.then_some(18),
-        ),
-        failed: false,
-    }
 }
 
 /// What `search_cli` and `run_local_database` do after the options are processed and before the
@@ -2080,19 +2064,12 @@ fn search(
                     .formats
                     .first()
                     .and_then(|format| super::tabular::tabular_spec(format.outfmt));
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
-                // ```c++
-                //        		const CBioseq_Handle& subject_bh =
-                //                 scope.GetBioseqHandle(align.GetSeq_id(1));
-                // ```
                 // Whether the first format's writer writes the texts of the subjects that a
                 // query's report reads one by one where it reads each
-                // (`QueryWarnings::subject_read`): outfmt 0 (description lines and alignment
-                // headings), 5 (`Hit`s) and the tabular rows.
+                // (`common::database::places_subject_reads`).
                 let places_reads = outputs.formats.first().is_some_and(|format| {
-                    matches!(
+                    crate::algorithm::common::database::places_subject_reads(
                         super::stage_e_report::format_number(format.outfmt),
-                        0 | 5 | 6 | 7 | 10 | 20
                     )
                 });
                 let plural_names = taxdb_found

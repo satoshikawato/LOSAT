@@ -642,10 +642,11 @@ pub(super) fn write_blastx_tabular(
 }
 
 /// Writes the organism report (outfmt 18, `report::tax_report`) of the query batches `batches`
-/// to `writer`: for each query its warning (`report::query_warning`) and its fetches' texts on
-/// `stderr`, then the caption, the `Query=` block (the query record's length, also with
-/// `-query_loc`, as outfmt 0's) and the table of the HSPs that the tabular rows show
-/// (`write_blastx_tabular`). The report is made before the batches' first byte
+/// to `writer`: for each query its warning (`report::query_warning`) on `stderr`, then the
+/// caption, the `Query=` block (the query record's length, also with `-query_loc`, as outfmt 0's)
+/// and the table of the HSPs that the tabular rows show (`write_blastx_tabular`), the texts of
+/// the subjects that the report reads one by one where it reads each (`ShownSubjects::query_reads`,
+/// `TaxReport::write_query`). The report is made before the batches' first byte
 /// (`tax_report::report_batch`), so that LOSAT's refusals come before it. NCBI writes it through
 /// `m_Outfile` (`CBlastFormat`), not a `CBlastTabularInfo`: a failing write is outfmt 0's
 /// "BLAST failed to write output" (`native::report_error` of the `io::Error`), not the tabular
@@ -751,20 +752,28 @@ fn write_blastx_tax_report(
             // ```
             // `cerr` is tied to `cout`: the report before the texts reaches the output first.
             let warning = query_warning(options, query, batch.search_skipped);
-            let fetches = shown.query_fetches(batch.query_ordinal + qidx);
-            if !warning.is_empty() || !fetches.is_empty() {
+            if !warning.is_empty() {
                 writer.flush()?;
             }
             stderr.write_all(&warning)?;
-            stderr.write_all(fetches)?;
+            // The texts of the subjects that the query's report reads one by one, written where
+            // it reads each (`ReadCursor`, the query's only).
+            let mut reads = crate::report::query_warnings::ReadCursor::new(std::slice::from_ref(
+                shown.query_reads(batch.query_ordinal + qidx),
+            ));
             let tax_query = &tax_queries[q_idx];
             report.write_query(
                 q_idx,
                 &mut *writer,
                 &mut *stderr,
+                reads.as_mut().map(|cursor| (cursor, 0)),
                 tax_query.title,
                 tax_query.length,
             )?;
+            // A text whose read the report did not place comes after it.
+            if let Some(reads) = reads.as_mut() {
+                reads.before_query(1, &mut *writer, &mut *stderr)?;
+            }
             q_idx += 1;
         }
     }

@@ -123,7 +123,7 @@ fn format_g(value: f64) -> String {
 /// The writer of the report (`m_ostream`): standard output or the `-o` file, with the run's
 /// diagnostics (`diag`). LOSAT writes the report in blocks; before each line it writes to
 /// standard error or the diagnostics, the report's file holds what NCBI's stream has written by
-/// then (`NcbiStream`): every line, which NCBI ends with `endl`, and of the line being written
+/// then (`cli::NcbiBuffer`): every line, which NCBI ends with `endl`, and of the line being written
 /// what the stream's buffer did not keep. `cerr` is tied to `cout`, so before a write to `cerr`
 /// a report on standard output is written whole. The streams then interleave as NCBI's do, also
 /// in one file (`-o F -logfile F`, `-logfile /dev/stdout`, `2>&1`): NCBI rpsbproc 0.5.1 with an
@@ -139,147 +139,30 @@ struct Report {
     out: Box<dyn Write>,
     /// The report's bytes not yet written to `out`.
     pending: Vec<u8>,
-    /// How many of the last bytes of `pending` NCBI's stream still keeps in its buffer.
-    held: usize,
-    stream: NcbiStream,
+    /// NCBI's buffer of the stream, which keeps the last bytes of `pending`
+    /// (`cli::NcbiBuffer::held`): what of a line that is being written has reached the file.
+    buffer: crate::cli::NcbiBuffer,
     quiet: bool,
     /// The first write error; nothing is written after it.
     failed: Option<std::io::Error>,
     diag: Diagnostics,
 }
 
-/// The buffer of NCBI's stream of the report, which decides what of a line that is being written
-/// has reached the file (`NcbiStream::held_after`). NCBI's every line ends with `endl`, which
-/// flushes it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NcbiStream {
-    /// `cout`, synchronized with C's `stdout` (NCBI does not call `sync_with_stdio(false)`):
-    /// each insertion is an `fwrite` into glibc's buffer of `block` bytes (`st_blksize` of the
-    /// standard output when it is below `BUFSIZ`, else `BUFSIZ`: `_IO_file_doallocate`).
-    Cout { block: usize },
-    /// The `ofstream` of `-o`: libstdc++'s `basic_filebuf` with a buffer of `BUFSIZ` bytes, of
-    /// which an insertion that does not fit in what is left is written directly with it.
-    File,
-}
-
-/// glibc's and libstdc++'s `BUFSIZ`.
-const BUFSIZ: usize = 8192;
-
 /// The size of the blocks in which LOSAT writes the report.
 const REPORT_BLOCK: usize = 1 << 16;
 
-impl NcbiStream {
-    /// The stream of a report on standard output: glibc's buffer of it.
-    fn cout() -> Self {
-        NcbiStream::Cout {
-            block: crate::cli::stdio_buffer_size(),
-        }
-    }
-
-    /// How many bytes the stream keeps after the insertion of `bytes`, when it kept `held`.
-    // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_xsputn`
-    // ```c
-    //   /* First figure out how much space is available in the buffer. */
-    //   ...
-    //       count = f->_IO_buf_end - f->_IO_write_ptr; /* Space available. */
-    //   ...
-    //   if (to_do + must_flush > 0)
-    //     {
-    //       size_t block_size, do_write;
-    //       /* Next flush the (full) buffer. */
-    //       if (_IO_OVERFLOW (f, EOF) == EOF)
-    //     ...
-    //       block_size = f->_IO_buf_end - f->_IO_buf_base;
-    //       do_write = to_do - (block_size >= 128 ? to_do % block_size : 0);
-    // ```
-    // NCBI reference (GCC 13 libstdc++): include/c++/13/bits/fstream.tcc:766-778
-    // (`basic_filebuf::xsputn`)
-    // ```c++
-    // 	  streamsize __bufavail = this->epptr() - this->pptr();
-    //
-    // 	  // Don't mistake 'uncommitted' mode buffered with unbuffered.
-    // 	  if (!_M_writing && _M_buf_size > 1)
-    // 	    __bufavail = _M_buf_size - 1;
-    //
-    // 	  if (__n >= __bufavail)
-    // 	    {
-    // 	      const streamsize __buffill = this->pptr() - this->pbase();
-    // 	      const char* __buf = reinterpret_cast<const char*>(this->pbase());
-    // 	      __ret = _M_file.xsputn_2(__buf, __buffill,
-    // 				       reinterpret_cast<const char*>(__s),
-    // 				       __n);
-    // ```
-    // (An insertion that ends a line is `endl`, which flushes the stream. LOSAT writes the
-    // report in the pieces of NCBI's insertions where a piece can reach a buffer's limit: the
-    // strings of the archive and the data. NCBI rpsbproc 0.5.1, both builds, on a `SESSION` line
-    // cut by an exception after a database name of 1,100, 5,000 and 9,000 bytes, with `-o F
-    // -logfile F` and with `-logfile /dev/stdout` on a pipe: line RG `E/e1c/bufprobe`.)
-    // NCBI reference (GCC 13 libstdc++): include/c++/13/ostream:570-576 (a `char` is put, not
-    // written with `sputn`: `held_after_put`)
-    // ```c++
-    //   template<typename _Traits>
-    //     inline basic_ostream<char, _Traits>&
-    //     operator<<(basic_ostream<char, _Traits>& __out, char __c)
-    //     {
-    //       if (__out.width() != 0)
-    // 	return __ostream_insert(__out, &__c, 1);
-    //       __out.put(__c);
-    //       return __out;
-    //     }
-    // ```
-    fn held_after(self, held: usize, bytes: &[u8]) -> usize {
-        if bytes.last() == Some(&b'\n') {
-            return 0;
-        }
-        let n = bytes.len();
-        match self {
-            NcbiStream::Cout { block } => {
-                if held + n <= block {
-                    held + n
-                } else if block >= 128 {
-                    (held + n) % block
-                } else {
-                    // `do_write` is the whole rest; the buffer keeps nothing.
-                    0
-                }
-            }
-            NcbiStream::File => {
-                if n >= BUFSIZ - 1 - held {
-                    0
-                } else {
-                    held + n
-                }
-            }
-        }
-    }
-
-    /// `held_after` for an insertion of one `char` (`put`, `sputc`): the buffer takes it while
-    /// it has room; a full buffer is written with it (`basic_filebuf::overflow`). On `cout`,
-    /// glibc's `putc` gives what an `fwrite` of one byte gives. NCBI rpsbproc 0.5.1, both builds,
-    /// with 8,190 bytes held before a tab of the `SESSION` line (line RG E1c review 2,
-    /// `s_same_mat8165`, `s_same_ev8156`).
-    fn held_after_put(self, held: usize) -> usize {
-        match self {
-            NcbiStream::Cout { .. } => self.held_after(held, b"\t"),
-            NcbiStream::File => {
-                if held < BUFSIZ - 1 {
-                    held + 1
-                } else {
-                    0
-                }
-            }
-        }
-    }
-}
-
 impl Report {
     /// A report written to `out` through NCBI's `stream`.
-    fn new(out: Box<dyn Write>, stream: NcbiStream, quiet: bool, diag: Diagnostics) -> Self {
+    fn new(
+        out: Box<dyn Write>,
+        stream: crate::cli::NcbiStdio,
+        quiet: bool,
+        diag: Diagnostics,
+    ) -> Self {
         Report {
             out,
             pending: Vec::with_capacity(REPORT_BLOCK),
-            held: 0,
-            stream,
+            buffer: crate::cli::NcbiBuffer::new(stream),
             quiet,
             failed: None,
             diag,
@@ -292,7 +175,15 @@ impl Report {
             return;
         }
         self.pending.extend_from_slice(bytes);
-        self.held = self.stream.held_after(self.held, bytes);
+        self.buffer.sputn(bytes.len());
+        // An insertion that ends a line is `endl`, which flushes the stream. LOSAT writes the
+        // report in the pieces of NCBI's insertions where a piece can reach a buffer's limit: the
+        // strings of the archive and the data. NCBI rpsbproc 0.5.1, both builds, on a `SESSION`
+        // line cut by an exception after a database name of 1,100, 5,000 and 9,000 bytes, with
+        // `-o F -logfile F` and with `-logfile /dev/stdout` on a pipe: line RG `E/e1c/bufprobe`.
+        if bytes.last() == Some(&b'\n') {
+            self.buffer.flush();
+        }
         self.write_blocks();
     }
 
@@ -303,14 +194,14 @@ impl Report {
             return;
         }
         self.pending.push(byte);
-        self.held = self.stream.held_after_put(self.held);
+        self.buffer.sputc();
         self.write_blocks();
     }
 
     /// Writes the report's full blocks that NCBI's stream has written.
     fn write_blocks(&mut self) {
-        if self.pending.len() - self.held >= REPORT_BLOCK {
-            self.write_out(self.pending.len() - self.held);
+        if self.pending.len() - self.buffer.held() >= REPORT_BLOCK {
+            self.write_out(self.pending.len() - self.buffer.held());
         }
     }
 
@@ -330,15 +221,15 @@ impl Report {
 
     /// The file holds what NCBI's stream has written by now.
     fn sync(&mut self) {
-        self.write_out(self.pending.len() - self.held);
+        self.write_out(self.pending.len() - self.buffer.held());
     }
 
     /// Before a write to `cerr`, which is tied to `cout`: a report on standard output is written
     /// whole (its stream flushed), one in the `-o` file as far as NCBI's stream has written it.
     fn before_cerr(&mut self) {
-        match self.stream {
-            NcbiStream::Cout { .. } => self.flush(),
-            NcbiStream::File => self.sync(),
+        match self.buffer.stream() {
+            crate::cli::NcbiStdio::Cout { .. } => self.flush(),
+            crate::cli::NcbiStdio::File => self.sync(),
         }
     }
 
@@ -362,7 +253,7 @@ impl Report {
     /// Writes the whole report (NCBI's stream flushed, as at the end of the program).
     fn flush(&mut self) {
         self.write_out(self.pending.len());
-        self.held = 0;
+        self.buffer.flush();
     }
 
     /// A progress line on standard error (`cerr`; not with `-q`, nor after a failed write).
@@ -1326,9 +1217,9 @@ fn run_ready(args: &RpsbprocArgs, ready: Ready, diag: Diagnostics) -> Outcome {
     }
     // `Ready` has the `-o` file when the run names one (`init` failed otherwise).
     let stream = if args.outfile.is_some() {
-        NcbiStream::File
+        crate::cli::NcbiStdio::File
     } else {
-        NcbiStream::cout()
+        crate::cli::NcbiStdio::cout()
     };
     let mut report = Report::new(out, stream, args.quiet, diag);
     let outcome = run_sessions(

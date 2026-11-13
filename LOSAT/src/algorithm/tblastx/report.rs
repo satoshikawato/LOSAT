@@ -1619,15 +1619,16 @@ impl TblastxOutputFormat {
         }
     }
 
-    /// Whether the format is a table whose fields read the sequence that NCBI's formatter finds
-    /// by a subject's Seq-align id (`report::tabular::reads_subject`: the default fields do).
+    /// Whether the format is a table (`is_tabular`) whose fields read the sequence that NCBI's
+    /// formatter finds by a subject's Seq-align id (`report::tabular::reads_subject`: the default
+    /// fields do).
     pub(crate) fn tabular_reads_subject(self) -> bool {
         let spec = match self {
-            Self::Tabular | Self::TabularWithComments => None,
             Self::CustomTabular(spec) => Some(spec),
-            _ => return false,
+            _ => None,
         };
-        crate::report::tabular::reads_subject(spec, crate::blastinput::app::Program::Tblastx)
+        self.is_tabular()
+            && crate::report::tabular::reads_subject(spec, crate::blastinput::app::Program::Tblastx)
     }
 
     /// Whether the format writes the displayed identity counts of the rows
@@ -1681,8 +1682,8 @@ impl TblastxOutputFormat {
     // ```
     /// Whether the report's writer writes the texts of the subjects that a query's report reads
     /// one by one where it reads each (`QueryWarnings::subject_read`): outfmt 0 (description
-    /// lines and alignment headings), 5 (`Hit`s) and the tabular rows; the others write them
-    /// before the query's report.
+    /// lines and alignment headings), 5 (`Hit`s), the tabular rows and the organism report (18,
+    /// a `CustomTabular`, `report::tax_report`); the others write them before the query's report.
     pub(crate) fn places_subject_reads(self) -> bool {
         matches!(
             self,

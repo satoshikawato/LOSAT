@@ -51,6 +51,7 @@ use std::io::{self, Write};
 use anyhow::Result;
 
 use crate::report::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi};
+use crate::report::query_warnings::ReadCursor;
 use crate::report::tabular::TabularNames;
 use crate::seqdb::taxdb::TaxNames;
 
@@ -946,12 +947,25 @@ pub struct TaxQuery<'a> {
     pub hsps: Vec<TaxHsp>,
 }
 
+/// What NCBI's report of a query does that can write to standard error, in its order
+/// (`organism_report`): the read of a subject's Bioseq at each Seq-align it does not skip
+/// (`GetBioseqHandle`: where the batch's prefetch is off, the first load of a blob writes the texts
+/// of its taxonomy lookups, `QueryWarnings::subject_read`) and the lookup of a taxid
+/// (`GetTaxInfo`, `TaxLookups::messages`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Step {
+    /// The read of the subject (`TaxHsp::subject`).
+    Read(usize),
+    /// The lookup of the taxid.
+    LookUp(i32),
+}
+
 /// The organism reports of one query batch, made before its first byte (`TaxReport::new`), so
-/// that LOSAT's refusals come before it: per query the taxids that its report looks up, in
-/// order, and its text.
+/// that LOSAT's refusals come before it: per query the reads and lookups of its report, in order
+/// (`Step`), and its text.
 pub struct TaxReport {
     lookups: TaxLookups,
-    queries: Vec<(Vec<i32>, Text)>,
+    queries: Vec<(Vec<Step>, Text)>,
     /// Whether the batch's first lookup has written its texts (the texts of opening with it).
     wrote_first: std::cell::Cell<bool>,
 }
@@ -978,12 +992,16 @@ impl TaxReport {
     /// Writes the report of query `q_idx` (of the `queries` given to `new`): the caption, the
     /// `Query=` block of its title `title` (outfmt 0's, `pairwise::write_blastp_query_header`)
     /// with its record's length `length`, and its organism report; the texts of the report's reads
-    /// of `./.ncbirc` and of its lookups go to `diagnostics` (after `out` is flushed).
+    /// of `./.ncbirc`, of its subjects' reads and of its lookups go to `diagnostics` (after `out`
+    /// is flushed), in the order of NCBI's report (`Step`). `reads`: where the batch's prefetch is
+    /// off, the texts of the subjects that the report reads one by one and the query's index among
+    /// them (`ReadCursor::subject_read`).
     pub fn write_query(
         &self,
         q_idx: usize,
         out: &mut dyn Write,
         diagnostics: &mut dyn Write,
+        mut reads: Option<(&mut ReadCursor<'_>, usize)>,
         title: &[u8],
         length: usize,
     ) -> io::Result<()> {
@@ -1007,7 +1025,8 @@ impl TaxReport {
         //     m_ConfigFile = new CNcbiIfstream(".ncbirc");
         //     m_Reg = new CNcbiRegistry(*m_ConfigFile);
         // ```
-        // The report's two reads of `./.ncbirc` post before its lookups.
+        // The report's two reads of `./.ncbirc` (`x_InitTaxFormat`) post before its reads and
+        // lookups (`x_InitTaxInfoMap`, taxFormat.cpp:140-141).
         let lookups = &self.lookups;
         if !lookups.registry_posts.is_empty() {
             out.flush()?;
@@ -1016,13 +1035,22 @@ impl TaxReport {
             }
             diagnostics.flush()?;
         }
-        let (taxids, text) = &self.queries[q_idx];
-        for &taxid in taxids {
-            let text = lookups.messages(taxid, !self.wrote_first.replace(true));
-            if !text.is_empty() {
-                out.flush()?;
-                diagnostics.write_all(&text)?;
-                diagnostics.flush()?;
+        let (steps, text) = &self.queries[q_idx];
+        for step in steps {
+            match *step {
+                Step::Read(subject) => {
+                    if let Some((cursor, query)) = reads.as_mut() {
+                        cursor.subject_read(*query, subject as u32, out, diagnostics)?;
+                    }
+                }
+                Step::LookUp(taxid) => {
+                    let text = lookups.messages(taxid, !self.wrote_first.replace(true));
+                    if !text.is_empty() {
+                        out.flush()?;
+                        diagnostics.write_all(&text)?;
+                        diagnostics.flush()?;
+                    }
+                }
             }
         }
         text.write_to(out)
@@ -1031,23 +1059,37 @@ impl TaxReport {
 
 /// Writes the reports of `queries` (`TaxReport::write_query` of `report`), each query's warnings
 /// before its report and the warnings after the last query at the end (`QueryWarnings`); the
-/// texts of the lookups go to the warnings' sink (none without it).
+/// texts of the subjects' reads (`QueryWarnings::with_subject_reads`) and of the lookups go to the
+/// warnings' sink (none without it).
 pub fn write_report(
     writer: &mut dyn Write,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
     queries: &[TaxQuery<'_>],
     report: &TaxReport,
 ) -> io::Result<()> {
-    let mut sink = io::sink();
     for (q_idx, query) in queries.iter().enumerate() {
-        if let Some(warnings) = warnings.as_deref_mut() {
-            warnings.before_query(q_idx, &mut *writer)?;
+        match warnings.as_deref_mut() {
+            Some(warnings) => {
+                warnings.before_query(q_idx, &mut *writer)?;
+                let (reads, sink) = warnings.reads_and_sink();
+                report.write_query(
+                    q_idx,
+                    &mut *writer,
+                    sink,
+                    reads.map(|cursor| (cursor, q_idx)),
+                    query.title,
+                    query.length,
+                )?;
+            }
+            None => report.write_query(
+                q_idx,
+                &mut *writer,
+                &mut io::sink(),
+                None,
+                query.title,
+                query.length,
+            )?,
         }
-        let diagnostics: &mut dyn Write = match warnings.as_deref_mut() {
-            Some(warnings) => &mut *warnings.sink,
-            None => &mut sink,
-        };
-        report.write_query(q_idx, &mut *writer, diagnostics, query.title, query.length)?;
     }
     if let Some(warnings) = warnings {
         warnings.after_last_query(queries.len(), &mut *writer)?;
@@ -1120,26 +1162,29 @@ pub fn report_batch<'a>(
 //         CSeqDB::GetTaxInfo(taxid, taxInfo);
 // ```
 /// The organism report of `hsps` (`CTaxFormat::x_InitTaxInfoMap`, then `DisplayOrgReport`) and
-/// the taxids it looks up, in order (`lookups`: a taxid not yet in the query's map, at each
-/// definition line that reaches it). A title that throws drops the rest of its subject's HSP
-/// before it widens the columns; a lookup that throws drops it after; either way the subject is
-/// not the previous id, so its next HSP is read again. LOSAT's refusals: a title that it does not
-/// write as NCBI where NCBI makes it (or, `shown_only`, shows it), and an organism line that
+/// its reads and lookups, in order (`Step`): the read of the subject of each HSP that it does not
+/// skip, then the lookups of its definition lines (`lookups`: a taxid not yet in the query's map,
+/// at each definition line that reaches it). A title that throws drops the rest of its subject's
+/// HSP before it widens the columns; a lookup that throws drops it after; either way the subject
+/// is not the previous id, so its next HSP is read again. LOSAT's refusals: a title that it does
+/// not write as NCBI where NCBI makes it (or, `shown_only`, shows it), and an organism line that
 /// holds `<@bl_taxid@>` (NCBI writes an uninitialised `int` there).
 fn organism_report(
     hsps: &[TaxHsp],
     subjects: &dyn TaxSubjects,
     lookups: &mut TaxLookups,
-) -> Result<(Vec<i32>, Text)> {
+) -> Result<(Vec<Step>, Text)> {
     let mut widths = Widths::default();
     let mut groups: Vec<Group<'_>> = Vec::new();
     let mut group_of: std::collections::HashMap<i32, usize> = Default::default();
-    let mut looked_up = Vec::new();
+    let mut steps = Vec::new();
     let mut previous: Option<usize> = None;
     for hsp in hsps {
         if previous.is_some_and(|previous| subjects.same(previous, hsp.subject)) {
             continue;
         }
+        // `m_Scope.GetBioseqHandle(*subid)` (taxFormat.cpp:997), before the definition lines.
+        steps.push(Step::Read(hsp.subject));
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:950-951
         // ```c++
         //         string total_bit_score_buf, raw_score_buf;
@@ -1166,7 +1211,7 @@ fn organism_report(
             let index = match group_of.get(&defline.taxid) {
                 Some(&index) => index,
                 None => {
-                    looked_up.push(defline.taxid);
+                    steps.push(Step::LookUp(defline.taxid));
                     let Some(names) = lookups.look_up(defline.taxid)? else {
                         threw = true;
                         break;
@@ -1203,7 +1248,7 @@ fn organism_report(
         }
     }
     let text = org_report_text(&groups, widths, &lookups.browser_url);
-    Ok((looked_up, text))
+    Ok((steps, text))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:450-517 (`DisplayOrgReport`)

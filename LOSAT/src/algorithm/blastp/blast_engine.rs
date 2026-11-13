@@ -2480,8 +2480,8 @@ impl BlastpReport {
     // ```
     /// Whether the report's writer writes the texts of the subjects that a query's report reads
     /// one by one where it reads each (`QueryWarnings::subject_read`): outfmt 0 (description
-    /// lines and alignment headings), 5 (`Hit`s) and the tabular rows; the others write them
-    /// before the query's report.
+    /// lines and alignment headings), 5 (`Hit`s), the tabular rows and the organism report (18,
+    /// a `CustomTabular`, `report::tax_report`); the others write them before the query's report.
     fn places_subject_reads(self) -> bool {
         matches!(
             self,
@@ -5129,7 +5129,7 @@ pub fn run(
     } else {
         choice.normalized()
     };
-    let mut stream = cli_report_stream(out_file, tax_report);
+    let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report);
     let result = {
         let mut outputs =
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
@@ -5207,7 +5207,7 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = cli_report_stream(out_file, false);
+        let mut report = crate::cli::ReportStream::of_cli(out_file, false);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -5231,21 +5231,6 @@ fn open_out_file(args: &BlastpArgs) -> Result<Option<std::io::BufWriter<std::fs:
             None => None,
         },
     )
-}
-
-/// The report stream of the command line: the `-out` file, or standard output (`tax_report`:
-/// the organism report's, `cli::NcbiReportBuffer`).
-fn cli_report_stream(
-    out_file: Option<std::io::BufWriter<std::fs::File>>,
-    tax_report: bool,
-) -> crate::cli::ReportStream {
-    crate::cli::ReportStream {
-        inner: crate::cli::report_destination(
-            out_file.map(|file| Box::new(file) as Box<dyn std::io::Write + Send>),
-            tax_report.then_some(18),
-        ),
-        failed: false,
-    }
 }
 
 /// The subjects of the command line's `-subject`, read where NCBI's handler of the

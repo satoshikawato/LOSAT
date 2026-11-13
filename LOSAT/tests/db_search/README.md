@@ -704,7 +704,8 @@ Where the reports read their subjects one by one (line DBID taxrow; `ids/txr_p` 
 --taxrow-only`, a decoy `gb|DDD00001.1|` without hits, A `gb|AAA00001.1|` taxid 9606, the best hit of `ids/txr_q.faa` /
 `ids/txr_q.fna`, and B `gb|BBB00001.1|` taxid 99990; `ids/txr_q2.*` end with a query without hits): with `PRE_FETCH_SEQS_LIMIT=0` NCBI's formatter loads each subject when it formats it, so the offset error of
 `tests/seqdb/taxdb/offset_last_past_end` comes between A's and B's tabular rows, description lines and BLAST XML `Hit`s
-where both streams go to one file. `tests/taxonomy_read_order.rs` compares LOSAT's merged stream with NCBI 2.17.0's
+where both streams go to one file; the organism report (outfmt 18) reads each subject after the `Query=` block, before the
+lookups of its taxids. `tests/taxonomy_read_order.rs` compares LOSAT's merged stream with NCBI 2.17.0's
 (`tests/fixtures/taxonomy_read_order`) in the six programs, with `ids/prd_txself` for a plural name's open.
 
 Review 3 of pssmread (rows `db.id.prd3.*`; `ids/prd_np` and its version 4 copy `ids/prd_np_4` from `ids/prd_np.faa`, A and B

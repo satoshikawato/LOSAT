@@ -1,0 +1,80 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_mstate.xml
+#Output data file:	(stdout)
+#Annotation data at:	sites
+#E-Value cutoff:	0.01
+#Redundancy:	Standard
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: YES
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSBLAST 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	158	NP_414781.1 RadC-like JAB domain-containing protein YkfG [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	441606	22	158	7.5304e-67	202.595	COG2003	RadC	N	-
+1	Query_1	Non-specific	502588	24	158	4.75122e-66	200.294	NF000642	PRK00024	N	-
+1	Query_1	Specific	515960	41	157	5.30046e-61	184.144	pfam04002	RadC	-	-
+1	Query_1	Specific	501540	41	155	2.48456e-60	182.27	cd08071	MPN_YfjY-like	-	530700
+1	Query_1	Non-specific	273171	39	158	3.46524e-47	152.593	TIGR00608	radc	N	-
+ENDDOMAINS
+SUPERFAMILIES
+1	Query_1	Superfamily	0	41	155	2.48456e-60	182.27	cl13996	MPN	-	-
+ENDSUPERFAMILIES
+SITES
+1	Query_1	Specific	Zn binding site	H107,H109,D120	3	3	501540
+ENDSITES
+ENDQUERY
+QUERY	Query_2	Peptide	148	NP_416506.1 RadC-like JAB domain-containing protein YeeS [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_2	Specific	441606	18	148	3.4858e-65	197.973	COG2003	RadC	N	-
+1	Query_2	Non-specific	502588	18	148	6.48502e-65	196.828	NF000642	PRK00024	N	-
+1	Query_2	Specific	501540	31	145	4.57894e-60	181.114	cd08071	MPN_YfjY-like	-	530700
+1	Query_2	Specific	515960	31	147	6.86475e-60	180.678	pfam04002	RadC	-	-
+1	Query_2	Non-specific	273171	29	148	9.15854e-48	153.749	TIGR00608	radc	N	-
+ENDDOMAINS
+SUPERFAMILIES
+1	Query_2	Superfamily	0	31	145	4.57894e-60	181.114	cl13996	MPN	-	-
+ENDSUPERFAMILIES
+SITES
+1	Query_2	Specific	Zn binding site	H97,H99,D110	3	3	501540
+ENDSITES
+ENDQUERY
+QUERY	Query_3	Peptide	185	NP_416542.1 dTDP-4-dehydrorhamnose 3,5-epimerase [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_3	Specific	273510	2	179	9.32362e-118	330.896	TIGR01221	rmlC	-	532251
+1	Query_3	Specific	441502	1	178	1.22914e-114	323.17	COG1898	RfbC	-	480982
+1	Query_3	Specific	513844	12	176	8.12583e-105	297.768	pfam00908	dTDP_sugar_isom	-	480982
+1	Query_3	Specific	380337	3	172	4.48011e-101	288.552	cd00438	cupin_RmlC	-	532251
+ENDDOMAINS
+SUPERFAMILIES
+1	Query_3	Superfamily	0	2	179	9.32362e-118	330.896	cl40423	cupin_RmlC-like	-	-
+ENDSUPERFAMILIES
+SITES
+1	Query_3	Specific	active site	N49,S51,H62,Q64,K72,H119,Y132,D169	8	8	380337
+1	Query_3	Specific	homodimer interface	R23,G24,F25,F26,Y27,E28,S29,F30,N31,S33,Q47,D48,N49,H50,S51,R52,S53,S54,V57,R59,T77,K133,Y137,S166	24	24	380337
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

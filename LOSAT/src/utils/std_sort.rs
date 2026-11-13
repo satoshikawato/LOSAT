@@ -6,9 +6,17 @@
 //! data). Every step below is the library's, so that the order is the same for every input.
 //!
 //! The functions take a slice and a "less" comparison (`comp(a, b)`: `a` goes before `b`), the
-//! `_Iter_comp_iter` of `std::sort(first, last, comp)`. The comparison must be a strict weak
-//! order (libstdc++'s unguarded loops run past the ends otherwise; here the slice indexing
-//! panics).
+//! `_Iter_comp_iter` of `std::sort(first, last, comp)`. With a strict weak order libstdc++'s
+//! unguarded loops stay inside the range. With a comparison that is not one (rpsbproc's of hits
+//! with NaN E-values or bit scores), the algorithm is still libstdc++'s, step for step, and its
+//! result is defined while its loops stay inside the vector. Two of them have no bound of their
+//! own: the first scan of `__unguarded_partition` (stopped by a sentinel that the median of three
+//! and the swaps leave) and the walk of `__unguarded_linear_insert` in `__final_insertion_sort`
+//! after the first 16 elements (stopped by an element that a partition left before it). A
+//! comparison that is not irreflexive and asymmetric, or a part sorted by the heap sort, can take
+//! them past the vector's ends, where NCBI reads outside it (undefined): `try_std_sort` gives
+//! `OutOfRange` before such a read. (`introsort_loop` compares positions as libstdc++'s signed
+//! differences.)
 
 /// `std::sort(first, last, comp)`.
 // libstdc++ (GCC 13): bits/stl_algo.h:1940-1951
@@ -38,12 +46,26 @@
 //       return std::__bit_width(make_unsigned_t<_Tp>(__n)) - 1;
 // ```
 pub(crate) fn std_sort<T: Copy>(slice: &mut [T], comp: &mut impl FnMut(&T, &T) -> bool) {
+    try_std_sort(slice, comp).expect("a strict weak order keeps libstdc++'s sort in its range");
+}
+
+/// A loop of libstdc++'s sort that would read outside the vector (a comparison that is not a
+/// strict weak order).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct OutOfRange;
+
+/// `std::sort(first, last, comp)` of any comparison: libstdc++'s permutation, or `OutOfRange`
+/// where one of its unguarded loops would leave the slice (the module's text).
+pub(crate) fn try_std_sort<T: Copy>(
+    slice: &mut [T],
+    comp: &mut impl FnMut(&T, &T) -> bool,
+) -> Result<(), OutOfRange> {
     if slice.is_empty() {
-        return;
+        return Ok(());
     }
     let lg = (usize::BITS - slice.len().leading_zeros() - 1) as usize;
-    introsort_loop(slice, 0, slice.len(), lg * 2, comp);
-    final_insertion_sort(slice, 0, slice.len(), comp);
+    introsort_loop(slice, 0, slice.len(), lg * 2, comp)?;
+    final_insertion_sort(slice, 0, slice.len(), comp)
 }
 
 /// `_S_threshold`.
@@ -74,23 +96,26 @@ const S_THRESHOLD: usize = 16;
 // 	}
 //     }
 // ```
+// (`__last - __first` is a signed difference: a cut past `__last`, which a comparison that is not
+// a strict weak order can give, makes it negative and ends the loop.)
 fn introsort_loop<T: Copy>(
     s: &mut [T],
     first: usize,
     mut last: usize,
     mut depth_limit: usize,
     comp: &mut impl FnMut(&T, &T) -> bool,
-) {
-    while last - first > S_THRESHOLD {
+) -> Result<(), OutOfRange> {
+    while last > first && last - first > S_THRESHOLD {
         if depth_limit == 0 {
             partial_sort(s, first, last, last, comp);
-            return;
+            return Ok(());
         }
         depth_limit -= 1;
-        let cut = unguarded_partition_pivot(s, first, last, comp);
-        introsort_loop(s, cut, last, depth_limit, comp);
+        let cut = unguarded_partition_pivot(s, first, last, comp)?;
+        introsort_loop(s, cut, last, depth_limit, comp)?;
         last = cut;
     }
+    Ok(())
 }
 
 // libstdc++ (GCC 13): bits/stl_algo.h:1891-1900
@@ -109,7 +134,7 @@ fn unguarded_partition_pivot<T: Copy>(
     first: usize,
     last: usize,
     comp: &mut impl FnMut(&T, &T) -> bool,
-) -> usize {
+) -> Result<usize, OutOfRange> {
     let mid = first + (last - first) / 2;
     move_median_to_first(s, first, first + 1, mid, last - 1, comp);
     unguarded_partition(s, first + 1, last, first, comp)
@@ -183,23 +208,33 @@ fn move_median_to_first<T: Copy>(
 // 	}
 //     }
 // ```
+// (The first scan reads `*__first` until the comparison fails: past the slice's end it reads
+// outside the vector, `OutOfRange`. The second scan stops at the pivot at the latest, since
+// `comp(pivot, pivot)` is false for rpsbproc's comparison, NaN or not; past the slice's start it
+// would read outside too.)
 fn unguarded_partition<T: Copy>(
     s: &mut [T],
     mut first: usize,
     mut last: usize,
     pivot: usize,
     comp: &mut impl FnMut(&T, &T) -> bool,
-) -> usize {
+) -> Result<usize, OutOfRange> {
     loop {
-        while comp(&s[first], &s[pivot]) {
+        loop {
+            if first >= s.len() {
+                return Err(OutOfRange);
+            }
+            if !comp(&s[first], &s[pivot]) {
+                break;
+            }
             first += 1;
         }
-        last -= 1;
+        last = last.checked_sub(1).ok_or(OutOfRange)?;
         while comp(&s[pivot], &s[last]) {
-            last -= 1;
+            last = last.checked_sub(1).ok_or(OutOfRange)?;
         }
         if first >= last {
-            return first;
+            return Ok(first);
         }
         s.swap(first, last);
         first += 1;
@@ -457,15 +492,16 @@ fn final_insertion_sort<T: Copy>(
     first: usize,
     last: usize,
     comp: &mut impl FnMut(&T, &T) -> bool,
-) {
+) -> Result<(), OutOfRange> {
     if last - first > S_THRESHOLD {
-        insertion_sort(s, first, first + S_THRESHOLD, comp);
+        insertion_sort(s, first, first + S_THRESHOLD, comp)?;
         // `__unguarded_insertion_sort` (stl_algo.h:1834-1842).
         for i in first + S_THRESHOLD..last {
-            unguarded_linear_insert(s, i, comp);
+            unguarded_linear_insert(s, i, comp)?;
         }
+        Ok(())
     } else {
-        insertion_sort(s, first, last, comp);
+        insertion_sort(s, first, last, comp)
     }
 }
 
@@ -491,14 +527,16 @@ fn final_insertion_sort<T: Copy>(
 // 	}
 //     }
 // ```
+// (The walk of `__unguarded_linear_insert` stops at `__first` at the latest: `comp(val, *__first)`
+// was false, and `*__first` is not moved before the walk reaches it.)
 fn insertion_sort<T: Copy>(
     s: &mut [T],
     first: usize,
     last: usize,
     comp: &mut impl FnMut(&T, &T) -> bool,
-) {
+) -> Result<(), OutOfRange> {
     if first == last {
-        return;
+        return Ok(());
     }
     for i in first + 1..last {
         if comp(&s[i], &s[first]) {
@@ -506,9 +544,10 @@ fn insertion_sort<T: Copy>(
             s.copy_within(first..i, first + 1);
             s[first] = value;
         } else {
-            unguarded_linear_insert(s, i, comp);
+            unguarded_linear_insert(s, i, comp)?;
         }
     }
+    Ok(())
 }
 
 // libstdc++ (GCC 13): bits/stl_algo.h:1790-1806
@@ -529,19 +568,22 @@ fn insertion_sort<T: Copy>(
 //       *__last = _GLIBCXX_MOVE(__val);
 //     }
 // ```
+// (Before the slice's start `--__next` points outside the vector: `OutOfRange`, the moves made
+// so far left in place as the error ends the sort.)
 fn unguarded_linear_insert<T: Copy>(
     s: &mut [T],
     mut last: usize,
     comp: &mut impl FnMut(&T, &T) -> bool,
-) {
+) -> Result<(), OutOfRange> {
     let value = s[last];
     let mut next = last - 1;
     while comp(&value, &s[next]) {
         s[last] = s[next];
         last = next;
-        next -= 1;
+        next = next.checked_sub(1).ok_or(OutOfRange)?;
     }
     s[last] = value;
+    Ok(())
 }
 
 #[cfg(test)]

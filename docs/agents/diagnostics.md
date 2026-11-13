@@ -413,6 +413,7 @@ export LOSAT_X_DCSEEDLEAN=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DIAGLV2=1
 export LOSAT_X_DISCLUTPAR=1
+export LOSAT_X_DP32=1
 export LOSAT_X_DPEMASK=1
 export LOSAT_X_DPNEON2=1
 export LOSAT_X_DPNIBBLE=1
@@ -741,6 +742,28 @@ Same values, faster computation:
   AVX2 only; the rule is `x_xdrop_avx2::available()`): the same values, lane width and band steps
   as the 128-bit kernels, so the same result and edit script; a call the 256-bit kernel does not
   take runs on the 128-bit kernel (`utils/x_xdrop_avx2.rs`). `LOSAT_X_DPNOAVX=1` turns it off.
+- `LOSAT_X_DP32=1` (every program's vector X-drop DP, speed; in the strict set from the pull request that
+  added it, 2026-11-13; `=0` returns to the previous path) a call whose X-drop the 16-bit lanes cannot hold
+  (raw X above about 26,700, or `gap_extend > 4095`: `fits_16bit`, the 16-bit kernels' own value-range test)
+  no longer returns None to the caller's scalar port (`ALIGN_EX`, `Blast_SemiGappedAlign`,
+  `s_BlastAlignPackedNucl`). First the X-drop is clamped to `R = max_m * min(M, N) + 3 * goe + ge * (M + N + 1)`:
+  for every X >= R the C loops drop no cell and give the same offsets, score, fence flag, edit script and cells
+  (the argument is at the head of `utils/xdrop_simd.rs`), so a small problem with a huge X-drop runs on the
+  16-bit or 8-bit lanes; a call whose clamped X-drop is still past them runs on 32-bit lanes, 4 per vector, on
+  x86_64 (SSE4.1 / AVX), aarch64 (NEON) and wasm32 (simd128) alike (`kernel::align_body32`: the 16-bit
+  kernel's recurrence, blocks, script bits, traceback rows, walk and band, with values up to `i32::MAX`). It
+  declines a call in which a row letter meets a column letter whose 16-bit table entry is -32768 (perhaps a
+  clamped lower score), and the scalar port runs that call. `=0` runs neither the clamp nor the 32-bit lanes.
+  The rule (conditional, not a new rule: the path runs exactly where the scalar fallback ran,
+  `docs/decisions/SWITCH_APPROVALS.md` (ii)) is marked per call (`x_reach!`: own path = an X-drop past the
+  16-bit lanes, which the switch clamps onto the 16-bit or 8-bit lanes or runs on the 32-bit lanes). The 8-bit and 16-bit kernels' machine code is unchanged (x86_64 objdump of every function against
+  dev e990a108f: only `xdrop_align` differs). Evidence: the random tests of `utils/xdrop_simd.rs`
+  (`wide_lanes_*`, `x_drop_clamp_keeps_every_scalar_result`, X-drops up to 2^31 - 300) and the blastn / blastp
+  tests that compare the dispatched extensions with their scalar ports in one process
+  (`wide_lanes_give_the_scalar_ports_results`); `tests/blastn_dp32.rs` and `tests/blastp_dp32.rs` compare whole
+  reports with `=0`. Local one-thread timing of `blastn -task blastn -xdrop_gap_final 1e5`, 12 kb x 20 kb (the
+  same run, user seconds): NCBI 82.3, dev e990a108f 72.5, with the switch 22.8, all three reports equal;
+  `-xdrop_gap 1e5` 58.1 -> 17.3, dc-megablast `-xdrop_gap_final 1e5` 29.2 -> 10.0; max RSS 302 -> 265 MB.
 - `LOSAT_X_DPEMASK=1` (with the 256-bit AVX2 kernel, speed; in the strict set from the pull request that
   added it, 2026-10-19; `=0` returns to the previous kernel) the 8-bit
   256-bit X-drop kernel (`align8`: blastp's and the translated programs' score-only DP, blastn's

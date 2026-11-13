@@ -84,15 +84,27 @@ pub(crate) struct DomAlign {
 impl DomAlign {
     /// A hit without segments (`TSeqAlignment::Reset` and the start of `ParseAlignSegs`).
     fn empty(align: &Align, pssm_id: u32) -> Self {
+        Self::new(
+            pssm_id,
+            i32::MAX,
+            0,
+            align.e_value.unwrap_or(0.0),
+            align.bit_score.unwrap_or(0.0),
+        )
+    }
+
+    /// A hit of the range `from`..`to` without segments, of a protein query (the alignment
+    /// type and the reading frame of `TDomSeqAlignment`'s constructor).
+    pub(crate) fn new(pssm_id: u32, from: i32, to: i32, e_value: f64, bit_score: f64) -> Self {
         DomAlign {
             pssm_id,
-            from: i32::MAX,
-            to: 0,
+            from,
+            to,
             m_starts: Vec::new(),
             s_starts: Vec::new(),
             lens: Vec::new(),
-            e_value: align.e_value.unwrap_or(0.0),
-            bit_score: align.bit_score.unwrap_or(0.0),
+            e_value,
+            bit_score,
             region: 0,
             n_missing: 0.0,
             c_missing: 0.0,

@@ -198,6 +198,10 @@ pub(crate) struct DomQuery {
     /// `m_dimSplitAligns`: the classification of the hits of each reading frame (index 0 only
     /// for a protein query).
     pub(crate) frames: [AlignIndex; 6],
+    /// `_TOfflDomQuery::m_dimTranslated` of a query of the XML input: the residues that its
+    /// alignments give each reading frame (`-` elsewhere), which the sites of a nucleotide query
+    /// read in place of `TranslateAll` of its bases; `None` for a query of an archive.
+    pub(crate) translated: Option<Box<[Vec<u8>; 6]>>,
 }
 
 /// `ConvertBlastMaskListToSeqLocInfoVector` as far as it can fail: the first location of each
@@ -1071,6 +1075,7 @@ pub(crate) fn process_blast_results(
             residues,
             aligns: Vec::new(),
             frames: Default::default(),
+            translated: None,
         };
         // NCBI reference (598d8ae6): c++/src/objects/seq/Bioseq.cpp:271-279,327-343
         // ```c++

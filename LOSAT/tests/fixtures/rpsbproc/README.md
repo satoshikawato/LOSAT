@@ -1,4 +1,4 @@
-# rpsbproc fixtures (PS16a-PS16c)
+# rpsbproc fixtures (PS16a-PS16d)
 
 Inputs and frozen NCBI outputs for `losat rpsbproc` (NCBI rpsbproc 0.5.1, the 2025-05-13 package).
 
@@ -37,8 +37,7 @@ Inputs and frozen NCBI outputs for `losat rpsbproc` (NCBI rpsbproc 0.5.1, the 20
 ## CASES.tsv
 
 `case`, `use` (`compare`: LOSAT must give the same stdout, stderr and exit code; `linux`: the same, on Linux only; `refuse`: LOSAT refuses, exit 1, with
-the bytes of `refused/<case>.{out,err,rc}`: the XML input until the XML reader of a later item, PS16d, and the
-refusals of PS16b and PS16c below), `stdin` (`-` = empty), `setup`
+the bytes of `refused/<case>.{out,err,rc}`: the refusals of PS16b, PS16c and PS16d below), `stdin` (`-` = empty), `setup`
 (`data-without:<file>`: a directory `data_missing/` holding the data files except that one; `data-with:<dir>`: a
 directory `<dir>/` holding the data files with those of `data_with/<dir>/` in their place; `data-with:<a>+<dir>`: the
 same with those of `data_with/<a>/` first, then those of `data_with/<dir>/`), `arguments` (split on
@@ -175,6 +174,68 @@ spaces). PS16a's cases of `-t feats`, `-t both` and the default `-t` (named `ref
 - `use` `linux` (`linux_cout_longdb`): run only on Linux (`rpsbproc_gives_ncbis_bytes_through_a_pipe_on_linux`):
   `-logfile /dev/stdout` with the standard output a pipe, where glibc's buffer of `cout` (4,096 bytes) decides the
   order of the report and the diagnostics.
-- `refused/refuse_xml.*`: LOSAT's bytes for the XML input with a successful `Init`, refused when its run would read the
-  archive (NCBI's standard error up to its warning `Warning: XML format support is deprecated!`, then the refusal).
-  With `-dryrun` NCBI reads no archive and passes, and LOSAT gives its bytes (`e1c_dry_xml`).
+- With `-dryrun` NCBI reads no input and passes the XML input, and LOSAT gives its bytes (`e1c_dry_xml`).
+
+## XML input (PS16d)
+
+- XML added for PS16d: NCBI BLAST+ 2.17.0 `rpsblast -outfmt 5` and `rpstblastn -outfmt 5`, one thread, against CDD
+  v3.22 (run in its directory as `-db Cdd`), on the queries of the PS16a-c archives (same options, so the same hits)
+  and four new nucleotide queries; commands in `ARCH_COMMANDS.tsv`. They are stored gzip-compressed
+  (`arch/x_*.xml.gz`, `gzip -9n`); the tests unpack each to `arch/x_<name>.xml` in the run directory before running,
+  so the report's header names `arch/x_<name>.xml`. NCBI's rpsbproc posts `Warning: XML format support is deprecated!`
+  and reads each `BlastOutput` document as one session (`SESSION 1 RPSBLAST 2.17.0+ Cdd BLOSUM62 0.01`: the version,
+  the database, the matrix and `-evalue` of the document); unlike the archive path, `-e` drops the HSPs whose E-value
+  is above it, and a query without a kept HSP prints as `Peptide` with no `DOMAINS` block, even a nucleotide one.
+  - Protein (`data/`, `data-with:sites`): `x_three`, `x_one`, `x_tiny3` (`BATCH_SIZE=1`: still one document), `x_sd2`,
+    `x_src2`, `x_qgap`, `x_dctr_e10` (the default E-value: the `-e` cases), `x_tie1`, `x_tie2`, `x_notitle`, `x_parsed`
+    (`-parse_deflines`), `x_mfirst`, `x_gen2`, `x_motdom`, `x_sdsite`, `x_mstate` (the PS16b sites and motifs, the motif
+    state across the queries of one document).
+  - Nucleotide (`data-with:nt`): `x_ntr67`, `x_ntr67e10`, `x_ntr67seg`, `x_ntr68rc`, `x_ntr94had`, `x_ntr60`,
+    `x_ntr60t1`, `x_ntr63`, `x_ntr04amb`, `x_ntpair`, `x_ntnohit` (the PS16c queries; NCBI builds a frame's residues
+    from the HSP's query string, `-` where no HSP covers it, instead of translating the query).
+  - New queries (`data_with/xnew/`, the rows their hits reach, the rule of `data_with/nt/`; `data_with/xnewprev/`
+    the v3.23 preview `cdtrack.txt` rows, as `data-with:xnew+xnewprev`): `x_lcasem` (`three` with residues 21-60 lower
+    case and `-lcase_masking`), `x_special` (deflines with `&`, `<`, `>`, quotes, `]]>`, `-->`; the second one holds
+    `&amp;` and `&lt;x&gt;` as text, which NCBI's writer leaves unescaped and its reader decodes), `x_mix3` (no-hit
+    queries around `one` and `three`), `x_nohit`, `x_lcl` (a profile DB with `lcl|` ids: `Hit_accession` `dom_rr1`
+    gives PSSM-ID 0), `x_ntspec1` (mg00017 alone: its minus-strand PRK00915 hit is Specific here and Non-specific in
+    the archive path), `x_ntspec2` (mg00006 with bases 1,001-1,600 lower case and `-lcase_masking`: the same for
+    COG1047), `x_ntmix2` (a 600 nt polyA, mg00067 and a 6 nt query), `x_ntp` (`-parse_deflines`, an id without a
+    title: `No definition line`).
+  - Streams made by hand: `x_cat2` (`x_one` then `x_three`: two sessions), `x_cattrunc` (`x_one` then the first half
+    of `x_three`: the cut document prints nothing), `x_lead` (white space before the document), `x_crlf`, `x_garbage`
+    and `x_thenasn` (text or an ASN.1 archive after the document end the run), `x_emptyit` (no `Iteration`),
+    `x_xml2` (`-outfmt 16`, BLAST XML2: no session), `x_mixpn` / `x_mixnp` (`x_mfirst` and `x_ntr94had` in both
+    orders: the motif state crosses the two documents).
+- For every PS16d case, NCBI's output with these data equals its output with the full v3.22 files (with the preview
+  `cdtrack.txt` for the `*prev` sets), and bioconda's rpsbproc 0.5.1 gives the same bytes.
+- Made by hand (PS16d's implementer, 2026-11-13): `arch/x_h_<name>.xml.gz`, edits of `x_one`, `x_three` and `x_ntr67`
+  for the edges of NCBI's XML reader and of `ParseBlastOutput` (generator `PR/tmp/impl16d/scripts/gen_h1.py` and
+  `gen_h2.py` of the task folder); `oracle/x.h_*` are NCBI's bytes in the fixture layout (both 0.5.1 builds the same,
+  and the same with the full v3.22 files). The getters of OPTIONAL members that NCBI's code calls unguarded
+  (`x.h_nomatrix`: the session line cut before the matrix; `x.h_noalen`, `x.h_noframe`; `x.h_noalen.e`: not reached for
+  an HSP above `-e`), libstdc++'s `basic_string::replace` out of range (`x.h_from0`: a hit from residue 0; `x.h_qlen2`,
+  `x.h_ntqlen2`: queries shorter than their hits), gaps and leading or trailing gaps in the alignment strings
+  (`x.h_qgap`, `x.h_gaps2`, `x.h_lead`; `x.h_hshort1`: `Hsp_hseq` one letter short, its terminating 0 read as a
+  residue), a query string that the alignments make longer (`x.h_qlen50`), entity and character references
+  (`x.h_defent`: UTF-8 of `&#233;` and `&#x1F600;`, `&#0;` dropped; `x.h_defbigref`: a reference of 2^32 - 1 ends the
+  text and a CDATA section follows), CDATA (`x.h_cdata`), NCBI's end-of-line handling (`x.h_defcr`), the declared
+  encoding (`x.h_latin1`, `x.h_cp1252`: bytes from 0x80 converted to UTF-8; `x.h_ebcdic`: unsupported, no session),
+  a comment between members (`x.h_comment`) and inside text (`x.h_defcomment`: the document fails), an unknown
+  member, a missing mandatory member and two members out of order after a good document (`x.h_unknown`,
+  `x.h_missmand`, `x.h_order`: one session), `<Iteration_hits/>` (`x.h_selfhits`), a byte order mark before the
+  second document (`x.h_bom2`; after a line end it is not skipped, `x.h_bom2nl`), `-2147483648` and `2147483648` as
+  INTEGER values (`x.h_intmin`: read as INT_MIN, unused; `x.h_intover`: overflow, no session), an empty REAL
+  (`x.h_evalempty`: 0), `Hit_accession` beyond `long` and with leading white space (`x.h_acchuge`, `x.h_acclead`),
+  a score beyond `int` (`x.h_scorehuge`: NCBI's `(int)` of it is never read), frames on a protein query
+  (`x.h_frame1`, `x.h_frame4`, `x.h_framem1`; `x.h_tframe2nd`: frame 1 on the first two HSPs of `x_three`) and frame
+  0 and 4 on a nucleotide one (`x.h_ntframe0`, `x.h_ntframe4`), a query length below the hits' ends
+  (`x.h_ntqlen1500`).
+- `refused/refuse_x*`: LOSAT's bytes for the hand-made XML that it refuses (PD-LOSAT-NCBI-DEFECTS 1.17): an
+  attribute (`refuse_xattr`), a namespace prefix (`refuse_xns`), a control character (`refuse_xctrl`; NCBI replaces it
+  and posts a warning), a NaN `Hsp_evalue` (`refuse_xevalnan`), an `Hsp_hseq` two letters short (`refuse_xhshort2`),
+  a protein query of length -3 (`refuse_xqlenneg`: NCBI's string of 2^32 - 3 bytes, `std::bad_alloc` by the address
+  space), a nucleotide query of 1 base (`refuse_xntqlen1`: frames of 1,431,655,765 residues) and of 2 bases
+  (`refuse_xntqlen2`: empty frames, whose residues NCBI writes over the strings' terminator, undefined). Each is NCBI's
+  standard output cut at a line end (before the document's session for what the reader refuses, before the query
+  for the rest) and its standard error up to the same point, then the refusal.

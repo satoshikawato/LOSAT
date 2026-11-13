@@ -1,8 +1,8 @@
 //! `losat rpsbproc` against NCBI's rpsbproc 0.5.1 (the binary of the 2025-05-13 package; bioconda's
 //! 0.5.1 on the BLAST+ 2.17.0 toolkit gave the same bytes): every case of
-//! `tests/fixtures/rpsbproc/CASES.tsv` (README.md there: the archives are NCBI rpsblast 2.17.0
-//! `-outfmt 11` of E. coli K-12 MG1655 proteins against CDD v3.22, the data files are CDD v3.22
-//! cut to the rows the archives reach). A `compare` case gives NCBI's standard output, standard
+//! `tests/fixtures/rpsbproc/CASES.tsv` (README.md there: the archives are NCBI rpsblast and
+//! rpstblastn 2.17.0 `-outfmt 11` and `-outfmt 5` of E. coli K-12 MG1655 proteins and genome pieces
+//! against CDD v3.22, the data files are CDD v3.22 cut to the rows the archives reach). A `compare` case gives NCBI's standard output, standard
 //! error and exit status (and the `-o` file `out.txt` and the `-logfile` file `log.txt`); a
 //! `refuse` case is refused by LOSAT (exit 1, the
 //! last line of standard error `Error: ... is not supported by LOSAT's rpsbproc...`, standard
@@ -20,8 +20,8 @@ fn fixtures() -> PathBuf {
 
 /// A directory of its own for one test (the tests of a binary run in parallel) holding a copy
 /// of the fixture's `arch/` and `data/` and of the files of `root/` (a copy, not a link:
-/// Windows; a gzip-compressed archive `arch/<name>.asn.gz` unpacked to `arch/<name>.asn`), removed
-/// at the end.
+/// Windows; a gzip-compressed archive `arch/<name>.asn.gz` or `arch/<name>.xml.gz` unpacked to
+/// `arch/<name>.asn` or `arch/<name>.xml`), removed at the end.
 struct RunDir(PathBuf);
 
 impl RunDir {
@@ -46,8 +46,9 @@ impl RunDir {
     }
 }
 
-/// Copies the files of `from` into `to` (made if missing); a file named `*.asn.gz` is unpacked
-/// to `*.asn` (the archives of nucleotide queries are stored compressed, README.md).
+/// Copies the files of `from` into `to` (made if missing); a file named `*.asn.gz` or `*.xml.gz`
+/// is unpacked to `*.asn` or `*.xml` (the archives of nucleotide queries and the XML inputs are
+/// stored compressed, README.md).
 fn copy_files(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();
     for entry in fs::read_dir(from).unwrap() {
@@ -56,11 +57,15 @@ fn copy_files(from: &Path, to: &Path) {
             continue;
         }
         let name = entry.file_name();
-        match name.to_str().and_then(|name| name.strip_suffix(".asn.gz")) {
-            Some(stem) => {
+        let packed = name.to_str().and_then(|name| {
+            name.strip_suffix(".gz")
+                .filter(|plain| plain.ends_with(".asn") || plain.ends_with(".xml"))
+        });
+        match packed {
+            Some(plain) => {
                 let mut reader =
                     flate2::read::GzDecoder::new(fs::File::open(entry.path()).unwrap());
-                let mut out = fs::File::create(to.join(format!("{stem}.asn"))).unwrap();
+                let mut out = fs::File::create(to.join(plain)).unwrap();
                 std::io::copy(&mut reader, &mut out).unwrap();
             }
             None => {
@@ -76,7 +81,7 @@ impl Drop for RunDir {
     }
 }
 
-/// One run of `losat rpsbproc words...` in `dir` with `stdin` (a file of the fixtures, or
+/// One run of `losat rpsbproc words...` in `dir` with `stdin` (a file of the run directory, or
 /// nothing): stdout, stderr, exit status. No LOSAT or NCBI variable, no registry file
 /// (`NCBI_CONFIG_PATH` names the run directory, which has none).
 fn rpsbproc(dir: &Path, words: &[&str], stdin: Option<&Path>) -> (Vec<u8>, Vec<u8>, i32) {
@@ -204,7 +209,7 @@ fn compare_rows(stem: &str, usage: &str) -> usize {
             continue;
         }
         set_up(dir, &setup);
-        let stdin = (stdin != "-").then(|| fixtures().join(&stdin));
+        let stdin = (stdin != "-").then(|| dir.join(&stdin));
         let words: Vec<&str> = arguments.split(' ').collect();
         let (out, err, status) = rpsbproc(dir, &words, stdin.as_deref());
         assert_same(&oracle, &case, &out, &err, status);
@@ -225,7 +230,7 @@ fn compare_rows(stem: &str, usage: &str) -> usize {
 
 #[test]
 fn rpsbproc_gives_ncbis_bytes() {
-    assert_eq!(compare_rows("compare", "compare"), 230);
+    assert_eq!(compare_rows("compare", "compare"), 356);
 }
 
 // The rows of `use` `linux`: `-logfile /dev/stdout` writes the diagnostics into the pipe of the
@@ -252,7 +257,7 @@ fn rpsbproc_refuses_what_it_does_not_give() {
             continue;
         }
         set_up(dir, &setup);
-        let stdin = (stdin != "-").then(|| fixtures().join(&stdin));
+        let stdin = (stdin != "-").then(|| dir.join(&stdin));
         let words: Vec<&str> = arguments.split(' ').collect();
         let (out, err, status) = rpsbproc(dir, &words, stdin.as_deref());
         assert_eq!(status, 1, "{case}");
@@ -270,7 +275,7 @@ fn rpsbproc_refuses_what_it_does_not_give() {
         assert_same(&expected, &case, &out, &err, status);
         refused += 1;
     }
-    assert_eq!(refused, 9);
+    assert_eq!(refused, 16);
 }
 
 // The command line outside NCBI's report (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): `-version`

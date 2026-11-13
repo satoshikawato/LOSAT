@@ -1,0 +1,56 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_ntr67.xml
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	1e-20
+#Redundancy:	Full
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSTBLASTN 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	5000	mg00067_330001-335000
+DOMAINS
+1	Query_1[1]	Specific	214491	2698	3420	1.20804e-94	305.681	smart00052	EAL	-	531754
+1	Query_1[1]	Specific	238923	2701	3414	9.36906e-81	265.948	cd01948	EAL	-	531754
+1	Query_1[1]	Non-specific	443970	2707	3441	8.91738e-80	274.101	COG4943	YjcC	N	-
+1	Query_1[1]	Non-specific	441802	2701	3432	2.51322e-73	257.02	COG2200	EAL	N	-
+1	Query_1[1]	Non-specific	444025	2716	3429	2.86174e-69	247.765	COG5001	COG5001	N	-
+1	Query_1[1]	Specific	513554	2701	3408	4.50529e-65	221.04	pfam00563	EAL	-	531754
+1	Query_1[1]	Non-specific	508224	2704	3441	4.6328e-30	129.504	NF008467	PRK11359	N	-
+1	Query_1[3]	Non-specific	507226	3	1493	0	1021.94	NF007399	PRK09928	N	-
+1	Query_1[3]	Specific	440903	3	1007	7.3437e-138	436.884	COG1292	BetT	N	-
+1	Query_1[3]	Non-specific	213565	3	971	3.90687e-136	429.851	TIGR00842	bcct	N	529170
+1	Query_1[3]	Specific	514667	3	971	1.52244e-126	404.999	pfam02028	BCCT	N	-
+1	Query_1[3]	Non-specific	503764	3	965	5.4693e-44	168.385	NF002887	PRK03356	N	-
+1	Query_1[-1]	Specific	440348	3555	4406	7.48505e-41	151.943	COG0583	LysR	-	-
+1	Query_1[-1]	Non-specific	176122	3573	4142	2.41605e-32	125.459	cd08431	PBP2_HupR	-	531135
+ENDDOMAINS
+SITES
+1	Query_1[-1]	Specific	putative dimerization interface	L4091-4089,Q4088-4086,L4082-4080,K4079-4077,P4067-4065,C4061-4059,Q4058-4056,I4055-4053,T4052-4050,V4049-4047,T4046-4044,T4043-4041,S3770-3768,I3767-3765,L3764-3762,V3761-3759,P3758-3756,D3755-3753,Q3737-3735,C3734-3732,I3728-3726,L3725-3723	23	0	176122
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

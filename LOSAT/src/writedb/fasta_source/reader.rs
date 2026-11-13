@@ -950,6 +950,19 @@ impl<R: Read> FastaReader<R> {
     /// none. Without `fDLOptional` data before a definition line is the `eNoDefline`
     /// error. `CBadResiduesException` comes only with `fValidate`, which is not set.
     pub(crate) fn read_one_seq(&mut self, warn: ReaderWarn<'_>) -> Result<Record, ReadError> {
+        if self.state.flags.mask_from_fasta {
+            self.read_one_seq_of::<true>(warn)
+        } else {
+            self.read_one_seq_of::<false>(warn)
+        }
+    }
+
+    /// `read_one_seq` with `ReaderFlags::mask_from_fasta` as `MASK_FROM_FASTA`: the records of
+    /// the other readers take no step of convert2blastmask's masks (one choice per record).
+    fn read_one_seq_of<const MASK_FROM_FASTA: bool>(
+        &mut self,
+        warn: ReaderWarn<'_>,
+    ) -> Result<Record, ReadError> {
         let state = &mut self.state;
         state.seq_data.clear();
         state.gaps.clear();
@@ -1013,13 +1026,15 @@ impl<R: Read> FastaReader<R> {
             }
             let raw_length = raw.len();
             match line.strip_prefix(b">?_") {
-                Some(rest) => state.parse_data_line(
+                Some(rest) => state.parse_data_line::<MASK_FROM_FASTA>(
                     &[b">".as_slice(), rest].concat(),
                     raw_length,
                     line_number,
                     warn,
                 )?,
-                None => state.parse_data_line(line, raw_length, line_number, warn)?,
+                None => {
+                    state.parse_data_line::<MASK_FROM_FASTA>(line, raw_length, line_number, warn)?
+                }
             }
         }
 
@@ -1419,6 +1434,7 @@ impl RecordState {
     /// `bIgnoreHyphens` is false: a hyphen counts as good. `bIsNuc` is true for nucleotide
     /// input (`fAssumeNuc | fForceType`). The warning about ambiguous nucleotides is an
     /// ignored problem of makeblastdb.
+    #[inline(always)]
     fn check_data_line(
         &self,
         s: &[u8],
@@ -1578,7 +1594,7 @@ impl RecordState {
     /// length while the line is read; `x_CloseGap` reads that length (`close_gap`). The
     /// fast copy of `fSkipCheck` is not taken (no `fSkipCheck`). `x_NucOrProt()` is empty:
     /// the molecule is set only in `AssembleSeq`.
-    fn parse_data_line(
+    fn parse_data_line<const MASK_FROM_FASTA: bool>(
         &mut self,
         s: &[u8],
         raw_length: usize,
@@ -1586,7 +1602,7 @@ impl RecordState {
         warn: ReaderWarn<'_>,
     ) -> Result<(), ReadError> {
         // `CMaskFromFasta::ParseDataLine`: an interval line is read as the residue `A`.
-        let s = if self.flags.mask_from_fasta && s[0].is_ascii_digit() {
+        let s = if MASK_FROM_FASTA && s[0].is_ascii_digit() {
             self.parse_interval(s)?;
             &b"A"[..]
         } else {
@@ -1615,7 +1631,9 @@ impl RecordState {
                 SPACE => {}
                 COMMENT => break,
                 GAP => {
-                    self.close_mask();
+                    if MASK_FROM_FASTA {
+                        self.close_mask();
+                    }
                     let run = 1 + s[pos + 1..]
                         .iter()
                         .position(|&byte| byte != c)
@@ -1633,7 +1651,7 @@ impl RecordState {
                         .iter()
                         .position(|&byte| actions[byte as usize] < RESIDUE_MIN)
                         .unwrap_or(s.len() - pos - 1);
-                    if self.flags.mask_from_fasta {
+                    if MASK_FROM_FASTA {
                         self.mask_run(&s[pos..pos + run]);
                     }
                     self.seq_data

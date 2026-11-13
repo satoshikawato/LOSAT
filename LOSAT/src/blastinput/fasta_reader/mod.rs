@@ -232,17 +232,16 @@ impl FastaRecord {
         self.source.as_ref()?.believed.as_deref()
     }
 
-    /// The record whose Seq-id is its local id `local_id` (a string), shown as `-parse_deflines`
-    /// shows the ids it read: psiblast `-in_pssm`, whose query is the PSSM's Bioseq, and whose
-    /// local id NCBI's formatter then shows (`Query= Query_1 <title>`, `qseqid` `Query_1`). An
-    /// integer local id (`local id 5`) shows as the string of its digits does.
-    pub fn believing_local_id(mut self) -> Self {
-        use crate::seqid::model::{ObjectId, ParsedSeqId};
-        let ids = vec![ParsedSeqId::Local(ObjectId::Str(
-            self.local_id.clone().into_bytes(),
-        ))];
-        let believed =
-            believed::BelievedIds::new(ids, crate::report::archive::bioseq::SeqLocStrand::Unknown);
+    /// The record of the Bioseq whose Seq-ids are `ids` (at least one), shown as `-parse_deflines`
+    /// shows the ids it read, whose Seq-aligns take the first (`BelievedIds::of_bioseq`): the query
+    /// of psiblast's and tblastn's `-in_pssm`, the PSSM's Bioseq (`pssm_search::PsiSearch::
+    /// query_record`; NCBI BLAST+ 2.17.0: `Query= gi|4504347 <title>`, `qseqid` `gi|4504347`, and
+    /// with `-parse_deflines` `Query= Query_1 <title>` of a local id).
+    pub fn believing(mut self, ids: Vec<crate::seqid::ParsedSeqId>) -> Self {
+        let believed = believed::BelievedIds::of_bioseq(
+            ids,
+            crate::report::archive::bioseq::SeqLocStrand::Unknown,
+        );
         self.local_id = believed.bare_id();
         self.source.get_or_insert_with(Default::default).believed =
             Some(std::sync::Arc::new(believed));

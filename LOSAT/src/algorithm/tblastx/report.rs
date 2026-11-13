@@ -1499,7 +1499,21 @@ pub(crate) fn write_tabular<W: Write>(
                 (!unsearched[q_idx]).then_some(query_hits.len()),
             )?;
         }
+        let mut previous: Option<u32> = None;
         for &(hsp_index, hsp) in query_hits {
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+            // ```c++
+            //        		const CBioseq_Handle& subject_bh =
+            //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+            // ```
+            // A subject's first row loads it where the query's batch did not prefetch it
+            // (`QueryWarnings::subject_read`; a subject's HSPs follow each other).
+            if previous != Some(hsp.hit.s_idx) {
+                previous = Some(hsp.hit.s_idx);
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    warnings.subject_read(q_idx, hsp.hit.s_idx, &mut *writer)?;
+                }
+            }
             // One printed row is one HSP; the probe marks it without changing it.
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
@@ -1657,6 +1671,26 @@ impl TblastxOutputFormat {
     /// one (`TabularNeeds::joins_subjects`: `qcovs`, `qcovus`).
     pub(crate) fn tabular_joins_subjects(self) -> bool {
         matches!(self, Self::CustomTabular(spec) if spec.needs().joins_subjects())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+    // ```c++
+    //        		const CBioseq_Handle& subject_bh =
+    //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+    // ```
+    /// Whether the report's writer writes the texts of the subjects that a query's report reads
+    /// one by one where it reads each (`QueryWarnings::subject_read`): outfmt 0 (description
+    /// lines and alignment headings), 5 (`Hit`s) and the tabular rows; the others write them
+    /// before the query's report.
+    pub(crate) fn places_subject_reads(self) -> bool {
+        matches!(
+            self,
+            TblastxOutputFormat::Pairwise
+                | TblastxOutputFormat::Tabular
+                | TblastxOutputFormat::TabularWithComments
+                | TblastxOutputFormat::CustomTabular(_)
+                | TblastxOutputFormat::Xml
+        )
     }
 
     /// Whether the format writes a query's own warnings to standard error

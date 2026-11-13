@@ -345,6 +345,34 @@ struct HeldState {
     held: Vec<u8>,
     discarded: bool,
     side: Option<HeldSideFiles>,
+    /// The run's standard error (`HeldOutput::stderr`), and what the run writes there while the
+    /// output is held: each text with the length of the held output before it.
+    stderr: Option<(Box<dyn Write>, Vec<(usize, Vec<u8>)>)>,
+}
+
+impl HeldState {
+    /// Writes the held output with the texts written to standard error while it was held, each
+    /// after the output before it (NCBI's `cerr` flushes `cout` first), and empties both.
+    fn write_held(&mut self) -> std::io::Result<()> {
+        let held = std::mem::take(&mut self.held);
+        let texts = self
+            .stderr
+            .as_mut()
+            .map(|(_, texts)| std::mem::take(texts))
+            .unwrap_or_default();
+        let mut written = 0;
+        for (at, text) in texts {
+            self.inner.write_all(&held[written..at])?;
+            self.inner.flush()?;
+            written = at;
+            if let Some((stderr, _)) = self.stderr.as_mut() {
+                stderr.write_all(&text)?;
+                stderr.flush()?;
+            }
+        }
+        self.inner.write_all(&held[written..])?;
+        self.inner.flush()
+    }
 }
 
 impl HeldOutput {
@@ -355,7 +383,27 @@ impl HeldOutput {
             held: Vec::new(),
             discarded: false,
             side,
+            stderr: None,
         })))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:493-500
+    // ```c++
+    //         if (new_hit) {
+    //             new_hit->SetNum(index);
+    //             ++index;
+    //             if( !incremental_output ) hits.push_back(new_hit);
+    // 	    else
+    // 	    {
+    // 		CNcbiOstrstream  one_hit_os;
+    // ```
+    /// The run's standard error `inner` through this output (`HeldStderr`): while the output is
+    /// held, what the run writes there is kept with the place in the output where NCBI, which
+    /// writes its document as it goes, writes it (the taxonomy texts of a `Hit`'s read between
+    /// the `Hit`s), and written there at `release`; at `discard` the texts alone.
+    pub(super) fn stderr(&self, inner: Box<dyn Write>) -> HeldStderr {
+        self.0.borrow_mut().stderr = Some((inner, Vec::new()));
+        HeldStderr(Rc::clone(&self.0))
     }
 
     /// Keeps everything written from now on in memory.
@@ -375,6 +423,13 @@ impl HeldOutput {
         if let Some(side) = &state.side {
             side.discard();
         }
+        // What the run wrote to standard error in the meantime stays (before the refusal).
+        if let Some((stderr, texts)) = state.stderr.as_mut() {
+            for (_, text) in std::mem::take(texts) {
+                let _ = stderr.write_all(&text);
+            }
+            let _ = stderr.flush();
+        }
     }
 
     /// Writes what is held and passes the bytes on again: the side files first (in order), then
@@ -388,13 +443,47 @@ impl HeldOutput {
             if let Err(error) = side.release() {
                 state.discarded = true;
                 state.held.clear();
+                // What the run wrote to standard error in the meantime stays.
+                if let Some((stderr, texts)) = state.stderr.as_mut() {
+                    for (_, text) in std::mem::take(texts) {
+                        let _ = stderr.write_all(&text);
+                    }
+                    let _ = stderr.flush();
+                }
                 return Err(error);
             }
         }
-        let held = std::mem::take(&mut state.held);
-        state.inner.write_all(&held)?;
-        state.inner.flush()?;
+        state.write_held()?;
         Ok(())
+    }
+}
+
+/// The run's standard error while its output may be held (`HeldOutput::stderr`).
+pub(super) struct HeldStderr(Rc<RefCell<HeldState>>);
+
+impl Write for HeldStderr {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let mut state = self.0.borrow_mut();
+        let at = state.held.len();
+        let holding = state.holding && !state.discarded;
+        let Some((stderr, texts)) = state.stderr.as_mut() else {
+            return Ok(bytes.len());
+        };
+        if holding {
+            texts.push((at, bytes.to_vec()));
+            Ok(bytes.len())
+        } else {
+            stderr.write(bytes)
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let mut state = self.0.borrow_mut();
+        let holding = state.holding && !state.discarded;
+        match state.stderr.as_mut() {
+            Some((stderr, _)) if !holding => stderr.flush(),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -423,9 +512,12 @@ impl Write for HeldOutput {
 
 impl Drop for HeldState {
     fn drop(&mut self) {
-        if !self.discarded && !self.held.is_empty() {
-            let _ = self.inner.write_all(&self.held);
-            let _ = self.inner.flush();
+        let texts = self
+            .stderr
+            .as_ref()
+            .is_some_and(|(_, texts)| !texts.is_empty());
+        if !self.discarded && (!self.held.is_empty() || texts) {
+            let _ = self.write_held();
         }
     }
 }
@@ -953,6 +1045,13 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 searched: !batch.search_skipped,
                 masks: &masks,
             };
+            // The texts of the subjects that the query's report reads one by one, written where
+            // NCBI loads the subject of each `Hit` (`HitSink::position`, `ReadCursor`).
+            let mut reads = crate::report::query_warnings::ReadCursor::new(std::slice::from_ref(
+                shown.query_reads(batch.query_ordinal + qidx),
+            ));
+            let mut marks: Vec<(usize, u32)> = Vec::new();
+            let marking = reads.is_some();
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
                 // A copy of one record of the database that follows another is shown in its
                 // `Hit`.
@@ -976,6 +1075,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 );
                 for range in hits {
                     let first = lists[range.start].oid;
+                    if let Some(at) = sink.position().filter(|_| marking) {
+                        marks.push((at, first as u32));
+                    }
                     let names = subject_cache
                         .get(&first)
                         .context("names of a subject with hits")?;
@@ -1038,7 +1140,19 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             });
             // A failed query leaves its partial bytes in `buf`, which the error return drops.
             written?;
-            writer.write_all(&buf)?;
+            match reads.as_mut() {
+                Some(reads) => {
+                    crate::report::query_warnings::write_at_marks(
+                        &buf,
+                        &marks,
+                        &mut *writer,
+                        |subject, writer| reads.subject_read(0, subject, writer, &mut *diagnostics),
+                    )?;
+                    // A text whose read no `Hit` placed comes after the query's report.
+                    reads.before_query(1, &mut *writer, &mut *diagnostics)?;
+                }
+                None => writer.write_all(&buf)?,
+            }
             buf.clear();
         }
     }
@@ -1230,6 +1344,57 @@ mod held_side_files_tests {
             .collect();
         names.sort();
         names
+    }
+
+    /// One log of the output (`o:`) and of standard error (`e:`) in the order written.
+    #[derive(Clone, Default)]
+    struct Log(Rc<RefCell<Vec<String>>>, &'static str);
+
+    impl Write for Log {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if !bytes.is_empty() {
+                self.0
+                    .borrow_mut()
+                    .push(format!("{}{}", self.1, String::from_utf8_lossy(bytes)));
+            }
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_held_output_writes_the_standard_error_texts_where_they_came() {
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let held = HeldOutput::new(Box::new(Log(Rc::clone(&log), "o:")), None);
+        let mut stderr = held.stderr(Box::new(Log(Rc::clone(&log), "e:")));
+        let mut output = held.clone();
+        // Not held: each goes at once.
+        output.write_all(b"head").unwrap();
+        stderr.write_all(b"w1").unwrap();
+        held.hold();
+        output.write_all(b"hit1").unwrap();
+        stderr.write_all(b"t2").unwrap();
+        output.write_all(b"hit2").unwrap();
+        assert_eq!(*log.borrow(), ["o:head", "e:w1"]);
+        held.release().unwrap();
+        assert_eq!(
+            *log.borrow(),
+            ["o:head", "e:w1", "o:hit1", "e:t2", "o:hit2"]
+        );
+        // A discarded output keeps its standard error texts and drops the output.
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let held = HeldOutput::new(Box::new(Log(Rc::clone(&log), "o:")), None);
+        let mut stderr = held.stderr(Box::new(Log(Rc::clone(&log), "e:")));
+        let mut output = held.clone();
+        held.hold();
+        output.write_all(b"hit1").unwrap();
+        stderr.write_all(b"t1").unwrap();
+        held.discard();
+        stderr.write_all(b"refusal").unwrap();
+        assert_eq!(*log.borrow(), ["e:t1", "e:refusal"]);
     }
 
     #[test]

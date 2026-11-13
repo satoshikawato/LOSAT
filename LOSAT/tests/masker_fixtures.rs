@@ -155,9 +155,17 @@ fn input(case: &Case) -> Option<&str> {
     case.words.get(at + 1).map(String::as_str)
 }
 
-/// The value of `-in` in `case` when it names a directory.
+/// The value of `-in` in `case` when it names a directory that the program opens as a file: the
+/// FASTA input (`-infmt blastdb` opens no file of that name), a name that is not blank (Windows
+/// reads `tests/<program>/ ` as the directory itself).
 fn input_directory<'a>(program: &str, case: &'a Case) -> Option<&'a str> {
-    input(case).filter(|name| fixtures(program).join(name).is_dir())
+    let database = case
+        .words
+        .windows(2)
+        .any(|pair| pair[0] == "-infmt" && pair[1] == "blastdb");
+    input(case).filter(|name| {
+        !database && !name.trim().is_empty() && fixtures(program).join(name).is_dir()
+    })
 }
 
 /// NCBI's stdout, stderr and exit status for the row `name` of `program`, as frozen.
@@ -352,6 +360,25 @@ fn convert2blastmask_through_the_library_gives_the_command_line_s_bytes() {
         differ.is_empty(),
         "rows that differ through the library: {differ:?}"
     );
+}
+
+// The rows that Windows answers as `in_missing` (`expected`) are the ones whose `-in` NCBI read as
+// a directory on Linux.
+#[test]
+fn the_rows_that_read_a_directory_are_the_ones_ncbi_read_as_one() {
+    for program in ["dustmasker", "segmasker", "convert2blastmask"] {
+        for case in cases(program) {
+            let (_, err, _) = expected_row(program, &case.name);
+            let read_a_directory = String::from_utf8_lossy(&err)
+                .contains("basic_filebuf::xsgetn error reading the file: Is a directory");
+            assert_eq!(
+                input_directory(program, &case).is_some(),
+                read_a_directory,
+                "{program} {}",
+                case.name
+            );
+        }
+    }
 }
 
 #[test]

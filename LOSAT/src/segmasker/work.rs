@@ -326,8 +326,8 @@ struct Record {
 
 /// `CMaskReader::GetNextSequence` of the FASTA reader or the database reader.
 enum Source<'a> {
-    Fasta(MaskFastaReader<Box<dyn std::io::Read + 'a>>),
-    Database(MaskBdbReader),
+    Fasta(Box<MaskFastaReader<Box<dyn std::io::Read + 'a>>>),
+    Database(Box<MaskBdbReader>),
 }
 
 /// `x_GetReader`: `CMaskFastaReader` of `-in` (a protein reader), or `CMaskBDBReader` of the
@@ -358,7 +358,7 @@ fn reader<'a>(
             let input: Box<dyn std::io::Read + 'a> =
                 Box::new(open_input_file("in", input, stdin).map_err(file_failure)?);
             MaskFastaReader::new(input, true, parse_seqids)
-                .map(Source::Fasta)
+                .map(|reader| Source::Fasta(Box::new(reader)))
                 .map_err(read_failure)
         }
         "blastdb" => MaskBdbReader::open(
@@ -368,7 +368,7 @@ fn reader<'a>(
             title_printed,
             super::PROGRAM,
         )
-        .map(Source::Database)
+        .map(|reader| Source::Database(Box::new(reader)))
         .map_err(database_failure),
         other => unreachable!("-infmt {other} passed its constraint"),
     }

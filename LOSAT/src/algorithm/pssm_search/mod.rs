@@ -73,7 +73,11 @@ pub struct PsiSearch {
     /// position-based composition-based statistics read; empty when the PSSM has none.
     pub(crate) freq_ratios: Vec<[f64; crate::core::blast_util::BLASTAA_SIZE]>,
     pub(crate) stats: PssmStats,
+    /// The query record as the reports show it without `-parse_deflines` (`query_record`).
     pub(crate) query: FastaRecord,
+    /// The Seq-id of a PSSM query whose one Seq-id is local, which `-parse_deflines` shows
+    /// (`query_record`); `None` for a FASTA query's later rounds.
+    pub(crate) local_seq_id: Option<crate::seqid::ParsedSeqId>,
     pub(crate) validation_error: Option<String>,
     /// The warnings of `PsiBlastSetupScoreBlock` for the search's options (the frequency ratios
     /// all zero, the composition-based statistics reset to mode 1), which the query's warning
@@ -181,6 +185,18 @@ impl PsiSearch {
         &self.query
     }
 
+    /// The query record of the PSSM search of `-in_pssm` as the reports show it (psiblast's,
+    /// tblastn's PSI-TBLASTN): the record of the PSSM's Bioseq (`in_pssm::psi_search_and_object`),
+    /// whose one local id `-parse_deflines` shows as it shows a FASTA query's ids (NCBI's formatter
+    /// takes `believe_query` of `-parse_deflines`, psiblast_app.cpp:482-484, tblastn_app.cpp; NCBI
+    /// BLAST+ 2.17.0: `Query= Query_1 <title>`, `qseqid` `Query_1`).
+    pub(crate) fn query_record(&self, parse_deflines: bool) -> FastaRecord {
+        match (&self.local_seq_id, parse_deflines) {
+            (Some(id), true) => self.query.clone().believing(vec![id.clone()]),
+            _ => self.query.clone(),
+        }
+    }
+
     /// The PSSM search of a later round of the FASTA query `query` (psiblast's rounds,
     /// `algorithm::psiblast::rounds`): the engine's PSSM of the round before, in full precision
     /// (NCBI's `CPssmWithParameters` in memory, never read back from text): its scores, its
@@ -228,6 +244,7 @@ impl PsiSearch {
                 h: stat(pssm.gapped.h),
             },
             query,
+            local_seq_id: None,
             validation_error: None,
             setup_messages,
             warning_title: None,

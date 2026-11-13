@@ -830,7 +830,7 @@ fn next_pssm(
     // title is the input PSSM's, `""` without one), and its letters the round-1 query's, O as X
     // (`encode_protein_sequence` in `query_pssm`).
     let id = match &io.query_id {
-        Some(id) => crate::report::serial::pssm::PssmSeqId::Local(id.clone()),
+        Some(id) => id.clone(),
         None => crate::algorithm::psiblast::pssm::fasta_query_id(
             record,
             args.first_query_ordinal + ranges.x_ordinal_base + ordinal + 1,

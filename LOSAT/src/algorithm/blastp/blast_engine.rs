@@ -5479,17 +5479,16 @@ fn search_cli(
         //                                fmt_args->GetFormattedOutputChoice(),
         //                                query_opts->GetParseDeflines(),
         // ```
-        // With `-parse_deflines` the reports believe the PSSM query's Seq-id as they believe a
-        // FASTA query's (NCBI BLAST+ 2.17.0: `Query= Query_1 <title>`, `qseqid` `Query_1`), and
-        // its id joins the search's scope as a FASTA query's does: NCBI shows a subject with that
-        // id as the PSSM's query (its title and letters), refused as for a FASTA query
-        // (`IdScope::add_record`; a database sequence with it, `query_batch::QueryScopes`).
-        let mut query = psi.query().clone();
-        if resolved.parse_deflines {
-            query = query.believing_local_id();
-            if let (Some(scope), Some(believed)) = (args.id_scope.as_deref(), query.believed()) {
-                scope.add_record(&believed.ids, None, "query", args.app.name())?;
-            }
+        // With `-parse_deflines` the reports believe the PSSM query's local Seq-id as they believe
+        // a FASTA query's (NCBI BLAST+ 2.17.0: `Query= Query_1 <title>`, `qseqid` `Query_1`); its
+        // other ids they show without it (`PsiSearch::query_record`). The ids the reports show
+        // join the search's scope as a FASTA query's do: NCBI shows a subject or a database
+        // sequence with one of them as the PSSM's query (its title and letters), refused as for a
+        // FASTA query (`IdScope::add_record` of the `-subject` records that `-parse_deflines`
+        // reads; the database's, `query_batch::QueryScopes`).
+        let query = psi.query_record(resolved.parse_deflines);
+        if let (Some(scope), Some(believed)) = (args.id_scope.as_deref(), query.believed()) {
+            scope.add_record(&believed.ids, None, "query", args.app.name())?;
         }
         let records = vec![query];
         // The PSSM files of `-in_pssm`'s rounds (item PS5b), checked as a FASTA query's below.
@@ -6486,11 +6485,14 @@ fn search(
     if let Some(observer) = outputs.observer.as_deref_mut() {
         observer.queries_begin();
     }
-    // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`).
+    // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`); with
+    // `-in_pssm`, of the PSSM's query when the reports show its ids (`PsiSearch::query_record`).
+    let believed_queries = args.parse_deflines
+        || (args.psi_search.is_some() && query_records.iter().any(|q| q.believed().is_some()));
     let query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
-        args.parse_deflines,
+        believed_queries,
         database.is_none(),
-        args.parse_deflines
+        believed_queries
             && crate::blastinput::query_batch::outfmts_have_xml(
                 outputs.formats.iter().map(|format| format.outfmt),
             ),

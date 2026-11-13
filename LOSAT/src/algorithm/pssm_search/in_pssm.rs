@@ -48,9 +48,8 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::config::ScoringMatrix;
 use crate::core::blast_util::{BLASTAA_SIZE, BLAST_SCORE_MIN};
 use crate::core::psi::{KarlinBlk, PsiScoreBlk};
-use crate::report::serial::pssm::{
-    ObjectId, PssmFinalData, PssmSeqId, PssmWithParameters, SeqData,
-};
+use crate::report::serial::pssm::{ObjectId, PssmFinalData, PssmWithParameters, SeqData};
+use crate::seqid::ParsedSeqId;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-118
 // ```c
@@ -421,6 +420,54 @@ fn visible(bytes: &[u8]) -> bool {
     bytes.iter().all(|&c| (0x20..=0x7e).contains(&c))
 }
 
+/// Whether every string of the Seq-id `id` is `visible` (and a local id is not empty, which NCBI's
+/// reports show as no id).
+fn seq_id_strings_visible(id: &ParsedSeqId) -> bool {
+    use crate::seqid::model::{Date, PatentNumber};
+    let object = |tag: &ObjectId| match tag {
+        ObjectId::Str(text) => visible(text),
+        ObjectId::Id(_) => true,
+    };
+    let text = |value: &Option<Vec<u8>>| value.as_deref().is_none_or(visible);
+    match id {
+        ParsedSeqId::Local(ObjectId::Str(name)) => !name.is_empty() && visible(name),
+        ParsedSeqId::Local(ObjectId::Id(_))
+        | ParsedSeqId::Gi(_)
+        | ParsedSeqId::Gibbsq(_)
+        | ParsedSeqId::Gibbmt(_) => true,
+        ParsedSeqId::Giim(giim) => text(&giim.db) && text(&giim.release),
+        ParsedSeqId::General(dbtag) => visible(&dbtag.db) && object(&dbtag.tag),
+        ParsedSeqId::Patent(patent) => {
+            let number = match &patent.cit.id {
+                PatentNumber::Number(number) | PatentNumber::AppNumber(number) => number,
+            };
+            visible(&patent.cit.country) && visible(number) && text(&patent.cit.doc_type)
+        }
+        ParsedSeqId::Pdb(pdb) => {
+            let rel = match &pdb.rel {
+                Some(Date::Str(date)) => visible(date),
+                Some(Date::Std(date)) => text(&date.season),
+                None => true,
+            };
+            visible(&pdb.mol) && text(&pdb.chain_id) && rel
+        }
+        ParsedSeqId::Genbank(id)
+        | ParsedSeqId::Embl(id)
+        | ParsedSeqId::Pir(id)
+        | ParsedSeqId::Swissprot(id)
+        | ParsedSeqId::Other(id)
+        | ParsedSeqId::Ddbj(id)
+        | ParsedSeqId::Prf(id)
+        | ParsedSeqId::Tpg(id)
+        | ParsedSeqId::Tpe(id)
+        | ParsedSeqId::Tpd(id)
+        | ParsedSeqId::Gpipe(id)
+        | ParsedSeqId::NamedAnnotTrack(id) => {
+            text(&id.name) && text(&id.accession) && text(&id.release)
+        }
+    }
+}
+
 /// The PSSM search of `pssm`: its query record, rows and values, or LOSAT's refusal.
 #[cfg(test)]
 pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
@@ -477,21 +524,50 @@ pub(crate) fn psi_search_and_object(
             "a PSSM of frequency ratios only written by row (NCBI reads the scores it computes for it in the wrong order)",
         ));
     }
-    // The query: one local Seq-id (`local str "Query_N"` in a psiblast PSSM), its title, its
-    // letters. The record's local id is the Seq-id's `GetSeqIdString()`: the string, or the
-    // integer's decimal digits (`CObject_id::AsString`); the reports show it where they show the
-    // local id of a FASTA query, and NCBI's warnings of the query start with it
-    // (`report::query_warnings::query_warning_with_seq_id`).
-    let local_id = match query.ids.as_slice() {
-        [PssmSeqId::Local(ObjectId::Str(id))] if visible(id) && !id.is_empty() => {
-            String::from_utf8_lossy(id).into_owned()
-        }
-        [PssmSeqId::Local(ObjectId::Id(id))] => id.to_string(),
-        _ => {
-            return Err(reader.refuse(
-                "a PSSM query whose Seq-id is not one local id (an accession, gi or other id is shown through the parsed Seq-ids of the query)",
-            ))
-        }
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:536-539 (quoted above)
+    // The query's Seq-ids: NCBI's scope holds the PSSM's Bioseq with all of them, and the query's
+    // Seq-loc (so its Seq-aligns, the PSSMs of the later rounds and its warnings) takes the first.
+    // One local id (`local str "Query_N"` in a psiblast PSSM) is shown as a FASTA query's local id
+    // is: the reports show the title alone, and with `-parse_deflines` the id
+    // (`PsiSearch::query_record`); the record's local id is the Seq-id's `GetSeqIdString()`, the
+    // string or the integer's decimal digits (`CObject_id::AsString`). Any other id (`gi 4504347`
+    // of a `-parse_deflines` PSSM, `swissprot`, `pdb`, ...), and several ids, are shown with or
+    // without `-parse_deflines`, as `-parse_deflines` shows the ids of a FASTA query (NCBI BLAST+
+    // 2.17.0: `Query= gi|4504347 <title>`, `qseqid` `gi|4504347`; `GetSeqIdString(cbs,
+    // believe_local_id)` asks `believe_local_id` of a local id only, align_format_util.cpp).
+    let ids = query.ids.as_slice();
+    if ids.is_empty() {
+        return Err(reader.refuse(
+            "a PSSM query without a Seq-id (NCBI BLAST+ makes the query's Seq-loc of its first Seq-id)",
+        ));
+    }
+    if let Some(refusal) = crate::blastinput::fasta_reader::believed::refused_id(
+        ids,
+        "query",
+        "the PSSM",
+        reader.program,
+    ) {
+        return Err(refusal);
+    }
+    // A local id among other ids: without `-parse_deflines` NCBI's reports show the title alone
+    // and its tabular ids put the title's first word in the local id's place (`qseqid`
+    // `gi|4504347|hemoglobin`, `s_ReplaceLocalId`), a mix that no FASTA query has (one without
+    // `-parse_deflines` has its local id only); NCBI's psiblast writes the one Seq-id of the
+    // query's Seq-aligns.
+    if ids.len() > 1 && ids.iter().any(|id| matches!(id, ParsedSeqId::Local(_))) {
+        return Err(reader.refuse(
+            "a PSSM query with a local Seq-id among other Seq-ids (NCBI's reports show it as no FASTA query is shown)",
+        ));
+    }
+    if !ids.iter().all(seq_id_strings_visible) {
+        return Err(reader.refuse(
+            "a PSSM query whose Seq-id holds an empty local id or a byte outside the visible ASCII range",
+        ));
+    }
+    let local_id = match ids {
+        [ParsedSeqId::Local(ObjectId::Str(id))] => Some(String::from_utf8_lossy(id).into_owned()),
+        [ParsedSeqId::Local(ObjectId::Id(id))] => Some(id.to_string()),
+        _ => None,
     };
     let titles: &[Vec<u8>] = query.titles.as_deref().unwrap_or(&[]);
     // NCBI's reader writes an error for each such byte of every VisibleString it keeps: the titles,
@@ -791,7 +867,11 @@ pub(crate) fn psi_search_and_object(
         pssm: QueryPssm { rows },
         freq_ratios,
         stats,
-        query: FastaRecord::new(local_id, title, &letters),
+        query: match local_id {
+            Some(local_id) => FastaRecord::new(local_id, title, &letters),
+            None => FastaRecord::new(String::new(), title, &letters).believing(ids.to_vec()),
+        },
+        local_seq_id: matches!(ids, [ParsedSeqId::Local(_)]).then(|| ids[0].clone()),
         validation_error,
         setup_messages: Vec::new(),
         warning_title: Some(warning_title),
@@ -1421,16 +1501,103 @@ mod tests {
             (ObjectId::Id(-3), "-3"),
         ] {
             let mut pssm = rnd();
-            pssm.pssm.query.as_mut().unwrap().ids = vec![PssmSeqId::Local(id)];
-            assert_eq!(psi_search_of(pssm).unwrap().query.local_id, shown);
+            pssm.pssm.query.as_mut().unwrap().ids = vec![ParsedSeqId::Local(id)];
+            let search = psi_search_of(pssm).unwrap();
+            assert_eq!(search.query.local_id, shown);
+            assert!(search.query.believed().is_none());
+            assert!(search.query_record(true).believed().is_some());
         }
-        let mut gi = rnd();
-        gi.pssm.query.as_mut().unwrap().ids = vec![PssmSeqId::Gi(7)];
-        let error = psi_search_of(gi).unwrap_err().to_string();
-        assert!(
-            error.contains("whose Seq-id is not one local id"),
-            "{error}"
-        );
+    }
+
+    // Line RG Q1b (`Q/SURVEY_Q1b.md`, NCBI BLAST+ 2.17.0): a PSSM query whose Seq-id is not local
+    // shows its ids with or without `-parse_deflines` (`Query= gi|4504347 ...`, `qseqid`
+    // `gi|4504347`, the warnings' label `4504347`), and its Seq-aligns take its first id
+    // (`m_gr`: of `gi 4504347, other NP_000549.1` the gi, while `Query=` shows `NP_000549.1`).
+    #[test]
+    fn a_query_with_other_seq_ids_shows_them() {
+        use crate::seqid::model::TextseqId;
+        let refseq = ParsedSeqId::Other(TextseqId {
+            accession: Some(b"NP_000549".to_vec()),
+            version: Some(1),
+            ..TextseqId::default()
+        });
+        for (ids, line, shown, warning, first) in [
+            (
+                vec![ParsedSeqId::Gi(4504347)],
+                "gi|4504347",
+                "4504347",
+                "4504347",
+                0,
+            ),
+            (
+                vec![ParsedSeqId::Gi(4504347), refseq.clone()],
+                "NP_000549.1",
+                "NP_000549.1",
+                "4504347",
+                0,
+            ),
+            (
+                vec![refseq.clone(), ParsedSeqId::Gi(4504347)],
+                "NP_000549.1",
+                "NP_000549.1",
+                "NP_000549",
+                0,
+            ),
+        ] {
+            let mut pssm = rnd();
+            pssm.pssm.query.as_mut().unwrap().ids = ids.clone();
+            let search = psi_search_of(pssm).unwrap();
+            for record in [search.query_record(false), search.query_record(true)] {
+                let believed = record.believed().expect("the ids are shown");
+                assert_eq!(record.local_id, line);
+                assert_eq!(record.shown_id(), shown.as_bytes());
+                assert_eq!(record.warning_id(), warning.as_bytes());
+                assert_eq!(believed.best, ids[first]);
+                assert_eq!(believed.ids, ids);
+            }
+        }
+    }
+
+    // `Q/SURVEY_Q1b.md` of line RG: a query without a Seq-id, a Geninfo import id (NCBI: `Failed to
+    // resolve SeqId: gim|77`), a database ordinal, a local id among other ids (shown as no FASTA
+    // query is) and an empty local id are refused.
+    #[test]
+    fn query_seq_ids_that_are_refused() {
+        use crate::seqid::model::{Dbtag, GiimportId};
+        for (ids, refusal) in [
+            (vec![], "without a Seq-id"),
+            (
+                vec![ParsedSeqId::Giim(GiimportId {
+                    id: 77,
+                    db: None,
+                    release: None,
+                })],
+                "is a Geninfo import id",
+            ),
+            (
+                vec![ParsedSeqId::General(Dbtag {
+                    db: b"BL_ORD_ID".to_vec(),
+                    tag: ObjectId::Id(5),
+                })],
+                "names a database ordinal",
+            ),
+            (
+                vec![
+                    ParsedSeqId::Local(ObjectId::Str(b"Query_1".to_vec())),
+                    ParsedSeqId::Gi(4504347),
+                ],
+                "a local Seq-id among other Seq-ids",
+            ),
+            (
+                vec![ParsedSeqId::Local(ObjectId::Str(Vec::new()))],
+                "an empty local id",
+            ),
+        ] {
+            let mut pssm = rnd();
+            pssm.pssm.query.as_mut().unwrap().ids = ids;
+            let error = psi_search_of(pssm).unwrap_err().to_string();
+            assert!(error.contains(refusal), "{error}");
+        }
     }
 
     // The review of PS4a, N8: a score outside one letter pair's range (`Int2`) is refused;

@@ -44,10 +44,7 @@ use crate::report::serial::asn_text_reader::{
     is_first_id_char, AsnTextError, AsnTextErrorKind, Reader, Result, StreamSource,
 };
 use crate::report::serial::pssm::{SEQ_INST_MOL, SEQ_INST_REPR};
-use crate::seqid::model::{
-    Date, DateStd, Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId,
-    PdbSeqId, TextseqId, SEQ_ID_ALTERNATIVES,
-};
+use crate::seqid::model::{ObjectId, ParsedSeqId};
 
 /// One `Blast4-archive`, with what rpsbproc takes from it.
 // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:67-74
@@ -1097,7 +1094,7 @@ impl<R: Read> ArchiveStream<R> {
                 2 => {
                     self.reader.enumerated(&NA_STRAND)?;
                 }
-                3 => id = Some(self.seq_id()?),
+                3 => id = Some(self.reader.seq_id()?),
                 _ => self.skip_value()?,
             }
         }
@@ -1166,10 +1163,10 @@ impl<R: Read> ArchiveStream<R> {
         while let Some(index) = self.reader.next_member(&mut members, &NAMES)? {
             match index {
                 0 => {
-                    self.object_id()?;
+                    self.reader.object_id()?;
                 }
                 1 => {
-                    self.dbtag()?;
+                    self.reader.dbtag()?;
                 }
                 2 => {
                     self.reader.int4()?;
@@ -1181,7 +1178,7 @@ impl<R: Read> ArchiveStream<R> {
                     self.string()?;
                 }
                 5 => {
-                    self.date()?;
+                    self.reader.date()?;
                 }
                 6 => {
                     let mut ignored = Query::default();
@@ -1227,7 +1224,7 @@ impl<R: Read> ArchiveStream<R> {
                 0 => {
                     let mut block_start = self.reader.start_block()?;
                     while self.reader.next_element(&mut block_start)? {
-                        let id = self.seq_id()?;
+                        let id = self.reader.seq_id()?;
                         query.ids.push(id);
                     }
                     self.reader.end_block()?;
@@ -1354,7 +1351,7 @@ impl<R: Read> ArchiveStream<R> {
                 }
                 1 => {
                     type_seen = true;
-                    let id = self.object_id()?;
+                    let id = self.reader.object_id()?;
                     fasta_reader =
                         top && matches!(id, ObjectId::Str(text) if text == b"CFastaReader");
                 }
@@ -1390,8 +1387,7 @@ impl<R: Read> ArchiveStream<R> {
             match index {
                 0 => {
                     label = true;
-                    defline =
-                        matches!(self.object_id()?, ObjectId::Str(text) if text == b"DefLine");
+                    defline = matches!(self.reader.object_id()?, ObjectId::Str(text) if text == b"DefLine");
                 }
                 1 => {
                     self.reader.int4()?;
@@ -1651,7 +1647,7 @@ impl<R: Read> ArchiveStream<R> {
                 5 => {
                     let mut block_start = self.reader.start_block()?;
                     while self.reader.next_element(&mut block_start)? {
-                        self.object_id()?;
+                        self.reader.object_id()?;
                     }
                     self.reader.end_block()?;
                 }
@@ -1710,7 +1706,7 @@ impl<R: Read> ArchiveStream<R> {
         let mut value_seen = false;
         while let Some(index) = self.reader.next_member(&mut members, &["id", "value"])? {
             if index == 0 {
-                name = match self.object_id()? {
+                name = match self.reader.object_id()? {
                     ObjectId::Str(text) => match text.as_slice() {
                         b"score" => Some("score"),
                         b"e_value" => Some("e_value"),
@@ -1798,7 +1794,7 @@ impl<R: Read> ArchiveStream<R> {
                 2 => {
                     let mut block_start = self.reader.start_block()?;
                     while self.reader.next_element(&mut block_start)? {
-                        let id = self.seq_id()?;
+                        let id = self.reader.seq_id()?;
                         seg.ids.push(id);
                     }
                     self.reader.end_block()?;
@@ -1845,286 +1841,6 @@ impl<R: Read> ArchiveStream<R> {
             return Err(self.reader.error("a mandatory member is missing"));
         }
         Ok(seg)
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:78-80
-    // ```text
-    // Object-id ::= CHOICE {
-    //     id INTEGER ,
-    //     str VisibleString }
-    // ```
-    fn object_id(&mut self) -> Result<ObjectId> {
-        Ok(if self.reader.choice(&["id", "str"])? == 0 {
-            ObjectId::Id(self.reader.int4()?)
-        } else {
-            ObjectId::Str(self.string()?)
-        })
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:71-73
-    // ```text
-    // Dbtag ::= SEQUENCE {
-    //     db VisibleString ,          -- name of database or system
-    //     tag Object-id }         -- appropriate tag
-    // ```
-    fn dbtag(&mut self) -> Result<Dbtag> {
-        let mut members = self.reader.begin_members()?;
-        let (mut db, mut tag) = (None, None);
-        while let Some(index) = self.reader.next_member(&mut members, &["db", "tag"])? {
-            match index {
-                0 => db = Some(self.string()?),
-                _ => tag = Some(self.object_id()?),
-            }
-        }
-        match (db, tag) {
-            (Some(db), Some(tag)) => Ok(Dbtag { db, tag }),
-            _ => Err(self.reader.error("a mandatory member is missing")),
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:54-65
-    // ```text
-    // Date ::= CHOICE {
-    //     str VisibleString ,        -- for those unparsed dates
-    //     std Date-std }             -- use this if you can
-    //
-    // Date-std ::= SEQUENCE {        -- NOTE: this is NOT a unix tm struct
-    //     year INTEGER ,             -- full year (including 1900)
-    //     month INTEGER OPTIONAL ,   -- month (1-12)
-    //     day INTEGER OPTIONAL ,     -- day of month (1-31)
-    //     season VisibleString OPTIONAL ,  -- for "spring", "may-june", etc
-    //     hour INTEGER OPTIONAL ,    -- hour of day (0-23)
-    //     minute INTEGER OPTIONAL ,  -- minute of hour (0-59)
-    //     second INTEGER OPTIONAL }  -- second of minute (0-59)
-    // ```
-    fn date(&mut self) -> Result<Date> {
-        if self.reader.choice(&["str", "std"])? == 0 {
-            return Ok(Date::Str(self.string()?));
-        }
-        const NAMES: [&str; 7] = ["year", "month", "day", "season", "hour", "minute", "second"];
-        let mut date = DateStd {
-            year: 0,
-            month: None,
-            day: None,
-            season: None,
-            hour: None,
-            minute: None,
-            second: None,
-        };
-        let mut year = false;
-        let mut members = self.reader.begin_members()?;
-        while let Some(index) = self.reader.next_member(&mut members, &NAMES)? {
-            match index {
-                0 => {
-                    date.year = self.reader.int4()?;
-                    year = true;
-                }
-                1 => date.month = Some(self.reader.int4()?),
-                2 => date.day = Some(self.reader.int4()?),
-                3 => date.season = Some(self.string()?),
-                4 => date.hour = Some(self.reader.int4()?),
-                5 => date.minute = Some(self.reader.int4()?),
-                _ => date.second = Some(self.reader.int4()?),
-            }
-        }
-        if !year {
-            return Err(self.reader.error("member year missing"));
-        }
-        Ok(Date::Std(date))
-    }
-
-    /// A `Seq-id` of any variant.
-    // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:24-74
-    // ```text
-    // Seq-id ::= CHOICE {
-    //     local Object-id ,            -- local use
-    //     gibbsq INTEGER ,             -- Geninfo backbone seqid
-    //     gibbmt INTEGER ,             -- Geninfo backbone moltype
-    //     giim Giimport-id ,           -- Geninfo import id
-    //     genbank Textseq-id ,
-    //     embl Textseq-id ,
-    //     pir Textseq-id ,
-    //     swissprot Textseq-id ,
-    //     patent Patent-seq-id ,
-    //     other Textseq-id ,           -- for historical reasons, 'other' = 'refseq'
-    //     general Dbtag ,              -- for other databases
-    //     gi INTEGER ,                 -- GenInfo Integrated Database
-    //     ddbj Textseq-id ,            -- DDBJ
-    //     prf Textseq-id ,             -- PRF SEQDB
-    //     pdb PDB-seq-id ,             -- PDB sequence
-    //     tpg Textseq-id ,             -- Third Party Annot/Seq Genbank
-    //     tpe Textseq-id ,             -- Third Party Annot/Seq EMBL
-    //     tpd Textseq-id ,             -- Third Party Annot/Seq DDBJ
-    //     gpipe Textseq-id ,           -- Internal NCBI genome pipeline processing ID
-    //     named-annot-track Textseq-id -- Internal named annotation tracking ID
-    // }
-    // ...
-    // Patent-seq-id ::= SEQUENCE {
-    //     seqid INTEGER ,         -- number of sequence in patent
-    //     cit Id-pat }           -- patent citation
-    //
-    // Textseq-id ::= SEQUENCE {
-    //     name VisibleString OPTIONAL ,
-    //     accession VisibleString OPTIONAL ,
-    //     release VisibleString OPTIONAL ,
-    //     version INTEGER OPTIONAL }
-    //
-    // Giimport-id ::= SEQUENCE {
-    //     id INTEGER ,                     -- the id to use here
-    //     db VisibleString OPTIONAL ,      -- dbase used in
-    //     release VisibleString OPTIONAL } -- the release
-    //
-    // PDB-seq-id ::= SEQUENCE {            --
-    //       mol PDB-mol-id ,                    -- the molecule name
-    //       chain INTEGER DEFAULT 32 ,          -- Deprecated:  'chain' can't support multiple character
-    //       ...
-    //       rel Date OPTIONAL ,                 -- release date, month and year
-    //       chain-id VisibleString OPTIONAL }   -- chain identifier; length-independent generalization of 'chain'
-    // ```
-    // NCBI reference (598d8ae6): c++/src/objects/biblio/biblio.asn:119-124
-    // ```text
-    // Id-pat ::= SEQUENCE {           -- just to identify a patent
-    //     country VisibleString ,         -- Patent Document Country
-    //     id CHOICE {
-    //         number VisibleString ,      -- Patent Document Number
-    //         app-number VisibleString } ,   -- Patent Doc Appl Number
-    //     doc-type VisibleString OPTIONAL }  -- Patent Doc Type
-    // ```
-    // `gi` is `TGi`, an `Int8` in NCBI's 64-bit build.
-    fn seq_id(&mut self) -> Result<ParsedSeqId> {
-        let variant = self.reader.choice(&SEQ_ID_ALTERNATIVES)?;
-        Ok(match variant {
-            0 => ParsedSeqId::Local(self.object_id()?),
-            1 => ParsedSeqId::Gibbsq(self.reader.int4()?),
-            2 => ParsedSeqId::Gibbmt(self.reader.int4()?),
-            3 => {
-                let mut members = self.reader.begin_members()?;
-                let mut giim = GiimportId {
-                    id: 0,
-                    db: None,
-                    release: None,
-                };
-                let mut id = false;
-                while let Some(index) = self
-                    .reader
-                    .next_member(&mut members, &["id", "db", "release"])?
-                {
-                    match index {
-                        0 => {
-                            giim.id = self.reader.int4()?;
-                            id = true;
-                        }
-                        1 => giim.db = Some(self.string()?),
-                        _ => giim.release = Some(self.string()?),
-                    }
-                }
-                if !id {
-                    return Err(self.reader.error("member id missing"));
-                }
-                ParsedSeqId::Giim(giim)
-            }
-            8 => {
-                let mut members = self.reader.begin_members()?;
-                let (mut seqid, mut cit) = (None, None);
-                while let Some(index) = self.reader.next_member(&mut members, &["seqid", "cit"])? {
-                    if index == 0 {
-                        seqid = Some(self.reader.int4()?);
-                        continue;
-                    }
-                    let mut members = self.reader.begin_members()?;
-                    let (mut country, mut number, mut doc_type) = (None, None, None);
-                    while let Some(index) = self
-                        .reader
-                        .next_member(&mut members, &["country", "id", "doc-type"])?
-                    {
-                        match index {
-                            0 => country = Some(self.string()?),
-                            1 => {
-                                let app = self.reader.choice(&["number", "app-number"])? == 1;
-                                let text = self.string()?;
-                                number = Some(if app {
-                                    PatentNumber::AppNumber(text)
-                                } else {
-                                    PatentNumber::Number(text)
-                                });
-                            }
-                            _ => doc_type = Some(self.string()?),
-                        }
-                    }
-                    let (Some(country), Some(id)) = (country, number) else {
-                        return Err(self.reader.error("a mandatory member is missing"));
-                    };
-                    cit = Some(IdPat {
-                        country,
-                        id,
-                        doc_type,
-                    });
-                }
-                let (Some(seqid), Some(cit)) = (seqid, cit) else {
-                    return Err(self.reader.error("a mandatory member is missing"));
-                };
-                ParsedSeqId::Patent(PatentSeqId { seqid, cit })
-            }
-            10 => ParsedSeqId::General(self.dbtag()?),
-            11 => ParsedSeqId::Gi(self.reader.int8()?),
-            14 => {
-                let mut members = self.reader.begin_members()?;
-                let mut pdb = PdbSeqId {
-                    mol: Vec::new(),
-                    chain: None,
-                    rel: None,
-                    chain_id: None,
-                };
-                let mut mol = false;
-                while let Some(index) = self
-                    .reader
-                    .next_member(&mut members, &["mol", "chain", "rel", "chain-id"])?
-                {
-                    match index {
-                        0 => {
-                            pdb.mol = self.string()?;
-                            mol = true;
-                        }
-                        1 => pdb.chain = Some(self.reader.int4()?),
-                        2 => pdb.rel = Some(self.date()?),
-                        _ => pdb.chain_id = Some(self.string()?),
-                    }
-                }
-                if !mol {
-                    return Err(self.reader.error("member mol missing"));
-                }
-                ParsedSeqId::Pdb(pdb)
-            }
-            _ => {
-                let mut members = self.reader.begin_members()?;
-                let mut id = TextseqId::default();
-                while let Some(index) = self
-                    .reader
-                    .next_member(&mut members, &["name", "accession", "release", "version"])?
-                {
-                    match index {
-                        0 => id.name = Some(self.string()?),
-                        1 => id.accession = Some(self.string()?),
-                        2 => id.release = Some(self.string()?),
-                        _ => id.version = Some(self.reader.int4()?),
-                    }
-                }
-                match variant {
-                    4 => ParsedSeqId::Genbank(id),
-                    5 => ParsedSeqId::Embl(id),
-                    6 => ParsedSeqId::Pir(id),
-                    7 => ParsedSeqId::Swissprot(id),
-                    9 => ParsedSeqId::Other(id),
-                    12 => ParsedSeqId::Ddbj(id),
-                    13 => ParsedSeqId::Prf(id),
-                    15 => ParsedSeqId::Tpg(id),
-                    16 => ParsedSeqId::Tpe(id),
-                    17 => ParsedSeqId::Tpd(id),
-                    18 => ParsedSeqId::Gpipe(id),
-                    _ => ParsedSeqId::NamedAnnotTrack(id),
-                }
-            }
-        })
     }
 }
 

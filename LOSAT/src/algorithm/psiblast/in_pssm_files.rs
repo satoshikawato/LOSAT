@@ -46,7 +46,8 @@ use anyhow::{bail, Result};
 
 use crate::core::blast_util::{BLASTAA_SIZE, BLAST_SCORE_MIN};
 use crate::core::psi::KarlinBlk;
-use crate::report::serial::pssm::{ObjectId, PssmSeqId, PssmWithParameters, SeqData};
+use crate::report::serial::pssm::{PssmWithParameters, SeqData};
+use crate::seqid::ParsedSeqId;
 
 use super::pssm::{AsciiPssmDiagnostics, PssmRequest};
 #[cfg(test)]
@@ -54,11 +55,12 @@ use crate::algorithm::pssm_search::in_pssm::with_computed_scores;
 use crate::algorithm::pssm_search::in_pssm::InPssmFile;
 
 /// The query PSSM of psiblast's rounds with `-in_pssm` (`rounds::PsiRoundPlan::input`): the
-/// Seq-id of its query, which the PSSM of each later round keeps (the first Seq-align's query id),
+/// first Seq-id of its query, which the PSSM of each later round keeps (the first Seq-align's query
+/// id: psiblast_app.cpp:539 makes the query's Seq-loc of `GetFirstId()`),
 /// and, when a PSSM file is written, the object that `SavePssmToFile` writes.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct InPssmRounds {
-    pub(crate) id: ObjectId,
+    pub(crate) id: ParsedSeqId,
     object: Option<PssmWithParameters>,
 }
 
@@ -86,11 +88,9 @@ pub(crate) fn rounds_input(file: InPssmFile, request: &PssmRequest) -> Result<In
         .as_ref()
         .map(|query| query.ids.as_slice())
     {
-        Some([PssmSeqId::Local(id)]) => id.clone(),
-        // `in_pssm::psi_search_and_object` has refused any other query.
-        _ => bail!(
-            "a PSSM query whose Seq-id is not one local id is not supported by LOSAT's PSIBLAST"
-        ),
+        Some([id, ..]) => id.clone(),
+        // `in_pssm::psi_search_and_object` has refused a query without a Seq-id.
+        _ => bail!("a PSSM query without a Seq-id is not supported by LOSAT's PSIBLAST"),
     };
     if !file.valid {
         return Ok(InPssmRounds { id, object: None });
@@ -406,7 +406,8 @@ fn ascii_pssm(object: &PssmWithParameters) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::report::serial::pssm::{
-        FormatRpsDbParameters, Pssm, PssmIntermediateData, PssmParameters, PssmQuery, SeqInst,
+        FormatRpsDbParameters, ObjectId, Pssm, PssmIntermediateData, PssmParameters, PssmQuery,
+        SeqInst,
     };
 
     /// A PSSM of `columns` positions of the letter M whose query has the Seq-id `id`.
@@ -420,7 +421,7 @@ mod tests {
                 row_labels: None,
                 by_row: Some(false),
                 query: Some(PssmQuery {
-                    ids: vec![PssmSeqId::Local(id)],
+                    ids: vec![ParsedSeqId::Local(id)],
                     titles: None,
                     inst: SeqInst {
                         repr: ("raw", 2),
@@ -505,7 +506,7 @@ mod tests {
         let input = rounds_input(file(vec![], false, true), &request(false, false)).unwrap();
         assert_eq!(
             (input.id.clone(), input.object.is_none()),
-            (ObjectId::Id(7), true)
+            (ParsedSeqId::Local(ObjectId::Id(7)), true)
         );
         let input = rounds_input(file(vec![], false, true), &request(true, false)).unwrap();
         assert!(input.object.is_some());
@@ -586,7 +587,7 @@ mod tests {
         let mut object = pssm(ObjectId::Str(b"myq".to_vec()), 1, 28);
         with_computed_scores(&mut object, &[[0; BLASTAA_SIZE]], GAPPED);
         let input = InPssmRounds {
-            id: ObjectId::Str(b"myq".to_vec()),
+            id: ParsedSeqId::Local(ObjectId::Str(b"myq".to_vec())),
             object: Some(object),
         };
         let ungapped = KarlinBlk {

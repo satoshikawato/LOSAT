@@ -1553,7 +1553,8 @@ fn reported_header(
 
 /// With `-parse_deflines`, LOSAT's refusal of a reported database sequence whose Seq-align id is
 /// the id of a query of the scope `queries` (`query_batch::QueryScopes::of_query` of a query that
-/// reports it): NCBI's scope finds the query instead, so its reports show the query's title and
+/// reports it; a query whose ids the reports show: `-parse_deflines`, and the PSSM query of
+/// `-in_pssm` whose Seq-id is not one local id): NCBI's scope finds the query instead, so its reports show the query's title and
 /// letters for the database sequence (`dropin-survey-20261029/DI7/DECISIONS.md` 8). Every report
 /// of a query batch asks for its own scope, also of a sequence whose header an earlier batch read.
 pub(crate) fn refuse_id_of_a_query(
@@ -1566,8 +1567,9 @@ pub(crate) fn refuse_id_of_a_query(
     if queries.has_key(&keys.own) {
         return Err(parsed_refusal(
             ordinal,
-            "has the Seq-id of a query read with -parse_deflines in the query batch that reports \
-             it (in any with outfmt 5; NCBI BLAST+ shows the query for it)",
+            "has the Seq-id of a query read with -parse_deflines (or of the PSSM query of \
+             -in_pssm) in the query batch that reports it (in any with outfmt 5; NCBI BLAST+ shows \
+             the query for it)",
             program,
         ));
     }
@@ -1576,8 +1578,8 @@ pub(crate) fn refuse_id_of_a_query(
             ordinal,
             &format!(
                 "has the Seq-align id {}, which NCBI BLAST+'s scope can match weakly to the id \
-                 of a query read with -parse_deflines in the query batch that reports it (in any \
-                 with outfmt 5): an accession with a version for one without, a name with or \
+                 of a query read with -parse_deflines (or of the PSSM query of -in_pssm) in the \
+                 query batch that reports it (in any with outfmt 5): an accession with a version for one without, a name with or \
                  without an accession, a pir or prf accession as a name; NCBI BLAST+ then shows \
                  the query for it",
                 String::from_utf8_lossy(&subject.alignment_fasta())

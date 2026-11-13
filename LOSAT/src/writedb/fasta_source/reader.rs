@@ -1419,7 +1419,6 @@ impl RecordState {
     /// `bIgnoreHyphens` is false: a hyphen counts as good. `bIsNuc` is true for nucleotide
     /// input (`fAssumeNuc | fForceType`). The warning about ambiguous nucleotides is an
     /// ignored problem of makeblastdb.
-    #[inline(always)]
     fn check_data_line(
         &self,
         s: &[u8],
@@ -1579,7 +1578,6 @@ impl RecordState {
     /// length while the line is read; `x_CloseGap` reads that length (`close_gap`). The
     /// fast copy of `fSkipCheck` is not taken (no `fSkipCheck`). `x_NucOrProt()` is empty:
     /// the molecule is set only in `AssembleSeq`.
-    #[inline]
     fn parse_data_line(
         &mut self,
         s: &[u8],
@@ -1587,26 +1585,8 @@ impl RecordState {
         line_number: u64,
         warn: ReaderWarn<'_>,
     ) -> Result<(), ReadError> {
-        if self.flags.mask_from_fasta {
-            self.parse_data_line_of::<true>(s, raw_length, line_number, warn)
-        } else {
-            self.parse_data_line_of::<false>(s, raw_length, line_number, warn)
-        }
-    }
-
-    /// `parse_data_line` with `ReaderFlags::mask_from_fasta` as `MASK_FROM_FASTA`, so that the
-    /// other readers' lines take no step of convert2blastmask's masks. Each of the two is a
-    /// function of its own (one hot loop in each).
-    #[inline(never)]
-    fn parse_data_line_of<const MASK_FROM_FASTA: bool>(
-        &mut self,
-        s: &[u8],
-        raw_length: usize,
-        line_number: u64,
-        warn: ReaderWarn<'_>,
-    ) -> Result<(), ReadError> {
         // `CMaskFromFasta::ParseDataLine`: an interval line is read as the residue `A`.
-        let s = if MASK_FROM_FASTA && s[0].is_ascii_digit() {
+        let s = if self.flags.mask_from_fasta && s[0].is_ascii_digit() {
             self.parse_interval(s)?;
             &b"A"[..]
         } else {
@@ -1635,9 +1615,7 @@ impl RecordState {
                 SPACE => {}
                 COMMENT => break,
                 GAP => {
-                    if MASK_FROM_FASTA {
-                        self.close_mask();
-                    }
+                    self.close_mask();
                     let run = 1 + s[pos + 1..]
                         .iter()
                         .position(|&byte| byte != c)
@@ -1655,7 +1633,7 @@ impl RecordState {
                         .iter()
                         .position(|&byte| actions[byte as usize] < RESIDUE_MIN)
                         .unwrap_or(s.len() - pos - 1);
-                    if MASK_FROM_FASTA {
+                    if self.flags.mask_from_fasta {
                         self.mask_run(&s[pos..pos + run]);
                     }
                     self.seq_data

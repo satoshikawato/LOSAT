@@ -133,10 +133,13 @@ static TOOL: Tool = Tool {
 //     return SegMaskerApplication().AppMain(argc, argv);
 // }
 // ```
-/// Runs `segmasker` with `words` (the command line after `losat segmasker`) on the process's
-/// standard streams; the exit status.
-pub(crate) fn run(words: &[OsString]) -> i32 {
-    crate::ncbi_app::run(&TOOL, words, work::run)
+/// Runs `segmasker` with `words` (the command line after `losat segmasker`), after its
+/// application start `start`, on the process's standard streams; the exit status.
+pub(crate) fn run(
+    words: &[OsString],
+    start: &crate::blastinput::ncbi_environment::ApplicationStart,
+) -> i32 {
+    crate::ncbi_app::run(&TOOL, words, start, work::run)
 }
 
 /// The run of one command line with `input` as its standard input, its output on `out` and its

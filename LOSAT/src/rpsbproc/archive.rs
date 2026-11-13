@@ -1575,7 +1575,7 @@ impl<R: Read> ArchiveStream<R> {
     // ```
     // (`OBJECTS_SEQ_DESCR_ALLOW_EMPTY` is false unless the environment sets it, which LOSAT's
     // rpsbproc rejects (`reader_variable`), or a registry file does, which
-    // `check_ncbi_application_settings` rejects.)
+    // the application start rejects, `ApplicationStart::settings`.)
     fn seq_descr(&mut self, query: &mut Query) -> Result<()> {
         let mut count = 0usize;
         let mut block_start = self.reader.start_block()?;

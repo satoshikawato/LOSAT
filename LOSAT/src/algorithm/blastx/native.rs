@@ -288,6 +288,7 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
 // ```
 fn run_inner(
     args: &BlastxArgs,
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     output: &mut Option<BufWriter<Box<dyn Write>>>,
     archive_slot: &mut Option<crate::report::archive::ArchiveHandle>,
     hold_slot: &mut Option<archive::ArchiveHold<Box<dyn Write + Send>>>,
@@ -302,16 +303,13 @@ fn run_inner(
     // ```
     // NCBI's application layer reads its environment and registry files before blastx's own
     // code runs; LOSAT rejects the settings that change the output first, before any option or
-    // file of the run, as its other programs do in `main` (BLASTX's command line entry takes the
-    // arguments only). The registry's `BLASTDB` finds `-db`, and the data loaders decide whether
-    // the reader tries the first line of the query or the `-subject` file as a Seq-id
+    // file of the run, in `main` as for its other programs: `settings` are those of the run's
+    // application start. The registry's `BLASTDB` finds `-db`, and the data loaders decide
+    // whether the reader tries the first line of the query or the `-subject` file as a Seq-id
     // (`FastaStream::seq_id_role`).
     // An RPSTBLASTN run (`BlastxArgs::rpstblastn`) is the NCBI application rpstblastn: its
     // settings, messages and query batches are that program's (`args::ProgramName`).
     let program = args.program();
-    let settings =
-        crate::blastinput::ncbi_environment::check_ncbi_application_settings(program.lower)
-            .map_err(anyhow::Error::msg)?;
     let id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>> =
         args.parse_deflines.then(Default::default);
     // Diagnostic (LOSAT_TIMING): the clock of the run (x_timing.rs). No NCBI counterpart.
@@ -2246,11 +2244,14 @@ pub(super) fn run_query_batches(
 /// the application stops with one of its own errors, and when the run ends with messages that no
 /// archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status), into the
 /// output the run opened.
-pub fn run(args: &BlastxArgs) -> Result<()> {
+pub fn run(
+    args: &BlastxArgs,
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+) -> Result<()> {
     let mut output: Option<BufWriter<Box<dyn Write>>> = None;
     let mut archive: Option<crate::report::archive::ArchiveHandle> = None;
     let mut hold: Option<archive::ArchiveHold<Box<dyn Write + Send>>> = None;
-    let result = run_inner(args, &mut output, &mut archive, &mut hold);
+    let result = run_inner(args, settings, &mut output, &mut archive, &mut hold);
     if let (Some(handle), Some(writer)) = (&archive, output.as_mut()) {
         match &result {
             Err(error) => {

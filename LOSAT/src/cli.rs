@@ -249,6 +249,10 @@ pub enum Commands {
 // ```
 // Translate registered canonical keys only. Consume each value once so a path
 // or a quoted filtering specification can never be interpreted as another key.
+/// Parses `argv` (`losat <program> <words>`) for a caller that runs no NCBI application start
+/// (the library API, the Web engine): the toolkit's words that the start reads (`-logfile`,
+/// `-conffile`, `-dryrun`, the versions) are refused (`toolkit_file_word_error`), and so is
+/// `-xmlhelp` (`xml_help_refusal`).
 pub fn try_parse_from<T, I, S>(argv: I) -> Result<T, clap::Error>
 where
     T: Parser + CommandFactory,
@@ -258,12 +262,43 @@ where
     try_parse_from_command(T::command(), argv)
 }
 
+/// `try_parse_from` after the command line's application start `start` of the program that
+/// `argv` names (`cli::main_entry`): the start has read `-logfile` and `-conffile`, the entry
+/// ends a `-dryrun` after the arguments, and `-xmlhelp` stops the reader with the request whose
+/// XML the entry prints (`xml_help_program`).
+pub(crate) fn try_parse_from_start<T, I, S>(
+    argv: I,
+    start: &crate::blastinput::ncbi_environment::ApplicationStart,
+) -> Result<T, clap::Error>
+where
+    T: Parser + CommandFactory,
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    parse_command(T::command(), argv, Some(start))
+}
+
 /// `try_parse_from` with `command`, one of `T`'s commands whose arguments a caller changed
 /// (Web ABI v1's BLASTX keeps its own `-outfmt` values, `blastx/web.rs`), read as clap's
 /// `Parser::try_parse_from` reads `T::command()`.
 pub(crate) fn try_parse_from_command<T, I, S>(
     command: clap::Command,
     argv: I,
+) -> Result<T, clap::Error>
+where
+    T: clap::FromArgMatches,
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    parse_command(command, argv, None)
+}
+
+/// The reader of `try_parse_from`, `try_parse_from_start` and `try_parse_from_command`: `start` is
+/// the command line's application start, `None` for a caller that runs none.
+fn parse_command<T, I, S>(
+    command: clap::Command,
+    argv: I,
+    start: Option<&crate::blastinput::ncbi_environment::ApplicationStart>,
 ) -> Result<T, clap::Error>
 where
     T: clap::FromArgMatches,
@@ -283,7 +318,7 @@ where
         if let Some(word) = ncbi_version_word(&tokens[2..]) {
             return Err(toolkit_file_word_error(program.get_name(), word));
         }
-        if crate::blastinput::ncbi_environment::application_start_of_process().is_none() {
+        if start.is_none() {
             if let Some(word) = toolkit_file_word(&tokens[2..]) {
                 return Err(toolkit_file_word_error(program.get_name(), word));
             }
@@ -309,9 +344,7 @@ where
             dryrun,
         } = preparse(&tokens[2..])
         {
-            let no_start =
-                crate::blastinput::ncbi_environment::application_start_of_process().is_none();
-            if no_start && (conffile.is_some() || dryrun) {
+            if start.is_none() && (conffile.is_some() || dryrun) {
                 // The library's makeblastdb takes `-logfile` (its own argument): the word named is
                 // the one refused.
                 let name = if conffile.is_some() {
@@ -530,15 +563,13 @@ where
         // The words before `-xmlhelp` read, as before `-help`: the entry prints the XML.
         Err(error) if error.kind() == ErrorKind::DisplayHelp && xml_help.is_some() => {
             let program = xml_help.unwrap_or_default();
-            return Err(
-                match crate::blastinput::ncbi_environment::application_start_of_process() {
-                    Some(_) => xml_help_request(program),
-                    None => clap::Error::raw(
-                        ErrorKind::InvalidValue,
-                        xml_help_refusal(&refusal_program_name(&program)),
-                    ),
-                },
-            );
+            return Err(match start {
+                Some(_) => xml_help_request(program),
+                None => clap::Error::raw(
+                    ErrorKind::InvalidValue,
+                    xml_help_refusal(&refusal_program_name(&program)),
+                ),
+            });
         }
         // The parser stopped at rpstblastn's help flag, the words before it read (NCBI's
         // order): the program writes NCBI's text (`RpstblastnArgs::ncbi_help_text`), and the
@@ -1097,7 +1128,7 @@ fn toolkit_word_as_written<'a>(tokens: &'a [OsString], name: &str) -> Option<&'a
 }
 
 // No NCBI counterpart: NCBI has no library API. The application start of the command line
-// (`cli::main_entry`, `ncbi_environment::start_application`) reads `-logfile` and `-conffile`
+// (`cli::main_entry`, `ncbi_environment::ApplicationStart`) reads `-logfile` and `-conffile`
 // before the arguments and prints the versions, and the entry ends a `-dryrun` after them;
 // LOSAT's library and the Web engine run none, so they do not take them (as the library takes
 // no PSSM file, `api::search`).
@@ -1194,8 +1225,8 @@ pub(crate) fn xml_help_text(program: &str) -> Option<String> {
 /// `command` with NCBI's two toolkit file arguments, `-logfile` and `-conffile`, in each NCBI
 /// application that runs them (the BLAST programs and makeblastdb), hidden as NCBI hides them.
 /// Their values are read by the application start (`ncbi_environment::log_file` and
-/// `start_application`), before the arguments: the argument reader only checks them (one of
-/// each, as NCBI's `Argument with this name is defined already`).
+/// `ApplicationStart::of_process`), before the arguments: the argument reader only checks them
+/// (one of each, as NCBI's `Argument with this name is defined already`).
 fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
     let names: Vec<String> = command
         .get_subcommands()

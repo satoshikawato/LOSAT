@@ -3095,6 +3095,7 @@ mod tests {
             let (mut log, mut messages) = (Vec::new(), Vec::new());
             let status = crate::writedb::makeblastdb::run_with(
                 &args,
+                None,
                 Some(&now),
                 crate::writedb::Platform::host(),
                 &mut fasta.as_slice(),

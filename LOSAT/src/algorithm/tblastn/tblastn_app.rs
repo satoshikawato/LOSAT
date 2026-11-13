@@ -47,7 +47,7 @@ impl TblastnArgs {
     // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
     // PrintOneResultSet dispatches the complete result to outfmt 0/6/7.
     /// `settings` are the NCBI application settings that LOSAT reproduces
-    /// (`ncbi_environment::check_ncbi_application_settings`): the readers of the subjects
+    /// (`ncbi_environment::ApplicationSettings`): the readers of the subjects
     /// and of the queries (`fasta_reader`) use them.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:67-72

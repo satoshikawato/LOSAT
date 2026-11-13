@@ -535,6 +535,7 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
+            None,
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -625,6 +626,7 @@ fn makedb_version(
     let mut stdin = stdin;
     let status = run_with(
         &args,
+        None,
         Some(&now),
         LINUX,
         &mut stdin,
@@ -1455,6 +1457,7 @@ fn run_v5_case(case: &V5Case) {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
+            None,
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -1587,6 +1590,7 @@ fn an_input_file_that_cannot_be_opened_stops_the_build() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
+            None,
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -1643,6 +1647,7 @@ fn run_parse_case(case: &ParseCase) {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let status = run_with(
         &args,
+        None,
         Some(&now),
         LINUX,
         &mut std::io::empty(),
@@ -1744,7 +1749,15 @@ fn run_fix_case(case: &FixCase) {
     });
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let mut stdin = case.stdin;
-    let status = run_with(&args, Some(&now), LINUX, &mut stdin, &mut out, &mut err);
+    let status = run_with(
+        &args,
+        None,
+        Some(&now),
+        LINUX,
+        &mut stdin,
+        &mut out,
+        &mut err,
+    );
     let show = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
     let err = build_tree_masked(&v5_markers(&err, &dir));
     let out = v5_markers(&out, &dir);
@@ -1845,6 +1858,7 @@ fn parse_seqids_v5_run(label: &str, input: &str, extra: &[&str]) -> (i32, String
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let status = run_with(
         &args,
+        None,
         Some(&now),
         LINUX,
         &mut std::io::empty(),
@@ -1942,6 +1956,7 @@ fn s2_gate() {
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let status = run_with(
                 &args,
+                None,
                 Some(&now),
                 LINUX,
                 &mut std::io::empty(),
@@ -1984,6 +1999,7 @@ fn s3a_gate() {
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let status = run_with(
                 &args,
+                None,
                 Some(&now),
                 LINUX,
                 &mut std::io::empty(),
@@ -2026,6 +2042,7 @@ fn s3b_gate() {
                     };
                     run_with(
                         &args,
+                        None,
                         Some(&now),
                         LINUX,
                         &mut std::io::empty(),

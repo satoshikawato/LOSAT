@@ -14,8 +14,8 @@ use std::ffi::OsString;
 use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::{
-    application_start_of_process, check_ncbi_application_settings, diag_target, log_file, preparse,
-    ApplicationSettings, DiagTarget, Preparsed,
+    diag_target, library_application_settings, log_file, preparse, ApplicationSettings,
+    ApplicationStart, DiagTarget, Preparsed,
 };
 
 use args::{ArgException, Args, ArgsError, Dep, Desc};
@@ -23,7 +23,7 @@ use args::{ArgException, Args, ArgsError, Dep, Desc};
 /// A program run by NCBI's application and argument reader.
 pub(crate) struct Tool {
     /// The program's name (`GetProgramBasename`): the start of its `-version` line, its usage,
-    /// its `<program>.ini` and its settings (`check_ncbi_application_settings`).
+    /// its `<program>.ini` and its settings (`ApplicationStart::settings`).
     pub(crate) program: &'static str,
     /// The program's name in LOSAT's refusals (`BLASTDBCMD`).
     pub(crate) refusal_name: &'static str,
@@ -243,9 +243,15 @@ impl Diag<'_> {
     }
 }
 
-/// Runs `tool` with `words` (the command line after `losat <program>`) and its body `body` on
-/// the process's standard streams; the exit status.
-pub(crate) fn run(tool: &'static Tool, words: &[OsString], body: Body) -> i32 {
+/// Runs `tool` with `words` (the command line after `losat <program>`), after the command line's
+/// application start `start` of `tool`, and its body `body` on the process's standard streams;
+/// the exit status.
+pub(crate) fn run(
+    tool: &'static Tool,
+    words: &[OsString],
+    start: &ApplicationStart,
+    body: Body,
+) -> i32 {
     let stdout = std::io::stdout();
     let stderr = std::io::stderr();
     let mut out = stdout.lock();
@@ -255,6 +261,7 @@ pub(crate) fn run(tool: &'static Tool, words: &[OsString], body: Body) -> i32 {
         words,
         (&mut std::io::stdin(), &mut out, &mut err),
         body,
+        Some(start),
         Some(ncbi_xml),
     );
     let _ = out.flush();
@@ -284,7 +291,7 @@ pub(crate) type Body = fn(
 //         LoadConfig(*m_Config, &x_conf);
 // ```
 /// The run of `tool` with `words`, its standard input `input`, its output on `out` and its
-/// errors on `err`; the exit status.
+/// errors on `err`; the exit status. The library API's run: no application start.
 ///
 /// The order is NCBI's: the diagnostic file of `-logfile` is opened first (append; stderr when
 /// it cannot be opened), then `-version` and the full versions are read (the first one is
@@ -305,7 +312,7 @@ pub(crate) fn run_with(
     err: &mut dyn Write,
     body: Body,
 ) -> i32 {
-    run_app(tool, words, (input, out, err), body, None)
+    run_app(tool, words, (input, out, err), body, None, None)
 }
 
 /// NCBI's XML of `program`'s arguments, whole: the readers of `ncbi_app` refuse no argument of
@@ -314,21 +321,22 @@ fn ncbi_xml(program: &str) -> Option<String> {
     crate::ncbi_xmlhelp::print(program, |_| false)
 }
 
-/// `run_with`, with the XML of `-xmlhelp` that the command line's `run` writes (`xml_help`); the
-/// library API's run has none and refuses the word (`cli::xml_help_refusal`, line RG DECISIONS
+/// `run_with`, with the application start and the XML of `-xmlhelp` that the command line's `run`
+/// has (`start`, `xml_help`); the library API's run has neither and refuses the words that they
+/// stand for (`cli::toolkit_file_word_refusal`; `cli::xml_help_refusal`, line RG DECISIONS
 /// E2x-1), so the library does not carry the XML.
 fn run_app(
     tool: &'static Tool,
     words: &[OsString],
     (input, out, err): (&mut dyn Read, &mut dyn Write, &mut dyn Write),
     body: Body,
+    start: Option<&ApplicationStart>,
     xml_help: Option<fn(&str) -> Option<String>>,
 ) -> i32 {
     // NCBI's application start (`ncbi_environment::ApplicationStart`), which the command line's
     // entry has made: the file of `-logfile` gets the usage report's messages when NCBI opens it,
     // before `-version`.
     let mut target = diag_target(log_file(words));
-    let start = application_start_of_process();
     if let Some(start) = start {
         start.write_log_setup(&mut target);
     }
@@ -366,7 +374,8 @@ fn run_app(
         tool,
     };
     // The file of `-conffile` is the configuration of the command line's application start
-    // (`start_application`); the library API runs none (`cli::toolkit_file_word_refusal`).
+    // (`ApplicationStart::of_process`); the library API runs none
+    // (`cli::toolkit_file_word_refusal`).
     if conffile.is_some() && start.is_none() {
         return diag.refuse(&crate::cli::toolkit_file_word_refusal(
             tool.program,
@@ -410,7 +419,10 @@ fn run_app(
         Err(ArgsError::Invalid(error)) => return diag.report_arg_exception(&error, None),
         Err(ArgsError::Refused(reason)) => return diag.refuse(&reason),
     };
-    let settings = match check_ncbi_application_settings(tool.program) {
+    let settings = match start.map_or_else(
+        || library_application_settings(tool.program),
+        ApplicationStart::settings,
+    ) {
         Ok(settings) => settings,
         Err(reason) => return diag.refuse(&reason),
     };

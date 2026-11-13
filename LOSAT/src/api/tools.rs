@@ -48,7 +48,7 @@ use std::ffi::OsString;
 use std::io::{self, Read, Write};
 
 use super::error::Error;
-use crate::blastinput::ncbi_environment::check_ncbi_application_settings;
+use crate::blastinput::ncbi_environment::library_application_settings;
 use crate::cli::{Cli, Commands};
 use crate::writedb::makeblastdb;
 use crate::writedb::time::LocalTime;
@@ -211,7 +211,7 @@ pub fn run_makeblastdb(
     };
     // NCBI's application layer reads the environment and the registry files before `Run`, and
     // LOSAT rejects the settings that change the output (`cli/main_entry.rs`).
-    let settings = check_ncbi_application_settings("makeblastdb").map_err(Error::Search)?;
+    let settings = library_application_settings("makeblastdb").map_err(Error::Search)?;
     makeblastdb::check_registry_settings(
         &args,
         settings
@@ -229,6 +229,7 @@ pub fn run_makeblastdb(
     };
     let status = makeblastdb::run_with(
         &args,
+        makeblastdb::registry_blastdb(&settings),
         now.as_ref(),
         Platform::host(),
         input,

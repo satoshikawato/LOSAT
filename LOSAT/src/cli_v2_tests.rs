@@ -1935,11 +1935,10 @@ fn version_words_in_an_option_value_are_read_as_ncbi_reads_them() {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (quoted at
 // `ncbi_environment::preparse`): `-logfile FILE` and `-conffile FILE` go to the argument reader
 // with their values, a last `-logfile` or `-conffile` without one is dropped. The command line's
-// application start reads them (`cli::main_entry`); a parser's caller without one, as these
-// tests and the library API and the Web engine, refuses them (`toolkit_file_word_error`).
+// application start reads them (`cli::main_entry`, `try_parse_from_start`); a parser's caller
+// without one, the library API and the Web engine, refuses them (`toolkit_file_word_error`).
 #[test]
 fn toolkit_file_options_need_the_command_lines_application_start() {
-    assert!(crate::blastinput::ncbi_environment::application_start_of_process().is_none());
     for (program, upper) in [
         ("blastn", "BLASTN"),
         ("blastp", "BLASTP"),
@@ -1979,6 +1978,20 @@ fn toolkit_file_options_need_the_command_lines_application_start() {
         );
         // `-out` then has no value: the parser's error.
         assert!(parse(program, &["-out", "-logfile"]).is_err(), "{program}");
+        // After the command line's application start of the program, its parser reads them (the
+        // start is a value of the entry: a test makes one without changing the process).
+        for words in [
+            &["-logfile", "log.txt"][..],
+            &["-conffile=x.ini"],
+            &["-evalue", "1", "-dryrun"],
+        ] {
+            let start =
+                crate::blastinput::ncbi_environment::ApplicationStart::of_process(program, words);
+            let mut argv = vec!["losat", program, "-query", "q.fa", "-subject", "s.fa"];
+            argv.extend(words);
+            let parsed = crate::cli::try_parse_from_start::<Cli, _, _>(argv, &start);
+            assert!(parsed.is_ok(), "{program} {words:?}: {:?}", parsed.err());
+        }
     }
     // makeblastdb's library run refuses `-conffile` too; a last word without value is dropped.
     let makedb = |words: &[&str]| {

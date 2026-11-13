@@ -657,9 +657,8 @@ pub(super) fn run_local(
 ) -> anyhow::Result<()> {
     let (query, subject) = (inputs.query, inputs.subject);
     if inputs.database {
-        use crate::blastinput::ncbi_environment::check_ncbi_application_settings;
-        let settings =
-            |name: &str| check_ncbi_application_settings(name).map_err(anyhow::Error::msg);
+        use crate::blastinput::ncbi_environment::library_application_settings;
+        let settings = |name: &str| library_application_settings(name).map_err(anyhow::Error::msg);
         return match command {
             Commands::Blastp(args) => {
                 run_local_database_blastp(args, query, settings("blastp")?, outputs)
@@ -715,9 +714,9 @@ pub(super) fn run_local(
             // the environment and `.ncbirc`; LOSAT reads it with the application settings, as
             // a database search of the library does.
             if args.window_masker_taxid.is_some_and(|taxid| taxid != 0) {
-                use crate::blastinput::ncbi_environment::check_ncbi_application_settings;
+                use crate::blastinput::ncbi_environment::library_application_settings;
                 let settings =
-                    check_ncbi_application_settings("blastn").map_err(anyhow::Error::msg)?;
+                    library_application_settings("blastn").map_err(anyhow::Error::msg)?;
                 args.window_masker_registry = Some(settings.window_masker_registry);
                 args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
             }

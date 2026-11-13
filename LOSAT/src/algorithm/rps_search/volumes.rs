@@ -106,12 +106,14 @@ impl<'a> RpsVolumeSet<'a> {
 /// `-searchsp` or `-dbsize` gets its length (`x_AdjustDbSize`, before the volumes; `DbSeqNum` is no
 /// remote option), then each volume's set-up the matrix and the gap costs of its `.aux`
 /// (`CreateRpsStructures`; the volumes' are the same, `RpsVolumeSetup`), also in a batch without a
-/// valid query. An `.aux` that cannot be read gives none: the batch's search fails there with
+/// valid query. `costs` are the volumes' matrix and gap costs as their files' set-up read them
+/// (`RpsVolumeSetup::costs`), `None` when the files do not open: the batch's search fails there with
 /// NCBI's error and no request follows. NCBI's threads over the volumes set them up on clones
 /// (`RunThreadedSearch`), whose search spaces never reach the handle; LOSAT writes the requests of
 /// NCBI's `-num_threads 1` at every thread count (DECISIONS F1b-2 of line RG).
 pub(crate) fn search_sets(
     db: &SeqDb,
+    costs: Option<(String, i32, i32)>,
     searchsp: Option<i64>,
     dbsize: Option<i64>,
 ) -> Vec<crate::report::archive::options::Param> {
@@ -125,26 +127,18 @@ pub(crate) fn search_sets(
             value: ParamValue::BigInteger(i64::try_from(db.total_length()).unwrap_or(i64::MAX)),
         });
     }
-    let aux = volumes.order.first().and_then(|&index| {
-        let mut path = volumes.volumes[index].base().as_os_str().to_os_string();
-        path.push(".aux");
-        std::fs::read(std::path::PathBuf::from(path))
-            .ok()
-            .and_then(|bytes| String::from_utf8(bytes).ok())
-            .and_then(|text| crate::seqdb::rps::parse_aux(&text))
-    });
-    if let Some(aux) = aux {
+    if let Some((matrix, gap_open, gap_extend)) = costs {
         sets.push(Param {
             name: "MatrixName",
-            value: ParamValue::Str(aux.matrix),
+            value: ParamValue::Str(matrix),
         });
         sets.push(Param {
             name: "GapOpeningCost",
-            value: ParamValue::Integer(aux.gap_open),
+            value: ParamValue::Integer(gap_open),
         });
         sets.push(Param {
             name: "GapExtensionCost",
-            value: ParamValue::Integer(aux.gap_extend),
+            value: ParamValue::Integer(gap_extend),
         });
     }
     sets
@@ -230,6 +224,23 @@ impl RpsVolumeSetup {
         };
         self.check_files(volume, &files)?;
         Ok(Ok(files))
+    }
+
+    /// The matrix and gap costs of the volumes' `.aux` (`search_sets`): those of the first volume
+    /// that `check` or `open` set up, else `volume`'s as its files read them
+    /// (`RpsVolumeFiles::open_for`, without LOSAT's checks); `None` when its files do not open.
+    pub(crate) fn costs(&self, volume: &Volume) -> Option<(String, i32, i32)> {
+        if let Some(costs) = &self.first_costs {
+            return Some(costs.clone());
+        }
+        match self.files(volume, false) {
+            Ok(Ok(files)) => Some((
+                files.aux.matrix.clone(),
+                files.aux.gap_open,
+                files.aux.gap_extend,
+            )),
+            _ => None,
+        }
     }
 
     /// LOSAT's checks of `volume` alone, once per run before the first byte of output

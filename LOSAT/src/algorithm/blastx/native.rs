@@ -937,7 +937,7 @@ fn run_inner(
     let (archived, strategic) = (archive.is_some(), strategy.is_some());
     let titles_may_refuse = if archived || strategic {
         if !query_is_regular {
-            archive::refuse_irregular_query(archived)?;
+            archive::refuse_irregular_query(archived, program.upper)?;
         }
         let refusable =
             archive::prescan_query_titles(

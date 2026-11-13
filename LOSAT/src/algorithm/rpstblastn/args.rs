@@ -230,6 +230,7 @@ impl RpstblastnArgs {
             use_sw_tback: self.use_sw_tback,
             comp_based_stats: self.comp_based_stats.clone(),
             several_volumes: false,
+            costs: None,
         })
     }
 
@@ -238,7 +239,11 @@ impl RpstblastnArgs {
     pub fn into_blastx_args(self) -> Result<BlastxArgs> {
         let search = self.rps_search()?;
         let requested_cbs = search.search.requested_cbs;
-        let mut args = BlastxArgs {
+        let request_inputs = self
+            .export_search_strategy
+            .is_some()
+            .then(|| Box::new(self.option_inputs()));
+        Ok(BlastxArgs {
             query: self.query,
             subject: None,
             subject_loc: None,
@@ -329,21 +334,39 @@ impl RpstblastnArgs {
             // search with composition-based statistics is BLASTX's (`resolve`).
             comp_based_stats: requested_cbs.to_string(),
             rpstblastn: Some(Arc::new(search)),
-            request_inputs: None,
-        };
-        // The search strategy's recorded options (`RequestKind::Rpstblastn`): BLASTX's of the same
-        // arguments, with the ones that the RPS search keeps (`RpsSearch`) as given.
-        if args.export_search_strategy.is_some() {
-            let mut inputs = crate::algorithm::blastx::option_inputs(&args);
-            inputs.kind = crate::report::archive::options::RequestKind::Rpstblastn;
-            inputs.xdrop_gap = self.xdrop_gap;
-            inputs.xdrop_gap_final = self.xdrop_gap_final;
-            inputs.max_hsps = self.max_hsps_per_subject.map(|count| count as i32);
-            inputs.qcov_hsp_perc = self.qcov_hsp_perc;
-            inputs.sum_stats = self.sum_stats;
-            args.request_inputs = Some(Box::new(inputs));
-        }
-        Ok(args)
+            request_inputs,
+        })
+    }
+
+    /// The options that rpstblastn's search strategy requests record
+    /// (`options::algorithm_options` of `RequestKind::Rpstblastn`: NCBI's argument classes of
+    /// `rpstblastn_args.cpp`), from the arguments as given (`-strand` is never recorded).
+    /// `HitlistSize` is the request's (`StrategyExport::for_run`).
+    pub(crate) fn option_inputs(&self) -> crate::report::archive::options::OptionInputs {
+        use crate::report::archive::options::{seg_filter, OptionInputs, RequestKind};
+        let mut inputs = OptionInputs::new(RequestKind::Rpstblastn, "rpstblastn");
+        inputs.dbsize = self.dbsize;
+        inputs.searchsp = self.searchsp;
+        inputs.evalue = self.evalue;
+        // `-xdrop_ungap` is never recorded (`SetXDropoff` has no remote option).
+        inputs.xdrop_gap = self.xdrop_gap;
+        inputs.xdrop_gap_final = self.xdrop_gap_final;
+        inputs.qcov_hsp_perc = self.qcov_hsp_perc;
+        inputs.max_hsps = self.max_hsps_per_subject.map(|count| count as i32);
+        inputs.sum_stats = self.sum_stats;
+        inputs.query_gencode = i32::from(self.query_gencode);
+        inputs.window_size = self.window_size;
+        inputs.soft_masking = self.soft_masking;
+        inputs.seg = self
+            .seg
+            .as_deref()
+            .and_then(|value| seg_filter(value, "RPSTBLASTN"));
+        inputs.ungapped = self.ungapped;
+        inputs.comp_based_stats = i32::from(
+            crate::algorithm::rpsblast::args::rps_composition_mode(&self.comp_based_stats),
+        );
+        inputs.use_sw_tback = self.use_sw_tback;
+        inputs
     }
 }
 

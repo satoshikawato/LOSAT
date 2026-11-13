@@ -82,19 +82,7 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.ungapped = args.ungapped;
     inputs.soft_masking = Some(args.soft_masking);
     // An archive is written only for a `-seg` that `resolve` read.
-    inputs.seg = args.seg_spec().ok().map(|seg| match seg {
-        crate::blastinput::value_parsers::SegSpec::No => Filter::No,
-        crate::blastinput::value_parsers::SegSpec::Yes => Filter::Yes,
-        crate::blastinput::value_parsers::SegSpec::WindowLocutHicut {
-            window,
-            locut,
-            hicut,
-        } => Filter::Seg {
-            window,
-            locut,
-            hicut,
-        },
-    });
+    inputs.seg = args.seg_spec().ok().map(Filter::from);
     inputs.culling_limit = args.culling_limit;
     inputs.subject_besthit = args.subject_besthit;
     inputs.max_intron_length = args.max_intron_length;
@@ -120,7 +108,13 @@ pub(crate) fn handle_for(
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
     let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
-    ArchiveHandle::for_program(&option_inputs(args), database, "BLASTX", options).map(Some)
+    ArchiveHandle::for_program(
+        &option_inputs(args),
+        database,
+        args.program().upper,
+        options,
+    )
+    .map(Some)
 }
 
 /// The refusal of a title that the archive cannot write as NCBI does
@@ -152,14 +146,14 @@ pub(crate) fn query_is_regular(file: &std::fs::File) -> bool {
 }
 
 /// The refusal of a query for which `query_is_regular` is false, with the archive (`archive`)
-/// or the search strategy.
-pub(crate) fn refuse_irregular_query(archive: bool) -> Result<()> {
+/// or the search strategy; `label` names the program (BLASTX, RPSTBLASTN).
+pub(crate) fn refuse_irregular_query(archive: bool, label: &str) -> Result<()> {
     let option = if archive {
         "-outfmt 11"
     } else {
         "-export_search_strategy"
     };
-    anyhow::bail!("unsupported BLASTX query input for {option}: use a regular file")
+    anyhow::bail!("unsupported {label} query input for {option}: use a regular file")
 }
 
 /// Reads the query file once before the search, batch by batch as the search reads it

@@ -545,7 +545,11 @@ impl PsiblastArgs {
             || (self.in_pssm.is_some()
                 && (self.out_pssm.is_some() || self.out_ascii_pssm.is_some())))
         .then(|| u32::try_from(self.num_iterations).unwrap_or(0));
-        let mut args = BlastpArgs {
+        let request_inputs = self
+            .export_search_strategy
+            .is_some()
+            .then(|| Box::new(self.option_inputs()));
+        Ok(BlastpArgs {
             query: self.query,
             subject: self.subject,
             db: self.db,
@@ -601,7 +605,7 @@ impl PsiblastArgs {
             archive: None,
             export_search_strategy: self.export_search_strategy,
             strategy: None,
-            request_inputs: None,
+            request_inputs,
             app: BlastpApp::Psiblast,
             inclusion_ethresh: Some(self.inclusion_ethresh),
             first_query_ordinal: self.first_query_ordinal,
@@ -622,20 +626,53 @@ impl PsiblastArgs {
             // (`BlastpArgs::check_options`) and sort nothing (`ResolvedBlastpArgs::sort`).
             formatting: self.formatting,
             rps: None,
-        };
-        // The search strategy's recorded options (`RequestKind::Psiblast`): BLASTP's of the same
-        // arguments, with psiblast's classes and the arguments that BLASTP's do not keep as given.
-        if args.export_search_strategy.is_some() {
-            let mut inputs = crate::algorithm::blastp::archive::option_inputs(&args);
-            inputs.kind = crate::report::archive::options::RequestKind::Psiblast;
-            inputs.sum_stats = self.sum_stats;
-            inputs.inclusion_ethresh = self.inclusion_ethresh;
-            inputs.pseudocount = self.pseudocount;
-            inputs.gap_trigger = self.gap_trigger;
-            inputs.num_iterations = Some(self.num_iterations);
-            args.request_inputs = Some(Box::new(inputs));
+        })
+    }
+
+    /// The options that psiblast's search strategy requests record (`options::algorithm_options`
+    /// of `RequestKind::Psiblast`: NCBI's argument classes of `psiblast_args.cpp` and their
+    /// conditions), from the arguments as given. `HitlistSize` is the request's
+    /// (`StrategyExport::for_run`); the database lists are the database's
+    /// (`OptionsHandle::set_database_filter`).
+    pub(crate) fn option_inputs(&self) -> crate::report::archive::options::OptionInputs {
+        use crate::report::archive::options::{seg_filter, OptionInputs, RequestKind};
+        let mut inputs = OptionInputs::new(RequestKind::Psiblast, "blastp");
+        inputs.dbsize = self.dbsize;
+        inputs.searchsp = self.searchsp;
+        inputs.sum_stats = self.sum_stats;
+        inputs.evalue = self.evalue;
+        inputs.gapopen = self.gap_open;
+        inputs.gapextend = self.gap_extend;
+        inputs.matrix = self.matrix.clone();
+        // `-xdrop_ungap` is never recorded (`SetXDropoff` has no remote option).
+        inputs.xdrop_gap = self.xdrop_gap;
+        inputs.xdrop_gap_final = self.xdrop_gap_final;
+        inputs.word_size = self.word_size;
+        inputs.qcov_hsp_perc = self.qcov_hsp_perc;
+        inputs.max_hsps = self.max_hsps_per_subject.map(|count| count as i32);
+        inputs.culling_limit = self.culling_limit;
+        // `static_cast<int>` of the double, as BLASTP's (`blastp::archive::option_inputs`).
+        inputs.threshold = self
+            .threshold
+            .map(crate::core::blast_util::ncbi_int4_from_double);
+        inputs.window_size = self.window_size;
+        inputs.soft_masking = self.soft_masking;
+        inputs.seg = self
+            .seg
+            .as_deref()
+            .and_then(|value| seg_filter(value, "PSIBLAST"));
+        if let Ok((mode, unified_p)) =
+            crate::blastinput::app::parse_comp_based_stats(&self.comp_based_stats, true, false)
+        {
+            inputs.comp_based_stats = mode as i32;
+            inputs.unified_p = unified_p;
         }
-        Ok(args)
+        inputs.use_sw_tback = self.use_sw_tback;
+        inputs.gap_trigger = self.gap_trigger;
+        inputs.pseudocount = self.pseudocount;
+        inputs.inclusion_ethresh = self.inclusion_ethresh;
+        inputs.num_iterations = Some(self.num_iterations);
+        inputs
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2744-2748

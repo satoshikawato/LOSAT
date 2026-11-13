@@ -204,7 +204,7 @@ pub struct HitlistArgs {
 /// The `HitlistSize` option of a run of format `outfmt` (`report_counts`): the archive's is that
 /// of outfmt 11, while outfmt 0 to 4 take the larger of `-num_descriptions` and `-num_alignments`
 /// (blast_args.cpp:2910-2936, probe `nd` of RG-F1).
-fn hitlist_size(outfmt: i32, counts: HitlistArgs) -> i32 {
+pub(crate) fn hitlist_size(outfmt: i32, counts: HitlistArgs) -> i32 {
     crate::blastinput::report_counts::report_counts(
         outfmt,
         counts.max_target_seqs,

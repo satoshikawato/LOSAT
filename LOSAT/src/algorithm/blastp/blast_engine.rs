@@ -6830,6 +6830,7 @@ fn search(
         && (super::archive::check_request_titles(
             &searched_queries[..batches.searched_done],
             "query",
+            args.app.name(),
             archive,
             strategy,
         )
@@ -6837,6 +6838,7 @@ fn search(
             || super::archive::check_request_titles(
                 subject_source.fasta_records(),
                 "subject",
+                args.app.name(),
                 archive,
                 strategy,
             )
@@ -13453,8 +13455,9 @@ fn run_call(
     // refuse (`BlastpReports::titles_may_refuse`).
     if reports.titles_may_refuse {
         let (archive, strategy) = (args.archive.is_some(), args.strategy.is_some());
-        super::archive::check_request_titles(query_records, "query", archive, strategy)?;
-        super::archive::check_request_titles(subject_records, "subject", archive, strategy)?;
+        let label = args.app.name();
+        super::archive::check_request_titles(query_records, "query", label, archive, strategy)?;
+        super::archive::check_request_titles(subject_records, "subject", label, archive, strategy)?;
     }
     // The request that the run writes once this call's batches are formatted (the batch that
     // stops the run or fails): its titles are refused here too, before any report.

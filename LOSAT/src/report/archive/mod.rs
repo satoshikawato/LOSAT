@@ -40,6 +40,9 @@ pub mod requests;
 pub mod strategy;
 pub mod writer;
 
+#[cfg(test)]
+mod option_walk_tests;
+
 use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::io::Write;

@@ -62,6 +62,33 @@ pub enum Filter {
     },
 }
 
+impl From<crate::blastinput::value_parsers::SegSpec> for Filter {
+    fn from(spec: crate::blastinput::value_parsers::SegSpec) -> Self {
+        use crate::blastinput::value_parsers::SegSpec;
+        match spec {
+            SegSpec::No => Filter::No,
+            SegSpec::Yes => Filter::Yes,
+            SegSpec::WindowLocutHicut {
+                window,
+                locut,
+                hicut,
+            } => Filter::Seg {
+                window,
+                locut,
+                hicut,
+            },
+        }
+    }
+}
+
+/// The filter of a `-seg` value as given (`app::parse_seg_option`; `label` names the program in
+/// its error), `None` for a value the program refuses (no request is written then).
+pub fn seg_filter(value: &str, label: &str) -> Option<Filter> {
+    crate::blastinput::app::parse_seg_option(value, label)
+        .ok()
+        .map(Filter::from)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:73-88
 // ```c++
 // void
@@ -234,7 +261,8 @@ pub struct OptionInputs {
     /// `-max_target_seqs`, else `-num_alignments`, else 500.
     pub hitlist_size: i32,
     pub comp_based_stats: i32,
-    /// `-comp_based_stats 2u` (BLASTP, an adjusting mode): `SetUnifiedP(1)`.
+    /// The `u` of `-comp_based_stats 2u` as given: `SetUnifiedP(1)` for BLASTP in an adjusting mode
+    /// (`algorithm_options`).
     pub unified_p: bool,
     pub use_sw_tback: bool,
     /// psiblast's `-inclusion_ethresh` (`CPssmEngineArgs`: recorded in place of the constructor's).
@@ -329,11 +357,35 @@ fn suggested_window(matrix: &str) -> i32 {
     crate::stats::protein_options::suggested_window_size(matrix)
 }
 
-fn default_threshold(kind: RequestKind) -> i32 {
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-602
+// ```c++
+// static bool
+// s_IsDefaultWordThreshold(EProgram program, double threshold)
+// {
+//     int word_threshold = static_cast<int>(threshold);
+//     bool retval = true;
+//     if (program == eBlastp &&
+//         word_threshold != BLAST_WORD_THRESHOLD_BLASTP) {
+//         retval = false;
+//     } else if (program == eBlastx &&
+//         word_threshold != BLAST_WORD_THRESHOLD_BLASTX) {
+//         retval = false;
+//     } else if (program == eTblastn &&
+//                word_threshold != BLAST_WORD_THRESHOLD_TBLASTN) {
+//         retval = false;
+//     }
+//     return retval;
+// }
+// ```
+/// Whether the word threshold set before the threshold class (`value`) is the default that the
+/// matrix's suggestion replaces: BLASTP, BLASTX and TBLASTN keep any other value; every other
+/// program (psiblast's `ePSIBlast`, TBLASTX, ...) takes the suggestion whatever was set.
+fn is_default_word_threshold(kind: RequestKind, value: i32) -> bool {
     match kind {
-        RequestKind::Blastp | RequestKind::Psiblast => 11,
-        RequestKind::Blastx => 12,
-        _ => 13,
+        RequestKind::Blastp => value == 11,
+        RequestKind::Blastx => value == 12,
+        RequestKind::Tblastn => value == 13,
+        _ => true,
     }
 }
 
@@ -738,7 +790,7 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                         Some(_) if inputs.task == "blastp-short" && !threshold_set_by_word_size => {
                             true
                         }
-                        Some(ParamValue::Integer(value)) => value == default_threshold(kind),
+                        Some(ParamValue::Integer(value)) => is_default_word_threshold(kind, value),
                         Some(_) => false,
                     };
                     if is_default {
@@ -807,9 +859,21 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
             Class::QueryGeneticCode => list.set("QueryGeneticCode", Integer(inputs.query_gencode)),
             Class::DbGeneticCode => list.set("DbGeneticCode", Integer(inputs.db_gencode)),
             Class::Formatting => list.set("HitlistSize", Integer(inputs.hitlist_size)),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:879-885
+            // ```c++
+            //         opt.SetCompositionBasedStats(compo_mode);
+            //         if (program == eBlastp &&
+            //             compo_mode != eNoCompositionBasedStats &&
+            //             tolower(comp_stat_string[1]) == 'u') {
+            //             opt.SetUnifiedP(1);
+            //         }
+            //         opt.SetSmithWatermanMode(smith_waterman_value);
+            // ```
+            // `UnifiedP` is BLASTP's only (psiblast's handle is `ePSIBlast`); `-use_sw_tback` is
+            // recorded in every mode, 0 included.
             Class::Cbs => {
                 list.set("CompositionBasedStats", Integer(inputs.comp_based_stats));
-                if inputs.unified_p && inputs.comp_based_stats != 0 {
+                if kind == RequestKind::Blastp && inputs.unified_p && inputs.comp_based_stats != 0 {
                     list.set("UnifiedP", Integer(1));
                 }
                 list.set("SmithWatermanMode", Boolean(inputs.use_sw_tback));
@@ -1114,6 +1178,15 @@ mod tests {
         assert_eq!(at("MatrixName"), at("SegFiltering") + 1);
         assert_eq!(at("Culling"), at("WordThreshold") + 1);
         assert_eq!(params[at("GapTrigger")].value, ParamValue::Real(20.0));
+        // `UnifiedP` is BLASTP's only (blast_args.cpp:880-884; review 3 R3-1).
+        let unified = |kind: RequestKind| {
+            let mut inputs = OptionInputs::new(kind, "blastp");
+            inputs.unified_p = true;
+            names(&inputs).iter().any(|name| name == "UnifiedP")
+        };
+        assert!(unified(RequestKind::Blastp));
+        assert!(!unified(RequestKind::Psiblast));
+        assert!(!unified(RequestKind::Rpsblast));
         let mut rps = OptionInputs::new(RequestKind::Rpsblast, "blastp");
         rps.window_size = Some(30);
         let listed = names(&rps);

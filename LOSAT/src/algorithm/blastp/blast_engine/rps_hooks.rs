@@ -163,10 +163,15 @@ pub(super) fn note_strategy_sets(
         })
         .into_iter()
         .collect();
+    // The volumes' matrix and gap costs as the first volume's files read them (the search sets the
+    // volumes up again, `rps_search`).
+    let volumes = RpsVolumeSet::of(database.seqdb());
+    let costs = RpsVolumeSetup::new("RPSBLAST", args.window_size as i32).costs(volumes.first());
     strategy.options().set_search_sets(
         before_batches,
         crate::algorithm::rps_search::volumes::search_sets(
             database.seqdb(),
+            costs,
             args.searchsp,
             Some(args.dbsize),
         ),

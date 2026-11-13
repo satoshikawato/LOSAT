@@ -1,0 +1,85 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/nt60t2.asn
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: YES
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	tblastn	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	4998	mg00060_295001-300000
+DOMAINS
+1	Query_1[-1]	Non-specific	469553	3739	4998	0	920.032	NF041671	peri_hyde_PaoC	N	-
+1	Query_1[-1]	Specific	441138	3745	4998	6.21466e-133	431.963	COG1529	CoxL	N	-
+1	Query_1[-1]	Specific	523884	3931	4716	5.8907e-68	230.907	pfam20256	MoCoBD_2	-	-
+1	Query_1[-1]	Specific	441578	2812	3654	7.95296e-55	193.929	COG1975	XdhC	-	-
+1	Query_1[-1]	Non-specific	132014	3760	4911	2.83857e-20	98.5437	TIGR02969	mam_aldehyde_ox	N	-
+1	Query_1[-1]	Non-specific	520754	2824	3108	8.81532e-17	79.0637	pfam13478	XdhC_C	N	-
+1	Query_1[-1]	Non-specific	515065	3424	3627	1.7531e-15	72.5242	pfam02625	XdhC_CoxI	-	-
+1	Query_1[-1]	Non-specific	215491	3808	4908	3.93024e-14	78.5877	PLN02906	PLN02906	N	-
+1	Query_1[-1]	Non-specific	515144	4786	4995	1.62324e-12	69.4209	pfam02738	MoCoBD_1	N	-
+1	Query_1[-1]	Non-specific	215096	3925	4911	5.465e-06	51.6402	PLN00192	PLN00192	N	-
+1	Query_1[-2]	Specific	440347	744	1901	6.32387e-33	132.855	COG0582	FimB	-	-
+1	Query_1[-2]	Non-specific	443998	828	1691	4.82424e-25	107.355	COG4973	XerC	-	-
+1	Query_1[-2]	Non-specific	512728	756	1505	4.99455e-24	103.948	COG4974	XerD	-	-
+1	Query_1[-2]	Non-specific	271182	756	1271	2.02186e-19	87.7109	cd00801	INT_P4_C	-	528952
+1	Query_1[-2]	Non-specific	271177	828	1280	2.98986e-18	83.9155	cd00796	INT_Rci_Hp1_C	-	528952
+1	Query_1[-2]	Non-specific	271189	801	1274	3.08525e-16	77.5992	cd01189	INT_ICEBs1_C_like	-	528952
+1	Query_1[-2]	Non-specific	271175	828	1268	4.20111e-15	74.8239	cd00397	DNA_BRE_C	-	528952
+1	Query_1[-2]	Non-specific	513580	828	1280	1.45212e-13	70.4285	pfam00589	Phage_integrase	-	528952
+1	Query_1[-2]	Non-specific	271184	801	1274	8.37243e-10	60.013	cd01184	INT_C_like_1	-	528952
+1	Query_1[-2]	Non-specific	271185	828	1193	4.7881e-09	57.2739	cd01185	INTN1_C_like	-	528952
+1	Query_1[-2]	Non-specific	271179	885	1214	1.13786e-07	53.2837	cd00798	INT_XerDC_C	C	528952
+1	Query_1[-2]	Non-specific	520685	1758	1904	1.0163e-06	48.0313	pfam13356	Arm-DNA-bind_3	N	-
+1	Query_1[-2]	Non-specific	271183	831	1214	0.000222722	44.1907	cd01182	INT_RitC_C_like	-	528952
+1	Query_1[-2]	Non-specific	271181	792	1253	0.00128459	41.5596	cd00800	INT_Lambda_C	-	528952
+1	Query_1[-2]	Non-specific	271188	828	1214	0.0018871	41.0732	cd01188	INT_RitA_C_like	-	528952
+1	Query_1[-2]	Non-specific	271192	888	1190	0.00688573	39.5829	cd01192	INT_C_like_3	C	528952
+1	Query_1[-3]	Non-specific	176163	2408	2719	2.05823e-33	128.733	cd08474	PBP2_CrgA_like_5	N	531135
+1	Query_1[-3]	Non-specific	176114	2408	2719	2.15621e-20	90.9627	cd08422	PBP2_CrgA_like	N	531135
+1	Query_1[-3]	Non-specific	176161	2402	2719	2.50926e-10	61.7593	cd08472	PBP2_CrgA_like_3	N	531135
+1	Query_1[-3]	Non-specific	176166	2408	2722	9.02714e-09	57.2401	cd08477	PBP2_CrgA_like_8	N	531135
+1	Query_1[-3]	Non-specific	176159	2402	2671	1.18866e-08	56.9345	cd08470	PBP2_CrgA_like_1	N	531135
+1	Query_1[-3]	Non-specific	515602	2399	2719	1.26982e-06	51.1397	pfam03466	LysR_substrate	N	-
+1	Query_1[-3]	Non-specific	176160	2402	2719	2.23044e-06	50.2165	cd08471	PBP2_CrgA_like_2	N	531135
+1	Query_1[-3]	Non-specific	176162	2411	2710	5.08522e-06	49.091	cd08473	PBP2_CrgA_like_4	N	531135
+1	Query_1[-3]	Non-specific	440348	2390	2578	2.64365e-05	47.939	COG0583	LysR	N	-
+1	Query_1[-3]	Non-specific	176168	2411	2719	4.81301e-05	46.4361	cd08479	PBP2_CrgA_like_9	N	531135
+1	Query_1[-3]	Non-specific	176164	2408	2719	0.000259454	44.0833	cd08475	PBP2_CrgA_like_6	N	531135
+1	Query_1[-3]	Non-specific	176165	2408	2719	0.000704937	42.6167	cd08476	PBP2_CrgA_like_7	N	531135
+1	Query_1[-3]	Non-specific	176169	2411	2719	0.00348833	40.7828	cd08480	PBP2_CrgA_like_10	N	531135
+ENDDOMAINS
+SUPERFAMILIES
+1	Query_1	Superfamily	0	756	1271	2.02186e-19	87.7109	cl00213	DNA_BRE_C	-	-
+1	Query_1	Superfamily	0	2408	2719	2.05823e-33	128.733	cl21456	Periplasmic_Binding_Protein_Type_2	N	-
+ENDSUPERFAMILIES
+SITES
+1	Query_1[-2]	Specific	active site	R1181-1179,H911-909,R902-900,R899-897,Y803-801	5	0	271182
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

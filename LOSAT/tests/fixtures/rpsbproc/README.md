@@ -1,4 +1,4 @@
-# rpsbproc fixtures (PS16a, PS16b)
+# rpsbproc fixtures (PS16a-PS16c)
 
 Inputs and frozen NCBI outputs for `losat rpsbproc` (NCBI rpsbproc 0.5.1, the 2025-05-13 package).
 
@@ -38,7 +38,7 @@ Inputs and frozen NCBI outputs for `losat rpsbproc` (NCBI rpsbproc 0.5.1, the 20
 
 `case`, `use` (`compare`: LOSAT must give the same stdout, stderr and exit code; `linux`: the same, on Linux only; `refuse`: LOSAT refuses, exit 1, with
 the bytes of `refused/<case>.{out,err,rc}`: the XML input until the XML reader of a later item, PS16d, and the
-refusals of PS16b below), `stdin` (`-` = empty), `setup`
+refusals of PS16b and PS16c below), `stdin` (`-` = empty), `setup`
 (`data-without:<file>`: a directory `data_missing/` holding the data files except that one; `data-with:<dir>`: a
 directory `<dir>/` holding the data files with those of `data_with/<dir>/` in their place; `data-with:<a>+<dir>`: the
 same with those of `data_with/<a>/` first, then those of `data_with/<dir>/`), `arguments` (split on
@@ -99,6 +99,57 @@ spaces). PS16a's cases of `-t feats`, `-t both` and the default `-t` (named `ref
   - `refuse_nodata`: `arch/q_nodata.asn`, `mfirst.asn` without the query's `seq-data` (review oracle R19), with
     `sites/`: the site's positions are outside the (empty) residues, where NCBI reads memory outside the string
     (its two builds print different bytes).
+
+## Nucleotide queries (PS16c)
+
+- Archives added for PS16c: NCBI BLAST+ 2.17.0 `rpstblastn -outfmt 11`, one thread, against CDD v3.22 (run in its
+  directory as `-db Cdd`), queries cut from the E. coli K-12 MG1655 genome (`NC_000913.3`) as 5 kb pieces named
+  `mgNNNNN_<from>-<to>` (1-based genome positions); commands in `ARCH_COMMANDS.tsv`. They are stored gzip-compressed
+  (`arch/*.asn.gz`, `gzip -9n`); the tests unpack each to `arch/<name>.asn` in the run directory before running, so the
+  report's header names `arch/<name>.asn`.
+  - `nt67.asn` (mg00067), `nt63.asn` (mg00063), `nt49.asn` (mg00049): hits in plus and minus frames, specific sites
+    with codon ranges (minus strand descending), superfamilies, and Generic sites of hierarchy roots with `ntprev`.
+  - `nt68.asn` (mg00068): `MOTIFS` lines of a structural domain (ANK repeats, source 0) on the plus strand;
+    `nt68rc.asn`: the reverse complement of the same piece (title `..._rc`), the same motifs on the minus strand.
+  - `nt60.asn`, `nt60t1.asn`, `nt60t2.asn`: mg00060 and the same piece 1 and 2 bases shorter at its end; its hits are
+    on the minus strand, whose frame numbers follow the query length modulo 3.
+  - `nt04amb.asn`: mg00004 with `N` at every 97th base from base 51, `R` at every 211th from 81 and `Y` at every 307th
+    from 131 (`ncbi4na` Seq-data); a site codon with an ambiguous base prints `X`.
+  - `nt67seg.asn` (`-seg yes`: `results.masks` with frames), `nt67e10.asn` (the default E-value).
+  - `ntpair.asn`: mg00063 and mg00067 in one batch (one session, two queries).
+  - `ntnohit.asn`: mg00001 to mg00010 with `-strand minus`, where NCBI's rpstblastn finds no hit: every query prints
+    `DOMAINS` and `ENDDOMAINS` with nothing between.
+  - `nt94had.asn`: bases 2,301-3,360 of mg00094 (genome 467,301-468,360): a HAD-domain hit whose "HAD signature
+    motif I" site carries a motif.
+  - `ntmix_p_n.asn` and `ntmix_n_p.asn`: PS16b's `mfirst.asn` (a protein query whose `HKY` catalytic site carries a
+    motif) and `nt94had.asn` one after the other, in both orders. NCBI's motif state (`st_motif_pos`) is one per
+    process, so it crosses from the protein session to the nucleotide one and back: the second session's motif site
+    is dropped.
+- `data_with/nt/`: the six data files cut to the rows these archives and `mfirst.asn` reach (the rule of `data/`);
+  the description column of `cddid.tbl` (never printed) is cut to 24 characters to keep the file small.
+  `data_with/ntprev/` (used as `data-with:nt+ntprev`): the rows of the v3.23 preview `cdtrack.txt` for those domains
+  and `nt`'s `cddid.tbl` with the parents and roots those rows name. For every PS16c case, NCBI's output with these
+  data equals its output with the full v3.22 files (with the preview `cdtrack.txt` for `ntprev`), and bioconda's
+  rpsbproc 0.5.1 gives the same bytes.
+- The cases of the PS16c review (2026-11-13; NCBI's binary and bioconda's 0.5.1 gave the same bytes, with these data
+  and with the full v3.22 files), archives edited by hand as the review's oracles were (`gzip -9n`):
+  - `ntnull1.asn`: `nt67.asn` with a second `Std-seg` in its first alignment whose only location is `null`
+    (`loc { null NULL }`). NCBI's `seqlocs[0]->IsNull() || seqlocs[1]->IsNull()` skips it without reading a second
+    location: the output is that of `nt67.asn`.
+  - `ntshort2.asn`: `nt67.asn` with the Seq-data `iupacna "AC"` (its `length` stays 5000). With `-t doms` NCBI prints
+    the hits (`ntshort2.doms`); where it translates the query for sites, see `refuse_ntshort2` below.
+- `refused/` holds the refusals of PS16c (PD-LOSAT-NCBI-DEFECTS 1.16) too, each LOSAT's output cut where NCBI's goes on
+  (checked against NCBI's output of the same case):
+  - `refuse_ntshort2`: `ntshort2.asn` with `-t both`: NCBI's `TranslateAll` erases from an empty string after
+    `ENDDOMAINS` (segmentation fault in both builds).
+  - `refuse_natoprot`: `arch/natoprot.asn`, `three.asn` with `mol na` (the protein queries read as nucleotide ones:
+    their Dense-seg hits in frame 1, their sites on the translation of their letters), `-t both -m std`: a site at
+    residue 117 of a translation of 58 residues, where NCBI reads outside the string (NCBI's binary, bioconda's and
+    NCBI's binary with the full data files print three different lines).
+  - `refuse_ntnoids1`: `nt67.asn` whose first alignment has no ids in its segments (its query id comes from the
+    first location): NCBI reads the hit id past the ids (segmentation fault after the `SESSION` line).
+  - `refuse_ntplusmax`: `nt67.asn` whose first alignment, on the plus strand, ends at base 2^31 (`to 2147483647`):
+    NCBI's `int` overflows and both builds print `-2147483648`.
 
 ## The NCBI C++ Toolkit options (line RG, item E1c)
 

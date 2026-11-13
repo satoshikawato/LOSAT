@@ -236,7 +236,7 @@ pub enum Commands {
     // static const char *PROGRAM_USAGE =	//multiline
     // "Process output from offline rpsblast to annotate sequence with conserved domain information";
     // ```
-    /// Process output from offline rpsblast to annotate sequence with conserved domain information (rpsbproc; its domain hits, sites and motifs of protein queries)
+    /// Process output from offline rpsblast to annotate sequence with conserved domain information (rpsbproc; its domain hits, sites and motifs of protein and nucleotide queries)
     #[command(name = "rpsbproc", help_template = NCBI_HELP_TEMPLATE)]
     Rpsbproc(crate::rpsbproc::RpsbprocArgs),
 }

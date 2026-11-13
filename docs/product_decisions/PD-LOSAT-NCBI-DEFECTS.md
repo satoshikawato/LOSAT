@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.16
+- Version: 1.17
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -27,7 +27,9 @@
   1.15 2026-11-12 (the explicit rejections of `losat rpsbproc`, rule 3, line PS items PS16a and
   PS16b);
   1.16 2026-11-13 (the explicit rejections of `losat rpsbproc` for nucleotide queries, rule 3,
-  line PS item PS16c)
+  line PS item PS16c);
+  1.17 2026-11-13 (the explicit rejections of `losat rpsbproc` in the XML input, rule 3, line PS
+  item PS16d)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -487,6 +489,23 @@ of exception 9 (PS16a) did.
     oracle `plusmax`: both builds print -2147483648), `pr - 1` of a residue at `INT_MIN`,
     `xres + 1` of a site's or motif's base). Every case is made by hand; none occurs in the
     rpstblastn archives of PS16c probe 1 (891 jobs).
+  - The BlastOutput XML input (`-outfmt 5` of rpsblast and rpstblastn; version 1.17, 2026-11-13,
+    line PS item PS16d, `DECISIONS.md` 37 and 40): an `Hsp_hseq` shorter than its `Hsp_qseq` by
+    more than one letter (`ParseBlastOutput` reads `hseq` at the indices of `qseq`, past its
+    terminating 0), an alignment that writes a residue at or past the end of NCBI's string of the
+    query's frame (`operator[]`; PS16d oracle `n_qlen2`, a nucleotide query of 2 bases whose hits
+    overwrite the string's terminator in both 0.5.1 builds), a NaN `Hsp_evalue` or `Hsp_bit-score`
+    among the kept HSPs (NCBI's sort of the hits is then undefined, as in an archive), a query whose
+    strings NCBI holds as 1 GiB or more at once (`NACommit`'s six frames, `PRCommit`'s residues and
+    their copy, in `unsigned int` lengths: a nucleotide query of 0 or 1 base gives frames of more
+    than a billion residues; oracles `n_qlen1`, `n_noqlen` and `p_qlenneg` end with
+    `basic_string::replace` or `std::bad_alloc` by the address space), and a coordinate of
+    `-2147483648` (`- COORDSBASE` overflows `int`). Of NCBI's XML reader, LOSAT refuses the
+    constructs that NCBI's BLAST XML writers never produce and that NCBI reads with state LOSAT does
+    not port: attributes (skipped, with NCBI's handling of `xmlns` and `nil`), namespace prefixes
+    (stripped), control characters in character data (replaced by `#` with a warning that quotes
+    NCBI's stack of the read). Every case is made by hand; none occurs in the 2,310 jobs of PS16d
+    probe 1 (NCBI's rpsblast and rpstblastn 2.17.0 XML).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

@@ -337,11 +337,6 @@ fn out_and_logfile_take_what_ncbi_writes_there() {
     );
 }
 
-/// The probe's cases that LOSAT's BLASTDBCMD does not serve: the toolkit word LOSAT refuses
-/// (`-dryrun`, probe B22, runs since line RG item E1b: `tests/ncbi_toolkit_dryrun.rs`; the full
-/// versions, probe B20, since item E3: `a_full_version_is_printed_before_the_arguments`).
-const REFUSALS: &[(&str, &[&str])] = &[("C06", &["-db", "db/p5", "-info", "-xmlhelp"])];
-
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:980-985 (quoted at
 // `ncbi_version::print`). NCBI BLAST+ 2.17.0 (probe B20, line RG `E/e3/ncbi/blastdbcmd.vf_args`):
 // `-version-full` prints the full version and exits 0 before the arguments are read; LOSAT's has
@@ -361,21 +356,19 @@ fn a_full_version_is_printed_before_the_arguments() {
     );
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-690 (quoted at `ncbi_xmlhelp`).
+// NCBI BLAST+ 2.17.0 (probe C06, and line RG `E/e2/ncbi/blastdbcmd.xml_args`): `-xmlhelp` after
+// the arguments prints the XML of blastdbcmd's arguments and exits 0. The toolkit words that the
+// probe's LOSAT refused all run now (`-dryrun`, probe B22, since line RG item E1b:
+// `tests/ncbi_toolkit_dryrun.rs`; the full versions, probe B20, since item E3:
+// `a_full_version_is_printed_before_the_arguments`; `-xmlhelp` since item E2x): LOSAT's
+// blastdbcmd refuses no argument by name, so its XML is NCBI's.
 #[test]
-fn what_blastdbcmd_does_not_serve_is_refused_without_output() {
-    let dir = TestDir::new("refuse");
-    for &(id, words) in REFUSALS {
-        let (stdout, stderr, code) = blastdbcmd(words, &dir.0);
-        let stderr = String::from_utf8_lossy(&stderr);
-        assert_eq!(stdout, b"", "{id} {words:?}");
-        assert_eq!(code, 1, "{id} {words:?}: {stderr}");
-        assert!(
-            stderr.starts_with("Error: ")
-                && stderr.ends_with("is not supported by LOSAT's BLASTDBCMD\n")
-                && stderr.lines().count() == 1,
-            "{id} {words:?}: {stderr}"
-        );
-    }
+fn xmlhelp_prints_ncbis_xml() {
+    let dir = TestDir::new("xmlhelp");
+    let (stdout, stderr, code) = blastdbcmd(&["-db", "db/p5", "-info", "-xmlhelp"], &dir.0);
+    assert_eq!((stderr, code), (Vec::new(), 0));
+    assert!(stdout == include_bytes!("../src/ncbi_xmlhelp/blastdbcmd.xml"));
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1015-1022 (quoted at

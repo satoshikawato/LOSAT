@@ -144,6 +144,8 @@ fmt_seqloc_asn1_binary	-in in/basic.fa -outfmt seqloc_asn1_binary
 unknown_opt	-in in/basic.fa -foo
 help_h	-h
 help_help	-help
+# help_xml (-xmlhelp, line RG item E2x): env_blast on ws, 2026-11-13 (ad-RG-E-5, line RG item E2 probe).
+help_xml	-xmlhelp
 help_noargs_extra	extra_positional
 ps_flag_value	-in in/basic.fa -parse_seqids true
 dup_opt	-in in/basic.fa -window 10 -window 20

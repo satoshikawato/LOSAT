@@ -277,11 +277,12 @@ impl<'a> MaskFromFasta<'a> {
             return Err(read_failure(error));
         }
         let parses_ids = reader.parses_ids();
+        let mask = reader.take_masks();
         let record = result.map_err(|error| {
             self.reader = None;
             match error {
                 ReadError::Parse(error) => Failure::Caught(error.exception()),
-                ReadError::Ncbi(exception) => Failure::Caught(exception),
+                ReadError::Ncbi(exception) => Failure::Caught(*exception),
                 ReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
             }
         })?;
@@ -292,9 +293,6 @@ impl<'a> MaskFromFasta<'a> {
         } else {
             ParsedSeqId::Local(ObjectId::Id(record.local_id as i32))
         };
-        Ok(Some(MaskedRecord {
-            best_id,
-            mask: record.masks,
-        }))
+        Ok(Some(MaskedRecord { best_id, mask }))
     }
 }

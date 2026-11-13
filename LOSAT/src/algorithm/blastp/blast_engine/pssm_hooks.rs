@@ -24,8 +24,8 @@ use anyhow::Result;
 use std::cell::RefCell;
 
 use super::{
-    blastp_gapped_x_dropoff_raw, database, BlastpRuntimeLookup, BlastpSubjectRef,
-    BlastpSubjectResult, BlastpSubjectScratch, PrelimCollector,
+    culling, database, BlastpRuntimeLookup, BlastpSubjectRef, BlastpSubjectResult,
+    BlastpSubjectScratch, PrelimCollector,
 };
 use crate::algorithm::blastp::args::{BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::encoding::EncodedProtein;
@@ -38,9 +38,6 @@ use crate::algorithm::pssm_search::prelim::{PssmPrelim, PssmSubjectScratch};
 use crate::algorithm::pssm_search::redo1;
 use crate::algorithm::pssm_search::traceback0::PssmTraceback0;
 use crate::algorithm::pssm_search::PsiSearch;
-use crate::algorithm::tblastx::constants::{
-    GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED_BITS,
-};
 use crate::algorithm::tblastx::lookup::{prepare_matrix_lookup_query_for_word_size, QueryContext};
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
@@ -184,12 +181,31 @@ pub(super) struct PssmPrelimRun<'a> {
     pub(super) prelim_hitlist_size: usize,
 }
 
+/// The preliminary and final gapped X-drops of a PSSM search (raw scores): the search's X-drops in
+/// bits at the smallest gapped Lambda of the query batch, the PSSM's `kbp_gap_psi` (one query).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:454-463 (quoted at
+/// `core::x_drop::gapped_x_dropoffs`)
+fn psi_gapped_x_dropoffs(args: &ResolvedBlastpArgs, karlin: &PsiKarlin) -> (i32, i32) {
+    crate::core::x_drop::gapped_x_dropoffs(
+        args.x_drop_gapped_bits,
+        args.x_drop_final_bits,
+        karlin.gapped.lambda,
+    )
+}
+
 /// The preliminary search of a PSSM query over the database `database` or the subject set
 /// `subjects`, its HSP lists collected into `x_compact_hit_lists` as blastp's are.
 ///
 /// The cutoffs are NCBI's with the PSSM's blocks: the ungapped X-drop from `kbp_psi`
 /// (`sbp->kbp`), the gap trigger from `kbp_std`, the hit-saving cutoff and the gapped X-drops
-/// from `kbp_gap_psi` (`sbp->kbp_gap`).
+/// from `kbp_gap_psi` (`sbp->kbp_gap`). The X-drops and the gap trigger in bits are the search's
+/// (`-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final`, `-gap_trigger` or the defaults,
+/// `ResolvedBlastpArgs`), converted as blastp's are (the X-drops in `core::x_drop`, the gap trigger
+/// in `tblastx::ncbi_cutoffs::gap_trigger_raw_score`); a gapped X-drop that NCBI's
+/// kernels cannot size with the PSSM's Lambda is refused before the search, as blastp refuses it
+/// with the matrix's (`core::x_drop::check_gapped_x_dropoffs`). With `-culling_limit` the
+/// subjects' lists go to the culling writer `culling` in place of the collector, as blastp's do.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:204-221
 /// ```c
@@ -253,6 +269,7 @@ pub(super) fn pssm_prelim(
     database: Option<&database::BlastpDatabase>,
     subjects: &[EncodedProtein],
     pool: &crate::utils::threading::SearchPool<'_>,
+    culling: Option<&mut culling::PrelimCulling>,
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
 ) -> Result<()> {
     let BlastpRuntimeLookup::Aa(table) = lookup else {
@@ -265,7 +282,15 @@ pub(super) fn pssm_prelim(
         return Ok(());
     }
     let karlin = psi_karlin(psi, run.contexts, run.gapped_params);
-    let x_dropoff = x_drop_raw_score(X_DROP_UNGAPPED_BITS, &karlin.ungapped, 1.0);
+    let x_dropoff = x_drop_raw_score(args.x_drop_ungapped_bits, &karlin.ungapped, 1.0);
+    let x_drops = psi_gapped_x_dropoffs(args, &karlin);
+    crate::core::x_drop::check_gapped_x_dropoffs(
+        args.app.name(),
+        (args.x_drop_gapped_bits, args.x_drop_final_bits),
+        x_drops,
+        (args.scoring.gap_open, args.scoring.gap_extend),
+        args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats,
+    )?;
     let stats = psi_stats(run.gumbel, run.exact_search_spaces);
     // `run.prelim_evalue` is `-evalue` without the Gumbel block (`run_resolved_in_pool`,
     // blast_parameters.c:931-939).
@@ -276,7 +301,7 @@ pub(super) fn pssm_prelim(
         run.cutoff_subject_length,
     );
     let word_cutoff =
-        gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, &ctx.karlin_params).min(hit_cutoff);
+        gap_trigger_raw_score(args.gap_trigger_bits, &ctx.karlin_params).min(hit_cutoff);
     let window = run.window;
     let prelim = PssmPrelim {
         rows: &psi.pssm,
@@ -288,10 +313,7 @@ pub(super) fn pssm_prelim(
         hit_cutoff,
         gap_open: args.scoring.gap_open,
         gap_extend: args.scoring.gap_extend,
-        x_drop_gapped: blastp_gapped_x_dropoff_raw(
-            X_DROP_GAPPED_PRELIM as f64,
-            karlin.gapped.lambda,
-        ),
+        x_drop_gapped: x_drops.0,
         karlin: &karlin.gapped,
         stats,
         prelim_evalue: run.prelim_evalue,
@@ -339,10 +361,10 @@ pub(super) fn pssm_prelim(
             run.total_query_span,
         )
     };
-    match database {
+    match (database, culling) {
         // The preliminary stage of a database: blocks of sequences in the order of their ordinal
         // ids (`database::search_blocks`, the deterministic merge of every thread count).
-        Some(database) => database::search_blocks(
+        (Some(database), None) => database::search_blocks(
             database,
             pool,
             window,
@@ -353,9 +375,17 @@ pub(super) fn pssm_prelim(
                 prelim_hitlist_size: run.prelim_hitlist_size,
             },
         ),
+        (Some(database), Some(culling)) => database::search_blocks(
+            database,
+            pool,
+            window,
+            &new_scratch,
+            &process_subject,
+            culling,
+        ),
         // A subject set: each subject in turn (`blast_engine.c:1409-1498`), with one diagonal
         // table, at every thread count.
-        None => {
+        (None, mut culling) => {
             let mut scratch = new_scratch();
             let mut subject_result = BlastpSubjectResult::new(0);
             for (s_idx, subject) in subjects.iter().enumerate() {
@@ -365,6 +395,10 @@ pub(super) fn pssm_prelim(
                     BlastpSubjectRef::of(subject),
                     &mut subject_result,
                 );
+                if let Some(culling) = culling.as_deref_mut() {
+                    culling.add(&mut subject_result);
+                    continue;
+                }
                 for (q_idx, list) in subject_result.x_compact_hsp_lists.drain(..) {
                     x_compact_hit_lists[q_idx]
                         .get_or_insert_with(|| BlastpHitList::new(run.prelim_hitlist_size))
@@ -411,11 +445,7 @@ pub(super) fn pssm_traceback(
     }
     let stats = psi_stats(gumbel, exact_search_spaces);
     let karlin = psi_karlin(psi, contexts, gapped_params);
-    let x_drop_gapped =
-        blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_PRELIM as f64, karlin.gapped.lambda);
-    let x_drop_final =
-        blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_FINAL as f64, karlin.gapped.lambda)
-            .max(x_drop_gapped);
+    let (_, x_drop_final) = psi_gapped_x_dropoffs(args, &karlin);
     if args.comp_based_stats.mode != BlastpCompositionMode::NoCompositionBasedStats {
         return pssm_redo(
             args,
@@ -532,6 +562,7 @@ fn pssm_redo(
         matrix: args.scoring.matrix,
         karlin: &karlin.gapped,
         x_drop_final,
+        x_drop_final_bits: args.x_drop_final_bits,
         stats,
         expect_value: args.evalue,
         hitlist_size: args.traceback_hitlist_size(),

@@ -390,6 +390,7 @@ impl RpsblastArgs {
             strategy: None,
             app: BlastpApp::Rpsblast,
             inclusion_ethresh: None,
+            gap_trigger: None,
             first_query_ordinal: 0,
             psiblast_pssm: None,
             formatting: self.formatting,

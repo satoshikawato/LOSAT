@@ -136,8 +136,9 @@ pub(super) fn x_cut_block_bytes(sequence_bytes: u64, threads: usize, largest: u6
 /// (seqdbvol.cpp:1805-1838, quoted above `block_subject`). A sequence of `n` letters takes
 /// `n / 4 + 1` bytes, so this is the sum up to 3 / 4 byte per sequence. The sequences are the
 /// included ones (`SeqDb::included_length`); an index that cannot be read counts as the largest
-/// database, whose blocks are those of one thread (the search then meets the error in the order
-/// of one thread).
+/// database, whose blocks are the cut's largest (`BLOCK_BYTES`, or `X_BNDBSMALL_BLOCK_BYTES` with
+/// LOSAT_X_BNDBSMALL on). The search then fails, and `x_one_thread_error` reads the blocks of
+/// `BLOCK_BYTES` again to return the error of the one-thread order.
 pub(super) fn x_sequence_bytes(db: &SeqDb) -> u64 {
     let length = db.included_length().unwrap_or(u64::MAX);
     (length / 4).saturating_add(u64::from(db.num_seqs()))

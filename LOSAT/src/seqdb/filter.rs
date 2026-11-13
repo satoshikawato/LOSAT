@@ -2635,18 +2635,10 @@ impl SeqDb {
     /// of `s_CompareIdList`, which the read of the line refuses in the same words.
     fn check_lines_kept(&self) -> Result<(), SeqDbError> {
         for ordinal in 0..self.num_seqs {
-            let oid = self.oid(ordinal);
-            let (at, vol_oid) = self.volume_of_oid(oid);
-            self.volumes[at].defline_set(vol_oid)?;
+            let at = self.locate_oid(self.oid(ordinal))?;
+            self.volumes[at.volume].defline_set(at.vol_oid)?;
         }
         Ok(())
-    }
-
-    /// The volume holding OID `oid` and the OID's number in it.
-    fn volume_of_oid(&self, oid: u32) -> (usize, u32) {
-        let at =
-            self.volume_starts[..self.volumes.len()].partition_point(|&start| start <= oid) - 1;
-        (at, oid - self.volume_starts[at])
     }
 
     /// The bitmap of the OIDs a seqid list keeps in a version 5 database (`ids`: sorted and
@@ -3464,8 +3456,8 @@ mod tests {
     fn kept_ids(db: &SeqDb) -> Vec<Vec<String>> {
         (0..db.num_seqs())
             .map(|ordinal| {
-                let (at, vol_oid) = db.volume_of_oid(db.oid(ordinal));
-                let set = db.volumes[at].defline_set(vol_oid).unwrap();
+                let at = db.locate_oid(db.oid(ordinal)).unwrap();
+                let set = db.volumes[at.volume].defline_set(at.vol_oid).unwrap();
                 set.deflines
                     .iter()
                     .flat_map(|d| d.ids.iter())
@@ -3592,8 +3584,10 @@ mod tests {
         let unrestricted = ids_db("prot_v5", SeqType::Protein);
         let gi_only: Vec<u32> = (0..unrestricted.num_seqs())
             .filter(|&oid| {
-                let (at, vol_oid) = unrestricted.volume_of_oid(oid);
-                let set = unrestricted.volumes[at].defline_set(vol_oid).unwrap();
+                let at = unrestricted.locate_oid(oid).unwrap();
+                let set = unrestricted.volumes[at.volume]
+                    .defline_set(at.vol_oid)
+                    .unwrap();
                 set.deflines.iter().all(|d| {
                     d.ids.iter().all(|id| {
                         matches!(id, ParsedSeqId::Gi(_))
@@ -3605,8 +3599,8 @@ mod tests {
         assert!(!gi_only.is_empty());
         for ordinal in 0..db.num_seqs() {
             let oid = db.oid(ordinal);
-            let (at, vol_oid) = db.volume_of_oid(oid);
-            match db.volumes[at].defline_set(vol_oid) {
+            let at = db.locate_oid(oid).unwrap();
+            match db.volumes[at.volume].defline_set(at.vol_oid) {
                 Ok(set) => {
                     assert!(!gi_only.contains(&oid), "{oid}");
                     assert!(set.deflines.iter().all(|d| {

@@ -339,10 +339,15 @@ fn unknown_algorithm_and_names_of_algorithms() {
     assert_eq!(algorithms.id_of("dustX"), Some(100));
     assert_eq!(algorithms.id_of("wmY"), Some(101));
     assert_eq!(algorithms.id_of("wmZ"), Some(102));
+}
 
-    // A sequence outside the database.
+/// An OID past the volumes fails at the locator (`SeqDb::locate_oid`, NCBI's `FindVol`) with
+/// `OID not found`, which every caller of `mask_ranges_at` meets before it asks for the masks.
+#[test]
+fn an_oid_past_the_volumes_is_not_found_by_the_locator() {
+    let db = SeqDb::open(&db_name("mask_remap"), SeqType::Nucleotide).unwrap();
     assert!(matches!(
-        oid_mask_ranges(&db, db.num_seqs(), 100),
+        oid_mask_ranges(&db, db.num_oids(), 100),
         Err(SeqDbError::Range(message)) if message == "OID not found"
     ));
 }

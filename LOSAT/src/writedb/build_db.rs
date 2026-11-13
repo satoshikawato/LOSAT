@@ -1280,8 +1280,6 @@ impl<'a> BuildDatabase<'a> {
         result
     }
 
-    /// Hands the diagnostics that the writer posted since the last call to
-    /// `warn`, the sink of the standard error stream.
     /// `s_FixBioseqDeltas` on a record past NCBI's 32-bit length (`Bioseq::past_seq_pos`),
     /// after the definition lines (`x_EditAndAddBioseq`), whose diagnostics come first.
     ///
@@ -1329,6 +1327,8 @@ impl<'a> BuildDatabase<'a> {
         }
     }
 
+    /// Hands the diagnostics that the writer posted since the last call to
+    /// `warn`, the sink of the standard error stream.
     fn post_diagnostics(&mut self, warn: Warn<'_>) {
         let diagnostics = self.output_db.take_diagnostics();
         if !diagnostics.is_empty() {

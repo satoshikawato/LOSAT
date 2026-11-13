@@ -17,6 +17,11 @@
 //! alignments, blast_format.cpp:1523-1530): in `ids/txr_s` and `ids/txr_sn` F (taxid 99990, a
 //! fragment of the query with every letter identical) comes before A with `-sorthits 3`, so the
 //! damaged `bad_magic`'s open, which the first read writes, comes before F's description line.
+//! The XML2 and JSON documents of outfmt 16 and 15 (`*.j15`, `*.j16`; line DBID json) load every
+//! subject of a query's report before they write any of it, after the document's start
+//! (`PrintProlog`, before the search) and outfmt 15's separator `,` (blast_format.cpp:2337-2342):
+//! the texts of a query's `Hit`s come between the separator and the report, with two queries
+//! with hits (`txr_q3.faa`, `txr_q2.fna`).
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
 //! ```c++
@@ -390,6 +395,78 @@ const CASES: &[(&str, &str, &str, &str, &str, &[&str], &str)] = &[
         "txr_q.fna",
         &["-task", "megablast", "-sorthits", "3"],
         "0",
+    ),
+    (
+        "blastp.j15",
+        "offset_last_past_end",
+        "blastp",
+        "txr_p",
+        "txr_q3.faa",
+        &[],
+        "15",
+    ),
+    (
+        "blastp.j16",
+        "offset_last_past_end",
+        "blastp",
+        "txr_p",
+        "txr_q3.faa",
+        &[],
+        "16",
+    ),
+    (
+        "blastp.j16b",
+        "bad_magic",
+        "blastp",
+        "txr_p",
+        "txr_q3.faa",
+        &[],
+        "16",
+    ),
+    (
+        "blastx.j15",
+        "offset_last_past_end",
+        "blastx",
+        "txr_p",
+        "txr_q2.fna",
+        &[],
+        "15",
+    ),
+    (
+        "tblastn.j15",
+        "offset_last_past_end",
+        "tblastn",
+        "txr_n",
+        "txr_q3.faa",
+        &[],
+        "15",
+    ),
+    (
+        "tblastx.j15",
+        "offset_last_past_end",
+        "tblastx",
+        "txr_n",
+        "txr_q2.fna",
+        &["-evalue", "1e-50", "-max_hsps", "1"],
+        "15",
+    ),
+    (
+        "blastn.j15",
+        "offset_last_past_end",
+        "blastn",
+        "txr_n",
+        "txr_q2.fna",
+        &["-task", "blastn"],
+        "15",
+    ),
+    (
+        "megablast.j16",
+        "offset_last_past_end",
+        "blastn",
+        "txr_n",
+        "txr_q2.fna",
+        &["-task", "megablast"],
+        "16",
     ),
 ];
 

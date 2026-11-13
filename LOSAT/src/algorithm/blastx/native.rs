@@ -341,24 +341,13 @@ fn run_inner(
     // write is rejected there too. The custom tabular fields are read as NCBI reads them
     // (`ResolvedOptions::tabular`).
     // `GetExportSearchStrategyStream` comes first: it creates the search strategy file
-    // (`strategy::create_strategy_file`), which an error after it leaves empty.
+    // (`strategy::open_strategy_file`), which an error after it leaves empty.
     use crate::blastinput::app::{self, Program};
-    let strategy_file = args
-        .export_search_strategy
-        .as_deref()
-        .map(|path| {
-            crate::blastinput::input_files::check_utf8_file_name(
-                path,
-                "export_search_strategy",
-                "BLASTX",
-            )?;
-            crate::report::archive::strategy::create_strategy_file(
-                path,
-                args.out.as_deref(),
-                "BLASTX",
-            )
-        })
-        .transpose()?;
+    let strategy_file = crate::report::archive::strategy::open_strategy_file(
+        args.export_search_strategy.as_deref(),
+        args.out.as_deref(),
+        "BLASTX",
+    )?;
     let choice = app::parse_formatting_string(&args.outfmt)?;
     let format = app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
@@ -367,9 +356,24 @@ fn run_inner(
     let archive = archive::handle_for(args, format == Some(app::ReportFormat::ArchiveFormat))?
         .map(|handle| handle.with_outfmt_text(&args.outfmt));
     archive_slot.clone_from(&archive);
-    // The search strategy's request, with the refusals of the archive's.
+    // The search strategy's request, with the refusals of the archive's, and the archive's
+    // options handle.
     let strategy = strategy_file
-        .map(|file| archive::strategy_for(args, choice.number, file, archive.as_ref()))
+        .map(|file| {
+            crate::report::archive::strategy::StrategyExport::for_run(
+                file,
+                archive::option_inputs(args),
+                choice.number,
+                crate::report::archive::strategy::HitlistArgs {
+                    max_target_seqs: args.max_target_seqs.map(|count| count as usize),
+                    num_descriptions: args.num_descriptions,
+                    num_alignments: args.num_alignments,
+                },
+                args.db.as_deref().map(crate::seqdb::db_argument_name),
+                "BLASTX",
+                archive.as_ref(),
+            )
+        })
         .transpose()?;
     // The run's output and diagnostics with the archive or the search strategy, which it holds in
     // order while a later batch's title may still be refused (`archive::ArchiveHold`,
@@ -924,8 +928,8 @@ fn run_inner(
     // error of NCBI's own before that batch writes them (`run`), and one that ends writes them
     // after its epilog. When that read finds no such title, no batch's check can refuse, and the
     // batches are not checked again (`titles_may_refuse`).
-    // The search strategy's requests (written before each batch's search, `render_batch` and
-    // `failed_batch`) are refused with them (`archive::check_request_titles`).
+    // The search strategy's requests (written before each batch's search, `take` below) are
+    // refused with them (`archive::check_request_titles`; `RunRequests::write` checks them).
     let (archived, strategic) = (archive.is_some(), strategy.is_some());
     let titles_may_refuse = if archived || strategic {
         if !query_is_regular {
@@ -1094,34 +1098,18 @@ fn run_inner(
                         results: &mut Vec<BatchResults>,
                         queries_before: usize|
      -> Result<()> {
+        // The batch's set-up has written its `EffectiveSearchSpace` option, which the next batch's
+        // search strategy request holds (`take` below).
+        if let Some(strategy) = &strategy {
+            strategy.note_searched(
+                queries_before..queries_before + queries.len(),
+                archive::batch_searched_space(results),
+            );
+        }
         if let Some(scopes) = query_scopes.borrow_mut().as_mut() {
             scopes.add_batch_ids(
                 queries.iter().filter_map(|record| record.believed()),
                 queries_before,
-            )?;
-        }
-        // The search strategy's request of the batch, which NCBI writes before the batch's search
-        // (`archive::write_blastx_strategy`; its titles are refused first, as the archive's are
-        // below).
-        if let Some(strategy) = &strategy {
-            let subject_records = database.is_none().then_some(&subjects[..]);
-            if titles_may_refuse {
-                archive::check_batch_titles(
-                    queries,
-                    subject_records,
-                    queries_before == 0,
-                    false,
-                    true,
-                )?;
-            }
-            archive::write_blastx_strategy(
-                strategy,
-                &archive::CallBatch {
-                    options: &options,
-                    queries,
-                    subject_records,
-                    batches: results,
-                },
             )?;
         }
         if let Some(handle) = &archive {
@@ -1195,13 +1183,7 @@ fn run_inner(
             // is dropped, `run`); only a run whose read before the search found such a title can
             // refuse (`titles_may_refuse`).
             if titles_may_refuse {
-                archive::check_batch_titles(
-                    queries,
-                    subject_records,
-                    queries_before == 0,
-                    true,
-                    false,
-                )?;
+                archive::check_batch_titles(queries, subject_records, queries_before == 0)?;
             }
             return archive::write_blastx_archive(
                 &archive::ArchiveCall {
@@ -1305,35 +1287,31 @@ fn run_inner(
         render_batch(&mut *writer, diagnostics, queries, results, queries_before)?;
         writer.flush().map_err(output_error)
     };
-    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:262-264 (quoted at
-    // `archive::write_blastx_strategy`)
-    // The search strategy's request of a batch whose search fails (a query without letters in
-    // a batch without a valid context, `Warning: Sequence contains no data`; the sequence file
-    // of `-db`): NCBI wrote it before the search. An empty batch has none: its
-    // `Empty CBlastQueryVector` comes before it.
-    let mut failed = |queries: &[FastaRecord], queries_before: usize| -> Result<()> {
-        match &strategy {
-            Some(strategy) if !queries.is_empty() => {
-                let subject_records = database.is_none().then_some(&subjects[..]);
-                if titles_may_refuse {
-                    archive::check_batch_titles(
-                        queries,
-                        subject_records,
-                        queries_before == 0,
-                        false,
-                        true,
-                    )?;
-                }
-                archive::write_blastx_strategy(
-                    strategy,
-                    &archive::CallBatch {
-                        options: &options,
-                        queries,
-                        subject_records,
-                        batches: &[],
-                    },
-                )
-            }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264
+    // ```c++
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    //
+    //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
+    // ```
+    // The search strategy's request of a reader batch (`-export_search_strategy`), which NCBI
+    // writes once its query factory is made, before its search: the loop takes each batch here
+    // before it looks at the batch's search (`run_query_batches`), so a batch whose search fails
+    // (a query without letters in a batch without a valid context, `Warning: Sequence contains no
+    // data`; the sequence file of `-db`) has one, and the file is apart from the reports. An empty
+    // batch has none: its `Empty CBlastQueryVector` comes before it. Each unit of a batch the
+    // search split takes it once (`StrategyExport::takes`).
+    let requests = strategy
+        .as_ref()
+        .map(|_| archive::requests(database.is_none().then_some(&subjects[..])));
+    let mut take = |queries: &[FastaRecord], queries_before: usize| -> Result<()> {
+        match (&strategy, &requests) {
+            (Some(strategy), Some(requests)) => requests.write(
+                strategy,
+                queries_before,
+                queries,
+                queries.first().map(FastaRecord::placement),
+            ),
             _ => Ok(()),
         }
     };
@@ -1356,7 +1334,7 @@ fn run_inner(
             &mut *stderr,
             &search_error,
             &mut render,
-            &mut failed,
+            &mut take,
         ),
     }
     .map_err(input_error)?;
@@ -1741,9 +1719,10 @@ pub(crate) type BatchRender<'r> =
 /// `search_subjects` (with 2+ threads, on one pool for the whole run) and handed to `render` with
 /// the number of queries reported before it, in the reader's order; the reader's warnings go to
 /// `diagnostics` in that order. `serial_batches` searches and reports each batch before the next
-/// is read (`-parse_deflines`). Returns the number of queries reported. `failed` takes the reader
-/// batch whose search fails, with the number of queries reported before it, before its error
-/// (the command line's search strategy request of that batch, `native::run_inner`).
+/// is read (`-parse_deflines`). Returns the number of queries reported. `take` takes each reader
+/// batch (each unit of a split one), with the number of queries reported before it, before its
+/// search's result is looked at (the command line's search strategy request of that batch,
+/// `native::run_inner`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_query_batches(
     options: &super::args::ResolvedOptions,
@@ -1758,7 +1737,7 @@ pub(super) fn run_query_batches(
         &mut Vec<BatchResults>,
         usize,
     ) -> Result<()>,
-    failed: &mut dyn FnMut(&[FastaRecord], usize) -> Result<()>,
+    take: &mut dyn FnMut(&[FastaRecord], usize) -> Result<()>,
 ) -> Result<usize> {
     use super::x_timing::Run as XRun;
     #[cfg(not(feature = "parallel"))]
@@ -1955,12 +1934,10 @@ pub(super) fn run_query_batches(
                           last: bool,
                           results: Result<Vec<BatchResults>>|
                      -> Result<()> {
+                        take(reader_batch, processed)?;
                         let results = match results {
                             Ok(results) => results,
-                            Err(error) => {
-                                failed(reader_batch, processed)?;
-                                return Err(search_error(error));
-                            }
+                            Err(error) => return Err(search_error(error)),
                         };
                         if let Some(mut results) = pending.add(start, last, results) {
                             render(&mut **diagnostics.borrow_mut(), reader_batch, &mut results, processed)?;
@@ -2067,13 +2044,11 @@ pub(super) fn run_query_batches(
                         match event {
                             XEvent::Warn(bytes) => diagnostics.borrow_mut().write_all(bytes)?,
                             XEvent::Batch(unit) => {
+                                take(&unit.batch, processed)?;
                                 let results =
                                     match searched.next().expect("one search per queued batch") {
                                         Ok(results) => results,
-                                        Err(error) => {
-                                            failed(&unit.batch, processed)?;
-                                            return Err(search_error(error));
-                                        }
+                                        Err(error) => return Err(search_error(error)),
                                     };
                                 if let Some(mut results) =
                                     pending.add(unit.range.start, unit.last, results)
@@ -2162,6 +2137,7 @@ pub(super) fn run_query_batches(
                     // Dispatch point: with a kept pool the batch is searched on it; without one,
                     // search_internal runs as before. Both searches compute the same result (the
                     // pool only changes who runs the work).
+                    take(queries, processed)?;
                     let x_t = super::x_timing::lap();
                     let searched = match x_pool {
                         Some(pool) => super::runtime::x_search_internal_in_pool(
@@ -2176,10 +2152,7 @@ pub(super) fn run_query_batches(
                     let x_t = super::x_timing::lap();
                     let mut results = match searched {
                         Ok(results) => results,
-                        Err(error) => {
-                            failed(queries, processed)?;
-                            return Err(search_error(error));
-                        }
+                        Err(error) => return Err(search_error(error)),
                     };
                     reader_batch_skipped(&mut results);
                     render(

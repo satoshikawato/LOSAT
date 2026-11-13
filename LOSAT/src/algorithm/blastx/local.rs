@@ -669,8 +669,6 @@ fn write_run(
                 queries,
                 database.is_none().then_some(subjects),
                 queries_before == 0,
-                true,
-                false,
             )?;
         }
         let hits = match made_hits {

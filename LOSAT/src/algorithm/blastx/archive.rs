@@ -33,7 +33,7 @@ use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
-use crate::report::archive::strategy::StrategyExport;
+use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RequestRecord, RunRequests};
 use crate::report::archive::ArchiveEncoding;
 use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
@@ -119,41 +119,22 @@ pub(crate) fn handle_for(
     ArchiveHandle::for_program(&option_inputs(args), database, "BLASTX").map(Some)
 }
 
-/// The search strategy export of a run (`-export_search_strategy`), into `file`
-/// (`strategy::create_strategy_file`), with BLASTX's recorded options and `-db` name. The
-/// `HitlistSize` is that of the run's format `outfmt` (`strategy::hitlist_size`).
-pub(crate) fn strategy_for(
-    args: &BlastxArgs,
-    outfmt: i32,
-    file: std::fs::File,
-    archive: Option<&ArchiveHandle>,
-) -> Result<StrategyExport> {
-    let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
-    StrategyExport::for_run(
-        file,
-        option_inputs(args),
-        outfmt,
-        crate::report::archive::strategy::HitlistArgs {
-            max_target_seqs: args.max_target_seqs.map(|count| count as usize),
-            num_descriptions: args.num_descriptions,
-            num_alignments: args.num_alignments,
-        },
-        database,
-        "BLASTX",
-        archive,
-    )
-}
-
 /// The refusal of a title that the archive cannot write as NCBI does
 /// (`report::archive::ArchiveEncoding::writes_text`: in text and binary a byte outside
 /// `0x20..=0x7E`, in XML a control byte) for BLASTX's records, before the first byte.
 pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    check_titles_in(ArchiveEncoding::from_env(), records, role, "-outfmt 11")
+    crate::report::archive::check_titles_in(
+        ArchiveEncoding::from_env(),
+        records,
+        role,
+        "BLASTX",
+        "-outfmt 11",
+    )
 }
 
 /// `check_titles` for the requests of a run: the archive's (`archive`, in the environment's
-/// encoding) and the search strategy's (`strategy`, always ASN.1 text,
-/// `report::archive::check_request_titles`).
+/// encoding) and the search strategy's (`strategy`, always ASN.1 text, as
+/// `RunRequests::write` checks them).
 pub(crate) fn check_request_titles(
     records: &[FastaRecord],
     role: &str,
@@ -164,30 +145,13 @@ pub(crate) fn check_request_titles(
         check_titles(records, role)?;
     }
     if strategy {
-        check_titles_in(
+        crate::report::archive::check_titles_in(
             ArchiveEncoding::Text,
             records,
             role,
+            "BLASTX",
             "-export_search_strategy",
         )?;
-    }
-    Ok(())
-}
-
-fn check_titles_in(
-    encoding: ArchiveEncoding,
-    records: &[FastaRecord],
-    role: &str,
-    option: &str,
-) -> Result<()> {
-    if let Some(record) = records
-        .iter()
-        .find(|record| !encoding.writes_text(record.title.as_bytes()))
-    {
-        anyhow::bail!(
-            "the title of the {role} {} has a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML), which is not supported by LOSAT's BLASTX with {option}",
-            record.internal_id
-        );
     }
     Ok(())
 }
@@ -272,8 +236,8 @@ pub(crate) fn prescan_query_titles(
 /// `local::report_batches`).
 ///
 /// `archive` and `strategy` are the requests whose titles are looked at. The search strategy's
-/// request of a batch comes before the batch's search (`write_blastx_strategy`), so a batch that
-/// fails its set-up has one (with its titles), and an empty batch has none
+/// request of a batch comes before the batch's search (`native::run_inner`'s `take`), so a batch
+/// that fails its set-up has one (with its titles), and an empty batch has none
 /// (`Empty CBlastQueryVector` comes before it).
 pub(crate) fn batches_may_refuse(
     options: &ResolvedOptions,
@@ -499,20 +463,17 @@ impl<S: Write> Write for HoldWriter<S> {
 /// with `-subject`, every subject (`subjects`, checked with the run's first batch, `first`). The
 /// batch that stops the run writes neither: a reader error, `Empty CBlastQueryVector`, a batch
 /// whose set-up fails (`written_batch`), and a batch whose search fails (the sequence file or a
-/// header file of `-db` that NCBI cannot read); the error archive holds no sequence.
-///
-/// `archive` and `strategy`: the requests whose titles are checked (`check_request_titles`; the
-/// search strategy's request of a batch is written before its search, `write_blastx_strategy`).
+/// header file of `-db` that NCBI cannot read); the error archive holds no sequence. (The search
+/// strategy's request of a batch, written before its search, checks its titles there,
+/// `RunRequests::write`.)
 pub(crate) fn check_batch_titles(
     queries: &[FastaRecord],
     subjects: Option<&[FastaRecord]>,
     first: bool,
-    archive: bool,
-    strategy: bool,
 ) -> Result<()> {
-    check_request_titles(queries, "query", archive, strategy)?;
+    check_titles(queries, "query")?;
     match subjects {
-        Some(subjects) if first => check_request_titles(subjects, "subject", archive, strategy),
+        Some(subjects) if first => check_titles(subjects, "subject"),
         _ => Ok(()),
     }
 }
@@ -542,8 +503,7 @@ pub(crate) fn written_batch(batch: &[FastaRecord], options: &ResolvedOptions) ->
         && !super::reader_batch::ReaderBatchShape::layout(batch, options).set_up_fails()
 }
 
-/// The queries of one query batch and what its requests read (the archive's and the search
-/// strategy's, `with_batch`).
+/// The queries of one query batch and what its archive reads (`with_batch`).
 pub(crate) struct CallBatch<'a> {
     pub options: &'a ResolvedOptions,
     /// The batch's queries; `BatchResults::query_ordinal` indexes them.
@@ -551,8 +511,7 @@ pub(crate) struct CallBatch<'a> {
     /// `-subject`: every subject record (the Bioseqs of the request); `None` for `-db`.
     pub subject_records: Option<&'a [FastaRecord]>,
     /// The results of the batch: one entry, or several when the search split a batch above
-    /// 10002 letters (`BATCH_SIZE`); none for the search strategy's request of a batch whose
-    /// search failed (`write_blastx_strategy`).
+    /// 10002 letters (`BATCH_SIZE`).
     pub batches: &'a [BatchResults],
 }
 
@@ -565,8 +524,8 @@ pub(crate) struct ArchiveCall<'a> {
     pub names: SeqalignSubjects<'a>,
 }
 
-/// The values of a batch's first query that `search-stats`, `ka-blocks` and the
-/// `EffectiveSearchSpace` option take.
+/// The values of a batch's first query that `search-stats` and `ka-blocks` take (the
+/// `EffectiveSearchSpace` option: `batch_searched_space`).
 struct FirstContext {
     /// The ungapped block of the first valid context and the gapped one (absent for an
     /// ungapped search); `None` when the first query has no valid context (both blocks are
@@ -575,8 +534,6 @@ struct FirstContext {
     /// The effective search space and length adjustment of that context (0 without one).
     search_space: i64,
     length_adjustment: i64,
-    /// The search space of the first query's context 0 (the option); 0 when it is not valid.
-    context0_space: i64,
 }
 
 fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstContext {
@@ -586,39 +543,88 @@ fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstCon
         karlin: valid.map(|parameters| (parameters.ungapped, gapped)),
         search_space: valid.map_or(0, |parameters| parameters.search_space),
         length_adjustment: valid.map_or(0, |parameters| i64::from(parameters.length_adjustment)),
-        // An invalid context keeps `-searchsp`, else 0 (`effective_lengths`).
-        context0_space: parameters[0].search_space,
     }
 }
 
-/// The defline line of the Bioseq: the line as read, else `>` and the title. BLASTX keeps
-/// its own copy of `report::archive::defline_of`: its `FastaRecord` is its own type, and an
-/// empty defline counts as missing.
-fn defline_of(record: &FastaRecord) -> Cow<'_, [u8]> {
-    match record
-        .source
-        .as_ref()
-        .map(|source| source.defline.as_slice())
-    {
-        Some(defline) if !defline.is_empty() => Cow::Borrowed(defline),
-        _ => {
-            let mut line = vec![b'>'];
-            line.extend_from_slice(record.title.as_bytes());
-            Cow::Owned(line)
+/// The `EffectiveSearchSpace` option of a reader batch whose results are `batches` (its units;
+/// `BatchArchive::searched_space`, `StrategyExport::note_searched`): the search space of the first
+/// query's context 0 (frame +1; an invalid context keeps `-searchsp`, else 0,
+/// `effective_lengths`), when NCBI searched the batch (a unit was searched).
+pub(crate) fn batch_searched_space(batches: &[BatchResults]) -> Option<i64> {
+    batches
+        .iter()
+        .any(|batch| !batch.search_skipped)
+        .then(|| batches[0].parameters[0].search_space)
+}
+
+/// The requests of a run's batches (`RunRequests`): nucleotide queries, protein subjects (the
+/// `-subject` records `subjects`, `None` for `-db`), and the lower-case runs of each query in both
+/// frames of a translated query (the reader keeps them only with `-lcase_masking`,
+/// `FastaRecord::archive_lowercase_runs`).
+pub(crate) fn requests(subjects: Option<&[FastaRecord]>) -> RunRequests<'_, FastaRecord> {
+    RunRequests {
+        policy: RequestPolicy {
+            query_protein: false,
+            subject_protein: true,
+            lcase: Some(LcaseFrames::PlusAndMinus),
+        },
+        subjects,
+        label: "BLASTX",
+    }
+}
+
+impl RequestRecord for FastaRecord {
+    fn bioseq<'a>(&'a self, defline: &'a [u8], protein: bool) -> BioseqInput<'a> {
+        BioseqInput {
+            id: &self.internal_id,
+            ids: self.believed().map(|ids| ids.ids.as_slice()),
+            seq_loc: self.archive_seq_loc(),
+            defline,
+            title: self.title.as_bytes(),
+            // The whole record, also when a range cut it (`FastaRecord::archive_letters`).
+            letters: self.archive_letters(),
+            protein,
         }
     }
-}
 
-fn bioseq_input<'a>(record: &'a FastaRecord, defline: &'a [u8], protein: bool) -> BioseqInput<'a> {
-    BioseqInput {
-        id: &record.internal_id,
-        ids: record.believed().map(|ids| ids.ids.as_slice()),
-        seq_loc: record.archive_seq_loc(),
-        defline,
-        title: record.title.as_bytes(),
-        // The whole record, also when a range cut it (`FastaRecord::archive_letters`).
-        letters: record.archive_letters(),
-        protein,
+    /// The line as read, else `>` and the title (`report::archive::defline_of`; BLASTX's
+    /// `FastaRecord` is its own type, and an empty defline counts as missing).
+    fn defline(&self) -> Cow<'_, [u8]> {
+        match self.source.as_ref().map(|source| source.defline.as_slice()) {
+            Some(defline) if !defline.is_empty() => Cow::Borrowed(defline),
+            _ => {
+                let mut line = vec![b'>'];
+                line.extend_from_slice(self.title.as_bytes());
+                Cow::Owned(line)
+            }
+        }
+    }
+
+    fn searched_len(&self) -> usize {
+        self.sequence.len()
+    }
+
+    /// The runs of the whole record, also outside a `-query_loc` interval (the reader's mask of
+    /// the record, `x_FastaToSeqLoc`), whatever `-strand`.
+    fn lowercase_runs(&self) -> Vec<(i32, i32)> {
+        self.archive_lowercase_runs()
+    }
+
+    fn mask(&self, frame: Frame, intervals: Vec<(i32, i32)>) -> MaskEntry {
+        MaskEntry {
+            id: self.internal_id.clone(),
+            best: self.believed().map(|ids| ids.best.clone()),
+            frame,
+            intervals,
+        }
+    }
+
+    fn title(&self) -> &[u8] {
+        self.title.as_bytes()
+    }
+
+    fn local_id(&self) -> &str {
+        &self.internal_id
     }
 }
 
@@ -667,30 +673,6 @@ fn results_masks(call: &CallBatch<'_>) -> Vec<MaskEntry> {
                         intervals,
                     });
                 }
-            }
-        }
-    }
-    masks
-}
-
-/// The `LCaseMask` parameters of `-lcase_masking`: per lower-case interval of a query (the
-/// runs of the whole record, in nucleotide coordinates, also outside a `-query_loc` interval:
-/// the reader's mask of the record, `x_FastaToSeqLoc`) one mask in frame `plus1` and one in
-/// `minus1`, whatever `-strand`.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:614-645
-/// (the user mask of a translated query is mapped to its plus and minus strand).
-fn lcase_masks(call: &CallBatch<'_>) -> Vec<MaskEntry> {
-    let mut masks = Vec::new();
-    for query in call.queries {
-        for (from, to) in query.archive_lowercase_runs() {
-            for frame in [Frame::Plus1, Frame::Minus1] {
-                masks.push(MaskEntry {
-                    id: query.internal_id.clone(),
-                    best: query.believed().map(|ids| ids.best.clone()),
-                    frame,
-                    intervals: vec![(from, to)],
-                });
             }
         }
     }
@@ -750,13 +732,10 @@ impl<'a> AlignSource for BlastxAligns<'a> {
     }
 }
 
-/// Calls `each` with the request inputs of the batch of `call` (`BatchArchive`; the archive and
-/// the search strategy file write their documents from it). `strategy`: the inputs of the search
-/// strategy's request, which NCBI writes before the batch's search: the results' masks are not
-/// made (the `LCaseMask` parameters, the lower-case runs, are the same before and after it).
+/// Calls `each` with the archive of the batch of `call` (`BatchArchive`: its request,
+/// `RunRequests::with_batch`, and its results).
 fn with_batch(
     call: &CallBatch<'_>,
-    strategy: bool,
     each: impl FnOnce(&BatchArchive<'_>) -> Result<()>,
 ) -> Result<()> {
     let options = call.options;
@@ -769,28 +748,6 @@ fn with_batch(
             gap_extend: options.gap_extend,
         })
     });
-    // The Bioseq inputs borrow their deflines: keep them alive for the whole call.
-    let subject_deflines: Vec<Cow<'_, [u8]>> = call
-        .subject_records
-        .map(|records| records.iter().map(defline_of).collect())
-        .unwrap_or_default();
-    let subjects_input: Vec<BioseqInput<'_>> = call
-        .subject_records
-        .map(|records| {
-            records
-                .iter()
-                .zip(&subject_deflines)
-                .map(|(record, defline)| bioseq_input(record, defline, true))
-                .collect()
-        })
-        .unwrap_or_default();
-    let deflines: Vec<Cow<'_, [u8]>> = call.queries.iter().map(defline_of).collect();
-    let queries: Vec<BioseqInput<'_>> = call
-        .queries
-        .iter()
-        .zip(&deflines)
-        .map(|(record, defline)| bioseq_input(record, defline, false))
-        .collect();
     let first = call
         .batches
         .first()
@@ -799,9 +756,7 @@ fn with_batch(
             karlin: None,
             search_space: 0,
             length_adjustment: 0,
-            context0_space: 0,
         });
-    let searched = call.batches.iter().any(|batch| !batch.search_skipped);
     let ka_blocks = match &first.karlin {
         Some((ungapped, gapped)) => [
             ka_block(ungapped, false),
@@ -811,49 +766,21 @@ fn with_batch(
         ],
         None => [KaBlock::missing(false), KaBlock::missing(true)],
     };
-    let lcase = lcase_masks(call);
-    let masks = if strategy {
-        Vec::new()
-    } else {
-        results_masks(call)
-    };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:587-605
-    // ```c++
-    //         if (seqloc_list.front()->IsInt())
-    //         {
-    //             const int kStart((int)seqloc_list.front()->GetStart(eExtreme_Positional));
-    //             const int kStop((int)seqloc_list.front()->GetStop(eExtreme_Positional));
-    //             const int kRangeLength = kStop - kStart + 1;
-    //             ...
-    //             const int kFullLength =
-    //                 bioseq_set->GetSeq_set().front()->GetSeq().GetInst().GetLength();
-    //
-    //             if (kFullLength != kRangeLength)
-    //             {
-    //             	x_AddParameterToProgramOptions(CBlast4Field::Get(eBlastOpt_RequiredStart), kStart);
-    //             	x_AddParameterToProgramOptions(CBlast4Field::Get(eBlastOpt_RequiredEnd), kStop);
-    // ```
-    // `RequiredStart` / `RequiredEnd`: the interval of the batch's first query when a range cut it
-    // to less than its record (as `tblastn::archive`).
-    let required = call.queries.first().and_then(|query| {
-        let place = query.placement();
-        let cut = query.sequence.len();
-        (cut != place.length).then_some((place.offset as i32, (place.offset + cut) as i32 - 1))
-    });
-    let batch = BatchArchive {
-        request: crate::report::archive::RequestInputs {
-            queries: &queries,
-            subjects: &subjects_input,
-            required,
-            lcase_masks: &lcase,
+    let masks = results_masks(call);
+    requests(call.subject_records).with_batch(
+        call.queries,
+        call.queries.first().map(FastaRecord::placement),
+        |request| {
+            each(&BatchArchive {
+                request: *request,
+                masks: &masks,
+                ka_blocks,
+                search_space: first.search_space,
+                length_adjustment: first.length_adjustment,
+                searched_space: batch_searched_space(call.batches),
+            })
         },
-        masks: &masks,
-        ka_blocks,
-        search_space: first.search_space,
-        length_adjustment: first.length_adjustment,
-        searched_space: searched.then_some(first.context0_space),
-    };
-    each(&batch)
+    )
 }
 
 /// Writes the archive of the batch of `call` to `writer`: the messages saved since the last
@@ -868,7 +795,7 @@ pub(crate) fn write_blastx_archive(call: &ArchiveCall<'_>, writer: &mut dyn Writ
         },
         gapped: call.batch.options.gapped,
     };
-    with_batch(&call.batch, false, |batch| {
+    with_batch(&call.batch, |batch| {
         let mut aligns = BlastxAligns {
             run,
             queries: call.batch.queries,
@@ -877,21 +804,6 @@ pub(crate) fn write_blastx_archive(call: &ArchiveCall<'_>, writer: &mut dyn Writ
             batches: call.batch.batches,
         };
         write_archive(call.handle, batch, &mut aligns, writer)
-    })
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:262-264
-// ```c++
-//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-//
-//             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
-// ```
-/// Writes the search strategy's request of the batch of `call` (`StrategyExport::write_batch`):
-/// NCBI writes it before the batch's search, so a batch whose search fails has one too (`call`
-/// then holds no results, and the request after it none).
-pub(crate) fn write_blastx_strategy(strategy: &StrategyExport, call: &CallBatch<'_>) -> Result<()> {
-    with_batch(call, true, |batch| {
-        strategy.write_unkeyed(&batch.request, batch.searched_space)
     })
 }
 

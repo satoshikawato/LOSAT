@@ -486,7 +486,8 @@ BLASTX の `-parse_deflines` は `-subject` でも使えるようにした（`bl
 | `run_blastdbcmd(argv, input, output, diagnostics)` | NCBI の引数読み（`ncbi_app::args`）をそのまま使う `run_with`。`input` は CLI の標準入力（`-entry_batch -`、`-ipg_batch -`、`-taxidlist -`）、`output` は CLI の標準出力 |
 | `run_dustmasker(argv, input, output, diagnostics)` | blastdbcmd と同じ殻（`ncbi_app`）の `dustmasker::run_with`。`input` は CLI の標準入力（`-in -` と `-in` なし）、`output` は CLI の標準出力。`-conffile`・`-dryrun` は CLI の application start が読むので断る |
 | `run_segmasker(argv, input, output, diagnostics)` | `run_dustmasker` と同じ殻の `segmasker::run_with`（線 RG の K2）。標準入力・出力・`-conffile`・`-dryrun` の扱いは `run_dustmasker` と同じ |
-| 失敗 | `Error::Search` で、文言は CLI が標準エラーに書いたものそのまま（`diagnostics` にも書く）。`run_makeblastdb` の clap の parser の拒否は `Error::Argv`。`run_blastdbcmd`・`run_dustmasker`・`run_segmasker` は NCBI の引数読みの拒否も CLI と同じ usage と報告を書くので `Error::Search` |
+| `run_convert2blastmask(argv, input, output, diagnostics)` | `run_dustmasker` と同じ殻の `convert2blastmask::run_with`（線 RG の K3）。標準入力・出力・`-conffile`・`-dryrun` の扱いは `run_dustmasker` と同じ |
+| 失敗 | `Error::Search` で、文言は CLI が標準エラーに書いたものそのまま（`diagnostics` にも書く）。`run_makeblastdb` の clap の parser の拒否は `Error::Argv`。`run_blastdbcmd`・`run_dustmasker`・`run_segmasker`・`run_convert2blastmask` は NCBI の引数読みの拒否も CLI と同じ usage と報告を書くので `Error::Search` |
 
 CLI の `run_with` はもとから writer を取っていたので、`run_makeblastdb` と `run_blastdbcmd` を足した時は engine の変更は無かった。標準入力は 2026-11-13（線 RG の K1b）に共有の殻 `ncbi_app` の 1 か所（`files::Cin`）にし、CLI は process の stdin を、library は呼び手の reader を渡す。
 

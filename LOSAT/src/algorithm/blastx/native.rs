@@ -606,6 +606,13 @@ fn run_inner(
     } else {
         (destination, None)
     };
+    // The run's standard error goes through the held output (`HeldOutput::stderr`): a held
+    // document gets the texts written in the meantime where NCBI writes them. The structured
+    // formats write no BLAST archive, so the run's standard error is the process's.
+    if let Some(held) = &held {
+        debug_assert!(archive.is_none());
+        stderr = Box::new(held.stderr(Box::new(io::stderr())));
+    }
     // The run keeps its output in the caller's slot: an error of NCBI's own is followed by the
     // error archive in the same output (`run`).
     let writer = output.insert(BufWriter::new(destination));
@@ -1591,7 +1598,16 @@ pub(super) fn reported_batch(
                 .map_or(crate::report::tabular::SubjectFetch::Every, |spec| {
                     spec.subject_fetch(crate::blastinput::app::Program::Blastx)
                 });
-            reported.fetch_by_query(database, results, options.gapped, rows)?;
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+            // ```c++
+            //        		const CBioseq_Handle& subject_bh =
+            //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+            // ```
+            // The writers of outfmt 0 (description lines and alignment headings), 5 (`Hit`s) and
+            // the tabular rows write the texts where they read each subject.
+            let places = matches!(options.outfmt, 0 | 5 | 6 | 7 | 10 | 20);
+            let rows_open = options.tabular.is_some_and(|spec| spec.checks_taxdb());
+            reported.fetch_by_query(database, results, options.gapped, rows, places, rows_open)?;
             if options.outfmt == 5 {
                 diagnostics.write_all(&reported.take_query_fetches())?;
             }
@@ -3178,6 +3194,7 @@ mod archive_error_tests {
                 &mut out,
                 &mut io::sink(),
                 &[Vec::new()],
+                &[],
                 &config,
                 std::slice::from_ref(&query),
                 &[true],

@@ -152,6 +152,10 @@ def test_a_tool_reads_its_input_as_the_command_line_reads_standard_input(losat):
         output = pylosat.segmasker(*words, input=data)
         assert output.bytes == stdout
         assert output.diagnostics == stderr.decode()
+    words = ("-masking_algorithm", "dust", "-masking_options", "o", "-outfmt", "interval")
+    output = pylosat.convert2blastmask(*words, input=">a\nACGTacgt\n")
+    assert output.bytes == b"4 - 7\n"
+    assert output.diagnostics == ""
 
 
 def test_a_tool_fails_with_the_command_lines_text(tmp_path):

@@ -2484,6 +2484,25 @@ impl BlastpReport {
         )
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+    // ```c++
+    //        		const CBioseq_Handle& subject_bh =
+    //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+    // ```
+    /// Whether the report's writer writes the texts of the subjects that a query's report reads
+    /// one by one where it reads each (`QueryWarnings::subject_read`): outfmt 0 (description
+    /// lines and alignment headings), 5 (`Hit`s) and the tabular rows; the others write them
+    /// before the query's report.
+    fn places_subject_reads(self) -> bool {
+        matches!(
+            self,
+            BlastpReport::Text(
+                OutputFormat::Pairwise | OutputFormat::Tabular | OutputFormat::TabularWithComments
+            ) | BlastpReport::CustomTabular(_)
+                | BlastpReport::Xml
+        )
+    }
+
     /// Whether NCBI writes a query's result warnings with its report
     /// (`ReportFormat::writes_query_warnings`): not for the Seq-annot formats.
     fn writes_query_warnings(self) -> bool {
@@ -2911,6 +2930,17 @@ fn write_blastp_tabular_hit_lists(
             continue;
         };
         for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+            // ```c++
+            //        		const CBioseq_Handle& subject_bh =
+            //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+            // ```
+            // The subject's first row (the default fields read it) loads it where the query's
+            // batch did not prefetch it (`QueryWarnings::subject_read`).
+            if let (Some(first), Some(warnings)) = (hsp_list.hsps.first(), warnings.as_deref_mut())
+            {
+                warnings.subject_read(q_idx, first.s_idx, &mut *writer)?;
+            }
             for hsp in &hsp_list.hsps {
                 // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
                 // ```c
@@ -13329,6 +13359,12 @@ fn run_resolved_in_pool(
     // the query's own warnings: those of its final hit list, psiblast's after the cut, where the
     // first format's rows read their Bioseqs (`TabularSpec::subject_fetch`; `nident` alone on
     // rows with identities, `ListedTitles::fetched_ranks`).
+    // The texts of the subjects that the reports of the queries whose batch's prefetch is off
+    // read one by one, by query, where the first format places them (`places_subject_reads`).
+    let mut subject_reads = crate::report::query_warnings::SubjectReads::default();
+    let places_reads = format_plans
+        .first()
+        .is_some_and(|outfmt| outfmt.places_subject_reads());
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
         if prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
@@ -13376,8 +13412,21 @@ fn run_resolved_in_pool(
                             if rows == crate::report::tabular::SubjectFetch::Every
                                 || fetched.peek().is_some()
                             {
-                                let messages = titles.prefetch_messages(database, fetched)?;
-                                query_warning_lines[query].extend(messages);
+                                // The first format writes the texts where it reads each
+                                // subject (`places_subject_reads`), else before the report.
+                                if places_reads {
+                                    subject_reads.set(
+                                        query,
+                                        titles.subject_read_texts(
+                                            database,
+                                            fetched,
+                                            plural_names,
+                                        )?,
+                                    );
+                                } else {
+                                    let messages = titles.prefetch_messages(database, fetched)?;
+                                    query_warning_lines[query].extend(messages);
+                                }
                             }
                             open_for_rows(shown)?;
                         }
@@ -13691,13 +13740,20 @@ fn run_resolved_in_pool(
         let side_sink = format.sink.side_files().cloned();
         // The taxonomy database's messages of XML2 and JSON go to the diagnostics at every
         // format, and the archive saves the warnings of its batches' queries.
-        let mut warnings = (warning_lines.is_some()
+        // The first format's writer also writes the texts of the subjects that the reports
+        // read one by one (`subject_reads`).
+        let first_lines = warning_lines.take();
+        let mut warnings = (first_lines.is_some()
             || matches!(outfmt, BlastpReport::Xml2(_) | BlastpReport::Archive))
         .then(|| {
-            crate::report::query_warnings::QueryWarnings::new(
-                warning_lines.take().unwrap_or(&[]),
+            let warnings = crate::report::query_warnings::QueryWarnings::new(
+                first_lines.unwrap_or(&[]),
                 &mut *outputs.diagnostics,
-            )
+            );
+            match first_lines {
+                Some(_) => warnings.with_subject_reads(subject_reads.queries()),
+                None => warnings,
+            }
         });
         let format_result: Result<()> = match outfmt {
             BlastpReport::Seqalign(serial) => (|| -> Result<()> {

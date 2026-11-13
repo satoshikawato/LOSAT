@@ -264,7 +264,18 @@ fn write_on_pool<W: Write>(
         hsp: 0,
         header: true,
     };
-    let format = |piece: &Piece| -> io::Result<Vec<u8>> {
+    // The queries whose reports read subjects that write texts: their pieces mark where the
+    // serial writer reads each subject (its first row), and the texts are written there
+    // (`QueryWarnings::subject_read`).
+    let marked: Vec<bool> = (0..hit_lists.len())
+        .map(|q_idx| {
+            warnings
+                .as_deref()
+                .is_some_and(|warnings| warnings.reads_with_texts(q_idx))
+        })
+        .collect();
+    let format = |piece: &Piece| -> io::Result<(Vec<u8>, Vec<(usize, u32)>)> {
+        let mut reads = Vec::new();
         let hit_list = hit_lists[piece.q_idx].as_ref();
         let title = query_titles.get(piece.q_idx).map_or(0, |title| title.len());
         let mut buffer = Vec::with_capacity(piece.bytes + if piece.header { title } else { 0 });
@@ -286,6 +297,9 @@ fn write_on_pool<W: Write>(
         while rows > 0 {
             let hsps = &lists[list].hsps;
             let take = (hsps.len() - hsp).min(rows);
+            if hsp == 0 && take > 0 && marked[piece.q_idx] {
+                reads.push((buffer.len(), lists[list].oid));
+            }
             write_hsp_rows(
                 &mut buffer,
                 &hsps[hsp..hsp + take],
@@ -299,7 +313,7 @@ fn write_on_pool<W: Write>(
             list += 1;
             hsp = 0;
         }
-        Ok(buffer)
+        Ok((buffer, reads))
     };
     loop {
         let mut window = Vec::new();
@@ -323,7 +337,14 @@ fn write_on_pool<W: Write>(
                     warnings.before_query(piece.q_idx, &mut *writer)?;
                 }
             }
-            writer.write_all(&buffer?)?;
+            let (buffer, reads) = buffer?;
+            crate::report::query_warnings::write_marked(
+                &buffer,
+                &reads,
+                piece.q_idx,
+                &mut *writer,
+                warnings.as_deref_mut(),
+            )?;
         }
     }
     write_tabular_epilog(writer, output_format, epilog)
@@ -586,6 +607,9 @@ mod tests {
             ),
         }
         .unwrap();
+        // The warnings end (`QueryWarnings`'s drop writes any read's text not placed) before the
+        // sink is read.
+        drop(warnings);
         drop((report, sink));
         Arc::try_unwrap(log).unwrap().into_inner().unwrap()
     }

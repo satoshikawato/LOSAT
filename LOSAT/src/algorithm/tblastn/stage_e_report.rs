@@ -196,6 +196,10 @@ pub(super) fn render(
     seg: Option<&SegParams>,
     mask_lowercase: bool,
     query_warning_lines: &[Vec<u8>],
+    // The texts of the subjects that each query's report reads one by one (its batch's prefetch
+    // off), by query, which the first format's writer places where it reads them
+    // (`QueryWarnings::subject_read`).
+    query_reads: &[crate::report::query_warnings::QueryReads],
     ranges: &ReportRanges<'_>,
     xml_values: super::blast_xml::XmlValues,
     xml_taxa: super::database::XmlTaxa,
@@ -435,10 +439,17 @@ pub(super) fn render(
                 .as_ref()
                 .is_some_and(crate::report::tabular::TabularSpec::checks_taxdb))
         .then(|| {
-            crate::report::query_warnings::QueryWarnings::new(
-                warning_lines.take().unwrap_or(&[]),
+            let first = warning_lines.take();
+            let warnings = crate::report::query_warnings::QueryWarnings::new(
+                first.unwrap_or(&[]),
                 &mut *outputs.diagnostics,
-            )
+            );
+            // The first format's writer also writes the texts of the subjects that the reports
+            // read one by one (`query_reads`).
+            match first {
+                Some(_) => warnings.with_subject_reads(query_reads),
+                None => warnings,
+            }
         });
         // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
         let side_sink = format.sink.side_files().cloned();
@@ -688,6 +699,18 @@ fn write_tabular(
             let _subject = subject_records
                 .get(oid)
                 .context("TBLASTN subject OID out of range")?;
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+            // ```c++
+            //        		const CBioseq_Handle& subject_bh =
+            //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+            // ```
+            // The subject's first row (the default fields read it) loads it where the query's
+            // batch did not prefetch it (`QueryWarnings::subject_read`).
+            if !list.hsps.hsps.is_empty() {
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    warnings.subject_read(q_idx, oid as u32, &mut *writer)?;
+                }
+            }
             ensure!(
                 list.payloads.len() == list.hsps.hsps.len(),
                 "TBLASTN report payload count mismatch"
@@ -1697,6 +1720,7 @@ mod tests {
                 1,
                 Some(&seg),
                 false,
+                &[],
                 &[],
                 &ReportRanges {
                     queries: &Default::default(),

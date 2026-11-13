@@ -1,0 +1,9 @@
+# BLASTP 2.17.0+
+# Query: q
+# Database: ids/prd_txself
+# Fields: query id, subject id, subject sci names
+# 2 hits found
+Error: [blastp] Error: Tax database file has wrong magic number.
+q	gb|BBB00001.1|	N/A
+q	gb|AAA00001.1|	N/A
+# BLAST processed 1 queries

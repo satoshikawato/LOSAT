@@ -162,6 +162,8 @@ pub(super) fn reads_subject_letters<'a>(
         8 | 9 | 11 | 12 => false,
         6 | 7 | 10 | 20 => super::tabular::tabular_spec(outfmt)
             .is_some_and(|spec| super::tabular::reads_rows(&spec)),
+        // The organism report (`report::tax_report`) shows scores and definition lines.
+        18 => false,
         _ => true,
     })
 }
@@ -292,17 +294,20 @@ pub(super) fn render(
     };
     // The tabular subject IDs, made before any format is written: a subject that NCBI
     // writes part of a row for and then stops at (RP-20) is rejected first
-    // (`tabular_subject_ids`). The tabular formats 6, 7, 10 and 20 show them.
-    let subject_ids = if outputs
-        .formats
-        .iter()
-        .any(|format| matches!(format_number(format.outfmt), 6 | 7 | 10 | 20))
-    {
+    // (`tabular_subject_ids`). The tabular formats 6, 7, 10 and 20 show them, not the organism
+    // report (`report::tabular::writes_rows`).
+    let shows_ids = |format: &crate::api::local_blast::FormatOutput<'_>| {
+        matches!(format_number(format.outfmt), 6 | 7 | 10 | 18 | 20)
+            && crate::report::tabular::writes_rows(
+                super::tabular::tabular_spec(format.outfmt).as_ref(),
+            )
+    };
+    let subject_ids = if outputs.formats.iter().any(shows_ids) {
         match shown {
             ShownSubjects::Fasta { .. } => tabular_subject_ids(hitlists, subject_records)?,
             ShownSubjects::Database { reported, .. } => {
                 reported.tabular_subject_ids(outputs.formats.iter().any(|format| {
-                    matches!(format_number(format.outfmt), 6 | 7 | 10 | 20)
+                    shows_ids(format)
                         && crate::report::tabular::reads_subject(
                             super::tabular::tabular_spec(format.outfmt).as_ref(),
                             crate::blastinput::app::Program::Tblastn,
@@ -404,7 +409,7 @@ pub(super) fn render(
             || format_number(format.outfmt) == ARCHIVE_FORMAT
             || custom_tabular
                 .as_ref()
-                .is_some_and(crate::report::tabular::TabularSpec::checks_taxdb))
+                .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid))
         .then(|| {
             let first = warning_lines.take();
             let warnings = crate::report::query_warnings::QueryWarnings::new(
@@ -424,25 +429,28 @@ pub(super) fn render(
         match format_number(format.outfmt) {
             // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
             // (`tabular`); never the default 6 and 7 below.
-            6 | 7 | 10 | 20 if custom_tabular.is_some() => super::tabular::write_tblastn_tabular(
-                &super::tabular::TblastnTabular {
-                    spec: custom_tabular.as_ref().expect("a custom tabular report"),
-                    inputs: tabular,
-                    queries: query_records,
-                    letters: subject_letters,
-                    subject_ids: &subject_ids,
-                    shown,
-                    query_batch_skipped,
-                    ranges,
-                    genetic_code,
-                    matrix: scoring.matrix,
-                    program_version: super::tabular::program_version(pssm.is_some()),
-                },
-                hitlists,
-                &mut writer,
-                warnings.as_mut(),
-                probe.as_mut(),
-            )?,
+            6 | 7 | 10 | 18 | 20 if custom_tabular.is_some() => {
+                super::tabular::write_tblastn_tabular(
+                    &super::tabular::TblastnTabular {
+                        spec: custom_tabular.as_ref().expect("a custom tabular report"),
+                        inputs: tabular,
+                        queries: query_records,
+                        letters: subject_letters,
+                        subject_ids: &subject_ids,
+                        subject_records,
+                        shown,
+                        query_batch_skipped,
+                        ranges,
+                        genetic_code,
+                        matrix: scoring.matrix,
+                        program_version: super::tabular::program_version(pssm.is_some()),
+                    },
+                    hitlists,
+                    &mut writer,
+                    warnings.as_mut(),
+                    probe.as_mut(),
+                )?
+            }
             6 | 7 => write_tabular(
                 &mut writer,
                 program,
@@ -523,12 +531,6 @@ pub(super) fn render(
                     ranges,
                     warnings.as_mut(),
                 )?;
-                // A run that stops before its first report (a database whose sequences cannot
-                // be read) still writes the document's start, which NCBI writes before the
-                // search.
-                if query_records.is_empty() && !ranges.epilog {
-                    writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
-                }
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
             // ```c++

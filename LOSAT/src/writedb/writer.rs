@@ -15,6 +15,7 @@ use super::header::{defline_set, encode_defline_set, BadChar, BadTitleChar};
 use super::lmdb::{
     lmdb_file_name, lmdb_map_size_from_env, LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
 };
+use super::mask_data::{MaskWriter, MaskedRanges};
 use super::ofstream::OfStream;
 use super::platform::Platform;
 pub use super::volume::Indices;
@@ -74,6 +75,9 @@ pub struct WriteDb {
     /// The first sequence of GIs only between two sequences with keys: makeblastdb 2.17.0
     /// aborts on it when it writes the `.pos` file (`WriteDb::close`).
     gi_only_between_keys: Option<(u32, Vec<u8>)>,
+    /// The mask data: the registered algorithms, the mask column and the blobs of the
+    /// sequence being written. Empty for a database without mask data.
+    mask: MaskWriter,
 }
 
 impl std::fmt::Debug for WriteDb {
@@ -198,6 +202,7 @@ impl WriteDb {
             lmdb_had_keys: false,
             gi_only_after_keys: None,
             gi_only_between_keys: None,
+            mask: MaskWriter::default(),
         }
     }
 
@@ -316,6 +321,8 @@ impl WriteDb {
         self.pending_hash = 0;
         self.ids.clear();
         self.tax_ids.clear();
+        // `x_ResetSequenceData`: the mask blobs of the previous sequence go.
+        self.mask.reset_sequence();
         if bioseq.is_aa != self.protein {
             let name = |protein: bool| if protein { "protein" } else { "nucleotide" };
             return Err(WriteDbError::Creation(format!(
@@ -554,7 +561,14 @@ impl WriteDb {
 
         let mut done = false;
         if let Some(volume) = self.volumes.last_mut() {
-            done = volume.write_sequence(&binary.seq, &binary.ambig, &binhdr, &self.ids, hash)?;
+            done = volume.write_sequence(
+                &binary.seq,
+                &binary.ambig,
+                &binhdr,
+                &self.ids,
+                hash,
+                self.mask.blobs(),
+            )?;
             if done {
                 self.insert_lmdb_entries()?;
             }
@@ -570,6 +584,12 @@ impl WriteDb {
                 arrays = volume.take_offset_arrays();
                 scratch = volume.take_index_scratch();
             }
+            // The date of the column is read before the volume's files are created, so
+            // that a clock that cannot be read leaves none.
+            let column_date = match self.mask.column_meta() {
+                Some(_) => Some(self.mask.column_date(index as usize)?),
+                None => None,
+            };
             self.volumes.push(Volume::create(
                 &self.dbname,
                 self.protein,
@@ -583,11 +603,23 @@ impl WriteDb {
                 self.indices,
                 scratch,
             )?);
+            if let (Some(meta), Some(date)) = (self.mask.column_meta(), &column_date) {
+                if let Some(volume) = self.volumes.last_mut() {
+                    volume.create_mask_column(meta, date, self.max_file_size)?;
+                }
+            }
             if !self.indices.full {
                 binhdr = self.cook_header(&bioseq.title);
             }
             let volume = self.volumes.last_mut().expect("a volume was pushed");
-            done = volume.write_sequence(&binary.seq, &binary.ambig, &binhdr, &self.ids, hash)?;
+            done = volume.write_sequence(
+                &binary.seq,
+                &binary.ambig,
+                &binhdr,
+                &self.ids,
+                hash,
+                self.mask.blobs(),
+            )?;
             if done {
                 self.insert_lmdb_entries()?;
             }
@@ -952,6 +984,56 @@ impl WriteDb {
         if let Some(volume) = self.volumes.last_mut() {
             let _ = volume.close();
         }
+    }
+
+    /// `RegisterMaskAlgorithm(program, options, name)`: registers a masking algorithm of the
+    /// filtering program `program` (a `Blast-filter-program` number) and returns its id.
+    /// `name` is the name of the mask file for makeblastdb. The first registration creates
+    /// the mask column.
+    pub fn register_mask_algorithm(
+        &mut self,
+        program: i32,
+        options: &[u8],
+        name: &[u8],
+    ) -> Result<i32, WriteDbError> {
+        self.mask
+            .register_program(program, options, name, !self.volumes.is_empty())
+    }
+
+    /// `RegisterMaskAlgorithm(id, description, options)`: the form of `makeblastdb -mask_id`.
+    pub fn register_mask_algorithm_id(
+        &mut self,
+        id: &[u8],
+        description: &[u8],
+        options: &[u8],
+    ) -> Result<i32, WriteDbError> {
+        self.mask
+            .register_id(id, description, options, !self.volumes.is_empty())
+    }
+
+    /// `SetMaskData`: the masked ranges of the sequence added last (its mask blobs are
+    /// written with it when it is published). The ranges are those
+    /// `MaskedRangeSet::get_ranges` gives.
+    pub fn set_mask_data(&mut self, ranges: &[MaskedRanges]) -> Result<(), WriteDbError> {
+        // `x_ComputeSeqLength` of a sequence from a `CBioseq` is the length of its Seq-inst.
+        let seq_length = self
+            .pending
+            .as_ref()
+            .and_then(|bioseq| u32::try_from(bioseq.length).ok());
+        self.mask
+            .set_mask_data(ranges, seq_length, !self.volumes.is_empty())
+    }
+
+    /// Test hook: the date that the mask column of volume `index` stores instead of the
+    /// time of its creation.
+    #[cfg(test)]
+    pub fn set_column_date(&mut self, index: usize, date: &[u8]) {
+        self.mask.set_column_date(index, date);
+    }
+
+    /// The date for a mask column when the clock cannot be read (the time of the build).
+    pub fn set_column_date_fallback(&mut self, date: &[u8]) {
+        self.mask.set_date_fallback(date);
     }
 
     /// The volumes written: the path of each without extension, its number

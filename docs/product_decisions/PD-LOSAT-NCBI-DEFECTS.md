@@ -517,9 +517,9 @@ of exception 9 (PS16a) did.
     `TDomAlignOrderByEValue`, which a NaN makes no strict weak order. Refused only where one of
     that sort's unguarded loops would read outside its vector (the comparison stays irreflexive and
     asymmetric with a NaN, so the partition's sentinels hold; the final insertion's walk can leave
-    the vector after the heap sort of a part that reached the depth limit). The permutations of 86
-    NaN inputs equal libstdc++ 13's (unit vectors); the fixture rows `x.h_*nan*`, `nan_hit`,
-    `nan_threshold` equal NCBI.
+    the vector only after the heap sort of the leftmost part, when it reaches the depth limit). The
+    permutations of 86 NaN inputs equal libstdc++ 13's (unit vectors); the fixture rows
+    `x.h_*nan*`, `nan_hit`, `nan_threshold` equal NCBI.
 
 - TBLASTN with `-window_size 0` (version 1.18, 2026-11-14, line RG item X2, Owner-delegated): with
   a low `-threshold`, NCBI's one-hit ungapped extension can give a negative `Int4` length, which

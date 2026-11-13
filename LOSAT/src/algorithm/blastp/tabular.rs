@@ -456,6 +456,75 @@ pub(super) fn write_blastp_tabular(
     write_tabular_rows::<false>(tab, hit_lists, writer, warnings, probe, rows)
 }
 
+/// Writes the organism report (outfmt 18, `report::tax_report`) of every query of `hit_lists`
+/// (indexed by query) to `writer`, each query's warnings before its report: the caption, the
+/// `Query=` block of its title (`tab.query_titles`) with the length of its record
+/// (`record_lengths`), and the table of its reported HSPs in the hit lists' order. The report is
+/// made before the batch's first byte (`tax_report::report_batch`), so that LOSAT's refusals come
+/// before it; `tab.names` carries the run's taxonomy database.
+pub(super) fn write_blastp_tax_report(
+    tab: &BlastpTabular<'_>,
+    record_lengths: &[usize],
+    hit_lists: &[Option<BlastpHitList>],
+    writer: &mut dyn Write,
+    warnings: Option<&mut QueryWarnings<'_>>,
+) -> Result<()> {
+    use crate::report::tax_report::{report_batch, write_report, TaxHsp, TaxPlain, TaxQuery};
+    let parsed = match &tab.subjects {
+        TabularSubjects::Records { parsed, .. } | TabularSubjects::Database { parsed, .. } => {
+            *parsed
+        }
+    };
+    let queries: Vec<TaxQuery<'_>> = hit_lists
+        .iter()
+        .enumerate()
+        .map(|(q_idx, hit_list)| TaxQuery {
+            title: tab
+                .query_titles
+                .get(q_idx)
+                .map_or(&b""[..], |title| title.as_ref()),
+            length: record_lengths.get(q_idx).copied().unwrap_or_default(),
+            hsps: hit_list
+                .iter()
+                .flat_map(reported)
+                .flat_map(|hsp_list| &hsp_list.hsps)
+                .map(|hsp| TaxHsp {
+                    subject: hsp.s_idx as usize,
+                    evalue: hsp.e_value,
+                    bit_score: hsp.bit_score,
+                })
+                .collect(),
+        })
+        .collect();
+    let plain = |s_idx: usize| match &tab.subjects {
+        TabularSubjects::Records { records, .. } => TaxPlain::Record {
+            local_id: records[s_idx].local_id.as_bytes(),
+            title: &records[s_idx].title,
+        },
+        TabularSubjects::Database {
+            ordinals,
+            titles,
+            taxonomy,
+            ..
+        } => TaxPlain::Stored {
+            ordinal: ordinals.get(s_idx).copied().unwrap_or_default(),
+            title: titles.get(s_idx).map_or(&[][..], |title| title),
+            taxid: taxonomy.get(s_idx).map_or(0, |taxonomy| taxonomy.taxid),
+        },
+    };
+    let report = report_batch(
+        &queries,
+        parsed,
+        plain,
+        true,
+        tab.taxdb_found,
+        tab.names,
+        tab.app.name(),
+    )?;
+    write_report(writer, warnings, &queries, &report)?;
+    Ok(())
+}
+
 /// rpsblast's report (`write_tabular_rows` with the gate of its rows on NCBI's alignment block,
 /// `needs_rows`). Cold and out of line (no NCBI counterpart: code placement only), so that
 /// blastp's and psiblast's writer keeps the default path's code.

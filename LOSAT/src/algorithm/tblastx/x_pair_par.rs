@@ -1874,9 +1874,10 @@ enum XHit {
 //    `s_f_idx: unit.f`, `s_frame: inp.s_frames_preliminary[unit.f].frame`, `s_idx: inp.s_idx`,
 //    `s_len: inp.s_len` and `contexts: inp.contexts`, and `x_hit` takes `q_idx`, `q_frame` and
 //    `q_orig_len` from `ctx = contexts[ctx_idx]`; the expansion takes the same values from the
-//    unit's `f`, the same `XSubject` (dispatch point 3 of run_impl.rs passes one `x_subject` to
-//    `run_subject_units` and `merge_subject`) and `inp.contexts[ctx_idx]`. `ctx_idx` is below the
-//    number of contexts; `u32::try_from` stops the run rather than truncate it.
+//    unit's `f`, the same `XSubject` (dispatch point 3, `subject_prep::run_unit_path`, passes one
+//    `x_subject` to `run_subject_units` and `merge_subject`) and `inp.contexts[ctx_idx]`.
+//    `ctx_idx` is below the number of contexts; `u32::try_from` stops the run rather than
+//    truncate it.
 // b. The expansion maps a unit's records one to one, in their order, and the chunk loop takes the
 //    units of a chunk in unit order (today's loop), so each chunk's init list is today's element for
 //    element.
@@ -2295,8 +2296,8 @@ impl<M: TbxScore> XPairPar<M> {
     // (frame, chunk), run. This is the only part of the seed stage that reads the group tables
     // (`self.groups`: `longest_chain` while the units are listed, the tables in `scan_unit`).
     // `merge_subject` is the second half; the two were one function (`run_subject`) and are
-    // called one after the other at dispatch point 2 of run_impl.rs, where the seed release
-    // ends its hold on the group tables between them (x_seed_release.rs).
+    // called one after the other at dispatch point 2 (`subject_prep::run_unit_path`), where the
+    // seed release ends its hold on the group tables between them (x_seed_release.rs).
     /// The units of one subject, run: what `merge_subject` builds `combined_ungapped_hits` from.
     pub(super) fn run_subject_units(
         &self,

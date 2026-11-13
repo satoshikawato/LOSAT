@@ -356,9 +356,44 @@ fn makedb_takes_makeblastdb_s_option_names() {
         );
     }
 
+    // `-mask_data` takes a list of files, `-mask_id` needs `-mask_data` and `-mask_desc` needs
+    // `-mask_id` (makeblastdb.cpp:259-277); the parser's errors end with exit status 2 as those of
+    // `-taxid_map` above.
+    assert_eq!(defaults.mask_data, None);
+    assert_eq!((defaults.mask_id, defaults.mask_desc), (None, None));
+    let given = args(
+        makedb(&[
+            "-dbtype",
+            "prot",
+            "-mask_data",
+            "a.asnt,b.asnb",
+            "-mask_id",
+            "x,y",
+            "-mask_desc",
+            "d1,d2",
+        ])
+        .unwrap(),
+    );
+    assert_eq!(given.mask_data.as_deref(), Some("a.asnt,b.asnb"));
+    assert_eq!(given.mask_id.as_deref(), Some("x,y"));
+    assert_eq!(given.mask_desc.as_deref(), Some("d1,d2"));
+    for words in [
+        &["-dbtype", "prot", "-mask_id", "x"][..],
+        &["-dbtype", "prot", "-mask_data", "a", "-mask_desc", "d"],
+        &["-dbtype", "prot", "-mask_desc", "d", "-mask_id", "x"],
+        &["-dbtype", "prot", "-mask_data"],
+    ] {
+        let err = makedb(words).unwrap_err();
+        assert_eq!(err.exit_code(), 2, "{words:?}: {err}");
+        assert!(
+            !err.to_string().contains("not supported"),
+            "{words:?}: {err}"
+        );
+    }
+
     // The options of makeblastdb that LOSAT does not implement are named (`-h` and
     // `-version` are served: `makeblastdb_is_a_name_of_makedb`).
-    for option in ["-mask_data", "-gi_mask", "-randomize", "-oid_masks"] {
+    for option in ["-gi_mask", "-gi_mask_name", "-randomize", "-oid_masks"] {
         let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();
         assert!(
             err.to_string().contains(&format!(
@@ -1323,7 +1358,9 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "2", None, UNSUPPORTED),
         (ALL, "3", None, UNSUPPORTED),
         (ALL, "4", None, UNSUPPORTED),
-        (ALL, "18", None, UNSUPPORTED),
+        // Line RG T2: the organism report in every program.
+        (SHARED, "18", None, Writes(TaxFormat)),
+        (SHARED, "18 qseqid", None, Writes(TaxFormat)),
         // Line CLI C2: BLASTN (PR 1), TBLASTN and TBLASTX (PR 2), BLASTP and BLASTX (PR 3) write 10
         // and 20 with the shared tabular writer.
         (SHARED, "10", None, Writes(CommaSeparatedValues)),
@@ -1932,14 +1969,30 @@ fn version_words_in_an_option_value_are_read_as_ncbi_reads_them() {
     }
 }
 
+// No NCBI counterpart: the command line's entry makes the application start of the program that
+// `argv[1]` names when it is one of `ENTRY_NAMES`, and runs a parsed command with that start
+// (`cli::main_entry`, which holds the start of every command it parses).
+#[test]
+fn every_command_is_an_entry_name() {
+    use clap::CommandFactory;
+    let command = Cli::command();
+    for sub in command.get_subcommands() {
+        for name in std::iter::once(sub.get_name()).chain(sub.get_all_aliases()) {
+            assert!(
+                crate::cli::ENTRY_NAMES.contains(&name),
+                "the command {name} is not one of ENTRY_NAMES"
+            );
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (quoted at
 // `ncbi_environment::preparse`): `-logfile FILE` and `-conffile FILE` go to the argument reader
 // with their values, a last `-logfile` or `-conffile` without one is dropped. The command line's
-// application start reads them (`cli::main_entry`); a parser's caller without one, as these
-// tests and the library API and the Web engine, refuses them (`toolkit_file_word_error`).
+// application start reads them (`cli::main_entry`, `try_parse_from_start`); a parser's caller
+// without one, the library API and the Web engine, refuses them (`toolkit_file_word_error`).
 #[test]
 fn toolkit_file_options_need_the_command_lines_application_start() {
-    assert!(crate::blastinput::ncbi_environment::application_start_of_process().is_none());
     for (program, upper) in [
         ("blastn", "BLASTN"),
         ("blastp", "BLASTP"),
@@ -1979,6 +2032,20 @@ fn toolkit_file_options_need_the_command_lines_application_start() {
         );
         // `-out` then has no value: the parser's error.
         assert!(parse(program, &["-out", "-logfile"]).is_err(), "{program}");
+        // After the command line's application start of the program, its parser reads them (the
+        // start is a value of the entry: a test makes one without changing the process).
+        for words in [
+            &["-logfile", "log.txt"][..],
+            &["-conffile=x.ini"],
+            &["-evalue", "1", "-dryrun"],
+        ] {
+            let start =
+                crate::blastinput::ncbi_environment::ApplicationStart::of_process(program, words);
+            let mut argv = vec!["losat", program, "-query", "q.fa", "-subject", "s.fa"];
+            argv.extend(words);
+            let parsed = crate::cli::try_parse_from_start::<Cli, _, _>(argv, &start);
+            assert!(parsed.is_ok(), "{program} {words:?}: {:?}", parsed.err());
+        }
     }
     // makeblastdb's library run refuses `-conffile` too; a last word without value is dropped.
     let makedb = |words: &[&str]| {
@@ -2129,9 +2196,9 @@ fn makedb_is_not_a_command_and_makeblastdb_checks_apply() {
         ("x.faa", Some("db"))
     );
     // The checks that name the command apply.
-    let error = makedb(&["-mask_data"]).unwrap_err().to_string();
+    let error = makedb(&["-gi_mask"]).unwrap_err().to_string();
     assert!(
-        error.contains("the NCBI BLAST+ option -mask_data is not supported by LOSAT's makeblastdb"),
+        error.contains("the NCBI BLAST+ option -gi_mask is not supported by LOSAT's makeblastdb"),
         "{error}"
     );
     assert!(makedb(&["-parse_seqids"]).is_ok());

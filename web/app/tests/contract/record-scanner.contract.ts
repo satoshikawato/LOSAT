@@ -7,8 +7,8 @@
 // cases are those that the FakeScanner follows too (its simplifications are listed in
 // src/infra/fake/fake-fasta.ts). The layout kind is not prescribed: the cases check that the
 // layout finds every residue.
-import type { FastaParserKind, IndexedRecord } from '../../src/domain/dataset';
-import type { RecordScanner, ScanResponse } from '../../src/ports/scan';
+import type { FastaParserKind, IndexedRecord } from 'losat/domain';
+import type { RecordScanner, ScanResponse } from 'losat/ports';
 import { check, rejects, same, sameBytes, sameValue, type ContractCase } from './contract';
 
 export interface RecordScannerEnv {

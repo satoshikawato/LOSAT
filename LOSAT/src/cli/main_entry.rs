@@ -104,13 +104,17 @@ fn run_main_entry() -> Result<()> {
     // (`ncbi_environment::ApplicationStart`), and its messages go to stderr at once, before
     // `-version` and before blastdbcmd's `-logfile` is read. The start of the others (dustmasker,
     // segmasker, rpsbproc) writes nothing here.
-    let program = argv
+    // The program's application start, made once here and given to what reads after it.
+    let start = argv
         .get(1)
         .and_then(|word| word.to_str())
-        .filter(|word| crate::cli::ENTRY_NAMES.contains(word));
-    let start = program
-        .map(|program| crate::blastinput::ncbi_environment::start_application(program, &argv[2..]));
-    if let Some(start) = start {
+        .filter(|word| crate::cli::ENTRY_NAMES.contains(word))
+        .map(|program| {
+            crate::blastinput::ncbi_environment::ApplicationStart::of_process(program, &argv[2..])
+        });
+    // The start of the program `name`, which the entry made above when `argv` names it.
+    let started = |name: &str| start.as_ref().filter(|start| start.program() == name);
+    if let Some(start) = &start {
         match start.usage_report() {
             Ok(text) => {
                 let mut stderr = std::io::stderr();
@@ -120,8 +124,8 @@ fn run_main_entry() -> Result<()> {
             Err(reason) => return Err(anyhow::Error::msg(reason.to_string())),
         }
     }
-    if argv.get(1).is_some_and(|word| word == "blastdbcmd") {
-        std::process::exit(crate::blastdbcmd::run(&argv[2..]));
+    if let Some(start) = started("blastdbcmd") {
+        std::process::exit(crate::blastdbcmd::run(&argv[2..], start));
     }
     // NCBI reference (598d8ae6): c++/src/app/dustmasker/main.cpp:39-42
     // ```c++
@@ -132,8 +136,8 @@ fn run_main_entry() -> Result<()> {
     // ```
     // `losat dustmasker` reads its command line with NCBI's argument reader (`ncbi_app`), as
     // blastdbcmd does.
-    if argv.get(1).is_some_and(|word| word == "dustmasker") {
-        std::process::exit(crate::dustmasker::run(&argv[2..]));
+    if let Some(start) = started("dustmasker") {
+        std::process::exit(crate::dustmasker::run(&argv[2..], start));
     }
     // NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:265-272
     // ```c++
@@ -144,8 +148,8 @@ fn run_main_entry() -> Result<()> {
     // }
     // ```
     // `losat segmasker` too.
-    if argv.get(1).is_some_and(|word| word == "segmasker") {
-        std::process::exit(crate::segmasker::run(&argv[2..]));
+    if let Some(start) = started("segmasker") {
+        std::process::exit(crate::segmasker::run(&argv[2..], start));
     }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263
     // ```c++
@@ -156,8 +160,8 @@ fn run_main_entry() -> Result<()> {
     // }
     // ```
     // `losat convert2blastmask` too.
-    if argv.get(1).is_some_and(|word| word == "convert2blastmask") {
-        std::process::exit(crate::convert2blastmask::run(&argv[2..]));
+    if let Some(start) = started("convert2blastmask") {
+        std::process::exit(crate::convert2blastmask::run(&argv[2..], start));
     }
     // No NCBI counterpart: makes those names (`cli::install_shims`). Read before clap, as the
     // top level has no options of its own.
@@ -196,14 +200,14 @@ fn run_main_entry() -> Result<()> {
     // The diagnostics go to the file of `-logfile`, which NCBI reads anywhere before `--`
     // (`ncbi_environment::log_file`), opened before `-version`: `blastn -version -logfile F`
     // makes F, with the usage report's messages.
-    let mut target = match program {
+    let mut target = match &start {
         Some(_) => {
             use crate::blastinput::ncbi_environment::{diag_target, log_file};
             diag_target(log_file(&argv[2..]))
         }
         None => crate::blastinput::ncbi_environment::DiagTarget::Stderr,
     };
-    if let Some(start) = start {
+    if let Some(start) = &start {
         start.write_log_setup(&mut target);
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (`-version` and the full
@@ -223,23 +227,31 @@ fn run_main_entry() -> Result<()> {
     // `ncbi_environment::ApplicationStart`). Its messages go where the diagnostics go, and a
     // `<program>.ini` that NCBI reports as malformed ends the program with exit status 2, `-h`
     // included.
-    if let Some(start) = start {
+    if let Some(start) = &start {
         match start.write_config_load(&mut target, &mut std::io::stderr()) {
             Ok(None) => {}
             Ok(Some(status)) => std::process::exit(status),
             Err(reason) => return Err(anyhow::Error::msg(reason)),
         }
     }
-    let program_name = program.map(str::to_string);
-    let dryrun = program.is_some()
+    let dryrun = start.is_some()
         && matches!(
             crate::blastinput::ncbi_environment::preparse(&argv[2..]),
             crate::blastinput::ncbi_environment::Preparsed::Words { dryrun: true, .. }
         );
     // NCBI blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
-    let cli: Cli = match crate::cli::try_parse_from(argv) {
+    let parsed = match &start {
+        Some(start) => crate::cli::try_parse_from_start(argv, start),
+        None => crate::cli::try_parse_from(argv),
+    };
+    let cli: Cli = match parsed {
         Ok(cli) => cli,
         Err(error) => exit_on_parse_error(&error, argv_is_rpsbproc),
+    };
+    // A parsed command's name is its program's (one of `ENTRY_NAMES`), whose start the entry
+    // made above.
+    let Some(start) = start else {
+        unreachable!("a command is named by its program, one of ENTRY_NAMES")
     };
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707, 292-296
     // ```c++
@@ -289,14 +301,12 @@ fn run_main_entry() -> Result<()> {
         if let Commands::Rpsbproc(args) = cli.command {
             exit_rpsbproc(crate::rpsbproc::dry_run(
                 args,
+                start.settings(),
                 crate::rpsbproc::Diagnostics::new(target),
             ));
             return Ok(());
         }
-        if let Some(name) = program_name.as_deref() {
-            crate::blastinput::ncbi_environment::check_ncbi_application_settings(name)
-                .map_err(anyhow::Error::msg)?;
-        }
+        start.settings().map_err(anyhow::Error::msg)?;
         return Ok(());
     }
     // The messages of tblastx's, rpsblast's and rpstblastn's runs go where the diagnostics go
@@ -306,13 +316,13 @@ fn run_main_entry() -> Result<()> {
     // diagnostics to the target itself (`rpsbproc::Diagnostics`): its `cerr` lines stay on the
     // standard error.
     let mut rpsbproc_target = None;
-    match program_name.as_deref() {
-        Some(name) if crate::blastinput::ncbi_environment::run_messages_follow_log(name) => {
+    match start.program() {
+        name if crate::blastinput::ncbi_environment::run_messages_follow_log(name) => {
             if let Err(reason) = target.into_standard_error(name) {
                 return Err(anyhow::Error::msg(reason));
             }
         }
-        Some("rpsbproc") => rpsbproc_target = Some(target),
+        "rpsbproc" => rpsbproc_target = Some(target),
         _ => drop(target),
     }
     if startup_trace {
@@ -354,7 +364,14 @@ fn run_main_entry() -> Result<()> {
             //         exit_code = BLAST_OUTPUT_ERROR;                                     \
             //     }                                                                       \
             // ```
-            if let Err(error) = blastx::BlastxArgs::run(args) {
+            // NCBI's application layer reads its environment and registry files before blastx's
+            // own code runs; LOSAT rejects the settings that change the output first, before any
+            // option or file of the run, and `native::run` runs with them.
+            let run = start
+                .settings()
+                .map_err(anyhow::Error::msg)
+                .and_then(|settings| blastx::BlastxArgs::run(args, settings));
+            if let Err(error) = run {
                 blastx::native::exit_on_native_error(&error);
                 return Err(error);
             }
@@ -382,9 +399,7 @@ fn run_main_entry() -> Result<()> {
             // ```
             // NCBI's application layer reads its environment and registry files before
             // blastn's own code runs; LOSAT rejects the settings that change the output.
-            let settings =
-                crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastn")
-                    .map_err(anyhow::Error::msg)?;
+            let settings = start.settings().map_err(anyhow::Error::msg)?;
             if let Err(error) = blastn::run(args, settings) {
                 crate::cli::exit_on_native_error(&error);
                 return Err(error);
@@ -401,9 +416,7 @@ fn run_main_entry() -> Result<()> {
             // ```
             // NCBI's application layer reads its environment and registry files before
             // blastp's own code runs; LOSAT rejects the settings that change the output.
-            let settings =
-                crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastp")
-                    .map_err(anyhow::Error::msg)?;
+            let settings = start.settings().map_err(anyhow::Error::msg)?;
             if let Err(error) = blastp::run(args, settings) {
                 crate::cli::exit_on_native_error(&error);
                 return Err(error);
@@ -422,9 +435,7 @@ fn run_main_entry() -> Result<()> {
             // NCBI's application layer reads its environment and registry files before
             // tblastx's own code runs (as for BLASTN); LOSAT rejects the settings that change
             // the output.
-            let settings =
-                crate::blastinput::ncbi_environment::check_ncbi_application_settings("tblastx")
-                    .map_err(anyhow::Error::msg)?;
+            let settings = start.settings().map_err(anyhow::Error::msg)?;
             if let Err(error) = tblastx::run(args, settings) {
                 crate::cli::exit_on_native_error(&error);
                 return Err(error);
@@ -467,9 +478,7 @@ fn run_main_entry() -> Result<()> {
             // layer reads the same environment and registry files (`makeblastdb.ini`, then
             // `.ncbirc`) before `Run`, and LOSAT rejects the settings that change the output.
             // The data loaders the check reports are not used for a FASTA input.
-            let settings =
-                crate::blastinput::ncbi_environment::check_ncbi_application_settings("makeblastdb")
-                    .map_err(anyhow::Error::msg)?;
+            let settings = start.settings().map_err(anyhow::Error::msg)?;
             crate::writedb::makeblastdb::check_registry_settings(
                 &args,
                 settings
@@ -488,7 +497,7 @@ fn run_main_entry() -> Result<()> {
             // The variables that makeblastdb reads itself.
             crate::writedb::makeblastdb::check_environment(&|name: &str| std::env::var_os(name))
                 .map_err(anyhow::Error::msg)?;
-            let status = crate::writedb::makeblastdb::run(&args);
+            let status = crate::writedb::makeblastdb::run(&args, &settings);
             if status != 0 {
                 std::process::exit(status);
             }
@@ -503,9 +512,7 @@ fn run_main_entry() -> Result<()> {
             // psiblast is an NCBI application as blastp: its application layer reads its
             // environment and registry files (`psiblast.ini`, then `.ncbirc`) before its own
             // code runs; LOSAT rejects the settings that change the output.
-            let settings =
-                crate::blastinput::ncbi_environment::check_ncbi_application_settings("psiblast")
-                    .map_err(anyhow::Error::msg)?;
+            let settings = start.settings().map_err(anyhow::Error::msg)?;
             if let Err(error) = psiblast::run(args, settings) {
                 crate::cli::exit_on_native_error(&error);
                 return Err(error);
@@ -521,9 +528,7 @@ fn run_main_entry() -> Result<()> {
             // rpsblast is an NCBI application as blastp: its application layer reads its
             // environment and registry files (`rpsblast.ini`, then `.ncbirc`) before its own
             // code runs; LOSAT rejects the settings that change the output.
-            let settings =
-                crate::blastinput::ncbi_environment::check_ncbi_application_settings("rpsblast")
-                    .map_err(anyhow::Error::msg)?;
+            let settings = start.settings().map_err(anyhow::Error::msg)?;
             if let Err(error) = crate::algorithm::rpsblast::run(args, settings) {
                 crate::cli::exit_on_native_error(&error);
                 return Err(error);
@@ -545,10 +550,9 @@ fn run_main_entry() -> Result<()> {
             // rpstblastn is an NCBI application as blastx: its application layer reads its
             // environment and registry files (`rpstblastn.ini`, then `.ncbirc`) before its own
             // code runs; LOSAT rejects the settings that change the output, before its own
-            // refusals. BLASTX's driver reads them again by the same name (`native::run`).
-            crate::blastinput::ncbi_environment::check_ncbi_application_settings("rpstblastn")
-                .map_err(anyhow::Error::msg)?;
-            if let Err(error) = crate::algorithm::rpstblastn::run(args) {
+            // refusals. BLASTX's driver runs with them (`native::run`).
+            let settings = start.settings().map_err(anyhow::Error::msg)?;
+            if let Err(error) = crate::algorithm::rpstblastn::run(args, settings) {
                 blastx::native::exit_on_native_error(&error);
                 return Err(error);
             }
@@ -563,6 +567,7 @@ fn run_main_entry() -> Result<()> {
                 rpsbproc_target.unwrap_or(crate::blastinput::ncbi_environment::DiagTarget::Stderr);
             exit_rpsbproc(crate::rpsbproc::run(
                 args,
+                start.settings(),
                 crate::rpsbproc::Diagnostics::new(target),
             ));
         }
@@ -570,9 +575,7 @@ fn run_main_entry() -> Result<()> {
             // NCBI's application layer reads its environment and registry files before
             // tblastn's own code runs (as for BLASTN); LOSAT rejects the settings that change
             // the output.
-            let settings =
-                crate::blastinput::ncbi_environment::check_ncbi_application_settings("tblastn")
-                    .map_err(anyhow::Error::msg)?;
+            let settings = start.settings().map_err(anyhow::Error::msg)?;
             if let Err(error) = tblastn::TblastnArgs::run(args, settings) {
                 crate::cli::exit_on_native_error(&error);
                 return Err(error);

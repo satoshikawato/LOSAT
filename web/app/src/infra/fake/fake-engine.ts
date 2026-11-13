@@ -1,10 +1,11 @@
 // FakeEngine: a stand-in for the real engine until the Wasm engine exists (plan §7, W0).
 // Its outputs are not search results and say so on every line. It exists so that the
 // application layer and UI can be built and tested against the EngineGateway contract.
-import { recordMismatch } from '../../domain/dataset';
-import { CUSTOM_OUTPUT, customOutfmt, OUTFMT_FLAG, outfmtOption, OUTPUT_FORMATS } from '../../domain/output-format';
-import { PROGRAMS, type ProgramId } from '../../domain/programs';
+import { RunOutputWriter, sha256Hex, toProgramDescription } from 'losat';
+import { CUSTOM_OUTPUT, OUTPUT_FORMATS, recordMismatch, type ProgramId } from 'losat/domain';
 import {
+  DIAGNOSTICS_STREAM,
+  HITS_STREAM,
   InputMismatchError,
   RunCancelledError,
   type EngineGateway,
@@ -14,11 +15,9 @@ import {
   type ProgramDescription,
   type RuntimeInfo,
   type ValidationResult,
-} from '../../ports/engine';
-import { DIAGNOSTICS_STREAM, HITS_STREAM } from '../../ports/run-output';
-import { sha256Hex } from '../browser/platform';
-import { toProgramDescription } from '../reactor/control';
-import { RunOutputWriter } from '../run-output/writer';
+} from 'losat/ports';
+import { customOutfmt, OUTFMT_FLAG, outfmtOption } from '../../domain/output-format';
+import { PROGRAMS } from '../../domain/programs';
 import DESCRIBE from './describe.json';
 import { fakeRecordKeys } from './fake-fasta';
 

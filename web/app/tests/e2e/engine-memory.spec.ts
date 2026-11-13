@@ -8,9 +8,9 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect } from '@playwright/test';
+import { inspectReactor } from 'losat';
+import { OUTPUT_FORMATS } from 'losat/domain';
 import { test } from './support/test';
-import { OUTPUT_FORMATS } from '../../src/domain/output-format';
-import { inspectReactor } from '../../src/infra/reactor/artifact';
 import { buildHarness, type HarnessFiles } from './support/browser';
 import { ENGINE, NO_ENGINE_REASON } from './support/engine';
 import { openHarness, startHarnessServer, type HarnessServer } from './support/harness-server';

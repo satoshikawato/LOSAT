@@ -1,0 +1,46 @@
+Blast-db-mask-info ::= {
+  algo-id 0,
+  algo-program dust,
+  algo-options "o",
+  masks {
+    masks {
+      int {
+        from 0,
+        to 2,
+        id swissprot {
+          name "ABC_HUMAN",
+          accession "P12345",
+          release "reviewed"
+        }
+      },
+      int {
+        from 3,
+        to 5,
+        id pdb {
+          mol "1ABC",
+          chain 65,
+          chain-id "A"
+        }
+      },
+      int {
+        from 0,
+        to 3,
+        id general {
+          db "db",
+          tag str "tag1"
+        }
+      },
+      int {
+        from 0,
+        to 3,
+        id local id 12345
+      },
+      int {
+        from 0,
+        to 3,
+        id local str "a_b"
+      }
+    },
+    more FALSE
+  }
+}

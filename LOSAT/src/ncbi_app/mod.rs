@@ -30,8 +30,8 @@ pub(crate) struct Tool {
     /// The version that `-version` prints (`GetFullVersion`).
     pub(crate) version: &'static str,
     /// NCBI's `-help` text (`CArgDescriptions::PrintUsage` of the descriptions with the details),
-    /// frozen. Its part before `OPTIONAL ARGUMENTS` is the usage that `-h` and the argument
-    /// errors print (`short_usage`).
+    /// frozen. Its part before the details (`REQUIRED ARGUMENTS` or `OPTIONAL ARGUMENTS`) is
+    /// the usage that `-h` and the argument errors print (`short_usage`).
     pub(crate) help: &'static str,
     /// The program's arguments in the order its `Init` describes them; the reader adds those
     /// of every `CArgDescriptions` (`args::descs`).
@@ -68,9 +68,14 @@ pub(crate) fn no_dependencies() -> Vec<(&'static str, Dep, &'static str)> {
 //     }
 // ```
 /// The text of `-h`: the usage and the description of `help` (a `Tool::help`), then NCBI's
-/// pointer to `-help`.
+/// pointer to `-help`. The details start with the mandatory arguments (`REQUIRED ARGUMENTS`,
+/// convert2blastmask's) or the optional ones.
 pub(crate) fn short_usage(help: &str) -> String {
-    let end = help.find("OPTIONAL ARGUMENTS").unwrap_or(help.len());
+    let end = ["REQUIRED ARGUMENTS", "OPTIONAL ARGUMENTS"]
+        .iter()
+        .filter_map(|heading| help.find(heading))
+        .min()
+        .unwrap_or(help.len());
     format!(
         "{}Use '-help' to print detailed descriptions of command line arguments\n",
         &help[..end]

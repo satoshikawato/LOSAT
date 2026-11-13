@@ -180,7 +180,7 @@ impl TblastnArgs {
         crate::utils::threading::validate_threads(args.num_threads)?;
         // The diagnostics stream: with the archive it also saves what it writes as the
         // messages of the next archive.
-        let mut stderr = crate::cli::CliStderr;
+        let mut stderr = crate::cli::CliStderr::process();
         let mut archive_tee;
         let diagnostics: &mut (dyn Write + Send) = match &archive {
             Some(handle) => {
@@ -2035,12 +2035,11 @@ fn search(
         // ```
         // A structured format (outfmt 8, 12) writes none of a query's own warnings
         // (`ReportFormat::writes_query_warnings`); the warnings go with the first format.
-        let result_warnings = outputs.formats.first().is_none_or(|format| {
-            crate::blastinput::app::ReportFormat::from_number(super::stage_e_report::format_number(
-                format.outfmt,
-            ))
-            .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings)
-        });
+        let result_warnings = outputs
+            .formats
+            .first()
+            .and_then(crate::api::local_blast::FormatOutput::report_format)
+            .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings);
         let filtered_empty = database.is_some_and(|database| database.filtered_empty());
         // The texts of the subjects that the reports of the queries whose batch's prefetch is
         // off read one by one, by query, where the first format places them (`places_reads`).

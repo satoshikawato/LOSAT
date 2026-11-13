@@ -2654,12 +2654,6 @@ impl BlastpReport {
         )
     }
 
-    /// Whether NCBI writes a query's result warnings with its report
-    /// (`ReportFormat::writes_query_warnings`): not for the Seq-annot formats.
-    fn writes_query_warnings(self) -> bool {
-        matches!(self, BlastpReport::Text(_) | BlastpReport::CustomTabular(_))
-    }
-
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
     /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6 and 7; with
     /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as
@@ -5206,7 +5200,7 @@ pub fn run(
     // database is opened after every option handler has run (`search_cli`). With `-subject` it
     // reads the subjects here, before the query and the output are opened.
     let archive = args.archive.clone();
-    let mut stderr = crate::cli::CliStderr;
+    let mut stderr = crate::cli::CliStderr::process();
     let mut archive_tee;
     let diagnostics: &mut (dyn Write + Send) = match &archive {
         Some(handle) => {
@@ -13867,9 +13861,11 @@ fn run_call(
     let filtered_empty = database.is_some_and(|database| database.filtered_empty());
     // A Seq-annot format writes no result warnings (`ReportFormat::writes_query_warnings`);
     // the warnings go with the first format.
-    let result_warnings = format_plans
+    let result_warnings = outputs
+        .formats
         .first()
-        .is_none_or(|outfmt| outfmt.writes_query_warnings());
+        .and_then(crate::api::local_blast::FormatOutput::report_format)
+        .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings);
     let mut query_warning_lines: Vec<Vec<u8>> = query_records
         .iter()
         .enumerate()
@@ -14993,8 +14989,9 @@ fn run_call(
             })(),
             BlastpReport::CustomTabular(spec) => (|| -> Result<()> {
                 // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
-                // (`tabular`); never the default 6 and 7 below.
-                let mut writer = format.sink.open()?;
+                // (`tabular`); never the default 6 and 7 below. The format's stream as the sink
+                // opens it (`OutputSink::ostream`): the organism report's.
+                let mut writer = format.sink.ostream()?;
                 let needs = spec.needs();
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
                 // ```c++

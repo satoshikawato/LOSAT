@@ -282,7 +282,7 @@ impl<'a> MaskFromFasta<'a> {
             self.reader = None;
             match error {
                 ReadError::Parse(error) => Failure::Caught(error.exception()),
-                ReadError::Ncbi(exception) => Failure::Caught(exception),
+                ReadError::Ncbi(exception) => Failure::Caught(*exception),
                 ReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
             }
         })?;

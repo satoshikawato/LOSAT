@@ -398,7 +398,7 @@ pub(crate) enum ReadError {
     Parse(ParseError),
     /// Another exception of NCBI's thrown while a record is read: the `CStringException` of
     /// an interval line of `CMaskFromFasta` (`ReaderFlags::mask_from_fasta`).
-    Ncbi(NcbiException),
+    Ncbi(Box<NcbiException>),
     /// An allocation whose size the input states could not be made
     /// (`std::bad_alloc` in NCBI, which no reader catches).
     OutOfMemory,
@@ -1784,8 +1784,10 @@ impl RecordState {
             Some(dash) => (&s[..dash], &s[dash + 1..]),
             None => (s, &[][..]),
         };
-        let to = string_to_uint(truncate_spaces(s2)).map_err(ReadError::Ncbi)?;
-        let from = string_to_uint(truncate_spaces(s1)).map_err(ReadError::Ncbi)?;
+        let to = string_to_uint(truncate_spaces(s2))
+            .map_err(|error| ReadError::Ncbi(Box::new(error)))?;
+        let from = string_to_uint(truncate_spaces(s1))
+            .map_err(|error| ReadError::Ncbi(Box::new(error)))?;
         self.masks.push((from, to));
         Ok(())
     }

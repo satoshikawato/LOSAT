@@ -590,7 +590,7 @@ impl BlastnDatabase {
                 lists.flat_map(|hsp_list| hsp_list.hsps.iter().map(|hsp| (hsp_list.oid, hsp))),
                 |hsp| {
                     crate::report::hit_sort::HspScores::of_hit(
-                        &hsp.clone().into_hit(),
+                        &crate::algorithm::blastn::hsp::BlastnHsp::clone(hsp).into_hit(),
                         hsp.num_ident,
                     )
                 },

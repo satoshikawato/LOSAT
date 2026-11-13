@@ -30,7 +30,7 @@
 //! string wrap below looks back at most one line (79 columns), so it always finds the bytes
 //! in the buffer, and the whole document stands for the buffer here.
 
-use super::encoder::{Encoder, Frames, NoTrace, ReplacedChar, SerialError, StreamPosition, Trace};
+use super::encoder::{Encoder, Replaced, SerialError, StreamPosition};
 use super::real::write_asn_text_double;
 
 /// The column after which a VisibleString is wrapped (`WrapAt(78, true)`).
@@ -39,9 +39,8 @@ const STRING_WRAP: usize = 78;
 /// The line length from which an OCTET STRING starts a new line (`WrapAt(78, false)`).
 const OCTET_WRAP: usize = 78;
 
-/// The ASN.1 text encoder, appending one document to `out`; `T` keeps what NCBI's posts of a
-/// replaced byte need (`Trace`).
-pub struct AsnTextEncoder<'b, T: Trace = NoTrace> {
+/// The ASN.1 text encoder, appending one document to `out`.
+pub struct AsnTextEncoder<'b> {
     out: &'b mut Vec<u8>,
     /// Where the document starts in `out` (the start of NCBI's buffer, `m_Buffer`).
     start: usize,
@@ -52,25 +51,17 @@ pub struct AsnTextEncoder<'b, T: Trace = NoTrace> {
     /// `CObjectOStreamAsn::m_BlockStart`.
     block_start: bool,
     error: Option<SerialError>,
-    trace: T,
+    /// The bytes that `visible_str_replacing` replaced (`replace`).
+    replaced: Vec<Replaced>,
+    /// `line`'s count of the ends of line: those before `lines_to` (the start of the line it
+    /// was on at its last call) in `out`.
+    lines_to: usize,
+    lines: u64,
 }
 
 impl<'b> AsnTextEncoder<'b> {
     /// An encoder that appends a document to `out`.
     pub fn new(out: &'b mut Vec<u8>) -> Self {
-        Self::with_trace(out)
-    }
-}
-
-impl<'b> AsnTextEncoder<'b, Frames> {
-    /// `new` with `Frames`: a replaced byte is a `ReplacedChar` (`take_replaced`), not an error.
-    pub fn traced(out: &'b mut Vec<u8>) -> Self {
-        Self::with_trace(out)
-    }
-}
-
-impl<'b, T: Trace> AsnTextEncoder<'b, T> {
-    fn with_trace(out: &'b mut Vec<u8>) -> Self {
         let start = out.len();
         Self {
             out,
@@ -79,22 +70,41 @@ impl<'b, T: Trace> AsnTextEncoder<'b, T> {
             line_length: 0,
             block_start: false,
             error: None,
-            trace: T::default(),
+            replaced: Vec::new(),
+            lines_to: start,
+            lines: 0,
         }
     }
 
-    /// `ReplaceVisibleChar` of the byte `byte` of `string`, at the line before the byte's wrap
-    /// (`ReplacedChar`; without `Frames`, `SerialError::NonVisibleChar`).
+    /// `ReplaceVisibleChar` of the byte `byte`, at the line before the byte's wrap (`Replaced`,
+    /// `encoder::Traced`); `write_string` then writes `#` as it writes a byte.
     #[cold]
     #[inline(never)]
-    fn replace(&mut self, byte: u8, string: &[u8]) {
-        if T::FRAMES {
-            let line = self.trace.line(&self.out[self.start..]);
-            self.trace
-                .replaced(byte, StreamPosition::Line(line), string);
-        } else if self.error.is_none() {
-            self.error = Some(SerialError::NonVisibleChar(byte));
+    fn replace(&mut self, byte: u8) {
+        let line = self.line();
+        self.replaced.push(Replaced {
+            byte,
+            position: StreamPosition::Line(line),
+            with_string: true,
+        });
+    }
+
+    /// `m_Output.GetLine()`: 1 + the ends of line of the document that the encoder holds (all of
+    /// it through `encoder::Traced`). The count goes on from the start of the line of the last
+    /// call: the string wrap inserts its end of line in the current line only, and the lines
+    /// before it are final. (After a flush that dropped bytes, which `Traced` prevents, it
+    /// counts the bytes held.)
+    fn line(&mut self) -> u64 {
+        if self.lines_to < self.start || self.lines_to > self.out.len() {
+            self.lines_to = self.start;
+            self.lines = 0;
         }
+        let tail = &self.out[self.lines_to..];
+        if let Some(last) = tail.iter().rposition(|&byte| byte == b'\n') {
+            self.lines += tail[..=last].iter().filter(|&&byte| byte == b'\n').count() as u64;
+            self.lines_to += last + 1;
+        }
+        1 + self.lines
     }
 
     /// `COStreamBuffer::PutString` / `PutChar`: bytes without an end of line.
@@ -277,6 +287,8 @@ impl<'b, T: Trace> AsnTextEncoder<'b, T> {
     /// ```
     /// `isspace` is that of the C locale; the bytes of the stream are visible characters,
     /// spaces and ends of line.
+    // Inlined into both forms of `write_string`, as into its one caller before the replacing form.
+    #[inline(always)]
     fn put_eol_at_word_end(&mut self, line_length: usize) {
         let buffer = self.start;
         let mut line_pos = self.line_length;
@@ -318,7 +330,7 @@ impl<'b, T: Trace> AsnTextEncoder<'b, T> {
     }
 }
 
-impl<T: Trace> Encoder for AsnTextEncoder<'_, T> {
+impl Encoder for AsnTextEncoder<'_> {
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:105-111
     /// ```c++
     /// void CObjectOStreamAsn::WriteFileHeader(TTypeInfo type)
@@ -332,7 +344,6 @@ impl<T: Trace> Encoder for AsnTextEncoder<'_, T> {
     /// (`WriteId` brackets a name with a space, `<` or `:`, objostrasn.cpp:489-504; a type
     /// name has none.)
     fn begin_document(&mut self, type_name: &str) {
-        self.trace.document(type_name);
         self.put(type_name.as_bytes());
         self.put(b" ::= ");
     }
@@ -399,15 +410,12 @@ impl<T: Trace> Encoder for AsnTextEncoder<'_, T> {
     /// ```
     /// (The member names of the ASN.1 modules start with a lower-case letter.)
     fn member(&mut self, name: &str, _tag: u8) {
-        self.trace.push(name);
         self.next_element();
         self.put(name.as_bytes());
         self.put(b" ");
     }
 
-    fn end_member(&mut self) {
-        self.trace.pop();
-    }
+    fn end_member(&mut self) {}
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:563-566
     /// ```c++
@@ -417,7 +425,6 @@ impl<T: Trace> Encoder for AsnTextEncoder<'_, T> {
     /// }
     /// ```
     fn begin_list(&mut self, _set: bool) {
-        self.trace.begin_list();
         self.start_block();
     }
 
@@ -429,7 +436,6 @@ impl<T: Trace> Encoder for AsnTextEncoder<'_, T> {
     /// }
     /// ```
     fn element(&mut self) {
-        self.trace.element();
         self.next_element();
     }
 
@@ -441,7 +447,6 @@ impl<T: Trace> Encoder for AsnTextEncoder<'_, T> {
     /// }
     /// ```
     fn end_list(&mut self) {
-        self.trace.end_list();
         self.end_block();
     }
 
@@ -468,7 +473,6 @@ impl<T: Trace> Encoder for AsnTextEncoder<'_, T> {
     /// ```
     /// The variant's name and a space, on the line of what precedes it.
     fn variant(&mut self, _type_name: &str, name: &str, _tag: u8) {
-        self.trace.push(name);
         self.block_start = false;
         self.put(name.as_bytes());
         self.put(b" ");
@@ -485,7 +489,6 @@ impl<T: Trace> Encoder for AsnTextEncoder<'_, T> {
     /// }
     /// ```
     fn end_variant(&mut self) {
-        self.trace.pop();
         self.block_start = false;
     }
 
@@ -587,25 +590,20 @@ impl<T: Trace> Encoder for AsnTextEncoder<'_, T> {
     ///     }
     /// ```
     /// A byte outside 0x20..0x7E (`GoodVisibleChar`, include/serial/impl/objistr.inl:456-459)
-    /// is written as `#`, NCBI's replacement, reported before the byte's wrap (`replace`).
+    /// is NCBI's replacement with an error message: here an error (`write_string`).
     fn visible_str(&mut self, value: &[u8]) {
-        self.put(b"\"");
-        for &byte in value {
-            let byte = if (0x20..=0x7e).contains(&byte) {
-                byte
-            } else {
-                self.replace(byte, value);
-                b'#'
-            };
-            if self.line_length > STRING_WRAP {
-                self.put_eol_at_word_end(STRING_WRAP);
-            }
-            self.put(&[byte]);
-            if byte == b'"' {
-                self.put(b"\"");
-            }
-        }
-        self.put(b"\"");
+        self.write_string::<false>(value);
+    }
+
+    /// `visible_str` that writes NCBI's `#` for a byte outside 0x20..0x7E and records it
+    /// (`replace`).
+    fn visible_str_replacing(&mut self, value: &[u8]) {
+        self.write_string::<true>(value);
+    }
+
+    /// `string_store` (`visible_str`) that writes NCBI's `#` (`visible_str_replacing`).
+    fn string_store_replacing(&mut self, value: &[u8]) {
+        self.write_string::<true>(value);
     }
 
     /// `WriteDouble2(data, DBL_DIG)` (`real::write_asn_text_double`).
@@ -683,7 +681,6 @@ impl<T: Trace> Encoder for AsnTextEncoder<'_, T> {
     fn flush_to(&mut self, sink: &mut dyn std::io::Write, all: bool) -> std::io::Result<()> {
         if all {
             sink.write_all(&self.out[self.start..])?;
-            self.trace.flushed(&self.out[self.start..]);
             self.out.truncate(self.start);
             return Ok(());
         }
@@ -698,7 +695,6 @@ impl<T: Trace> Encoder for AsnTextEncoder<'_, T> {
             return Ok(());
         }
         sink.write_all(&self.out[self.start..keep_from])?;
-        self.trace.flushed(&self.out[self.start..keep_from]);
         self.out.drain(self.start..keep_from);
         Ok(())
     }
@@ -707,8 +703,39 @@ impl<T: Trace> Encoder for AsnTextEncoder<'_, T> {
         self.error
     }
 
-    fn take_replaced(&mut self) -> Vec<ReplacedChar> {
-        self.trace.take()
+    fn take_replaced(&mut self) -> Vec<Replaced> {
+        std::mem::take(&mut self.replaced)
+    }
+}
+
+impl AsnTextEncoder<'_> {
+    /// The loop of `WriteString` (quoted at `visible_str`): without `REPLACE` a byte outside
+    /// 0x20..0x7E is the error `NonVisibleChar` and is not written, with it the byte is
+    /// recorded at its line (before its wrap, `replace`) and `#` is written in its place.
+    #[inline(always)]
+    fn write_string<const REPLACE: bool>(&mut self, value: &[u8]) {
+        self.put(b"\"");
+        for &byte in value {
+            let byte = if (0x20..=0x7e).contains(&byte) {
+                byte
+            } else if REPLACE {
+                self.replace(byte);
+                b'#'
+            } else {
+                if self.error.is_none() {
+                    self.error = Some(SerialError::NonVisibleChar(byte));
+                }
+                continue;
+            };
+            if self.line_length > STRING_WRAP {
+                self.put_eol_at_word_end(STRING_WRAP);
+            }
+            self.put(&[byte]);
+            if byte == b'"' {
+                self.put(b"\"");
+            }
+        }
+        self.put(b"\"");
     }
 }
 

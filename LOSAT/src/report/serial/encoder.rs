@@ -43,9 +43,9 @@ pub enum SerialError {
     JsonDouble(super::real::JsonDoubleError),
     /// A VisibleString byte outside 0x20..0x7E in the ASN.1 text or binary stream (in XML a
     /// control character other than TAB, LF and CR), which NCBI replaces by `#` with an error
-    /// message (`eFNP_ReplaceAndWarn`, `ReplacedChar`): an encoder without `Frames` reports it
-    /// here, and a caller that posts NCBI's messages writes the document again with `Frames`
-    /// (`ReplacedChar`); the other callers refuse such strings before the search.
+    /// message (`eFNP_ReplaceAndWarn`, `ReplacedChar`): `visible_str` reports it here; a
+    /// caller that posts NCBI's messages writes the document again through `Traced`
+    /// (`visible_str_replacing`), the other callers refuse such strings before the search.
     NonVisibleChar(u8),
     /// A NaN or an infinity in the ASN.1 binary stream, which NCBI marks with its own form
     /// byte and LOSAT does not write (no BLAST report has one).
@@ -150,12 +150,23 @@ pub enum StreamPosition {
 /// The text and binary streams pass the whole string as `str`, the XML stream `kEmptyStr`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReplacedChar {
-    /// `GetStackTrace()` (`Frames::stack_trace`).
+    /// `GetStackTrace()` (`Traced::stack_trace`).
     pub trace: String,
     pub byte: u8,
     pub position: StreamPosition,
-    /// The string that holds the byte (empty in XML).
-    pub string: Vec<u8>,
+    /// The string that holds the byte (empty in XML), one copy for the bytes of a string.
+    pub string: std::sync::Arc<[u8]>,
+}
+
+/// A byte that an encoder replaced by `#`, as the encoder knows it: `Traced` adds the stack
+/// trace and the string (`ReplacedChar`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Replaced {
+    pub byte: u8,
+    /// The position in the bytes that the encoder holds.
+    pub position: StreamPosition,
+    /// Whether NCBI's message quotes the string (the text and binary streams, not XML).
+    pub with_string: bool,
 }
 
 impl ReplacedChar {
@@ -180,202 +191,6 @@ impl ReplacedChar {
             message.extend_from_slice(&self.string);
         }
         message
-    }
-}
-
-/// What an encoder keeps for the posts of `ReplacedChar`. `NoTrace`, the default, keeps nothing
-/// and costs nothing: its encoder reports a replaced byte as `SerialError::NonVisibleChar`.
-/// `Frames` follows NCBI's object stack and the stream's position and records each replaced
-/// byte instead; a caller that posts NCBI's messages writes a document with `Frames` only when
-/// its first writing reported the error.
-pub trait Trace: Default {
-    /// Whether the encoder records `ReplacedChar`s (`Frames`).
-    const FRAMES: bool;
-    /// `WriteFileHeader(type)`: the bottom frame, the document's type.
-    fn document(&mut self, _type_name: &str) {}
-    /// `BeginClassMember` / `BeginChoiceVariant`: a frame named `name`.
-    fn push(&mut self, _name: &str) {}
-    /// `EndClassMember` / `EndChoiceVariant`.
-    fn pop(&mut self) {}
-    /// `BeginContainer`.
-    fn begin_list(&mut self) {}
-    /// `BeginContainerElement` (and the `EndContainerElement` of the element before).
-    fn element(&mut self) {}
-    /// `EndContainer` (and the `EndContainerElement` of the last element).
-    fn end_list(&mut self) {}
-    /// The bytes of the document that the encoder handed to its sink and dropped.
-    fn flushed(&mut self, _bytes: &[u8]) {}
-    /// A replaced byte of `string` at `position` (`Frames` only).
-    fn replaced(&mut self, _byte: u8, _position: StreamPosition, _string: &[u8]) {}
-    /// The line of the stream after the document's bytes `buffered` that the encoder still
-    /// holds (`Frames` only).
-    fn line(&mut self, _buffered: &[u8]) -> u64 {
-        0
-    }
-    /// The offset in the stream after the document's bytes `buffered` that the encoder still
-    /// holds (`Frames` only).
-    fn offset(&self, _buffered: &[u8]) -> u64 {
-        0
-    }
-    /// The replaced bytes recorded so far, which the trace forgets.
-    fn take(&mut self) -> Vec<ReplacedChar> {
-        Vec::new()
-    }
-}
-
-/// The encoders' default `Trace`: nothing kept.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NoTrace;
-
-impl Trace for NoTrace {
-    const FRAMES: bool = false;
-}
-
-/// A frame of NCBI's object stack that `GetStackTraceASN` reads.
-#[derive(Clone, Debug)]
-enum Frame {
-    /// A member or a choice variant: `.name`.
-    Named(String),
-    /// A container: nothing.
-    List,
-    /// A container element: `.E`.
-    Element,
-}
-
-/// NCBI's object stack and the stream's position, for the posts of `ReplacedChar`.
-#[derive(Clone, Debug, Default)]
-pub struct Frames {
-    root: String,
-    frames: Vec<Frame>,
-    /// The document's bytes that went to the sink, and the ends of line among them.
-    flushed_bytes: u64,
-    flushed_lines: u64,
-    /// The ends of line before `counted` in the bytes still held: the bytes before the last end
-    /// of line are final (the string wrap inserts its end of line into the last line only).
-    counted: usize,
-    counted_lines: u64,
-    replaced: Vec<ReplacedChar>,
-}
-
-impl Frames {
-    /// `CObjectStack::GetStackTraceASN`: the document's type, then `.name` for each member or
-    /// variant frame and `.E` for each container element.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:80-120
-    /// ```c++
-    ///     string stack = FetchFrameFromBottom(0).HasTypeInfo() ?
-    ///         FetchFrameFromBottom(0).m_TypeInfo->GetName() : "?";
-    ///     for ( size_t i = 1; i < GetStackDepth(); ++i ) {
-    ///         const TFrame& frame = FetchFrameFromBottom(i);
-    ///         switch ( frame.m_FrameType ) {
-    ///         case TFrame::eFrameClassMember:
-    ///         case TFrame::eFrameChoiceVariant:
-    ///             {
-    ///                 ...
-    ///                     const CMemberId& id = *frame.m_MemberId;
-    ///                     stack += '.';
-    ///                     if ( !id.GetName().empty() ) {
-    ///                         stack += id.GetName();
-    ///                     }
-    ///                     ...
-    ///             }
-    ///             break;
-    ///         case TFrame::eFrameArrayElement:
-    ///             stack += ".E";
-    ///             break;
-    ///         default:
-    ///             break;
-    ///         }
-    ///     }
-    ///     return stack;
-    /// ```
-    /// (A member without a name, `.[tag]`, is not in LOSAT's types.)
-    pub fn stack_trace(&self) -> String {
-        let mut stack = self.root.clone();
-        for frame in &self.frames {
-            match frame {
-                Frame::Named(name) => {
-                    stack.push('.');
-                    stack.push_str(name);
-                }
-                Frame::Element => stack.push_str(".E"),
-                Frame::List => {}
-            }
-        }
-        stack
-    }
-}
-
-impl Trace for Frames {
-    const FRAMES: bool = true;
-
-    fn document(&mut self, type_name: &str) {
-        self.root = type_name.to_string();
-    }
-
-    fn push(&mut self, name: &str) {
-        self.frames.push(Frame::Named(name.to_string()));
-    }
-
-    fn pop(&mut self) {
-        self.frames.pop();
-    }
-
-    fn begin_list(&mut self) {
-        self.frames.push(Frame::List);
-    }
-
-    fn element(&mut self) {
-        if matches!(self.frames.last(), Some(Frame::Element)) {
-            self.frames.pop();
-        }
-        self.frames.push(Frame::Element);
-    }
-
-    fn end_list(&mut self) {
-        if matches!(self.frames.last(), Some(Frame::Element)) {
-            self.frames.pop();
-        }
-        self.frames.pop();
-    }
-
-    fn flushed(&mut self, bytes: &[u8]) {
-        self.flushed_bytes += bytes.len() as u64;
-        self.flushed_lines += bytes.iter().filter(|&&byte| byte == b'\n').count() as u64;
-        self.counted = 0;
-        self.counted_lines = 0;
-    }
-
-    fn replaced(&mut self, byte: u8, position: StreamPosition, string: &[u8]) {
-        self.replaced.push(ReplacedChar {
-            trace: self.stack_trace(),
-            byte,
-            position,
-            string: string.to_vec(),
-        });
-    }
-
-    fn line(&mut self, buffered: &[u8]) -> u64 {
-        let end = buffered
-            .iter()
-            .rposition(|&byte| byte == b'\n')
-            .map_or(0, |at| at + 1);
-        if end > self.counted {
-            self.counted_lines += buffered[self.counted..end]
-                .iter()
-                .filter(|&&byte| byte == b'\n')
-                .count() as u64;
-            self.counted = end;
-        }
-        1 + self.flushed_lines + self.counted_lines
-    }
-
-    fn offset(&self, buffered: &[u8]) -> u64 {
-        self.flushed_bytes + buffered.len() as u64
-    }
-
-    fn take(&mut self) -> Vec<ReplacedChar> {
-        std::mem::take(&mut self.replaced)
     }
 }
 
@@ -440,6 +255,12 @@ pub trait Encoder {
     fn boolean(&mut self, value: bool);
     /// `WriteString` of a VisibleString.
     fn visible_str(&mut self, value: &[u8]);
+    /// `visible_str` that writes NCBI's `#` for each byte that NCBI's stream replaces and
+    /// records it (`Replaced`, `take_replaced`) instead of the error `NonVisibleChar`: what
+    /// `Traced` calls. The default is `visible_str` (an encoder that replaces nothing).
+    fn visible_str_replacing(&mut self, value: &[u8]) {
+        self.visible_str(value);
+    }
     /// `WriteDouble` of a REAL.
     fn real(&mut self, value: f64);
     /// `WriteBytes` of an OCTET STRING (`Seq-data` `ncbi2na` and `ncbi4na`): in ASN.1 text
@@ -452,6 +273,11 @@ pub trait Encoder {
     /// text; the application tag 0x41, the length and the bytes in ASN.1 binary.
     fn string_store(&mut self, value: &[u8]) {
         self.visible_str(value);
+    }
+    /// `string_store` with `visible_str_replacing`'s replacement where the stream checks a
+    /// StringStore (ASN.1 text); the default is `string_store`.
+    fn string_store_replacing(&mut self, value: &[u8]) {
+        self.string_store(value);
     }
     /// The bytes that `flush_to` would hand over (0 for an encoder that cannot flush).
     fn buffered(&self) -> usize {
@@ -487,9 +313,247 @@ pub trait Encoder {
     }
     /// The first error raised while writing (the document is then not written), if any.
     fn error(&self) -> Option<SerialError>;
-    /// The bytes replaced so far by an encoder with `Frames` (`ReplacedChar`), which it forgets;
-    /// none for the other encoders.
-    fn take_replaced(&mut self) -> Vec<ReplacedChar> {
+    /// The bytes that `visible_str_replacing` and `string_store_replacing` replaced so far
+    /// (`Replaced`), which the encoder forgets. `Traced` takes them after each string and
+    /// returns `ReplacedChar`s from its `take_replaced_chars`.
+    fn take_replaced(&mut self) -> Vec<Replaced> {
         Vec::new()
+    }
+}
+
+/// A frame of NCBI's object stack that `GetStackTraceASN` reads.
+#[derive(Clone, Debug)]
+enum Frame {
+    /// A member or a choice variant: `.name`.
+    Named(String),
+    /// A container: nothing.
+    List,
+    /// A container element: `.E`.
+    Element,
+}
+
+/// The encoder `E` (ASN.1 text, ASN.1 binary, or XML in the archive's object mode, whose
+/// `variant_string_list` is the trait's sequence of calls; not the standard-XML mode of outfmt
+/// 14 / 16, which writes it otherwise) with NCBI's object stack, for the posts of the bytes that
+/// it replaces (`ReplacedChar`). A caller that posts NCBI's messages
+/// writes a document again through it when the first writing reported
+/// `SerialError::NonVisibleChar`; it writes the strings with `visible_str_replacing`. The
+/// encoders by themselves keep no stack and replace nothing, so that the documents without
+/// such a byte are written as before.
+///
+/// The whole document stays in `E`'s buffer until `flush_to(.., true)` (a flush before the end
+/// does nothing), so that the encoder's positions count from the document's start: the text
+/// and XML encoders count the lines from their start, and `base` is the length of the binary
+/// encoder's buffer before the document.
+///
+/// (NCBI's XML stream pushes no container element frame for an element of a named type
+/// (`WillHaveName`, objostrxml.cpp:1186-1209), so its trace has no `.E` there; no XML document
+/// that LOSAT traces has such a list with a string that can hold a control character.)
+pub struct Traced<E> {
+    inner: E,
+    base: u64,
+    root: String,
+    frames: Vec<Frame>,
+    replaced: Vec<ReplacedChar>,
+}
+
+/// The empty string of the XML stream's messages.
+fn no_string() -> std::sync::Arc<[u8]> {
+    std::sync::Arc::from(&[][..])
+}
+
+impl<E: Encoder> Traced<E> {
+    /// `inner`, which appends a document to a buffer of `base` bytes.
+    pub fn new(inner: E, base: usize) -> Self {
+        Self {
+            inner,
+            base: base as u64,
+            root: String::new(),
+            frames: Vec::new(),
+            replaced: Vec::new(),
+        }
+    }
+
+    /// `CObjectStack::GetStackTraceASN`: the document's type, then `.name` for each member or
+    /// variant frame and `.E` for each container element.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:80-120
+    /// ```c++
+    ///     string stack = FetchFrameFromBottom(0).HasTypeInfo() ?
+    ///         FetchFrameFromBottom(0).m_TypeInfo->GetName() : "?";
+    ///     for ( size_t i = 1; i < GetStackDepth(); ++i ) {
+    ///         const TFrame& frame = FetchFrameFromBottom(i);
+    ///         switch ( frame.m_FrameType ) {
+    ///         case TFrame::eFrameClassMember:
+    ///         case TFrame::eFrameChoiceVariant:
+    ///             {
+    ///                 ...
+    ///                     const CMemberId& id = *frame.m_MemberId;
+    ///                     stack += '.';
+    ///                     if ( !id.GetName().empty() ) {
+    ///                         stack += id.GetName();
+    ///                     }
+    ///                     ...
+    ///             }
+    ///             break;
+    ///         case TFrame::eFrameArrayElement:
+    ///             stack += ".E";
+    ///             break;
+    ///         default:
+    ///             break;
+    ///         }
+    ///     }
+    ///     return stack;
+    /// ```
+    /// (A member without a name, `.[tag]`, is not in LOSAT's types.)
+    pub fn stack_trace(&self) -> String {
+        let mut stack = self.root.clone();
+        for frame in &self.frames {
+            match frame {
+                Frame::Named(name) => {
+                    stack.push('.');
+                    stack.push_str(name);
+                }
+                Frame::Element => stack.push_str(".E"),
+                Frame::List => {}
+            }
+        }
+        stack
+    }
+
+    /// Takes the bytes that `inner` replaced in `string`, which it just wrote, with the stack
+    /// trace and one shared copy of the string.
+    fn collect(&mut self, string: &[u8]) {
+        let replaced = self.inner.take_replaced();
+        if replaced.is_empty() {
+            return;
+        }
+        let trace = self.stack_trace();
+        let shared: std::sync::Arc<[u8]> = std::sync::Arc::from(string);
+        for byte in replaced {
+            let position = match byte.position {
+                StreamPosition::Byte(offset) => StreamPosition::Byte(offset - self.base),
+                line => line,
+            };
+            self.replaced.push(ReplacedChar {
+                trace: trace.clone(),
+                byte: byte.byte,
+                position,
+                string: if byte.with_string {
+                    shared.clone()
+                } else {
+                    no_string()
+                },
+            });
+        }
+    }
+
+    /// The bytes replaced so far (`ReplacedChar`), which it forgets.
+    pub fn take_replaced_chars(&mut self) -> Vec<ReplacedChar> {
+        std::mem::take(&mut self.replaced)
+    }
+
+    /// `EndContainerElement` of the open element, if any.
+    fn end_element(&mut self) {
+        if matches!(self.frames.last(), Some(Frame::Element)) {
+            self.frames.pop();
+        }
+    }
+}
+
+impl<E: Encoder> Encoder for Traced<E> {
+    fn writes_defaults(&self) -> bool {
+        self.inner.writes_defaults()
+    }
+    fn begin_document(&mut self, type_name: &str) {
+        self.root = type_name.to_string();
+        self.inner.begin_document(type_name);
+    }
+    fn end_document(&mut self) {
+        self.inner.end_document();
+    }
+    fn begin_sequence(&mut self, type_name: &str) {
+        self.inner.begin_sequence(type_name);
+    }
+    fn end_sequence(&mut self) {
+        self.inner.end_sequence();
+    }
+    fn begin_named(&mut self, type_name: &str) {
+        self.inner.begin_named(type_name);
+    }
+    fn end_named(&mut self) {
+        self.inner.end_named();
+    }
+    fn member(&mut self, name: &str, tag: u8) {
+        self.frames.push(Frame::Named(name.to_string()));
+        self.inner.member(name, tag);
+    }
+    fn end_member(&mut self) {
+        self.inner.end_member();
+        self.frames.pop();
+    }
+    fn begin_list(&mut self, set: bool) {
+        self.frames.push(Frame::List);
+        self.inner.begin_list(set);
+    }
+    fn element(&mut self) {
+        self.end_element();
+        self.frames.push(Frame::Element);
+        self.inner.element();
+    }
+    fn end_list(&mut self) {
+        self.end_element();
+        self.frames.pop();
+        self.inner.end_list();
+    }
+    fn variant(&mut self, type_name: &str, name: &str, tag: u8) {
+        self.frames.push(Frame::Named(name.to_string()));
+        self.inner.variant(type_name, name, tag);
+    }
+    fn end_variant(&mut self) {
+        self.inner.end_variant();
+        self.frames.pop();
+    }
+    fn int(&mut self, value: i32) {
+        self.inner.int(value);
+    }
+    fn big_int(&mut self, value: i64) {
+        self.inner.big_int(value);
+    }
+    fn enumerated(&mut self, name: &str, value: i32) {
+        self.inner.enumerated(name, value);
+    }
+    fn named_int(&mut self, name: &str, value: i32) {
+        self.inner.named_int(name, value);
+    }
+    fn boolean(&mut self, value: bool) {
+        self.inner.boolean(value);
+    }
+    fn visible_str(&mut self, value: &[u8]) {
+        self.inner.visible_str_replacing(value);
+        self.collect(value);
+    }
+    fn real(&mut self, value: f64) {
+        self.inner.real(value);
+    }
+    fn octets(&mut self, value: &[u8]) {
+        self.inner.octets(value);
+    }
+    fn string_store(&mut self, value: &[u8]) {
+        self.inner.string_store_replacing(value);
+        self.collect(value);
+    }
+    fn buffered(&self) -> usize {
+        self.inner.buffered()
+    }
+    fn flush_to(&mut self, sink: &mut dyn std::io::Write, all: bool) -> std::io::Result<()> {
+        if all {
+            self.inner.flush_to(sink, true)
+        } else {
+            Ok(())
+        }
+    }
+    fn error(&self) -> Option<SerialError> {
+        self.inner.error()
     }
 }

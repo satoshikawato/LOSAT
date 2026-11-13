@@ -32,7 +32,7 @@
 //! }
 //! ```
 
-use super::encoder::{Encoder, Frames, NoTrace, ReplacedChar, SerialError, StreamPosition, Trace};
+use super::encoder::{Encoder, Replaced, SerialError, StreamPosition};
 use super::real::double_to_string_posix;
 
 /// `DBL_DIG`: the precision of `WriteDouble` (`WriteDouble2(data, DBL_DIG)`).
@@ -59,52 +59,74 @@ const INDEFINITE_LENGTH: u8 = 0x80;
 const REAL_DECIMAL: u8 = 0x00;
 
 /// The ASN.1 binary encoder, appending one document to `out`.
-///
-/// `T` keeps what NCBI's posts of a replaced byte need (`Trace`); `start` is where the document
-/// starts in `out` until the first flush.
-pub struct AsnBinaryEncoder<'b, T: Trace = NoTrace> {
+pub struct AsnBinaryEncoder<'b> {
     out: &'b mut Vec<u8>,
-    start: usize,
     error: Option<SerialError>,
-    trace: T,
+    /// The bytes that `visible_str_replacing` replaced (`replace`).
+    replaced: Vec<Replaced>,
 }
 
 impl<'b> AsnBinaryEncoder<'b> {
     /// An encoder that appends a document to `out`.
     pub fn new(out: &'b mut Vec<u8>) -> Self {
-        Self::with_trace(out)
-    }
-}
-
-impl<'b> AsnBinaryEncoder<'b, Frames> {
-    /// `new` with `Frames`: a replaced byte is a `ReplacedChar` (`take_replaced`), not an error.
-    pub fn traced(out: &'b mut Vec<u8>) -> Self {
-        Self::with_trace(out)
-    }
-}
-
-impl<'b, T: Trace> AsnBinaryEncoder<'b, T> {
-    fn with_trace(out: &'b mut Vec<u8>) -> Self {
-        let start = out.len();
         Self {
             out,
-            start,
             error: None,
-            trace: T::default(),
+            replaced: Vec::new(),
         }
     }
 
-    /// `ReplaceVisibleChar` of the byte `byte` of `string`, at its offset in the stream
-    /// (`ReplacedChar`; without `Frames`, `SerialError::NonVisibleChar`).
+    /// `ReplaceVisibleChar` of the byte `byte`, at its offset in the buffer (`Replaced`;
+    /// `encoder::Traced` makes it the offset in the document); `write_string` then writes `#`.
     #[cold]
     #[inline(never)]
-    fn replace(&mut self, byte: u8, string: &[u8]) {
-        if T::FRAMES {
-            let offset = self.trace.offset(&self.out[self.start..]);
-            self.trace
-                .replaced(byte, StreamPosition::Byte(offset), string);
-        } else if self.error.is_none() {
-            self.error = Some(SerialError::NonVisibleChar(byte));
+    fn replace(&mut self, byte: u8) {
+        self.replaced.push(Replaced {
+            byte,
+            position: StreamPosition::Byte(self.out.len() as u64),
+            with_string: true,
+        });
+    }
+
+    /// The bytes of `WriteString` of a VisibleString: a byte outside 0x20..0x7E is written as
+    /// `#`, the error `NonVisibleChar` without `REPLACE`, recorded at its offset with it
+    /// (`replace`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:841-865
+    /// ```c++
+    ///     WriteLength(length - fixed);
+    ///     if ( type == eStringTypeVisible && x_FixCharsMethod() != eFNP_Allow ) {
+    ///         size_t done = 0;
+    ///         for ( size_t i = 0; i < length; ++i ) {
+    ///             char c = str[i];
+    ///             if ( !GoodVisibleChar(c) ) {
+    ///                 ...
+    ///                 if ( i > done ) {
+    ///                     WriteBytes(str.data() + done, i - done);
+    ///                 }
+    ///                 c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, str, x_FixCharsSubst());
+    ///                 if (c != 0) {
+    ///                     WriteByte(c);
+    ///                 }
+    ///                 done = i + 1;
+    ///             }
+    ///         }
+    /// ```
+    #[inline(always)]
+    fn write_string<const REPLACE: bool>(&mut self, value: &[u8]) {
+        self.out.push(TAG_VISIBLE_STRING);
+        self.length(value.len());
+        for &byte in value {
+            if (0x20..=0x7e).contains(&byte) {
+                self.out.push(byte);
+            } else {
+                if REPLACE {
+                    self.replace(byte);
+                } else if self.error.is_none() {
+                    self.error = Some(SerialError::NonVisibleChar(byte));
+                }
+                self.out.push(b'#');
+            }
         }
     }
 
@@ -219,12 +241,10 @@ impl<'b, T: Trace> AsnBinaryEncoder<'b, T> {
     }
 }
 
-impl<T: Trace> Encoder for AsnBinaryEncoder<'_, T> {
+impl Encoder for AsnBinaryEncoder<'_> {
     /// `WriteFileHeader` writes nothing in the binary stream (the type name `Seq-annot ::=`
     /// belongs to the text stream).
-    fn begin_document(&mut self, type_name: &str) {
-        self.trace.document(type_name);
-    }
+    fn begin_document(&mut self, _type_name: &str) {}
 
     /// No separator follows a binary document (`SetAutoSeparator` is not set).
     fn end_document(&mut self) {}
@@ -240,41 +260,33 @@ impl<T: Trace> Encoder for AsnBinaryEncoder<'_, T> {
         self.end_of_content();
     }
 
-    fn member(&mut self, name: &str, tag: u8) {
-        self.trace.push(name);
+    fn member(&mut self, _name: &str, tag: u8) {
         self.context_open(tag);
     }
 
     fn end_member(&mut self) {
-        self.trace.pop();
         self.end_of_content();
     }
 
     /// `BeginContainer`: `30 80` for a SEQUENCE OF, `31 80` for a SET OF
     /// (`MakeContainerTagByte`).
     fn begin_list(&mut self, set: bool) {
-        self.trace.begin_list();
         self.out
             .extend_from_slice(&[if set { TAG_SET } else { TAG_SEQUENCE }, INDEFINITE_LENGTH]);
     }
 
     /// `BeginContainerElement` writes nothing: the element writes its own tag.
-    fn element(&mut self) {
-        self.trace.element();
-    }
+    fn element(&mut self) {}
 
     fn end_list(&mut self) {
-        self.trace.end_list();
         self.end_of_content();
     }
 
-    fn variant(&mut self, _type_name: &str, name: &str, tag: u8) {
-        self.trace.push(name);
+    fn variant(&mut self, _type_name: &str, _name: &str, tag: u8) {
         self.context_open(tag);
     }
 
     fn end_variant(&mut self) {
-        self.trace.pop();
         self.end_of_content();
     }
 
@@ -329,42 +341,15 @@ impl<T: Trace> Encoder for AsnBinaryEncoder<'_, T> {
     }
 
     /// `WriteString` of a VisibleString: the tag, the length and the bytes. A byte outside
-    /// 0x20..0x7E is written as `#`, NCBI's replacement, reported at its offset (`replace`).
-    ///
-    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:841-865
-    /// ```c++
-    ///     WriteLength(length - fixed);
-    ///     if ( type == eStringTypeVisible && x_FixCharsMethod() != eFNP_Allow ) {
-    ///         size_t done = 0;
-    ///         for ( size_t i = 0; i < length; ++i ) {
-    ///             char c = str[i];
-    ///             if ( !GoodVisibleChar(c) ) {
-    ///                 ...
-    ///                 if ( i > done ) {
-    ///                     WriteBytes(str.data() + done, i - done);
-    ///                 }
-    ///                 c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, str, x_FixCharsSubst());
-    ///                 if (c != 0) {
-    ///                     WriteByte(c);
-    ///                 }
-    ///                 done = i + 1;
-    ///             }
-    ///         }
-    ///         if ( done < length ) {
-    ///             WriteBytes(str.data() + done, length - done);
-    ///         }
-    /// ```
+    /// 0x20..0x7E is replaced by NCBI (`eFNP_ReplaceAndWarn`, as in the text stream): here an
+    /// error (`write_string`).
     fn visible_str(&mut self, value: &[u8]) {
-        self.out.push(TAG_VISIBLE_STRING);
-        self.length(value.len());
-        for &byte in value {
-            if (0x20..=0x7e).contains(&byte) {
-                self.out.push(byte);
-            } else {
-                self.replace(byte, value);
-                self.out.push(b'#');
-            }
-        }
+        self.write_string::<false>(value);
+    }
+
+    /// `visible_str` that records each replaced byte (`replace`) instead of the error.
+    fn visible_str_replacing(&mut self, value: &[u8]) {
+        self.write_string::<true>(value);
     }
 
     /// `WriteDouble2(data, DBL_DIG)`: `09`, the length, the decimal form byte 0 and the
@@ -417,10 +402,6 @@ impl<T: Trace> Encoder for AsnBinaryEncoder<'_, T> {
 
     fn flush_to(&mut self, sink: &mut dyn std::io::Write, _all: bool) -> std::io::Result<()> {
         sink.write_all(self.out)?;
-        if T::FRAMES {
-            self.trace.flushed(&self.out[self.start..]);
-            self.start = 0;
-        }
         self.out.clear();
         Ok(())
     }
@@ -444,7 +425,7 @@ impl<T: Trace> Encoder for AsnBinaryEncoder<'_, T> {
         self.error
     }
 
-    fn take_replaced(&mut self) -> Vec<ReplacedChar> {
-        self.trace.take()
+    fn take_replaced(&mut self) -> Vec<Replaced> {
+        std::mem::take(&mut self.replaced)
     }
 }

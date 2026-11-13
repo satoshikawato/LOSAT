@@ -138,6 +138,7 @@ impl Diag<'_> {
     /// `Error: (803.7) <prefix> <message>`).
     pub(crate) fn post_replaced(&mut self, replaced: &[ReplacedChar]) {
         for byte in replaced {
+            debug_assert!(!byte.trace.is_empty(), "a byte replaced through `Traced`");
             self.err_post_code_bytes(Some(ReplacedChar::ERR_CODE), &byte.message());
         }
     }

@@ -15,7 +15,7 @@ use crate::report::defline::generate_bioseq_defline;
 use crate::report::seqid::SeqId;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
-use crate::report::serial::encoder::{Encoder, ReplacedChar, SerialError};
+use crate::report::serial::encoder::{Encoder, ReplacedChar, SerialError, Traced};
 use crate::report::serial::xml::XmlEncoder;
 use crate::seqdb::mask::FilterProgram;
 use crate::seqid::label::bioseq_fasta;
@@ -344,7 +344,7 @@ enum Document<'a> {
 
 /// `os << MSerial_<format> << object`: one document in `serial`, and the bytes that NCBI's
 /// stream writes as `#` with an error message (`ReplacedChar`). A document with such a byte is
-/// written again with the encoder's `Frames`, which knows the messages.
+/// written again through `Traced`, which knows the messages.
 fn write_document(
     serial: Serial,
     document: &Document<'_>,
@@ -365,13 +365,14 @@ fn write_document(
         out.truncate(start);
         error = match serial {
             Serial::AsnText => {
-                encode_traced(&mut AsnTextEncoder::traced(out), document, &mut replaced)
+                encode_traced(AsnTextEncoder::new(out), start, document, &mut replaced)
             }
             Serial::AsnBinary => {
-                encode_traced(&mut AsnBinaryEncoder::traced(out), document, &mut replaced)
+                encode_traced(AsnBinaryEncoder::new(out), start, document, &mut replaced)
             }
             Serial::Xml => encode_traced(
-                &mut XmlEncoder::ncbi_object_traced(out, module),
+                XmlEncoder::ncbi_object(out, module),
+                start,
                 document,
                 &mut replaced,
             ),
@@ -385,20 +386,26 @@ fn write_document(
     }
 }
 
-/// `encode` with an encoder that records the replaced bytes, which go to `replaced`.
+/// `encode` through `Traced` of `enc`, which appends to a buffer of `start` bytes; the replaced
+/// bytes go to `replaced`.
 fn encode_traced<E: Encoder>(
-    enc: &mut E,
+    enc: E,
+    start: usize,
     document: &Document<'_>,
     replaced: &mut Vec<ReplacedChar>,
 ) -> Option<SerialError> {
-    let error = encode(enc, document);
-    *replaced = enc.take_replaced();
+    let mut enc = Traced::new(enc, start);
+    let error = encode(&mut enc, document);
+    *replaced = enc.take_replaced_chars();
     error
 }
 
 /// NCBI's posts of the bytes that its stream replaced in a document (`Diag::post_replaced`),
 /// which come while the document is written: the output written before goes first (NCBI's
-/// `cerr` is tied to `cout`), the document after (it is in the serial stream's buffer).
+/// `cerr` is tied to `cout`), then the posts, then the document. (NCBI's serial buffer,
+/// `COStreamBuffer` of 4096 bytes, hands the start of a longer document to the output while it
+/// writes it, so with the output and the diagnostics in one file NCBI's posts of later bytes
+/// come after that start; LOSAT does not reproduce those flush points.)
 fn post_document(replaced: &[ReplacedChar], out: &mut dyn Write, diag: &mut Diag) {
     if !replaced.is_empty() {
         let _ = out.flush();

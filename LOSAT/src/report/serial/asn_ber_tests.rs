@@ -4,7 +4,7 @@
 //! do not hold (an integer of three or four bytes, a string of 128 bytes or more).
 
 use super::asn_ber::AsnBinaryEncoder;
-use super::encoder::{Encoder, ReplacedChar, SerialError, StreamPosition};
+use super::encoder::{Encoder, ReplacedChar, SerialError, StreamPosition, Traced};
 
 /// The bytes that `write` makes the encoder append.
 fn bytes(write: impl FnOnce(&mut AsnBinaryEncoder<'_>)) -> Vec<u8> {
@@ -104,17 +104,20 @@ fn visible_strings_have_short_and_long_lengths() {
     );
 }
 
-/// A byte outside 0x20..0x7E is an error without `Frames`, as in the ASN.1 text encoder.
+/// A byte outside 0x20..0x7E is `#` and an error, as in the ASN.1 text encoder (through
+/// `Traced` a record, no error).
 #[test]
 fn a_non_visible_byte_is_an_error() {
     let mut buf = Vec::new();
     let mut enc = AsnBinaryEncoder::new(&mut buf);
     enc.visible_str(b"a\tb");
     assert_eq!(enc.error(), Some(SerialError::NonVisibleChar(b'\t')));
+    assert_eq!(buf, b"\x1a\x03a#b");
 }
 
-/// With `Frames`, a byte outside 0x20..0x7E is `#` and a `ReplacedChar` at its offset in the
-/// stream (bytes already flushed count), with NCBI's stack trace: members and variants by name,
+/// Through `Traced`, a byte outside 0x20..0x7E is `#` and a `ReplacedChar` at its offset in the
+/// document (from the buffer's length before it; a flush before the end keeps the document),
+/// with NCBI's stack trace: members and variants by name,
 /// `.E` for a container element, nothing for named types and classes (`GetStackTraceASN`;
 /// NCBI 2.17.0 convert2blastmask, probe RG K/k4/probe case c_bin_e: `Bad char [0xC3] in string
 /// at byte 20` for the string's first byte at offset 20).
@@ -122,7 +125,8 @@ fn a_non_visible_byte_is_an_error() {
 fn with_frames_a_non_visible_byte_is_replaced_at_its_offset() {
     let mut sink = Vec::new();
     let mut buf = Vec::new();
-    let mut enc = AsnBinaryEncoder::traced(&mut buf);
+    buf.extend_from_slice(b"before");
+    let mut enc = Traced::new(AsnBinaryEncoder::new(&mut buf), 6);
     enc.begin_document("Seq-loc");
     enc.variant("Seq-loc", "packed-int", 5);
     enc.begin_named("Packed-seqint");
@@ -151,8 +155,9 @@ fn with_frames_a_non_visible_byte_is_replaced_at_its_offset() {
     enc.end_member();
     enc.end_document();
     assert_eq!(enc.error(), None);
-    let replaced = enc.take_replaced();
+    let replaced = enc.take_replaced_chars();
     enc.flush_to(&mut sink, true).unwrap();
+    let sink = sink[6..].to_vec();
     let first = sink.iter().position(|&byte| byte == b'#').unwrap() as u64;
     let last = sink.iter().rposition(|&byte| byte == b'#').unwrap() as u64;
     assert_eq!(
@@ -162,13 +167,13 @@ fn with_frames_a_non_visible_byte_is_replaced_at_its_offset() {
                 trace: "Seq-loc.packed-int.E.id.local.str".to_string(),
                 byte: b'\t',
                 position: StreamPosition::Byte(first),
-                string: b"b\tc".to_vec(),
+                string: std::sync::Arc::from(&b"b\tc"[..]),
             },
             ReplacedChar {
                 trace: "Seq-loc.x".to_string(),
                 byte: 0xff,
                 position: StreamPosition::Byte(last),
-                string: b"\xff".to_vec(),
+                string: std::sync::Arc::from(&b"\xff"[..]),
             },
         ]
     );

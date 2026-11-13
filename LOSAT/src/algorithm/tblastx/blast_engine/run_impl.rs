@@ -6475,8 +6475,8 @@ fn search_query_batch<S: TbxScore>(
             // BLASTP's `s_BlastAaExtendOneHit` with the search's matrix (`extend_one_hit_for`),
             // on the context's letters and the chunk's, as the two-hit extensions read them. The
             // unit path and `scan_chunk_bucketed` are two-hit only: a batch of window 0 is a
-            // `debugging` one for `x_pair_par::decide` (the reference loop), and `scan_chunk` takes
-            // this closure for every chunk.
+            // `reference_loop` one for `x_pair_par::decide`, and `scan_chunk` takes this closure
+            // for every chunk.
             let scan_chunk_one_hit = |chunk: SubjectChunk,
                                       offset_pairs: &mut [OffsetPair],
                                       diag_array: &mut [DiagStruct],
@@ -6595,6 +6595,14 @@ fn search_query_batch<S: TbxScore>(
                                 wordsize_usize,
                             ) else {
                                 // A word past the letters, which the scan does not give.
+                                x_read_failure.fail(
+                                    s_idx,
+                                    anyhow::anyhow!(
+                                        "TBLASTX -window_size 0: the word at query offset {} and subject offset {} is past the letters (internal error)",
+                                        query_offset,
+                                        subject_offset
+                                    ),
+                                );
                                 continue;
                             };
                             let hit = result.ungapped_data;
@@ -6615,17 +6623,19 @@ fn search_query_batch<S: TbxScore>(
                                     //         status = BLAST_LinkHsps(program_number, hsp_list_out,
                                     // ```
                                     // A word whose running sum is reset after its best part
-                                    // (possible below the default -threshold) gives an HSP whose
-                                    // length is not positive. NCBI links it with the others
-                                    // before `Blast_HSPListReevaluateUngapped` deletes it; the
+                                    // (possible with a low -threshold) gives an HSP whose length
+                                    // is not positive. NCBI links it with the others before
+                                    // `Blast_HSPListReevaluateUngapped` deletes it, a
+                                    // deterministic result that LOSAT is still to port (the
                                     // linking of LOSAT's TBLASTX takes HSPs of positive length
-                                    // only, so the search stops (the earliest such subject's
-                                    // error is reported, `XReadFailure`).
+                                    // only), so the search stops (the earliest such subject's
+                                    // error is reported, `XReadFailure`; the message names no
+                                    // value of the HSP, which may differ between chunks searched
+                                    // at the same time).
                                     x_read_failure.fail(
                                         s_idx,
                                         anyhow::anyhow!(
-                                            "TBLASTX -window_size 0: the one-hit word finder saved an ungapped alignment of length {} (a word whose running sum is reset after its best part, which a -threshold below the default allows); LOSAT does not support it (NCBI BLAST+ links it before re-evaluation deletes it)",
-                                            hit.length
+                                            "TBLASTX -window_size 0: the one-hit word finder saved an ungapped alignment whose length is not positive (a word whose running sum is reset after its best part, which a low -threshold allows); LOSAT does not support it yet (NCBI BLAST+ links it with the other alignments before its re-evaluation deletes it)"
                                         ),
                                     );
                                 } else {

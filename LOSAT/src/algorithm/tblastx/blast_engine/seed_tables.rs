@@ -176,7 +176,7 @@ pub(super) fn scan_tables<'b, S: TbxScore>(
             query_length,
             diag_array_size,
             subjects,
-            debugging: trace_hsp_target().is_some()
+            reference_loop: trace_hsp_target().is_some()
                 || scan_debug_range.is_some()
                 || extension_debug_enabled
                 || diag_enabled

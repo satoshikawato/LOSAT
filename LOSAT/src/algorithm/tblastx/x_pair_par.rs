@@ -844,7 +844,7 @@ pub(super) struct XBatch<'a, M: TbxScore = Blosum62Score> {
     /// A trace, debug or diagnostics switch is on, the subject has lower-case letters with
     /// `-lcase_masking`, or the word finder is the one-hit one (`-window_size 0`): they exist only
     /// in the reference loop.
-    pub debugging: bool,
+    pub reference_loop: bool,
     /// LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS or the parallel-chunk path is on.
     pub chunk_switches: bool,
     /// PAIRLUT: the groups built at the lookup build site (`lut_build`), or None.
@@ -879,7 +879,7 @@ pub(super) struct XGates<'a> {
     pub query_length: i32,
     pub diag_array_size: i32,
     pub subjects: crate::algorithm::tblastx::subjects::Subjects<'a>,
-    pub debugging: bool,
+    pub reference_loop: bool,
     pub chunk_switches: bool,
     /// The threads of the batch's search pool (`SearchPool::threads`).
     pub threads: usize,
@@ -913,7 +913,7 @@ pub(super) struct XGates<'a> {
 // same code.
 /// Whether the unit path runs for a batch.
 pub(super) fn decide(g: &XGates<'_>) -> XDecision {
-    if g.debugging || g.chunk_switches {
+    if g.reference_loop || g.chunk_switches {
         return XDecision::Gate;
     }
     let (max_context_len, longest_subject_chunk) = x_guard_lengths(g.contexts, g.subjects);
@@ -965,7 +965,7 @@ pub(super) fn decide_uncut(g: &XGates<'_>) -> XDecision {
             query_length: g.query_length,
             diag_array_size: g.diag_array_size,
             subjects: g.subjects,
-            debugging: g.debugging,
+            reference_loop: g.reference_loop,
             chunk_switches: g.chunk_switches,
             threads: g.threads,
             cost_gate: g.cost_gate,
@@ -1083,8 +1083,8 @@ pub(super) struct XLutEarly<'a, M: TbxScore = Blosum62Score> {
     pub threshold: i32,
     pub window: i32,
     pub subjects: crate::algorithm::tblastx::subjects::Subjects<'a>,
-    /// As `XBatch::debugging`.
-    pub debugging: bool,
+    /// As `XBatch::reference_loop`.
+    pub reference_loop: bool,
     /// `requested_parallel` and `use_serial_scan_chunks` of the batch (RI:2130, 2139).
     pub requested_parallel: bool,
     pub use_serial_scan_chunks: bool,
@@ -1228,7 +1228,7 @@ fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
         query_length,
         diag_array_size,
         subjects: e.subjects,
-        debugging: e.debugging,
+        reference_loop: e.reference_loop,
         chunk_switches: early_chunk_switches(
             e.requested_parallel,
             e.use_serial_scan_chunks,
@@ -2106,7 +2106,7 @@ impl<M: TbxScore> XPairPar<M> {
                 query_length: b.query_length,
                 diag_array_size: b.diag_array_size,
                 subjects: b.subjects,
-                debugging: b.debugging,
+                reference_loop: b.reference_loop,
                 chunk_switches: b.chunk_switches,
                 threads: b.threads,
                 cost_gate: cost_gate(),
@@ -5221,13 +5221,13 @@ mod tests {
         ];
         let none: [FastaRecord; 0] = [];
         let decision_band =
-            |subjects: &[FastaRecord], debugging: bool, chunk_switches: bool, band: bool| {
+            |subjects: &[FastaRecord], reference_loop: bool, chunk_switches: bool, band: bool| {
                 decide(&XGates {
                     contexts: &contexts,
                     query_length,
                     diag_array_size,
                     subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(subjects),
-                    debugging,
+                    reference_loop,
                     chunk_switches,
                     threads: 1,
                     cost_gate: false,
@@ -5237,8 +5237,8 @@ mod tests {
                     unit_mask: false,
                 })
             };
-        let decision = |subjects: &[FastaRecord], debugging: bool, chunk_switches: bool| {
-            decision_band(subjects, debugging, chunk_switches, false)
+        let decision = |subjects: &[FastaRecord], reference_loop: bool, chunk_switches: bool| {
+            decision_band(subjects, reference_loop, chunk_switches, false)
         };
         assert_eq!(decision(&short, false, false), XDecision::Units);
         assert_eq!(decision(&none, false, false), XDecision::Units);
@@ -5260,13 +5260,13 @@ mod tests {
         assert!(x_band_fits(256, 256) && !x_band_fits(257, 256));
         // LOSAT_X_TBXUNITMASK: the memory rule is not applied where LOSAT_X_TBXQSLICE cuts no group
         // (small groups at one thread); the gates and the second guard still are.
-        let decision_mask = |subjects: &[FastaRecord], debugging: bool| {
+        let decision_mask = |subjects: &[FastaRecord], reference_loop: bool| {
             decide(&XGates {
                 contexts: &contexts,
                 query_length,
                 diag_array_size,
                 subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(subjects),
-                debugging,
+                reference_loop,
                 chunk_switches: false,
                 threads: 1,
                 cost_gate: false,
@@ -5286,7 +5286,7 @@ mod tests {
                 query_length,
                 diag_array_size,
                 subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(&long),
-                debugging: false,
+                reference_loop: false,
                 chunk_switches: false,
                 threads: 1,
                 cost_gate: true,
@@ -5308,7 +5308,7 @@ mod tests {
             query_length,
             diag_array_size: wide,
             subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(&short),
-            debugging: false,
+            reference_loop: false,
             chunk_switches: false,
             threads: 1,
             cost_gate: false,
@@ -5356,7 +5356,7 @@ mod tests {
         let decision_at = |threshold: i32,
                            diag_array_size: i32,
                            subjects: &[FastaRecord],
-                           debugging: bool,
+                           reference_loop: bool,
                            threads: usize,
                            cost_gate: bool| {
             decide(&XGates {
@@ -5364,7 +5364,7 @@ mod tests {
                 query_length,
                 diag_array_size,
                 subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(subjects),
-                debugging,
+                reference_loop,
                 chunk_switches: false,
                 threads,
                 cost_gate,
@@ -5376,10 +5376,17 @@ mod tests {
         };
         let decision = |diag_array_size: i32,
                         subjects: &[FastaRecord],
-                        debugging: bool,
+                        reference_loop: bool,
                         threads: usize,
                         cost_gate: bool| {
-            decision_at(13, diag_array_size, subjects, debugging, threads, cost_gate)
+            decision_at(
+                13,
+                diag_array_size,
+                subjects,
+                reference_loop,
+                threads,
+                cost_gate,
+            )
         };
         // Without the gate nothing changes.
         for t in [1, 2, 8] {
@@ -5475,13 +5482,13 @@ mod tests {
                         threads: usize,
                         threshold: i32,
                         n1_gate: bool,
-                        debugging: bool| {
+                        reference_loop: bool| {
             decide(&XGates {
                 contexts: &contexts,
                 query_length,
                 diag_array_size: diag_array_size_for(query_length, 40),
                 subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(subjects),
-                debugging,
+                reference_loop,
                 chunk_switches: false,
                 threads,
                 cost_gate: true,
@@ -7064,7 +7071,7 @@ mod tests {
             query_length,
             diag_array_size,
             subjects,
-            debugging: false,
+            reference_loop: false,
             chunk_switches: false,
             threads,
             cost_gate: false,
@@ -7085,14 +7092,14 @@ mod tests {
         };
         assert_eq!(decide_uncut(&unmasked), XDecision::Guard);
         let gated = XGates {
-            debugging: true,
+            reference_loop: true,
             ..gates
         };
         assert_eq!(decide_uncut(&gated), XDecision::Gate);
         // Against `decide`'s statements with `x_band_masked` not reading the slicing rule, over
         // gates drawn at random (thread counts, switches, context and subject lengths, tables).
         let reference = |g: &XGates<'_>| -> XDecision {
-            if g.debugging || g.chunk_switches {
+            if g.reference_loop || g.chunk_switches {
                 return XDecision::Gate;
             }
             let (max_context_len, longest_subject_chunk) = x_guard_lengths(g.contexts, g.subjects);
@@ -7128,7 +7135,7 @@ mod tests {
                 query_length,
                 diag_array_size: diag_array_size_for(query_length, window),
                 subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(&records),
-                debugging: rng.below(8) == 0,
+                reference_loop: rng.below(8) == 0,
                 chunk_switches: rng.below(8) == 0,
                 threads: [1, 4, 8, 32][rng.below(4) as usize],
                 cost_gate: rng.below(2) == 0,

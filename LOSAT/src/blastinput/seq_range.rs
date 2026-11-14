@@ -8,7 +8,7 @@
 //! coordinates by the interval's start (`RemapToQueryLoc`, `s_RemapToSubjectLoc`) and
 //! print the record's length.
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 
 use crate::blastinput::app;
 use crate::blastinput::fasta_reader::InputRecord;
@@ -21,13 +21,6 @@ pub enum RangeRole {
 }
 
 impl RangeRole {
-    fn option(self) -> &'static str {
-        match self {
-            Self::Query => "-query_loc",
-            Self::Subject => "-subject_loc",
-        }
-    }
-
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1996-1998
     // ```c++
     //         m_Range = ParseSequenceRange(args[kArgQueryLocation].AsString(),
@@ -107,12 +100,19 @@ impl SequenceRange {
 ///             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
 ///             exit_code = BLAST_ENGINE_ERROR;                                 \
 /// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+/// ```c++
+///     catch (const CException& e) {                                           \
+///         LOG_POST(Error << "Error: " << e.what());                           \
+///         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+///     }                                                                       \
+/// ```
 /// `NStr::Split` keeps empty tokens (`1--5` has three, `-10` an empty first one).
-/// `NStr::StringToInt` converts the start, then the stop, before the other checks; a part
-/// that it cannot convert stops NCBI with a `CStringException`, whose text names the
-/// source files of the build (exit 255): LOSAT rejects that value explicitly, as it does
-/// the environment variables that NCBI converts the same way (plan TD-15).
-pub fn parse_sequence_range(value: &str, role: RangeRole, program: &str) -> Result<SequenceRange> {
+/// `NStr::StringToInt` (flags 0, `ncbi_str::string_to_int`) converts the start, then the stop,
+/// before the other checks; a part that it cannot convert (`a`, `1.5`, ` 5`) throws its
+/// `CStringException`, which ends the program with `CATCH_ALL`'s report (`NativeError::exception`,
+/// exit status 255) where the range is read, before anything is written.
+pub fn parse_sequence_range(value: &str, role: RangeRole) -> Result<SequenceRange> {
     let prefix = role.error_prefix();
     let tokens: Vec<&str> = value.split('-').collect();
     if tokens.len() != 2 || tokens[0].is_empty() || tokens[1].is_empty() {
@@ -120,13 +120,8 @@ pub fn parse_sequence_range(value: &str, role: RangeRole, program: &str) -> Resu
     }
     let mut numbers = [0i32; 2];
     for (number, token) in numbers.iter_mut().zip(&tokens) {
-        match crate::blastinput::query_batch::ncbi_string_to_int(std::ffi::OsStr::new(token)) {
-            Some(value) => *number = value,
-            None => bail!(
-                "the {} value {value:?} has a part {token:?} that NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's {program}",
-                role.option()
-            ),
-        }
+        *number = crate::ncbi_str::string_to_int(token.as_bytes(), 0)
+            .map_err(|e| crate::cli::NativeError::exception(&e))?;
     }
     let [from, to] = numbers;
     if from <= 0 || to <= 0 {
@@ -151,13 +146,9 @@ pub fn parse_sequence_range(value: &str, role: RangeRole, program: &str) -> Resu
 }
 
 /// Parses the range of a role when it was given (`args.Exist(...) && args[...]`).
-pub fn parse_optional_range(
-    value: Option<&str>,
-    role: RangeRole,
-    program: &str,
-) -> Result<Option<SequenceRange>> {
+pub fn parse_optional_range(value: Option<&str>, role: RangeRole) -> Result<Option<SequenceRange>> {
     value
-        .map(|value| parse_sequence_range(value, role, program))
+        .map(|value| parse_sequence_range(value, role))
         .transpose()
 }
 
@@ -253,6 +244,11 @@ impl Placements {
     /// Whether a range applies (some record may then be searched in part).
     pub fn ranged(&self) -> bool {
         !self.0.is_empty()
+    }
+
+    /// Where record `index`'s letters lie in the record, `None` without a range.
+    pub fn get(&self, index: usize) -> Option<RecordPlacement> {
+        self.0.get(index).copied()
     }
 }
 
@@ -626,7 +622,7 @@ mod tests {
     // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2802-2805 ParseSequenceRange_1BasedRange
     #[test]
     fn spellings_follow_ncbis_parser() {
-        let parse = |text: &str| parse_sequence_range(text, RangeRole::Query, "BLASTN");
+        let parse = |text: &str| parse_sequence_range(text, RangeRole::Query);
         assert_eq!(parse("10-20").unwrap(), SequenceRange { from: 9, to: 19 });
         assert_eq!(parse("+1-5").unwrap(), SequenceRange { from: 0, to: 4 });
         assert_eq!(parse("01-05").unwrap(), SequenceRange { from: 0, to: 4 });
@@ -655,24 +651,50 @@ mod tests {
             assert!(message(parse(text).unwrap_err()).contains("(range cannot be empty)"));
         }
         assert!(message(parse("20-10").unwrap_err()).contains("(start cannot be larger than stop)"));
-        for text in [
-            " 1-5",
-            "1-5 ",
-            "a-5",
-            "1-5a",
-            "1.0-5",
-            "0x10-0x20",
-            "1-2147483648",
-            "0-a",
+        // NCBI BLAST+ 2.17.0 blastn and blastp `-query_loc` / `-subject_loc` (env parity probe
+        // h_probe of 2026-11-12, cases `LOC.*`: `a-10`, `1-b`, `1-1.5`): the part that
+        // `NStr::StringToInt` cannot convert stops the program with its `CStringException`, the
+        // start before the stop.
+        let root = crate::ncbi_exception::NCBI_BUILD_ROOT;
+        for (text, part, line, kind, pos) in [
+            ("a-10", "a", 861, "Int8", 0),
+            ("1-b", "b", 861, "Int8", 0),
+            ("1-1.5", "1.5", 870, "Int8", 1),
+            (" 1-5", " 1", 861, "Int8", 0),
+            ("1-5 ", "5 ", 870, "Int8", 1),
+            ("1-5a", "5a", 870, "Int8", 1),
+            ("1.0-5", "1.0", 870, "Int8", 1),
+            ("0x10-0x20", "0x10", 870, "Int8", 1),
+            ("0-a", "a", 861, "Int8", 0),
+            ("1-2147483648", "2147483648", 640, "int, overflow", 0),
+            (
+                "1-99999999999999999999",
+                "99999999999999999999",
+                852,
+                "Int8, overflow",
+                18,
+            ),
         ] {
-            let error = message(parse(text).unwrap_err());
-            assert!(
-                error.contains("cannot convert to an int") && error.contains("LOSAT's BLASTN"),
-                "{text:?}: {error}"
+            let function = if line == 640 {
+                "StringToInt"
+            } else {
+                "StringToInt8"
+            };
+            let error = parse(text).unwrap_err();
+            let native = error
+                .downcast_ref::<crate::cli::NativeError>()
+                .expect("NCBI's exception");
+            assert_eq!(native.exit, 255, "{text:?}");
+            assert_eq!(
+                native.message,
+                format!(
+                    "Error: NCBI C++ Exception:\n    T0 \"{root}/src/corelib/ncbistr.cpp\", line {line}: Error: (CStringException::eConvert) ncbi::NStr::{function}() - Cannot convert string '{part}' to {kind} (m_Pos = {pos})\n\n"
+                ),
+                "{text:?}"
             );
         }
         assert!(
-            message(parse_sequence_range("5-3", RangeRole::Subject, "TBLASTN").unwrap_err())
+            message(parse_sequence_range("5-3", RangeRole::Subject).unwrap_err())
                 .starts_with("BLAST engine error: Invalid specification of subject location")
         );
     }

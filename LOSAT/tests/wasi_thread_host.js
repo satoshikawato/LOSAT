@@ -456,7 +456,7 @@ async function compileThreadedModule(wasmPath) {
 // module again on the shared memory (a new instance per guest thread, as before) and waits
 // for a start order, so a later search's `thread-spawn` takes it instead of booting a new
 // Node worker (about 20 ms each, one after another while the guest waits). This is what the
-// browser's thread host (web/app/src/infra/engine-worker/thread-host.ts) does. A command
+// browser's thread host (web/packages/losat/src/infra/engine-worker/thread-host.ts) does. A command
 // runs one search, so its workers still exit with their threads. The guest gets the same
 // threads in the same order; only the worker that runs each one changes.
 function recycleWorkers(kind) {

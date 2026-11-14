@@ -97,8 +97,9 @@ below only when its condition holds:
 
 ## GitHub CI
 
-A PR runs `ci.yml` (`rust` 15-18 min: lint, a build of about 8 min and three cargo-nextest
-shards of 4-7 min; `fast output regressions` about 15 min with all programs; runs of 2026-11-12)
+A PR runs `ci.yml` (`rust` 10-12 min: lint, the test build in two parts, the unit tests in about
+6 min and the rest in about 4, then six cargo-nextest shards of 3-5 min; `fast output regressions`
+9-13 min with all programs; runs of 2026-11-13 after #1088, 15-18 min before #1082, #1083 and #1088)
 and, when `web/**` or `LOSAT/src/**` changed, `web.yml` (12-14 min: reactors and native, then V-ABI
 quick, one process per reactor, and seven browser-engine shards, beside the FakeEngine application's
 tests in three browser jobs; 17 min p50 of 69 runs of 2026-11-12/13 before V-ABI's two processes,

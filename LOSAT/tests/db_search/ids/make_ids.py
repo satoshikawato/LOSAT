@@ -155,12 +155,24 @@ and `prd_ax` (A `gb|AAA00001.1|` 99990 and X `gb|XXX00001.1|` 150, a random sequ
 Where the reports read their subjects one by one (line DBID taxrow, review 3 H2 of pssmread), version 5:
 `txr_p` (protein, `txr_p.faa`) and `txr_n` (nucleotide, `txr_n.fna`, the proteins' back-translations), each a decoy
 `gb|DDD00001.1|` taxid 9606 without hits, A `gb|AAA00001.1|` taxid 9606 (the best hit of `txr_q.faa` / `txr_q.fna`;
-`txr_q2.*` add a query without hits) and B `gb|BBB00001.1|` taxid 99990, whose lookup writes the offset error of
-`tests/seqdb/taxdb/offset_last_past_end` (`txr.map`), for `tests/taxonomy_read_order.rs`; `txr_s` (protein,
+`txr_q2.*` add a query without hits; `txr_q3.faa` is `txr_q.faa`'s query twice) and B `gb|BBB00001.1|` taxid 99990,
+whose lookup writes the offset error of `tests/seqdb/taxdb/offset_last_past_end` (`txr.map`), for
+`tests/taxonomy_read_order.rs`; `txr_s` (protein,
 `txr_s.faa`) and `txr_sn` (nucleotide, `txr_s.fna`) for its `-sorthits` cases (line DBID taxrow2): the decoy, A and F
 `gb|FFF00001.1|` taxid 99990 (`txr_s.map`), the first 45 letters of `txr_q.faa` (135 of `txr_q.fna`), whose identities
 put it before A with `-sorthits 3` only.
 `--taxrow-only` builds only these.
+
+Text Seq-ids that differ only in the case of their letters in two databases (line DBID pircase), version 5, made from
+the FASTA of the same names: `pcs_pir_y` (Y `pir||PIRNAME`, the best hit of `pcs_q.faa`) and `pcs_pir_a` (A
+`pir||pirname`, B `gb|BBB00001.1|`), `pcs_prf_y` and `pcs_prf_a` (`prf||PRFNAME` and `prf||prfname`), `pcs_piracc_y`
+and `pcs_piracc_a` (`pir|ACC01.1|PIRNAME` and `pir|acc01.1|pirname`), `pcs_gb_y` and `pcs_gb_a` (the names alone
+`gb||locusy` and `gb||LOCUSY`), the controls `pcs_ctl_y` and `pcs_ctl_a` (`pir||PIRNAME` and `pir||PIRNAMX`),
+`pcs_embgb_y` and `pcs_embgb_a` (`gb||locusy` and `emb||LOCUSY`: another alternative) and `pcs_sptr_y` and
+`pcs_sptr_a` (`sp||NAMEY` and `tr||namey`: another release), and `pcs_ngb_y` and `pcs_ngb_a` (nucleotide, the
+proteins' back-translations, `gb||locusy` and `gb||LOCUSY`, query `pcs_q.fna`). NCBI's scope takes the two ids of a
+pair of one alternative and release for one and writes the names of the one it reads first for both; the keys of a name
+and of a FASTA text are as written. `--pircase-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
 `pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
@@ -362,6 +374,18 @@ def build_taxrow(args: argparse.Namespace) -> None:
             check=True, stdout=subprocess.DEVNULL)
 
 
+def build_pircase(args: argparse.Namespace) -> None:
+    for name, extension in (("pcs_pir_y", "faa"), ("pcs_pir_a", "faa"), ("pcs_prf_y", "faa"), ("pcs_prf_a", "faa"),
+                            ("pcs_piracc_y", "faa"), ("pcs_piracc_a", "faa"), ("pcs_gb_y", "faa"), ("pcs_gb_a", "faa"),
+                            ("pcs_ctl_y", "faa"), ("pcs_ctl_a", "faa"), ("pcs_embgb_y", "faa"), ("pcs_embgb_a", "faa"),
+                            ("pcs_sptr_y", "faa"), ("pcs_sptr_a", "faa"), ("pcs_ngb_y", "fna"), ("pcs_ngb_a", "fna")):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / f"{name}.{extension}"),
+             "-dbtype", "nucl" if extension == "fna" else "prot", "-parse_seqids", "-blastdb_version", "5",
+             "-title", f"{name} (parsed Seq-ids)", "-out", str(args.out / name)],
+            check=True, stdout=subprocess.DEVNULL)
+
+
 def build_join(args: argparse.Namespace) -> None:
     for name, fasta, dbtype, taxid in (("pjoin_a", "pjoin_a.faa", "prot", None), ("pjoin_b", "pjoin_b.faa", "prot", None),
                                        ("pjoin_c", "pjoin_c.faa", "prot", None), ("pjoin_bt", "pjoin_b.faa", "prot", "9606"),
@@ -402,6 +426,7 @@ def main() -> int:
     ap.add_argument("--pssmrows-only", action="store_true", help="build only the databases of line DBID pssmrows")
     ap.add_argument("--pssmread-only", action="store_true", help="build only the databases of line DBID pssmread")
     ap.add_argument("--taxrow-only", action="store_true", help="build only the databases of line DBID taxrow")
+    ap.add_argument("--pircase-only", action="store_true", help="build only the databases of line DBID pircase")
     args = ap.parse_args()
     if args.weak_only:
         build_weak(args)
@@ -438,6 +463,9 @@ def main() -> int:
         return 0
     if args.taxrow_only:
         build_taxrow(args)
+        return 0
+    if args.pircase_only:
+        build_pircase(args)
         return 0
     variants = [r for r in records(SEQID / "variants.fa") if r[1:].split()[0] not in DROPPED_VARIANTS]
     all_records = (records(SEQID / "prot_ids.fa") + records(SEQID / "prot_extra.fa") + variants

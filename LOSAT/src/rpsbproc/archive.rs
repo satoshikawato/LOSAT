@@ -42,7 +42,7 @@
 use std::io::Read;
 
 use crate::report::serial::asn_text_reader::{
-    is_first_id_char, AsnTextError, AsnTextErrorKind, Reader, Result, StreamSource,
+    AsnTextError, AsnTextErrorKind, Reader, Result, StreamSource,
 };
 use crate::report::serial::pssm::{SEQ_INST_MOL, SEQ_INST_REPR};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
@@ -697,7 +697,7 @@ impl<R: Read> ArchiveStream<R> {
             Err(error) => {
                 self.done = true;
                 match error.kind {
-                    AsnTextErrorKind::Format => Ok(None),
+                    AsnTextErrorKind::Format | AsnTextErrorKind::Eof => Ok(None),
                     AsnTextErrorKind::Unsupported => Err(error),
                 }
             }
@@ -717,22 +717,6 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     /// `ReadFileHeader` and the type check of the root reader, then the object.
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:709-721
-    // ```c++
-    // string CObjectIStreamAsn::ReadFileHeader()
-    // {
-    //     CTempString id = ReadTypeId(SkipWhiteSpace());
-    //     string s(id);
-    //     if ( SkipWhiteSpace() == ':' &&
-    //          m_Input.PeekCharNoEOF(1) == ':' &&
-    //          m_Input.PeekCharNoEOF(2) == '=' ) {
-    //         m_Input.SkipChars(3);
-    //     }
-    //     else
-    //         ThrowError(fFormatError, "'::=' expected");
-    //     return s;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:892-898
     // ```c++
     //     string name = ReadFileHeader();
@@ -742,22 +726,12 @@ impl<R: Read> ArchiveStream<R> {
     //                    "incompatible type "+name+"<>"+typeInfo->GetName());
     //     }
     // ```
-    // A type name in brackets (`ReadTypeId`, objistrasn.cpp:292-313) stops before its `]`, so
-    // the `::=` check that follows always fails.
     fn archive_object(&mut self) -> Result<Archive> {
         let r = &mut self.reader;
-        let c = r.skip_white_space()?;
-        if c == b'[' {
-            return Err(r.error("'::=' expected"));
-        }
-        let id = r.scan_end_of_id(is_first_id_char(c));
+        let id = r.file_header()?;
         if !id.is_empty() && r.bytes(id) != b"Blast4-archive" {
             return Err(r.error("incompatible type"));
         }
-        if r.skip_white_space()? != b':' || r.peek_at(1) != b':' || r.peek_at(2) != b'=' {
-            return Err(r.error("'::=' expected"));
-        }
-        r.pos += 3;
         let mut members = r.begin_members()?;
         let (mut request, mut results) = (None, None);
         while let Some(index) = self
@@ -1575,7 +1549,7 @@ impl<R: Read> ArchiveStream<R> {
     // ```
     // (`OBJECTS_SEQ_DESCR_ALLOW_EMPTY` is false unless the environment sets it, which LOSAT's
     // rpsbproc rejects (`reader_variable`), or a registry file does, which
-    // `check_ncbi_application_settings` rejects.)
+    // the application start rejects, `ApplicationStart::settings`.)
     fn seq_descr(&mut self, query: &mut Query) -> Result<()> {
         let mut count = 0usize;
         let mut block_start = self.reader.start_block()?;

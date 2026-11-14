@@ -1,3 +1,4 @@
+import type { OutputFormat, ProgramId } from 'losat/domain';
 // The verification badge of a run (plan §6.1, design §10.3, PD-LOSAT-WEB-APP-BOUNDARY
 // "Compatibility contract"). A run matches a certified profile only when its program and
 // options were compared byte for byte with NCBI BLAST+ for every output format (the records
@@ -11,8 +12,6 @@
 // and the certification records at build time (build/verification.ts); nobody writes it
 // by hand. The badge speaks about the engine, the options and the runtime path, never
 // about the user's inputs: no run is compared with NCBI when it runs.
-import type { OutputFormat } from './output-format';
-import type { ProgramId } from './programs';
 
 /** What the records show for one program. */
 export interface ProgramVerification {

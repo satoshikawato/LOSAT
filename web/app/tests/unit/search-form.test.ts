@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { toProgramDescription } from 'losat';
+import { REGION_FLAG, type ProgramId } from 'losat/domain';
 import { duplicateIds } from '../../src/domain/dataset';
 import { geneticCodeLabel } from '../../src/domain/genetic-codes';
 import {
@@ -29,28 +31,18 @@ import {
   COMPOSITION_MODES,
   fastaParser,
   MATRICES,
+  programById,
   PROGRAMS,
   PROTEIN_GAP_COSTS,
   PROTEIN_WORD_SIZES,
-  programById,
   residueUnit,
   searchSummary,
   searchSummaryParts,
   sequenceKind,
   type ParameterField,
-  type ProgramId,
 } from '../../src/domain/programs';
-import {
-  REGION_FLAG,
-  regionFromPositions,
-  regionProblem,
-  regionProblemFields,
-  regionRange,
-  regionValue,
-  swappedRegion,
-} from '../../src/domain/region';
+import { regionFromPositions, regionProblem, regionProblemFields, regionRange, regionValue, swappedRegion } from '../../src/domain/region';
 import { estimateKind, looksLikeOtherKind } from '../../src/domain/sequence-kind';
-import { toProgramDescription } from '../../src/infra/reactor/control';
 
 const valueOption = (flag: string, defaultValue?: string, choices?: readonly string[]): EngineOption => ({
   flag,

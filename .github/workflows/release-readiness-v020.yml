@@ -146,7 +146,7 @@ jobs:
           python3 LOSAT/tests/prepare_release_candidate_v020.py source \
             --repo-root . \
             --candidate-sha "$CANDIDATE_SHA" \
-            --crate "${package_target}/package/LOSAT-0.2.0.crate" \
+            --crate "${package_target}/package/losat-0.2.0.crate" \
             --output-dir .tmp/release-readiness/source
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -273,7 +273,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 
       - name: Build exact serial-Wasm release artifact
-        run: cd LOSAT && cargo build --release --target wasm32-wasip1 --no-default-features --locked
+        run: cd LOSAT && cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --locked
 
       - name: Assemble, extract, and smoke serial-Wasm artifact
         run: |
@@ -321,7 +321,7 @@ jobs:
       # The contract's build command. The shared-memory maximum is a link argument of the target's
       # rustflags in LOSAT/.cargo/config.toml; no RUSTFLAGS variable is set here.
       - name: Build exact threaded-Wasm release artifact
-        run: cd LOSAT && cargo build --release --target wasm32-wasip1-threads --features wasm-threads --locked
+        run: cd LOSAT && cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads --locked
 
       # The published threaded module carries the shared-memory guard (LOSAT/tests/wasi_shared_memory.js),
       # so that every host, browsers included, runs guarded bytes (release v0.2.0 DECISIONS 52). The
@@ -409,7 +409,7 @@ jobs:
           - artifact: rc-source-package
             runner: ubuntu-24.04
             target_triple: source
-            archive: LOSAT-0.2.0.crate
+            archive: losat-0.2.0.crate
             python: python3
             wasm: false
     runs-on: ${{ matrix.runner }}

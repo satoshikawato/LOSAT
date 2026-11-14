@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { toProgramDescription } from 'losat';
+import { CUSTOM_OUTPUT, type ProgramId } from 'losat/domain';
 import {
   buildArgv,
   commandWords,
@@ -13,9 +15,7 @@ import {
   splitOptions,
   toShellCommand,
 } from '../../src/domain/argv';
-import { CUSTOM_OUTPUT } from '../../src/domain/output-format';
-import { PROGRAMS, type ProgramId } from '../../src/domain/programs';
-import { toProgramDescription } from '../../src/infra/reactor/control';
+import { PROGRAMS } from '../../src/domain/programs';
 
 describe('buildArgv', () => {
   it('puts the program and input names first, then parameters in the given order', () => {
@@ -100,7 +100,7 @@ describe('buildArgv', () => {
   // others names -subject or -num_threads, which the browser sets itself.
   const extra = (program: ProgramId, words: readonly string[]) => () =>
     buildArgv({ program, queryName: 'q.fa', subjectName: 's.fa', parameters: [], extra: words });
-  it.each(['-h', '-help', '-help-full', '--help'])('refuses %s, which asks the CLI for its help, in a few words', (word) => {
+  it.each(['-h', '-help', '-help-full', '-xmlhelp', '--help'])('refuses %s, which asks the CLI for its help, in a few words', (word) => {
     for (const program of PROGRAMS) expect(extra(program.id, ['-evalue', '1', word]), program.id).toThrow(`${word} is not available in the browser`);
   });
 

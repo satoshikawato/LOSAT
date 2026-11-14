@@ -121,6 +121,9 @@ pub(super) struct TblastnTabular<'a> {
     /// The default report's tabular subject ids (`sseqid`, `sacc`, `saccver`), by subject index
     /// or rank (`stage_e_report::tabular_subject_ids`, `ReportedSubjects::tabular_subject_ids`).
     pub subject_ids: &'a [Arc<[u8]>],
+    /// The records of a subject set (`-subject`; the organism report shows their local ids and
+    /// titles).
+    pub subject_records: &'a [FastaRecord],
     pub shown: &'a ShownSubjects<'a>,
     /// By query: whether NCBI did not search its batch (outfmt 7's lines without a count).
     pub query_batch_skipped: &'a [bool],
@@ -199,7 +202,7 @@ fn reported_ranks(hitlists: &[KappaResultHitList]) -> impl Iterator<Item = usize
 pub(super) fn write_tblastn_tabular(
     tab: &TblastnTabular<'_>,
     hitlists: &[KappaResultHitList],
-    writer: &mut dyn Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     mut warnings: Option<&mut QueryWarnings<'_>>,
     mut probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
@@ -246,6 +249,47 @@ pub(super) fn write_tblastn_tabular(
         },
     };
     let names = tab.inputs.names.as_ref();
+    // Outfmt 18, the organism report: the `Query=` block shows the query record's length, also
+    // with `-query_loc` (as outfmt 0's).
+    if spec.kind == TabularKind::TaxReport {
+        let titles: Vec<_> = tab.queries.iter().map(FastaRecord::query_line).collect();
+        let queries: Vec<crate::report::tax_report::TaxQuery<'_>> = tab
+            .queries
+            .iter()
+            .zip(hitlists)
+            .enumerate()
+            .map(
+                |(q_idx, (query, hitlist))| crate::report::tax_report::TaxQuery {
+                    title: &titles[q_idx],
+                    length: tab.ranges.queries.length(q_idx, query.seq().len()),
+                    hsps: hitlist
+                        .lists()
+                        .iter()
+                        .flat_map(|list| {
+                            list.hsps.hsps.iter().zip(&list.payloads).map(
+                                move |(linked, payload)| crate::report::tax_report::TaxHsp {
+                                    subject: list.oid as usize,
+                                    evalue: linked.evalue,
+                                    bit_score: payload.bit_score,
+                                },
+                            )
+                        })
+                        .collect(),
+                },
+            )
+            .collect();
+        return crate::algorithm::common::tabular::write_tax_report(
+            &subjects,
+            tab.subject_records,
+            false,
+            tab.inputs.taxdb_found,
+            names,
+            PROGRAM,
+            &queries,
+            writer,
+            warnings,
+        );
+    }
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;
     // those of the other ids are `ReportedSubjects::tabular_subject_ids`'.
     if needs.all_deflines {

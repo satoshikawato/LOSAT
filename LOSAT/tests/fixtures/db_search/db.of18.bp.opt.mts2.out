@@ -1,0 +1,22 @@
+
+                                          Tax BLAST report                                          
+
+Query= pq1 query protein one
+
+Length=300
+
+                                           Organism Report                                           
+Accession                                      Description                           Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ XP_000101           subject one two HSPs                                              313   5e-109  
+ s3_local_identifier subject three with a title that is longer than the description... 247   4e-87   
+
+                                          Tax BLAST report                                          
+
+Query= pq2 unrelated query (no hits)
+
+Length=40
+
+                                           Organism Report                                           
+Accession...  Description... Score... E-value... 

@@ -20,8 +20,12 @@
 //! `-parse_seqids`) put tax ids on the definition lines and into the version 5
 //! tax id files (`taxid_set`).
 //!
-//! Not written: mask data and OID masks (`losat makeblastdb` refuses their options,
-//! `makeblastdb::UNSUPPORTED_OPTIONS`).
+//! Mask data (`-mask_data`, `-mask_id`, `-mask_desc`): the library writes the mask column of a
+//! volume (the files `.?aa`, `.?ab`, `.?ac`, version 4 and 5 alike) from the mask files that
+//! `mask_info` reads (ASN.1 text or binary, as dustmasker, segmasker, windowmasker and
+//! convert2blastmask write them) and `mask_data` turns into ranges per sequence, with or without
+//! `-parse_seqids`. `losat makeblastdb` refuses `-gi_mask`, `-gi_mask_name`, `-oid_masks` and
+//! the other options of `makeblastdb::UNSUPPORTED_OPTIONS`.
 
 pub mod bioseq;
 pub mod build_db;
@@ -38,6 +42,8 @@ pub(crate) mod isam;
 pub(crate) mod lmdb;
 pub mod local_offset;
 pub mod makeblastdb;
+pub(crate) mod mask_data;
+pub(crate) mod mask_info;
 #[allow(dead_code)]
 pub(crate) mod mdb;
 pub(crate) mod metadata;
@@ -82,6 +88,14 @@ pub enum WriteDbError {
     /// layer after its environment is open (`lmdb::error`, NCBI's `CSeqDBException` texts of
     /// `CWriteDB_LMDB`), which occur only in the close and so become creation errors.
     Other(String),
+    /// LOSAT's refusal of an input that makeblastdb reads, raised inside the build (mask data
+    /// whose ranges NCBI orders by memory addresses, `mask_data::range_set`, at the close of a
+    /// build that would otherwise succeed; a mask column created after the first volume): "losat
+    /// makeblastdb: " and the message, exit status 1, like `MakedbError::Unsupported`. Both end
+    /// the build as an error of NCBI's build at that point does (`EndBuild(true)`: its files are
+    /// removed); a registration after the first volume (makeblastdb registers every algorithm
+    /// before the input) is refused before anything changes and leaves the build open.
+    Unsupported(String),
     /// An allocation failed (`std::bad_alloc`): makeblastdb prints "BLAST ran
     /// out of memory".
     OutOfMemory,
@@ -133,6 +147,7 @@ impl std::fmt::Display for WriteDbError {
             // with an empty line.
             WriteDbError::Exception(e) => write!(f, "Error: {}", e.what()),
             WriteDbError::Other(message) => write!(f, "Error: {message}"),
+            WriteDbError::Unsupported(message) => write!(f, "losat makeblastdb: {message}"),
             WriteDbError::OutOfMemory => f.write_str("BLAST ran out of memory"),
             WriteDbError::Io { path, source } => {
                 write!(f, "Error: {}: {source}", path.display())

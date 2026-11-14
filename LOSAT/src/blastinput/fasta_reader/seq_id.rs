@@ -566,7 +566,8 @@ fn x_identify_accession(main: &[u8], has_version: bool) -> Option<SeqIdLine> {
 /// at that throw, so a line is FASTA exactly when it is neither tagged, an identified
 /// accession, nor a whitelisted general ID.
 pub(super) fn classify(line: &[u8]) -> SeqIdLine {
-    let line = super::stream::trim_input_space(line);
+    // `NStr::TruncateSpaces_Unsafe(the_id_in, NStr::eTrunc_Both)` (Seq_id.cpp:2459).
+    let line = crate::ncbi_str::truncate_spaces(line);
     // blast_fasta_input.cpp:132: `!line.empty() && isalnum(line.data()[0]&0xff)`.
     if line.first().is_none_or(|&first| !alnum(first)) {
         return SeqIdLine::Fasta;
@@ -625,6 +626,6 @@ pub(crate) fn reject_seq_id_line(line: &[u8], program: &str, role: &str) -> Opti
     }
     Some(anyhow::anyhow!(
         "the first line of the {role} ({:?}) is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT's {program} (start the {role} with a '>' defline, or set DATA_LOADERS=none in the [BLAST] section of .ncbirc)",
-        String::from_utf8_lossy(super::stream::trim_input_space(line)),
+        String::from_utf8_lossy(crate::ncbi_str::truncate_spaces(line)),
     ))
 }

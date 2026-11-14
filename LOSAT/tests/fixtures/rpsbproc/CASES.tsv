@@ -86,7 +86,6 @@ bad_unkmember	compare	-	-	-i arch/bad/unkmember.asn -d data -m full -t doms -f
 t_feats	compare	-	-	-i arch/three.asn -d data -t feats
 t_both	compare	-	-	-i arch/three.asn -d data -t both
 t_default	compare	-	-	-i arch/three.asn -d data
-refuse_xml	refuse	-	-	-i arch/one.xml -d data -t doms
 q_tab_utf8	compare	-	-	-i q_tab_utf8.asn -d data -t doms
 bracket_member	compare	-	-	-i bracket_member.asn -d data -t doms
 neg0_length	compare	-	-	-i neg0_length.asn -d data -t doms
@@ -239,3 +238,143 @@ refuse_ntshort2	refuse	-	data-with:nt	-i arch/ntshort2.asn -d nt -t both
 refuse_natoprot	refuse	-	-	-i arch/natoprot.asn -d data -t both -m std
 refuse_ntnoids1	refuse	-	data-with:nt	-i arch/ntnoids1.asn -d nt -t doms
 refuse_ntplusmax	refuse	-	data-with:nt	-i arch/ntplusmax.asn -d nt -t doms -m std
+x.three.both.rep	compare	-	-	-i arch/x_three.xml -d data -t both -m rep
+x.three.both.full.f	compare	-	-	-i arch/x_three.xml -d data -t both -m full -f
+x.three.doms.std	compare	-	-	-i arch/x_three.xml -d data -t doms -m std
+x.three.feats.rep	compare	-	-	-i arch/x_three.xml -d data -t feats -m rep
+x.three.default	compare	-	-	-i arch/x_three.xml -d data
+x.three.e1e-30	compare	-	-	-i arch/x_three.xml -d data -t doms -m full -e 1e-30
+x.three.e0	compare	-	-	-i arch/x_three.xml -d data -t doms -m full -e 0
+x.three.q	compare	-	-	-i arch/x_three.xml -d data -t doms -q
+x.one.stdin	compare	arch/x_one.xml	-	-d data -t both
+x.one.both.rep	compare	-	-	-i arch/x_one.xml -d data -t both -m rep
+x.tiny3.both.rep	compare	-	-	-i arch/x_tiny3.xml -d data -t both -m rep
+x.sd2.both.full	compare	-	-	-i arch/x_sd2.xml -d data -t both -m full
+x.src2.both.rep	compare	-	-	-i arch/x_src2.xml -d data -t both -m rep
+x.src2.both.std.f	compare	-	-	-i arch/x_src2.xml -d data -t both -m std -f
+x.qgap.both.full	compare	-	-	-i arch/x_qgap.xml -d data -t both -m full
+x.dctr_e10.default	compare	-	-	-i arch/x_dctr_e10.xml -d data
+x.dctr_e10.e10.full	compare	-	-	-i arch/x_dctr_e10.xml -d data -t both -m full -e 10
+x.dctr_e10.e1e-5.rep	compare	-	-	-i arch/x_dctr_e10.xml -d data -t both -m rep -e 1e-5
+x.dctr_e10.doms.full.f	compare	-	-	-i arch/x_dctr_e10.xml -d data -t doms -m full -f
+x.dctr_e10.e2e-6	compare	-	-	-i arch/x_dctr_e10.xml -d data -t doms -m full -e 2e-6
+x.dctr_e10.e0.0100000001	compare	-	-	-i arch/x_dctr_e10.xml -d data -t doms -m full -e 0.0100000001
+x.dctr_e10.em1	compare	-	-	-i arch/x_dctr_e10.xml -d data -t doms -m full -e -1
+x.tie1.doms.rep	compare	-	-	-i arch/x_tie1.xml -d data -t doms -m rep
+x.tie1.doms.full	compare	-	-	-i arch/x_tie1.xml -d data -t doms -m full
+x.tie2.doms.rep	compare	-	-	-i arch/x_tie2.xml -d data -t doms -m rep
+x.tie2.doms.full	compare	-	-	-i arch/x_tie2.xml -d data -t doms -m full
+x.notitle.both.rep	compare	-	-	-i arch/x_notitle.xml -d data -t both -m rep
+x.parsed.both.rep	compare	-	-	-i arch/x_parsed.xml -d data -t both -m rep
+x.cat2.both.rep	compare	-	-	-i arch/x_cat2.xml -d data -t both -m rep
+x.cattrunc.both.rep	compare	-	-	-i arch/x_cattrunc.xml -d data -t both -m rep
+x.lead.doms.rep	compare	-	-	-i arch/x_lead.xml -d data -t doms -m rep
+x.crlf.both.rep	compare	-	-	-i arch/x_crlf.xml -d data -t both -m rep
+x.garbage.doms.rep	compare	-	-	-i arch/x_garbage.xml -d data -t doms -m rep
+x.thenasn.doms.rep	compare	-	-	-i arch/x_thenasn.xml -d data -t doms -m rep
+x.emptyit.both.rep	compare	-	-	-i arch/x_emptyit.xml -d data -t both -m rep
+x.xml2.both.rep	compare	-	-	-i arch/x_xml2.xml -d data -t both -m rep
+x.mfirst.both.rep	compare	-	data-with:sites	-i arch/x_mfirst.xml -d sites -t both -m rep
+x.mfirst.feats.full	compare	-	data-with:sites	-i arch/x_mfirst.xml -d sites -t feats -m full
+x.gen2.both.rep	compare	-	data-with:sites	-i arch/x_gen2.xml -d sites -t both -m rep
+x.gen2.feats.full	compare	-	data-with:sites	-i arch/x_gen2.xml -d sites -t feats -m full
+x.motdom.both.rep	compare	-	data-with:sites	-i arch/x_motdom.xml -d sites -t both -m rep
+x.motdom.feats.full	compare	-	data-with:sites	-i arch/x_motdom.xml -d sites -t feats -m full
+x.sdsite.both.rep	compare	-	data-with:sites	-i arch/x_sdsite.xml -d sites -t both -m rep
+x.sdsite.feats.full	compare	-	data-with:sites	-i arch/x_sdsite.xml -d sites -t feats -m full
+x.mstate.both.rep	compare	-	data-with:sites	-i arch/x_mstate.xml -d sites -t both -m rep
+x.mstate.feats.full	compare	-	data-with:sites	-i arch/x_mstate.xml -d sites -t feats -m full
+x.mstate.both.std.f	compare	-	data-with:sites	-i arch/x_mstate.xml -d sites -t both -m std -f
+x.ntr67.both.rep	compare	-	data-with:nt	-i arch/x_ntr67.xml -d nt -t both -m rep
+x.ntr67.both.full.f	compare	-	data-with:nt	-i arch/x_ntr67.xml -d nt -t both -m full -f
+x.ntr67.feats.rep	compare	-	data-with:nt	-i arch/x_ntr67.xml -d nt -t feats -m rep
+x.ntr67.default	compare	-	data-with:nt	-i arch/x_ntr67.xml -d nt
+x.ntr67e10.default	compare	-	data-with:nt	-i arch/x_ntr67e10.xml -d nt
+x.ntr67e10.e10.full	compare	-	data-with:nt	-i arch/x_ntr67e10.xml -d nt -t both -m full -e 10
+x.ntr67seg.both.rep	compare	-	data-with:nt	-i arch/x_ntr67seg.xml -d nt -t both -m rep
+x.ntr68rc.both.rep	compare	-	data-with:nt	-i arch/x_ntr68rc.xml -d nt -t both -m rep
+x.ntr94had.both.rep	compare	-	data-with:nt	-i arch/x_ntr94had.xml -d nt -t both -m rep
+x.ntr94had.feats.full	compare	-	data-with:nt	-i arch/x_ntr94had.xml -d nt -t feats -m full
+x.ntr60.both.rep	compare	-	data-with:nt	-i arch/x_ntr60.xml -d nt -t both -m rep
+x.ntr60t1.both.rep	compare	-	data-with:nt	-i arch/x_ntr60t1.xml -d nt -t both -m rep
+x.ntr63.both.full	compare	-	data-with:nt	-i arch/x_ntr63.xml -d nt -t both -m full
+x.ntr04amb.both.rep	compare	-	data-with:nt	-i arch/x_ntr04amb.xml -d nt -t both -m rep
+x.ntpair.both.rep	compare	-	data-with:nt	-i arch/x_ntpair.xml -d nt -t both -m rep
+x.ntnohit.both.rep	compare	-	data-with:nt	-i arch/x_ntnohit.xml -d nt -t both -m rep
+x.mixpn.both.rep	compare	-	data-with:nt	-i arch/x_mixpn.xml -d nt -t both -m rep
+x.mixnp.both.rep	compare	-	data-with:nt	-i arch/x_mixnp.xml -d nt -t both -m rep
+x.ntr67.ntprev.both.rep	compare	-	data-with:nt+ntprev	-i arch/x_ntr67.xml -d ntprev -t both -m rep
+x.mfirst.ctprev.both.rep	compare	-	data-with:sites+ctprev	-i arch/x_mfirst.xml -d ctprev -t both -m rep
+x.lcasem.both.full	compare	-	data-with:xnew	-i arch/x_lcasem.xml -d xnew -t both -m full
+x.lcasem.feats.rep	compare	-	data-with:xnew	-i arch/x_lcasem.xml -d xnew -t feats -m rep
+x.special.both.rep	compare	-	data-with:xnew	-i arch/x_special.xml -d xnew -t both -m rep
+x.mix3.both.rep	compare	-	data-with:xnew	-i arch/x_mix3.xml -d xnew -t both -m rep
+x.mix3.doms.full.f	compare	-	data-with:xnew	-i arch/x_mix3.xml -d xnew -t doms -m full -f
+x.nohit.both.rep	compare	-	data-with:xnew	-i arch/x_nohit.xml -d xnew -t both -m rep
+x.lcl.both.rep	compare	-	data-with:xnew	-i arch/x_lcl.xml -d xnew -t both -m rep
+x.ntspec1.both.rep	compare	-	data-with:xnew	-i arch/x_ntspec1.xml -d xnew -t both -m rep
+x.ntspec1.both.full	compare	-	data-with:xnew	-i arch/x_ntspec1.xml -d xnew -t both -m full
+x.ntspec2.both.rep	compare	-	data-with:xnew	-i arch/x_ntspec2.xml -d xnew -t both -m rep
+x.ntspec2.both.full	compare	-	data-with:xnew	-i arch/x_ntspec2.xml -d xnew -t both -m full
+x.ntspec2.feats.full	compare	-	data-with:xnew	-i arch/x_ntspec2.xml -d xnew -t feats -m full
+x.ntmix2.both.rep	compare	-	data-with:xnew	-i arch/x_ntmix2.xml -d xnew -t both -m rep
+x.ntp.both.rep	compare	-	data-with:xnew	-i arch/x_ntp.xml -d xnew -t both -m rep
+x.ntspec1.xnewprev.both.rep	compare	-	data-with:xnew+xnewprev	-i arch/x_ntspec1.xml -d xnewprev -t both -m rep
+x.h_from0.both	compare	-	-	-i arch/x_h_p_from0.xml -d data -t both
+x.h_nomatrix.doms	compare	-	-	-i arch/x_h_p_nomatrix.xml -d data -t doms
+x.h_noalen.doms	compare	-	-	-i arch/x_h_p_noalen.xml -d data -t doms
+x.h_noalen.e	compare	-	-	-i arch/x_h_p_noalen.xml -d data -t doms -e 1e-50
+x.h_noframe.both	compare	-	-	-i arch/x_h_p_noframe.xml -d data -t both
+x.h_qgap.both	compare	-	-	-i arch/x_h_p_qgap.xml -d data -t both -m full
+x.h_gaps2.both	compare	-	-	-i arch/x_h_p_gaps2.xml -d data -t both
+x.h_lead.both	compare	-	-	-i arch/x_h_p_lead.xml -d data -t both
+x.h_hshort1.both	compare	-	-	-i arch/x_h_p_hshort1.xml -d data -t both
+x.h_qlen50.both	compare	-	-	-i arch/x_h_p_qlen50.xml -d data -t both
+x.h_qlen2.both	compare	-	-	-i arch/x_h_p_qlen2.xml -d data -t both
+x.h_defent.doms	compare	-	-	-i arch/x_h_p_def_ent.xml -d data -t doms
+x.h_defcr.doms	compare	-	-	-i arch/x_h_p_def_cr.xml -d data -t doms
+x.h_defbigref.doms	compare	-	-	-i arch/x_h_p_def_bigref2.xml -d data -t doms
+x.h_cdata.doms	compare	-	-	-i arch/x_h_p_def_cdata.xml -d data -t doms
+x.h_latin1.doms	compare	-	-	-i arch/x_h_p_latin1.xml -d data -t doms
+x.h_cp1252.doms	compare	-	-	-i arch/x_h_p_cp1252.xml -d data -t doms
+x.h_ebcdic.doms	compare	-	-	-i arch/x_h_p_ebcdic.xml -d data -t doms
+x.h_comment.doms	compare	-	-	-i arch/x_h_p_comment.xml -d data -t doms
+x.h_defcomment.doms	compare	-	-	-i arch/x_h_p_def_comment.xml -d data -t doms
+x.h_unknown.doms	compare	-	-	-i arch/x_h_p_unknown.xml -d data -t doms
+x.h_missmand.doms	compare	-	-	-i arch/x_h_p_missmand.xml -d data -t doms
+x.h_order.doms	compare	-	-	-i arch/x_h_p_order.xml -d data -t doms
+x.h_selfhits.doms	compare	-	-	-i arch/x_h_p_selfhits.xml -d data -t doms
+x.h_bom2.doms	compare	-	-	-i arch/x_h_p_bom2.xml -d data -t doms
+x.h_bom2nl.doms	compare	-	-	-i arch/x_h_p_bom2nl.xml -d data -t doms
+x.h_intmin.doms	compare	-	-	-i arch/x_h_p_intmin.xml -d data -t doms
+x.h_intover.doms	compare	-	-	-i arch/x_h_p_intover.xml -d data -t doms
+x.h_evalempty.doms	compare	-	-	-i arch/x_h_p_evalempty.xml -d data -t doms
+x.h_acchuge.doms	compare	-	-	-i arch/x_h_p_acc_huge.xml -d data -t doms
+x.h_acclead.doms	compare	-	-	-i arch/x_h_p_acc_lead.xml -d data -t doms
+x.h_scorehuge.doms	compare	-	-	-i arch/x_h_p_scorehuge.xml -d data -t doms
+x.h_frame1.both	compare	-	-	-i arch/x_h_p_frame1.xml -d data -t both
+x.h_frame4.both	compare	-	-	-i arch/x_h_p_frame4.xml -d data -t both
+x.h_framem1.both	compare	-	-	-i arch/x_h_p_framem1.xml -d data -t both
+x.h_tframe2nd.both	compare	-	-	-i arch/x_h_t_frame2nd.xml -d data -t both
+x.h_ntframe0.both	compare	-	data-with:nt	-i arch/x_h_n_frame0.xml -d nt -t both
+x.h_ntframe4.doms	compare	-	data-with:nt	-i arch/x_h_n_frame4.xml -d nt -t doms -m std
+refuse_xntqlen2	refuse	-	data-with:nt	-i arch/x_h_n_qlen2.xml -d nt -t both
+x.h_ntqlen1500.both	compare	-	data-with:nt	-i arch/x_h_n_qlen1500.xml -d nt -t both
+refuse_xattr	refuse	-	-	-i arch/x_h_p_attr.xml -d data -t doms
+refuse_xns	refuse	-	-	-i arch/x_h_p_ns.xml -d data -t doms
+refuse_xctrl	refuse	-	-	-i arch/x_h_p_def_ctrl.xml -d data -t doms
+refuse_xhshort2	refuse	-	-	-i arch/x_h_p_hshort2.xml -d data -t both
+refuse_xqlenneg	refuse	-	-	-i arch/x_h_p_qlenneg.xml -d data -t both
+refuse_xntqlen1	refuse	-	data-with:nt	-i arch/x_h_n_qlen1.xml -d nt -t doms -m std
+x.h_nanexpect.doms	compare	-	-	-i arch/x_h_p_nanexpect.xml -d data -t doms -m std
+x.h_bitnan.both	compare	-	-	-i arch/x_h_p_bitnan.xml -d data -t both
+x.h_evalnan.both	compare	-	-	-i arch/x_h_p_evalnan.xml -d data -t both
+x.h_tnan3.full	compare	-	-	-i arch/x_h_t_nan3.xml -d data -t doms -m full
+x.h_tnan3.both	compare	-	-	-i arch/x_h_t_nan3.xml -d data -t both
+x.h_ntnanthird.full	compare	-	data-with:nt	-i arch/x_h_n_nanthird.xml -d nt -t doms -m full -e 10
+x.h_ntnanthird.both	compare	-	data-with:nt	-i arch/x_h_n_nanthird.xml -d nt -t both -e 10
+x.h_ntnanall.full	compare	-	data-with:nt	-i arch/x_h_n_nanall.xml -d nt -t doms -m full -e 10
+x.h_ntbitnan.both	compare	-	data-with:nt	-i arch/x_h_n_bitnan.xml -d nt -t both -m full -e 10
+nan_threshold	compare	-	-	-i arch/bad/a_nan.asn -d data -t doms -m std
+nan_hit	compare	-	-	-i arch/bad/a_nanhit.asn -d data -t both
+refuse_xcoordmin	refuse	-	-	-i arch/x_h_p_coordmin.xml -d data -t doms

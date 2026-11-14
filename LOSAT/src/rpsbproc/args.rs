@@ -74,6 +74,8 @@ pub struct RpsbprocArgs {
     // 		...
     // 		NumericDefVal(DEF_EVALCUTOFF),	//Default Value
     // ```
+    // (`ParseBlastOutput` skips an HSP whose E-value is above it, `offline::OfflineQuery`; the
+    // archive path does not pass it, quoted at `run_sessions`.)
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:1485-1486
     // ```c++
     // constexpr const double PRECALC_EVALUE = 0.01;	//default evalue cut off
@@ -84,7 +86,7 @@ pub struct RpsbprocArgs {
         value_name = "REAL",
         default_value = "0.01",
         value_parser = rpsbproc_real,
-        help = "E-value cut-off, shown in the header (also --evalue); it selects no hit of an ASN.1 archive."
+        help = "E-value cut-off, shown in the header (also --evalue); it drops the HSPs above it in the XML input and selects no hit of an ASN.1 archive."
     )]
     pub evalue: f64,
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:103-104

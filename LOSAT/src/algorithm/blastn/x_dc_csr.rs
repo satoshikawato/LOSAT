@@ -60,8 +60,9 @@
 //! empty: the CSR replaces them (`qs` has one element per word, `next_pos` one per query
 //! position), so the table takes no more memory. Every reader of the chains of a discontiguous
 //! table goes through `DiscTemplates::x_csr`: the strip scan of LOSAT_X_PAIRPARDISC and its
-//! diagonal-array stage (`scan_strip_disc`), the reference scan of `search_query_batch`
-//! (`run.rs`, its `x_on_word_csr`; the chains' `on_word` stays as it was), and
+//! diagonal-array stage (`scan_strip_disc`), the reference scan of a two-stage table
+//! (`two_stage_scan.rs` `scan_two_stage_lookup`, its `x_on_word_csr`; the chains' `on_word`
+//! stays as it was), and
 //! `TwoStageLookup::contains_hit` and `count_hits` where the table has no chains.
 //!
 //! The scans of a CSR table read their words through `Ring`: each word enters a FIFO of `RING`

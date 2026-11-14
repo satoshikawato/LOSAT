@@ -122,10 +122,13 @@ static TOOL: Tool = Tool {
 //     return CConvert2BlastMaskApplication().AppMain(argc, argv);
 // }
 // ```
-/// Runs `convert2blastmask` with `words` (the command line after `losat convert2blastmask`) on
-/// the process's standard streams; the exit status.
-pub(crate) fn run(words: &[OsString]) -> i32 {
-    crate::ncbi_app::run(&TOOL, words, work::run)
+/// Runs `convert2blastmask` with `words` (the command line after `losat convert2blastmask`),
+/// after its application start `start`, on the process's standard streams; the exit status.
+pub(crate) fn run(
+    words: &[OsString],
+    start: &crate::blastinput::ncbi_environment::ApplicationStart,
+) -> i32 {
+    crate::ncbi_app::run(&TOOL, words, start, work::run)
 }
 
 /// The run of one command line with `input` as its standard input, its output on `out` and its

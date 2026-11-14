@@ -308,7 +308,7 @@ fn subject_values<'a>(
 /// stream failure of NCBI's formatter (`report::TabularFlushError`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_blastx_tabular(
-    writer: &mut impl Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     stderr: &mut dyn Write,
     options: &ResolvedOptions,
     spec: &TabularSpec,
@@ -319,6 +319,9 @@ pub(super) fn write_blastx_tabular(
     mut probe: Option<&mut crate::api::local_blast::FormatProbe<'_>>,
     first_hsp: crate::api::local_blast::HspIndex,
 ) -> Result<()> {
+    if spec.kind == crate::report::tabular::TabularKind::TaxReport {
+        return write_blastx_tax_report(writer, stderr, options, queries, subjects, shown, batches);
+    }
     let needs = spec.needs();
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:183
     // ```c++
@@ -633,6 +636,145 @@ pub(super) fn write_blastx_tabular(
                 Ok(())
             })()
             .map_err(tabular_io_error)?;
+        }
+    }
+    Ok(())
+}
+
+/// Writes the organism report (outfmt 18, `report::tax_report`) of the query batches `batches`
+/// to `writer`: for each query its warning (`report::query_warning`) on `stderr`, then the
+/// caption, the `Query=` block (the query record's length, also with `-query_loc`, as outfmt 0's)
+/// and the table of the HSPs that the tabular rows show (`write_blastx_tabular`), the texts of
+/// the subjects that the report reads one by one where it reads each (`ShownSubjects::query_reads`,
+/// `TaxReport::write_query`). The report is made before the batches' first byte
+/// (`tax_report::report_batch`), so that LOSAT's refusals come before it. NCBI writes it through
+/// `m_Outfile` (`CBlastFormat`), not a `CBlastTabularInfo`: a failing write is outfmt 0's
+/// "BLAST failed to write output" (`native::report_error` of the `io::Error`), not the tabular
+/// formats' abort (probe `T/t2/fix1` `f1.d5.blastx.*`).
+#[allow(clippy::too_many_arguments)]
+fn write_blastx_tax_report(
+    writer: &mut crate::cli::NcbiOstream<'_>,
+    stderr: &mut dyn Write,
+    options: &ResolvedOptions,
+    queries: &[FastaRecord],
+    subjects: &[FastaRecord],
+    shown: &ShownSubjects<'_>,
+    batches: &[BatchResults],
+) -> Result<()> {
+    use crate::report::tax_report::{report_batch, TaxHsp, TaxPlain, TaxQuery};
+    let program = options.program().upper;
+    let titles: Vec<String> = batches
+        .iter()
+        .flat_map(|batch| {
+            (0..batch.queries.len()).map(|qidx| {
+                queries[batch.query_ordinal + qidx]
+                    .query_line()
+                    .into_owned()
+            })
+        })
+        .collect();
+    // The HSPs of each query that the tabular rows show (`write_blastx_tabular`).
+    let tax_queries: Vec<TaxQuery<'_>> = batches
+        .iter()
+        .flat_map(|batch| {
+            batch
+                .queries
+                .iter()
+                .enumerate()
+                .map(move |(qidx, lists)| (batch.query_ordinal + qidx, lists))
+        })
+        .zip(&titles)
+        .map(|((ordinal, lists), title)| TaxQuery {
+            title: title.as_bytes(),
+            length: queries[ordinal].placement().length,
+            hsps: lists[..lists.len().min(options.shown_lists())]
+                .iter()
+                .flat_map(|list| {
+                    list.hsps
+                        .iter()
+                        .filter(|hsp| has_seqalign(hsp, options.gapped))
+                        .map(move |hsp| TaxHsp {
+                            subject: list.oid,
+                            evalue: hsp.evalue,
+                            bit_score: hsp.bit_score,
+                        })
+                })
+                .collect(),
+        })
+        .collect();
+    let parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>] = match shown {
+        ShownSubjects::Fasta { parsed, .. } => &parsed.subjects,
+        ShownSubjects::Database { reported, .. } => reported.parsed(),
+    };
+    let plain = |oid: usize| match shown {
+        ShownSubjects::Fasta { .. } => TaxPlain::Record {
+            local_id: subjects[oid].internal_id.as_bytes(),
+            title: subjects[oid].title.as_bytes(),
+        },
+        ShownSubjects::Database { reported, .. } => TaxPlain::Stored {
+            ordinal: reported.ordinal(oid),
+            title: reported
+                .stored_titles()
+                .get(oid)
+                .map_or(&[][..], |title| title),
+            taxid: reported
+                .tabular_taxonomy(oid)
+                .map_or_else(|| reported.taxid(oid), |taxonomy| taxonomy.taxid),
+        },
+    };
+    // A `-subject` search's report looks names up in the run's database.
+    let subject_names = options
+        .subject_taxdb
+        .as_ref()
+        .map(|taxdb| taxdb.report_names(program));
+    let names = match shown {
+        ShownSubjects::Database { reported, .. } => reported.tabular_names(),
+        ShownSubjects::Fasta { .. } => subject_names.as_ref(),
+    };
+    let report = report_batch(
+        &tax_queries,
+        parsed,
+        plain,
+        true,
+        options.taxdb_found,
+        names,
+        program,
+    )?;
+    let mut q_idx = 0;
+    for batch in batches {
+        for qidx in 0..batch.queries.len() {
+            let query = &queries[batch.query_ordinal + qidx];
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
+            // ```c++
+            //     if (results.HasWarnings()) {
+            //         ERR_POST(Warning << results.GetWarningStrings());
+            //     }
+            // ```
+            // `cerr` is tied to `cout`: the report before the texts reaches the output first.
+            let warning = query_warning(options, query, batch.search_skipped);
+            if !warning.is_empty() {
+                writer.flush()?;
+            }
+            stderr.write_all(&warning)?;
+            // The texts of the subjects that the query's report reads one by one, written where
+            // it reads each (`ReadCursor`, the query's only).
+            let mut reads = crate::report::query_warnings::ReadCursor::new(std::slice::from_ref(
+                shown.query_reads(batch.query_ordinal + qidx),
+            ));
+            let tax_query = &tax_queries[q_idx];
+            report.write_query(
+                q_idx,
+                &mut *writer,
+                &mut *stderr,
+                reads.as_mut().map(|cursor| (cursor, 0)),
+                tax_query.title,
+                tax_query.length,
+            )?;
+            // A text whose read the report did not place comes after it.
+            if let Some(reads) = reads.as_mut() {
+                reads.before_query(1, &mut *writer, &mut *stderr)?;
+            }
+            q_idx += 1;
         }
     }
     Ok(())

@@ -1,0 +1,55 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_ntnohit.xml
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSTBLASTN 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	5000	mg00001_1-5000
+ENDQUERY
+QUERY	Query_2	Peptide	5000	mg00002_5001-10000
+ENDQUERY
+QUERY	Query_3	Peptide	5000	mg00003_10001-15000
+ENDQUERY
+QUERY	Query_4	Peptide	5000	mg00004_15001-20000
+ENDQUERY
+QUERY	Query_5	Peptide	5000	mg00005_20001-25000
+ENDQUERY
+QUERY	Query_6	Peptide	5000	mg00006_25001-30000
+ENDQUERY
+QUERY	Query_7	Peptide	5000	mg00007_30001-35000
+ENDQUERY
+QUERY	Query_8	Peptide	5000	mg00008_35001-40000
+ENDQUERY
+QUERY	Query_9	Peptide	5000	mg00009_40001-45000
+ENDQUERY
+QUERY	Query_10	Peptide	5000	mg00010_45001-50000
+ENDQUERY
+ENDSESSION	1
+ENDDATA

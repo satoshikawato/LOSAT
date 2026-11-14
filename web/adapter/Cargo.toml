@@ -1,7 +1,7 @@
 # The LOSAT Web engine adapter: ABI v2 (docs/web/abi_v2.md) over the engine crate.
 # Plan TD-6: the build must match the certified command-WASI builds. The release profile
 # and the Wasm rustflags (.cargo/config.toml) are copies of LOSAT's. The reactor start-up
-# comes from LOSAT/build.rs through the LOSAT dependency (Cargo passes its
+# comes from LOSAT/build.rs through the `losat` dependency (Cargo passes its
 # rustc-cdylib-link-arg to this cdylib), so this crate has no build script.
 # tools/check_build_identity.py detects any drift.
 [package]
@@ -15,7 +15,7 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-LOSAT = { path = "../../LOSAT", default-features = false }
+losat = { path = "../../LOSAT", default-features = false }
 clap = { version = "4.5", features = ["derive"] }
 # The SHA-256 of a named input file (`files.rs`), counted over its chunks as they come.
 sha2 = { version = "0.10", default-features = false }
@@ -29,7 +29,7 @@ flate2 = { version = "1.1", default-features = false, features = ["zlib-rs", "ru
 [features]
 default = []
 # The threaded reactor: wasm32-wasip1-threads with the engine's parallel search.
-threads = ["LOSAT/parallel", "LOSAT/wasm-threads"]
+threads = ["losat/parallel", "losat/wasm-threads"]
 
 # A copy of LOSAT/Cargo.toml [profile.release] (checked by tools/check_build_identity.py).
 [profile.release]

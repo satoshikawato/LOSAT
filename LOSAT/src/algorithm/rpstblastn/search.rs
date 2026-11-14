@@ -72,6 +72,9 @@ pub(crate) struct TranslatedRpsSearch {
     /// Whether the database has several volumes, whose results NCBI merges
     /// (`RpsTblastnSearch::merges_volumes`); set by `for_database`.
     pub(crate) several_volumes: bool,
+    /// The volumes' matrix and gap costs as their set-up read them (`RpsVolumeSetup::costs`), for
+    /// the search strategy's requests (`handle_sets`); set by `for_database`.
+    pub(crate) costs: Option<(String, i32, i32)>,
 }
 
 impl RpsTblastnSearch for TranslatedRpsSearch {
@@ -83,16 +86,6 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         let Some(database) = database else {
             bail!("a search without -db is not supported by LOSAT's {PROGRAM}");
         };
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:59-61
-        // ```c++
-        //     char* chunk_sz_str = getenv("CHUNK_SIZE");
-        //     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
-        //         retval = NStr::StringToInt(chunk_sz_str);
-        // ```
-        // NCBI reads it in the set-up of every query batch (`CQuerySplitter`), before its RPS
-        // structures; RPSTBLASTN never splits a query (`split_query_aux_priv.cpp:88`), so a value
-        // it reads changes nothing, and one it cannot convert stops it (`CStringException`).
-        crate::blastinput::app::read_query_split_variable(PROGRAM, "CHUNK_SIZE")?;
         // LOSAT's refusals of the volumes' files come before the first byte, as rpsblast's do;
         // NCBI's own errors of the files stay where NCBI's search of a batch raises them
         // (`search_window`), and the options' refusals below wait for the files to open.
@@ -109,6 +102,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         }
         Ok(Arc::new(Self {
             several_volumes: volumes.order.len() > 1,
+            costs: setup.costs(volumes.first()),
             ..self.clone()
         }))
     }
@@ -121,11 +115,14 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         diagnostics: &mut dyn Write,
         search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
         render: &mut BatchRender<'_>,
+        take: &mut dyn FnMut(&[FastaRecord], usize) -> Result<()>,
     ) -> Result<usize> {
         let Some(database) = database else {
             bail!("a search without -db is not supported by LOSAT's {PROGRAM}");
         };
-        let mut processed = 0usize;
+        // The queries of the batches replayed so far: each batch's search strategy request and
+        // render take the number before it.
+        let processed = std::cell::Cell::new(0usize);
         let diagnostics = std::cell::RefCell::new(diagnostics);
         let volumes = RpsVolumeSet::of(database.x_seqdb());
         let setup = RpsVolumeSetup::new(PROGRAM, options.window_size);
@@ -142,7 +139,6 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         // count takes the same path, and a long record, a batch of its own, makes a window of at
         // most the bound plus that batch. (`native::run` refused a `BATCH_SIZE` it cannot read.)
         let batch_size = crate::blastinput::app::query_batch_size(
-            PROGRAM,
             crate::algorithm::blastx::query_setup::RPSTBLASTN_BATCH_SIZE as u32,
         )? as usize;
         let bound = batch_size.saturating_mul(threads).saturating_mul(4);
@@ -155,6 +151,11 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
             // The window's batches searched together (`search_window`), then its events
             // replayed in the reader's order (`replay`): what NCBI's one-batch loop writes, in
             // its order, up to the first batch that fails, which ends the run with its error.
+            // Each batch's search strategy request (`take`, `-export_search_strategy`) is
+            // written in the replay, before the batch's report or error, as NCBI writes it
+            // before the batch's search (`SaveSearchStrategy`, quoted in the module's header):
+            // after the batches before it are reported (their search spaces, which the request
+            // holds, `StrategyExport::note_searched`), and none for a batch after one that fails.
             let mut flush = || -> Result<()> {
                 let events = std::mem::take(&mut *window.borrow_mut()).events;
                 let batches: Vec<&[FastaRecord]> = events
@@ -171,14 +172,15 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
                     &events,
                     searched,
                     &mut |bytes| Ok(diagnostics.borrow_mut().write_all(bytes)?),
+                    &mut |queries| take(queries, processed.get()),
                     &mut |queries, results| {
                         render(
                             &mut **diagnostics.borrow_mut(),
                             queries,
                             &mut vec![results],
-                            processed,
+                            processed.get(),
                         )?;
-                        processed += queries.len();
+                        processed.set(processed.get() + queries.len());
                         Ok(())
                     },
                 )
@@ -234,11 +236,27 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
             }
             read_result
         })?;
-        Ok(processed)
+        Ok(processed.get())
     }
 
     fn merges_volumes(&self) -> bool {
         self.several_volumes
+    }
+
+    fn handle_sets(
+        &self,
+        database: Option<&BlastxDatabase>,
+        searchsp: Option<i64>,
+        dbsize: Option<i64>,
+    ) -> Vec<crate::report::archive::options::Param> {
+        database.map_or_else(Vec::new, |database| {
+            crate::algorithm::rps_search::volumes::search_sets(
+                database.x_seqdb(),
+                self.costs.clone(),
+                searchsp,
+                dbsize,
+            )
+        })
     }
 }
 
@@ -590,9 +608,7 @@ impl TranslatedRpsSearch {
         // DECISIONS 38 D3: every probed query (`out/u.*` of the design) segfaults after the
         // search, valgrind: a read at address 0 in `BLAST_ComputeTraceback_MT`.
         if self.ungapped {
-            bail!(
-                "-ungapped (NCBI BLAST+ 2.17.0's rpstblastn crashes after an ungapped search) is not supported by LOSAT's {PROGRAM}"
-            );
+            bail!("{}", crate::cli::run_refusal(PROGRAM, "ungapped"));
         }
         Ok(())
     }
@@ -613,13 +629,26 @@ struct RpsWindow {
 }
 
 /// The events of a window in the reader's order (D1 of PS12s): each warning written (`warn`),
-/// each batch's results reported (`report`) with its records, from `searched` (one entry per
-/// batch, `search_window`); a batch that failed ends the replay with its error, after the events
-/// before it, as it ended NCBI's loop of one batch at a time.
+/// each batch's search strategy request taken (`take`), then its results reported (`report`)
+/// with its records, from `searched` (one entry per batch, `search_window`); a batch that failed
+/// ends the replay with its error, after its request and the events before it, as it ended
+/// NCBI's loop of one batch at a time.
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:193-208
+/// ```c++
+///             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+///             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+///
+///             SaveSearchStrategy(args, m_CmdLineArgs, queries, opts_hndl);
+///             ...
+///             	CLocalRPSBlast  local_search (query_batch, db_args->GetDatabaseName(), opts_hndl, args[kArgNumThreads].AsInteger() );
+///             	results = local_search.Run();
+/// ```
 fn replay<T>(
     events: &[RpsEvent],
     searched: Vec<Option<Result<T>>>,
     warn: &mut dyn FnMut(&[u8]) -> Result<()>,
+    take: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     report: &mut dyn FnMut(&[FastaRecord], T) -> Result<()>,
 ) -> Result<()> {
     let mut searched = searched.into_iter();
@@ -627,6 +656,8 @@ fn replay<T>(
         match event {
             RpsEvent::Warn(bytes) => warn(bytes)?,
             RpsEvent::Batch(queries) => {
+                // The batch's request, before its search's result or error is looked at.
+                take(queries)?;
                 let results = searched
                     .next()
                     .flatten()
@@ -687,8 +718,8 @@ impl WindowBatch {
     }
 }
 
-/// Each batch of a window prepared (`prepare_unit_queries`: frames, masks, `-query_loc`), the
-/// batches at the same time on the run's pool; each batch's result is its own.
+/// Each batch of a window prepared (`prepare_batch`), the batches at the same time on the run's
+/// pool; each batch's result is its own.
 fn prepare_batches(
     batches: &[&[FastaRecord]],
     options: &ResolvedOptions,
@@ -704,15 +735,35 @@ fn prepare_batches(
             batches
                 .par_iter()
                 .with_max_len(1)
-                .map(|queries| prepare_unit_queries(queries, None, options))
+                .map(|queries| prepare_batch(queries, options))
                 .collect()
         });
     }
     let _ = pool;
     batches
         .iter()
-        .map(|queries| prepare_unit_queries(queries, None, options))
+        .map(|queries| prepare_batch(queries, options))
         .collect()
+}
+
+/// A batch's set-up before its RPS structures: the query splitter's `CHUNK_SIZE`, then the
+/// queries (`prepare_unit_queries`: frames, masks, `-query_loc`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:59-61
+/// ```c++
+///     char* chunk_sz_str = getenv("CHUNK_SIZE");
+///     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
+///         retval = NStr::StringToInt(chunk_sz_str);
+/// ```
+/// NCBI reads it in the set-up of every query batch (`CQuerySplitter`), before its RPS
+/// structures; RPSTBLASTN never splits a query (`split_query_aux_priv.cpp:88`), so a value it
+/// reads changes nothing, and one it cannot convert is its `CStringException`
+/// (`app::read_query_split_variable`), which the batch's error frame passes on as it is
+/// (`native::database_search_error`): the first batch stops here, after the outfmt 0 prolog,
+/// the messages of its records and its search strategy request (`replay`).
+fn prepare_batch(queries: &[FastaRecord], options: &ResolvedOptions) -> Result<PreparedQueryBatch> {
+    crate::blastinput::app::read_query_split_variable("CHUNK_SIZE")?;
+    prepare_unit_queries(queries, None, options)
 }
 
 /// The results of a batch that is not searched: no list for any query, BLASTX's unsearched
@@ -1003,6 +1054,7 @@ mod tests {
 
     fn hsp(frame: i32, score: i32, q: (usize, usize), s: (usize, usize)) -> BlastpHsp {
         BlastpHsp {
+            num: 1,
             identity: 50.0,
             length: q.1 - q.0 + 2,
             mismatch: 1,
@@ -1094,6 +1146,7 @@ mod tests {
             hsps: evalues
                 .iter()
                 .map(|&e| BlastpHsp {
+                    num: 1,
                     e_value: e,
                     ..hsp(1, 10, (1, 9), (1, 9))
                 })
@@ -1150,6 +1203,7 @@ mod tests {
             use_sw_tback: false,
             comp_based_stats: "0".to_string(),
             several_volumes: false,
+            costs: None,
         };
         assert!(search.check_options().is_ok());
         search.search.sum_stats = true;
@@ -1183,7 +1237,11 @@ mod tests {
             RpsEvent::Warn(b"w2\n".to_vec()),
             RpsEvent::Batch(vec![record("e", DNA)]),
         ];
-        let run = |searched: Vec<Option<Result<u32>>>| -> (Vec<String>, Option<String>) {
+        // The log of a replay: warnings, each batch's request (`take:` and its first query) and
+        // report; `take_fails` names the first query of a batch whose request fails.
+        let run = |searched: Vec<Option<Result<u32>>>,
+                   take_fails: Option<&str>|
+         -> (Vec<String>, Option<String>) {
             let log = std::cell::RefCell::new(Vec::new());
             let result = replay(
                 &events,
@@ -1191,6 +1249,14 @@ mod tests {
                 &mut |bytes| {
                     log.borrow_mut()
                         .push(String::from_utf8_lossy(bytes).trim().to_string());
+                    Ok(())
+                },
+                &mut |queries| {
+                    let first = queries[0].internal_id.as_str();
+                    if take_fails == Some(first) {
+                        anyhow::bail!("request {first} failed");
+                    }
+                    log.borrow_mut().push(format!("take:{first}"));
                     Ok(())
                 },
                 &mut |queries, results| {
@@ -1205,34 +1271,63 @@ mod tests {
                 result.err().map(|error| error.to_string()),
             )
         };
-        let all = run(vec![Some(Ok(1)), Some(Ok(2)), Some(Ok(3)), Some(Ok(4))]);
-        let expected: Vec<String> = ["w0", "a=1", "b+c=2", "w1", "d=3", "w2", "e=4"]
-            .iter()
-            .map(|line| line.to_string())
-            .collect();
-        assert_eq!(all, (expected, None));
-        let failed = run(vec![
-            Some(Ok(1)),
-            Some(Ok(2)),
-            Some(Err(anyhow::anyhow!("batch 3 failed"))),
+        let lines =
+            |lines: &[&str]| -> Vec<String> { lines.iter().map(|line| line.to_string()).collect() };
+        let all = run(
+            vec![Some(Ok(1)), Some(Ok(2)), Some(Ok(3)), Some(Ok(4))],
             None,
+        );
+        let expected = lines(&[
+            "w0", "take:a", "a=1", "take:b", "b+c=2", "w1", "take:d", "d=3", "w2", "take:e", "e=4",
         ]);
+        assert_eq!(all, (expected, None));
+        // A failing batch has its request; the batches after it have none.
+        let failed = run(
+            vec![
+                Some(Ok(1)),
+                Some(Ok(2)),
+                Some(Err(anyhow::anyhow!("batch 3 failed"))),
+                None,
+            ],
+            None,
+        );
         assert_eq!(
             failed,
             (
-                vec!["w0".into(), "a=1".into(), "b+c=2".into(), "w1".into()],
+                lines(&["w0", "take:a", "a=1", "take:b", "b+c=2", "w1", "take:d"]),
                 Some("batch 3 failed".to_string())
             )
         );
-        let first = run(vec![
-            Some(Err(anyhow::anyhow!("batch 1 failed"))),
+        let first = run(
+            vec![
+                Some(Err(anyhow::anyhow!("batch 1 failed"))),
+                None,
+                None,
+                None,
+            ],
             None,
-            None,
-            None,
-        ]);
+        );
         assert_eq!(
             first,
-            (vec!["w0".into()], Some("batch 1 failed".to_string()))
+            (lines(&["w0", "take:a"]), Some("batch 1 failed".to_string()))
+        );
+        // A batch's failing request comes after the batches before it and before the batch's
+        // own error.
+        let request = run(
+            vec![
+                Some(Ok(1)),
+                Some(Ok(2)),
+                Some(Err(anyhow::anyhow!("batch 3 failed"))),
+                None,
+            ],
+            Some("d"),
+        );
+        assert_eq!(
+            request,
+            (
+                lines(&["w0", "take:a", "a=1", "take:b", "b+c=2", "w1"]),
+                Some("request d failed".to_string())
+            )
         );
     }
 
@@ -1328,6 +1423,7 @@ mod tests {
             use_sw_tback: false,
             comp_based_stats: "0".to_string(),
             several_volumes: true,
+            costs: None,
         };
         search.search.x_drop_gapped_bits = Some(1e9);
         let n_only = [record("n", &[b'N'; 210])];
@@ -1368,6 +1464,7 @@ mod tests {
             use_sw_tback: false,
             comp_based_stats: "0".to_string(),
             several_volumes: false,
+            costs: None,
         };
         search.search.x_drop_ungapped_bits = Some(9e6);
         let repeat = b"TGGTGTTGC".repeat(20);

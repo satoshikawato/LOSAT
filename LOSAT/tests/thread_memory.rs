@@ -16,7 +16,7 @@
 //! grows with the input; workspaces of a constant size per thread do not.
 //!
 //! What is measured. The global allocator of this binary counts the bytes of the live blocks and
-//! their most at once (`HELD`); a search runs through the library API (`LOSAT::api::run`, outfmt 6)
+//! their most at once (`HELD`); a search runs through the library API (`losat::api::run`, outfmt 6)
 //! on a thread of its own, and its peak is the most bytes held during the call beyond those held
 //! before it. On 64-bit Linux with glibc LOSAT asks for 32 MiB and one page, rounded up to a whole
 //! element, for a buffer that it wants glibc to map (`utils/x_mapped.rs` `X_MAPPED_BYTES`,
@@ -84,7 +84,7 @@ use std::ops::Range;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-use LOSAT::api::{read_fasta, run, validate, FastaRecord, Inputs, Program, Role};
+use losat::api::{read_fasta, run, validate, FastaRecord, Inputs, Program, Role};
 
 // ---------------------------------------------------------------------------------------------
 // The counting allocator

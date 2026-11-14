@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// The engine crate's name, kept out of a literal path so that this file passes its own scan.
-const ENGINE: &str = "LOSAT";
+const ENGINE: &str = "losat";
 const FACADE: &str = "web_adapter";
 /// The hidden child of `api` (the façade's `run_local_*` and outputs), written in two pieces for
 /// the same reason.
@@ -131,7 +131,7 @@ fn the_adapter_names_the_engine_through_the_api_and_the_facade_only() {
             for at in word_starts(line, ENGINE) {
                 let rest = &line[at + ENGINE.len()..];
                 let Some(path_rest) = rest.strip_prefix("::") else {
-                    // `LOSAT` as a word of prose, or an alias of the crate.
+                    // `losat` as a word of prose, or an alias of the crate.
                     if rest.trim_start().starts_with("as ") || line.trim_start().starts_with("use ")
                     {
                         wrong.push(format!("{}:{}: {line}", path.display(), line_number + 1));

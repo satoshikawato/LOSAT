@@ -1,0 +1,23 @@
+{
+  "version": "1.2",
+  "dbname": "ps_plain_8890",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "in/ps_plain.faa",
+  "number-of-letters": 1610,
+  "number-of-sequences": 11,
+  "last-updated": "2026-11-13T12:49:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 39999,
+  "bytes-to-cache": 1814,
+  "files": [
+    "ps_plain_8890.pdb",
+    "ps_plain_8890.phr",
+    "ps_plain_8890.pin",
+    "ps_plain_8890.pot",
+    "ps_plain_8890.psq",
+    "ps_plain_8890.ptf",
+    "ps_plain_8890.pto"
+  ]
+}

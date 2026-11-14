@@ -1,0 +1,18 @@
+
+                                          Tax BLAST report                                          
+
+Query= pdq query of the duplicated record
+
+Length=220
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                          (only common) [x]                                         
+ AB000003  unnamed protein product                                                     466   2e-174  
+
+                                      TPA: tpa organism () [x]                                      
+ AB000002  unnamed protein product [TPA: tpa organism]                                 466   2e-174  
+
+                                 uncultured bacterium () [bacteria]                                 
+ AB000001  unnamed protein product [uncultured bacterium]                              466   2e-174  

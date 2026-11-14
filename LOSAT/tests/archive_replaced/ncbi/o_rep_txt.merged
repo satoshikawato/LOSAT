@@ -1,0 +1,646 @@
+Error: (803.7) [blastn] Blast4-archive.request.body.queue-search.subject.sequences.E.id.E.local.str
+Bad char [0x7F] in string at line 38
+sr
+Error: (803.7) [blastn] Blast4-archive.results.alignments.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 134
+sr
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "q1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q1 plain"
+                  }
+                }
+              },
+              title "plain"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 180,
+              seq-data ncbi2na '3A33EFEB717FDE76CF4BF9D2CEF59600F3DBFC5E930D35
+B77A0AFA0EB6D2FF38CFAE00C5ACEFDB7ABFD603F3EB'H
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "s#r"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">lcl|s\177r rep"
+                }
+              }
+            },
+            title "rep"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 2200,
+            seq-data ncbi2na '3A33EFEB717FDE76CF4BF9D2CEF59600F3DBFC5E930D35B7
+7A0AFA0EB6D2FF38CFAE00C5ACEFDB7ABFD603F3EB6D6FA13B0C33537661613A33EFEB717FDE76
+CF4BF9D2CEF59600F3DBFC5E930D35B77A0AFA0EB6D2FF38CFAE00C5ACEFDB7ABFD603F3EB4CBC
+C7C2547A88A7DDCB3A33EFEB717FDE76CF4BF9D2CEF59600F3DBFC5E930D35B77A0AFA0EB6D2FF
+38CFAE00C5ACEFDB7ABFD603F3EBE54811586F88115A804A3A33EFEB717FDE76CF4BF9D2CEF596
+00F3DBFC5E930D35B77A0AFA0EB6D2FF38CFAE00C5ACEFDB7ABFD603F3EB018FCFABB4D21C82B1
+073A33EFEB717FDE76CF4BF9D2CEF59600F3DBFC5E930D35B77A0AFA0EB6D2FF38CFAE00C5ACEF
+DB7ABFD603F3EB0C0E3A89F2EB1BC298EB3A33EFEB717FDE76CF4BF9D2CEF59600F3DBFC5E930D
+35B77A0AFA0EB6D2FF38CFAE00C5ACEFDB7ABFD603F3EB09A9C2D12BB0E905423F3A33EFEB717F
+DE76CF4BF9D2CEF59600F3DBFC5E930D35B77A0AFA0EB6D2FF38CFAE00C5ACEFDB7ABFD603F3EB
+14398505B7432759FC8A3A33EFEB717FDE76CF4BF9D2CEF59600F3DBFC5E930D35B77A0AFA0EB6
+D2FF38CFAE00C5ACEFDB7ABFD603F3EB30BAD037ACCFC89B9DAE3A33EFEB717FDE76CF4BF9D2CE
+F59600F3DBFC5E930D35B77A0AFA0EB6D2FF38CFAE00C5ACEFDB7ABFD603F3EB10999A6E771FDD
+311A2A3A33EFEB717FDE76CF4BF9D2CEF59600F3DBFC5E930D35B77A0AFA0EB6D2FF38CFAE00C5
+ACEFDB7ABFD603F3EB11260021676C247A2802'H
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 367584
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 180
+          },
+          {
+            id str "blast_score",
+            value int 180
+          },
+          {
+            id str "e_value",
+            value real { 146779634041462, 10, -109 }
+          },
+          {
+            id str "bit_score",
+            value real { 333517231654535, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 180
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "q1",
+            local str "s#r"
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            180
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {Error: (803.7) [blastn] Blast4-archive.results.alignments.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 183
+sr
+Error: (803.7) [blastn] Blast4-archive.results.alignments.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 232
+sr
+Error: (803.7) [blastn] Blast4-archive.results.alignments.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 281
+sr
+Error: (803.7) [blastn] Blast4-archive.results.alignments.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 330
+sr
+
+            id str "score",
+            value int 180
+          },
+          {
+            id str "blast_score",
+            value int 180
+          },
+          {
+            id str "e_value",
+            value real { 146779634041462, 10, -109 }
+          },
+          {
+            id str "bit_score",
+            value real { 333517231654535, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 180
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "q1",
+            local str "s#r"
+          },
+          starts {
+            0,
+            220
+          },
+          lens {
+            180
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 180
+          },
+          {
+            id str "blast_score",
+            value int 180
+          },
+          {
+            id str "e_value",
+            value real { 146779634041462, 10, -109 }
+          },
+          {
+            id str "bit_score",
+            value real { 333517231654535, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 180
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "q1",
+            local str "s#r"
+          },
+          starts {
+            0,
+            440
+          },
+          lens {
+            180
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 180
+          },
+          {
+            id str "blast_score",
+            value int 180
+          },
+          {
+            id str "e_value",
+            value real { 146779634041462, 10, -109 }
+          },
+          {
+            id str "bit_score",
+            value real { 333517231654535, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 180
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "q1",
+            local str "s#r"
+          },
+          starts {
+            0,
+            660
+          },
+          lens {
+            180
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 180
+          },
+          {
+            id str "blast_score",
+            value int 180
+          },
+          {
+            id str "e_value",
+            value real { 146779634041462, 10, -109 }
+          },
+          {
+            id str "bit_score",
+            value real { 333517231654535, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 180
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "q1",
+            local str "s#r"
+          },
+          starts {
+            0,
+            880
+          },
+          lens {
+            180
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 180
+          },
+          {
+            id str "blasError: (803.7) [blastn] Blast4-archive.results.alignments.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 379
+sr
+Error: (803.7) [blastn] Blast4-archive.results.alignments.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 428
+sr
+Error: (803.7) [blastn] Blast4-archive.results.alignments.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 477
+sr
+Error: (803.7) [blastn] Blast4-archive.results.alignments.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 526
+sr
+t_score",
+            value int 180
+          },
+          {
+            id str "e_value",
+            value real { 146779634041462, 10, -109 }
+          },
+          {
+            id str "bit_score",
+            value real { 333517231654535, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 180
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "q1",
+            local str "s#r"
+          },
+          starts {
+            0,
+            1100
+          },
+          lens {
+            180
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 180
+          },
+          {
+            id str "blast_score",
+            value int 180
+          },
+          {
+            id str "e_value",
+            value real { 146779634041462, 10, -109 }
+          },
+          {
+            id str "bit_score",
+            value real { 333517231654535, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 180
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "q1",
+            local str "s#r"
+          },
+          starts {
+            0,
+            1320
+          },
+          lens {
+            180
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 180
+          },
+          {
+            id str "blast_score",
+            value int 180
+          },
+          {
+            id str "e_value",
+            value real { 146779634041462, 10, -109 }
+          },
+          {
+            id str "bit_score",
+            value real { 333517231654535, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 180
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "q1",
+            local str "s#r"
+          },
+          starts {
+            0,
+            1540
+          },
+          lens {
+            180
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 180
+          },
+          {
+            id str "blast_score",
+            value int 180
+          },
+          {
+            id str "e_value",
+            value real { 146779634041462, 10, -109 }
+          },
+          {
+            id str "bit_score",
+            value real { 333517231654535, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 180
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "q1",
+            local str "s#r"
+          },
+          starts {
+            0,
+            1760
+          },
+          lens {
+            180
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 180
+          },
+          {
+            id str "blast_score",
+            value int 180
+          },
+          {
+            id str "e_value"Error: (803.7) [blastn] Blast4-archive.results.alignments.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 575
+sr
+,
+            value real { 146779634041462, 10, -109 }
+          },
+          {
+            id str "bit_score",
+            value real { 333517231654535, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 180
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "q1",
+            local str "s#r"
+          },
+          starts {
+            0,
+            1980
+          },
+          lens {
+            180
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 367584",
+      "Effective search space used: 367584",
+      "Length adjustment: 12"
+    }
+  }
+}

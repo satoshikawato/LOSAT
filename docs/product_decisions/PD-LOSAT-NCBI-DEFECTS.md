@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.25
+- Version: 1.26
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -50,6 +50,10 @@
   1.25 2026-11-14 (a version 5 database list that mixes databases with and without accession
   tables is searched; the rejection of 1.9 keeps only a run whose reports look a parsed Seq-id up
   in a file without the table, rule 3, line DBID item mixdb, Owner-delegated)
+  1.26 2026-11-14 (exception 12, the `losat rpsbproc` exception: coordinate arithmetic past NCBI's
+  `int`, protein and nucleotide queries and the XML input alike; line PS item PS16-Q1, the Owner's
+  Q1 = B with the Owner-delegated additions of line PS `DECISIONS.md` 58 and 59; `MapSegSet`'s segment
+  end reproduced, rule 2)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -401,7 +405,135 @@ asks the maintainer to accept it, as the PRs of versions 1.5 and 1.13 did.
     (`LOSAT/src/rpsbproc/archive_tests.rs`, the archive) and `numbers` (`LOSAT/src/report/serial/xml_reader_tests.rs`,
     the XML input).
 
+## Approved exception (`losat rpsbproc`, coordinate arithmetic past NCBI's `int`, version 1.26)
+
+Version 1.26. The Owner decided on 2026-11-14 (line PS `DECISIONS.md` 57, Q1 = B, words 「Q1=B」)
+the question of PS16c's PR (#1081) and of PS16d's review: a hit whose coordinate overflows NCBI's
+`int` (`m_iFrom + COORDSBASE` and `m_iTo + COORDSBASE` of the DOMAINS and SUPERFAMILIES lines, with
+`Calculate`'s overlap sets of the hit), for protein and nucleotide queries alike, and the XML input's
+coordinates (`- COORDSBASE` of an HSP's coordinates and what follows from it), are widened under one
+approved exception, one rule for one expression, under the Owner's rule of 2026-10-10 that LOSAT does
+not reproduce a signed `Int4` overflow (undefined behaviour in C++), as exception 4 widens the culling
+limit. The other `int` overflows of the same coordinate arithmetic, which the question did not name,
+were added to this exception after a code check by an Owner-delegated decision (line PS
+`DECISIONS.md` 58, standing instruction 2026-09-29, restated 2026-10-07): the site's `xres +
+COORDSBASE` and the motif's `GetLeft() + COORDSBASE`, `MinusPr2PlusNA`'s `pr - 1`, the set algebra of
+`CSegSet`, `CalcMasterGaps`, `GetTranslatedPosMap`'s `++c`, a `Std-seg`'s `t - f + 1` and `m_iTo + 1`,
+and the data files' `SetData` `seg.to + 1` and `GetMotifResPos` `++c` (rejected there: leaving them
+refused, two rules for one kind of overflow); and, by line PS `DECISIONS.md` 59 (Owner-delegated,
+after the delta review), `++alnResIdx` and `ParseAlignStrings`' `++start` of an `Hsp_qseq` of 2^31
+letters or more (rejected there: refusing such an `Hsp_qseq`, by its length or by the memory rule of
+`DECISIONS.md` 40, which measures what NCBI builds from a number or pattern in the input, not the
+strings the input carries). The PR (PS16-Q1) asks the maintainer to accept version
+1.26 with both parts. It moves the coordinate overflows that versions 1.16 and 1.17 rejected (rule 3)
+here, and names the widening that PS16a made for protein queries.
+
+12. **rpsbproc's `int` coordinate arithmetic past `int`'s range.** rpsbproc 0.5.1 keeps positions in
+    `SeqPos_t` (`int`) and adds to them in `int`. A hit that starts or ends at base 2^31 - 1, a site or
+    motif mapped there, a `Std-seg` subject interval of 2^31 positions or more, or a coordinate of
+    -2147483648 in a BlastOutput XML document overflows that arithmetic. NCBI's two 0.5.1 builds wrap
+    it: a hit of rpstblastn that ends at 2^31 - 1 prints `-2147483648` as its end (PS16c review oracle
+    `plusmax`, PS16-Q1 oracles `ntplusmax`, `ntminusmax`), and so does an ANK motif of sd00045 that
+    starts there (`ntmotifmax`); an `Hsp_query-from` of -2147483648 throws `basic_string::replace` at
+    position 2147483647 (`xqfmin`). LOSAT computes every such `int` operation as its mathematical
+    value (`i64`) and keeps the value where NCBI keeps the `int`; what NCBI defines after it stays
+    NCBI's: a conversion to `unsigned int` is the value modulo 2^32, `unsigned int` arithmetic wraps,
+    a `size_t` is the value modulo 2^64, a print prints the value. A value that then reads a string
+    outside its range is refused as before (rule 3). The expressions, for protein and nucleotide
+    queries alike:
+    - `m_iFrom + COORDSBASE` and `m_iTo + COORDSBASE` of the DOMAINS and SUPERFAMILIES lines, the
+      residues `+ COORDSBASE` of the SITES and MOTIFS lines, and a nucleotide query's `xres +
+      COORDSBASE` of a site's codon and `GetLeft() + COORDSBASE` of a motif (one owner,
+      `rpsbproc::printed_position`);
+    - the set algebra of `CSegSet` (`from - 1`, `to + 1`, the total residues, the `ori_from` sums),
+      `MapSegSet`'s `diff` and `end + 1`, `CalcMasterGaps`' gap start and length, `GetTranslatedPosMap`'s
+      `++c` and `ori_from + inc` (PS16a's widening, `rpsbproc::segset::Seg`; `Calculate`'s overlap
+      sets of a hit that ends at 2^31 - 1);
+    - `ParseAlignSegs` of a `Std-seg`: a subject interval's `t - f + 1` (stored in the `unsigned int`
+      lengths) and a minus-strand hit's `m_iTo + 1` (divided as an `unsigned int`); `MinusPr2PlusNA`'s
+      `pr - 1` at `INT_MIN`;
+    - the XML input's `- COORDSBASE` of an `Hsp_query-from`, `Hsp_query-to` or `Hsp_hit-from` of
+      -2147483648, "see if NA"'s `m_iTo - m_iFrom + 1`, `ParseAlignStrings`' `++qf`, `--qf`, `++hf`
+      and `--hf` (`m_vecSStarts` holds the values: `rpsbproc::domains::SubjectStarts`), and the
+      alignment strings' positions `++alnResIdx` and `++start` in an `Hsp_qseq` of 2^31 letters or more
+      (compared with the `unsigned int` length, used as `size_t` indices and in the `unsigned int`
+      `start - segLen`; the segment lengths are `unsigned int` already);
+    - the data files' site positions (a hand-edited `cddannot.dat` with a position of 2^31 - 1):
+      `SetData`'s `sorted[i] > seg.to + 1` (`common/impl/segset_impl.hpp:25-55`,
+      `rpsbproc::data::site_data_segs`) and `GetMotifResPos`'s `for (SeqPos_t c = v->from; c <= v->to;
+      ++c)` (`common/basedata.cpp:622`, `rpsbproc::sites::MotifState::motif_check`), whose `++c` past
+      2^31 - 1 would never end the loop in a wrap; LOSAT computed both in `i64` before version 1.26.
+
+    Evidence: for each kind, an input at the limit run by both 0.5.1 builds (the same bytes in all
+    33 jobs) and a nearby input whose coordinates are moved away from the limit by a known shift;
+    LOSAT's output of the limit equals NCBI's output of the nearby input up to that shift, and LOSAT's
+    output of the nearby input equals NCBI's (task folder `PR/tmp/impl16q1/oracle/INDEX.md`; the
+    fixture rows of `use` `widened` in `LOSAT/tests/fixtures/rpsbproc/CASES.tsv`, each with its nearby
+    `compare` row, README.md there):
+    - `ntplusmax` (nt67's first hit ends at 2^31 - 1; `-t doms -m std`, `-t doms -m rep -f`, `-t both
+      -m std`): NCBI prints `-2147483648`, LOSAT 2147483648; the hit 3 bases shorter
+      (`ntplusmax3`) prints 2147483645 in NCBI, nothing else differs.
+    - `ntminusmax` (nt67's first minus-strand hit ends at 2^31 - 1): `alignedLen` is 715,827,882
+      codons as for the hit one base shorter (`ntminusmax1`, which NCBI prints with end 2147483647);
+      LOSAT prints 2147483648, NCBI `-2147483648`.
+    - `ntslen` (a subject interval from 2^32 - 5 to 2^31 - 2, `t - f + 1` = 2^31 + 4): NCBI's and
+      LOSAT's bytes are the same, and the same as for the interval 5 positions shorter (`ntslen1`, no
+      overflow).
+    - `ntmotifmax` (nt68's sd00045 hit moved so that an ANK motif starts at base 2^31 - 1, with the
+      oracle data `ntmot` that keeps its motifs only): NCBI prints `-2147483648`, LOSAT 2147483648;
+      the hit 3 bases lower (`ntmotifmax3`) prints 2147483645 and every other number 3 lower.
+    - `xqfmin` (an `Hsp_query-from` of -2147483648): NCBI's `replace` throws at position 2147483647,
+      LOSAT's at 18446744071562067967, one below NCBI's for -2147483647 (`xqfmin1`).
+    - `xqtmin` (`Hsp_query-to`): NCBI keeps the range from 4 to 2^31 - 1 (its wrap) and prints the hit
+      in `-m rep`; LOSAT's range ends at -2^31 - 1, below its start, as NCBI's for -2147483647
+      (`xqtmin1`): the hit is no representative and prints `-2147483648` in `-m full`, one below
+      `xqtmin1`'s.
+    - `xhfmin` (`Hsp_hit-from`): NCBI's wrapped domain start 2^31 - 1 marks the hit `N`; LOSAT's
+      -2^31 - 1 does not, as NCBI for -2147483647 (`xhfmin1`).
+    - `xhfmax` (`++hf` past 2^31 - 1 after a query gap) and `xspan` (a span of 2^31 for a query of
+      length 0): NCBI's bytes, LOSAT's and the nearby input's (`xhfmax5`, 5 lower; `xspan1`, a span of
+      2^31 - 1) are the same.
+    - Nucleotide queries of the XML input (the PS16-Q1 review's oracle `nx`: `x_ntpair.xml` with the
+      first minus-frame or plus-frame HSP's `Hsp_query-from`, `Hsp_query-to` or `Hsp_hit-from` at
+      -2147483648, 12 limit jobs, through `(m_iTo / 3) << 2`, `PlusNA2PlusPr`, `PlusNA2MinusPr` and `hf`
+      on both strands): LOSAT's output equals NCBI's for -2147483647, byte for byte or with the one
+      printed coordinate one lower; fixture rows `x.h_ntmqfmin.rep` (NCBI drops the hit its wrapped
+      range reclassifies; LOSAT prints `-2147483648` where NCBI prints `-2147483647` for the nearby
+      input) and `x.h_ntphfmin.rep` (NCBI marks the hit `N`, LOSAT and the nearby input do not).
+    The fixture test `widened_rows_are_their_nearby_rows_moved_back` (`LOSAT/tests/rpsbproc_fixtures.rs`)
+    checks every `widened` row against NCBI's bytes of its nearby row and the shift of
+    `widened/PAIRS.tsv`.
+    `pr - 1` of `INT_MIN` and a site's `xres + 1` at 2^31 - 1 are not reached end to end: a site
+    reads its residue in the frame's translation first, which no query below 2^31 bases holds there
+    (refused, rule 3), and a minus-strand motif reaches residue `INT_MIN` only through a segment of
+    about 7e8 residues; their values are unit tested against the residue next to them (the codon 3
+    bases away).
+    Unit tests (`LOSAT/src/rpsbproc/`): `mod.rs` `printed_positions_past_int`, `query.rs`
+    `refusals_of_translated_hits`, `domains_tests.rs` `std_seg_forms`,
+    `a_minus_strand_hit_that_ends_at_int_max`, `ends_that_overflow_int`, `frames_tests.rs`
+    `frame_conversions`, `nucleotide_tests.rs` `codons_and_their_overflow`,
+    `motif_ends_and_their_overflow`, `offline_tests.rs` `coordinates_of_int_min`,
+    `span_that_overflows_int`, `domain_positions_that_overflow_int`, `string_reads_at_int_positions`,
+    `see_if_na_counts_and_refuses`.
+    An `Hsp_qseq` of 2^31 letters or more (PS16-Q1 fix round 2 oracle `q31`, ws): the fixture's `x_one.xml`
+    with L leading query gaps in `Hsp_qseq` and L letters in `Hsp_hseq` before the HSP's 70 columns, which
+    `++alnResIdx` trims, so the HSP's segments and residues are those of the 70 columns whatever L is. For
+    L = 2^31 - 128 (the nearby input, no overflow), LOSAT's stdout, stderr and exit code equal both NCBI 0.5.1
+    builds'. For L = 2^31 + 8 (the limit), LOSAT, in a build with overflow checks, prints the same bytes
+    except the line that echoes the input file's name. NCBI's binary prints the same there: its compiled
+    loop shows no wrap in this output, which the undefined behaviour allows.
+
 ## Reproduced as NCBI (rule 2)
+
+- `losat rpsbproc`, the end of an aligned segment when a site is mapped (`MapSegSet`'s `SeqPos_t end
+  = m_vecSStarts[idx] + m_vecLens[idx] - 1`, `common/basedata.cpp:1180-1250`): an `unsigned int` sum
+  stored in an `int`, which wraps for a segment that passes model position 2^31 - 1, so the sites
+  beyond it are not mapped. Version 1.26 (PS16-Q1) reproduces it; PS16a had added it in `i64` and
+  printed a SITES line that NCBI does not (the PS16-Q1 review's oracle `mse`: `three.asn` with the
+  subject starts of its 199908 hits and that model's site positions moved by K; at K = 2147483586 both
+  0.5.1 builds and LOSAT print no SITES line, at K = 2147483576 all print it). Fixture rows
+  `mse86.both`, `mse76.both`; unit test `mapped_segment_ends_wrap_as_unsigned_int`
+  (`LOSAT/src/rpsbproc/domains_tests.rs`).
 
 - A text seqid list whose ids all go in NCBI's rewriting for a version 5 database (gi ids
   only): NCBI prints `Empty seqid list` and searches the whole database (its code would
@@ -544,12 +676,11 @@ asks the maintainer to accept it, as the PRs of versions 1.5 and 1.13 did.
     byte of an empty string, and libstdc++ moves `SIZE_MAX` bytes: oracle `short2`, segmentation
     fault); a site at a residue outside its reading frame's translation other than its end
     (`operator[]` past the string; oracle `natoprot` and the review's `otherstrand`, where the two
-    builds print different bytes); and arithmetic of the coordinates that overflows NCBI's `int`
-    (undefined: a subject interval's length, `m_iFrom + 1` and `m_iTo + 1` of a hit that starts or
-    ends at 2^31 - 1, in its DOMAINS and SUPERFAMILIES lines and `Calculate`'s overlap sets (review
-    oracle `plusmax`: both builds print -2147483648), `pr - 1` of a residue at `INT_MIN`,
-    `xres + 1` of a site's or motif's base). Every case is made by hand; none occurs in the
-    rpstblastn archives of PS16c probe 1 (891 jobs).
+    builds print different bytes). Version 1.26 moved the arithmetic of the coordinates that
+    overflows NCBI's `int` (a subject interval's length, `m_iFrom + 1` and `m_iTo + 1` of a hit that
+    starts or ends at 2^31 - 1, `pr - 1` of a residue at `INT_MIN`, `xres + 1` of a site's or motif's
+    base) to exception 12. Every case is made by hand; none occurs in the rpstblastn archives of
+    PS16c probe 1 (891 jobs).
   - The BlastOutput XML input (`-outfmt 5` of rpsblast and rpstblastn; version 1.17, 2026-11-13,
     line PS item PS16d, `DECISIONS.md` 37 and 40): an `Hsp_hseq` shorter than its `Hsp_qseq` by
     more than one letter (`ParseBlastOutput` reads `hseq` at the indices of `qseq`, past its
@@ -560,16 +691,19 @@ asks the maintainer to accept it, as the PRs of versions 1.5 and 1.13 did.
     GiB or more at once (`NACommit`'s six frames, `PRCommit`'s residues and their copy, in
     `unsigned int` lengths: a nucleotide query of 0 or 1 base gives frames of more than a billion
     residues; oracles `n_qlen1`, `n_noqlen` and `p_qlenneg` end with `basic_string::replace` or
-    `std::bad_alloc` by the address space), the coordinate arithmetic of an HSP that overflows
-    NCBI's `int` (`- COORDSBASE` of an `Hsp_query-from`, `Hsp_query-to` or `Hsp_hit-from` of
-    `-2147483648`; `m_iTo - m_iFrom + 1` of "see if NA"; `++hf` and `--hf` of `ParseAlignStrings`
-    at `int`'s limits; an `Hsp_qseq` of 2^31 letters or more). (A REAL of more than 18
+    `std::bad_alloc` by the address space), an `Hsp_qseq` of 2^31 letters or more that "see if NA"
+    reads past its end (its `t0 = t1 + 1` stores a `size_t` of 2^31 or more in an `int`: a negative
+    index) or over which that loop starts over and never ends (2^32 - 1 letters or more; version 1.26,
+    which widens the rest of such an `Hsp_qseq`, exception 12). (A REAL of more than 18
     significant digits, refused in 1.17, is read as NCBI reads it since 1.19.) Of NCBI's XML
     reader, LOSAT refuses the constructs that NCBI's BLAST XML writers never produce and that NCBI
     reads with state LOSAT does not port: attributes (skipped, with NCBI's handling of `xmlns` and
     `nil`), namespace prefixes (stripped), control characters in character data (replaced by `#`
-    with a warning that quotes NCBI's stack of the read). Every case is made by hand; none occurs
-    in the 2,310 jobs of PS16d probe 1 (NCBI's rpsblast and rpstblastn 2.17.0 XML).
+    with a warning that quotes NCBI's stack of the read). Version 1.26 moved the coordinate arithmetic
+    of an HSP that overflows NCBI's `int` (`- COORDSBASE` of an `Hsp_query-from`, `Hsp_query-to` or
+    `Hsp_hit-from` of `-2147483648`; `m_iTo - m_iFrom + 1` of "see if NA"; `++hf` and `--hf` of
+    `ParseAlignStrings`) to exception 12. Every case is made by hand; none occurs in the 2,310 jobs
+    of PS16d probe 1 (NCBI's rpsblast and rpstblastn 2.17.0 XML).
   - NaN E-values and bit scores of hits, archives and XML alike (version 1.17, the PS16d review
     S3-3; it narrows PS16a's refusal of every NaN): NCBI's `HUGE_VAL/HUGE_VAL` (sign set, printed
     `-nan`) is kept and the hits are sorted as libstdc++'s `std::sort` sorts them with
@@ -700,8 +834,8 @@ would port:
 - A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
   each time it reads the definition line.
 - Titles NCBI takes from the tax ids, where a report shows them (outfmt 0, a printed tabular id
-  that replaces `lcl|Subject_N`): an empty title made from the taxonomy database's name of the
-  tax id, and a title whose end `x_AdjustProteinTitleSuffix` rewrites.
+  that replaces `lcl|Subject_N`): a title whose end `x_AdjustProteinTitleSuffix` rewrites (an
+  empty title LOSAT makes from the tax id's name as NCBI does since line RG item T5).
 
 ## Ported (rule 4)
 

@@ -15,7 +15,11 @@ run:
   write: then LOSAT stops there).
 - `SEQ_ID_PREFER_ACCESSION_OVER_GI`, `SEQ_ID_AVOID_GI` and a `[BLAST] BLASTDB` value that LOSAT
   cannot read: where the `-db` database opens, which in every search program is before an empty
-  query file ends the run.
+  query file ends the run. A `[BLAST] BLASTDB` value that LOSAT cannot read also stops a
+  `-subject` search whose report looks `taxdb.bti` up (a tabular report with `sscinames`,
+  `scomnames`, `sblastnames` or `sskingdoms`, or the organism report, outfmt 18), at the same
+  point; the singular names (`ssciname`, ...) look nothing up for `-subject` records, which have no
+  taxid, so they do not read it, as in NCBI BLAST+.
 - The other variables of a search: after the options and the input files, before the search. An
   empty query file ends the run first, as in NCBI BLAST+ (`Query is Empty!`, exit status 0).
 - The query splitting variables in blastx (at every query batch) and tblastx, and the splitting
@@ -73,7 +77,7 @@ file with any other entry stops the run, and so does an `NCBI_CONFIG__<SECTION>_
 for another entry. LOSAT reads the files as NCBI BLAST+ 2.17.0 does: comments, sections, entries
 before the first section (left out), a value continued on the next line after a backslash, quotes
 at the ends of a value, and backslash escapes. A value that is not UTF-8 stops a run that opens a
-database for `BLASTDB`, `-window_masker_taxid` for `WINDOW_MASKER_PATH`, and
+database or looks `taxdb.bti` up for `BLASTDB`, `-window_masker_taxid` for `WINDOW_MASKER_PATH`, and
 `makeblastdb -parse_seqids` for `MAX_SEQID_LENGTH`.
 
 A file that NCBI BLAST+ reports as malformed gets NCBI BLAST+'s messages, where NCBI BLAST+ writes

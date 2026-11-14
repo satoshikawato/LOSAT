@@ -393,7 +393,7 @@ impl<F: SideFiles> Xml2Document<F> {
         };
         if let Some(exception) = failure {
             report.clear();
-            return self.failed(exception, out);
+            return self.failed(exception);
         }
         let result = self.write(report, out);
         report.clear();
@@ -434,12 +434,7 @@ impl<F: SideFiles> Xml2Document<F> {
     /// the exception (`CaughtException`, the program posts its message and goes on), the file
     /// forms (outfmt 13 and 14) have opened the report's file, which stays empty, and end the
     /// program with it (`CATCH_ALL`, exit status 255; the master file stays empty: no epilog).
-    fn failed(
-        &mut self,
-        exception: crate::ncbi_exception::NcbiException,
-        out: &mut Vec<u8>,
-    ) -> Result<()> {
-        let _ = out;
+    fn failed(&mut self, exception: crate::ncbi_exception::NcbiException) -> Result<()> {
         self.written += 1;
         match self.kind {
             Xml2Kind::Single16 | Xml2Kind::Single15 => {
@@ -469,7 +464,7 @@ impl<F: SideFiles> Xml2Document<F> {
         let pending = std::mem::take(&mut self.pending);
         self.separator(out);
         if let Some(exception) = self.pending_failure.take() {
-            return self.failed(exception, out);
+            return self.failed(exception);
         }
         self.write(&pending, out)
     }
@@ -514,7 +509,7 @@ impl<F: SideFiles> Xml2Document<F> {
             let pending = std::mem::take(&mut self.pending);
             self.separator(out);
             match self.pending_failure.take() {
-                Some(exception) => match self.failed(exception, out) {
+                Some(exception) => match self.failed(exception) {
                     Err(error) if error.is::<crate::report::blast_xml::CaughtException>() => {
                         caught = Some(error)
                     }

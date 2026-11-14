@@ -150,20 +150,35 @@ export function outfmtOf(argv: readonly string[], output: RunOutput): string {
  * `-custom` after the number where words configure it (`…outfmt6-custom.txt`, BLAST+'s "custom
  * format" of its -outfmt help; outfmt 5 ignores words).
  */
-export function outputFileName(
-  run: {
-    readonly number: number;
-    readonly program: string;
-    readonly task?: string | undefined;
-    readonly queuedAt: number;
-    readonly argv: readonly string[];
-  },
-  output: RunOutput,
-): string {
-  const time = new Date(run.queuedAt).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
-  const task = run.task === undefined ? '' : `-${run.task}`;
+export function outputFileName(run: ExportedRun, output: RunOutput): string {
   const number = outputNumber(run.argv, output);
   const format = output === CUSTOM_OUTPUT && configures(outfmtOf(run.argv, output)) ? `${number}-custom` : String(number);
   const { extension } = FILE_TYPES[number] ?? TEXT_FILE;
-  return `losat-run${run.number}-${run.program}${task}-${time}.outfmt${format}.${extension}`;
+  return `${exportPrefix(run)}.outfmt${format}.${extension}`;
+}
+
+/** What names the files of a run: its number, program, task and the time of its "Run LOSAT". */
+export interface ExportedRun {
+  readonly number: number;
+  readonly program: string;
+  readonly task?: string | undefined;
+  readonly queuedAt: number;
+  readonly argv: readonly string[];
+}
+
+/** The start of the name of every file of a run that the page saves (`losat-run3-blastn-megablast-20261104T111530Z`). */
+function exportPrefix(run: ExportedRun): string {
+  const time = new Date(run.queuedAt).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  const task = run.task === undefined ? '' : `-${run.task}`;
+  return `losat-run${run.number}-${run.program}${task}-${time}`;
+}
+
+/**
+ * The file name of a file that a run made besides its outputs (the file of `-logfile NAME`; line RG
+ * E1w-3b): the run's start of the names of its outputs, `logfile`, then the file's own name
+ * (`losat-run3-tblastx-20261104T111530Z.logfile.run.log`), so that the files of two runs get other
+ * names, and no file of a run gets the name of one of its outputs (`-logfile outfmt6.txt`).
+ */
+export function runFileName(run: ExportedRun, name: string): string {
+  return `${exportPrefix(run)}.logfile.${name}`;
 }

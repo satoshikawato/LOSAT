@@ -1,0 +1,114 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: mask probe v5
+Masked using: 'dust', options: 'window=64; level=20; linker=1'
+           5 sequences; 7,360 total letters
+
+
+
+Query= q1
+
+Length=900
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 test subject s1                                                    1578    0.0  
+
+
+>s1 test subject s1
+Length=3000
+
+ Score = 1578 bits (796),  Expect = 0.0
+ Identities = 871/896 (97%), Gaps = 0/896 (0%)
+ Strand=Plus/Plus
+
+Query  5     TGCGCATCTGTCGATTGAAATAGCAGCCGACCGGTCTATGTTACTCATTTTGTGCGCTAC  64
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  605   TGCGCATCTGTCGATTGAAATAGCAGCCGACCGGTCTATGTTACTCATTTTGTGCGCTAC  664
+
+Query  65    GAGGCGGGCCTCCGTTTACCAGATCGGTGCACTCTACCGGTTCGAACACATAATATACGC  124
+             || | ||||||||||||||||||||||||||||||||||||||||||||| ||||||| |
+Sbjct  665   GACGAGGGCCTCCGTTTACCAGATCGGTGCACTCTACCGGTTCGAACACAAAATATACTC  724
+
+Query  125   ATCGACTGGTGGAAAACCTCCACGAGACTGAGAGACTGCCATGACTTATCCACTTTCGAG  184
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  725   ATCGACTGGTGGAAAACCTCCACGAGACTGAGAGACTGCCATGACTTATCCACTTTCGAG  784
+
+Query  185   ATAATCTAGACCGCTGTCCCTCTAGCCCAGCTATCTGCGGCCCTCCAGAAATCAAGGTCA  244
+             |||||||||||||||||| |||||||||||| ||||||||||||||||||||||||||||
+Sbjct  785   ATAATCTAGACCGCTGTCACTCTAGCCCAGCGATCTGCGGCCCTCCAGAAATCAAGGTCA  844
+
+Query  245   TTAAACAAGCGATCAGGGGACAGGATCTGAGGGCTTCAACTCTAGGGGTACGAGCATTTG  304
+             |||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||
+Sbjct  845   TTAAACAAGCGATCAGGGGACAGGATCTGAGGGCTTCAACTCTAGGGGTACGTGCATTTG  904
+
+Query  305   AGTGATTCGCACGGCGTCCAGTCGTTTTGAACCTCTTCACTCTGAAACCGGATGCGGCCT  364
+             |||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||
+Sbjct  905   AGTGATTCGCACGGCGTCCAGTCGTTTTGAACCTCTTCACTCGGAAACCGGATGCGGCCT  964
+
+Query  365   CATGAATGCAGCATTTAGGCACGTTGGGCCTACCATCACACACACACACACACACACACA  424
+              |||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  965   AATGAATGCAGAATTTAGGCACGTTGGGCCTACCATcacacacacacacacacacacaca  1024
+
+Query  425   CACACACACACACACACACACACACACACACACACACACACACAAACACACACACACACA  484
+             |||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||
+Sbjct  1025  cacacacacacacacacacacacacacacacacacacacacacacacacacacacacaca  1084
+
+Query  485   CACACACACACACACATCCGAGCGAGTAGGGGTGTACTTTTCTCCCCCTCGTAGTAGCCT  544
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1085  cacacacacacacacaTCCGAGCGAGTAGGGGTGTACTTTTCTCCCCCTCGTAGTAGCCT  1144
+
+Query  545   AAGAGTTTAACCCGCACGCCATGGCTTGAGCCAATCGCTGAGAGGCTGAGGATTGTTTAT  604
+             ||| |||||||||||||||| ||||||||||||||||||||||| |||||||||||||||
+Sbjct  1145  AAGGGTTTAACCCGCACGCCGTGGCTTGAGCCAATCGCTGAGAGACTGAGGATTGTTTAT  1204
+
+Query  605   TCAGGCACAGAAGGAGCAGAAAGGGCTGCCATATTTGGGGCCATCGTCACAAGCTCTAAC  664
+             |||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||
+Sbjct  1205  TCAGGCACAGAAGGAGCAGAAAGGGCTGCCATATTTGGCGCCATCGTCACAAGCTCTAAC  1264
+
+Query  665   CGCGTCTGGCGTACGATGACTAACGCTCTCGGCTTTCTGCCCGGAAGCATCTACCGTCCG  724
+             ||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||| 
+Sbjct  1265  CGCGTCTGGCGTACGATGACTAACGCTCTCGGCTTTCTGCCGGGAAGCATCTACCGTCCC  1324
+
+Query  725   CAGTTCGTGTACACCGAGGCACGTCTGGTAAGATCTTGGAACCGGGTTCGGACCAGAATC  784
+             ||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||
+Sbjct  1325  CAGTTCGTGTACACCGAGGCACGTCTGGTAAGATCATGGAACCGGGTTCGGACCAGAATC  1384
+
+Query  785   ATTAGTTTCGGTTATAGGTAGAGAGCGTTATTAGCCAACGCCTTTGTCTAATGCTCCCAG  844
+              |||||| ||||||| |||||| |||||||||||||||||||||||||||||||||| ||
+Sbjct  1385  GTTAGTTCCGGTTATGGGTAGAAAGCGTTATTAGCCAACGCCTTTGTCTAATGCTCCGAG  1444
+
+Query  845   AAAGGAGTAGAGATTTGGCACAGCCGTTCCATCCAGATGCTCATATCCTTCGGAAC  900
+             ||||||| |||||||||||||||||| |||||||||||||||||||||||||||||
+Sbjct  1445  AAAGGAGCAGAGATTTGGCACAGCCGGTCCATCCAGATGCTCATATCCTTCGGAAC  1500
+
+
+
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Gapped
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Effective search space used: 6494145
+
+
+  Database: mask probe v5
+  Masked using: 'dust', options: 'window=64; level=20; linker=1'
+    Posted date:  Nov 14, 2026  5:20 AM
+  Number of letters in database: 7,360
+  Number of sequences in database:  5
+
+
+
+Matrix: blastn matrix 1 -3
+Gap Penalties: Existence: 5, Extension: 2

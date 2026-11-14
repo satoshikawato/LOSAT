@@ -594,6 +594,11 @@ fn x_make_room(
         // Exact blastp: the backbone and the pv array have the sizes of the block's own table (fixed
         // by the word length and the alphabet).
         BlastpRuntimeLookup::Aa(table) => {
+            // A table of 4-letter words (item SC8b) is never built ahead (`blastp_aa_lookup_ahead`):
+            // no room for it.
+            if !super::x_bp_aa_vectors_reused(table) {
+                return false;
+            }
             let Some(spares) = x_bp_aa_spares(pool) else {
                 return false;
             };
@@ -1733,7 +1738,7 @@ mod tests {
     ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
         match args.lookup_table_type {
             BlastpLookupTableType::AaLookupTable => {
-                super::super::blastp_aa_lookup(args, frames, false)
+                super::super::blastp_aa_lookup(args, frames, false, pool)
             }
             BlastpLookupTableType::CompressedAaLookupTable => {
                 let lengths: Vec<usize> = records.iter().map(|record| record.seq().len()).collect();

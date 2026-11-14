@@ -395,6 +395,11 @@ pub struct DatabaseInfo {
     pub num_sequences: u64,
     /// `total_length`.
     pub total_letters: u64,
+    /// `filt_algorithm_name`: the database masking's algorithm (`Masked using:`), empty for a
+    /// search without it.
+    pub filt_algorithm_name: String,
+    /// `filt_algorithm_options`: its options, empty for its defaults.
+    pub filt_algorithm_options: String,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:511-523
@@ -2111,12 +2116,57 @@ fn write_blast_database_header<W: Write>(
 ) -> io::Result<()> {
     write!(writer, "Database: ")?;
     write_flatfile_wrapped(writer, &database.definition, 68)?;
+    if let Some(first) = database.databases.first() {
+        write_masked_using(writer, "", first)?;
+    }
     writeln!(
         writer,
         "           {} sequences; {} total letters",
         format_count_with_commas(i64::try_from(database.num_sequences).unwrap_or(i64::MAX)),
         format_count_with_commas(i64::try_from(database.total_letters).unwrap_or(i64::MAX))
     )?;
+    writeln!(writer)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:526-532,546-553
+// ```c++
+//         x_WrapOutputLine(db_titles, line_length, out);
+//         if ( !dbinfo->filt_algorithm_name.empty() ) {
+//             out << "Masked using: '" << dbinfo->filt_algorithm_name << "'";
+//             if ( !dbinfo->filt_algorithm_options.empty() ) {
+//                 out << ", options: '" << dbinfo->filt_algorithm_options << "'";
+//             }
+//             out << endl;
+//         }
+//     ...
+//             x_WrapOutputLine(dbinfo->definition, line_length, out);
+//
+//             if ( !dbinfo->filt_algorithm_name.empty() ) {
+//                 out << "  Masked using: '" << dbinfo->filt_algorithm_name << "'";
+//                 if ( !dbinfo->filt_algorithm_options.empty() ) {
+//                     out << ", options: '" << dbinfo->filt_algorithm_options << "'";
+//                 }
+//                 out << endl;
+//             }
+// ```
+/// The `Masked using:` line of a database searched with database masking (`indent` before it:
+/// none in the prolog, two spaces in the epilog), not wrapped; nothing without it.
+fn write_masked_using<W: Write>(
+    writer: &mut W,
+    indent: &str,
+    database: &DatabaseInfo,
+) -> io::Result<()> {
+    if database.filt_algorithm_name.is_empty() {
+        return Ok(());
+    }
+    write!(
+        writer,
+        "{indent}Masked using: '{}'",
+        database.filt_algorithm_name
+    )?;
+    if !database.filt_algorithm_options.is_empty() {
+        write!(writer, ", options: '{}'", database.filt_algorithm_options)?;
+    }
     writeln!(writer)
 }
 
@@ -2164,6 +2214,7 @@ fn write_final_database_block<W: Write>(
     for database in &database.databases {
         write!(writer, "  Database: ")?;
         write_flatfile_wrapped(writer, &database.definition, 68)?;
+        write_masked_using(writer, "  ", database)?;
         writeln!(writer, "    Posted date:  {}", database.date)?;
         writeln!(
             writer,
@@ -4872,6 +4923,8 @@ mod tests {
             date: "Oct 13, 2026  1:18 PM".to_string(),
             num_sequences: 17,
             total_letters: 2287,
+            filt_algorithm_name: String::new(),
+            filt_algorithm_options: String::new(),
         }])
     }
 
@@ -4899,12 +4952,56 @@ mod tests {
                 date: "Oct 12, 2026  1:01 AM".to_string(),
                 num_sequences: 575_748,
                 total_letters: 209_017_843,
+                filt_algorithm_name: String::new(),
+                filt_algorithm_options: String::new(),
             }]),
         )
         .unwrap();
         assert_eq!(
             String::from_utf8(written).unwrap(),
             "Database: Swiss-Prot\n           575,748 sequences; 209,017,843 total letters\n\n"
+        );
+    }
+
+    // NCBI BLAST+ 2.17.0 `blastn -db db/b5\ db/a5 -db_soft_mask 11` (probe m04 of the M4a-2 survey):
+    // the prolog shows the first name's algorithm after all titles, the epilog each name's own;
+    // `, options:` only for an algorithm with options (probe m06c, `'windowmasker'`).
+    #[test]
+    fn masked_databases_show_their_algorithms() {
+        let database = |definition: &[u8], name: &str, options: &str| DatabaseInfo {
+            definition: definition.to_vec(),
+            date: "Nov 14, 2026  4:29 AM".to_string(),
+            num_sequences: 5,
+            total_letters: 7360,
+            filt_algorithm_name: name.to_string(),
+            filt_algorithm_options: options.to_string(),
+        };
+        let shown = PairwiseDatabase::new(vec![
+            database(b"dust40 only", "dust", "window=32; level=40; linker=1"),
+            database(b"mask probe v5", "windowmasker", ""),
+        ]);
+        let mut written = Vec::new();
+        write_blast_database_header(&mut written, &shown).unwrap();
+        assert_eq!(
+            String::from_utf8(written).unwrap(),
+            "Database: dust40 only; mask probe v5\n\
+             Masked using: 'dust', options: 'window=32; level=40; linker=1'\n\
+             \x20          10 sequences; 14,720 total letters\n\n"
+        );
+        let mut written = Vec::new();
+        write_final_database_block(&mut written, &shown).unwrap();
+        assert_eq!(
+            String::from_utf8(written).unwrap(),
+            "  Database: dust40 only\n\
+             \x20 Masked using: 'dust', options: 'window=32; level=40; linker=1'\n\
+             \x20   Posted date:  Nov 14, 2026  4:29 AM\n\
+             \x20 Number of letters in database: 7,360\n\
+             \x20 Number of sequences in database:  5\n\n\
+             \x20 Database: mask probe v5\n\
+             \x20 Masked using: 'windowmasker'\n\
+             \x20   Posted date:  Nov 14, 2026  4:29 AM\n\
+             \x20 Number of letters in database: 7,360\n\
+             \x20 Number of sequences in database:  5\n\n\n\n"
         );
     }
 

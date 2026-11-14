@@ -380,7 +380,7 @@ impl RpsVolumeSetup {
         let offsets = files.offsets();
         let mut consensus = vec![0u8; concat];
         if num_seqs > 0 {
-            let block = volume.read_block(0, num_seqs, 0).map_err(|error| {
+            let block = volume.read_block(0, num_seqs, 0, 0).map_err(|error| {
                 crate::algorithm::common::database::database_error(error, self.program)
             })?;
             for oid in 0..num_seqs as usize {

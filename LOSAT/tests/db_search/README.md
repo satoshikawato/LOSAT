@@ -561,6 +561,13 @@ plus the first ordinal id of the volume, so its own number finds the sequence, w
 parsed Seq-ids; another n finds no sequence or another one, which LOSAT refuses in the formats that read the
 Bioseq. No record names `gnl|BL_ORD_ID|0`: makeblastdb stores it with a string tag.
 
+Aliases that restrict a database with parsed Seq-ids by `FIRST_OID` and `LAST_OID` (line DBID ordnum; rows
+`db.id.on.*`): `make_ids.py` writes `ids/pfound_r.pal` (OIDs 1 to 9 of `ids/pfound_v5`), `ids/refuse_r.pal` (OIDs 1
+to 5 of `ids/refuse_v5`) and `ids/njoined_r.nal` (`nfound_v4`, `njoined_a` and `njoined_b`, OIDs 2 and 3 only: the
+pair of `ids/njoined`), and the list `ids/pfound_nsl.txt` (AAA00001.1, OID 0 of `ids/pfound_v5`, for
+`-negative_seqidlist`). The rank of a searched sequence is its OID less the OIDs left out before it; LOSAT's refusals
+name the OID, as `blastdbcmd -outfmt %o` prints it (with `taxfilter/tfe_nr` and `taxfilter/tfe_pr`, OIDs 1 to 3).
+
 Seq-align ids that NCBI's formatters look up like any other (line DBID N2b; rows `db.id.*.look.*`): `make_ids.py`
 writes, from the FASTA of `ids/make_look_fasta.py`, `ids/plook_v5` and `ids/plook_v4` from `ids/plook.faa` (an
 accession, `bbs|123`, `nat|NA000001.1|`, `lcl|777`, `gnl|PIG|124`, `bbs|300` then `lcl|300` and `lcl|301` then
@@ -1401,3 +1408,78 @@ The databases (version 4; `.pjs` deleted). Run from `LOSAT/`:
     makeblastdb -in tests/db_search/of1/dispref.fa -dbtype prot -out tests/db_search/of1/dispref \
         -title "a database sequence whose display id is not its local id" -parse_seqids -blastdb_version 4
     rm tests/db_search/of1/*.pjs
+## `dbmask/`: database masks of BLASTN searches (line NP, series M, M4a-2a)
+
+Rows `db.dbmask.*` (`-db_soft_mask`, `-db_hard_mask`). The inputs are the probe inputs of the M4a-2 survey
+(`ncbi-parity-20261019/M/m4a2/probe/in`, written by its `scripts/gen.py`, seed 20261114): `subj.fna` (five subjects:
+`s1` with a 100-letter CA repeat at 1000 and a 24-letter poly-A at 2000, `s2` without low complexity, `s3` with
+repeats at both ends, `s4` all `GA`, `s5` random), the queries `q.fna` (all five), `q1.fna` (over the CA repeat of
+`s1`), `q4.fna` (over its poly-A), `q5.fna` (over `s5`), `q56.fna` (`q5` and the `s4` query of the edge cases) and the
+seqid list `ids_s1.txt`. Made with NCBI BLAST+ 2.17.0 from `dbmask/` (`BLAST_USAGE_REPORT=false`):
+
+```
+dustmasker -in subj.fna -infmt fasta -outfmt maskinfo_asn1_bin -out dust.asnb
+dustmasker -in subj.fna -infmt fasta -level 40 -window 32 -outfmt maskinfo_asn1_bin -out dust40.asnb
+windowmasker -mk_counts -in subj.fna -infmt fasta -out wm.counts
+windowmasker -ustat wm.counts -in subj.fna -infmt fasta -outfmt maskinfo_asn1_bin -out wm.asnb
+dustmasker -in subj.fna -infmt fasta -parse_seqids -outfmt maskinfo_asn1_bin -out dust_p.asnb
+makeblastdb -in subj.fna -dbtype nucl -out a5 -title "mask probe v5" -mask_data dust.asnb,dust40.asnb,wm.asnb
+makeblastdb -in subj.fna -dbtype nucl -out a4 -title "mask probe v4" -blastdb_version 4 -mask_data dust.asnb,dust40.asnb,wm.asnb
+makeblastdb -in subj.fna -dbtype nucl -out b5 -title "dust40 only" -mask_data dust40.asnb
+makeblastdb -in subj.fna -dbtype nucl -out k5 -title "mask ids v5" -mask_data dust.asnb,wm.asnb -mask_id mydust,mywm
+makeblastdb -in subj.fna -dbtype nucl -out nm5 -title "no mask v5"
+makeblastdb -in subj.fna -dbtype nucl -out p5 -title "parsed v5" -parse_seqids -mask_data dust_p.asnb
+makeblastdb -in subj.fna -dbtype nucl -out xb4 -title "big-endian mask data only" -blastdb_version 4 -mask_data dust.asnb
+rm xb4.nac
+blastdb_aliastool -dblist "a5 nm5" -dbtype nucl -out al_a_nm -title "a5 and nm5"
+blastdb_aliastool -dblist "a5 b5" -dbtype nucl -out al_a_b -title "a5 and b5"
+blastdb_aliastool -dblist "b5 a5" -dbtype nucl -out al_b_a -title "b5 and a5"
+sed 's/^>s/>t/' subj.fna > t.fna
+dustmasker -in t.fna -infmt fasta -level 40 -window 32 -parse_seqids -outfmt maskinfo_asn1_bin -out t_dust40.asnb
+makeblastdb -in t.fna -dbtype nucl -out zz5 -title "zz dust40" -parse_seqids -mask_data t_dust40.asnb
+rm t.fna
+```
+
+(`wm.counts` is not kept.) `a5` and `a4` have the algorithms 11 (dust, defaults), 12 (dust `window=32; level=40;
+linker=1`) and 30 (windowmasker, default options); `b5` has the second dust as its 11; `k5` has 100 (`mydust`) and 101
+(`mywm`); `p5` has the dust of `-parse_seqids` ids as 11; `nm5` has no mask data; `xb4` is a mask column without its
+little-endian `.nac`, which LOSAT refuses for a search (NCBI reads its ranges byte-reversed, M/DECISIONS 9); `zz5`
+(review 1 of M4a-2a, F2) holds the same subjects as `t1`-`t5` with the second dust alone (its 11), so that in the list
+`p5 zz5` the algorithm 11 is `p5`'s dust and `zz5` lacks it: NCBI reads no mask of `zz5` when `-seqidlist`
+(`ids_s1s2s3.txt`) searches `p5`'s sequences only, and LOSAT refuses the search only where it would read one. The seqid
+lists `ids_s1.txt`, `ids_s1s2s3.txt` and `ids_s3s5.txt` hold those local ids, one per line. The rows
+also use `../seqdb/db/mask_nucl_colon_id` (`-mask_id c:id`, stored with 0x01 for the colon),
+`../seqdb/db/mask_nucl_mv` (two volumes, dust 11 and windowmasker 30) and `../fasta/outfmt11/arch_empty.fna`
+(an empty query).
+
+The edge databases hold hand-made masks of `s5` (local id 5, 1200 letters) and `s4` (local id 4, 300 letters) in
+ASN.1 text (`edge_<case>.asnt`, the survey's `scripts/mkedge.py` form: `algo-program dust`, `algo-options "edge
+<case>"`, one `packed-int` per sequence, `from`/`to` inclusive): `unsorted` (600-699, 100-199), `overlap` (100-299,
+200-399), `adjacent` (100-199, 200-299), `ends` (0-99, 1100-1199), `tiny` (301-301, 500-502, 703-705), `nested`
+(100-499, 200-299), `many` (25 masks of 5 letters every 37 from 150), `head` (0-99), `tail` (1000-1199), `whole5`
+(0-1199) and `whole4` (`s4` 0-299, `s5` 400-449). makeblastdb stores each sequence's masks in the order given, so the
+searches meet unsorted and overlapping lists:
+
+```
+makeblastdb -in subj.fna -dbtype nucl -out edge1 -title "edge masks 1" -blastdb_version 4 \
+  -mask_data edge_unsorted.asnt,edge_overlap.asnt,edge_adjacent.asnt,edge_ends.asnt,edge_tiny.asnt
+makeblastdb -in subj.fna -dbtype nucl -out edge2 -title "edge masks 2" -blastdb_version 4 \
+  -mask_data edge_nested.asnt,edge_many.asnt,edge_head.asnt,edge_tail.asnt,edge_whole5.asnt,edge_whole4.asnt
+```
+
+`edge1` has the algorithms 11 to 15 in that order, `edge2` 11 to 16.
+
+Review 2 of M4a-2a added damaged copies of `a5` and alias files over `p5 zz5`:
+
+```
+mkdir dmg dmg3 && cp a5.* dmg/ && cp a5.* dmg3/
+truncate -s 360 dmg/a5.nac dmg/a5.nab
+for f in dmg3/a5.nac dmg3/a5.nab; do printf '\x00\x00\x10\x00' | dd of=$f bs=1 seek=8 conv=notrunc; done
+```
+
+`dmg/a5` has mask data files cut inside the blob of `s1` (a range past the end of the data file: NCBI's
+`SEQDB_FILE_ASSERT`), `dmg3/a5` a first blob whose algorithm 11 states 4096 pairs (`CBlastDbBlob::x_ReadRaw: hit end
+of data`); NCBI's search reports both as `BLAST engine error: Database memory map file error`, exit status 3. The alias
+files `zr_t2.nal`, `zr_p5.nal` and `zr_t1.nal` give `DBLIST p5 zz5` with the OID ranges 7-7 (`t2` alone, no mask
+data), 3-5 (`s3`-`s5`) and 1-6 (`s1`-`s5` and `t1`, which has mask data that `zz5`'s volume reads without the
+algorithm 11 of the list): NCBI reads masks of `zz5` only in the last.

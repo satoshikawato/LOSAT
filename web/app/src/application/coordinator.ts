@@ -7,22 +7,25 @@
 // Inputs go through the data layer (plan §5.4): each input becomes a source, the source
 // gets a record table (a dataset revision), and the run snapshot holds the bytes of the
 // included records with their IDs and lengths, which the engine checks at `register`.
-import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type ProgramId, type RunOutput } from 'losat/domain';
+import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type ProgramId, type RunFile, type RunOutput } from 'losat/domain';
 import {
   RunCancelledError,
+  runFilesOf,
   type EngineGateway,
   type EngineInput,
   type EnginePhase,
   type HspRecord,
+  type StartResult,
   type ValidationResult,
 } from 'losat/ports';
 import { buildArgv, optionValue, PASTED_NAMES } from '../domain/argv';
 import { countsName, parseTaxid, type CountsOrigin } from '../domain/counts';
-import { outputFileName, outputMediaType, runOutputs } from '../domain/output-format';
+import { outputFileName, outputMediaType, runFileName, runOutputs } from '../domain/output-format';
 import { fastaParser, programById } from '../domain/programs';
-import { isTerminal, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
+import { isTerminal, type ConffileSnapshot, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
+import { registryName, unreadableConffile } from './conffile';
 import { taskOf } from './results';
 import { Store } from './store';
 
@@ -55,6 +58,12 @@ export interface SearchRequest {
   readonly windowMasker?: File;
   /** Where the counts of a taxonomy ID came from; the run records it. */
   readonly windowMaskerOrigin?: CountsOrigin;
+  /**
+   * The file chosen for the argv's `-conffile` (Additional options; line RG E1w-3b): read once when
+   * the runs are queued (once for the requests of a group that share it), the run reads its bytes under
+   * the name that the engine's start reads of the argv. Not used by an argv without `-conffile`.
+   */
+  readonly conffile?: File;
 }
 
 export interface RunView {
@@ -76,6 +85,8 @@ export interface CoordinatorDeps {
   readonly downloader: Downloader;
   readonly now: () => number;
   readonly newRunId: () => string;
+  /** The lower-case hex SHA-256 of bytes (the package's `sha256Hex`), for the registry file of a snapshot. */
+  readonly digest: (bytes: Uint8Array) => Promise<string>;
 }
 
 export type EnqueueResult = ValidationResult & { readonly runId?: string };
@@ -99,6 +110,12 @@ export class Coordinator {
    * that removes runs must remove the entries that no run uses.
    */
   private readonly runInputs = new Map<string, Promise<RunInput>>();
+  /**
+   * The bytes of the registry file of each queued or running run whose argv has `-conffile` (read at
+   * enqueue, shared by a group), by run: the run's input until it ends, when they go; its snapshot
+   * keeps the name, the size and the SHA-256.
+   */
+  private readonly conffiles = new Map<string, Blob>();
   private active: string | undefined;
   private nextNumber = 1;
 
@@ -120,6 +137,8 @@ export class Coordinator {
   async enqueueAll(requests: readonly SearchRequest[]): Promise<EnqueueAllResult> {
     if (requests.length === 0) return { ok: false, message: 'There is nothing to search.' };
     const prepared: Prepared[] = [];
+    // Each registry file read once, with its SHA-256, for the requests of a group that share it.
+    const reads = new Map<File, Promise<{ readonly file: Blob; readonly sha256: string }>>();
     for (const request of requests) {
       const queryName = inputName(request.query, PASTED_NAMES.query);
       const subjectName = inputName(request.subject, PASTED_NAMES.subject);
@@ -129,14 +148,38 @@ export class Coordinator {
       } catch (error) {
         return { ok: false, message: errorMessage(error) };
       }
+      // NCBI's application start first: the name of the registry file that the argv reads, and
+      // whether the run is a dry run (line RG E1w-3b).
+      let start: StartResult;
+      try {
+        start = await this.deps.engine.start(argv);
+      } catch (error) {
+        return { ok: false, message: `The options could not be checked: ${errorMessage(error)}` };
+      }
+      if (!start.ok) return start;
+      let conffile: Prepared['conffile'];
+      const { dryRun } = start.start;
+      // The file chosen for the argv's -conffile, under its name (`registryName`: none for `-conffile=`).
+      const conffileName = registryName(start.start);
+      if (conffileName !== undefined && request.conffile !== undefined) {
+        const chosen = request.conffile;
+        let read = reads.get(chosen);
+        if (read === undefined) reads.set(chosen, (read = this.readConffile(chosen)));
+        try {
+          const { file, sha256 } = await read;
+          conffile = { snapshot: Object.freeze({ name: conffileName, fileName: chosen.name, size: file.size, sha256 }), file };
+        } catch (error) {
+          return { ok: false, message: unreadableConffile(conffileName, chosen.name, error) };
+        }
+      }
       let validation: ValidationResult;
       try {
-        validation = await this.deps.engine.validate(argv);
+        validation = await this.deps.engine.validate(argv, conffile === undefined ? undefined : { name: conffile.snapshot.name, file: conffile.file });
       } catch (error) {
         return { ok: false, message: `The options could not be checked: ${errorMessage(error)}` };
       }
       if (!validation.ok) return validation;
-      prepared.push({ request, argv, queryName, subjectName });
+      prepared.push({ request, argv, queryName, subjectName, conffile, dryRun });
     }
 
     // The snapshots hold what the runs need: the sources made here from text and files are
@@ -154,8 +197,10 @@ export class Coordinator {
 
   private async freeze(prepared: readonly Prepared[], made: Made): Promise<EnqueueAllResult> {
     const snapshots: RunSnapshot[] = [];
+    /** The bytes of the registry file of each snapshot, in their order. */
+    const conffiles: Array<Blob | undefined> = [];
     const groupId = prepared.length > 1 ? this.deps.newRunId() : undefined;
-    for (const [index, { request, argv, queryName, subjectName }] of prepared.entries()) {
+    for (const [index, { request, argv, queryName, subjectName, conffile, dryRun }] of prepared.entries()) {
       const program = programById(request.program);
       let query: InputSnapshot;
       let subject: InputSnapshot;
@@ -190,10 +235,13 @@ export class Coordinator {
           subject,
           requestedThreads: request.requestedThreads,
           ...(windowMasker === undefined ? {} : { windowMasker }),
+          ...(conffile === undefined ? {} : { conffile: conffile.snapshot }),
+          ...(dryRun ? { dryRun: true as const } : {}),
           queuedAt: this.deps.now(),
           ...(groupId === undefined ? {} : { group: Object.freeze({ groupId, position: index + 1, size: prepared.length }) }),
         }),
       );
+      conffiles.push(conffile?.file);
     }
     // Numbers are given only now, so that a request that fails leaves no gap.
     const numbered = snapshots.map((snapshot) => Object.freeze({ ...snapshot, number: this.nextNumber++ }));
@@ -201,7 +249,11 @@ export class Coordinator {
       ...this.state.get().runs,
       ...numbered.map((snapshot): RunView => ({ snapshot, status: 'queued', record: {} })),
     ]);
-    for (const snapshot of numbered) this.queue.push(snapshot.runId);
+    for (const [index, snapshot] of numbered.entries()) {
+      const file = conffiles[index];
+      if (file !== undefined) this.conffiles.set(snapshot.runId, file);
+      this.queue.push(snapshot.runId);
+    }
     this.pump();
     return { ok: true, runIds: numbered.map((snapshot) => snapshot.runId) };
   }
@@ -225,6 +277,7 @@ export class Coordinator {
     const queuedIndex = this.queue.indexOf(runId);
     if (queuedIndex >= 0) {
       this.queue.splice(queuedIndex, 1);
+      this.conffiles.delete(runId);
       this.update(runId, { status: 'cancelled', record: { ...view.record, endedAt: this.deps.now() } });
       return;
     }
@@ -237,13 +290,37 @@ export class Coordinator {
     const view = this.find(runId);
     if (view?.status !== 'completed') throw new Error('only completed runs can be exported');
     const { number, program, argv, queuedAt } = view.snapshot;
-    const [bytes, description] = await Promise.all([
-      this.deps.data.readOutput(runId, output),
-      // Without the engine's default task the name has none; the output is still saved.
-      this.deps.engine.describe(program).catch(() => undefined),
-    ]);
-    const { task } = description === undefined ? { task: optionValue(argv, '-task') } : taskOf(argv, description);
+    const [bytes, task] = await Promise.all([this.deps.data.readOutput(runId, output), this.taskOf(view.snapshot)]);
     this.deps.downloader.save(outputFileName({ number, program, task, queuedAt, argv }, output), bytes, outputMediaType(argv, output));
+  }
+
+  /**
+   * Saves a file that a run made besides its outputs (RunRecord.runFiles: the file of `-logfile`), its
+   * bytes as the engine wrote them, named by runFileName. A failed run keeps its files too.
+   */
+  async exportRunFile(runId: string, index: number): Promise<void> {
+    const view = this.find(runId);
+    const file: RunFile | undefined = view?.record.runFiles?.[index];
+    if (view === undefined || file === undefined) throw new Error('the run has no such file');
+    const { number, program, argv, queuedAt } = view.snapshot;
+    const task = await this.taskOf(view.snapshot);
+    this.deps.downloader.save(runFileName({ number, program, task, queuedAt, argv }, file.name), file.bytes, 'text/plain');
+  }
+
+  /**
+   * Reads the file chosen for `-conffile` once: its bytes as a Blob (a copy that the file's later
+   * changes do not reach), the run's input, and their SHA-256.
+   */
+  private async readConffile(chosen: File): Promise<{ readonly file: Blob; readonly sha256: string }> {
+    const bytes = new Uint8Array(await chosen.arrayBuffer());
+    return { file: new Blob([bytes]), sha256: await this.deps.digest(bytes) };
+  }
+
+  /** The task of a run for its files' names: the argv's, or the engine's default; none without the engine's description. */
+  private async taskOf(snapshot: RunSnapshot): Promise<string | undefined> {
+    // Without the engine's default task the name has none; the file is still saved.
+    const description = await this.deps.engine.describe(snapshot.program).catch(() => undefined);
+    return description === undefined ? optionValue(snapshot.argv, '-task') : taskOf(snapshot.argv, description).task;
   }
 
   /** Opens one output of a completed run without reading it (a binary one, which is not shown): rejects as `readOutput` when it cannot be read. */
@@ -337,8 +414,11 @@ export class Coordinator {
     const view = this.find(runId);
     if (view === undefined) throw new Error(`missing run ${runId}`);
     const { snapshot } = view;
+    const conffile = this.conffiles.get(runId);
     let staged = false;
     const startedAt = this.deps.now();
+    // The files that the run made besides its outputs, which a completed and a failed run keep.
+    let runFiles: readonly RunFile[] | undefined;
     try {
       this.update(runId, { status: 'preparing', record: { startedAt } });
       const output = await this.deps.data.openRun(runId, runOutputs(snapshot.argv));
@@ -356,10 +436,15 @@ export class Coordinator {
           subject: engineInput(snapshot.subject),
           requestedThreads: snapshot.requestedThreads,
           ...(snapshot.windowMasker === undefined ? {} : { windowMasker: snapshot.windowMasker }),
+          ...(snapshot.conffile === undefined || conffile === undefined ? {} : { conffile: { name: snapshot.conffile.name, file: conffile } }),
         },
         output,
         (phase) => this.onPhase(runId, phase),
-      );
+      ).catch((error: unknown) => {
+        runFiles = runFilesOf(error);
+        throw error;
+      });
+      runFiles = runtime.runFiles;
       if (this.cancelRequested.has(runId)) throw new RunCancelledError(runId);
       this.update(runId, { status: 'finalizing' });
       const result = await this.deps.data.commitRun(runId);
@@ -378,6 +463,7 @@ export class Coordinator {
           ...(runtime.windowMasker === undefined
             ? {}
             : { windowMasker: { ...runtime.windowMasker, ...(snapshot.windowMasker?.origin === undefined ? {} : { origin: snapshot.windowMasker.origin }) } }),
+          ...(runFiles === undefined ? {} : { runFiles }),
         },
       });
     } catch (error) {
@@ -388,9 +474,12 @@ export class Coordinator {
         record: {
           endedAt: this.deps.now(),
           ...(cancelled ? {} : { error: errorMessage(error) }),
+          ...(cancelled || runFiles === undefined ? {} : { runFiles }),
         },
       });
     } finally {
+      // The run's registry file goes with its run; the snapshot keeps its name, size and SHA-256.
+      this.conffiles.delete(runId);
       this.cancelRequested.delete(runId);
       this.active = undefined;
       void this.refreshStorage();
@@ -424,12 +513,15 @@ export class Coordinator {
   }
 }
 
-/** A request that the engine validated, with its argv and the names of its inputs. */
+/** A request that the engine validated, with its argv, the names of its inputs, and what the engine's start read of it. */
 interface Prepared {
   readonly request: SearchRequest;
   readonly argv: readonly string[];
   readonly queryName: string;
   readonly subjectName: string;
+  /** The registry file of the argv's `-conffile`, read from the chosen file: what the snapshot keeps of it, and its bytes. */
+  readonly conffile: { readonly snapshot: ConffileSnapshot; readonly file: Blob } | undefined;
+  readonly dryRun: boolean;
 }
 
 /** What one enqueueAll made: sources of text and files, and the cached run inputs of dataset revisions. */

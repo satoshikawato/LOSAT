@@ -1378,6 +1378,9 @@ fn search(
     } else {
         0
     };
+    if let Some(database) = database {
+        database.check_accession_tables()?;
+    }
     app::check_search_environment("TBLASTN", database.is_none())?;
     let subjects = subject_records;
     // The search reads the residues of the subject records in place (NCBI's subjects stay in the
@@ -2009,7 +2012,7 @@ fn search(
             // LOSAT's refusal of a reported sequence with the id of a query of its scope, after
             // NCBI's own errors of the batch: the reports would show it (the prefetch's error
             // above comes first).
-            if let (Some(_), Some(scopes)) = (database, batches.query_scopes.as_ref()) {
+            if let (Some(database), Some(scopes)) = (database, batches.query_scopes.as_ref()) {
                 crate::algorithm::common::database::refuse_reported_ids_of_queries(
                     &titles,
                     batch_results
@@ -2020,6 +2023,7 @@ fn search(
                                 Some((range.start + index, u32::try_from(list.oid).ok()?))
                             })
                         }),
+                    database.oid_map(),
                     scopes,
                     "TBLASTN",
                 )?;

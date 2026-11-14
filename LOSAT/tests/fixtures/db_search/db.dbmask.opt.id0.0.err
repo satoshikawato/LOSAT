@@ -1,0 +1,9 @@
+BLAST Database error: Filtering algorithm ID 0 is not supported.
+
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+11           dust                                    window=64; level=20; linker=1           
+12           dust                                    window=32; level=40; linker=1           
+30           windowmasker                            default options used                    
+

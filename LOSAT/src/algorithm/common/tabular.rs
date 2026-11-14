@@ -263,7 +263,7 @@ impl<'a> TabularSubjects<'a> {
                     Some(subject) => {
                         let refused = |problem: &str| {
                             crate::algorithm::common::database::parsed_refusal(
-                                ordinals.get(s_idx).copied().unwrap_or_default(),
+                                oids.oid(ordinals.get(s_idx).copied().unwrap_or_default()),
                                 &format!("has {problem}"),
                                 program,
                             )

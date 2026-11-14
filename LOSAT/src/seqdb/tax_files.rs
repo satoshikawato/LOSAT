@@ -362,54 +362,59 @@ pub fn acc_case_variant_oids<R: ReadAt + ?Sized>(
 
 /// The strings other than `acc` that differ from it only in the case of ASCII letters at or after
 /// byte `from` and whose every prefix that leaves `acc`'s letters `has_prefix` finds (a key
-/// starts with it), in byte order: the candidates for keys of a case variant of `acc`, built
-/// letter by letter, a letter of the other case followed only where `has_prefix` finds what is
-/// built so far. On `acc`'s own letters nothing is asked, so where no key differs in case it is
-/// asked once for each letter.
+/// starts with it), in byte order: the candidates for keys of a case variant of `acc`. Along
+/// `acc`'s own letters nothing is asked: for each letter, the prefix that turns it to the other
+/// case is asked once, and only where it is found does the search go on from there, each later
+/// byte in both cases. So where no key differs in case it is asked once for each letter.
 pub fn case_variant_keys<E>(
     acc: &[u8],
     from: usize,
     mut has_prefix: impl FnMut(&[u8]) -> Result<bool, E>,
 ) -> Result<Vec<Vec<u8>>, E> {
-    fn walk<E>(
-        acc: &[u8],
-        prefix: &mut Vec<u8>,
-        flipped: bool,
-        has_prefix: &mut dyn FnMut(&[u8]) -> Result<bool, E>,
-        keys: &mut Vec<Vec<u8>>,
-    ) -> Result<(), E> {
-        let Some(&byte) = acc.get(prefix.len()) else {
-            if flipped {
-                keys.push(prefix.clone());
-            }
-            return Ok(());
-        };
-        let other = if byte.is_ascii_uppercase() {
+    /// The other case of an ASCII letter.
+    fn flip(byte: u8) -> Option<u8> {
+        if byte.is_ascii_uppercase() {
             Some(byte.to_ascii_lowercase())
         } else if byte.is_ascii_lowercase() {
             Some(byte.to_ascii_uppercase())
         } else {
             None
+        }
+    }
+    /// The variants under `prefix`, which already leaves `acc`'s letters and is found.
+    fn below<E>(
+        acc: &[u8],
+        prefix: &mut Vec<u8>,
+        has_prefix: &mut dyn FnMut(&[u8]) -> Result<bool, E>,
+        keys: &mut Vec<Vec<u8>>,
+    ) -> Result<(), E> {
+        let Some(&byte) = acc.get(prefix.len()) else {
+            keys.push(prefix.clone());
+            return Ok(());
         };
-        // Byte order: the upper-case letter first.
-        let cases = match other {
-            Some(other) if other < byte => [Some((other, true)), Some((byte, flipped))],
-            Some(other) => [Some((byte, flipped)), Some((other, true))],
-            None => [Some((byte, flipped)), None],
-        };
-        for (byte, flipped) in cases.into_iter().flatten() {
+        for byte in [Some(byte), flip(byte)].into_iter().flatten() {
             prefix.push(byte);
-            if !flipped || has_prefix(prefix)? {
-                walk(acc, prefix, flipped, has_prefix, keys)?;
+            if has_prefix(prefix)? {
+                below(acc, prefix, has_prefix, keys)?;
             }
             prefix.pop();
         }
         Ok(())
     }
-    let from = from.min(acc.len());
     let mut keys = Vec::new();
-    let mut prefix = acc[..from].to_vec();
-    walk(acc, &mut prefix, false, &mut has_prefix, &mut keys)?;
+    let mut prefix = Vec::new();
+    for (at, &byte) in acc.iter().enumerate().skip(from) {
+        let Some(other) = flip(byte) else {
+            continue;
+        };
+        prefix.clear();
+        prefix.extend_from_slice(&acc[..at]);
+        prefix.push(other);
+        if has_prefix(&prefix)? {
+            below(acc, &mut prefix, &mut has_prefix, &mut keys)?;
+        }
+    }
+    keys.sort_unstable();
     Ok(keys)
 }
 

@@ -1319,8 +1319,12 @@ impl<'a> HeaderReader<'a> {
         // of the Seq-align id's own handle: the key of a name is the same in every alternative and
         // release, which the handles keep apart (`gb||locusy` and `emb||LOCUSY`, `sp||NAMEY` and
         // `tr||namey`: review 1 of line DBID pircase, H1).
-        let handle = crate::seqid::mask_handle::mask_handle_key(id)
-            .ok()
+        let handle = (!variants.is_empty())
+            .then(|| {
+                crate::seqid::mask_handle::mask_handle_key(id)
+                    .ok()
+                    .flatten()
+            })
             .flatten();
         // The first was compared above. Besides a sequence given instead, any other holder
         // (also a copy of the subject's record) is one the scope can read for it.

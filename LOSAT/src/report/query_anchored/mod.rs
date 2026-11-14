@@ -367,7 +367,7 @@ pub(crate) fn write_section<W: Write + ?Sized>(
     if view.anchored {
         map.set_anchor(0);
     }
-    let rows = prepare_rows(&map, line_length, sequences);
+    let rows = prepare_rows(&map, line_length, hsps.query_bioseq, sequences);
     display_rows(writer, &map, view, line_length, rows, sequences)
 }
 
@@ -418,7 +418,12 @@ struct RowData {
 /// ```
 /// (`maxStartLen` is the width of the largest 0-based position, which the 1-based numbers
 /// printed can exceed by one digit.)
-fn prepare_rows(map: &AlnMap<'_>, line_length: usize, sequences: &dyn Sequences) -> RowData {
+fn prepare_rows(
+    map: &AlnMap<'_>,
+    line_length: usize,
+    query_bioseq: Option<u32>,
+    sequences: &dyn Sequences,
+) -> RowData {
     let num_rows = map.num_rows();
     let mut letters = |seq: SeqKey, from: u32, to: u32, out: &mut Vec<u8>| {
         sequences.letters(seq, from, to, out);
@@ -454,7 +459,8 @@ fn prepare_rows(map: &AlnMap<'_>, line_length: usize, sequences: &dyn Sequences)
                 intervals.clear();
                 sequences.masks(key, &mut intervals);
                 keys.push(key);
-                data.masks.push(fill_loc_list(map, key, &intervals));
+                data.masks
+                    .push(fill_loc_list(map, key, query_bioseq, &intervals));
                 keys.len() - 1
             }
         };
@@ -509,12 +515,25 @@ fn prepare_rows(map: &AlnMap<'_>, line_length: usize, sequences: &dyn Sequences)
 /// A mask goes to the columns of the first row of its sequence whose letters it meets, and
 /// `x_OutputSeq` puts those columns in lower case in every row of that sequence: a subject's mask
 /// spreads to the same columns of its other HSPs' rows (PD-LOSAT-NCBI-DEFECTS rule 2, DECISIONS
-/// T3-6).
-fn fill_loc_list(map: &AlnMap<'_>, key: SeqKey, masks: &[(u32, u32)]) -> Vec<(i64, i64)> {
+/// T3-6). The rows of a subject that is the query's own Bioseq (`query_bioseq`) have the query's
+/// id, so the query's row, the first, takes its masks.
+fn fill_loc_list(
+    map: &AlnMap<'_>,
+    key: SeqKey,
+    query_bioseq: Option<u32>,
+    masks: &[(u32, u32)],
+) -> Vec<(i64, i64)> {
+    let own = |row_key: SeqKey| match query_bioseq {
+        Some(subject) => {
+            let one = |key: SeqKey| key == SeqKey::Query || key == SeqKey::Subject(subject);
+            row_key == key || (one(row_key) && one(key))
+        }
+        None => row_key == key,
+    };
     let mut list = Vec::new();
     for &(from, to) in masks {
         for row in 0..map.num_rows() {
-            if map.seq_key(row) == key && map.seq_start(row) <= to && from <= map.seq_stop(row) {
+            if own(map.seq_key(row)) && map.seq_start(row) <= to && from <= map.seq_stop(row) {
                 list.push((
                     i64::from(map.aln_pos_from_seq_pos(row, from)),
                     i64::from(map.aln_pos_from_seq_pos(row, to)),

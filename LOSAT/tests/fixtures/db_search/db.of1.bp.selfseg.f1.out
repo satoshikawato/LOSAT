@@ -1,0 +1,260 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pd_self_p.faa).
+           4 sequences; 2,200 total letters
+
+
+
+Query= selfp1 first record
+
+Length=550
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+selfp1 first record                                                   414     7e-143
+
+
+
+selfp1  1    ESDLQYGLDATVHMKMPEEIRWLVDTCNDAHFSHLGSPGCISMQWNHMEVLHPSNVDHHR  60
+selfp1  1    ............................................................  60
+selfp1  331  ............................................................  390
+
+selfp1  61   STSQPMKNGFRGAQRTWANIWTLTPDQGNNPEHSYLLGQAITEYYNKLLNYHAHYMSIYH  120
+selfp1  61   ............................................................  120
+selfp1  391  ....................KKKKKKKKKKKKKKKKKKKK....................  450
+
+selfp1  121  MRRDHYSWKRWEFGFTIVCHLEKNQLIMLHQQRHAFWDSFCITSAHSQSEDTASVWYLPF  180
+selfp1  121  ............................................................  180
+selfp1  451  ............................................................  510
+
+selfp1  181  qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq  240
+
+selfp1  241  qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq  300
+
+selfp1  301  qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqESDLQYGLDATVHMKMPEEIRWLVDTCNDA  360
+selfp1  331                                ..............................  360
+selfp1  1                                  ..............................  30
+
+selfp1  361  HFSHLGSPGCISMQWNHMEVLHPSNVDHHRSTSQPMKNGFRGAQRTWANIkkkkkkkkkk  420
+selfp1  361  ............................................................  420
+selfp1  31   ..................................................WTLTPDQGNN  90
+
+selfp1  421  kkkkkkkkkkITEYYNKLLNYHAHYMSIYHMRRDHYSWKRWEFGFTIVCHLEKNQLIMLH  480
+selfp1  421  ............................................................  480
+selfp1  91   PEHSYLLGQA..................................................  150
+
+selfp1  481  QQRHAFWDSFCITSAHSQSEDTASVWYLPFISIFKVHDLAQLLVEAEQSLWYGNTWMCYI  540
+selfp1  481  ............................................................  540
+selfp1  151  ..............................                                180
+
+selfp1  541  IFWSGTSLDV  550
+selfp1  541  ..........  550
+
+
+Lambda      K        H        a         alpha
+   0.323    0.133    0.461    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1020100
+
+
+Query= NP_000011.1 with accession
+
+Length=550
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000011.1 with accession                                            410     8e-142
+
+
+
+NP_000011.1  1    DSNKTPPRKQCTRHEFLFDEICIHCWAIYNHWHLQGQAVFKLPGRDRSCSVHLDREQCIH  60
+NP_000011.1  1    ............................................................  60
+NP_000011.1  331  ............................................................  390
+
+NP_000011.1  61   AEIHHEVQYLTHHDTRGFPWMMNRQCHDCCHISWFYFCWLHMWSCDSWVLAQELAPTSDE  120
+NP_000011.1  61   ............................................................  120
+NP_000011.1  391  ....................KKKKKKKKKKKKKKKKKKKK....................  450
+
+NP_000011.1  121  DWHMCNMSDEKMIYTLDNITRQFWRIKGNKDQHSVSTWIITVHMTYQFDDNHGQQKYALR  180
+NP_000011.1  121  ............................................................  180
+NP_000011.1  451  ............................................................  510
+
+NP_000011.1  181  qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq  240
+
+NP_000011.1  241  qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq  300
+
+NP_000011.1  301  qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqDSNKTPPRKQCTRHEFLFDEICIHCWAIYN  360
+NP_000011.1  331                                ..............................  360
+NP_000011.1  1                                  ..............................  30
+
+NP_000011.1  361  HWHLQGQAVFKLPGRDRSCSVHLDREQCIHAEIHHEVQYLTHHDTRGFPWkkkkkkkkkk  420
+NP_000011.1  361  ............................................................  420
+NP_000011.1  31   ..................................................MMNRQCHDCC  90
+
+NP_000011.1  421  kkkkkkkkkkHMWSCDSWVLAQELAPTSDEDWHMCNMSDEKMIYTLDNITRQFWRIKGNK  480
+NP_000011.1  421  ............................................................  480
+NP_000011.1  91   HISWFYFCWL..................................................  150
+
+NP_000011.1  481  DQHSVSTWIITVHMTYQFDDNHGQQKYALRTDWRWNAMDVALGLGDHTPDVVINAFIGML  540
+NP_000011.1  481  ............................................................  540
+NP_000011.1  151  ..............................                                180
+
+NP_000011.1  541  RNVHGQYFNG  550
+NP_000011.1  541  ..........  550
+
+
+Lambda      K        H        a         alpha
+   0.326    0.137    0.497    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1020100
+
+
+Query= NP_000012.1 with gi
+
+Length=550
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000012.1 with gi                                                   418     9e-145
+
+
+
+NP_000012.1  1    EISRYHCWNPYTDTYSLEPFAHRNTVDWDDGKNGWNYSCIGWCMSFQMDLEKHQQDFVDM  60
+NP_000012.1  1    ............................................................  60
+NP_000012.1  331  ............................................................  390
+
+NP_000012.1  61   HQKLEADPFDKFIRRKQGTVYMAAESKLESHIVMQDDWDTITVPDVQVDNMQQCNQDATE  120
+NP_000012.1  61   ............................................................  120
+NP_000012.1  391  ....................KKKKKK.KKKKKKKKKKKKK....................  450
+
+NP_000012.1  121  ACCMILYCLGEVAVTDDICHHHIQDTMVAISKMPSHLYVYYRCFYERNQYSEQCYCRSER  180
+NP_000012.1  121  ............................................................  180
+NP_000012.1  451  ............................................................  510
+
+NP_000012.1  181  qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq  240
+
+NP_000012.1  241  qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq  300
+
+NP_000012.1  301  qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqEISRYHCWNPYTDTYSLEPFAHRNTVDWDD  360
+NP_000012.1  331                                ..............................  360
+NP_000012.1  1                                  ..............................  30
+
+NP_000012.1  361  GKNGWNYSCIGWCMSFQMDLEKHQQDFVDMHQKLEADPFDKFIRRKQGTVkkkkkkkkkk  420
+NP_000012.1  361  ............................................................  420
+NP_000012.1  31   ..................................................YMAAES.LES  90
+
+NP_000012.1  421  kkkkkkkkkkITVPDVQVDNMQQCNQDATEACCMILYCLGEVAVTDDICHHHIQDTMVAI  480
+NP_000012.1  421  ............................................................  480
+NP_000012.1  91   HIVMQDDWDT..................................................  150
+
+NP_000012.1  481  SKMPSHLYVYYRCFYERNQYSEQCYCRSERSIRTVWAAYGFMFTCPYFQLPANFMSPDGT  540
+NP_000012.1  481  ............................................................  540
+NP_000012.1  151  ..............................                                180
+
+NP_000012.1  541  FYMEFQVRAK  550
+NP_000012.1  541  ..........  550
+
+
+Lambda      K        H        a         alpha
+   0.325    0.136    0.466    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1020100
+
+
+Query= selfp4
+
+Length=550
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+selfp4 unnamed protein product                                        414     6e-143
+
+
+
+selfp4  1    NRDHQLVRFCLGVWVCSSYPACTVPQEKNEILGMQMYLEMNPCNGWNPARKEKQAVRLDN  60
+selfp4  1    ............................................................  60
+selfp4  331  ............................................................  390
+
+selfp4  61   RMVLQVDTQHVLERFISWKHHVMMCDSTQYPYGHNKVCRSGFWDHYKKKDGTGKHYMYNH  120
+selfp4  61   ............................................................  120
+selfp4  391  ....................KKKKKKKKKKKKKKK.KKKK....................  450
+
+selfp4  121  MDELLTCHLFFVFGPVIMICNYWGRIPVSPQCVRCSSHNWPIIIQNKGTYKRKETNQEWP  180
+selfp4  121  ............................................................  180
+selfp4  451  ............................................................  510
+
+selfp4  181  qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq  240
+
+selfp4  241  qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq  300
+
+selfp4  301  qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqNRDHQLVRFCLGVWVCSSYPACTVPQEKNE  360
+selfp4  331                                ..............................  360
+selfp4  1                                  ..............................  30
+
+selfp4  361  ILGMQMYLEMNPCNGWNPARKEKQAVRLDNRMVLQVDTQHVLERFISWKHkkkkkkkkkk  420
+selfp4  361  ............................................................  420
+selfp4  31   ..................................................HVMMCDSTQY  90
+
+selfp4  421  kkkkkkkkkkGFWDHYKKKDGTGKHYMYNHMDELLTCHLFFVFGPVIMICNYWGRIPVSP  480
+selfp4  421  ............................................................  480
+selfp4  91   PYGHN.VCRS..................................................  150
+
+selfp4  481  QCVRCSSHNWPIIIQNKGTYKRKETNQEWPVQEFLYCLWMDEAAEWMDNVWHIIPNKDTV  540
+selfp4  481  ............................................................  540
+selfp4  151  ..............................                                180
+
+selfp4  541  TDTMFRIKVS  550
+selfp4  541  ..........  550
+
+
+Lambda      K        H        a         alpha
+   0.325    0.138    0.489    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1020100
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pd_self_p.faa).
+    Posted date:  Unknown
+  Number of letters in database: 2,200
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

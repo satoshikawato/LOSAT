@@ -14216,10 +14216,15 @@ fn run_call(
             }
         }
     }
+    // Outfmt 0 only: the query-anchored sections draw these masks as NCBI does
+    // (`query_anchored::fill_loc_list`).
     if args.parse_deflines
-        && format_plans
-            .iter()
-            .any(|outfmt| matches!(outfmt, BlastpReport::Pairwise(_)))
+        && format_plans.iter().any(|outfmt| {
+            matches!(
+                outfmt,
+                BlastpReport::Pairwise(crate::report::pairwise::PairwiseView::Pairwise)
+            )
+        })
     {
         let masks = query_record_masks(&query_frames, &ranges.query_input.placements);
         crate::blastinput::fasta_reader::believed::refuse_shared_masks(

@@ -1,6 +1,7 @@
-//! The refusals of a nucleotide query's SITES and MOTIFS lines: NCBI's `TranslateAll` of fewer
-//! than 3 bases or reverse-complement letters, a site residue outside its frame's translation,
-//! and the codon and motif positions whose `int` arithmetic overflows.
+//! The refusals of a nucleotide query's SITES and MOTIFS lines (NCBI's `TranslateAll` of fewer
+//! than 3 bases or reverse-complement letters, a site residue outside its frame's translation),
+//! and the codon and motif positions whose `int` arithmetic overflows (computed as their values,
+//! PD-LOSAT-NCBI-DEFECTS exception 11).
 
 use super::*;
 use crate::rpsbproc::archive::{Align, Segs, StdLoc, StdPair};
@@ -97,50 +98,72 @@ fn residues_outside_the_translation() {
 }
 
 // rpsbproc_main.cpp:949,1456-1457,1631-1633 (quoted at `codon`): the plus-strand codon of a
-// residue, `xres + 1` in `int` and `xres +/- 2 + 1` in `unsigned int` (wraps); `xres + 1` at
-// `INT_MAX` and `MinusPr2PlusNA`'s `pr - 1` at `INT_MIN` overflow `int`: refused.
+// residue, `xres + 1` in `int` and `xres +/- 2 + 1` in `unsigned int` (wraps). `xres + 1` at
+// `INT_MAX` and `MinusPr2PlusNA`'s `pr - 1` at `INT_MIN` overflow `int` (undefined): computed as
+// their values (PD-LOSAT-NCBI-DEFECTS exception 11), which equal the codon of the residue next to
+// it, which does not overflow, moved by 3 bases.
 #[test]
 fn codons_and_their_overflow() {
     // Frame +2: 10 * 3 + 1 = 31. Frame -1 of 5,000 bases: 5000 - 9 * 3 - 3 - 1 = 4969.
-    assert_eq!(value(codon(&frame(1, b""), 10, 5000)), (32, 34));
-    assert_eq!(value(codon(&frame(3, b""), 10, 5000)), (4970, 4968));
+    assert_eq!(codon(&frame(1, b""), 10, 5000), (32, 34));
+    assert_eq!(codon(&frame(3, b""), 10, 5000), (4970, 4968));
     // Frame +1, residue -1: xres = -3; the second number is (2^32 - 3) + 3 modulo 2^32.
-    assert_eq!(value(codon(&frame(0, b""), -1, 5000)), (-2, 0));
-    // Frame +2, residue 715,827,882: 715827882 * 3 + 1 = 2^31 - 1.
+    assert_eq!(codon(&frame(0, b""), -1, 5000), (-2, 0));
+    // Frame +2, residue 715,827,882: 715827882 * 3 + 1 = 2^31 - 1, printed 2^31.
     assert_eq!(
-        refusal(codon(&frame(1, b""), 715_827_882, 5000)),
-        "a site at residue 715827883 of reading frame 2 whose position on the query overflows NCBI's int (undefined) is not supported by LOSAT's rpsbproc"
+        codon(&frame(1, b""), 715_827_882, 5000),
+        (2_147_483_648, 2_147_483_650)
     );
     assert_eq!(
-        refusal(codon(&frame(3, b""), i32::MIN, 5000)),
-        "a site at residue -2147483647 of reading frame -1 whose position on the query overflows NCBI's int (undefined) is not supported by LOSAT's rpsbproc"
+        codon(&frame(1, b""), 715_827_881, 5000),
+        (2_147_483_645, 2_147_483_647)
+    );
+    // Frame -1, residue `INT_MIN` (`pr - 1` = -2^31 - 1), and the residue after it.
+    let min = i64::from(i32::MIN);
+    assert_eq!(
+        codon(&frame(3, b""), min, 5000),
+        (-2_147_478_648, 2_147_488_646)
+    );
+    assert_eq!(
+        codon(&frame(3, b""), min + 1, 5000),
+        (-2_147_478_651, 2_147_488_643)
     );
 }
 
 // rpsbproc_main.cpp:1746-1747,1788-1789 (quoted at `motif_ends`): `GetLeft() + 1` in `int` and
-// `GetRight() +/- 2 + 1` in `unsigned int` after `Pr2NaConvert`; a set outside `int`, a
+// `GetRight() +/- 2 + 1` in `unsigned int` after `Pr2NaConvert`. A set past `int`'s range, a
 // minus-strand residue at `INT_MIN` (`domains::pr2na_ends`) and `GetLeft() + 1` at `INT_MAX`
-// overflow `int`: refused.
+// overflow `int` (undefined): computed as their values (PD-LOSAT-NCBI-DEFECTS exception 11;
+// PS16-Q1 oracle `ntmotifmax` and its nearby input, the motif one residue lower).
 #[test]
 fn motif_ends_and_their_overflow() {
     let set = |from: i64, to: i64| SegSet::from_segs(vec![Seg::new(from, to)]);
     // Frame +2 (388 % 3 = 1): 134 * 3 + 1 = 403, 138 * 3 + 1 + 2 = 417, then + 2 + 1.
     let plus = hit(388, 2583, 1);
-    assert_eq!(value(motif_ends(&set(134, 138), &plus, 1, "2")), (404, 420));
-    let refused = "a motif of reading frame 2 whose positions overflow NCBI's int (undefined) is not supported by LOSAT's rpsbproc";
+    assert_eq!(motif_ends(&set(134, 138), &plus, 1), (404, 420));
+    // 715827882 * 3 + 1 = 2^31 - 1, printed 2^31 (the right end + 2 + 2 + 1); the residue below
+    // it gives 3 less.
     assert_eq!(
-        refusal(motif_ends(&set(715_827_882, 715_827_882), &plus, 1, "2")),
-        refused
+        motif_ends(&set(715_827_882, 715_827_882), &plus, 1),
+        (2_147_483_648, 2_147_483_652)
     );
     assert_eq!(
-        refusal(motif_ends(&set(5, i64::from(i32::MAX) + 1), &plus, 1, "2")),
-        refused
+        motif_ends(&set(715_827_881, 715_827_881), &plus, 1),
+        (2_147_483_645, 2_147_483_649)
+    );
+    // A range that ends past `int`: its end converts modulo 2^32 (2^31 * 3 + 1 + 2 + 2 + 1).
+    assert_eq!(
+        motif_ends(&set(5, i64::from(i32::MAX) + 1), &plus, 1),
+        (17, 2_147_483_654)
     );
     // Frame -1 of a minus-strand hit (alignedLen (599 + 1) / 3 = 200, na length 601).
     let minus = hit(301, 599, 2);
-    assert_eq!(value(motif_ends(&set(10, 12), &minus, 3, "-1")), (563, 569));
+    assert_eq!(motif_ends(&set(10, 12), &minus, 3), (563, 569));
+    // From `INT_MIN`: `pr - 1` of its right end is -2^31 - 1, 2^31 - 1 modulo 2^32.
+    let min = i64::from(i32::MIN);
+    assert_eq!(motif_ends(&set(min, 12), &minus, 3), (563, 2_147_484_247));
     assert_eq!(
-        refusal(motif_ends(&set(i64::from(i32::MIN), 12), &minus, 3, "-1")),
-        "a motif of reading frame -1 whose positions overflow NCBI's int (undefined) is not supported by LOSAT's rpsbproc"
+        motif_ends(&set(min + 1, 12), &minus, 3),
+        (563, 2_147_484_244)
     );
 }

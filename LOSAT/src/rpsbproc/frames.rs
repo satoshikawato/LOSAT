@@ -19,7 +19,10 @@
 //! ```
 //! The positions are `SeqPos_t` (`int`) and the lengths `SeqLen_t` (`unsigned int`); the
 //! functions below follow C++'s conversions: an expression with an `unsigned int` operand is
-//! computed modulo 2^32 and stored back in an `int` (two's complement in NCBI's build).
+//! computed modulo 2^32 and stored back in an `int` (two's complement in NCBI's build). A
+//! position argument is an `i64`: an `int` that NCBI's arithmetic took past its range holds its
+//! mathematical value (PD-LOSAT-NCBI-DEFECTS exception 11), and its conversion to `unsigned int`
+//! is that value modulo 2^32.
 
 /// `READINGFRAME::RF_SIZE`.
 pub(crate) const RF_SIZE: u32 = 3;
@@ -44,12 +47,14 @@ pub(crate) fn plus_rf_idx_to_minus(prfidx: u32, na_len: u32) -> u32 {
 // 		return pr * READINGFRAME::RF_SIZE + rfidx;
 // 	}
 // ```
-pub(crate) fn plus_pr_to_plus_na(pr: i32, rfidx: u32) -> i32 {
+pub(crate) fn plus_pr_to_plus_na(pr: i64, rfidx: u32) -> i32 {
     (pr as u32).wrapping_mul(RF_SIZE).wrapping_add(rfidx) as i32
 }
 
 /// `MinusPr2PlusNA`: the plus-strand position of the first base of the codon of residue `pr`
-/// of a minus-strand frame. `None` where `pr - 1` overflows NCBI's `int` (`pr` = `INT_MIN`).
+/// of a minus-strand frame. `pr - 1` is `int` arithmetic, which overflows at `INT_MIN`
+/// (undefined in C++): it is computed as its value (PD-LOSAT-NCBI-DEFECTS exception 11), whose
+/// product with `RF_SIZE` converts it to `unsigned int` (modulo 2^32).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:230-237
 // ```c++
 // 	static SeqPos_t MinusPr2PlusNA(SeqPos_t pr, TFRAMEINDEX rfidx, SeqLen_t na_len)
@@ -60,14 +65,12 @@ pub(crate) fn plus_pr_to_plus_na(pr: i32, rfidx: u32) -> i32 {
 // 		return na_len - (pr - 1) * READINGFRAME::RF_SIZE - rfidx - 1;
 // 	}
 // ```
-pub(crate) fn minus_pr_to_plus_na(pr: i32, rfidx: u32, na_len: u32) -> Option<i32> {
-    let pr_1 = pr.checked_sub(1)?;
-    Some(
-        na_len
-            .wrapping_sub((pr_1 as u32).wrapping_mul(RF_SIZE))
-            .wrapping_sub(rfidx)
-            .wrapping_sub(1) as i32,
-    )
+pub(crate) fn minus_pr_to_plus_na(pr: i64, rfidx: u32, na_len: u32) -> i32 {
+    let pr_1 = pr - 1;
+    na_len
+        .wrapping_sub((pr_1 as u32).wrapping_mul(RF_SIZE))
+        .wrapping_sub(rfidx)
+        .wrapping_sub(1) as i32
 }
 
 /// `PlusId2PlusRFIdx`: the plus-strand frame index of a plus frame (1 to 3; any positive
@@ -105,7 +108,7 @@ pub(crate) fn minus_id_to_plus_rf_idx(rf: i32, na_len: u32) -> u32 {
 // 		return (na - rfidx) / READINGFRAME::RF_SIZE;
 // 	}
 // ```
-pub(crate) fn plus_na_to_plus_pr(na: i32, rfidx: u32) -> i32 {
+pub(crate) fn plus_na_to_plus_pr(na: i64, rfidx: u32) -> i32 {
     ((na as u32).wrapping_sub(rfidx) / RF_SIZE) as i32
 }
 
@@ -120,7 +123,7 @@ pub(crate) fn plus_na_to_plus_pr(na: i32, rfidx: u32) -> i32 {
 // 		return (na_len - na - rfidx + 2) / READINGFRAME::RF_SIZE;
 // 	}
 // ```
-pub(crate) fn plus_na_to_minus_pr(na: i32, rfidx: u32, na_len: u32) -> i32 {
+pub(crate) fn plus_na_to_minus_pr(na: i64, rfidx: u32, na_len: u32) -> i32 {
     (na_len
         .wrapping_sub(na as u32)
         .wrapping_sub(rfidx)

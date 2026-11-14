@@ -33,8 +33,8 @@ use super::query::DomQuery;
 use super::segset::SegSet;
 use super::sites::MotifState;
 use super::{
-    mostly_mapped, print_cluster_line, print_dom_line, site_segset, write_source, MotifRecord,
-    PrintError, Report, OVERLAPLEADING,
+    mostly_mapped, print_cluster_line, print_dom_line, printed_position, site_segset, write_source,
+    MotifRecord, PrintError, Report, OVERLAPLEADING,
 };
 
 /// The DOMAINS and SUPERFAMILIES parts of a nucleotide query (`-t doms` and `both`), then its
@@ -530,8 +530,8 @@ struct Frame<'a> {
 // ```
 // `mapped` is never counted in this branch (0 in every line). `codonEnd` is a `SeqLen_t`
 // (`unsigned int`), so the second number of a codon is an `unsigned int` (`xres + 2 + 1`,
-// `xres - 2 + 1`, modulo 2^32) while the first is `xres + 1` in `int` (an overflow, undefined,
-// is refused). The structural domains' sites (`rpsbproc_main.cpp:1499-1569`, `:1658-1699`)
+// `xres - 2 + 1`, modulo 2^32) while the first is `xres + 1` in `int` (`printed_position`). The
+// structural domains' sites (`rpsbproc_main.cpp:1499-1569`, `:1658-1699`)
 // print `Specific` and the source `0`; the minus-strand frames print the source PSSM-ID as it
 // is, the plus-strand frames as `write_source`. A residue position outside the frame's
 // translation other than its end (where `operator[]` gives the terminating 0) reads outside
@@ -567,7 +567,7 @@ fn print_site(
     let mut delimit: &[u8] = b"";
     for position in &mapped_positions {
         let letter = translated_residue(frame, position.curr)?;
-        let (first, last) = codon(frame, position.curr, query.length)?;
+        let (first, last) = codon(frame, position.curr, query.length);
         codons.extend_from_slice(delimit);
         codons.push(letter);
         codons.extend_from_slice(format!("{first}-{last}").as_bytes());
@@ -601,7 +601,7 @@ fn print_site(
 
 /// `(char)toupper(dimTranslated[rfidx][curr])`: the terminating 0 at the translation's end;
 /// elsewhere outside it NCBI reads outside the string (undefined), which LOSAT refuses.
-fn translated_residue(frame: &Frame, curr: i32) -> Result<u8, PrintError> {
+fn translated_residue(frame: &Frame, curr: i64) -> Result<u8, PrintError> {
     let len = frame.translation.len();
     match usize::try_from(curr) {
         Ok(at) if at < len => Ok(frame.translation[at].to_ascii_uppercase()),
@@ -609,7 +609,7 @@ fn translated_residue(frame: &Frame, curr: i32) -> Result<u8, PrintError> {
         _ => Err(PrintError::Unsupported(
             format!(
                 "a site at residue {} of the translation of reading frame {} ({len} residues; NCBI reads outside it) is not supported by LOSAT's rpsbproc",
-                i64::from(curr) + 1,
+                printed_position(curr),
                 frame.label
             )
             .into_bytes(),
@@ -619,8 +619,9 @@ fn translated_residue(frame: &Frame, curr: i32) -> Result<u8, PrintError> {
 
 /// The two numbers of the codon of residue `curr` of the frame's translation (quoted at
 /// `print_site`): `xres + COORDSBASE` in `int`, `xres + codonEnd + COORDSBASE` (minus strand
-/// `xres - codonEnd + COORDSBASE`) in `unsigned int`; refused where the `int` arithmetic
-/// overflows (`pr - 1` of `MinusPr2PlusNA` at `INT_MIN`, `xres + 1` at `INT_MAX`).
+/// `xres - codonEnd + COORDSBASE`) in `unsigned int`. The `int` arithmetic that overflows (`pr -
+/// 1` of `MinusPr2PlusNA` at `INT_MIN`, `xres + 1` at `INT_MAX`; undefined) is computed as its
+/// value (`frames::minus_pr_to_plus_na`, `printed_position`; PD-LOSAT-NCBI-DEFECTS exception 11).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:949,1456-1457,1631-1633
 // ```c++
 // 	static constexpr const SeqLen_t codonEnd = READINGFRAME::RF_SIZE - 1;
@@ -630,26 +631,15 @@ fn translated_residue(frame: &Frame, curr: i32) -> Result<u8, PrintError> {
 //
 // 									(*m_ostream) << dimDelimit << (char)toupper(dimTranslated[rfidx][iterRP->curr]) << (xres + COORDSBASE) << '-' << (xres - codonEnd + COORDSBASE);
 // ```
-fn codon(frame: &Frame, curr: i32, query_len: u32) -> Result<(i32, u32), PrintError> {
-    let overflow = || {
-        PrintError::Unsupported(
-            format!(
-                "a site at residue {} of reading frame {} whose position on the query overflows NCBI's int (undefined) is not supported by LOSAT's rpsbproc",
-                i64::from(curr) + 1,
-                frame.label
-            )
-            .into_bytes(),
-        )
-    };
+fn codon(frame: &Frame, curr: i64, query_len: u32) -> (i64, u32) {
     let (xres, last) = if frame.rfidx < RF_SIZE {
         let xres = plus_pr_to_plus_na(curr, frame.rfidx);
         (xres, (xres as u32).wrapping_add(2).wrapping_add(1))
     } else {
-        let xres = minus_pr_to_plus_na(curr, frame.rfidx, query_len).ok_or_else(overflow)?;
+        let xres = minus_pr_to_plus_na(curr, frame.rfidx, query_len);
         (xres, (xres as u32).wrapping_sub(2).wrapping_add(1))
     };
-    let first = xres.checked_add(1).ok_or_else(overflow)?;
-    Ok((first, last))
+    (printed_position(xres), last)
 }
 
 /// The MOTIFS part of a nucleotide query: each motif as the range of bases of its mapped
@@ -707,7 +697,7 @@ fn codon(frame: &Frame, curr: i32, query_len: u32) -> Result<(i32, u32), PrintEr
 // query's); the source is the PSSM-ID as it is. The minus-strand loop reads `alnLen` from the
 // first record of a frame that may have none (survey 8.7): unused, so dead (no motif of that
 // frame exists then), and not read here. `GetRight() +/- codonEnd + COORDSBASE` is an
-// `unsigned int`; `GetLeft() + COORDSBASE` an `int` (an overflow is refused).
+// `unsigned int`; `GetLeft() + COORDSBASE` an `int` (`printed_position`).
 fn print_motifs(
     report: &mut Report,
     query: &DomQuery,
@@ -726,7 +716,7 @@ fn print_motifs(
             if !mostly_mapped(&featsegs, motif.site) {
                 continue;
             }
-            let (first, last) = motif_ends(&featsegs, align, rfidx, &rf)?;
+            let (first, last) = motif_ends(&featsegs, align, rfidx);
             report.write(session.as_bytes());
             report.write(b"\t");
             report.write(&query.accession);
@@ -743,8 +733,9 @@ fn print_motifs(
 
 /// The two numbers of a motif line of frame `rfidx` (quoted at `print_motifs`):
 /// `GetLeft() + COORDSBASE` in `int`, `GetRight() + codonEnd + COORDSBASE` (minus strand
-/// `- codonEnd`) in `unsigned int`, after `Pr2NaConvert`; refused where the `int` arithmetic
-/// overflows (`domains::pr2na_ends`, and `+ 1` at `INT_MAX`).
+/// `- codonEnd`) in `unsigned int`, after `Pr2NaConvert` of the set (not empty: `mostly_mapped`).
+/// The `int` arithmetic that overflows (`domains::pr2na_ends`,
+/// and `+ 1` at `INT_MAX`; undefined) is computed as its value (PD-LOSAT-NCBI-DEFECTS exception 11).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1746-1747,1788-1789
 // ```c++
 // 								iterM->iterAlignRec->pAlign->Pr2NaConvert(featsegs);
@@ -752,28 +743,14 @@ fn print_motifs(
 // 								iterM->iterAlignRec->pAlign->Pr2NaConvert(featsegs);
 // 								(*m_ostream) << ... << featsegs.GetLeft() + COORDSBASE << DELIMIT << featsegs.GetRight() - codonEnd + COORDSBASE << DELIMIT << iterM->uiSrcPssmId << endl;
 // ```
-fn motif_ends(
-    featsegs: &SegSet,
-    align: &DomAlign,
-    rfidx: usize,
-    rf: &str,
-) -> Result<(i32, u32), PrintError> {
-    let refusal = || {
-        PrintError::Unsupported(
-            format!(
-                "a motif of reading frame {rf} whose positions overflow NCBI's int (undefined) is not supported by LOSAT's rpsbproc"
-            )
-            .into_bytes(),
-        )
-    };
-    let (left, right) = pr2na_ends(featsegs, align).ok_or_else(refusal)?;
-    let first = left.checked_add(1).ok_or_else(refusal)?;
+fn motif_ends(featsegs: &SegSet, align: &DomAlign, rfidx: usize) -> (i64, u32) {
+    let (left, right) = pr2na_ends(featsegs, align).expect("a mapped motif is not empty");
     let last = if rfidx < 3 {
         (right as u32).wrapping_add(2).wrapping_add(1)
     } else {
         (right as u32).wrapping_sub(2).wrapping_add(1)
     };
-    Ok((first, last))
+    (printed_position(left), last)
 }
 
 #[cfg(test)]

@@ -216,38 +216,39 @@ fn undefined_reads_and_writes() {
     assert!(matches!(q.failure, Some(ProcessError::Unsupported(_))));
 }
 
-fn refused(q: &OfflineQuery) -> String {
-    match &q.failure {
-        Some(ProcessError::Unsupported(message)) => message.clone(),
-        other => panic!("not a refusal: {other:?}"),
-    }
-}
-
 // `GetQuery_from() - COORDSBASE`, `GetQuery_to() - COORDSBASE` and `GetHit_from() - COORDSBASE`
-// of `-2147483648` overflow `int` (offl_cd_align_proc.cpp:166-167, 234, quoted at `parse_hsp`):
-// refused for each of the three members.
+// of `-2147483648` overflow `int` (offl_cd_align_proc.cpp:166-167, 234, quoted at `parse_hsp`;
+// undefined): computed as their value, `INT_MIN - 1`, which `m_iFrom`, `m_iTo` and the domain's
+// start keep (PD-LOSAT-NCBI-DEFECTS exception 11). Each equals NCBI's result for `-2147483647`
+// (no overflow) moved by one: the `replace` at `m_iFrom`'s `size_t` throws one position lower
+// (PS16-Q1 oracles `xqfmin` and `xqfmin1`), the range ends and the domain starts one lower.
 #[test]
 fn coordinates_of_int_min() {
-    let message = "an HSP coordinate of -2147483648 (NCBI's `- COORDSBASE` overflows int, undefined) in the XML input is not supported by LOSAT's rpsbproc";
-    for member in 0..3 {
+    for (from, pos) in [
+        (i32::MIN, 18_446_744_071_562_067_967u64),
+        (-i32::MAX, 18_446_744_071_562_067_968),
+    ] {
+        let mut q = query(10);
+        q.hsp(1, &hsp(from, 7, 0, b"ABC", b"ABC"), 0.01);
+        assert_eq!(
+            message_of(&q),
+            format!("basic_string::replace: __pos (which is {pos}) > this->size() (which is 10)")
+        );
+    }
+    for to in [i32::MIN, -i32::MAX] {
+        let mut q = query(10);
+        q.hsp(1, &hsp(5, to, 0, b"ABC", b"ABC"), 0.01);
+        assert!(q.failure.is_none());
+        assert_eq!((q.aligns[0].from, q.aligns[0].to), (4, i64::from(to) - 1));
+    }
+    for hit_from in [i32::MIN, -i32::MAX] {
         let mut hit = hsp(5, 7, 0, b"ABC", b"ABC");
-        match member {
-            0 => hit.query_from = i32::MIN,
-            1 => hit.query_to = i32::MIN,
-            _ => hit.hit_from = i32::MIN,
-        }
+        hit.hit_from = hit_from;
         let mut q = query(10);
         q.hsp(1, &hit, 0.01);
-        assert_eq!(refused(&q), message, "{member}");
+        assert!(q.failure.is_none());
+        assert_eq!(q.aligns[0].s_starts, vec![i64::from(hit_from) - 1]);
     }
-    // `-2147483647` is read: `m_iFrom` is then `INT_MIN`, and NCBI's `replace` at that `size_t`
-    // throws.
-    let mut q = query(10);
-    q.hsp(1, &hsp(-i32::MAX, 7, 0, b"ABC", b"ABC"), 0.01);
-    assert_eq!(
-        message_of(&q),
-        "basic_string::replace: __pos (which is 18446744071562067968) > this->size() (which is 10)"
-    );
 }
 
 fn message_of(q: &OfflineQuery) -> String {
@@ -255,36 +256,49 @@ fn message_of(q: &OfflineQuery) -> String {
 }
 
 // "See if NA" (offl_cd_align_proc.cpp:209-228): `m_iTo - m_iFrom + 1` is `int` arithmetic; a span
-// of `INT_MAX + 1` overflows (refused). It is reached only while `m_dimTranslated[0]` is empty
-// (a protein query of length 0).
+// of `INT_MAX + 1` or more overflows (undefined): computed as its value, compared as an `unsigned
+// int` (modulo 2^32) with `aaRes` (PD-LOSAT-NCBI-DEFECTS exception 11). It is reached only while
+// `m_dimTranslated[0]` is empty (a protein query of length 0); this one commits nothing and its
+// `replace` at `m_iFrom` (-1) throws, as NCBI's (PS16-Q1 oracle `xspan`).
 #[test]
 fn span_that_overflows_int() {
     let mut q = query(0);
     q.hsp(1, &hsp(0, i32::MAX, 0, b"ABC", b"ABC"), 0.01);
     assert_eq!(
-        refused(&q),
-        "an HSP whose Hsp_query-to - Hsp_query-from + 1 overflows NCBI's int (undefined) in the XML input is not supported by LOSAT's rpsbproc"
+        message_of(&q),
+        "basic_string::replace: __pos (which is 18446744073709551615) > this->size() (which is 0)"
     );
 }
 
-// `++hf` and `--hf` of `ParseAlignStrings` at `int`'s limits (offl_cd_align_proc.cpp:51-122):
-// a hit from `INT_MAX` with a query gap after it, and one whose `hf += segLen` wraps to `INT_MIN`
-// before a domain gap. `qf` reaches no limit: `replace` checks it against the string first.
+// `++hf` and `--hf` of `ParseAlignStrings` past `int`'s limits (offl_cd_align_proc.cpp:51-122;
+// undefined): computed as their values, which `m_vecSStarts` keeps (PD-LOSAT-NCBI-DEFECTS
+// exception 11): a hit from `INT_MAX` with a query gap after it (PS16-Q1 oracle `xhfmax`, whose
+// nearby input starts 5 lower), and one whose `hf += segLen` wraps to `INT_MIN` (an `unsigned
+// int` sum stored in the `int`) before a domain gap (`--hf`). `qf` reaches no limit: `replace`
+// checks it against the string first.
 #[test]
 fn domain_positions_that_overflow_int() {
-    let message = "an alignment whose positions overflow NCBI's int (undefined) in the XML input is not supported by LOSAT's rpsbproc";
-    // hf = INT_MAX - 1, then + 1 at the gap, then `++hf` in the run of query gaps.
-    let mut up = hsp(1, 2, 0, b"A--B", b"AXYB");
-    up.hit_from = i32::MAX;
-    let mut q = query(10);
-    q.hsp(1, &up, 0.01);
-    assert_eq!(refused(&q), message);
-    // hf = INT_MAX - 1, + 2 wraps to INT_MIN, then `--hf` at the domain gap.
-    let mut down = hsp(1, 3, 0, b"ABC", b"AB-");
+    // hf = INT_MAX - 1, then + 1 at the gap, then `++hf` twice in the run of query gaps.
+    for (hit_from, starts) in [
+        (i32::MAX, vec![2_147_483_646, 2_147_483_649]),
+        (i32::MAX - 5, vec![2_147_483_641, 2_147_483_644]),
+    ] {
+        let mut up = hsp(1, 2, 0, b"A--B", b"AXYB");
+        up.hit_from = hit_from;
+        let mut q = query(10);
+        q.hsp(1, &up, 0.01);
+        assert!(q.failure.is_none());
+        assert_eq!(q.aligns[0].s_starts, starts);
+        assert_eq!(q.aligns[0].m_starts, vec![0, 1]);
+    }
+    // hf = INT_MAX - 1, + 2 wraps to INT_MIN, `--hf` at the domain gap gives INT_MIN - 1, and
+    // `++hf` at the next pair INT_MIN again.
+    let mut down = hsp(1, 4, 0, b"ABCD", b"AB-D");
     down.hit_from = i32::MAX;
     let mut q = query(10);
     q.hsp(1, &down, 0.01);
-    assert_eq!(refused(&q), message);
+    assert!(q.failure.is_none());
+    assert_eq!(q.aligns[0].s_starts, vec![2_147_483_646, -2_147_483_648]);
     // A `qf` past the string throws at the `replace` of its run.
     let mut q = query(10);
     q.hsp(1, &hsp(i32::MAX, i32::MAX, 0, b"A-B", b"AXB"), 0.01);
@@ -294,7 +308,8 @@ fn domain_positions_that_overflow_int() {
     );
 }
 
-// `SeqLen_t alnLen = qseq.size()`: an `Hsp_qseq` of 2^31 letters or more is refused.
+// `SeqLen_t alnLen = qseq.size()`: an `Hsp_qseq` of 2^31 letters or more is refused under the
+// memory rule (NCBI holds it and its `Hsp_hseq`, 4 GiB or more at once).
 #[test]
 fn alignment_lengths_beyond_int() {
     assert_eq!(
@@ -306,7 +321,7 @@ fn alignment_lengths_beyond_int() {
     };
     assert_eq!(
         message,
-        "an Hsp_qseq of 2^31 or more letters (beyond NCBI's int positions) in the XML input is not supported by LOSAT's rpsbproc"
+        "an Hsp_qseq of 2^31 or more letters (NCBI's rpsbproc holds it and its Hsp_hseq, 4 GiB or more at once; NCBI's result depends on the host's memory) in the XML input is not supported by LOSAT's rpsbproc"
     );
 }
 

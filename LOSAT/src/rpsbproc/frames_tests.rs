@@ -86,7 +86,19 @@ fn frame_conversions() {
     assert_eq!(plus_pr_to_plus_na(10, 2), 32);
     assert_eq!(plus_pr_to_plus_na(-1, 0), -3);
     // na_len - (pr - 1) * 3 - rfidx - 1
-    assert_eq!(minus_pr_to_plus_na(0, 3, 5000), Some(4999));
-    assert_eq!(minus_pr_to_plus_na(10, 5, 5000), Some(5000 - 27 - 6));
-    assert_eq!(minus_pr_to_plus_na(i32::MIN, 3, 5000), None);
+    assert_eq!(minus_pr_to_plus_na(0, 3, 5000), 4999);
+    assert_eq!(minus_pr_to_plus_na(10, 5, 5000), 5000 - 27 - 6);
+    // `pr - 1` of `INT_MIN` overflows `int` (undefined): its value, -2^31 - 1, is 2^31 - 1
+    // modulo 2^32 in the product (PD-LOSAT-NCBI-DEFECTS exception 11); the residue after it
+    // (`INT_MIN + 1`, no overflow) gives the base 3 below.
+    let min = i64::from(i32::MIN);
+    assert_eq!(minus_pr_to_plus_na(min, 3, 5000), -2_147_478_649);
+    assert_eq!(minus_pr_to_plus_na(min + 1, 3, 5000), -2_147_478_649 - 3);
+    // A residue past `int`'s range (a mapped position that NCBI's `int` arithmetic took there)
+    // converts modulo 2^32.
+    assert_eq!(minus_pr_to_plus_na(min - 1, 3, 5000), -2_147_478_649 + 3);
+    assert_eq!(
+        plus_pr_to_plus_na(i64::from(i32::MAX) + 1, 0),
+        plus_pr_to_plus_na(min, 0)
+    );
 }

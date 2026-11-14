@@ -53,13 +53,16 @@ const GAP_THRESHOLD: i64 = 35;
 // 		m_uiPssmId(0), m_iRegionIdx(0), m_dNMissing(0.0), m_dCMissing(0.0), m_bSpecQualified(false), m_iRepClass(0), m_bRep(0), m_bLifted(0), m_bSuppressed(0)
 // 	{};
 // ```
+// (`m_iFrom` and `m_iTo` are `i64`: the XML input's `GetQuery_from() - COORDSBASE` of
+// `-2147483648` stores `INT_MIN - 1` there, the value of NCBI's overflowing `int` arithmetic,
+// PD-LOSAT-NCBI-DEFECTS exception 11; an archive's are `int`s, converted from `TSeqPos`.)
 #[derive(Clone, Debug)]
 pub(crate) struct DomAlign {
     pub(crate) pssm_id: u32,
-    pub(crate) from: i32,
-    pub(crate) to: i32,
+    pub(crate) from: i64,
+    pub(crate) to: i64,
     pub(crate) m_starts: Vec<i32>,
-    pub(crate) s_starts: Vec<i32>,
+    pub(crate) s_starts: SubjectStarts,
     pub(crate) lens: Vec<u32>,
     pub(crate) e_value: f64,
     pub(crate) bit_score: f64,
@@ -86,7 +89,7 @@ impl DomAlign {
     fn empty(align: &Align, pssm_id: u32) -> Self {
         Self::new(
             pssm_id,
-            i32::MAX,
+            i64::from(i32::MAX),
             0,
             align.e_value.unwrap_or(0.0),
             align.bit_score.unwrap_or(0.0),
@@ -95,13 +98,13 @@ impl DomAlign {
 
     /// A hit of the range `from`..`to` without segments, of a protein query (the alignment
     /// type and the reading frame of `TDomSeqAlignment`'s constructor).
-    pub(crate) fn new(pssm_id: u32, from: i32, to: i32, e_value: f64, bit_score: f64) -> Self {
+    pub(crate) fn new(pssm_id: u32, from: i64, to: i64, e_value: f64, bit_score: f64) -> Self {
         DomAlign {
             pssm_id,
             from,
             to,
             m_starts: Vec::new(),
-            s_starts: Vec::new(),
+            s_starts: SubjectStarts::default(),
             lens: Vec::new(),
             e_value,
             bit_score,
@@ -126,6 +129,70 @@ impl DomAlign {
     /// The plus-strand frame index (`m_ReadingFrame & READINGFRAME::RF_SIZE`).
     pub(crate) fn plus_rf_idx(&self) -> u32 {
         self.reading_frame & RF_SIZE
+    }
+}
+
+/// `m_vecSStarts` (`std::vector<SeqPos_t>`): the starts of the segments on the model. NCBI keeps
+/// `int`s; LOSAT keeps `i32`s, 4 bytes a segment, until a start past `int`'s range comes, and
+/// `i64`s from then on: `ParseAlignStrings` of the XML input moves its `int` `hf` past the range
+/// with `++hf`, `--hf` (and `- COORDSBASE` of an `Hsp_hit-from` of `-2147483648`), which LOSAT
+/// computes as their values (PD-LOSAT-NCBI-DEFECTS exception 11). An archive's starts are `int`s
+/// (converted from `TSeqPos`), so they stay narrow, and so does every start of a real document.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum SubjectStarts {
+    Narrow(Vec<i32>),
+    Wide(Vec<i64>),
+}
+
+impl Default for SubjectStarts {
+    fn default() -> Self {
+        SubjectStarts::Narrow(Vec::new())
+    }
+}
+
+impl SubjectStarts {
+    /// `push_back`.
+    pub(crate) fn push(&mut self, start: i64) {
+        match self {
+            SubjectStarts::Narrow(starts) => match i32::try_from(start) {
+                Ok(start) => starts.push(start),
+                Err(_) => {
+                    let mut wide: Vec<i64> = starts.iter().map(|&start| i64::from(start)).collect();
+                    wide.push(start);
+                    *self = SubjectStarts::Wide(wide);
+                }
+            },
+            SubjectStarts::Wide(starts) => starts.push(start),
+        }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            SubjectStarts::Narrow(starts) => starts.len(),
+            SubjectStarts::Wide(starts) => starts.len(),
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// `m_vecSStarts[i]` (`i` below `len()`).
+    pub(crate) fn get(&self, i: usize) -> i64 {
+        match self {
+            SubjectStarts::Narrow(starts) => i64::from(starts[i]),
+            SubjectStarts::Wide(starts) => starts[i],
+        }
+    }
+}
+
+impl PartialEq<Vec<i64>> for SubjectStarts {
+    fn eq(&self, other: &Vec<i64>) -> bool {
+        self.len() == other.len()
+            && other
+                .iter()
+                .enumerate()
+                .all(|(i, &start)| self.get(i) == start)
     }
 }
 
@@ -187,7 +254,7 @@ fn clean_alignment(seg: &DenseSeg, align: &mut DomAlign) {
         let (m, s) = (seg.starts[2 * i], seg.starts[2 * i + 1]);
         if m >= 0 && s >= 0 {
             align.m_starts.push(m);
-            align.s_starts.push(s);
+            align.s_starts.push(i64::from(s));
             align.lens.push(len);
         }
     }
@@ -244,8 +311,8 @@ pub(crate) fn parse_align(seg: &DenseSeg, align: &Align, pssm_id: u32) -> DomAli
     if let (Some(&first), Some(&last), Some(&last_len)) =
         (dom.m_starts.first(), dom.m_starts.last(), dom.lens.last())
     {
-        dom.from = first;
-        dom.to = (last as u32).wrapping_add(last_len).wrapping_sub(1) as i32;
+        dom.from = i64::from(first);
+        dom.to = i64::from((last as u32).wrapping_add(last_len).wrapping_sub(1) as i32);
     }
     dom
 }
@@ -379,10 +446,13 @@ pub(crate) fn parse_align(seg: &DenseSeg, align: &Align, pssm_id: u32) -> DomAli
 // 	}
 // ```
 // The types decide the arithmetic: `GetFrom`/`GetTo`/`GetPoint` are `TSeqPos` (unsigned)
-// stored in `SeqPos_t` (`int`, wraps in NCBI's build); `t - f + 1` is `int` arithmetic
-// (refused where it overflows, undefined); `m_iFrom % RF_SIZE`, `*iterMS / RF_SIZE` and the
-// minus-strand sum are `unsigned int` arithmetic (wraps); `m_iTo + 1` is `int` (`m_iTo` is
-// at least 0, the overflow of `INT_MAX + 1` is refused). A segment whose subject location is
+// stored in `SeqPos_t` (`int`, wraps in NCBI's build); `t - f + 1` is `int` arithmetic, which
+// overflows for an interval of 2^31 positions or more (undefined): computed as its value
+// (PD-LOSAT-NCBI-DEFECTS exception 11), which `push_back` converts to the `unsigned int` of
+// `m_vecLens` (modulo 2^32); `m_iFrom % RF_SIZE`, `*iterMS / RF_SIZE` and the minus-strand sum
+// are `unsigned int` arithmetic (wraps); `m_iTo + 1` is `int` (`m_iTo` is at least 0), which
+// overflows for a hit that ends at 2^31 - 1: computed as its value (exception 11), which the
+// division by the `unsigned int` `RF_SIZE` converts modulo 2^32. A segment whose subject location is
 // neither `int` nor `pnt` leaves its query start without a subject start and length: the
 // vectors differ in length, which the plus-strand code and the classification read within
 // bounds (LOSAT keeps the three vectors as NCBI does), but the minus-strand loop above reads
@@ -392,9 +462,7 @@ pub(crate) fn parse_align(seg: &DenseSeg, align: &Align, pssm_id: u32) -> DomAli
 // whose only location is not `null`, is read past its end (refused), and a segment whose first
 // location is `null` is skipped whatever follows (PS16c review oracle `nullone`). The strand
 // that counts is the last one set; `unknown`, `plus` and `both` make a plus-strand hit, `minus`
-// and `both-rev` a minus-strand one, `other` (or none) an alignment of two proteins. (The
-// `m_iFrom + COORDSBASE` and `m_iTo + COORDSBASE` of the DOMAINS lines are checked by the
-// caller, for the hits it keeps.)
+// and `both-rev` a minus-strand one, `other` (or none) an alignment of two proteins.
 pub(crate) fn parse_std_align(
     segs: &[StdPair],
     align: &Align,
@@ -430,11 +498,11 @@ pub(crate) fn parse_std_align(
             StdLoc::Pnt { point, strand } => (point as i32, point as i32, strand),
             _ => continue,
         };
-        if start < dom.from {
-            dom.from = start;
+        if i64::from(start) < dom.from {
+            dom.from = i64::from(start);
         }
-        if end > dom.to {
-            dom.to = end;
+        if i64::from(end) > dom.to {
+            dom.to = i64::from(end);
         }
         dom.m_starts.push(start);
         if let Some(strand) = strand {
@@ -442,20 +510,12 @@ pub(crate) fn parse_std_align(
         }
         match hit {
             StdLoc::Int { from, to, .. } => {
-                let (f, t) = (from as i32, to as i32);
-                let len = t
-                    .checked_sub(f)
-                    .and_then(|diff| diff.checked_add(1))
-                    .ok_or_else(|| {
-                        format!(
-                            "a Std-seg subject interval from {from} to {to}, whose length overflows NCBI's int (undefined), is not supported by LOSAT's rpsbproc"
-                        )
-                    })?;
+                let (f, t) = (i64::from(from as i32), i64::from(to as i32));
                 dom.s_starts.push(f);
-                dom.lens.push(len as u32);
+                dom.lens.push((t - f + 1) as u32);
             }
             StdLoc::Pnt { point, .. } => {
-                dom.s_starts.push(point as i32);
+                dom.s_starts.push(i64::from(point as i32));
                 dom.lens.push(1);
             }
             _ => {}
@@ -465,10 +525,7 @@ pub(crate) fn parse_std_align(
         dom.pr2na = true;
         dom.reading_frame = (dom.from as u32) % RF_SIZE;
         if qstrand == STRAND_MINUS || qstrand == STRAND_BOTH_REV {
-            let end = dom.to.checked_add(1).ok_or_else(|| {
-                "a minus-strand Std-seg that ends at position 2147483647 (NCBI's int overflows) is not supported by LOSAT's rpsbproc".to_string()
-            })?;
-            let aligned_len = end as u32 / RF_SIZE;
+            let aligned_len = (dom.to + 1) as u32 / RF_SIZE;
             dom.reading_frame |= aligned_len << 2;
             if dom.m_starts.len() > dom.lens.len() {
                 return Err(
@@ -650,7 +707,9 @@ struct Facility {
 // missing and their hits are dropped (cdalignproc_base.cpp:133-195). `Multidom` hits (`m_iRepClass`
 // 1) are not made since 2018-04-04 (the commented lines above), so the output's `Multidom` type
 // is never printed.
-// (`m_uiLength - (sstart + len)` is `unsigned int` arithmetic stored in an `int`; the ratios
+// (`m_uiLength - (sstart + len)` is `unsigned int` arithmetic stored in an `int`, of the start's
+// value modulo 2^32 where the XML input took it past `int` (`SubjectStarts`); `iNMissing` is
+// that value (PD-LOSAT-NCBI-DEFECTS exception 11); the ratios
 // divide doubles, so a model of length 0 gives an infinity or a NaN as NCBI's does. A NaN E-value
 // or bit score makes `TDomAlignOrderByEValue` no strict weak order (`order_by_e_value`): libstdc++'s
 // sort, which `try_std_sort` follows step by step, is then still defined while it reads inside the
@@ -681,12 +740,12 @@ pub(crate) fn calculate(
         };
         let domain = &data.domains[domain_index];
         let length = domain.length;
-        let n_missing = align.s_starts[0];
+        let n_missing = align.s_starts.get(0);
         let c_missing = length.wrapping_sub(
-            (*align.s_starts.last().expect("not empty") as u32)
+            (align.s_starts.get(align.s_starts.len() - 1) as u32)
                 .wrapping_add(*align.lens.last().expect("not empty")),
         ) as i32;
-        align.n_missing = f64::from(n_missing) / f64::from(length);
+        align.n_missing = n_missing as f64 / f64::from(length);
         align.c_missing = f64::from(c_missing) / f64::from(length);
         align.spec_qualified =
             domain.min_bit_score > 0.0 && align.bit_score >= domain.min_bit_score;
@@ -805,10 +864,7 @@ pub(crate) fn calculate(
     .map_err(sort_out_of_range)?;
     let segs_of = |facility: &Facility, aligns: &[DomAlign], gap_sets: &[SegSet]| {
         let mut segs = SegSet::new();
-        segs.add(
-            i64::from(aligns[facility.align].from),
-            i64::from(aligns[facility.align].to),
-        );
+        segs.add(aligns[facility.align].from, aligns[facility.align].to);
         if let Some(gaps) = facility.gaps {
             segs.clip(&gap_sets[gaps]);
         }
@@ -1106,13 +1162,17 @@ pub(crate) fn map_seg_set(set: &mut SegSet, align: &DomAlign) {
 // 	}
 // ```
 // (`qLen - rfidx` and `c + offset` are `unsigned int` arithmetic, which wraps; `c + offset`
-// is stored in an `int`.)
+// is stored in an `int`. `++c` and `ori_from + inc` are `int` arithmetic, which overflows past
+// `INT_MAX` (undefined; a mapped range at the limit, made by hand): computed as their values,
+// which the plus strand stores as they are (PD-LOSAT-NCBI-DEFECTS exception 11); a position
+// outside the translation is then read by the out-of-range rules of its reader.)
 pub(crate) fn translated_pos_map(
     set: &SegSet,
     align: &DomAlign,
     query_len: u32,
 ) -> Result<Vec<ResiduePos>, String> {
-    let mut offset = 0u32;
+    // `Some(offset)` on the minus strand, whose `c + offset` is an `unsigned int`.
+    let mut minus_offset = None;
     if align.pr2na {
         let aligned_len = align.aligned_len();
         let aa_len = query_len.wrapping_sub(align.plus_rf_idx()) / RF_SIZE;
@@ -1122,7 +1182,7 @@ pub(crate) fn translated_pos_map(
                     "Invalid protein length {aa_len}: shorter than aligned range {aligned_len}"
                 ));
             }
-            offset = aa_len - aligned_len;
+            minus_offset = Some(aa_len - aligned_len);
         }
     }
     let mut positions = Vec::with_capacity(set.total_residues().max(0) as usize);
@@ -1130,9 +1190,13 @@ pub(crate) fn translated_pos_map(
         let mut c = seg.from;
         let mut inc = 0i64;
         while c <= seg.to {
+            let curr = match minus_offset {
+                Some(offset) => i64::from((c as u32).wrapping_add(offset) as i32),
+                None => c,
+            };
             positions.push(ResiduePos {
-                curr: (c as i32 as u32).wrapping_add(offset) as i32,
-                ori: (seg.ori_from + inc) as i32,
+                curr,
+                ori: seg.ori_from + inc,
             });
             c += 1;
             inc += 1;
@@ -1143,8 +1207,10 @@ pub(crate) fn translated_pos_map(
 
 /// The two ends of a mapped set after `TSeqAlignment::Pr2NaConvert` (`GetLeft`, `GetRight`):
 /// positions on the query's plus strand for a hit of a translated query; the set's own ends
-/// for the others. `None` where NCBI's `int` arithmetic overflows (a position outside `int`,
-/// or `pr - 1` of `INT_MIN`; undefined).
+/// for the others (`None`: an empty set). A position that NCBI's `int` arithmetic took past
+/// `int`'s range holds its value, and `pr - 1` of `INT_MIN` is computed as its value
+/// (`frames::minus_pr_to_plus_na`; PD-LOSAT-NCBI-DEFECTS exception 11): the conversions after
+/// them are `unsigned int`'s, modulo 2^32.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:1137-1177
 // ```c++
 // void TSeqAlignment::Pr2NaConvert(CSegSet &segset) const
@@ -1202,40 +1268,28 @@ pub(crate) fn translated_pos_map(
 // Only the ends are printed (the motif lines), so only the first and the last ranges are
 // converted; `ori_from` is not read after the conversion. The minus strand reverses the list:
 // the left end comes from the last range's `to`, the right end from the first range's `from`.
-// The minus strand's `ori_from += (to - from + 1) / m_iFactor - 1` is `int` arithmetic on the
-// converted bases, which overflows only for a range of more than 2^31 bases (made by hand
-// only). It is left unchecked on purpose: its value is never read, so no printed number
-// depends on it (PS16c review S3-4).
-pub(crate) fn pr2na_ends(set: &SegSet, align: &DomAlign) -> Option<(i32, i32)> {
+// The minus strand's `ori_from += (to - from + 1) / m_iFactor - 1` is not computed: its value
+// is never read, so no printed number depends on it (PS16c review S3-4).
+pub(crate) fn pr2na_ends(set: &SegSet, align: &DomAlign) -> Option<(i64, i64)> {
     let (first, last) = (set.segs().first()?, set.segs().last()?);
-    let int = |value: i64| i32::try_from(value).ok();
     if !align.pr2na {
-        return Some((int(first.from)?, int(last.to)?));
+        return Some((first.from, last.to));
     }
     let rfidx = align.plus_rf_idx();
     let aligned_len = align.aligned_len();
     if aligned_len > 0 {
         let na_len = aligned_len.wrapping_mul(RF_SIZE).wrapping_add(rfidx);
-        // Each range's two conversions: `pr - 1` overflows only at `INT_MIN`.
-        for seg in set.segs() {
-            int(seg.from)?.checked_sub(1)?;
-            int(seg.to)?.checked_sub(1)?;
-        }
-        let left = (minus_pr_to_plus_na(int(last.to)?, RF_SIZE, na_len)? as u32)
+        let left = (minus_pr_to_plus_na(last.to, RF_SIZE, na_len) as u32)
             .wrapping_sub(RF_SIZE)
             .wrapping_add(1) as i32;
-        let right = minus_pr_to_plus_na(int(first.from)?, RF_SIZE, na_len)?;
-        Some((left, right))
+        let right = minus_pr_to_plus_na(first.from, RF_SIZE, na_len);
+        Some((i64::from(left), i64::from(right)))
     } else {
-        for seg in set.segs() {
-            int(seg.from)?;
-            int(seg.to)?;
-        }
-        let left = plus_pr_to_plus_na(int(first.from)?, rfidx);
-        let right = (plus_pr_to_plus_na(int(last.to)?, rfidx) as u32)
+        let left = plus_pr_to_plus_na(first.from, rfidx);
+        let right = (plus_pr_to_plus_na(last.to, rfidx) as u32)
             .wrapping_add(RF_SIZE)
             .wrapping_sub(1) as i32;
-        Some((left, right))
+        Some((i64::from(left), i64::from(right)))
     }
 }
 

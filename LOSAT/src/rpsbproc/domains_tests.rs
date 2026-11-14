@@ -40,7 +40,7 @@ fn parse_align_keeps_the_aligned_segments() {
     assert_eq!((dom.e_value, dom.bit_score, dom.pssm_id), (1e-5, 40.5, 42));
     // No aligned segment: NCBI's range stays `k_INT_MAX` .. 0.
     let none = parse_align(&dense_seg(&[-1, 0], &[5]), &align(), 42);
-    assert_eq!((none.from, none.to), (i32::MAX, 0));
+    assert_eq!((none.from, none.to), (i64::from(i32::MAX), 0));
     assert!(none.s_starts.is_empty());
 }
 
@@ -125,7 +125,9 @@ fn a_minus_strand_hit_of_a_translated_query() {
 // Without a strand the hit is an alignment of two proteins; a subject location that is not
 // `int` or `pnt` leaves its query start alone (plus strand: kept as NCBI does), which the
 // minus strand reads past (refused); `null` and `empty` segments are skipped; a `pnt` is a
-// position of length 1; a subject interval whose length overflows `int` is refused.
+// position of length 1. A subject interval whose length `t - f + 1` overflows `int` (undefined)
+// has the length's value modulo 2^32, the `unsigned int` of `m_vecLens` (PD-LOSAT-NCBI-DEFECTS
+// exception 11; PS16-Q1 oracle `ntslen` and its nearby input `ntslen1`, one position shorter).
 #[test]
 fn std_seg_forms() {
     let none =
@@ -155,14 +157,20 @@ fn std_seg_forms() {
         parse_std_align(&minus, &align(), 1).unwrap_err(),
         "a minus-strand Std-seg with a subject location other than int or pnt (NCBI reads past its segment lengths) is not supported by LOSAT's rpsbproc"
     );
-    let overflow = [std_seg(
-        int(0, 2, Some(1)),
-        int(0x8000_0000, 0x7fff_ffff, None),
-    )];
-    assert_eq!(
-        parse_std_align(&overflow, &align(), 1).unwrap_err(),
-        "a Std-seg subject interval from 2147483648 to 2147483647, whose length overflows NCBI's int (undefined), is not supported by LOSAT's rpsbproc"
-    );
+    let length = |from: u32, to: u32| {
+        let dom = parse_std_align(
+            &[std_seg(int(0, 2, Some(1)), int(from, to, None))],
+            &align(),
+            1,
+        )
+        .unwrap();
+        (dom.s_starts.get(0), dom.lens[0])
+    };
+    // 2^31 - 1 - (-2^31) + 1 = 2^32; 2^31 - 1 - (-5) + 1 = 2^31 + 5.
+    assert_eq!(length(0x8000_0000, 0x7fff_ffff), (-2_147_483_648, 0));
+    assert_eq!(length(0xffff_fffb, 0x7fff_ffff), (-5, 2_147_483_653));
+    assert_eq!(length(0xffff_fffb, 0x7fff_fffe), (-5, 2_147_483_652));
+    assert_eq!(length(0, 0x7fff_fffe), (0, 0x7fff_ffff));
 }
 
 // biodata_blast.cpp:63 (quoted at `parse_std_align`): `seqlocs[0]->IsNull() ||
@@ -205,8 +213,9 @@ fn locations_are_read_in_ncbis_order() {
 
 // biodata_blast.cpp:178-182 (quoted at `parse_std_align`): `alignedLen = (dst.m_iTo + 1) /
 // RF_SIZE` of a minus-strand hit is `int` arithmetic, which overflows for a hit that ends at
-// 2^31 - 1 (refused); one base before, the aligned length is 715,827,882 codons. A plus-strand
-// hit with that end parses (the caller refuses it as a kept hit of a nucleotide query).
+// 2^31 - 1 (undefined): its value, 2^31, divided as an `unsigned int` (PD-LOSAT-NCBI-DEFECTS
+// exception 11; PS16-Q1 oracle `ntminusmax`), gives 715,827,882 codons, as the hit one base
+// shorter does (no overflow). A plus-strand hit with that end parses as it is.
 #[test]
 fn a_minus_strand_hit_that_ends_at_int_max() {
     let hit = |to: u32, strand: i32| {
@@ -215,19 +224,18 @@ fn a_minus_strand_hit_that_ends_at_int_max() {
             int(0, 2, None),
         )]
     };
-    assert_eq!(
-        parse_std_align(&hit(0x7fff_ffff, 2), &align(), 1).unwrap_err(),
-        "a minus-strand Std-seg that ends at position 2147483647 (NCBI's int overflows) is not supported by LOSAT's rpsbproc"
-    );
+    let dom = parse_std_align(&hit(0x7fff_ffff, 2), &align(), 1).unwrap();
+    assert_eq!(dom.aligned_len(), 715_827_882);
     let dom = parse_std_align(&hit(0x7fff_fffe, 2), &align(), 1).unwrap();
     assert_eq!(dom.aligned_len(), 715_827_882);
     let dom = parse_std_align(&hit(0x7fff_ffff, 1), &align(), 1).unwrap();
-    assert_eq!((dom.from, dom.to), (2_147_483_640, i32::MAX));
+    assert_eq!((dom.from, dom.to), (2_147_483_640, i64::from(i32::MAX)));
 }
 
 // basedata.cpp:1137-1177 and segset_impl.hpp:281-290 (quoted at `pr2na_ends`): a range of the
-// set outside `int` (NCBI's set arithmetic overflowed before) and, on the minus strand, a
-// residue at `INT_MIN` (`MinusPr2PlusNA`'s `pr - 1`) give no ends: the motif is refused.
+// set past `int`'s range (NCBI's set arithmetic overflowed before) and, on the minus strand, a
+// residue at `INT_MIN` (`MinusPr2PlusNA`'s `pr - 1`) are computed as their values, which the
+// conversions to `unsigned int` take modulo 2^32 (PD-LOSAT-NCBI-DEFECTS exception 11).
 #[test]
 fn ends_that_overflow_int() {
     let plus = parse_std_align(
@@ -244,13 +252,53 @@ fn ends_that_overflow_int() {
     .unwrap();
     let set = |from: i64, to: i64| SegSet::from_segs(vec![Seg::new(from, to)]);
     let past = i64::from(i32::MAX) + 1;
-    assert_eq!(pr2na_ends(&set(5, past), &plus), None);
-    assert_eq!(pr2na_ends(&set(5, past), &minus), None);
+    // 2^31 converts as `INT_MIN` does: (2^31 * 3 + 1 + 2) modulo 2^32, as an `int`.
+    assert_eq!(pr2na_ends(&set(5, past), &plus), Some((16, -2_147_483_645)));
+    assert_eq!(
+        pr2na_ends(&set(5, past - 1), &plus),
+        Some((16, -2_147_483_648))
+    );
+    assert_eq!(
+        pr2na_ends(&set(5, past), &minus),
+        Some((-2_147_483_050, 585))
+    );
+    assert_eq!(
+        pr2na_ends(&set(5, past - 1), &minus),
+        Some((-2_147_483_047, 585))
+    );
     let min = i64::from(i32::MIN);
-    assert_eq!(pr2na_ends(&set(min, 10), &minus), None);
-    assert!(pr2na_ends(&set(min + 1, 10), &minus).is_some());
+    // `pr - 1` of `INT_MIN`: -2^31 - 1, 2^31 - 1 modulo 2^32; the residue after it gives 3 less.
+    assert_eq!(
+        pr2na_ends(&set(min, 10), &minus),
+        Some((568, -2_147_483_048))
+    );
+    assert_eq!(
+        pr2na_ends(&set(min + 1, 10), &minus),
+        Some((568, -2_147_483_051))
+    );
     // The plus strand has no `pr - 1`: `INT_MIN * 3 + rfidx` wraps.
-    assert!(pr2na_ends(&set(min, 10), &plus).is_some());
+    assert_eq!(pr2na_ends(&set(min, 10), &plus), Some((-2_147_483_647, 33)));
+}
+
+// basedata.cpp:1180-1250 (quoted at `segset::SegSet::map_through`): `m_vecSStarts[idx] +
+// m_vecLens[idx] - 1` is an `unsigned int` sum stored in the `int` `end`. A segment from model
+// position 2^31 - 3 of 10 residues ends at -2^31 + 6 for NCBI, below the site's range (2^31 - 8
+// to 2^31 - 1), which is then not mapped; one from 2^31 - 14 ends at 2^31 - 5 and maps the part
+// of the range up to it.
+#[test]
+fn mapped_segment_ends_wrap_as_unsigned_int() {
+    let map = |s_start: i32| {
+        let dom = parse_align(&dense_seg(&[0, s_start], &[10]), &align(), 1);
+        let mut set = SegSet::new();
+        set.add(2_147_483_640, 2_147_483_647);
+        map_seg_set(&mut set, &dom);
+        set.segs()
+            .iter()
+            .map(|seg| (seg.from, seg.to))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(map(2_147_483_645), vec![]);
+    assert_eq!(map(2_147_483_634), vec![(6, 9)]);
 }
 
 // basedata.cpp:1252-1300 (quoted at `translated_pos_map`): a minus-strand hit's positions move

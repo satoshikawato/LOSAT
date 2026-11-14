@@ -878,17 +878,12 @@ fn process_cd_query(
         // 			CSegSet thisSegs;
         // 			thisSegs.AddSeg(iter->pAlign->m_iFrom, iter->pAlign->m_iTo);
         // ```
-        // A kept hit of a nucleotide query whose range starts or ends at 2^31 - 1: the `int`
-        // sums of its DOMAINS and SUPERFAMILIES lines overflow (undefined; PS16c review oracle
-        // `plusmax`: both 0.5.1 builds print -2147483648), and so may the overlap sets of
-        // `Calculate` that start from the range (`GetTotalResidues`' `to - from + 1`, the
-        // `+ 1` of `Cross` and `Merge`): refused, whatever the strand (PD-LOSAT-NCBI-DEFECTS
-        // 1.16). A protein query's hit keeps PS16a's widened sums (`print_dom_line`).
-        if query.is_na && (dom.from == i32::MAX || dom.to == i32::MAX) {
-            return Err(ProcessError::Unsupported(
-                "a hit of a nucleotide query that starts or ends at position 2147483647 (NCBI's int overflows) is not supported by LOSAT's rpsbproc".to_string(),
-            ));
-        }
+        // A kept hit whose range starts or ends at 2^31 - 1, of a protein or a nucleotide query:
+        // the `int` sums of its DOMAINS and SUPERFAMILIES lines overflow (undefined; PS16c review
+        // oracle `plusmax`: both 0.5.1 builds print -2147483648), and so may the overlap sets of
+        // `Calculate` that start from the range (`GetTotalResidues`' `to - from + 1`, the `+ 1`
+        // of `Cross` and `Merge`): computed as their values (`printed_position`, `segset::Seg`;
+        // PD-LOSAT-NCBI-DEFECTS exception 11).
         query.aligns.push(dom);
     }
     if !query.is_na {
@@ -1159,9 +1154,11 @@ mod tests {
     // Seq_align.cpp:339-358 and rpsbproc_main.cpp:1809,1836, quoted at `process_cd_query` and
     // `query_row_id`): a first segment with fewer than 2 ids is read past its end (PS16c oracle
     // `noids1`: segmentation fault in both 0.5.1 builds); a first location of a variant whose
-    // id LOSAT does not look up; a kept hit whose range starts or ends at 2^31 - 1, whose
-    // DOMAINS line overflows `int` (review oracle `plusmax`), whatever the strand. A hit whose
-    // PSSM-ID is 0 is dropped before it is classified or printed.
+    // id LOSAT does not look up. A kept hit whose range starts or ends at 2^31 - 1, whose
+    // DOMAINS line overflows NCBI's `int` (PS16c review oracle `plusmax`, PS16-Q1 oracle
+    // `ntplusmax` and its nearby input), is kept whatever the strand, with its range
+    // (PD-LOSAT-NCBI-DEFECTS exception 11). A hit whose PSSM-ID is 0 is dropped before it is
+    // classified or printed.
     #[test]
     fn refusals_of_translated_hits() {
         let data = fixture_data();
@@ -1205,7 +1202,11 @@ mod tests {
                     score_of_other_type: None,
                 };
                 match process_blast_results(&entries, &[align], &data) {
-                    Ok(queries) => Ok(queries[0].aligns.len()),
+                    Ok(queries) => Ok(queries[0]
+                        .aligns
+                        .iter()
+                        .map(|align| (align.from, align.to))
+                        .collect::<Vec<_>>()),
                     Err(ProcessError::Unsupported(message)) => Err(message),
                     Err(other) => panic!("{other:?}"),
                 }
@@ -1222,14 +1223,18 @@ mod tests {
             refused("a Std-seg without ids whose first location is a packed-int")
         );
         let end = 0x7fff_ffff;
-        let overflow = refused(
-            "a hit of a nucleotide query that starts or ends at position 2147483647 (NCBI's int overflows)",
-        );
         for strand in [0, 1, 3, 255] {
-            assert_eq!(run(row(), cdd(5), 0, end, strand), overflow);
+            assert_eq!(
+                run(row(), cdd(5), 0, end, strand),
+                Ok(vec![(0, i64::from(end))])
+            );
         }
-        assert_eq!(run(row(), cdd(5), end, end, 1), overflow);
-        assert_eq!(run(row(), cdd(0), 0, end, 1), Ok(0));
+        let end = i64::from(end);
+        assert_eq!(
+            run(row(), cdd(5), 0x7fff_ffff, 0x7fff_ffff, 1),
+            Ok(vec![(end, end)])
+        );
+        assert_eq!(run(row(), cdd(0), 0, 0x7fff_ffff, 1), Ok(vec![]));
     }
 
     // `Get1LetterSeqData` (biodata_core.cpp:199-253, quoted at `one_letter_residues`): the

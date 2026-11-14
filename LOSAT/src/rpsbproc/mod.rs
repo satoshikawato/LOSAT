@@ -102,6 +102,25 @@ const E_INPUT_FILE_OPEN_ERROR: i32 = 3;
 const E_OUTPUT_FILE_OPEN_ERROR: i32 = 4;
 const E_INPUT_DATA_ERROR: i32 = 5;
 
+/// `CRpsbProcApp::COORDSBASE`: the printed coordinates count from 1.
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:335
+// ```c++
+// 	constexpr static const int COORDSBASE = 1;
+// ```
+const COORDSBASE: i64 = 1;
+
+/// `position + COORDSBASE`, the `int` sum of every coordinate that rpsbproc prints in `int`
+/// (`m_iFrom + COORDSBASE` and `m_iTo + COORDSBASE` of the DOMAINS and SUPERFAMILIES lines, the
+/// residues of the SITES and MOTIFS lines, the first base of a nucleotide query's codon and motif).
+/// NCBI's sum overflows at `INT_MAX` (undefined in C++; both 0.5.1 builds print -2147483648, PS16c
+/// review oracle `plusmax`): LOSAT adds in `i64`, so it prints 2147483648, as NCBI prints the
+/// position of a hit moved away from the limit (PD-LOSAT-NCBI-DEFECTS exception 11, the Owner's
+/// rule of 2026-10-10 and Q1 = B of 2026-11-14). `position` holds an `int`'s value, past `int`'s
+/// range where NCBI's arithmetic took it there (exception 11 too).
+fn printed_position(position: impl Into<i64>) -> i64 {
+    position.into() + COORDSBASE
+}
+
 /// `OVERLAPLEADING` as rpsbproc stores it (`unsigned int` of 10000000000).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:338
 // ```c++
@@ -2062,7 +2081,7 @@ fn upper_at(text: &[u8], res: i64) -> Result<u8, PrintError> {
         Err(PrintError::Unsupported(
             format!(
                 "a site or motif at position {} of a query with {len} residues (NCBI reads outside the sequence) is not supported by LOSAT's rpsbproc",
-                res + 1
+                printed_position(res)
             )
             .into_bytes(),
         ))
@@ -2368,9 +2387,9 @@ fn print_features(
                 report.write(data.text(motif.site.title));
                 report.write(b"\t");
                 report.write(&[letter0]);
-                report.write((res0 + 1).to_string().as_bytes());
+                report.write(printed_position(res0).to_string().as_bytes());
                 report.write(b"\t");
-                report.write((res1 + 1).to_string().as_bytes());
+                report.write(printed_position(res1).to_string().as_bytes());
                 report.write(&[letter1]);
                 report.write(b"\t");
                 write_source(report, data, motif.source);
@@ -2430,7 +2449,7 @@ fn print_site(
     for (letter, res) in residues {
         report.write(delimit);
         report.write(&[letter]);
-        report.write((res + 1).to_string().as_bytes());
+        report.write(printed_position(res).to_string().as_bytes());
         delimit = b",";
     }
     let complete: i64 = data
@@ -2493,8 +2512,8 @@ fn print_incomplete(report: &mut Report, n_missing: f64, c_missing: f64) {
 //
 // }
 // ```
-// (`m_iFrom + COORDSBASE` is `int` arithmetic, which overflows at `INT_MAX` (undefined in C++);
-// LOSAT adds in `i64`, as `segset::Seg` keeps its sums.)
+// (`m_iFrom + COORDSBASE` is `int` arithmetic, which overflows at `INT_MAX` (undefined in C++):
+// `printed_position`, for protein and nucleotide queries alike.)
 fn print_dom_line(
     report: &mut Report,
     kind: &[u8],
@@ -2511,8 +2530,8 @@ fn print_dom_line(
     };
     let numbers = format!(
         "\t{pssm_id}\t{}\t{}\t{}\t{}\t",
-        i64::from(align.from) + 1,
-        i64::from(align.to) + 1,
+        printed_position(align.from),
+        printed_position(align.to),
         format_g(align.e_value),
         format_g(align.bit_score)
     );
@@ -2554,8 +2573,8 @@ fn print_cluster_line(report: &mut Report, record: &Record, query: &DomQuery, da
     let cluster = &data.clusters[record.cluster.expect("a superfamily line has its cluster")];
     let numbers = format!(
         "Superfamily\t0\t{}\t{}\t{}\t{}\t",
-        i64::from(align.from) + 1,
-        i64::from(align.to) + 1,
+        printed_position(align.from),
+        printed_position(align.to),
         format_g(align.e_value),
         format_g(align.bit_score)
     );
@@ -2596,6 +2615,19 @@ mod tests {
                 "{path}"
             );
         }
+    }
+
+    // rpsbproc_main.cpp:1809,1836 (quoted at `print_dom_line`, `print_cluster_line`): `m_iFrom +
+    // COORDSBASE` of a hit that ends at 2^31 - 1 overflows `int` (both 0.5.1 builds print
+    // -2147483648: PS16c review oracle `plusmax`); its value, 2^31, is what NCBI prints for the hit
+    // moved 3 bases down plus 3 (PS16-Q1 oracle `ntplusmax` and its nearby input `ntplusmax3`;
+    // PD-LOSAT-NCBI-DEFECTS exception 11). The XML input's `INT_MIN - 1` prints `INT_MIN`.
+    #[test]
+    fn printed_positions_past_int() {
+        assert_eq!(printed_position(i32::MAX), 2_147_483_648);
+        assert_eq!(printed_position(i32::MAX - 3), 2_147_483_645);
+        assert_eq!(printed_position(i64::from(i32::MIN) - 1), -2_147_483_648);
+        assert_eq!(printed_position(0), 1);
     }
 
     // `ostream << double` of -0.0 is glibc's `%g`, "-0".

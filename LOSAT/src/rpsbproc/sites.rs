@@ -22,11 +22,13 @@ use super::data::{CddData, Site};
 use super::prosite::{MapEnd, MatchError, ProSite};
 
 /// A mapped residue (`TSeg_base::TResiduePos`): its position on the query (`curr`) and the
-/// position on the model it came from (`ori`).
+/// position on the model it came from (`ori`). NCBI's are `SeqPos_t` (`int`); LOSAT's `i64`s hold
+/// the values of NCBI's `int` arithmetic past `int`'s range (`domains::translated_pos_map`,
+/// PD-LOSAT-NCBI-DEFECTS exception 11).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ResiduePos {
-    pub(crate) curr: i32,
-    pub(crate) ori: i32,
+    pub(crate) curr: i64,
+    pub(crate) ori: i64,
 }
 
 /// NCBI's `static vector<SeqPos_t> st_motif_pos` of `MotifCheck`, for one run.
@@ -165,6 +167,7 @@ impl MotifState {
                     return Ok(1);
                 };
                 let ori = mapped[map_idx].ori;
+                let position = i64::from(position);
                 if ori > position {
                     return Ok(1);
                 }
@@ -182,8 +185,11 @@ impl MotifState {
             buffer.clear();
             let mut text = Vec::new();
             for res in mapped {
-                if res.curr >= 0 && (res.curr as usize) < residues.len() {
-                    text.push(residues[res.curr as usize]);
+                if let Some(&residue) = usize::try_from(res.curr)
+                    .ok()
+                    .and_then(|at| residues.get(at))
+                {
+                    text.push(residue);
                     buffer.push_back().map_err(MotifError::Map)?;
                 }
             }

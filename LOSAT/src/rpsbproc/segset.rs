@@ -31,11 +31,15 @@
 //! classification makes (`Pr2NaConvert` changes it for a nucleotide query's motifs, whose ends
 //! only are printed: `domains::pr2na_ends`).
 
+use super::domains::SubjectStarts;
+
 /// `TSeg_base`. Its positions are `SeqPos_t` (`int`) in NCBI; LOSAT keeps them in `i64`, so
-/// the sums of the set algebra (`from - 1`, `to + 1`, the total residues) do not overflow where
-/// NCBI's do (positions near 2^31 of a crafted Dense-seg; undefined in C++, which LOSAT widens
-/// under the rule of 2026-10-10, as PD-LOSAT-NCBI-DEFECTS exception 4 does). The positions that
-/// come in are `int`s, so every result NCBI defines is the same.
+/// the `int` sums of the set algebra (`from - 1`, `to + 1`, the total residues, the mapping's
+/// `diff` and `ori_from` sums) do not overflow where NCBI's do (positions near 2^31 of a crafted
+/// alignment; undefined in C++): they are computed as their values and kept, under
+/// PD-LOSAT-NCBI-DEFECTS exception 11 (the Owner's rule of 2026-10-10 and Q1 = B of 2026-11-14).
+/// The positions that come in are `int`s and the `unsigned int` arithmetic is done modulo 2^32,
+/// so every result NCBI defines is the same.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Seg {
     pub(crate) from: i64,
@@ -543,8 +547,10 @@ impl SegSet {
     // ```
     // (rpsbproc calls it with `doConvert` false everywhere; the conversion of a nucleotide
     // query's motifs is `domains::pr2na_ends`. NCBI changes the list in place; LOSAT writes the
-    // new ranges in order into a new list.)
-    pub(crate) fn map_through(&mut self, m_starts: &[i32], s_starts: &[i32], lens: &[u32]) {
+    // new ranges in order into a new list. `m_vecSStarts[idx] + m_vecLens[idx] - 1` adds an
+    // `int` and an `unsigned int`: an `unsigned int` sum, modulo 2^32, stored in the `int` `end`;
+    // the other sums are `int` arithmetic, computed as their values (`Seg`).)
+    pub(crate) fn map_through(&mut self, m_starts: &[i32], s_starts: &SubjectStarts, lens: &[u32]) {
         if self.segs.is_empty() {
             return;
         }
@@ -554,13 +560,13 @@ impl SegSet {
         let mut source = old.into_iter();
         let mut current = source.next();
         while let Some(mut iter) = current {
-            if idx >= lens.len() || i64::from(s_starts[idx]) > iter.to {
+            if idx >= lens.len() || s_starts.get(idx) > iter.to {
                 current = source.next();
                 continue;
             }
-            let start = i64::from(s_starts[idx]);
+            let start = s_starts.get(idx);
             let diff = start - i64::from(m_starts[idx]);
-            let end = start + i64::from(lens[idx]) - 1;
+            let end = i64::from((start as u32).wrapping_add(lens[idx]).wrapping_sub(1) as i32);
             if end >= iter.to {
                 if iter.from < start {
                     iter.ori_from += start - iter.from;

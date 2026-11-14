@@ -41,8 +41,8 @@ use anyhow::Result;
 
 use super::args::ResolvedOptions;
 use super::empty_rows::{
-    mapped_query_nucleotide, row_is_empty, rows_empty, std_seg_lengths_not_accurate, AlignQueryIds,
-    SubjectLoc,
+    row_is_empty, rows_empty, std_seg_lengths_not_accurate, tabular_empty_row, AlignQueryIds,
+    SubjectLoc, TabularEmptyRow,
 };
 use super::input::FastaRecord;
 use super::report::{
@@ -51,7 +51,7 @@ use super::report::{
 };
 use super::runtime::BatchResults;
 use crate::cli::NativeError;
-use crate::report::serial::seqalign::ungapped_interval;
+use crate::report::serial::seqalign::{mapped_empty_query_nucleotide, ungapped_interval};
 use crate::report::tabular::{
     coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, TabularField,
     TabularHsp, TabularKind, TabularQuery, TabularSpec, TabularSubject, TabularTaxonomy,
@@ -537,9 +537,9 @@ pub(super) fn write_blastx_tabular(
                         query_ranges.extend(shown_hsps().map(|hsp| {
                             let raw = &hsp.hsp;
                             // The one nucleotide of `-subject`'s mapped empty row
-                            // (`empty_rows::mapped_query_nucleotide`); `-db` stopped above.
+                            // (`seqalign::mapped_empty_query_nucleotide`); `-db` stopped above.
                             if rows_empty(raw) {
-                                let at = mapped_query_nucleotide(
+                                let at = mapped_empty_query_nucleotide(
                                     ungapped_interval(
                                         raw.q_start,
                                         raw.q_end,
@@ -608,15 +608,19 @@ pub(super) fn write_blastx_tabular(
                             }
                         }
                         let raw = &hsp.hsp;
-                        // An HSP of length 0 (`empty_rows`): with `-subject` the alignment block
-                        // throws on the mapped Std-seg after the rows before it; with `-db` a
-                        // subject's only HSP is its Seq-align (`PrepareBlastUngappedSeqalign`
-                        // splits only Seq-aligns of several), which has no
-                        // `hsp_percent_coverage`, so that the query's fields read its empty query
-                        // row and the row leaves before its alignment block.
+                        // An HSP of length 0 (`empty_rows::tabular_empty_row`).
                         let empty = rows_empty(raw);
-                        if empty && loc == SubjectLoc::Interval && spec.opens_counts(&hsp.identity)
-                        {
+                        let form = if empty {
+                            tabular_empty_row(
+                                loc,
+                                spec.opens_counts(&hsp.identity),
+                                shown_count,
+                                spec.reads_query(),
+                            )
+                        } else {
+                            TabularEmptyRow::Row
+                        };
+                        if form == TabularEmptyRow::Throws {
                             writer.write_all(&buf)?;
                             writer.flush()?;
                             return Err(
@@ -625,16 +629,9 @@ pub(super) fn write_blastx_tabular(
                         }
                         let a;
                         let catch_ids;
-                        let (row, row_query, row_subject) = if empty
-                            && loc == SubjectLoc::Whole
-                            && shown_count == 1
-                            && spec.reads_query()
-                        {
-                            // The row that leaves at the query's fields (`bioseqs_found` false):
-                            // the query id of the Seq-align, the scores, the subject's ids and
-                            // names, `qcovs`; the other fields keep `x_ResetFields`' values
-                            // (`qcovhsp` `N/A`, `slen` 0 without a subject field that reads its
-                            // Bioseq, `TabularSpec::reads_subject_bioseq`).
+                        let (row, row_query, row_subject) = if form == TabularEmptyRow::Leaves {
+                            // `slen` is 0 without a subject field that reads its Bioseq
+                            // (`TabularSpec::reads_subject_bioseq`).
                             let row = TabularHsp {
                                 q_start: 0,
                                 q_end: 0,

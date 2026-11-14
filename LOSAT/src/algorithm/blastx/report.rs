@@ -1540,26 +1540,28 @@ pub(super) fn render_queries_with(
                             read = true;
                             reads.subject_read(0, list.oid as u32, &mut *writer, &mut *stderr)?;
                         }
-                        // An HSP of length 0 (`empty_rows`), as in the tabular reports with a field
-                        // list (`tabular::write_blastx_tabular`): with `-subject` the alignment
-                        // block of the default fields throws on the mapped Std-seg, after the rows
-                        // before it; with `-db` a subject's only HSP leaves at the query's id
-                        // (`AlignQueryIds`), the alignment's fields at 0.
+                        // The default fields enter NCBI's alignment block and read the query
+                        // (`qaccver`, `qstart`, ...).
                         if rows_empty(&hsp.hsp) {
-                            if SubjectLoc::of(shown) == SubjectLoc::Interval {
+                            let shown_hsps = list
+                                .hsps
+                                .iter()
+                                .filter(|h| has_seqalign(h, options.gapped))
+                                .count();
+                            let form = super::empty_rows::tabular_empty_row(
+                                SubjectLoc::of(shown),
+                                true,
+                                shown_hsps,
+                                true,
+                            );
+                            if form == super::empty_rows::TabularEmptyRow::Throws {
                                 writer.flush()?;
                                 return Err(NativeError::exception(
                                     &super::empty_rows::std_seg_lengths_not_accurate(),
                                 )
                                 .into());
                             }
-                            if list
-                                .hsps
-                                .iter()
-                                .filter(|h| has_seqalign(h, options.gapped))
-                                .count()
-                                == 1
-                            {
+                            if form == super::empty_rows::TabularEmptyRow::Leaves {
                                 let ids = AlignQueryIds::of(query);
                                 let a = DisplayAlignment::empty();
                                 let values: Vec<_> = options
@@ -1804,24 +1806,20 @@ fn write_pairwise(
 }
 
 /// The error of outfmt 0's writer: its stop at an HSP of length 0 (`EmptyRowsStop`) is NCBI's
-/// exception, `Row is empty` where the description table reads the HSP (after the query's
-/// `Length=`), `CreateDensegFromStdseg` where `-subject`'s alignment section reaches it (the Seq-loc
-/// mapper's rows); a write error stays.
+/// exception, `Row is empty` where the sorts or the description table read the HSP's empty rows
+/// (after the query's `Length=`), `CreateDensegFromStdseg` where they or `-subject`'s alignment
+/// section make a Dense-seg of the Seq-loc mapper's rows; a write error stays.
 fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
     use crate::report::pairwise::EmptyRowsStop;
     match error
         .get_ref()
         .and_then(|e| e.downcast_ref::<EmptyRowsStop>())
     {
-        Some(EmptyRowsStop::Descriptions) => {
+        Some(EmptyRowsStop::RowIsEmpty) => {
             NativeError::exception(&super::empty_rows::row_is_empty()).into()
         }
-        Some(EmptyRowsStop::Alignments) => {
+        Some(EmptyRowsStop::StdSegLengths) => {
             NativeError::exception(&super::empty_rows::std_seg_lengths_not_accurate()).into()
-        }
-        Some(EmptyRowsStop::Sorted) => {
-            super::empty_rows::EmptyRowsRefusal(super::empty_rows::UNPORTED_SORTED.to_string())
-                .into()
         }
         None => error.into(),
     }

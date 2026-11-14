@@ -191,9 +191,11 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
             || e.exit == 255
     }) {
         // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1), a
-        // write to one that fails (`framing::side_file_write_error`), or an exception of NCBI's
-        // formatters that ends the program through `CATCH_ALL` (`NativeError::exception`: the
-        // reports of an ungapped HSP of length 0, `empty_rows`).
+        // write to one that fails (`framing::side_file_write_error`), or any exception of NCBI's
+        // that a report raises and that ends the program through `CATCH_ALL`'s `CException`
+        // branch (`NativeError::exception`, exit status 255, blast_app_util.hpp:247-250; such as
+        // the formatters' exceptions on an ungapped HSP of length 0, `empty_rows`), which is not
+        // an engine error.
         error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()

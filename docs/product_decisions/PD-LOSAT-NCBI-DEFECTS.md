@@ -732,7 +732,8 @@ would port:
   `SetFields` leaves before its alignment block), Seq-aligns whose empty rows end at `TSeqPos`
   4294967295, `CSeq_align::GetSeqRange`'s `Row is empty` (`Seq_align.cpp:227`, exit status 255)
   where `qcovs` and outfmt 0's description table read the rows, and a block without rows past
-  that table. With `-subject` NCBI's Seq-loc mapper rewrites the query row to one nucleotide with
+  that table, and the same exception where outfmt 0's `-sorthits` and `-sorthsps` sorts read them
+  (`SortSeqalignForSortableFormat`). With `-subject` NCBI's Seq-loc mapper rewrites the query row to one nucleotide with
   a fuzz (`seq_align_mapper_base.cpp:1535-1557`): `CreateDensegFromStdseg`'s exception
   (`Seq_align.cpp:801`) where the tabular rows, outfmt 0's alignments and the XML make a Dense-seg
   of it, that nucleotide in `qcovs`. BLAST XML, XML2 and JSON catch the exception (exit status 0,
@@ -741,9 +742,7 @@ would port:
   HSP at the first letter of the searched range, which the mapper cuts into two alignments
   without scores. NCBI's output there is partly not defined (on the 4 GiB limit of the line's
   probes `BLAST ran out of memory`, exit status 4, for a segment of about 2^32 letters), and the
-  rest comes from `CAlnVec` over alignments that the mapper makes by accident. LOSAT also refuses
-  outfmt 0 with `-sorthits` or `-sorthsps` where such an HSP lies only past the description table:
-  NCBI's sorts may read its ranges (`SortSeqalignForSortableFormat`), which LOSAT does not model.
+  rest comes from `CAlnVec` over alignments that the mapper makes by accident.
 - `-evalue` with a signed infinity or NaN (`+inf`, `-nan`, `+nan(1)`, `1e999`): NCBI's
   `CArg_Double` reads them with `strtod` and its option check (`<= 0`) lets them pass;
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT

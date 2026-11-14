@@ -12,42 +12,16 @@ use crate::ncbi_exception::{NcbiException, ThrowSite};
 
 use super::preliminary::PreliminaryHsp;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1348-1377
-// ```c++
-//     if (hsp->query.frame == 0) {
-//        query_loc->SetInt().SetFrom(hsp->query.offset);
-//        query_loc->SetInt().SetTo(hsp->query.end - 1);
-//     } else if (hsp->query.frame > 0) {
-//        query_loc->SetInt().SetFrom(CODON_LENGTH*(hsp->query.offset) +
-//                                    hsp->query.frame - 1);
-//        query_loc->SetInt().SetTo(CODON_LENGTH*(hsp->query.end) +
-//                                  hsp->query.frame - 2);
-//     } else {
-//        query_loc->SetInt().SetFrom(query_length -
-//            CODON_LENGTH*(hsp->query.end) + hsp->query.frame + 1);
-//        query_loc->SetInt().SetTo(query_length - CODON_LENGTH*hsp->query.offset
-//                                  + hsp->query.frame);
-//     }
-//     ...
-//     if (hsp->subject.frame == 0) {
-//        subject_loc->SetInt().SetFrom(hsp->subject.offset);
-//        subject_loc->SetInt().SetTo(hsp->subject.end - 1);
-// ```
-// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:224-228
-// ```c++
-//             if (rng.Empty()) {
-//                 NCBI_THROW(CSeqalignException, eInvalidAlignment,
-//                            "CSeq_align::GetSeqRange(): Row is empty");
-//             }
-//             return rng;
-// ```
-/// Whether the Std-seg rows of the reported ungapped HSP `hsp` are empty: an HSP of length 0,
-/// whose rows end one before they start (`CRange(from, from - 1)` is empty, so
-/// `CSeq_align::GetSeqRange` throws on them). Every reported HSP of another length has rows of its
-/// letters (gapped HSPs, and `Blast_HSPTest` deleted the ungapped ones of negative length).
+/// Whether the Std-seg rows of the reported ungapped HSP `hsp` are empty: an HSP of length 0
+/// (`serial::seqalign::ungapped_rows_empty`, the one predicate of the writers). Every reported HSP
+/// of another length has rows of its letters (gapped HSPs, and `Blast_HSPTest` deleted the
+/// ungapped ones of negative length).
 #[inline]
 pub(crate) fn rows_empty(hsp: &PreliminaryHsp) -> bool {
-    hsp.q_end == hsp.q_start
+    crate::report::serial::seqalign::ungapped_rows_empty(
+        i64::from(hsp.q_start),
+        i64::from(hsp.q_end),
+    )
 }
 
 /// The `__FILE__` of `Seq_align.cpp` in BLAST+'s build (the `seq` library compiles it from
@@ -87,7 +61,7 @@ pub(crate) fn row_is_empty() -> NcbiException {
 //                                    "Std-seg segment lengths not accurate!");
 // ```
 /// `CreateDensegFromStdseg(): Std-seg segment lengths not accurate!` (Seq_align.cpp:801): the
-/// Std-seg of `-subject` that the Seq-loc mapper rewrote (`MappedRows`), a query row of one
+/// Std-seg of `-subject` that the Seq-loc mapper rewrote, a query row of one
 /// nucleotide and an empty subject row (0 is neither 3 nor a third of 1, nor 1), where a formatter
 /// makes a Dense-seg of it (the tabular rows' alignment block, BLAST XML).
 pub(crate) fn std_seg_lengths_not_accurate() -> NcbiException {
@@ -112,39 +86,18 @@ pub(crate) fn std_seg_lengths_not_accurate() -> NcbiException {
 //     subj_aligns.Reset(RemapAlignToLoc(*subj_aligns, kSubjDimension, subj_loc));
 // }
 // ```
-// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:424-427
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:425-428
 // ```c++
 //             int len = loc.GetTotalRange().GetLength();
 //             if (len == 0  ||  loc.IsWhole()) {
 //                 continue; // ignore unknown lengths
 //             }
 // ```
-// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1535-1557
-// ```c++
-//                         if ( start_frame ) {
-//                             if (start >= start_frame) {
-//                                 // Add 1 or 2 bases to match complete codon.
-//                                 loc->SetInt().SetFuzz_from().SetAlt().push_back(start);
-//                                 start -= start_frame;
-//                             }
-//                             ...
-//                         if ( stop_frame ) {
-//                             loc->SetInt().SetFuzz_to().SetAlt().push_back(stop - 1);
-//                             stop += stop_frame;
-//                         }
-//                     }
-//                 }
-//
-//                 loc->SetInt().SetFrom(start);
-//                 // len may be 0 after dividing by width, check it before
-//                 // decrementing stop.
-//                 loc->SetInt().SetTo(stop > start ? stop - 1 : stop);
-// ```
 /// Which Seq-loc NCBI's Seq-aligns have for the subject: `-db`'s whole sequence, whose
 /// Seq-aligns stay as the engine made them, or `-subject`'s interval
 /// (blast_fasta_input.cpp:459-460), to which `s_RemapToSubjectLoc` maps every Seq-align with
 /// `CSeq_loc_Mapper_Base`. The mapper keeps the rows of an HSP with letters; it rewrites the
-/// empty rows of an HSP of length 0 (`MappedRows`).
+/// empty rows of an HSP of length 0 (`serial::seqalign::mapped_empty_query_nucleotide`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SubjectLoc {
     Whole,
@@ -161,23 +114,67 @@ impl SubjectLoc {
     }
 }
 
-/// The query row of the Std-seg that the Seq-loc mapper of `-subject` makes of an HSP of length
-/// 0 at a subject offset above 0, in nucleotides of the record (0-based): one nucleotide, at the
-/// engine's `from` on a plus frame and one before it on a minus frame (the mapper takes the
-/// frames from the empty protein row and pads the nucleotide row to codons, `x_GetDstStd`); the
-/// subject row stays empty. Probes: c0054 and P1's p0017, p0077, p0095, p0106 (`X/SURVEY_X2g.md`
-/// 1.3).
-pub(crate) fn mapped_query_nucleotide(raw_from: i32, frame: i8) -> i32 {
-    if frame > 0 {
-        raw_from
-    } else {
-        raw_from - 1
-    }
+/// How NCBI's tabular formatter (`CBlastTabularInfo::SetFields`) writes the row of an HSP with
+/// empty rows (`rows_empty`): the one decision of BLASTX's two tabular writers (the field lists,
+/// `tabular::write_blastx_tabular`, and the default fields of outfmt 6 and 7, `report.rs`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TabularEmptyRow {
+    /// `-subject` with a field of the alignment block: `CreateDensegFromStdseg` on the mapped
+    /// Std-seg (`std_seg_lengths_not_accurate`), after the rows before it.
+    Throws,
+    /// `-db`, a subject whose only shown HSP it is, with a query field: the row that leaves at the
+    /// query's fields (the query's Seq-align id, `AlignQueryIds`; the scores and the subject's
+    /// fields; `qcovhsp` `N/A`; every field of the alignment block at `x_ResetFields`' 0).
+    Leaves,
+    /// The row as of any HSP (`-db`: the empty ranges; `-subject` without a field of the
+    /// alignment block: its scores and ids, the mapped nucleotide in `qcovs` and `qcovhsp`).
+    Row,
 }
 
-/// The refusal of outfmt 0 with `-sorthits` or `-sorthsps` where an HSP of length 0 is only past the
-/// description table (`report::pairwise::EmptyRowsStop::Sorted`).
-pub(crate) const UNPORTED_SORTED: &str = "BLASTX -ungapped -window_size 0 with -sorthits or -sorthsps: a one-hit ungapped alignment of length 0 past the description table of -outfmt 0, whose ranges NCBI BLAST+'s sorts may read (it then stops with an exception), which LOSAT does not support";
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:737-746
+// ```c++
+// void CBlastTabularInfo::x_SetQueryCovSeqalign(const CSeq_align & align, int query_len)
+// {
+// 	double tmp = 0;
+// 	if(!align.GetNamedScore("hsp_percent_coverage", tmp)) {
+// 		int len = abs((int) (align.GetSeqStop(0) - align.GetSeqStart(0))) + 1;
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3170-3184
+// ```c++
+//             if(seg.GetStd().size() > 1){
+//                 //has more than one stdseg. Need to seperate as each
+//                 //is a distinct HSP
+//                 ITERATE (CSeq_align::C_Segs::TStd, iterStdseg, seg.GetStd()){
+//                     CRef<CSeq_align> aln(new CSeq_align);
+//                     if((*iterStdseg)->IsSetScores()){
+//                         aln->SetScore() = (*iterStdseg)->GetScores();
+//                     }
+//                     aln->SetSegs().SetStd().push_back(*iterStdseg);
+//                     alnSetRef->Set().push_back(aln);
+//                 }
+//
+//             } else {
+//                 alnSetRef->Set().push_back(*iter);
+//             }
+// ```
+/// The row form of an HSP with empty rows of a subject with `subject_hsps` shown HSPs, where the
+/// report's fields enter NCBI's alignment block (`opens_block`, `TabularSpec::opens_counts`,
+/// tabular.cpp:900-908) and read the query (`reads_query`, `TabularSpec::reads_query`,
+/// tabular.cpp:778-800). A subject's only HSP keeps its Seq-align unsplit, with the scores on its
+/// Std-seg and none named on the Seq-align, so that `x_SetQueryCovSeqalign` reads the query
+/// row's range, which throws on `-db`'s empty row, caught by `SetFields`.
+pub(crate) fn tabular_empty_row(
+    loc: SubjectLoc,
+    opens_block: bool,
+    subject_hsps: usize,
+    reads_query: bool,
+) -> TabularEmptyRow {
+    match loc {
+        SubjectLoc::Interval if opens_block => TabularEmptyRow::Throws,
+        SubjectLoc::Whole if subject_hsps == 1 && reads_query => TabularEmptyRow::Leaves,
+        _ => TabularEmptyRow::Row,
+    }
+}
 
 /// LOSAT's refusal of a report of an ungapped HSP of length 0 whose form LOSAT does not
 /// reproduce: not an error of NCBI's engine or formatters.
@@ -197,7 +194,7 @@ impl std::error::Error for EmptyRowsRefusal {}
 /// without `-parse_deflines`, else the id of its Seq-aligns (`BelievedIds::best`), as
 /// `s_GetSeqIdListString` shows a list of that one id.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:794-798
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:793-797
 /// ```c++
 ///             list<CRef<CSeq_id> > query_ids;
 ///             CRef<CSeq_id> id(new CSeq_id());
@@ -246,7 +243,7 @@ impl AlignQueryIds {
 /// The refusal of `-subject` where a reported HSP of length 0 lies at the subject's first letter.
 pub(crate) const UNPORTED_SUBJECT_START: &str = "BLASTX -ungapped -window_size 0 with -subject: a one-hit ungapped alignment of length 0 at the first letter of its subject among the hits to report, which NCBI BLAST+'s Seq-loc mapper cuts into two alignments without scores (tabular rows of the query's Seq-align id with an E-value of 0.0 and a bit score of -1.0, or an exception, depending on the frame and the fields), which LOSAT does not support";
 
-// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:1430-1437
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:1431-1437
 // ```c++
 //     CSeq_loc src_loc(*id, 0, len - 1);
 //     ENa_strand strand = loc.GetStrand();
@@ -306,12 +303,33 @@ mod tests {
         );
     }
 
+    // X/SURVEY_X2g_formats.md 3 (set C): -subject throws only with a field of the alignment
+    // block; -db leaves at the query's fields only for a subject's only HSP with a query field.
+    #[test]
+    fn the_tabular_row_of_empty_rows_follows_the_mode_and_the_fields() {
+        use TabularEmptyRow::*;
+        assert_eq!(
+            tabular_empty_row(SubjectLoc::Interval, true, 1, true),
+            Throws
+        );
+        assert_eq!(
+            tabular_empty_row(SubjectLoc::Interval, true, 3, false),
+            Throws
+        );
+        assert_eq!(tabular_empty_row(SubjectLoc::Interval, false, 1, true), Row);
+        assert_eq!(tabular_empty_row(SubjectLoc::Whole, true, 1, true), Leaves);
+        assert_eq!(tabular_empty_row(SubjectLoc::Whole, false, 1, true), Leaves);
+        assert_eq!(tabular_empty_row(SubjectLoc::Whole, true, 2, true), Row);
+        assert_eq!(tabular_empty_row(SubjectLoc::Whole, true, 1, false), Row);
+    }
+
     // X/SURVEY_X2g_formats.md 1: p0095 (frame -1, raw query row (119, 118)) maps to 118..118;
     // a plus frame keeps its start.
     #[test]
     fn the_mapped_nucleotide_follows_the_strand() {
-        assert_eq!(mapped_query_nucleotide(119, -1), 118);
-        assert_eq!(mapped_query_nucleotide(81, 1), 81);
-        assert_eq!(mapped_query_nucleotide(0, 1), 0);
+        use crate::report::serial::seqalign::mapped_empty_query_nucleotide;
+        assert_eq!(mapped_empty_query_nucleotide(119, -1), 118);
+        assert_eq!(mapped_empty_query_nucleotide(81, 1), 81);
+        assert_eq!(mapped_empty_query_nucleotide(0, 1), 0);
     }
 }

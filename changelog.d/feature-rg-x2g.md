@@ -8,5 +8,7 @@
   tabular rows with `-subject`), the cut document and the error message of BLAST XML, XML2 and JSON,
   and the Seq-aligns of outfmt 8, 9, 11 and 12. LOSAT no longer crashes when such an alignment
   touches a lower-case or SEG mask. With `-subject`, an alignment of length 0 at the subject's first
-  letter is refused (an error, exit status 1), where NCBI BLAST+'s output depends on its memory
+  letter is refused (an error, exit status 1): NCBI BLAST+'s Seq-loc mapper cuts it into two
+  alignments without scores, which NCBI BLAST+ writes as rows of the query's Seq-align id, stops
+  on with an exception or runs out of memory on, depending on the frame, the fields and its memory
   limit.

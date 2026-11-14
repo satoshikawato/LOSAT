@@ -1129,16 +1129,19 @@ fn process_mask_data_follows_makeblastdb_on_its_options() {
             true,
         ),
     ];
-    #[cfg(unix)]
-    cases.push((
-        "dangling.asnt",
-        None,
-        None,
-        0,
-        missing("dangling.asnt"),
-        vec![],
-        false,
-    ));
+    // The link to nothing that `option_root` makes on Unix only (`cfg!`, not `#[cfg]`: the vector
+    // is extended on every platform, so it is mutable on every platform).
+    cases.extend(cfg!(unix).then(|| {
+        (
+            "dangling.asnt",
+            None,
+            None,
+            0,
+            missing("dangling.asnt"),
+            vec![],
+            false,
+        )
+    }));
     for (mask_data, mask_id, mask_desc, status, stderr, mask_files, column) in cases {
         let label = format!("{mask_data:?} {mask_id:?} {mask_desc:?}");
         let case = option_case(&tmp.0, mask_data, mask_id, mask_desc);

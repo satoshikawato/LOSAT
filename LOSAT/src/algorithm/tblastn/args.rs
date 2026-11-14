@@ -341,6 +341,11 @@ pub struct TblastnArgs {
     /// give no search path: not found, DECISIONS 7 of line CLI C2). Not a public option.
     #[arg(skip)]
     pub tabular_taxdb: Option<bool>,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made by the
+    /// command line with `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere.
+    /// Not a public option.
+    #[arg(skip)]
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
     // ```c++
     //     int GetLocalIdCounterInitValue() const { return m_LocalIdCounter; }
@@ -361,8 +366,11 @@ pub struct TblastnArgs {
 // return (genetic_codes.find(val) != genetic_codes.end());
 // ```
 // Stage A product decision admits 32 from gc.prt:340-347 for TBLASTN only.
+/// `NStr::StringToInt(value)` of `CArgAllowGeneticCodeInteger` is
+/// `value_parsers::genetic_code_number` (LOSAT's "invalid" message for the values outside 0..=255).
 pub fn tblastn_genetic_code(value: &str) -> std::result::Result<u8, String> {
-    let id = value.parse::<u8>().map_err(|_| "invalid genetic code ID")?;
+    let id = crate::blastinput::value_parsers::genetic_code_number(value)
+        .ok_or("invalid genetic code ID")?;
     GeneticCode::try_from_id(id).map(|_| id)
 }
 
@@ -989,14 +997,14 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // every gap cost pair of its table, as `validate_protein_options` has checked them; the
     // threshold and window are the options' (the matrix's suggested values by default). The
     // standard table takes word sizes 2 to 4 and the compressed one 5 to 7; the word finder is
-    // the two-hit one (a window above 0).
-    let profile_supported = (2..=7).contains(&args.word_size) && window > 0;
+    // the two-hit one (a window above 0) or the one-hit one (a window of 0,
+    // `XTwoHit::x_pairs_one_hit`).
+    let profile_supported = (2..=7).contains(&args.word_size);
     let Some(matrix) = matrix.filter(|_| profile_supported) else {
         anyhow::bail!(
-            "the matrix {} with word size {} and window size {} is not supported by LOSAT's TBLASTN; it implements the two-hit word finder (a window size above 0) with word sizes 2 to 7",
+            "the matrix {} with word size {} is not supported by LOSAT's TBLASTN; it implements word sizes 2 to 7",
             args.matrix_name,
-            args.word_size,
-            window
+            args.word_size
         );
     };
     Ok(SearchSettings {
@@ -1070,6 +1078,37 @@ mod tests {
     use super::*;
 
     use crate::cli::{try_parse_from, Cli, Commands};
+
+    // TBLASTN's `-query_gencode` and `-db_gencode`: `genetic_code_number`, then the codes LOSAT
+    // builds (32 included, Stage A); "invalid genetic code ID" for what is not a number of 0 to
+    // 255 written without a minus sign.
+    #[test]
+    fn tblastn_genetic_codes_are_read_as_ncbi_reads_them() {
+        for value in [
+            "-0",
+            "-5",
+            "256",
+            "2147483648",
+            "",
+            " 5",
+            "5 ",
+            "5.0",
+            "0x",
+            "0x5",
+        ] {
+            assert_eq!(
+                tblastn_genetic_code(value),
+                Err("invalid genetic code ID".to_string()),
+                "{value:?}"
+            );
+        }
+        for (value, expected) in [("+5", 5), ("005", 5), ("11", 11), ("33", 33)] {
+            assert_eq!(tblastn_genetic_code(value), Ok(expected), "{value}");
+        }
+        for value in ["0", "7", "8", "255"] {
+            assert!(tblastn_genetic_code(value).is_err(), "{value}");
+        }
+    }
 
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942
     // arg_desc.AddFlag(kArgUseLCaseMasking,
@@ -1211,8 +1250,6 @@ mod tests {
         for extra in [
             &["-ungapped", "-comp_based_stats", "F"][..],
             &["-max_intron_length", "100", "-sum_stats", "true"],
-            &["-window_size", "0"],
-            &["-word_size", "5", "-window_size", "0"],
             &["-max_target_seqs", "1073741799"],
             &["-comp_based_stats", "0", "-max_target_seqs", "2147483598"],
         ] {
@@ -1280,6 +1317,10 @@ mod tests {
                 "-word_size",
                 "7",
             ],
+            // The one-hit word finder (line RG, X2; aa_ungapped.c:214-224).
+            &["-window_size", "0"],
+            &["-word_size", "5", "-window_size", "0"],
+            &["-task", "tblastn-fast", "-window_size", "0"],
         ] {
             check_options(&parse(extra).unwrap()).unwrap();
         }
@@ -1340,7 +1381,7 @@ mod tests {
         }
         // NCBI api/blast_options_handle.cpp:436-447: tblastn-fast sets word size 5, the
         // compressed lookup table and BLAST_WORD_THRESHOLD_BLASTP_FAST (20); with BLOSUM62 11/1
-        // the table of word size 3, 5, 6 or 7 takes any threshold and window size above 0.
+        // the table of word size 3, 5, 6 or 7 takes any threshold and window size.
         let fast = parse(&["-task", "tblastn-fast"]).unwrap();
         let resolved = fast.resolve().unwrap();
         assert_eq!(

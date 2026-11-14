@@ -271,10 +271,9 @@ pub struct TblastxArgs {
     #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = tblastx_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
     pub xdrop_ungap: Option<f64>,
 
-    /// Two-hit window size for triggering ungapped extension (default: 40, or the matrix's
-    /// suggestion; `window`). Smaller values are more strict, larger values are more sensitive.
-    /// 0 (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX.
-    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    // The window of the two-hit word finder (`window`); 0 takes the one-hit word finder. The help is
+    // NCBI's, as tblastn's.
+    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
     pub window_size: Option<i32>,
 
     /// Output format: 0 (pairwise), 6 or 7 (tabular), without custom fields.
@@ -342,6 +341,11 @@ pub struct TblastxArgs {
     /// give no search path: not found, DECISIONS 7 of line CLI C2). Not a public option.
     #[arg(skip)]
     pub tabular_taxdb: Option<bool>,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made by the
+    /// command line with `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere.
+    /// Not a public option.
+    #[arg(skip)]
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
     // ```c++
     //     int GetLocalIdCounterInitValue() const { return m_LocalIdCounter; }

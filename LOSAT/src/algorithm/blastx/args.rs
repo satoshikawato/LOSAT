@@ -469,6 +469,11 @@ pub struct BlastxArgs {
     /// `None` in every BLASTX run.
     #[arg(skip)]
     pub(crate) request_inputs: Option<Box<crate::report::archive::options::OptionInputs>>,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), which a
+    /// library call (`api::run`) reads from the application settings, as the command line
+    /// does (`common::database::SubjectTaxdb`); `None` elsewhere. Not a public option.
+    #[arg(skip)]
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
 }
 
 /// The search of RPSTBLASTN's query batches (`rps_search::translated`, series PR item PS12a,
@@ -846,6 +851,9 @@ pub struct ResolvedOptions {
     /// `native::run` (`-db`: the database's search path, `-subject`: NCBI's). False otherwise,
     /// as Web reads it (DECISIONS 7 of line CLI C2).
     pub taxdb_found: bool,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), set with
+    /// `taxdb_found` (`common::database::SubjectTaxdb`); `None` otherwise.
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
     /// A list kept no sequence of the database (`SeqDb::filtered_empty`): the queries of the
     /// searched batches have `EMPTY_DATABASE_MESSAGE`.
     pub filtered_empty: bool,
@@ -1484,7 +1492,8 @@ impl BlastxArgs {
             outfmt,
             fields,
             tabular,
-            taxdb_found: false,
+            taxdb_found: self.subject_taxdb.is_some(),
+            subject_taxdb: self.subject_taxdb.clone(),
             filtered_empty: false,
             num_threads: self.num_threads,
             query_range: None,

@@ -83,10 +83,12 @@ The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blas
 | `15` | Single-file BLAST JSON | all five | all five (with `-subject` and `-db`) |
 | `16` | Single-file BLAST XML2 | all five | all five (with `-subject` and `-db`) |
 | `17` | Sequence Alignment/Map (SAM) | `blastn` only | `blastn` (with `-subject` and `-db`; `SQ` and `SR` as in NCBI) |
-| `18` | Organism Report | all five | not written |
+| `18` | Organism Report | all five | all five programs (with `-subject` and `-db`) |
 | `20` | Comma-separated values with header lines | all five | all five programs |
 
 Outfmt `17` (SAM, `blastn` only) is NCBI's document byte for byte except the `CL:` tag of its `@PG` line, which holds LOSAT's own command line (every argument followed by one space, as NCBI writes its own); a run without a command line (the library) has no `CL:` tag. NCBI writes the whole document when the search ends, and so does LOSAT, which holds the records as text until then. `-outfmt "17 SQ"` writes the target's letters in SEQ and `-outfmt "17 SR"` makes the subject the reference; other words are ignored, as in NCBI.
+
+Outfmt `18` (the organism report, NCBI's "Tax BLAST report") groups each query's subjects by the taxid of each definition line under the names that the taxonomy database gives for it (`taxdb.bti` and `taxdb.btd`, found as for outfmt `13` to `16` below; a `-subject` record has taxid 0). As in NCBI BLAST+, a subject whose taxid the database does not know is left out but still widens the columns, a subject whose title is in an encoding that NCBI cannot read is left out without widening them, each definition line of a database sequence is a row of its own, and without a taxonomy database the report has the headers only. Where the identifiers, scores and E-values take more than 96 columns, NCBI's unsigned column width wraps and a line is padded with about 4 GiB of spaces; LOSAT writes the same bytes, holding the spaces as a count.
 
 Outfmt `13` and `14` write the report of the n-th query to `<base>_<n>.json` / `<base>_<n>.xml` next to `-out FILE` and a master file at `FILE` that lists them, with NCBI's names: the base is `FILE` without its extension if that is `.json` (13) or `.xml` (14), and the master file always uses the `.xml` rule and drops the directory (`-out o.json` with `-outfmt 13` lists `o.json_1.json`); `blastx` holds the side files in memory, like the document of `-outfmt 5`, 15 and 16, in the rare run in which a later query batch could still be refused. Outfmt `13` to `16` with `-db` write the scientific name of a sequence's taxid (`sciname`) when `taxdb.bti` is found as NCBI finds it: in the current directory, in `BLASTDB` (the environment variable, `~/.ncbirc` or `NCBI_CONFIG__BLAST__BLASTDB`), not in the `-db` directory. The other output formats never read it.
 
@@ -326,7 +328,7 @@ losat convert2blastmask -in masked.fna -masking_algorithm other -masking_options
 | `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX, PSIBLAST; section 6) |
 | `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp`, `blastp-fast` or `blastp-short` (for `blastp`); `blastx` or `blastx-fast` (for `blastx`); `tblastn` or `tblastn-fast` (for `tblastn`) |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
-| `-outfmt <spec>` | Integer, or `6`/`7`/`10`/`20` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `10`=CSV, `11`=BLAST archive, `12`=Seq-align (JSON), `13`=BLAST JSON and `14`=BLAST XML2 as files next to `-out`, `15`=BLAST JSON and `16`=BLAST XML2, `17`=SAM (BLASTN only), `20`=CSV with header lines; custom tabular fields and `delim=` with `6`, `7`, `10` and `20` in every program. `1` to `4` and `18` are not written |
+| `-outfmt <spec>` | Integer, or `6`/`7`/`10`/`20` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `10`=CSV, `11`=BLAST archive, `12`=Seq-align (JSON), `13`=BLAST JSON and `14`=BLAST XML2 as files next to `-out`, `15`=BLAST JSON and `16`=BLAST XML2, `17`=SAM (BLASTN only), `18`=organism report, `20`=CSV with header lines; custom tabular fields and `delim=` with `6`, `7`, `10` and `20` in every program. `1` to `4` are not written |
 | `-num_threads <int>` | Integer | `1` | Number of threads to use |
 | `-max_target_seqs <int>`| Integer | `500` | Maximum number of aligned target sequences to keep |
 | `-max_hsps <int>` | Integer | Unlimited | Maximum number of HSPs per subject sequence |
@@ -414,10 +416,10 @@ LOSAT can be built as a standalone WASI module or embedded into web browsers:
 cd LOSAT
 
 # Build single-threaded WASI command
-cargo build --release --target wasm32-wasip1 --no-default-features
+cargo build --release --bin losat --target wasm32-wasip1 --no-default-features
 
 # Build multithreaded WASI command (requires shared-memory runtime)
-cargo build --release --target wasm32-wasip1-threads --features wasm-threads
+cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads
 ```
 
 LOSAT powers the client-side comparative genomic alignment engine in [gbdraw](https://github.com/satoshikawato/gbdraw), enabling interactive circular and linear genome visualization without any backend server requirements.
@@ -426,10 +428,10 @@ LOSAT powers the client-side comparative genomic alignment engine in [gbdraw](ht
 
 ## Library use (Rust)
 
-The crate's public surface is the module `LOSAT::api` ([plan](docs/losat_library_surface_plan.md)); every other module is the command line or the engine, hidden from the documentation and outside the compatibility promise. `api` searches FASTA records in memory with the command line's options and returns the command line's reports byte for byte, plus one typed record per HSP and the statistics of each query:
+The library is the crate `losat` (not on crates.io yet; until then, depend on this repository's `LOSAT/` directory by path or git). The crate's public surface is the module `losat::api` ([plan](docs/losat_library_surface_plan.md)); every other module is the command line or the engine, hidden from the documentation and outside the compatibility promise. `api` searches FASTA records in memory with the command line's options and returns the command line's reports byte for byte, plus one typed record per HSP and the statistics of each query:
 
 ```rust
-use LOSAT::api::{read_fasta, run_collect, validate, Inputs, Program, Role};
+use losat::api::{read_fasta, run_collect, validate, Inputs, Program, Role};
 
 let query = read_fasta(Program::Blastp, Role::Query, &std::fs::read("query.faa")?)?;
 let subject = read_fasta(Program::Blastp, Role::Subject, &std::fs::read("subject.faa")?)?;
@@ -446,7 +448,7 @@ let outcome = run_collect(&search, Inputs::new(&query, &subject), &["6", "0"])?;
 
 ## Library use (Python)
 
-[`python/`](python/README.md) holds `pylosat`, a binding of `LOSAT::api` built with PyO3: a search runs in the Python process, with the command line's options and report bytes, its HSPs as an Arrow table, and Ctrl-C between query batches. It is not published yet; build it from the repository with `maturin develop`.
+[`python/`](python/README.md) holds `pylosat`, a binding of `losat::api` built with PyO3: a search runs in the Python process, with the command line's options and report bytes, its HSPs as an Arrow table, and Ctrl-C between query batches. It is not published yet; build it from the repository with `maturin develop`.
 
 ---
 
@@ -478,8 +480,9 @@ The `LOSAT_X_*` environment variables, `LOSAT_TIMING`, `LOSAT_X_STATS`, `LOSAT_X
 LOSAT stops with an error for each option and value below; it does not run something else in its place. Use NCBI BLAST+ for them, except where an item says that NCBI BLAST+ fails there too. "All five programs" means `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 
 **Output**
-- `-outfmt 1`, `2`, `3`, `4` and `18`: all five programs.
+- `-outfmt 1`, `2`, `3` and `4`: all five programs.
 - `-html`: all five programs.
+- `-outfmt 18` with a taxonomy database that names a taxid of a shown group with the text `<@bl_taxid@>` (NCBI BLAST+ writes an uninitialised number there), with a `./.ncbirc` that has a syntax error (NCBI's report stops there with an exception) or `[NCBI] .Inherits` (NCBI's report reads the files it names), and with a shown row of a database sequence whose empty title NCBI makes from its taxids and the taxonomy database (as outfmt `0` refuses it): all five programs, before the query batch's first byte.
 - `-sorthits` with a description table that lists every subject and whose last subject alone has a total score above 99999 bits: all five programs. NCBI BLAST+ 2.17.0 pads that row with spaces without end, so it never finishes the report and has no output to use there either; LOSAT writes what NCBI writes before that table (the earlier queries' reports and the query's first lines) and then stops with the error.
 
 **Scoring and search settings**
@@ -493,7 +496,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 - `-task rmblastn`: `blastn`.
 - `-use_sw_tback`: `blastp`, `blastx`, `tblastn`.
 - `-max_intron_length` other than 0: `tblastn` with sum statistics (its default, and `-sum_stats true` with `-in_pssm`; without them NCBI does not use it, and neither does LOSAT), and `tblastx` the option itself. `blastx` accepts it.
-- `-window_size 0`: `tblastn`, `tblastx`.
+- With `-window_size 0` (the one-hit word finder) and a low `-threshold`: a one-hit ungapped alignment whose length is not positive, which NCBI BLAST+ links with the others before its re-evaluation deletes it (a result LOSAT does not reproduce yet): `tblastx`; the gapped start of a one-hit alignment of negative length whose window of 11 letters reads past NCBI BLAST+'s buffer of the query batch or of the subject's six frames, where NCBI BLAST+ reads outside its memory (inside those buffers LOSAT reads the bytes NCBI BLAST+ reads; `blastp` reads the letters past a sequence as the sentinel, [PD-LOSAT-NCBI-DEFECTS](docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md) 1.3 item 3), with `-in_pssm` one whose window passes the PSSM's last position, where NCBI BLAST+ reads past its matrix, and two whose gapped starts lie at the end of their 5,000,000-letter part of a frame or past it, on which NCBI BLAST+ never finishes; with `-in_pssm`, one whose gapped start lies after the last letter of its frame (a result LOSAT does not reproduce yet): `tblastn`.
 - A gapped X-drop whose raw score makes the sizes of NCBI's gapped alignment kernels leave 32-bit integers (from about 4.14e8 to 8.27e8 bits with BLOSUM62 11/1; NCBI's arithmetic overflows. A larger value leaves 32-bit integers itself and becomes NCBI's INT_MIN, which the kernels raise to the gap costs: those searches run as NCBI's): `-xdrop_gap` at every `-comp_based_stats`, and `-xdrop_gap_final` with `-comp_based_stats 0` (the redo of modes 1 to 3 runs with its own X-drop): `blastp`, `blastx`, `tblastn`, `psiblast` (its later rounds and `-in_pssm` with the PSSM's Lambda).
 - A final gapped X-drop of dynamic programming (`-task blastn`, `blastn-short`, `dc-megablast`, `-no_greedy`) whose raw score divided by the gap extension reaches 1,073,741,721 (NCBI's arithmetic overflows), and a gapped X-drop of greedy extension (`-task megablast`) at which NCBI's greedy alignment reads or writes outside its arrays (NCBI then corrupts its heap, reads memory it did not write, crashes or stops with `BLAST engine error: Unknown error code -1`): with the default scores (reward 1, penalty -2), `-xdrop_gap` or `-xdrop_gap_final` from about -7.4 to -1.98e9 bits and from about 1.98e9 to 3.97e9 bits, and from about -1.98e9 to -3.97e9 bits unless the other X-drop is as large in NCBI's doubled arithmetic; the limits move with the scores, and with an even reward a value past 32-bit integers is refused too: `blastn`.
 - `-ungapped`: `blastp`, `tblastn`; with `-outfmt` 8, 9, 11, 12 and 17: `blastn`.
@@ -550,7 +553,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 
 **segmasker** runs every option of its `-help` (`-xmlhelp` on the command line only, see the Toolkit options above); refused: what dustmasker refuses above (titles, database sequences and definition lines, the serial writer, a failed write of a `seqloc_*` or `maskinfo_*` output and a FASTA record of 4,294,967,296 letters or more), a `-locut` or `-hicut` value that ends in `e` or `E` after more than 18 significant digits or 15 places (NCBI computes it in x87 extended precision; refused when the run reads it, so `-h`, `-dryrun` and the errors of other arguments are NCBI's), a protein database whose residue bytes are above 127 (makeblastdb writes 0 to 27; NCBI's SEG reads them as negative characters), and a database error that LOSAT reports without the place in NCBI's source that NCBI's report names (a missing database or volume, an alias file without `DBLIST`, an empty database name and an alias value that NCBI cannot convert are reported as NCBI reports them).
 
-**convert2blastmask** runs every option of its `-help` (`-xmlhelp` on the command line only, see the Toolkit options above); refused: a `-masking_options` byte outside the visible ASCII range with `-outfmt maskinfo_asn1_text` or `maskinfo_asn1_bin` (NCBI writes `#` for it and posts an error; LOSAT stops), a `Blast-db-mask-info` that LOSAT's serial writer cannot write as NCBI does, and a failed write of a `maskinfo_*` output (NCBI's serial stream reports it; `interval` goes on silently, as NCBI's, as for dustmasker and segmasker).
+**convert2blastmask** runs every option of its `-help` (`-xmlhelp` on the command line only, see the Toolkit options above); a byte outside the visible ASCII range in `-masking_options` or in a `-parse_seqids` id (DEL) is written as NCBI writes it (`#` with NCBI's error message for each such byte in `maskinfo_asn1_text` and `maskinfo_asn1_bin`, and for each control character other than TAB, LF and CR in `maskinfo_xml`; as in dustmasker's and segmasker's `seqloc_*` and `maskinfo_*` outputs); refused: a command-line word that is not UTF-8, a `Blast-db-mask-info` that LOSAT's serial writer cannot write as NCBI does, and a failed write of a `maskinfo_*` output (NCBI's serial stream reports it; `interval` goes on silently, as NCBI's, as for dustmasker and segmasker).
 
 **makeblastdb**
 - `-randomize`, `-gi_mask`, `-gi_mask_name`, `-oid_masks`, `-metadata_output_prefix`.

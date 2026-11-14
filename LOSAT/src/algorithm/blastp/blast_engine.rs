@@ -2654,31 +2654,6 @@ impl BlastpReport {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
-    // ```c++
-    //        		const CBioseq_Handle& subject_bh =
-    //                 scope.GetBioseqHandle(align.GetSeq_id(1));
-    // ```
-    /// Whether the report's writer writes the texts of the subjects that a query's report reads
-    /// one by one where it reads each (`QueryWarnings::subject_read`): outfmt 0 (description
-    /// lines and alignment headings), 5 (`Hit`s) and the tabular rows; the others write them
-    /// before the query's report.
-    fn places_subject_reads(self) -> bool {
-        matches!(
-            self,
-            BlastpReport::Text(
-                OutputFormat::Pairwise | OutputFormat::Tabular | OutputFormat::TabularWithComments
-            ) | BlastpReport::CustomTabular(_)
-                | BlastpReport::Xml
-        )
-    }
-
-    /// Whether NCBI writes a query's result warnings with its report
-    /// (`ReportFormat::writes_query_warnings`): not for the Seq-annot formats.
-    fn writes_query_warnings(self) -> bool {
-        matches!(self, BlastpReport::Text(_) | BlastpReport::CustomTabular(_))
-    }
-
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
     /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6 and 7; with
     /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as
@@ -2716,13 +2691,13 @@ impl BlastpReport {
     }
 
     /// Whether the report is tabular (outfmt 6, 7, 10 and 20), which reads the tabular subject
-    /// IDs.
+    /// IDs (`report::tabular::writes_rows`: not the organism report).
     fn is_tabular(self) -> bool {
-        matches!(
-            self,
-            BlastpReport::Text(OutputFormat::Tabular | OutputFormat::TabularWithComments)
-                | BlastpReport::CustomTabular(_)
-        )
+        match self {
+            BlastpReport::Text(OutputFormat::Tabular | OutputFormat::TabularWithComments) => true,
+            BlastpReport::CustomTabular(spec) => spec.writes_rows(),
+            _ => false,
+        }
     }
 
     /// The subject ids that the report prints (`PrintedIds`): none but in a table.
@@ -5225,7 +5200,7 @@ pub fn run(
     // database is opened after every option handler has run (`search_cli`). With `-subject` it
     // reads the subjects here, before the query and the output are opened.
     let archive = args.archive.clone();
-    let mut stderr = std::io::stderr();
+    let mut stderr = crate::cli::CliStderr::process();
     let mut archive_tee;
     let diagnostics: &mut (dyn Write + Send) = match &archive {
         Some(handle) => {
@@ -5298,6 +5273,8 @@ pub fn run(
     };
     let out_file = open_out_file(&args)?;
     let pairwise = format == Some(crate::blastinput::app::ReportFormat::Pairwise);
+    // The organism report's `-out` file is written as NCBI's buffer writes it.
+    let tax_report = format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
     // LOSAT's reports read the format number and the custom fields that NCBI keeps; blastp's
     // custom tabular report of a delimiter, which `normalized` drops, reads the value as given, as
     // NCBI does (`tabular::custom_tabular_spec`).
@@ -5330,7 +5307,7 @@ pub fn run(
     } else {
         choice.normalized()
     };
-    let mut stream = cli_report_stream(out_file);
+    let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report);
     let result = {
         let mut outputs =
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
@@ -5375,9 +5352,10 @@ pub fn run(
     //         exit_code = BLAST_OUTPUT_ERROR;                                     \
     //     }                                                                       \
     // ```
-    // The outfmt 0 formatter's stream throws when a write fails; for outfmt 6/7 NCBI aborts
-    // and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
-    if stream.failed && pairwise {
+    // The outfmt 0 formatter's stream throws when a write fails, as the organism report's
+    // where NCBI's buffer writes it (`cli::NcbiReportBuffer`); for outfmt 6/7 NCBI aborts and LOSAT reports
+    // the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
+    if stream.failed && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
             message: "BLAST failed to write output\n".to_string(),
@@ -5407,7 +5385,7 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = cli_report_stream(out_file);
+        let mut report = crate::cli::ReportStream::of_cli(out_file, false);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -5431,19 +5409,6 @@ fn open_out_file(args: &BlastpArgs) -> Result<Option<std::io::BufWriter<std::fs:
             None => None,
         },
     )
-}
-
-/// The report stream of the command line: the `-out` file, or standard output.
-fn cli_report_stream(
-    out_file: Option<std::io::BufWriter<std::fs::File>>,
-) -> crate::cli::ReportStream {
-    crate::cli::ReportStream {
-        inner: match out_file {
-            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
-            None => crate::cli::report_standard_output(),
-        },
-        failed: false,
-    }
 }
 
 /// The subjects of the command line's `-subject`, read where NCBI's handler of the
@@ -5666,8 +5631,20 @@ fn open_search_database(
             .filter_map(|format| super::tabular::custom_tabular_spec(format.outfmt))
             .any(|spec| spec.needs().taxonomy_names)
     {
-        resolved.subject_taxdb_found =
-            crate::algorithm::common::database::subject_taxdb_found(settings, args.app.name())?;
+        // The organism report's lookups open the run's own database.
+        if outputs
+            .formats
+            .iter()
+            .filter_map(|format| super::tabular::custom_tabular_spec(format.outfmt))
+            .any(|spec| spec.kind == crate::report::tabular::TabularKind::TaxReport)
+        {
+            resolved.subject_taxdb =
+                crate::algorithm::common::database::SubjectTaxdb::of(settings, args.app.name())?;
+            resolved.subject_taxdb_found = resolved.subject_taxdb.is_some();
+        } else {
+            resolved.subject_taxdb_found =
+                crate::algorithm::common::database::subject_taxdb_found(settings, args.app.name())?;
+        }
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -13912,9 +13889,11 @@ fn run_call(
     let filtered_empty = database.is_some_and(|database| database.filtered_empty());
     // A Seq-annot format writes no result warnings (`ReportFormat::writes_query_warnings`);
     // the warnings go with the first format.
-    let result_warnings = format_plans
+    let result_warnings = outputs
+        .formats
         .first()
-        .is_none_or(|outfmt| outfmt.writes_query_warnings());
+        .and_then(crate::api::local_blast::FormatOutput::report_format)
+        .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings);
     let mut query_warning_lines: Vec<Vec<u8>> = query_records
         .iter()
         .enumerate()
@@ -14034,15 +14013,16 @@ fn run_call(
     // first format's rows read their Bioseqs (`TabularSpec::subject_fetch`; `nident` alone on
     // rows with identities, `ListedTitles::fetched_ranks`).
     // The texts of the subjects that the reports of the queries whose batch's prefetch is off
-    // read one by one, by query, where the first format places them (`places_subject_reads`).
+    // read one by one, by query, where the first format places them
+    // (`ReportFormat::places_subject_reads`).
     let mut subject_reads = crate::report::query_warnings::SubjectReads::default();
-    let places_reads = format_plans
+    let first_report = outputs
+        .formats
         .first()
-        .is_some_and(|outfmt| outfmt.places_subject_reads());
-    let pairwise_first = matches!(
-        format_plans.first(),
-        Some(BlastpReport::Text(OutputFormat::Pairwise))
-    );
+        .and_then(crate::api::local_blast::FormatOutput::report_format);
+    let places_reads =
+        first_report.is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
+    let pairwise_first = first_report == Some(crate::blastinput::app::ReportFormat::Pairwise);
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
         if prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
@@ -14050,7 +14030,7 @@ fn run_call(
             // taxonomy database before a later batch's prefetch (`TaxdbRun::open_for_rows`).
             let plural_names = matches!(
                 format_plans.first(),
-                Some(BlastpReport::CustomTabular(spec)) if spec.checks_taxdb()
+                Some(BlastpReport::CustomTabular(spec)) if spec.looks_up_every_taxid()
             );
             let rows = match format_plans.first() {
                 Some(BlastpReport::CustomTabular(spec)) => {
@@ -14426,13 +14406,19 @@ fn run_call(
             .map(|observer| FormatProbe::new(observer, format_index));
         // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
         let side_sink = format.sink.side_files().cloned();
-        // The taxonomy database's messages of XML2 and JSON go to the diagnostics at every
-        // format, and the archive saves the warnings of its batches' queries.
+        // The taxonomy database's messages of XML2 and JSON, and of the organism report's
+        // lookups, go to the diagnostics at every format, and the archive saves the warnings of
+        // its batches' queries.
         // The first format's writer also writes the texts of the subjects that the reports
         // read one by one (`subject_reads`).
         let first_lines = warning_lines.take();
         let mut warnings = (first_lines.is_some()
-            || matches!(outfmt, BlastpReport::Xml2(_) | BlastpReport::Archive))
+            || matches!(outfmt, BlastpReport::Xml2(_) | BlastpReport::Archive)
+            || matches!(
+                outfmt,
+                BlastpReport::CustomTabular(spec)
+                    if spec.kind == crate::report::tabular::TabularKind::TaxReport
+            ))
         .then(|| {
             let warnings = crate::report::query_warnings::QueryWarnings::new(
                 first_lines.unwrap_or(&[]),
@@ -15031,8 +15017,9 @@ fn run_call(
             })(),
             BlastpReport::CustomTabular(spec) => (|| -> Result<()> {
                 // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
-                // (`tabular`); never the default 6 and 7 below.
-                let mut writer = format.sink.open()?;
+                // (`tabular`); never the default 6 and 7 below. The format's stream as the sink
+                // opens it (`OutputSink::ostream`): the organism report's.
+                let mut writer = format.sink.ostream()?;
                 let needs = spec.needs();
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
                 // ```c++
@@ -15058,9 +15045,14 @@ fn run_call(
                     }
                     _ => Vec::new(),
                 };
+                // A `-subject` search's organism report (outfmt 18) looks names up in the run's
+                // database.
                 let names = match database {
                     Some(database) => database.tabular_names(spec, &taxonomy, args.app.name())?,
-                    None => None,
+                    None => args
+                        .subject_taxdb
+                        .as_ref()
+                        .map(|taxdb| taxdb.report_names(args.app.name())),
                 };
                 let tabular_subjects = match (listed_subjects.as_ref(), database) {
                     (Some(listed), Some(_)) => super::tabular::TabularSubjects::Database {
@@ -15120,6 +15112,24 @@ fn run_call(
                     },
                     names: names.as_ref(),
                 };
+                // Outfmt 18, the organism report: the `Query=` block shows the query record's
+                // length, also with `-query_loc` (as outfmt 0's, `pairwise_queries`).
+                if spec.kind == crate::report::tabular::TabularKind::TaxReport {
+                    let record_lengths: Vec<usize> = query_lengths
+                        .iter()
+                        .enumerate()
+                        .map(|(q_idx, &length)| ranges.query_input.placements.length(q_idx, length))
+                        .collect();
+                    super::tabular::write_blastp_tax_report(
+                        &tab,
+                        &record_lengths,
+                        &hit_lists,
+                        &mut writer,
+                        warnings.as_mut(),
+                    )?;
+                    writer.flush()?;
+                    return Ok(());
+                }
                 // The rows of the queries' HSPs when a field shows them (and rpsblast's
                 // identities, `tabular::needs_rows`), a window at a time (`query_rows`).
                 let mut rows = super::tabular::needs_rows(needs.rows, spec, args.app).then(|| {
@@ -15498,6 +15508,7 @@ mod tests {
             strategy: None,
             request_inputs: None,
             app: BlastpApp::Blastp,
+            subject_taxdb: None,
             inclusion_ethresh: None,
             gap_trigger: None,
             sum_stats: false,

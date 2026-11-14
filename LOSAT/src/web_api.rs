@@ -332,6 +332,7 @@ fn parse_blastn_args(
         window_masker_registry: None,
         // ABI v1 writes no tabular field list.
         tabular_taxdb: None,
+        subject_taxdb: None,
         strand: "both".to_string(),
         // The frozen web ABI v1 (plan TD-1) has no ranges.
         query_loc: None,
@@ -487,6 +488,7 @@ fn parse_tblastx_args(
         export_search_strategy: None,
         strategy: None,
         tabular_taxdb: None,
+        subject_taxdb: None,
         first_query_ordinal: 0,
         matrix_file: None,
     };
@@ -667,6 +669,7 @@ fn parse_blastp_args(
         strategy: None,
         request_inputs: None,
         app: blastp::args::BlastpApp::Blastp,
+        subject_taxdb: None,
         inclusion_ethresh: None,
         gap_trigger: None,
         sum_stats: false,

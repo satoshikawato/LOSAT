@@ -49,6 +49,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::MaskedRangeSet;
+use crate::ncbi_str::{string_to_int, truncate_spaces_str};
 use crate::writedb::build_db::BuildDatabase;
 use crate::writedb::fasta_source::Warn;
 use crate::writedb::makeblastdb::MakedbError;
@@ -175,22 +176,6 @@ impl MaskDataError {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3146-3185
-// ```c++
-// template <typename TStr>
-// TStr s_TruncateSpaces(const TStr& str, NStr::ETrunc where,
-//                       const TStr& empty_str)
-// {
-//     ...
-//         while ( isspace((unsigned char) str[beg]) ) {
-//     ...
-//         while (isspace((unsigned char) str[--end])) {
-// ```
-/// `NStr::TruncateSpaces(str)`: white space (`isspace` of the C locale) at both ends goes.
-fn truncate_spaces(text: &str) -> &str {
-    text.trim_matches(|c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r'))
-}
-
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistr_util.hpp:264-275,282-301
 // ```c++
 //     void Do(TContainer&     target,
@@ -259,76 +244,11 @@ fn split_commas(text: &str) -> Vec<&str> {
 //         return (*value || !errno);
 //     }
 // ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:798-873
-// ```c++
-// Int8 NStr::StringToInt8(const CTempString str, TStringToNumFlags flags, int base)
-// {
-//     ...
-//     // Determine sign
-//     bool sign = false;
-//     switch (str[pos]) {
-//     case '-':
-//         sign = true;
-//         /*FALLTHRU*/
-//     case '+':
-//         pos++;
-//         break;
-//     ...
-//     while (char ch = str[pos]) {
-//         ...
-//         if ( !s_IsGoodCharForRadix(ch, base, &delta) ) {
-//             break;
-//         }
-//         // Overflow check
-//         if ( n >= limdiv  &&  (n > limdiv  ||  delta > limoff) ) {
-//             S2N_CONVERT_ERROR_OVERFLOW(Int8);
-//         }
-//     ...
-//     if ( pos == pos0  || ((comma >= 0)  &&  (comma != 3)) ) {
-//         S2N_CONVERT_ERROR_INVAL(Int8);
-//     }
-//     ...
-//     CHECK_ENDPTR(Int8);
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:635-643
-// ```c++
-// int NStr::StringToInt(const CTempString str, TStringToNumFlags flags, int base)
-// {
-//     S2N_CONVERT_GUARD_EX(flags);
-//     Int8 value = StringToInt8(str, flags, base);
-//     if ( value < kMin_Int  ||  value > kMax_Int ) {
-//         S2N_CONVERT_ERROR(int, "overflow", ERANGE, 0);
-//     }
-//     return (int) value;
-// }
-// ```
-// With `fConvErr_NoThrow` and no other flag the text converts when it is an optional sign and one
-// or more decimal digits and nothing else (no spaces, no commas, no "0x"), and its value is in
-// the range of Int4 (a value outside it, or beyond Int8, sets errno and gives 0). A zero that
-// leaves errno clear ("0", "-0", "007") is numeric.
-/// `NStr::StringToNumeric<Int4>(text, &nid, fConvErr_NoThrow, 10)`: whether `text` converts.
+/// `NStr::StringToNumeric<Int4>(text, &nid, fConvErr_NoThrow, 10)`: whether `text` converts
+/// (`StringToInt` with no flag, `ncbi_str::string_to_int`; with `fConvErr_NoThrow` a failed
+/// conversion gives 0 and sets errno).
 fn is_numeric_int4(text: &str) -> bool {
-    let digits = text
-        .strip_prefix('-')
-        .or_else(|| text.strip_prefix('+'))
-        .unwrap_or(text);
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return false;
-    }
-    let negative = text.starts_with('-');
-    // Int4 holds -2^31 ..= 2^31 - 1; every other value, and an overflow of Int8 on the way,
-    // is an error as well.
-    let mut value: i64 = 0;
-    for b in digits.bytes() {
-        value = value * 10 + i64::from(b - b'0');
-        if value > i64::from(i32::MAX) + 1 {
-            return false;
-        }
-    }
-    if negative {
-        value = -value;
-    }
-    (i64::from(i32::MIN)..=i64::from(i32::MAX)).contains(&value)
+    string_to_int(text.as_bytes(), 0).is_ok()
 }
 
 fn options_error(message: &str) -> MaskDataError {
@@ -483,7 +403,7 @@ pub(crate) fn process_mask_data(
     let Some(files) = options.mask_data else {
         return Ok(());
     };
-    let file_list = split_commas(truncate_spaces(files));
+    let file_list = split_commas(truncate_spaces_str(files));
     if file_list.is_empty() {
         return Err(options_error(
             "mask_data option found, but no files were specified.",
@@ -494,7 +414,7 @@ pub(crate) fn process_mask_data(
     let desc_list: Vec<&str>;
 
     if let Some(ids) = options.mask_id {
-        id_list = split_commas(truncate_spaces(ids));
+        id_list = split_commas(truncate_spaces_str(ids));
         if file_list.len() != id_list.len() {
             return Err(options_error(
                 "the size of mask_id does not match that of mask_data.",
@@ -507,7 +427,7 @@ pub(crate) fn process_mask_data(
     }
 
     if let Some(descs) = options.mask_desc {
-        desc_list = split_commas(truncate_spaces(descs));
+        desc_list = split_commas(truncate_spaces_str(descs));
         if file_list.len() != desc_list.len() {
             return Err(options_error(
                 "the size of mask_desc does not match that of mask_data.",
@@ -597,9 +517,9 @@ mod tests {
 
     #[test]
     fn spaces_and_commas_are_split_as_ncbi_does() {
-        assert_eq!(truncate_spaces(" \t a b \n"), "a b");
-        assert_eq!(truncate_spaces(" \u{a0}"), "\u{a0}");
-        assert_eq!(truncate_spaces("  "), "");
+        assert_eq!(truncate_spaces_str(" \t a b \n"), "a b");
+        assert_eq!(truncate_spaces_str(" \u{a0}"), "\u{a0}");
+        assert_eq!(truncate_spaces_str("  "), "");
         assert!(split_commas("").is_empty());
         assert_eq!(split_commas(","), ["", ""]);
         assert_eq!(split_commas("a,"), ["a", ""]);

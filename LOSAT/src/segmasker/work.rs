@@ -146,7 +146,7 @@ pub(super) fn run(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
-    match run_masks(args, settings, stdin, out) {
+    match run_masks(args, settings, stdin, out, diag) {
         Ok(()) => 0,
         Err(Failure::Caught(exception)) => {
             diag.cerr(format!("{}\n", exception.what()).as_bytes());
@@ -169,6 +169,7 @@ fn run_masks(
     settings: &ApplicationSettings,
     stdin: &mut Cin<'_>,
     out: &mut dyn Write,
+    diag: &mut Diag,
 ) -> Result<(), Failure> {
     let value = |name| args.value(name).expect("a key with a default");
     // `CSegMasker masker(args["window"].AsInteger(), args["locut"].AsDouble(), ...)`: a value
@@ -213,12 +214,12 @@ fn run_masks(
                 iupac: &record.iupacaa,
                 protein: true,
             };
-            writer.print(&seq, &mask, parse_seqids, &mut out)?;
+            writer.print(&seq, &mask, parse_seqids, &mut out, diag)?;
             serial_write_failure::<Failure>(&out, outfmt, super::PROGRAM)?;
         }
         Ok(())
     })();
-    finish(writer, &mut out, result, outfmt, super::PROGRAM)
+    finish(writer, &mut out, diag, result, outfmt, super::PROGRAM)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/segmask/segmask.cpp:40-52

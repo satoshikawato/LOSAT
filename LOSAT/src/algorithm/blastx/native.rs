@@ -176,10 +176,12 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     // ```
     if error.is::<super::blast_xml::XmlRefusal>()
         || crate::report::pairwise::is_total_score_refusal(&error)
+        || error.is::<crate::report::tax_report::TaxReportRefusal>()
     {
-        // LOSAT's refusal of a title NCBI's XML cannot write, or of a `-sorthits` table whose
+        // LOSAT's refusal of a title NCBI's XML cannot write, of a `-sorthits` table whose
         // last total NCBI pads without end (`TotalScoreRefusal`, an `io::Error` of the report's
-        // writes): not an error of NCBI's engine or of its output stream.
+        // writes), or of an organism report (outfmt 18, made before its first byte): not an
+        // error of NCBI's engine or of its output stream.
         error
     } else if error.downcast_ref::<NativeError>().is_some_and(|e| {
         (e.exit == 1 && e.message.starts_with("Command line argument error"))
@@ -289,7 +291,7 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
 fn run_inner(
     args: &BlastxArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
-    output: &mut Option<BufWriter<Box<dyn Write>>>,
+    output: &mut Option<crate::cli::NcbiOstream<'static>>,
     archive_slot: &mut Option<crate::report::archive::ArchiveHandle>,
     hold_slot: &mut Option<archive::ArchiveHold<Box<dyn Write + Send>>>,
 ) -> Result<()> {
@@ -465,17 +467,24 @@ fn run_inner(
     // With the BLAST archive the diagnostics also go to its message log (`DiagTee`): the
     // messages of each archive are the diagnostics posted since the previous one.
     let mut archive_stderr: Box<dyn Write + Send> = match &hold {
-        Some(hold) => Box::new(hold.writer(Box::new(io::stderr()))),
-        None => Box::new(io::stderr()),
+        Some(hold) => Box::new(hold.writer(Box::new(crate::cli::CliStderr::process()))),
+        None => Box::new(crate::cli::CliStderr::process()),
     };
     let mut archive_tee;
-    let mut stderr: Box<dyn Write + '_> = match &archive {
-        Some(handle) => {
+    let tax_report = choice.number == 18;
+    let mut stderr: Box<dyn Write + '_> = match (&archive, &hold) {
+        (Some(handle), _) => {
             archive_tee =
                 crate::report::archive::DiagTee::new(&mut *archive_stderr, handle.clone());
             Box::new(&mut archive_tee)
         }
-        None => Box::new(io::stderr()),
+        // The organism report's texts go through the hold with the report (`destination` below),
+        // its standard output written before each text where the text is made (`cli::CliStderr`,
+        // `cerr`'s tie), so that a held run keeps NCBI's order (review 4 D1 of line RG T2).
+        (None, Some(hold)) if tax_report => Box::new(crate::cli::CliStderr::through(
+            hold.writer(Box::new(io::stderr())),
+        )),
+        (None, _) => Box::new(crate::cli::CliStderr::process()),
     };
     // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
     // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the formatting handler and before
@@ -582,14 +591,30 @@ fn run_inner(
             .map_err(early_archive_error)?;
     let destination: Box<dyn Write> =
         match (args.out.as_deref().filter(|p| *p != Path::new("-")), &hold) {
+            // The organism report's file or standard output as NCBI's buffer writes it
+            // (`cli::report_destination_through`), with the hold after the buffer: what the hold
+            // keeps is what the buffer writes, where the buffer writes it.
+            (path, hold) if tax_report => crate::cli::report_destination_through(
+                path.map(|path| {
+                    File::create(path)
+                        .map(|file| Box::new(file) as Box<dyn Write + Send>)
+                        .map_err(|_| inaccessible("out", path))
+                })
+                .transpose()?,
+                true,
+                |device| match hold {
+                    Some(hold) => Box::new(hold.writer(device)),
+                    None => device,
+                },
+            ),
             (Some(path), Some(hold)) => Box::new(hold.writer(Box::new(
                 File::create(path).map_err(|_| inaccessible("out", path))?,
             ))),
             (None, Some(hold)) => Box::new(hold.writer(Box::new(io::stdout()))),
+            (None, None) => Box::new(io::stdout().lock()),
             (Some(path), None) => {
                 Box::new(File::create(path).map_err(|_| inaccessible("out", path))?)
             }
-            (None, None) => Box::new(io::stdout().lock()),
         };
     // BLAST XML (outfmt 5) and the XML2 and JSON documents (outfmt 13 to 16): the output can
     // hold the whole document in memory (`blast_xml::HeldOutput`), decided below before the
@@ -623,7 +648,13 @@ fn run_inner(
     }
     // The run keeps its output in the caller's slot: an error of NCBI's own is followed by the
     // error archive in the same output (`run`).
-    let writer = output.insert(BufWriter::new(destination));
+    // The organism report's stream is NCBI's buffer (`cli::report_destination_through`), which
+    // takes each write as one of NCBI's insertions (`cli::NcbiOstream`): no buffer of LOSAT's
+    // comes before it.
+    let writer = output.insert(crate::cli::NcbiOstream::new(match tax_report {
+        true => destination,
+        false => Box::new(BufWriter::new(destination)),
+    }));
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
     // ```c++
     //     if(hitlist_size < 5){
@@ -737,9 +768,18 @@ fn run_inner(
     // whether `taxdb.bti` is on the search path: its formatters warn without it. A `-db` search
     // asks its database; a `-subject` search the search path of NCBI's databases (the
     // environment and the registry), as BLASTP's and BLASTN's.
-    if options.tabular.is_some_and(|spec| spec.checks_taxdb()) {
+    if options
+        .tabular
+        .is_some_and(|spec| spec.looks_up_every_taxid())
+    {
         options.taxdb_found = match &database {
             Some(database) => database.taxdb_found(),
+            // The organism report's lookups open the run's own database.
+            None if options.outfmt == 18 => {
+                options.subject_taxdb =
+                    crate::algorithm::common::database::SubjectTaxdb::of(&settings, "BLASTX")?;
+                options.subject_taxdb.is_some()
+            }
             None => crate::algorithm::common::database::subject_taxdb_found(&settings, "BLASTX")?,
         };
     }
@@ -1053,7 +1093,7 @@ fn run_inner(
         .map_err(report_error)?;
     if let Some(xml2) = xml2.borrow_mut().as_mut() {
         let mut start = Vec::new();
-        xml2.start(&mut start);
+        xml2.document_mut().start(&mut start);
         writer.write_all(&start).map_err(output_error)?;
     }
     // NCBI writes the prolog out before it searches the first batch, so the warnings of the
@@ -1117,7 +1157,7 @@ fn run_inner(
             program.upper,
         )
     });
-    let render_batch = |writer: &mut BufWriter<Box<dyn Write>>,
+    let render_batch = |writer: &mut crate::cli::NcbiOstream<'static>,
                         diagnostics: &mut dyn Write,
                         queries: &[FastaRecord],
                         results: &mut Vec<BatchResults>,
@@ -1418,7 +1458,9 @@ pub(super) struct ReportedAsks {
 impl ReportedAsks {
     /// What the reports of `options.outfmt` ask.
     pub(super) fn of(options: &super::args::ResolvedOptions) -> Self {
-        let tabular = matches!(options.outfmt, 6 | 7 | 10 | 20);
+        // The organism report (18) makes no tabular subject ids (`report::tabular::writes_rows`).
+        let tabular = matches!(options.outfmt, 6 | 7 | 10 | 18 | 20)
+            && crate::report::tabular::writes_rows(options.tabular);
         Self {
             tabular,
             tabular_reads: tabular
@@ -1442,7 +1484,7 @@ impl ReportedAsks {
             },
             // Outfmt 10 and 20 prefetch as 6 does (`reported_batch`).
             prefetched: prefetches_subjects(Some(match options.outfmt {
-                10 | 20 => 6,
+                10 | 18 | 20 => 6,
                 outfmt => i32::from(outfmt),
             })) && !crate::algorithm::common::database::prefetch_always_off(),
         }
@@ -1582,7 +1624,7 @@ pub(super) fn reported_batch(
     // Outfmt 10 and 20 read the subjects as 6 and 7 do; the rows' own
     // lookups of the taxonomy names come with the rows (`tabular`).
     let prefetch_format = match options.outfmt {
-        10 | 20 => 6,
+        10 | 18 | 20 => 6,
         outfmt => i32::from(outfmt),
     };
     let mut reported = reported;
@@ -1602,17 +1644,21 @@ pub(super) fn reported_batch(
                 .map_or(crate::report::tabular::SubjectFetch::Every, |spec| {
                     spec.subject_fetch(crate::blastinput::app::Program::Blastx)
                 });
-            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
-            // ```c++
-            //        		const CBioseq_Handle& subject_bh =
-            //                 scope.GetBioseqHandle(align.GetSeq_id(1));
-            // ```
-            // The writers of outfmt 0 (description lines and alignment headings), 5 (`Hit`s) and
-            // the tabular rows write the texts where they read each subject.
-            let places = matches!(options.outfmt, 0 | 5 | 6 | 7 | 10 | 20);
-            let rows_open = options.tabular.is_some_and(|spec| spec.checks_taxdb());
+            // The writers of outfmt 0 (description lines and alignment headings), 5 (`Hit`s), the
+            // tabular rows and the organism report write the texts where they read each subject
+            // (`ReportFormat::places_subject_reads`).
+            use crate::blastinput::app::ReportFormat;
+            let first_report = ReportFormat::from_number(i32::from(options.outfmt));
+            let places = first_report.is_some_and(ReportFormat::places_subject_reads);
+            // A field list with a plural name and the organism report look every taxid up, taxid
+            // 0 too: the first row or report line opens the taxonomy database after the first
+            // read (`common::database::subject_read_texts`).
+            let rows_open = options
+                .tabular
+                .is_some_and(|spec| spec.looks_up_every_taxid());
             // The pairwise report reads its subjects in the order of its `-sorthits`.
-            let pairwise = (options.outfmt == 0).then(|| options.report_sort());
+            let pairwise =
+                (first_report == Some(ReportFormat::Pairwise)).then(|| options.report_sort());
             reported.fetch_by_query(
                 database,
                 results,
@@ -2249,7 +2295,7 @@ pub fn run(
     args: &BlastxArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
-    let mut output: Option<BufWriter<Box<dyn Write>>> = None;
+    let mut output: Option<crate::cli::NcbiOstream<'static>> = None;
     let mut archive: Option<crate::report::archive::ArchiveHandle> = None;
     let mut hold: Option<archive::ArchiveHold<Box<dyn Write + Send>>> = None;
     let result = run_inner(args, settings, &mut output, &mut archive, &mut hold);

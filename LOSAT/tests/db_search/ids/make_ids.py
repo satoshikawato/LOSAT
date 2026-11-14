@@ -155,8 +155,9 @@ and `prd_ax` (A `gb|AAA00001.1|` 99990 and X `gb|XXX00001.1|` 150, a random sequ
 Where the reports read their subjects one by one (line DBID taxrow, review 3 H2 of pssmread), version 5:
 `txr_p` (protein, `txr_p.faa`) and `txr_n` (nucleotide, `txr_n.fna`, the proteins' back-translations), each a decoy
 `gb|DDD00001.1|` taxid 9606 without hits, A `gb|AAA00001.1|` taxid 9606 (the best hit of `txr_q.faa` / `txr_q.fna`;
-`txr_q2.*` add a query without hits) and B `gb|BBB00001.1|` taxid 99990, whose lookup writes the offset error of
-`tests/seqdb/taxdb/offset_last_past_end` (`txr.map`), for `tests/taxonomy_read_order.rs`; `txr_s` (protein,
+`txr_q2.*` add a query without hits; `txr_q3.faa` is `txr_q.faa`'s query twice) and B `gb|BBB00001.1|` taxid 99990,
+whose lookup writes the offset error of `tests/seqdb/taxdb/offset_last_past_end` (`txr.map`), for
+`tests/taxonomy_read_order.rs`; `txr_s` (protein,
 `txr_s.faa`) and `txr_sn` (nucleotide, `txr_s.fna`) for its `-sorthits` cases (line DBID taxrow2): the decoy, A and F
 `gb|FFF00001.1|` taxid 99990 (`txr_s.map`), the first 45 letters of `txr_q.faa` (135 of `txr_q.fna`), whose identities
 put it before A with `-sorthits 3` only.

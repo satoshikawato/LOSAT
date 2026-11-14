@@ -614,6 +614,11 @@ pub struct BlastpArgs {
     /// (`algorithm/psiblast`).
     #[arg(skip)]
     pub app: BlastpApp,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), which a
+    /// library call (`api::run`) reads from the application settings, as the command line
+    /// does (`common::database::SubjectTaxdb`); `None` elsewhere. Not a public option.
+    #[arg(skip)]
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1117-1119
     // ```c++
     //     if (args[kArgPSIInclusionEThreshold]) {
@@ -928,6 +933,9 @@ pub struct ResolvedBlastpArgs {
     /// for `run_local`, which has no search path (C2 DECISIONS 7). A `-db` search asks its
     /// database (`BlastpDatabase::taxdb_found`).
     pub subject_taxdb_found: bool,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made with
+    /// `subject_taxdb_found` (`common::database::SubjectTaxdb`); `None` otherwise.
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
 }
 
 impl ResolvedBlastpArgs {
@@ -1508,7 +1516,8 @@ impl BlastpArgs {
                 .inclusion_ethresh
                 .unwrap_or(super::blast_engine::PSI_INCLUSION_ETHRESH),
             traceback_hitlist: 0,
-            subject_taxdb_found: false,
+            subject_taxdb_found: self.subject_taxdb.is_some(),
+            subject_taxdb: self.subject_taxdb.clone(),
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:60-66 (no word
         // threshold for RPS-BLAST: the reports print none, blast_format.cpp:2281-2284)

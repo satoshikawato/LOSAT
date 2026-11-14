@@ -550,17 +550,17 @@ pub fn check_registry_settings(
             "{reason} ([BLAST] MAX_SEQID_LENGTH changes the Seq-ids NCBI makeblastdb parses \
              with -parse_seqids)"
         )),
-        Ok(Some(value)) if string_to_uint(value).is_some_and(|limit| limit != 0) => Err(format!(
-            "the registry entry [BLAST] MAX_SEQID_LENGTH ({value}), which changes the Seq-ids \
-             NCBI makeblastdb parses with -parse_seqids, is not supported by LOSAT's makeblastdb"
-        )),
+        // `NStr::StringToUInt(value)` with no flags: no limit where it throws.
+        Ok(Some(value))
+            if crate::ncbi_str::string_to_uint(value.as_bytes()).is_ok_and(|limit| limit != 0) =>
+        {
+            Err(format!(
+                "the registry entry [BLAST] MAX_SEQID_LENGTH ({value}), which changes the Seq-ids \
+                 NCBI makeblastdb parses with -parse_seqids, is not supported by LOSAT's makeblastdb"
+            ))
+        }
         Ok(_) => Ok(()),
     }
-}
-
-/// `NStr::StringToUInt(value)` with no flags: `None` where it throws.
-fn string_to_uint(value: &str) -> Option<u32> {
-    crate::ncbi_str::string_to_uint(value.as_bytes()).ok()
 }
 
 /// The checks of the arguments that LOSAT makes first: what LOSAT does not
@@ -1280,50 +1280,42 @@ fn add_input_and_close(
         // again), its own "Adding sequences" line, and "No sequences added" for a
         // file without a sequence.
         for &name in names {
-            match std::fs::File::open(name) {
-                // A compressed name is inflated while it is read (`CompressedInput`); a fault of
-                // its data is reported by name, after the build removed its files as for any
-                // failed input.
-                Ok(mut file) => match compression_of_name(std::path::Path::new(name)) {
-                    Some(compression) => {
-                        let mut input = CompressedInput::new(file, compression);
-                        let result = add_fasta(db, &mut input, err);
-                        if let Some(fault) = input.fault() {
-                            return Err(compressed_fault_error(name, compression, fault));
-                        }
-                        result?
+            // A file that exists and cannot be opened (`x_VerifyInputFilesType` has warned that
+            // it does "NOT appear to be FASTA"). makeblastdb does not test the stream it
+            // opened: `AddFasta` skips a stream that is not good and adds nothing from it, not
+            // even its "Adding sequences" line; a build of such files alone ends with "No
+            // volumes were created." and exit status 0 (makeblastdb 2.17.0, a compressed name
+            // too). A deterministic NCBI result, reproduced.
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1398-1408
+            // ```c++
+            // bool CBuildDatabase::AddFasta(CNcbiIstream & fasta_file)
+            // {
+            //     // Add any fasta sequences as well.
+            //     bool success = true;
+            //
+            //     if (fasta_file) {
+            //         CFastaBioseqSource fbs(fasta_file,
+            //                                m_IsProtein,
+            //                                m_ParseIDs,
+            //                                m_LongIDs);
+            //
+            // ```
+            let Ok(mut file) = std::fs::File::open(name) else {
+                continue;
+            };
+            // A compressed name is inflated while it is read (`CompressedInput`); a fault of
+            // its data is reported by name, after the build removed its files as for any
+            // failed input.
+            match compression_of_name(std::path::Path::new(name)) {
+                Some(compression) => {
+                    let mut input = CompressedInput::new(file, compression);
+                    let result = add_fasta(db, &mut input, err);
+                    if let Some(fault) = input.fault() {
+                        return Err(compressed_fault_error(name, compression, fault));
                     }
-                    None => add_fasta(db, &mut file, err)?,
-                },
-                // A file that exists and cannot be opened. makeblastdb does
-                // not test the stream it opened: `AddFasta` skips a stream
-                // that is not good and adds nothing from it (a build of that
-                // file alone ends with "No volumes were created." and exit
-                // status 0). LOSAT does not reproduce that: it reports the
-                // file, with the exit status of its file-system errors, and
-                // removes what earlier files added.
-                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1398-1408
-                // ```c++
-                // bool CBuildDatabase::AddFasta(CNcbiIstream & fasta_file)
-                // {
-                //     // Add any fasta sequences as well.
-                //     bool success = true;
-                //
-                //     if (fasta_file) {
-                //         CFastaBioseqSource fbs(fasta_file,
-                //                                m_IsProtein,
-                //                                m_ParseIDs,
-                //                                m_LongIDs);
-                //
-                // ```
-                Err(source) => {
-                    let mut warn = warn_to(err);
-                    let _ = db.end_build(true, &mut warn);
-                    return Err(MakedbError::Build(WriteDbError::Io {
-                        path: name.into(),
-                        source,
-                    }));
+                    result?
                 }
+                None => add_fasta(db, &mut file, err)?,
             }
         }
     }

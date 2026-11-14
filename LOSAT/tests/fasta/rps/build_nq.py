@@ -13,6 +13,20 @@ No NCBI counterpart: test inputs. Usage: python3 build_nq.py [OUT_DIR] (default:
   and 12 letters, its first 570-572 letters and their reverse complements, and 600 letters with a
   run of 30 N, a run of 60 lower-case letters, and the ambiguity codes R Y K M S W.
 - odd.fna: a query of 4 letters, an empty one and one of 4 N.
+- nwin.fna and nwin0.fna (series PR, item PS12s: the windows of query batches): 130 and 36 records
+  of 60-270 letters (seed 12 and 13) for rows with `BATCH_SIZE` 200 and 100, so that the batches
+  are many and windows of 4, 8, 16 and 32 batches (1, 2, 4 and 8 threads) cut them in different
+  places. The first records are random letters (no hit at a small e-value); later, every third
+  record is a back-translated window of 35-70 letters of one of the three profiles' fragments
+  (`rps_mini`: q40.faa records 32, 18 and 4), on alternating strands, between random records. A
+  record of 250 random letters followed by one of 210 (nwin0: 110) N makes a batch of one record
+  without a valid frame, twice; nwin.fna has an empty record early and, in later batches, a record
+  with hyphens, one whose title ends with 25 nucleotides and one with the invalid residue J (the
+  reader's warnings).
+- nfirst.fna (series PR, item PS12s, review B1 and S1): a record of 210 N (with `BATCH_SIZE` 200 a
+  first batch of its own without a valid frame), the records w45-w50 of nwin.fna (two of them hit),
+  and `p_tgg`, 20 TGGTGTTGC repeats (frames whose Lambda is below the ideal one: a large
+  `-xdrop_ungap` leaves 32 bits for them first).
 """
 
 import random
@@ -36,9 +50,13 @@ def reverse_complement(text: str) -> str:
 
 
 def read_fasta(path: Path) -> list[tuple[str, str]]:
+    return parse_fasta(path.read_text())
+
+
+def parse_fasta(text: str) -> list[tuple[str, str]]:
     records: list[tuple[str, str]] = []
     title, letters = None, []
-    for line in path.read_text().splitlines():
+    for line in text.splitlines():
         if line.startswith(">"):
             if title is not None:
                 records.append((title, "".join(letters)))
@@ -94,12 +112,69 @@ def nedge(proteins: list[tuple[str, str]]) -> str:
     return fasta(records)
 
 
+def nwin(proteins: list[tuple[str, str]], count: int, seed: int, n_run: int) -> str:
+    rnd = random.Random(seed)
+    # The profiles' fragments (tests/db_search/rps/build.sh): q40.faa records 32 (1-190), 18
+    # (301-480) and 4 (1101-1290).
+    regions = [proteins[32][1][0:190], proteins[18][1][300:480], proteins[4][1][1100:1290]]
+
+    def random_letters(n: int) -> str:
+        return "".join(rnd.choice("ACGT") for _ in range(n))
+
+    records: list[tuple[str, str]] = []
+    first_hit = count // 3
+    hit = 0
+    for i in range(count):
+        if i in (count // 10, (2 * count) // 3):
+            records.append((f"w{i} long", random_letters(250)))
+            records.append((f"w{i}n nrun", "N" * n_run))
+            continue
+        if count > 100 and i == count // 5:
+            records.append((f"w{i} empty", ""))
+            continue
+        if i >= first_hit and i % 3 == 0:
+            region = regions[hit % 3]
+            size = rnd.randint(35, 70)
+            start = rnd.randint(0, len(region) - size)
+            letters = random_letters(rnd.randint(0, 10))
+            letters += back_translate(region[start : start + size].upper(), rnd)
+            letters += random_letters(rnd.randint(0, 10))
+            if hit % 2:
+                letters = reverse_complement(letters)
+            records.append((f"w{i} hit {hit % 3} {start + 1}-{start + size}", letters))
+            hit += 1
+            continue
+        letters = random_letters(rnd.randint(60, 240))
+        title = f"w{i} rnd"
+        if count > 100 and i == (3 * count) // 4:
+            letters = letters[:30] + "-" + letters[30:60] + "-" + letters[60:]
+            title = f"w{i} hyphens"
+        if count > 100 and i == (4 * count) // 5:
+            title = f"w{i} title " + random_letters(25)
+        if count > 100 and i == (5 * count) // 6:
+            letters = letters[:40] + "J" + letters[40:]
+            title = f"w{i} invalid"
+        records.append((title, letters))
+    return fasta(records)
+
+
+def nfirst(window: str) -> str:
+    records = parse_fasta(window)
+    start = next(i for i, (title, _) in enumerate(records) if title.startswith("w45 "))
+    tgg = ("p_tgg", "TGGTGTTGC" * 20)
+    return fasta([("n0 nrun", "N" * 210)] + records[start : start + 6] + [tgg])
+
+
 def main() -> int:
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE
     proteins = read_fasta(HERE / "q40.faa")
     (out / "nq.fna").write_text(nq(proteins))
     (out / "nedge.fna").write_text(nedge(proteins))
     (out / "odd.fna").write_text(">e1\nACGT\n>e2\n\n>e3\nNNNN\n")
+    window = nwin(proteins, 130, 12, 210)
+    (out / "nwin.fna").write_text(window)
+    (out / "nwin0.fna").write_text(nwin(proteins, 36, 13, 110))
+    (out / "nfirst.fna").write_text(nfirst(window))
     return 0
 
 

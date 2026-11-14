@@ -7,6 +7,8 @@ Blast applications download:
 	ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
 
 For more information please refer to the README file
+Warning: XML format support is deprecated!
 RPSBlast session 0 start...
+RPSBlast session 1 start...
 Calculating....
-Error: a hit of a nucleotide query that starts or ends at position 2147483647 (NCBI's int overflows) is not supported by LOSAT's rpsbproc
+Error: (106.7) Application's execution failed: basic_string::replace: __pos (which is 18446744071562067968) > this->size() (which is 79)

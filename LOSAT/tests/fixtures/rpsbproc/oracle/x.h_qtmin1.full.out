@@ -1,10 +1,10 @@
 #Post-RPSBLAST Processing Utility
 
-#Input data file:	arch/ntplusmax.asn
+#Input data file:	arch/x_h_p_qtmin1.xml
 #Output data file:	(stdout)
-#Annotation data at:	nt
+#Annotation data at:	data
 #E-Value cutoff:	0.01
-#Redundancy:	Standard
+#Redundancy:	Full
 #Data requested:	Domain hits
 #Output format -- tab-delimited table
 #Show superfamilies: NO
@@ -22,4 +22,11 @@
 #ENDDATA
 #=====================================================================
 DATA
-SESSION	1	tblastn	2.17.0+	Cdd	BLOSUM62	0.01
+SESSION	1	RPSBLAST 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	79	NP_414783.1 protein YkfF [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	488084	5	-2147483647	5.04742e-43	133.904	pfam06006	DUF905	-	-
+ENDDOMAINS
+ENDQUERY
+ENDSESSION	1
+ENDDATA

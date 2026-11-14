@@ -602,6 +602,13 @@ fn every_rpsblast_argument_is_recorded_as_ncbi_records_it() {
             &["-comp_based_stats", "2u"],
             &[At("CompositionBasedStats", "Integer(2)")],
         ),
+        // `SetSmithWatermanMode` (blast_args.cpp:885): fixture `rpsblast.mask.sw` of
+        // tests/fixtures/strategy (PS11c-3).
+        (
+            "use_sw_tback",
+            &["-use_sw_tback"],
+            &[At("SmithWatermanMode", "Boolean(true)")],
+        ),
     ];
     walk(&App {
         program: "rpsblast",

@@ -136,8 +136,11 @@ fn several_hsps_give_several_alignments() {
         .unwrap()
         .unwrap();
     assert_eq!(alignments.len(), 2, "{alignments:?}");
-    assert!(alignments[0].match_start > alignments[1].match_start);
-    assert!(alignments[1].score > alignments[0].score);
+    assert!(
+        alignments[0].match_start > alignments[1].match_start,
+        "{alignments:?}"
+    );
+    assert!(alignments[1].score > alignments[0].score, "{alignments:?}");
     assert_eq!(
         (alignments[1].query_start, alignments[1].match_start),
         (0, 10)
@@ -182,7 +185,7 @@ fn one_hsp_gives_one_alignment() {
         .unwrap()
         .unwrap();
     assert_eq!(alignments.len(), 1);
-    assert_eq!(alignments[0].match_start, 10);
+    assert_eq!(alignments[0].match_start, 10, "{alignments:?}");
 }
 
 // The first alignment's significance: its e-value below `-evalue`, and the heap of redone

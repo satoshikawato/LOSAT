@@ -241,9 +241,10 @@ fn empty_windows_score_zero() {
             query_end: 0
         }
     );
-    // A score of 0 to reach: the scan stops after its first cell, at (0, 0).
+    // A score of 0 to reach (the score-only scan found no positive cell): the scan stops after its
+    // first cell, whose score 0 leaves the start at (0, 0).
     let start = find_start(
-        &[2, 1],
+        &[1, 2],
         &rows,
         SwEnd {
             score: 0,

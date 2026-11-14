@@ -840,8 +840,8 @@ pub fn stored_source(
         .unwrap_or(&super::defline::UNNAMED_SOURCE)
 }
 
-/// The heading `heading` of a database sequence's alignments (`write_database_subject_alignments_part`):
-/// its definition-line lines (`DatabaseHeading::write_lines`), then `Length=` when the length is
+/// The heading `heading` of a database sequence's alignments
+/// (`write_database_subject_alignments_part`): its definition-line lines (`DatabaseHeading::write_lines`), then `Length=` when the length is
 /// known, and one blank line; or nothing, and the Seq-id text of NCBI's line in place of each
 /// alignment, where NCBI cannot make the heading's title. BLASTX writes it with its own HSP
 /// blocks.

@@ -7810,9 +7810,12 @@ fn x_batch_blocks(
 // overflow banks to the one table of all queries, where the refusal is made), where there is more
 // than one. Any report: the blocks write nothing, and the hit lists of all queries are joined
 // before the redo and the reports, so the reports, their order and every error after the set-up
-// are those of one table (the set-up's errors and refusals come before the first block). Only
-// blastp: psiblast searches one query per batch (its `-in_pssm`, `-sum_stats` and rounds), and
-// rpsblast scans with the database's table.
+// are those of one table. The set-up's errors and refusals come before the first block: the call
+// of all queries makes them, but it builds no table, so a refusal of a table's build (a compressed
+// table that fills NCBI's overflow banks) cannot come first in a block only because
+// `x_word_blocks` plans no blocks wherever a batch's table could fill them. Only blastp: psiblast
+// searches one query per batch (its `-in_pssm`, `-sum_stats` and rounds), and rpsblast scans with
+// the database's table.
 // No NCBI counterpart: chooses LOSAT's blocks; it does not change any value NCBI computes.
 fn x_prelim_block_plan(
     args: &ResolvedBlastpArgs,
@@ -9805,12 +9808,14 @@ enum PrelimOnly<'a> {
     Chunk(&'a mut Vec<Option<BlastpHitList>>),
     /// The block's lists, and what the call of all queries made once for all its blocks: its
     /// subjects, encoded, with `-lcase_masking` their scan ranges (`x_soft_subject`), and the
-    /// block's query frames (SEG made once).
+    /// block's query frames (SEG made once); `first_query`: the index among the call's queries of
+    /// the block's first (the block counts its queries from it; the diagnostics name the call's).
     Block {
         lists: &'a mut Vec<Option<BlastpHitList<XPrelimHsp>>>,
         subjects: &'a [EncodedProtein],
         soft_subjects: Option<&'a [Vec<(i32, i32)>]>,
         frames: &'a [Vec<QueryFrame>],
+        first_query: usize,
     },
 }
 
@@ -9911,6 +9916,14 @@ fn run_call(
             ..
         }) => Some((*subjects, *frames, *soft_subjects)),
         _ => None,
+    };
+    // Diagnostic (LOSAT_DEBUG_BLASTP_TRACE_HSP): the index among the call's queries of this call's
+    // first query, which the scan's trace adds to its query index: a block of the preliminary
+    // stage (`PrelimOnly::Block`) counts its queries from its first, and the trace names the
+    // queries of the search of all queries, as its redo's does. No NCBI counterpart.
+    let x_trace_query_base = match &prelim {
+        Some(PrelimOnly::Block { first_query, .. }) => *first_query as u32,
+        _ => 0,
     };
     let timing_enabled = blastp_timing_env_enabled();
     let kappa_range_counters_enabled = blastp_kappa_range_counters_env_enabled();
@@ -10177,9 +10190,6 @@ fn run_call(
     } else {
         None
     };
-    if x_blocks.is_some() {
-        super::x_query_blocks::x_reach_block_search(true);
-    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2746-2748
     // ```c
     // Boolean check_ideal =
@@ -11743,13 +11753,13 @@ fn run_call(
             //                                   hit_options->min_diag_separation))
             // ```
             if let Some(target) = blastp_trace_hsp_target() {
-                if blastp_trace_matches_pair(target, ctx.q_idx, s_idx as u32)
+                if blastp_trace_matches_pair(target, ctx.q_idx + x_trace_query_base, s_idx as u32)
                     && blastp_trace_init_hsp_overlaps_target(target, &init_hsp)
                 {
                     eprintln!(
                         "[BLASTP_TRACE_HSP] init hit_index={} q_idx={} s_idx={} ungapped=q{}..{} s{}..{} seed=({}, {}) score={} cutoff={} mode={:?} tree_contains={}",
                         hit_index,
-                        ctx.q_idx,
+                        ctx.q_idx + x_trace_query_base,
                         s_idx,
                         init_hsp.ungapped_data.q_start + 1,
                         init_hsp.query_end_absolute(),
@@ -11814,7 +11824,7 @@ fn run_call(
             // status = s_BlastProtGappedAlignment(..., init_hsp, ...);
             // ```
             if let Some(target) = blastp_trace_hsp_target() {
-                if blastp_trace_matches_pair(target, ctx.q_idx, s_idx as u32)
+                if blastp_trace_matches_pair(target, ctx.q_idx + x_trace_query_base, s_idx as u32)
                     && usize::try_from(preliminary_hsp.query_start + 1).ok() == Some(target.q_start)
                     && usize::try_from(preliminary_hsp.query_end).ok() == Some(target.q_end)
                     && usize::try_from(preliminary_hsp.subject_start + 1).ok()
@@ -12278,6 +12288,10 @@ fn run_call(
         // read fails a block's search (`database::PreliminaryReadError`, handed on by the block):
         // it is this call's error, made with this call's batches and reports
         // (`preliminary_search_error`), as where one table finds it.
+        // The blocks run (`LOSAT_X_REACH`): recorded here, not where they are planned, so that a
+        // call whose blocks do not run (no valid query of a database, or an error of the set-up)
+        // does not record them.
+        super::x_query_blocks::x_reach_block_search(true);
         for block in blocks {
             let input = x_block_input(&query_batches, block);
             let block_input = ranges.query_input.slice(input.clone());
@@ -12295,6 +12309,7 @@ fn run_call(
                     subjects,
                     soft_subjects: x_soft_subjects,
                     frames: &query_frames[block.clone()],
+                    first_query: block.start,
                 }),
                 &BlastpRanges {
                     input_records: &ranges.input_records[input.clone()],

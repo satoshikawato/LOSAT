@@ -98,8 +98,8 @@ pub(crate) fn merge_query_chunk(
 /// the HSPs' query coordinates, of `query_length` letters (`HitListHsp::move_to_query` on each HSP,
 /// and each list's `query_index`): a query chunk's part merged into its query
 /// (`merge_query_chunk`), or (LOSAT_X_BPQBLOCK) the compact list of a block's query moved to the
-/// query's index among all queries (`blast_engine.rs` `x_prelim_blocks`; offset 0: a blastp HSP's
-/// query coordinates are relative to its context).
+/// query's index among all queries (`blast_engine.rs`: `run_call`'s loop over the blocks of
+/// `x_prelim_block_plan`; offset 0: a blastp HSP's query coordinates are relative to its context).
 pub(crate) fn rebase_hit_list<H: HitListHsp>(
     hitlist: &mut BlastpHitList<H>,
     q_idx: u32,

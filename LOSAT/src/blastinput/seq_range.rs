@@ -393,8 +393,8 @@ impl QueryInput {
     /// The input records `input` as an input of their own: their lengths and skips, and the
     /// searched queries among them (`searched_in`) with their placements, numbered from
     /// `input.start`. EXPERIMENT (LOSAT_X_BPQBLOCK): a block of whole query batches of the search
-    /// of all queries (`blast_engine.rs` `x_prelim_blocks`), whose `batches` are the whole input's
-    /// batches of those records.
+    /// of all queries (`blast_engine.rs`: `x_prelim_block_plan`, and `run_call`'s loop over its
+    /// blocks), whose `batches` are the whole input's batches of those records.
     pub fn slice(&self, input: std::ops::Range<usize>) -> Self {
         let searched = self.searched_in(input.clone());
         Self {

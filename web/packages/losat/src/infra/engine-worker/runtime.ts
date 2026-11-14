@@ -7,12 +7,25 @@
 // instance holds it, the subject, compare the records that the engine read with the
 // record tables (plan §5.4; a difference stops the run before any output), run, and send
 // the output streams to the Data worker's port. A BLASTN search with -window_masker_db also
-// gives the engine the counts file, which the instance holds for later BLASTN searches.
+// gives the engine the counts file, which the instance holds for later BLASTN searches. A search
+// with -conffile gives the engine the registry file for that search only, and the files that a
+// run makes besides its outputs (stream 8: the file of -logfile) come back with its result, or with
+// its error when it fails (line RG E1w-3b); they never go to the Data worker.
 import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
-import { InputMismatchError, type EnginePhase } from '../../ports/engine.js';
+import { readStoredZip, type RunFile } from '../../domain/run-files.js';
+import { InputMismatchError, withRunFiles, type EnginePhase } from '../../ports/engine.js';
 import { OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
 import type { CountsUse } from '../../domain/counts.js';
-import { EngineCallError, FILE_WINDOW_MASKER_COUNTS, ROLE_QUERY, ROLE_SUBJECT, type ChunkBuffer, type FileInfo } from '../reactor/abi.js';
+import {
+  EngineCallError,
+  FILE_REGISTRY,
+  FILE_WINDOW_MASKER_COUNTS,
+  loadFile,
+  ROLE_QUERY,
+  ROLE_SUBJECT,
+  RUN_FILES_STREAM,
+  type FileInfo,
+} from '../reactor/abi.js';
 import type { ReactorArtifact } from '../reactor/artifact.js';
 import { instantiateSerial, instantiateThreadedMain, type ReactorInstance } from '../reactor/instance.js';
 import { createSharedMemory } from '../reactor/shared-memory.js';
@@ -54,9 +67,6 @@ interface HeldCounts {
   readonly handle: number;
   readonly info: FileInfo;
 }
-
-/** Bytes of a counts file given to the engine at a time, through one buffer of engine memory. */
-export const COUNTS_CHUNK_BYTES = 8 * 1024 * 1024;
 
 interface Loaded {
   readonly path: RuntimePath;
@@ -122,10 +132,19 @@ export class EngineRuntime {
     // successor. Its calls into the instance are uses of their own, with the file's chunks read
     // between them.
     let windowMasker: CountsUse | undefined;
+    let registry: number | undefined;
     try {
       windowMasker = await this.counts(loaded, request, use);
+      // The registry file of -conffile, which the start of `validate` and `run` reads (ABI v2 §4),
+      // for this search only (`search` releases it): the start of every later call would read a file
+      // named `.ncbirc` or `<program>.ini` as the CLI reads one in its directory. After the counts
+      // file, whose name it cannot take while the instance holds that file.
+      if (request.conffile !== undefined) {
+        const { name, file } = request.conffile;
+        registry = (await loadFile(loaded.instance.abi, FILE_REGISTRY, name, file, (body) => inUse(use, body))).handle;
+      }
     } catch (error) {
-      // A trap while the file was given to the engine: the next search loads the module again
+      // A trap while a file was given to the engine: the next search loads the module again
       // (a stopped threaded instance is ended by the Gateway, as in `search`).
       if (loaded.instance.abi.stoppedBy !== undefined && loaded.path === 'serial') this.dispose();
       throw error;
@@ -133,35 +152,48 @@ export class EngineRuntime {
     if (use !== undefined && !use.enter()) throw new Error(ENDING);
     try {
       if (use !== undefined) this.options.onUse?.();
-      return this.search(loaded, request, fallbackReason, phase, windowMasker);
+      return this.search(loaded, request, fallbackReason, phase, windowMasker, registry);
     } finally {
       use?.leave();
     }
   }
 
-  /** The search of `run` on the instance that `run` chose. */
+  /** The search of `run` on the instance that `run` chose, with the handle of the registry file that `run` gave the engine. */
   private search(
     loaded: Loaded,
     request: WorkerRun,
     fallbackReason: string | undefined,
     phase: (phase: EnginePhase) => void,
     windowMasker: CountsUse | undefined,
+    registryHandle: number | undefined,
   ): WorkerRunResult {
     const threads = loaded.path === 'threaded' ? request.threads : 1;
     const argv = [...request.argv, '-num_threads', String(threads)];
     const abi = loaded.instance.abi;
-    const invalid = abi.validate(argv);
-    if (invalid !== undefined) throw new EngineCallError(invalid);
-
-    const query = abi.register(request.program, ROLE_QUERY, request.query.bytes);
-    let queryReleased = false;
-    const releaseQuery = () => {
-      if (queryReleased || abi.stoppedBy !== undefined) return;
-      queryReleased = true;
-      abi.release(query.handle);
+    // What the engine holds for this search alone: the registry file of -conffile and the query. Each
+    // is released once, before `end` or when the search fails, unless the instance stopped.
+    let registry = registryHandle;
+    let query: number | undefined;
+    const release = () => {
+      if (abi.stoppedBy !== undefined) return;
+      if (query !== undefined) {
+        const handle = query;
+        query = undefined;
+        abi.release(handle);
+      }
+      if (registry !== undefined) {
+        const handle = registry;
+        registry = undefined;
+        abi.fileRelease(handle);
+      }
     };
     try {
-      const queryMismatch = recordMismatch(request.query.records, query.records);
+      const invalid = abi.validate(argv);
+      if (invalid !== undefined) throw new EngineCallError(invalid);
+
+      const registered = abi.register(request.program, ROLE_QUERY, request.query.bytes);
+      query = registered.handle;
+      const queryMismatch = recordMismatch(request.query.records, registered.records);
       if (queryMismatch !== undefined) throw new InputMismatchError('query', queryMismatch);
       const subjectRetained = loaded.retained?.key === request.subject.key;
       const subject = this.subject(loaded, request);
@@ -173,16 +205,26 @@ export class EngineRuntime {
       // The engine's standard error of this search only, for a stop message.
       loaded.instance.wasi.clear();
       phase('running');
-      abi.run(argv, query.handle, subject.handle, (stream, bytes) => {
-        this.options.beforeOutput?.();
-        if (OUTPUT_STREAMS.includes(stream as OutputStream)) writer.write(stream as OutputStream, bytes);
-      });
+      // The run's files (stream 8) stay here, apart from the outputs.
+      const archive: Uint8Array[] = [];
+      try {
+        abi.run(argv, registered.handle, subject.handle, (stream, bytes) => {
+          this.options.beforeOutput?.();
+          if (stream === RUN_FILES_STREAM) archive.push(bytes.slice());
+          else if (OUTPUT_STREAMS.includes(stream as OutputStream)) writer.write(stream as OutputStream, bytes);
+        });
+      } catch (error) {
+        // A run that the engine failed gives the files that it made (TBLASTX's file of -logfile holds
+        // its error); a stop does not (the chunks before a trap are discarded, ABI v2 §4).
+        throw abi.stoppedBy === undefined ? failedWithFiles(error, archive) : error;
+      }
+      const runFiles = readRunFiles(archive);
       const linearBytesAfter = abi.memoryBytes();
       loaded.runs++;
       loaded.ran.add(request.argv.join('\0'));
       // The last call into the instance comes before `end`: a failure after it must not
       // follow an output that the data layer may already commit.
-      releaseQuery();
+      release();
       phase('finalizing');
       writer.end();
       const path = loaded.path;
@@ -195,9 +237,10 @@ export class EngineRuntime {
         subjectRetained,
         ...(windowMasker === undefined ? {} : { windowMasker }),
         ...(loaded.counts === undefined ? {} : { countsBytes: loaded.counts.info.size }),
+        ...(runFiles.length === 0 ? {} : { runFiles }),
       };
     } finally {
-      if (abi.stoppedBy === undefined) releaseQuery();
+      if (abi.stoppedBy === undefined) release();
       // A stopped threaded instance keeps its thread workers and the keeper: threads of the
       // search may still run and grow the memory. They count as a use, so the Gateway, which
       // ends the runtime on the stop, ends this worker once the keeper has grown the memory
@@ -306,43 +349,11 @@ export class EngineRuntime {
     inUse(use, () => loaded.instance.abi.fileRelease(held.handle));
   }
 
-  /** Gives the file to the engine in chunks, ends it, and holds it. */
+  /** Gives the file to the engine in chunks (`loadFile`), ends it, and holds it. */
   private async loadCounts(loaded: Loaded, wanted: WorkerCounts, key: string, use: InstanceUse | undefined): Promise<FileInfo> {
-    const { abi } = loaded.instance;
-    const size = wanted.blob.size;
-    const handle = inUse(use, () => abi.fileBegin(FILE_WINDOW_MASKER_COUNTS, wanted.name, size));
-    let buffer: ChunkBuffer | undefined;
-    try {
-      buffer = inUse(use, () => abi.chunkBuffer(Math.max(1, Math.min(COUNTS_CHUNK_BYTES, size))));
-      for (let offset = 0; offset < size; offset += COUNTS_CHUNK_BYTES) {
-        const bytes = new Uint8Array(await wanted.blob.slice(offset, offset + COUNTS_CHUNK_BYTES).arrayBuffer());
-        inUse(use, () => abi.fileChunk(handle, bytes, buffer!));
-      }
-      const info = inUse(use, () => abi.fileEnd(handle));
-      loaded.counts = { key, handle, info };
-      return info;
-    } catch (error) {
-      // The engine drops a file whose chunk or end it refused; one that it still holds (the file
-      // could not be read) is released, so that the name is free for the next search. Not when
-      // the runtime is ending: the instance goes with it.
-      if (abi.stoppedBy === undefined) {
-        try {
-          inUse(use, () => abi.fileRelease(handle));
-        } catch {
-          // Already dropped by the engine, or the runtime is ending.
-        }
-      }
-      throw error;
-    } finally {
-      if (buffer !== undefined) {
-        const taken = buffer;
-        try {
-          inUse(use, () => abi.freeChunkBuffer(taken));
-        } catch {
-          // The runtime is ending: the instance goes with it.
-        }
-      }
-    }
+    const info = await loadFile(loaded.instance.abi, FILE_WINDOW_MASKER_COUNTS, wanted.name, wanted.blob, (body) => inUse(use, body));
+    loaded.counts = { key, handle: info.handle, info };
+    return info;
   }
 
   /** The subject handle: the retained one if its key matches, else a new registration. */
@@ -407,6 +418,34 @@ function inUse<T>(use: InstanceUse | undefined, body: () => T): T {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** The files of a run's archive (stream 8, in chunks); none when the run sent none. */
+function readRunFiles(chunks: readonly Uint8Array[]): RunFile[] {
+  if (chunks.length === 0) return [];
+  const archive = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    archive.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return readStoredZip(archive);
+}
+
+/**
+ * The error of a run that the engine failed, with the files that the run made (`withRunFiles`). An
+ * archive that cannot be read is told after the run's error, which stays the run's.
+ */
+function failedWithFiles(error: unknown, chunks: readonly Uint8Array[]): unknown {
+  let runFiles: RunFile[];
+  try {
+    runFiles = readRunFiles(chunks);
+  } catch (unreadable) {
+    if (!(error instanceof Error)) return error;
+    error.message = `${error.message} (${messageOf(unreadable)})`;
+    return error;
+  }
+  return runFiles.length === 0 || !(error instanceof Error) ? error : withRunFiles(error, runFiles);
 }
 
 /** Bytes at each end of a counts file that its key includes (`edgeDigest`). */

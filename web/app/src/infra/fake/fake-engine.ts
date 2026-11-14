@@ -14,6 +14,7 @@ import {
   type HspRecord,
   type ProgramDescription,
   type RuntimeInfo,
+  type StartResult,
   type ValidationResult,
 } from 'losat/ports';
 import { customOutfmt, OUTFMT_FLAG, outfmtOption } from '../../domain/output-format';
@@ -49,9 +50,17 @@ export class FakeEngine implements EngineGateway {
   }
 
   /**
+   * NCBI's application start is not imitated: no registry file, no file of the run, no dry run (its
+   * `validate` refuses `-conffile`, `-logfile` and `-dryrun`, which `describe` does not list).
+   */
+  async start(): Promise<StartResult> {
+    return { ok: true, start: { conffile: null, logFile: null, dryRun: false } };
+  }
+
+  /**
    * Refuses an unknown program, and a word that is neither an option of the program's `describe`
    * nor the value of the option before it, with the CLI's message; the engine's other checks are
-   * not imitated.
+   * not imitated, and a registry file is not read.
    */
   async validate(argv: readonly string[]): Promise<ValidationResult> {
     const program = argv[0];

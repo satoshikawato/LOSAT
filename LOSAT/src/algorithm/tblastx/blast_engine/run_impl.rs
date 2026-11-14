@@ -836,13 +836,9 @@ pub fn run(
 ) -> Result<()> {
     args.id_scope = args.parse_deflines.then(Default::default);
     // NCBI's score block looks for the file of a `-matrix` that its tables do not have when it
-    // sets up a batch (`ApplicationSettings::matrix_file`); the run refuses it there, as the
-    // name that NCBI aborts on (`run_in_pool`).
-    if args.scoring_matrix() == TblastxMatrix::Unknown {
-        args.matrix_file = settings
-            .matrix_file(args.matrix_name())
-            .map_err(anyhow::Error::msg)?;
-    }
+    // sets up a batch (`TblastxArgs::find_matrix_file`); the run refuses it there, as the name
+    // that NCBI aborts on (`run_in_pool`).
+    args.find_matrix_file(&settings.matrix_search)?;
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:106-111
     // ```c
     // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
@@ -1358,26 +1354,6 @@ fn cli_outfmts(args: &TblastxArgs) -> Result<[i32; 1]> {
     Ok([crate::blastinput::app::parse_formatting_string(&args.outfmt)?.number])
 }
 
-/// The options that LOSAT's TBLASTX rejects, where NCBI would start the search.
-pub(crate) fn check_losat_limits(args: &TblastxArgs) -> Result<()> {
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:214-224
-    // ```c
-    //     if (ewp->diag_table->multiple_hits) {
-    //         status = s_BlastAaWordFinder_TwoHit(subject, query,
-    //     ...
-    //     } else {
-    //         status = s_BlastAaWordFinder_OneHit(subject, query,
-    // ```
-    // LOSAT's TBLASTX scans with the two-hit word finder only; the one-hit word finder of
-    // a window of 0 is not ported.
-    if args.window() == 0 {
-        anyhow::bail!(
-            "-window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX"
-        );
-    }
-    Ok(())
-}
-
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options and LOSAT's limits.
 pub fn check_options(args: &TblastxArgs) -> Result<()> {
@@ -1386,7 +1362,6 @@ pub fn check_options(args: &TblastxArgs) -> Result<()> {
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
     check_ncbi_options(args, &cli_outfmts(args)?, &mut std::io::sink())?;
-    check_losat_limits(args)?;
     // The host validates the argv it runs, with its `-num_threads` (docs/web/abi_v2.md).
     crate::utils::threading::validate_threads(args.num_threads)
 }
@@ -1710,6 +1685,8 @@ pub fn run_local_database(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // The file of an unknown `-matrix`, first, as the command line's `run` looks it up.
+    args.find_matrix_file(&settings.matrix_search)?;
     // NCBI parses -outfmt before its option handlers run; `search` checks the formats again.
     check_report_formats(outputs, args.out.as_deref())?;
     let archive_requested = outputs
@@ -1879,8 +1856,6 @@ fn search(
     // (`check_report_formats`: `xinclude_check`), as the other format checks of each
     // requested format.
     check_report_formats(outputs, args.out.as_deref())?;
-    // LOSAT's limits come where NCBI starts the search, after its checks.
-    check_losat_limits(&args)?;
     crate::blastinput::app::check_search_environment(
         "TBLASTX",
         !matches!(source, SubjectSource::Database(_)),
@@ -4395,6 +4370,14 @@ impl Drop for XEndBatch<'_> {
     }
 }
 
+// No NCBI counterpart: a call boundary; it computes no value NCBI computes.
+/// Calls `f` in a function of its own that is never inlined, so that a closure that calls it
+/// (`search_query_batch`'s chunk scan for `-window_size 0`) does not take `f`'s code.
+#[inline(never)]
+fn x_out_of_line<R>(f: impl FnOnce() -> R) -> R {
+    f()
+}
+
 /// Searches one query batch against the subjects and returns its hits and query statistics: the
 /// set-up of the batch (the flags, the queries' frames, the lookup table: `batch_setup.rs`; the
 /// diagonal table, the offset arrays and the seed release: `seed_tables.rs`; the cutoffs, length
@@ -6330,6 +6313,267 @@ fn search_query_batch<S: TbxScore>(
                 TblastxChunkScanResult { chunk, hits, stats }
             };
 
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:760-807
+            // ```c
+            //     scan_range[0] = 0;
+            //     scan_range[1] = subject->seq_ranges[0].left;
+            //     scan_range[2] = subject->seq_ranges[0].right - wordsize;
+            //
+            //     while (scan_range[1] <= scan_range[2]) {
+            //         /* scan the subject sequence for hits */
+            //         hits = scansub(lookup_wrap, subject,
+            //                        offset_pairs, array_size, scan_range);
+            //
+            //         totalhits += hits;
+            //         /* for each hit, */
+            //         for (i = 0; i < hits; ++i) {
+            //             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+            //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+            //             diag_coord = (subject_offset - query_offset) & diag_mask;
+            //             diff = subject_offset -
+            //                 (diag_array[diag_coord].last_hit - diag_offset);
+            //
+            //             /* do an extension, but only if we have not already extended this
+            //                far */
+            //             if (diff >= 0) {
+            //                 Int4 curr_context = BSearchContextInfo(query_offset,
+            //                                                        query_info);
+            //                 BlastUngappedCutoffs *cutoffs = word_params->cutoffs +
+            //                                                         curr_context;
+            //                 score = s_BlastAaExtendOneHit(matrix, subject, query,
+            //                                               subject_offset, query_offset,
+            //                                               cutoffs->x_dropoff,
+            //                                               &hsp_q, &hsp_s, &hsp_len,
+            //                                               wordsize, use_pssm, &s_last_off);
+            //
+            //                 /* if the hsp meets the score threshold, report it */
+            //                 if (score >= cutoffs->cutoff_score) {
+            //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+            //                                      query_offset, subject_offset, hsp_len,
+            //                                      score);
+            //                 }
+            //                 diag_array[diag_coord].last_hit =
+            //                     s_last_off - (wordsize - 1) + diag_offset;
+            //                 ++hits_extended;
+            //             }
+            //         }                       /* end for */
+            //     }                           /* end while */
+            //
+            //     /* increment the offset in the diagonal array (no windows used) */
+            //     Blast_ExtendWordExit(ewp, subject->length);
+            // ```
+            // `s_BlastAaWordFinder_OneHit` (`-window_size 0`: `BlastAaWordFinder` takes it when the
+            // diagonal table has no `multiple_hits`, aa_ungapped.c:214-224) on one chunk of a frame:
+            // the scan of `scan_chunk_plain` without the clamp of a short first range (that loop
+            // then never starts: no `scansub` call, no hit), the diagonal `s - q`, no flag, and
+            // `last_hit` set after every extension, also one below the cutoff. The extension is
+            // `s_BlastAaExtendOneHit` with the search's scores (`extension::extend_hit_one_hit`, on
+            // the two-hit extension's walks), on the context's letters and the chunk's, as the
+            // two-hit extensions read them. The
+            // unit path and `scan_chunk_bucketed` are two-hit only: a batch of window 0 is a
+            // `reference_loop` one for `x_pair_par::decide`, and `scan_chunk` takes this closure
+            // for every chunk.
+            let scan_chunk_one_hit = |chunk: SubjectChunk,
+                                      offset_pairs: &mut [OffsetPair],
+                                      diag_array: &mut [DiagStruct],
+                                      diag_offset: &mut i32,
+                                      scan_chunk_size: Option<usize>,
+                                      sc: S|
+             -> TblastxChunkScanResult {
+                let mut init_hsps: Vec<InitHSP> = Vec::new();
+                let stats = TblastxChunkScanStats::default();
+                let chunk_end = chunk.offset.saturating_add(chunk.length);
+                let subject = &subject_all[chunk.offset..chunk_end];
+                if subject.len() < wordsize as usize {
+                    // As `scan_chunk_plain` (aa_ungapped.c:760-764: `scan_range[2] <
+                    // scan_range[1]`, no scan; blast_extend.c:167-173).
+                    advance_tblastx_diag_offset(diag_offset, diag_array, window, chunk.length);
+                    return TblastxChunkScanResult {
+                        chunk,
+                        hits: Vec::new(),
+                        stats,
+                    };
+                }
+                // The scan ranges of `scan_chunk_plain` (masksubj.inl:43-58; `-lcase_masking`:
+                // `x_soft_chunk`, and a chunk without ranges is not searched).
+                let base_seq_ranges: [(i32, i32); 1] = [(0, chunk.length as i32)];
+                let x_soft = x_soft_calls
+                    .as_ref()
+                    .map(|calls| x_soft_chunk(calls, &chunk));
+                if let Some(None) = x_soft {
+                    return TblastxChunkScanResult {
+                        chunk,
+                        hits: Vec::new(),
+                        stats,
+                    };
+                }
+                let x_soft = x_soft.flatten();
+                let x_scan_letters = x_soft_scan_letters(x_soft, subject, subject_full, &chunk);
+                let scan_interiors = tblastx_scan_interiors(
+                    chunk.length,
+                    if x_soft.is_some() {
+                        None
+                    } else {
+                        scan_chunk_size
+                    },
+                );
+                let wordsize_usize = wordsize as usize;
+                for (interior_start, interior_end) in scan_interiors.into_iter() {
+                    let seq_ranges = match x_soft {
+                        Some(ranges) => ranges.to_vec(),
+                        None => clip_tblastx_seq_ranges_for_scan_interior(
+                            &base_seq_ranges,
+                            interior_start,
+                            interior_end,
+                            wordsize_usize,
+                            subject.len(),
+                        ),
+                    };
+                    if seq_ranges.is_empty() {
+                        continue;
+                    }
+                    // [C] scan_range[1] = subject->seq_ranges[0].left;
+                    // [C] scan_range[2] = subject->seq_ranges[0].right - wordsize;
+                    let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
+                    // [C] while (scan_range[1] <= scan_range[2])
+                    while scan_range[1] <= scan_range[2] {
+                        let prev_scan_left = scan_range[1];
+                        // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+                        let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
+                            x_scan_bf,
+                            lookup_ref,
+                            x_scan_letters,
+                            &seq_ranges,
+                            offset_pairs,
+                            offset_array_size,
+                            &mut scan_range,
+                        );
+                        if hits == 0 && scan_range[1] == prev_scan_left {
+                            // The guard of `scan_chunk_plain`.
+                            break;
+                        }
+                        // [C] for (i = 0; i < hits; ++i)
+                        for pair in &offset_pairs[..hits as usize] {
+                            let query_offset = pair.q_off;
+                            let subject_offset = pair.s_off;
+                            // [C] diag_coord = (subject_offset - query_offset) & diag_mask;
+                            // (Uint4 offsets: the difference wraps.)
+                            let diag_coord = (subject_offset.wrapping_sub(query_offset)
+                                & (diag_mask as u32))
+                                as usize;
+                            let diag_entry = &mut diag_array[diag_coord];
+                            // [C] diff = subject_offset -
+                            // [C]     (diag_array[diag_coord].last_hit - diag_offset);
+                            // (Uint4 minus Int4 in unsigned arithmetic, read as the Int4 `diff`.)
+                            let diff = subject_offset.wrapping_sub(
+                                diag_entry.last_hit().wrapping_sub(*diag_offset) as u32,
+                            ) as i32;
+                            // [C] if (diff >= 0)
+                            if diff < 0 {
+                                continue;
+                            }
+                            // [C] curr_context = BSearchContextInfo(query_offset, query_info);
+                            let ctx_idx = lookup_ref.get_context_idx(query_offset as i32);
+                            let ctx = &contexts_ref[ctx_idx];
+                            let q_raw = query_offset.wrapping_sub(ctx.frame_base as u32) as usize;
+                            // The context's letters (`query->sequence` from the context's offset,
+                            // blast_query_info.c:311-315), as the two-hit extensions read them.
+                            let query = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
+                            // [C] score = s_BlastAaExtendOneHit(matrix, subject, query, ...);
+                            let Some(hit) =
+                                crate::algorithm::tblastx::extension::extend_hit_one_hit(
+                                    sc,
+                                    query,
+                                    subject,
+                                    q_raw,
+                                    subject_offset as usize,
+                                    x_dropoff_per_context[ctx_idx],
+                                )
+                            else {
+                                // A word past the letters, which the scan does not give.
+                                x_read_failure.fail(
+                                    s_idx,
+                                    anyhow::anyhow!(
+                                        "TBLASTX -window_size 0: the word at query offset {} and subject offset {} is past the letters (internal error)",
+                                        query_offset,
+                                        subject_offset
+                                    ),
+                                );
+                                continue;
+                            };
+                            // [C] if (score >= cutoffs->cutoff_score)
+                            // [C]     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+                            // [C]                      query_offset, subject_offset, hsp_len, score);
+                            if hit.score >= cutoff_scores[ctx_idx] {
+                                if hit.length <= 0 {
+                                    // NCBI reference (598d8ae6):
+                                    // c++/src/algo/blast/core/aa_ungapped.c:1054,1083 and
+                                    // c++/src/algo/blast/core/blast_engine.c:870-873
+                                    // ```c
+                                    //     init_hit_width = q_right_off - q_left_off + 1;
+                                    // ...
+                                    //     *hsp_len = left_disp + right_disp + init_hit_width;
+                                    // ...
+                                    //     if (hit_params->link_hsp_params) {
+                                    //         status = BLAST_LinkHsps(program_number, hsp_list_out,
+                                    // ```
+                                    // A word whose running sum is reset after its best part
+                                    // (possible with a low -threshold) gives an HSP whose length
+                                    // is not positive. NCBI links it with the others before
+                                    // `Blast_HSPListReevaluateUngapped` deletes it, a
+                                    // deterministic result that LOSAT is still to port (the
+                                    // linking of LOSAT's TBLASTX takes HSPs of positive length
+                                    // only), so the search stops (the earliest such subject's
+                                    // error is reported, `XReadFailure`; the message names no
+                                    // value of the HSP, which may differ between chunks searched
+                                    // at the same time).
+                                    x_read_failure.fail(
+                                        s_idx,
+                                        anyhow::anyhow!(
+                                            "TBLASTX -window_size 0: the one-hit word finder saved an ungapped alignment whose length is not positive (a word whose running sum is reset after its best part, which a low -threshold allows); LOSAT does not support it yet (NCBI BLAST+ links it with the other alignments before its re-evaluation deletes it)"
+                                        ),
+                                    );
+                                } else {
+                                    let hsp_q_absolute = ctx.frame_base + hit.q_start;
+                                    init_hsps.push(InitHSP {
+                                        q_start_absolute: hsp_q_absolute,
+                                        q_end_absolute: hsp_q_absolute + hit.length,
+                                        s_start: hit.s_start,
+                                        s_end: hit.s_start + hit.length,
+                                        q_seed_absolute: query_offset as i32,
+                                        s_seed: subject_offset as i32,
+                                        score: hit.score,
+                                        ctx_idx,
+                                        s_f_idx,
+                                        q_idx: ctx.q_idx,
+                                        s_idx: s_idx as u32,
+                                        q_frame: ctx.frame,
+                                        s_frame: s_frame.frame,
+                                        q_orig_len: ctx.orig_len,
+                                        s_orig_len: s_len,
+                                    });
+                                }
+                            }
+                            // [C] diag_array[diag_coord].last_hit =
+                            // [C]     s_last_off - (wordsize - 1) + diag_offset;
+                            diag_entry.set_last_hit(hit.s_last_off - (wordsize - 1) + *diag_offset);
+                        }
+                    }
+                }
+                // [C] Blast_ExtendWordExit(ewp, subject->length);
+                advance_tblastx_diag_offset(diag_offset, diag_array, window, chunk.length);
+                // aa_ungapped.c:232 `Blast_InitHitListSortByScore`, then the conversion of
+                // `scan_chunk_plain` (blast_engine.c:561-584).
+                sort_init_hsps_by_score_ncbi(&mut init_hsps);
+                let mut hits = if init_hsps.is_empty() {
+                    Vec::new()
+                } else {
+                    get_ungapped_hsp_list(init_hsps, contexts_ref, s_frames_listed)
+                };
+                adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
+                TblastxChunkScanResult { chunk, hits, stats }
+            };
+
             // EXPERIMENT (SEEDBUCKET): the scan order (`scan_chunk_plain`) or the bucketed order
             // (`scan_chunk_bucketed`, only for tables of at least LOSAT_X_SEEDBUCKET_MIN_CELLS
             // cells).
@@ -6354,6 +6598,20 @@ fn search_query_batch<S: TbxScore>(
                               scan_chunk_size: Option<usize>,
                               sc: S|
              -> TblastxChunkScanResult {
+                // The one-hit word finder (`-window_size 0`) has a loop of its own, compiled out of
+                // line (`x_out_of_line`) so that this closure keeps the two-hit scan's code.
+                if window == 0 {
+                    return x_out_of_line(|| {
+                        scan_chunk_one_hit(
+                            chunk,
+                            offset_pairs,
+                            diag_array,
+                            diag_offset,
+                            scan_chunk_size,
+                            sc,
+                        )
+                    });
+                }
                 // The debug/trace paths exist only in the reference loop.
                 let x_debugging = scan_debug_range.is_some() || trace_hsp_target().is_some();
                 if crate::algorithm::tblastx::x_seed_bucket::bucketed(diag_array.len())

@@ -131,7 +131,7 @@ impl TblastnArgs {
             // ```
             // A PSSM search's request is the PSSM one (program `blastp`, service `psi`, the
             // whole `PssmWithParameters`; with `-subject` NCBI stops with that error after
-            // the prolog): item F1b of line RG, with psiblast's.
+            // the prolog): item F1b-2 of line RG, with psiblast's.
             if args.in_pssm.is_some() {
                 anyhow::bail!(
                         "-export_search_strategy with -in_pssm is not supported by LOSAT's TBLASTN yet (NCBI writes a PSI-BLAST request with -db and stops with \"Remote PSI-BL2SEQ is not supported\" with -subject)"

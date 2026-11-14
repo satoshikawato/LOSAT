@@ -70,6 +70,9 @@ pub(crate) struct TranslatedRpsSearch {
     /// Whether the database has several volumes, whose results NCBI merges
     /// (`RpsTblastnSearch::merges_volumes`); set by `for_database`.
     pub(crate) several_volumes: bool,
+    /// The volumes' matrix and gap costs as their set-up read them (`RpsVolumeSetup::costs`), for
+    /// the search strategy's requests (`handle_sets`); set by `for_database`.
+    pub(crate) costs: Option<(String, i32, i32)>,
 }
 
 impl RpsTblastnSearch for TranslatedRpsSearch {
@@ -107,6 +110,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         }
         Ok(Arc::new(Self {
             several_volumes: volumes.order.len() > 1,
+            costs: setup.costs(volumes.first()),
             ..self.clone()
         }))
     }
@@ -119,6 +123,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         diagnostics: &mut dyn Write,
         search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
         render: &mut BatchRender<'_>,
+        take: &mut dyn FnMut(&mut dyn Write, &[FastaRecord], usize) -> Result<()>,
     ) -> Result<usize> {
         let Some(database) = database else {
             bail!("a search without -db is not supported by LOSAT's {PROGRAM}");
@@ -149,6 +154,10 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
                     if queries.is_empty() {
                         return Err(engine("Empty CBlastQueryVector"));
                     }
+                    // The batch's search strategy request (`SaveSearchStrategy`, quoted in the
+                    // module's header), before its search; NCBI's posts of the bytes replaced in
+                    // it follow the batch's reader messages (written by `read` before the batch).
+                    take(&mut **diagnostics.borrow_mut(), queries, processed)?;
                     let mut results = vec![self
                         .search_batch(
                             queries,
@@ -182,6 +191,22 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
 
     fn merges_volumes(&self) -> bool {
         self.several_volumes
+    }
+
+    fn handle_sets(
+        &self,
+        database: Option<&BlastxDatabase>,
+        searchsp: Option<i64>,
+        dbsize: Option<i64>,
+    ) -> Vec<crate::report::archive::options::Param> {
+        database.map_or_else(Vec::new, |database| {
+            crate::algorithm::rps_search::volumes::search_sets(
+                database.x_seqdb(),
+                self.costs.clone(),
+                searchsp,
+                dbsize,
+            )
+        })
     }
 }
 
@@ -856,6 +881,7 @@ mod tests {
             use_sw_tback: false,
             comp_based_stats: "0".to_string(),
             several_volumes: false,
+            costs: None,
         };
         assert!(search.check_options().is_ok());
         search.search.sum_stats = true;

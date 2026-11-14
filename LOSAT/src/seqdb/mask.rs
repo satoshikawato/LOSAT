@@ -23,7 +23,7 @@ use super::{SeqDb, SeqDbError, SeqLocation};
 /// A filtering algorithm of the database (`GetMaskAlgorithmDetails`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaskAlgorithm {
-    /// The database-wide id (the `algo_id` of [`SeqDb::mask_ranges`]).
+    /// The database-wide id (the `algo_id` of [`SeqDb::mask_ranges_at`]).
     pub id: i32,
     /// The program: a `Blast-filter-program` number, or a name.
     pub program: String,
@@ -33,7 +33,7 @@ pub struct MaskAlgorithm {
     pub options: String,
 }
 
-/// What [`SeqDb::mask_ranges`] found.
+/// What [`SeqDb::mask_ranges_at`] found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MaskRanges {
     /// The masked ranges `(start, end)` of the algorithm in the sequence (`end` is

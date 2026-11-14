@@ -1308,7 +1308,8 @@ pub(crate) fn write_ascii_pssm(
 /// VisibleString, and NCBI's ASN.1 text stream writes `#` for each such byte with an error message
 /// of three lines for each (`Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.title`,
 /// `Bad char [0xC3] in string at line 12`, the title; NCBI 2.17.0, a UTF-8 title, status 0),
-/// which LOSAT does not reproduce (as outfmt 11's titles, `report::archive::check_titles`). The
+/// which LOSAT does not reproduce here (the BLAST archive and the search strategy write such a
+/// title as NCBI does, `report::serial::encoder::Traced`). The
 /// FASTA reader cuts a title at its first byte below 0x20, so the bytes refused are those from
 /// 0x7F on.
 // NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:413-444

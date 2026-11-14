@@ -319,9 +319,11 @@ mod tests {
             crate::report::archive::ArchiveEncoding::Text,
             crate::report::archive::ArchiveRequest {
                 program: "blastp",
+                application: "blastp",
                 service: "plain",
                 algorithm: Vec::new(),
                 database: None,
+                step_number: None,
             },
             OptionsHandle::default(),
         );

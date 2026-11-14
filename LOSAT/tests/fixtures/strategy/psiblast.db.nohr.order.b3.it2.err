@@ -1,0 +1,7 @@
+Error: (803.7) [psiblast] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 21
+q1 oneé
+Error: (803.7) [psiblast] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 21
+q1 oneé
+BLAST Database error: Error: File ({ENGINE}/tests/db_search/nophr.phr) not found.

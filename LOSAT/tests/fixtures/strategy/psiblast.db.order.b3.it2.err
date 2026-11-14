@@ -1,0 +1,17 @@
+Error: (803.7) [psiblast] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 21
+q1 oneé
+Error: (803.7) [psiblast] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 21
+q1 oneé
+Warning: [psiblast] Query_1 q1 oneé: Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics Frequency ratios for PSSM are all zeros, frequency ratios for BLOSUM62 will be used during traceback in composition based statistics 
+Warning: [psiblast] Query_2 q2 two: One or more O characters replaced by X for alignment score calculations at positions 10 
+Warning: [psiblast] Query_2 q2 two: Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics Frequency ratios for PSSM are all zeros, frequency ratios for BLOSUM62 will be used during traceback in composition based statistics One or more O characters replaced by X for alignment score calculations at positions 10 
+Error: (803.7) [psiblast] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 21
+q3 thrée
+Error: (803.7) [psiblast] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 21
+q3 thrée
+Warning: [psiblast] Query_3 q3 thrée: One or more O characters replaced by X for alignment score calculations at positions 10 
+Warning: [psiblast] Query_3 q3 thrée: Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics Frequency ratios for PSSM are all zeros, frequency ratios for BLOSUM62 will be used during traceback in composition based statistics One or more O characters replaced by X for alignment score calculations at positions 10 

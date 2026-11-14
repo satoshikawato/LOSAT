@@ -345,7 +345,7 @@ fn run_inner(
     let strategy_file = crate::report::archive::strategy::open_strategy_file(
         args.export_search_strategy.as_deref(),
         args.out.as_deref(),
-        "BLASTX",
+        program.upper,
     )?;
     let choice = app::parse_formatting_string(&args.outfmt)?;
     let format = app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
@@ -388,11 +388,7 @@ fn run_inner(
     // NCBI sets up a query batch (`ApplicationSettings::matrix_file`): the first batch is refused
     // then (`query_setup::matrix_error_message`), and a run without a batch reads no file.
     if let Ok(options) = &mut resolution {
-        if options.unknown_matrix {
-            options.matrix_file = settings
-                .matrix_file(&options.matrix)
-                .map_err(anyhow::Error::msg)?;
-        }
+        options.find_matrix_file(&settings.matrix_search)?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3157-3165
     // ```c++
@@ -957,7 +953,17 @@ fn run_inner(
     // of the reports, as rpsblast refuses them (`args::RpsTblastnSearch::for_database`, once per
     // run).
     if let Some(search) = options.rpstblastn.clone() {
-        options.rpstblastn = Some(search.for_database(&options, database.as_ref())?);
+        let search = search.for_database(&options, database.as_ref())?;
+        // What each batch's RPS set-up writes into the options handle, which the search strategy's
+        // later requests hold (`OptionsHandle::pass`): the search for the database knows its
+        // volumes' costs.
+        if let Some(strategy) = &strategy {
+            strategy.options().set_search_sets(
+                Vec::new(),
+                search.handle_sets(database.as_ref(), args.searchsp, args.dbsize),
+            )?;
+        }
+        options.rpstblastn = Some(search);
     }
     // LOSAT_X_DBIDXREAD acts on a database's index files only; the new side is marked where a
     // volume is opened (`seqdb::Volume::open`).
@@ -1289,6 +1295,7 @@ fn run_inner(
             &mut *stderr,
             &search_error,
             &mut render,
+            &mut take,
         ),
         None => run_query_batches(
             &options,

@@ -26,7 +26,6 @@ use super::seqalign::{query_records, EngineCounts};
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
-use crate::blastinput::value_parsers::SegSpec;
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
@@ -41,8 +40,12 @@ use crate::stats::tables::KarlinParams;
 
 /// The recorded options of a BLASTP run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
-/// always sets it (`S/DESIGN_OF8.md` 2.2).
+/// always sets it (`S/DESIGN_OF8.md` 2.2). An application whose search is BLASTP's (psiblast,
+/// rpsblast) gives its own (`BlastpArgs::request_inputs`), made from these and its arguments.
 pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
+    if let Some(inputs) = &args.request_inputs {
+        return OptionInputs::clone(inputs);
+    }
     let mut inputs = OptionInputs::new(Program::Blastp, &args.task);
     inputs.dbsize = args.dbsize;
     inputs.searchsp = args.searchsp;
@@ -86,19 +89,7 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
         .seg
         .as_deref()
         .and_then(|value| crate::blastinput::app::parse_seg_option(value, "BLASTP").ok())
-        .map(|spec| match spec {
-            SegSpec::No => Filter::No,
-            SegSpec::Yes => Filter::Yes,
-            SegSpec::WindowLocutHicut {
-                window,
-                locut,
-                hicut,
-            } => Filter::Seg {
-                window,
-                locut,
-                hicut,
-            },
-        });
+        .map(Filter::from);
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)

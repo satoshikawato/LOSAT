@@ -85,9 +85,38 @@ pub(super) fn search_rounds(
         }
     }
     let epilog = batches.stop.is_none();
+    // The search strategy's requests (`-export_search_strategy`): one per query, written before
+    // its first round (`run_queries`), and the one of the batch that stops the run
+    // (`QueryBatches::stop_batch`). NCBI's posts of the bytes replaced in a query's request follow
+    // the reader's messages of its batch: round 1's call places them before the query's report
+    // (`CallRequests::take_posts`), and an error of the batch after those messages
+    // (`write_request_posts`).
+    let requests = args.strategy.as_ref().map(|_| {
+        crate::algorithm::blastp::archive::requests(
+            subject_source
+                .database()
+                .is_none()
+                .then(|| subject_source.fasta_records()),
+            args.lcase_masking,
+        )
+    });
+    let write_stop_request = || -> Result<()> {
+        match (
+            args.strategy.as_ref(),
+            requests.as_ref(),
+            batches.stop_batch.clone(),
+        ) {
+            (Some(strategy), Some(requests), Some(span)) => {
+                requests.write(strategy, span.start, &searched_queries[span], None)
+            }
+            _ => Ok(()),
+        }
+    };
     if batches.searched_done == 0 {
         // As `search`: the first batch's stop after the prolog, or the reports of no query.
         if let Some((_, error)) = batches.stop.as_ref() {
+            // The request of a batch that NCBI made a query factory of, before any output.
+            write_stop_request()?;
             write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
             // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (quoted at
             // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM
@@ -127,11 +156,18 @@ pub(super) fn search_rounds(
                 outputs,
                 pool,
                 epilog,
+                requests.as_ref(),
             )
         })?;
+        // The request of the batch that stops the run follows the queries' rounds (NCBI wrote it
+        // before the search that fails).
+        write_stop_request()?;
     }
+    // The stopping batch's reader messages, NCBI's posts of the bytes replaced in its request
+    // (written above, after the rounds of the queries before), its error.
     if let Some((warnings, error)) = batches.stop {
         outputs.diagnostics.write_all(&warnings)?;
+        super::write_request_posts(args, &mut *outputs.diagnostics)?;
         return Err(error);
     }
     Ok(())
@@ -189,6 +225,7 @@ fn run_queries(
     outputs: &mut ReportOutputs<'_>,
     pool: &crate::utils::threading::SearchPool<'_>,
     epilog: bool,
+    requests: Option<&crate::report::archive::requests::RunRequests<'_>>,
 ) -> Result<()> {
     let mut files = RoundFiles::new(
         &plan.request,
@@ -226,6 +263,22 @@ fn run_queries(
         // `kbp_psi[0]` and `kbp_gap_psi[0]` of the input PSSM's search, after a round 1 without
         // alignments (`in_pssm_files::InPssmRounds::written_back`).
         let mut searched_input = None;
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:337-339
+        // ```c++
+        //     CRef<IQueryFactory> query_factory(s_MakeQueryFactory(pssm, query));
+        //
+        //     SaveSearchStrategy(args, m_CmdLineArgs, query_factory, opts_hndl, pssm, kNumIterations);
+        // ```
+        // The query's search strategy request, before its first round (also when round 1 fails
+        // with a header file NCBI cannot read). Round 1's call notes the query's searched space
+        // (`CallRequests`, which finds the request written) and writes NCBI's posts of the bytes
+        // replaced in it after the reader's messages of the query's batch, before its report
+        // (`CallRequests::take_posts`); the later rounds' calls find all three done. NCBI's
+        // handle keeps the last round's space, which is round 1's: every round's effective
+        // lengths read the same `kbp_gap_std` (blast_setup.c:766-768).
+        if let (Some(strategy), Some(requests)) = (args.strategy.as_ref(), requests) {
+            requests.write(strategy, query, records, None)?;
+        }
         while state.go() {
             let round = state.number();
             match (&pssm, input_files.as_mut()) {
@@ -332,6 +385,9 @@ fn run_queries(
                     }
                     if round == 1 {
                         outputs.diagnostics.write_all(&batches.warnings[query])?;
+                        // NCBI's posts of the bytes replaced in the query's request, which
+                        // round 1's report did not place.
+                        super::write_request_posts(args, &mut *outputs.diagnostics)?;
                     }
                     return Err(failure.error);
                 }

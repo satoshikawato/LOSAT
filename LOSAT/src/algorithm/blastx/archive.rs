@@ -43,8 +43,12 @@ use crate::stats::tables::KarlinParams;
 
 /// The recorded options of a BLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
-/// always sets it (`S/DESIGN_OF8.md` 2.2).
+/// always sets it (`S/DESIGN_OF8.md` 2.2). RPSTBLASTN, whose search is BLASTX's, gives its own
+/// (`BlastxArgs::request_inputs`), made from these and its arguments.
 pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
+    if let Some(inputs) = &args.request_inputs {
+        return OptionInputs::clone(inputs);
+    }
     let mut inputs = OptionInputs::new(Program::Blastx, &args.task);
     inputs.dbsize = args.dbsize;
     inputs.searchsp = args.searchsp;
@@ -78,19 +82,7 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.ungapped = args.ungapped;
     inputs.soft_masking = Some(args.soft_masking);
     // An archive is written only for a `-seg` that `resolve` read.
-    inputs.seg = args.seg_spec().ok().map(|seg| match seg {
-        crate::blastinput::value_parsers::SegSpec::No => Filter::No,
-        crate::blastinput::value_parsers::SegSpec::Yes => Filter::Yes,
-        crate::blastinput::value_parsers::SegSpec::WindowLocutHicut {
-            window,
-            locut,
-            hicut,
-        } => Filter::Seg {
-            window,
-            locut,
-            hicut,
-        },
-    });
+    inputs.seg = args.seg_spec().ok().map(Filter::from);
     inputs.culling_limit = args.culling_limit;
     inputs.subject_besthit = args.subject_besthit;
     inputs.max_intron_length = args.max_intron_length;

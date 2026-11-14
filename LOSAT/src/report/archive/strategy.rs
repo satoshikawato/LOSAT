@@ -55,7 +55,14 @@
 //! that ends it. One cursor of the run (`State::next_query`), keyed by the run's index of each
 //! batch's first query, keeps every request written once and in order (a batch searched again
 //! writes none), and the batch's searched space moves the next request's `EffectiveSearchSpace`
-//! option (`note_searched`). A broken order is LOSAT's internal error, not a file that differs.
+//! option (`note_searched`), with what the batch's set-up sets in the options handle (RPS's
+//! database length and `.aux` costs, `OptionsHandle::pass`). A broken order is LOSAT's internal
+//! error, not a file that differs.
+//!
+//! The applications whose search is another program's write their own requests through the same
+//! cursor (`options::RequestKind`): psiblast with a FASTA query one per query (BLASTP's batches
+//! of one query, or `psi_round`'s rounds, before the query's first round), rpsblast BLASTP's,
+//! rpstblastn BLASTX's.
 
 use std::io::Write;
 use std::ops::Range;
@@ -66,13 +73,14 @@ use anyhow::Result;
 
 use super::options::OptionInputs;
 use super::writer::{write_strategy_request, RequestInputs};
-use super::{ArchiveRequest, OptionsHandle, SearchSpaceCarry};
+use super::{ArchiveRequest, HandleCarry, OptionsHandle};
 use crate::report::diag_log::{Posts, ERROR};
 
 struct State {
     sink: Box<dyn Write + Send>,
-    /// The `EffectiveSearchSpace` option after the batches noted so far (`note_searched`).
-    carry: SearchSpaceCarry,
+    /// What the searches set in the options handle after the batches noted so far
+    /// (`note_searched`).
+    carry: HandleCarry,
     /// The run's searched queries whose batches' requests are written: the next request starts
     /// here.
     next_query: usize,
@@ -201,7 +209,7 @@ pub struct HitlistArgs {
 /// The `HitlistSize` option of a run of format `outfmt` (`report_counts`): the archive's is that
 /// of outfmt 11, while outfmt 0 to 4 take the larger of `-num_descriptions` and `-num_alignments`
 /// (blast_args.cpp:2910-2936, probe `nd` of RG-F1).
-fn hitlist_size(outfmt: i32, counts: HitlistArgs) -> i32 {
+pub(crate) fn hitlist_size(outfmt: i32, counts: HitlistArgs) -> i32 {
     crate::blastinput::report_counts::report_counts(
         outfmt,
         counts.max_target_seqs,
@@ -232,7 +240,7 @@ pub fn open_strategy_file(
 }
 
 impl StrategyExport {
-    /// The export of a run of `inputs.program` into `sink` (`create_strategy_file`). `database`
+    /// The export of a run of `inputs.kind` into `sink` (`create_strategy_file`). `database`
     /// is the `-db` argument as NCBI keeps it (`None` for `-subject`); `options` is the run's
     /// options handle, which its archive shares. The request is the archive's
     /// (`ArchiveRequest::for_inputs`).
@@ -247,7 +255,7 @@ impl StrategyExport {
             options,
             state: Mutex::new(State {
                 sink,
-                carry: SearchSpaceCarry::default(),
+                carry: HandleCarry::default(),
                 next_query: 0,
                 noted_through: 0,
                 stop: usize::MAX,
@@ -306,12 +314,12 @@ impl StrategyExport {
     /// Writes the request of the batch of the run's searched queries `queries`, where NCBI writes
     /// it: after the batch is read and made a query factory, before its search. `make` builds the
     /// request (from the batch's records, `requests::RunRequests`) and hands it to its argument,
-    /// which writes it with the `EffectiveSearchSpace` option the batches before left
-    /// (`note_searched`), all under one lock. NCBI's posts of the bytes that ASN.1 text replaced
-    /// in it (`replaced_posts`) wait for the run to write them where the batch starts
-    /// (`take_posts`). Returns false, calling nothing, when the request is not to be written
-    /// (`takes`). The requests are written in the run's order, each starting where the one
-    /// before ended, after the batch before was noted; anything else is LOSAT's internal error.
+    /// which writes it with what the batches before set in the options handle (`note_searched`),
+    /// all under one lock. NCBI's posts of the bytes that ASN.1 text replaced in it
+    /// (`replaced_posts`) wait for the run to write them where the batch starts (`take_posts`).
+    /// Returns false, calling nothing, when the request is not to be written (`takes`). The
+    /// requests are written in the run's order, each starting where the one before ended, after
+    /// the batch before was noted; anything else is LOSAT's internal error.
     pub fn write_with(
         &self,
         queries: Range<usize>,
@@ -330,14 +338,15 @@ impl StrategyExport {
             let shared = &self.0;
             let mut posts = Posts::new();
             make(&mut |request| {
+                let sets = shared.options.request_sets(&state.carry);
                 let written = write_strategy_request(
                     &mut *state.sink,
                     &shared.request,
                     request,
-                    state.carry.option(),
+                    &sets,
                     shared.options.database_list(),
                     |replaced| {
-                        posts = replaced_posts(shared.request.program, replaced);
+                        posts = replaced_posts(shared.request.application, replaced);
                         Ok(())
                     },
                 );
@@ -417,12 +426,13 @@ impl StrategyExport {
     //     }
     //     options->SetEffectiveSearchSpace(eff_searchsp);
     // ```
-    /// Moves the `EffectiveSearchSpace` option of the requests after the batch of the run's
-    /// searched queries `queries` past that batch, once the batch's set-up has written it into the
-    /// options handle (above): `searched` is the batch's option when NCBI searched the batch (the
-    /// archive's `BatchArchive::searched_space`, from the same values), `None` for a batch NCBI does
-    /// not search (`OptionsHandle::pass`). A batch noted already (a search of the batches again) is
-    /// not passed again; a batch noted out of the run's order is LOSAT's internal error.
+    /// Moves what the requests after the batch of the run's searched queries `queries` hold of the
+    /// options handle past that batch, once the batch's set-up has written it into the handle
+    /// (above; `OptionsHandle::pass`: the set-up's parameters, then the search space): `searched`
+    /// is the batch's `EffectiveSearchSpace` option when NCBI searched the batch (the archive's
+    /// `BatchArchive::searched_space`, from the same values), `None` for a batch NCBI does not
+    /// search. A batch noted already (a search of the batches again, psiblast's later rounds of a
+    /// query) is not passed again; a batch noted out of the run's order is LOSAT's internal error.
     pub fn note_searched(&self, queries: Range<usize>, searched: Option<i64>) -> Result<()> {
         self.with_state(|state| {
             if queries.end <= state.noted_through {
@@ -470,19 +480,20 @@ impl StrategyExport {
 // 		d->SetMessage(NStr::Sanitize(m));
 // 		d->SetCode((int)mess.m_Severity);
 // ```
-/// NCBI's posts of the bytes that ASN.1 text replaced in a request of a run of `program`
-/// (`encoder::ReplacedChar`, with the application's prefix): one error post each, which the
+/// NCBI's posts of the bytes that ASN.1 text replaced in a request of a run of the application
+/// `application` (`encoder::ReplacedChar`, with its prefix, `ArchiveRequest::application`): one
+/// error post each, which the
 /// application's handler also saves as a message of the batch's archive (outfmt 11) when it
 /// writes one (`Posts::write`; the archive's own posts are not saved, `super::post_replaced`).
 /// NCBI posts them while it writes the request, after it read the batch (whose reader messages
 /// come first) and before the batch's search: blastn_app.cpp:277-282.
 fn replaced_posts(
-    program: &str,
+    application: &str,
     replaced: &[crate::report::serial::encoder::ReplacedChar],
 ) -> Posts {
     let mut posts = Posts::new();
     for byte in replaced {
-        posts.post(ERROR, byte.post(Some(program)));
+        posts.post(ERROR, byte.post(Some(application)));
     }
     posts
 }
@@ -702,9 +713,11 @@ mod tests {
             crate::report::archive::ArchiveEncoding::Text,
             ArchiveRequest {
                 program: "blastp",
+                application: "blastp",
                 service: "plain",
                 algorithm: Vec::new(),
                 database: None,
+                step_number: None,
             },
             OptionsHandle::default(),
         );
@@ -732,8 +745,10 @@ mod tests {
         assert_eq!(all.matches("name \"TaxidList\"").count(), 2, "{all}");
         assert!(all.contains("value big-integer 0\n"), "{all}");
         // The archive's carry is its own: its first archive's option is its batch's.
-        assert_eq!(handle.search_space_option(None), None);
-        assert_eq!(handle.search_space_option(Some(5)), Some(0));
+        let space =
+            |searched| crate::report::archive::tests::search_space(&handle.request_sets(searched));
+        assert_eq!(space(None), None);
+        assert_eq!(space(Some(5)), Some(0));
     }
 
     /// `-` and a file that is also `-out` are refused; a path that cannot be created is NCBI's

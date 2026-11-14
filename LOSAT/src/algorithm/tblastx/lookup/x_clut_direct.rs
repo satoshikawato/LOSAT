@@ -1703,13 +1703,30 @@ fn x_give_back_to_pool<H: XQueryOffset + XPooledOffset>(table: &mut XFlatCompres
     if pool.lent == 0 {
         return;
     }
+    // Only the vectors an arena would keep; the table keeps (and drops) the others.
     let vectors = XFlatTableVectors {
-        starts: std::mem::take(&mut table.starts),
-        hits: std::mem::take(&mut table.hits),
-        pv: std::mem::take(&mut table.pv),
+        starts: x_take_arena_sized(&mut table.starts),
+        hits: x_take_arena_sized(&mut table.hits),
+        pv: x_take_arena_sized(&mut table.pv),
     };
     let kept = pool.take_back(vectors);
     debug_assert!(kept.is_ok());
+}
+
+// No NCBI counterpart: memory placement only (line NP, SC9d); NCBI frees the vectors.
+/// `vector`'s buffer taken for the pool (`vector` left empty), unless glibc maps a block of its
+/// capacity whatever its dynamic mmap threshold (more than its largest one,
+/// DEFAULT_MMAP_THRESHOLD_MAX on 64-bit): then nothing is taken (an empty vector), and the buffer,
+/// dropped with its table, goes back to the system. The pool is for the vectors that a pool thread's
+/// arena would keep after they are freed; kept, the larger ones stayed resident between builds
+/// (word size 7's 40 MB of starts per table: 800 cDNAs x scer_pep at 8 threads, 1.41-1.46 GB of
+/// maximum RSS with them in the pool, 1.06-1.15 GB without the pool).
+fn x_take_arena_sized<T>(vector: &mut Vec<T>) -> Vec<T> {
+    let bytes = vector.capacity().saturating_mul(std::mem::size_of::<T>());
+    if cfg!(all(target_os = "linux", target_env = "gnu")) && bytes > 32 << 20 {
+        return Vec::new();
+    }
+    std::mem::take(vector)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (see

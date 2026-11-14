@@ -1,0 +1,33 @@
+
+                                          Tax BLAST report                                          
+
+Query= pdq query of the duplicated record
+
+Length=220
+
+                                           Organism Report                                           
+Accession                                   Description                               Score E-value 
+
+                                    Bacillus sp. () [firmicutes]                                    
+ WP_300000001 unnamed protein product [Bacillus sp.]                                   466   9e-174  
+ P99901       unnamed protein product [Bacillus sp.]                                   466   9e-174  
+ 1XZ2_A       Chain A                                                                  466   9e-174  
+ AB342061     unnamed protein product [Bacillus sp.]                                   466   9e-174  
+ AB332002     first title                                                              466   9e-174  
+ AB322001     unnamed protein product [Bacillus sp.]                                   466   9e-174  
+ AB302002     unnamed protein product [uncultured bacterium]                           466   9e-174  
+
+                                 uncultured bacterium () [bacteria]                                 
+ NP_300001    unnamed protein product [uncultured bacterium]                           466   9e-174  
+ Subject_1    unnamed protein product [uncultured bacterium]                           466   9e-174  
+ 1XY2         unnamed protein product [uncultured bacterium]                           466   9e-174  
+ BK320041     TPA: unnamed protein product [uncultured bacterium]                      466   9e-174  
+ AB332001     first title                                                              466   9e-174  
+ AB322002     second title                                                             466   9e-174  
+ AB302001     unnamed protein product [uncultured bacterium]                           466   9e-174  
+
+                                  A &amp; B &lt;x&gt; &#65; () [x]                                  
+ seq21        unnamed protein product [A & B <x> A]                                    466   9e-174  
+
+                                      TPA: tpa organism () [x]                                      
+ CA320051     unnamed protein product [TPA: tpa organism]                              466   9e-174  

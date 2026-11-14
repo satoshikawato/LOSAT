@@ -34,6 +34,9 @@
 //! variant's 0-based position in its ASN.1 SEQUENCE or CHOICE (absent OPTIONAL members still
 //! count), which only the binary encoder writes (its context tag `[tag]`).
 
+pub use super::out_buffer::Stream;
+use super::out_buffer::{OutBuffer, Piece};
+
 /// An error that NCBI's object stream raises while it writes a value, which LOSAT reports
 /// instead of writing the document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -167,6 +170,16 @@ pub struct Replaced {
     pub position: StreamPosition,
     /// Whether NCBI's message quotes the string (the text and binary streams, not XML).
     pub with_string: bool,
+    /// The length of `Encoder::held` when NCBI posts the byte (before its wrap and its `#`).
+    pub at: usize,
+}
+
+/// A replaced byte (`ReplacedChar`) and the bytes of its document that NCBI's stream had
+/// written to its output when NCBI posted it (`out_buffer::OutBuffer::written`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Posted {
+    pub written: u64,
+    pub replaced: ReplacedChar,
 }
 
 impl ReplacedChar {
@@ -192,10 +205,25 @@ impl ReplacedChar {
         }
         message
     }
+
+    /// The text of the post on the diagnostics stream: `Error: (803.7) `, the application's
+    /// prefix (`SetDiagPostPrefix`) in brackets when it has one, the message and an end of line
+    /// (`ncbi_exception::error_post_line`, `SDiagMessage::x_OldWrite`).
+    pub fn post(&self, prefix: Option<&str>) -> Vec<u8> {
+        let (code, subcode) = Self::ERR_CODE;
+        crate::ncbi_exception::error_post_line(
+            Some(&format!("{code}.{subcode}")),
+            prefix,
+            &self.message(),
+        )
+    }
 }
 
 /// The calls of NCBI's `CObjectOStream` that the serialized BLAST reports make.
 pub trait Encoder {
+    /// NCBI's object stream that the encoder writes, whose output buffer `Traced` follows
+    /// (`out_buffer`); `None` for an encoder that `Traced` does not wrap.
+    const STREAM: Option<Stream> = None;
     /// `IsWritingDefaultValuesEnforced`: whether a member with a DEFAULT that was not set is
     /// written anyway, with its default value (`report::seqid` quotes the rule). Only NCBI's
     /// JSON stream enforces it (`m_EnforceWritingDefaults`, `json`).
@@ -292,6 +320,18 @@ pub trait Encoder {
         let _ = (sink, all);
         Ok(())
     }
+    /// The bytes of the document that the encoder holds (that `flush_to` has not handed on), for
+    /// `Traced`; the binary encoder's buffer also holds what preceded the document until its
+    /// first hand-on. The default holds nothing.
+    fn held(&self) -> &[u8] {
+        &[]
+    }
+    /// Hands the first `count` bytes of `held` to `sink` and drops them (`Traced` hands on the
+    /// bytes that NCBI's buffer has written to its output). The default hands nothing.
+    fn hand_on(&mut self, sink: &mut dyn std::io::Write, count: usize) -> std::io::Result<()> {
+        let _ = (sink, count);
+        Ok(())
+    }
     /// A CHOICE value of the type `type_name` whose variant `name` (position `tag`) is a
     /// SEQUENCE OF VisibleString: the strings of `items` in order. The default is `variant`,
     /// a list of string elements and `end_variant`; the XML stream in its standard-XML mode
@@ -328,33 +368,55 @@ enum Frame {
     Named(String),
     /// A container: nothing.
     List,
-    /// A container element: `.E`.
-    Element,
+    /// A container element: `.E`, unless `shown` is false (an element of a named type in
+    /// NCBI's XML stream, `Traced::name_element`).
+    Element { shown: bool },
 }
 
 /// The encoder `E` (ASN.1 text, ASN.1 binary, or XML in the archive's object mode, whose
 /// `variant_string_list` is the trait's sequence of calls; not the standard-XML mode of outfmt
 /// 14 / 16, which writes it otherwise) with NCBI's object stack, for the posts of the bytes that
-/// it replaces (`ReplacedChar`). A caller that posts NCBI's messages
-/// writes a document again through it when the first writing reported
-/// `SerialError::NonVisibleChar`; it writes the strings with `visible_str_replacing`. The
-/// encoders by themselves keep no stack and replace nothing, so that the documents without
-/// such a byte are written as before.
+/// it replaces (`ReplacedChar`). A caller that posts NCBI's messages writes a document through
+/// it when one of its strings has such a byte (the archive and the search strategy decide that
+/// before they write, `report::archive`; the mask writers write a document again when the first
+/// writing reported `SerialError::NonVisibleChar`); it writes the strings with
+/// `visible_str_replacing`. The encoders by themselves keep no stack and replace nothing, so that
+/// the documents without such a byte are written as before.
 ///
-/// The whole document stays in `E`'s buffer until `flush_to(.., true)` (a flush before the end
-/// does nothing), so that the encoder's positions count from the document's start: the text
-/// and XML encoders count the lines from their start, and `base` is the length of the binary
-/// encoder's buffer before the document.
+/// The positions count from the document's start: `flush_to` counts the bytes that it hands on
+/// (the bytes for the binary stream, the ends of line for the text and XML streams), and `base`
+/// is the length of the encoder's buffer before the document.
 ///
-/// (NCBI's XML stream pushes no container element frame for an element of a named type
-/// (`WillHaveName`, objostrxml.cpp:1186-1209), so its trace has no `.E` there; no XML document
-/// that LOSAT traces has such a list with a string that can hold a control character.)
-pub struct Traced<E> {
+/// NCBI posts each byte when it writes it, after the bytes that its output buffer had written to
+/// the output by then (`out_buffer`): `Traced` follows that buffer from the bytes of each call
+/// (`Encoder::held`) and hands its sink no more than NCBI had written (`flush_to`, which hands
+/// what NCBI has written so far; at the end, everything). A `Traced` with a post function
+/// (`posting`) posts each byte there, after handing on exactly the bytes that NCBI had written
+/// before it, so that the output and the posts in one file (`2>&1`) follow NCBI's order; without
+/// one the posts wait for `take_replaced_chars` / `take_posted` (`Posted` holds those bytes).
+///
+/// NCBI's XML stream pushes no container element frame for an element of a named type
+/// (`WillHaveName`, objostrxml.cpp:1186-1209), so its trace has no `.E` there: `Traced::xml`
+/// drops the frame of an element whose value starts with a named type
+/// (`begin_sequence`, `begin_named`, `variant`).
+pub struct Traced<E, P = fn(&ReplacedChar) -> std::io::Result<()>> {
     inner: E,
     base: u64,
+    /// Whether the stream is NCBI's XML stream (`name_element`).
+    xml: bool,
+    /// The bytes and the ends of line of the encoder's buffer that `flush_to` handed on.
+    flushed_bytes: u64,
+    flushed_lines: u64,
     root: String,
     frames: Vec<Frame>,
-    replaced: Vec<ReplacedChar>,
+    /// NCBI's output buffer of the document (`E::STREAM`).
+    buffer: Option<OutBuffer>,
+    /// The bytes of the document handed on.
+    handed: u64,
+    /// The bytes at the start of `inner.held()` that precede the document (`Encoder::held`).
+    foreign: usize,
+    posted: Vec<Posted>,
+    post: Option<P>,
 }
 
 /// The empty string of the XML stream's messages.
@@ -362,18 +424,77 @@ fn no_string() -> std::sync::Arc<[u8]> {
     std::sync::Arc::from(&[][..])
 }
 
+/// A sink that counts what it hands on (`Traced::flush_to`).
+struct Counted<'s> {
+    sink: &'s mut dyn std::io::Write,
+    bytes: u64,
+    lines: u64,
+}
+
+impl std::io::Write for Counted<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.sink.write(buf)?;
+        self.bytes += written as u64;
+        self.lines += buf[..written].iter().filter(|&&byte| byte == b'\n').count() as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.sink.flush()
+    }
+}
+
 impl<E: Encoder> Traced<E> {
-    /// `inner`, which appends a document to a buffer of `base` bytes.
+    /// `inner` (ASN.1 text or binary), which appends a document to a buffer of `base` bytes.
     pub fn new(inner: E, base: usize) -> Self {
         Self {
+            foreign: inner.held().len(),
             inner,
             base: base as u64,
+            xml: false,
+            flushed_bytes: 0,
+            flushed_lines: 0,
             root: String::new(),
             frames: Vec::new(),
-            replaced: Vec::new(),
+            buffer: E::STREAM.map(OutBuffer::new),
+            handed: 0,
+            posted: Vec::new(),
+            post: None,
         }
     }
 
+    /// `new` of NCBI's XML object stream (`name_element`).
+    pub fn xml(inner: E, base: usize) -> Self {
+        Self {
+            xml: true,
+            ..Self::new(inner, base)
+        }
+    }
+
+    /// The same encoder, which posts each replaced byte with `post` as NCBI does
+    /// (`flush_to`).
+    pub fn posting<Q>(self, post: Q) -> Traced<E, Q>
+    where
+        Q: FnMut(&ReplacedChar) -> std::io::Result<()>,
+    {
+        Traced {
+            inner: self.inner,
+            base: self.base,
+            xml: self.xml,
+            flushed_bytes: self.flushed_bytes,
+            flushed_lines: self.flushed_lines,
+            root: self.root,
+            frames: self.frames,
+            buffer: self.buffer,
+            handed: self.handed,
+            foreign: self.foreign,
+            posted: self.posted,
+            post: Some(post),
+        }
+    }
+}
+
+impl<E: Encoder, P> Traced<E, P> {
     /// `CObjectStack::GetStackTraceASN`: the document's type, then `.name` for each member or
     /// variant frame and `.E` for each container element.
     ///
@@ -414,146 +535,286 @@ impl<E: Encoder> Traced<E> {
                     stack.push('.');
                     stack.push_str(name);
                 }
-                Frame::Element => stack.push_str(".E"),
-                Frame::List => {}
+                Frame::Element { shown: true } => stack.push_str(".E"),
+                Frame::Element { shown: false } | Frame::List => {}
             }
         }
         stack
     }
 
-    /// Takes the bytes that `inner` replaced in `string`, which it just wrote, with the stack
-    /// trace and one shared copy of the string.
-    fn collect(&mut self, string: &[u8]) {
+    /// The bytes replaced so far (`ReplacedChar`) and not posted, which it forgets.
+    pub fn take_replaced_chars(&mut self) -> Vec<ReplacedChar> {
+        self.take_posted()
+            .into_iter()
+            .map(|posted| posted.replaced)
+            .collect()
+    }
+
+    /// `take_replaced_chars` with the bytes that NCBI had written before each post (`Posted`).
+    pub fn take_posted(&mut self) -> Vec<Posted> {
+        std::mem::take(&mut self.posted)
+    }
+
+    /// `EndContainerElement` of the open element, if any.
+    fn end_element(&mut self) {
+        if matches!(self.frames.last(), Some(Frame::Element { .. })) {
+            self.frames.pop();
+        }
+    }
+
+    /// The value of the element just opened starts with the named type `type_name`: NCBI's
+    /// XML stream has no element frame for it.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1186-1202
+    /// ```c++
+    /// bool CObjectOStreamXml::WillHaveName(TTypeInfo elementType)
+    /// {
+    ///     while ( elementType->GetName().empty() ) {
+    ///         if ( elementType->GetTypeFamily() != eTypeFamilyPointer )
+    ///             return false;
+    ///         elementType = CTypeConverter<CPointerTypeInfo>::SafeCast(
+    ///             elementType)->GetPointedType();
+    ///     }
+    ///     // found named type
+    ///     return true;
+    /// }
+    ///
+    /// void CObjectOStreamXml::BeginContainerElement(TTypeInfo elementType)
+    /// {
+    ///     if ( !WillHaveName(elementType) ) {
+    ///         BeginArrayElement(elementType);
+    ///     }
+    /// }
+    /// ```
+    /// (`WriteContainerContents`, 1255-1316, pushes `eFrameArrayElement` under the same test.)
+    /// An anonymous type (an empty name, or the open member's tag that the writers pass for one,
+    /// `xml::anonymous_type`) has no name, so its element keeps its frame.
+    fn name_element(&mut self, type_name: &str) {
+        if self.xml && !type_name.is_empty() && !super::xml::anonymous_type(type_name) {
+            if let Some(Frame::Element { shown }) = self.frames.last_mut() {
+                *shown = false;
+            }
+        }
+    }
+}
+
+impl<E: Encoder, P> Traced<E, P> {
+    /// `write` (one call of `inner`, which writes `piece`), followed in NCBI's buffer.
+    fn call(&mut self, piece: Piece, write: impl FnOnce(&mut E)) {
+        let before = self.inner.held().len();
+        let last = self.inner.held().last().copied();
+        write(&mut self.inner);
+        self.follow(piece, before, last, &[]);
+    }
+
+    /// The buffer calls of the bytes that `inner` wrote after `before` held bytes, whose last
+    /// was `last` (`out_buffer::OutBuffer::put`); what NCBI had written at each of `posts` (the
+    /// offsets of `held` where NCBI posts).
+    fn follow(
+        &mut self,
+        piece: Piece,
+        before: usize,
+        last: Option<u8>,
+        posts: &[usize],
+    ) -> Vec<u64> {
+        let mut written = Vec::new();
+        let Some(buffer) = self.buffer.as_mut() else {
+            written.resize(posts.len(), 0);
+            return written;
+        };
+        let held = self.inner.held();
+        // XML's `value` attribute replaces the `>` that ended the bytes before the call
+        // (`OpenTagEndBack`); a string's wrap inserts its end of line after them.
+        let start = if before > 0 && held.get(before - 1).copied() != last {
+            before - 1
+        } else {
+            before
+        };
+        let offsets: Vec<usize> = posts.iter().map(|&at| at - start).collect();
+        buffer.put(piece, &held[start..], &offsets, &mut written);
+        written
+    }
+
+    /// A string written by `write`: the bytes that `inner` replaced in it, with the stack trace,
+    /// one shared copy of the string and what NCBI had written when it posted each.
+    fn string(&mut self, string: &[u8], write: impl FnOnce(&mut E)) {
+        let before = self.inner.held().len();
+        let last = self.inner.held().last().copied();
+        write(&mut self.inner);
         let replaced = self.inner.take_replaced();
+        let posts: Vec<usize> = replaced.iter().map(|byte| byte.at).collect();
+        let written = self.follow(Piece::Str, before, last, &posts);
         if replaced.is_empty() {
             return;
         }
         let trace = self.stack_trace();
         let shared: std::sync::Arc<[u8]> = std::sync::Arc::from(string);
-        for byte in replaced {
+        for (byte, written) in replaced.into_iter().zip(written) {
             let position = match byte.position {
-                StreamPosition::Byte(offset) => StreamPosition::Byte(offset - self.base),
-                line => line,
+                StreamPosition::Byte(offset) => {
+                    StreamPosition::Byte(self.flushed_bytes + offset - self.base)
+                }
+                StreamPosition::Line(line) => StreamPosition::Line(self.flushed_lines + line),
             };
-            self.replaced.push(ReplacedChar {
-                trace: trace.clone(),
-                byte: byte.byte,
-                position,
-                string: if byte.with_string {
-                    shared.clone()
-                } else {
-                    no_string()
+            self.posted.push(Posted {
+                written,
+                replaced: ReplacedChar {
+                    trace: trace.clone(),
+                    byte: byte.byte,
+                    position,
+                    string: if byte.with_string {
+                        shared.clone()
+                    } else {
+                        no_string()
+                    },
                 },
             });
         }
     }
 
-    /// The bytes replaced so far (`ReplacedChar`), which it forgets.
-    pub fn take_replaced_chars(&mut self) -> Vec<ReplacedChar> {
-        std::mem::take(&mut self.replaced)
-    }
-
-    /// `EndContainerElement` of the open element, if any.
-    fn end_element(&mut self) {
-        if matches!(self.frames.last(), Some(Frame::Element)) {
-            self.frames.pop();
+    /// Hands on the bytes of the document up to `target` (bytes from its start).
+    fn hand_to(&mut self, sink: &mut dyn std::io::Write, target: u64) -> std::io::Result<()> {
+        if target > self.handed {
+            let count = (target - self.handed) as usize + std::mem::take(&mut self.foreign);
+            // NCBI's buffer never writes more than the encoder holds: a larger count is a model
+            // (`out_buffer`) that drifted from the encoder.
+            debug_assert!(
+                count <= self.inner.held().len(),
+                "Traced hands on {count} bytes of the {} held",
+                self.inner.held().len()
+            );
+            let count = count.min(self.inner.held().len());
+            self.inner.hand_on(sink, count)?;
+            self.handed = target;
         }
+        Ok(())
     }
 }
 
-impl<E: Encoder> Encoder for Traced<E> {
+impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Traced<E, P> {
     fn writes_defaults(&self) -> bool {
         self.inner.writes_defaults()
     }
     fn begin_document(&mut self, type_name: &str) {
         self.root = type_name.to_string();
-        self.inner.begin_document(type_name);
+        self.call(Piece::Header, |inner| inner.begin_document(type_name));
     }
     fn end_document(&mut self) {
-        self.inner.end_document();
+        self.call(Piece::End, |inner| inner.end_document());
     }
     fn begin_sequence(&mut self, type_name: &str) {
-        self.inner.begin_sequence(type_name);
+        self.name_element(type_name);
+        self.call(Piece::Markup, |inner| inner.begin_sequence(type_name));
     }
     fn end_sequence(&mut self) {
-        self.inner.end_sequence();
+        self.call(Piece::Markup, |inner| inner.end_sequence());
     }
     fn begin_named(&mut self, type_name: &str) {
-        self.inner.begin_named(type_name);
+        self.name_element(type_name);
+        self.call(Piece::Markup, |inner| inner.begin_named(type_name));
     }
     fn end_named(&mut self) {
-        self.inner.end_named();
+        self.call(Piece::Markup, |inner| inner.end_named());
     }
     fn member(&mut self, name: &str, tag: u8) {
         self.frames.push(Frame::Named(name.to_string()));
-        self.inner.member(name, tag);
+        self.call(Piece::Markup, |inner| inner.member(name, tag));
     }
     fn end_member(&mut self) {
-        self.inner.end_member();
+        self.call(Piece::Markup, |inner| inner.end_member());
         self.frames.pop();
     }
     fn begin_list(&mut self, set: bool) {
         self.frames.push(Frame::List);
-        self.inner.begin_list(set);
+        self.call(Piece::Markup, |inner| inner.begin_list(set));
     }
     fn element(&mut self) {
         self.end_element();
-        self.frames.push(Frame::Element);
-        self.inner.element();
+        self.frames.push(Frame::Element { shown: true });
+        self.call(Piece::Markup, |inner| inner.element());
     }
     fn end_list(&mut self) {
         self.end_element();
         self.frames.pop();
-        self.inner.end_list();
+        self.call(Piece::Markup, |inner| inner.end_list());
     }
     fn variant(&mut self, type_name: &str, name: &str, tag: u8) {
+        self.name_element(type_name);
         self.frames.push(Frame::Named(name.to_string()));
-        self.inner.variant(type_name, name, tag);
+        self.call(Piece::Markup, |inner| inner.variant(type_name, name, tag));
     }
     fn end_variant(&mut self) {
-        self.inner.end_variant();
+        self.call(Piece::Markup, |inner| inner.end_variant());
         self.frames.pop();
     }
     fn int(&mut self, value: i32) {
-        self.inner.int(value);
+        self.call(Piece::Number, |inner| inner.int(value));
     }
     fn big_int(&mut self, value: i64) {
-        self.inner.big_int(value);
+        self.call(Piece::Number, |inner| inner.big_int(value));
     }
     fn enumerated(&mut self, name: &str, value: i32) {
-        self.inner.enumerated(name, value);
+        self.call(Piece::Enum, |inner| inner.enumerated(name, value));
     }
     fn named_int(&mut self, name: &str, value: i32) {
-        self.inner.named_int(name, value);
+        self.call(Piece::Enum, |inner| inner.named_int(name, value));
     }
     fn boolean(&mut self, value: bool) {
-        self.inner.boolean(value);
+        self.call(Piece::Bool, |inner| inner.boolean(value));
     }
     fn visible_str(&mut self, value: &[u8]) {
-        self.inner.visible_str_replacing(value);
-        self.collect(value);
+        self.string(value, |inner| inner.visible_str_replacing(value));
     }
     fn real(&mut self, value: f64) {
-        self.inner.real(value);
+        self.call(Piece::Real, |inner| inner.real(value));
     }
     fn octets(&mut self, value: &[u8]) {
-        self.inner.octets(value);
+        self.call(Piece::Octets, |inner| inner.octets(value));
     }
     fn string_store(&mut self, value: &[u8]) {
-        self.inner.string_store_replacing(value);
-        self.collect(value);
+        self.string(value, |inner| inner.string_store_replacing(value));
     }
     fn buffered(&self) -> usize {
         self.inner.buffered()
     }
+    /// Hands on what NCBI's buffer has written to its output so far, and with `all` (the
+    /// document is complete) everything; with a post function first each byte that waits, after
+    /// exactly the bytes that NCBI had written before posting it, the sink flushed.
     fn flush_to(&mut self, sink: &mut dyn std::io::Write, all: bool) -> std::io::Result<()> {
-        if all {
-            self.inner.flush_to(sink, true)
-        } else {
-            Ok(())
-        }
+        let mut counted = Counted {
+            sink,
+            bytes: 0,
+            lines: 0,
+        };
+        let handed = self.hand_on_posting(&mut counted, all);
+        self.flushed_bytes += counted.bytes;
+        self.flushed_lines += counted.lines;
+        handed
     }
     fn error(&self) -> Option<SerialError> {
         self.inner.error()
+    }
+}
+
+impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Traced<E, P> {
+    /// `flush_to` to the counting sink.
+    fn hand_on_posting(&mut self, sink: &mut dyn std::io::Write, all: bool) -> std::io::Result<()> {
+        if self.post.is_some() {
+            for posted in std::mem::take(&mut self.posted) {
+                self.hand_to(sink, posted.written)?;
+                sink.flush()?;
+                if let Some(post) = self.post.as_mut() {
+                    post(&posted.replaced)?;
+                }
+            }
+        }
+        if all {
+            self.foreign = 0;
+            return self.inner.flush_to(sink, true);
+        }
+        match self.buffer.as_ref().map(OutBuffer::written) {
+            Some(written) => self.hand_to(sink, written),
+            None => self.inner.flush_to(sink, false),
+        }
     }
 }

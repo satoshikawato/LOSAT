@@ -1,0 +1,43 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/ntmotifmax.asn
+#Output data file:	(stdout)
+#Annotation data at:	ntmot
+#E-Value cutoff:	0.01
+#Redundancy:	Standard
+#Data requested:	Site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	tblastn	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	5000	mg00068_335001-340000
+MOTIFS
+1	Query_1[1]	ANK repeat	394	488	0
+1	Query_1[1]	ANK repeat	490	689	0
+1	Query_1[1]	ANK repeat	691	803	0
+1	Query_1[1]	ANK repeat	391	488	0
+1	Query_1[1]	ANK repeat	490	584	0
+1	Query_1[2]	ANK repeat	2147483648	2147483736	0
+1	Query_1[2]	ANK repeat	-2147483558	2147483850	0
+1	Query_1[2]	ANK repeat	-2147483444	2147483931	0
+ENDMOTIFS
+ENDQUERY
+ENDSESSION	1
+ENDDATA

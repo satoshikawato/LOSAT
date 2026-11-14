@@ -55,6 +55,7 @@ blastp.sub.nodir	blastp	-	-query tests/fasta/strategy/none.fa -subject tests/fas
 blastp.sub.badopt.pre	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 6 -export_search_strategy {ss} -evalue abc	parser	2	old	-
 blastp.sub.noseq.batches	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/noseq_blastp.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
 blastp.sub.xmlmatrix.batches	blastp	BATCH_SIZE=150	-query tests/fasta/outfmt11/arch_bp_batches.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -matrix blosum62 -outfmt 5 -export_search_strategy {ss}	ncbi	3	-	-
+blastp.sub.xmlmatrix.batches.f16	blastp	BATCH_SIZE=100	-query tests/fasta/outfmt11/arch_bp_batches.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	3	-	-
 blastp.db.xmlmatrix.f16	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -db tests/db_search/arch_sprot -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	3	-	-
 blastp.sub.stdout	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 6 -export_search_strategy -	refuse	1	-	-export_search_strategy - (the search strategy on the standard output
 blastp.sub.sameout	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 6 -export_search_strategy {ss} -out {ss}	refuse	1	-	an -export_search_strategy file that is also the output
@@ -192,6 +193,8 @@ tblastn.sub.short.x1	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/allx_tbn.f
 tblastx.sub.short.q	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/strategy/short.fna -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
 tblastx.sub.short.q.f0	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/strategy/short.fna -export_search_strategy {ss}	ncbi	3	-	-
 tblastx.sub.short.x1	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/allx_tbx.fna -subject tests/fasta/strategy/short.fna -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.short.q.xmlmatrix	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/strategy/short.fna -matrix blosum62 -outfmt 5 -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.short.xmlmatrix.b3.f16	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xm3.fna -subject tests/fasta/strategy/short.fna -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	3	-	-
 blastn.db.nohr.nh1	blastn	-	-query tests/fasta/strategy/nh1_blastn.fna -db tests/db_search/nnophr -task blastn -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.db.nohr.nh	blastn	-	-query tests/fasta/strategy/nh_blastn.fna -db tests/db_search/nnophr -task blastn -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
 blastn.db.nohr.nh.batches	blastn	BATCH_SIZE=1	-query tests/fasta/strategy/nh_blastn.fna -db tests/db_search/nnophr -task blastn -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
@@ -233,6 +236,8 @@ blastn.db.dbmask.key	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_
 blastn.db.dbmask.name	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/a5 -db_soft_mask dust -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.db.dbmask.f11	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/a5 -db_soft_mask +11 -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.db.dbmask.hard	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/k5 -db_hard_mask mydust -outfmt 6 -export_search_strategy {ss}	refuse	1	-	-db_hard_mask (hard masking of the database sequences) is not supported by LOSAT's BLASTN
+blastn.db.dbmask.name.cafe	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/a5 -db_soft_mask café -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+blastn.db.dbmask.name.cafe.f11	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/a5 -db_soft_mask café -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.sub.lcase.qloc.minus	blastn	-	-query tests/fasta/outfmt11/arch_lcout.fna -subject tests/fasta/outfmt11/arch_s.fna -lcase_masking -query_loc 10-100 -strand minus -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.sub.lcase.sloc	blastn	-	-query tests/fasta/outfmt11/arch_lcout.fna -subject tests/fasta/outfmt11/arch_s.fna -lcase_masking -subject_loc 10-140 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.sub.lcase.qloc.sloc	blastn	-	-query tests/fasta/outfmt11/arch_lcout.fna -subject tests/fasta/outfmt11/arch_s.fna -lcase_masking -query_loc 10-100 -subject_loc 10-140 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
@@ -240,28 +245,78 @@ tblastx.sub.lcase.qloc	tblastx	-	-query tests/fasta/outfmt11/arch_bx_lc.fna -sub
 tblastx.db.lcase.qloc	tblastx	-	-query tests/fasta/outfmt11/arch_bx_lc.fna -db tests/db_search/arch_tbx_snucl -lcase_masking -query_loc 10-100 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 tblastx.sub.lcase.sloc	tblastx	-	-query tests/fasta/outfmt11/arch_bx_lc.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -lcase_masking -subject_loc 10-140 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 tblastx.sub.lcase.qloc.sloc	tblastx	-	-query tests/fasta/outfmt11/arch_bx_lc.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -lcase_masking -query_loc 10-100 -subject_loc 10-140 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
-blastn.sub.title.b2	blastn	BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_blastn.fna -subject tests/fasta/outfmt11/arch_s.fna -outfmt 6 -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-blastn.sub.title.subject	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/strategy/title_s_blastn.fna -outfmt 6 -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-blastn.sub.title.stop	blastn	BATCH_SIZE=1	-query tests/fasta/strategy/title_stop_blastn.fna -subject tests/fasta/outfmt11/arch_s.fna -outfmt 6 -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-blastp.sub.title.b2	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_blastp.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 6 -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-blastp.sub.title.b2.f0	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_blastp.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-blastp.sub.title.subject	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/strategy/title_s_blastp.faa -outfmt 6 -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-blastp.sub.title.stop	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/title_stop_blastp.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 6 -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-blastx.sub.title.b2	blastx	BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_blastx.fna -subject tests/fasta/outfmt11/arch_bx_s.faa -outfmt 6 -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-blastx.sub.title.b2.f0	blastx	BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_blastx.fna -subject tests/fasta/outfmt11/arch_bx_s.faa -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-blastx.sub.title.subject	blastx	-	-query tests/fasta/outfmt11/arch_bx_q.fna -subject tests/fasta/strategy/title_s_blastx.faa -outfmt 6 -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-tblastn.sub.title.b2	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_tblastn.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -outfmt 6 -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-tblastn.sub.title.b2.f0	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_tblastn.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-tblastn.sub.title.subject	tblastn	-	-query tests/fasta/outfmt11/arch_tbn_q.faa -subject tests/fasta/strategy/title_s_tblastn.fna -outfmt 6 -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-tblastn.sub.title.stop	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/title_stop_tblastn.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -outfmt 6 -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-tblastx.sub.title.b2	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_tblastx.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -outfmt 6 -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-tblastx.sub.title.subject	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/strategy/title_s_tblastx.fna -outfmt 6 -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-tblastx.sub.title.stop	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/title_stop_tblastx.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -outfmt 6 -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-blastp.sub.title.stop.f0	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/title_stop_blastp.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-tblastn.sub.title.stop.f0	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/title_stop_tblastn.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-blastp.db.nohr.nh.title.batches	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/nh_title_blastp.faa -db tests/db_search/nophr -evalue 1e-5 -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-blastp.db.nosq.allx.title	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/allx_title_bp.faa -db tests/db_search/arch_sprot_nopsq -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
-blastp.db.nosq.title.f0	blastp	-	-query tests/fasta/strategy/title1_bp.faa -db tests/db_search/arch_sprot_nopsq -export_search_strategy {ss}	refuse	1	-	has a character the archive cannot write as NCBI does
+blastn.sub.title.b2	blastn	BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_blastn.fna -subject tests/fasta/outfmt11/arch_s.fna -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+blastn.sub.title.subject	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/strategy/title_s_blastn.fna -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+blastn.sub.title.stop	blastn	BATCH_SIZE=1	-query tests/fasta/strategy/title_stop_blastn.fna -subject tests/fasta/outfmt11/arch_s.fna -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+blastp.sub.title.b2	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_blastp.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+blastp.sub.title.b2.f0	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_blastp.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -export_search_strategy {ss}	ncbi	0	-	-
+blastp.sub.title.subject	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/strategy/title_s_blastp.faa -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+blastp.sub.title.stop	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/title_stop_blastp.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+blastx.sub.title.b2	blastx	BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_blastx.fna -subject tests/fasta/outfmt11/arch_bx_s.faa -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+blastx.sub.title.b2.f0	blastx	BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_blastx.fna -subject tests/fasta/outfmt11/arch_bx_s.faa -export_search_strategy {ss}	ncbi	0	-	-
+blastx.sub.title.subject	blastx	-	-query tests/fasta/outfmt11/arch_bx_q.fna -subject tests/fasta/strategy/title_s_blastx.faa -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.sub.title.b2	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_tblastn.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.sub.title.b2.f0	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_tblastn.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.sub.title.subject	tblastn	-	-query tests/fasta/outfmt11/arch_tbn_q.faa -subject tests/fasta/strategy/title_s_tblastn.fna -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.sub.title.stop	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/title_stop_tblastn.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.title.b2	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_tblastx.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastx.sub.title.subject	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/strategy/title_s_tblastx.fna -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastx.sub.title.stop	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/title_stop_tblastx.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+blastp.sub.title.stop.f0	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/title_stop_blastp.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -export_search_strategy {ss}	ncbi	3	-	-
+tblastn.sub.title.stop.f0	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/title_stop_tblastn.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -export_search_strategy {ss}	ncbi	3	-	-
+blastp.db.nohr.nh.title.batches	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/nh_title_blastp.faa -db tests/db_search/nophr -evalue 1e-5 -export_search_strategy {ss}	ncbi	2	-	-
+blastp.db.nosq.allx.title	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/allx_title_bp.faa -db tests/db_search/arch_sprot_nopsq -export_search_strategy {ss}	ncbi	3	-	-
+blastp.db.nosq.title.f0	blastp	-	-query tests/fasta/strategy/title1_bp.faa -db tests/db_search/arch_sprot_nopsq -export_search_strategy {ss}	ncbi	3	-	-
+blastn.sub.order.b3	blastn	BATCH_SIZE=100	-query tests/fasta/strategy/order_b3.fna -subject tests/fasta/strategy/order_s.fna -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+blastn.sub.order.b3.f11	blastn	BATCH_SIZE=100	-query tests/fasta/strategy/order_b3.fna -subject tests/fasta/strategy/order_s.fna -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
+blastn.sub.order.stop	blastn	BATCH_SIZE=100	-query tests/fasta/strategy/order_stop.fna -subject tests/fasta/strategy/order_s.fna -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+blastn.sub.order.stop.f11	blastn	BATCH_SIZE=100	-query tests/fasta/strategy/order_stop.fna -subject tests/fasta/strategy/order_s.fna -outfmt 11 -export_search_strategy {ss}	ncbi	3	-	-
+blastp.sub.order.b3	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/order_b3.faa -subject tests/fasta/strategy/order_s.faa -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+blastp.sub.order.b3.f11	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/order_b3.faa -subject tests/fasta/strategy/order_s.faa -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
+blastp.sub.order.stop	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/order_stop.faa -subject tests/fasta/strategy/order_s.faa -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+blastp.sub.order.stop.f11	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/order_stop.faa -subject tests/fasta/strategy/order_s.faa -outfmt 11 -export_search_strategy {ss}	ncbi	3	-	-
+blastx.sub.order.b3	blastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_b3.fna -subject tests/fasta/strategy/order_s.faa -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+blastx.sub.order.b3.f11	blastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_b3.fna -subject tests/fasta/strategy/order_s.faa -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.sub.order.b3	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/order_b3.faa -subject tests/fasta/strategy/order_s.fna -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.sub.order.b3.f11	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/order_b3.faa -subject tests/fasta/strategy/order_s.fna -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.sub.order.stop	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/order_stop.faa -subject tests/fasta/strategy/order_s.fna -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+tblastn.sub.order.stop.f11	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/order_stop.faa -subject tests/fasta/strategy/order_s.fna -outfmt 11 -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.order.b3	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_b3.fna -subject tests/fasta/strategy/order_s.fna -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastx.sub.order.b3.f11	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_b3.fna -subject tests/fasta/strategy/order_s.fna -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
+tblastx.sub.order.stop	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_stop.fna -subject tests/fasta/strategy/order_s.fna -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.order.stop.f11	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_stop.fna -subject tests/fasta/strategy/order_s.fna -outfmt 11 -export_search_strategy {ss}	ncbi	3	-	-
+blastp.sub.order.b3.f0	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/order_b3.faa -subject tests/fasta/strategy/order_s.faa -export_search_strategy {ss}	ncbi	0	-	-
+blastp.sub.order.allx	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/order_allx.faa -subject tests/fasta/strategy/order_s.faa -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+blastp.sub.order.allx.f11	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/order_allx.faa -subject tests/fasta/strategy/order_s.faa -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.sub.order.allx	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/order_allx.faa -subject tests/fasta/strategy/order_s.fna -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.sub.order.allx.f11	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/order_allx.faa -subject tests/fasta/strategy/order_s.fna -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
+blastp.db.order.b3	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/order_b3.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+blastp.db.order.b3.f11	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/order_b3.faa -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.db.order.b3	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/order_b3.faa -db tests/db_search/arch_snucl -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+blastp.db.order.xmlmatrix	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/order_xm.faa -db tests/db_search/arch_sprot -matrix blosum62 -outfmt 5 -export_search_strategy {ss}	ncbi	3	-	-
+blastp.db.order.xmlmatrix.f16	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/order_xm.faa -db tests/db_search/arch_sprot -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	3	-	-
+tblastn.db.order.xmlmatrix	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/order_xm.faa -db tests/db_search/arch_snucl -matrix blosum62 -outfmt 5 -export_search_strategy {ss}	ncbi	3	-	-
+tblastn.db.order.xmlmatrix.f16	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/order_xm.faa -db tests/db_search/arch_snucl -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	3	-	-
+blastp.sub.order.xmlmatrix.b3.f16	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/order_xm3.faa -subject tests/fasta/strategy/order_s.faa -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	3	-	-
+blastp.sub.order.xmlmatrix.b1.f15	blastp	-	-query tests/fasta/strategy/order_xm3.faa -subject tests/fasta/strategy/order_s.faa -matrix blosum62 -outfmt 15 -export_search_strategy {ss}	ncbi	3	-	-
+blastp.sub.order.xmlmatrix.q1.f16	blastp	-	-query tests/fasta/strategy/order_xm1.faa -subject tests/fasta/strategy/order_s.faa -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	3	-	-
+blastp.sub.order.xmlmatrix.s1.f15	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/order_xms.faa -subject tests/fasta/strategy/order_s.faa -matrix blosum62 -outfmt 15 -export_search_strategy {ss}	ncbi	3	-	-
+blastx.sub.order.xmlmatrix.b3.f16	blastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xm3.fna -subject tests/fasta/strategy/order_s.faa -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	3	-	-
+blastx.sub.order.xmlmatrix.b1.f15	blastx	-	-query tests/fasta/strategy/order_xm3.fna -subject tests/fasta/strategy/order_s.faa -matrix blosum62 -outfmt 15 -export_search_strategy {ss}	ncbi	3	-	-
+blastx.sub.order.xmlmatrix.q1.f16	blastx	-	-query tests/fasta/strategy/order_xm1.fna -subject tests/fasta/strategy/order_s.faa -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	3	-	-
+blastx.sub.order.xmlmatrix.s1.f15	blastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xms.fna -subject tests/fasta/strategy/order_s.faa -matrix blosum62 -outfmt 15 -export_search_strategy {ss}	ncbi	3	-	-
+tblastn.sub.order.xmlmatrix.b3.f16	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/order_xm3.faa -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	3	-	-
+tblastn.sub.order.xmlmatrix.b1.f15	tblastn	-	-query tests/fasta/strategy/order_xm3.faa -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 15 -export_search_strategy {ss}	ncbi	3	-	-
+tblastn.sub.order.xmlmatrix.q1.f16	tblastn	-	-query tests/fasta/strategy/order_xm1.faa -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	3	-	-
+tblastn.sub.order.xmlmatrix.s1.f15	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/order_xms.faa -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 15 -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.order.xmlmatrix.b3.f16	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xm3.fna -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.order.xmlmatrix.b1.f15	tblastx	-	-query tests/fasta/strategy/order_xm3.fna -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 15 -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.order.xmlmatrix.q1.f16	tblastx	-	-query tests/fasta/strategy/order_xm1.fna -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.order.xmlmatrix.s1.f15	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xms.fna -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 15 -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.order.xmlmatrix.prefetch	tblastx	PRE_FETCH_SEQS_LIMIT=abc	-query tests/fasta/strategy/order_xm1.fna -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 5 -export_search_strategy {ss}	ncbi	255	-	-
+tblastx.sub.order.xmlmatrix.prefetch.b3.f16	tblastx	BATCH_SIZE=1,PRE_FETCH_SEQS_LIMIT=abc	-query tests/fasta/strategy/order_xm3.fna -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	255	-	-
+blastx.sub.order.xmlmatrix.dupid.b3.f16	blastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xmdup.fna -parse_deflines -subject tests/fasta/strategy/order_s.faa -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	refuse	1	-	two query records have the Seq-id lcl|dup
+tblastx.sub.order.xmlmatrix.dupid.b3.f16	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xmdup.fna -parse_deflines -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	refuse	1	-	two query records have the Seq-id lcl|dup
 psiblast.db.itdef	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.db.it2	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.db.it0	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -num_iterations 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
@@ -270,6 +325,8 @@ psiblast.db.three.it1	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db t
 psiblast.db.three.it2	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.db.three.it0	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.sub.three.it2	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.qloc.it2	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -query_loc 20-300 -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.qloc.skip.it2	psiblast	-	-query tests/fasta/psiblast/q4a_skip.faa -db tests/db_search/paja -query_loc 20-300 -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.db.two.it2.cbs3	psiblast	-	-query tests/fasta/psiblast/two.faa -db tests/db_search/paja -num_iterations 2 -comp_based_stats 3 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.db.three.it2.ssp	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -searchsp 1000000 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.db.three.ssp0	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -searchsp 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
@@ -335,10 +392,20 @@ rpsblast.noloo.inv.b1	rpsblast	BLASTDB={rps:rps_mini-loo},BATCH_SIZE=1	-query te
 rpsblast.3vL.q40	rpsblast	BLASTDB={rps:rps_mini3v+tests/fasta/strategy/rps3vL.pal}	-query tests/fasta/rps/q40.faa -db rps3vL -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpsblast.mixed.b400	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=400	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpsblast.3v.mixed.b400	rpsblast	BLASTDB={rps:rps_mini3v},BATCH_SIZE=400	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini3v -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
-psiblast.db.title.b2	psiblast	-	-query tests/fasta/strategy/title_b2_blastp.faa -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	refuse	1	-	not supported by LOSAT's PSIBLAST with -export_search_strategy
-psiblast.db.title.b2.it2	psiblast	-	-query tests/fasta/strategy/title_b2_blastp.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	refuse	1	-	not supported by LOSAT's PSIBLAST with -export_search_strategy
-rpsblast.title.b2	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_blastp.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	refuse	1	-	not supported by LOSAT's RPSBLAST with -export_search_strategy
-rpstblastn.title.b2	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_blastx.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	refuse	1	-	not supported by LOSAT's RPSTBLASTN with -export_search_strategy
+psiblast.db.title.b2	psiblast	-	-query tests/fasta/strategy/title_b2_blastp.faa -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.title.b2.it2	psiblast	-	-query tests/fasta/strategy/title_b2_blastp.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.title.b2	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_blastp.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpstblastn.title.b2	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_blastx.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.order.b3	psiblast	-	-query tests/fasta/strategy/order_b3.faa -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.order.b3.it2	psiblast	-	-query tests/fasta/strategy/order_b3.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.sub.order.b3.it2	psiblast	-	-query tests/fasta/strategy/order_b3.faa -subject tests/fasta/strategy/order_s.faa -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.order.xpol	psiblast	-	-query tests/fasta/strategy/order_xpol.faa -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+psiblast.db.order.xpol.it2	psiblast	-	-query tests/fasta/strategy/order_xpol.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+psiblast.db.nohr.order.b3.it2	psiblast	-	-query tests/fasta/strategy/order_b3.faa -db tests/db_search/nophr -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
+rpsblast.order.b3	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	-query tests/fasta/strategy/order_b3.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.order.stop	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	-query tests/fasta/strategy/order_stop.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+rpstblastn.order.b3	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	-query tests/fasta/strategy/order_b3.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpstblastn.order.stop	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	-query tests/fasta/strategy/order_stop.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
 psiblast.pssm.db.itdef	psiblast	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.pssm.db.it2	psiblast	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.pssm.db.it0	psiblast	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/paja -num_iterations 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-

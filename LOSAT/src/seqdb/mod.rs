@@ -609,6 +609,10 @@ pub struct SeqDb {
     alias_totals: alias::AliasTotals,
     /// Whether the alias files give an OID range (`alias::range_mask`).
     alias_ranges: bool,
+    /// Whether NCBI's OID bit set is the special all-set one after the alias files' OID ranges
+    /// (`alias::all_bits_special_set`): a positive list left with no id then keeps every OID
+    /// (`SeqDb::restrict_seqids`).
+    all_bits_special_set: bool,
     /// NCBI's `m_OidListSetup`: whether its OID list was built, which a database opened
     /// without a list does at its first use (`SeqDb::check_or_find_oid`).
     oid_list_set_up: AtomicBool,
@@ -1175,6 +1179,7 @@ impl SeqDb {
             first_oid_length: None,
             alias_totals: alias::AliasTotals::default(),
             alias_ranges: false,
+            all_bits_special_set: false,
             oid_list_set_up: AtomicBool::new(false),
             list_applied: false,
             name: name.to_string(),
@@ -1277,6 +1282,7 @@ impl SeqDb {
         self.printed_num_seqs = nseq;
         self.printed_total_length = length;
         self.alias_ranges = mask.is_some();
+        self.all_bits_special_set = alias::all_bits_special_set(root, names, &self.volume_starts);
         if let Some(words) = mask {
             let range = alias::top_iteration_range(root, num_oids).unwrap_or((0, num_oids));
             let filter = filter::OidFilter::new(words, num_oids).with_range(range);
@@ -2373,7 +2379,7 @@ impl SeqDb {
 
     /// The Blast-def-line `taxid` of each definition line of `ordinal`, 0 for none: read
     /// apart from `deflines`, for the XML2 and JSON formats, the prefetch's taxonomy lookups and
-    /// an empty stored title (`HeaderReader::stored_taxonomy_title`).
+    /// an empty stored title made from its source (`HeaderReader::stored_source`).
     pub fn defline_taxids(&self, ordinal: u32) -> Result<Vec<i32>, SeqDbError> {
         let at = self.find_volume(ordinal)?;
         self.volumes[at.volume].defline_taxids(at.vol_oid)

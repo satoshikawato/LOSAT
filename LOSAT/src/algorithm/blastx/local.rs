@@ -203,6 +203,7 @@ fn search_records(
         // already (`native::database_search_error`).
         if error.is::<super::parameters::SearchSpaceOverflow>()
             || error.is::<super::split::QuerySplitRefusal>()
+            || error.is::<super::preliminary::OneHitWindowRefusal>()
             || error.is::<crate::cli::NativeError>()
         {
             error
@@ -1055,6 +1056,7 @@ fn search_database(
     }
     // The letters of a reader batch (`native::run_inner`).
     let batch_size = app::query_batch_size(BATCH_SIZE as u32)? as usize;
+    database.check_accession_tables()?;
     app::check_search_environment("BLASTX", false)?;
     let pairwise = database.pairwise_database();
     let no_reported = ReportedSubjects::default();

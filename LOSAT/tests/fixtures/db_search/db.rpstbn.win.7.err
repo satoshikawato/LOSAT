@@ -1,0 +1,5 @@
+Warning: [rpstblastn] Query_15 w13n nrun: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+Warning: [rpstblastn] Query_28 w26 empty: Sequence contains no data 
+Warning: [rpstblastn] Query_89 w86n nrun: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+CFastaReader: Hyphens are invalid and will be ignored around line 367
+FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?

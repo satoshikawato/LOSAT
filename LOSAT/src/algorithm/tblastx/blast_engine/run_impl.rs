@@ -2106,6 +2106,9 @@ fn search(
     // (`check_report_formats`: `xinclude_check`), as the other format checks of each
     // requested format.
     check_report_formats(outputs, args.out.as_deref())?;
+    if let SubjectSource::Database(database) = &source {
+        database.check_accession_tables()?;
+    }
     crate::blastinput::app::check_search_environment(
         "TBLASTX",
         !matches!(source, SubjectSource::Database(_)),
@@ -4028,6 +4031,7 @@ fn run_batch_loop(
                     ordered
                         .iter()
                         .map(|hsp| (start + hsp.hit.q_idx as usize, hsp.hit.s_idx)),
+                    database.oid_map(),
                     scopes,
                     "TBLASTX",
                 )?;

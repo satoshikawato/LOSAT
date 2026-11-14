@@ -1,12 +1,13 @@
 //! The search of a run's queries against one profile volume: every (query, volume) pair alone,
-//! the queries in parallel in the run's pool, each query's preliminary stage and traceback on a
-//! worker's scratch, the results in query order. The outfmt 0 K of each query batch is computed
-//! from the queries' marks after (`batch_gapped_k`).
+//! each valid context of each query (a protein query's one, a translated query's frames) a unit
+//! of the run's pool on a worker's scratch, the query's traceback run by the worker that searches
+//! its last context, the results in query order (series PR, item PS12s, D2). The outfmt 0 K of
+//! each query batch is computed from the queries' marks after (`batch_gapped_k`).
 //!
 //! NCBI searches the queries of a batch one after another on one diagonal table, then traces the
 //! lists of the whole batch; a query's results depend on the volume, the options and the query
-//! only (the table's entries of earlier queries read as empty, `wordfinder.rs`), so LOSAT's
-//! bytes are the same at every thread count.
+//! only (the table's entries of earlier queries and contexts read as empty, `wordfinder.rs`), so
+//! LOSAT's bytes are the same at every thread count.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1161-1188
 //! ```c
@@ -38,12 +39,13 @@ use anyhow::Result;
 
 use super::prelim::{RpsPrelim, RpsPrelimScratch};
 use super::redo::RpsRedoParams;
-use super::scan::{RpsBuckets, RpsTable};
+use super::scan::{RpsBlockPool, RpsTable};
 use super::traceback::{
     filter_results, formatter_identities, RpsTraceScratch, RpsTraceback, RpsTraced,
 };
-use super::wordfinder::{RpsDiagTable, RpsWordParams, RpsWordScratch};
+use super::wordfinder::{RpsWordParams, RpsWordScratch};
 use super::{RpsRows, RPS_K_MULT};
+use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
 use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::redo1::{RedoRun, SCALING_FACTOR};
 use crate::seqdb::rps::RpsVolumeFiles;
@@ -506,13 +508,18 @@ impl RpsRun<'_> {
     }
 
     /// Every query's traced results on the volume `files`, whose consensus letters are
-    /// `consensus` (at the profiles' offsets), in query order.
+    /// `consensus` (at the profiles' offsets), in query order, on the scratch of the run's
+    /// workers (`workers`): the volume's refusals before the queries' cutoffs (`Err`), else the
+    /// queries' results (`RpsVolumeResults`), which a caller reads batch by batch in the order
+    /// NCBI's search of a batch meets its errors (the queries search at the same time on several
+    /// threads).
     pub(crate) fn search_volume(
         &self,
         files: &RpsVolumeFiles,
         consensus: &super::volumes::Consensus<'_>,
         pool: &crate::utils::threading::SearchPool<'_>,
-    ) -> Result<Vec<RpsTraced>> {
+        workers: &RpsWorkers,
+    ) -> Result<RpsVolumeResults> {
         let rows = files.rows();
         let offsets = files.offsets();
         let scale = files.aux.scale;
@@ -541,29 +548,46 @@ impl RpsRun<'_> {
         };
         // The X-drops at the scale (`gapped_x_drops`, NCBI's `BlastExtensionParametersNew`).
         let (x_drop_gapped, x_drop_final) = self.gapped_x_drops(scale, gap_open, gap_extend)?;
-        // Every searched query's cutoffs, before the search (`BlastHitSavingParametersNew` and
-        // `BlastInitialWordParametersNew` set them for the whole batch before its scan).
-        let cutoffs = self
-            .queries
-            .iter()
-            .map(|query| {
-                query
-                    .frames
-                    .iter()
-                    .map(|frame| {
-                        if frame.valid {
-                            self.cutoffs(frame, query.frames.len(), scale)
-                        } else {
-                            Ok(RpsCutoffs {
-                                x_dropoff: 0,
-                                word_cutoff: 0,
-                                hit_cutoff: 0,
-                            })
-                        }
-                    })
-                    .collect::<Result<Vec<_>>>()
-            })
-            .collect::<Result<Vec<_>>>()?;
+        // Every query's cutoffs, before the search (`BlastHitSavingParametersNew` and
+        // `BlastInitialWordParametersNew` set them for the whole batch before its scan); a query
+        // whose cutoffs are refused keeps that refusal apart (`RpsVolumeResults::batches` reads it
+        // before any search error of its batch) and is not searched.
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1372-1374
+        // ```c
+        //     if ((status = BlastInitialWordParametersNew(program_number,
+        //             word_options, hit_params, lookup_wrap, sbp, query_info,
+        //             BlastSeqSrcGetAvgSeqLen(seq_src), &word_params)) != 0)
+        // ```
+        let mut refused: Vec<Option<anyhow::Error>> = Vec::with_capacity(self.queries.len());
+        let mut cutoffs: Vec<Vec<RpsCutoffs>> = Vec::with_capacity(self.queries.len());
+        for query in &self.queries {
+            let frames = query
+                .frames
+                .iter()
+                .map(|frame| {
+                    if frame.valid {
+                        self.cutoffs(frame, query.frames.len(), scale)
+                    } else {
+                        Ok(RpsCutoffs {
+                            x_dropoff: 0,
+                            word_cutoff: 0,
+                            hit_cutoff: 0,
+                        })
+                    }
+                })
+                .collect::<Result<Vec<_>>>();
+            match frames {
+                Ok(frames) => {
+                    cutoffs.push(frames);
+                    refused.push(None);
+                }
+                Err(refusal) => {
+                    cutoffs.push(Vec::new());
+                    refused.push(Some(refusal));
+                }
+            }
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1862-1895
         // ```c
         //       kbp[kbp_context]->Lambda /= scaling_factor;
@@ -572,14 +596,27 @@ impl RpsRun<'_> {
         //       kbp[kbp_context]->Lambda *= scaling_factor;
         // ```
         // NCBI divides Lambda by the scale for each HSP's e-value and multiplies it back; at a
-        // scale where that does not give Lambda back, NCBI's Lambda changes from HSP to HSP.
+        // scale where that does not give Lambda back, NCBI's Lambda changes from HSP to HSP. A
+        // refusal of the volume after the queries' cutoffs (NCBI's e-values come after its set-up),
+        // so a batch's refusal of its cutoffs comes first; nothing is searched.
         let lambda = self.gapped.lambda;
         if lambda / scale * scale != lambda {
-            anyhow::bail!(
-                "a profile database of the scale {scale} (NCBI BLAST+ divides Lambda by the scale for each e-value and multiplies it back, which changes Lambda at this scale) is not supported by LOSAT's {}",
-                self.program
-            );
+            let searched = refused.iter().map(|_| None).collect();
+            return Ok(RpsVolumeResults {
+                refused,
+                late: Some(anyhow::anyhow!(
+                    "a profile database of the scale {scale} (NCBI BLAST+ divides Lambda by the scale for each e-value and multiplies it back, which changes Lambda at this scale) is not supported by LOSAT's {}",
+                    self.program
+                )),
+                searched,
+            });
         }
+        // Each searched query's result (`None` for a query refused at its cutoffs).
+        let mut results: Vec<std::sync::Mutex<Option<Result<RpsTraced>>>> = self
+            .queries
+            .iter()
+            .map(|_| std::sync::Mutex::new(None))
+            .collect();
         let traceback = RpsTraceback {
             rows,
             offsets,
@@ -609,67 +646,117 @@ impl RpsRun<'_> {
         // list (`BlastHSPCBSStreamClose`, blast_traceback.c:1839-1846; `core::blast_hspstream`).
         let cbs_close =
             crate::core::blast_hspstream::adaptive_cbs_close(self.cbs > 0, self.hitlist_size);
-        let new_scratch = || {
-            let mut diag = RpsDiagTable::new();
-            diag.reset_for(rows.len() as i32, self.window);
-            (
-                RpsPrelimScratch::new(RpsWordScratch {
-                    diag,
-                    buckets: RpsBuckets::new(rows.len()),
-                }),
-                RpsTraceScratch::new(),
-            )
+        // The preliminary stage of one context of a query (NCBI's frame loop: each context
+        // scanned as a subject with its own cutoffs).
+        let prelim_of = |q_idx: usize, context: usize| -> RpsPrelim<'_> {
+            let frame = &self.queries[q_idx].frames[context];
+            let cutoffs = &cutoffs[q_idx][context];
+            RpsPrelim {
+                word: RpsWordParams {
+                    rows: RpsRows { rows },
+                    table,
+                    window: self.window,
+                    cutoff: cutoffs.word_cutoff,
+                    dropoff: cutoffs.x_dropoff,
+                },
+                rows,
+                offsets,
+                gap_open,
+                gap_extend,
+                x_drop_gapped,
+                hit_cutoff: cutoffs.hit_cutoff,
+                karlin: prelim_karlin,
+                stats: frame.stats(self.gumbel),
+                prelim_evalue: self.prelim_evalue,
+                prelim_hitlist_size: self.prelim_hitlist_size,
+                query_index: q_idx as u32,
+                program: self.program,
+            }
         };
-        let search_one = |scratch: &mut (RpsPrelimScratch, RpsTraceScratch),
-                          q_idx: usize|
-         -> Result<RpsTraced> {
+        // The units of the volume's search (D2 of PS12s): each valid context of each query whose
+        // cutoffs exist, query by query in the context order, each searched on its own
+        // (`RpsPrelim::search_frame`) with its HSPs kept apart. A context's search reads nothing
+        // another context writes: the diagonal table's entries of earlier contexts read as empty
+        // (`wordfinder.rs`) and each context's scan starts its own runs of hits.
+        let mut units: Vec<(usize, usize)> = Vec::new();
+        let mut first_unit = Vec::with_capacity(self.queries.len());
+        let mut remaining = Vec::with_capacity(self.queries.len());
+        for (q_idx, query) in self.queries.iter().enumerate() {
+            first_unit.push(units.len());
+            let searched = refused[q_idx].is_none();
+            if searched {
+                units.extend(
+                    query
+                        .frames
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, frame)| frame.valid)
+                        .map(|(context, _)| (q_idx, context)),
+                );
+            }
+            let count = units.len() - first_unit[q_idx];
+            if searched && count == 0 {
+                *results[q_idx]
+                    .get_mut()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Ok(RpsTraced {
+                    hit_list: None,
+                    k_mark: None,
+                }));
+            }
+            remaining.push(std::sync::atomic::AtomicUsize::new(count));
+        }
+        let searched_units: Vec<std::sync::Mutex<Option<Result<Vec<BlastpPreliminaryHsp>>>>> =
+            units.iter().map(|_| std::sync::Mutex::new(None)).collect();
+        // The rest of a query's search on this volume, run by the worker that searched its last
+        // context: its contexts' HSPs concatenated in the context order (`Blast_HSPListAppend`
+        // of NCBI's frame loop), the e-values, the reap and the collector (`finish`), then the
+        // traceback. A context whose search failed gives the query its error, the first in the
+        // context order (where NCBI's loop, and the search before PS12s, stopped).
+        let finish_query = |scratch: &mut RpsScratch, q_idx: usize| -> Result<RpsTraced> {
             let query = &self.queries[q_idx];
             let none = RpsTraced {
                 hit_list: None,
                 k_mark: None,
             };
-            // The contexts one after the other (NCBI's frame loop), each scanned as a subject
-            // with its own cutoffs; their HSPs combine in the context order (`search_frame`).
-            let mut searched = None;
-            for (frame, cutoffs) in query.frames.iter().zip(&cutoffs[q_idx]) {
-                if !frame.valid {
-                    continue;
+            let mut combined = std::mem::take(&mut scratch.prelim.combined);
+            combined.clear();
+            let mut failed = None;
+            let mut last = 0;
+            for unit in first_unit[q_idx]..first_unit[q_idx] + units_of(&first_unit, &units, q_idx)
+            {
+                let searched = searched_units[unit]
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take()
+                    .expect("each context of a query is searched before its last one finishes");
+                match searched {
+                    Ok(hsps) if failed.is_none() => combined.extend(hsps),
+                    Ok(_) => {}
+                    Err(error) => {
+                        failed.get_or_insert(error);
+                    }
                 }
-                let prelim = RpsPrelim {
-                    word: RpsWordParams {
-                        rows: RpsRows { rows },
-                        table,
-                        window: self.window,
-                        cutoff: cutoffs.word_cutoff,
-                        dropoff: cutoffs.x_dropoff,
-                    },
-                    rows,
-                    offsets,
-                    gap_open,
-                    gap_extend,
-                    x_drop_gapped,
-                    hit_cutoff: cutoffs.hit_cutoff,
-                    karlin: prelim_karlin,
-                    stats: frame.stats(self.gumbel),
-                    prelim_evalue: self.prelim_evalue,
-                    prelim_hitlist_size: self.prelim_hitlist_size,
-                    query_index: q_idx as u32,
-                    program: self.program,
-                };
-                prelim.search_frame(&mut scratch.0, &frame.aa_seq[1..], frame.frame)?;
-                searched = Some(prelim);
+                last = units[unit].1;
             }
-            let Some(prelim) = searched else {
-                return Ok(none);
+            let finished = match failed {
+                Some(error) => Err(error),
+                None => Ok(prelim_of(q_idx, last).finish(&mut combined, query.stat_length())),
             };
-            let Some(mut lists) = prelim.finish(&mut scratch.0, query.stat_length()) else {
+            combined.clear();
+            scratch.prelim.combined = combined;
+            let Some(mut lists) = finished? else {
                 return Ok(none);
             };
             if cbs_close {
                 lists.cbs_close_trim(self.hitlist_size);
             }
-            let mut traced =
-                traceback.trace_query(lists, query, q_idx as u32, self.gumbel, &mut scratch.1)?;
+            let mut traced = traceback.trace_query(
+                lists,
+                query,
+                q_idx as u32,
+                self.gumbel,
+                &mut scratch.trace,
+            )?;
             if let Some(hit_list) = traced.hit_list.as_mut() {
                 if query
                     .frames
@@ -688,24 +775,204 @@ impl RpsRun<'_> {
             }
             Ok(traced)
         };
+        // One unit: its context's HSPs, kept until the query's last context is searched; the
+        // worker that searches that one finishes the query at once, so a query's preliminary
+        // HSPs live only while the query is in flight.
+        let run_unit = |scratch: &mut RpsScratch, unit: usize| {
+            let (q_idx, context) = units[unit];
+            let frame = &self.queries[q_idx].frames[context];
+            // The worker's table and buckets for this volume (what the worker kept stays).
+            scratch.prelim.word.prepare_for(rows.len(), self.window);
+            let mut hsps = Vec::new();
+            let searched = prelim_of(q_idx, context)
+                .search_frame(
+                    &mut scratch.prelim,
+                    &frame.aa_seq[1..],
+                    frame.frame,
+                    &mut hsps,
+                )
+                .map(|()| hsps);
+            *searched_units[unit]
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(searched);
+            if remaining[q_idx].fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 {
+                let traced = finish_query(scratch, q_idx);
+                *results[q_idx]
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(traced);
+            }
+        };
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         if pool.enabled() && pool.threads() > 1 {
             use rayon::prelude::*;
-            return pool.install(|| {
-                (0..self.queries.len())
+            pool.install(|| {
+                (0..units.len())
                     .into_par_iter()
-                    .map_init(new_scratch, search_one)
-                    .collect()
+                    .with_max_len(1)
+                    .for_each(|unit| {
+                        // The worker's index in the run's pool (its scratch, `RpsWorkers`).
+                        let slot = rayon::current_thread_index().unwrap_or(0);
+                        workers.with(slot, |scratch| run_unit(scratch, unit));
+                    });
             });
+            return Ok(take_results(refused, results));
         }
         let _ = pool;
-        let mut scratch = new_scratch();
-        (0..self.queries.len())
-            .map(|q_idx| search_one(&mut scratch, q_idx))
-            .collect()
+        // Without a pool the units run on the caller's thread, on the first scratch.
+        for unit in 0..units.len() {
+            workers.with(0, |scratch| run_unit(scratch, unit));
+        }
+        Ok(take_results(refused, results))
+    }
+}
+
+/// The number of units of the query `q_idx` (`search_volume`).
+fn units_of(first_unit: &[usize], units: &[(usize, usize)], q_idx: usize) -> usize {
+    first_unit.get(q_idx + 1).copied().unwrap_or(units.len()) - first_unit[q_idx]
+}
+
+/// A volume's search of a run's queries (`RpsRun::search_volume`), read query batch by query
+/// batch (`batches`) in the order NCBI's search of one batch meets its errors.
+pub(crate) struct RpsVolumeResults {
+    /// Each query's refusal of its cutoffs (`None` where they exist).
+    refused: Vec<Option<anyhow::Error>>,
+    /// The volume's refusal after the queries' cutoffs (the Lambda at the volume's scale): no
+    /// query was searched.
+    late: Option<anyhow::Error>,
+    /// Each searched query's result: its traced lists, or the first error of its search (`None`
+    /// for a query that was not searched).
+    searched: Vec<Option<Result<RpsTraced>>>,
+}
+
+impl RpsVolumeResults {
+    /// The results of the query batches whose numbers of queries are `spans`, in query order:
+    /// each batch's traced lists, up to the first batch that fails, whose error ends the list.
+    /// A batch's error is the first refusal of its queries' cutoffs (NCBI sets the cutoffs of the
+    /// whole batch before its scan, `search_volume`), else the volume's refusal after them, else
+    /// the first error of its queries' searches in query order (the queries search at the same
+    /// time).
+    pub(crate) fn batches(self, spans: &[usize]) -> Vec<Result<Vec<RpsTraced>>> {
+        let Self {
+            refused,
+            mut late,
+            searched,
+        } = self;
+        let mut refused = refused.into_iter();
+        let mut searched = searched.into_iter();
+        let mut batches = Vec::with_capacity(spans.len());
+        for &count in spans {
+            // The batch's refusals are all consumed: the next batch never reads them.
+            let first_refusal = refused
+                .by_ref()
+                .take(count)
+                .fold(None, |first, refusal| first.or(refusal));
+            let results: Vec<Option<Result<RpsTraced>>> = searched.by_ref().take(count).collect();
+            let batch = match first_refusal.or_else(|| late.take()) {
+                Some(refusal) => Err(refusal),
+                None => results
+                    .into_iter()
+                    .map(|result| result.expect("a query whose cutoffs exist is searched"))
+                    .collect(),
+            };
+            let failed = batch.is_err();
+            batches.push(batch);
+            if failed {
+                break;
+            }
+        }
+        batches
+    }
+
+    /// The results of the run's queries as one batch (`batches`), for the tests of the order of
+    /// the errors.
+    #[cfg(test)]
+    pub(crate) fn all(self) -> Result<Vec<RpsTraced>> {
+        let count = self.refused.len();
+        self.batches(&[count])
+            .pop()
+            .expect("one batch has its result")
+    }
+}
+
+/// Every query's result of a volume's search, in query order (`RpsVolumeResults`).
+fn take_results(
+    refused: Vec<Option<anyhow::Error>>,
+    results: Vec<std::sync::Mutex<Option<Result<RpsTraced>>>>,
+) -> RpsVolumeResults {
+    let searched = results
+        .into_iter()
+        .zip(&refused)
+        .map(|(result, refusal)| {
+            let result = result
+                .into_inner()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            match refusal {
+                Some(_) => None,
+                None => Some(result.expect("every searched query of the volume has its result")),
+            }
+        })
+        .collect();
+    RpsVolumeResults {
+        refused,
+        late: None,
+        searched,
+    }
+}
+
+/// The scratch of one worker of an RPS search: its preliminary stage's (the word finder's
+/// diagonal table and buckets, the gapped kernels' memory) and its traceback's.
+struct RpsScratch {
+    prelim: RpsPrelimScratch,
+    trace: RpsTraceScratch,
+}
+
+impl RpsScratch {
+    /// A worker's scratch, its buckets' blocks from the run's `pool`.
+    fn new(pool: &std::sync::Arc<RpsBlockPool>) -> Self {
+        Self {
+            prelim: RpsPrelimScratch::new(RpsWordScratch::new(pool.clone())),
+            trace: RpsTraceScratch::new(),
+        }
+    }
+}
+
+/// The scratch of a run's workers (series PR, item PS12s, D3): one for each thread of the run's
+/// pool (`rayon::current_thread_index` inside the pool; the first for a search without a pool),
+/// kept from volume to volume and from query batch to query batch, where each search of a volume
+/// made its own (whose buckets grew again by doubling). A worker's diagonal table stays where the
+/// next volume's table has the same length (`RpsWordScratch::prepare_for`); the buckets' blocks
+/// come from one pool of the run (`RpsBlockPool`, M2), to which each bucket gives its blocks back
+/// as soon as its hits are read. A search's values do not depend on what its scratch held before
+/// (`wordfinder.rs`), so only the memory and its reuse change.
+pub(crate) struct RpsWorkers {
+    slots: Vec<std::sync::Mutex<RpsScratch>>,
+    pool: std::sync::Arc<RpsBlockPool>,
+}
+
+impl RpsWorkers {
+    /// The scratch of a run of `threads` threads (empty until a worker searches).
+    pub(crate) fn new(threads: usize) -> Self {
+        let pool = std::sync::Arc::new(RpsBlockPool::default());
+        Self {
+            slots: (0..threads.max(1))
+                .map(|_| std::sync::Mutex::new(RpsScratch::new(&pool)))
+                .collect(),
+            pool,
+        }
+    }
+
+    /// `work` on the scratch of the worker `slot` (its index in the run's pool; 0 without a
+    /// pool), or on a scratch of its own where that one is not free (no task of a search waits
+    /// for the pool, so a worker never holds its scratch twice) or the slot is not one of the
+    /// run's.
+    fn with<T>(&self, slot: usize, work: impl FnOnce(&mut RpsScratch) -> T) -> T {
+        match self.slots.get(slot).and_then(|slot| slot.try_lock().ok()) {
+            Some(mut scratch) => work(&mut scratch),
+            None => work(&mut RpsScratch::new(&self.pool)),
+        }
     }
 }
 
@@ -1311,5 +1578,336 @@ mod tests {
         let mut hit_list = build();
         finish_volume_list(&mut hit_list, 0, 0.0, &query, 10);
         assert_eq!(oids(&hit_list), vec![1, 2]);
+    }
+
+    /// The files of the fixture database `rps_mini` (tests/db_search/rps/, three profiles)
+    /// inflated into a directory of this test, and the database opened.
+    fn rps_mini(name: &str) -> (std::path::PathBuf, crate::seqdb::SeqDb) {
+        rps_mini_without(name, &[])
+    }
+
+    /// `rps_mini` without the files of the extensions `left_out`.
+    fn rps_mini_without(
+        name: &str,
+        left_out: &[&str],
+    ) -> (std::path::PathBuf, crate::seqdb::SeqDb) {
+        use std::io::Read;
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/rps");
+        let dir =
+            std::env::temp_dir().join(format!("losat-rps-engine-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for extension in [
+            "aux", "loo", "rps", "pin", "psq", "phr", "pdb", "pos", "pot", "ptf", "pto",
+        ] {
+            if left_out.contains(&extension) {
+                continue;
+            }
+            let mut bytes = Vec::new();
+            flate2::read::GzDecoder::new(
+                std::fs::read(fixtures.join(format!("rps_mini.{extension}.gz")))
+                    .unwrap()
+                    .as_slice(),
+            )
+            .read_to_end(&mut bytes)
+            .unwrap();
+            std::fs::write(dir.join(format!("rps_mini.{extension}")), bytes).unwrap();
+        }
+        let db = crate::seqdb::SeqDb::open(
+            dir.join("rps_mini").to_str().unwrap(),
+            crate::seqdb::SeqType::Protein,
+        )
+        .unwrap();
+        (dir, db)
+    }
+
+    /// NCBIstdaa letters of `text` between two sentinels.
+    fn encoded(text: &str) -> Vec<u8> {
+        const LETTERS: &[u8] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
+        let mut letters = vec![0u8];
+        letters.extend(text.bytes().map(|letter| {
+            LETTERS
+                .iter()
+                .position(|&l| l == letter.to_ascii_uppercase())
+                .unwrap_or(21) as u8
+        }));
+        letters.push(0);
+        letters
+    }
+
+    // D2 of PS12s: a volume's search with every valid context of every query a unit of the pool
+    // (the query finished by the worker that searches its last context) gives each query the
+    // results of the search one context after another on one worker; a query whose cutoffs are
+    // refused gets that refusal as its result, the others theirs.
+    #[test]
+    fn units_of_contexts_give_the_results_of_the_search_in_order() {
+        use crate::algorithm::rps_search::volumes::{Consensus, RpsVolumeSet, RpsVolumeSetup};
+        let (dir, db) = rps_mini("units");
+        let volumes = RpsVolumeSet::of(&db);
+        let volume = &volumes.volumes[0];
+        let mut setup = RpsVolumeSetup::new("RPSTBLASTN", 40);
+        assert!(setup.check(volume, false).unwrap().is_ok());
+        let Ok(files) = setup.reopen(volume, false).unwrap() else {
+            panic!("rps_mini opens");
+        };
+        // The profiles' fragments (tests/db_search/rps/build.sh) as the frames of queries: windows
+        // of the WSSV proteins with the profiles' letters, and two queries of other letters.
+        let proteins = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/rps/q40.faa"),
+        )
+        .unwrap();
+        let sequences: Vec<String> = proteins
+            .split('>')
+            .filter(|record| !record.is_empty())
+            .map(|record| record.lines().skip(1).collect())
+            .collect();
+        let windows = [
+            (32, 0, 80),
+            (32, 60, 190),
+            (18, 300, 400),
+            (18, 380, 480),
+            (4, 1100, 1200),
+            (4, 1180, 1290),
+            (0, 0, 120),
+            (1, 10, 90),
+        ];
+        let frames: Vec<Vec<u8>> = (0..18)
+            .map(|i| {
+                let (record, start, end) = windows[i % windows.len()];
+                let sequence = &sequences[record];
+                encoded(&sequence[start.min(sequence.len())..end.min(sequence.len())])
+            })
+            .collect();
+        let kbp = KarlinParams {
+            lambda: 0.3176,
+            k: 0.134,
+            h: 0.4012,
+            alpha: 0.0,
+            beta: 0.0,
+        };
+        let options = RpsSearch::default();
+        // BLOSUM62 11/1's Gumbel block (the database's 1,000,000 letters).
+        let gumbel = crate::stats::spouge::lookup_protein_gumbel_params(
+            &crate::config::ProteinScoringSpec {
+                matrix: crate::config::ScoringMatrix::Blosum62,
+                gap_open: 11,
+                gap_extend: 1,
+            },
+            1_000_000,
+        )
+        .unwrap();
+        // Six queries of six frames (one of them invalid), the second with a Lambda that makes its
+        // ungapped X-drop leave 32 bits (refused: NCBI's default X-drop, so the refusal names the
+        // database's scale).
+        let queries: Vec<RpsQuery<'_>> = (0..6)
+            .map(|q| RpsQuery {
+                frames: (0..NUM_FRAMES)
+                    .map(|f| {
+                        let aa_seq = &frames[(q * NUM_FRAMES + f) % frames.len()];
+                        RpsFrame {
+                            frame: [1, 2, 3, -1, -2, -3][f],
+                            aa_seq,
+                            aa_seq_nomask: None,
+                            valid: f != 4,
+                            kbp_std: KarlinParams {
+                                lambda: if q == 1 { 1e-300 } else { kbp.lambda },
+                                ..kbp
+                            },
+                            search_space: 20_000_000,
+                            first_query_length: aa_seq.len() - 2,
+                        }
+                    })
+                    .collect(),
+                batch_kbp: kbp,
+            })
+            .collect();
+        let run = RpsRun {
+            queries,
+            gapped: KarlinParams {
+                lambda: 0.267,
+                k: 0.041,
+                h: 0.14,
+                alpha: 1.9,
+                beta: -30.0,
+            },
+            gumbel: Some(&gumbel),
+            cutoff_subject_length: 180,
+            evalue: 10.0,
+            prelim_evalue: 10.0,
+            cbs: 0,
+            sbp: None,
+            hitlist_size: 500,
+            prelim_hitlist_size: 500,
+            window: 40,
+            x_drop_ungapped_bits: 7.0,
+            x_drop_gapped_bits: 15.0,
+            x_drop_final_bits: 25.0,
+            gap_trigger_bits: 22.0,
+            options: &options,
+            program: "RPSTBLASTN",
+        };
+        let consensus = Consensus::new(&setup, volume, &files);
+        let shown = |results: RpsVolumeResults| -> Vec<String> {
+            assert!(results.late.is_none());
+            results
+                .refused
+                .into_iter()
+                .zip(results.searched)
+                .map(|(refusal, result)| match (refusal, result) {
+                    (Some(refusal), None) => format!("refused: {refusal}"),
+                    (None, Some(Ok(traced))) => {
+                        format!("{:?} {:?}", traced.hit_list, traced.k_mark)
+                    }
+                    (None, Some(Err(error))) => format!("failed: {error}"),
+                    _ => unreachable!("a query is refused or searched"),
+                })
+                .collect()
+        };
+        let serial = shown(
+            run.search_volume(
+                &files,
+                &consensus,
+                &crate::utils::threading::SearchPool::x_serial(),
+                &RpsWorkers::new(1),
+            )
+            .unwrap(),
+        );
+        assert_eq!(serial.len(), 6);
+        assert!(
+            serial[1].starts_with("refused: a profile database of the scale 100"),
+            "{}",
+            serial[1]
+        );
+        let with_hits = serial
+            .iter()
+            .filter(|shown| shown.starts_with("Some(BlastpHitList"))
+            .count();
+        assert!(with_hits >= 4, "{serial:?}");
+        for threads in [2, 4] {
+            let workers = RpsWorkers::new(threads);
+            let parallel =
+                crate::utils::threading::with_search_pool(threads, "RPSTBLASTN", |pool| {
+                    // Twice on the same workers: the kept scratch gives the same results.
+                    let first = shown(run.search_volume(&files, &consensus, pool, &workers)?);
+                    let again = shown(run.search_volume(&files, &consensus, pool, &workers)?);
+                    assert_eq!(first, again);
+                    Ok(first)
+                })
+                .unwrap();
+            assert_eq!(parallel, serial, "{threads} threads");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // S1 and N1 of the review of PS12s: a batch's refusal of a query's cutoffs comes before the
+    // search errors of the batch's earlier queries, and the volume's refusal of its Lambda at the
+    // scale after the cutoffs (NCBI sets the cutoffs of the whole batch before its scan,
+    // blast_engine.c:1372-1374, quoted at `search_volume`; its e-values come after). Query 0 has
+    // hits, so its traceback reads the consensus letters, whose file (.psq) is missing: its search
+    // fails; query 1's ungapped X-drop leaves 32 bits: refused at its cutoffs.
+    #[test]
+    fn a_batchs_cutoff_refusal_comes_before_its_search_errors() {
+        use crate::algorithm::rps_search::volumes::{Consensus, RpsVolumeSet, RpsVolumeSetup};
+        let proteins = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/rps/q40.faa"),
+        )
+        .unwrap();
+        let record: String = proteins
+            .split('>')
+            .filter(|record| !record.is_empty())
+            .nth(32)
+            .unwrap()
+            .lines()
+            .skip(1)
+            .collect();
+        let letters = encoded(&record[..80]);
+        let options = RpsSearch::default();
+        let gumbel = crate::stats::spouge::lookup_protein_gumbel_params(
+            &crate::config::ProteinScoringSpec::default(),
+            1_000_000,
+        )
+        .unwrap();
+        let queries = || {
+            let mut queries = vec![
+                cutoff_query(&letters, 20_000_000),
+                cutoff_query(&letters, 20_000_000),
+            ];
+            queries[1].frames[0].kbp_std.lambda = 1e-300;
+            queries
+        };
+        let run = |lambda: f64| RpsRun {
+            queries: queries(),
+            gapped: KarlinParams {
+                lambda,
+                ..x_drop_run(&gumbel, &options, 15.0, 25.0).gapped
+            },
+            cutoff_subject_length: 180,
+            ..x_drop_run(&gumbel, &options, 15.0, 25.0)
+        };
+        let search = |left_out: &[&str], lambda: f64| {
+            let (dir, db) = rps_mini_without("cutoffs", left_out);
+            let volumes = RpsVolumeSet::of(&db);
+            let volume = &volumes.volumes[0];
+            let mut setup = RpsVolumeSetup::new("RPSBLAST", 40);
+            assert!(setup.check(volume, false).unwrap().is_ok());
+            let Ok(files) = setup.reopen(volume, false).unwrap() else {
+                panic!("rps_mini opens");
+            };
+            let consensus = Consensus::new(&setup, volume, &files);
+            let results = run(lambda)
+                .search_volume(
+                    &files,
+                    &consensus,
+                    &crate::utils::threading::SearchPool::x_serial(),
+                    &RpsWorkers::new(1),
+                )
+                .unwrap();
+            let _ = std::fs::remove_dir_all(dir);
+            results
+        };
+        let errors = |results: RpsVolumeResults, spans: &[usize]| -> Vec<String> {
+            results
+                .batches(spans)
+                .into_iter()
+                .map(|batch| match batch {
+                    Ok(traced) => format!("{} lists", traced.len()),
+                    Err(error) => error.to_string(),
+                })
+                .collect()
+        };
+        let lambda = 0.267;
+        // With every file: query 0 has a hit list, query 1 is refused.
+        let whole = search(&[], lambda);
+        assert!(whole.refused[1].is_some() && whole.refused[0].is_none());
+        assert!(matches!(&whole.searched[0], Some(Ok(traced)) if traced.hit_list.is_some()));
+        let scale_refusal = "a profile database of the scale 100 (its scaled";
+        assert!(errors(whole, &[2])[0].starts_with(scale_refusal));
+        // Without the consensus letters: query 0's search fails; in one batch query 1's refusal
+        // still comes first, in a batch of its own query 0's error ends the batches.
+        let missing = |spans: &[usize]| errors(search(&["psq"], lambda), spans);
+        assert!(
+            missing(&[2])[0].starts_with(scale_refusal),
+            "{:?}",
+            missing(&[2])
+        );
+        let alone = missing(&[1, 1]);
+        assert_eq!(alone.len(), 1);
+        assert!(alone[0].contains("rps_mini.psq"), "{alone:?}");
+        // A Lambda that the scale does not give back (0.4389734947748931 / 100 * 100 differs):
+        // the volume's refusal comes after the batch's cutoff refusals, before any search.
+        let late = 0.438_973_494_774_893_1;
+        assert_ne!(late / 100.0 * 100.0, late);
+        let lambda_refusal = "a profile database of the scale 100 (NCBI BLAST+ divides Lambda";
+        let refused = search(&[], late);
+        assert!(refused.searched.iter().all(Option::is_none));
+        assert!(errors(refused, &[2])[0].starts_with(scale_refusal));
+        let first = errors(search(&[], late), &[1, 1]);
+        assert_eq!(first.len(), 1);
+        assert!(first[0].starts_with(lambda_refusal), "{first:?}");
+        // `all` reads the run's queries as one batch (rpsblast's).
+        let Err(error) = search(&[], lambda).all() else {
+            panic!("the run's queries are refused");
+        };
+        assert!(error.to_string().starts_with(scale_refusal), "{error}");
     }
 }

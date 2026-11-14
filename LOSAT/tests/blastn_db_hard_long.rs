@@ -18,7 +18,7 @@
 //! makeblastdb and blastn `-num_threads 1` on the same inputs (`DBMASK_HARD_LONG_DIR=<dir>` keeps
 //! them there; README.md of that fixture directory).
 //!
-//! The run writes about 14 MB into a temporary directory.
+//! The run writes about 14 MB into a temporary directory, which it removes also when it fails.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -148,16 +148,37 @@ fn expected(task: &str) -> Vec<u8> {
 /// The tabular columns: NCBI's standard twelve and the identities.
 const OUTFMT: &str = "6 std nident";
 
+/// The run's directory, removed when the test ends, also when an assert fails (review 2 T3 of
+/// M4a-2b), unless `DBMASK_HARD_LONG_DIR` names it (kept).
+struct RunDir {
+    path: PathBuf,
+    keep: bool,
+}
+
+impl Drop for RunDir {
+    fn drop(&mut self) {
+        if !self.keep {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
 #[test]
 fn hard_masked_sequences_over_ncbi_s_chunk_merge_their_chunks_as_ncbi() {
-    let dir = match std::env::var_os("DBMASK_HARD_LONG_DIR") {
-        Some(dir) => PathBuf::from(dir),
-        None => {
-            std::env::temp_dir().join(format!("losat-blastn-db-hard-long-{}", std::process::id()))
-        }
+    let run_dir = match std::env::var_os("DBMASK_HARD_LONG_DIR") {
+        Some(dir) => RunDir {
+            path: PathBuf::from(dir),
+            keep: true,
+        },
+        None => RunDir {
+            path: std::env::temp_dir()
+                .join(format!("losat-blastn-db-hard-long-{}", std::process::id())),
+            keep: false,
+        },
     };
-    std::fs::create_dir_all(&dir).unwrap();
-    write_inputs(&dir);
+    let dir = run_dir.path.as_path();
+    std::fs::create_dir_all(dir).unwrap();
+    write_inputs(dir);
     let db = dir.join("hl").to_str().unwrap().to_string();
     let output = losat()
         .arg("makeblastdb")
@@ -196,9 +217,6 @@ fn hard_masked_sequences_over_ncbi_s_chunk_merge_their_chunks_as_ncbi() {
                 failed.push(format!("{task} at {threads} threads"));
             }
         }
-    }
-    if std::env::var_os("DBMASK_HARD_LONG_DIR").is_none() {
-        std::fs::remove_dir_all(&dir).unwrap();
     }
     assert!(failed.is_empty(), "rows differ from NCBI's: {failed:?}");
 }

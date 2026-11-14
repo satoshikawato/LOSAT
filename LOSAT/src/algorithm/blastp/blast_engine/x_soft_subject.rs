@@ -254,10 +254,9 @@ fn scan(
     }
 }
 
-/// NCBI's longest subject chunk (`MAX_DBSEQ_LEN`, blast_gapalign.h:54).
-const MAX_DBSEQ_LEN: usize = 5_000_000;
-/// NCBI's overlap of two subject chunks (`DBSEQ_CHUNK_OVERLAP`, blast_hits.h:192).
-const DBSEQ_CHUNK_OVERLAP: i32 = 100;
+// NCBI's longest subject chunk (`MAX_DBSEQ_LEN`, blast_gapalign.h:54) and the overlap of two
+// subject chunks (`DBSEQ_CHUNK_OVERLAP`, blast_hits.h:192): the one copy of both macros.
+use crate::core::subject_split::{DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-310 (`s_GetNextSubjectChunk`)
 // ```c
@@ -307,7 +306,7 @@ fn chunk_scans(
     while next < length {
         let offset = next;
         let chunk_length = if offset + (MAX_DBSEQ_LEN as i32) < length {
-            next = offset + MAX_DBSEQ_LEN as i32 - DBSEQ_CHUNK_OVERLAP;
+            next = offset + MAX_DBSEQ_LEN as i32 - DBSEQ_CHUNK_OVERLAP as i32;
             MAX_DBSEQ_LEN as i32
         } else {
             next = length;

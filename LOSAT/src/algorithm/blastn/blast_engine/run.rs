@@ -704,7 +704,10 @@ impl SubjectSplitState {
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:221-310
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:221-310 (the arithmetic of
+    // `core::subject_split::HardSplitState::next_chunk` on `&full_range`, kept here for the default
+    // path's code: one function for both cost the chunk loop 14 instructions per subject, review 2
+    // S1 of M4a-2b)
     // ```c
     // if (backup->next >= backup->full_range.right) return SUBJECT_SPLIT_DONE;
     // residual = is_nucleotide ?  backup->next % COMPRESSION_RATIO : 0;
@@ -15920,6 +15923,18 @@ mod tests {
         hard: Option<&[(i32, i32)]>,
         soft: Option<&[(i32, i32)]>,
     ) -> Vec<ModelChunk> {
+        ncbi_ranged_chunks(length, hard, soft)
+            .into_iter()
+            .map(|(chunk, _)| chunk)
+            .collect()
+    }
+
+    /// `ncbi_chunks` with each chunk's hard range (`hm_index` when it is cut).
+    fn ncbi_ranged_chunks(
+        length: i32,
+        hard: Option<&[(i32, i32)]>,
+        soft: Option<&[(i32, i32)]>,
+    ) -> Vec<(ModelChunk, usize)> {
         const MAX: i32 = 5_000_000;
         const OVERLAP: i32 = 100;
         let full = [(0, length)];
@@ -15936,6 +15951,7 @@ mod tests {
             }
             let residual = next % 4;
             offset = next - residual;
+            let range = hm_index;
             let subject_length;
             if offset + MAX < hard_ranges[hm_index].1 {
                 subject_length = MAX;
@@ -15987,7 +16003,7 @@ mod tests {
                 length
             };
             let overlap = if offset == range_left { 0 } else { OVERLAP };
-            chunks.push((offset, subject_length, seq_ranges, overlap));
+            chunks.push(((offset, subject_length, seq_ranges, overlap), range));
         }
     }
 
@@ -16156,17 +16172,24 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-310, 579-584 (quoted
-    // at `SubjectSplitState::next_chunk`); na_ungapped.c:1647-1668 (quoted at `HardMaskShape::of`)
+    // at `SubjectSplitState::next_chunk`); na_ungapped.c:1647-1668, masksubj.inl:43-58,
+    // blast_engine.c:493-500, 565 and blast_hits.c:2873-2911, 2956 (quoted at `HardMaskShape::of`)
     // The refusals of `-db_hard_mask` against NCBI's chunks (the model above, not the chunker
-    // that the refusals run; reviews F1-F3 and T1 of M4a-2b), for random sorted masks of
-    // sequences of 1 to 64 letters, with empty masks at 0 in front of a third of the sets, and
-    // words of 4 to 16 letters: a shape is refused as `TailMask` exactly when a chunk shorter
-    // than the sequence scans the full range and the scan reads a word (`length >= word`), and as
-    // `ShortLastMask` exactly when the chunk of the last hard range starts before the end of the
-    // chunk before it; an accepted shape has neither. In 1 to 64 letters every hard range is one
-    // chunk.
+    // that the refusals run; reviews F1-F3 and T1 of M4a-2b, review 2 F1 and T1): a shape is
+    // refused as `TailMask` exactly when a chunk shorter than the sequence scans the full range
+    // and the scan reads a word (`length >= word`), and as `ShortLastMask` exactly when NCBI's
+    // merge after the final chunk can take an HSP of an earlier chunk by the overlap that it reads
+    // past its list: the final chunk is of the last hard range and scans a word (else NCBI does
+    // not merge it), and an earlier chunk of another hard range that scans a word ends after the
+    // final chunk's offset (`hspcnt1`; a chunk of the same range is LOSAT's overlap, decision
+    // B-d); an accepted shape has neither. A chunk scans a word when one of its `seq_ranges`
+    // holds `word` letters (`s_DetermineScanningOffsets`). Random sorted masks of sequences of 1
+    // to 64 letters (a third of the sets with empty masks at 0 first, words of 4 to 16 letters),
+    // and of sequences of up to 15,000,000 letters with one to four masks of 0 to 5 letters (some
+    // longer) at random places (words of 4 to 28 letters), where ranges over MAX_DBSEQ_LEN letters
+    // are cut into several chunks and the final chunk can follow a full chunk of its own range.
     #[test]
-    fn hard_mask_refusals_are_the_chunks_that_ncbi_reads_past() {
+    fn hard_mask_refusals_are_the_merges_that_ncbi_decides_past_its_list() {
         use crate::blastinput::db_mask::HardMaskShape;
         let mut seed = 0x2545_F491_4F6C_DD1Du64;
         let mut next = |bound: u64| {
@@ -16175,10 +16198,17 @@ mod tests {
             seed ^= seed << 17;
             (seed % bound) as i32
         };
-        let (mut tails, mut shorts, mut accepted) = (0, 0, 0);
-        for _ in 0..20_000 {
-            let length = 1 + next(64);
-            let word = 4 + next(13);
+        // tails, shorts, accepted; of the long sequences: shorts, accepted with the final chunk
+        // after a chunk of its own range (B-d), and accepted where only chunks that scan no word
+        // end after the final chunk's offset (review 2 F1).
+        let mut counts = [0usize; 6];
+        for case in 0..40_000 {
+            let long = case % 2 == 1;
+            let (length, word) = if long {
+                (1 + next(15_000_000), 4 + next(25))
+            } else {
+                (1 + next(64), 4 + next(13))
+            };
             let mut masks = vec![
                 (0, 0);
                 if next(3) == 0 {
@@ -16189,8 +16219,14 @@ mod tests {
             ];
             let mut at = 0;
             for _ in 0..1 + next(4) {
-                let start = at + next(8);
-                let end = (start + next(12)).min(length);
+                let (start, end) = if long {
+                    let start = at + next((length - at).max(1) as u64);
+                    let letters = if next(8) == 0 { next(5_000) } else { next(6) };
+                    (start, (start + letters).min(length))
+                } else {
+                    let start = at + next(8);
+                    (start, (start + next(12)).min(length))
+                };
                 if start > length {
                     break;
                 }
@@ -16198,28 +16234,63 @@ mod tests {
                 at = end;
             }
             let hard = complement(&masks, length);
-            let chunks = ncbi_chunks(length, Some(&hard), None);
+            let chunks = ncbi_ranged_chunks(length, Some(&hard), None);
+            let scans =
+                |chunk: &ModelChunk| chunk.2.iter().any(|&(left, right)| left + word <= right);
             let scans_past = chunks
                 .iter()
-                .any(|chunk| chunk.1 < length && chunk.2 == [(0, length)] && length >= word);
-            // The chunk of the last hard range ends at the sequence's end; it is the final one
-            // when the last range has letters (`masks`' last end before `length`).
-            let last_end = masks.last().map_or(0, |&(_, end)| end);
-            let merges_across = last_end < length
-                && chunks.len() >= 2
-                && chunks[chunks.len() - 1].0 < {
-                    let before = &chunks[chunks.len() - 2];
-                    before.0 + before.1
-                };
+                .any(|(chunk, _)| chunk.1 < length && chunk.2 == [(0, length)] && length >= word);
+            // The final chunk of the last hard range, after which NCBI reads the overlap past
+            // the list (the loop ends there), and the earlier chunks that end after its offset.
+            let (merges_past, after_own_range, only_no_word) = match chunks.split_last() {
+                Some(((last, range), earlier)) if *range == hard.len() - 1 => {
+                    let reach = |chunk: &ModelChunk| chunk.0 + chunk.1 > last.0;
+                    (
+                        scans(last)
+                            && earlier.iter().any(|(chunk, other)| {
+                                other != range && scans(chunk) && reach(chunk)
+                            }),
+                        earlier.last().is_some_and(|(_, other)| other == range),
+                        scans(last)
+                            && earlier
+                                .iter()
+                                .any(|(chunk, other)| other != range && reach(chunk))
+                            && !earlier.iter().any(|(chunk, other)| {
+                                other != range && scans(chunk) && reach(chunk)
+                            }),
+                    )
+                }
+                _ => (false, false, false),
+            };
             let stored: Vec<(u32, u32)> = masks
                 .iter()
                 .map(|&(start, end)| (start as u32, end as u32))
                 .collect();
-            let shape = HardMaskShape::of(&stored, &|| Some(length as usize), word as usize);
+            let shape = HardMaskShape::of(&stored, None, &|| Some(length as usize), word as usize);
+            // The same shape from the bounds of the length that the index gives (the packed bytes
+            // and 0 to 3 letters in the last one; review 2 S4).
+            let low = (length - length % 4) as usize;
+            assert_eq!(
+                HardMaskShape::of(
+                    &stored,
+                    Some((low, low + 3)),
+                    &|| Some(length as usize),
+                    word as usize
+                ),
+                shape,
+                "{length} {masks:?} word {word}: bounds"
+            );
             match shape {
-                Ok(Some(HardMaskShape::TailMask { .. })) => tails += 1,
-                Ok(Some(HardMaskShape::ShortLastMask { .. })) => shorts += 1,
-                Ok(None) => accepted += 1,
+                Ok(Some(HardMaskShape::TailMask { .. })) => counts[0] += 1,
+                Ok(Some(HardMaskShape::ShortLastMask { .. })) => {
+                    counts[1] += 1;
+                    counts[3] += usize::from(long);
+                }
+                Ok(None) => {
+                    counts[2] += 1;
+                    counts[4] += usize::from(long && after_own_range);
+                    counts[5] += usize::from(only_no_word);
+                }
                 other => panic!("{length} {masks:?}: {other:?}"),
             }
             assert_eq!(
@@ -16229,13 +16300,18 @@ mod tests {
             );
             assert_eq!(
                 matches!(shape, Ok(Some(HardMaskShape::ShortLastMask { .. }))),
-                merges_across && !scans_past,
+                merges_past && !scans_past,
                 "{length} {masks:?} word {word}: {chunks:?}"
             );
         }
         assert!(
-            tails > 300 && shorts > 300 && accepted > 1000,
-            "{tails} {shorts} {accepted}"
+            counts[0] > 300
+                && counts[1] > 1000
+                && counts[2] > 10_000
+                && counts[3] > 100
+                && counts[4] > 1000
+                && counts[5] > 100,
+            "{counts:?}"
         );
     }
 }

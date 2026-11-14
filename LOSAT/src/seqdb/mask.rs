@@ -1215,17 +1215,25 @@ impl SeqDb {
     /// The first sequence that the search reads (by ordinal id: those the list and the alias
     /// files' ranges include) whose masks of the filtering algorithm `algo_id`, as stored, `test`
     /// finds a refusal in, with its NCBI OID (as `blastdbcmd`'s `%o`) and its volume's path.
-    /// `test` gets the masks (never empty) and a function that reads the sequence's length (the
-    /// sequence's index and its last byte; `None` when they cannot be read, and `test` then
-    /// gives `Err(())`). No NCBI counterpart:
-    /// a check of the masks before the search for LOSAT's refusals (`blastinput::db_mask`,
-    /// series NP, M4a-2b), with `-db_hard_mask` only. The masks are read 4,096 sequences at a
-    /// time (`SeqDb::read_mask_block`); a sequence whose masks or length cannot be read ends the
-    /// walk without a finding (the search meets that read error first, as `searches_a_blob_of`).
+    /// `test` gets the masks (never empty), the bounds of the sequence's length that the index
+    /// gives (`Volume::nucleotide_length_bounds`, read once per block at its first sequence with
+    /// masks; `None` where they give none or cannot be read) and a function that reads the
+    /// sequence's length (the sequence's index and its last byte; `None` when they cannot be
+    /// read, and `test` then gives `Err(())`), which `test` calls only where the bounds do not
+    /// decide (review 2 S4 of M4a-2b: three reads per sequence were most of the walk). No NCBI
+    /// counterpart: a check of the masks before the search for LOSAT's refusals
+    /// (`blastinput::db_mask`, series NP, M4a-2b), with `-db_hard_mask` only. The masks are read
+    /// 4,096 sequences at a time (`SeqDb::read_mask_block`); a sequence whose masks or length
+    /// cannot be read ends the walk without a finding (the search meets that read error first,
+    /// as `searches_a_blob_of`).
     pub fn first_searched_masks<T>(
         &self,
         algo_id: i32,
-        mut test: impl FnMut(&[(u32, u32)], &dyn Fn() -> Option<usize>) -> Result<Option<T>, ()>,
+        mut test: impl FnMut(
+            &[(u32, u32)],
+            Option<(usize, usize)>,
+            &dyn Fn() -> Option<usize>,
+        ) -> Result<Option<T>, ()>,
     ) -> Option<(u32, PathBuf, T)> {
         const WALK_BLOCK: u32 = 4096;
         let mut block = MaskBlock::default();
@@ -1235,6 +1243,9 @@ impl SeqDb {
             self.x_block_range(ordinal, end_ordinal.min(ordinal.saturating_add(WALK_BLOCK)))
         {
             self.read_mask_block(run, algo_id, &mut block);
+            // The block's length bounds, read at its first sequence with masks (none where the
+            // index cannot be read: each length is then read alone, with its own error).
+            let mut bounds: Option<Vec<Option<(usize, usize)>>> = None;
             for vol_oid in run.first..run.end {
                 let seq_ordinal = run.first_ordinal + (vol_oid - run.first);
                 let masks = match block.ranges(vol_oid) {
@@ -1246,8 +1257,17 @@ impl SeqDb {
                 if masks.is_empty() {
                     continue;
                 }
+                let length_bounds = bounds
+                    .get_or_insert_with(|| {
+                        self.volumes[run.volume]
+                            .nucleotide_length_bounds(run.first, run.end)
+                            .unwrap_or_default()
+                    })
+                    .get((vol_oid - run.first) as usize)
+                    .copied()
+                    .flatten();
                 let length = || self.nucleotide_length(seq_ordinal).ok();
-                match test(masks, &length) {
+                match test(masks, length_bounds, &length) {
                     Ok(None) => {}
                     Ok(Some(found)) => {
                         return Some((

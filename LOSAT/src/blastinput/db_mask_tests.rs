@@ -402,10 +402,13 @@ fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
 // 1368-1370; na_ungapped.c:1647-1668): a mask that runs to the end after the chunk from 0 (empty
 // masks at 0 or at the end around it; the first range at or below MAX_DBSEQ_LEN), in a subject of
 // a word or more (`min_subj_seq_length` is 1 for BLASTN: 4 letters at word 4, review F2); masks
-// that go back; a last mask after which the final chunk starts before the end of the chunk of the
-// range before it, not where the last range is longer than MAX_DBSEQ_LEN and its final chunk
-// follows a full chunk of the same range (review F3). The length is read for every sequence with
-// sorted masks (the chunks need it), never for masks out of order.
+// that go back; a last mask after which the final chunk starts before the end of an earlier chunk
+// of another range, both chunks scanning a word (masksubj.inl:43-58; blast_engine.c:500, 565;
+// blast_hits.c:2873-2911, 2956: NCBI's merge then takes the earlier chunk's HSPs by the overlap it
+// reads past its list; review 2 F1: not where only a chunk without a word ends there, or where
+// the final chunk has no word), not where the last range is longer than MAX_DBSEQ_LEN and its
+// final chunk follows a full chunk of the same range (review F3). The length is read for every
+// sequence with sorted masks (the chunks need it), never for masks out of order.
 #[test]
 fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
     use std::cell::Cell;
@@ -415,7 +418,10 @@ fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
             reads.set(reads.get() + 1);
             Some(length)
         };
-        (HardMaskShape::of(masks, &read, 11).unwrap(), reads.get())
+        (
+            HardMaskShape::of(masks, None, &read, 11).unwrap(),
+            reads.get(),
+        )
     };
     let tail = |start, end| Some(HardMaskShape::TailMask { start, end });
     assert_eq!(shape(&[(100, 300)], 300), (tail(100, 300), 1));
@@ -464,15 +470,66 @@ fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
     assert_eq!(shape(&[(10, 20), (1199, 1199)], 1199), (None, 1));
     // A middle mask shorter than its residual merges with an overlap that NCBI reads in bounds.
     assert_eq!(shape(&[(301, 302), (500, 503)], 1200), (None, 1));
+    // Review 2 F1: the chunk between two one-letter masks (101-102, scanned from 101: one letter)
+    // and the chunk of an empty last mask's range (1000-1002, scanned from 1002) hold no word, and
+    // the chunk before them ends at the final chunk's offset: no HSP of theirs reaches the merge.
+    assert_eq!(shape(&[(100, 101), (102, 103)], 1200), (None, 1));
+    assert_eq!(shape(&[(1000, 1002), (1002, 1002)], 1200), (None, 1));
+    // The chunk from 0 ends at 101, after the final chunk's offset 100.
+    assert_eq!(shape(&[(101, 102), (102, 103)], 1200), (short(102, 103), 1));
+    // The final chunk (1000-1012, scanned from 1002) holds a word of 10 letters, not of 11.
+    assert_eq!(
+        HardMaskShape::of(&[(1001, 1002)], None, &|| Some(1012), 11),
+        Ok(None)
+    );
+    assert_eq!(
+        HardMaskShape::of(&[(1001, 1002)], None, &|| Some(1012), 10),
+        Ok(short(1001, 1002))
+    );
     // A subject that the scan reads no word of: shorter than the word.
     assert_eq!(shape(&[(0, 10)], 10), (None, 1));
     assert_eq!(shape(&[(5, 11)], 11), (tail(5, 11), 1));
-    assert_eq!(HardMaskShape::of(&[(0, 4)], &|| Some(4), 5), Ok(None));
-    assert_eq!(HardMaskShape::of(&[(2, 4)], &|| Some(4), 4), Ok(tail(2, 4)));
-    assert_eq!(HardMaskShape::of(&[(0, 4)], &|| Some(4), 4), Ok(tail(0, 4)));
-    assert_eq!(HardMaskShape::of(&[(1, 3)], &|| Some(3), 4), Ok(None));
+    assert_eq!(HardMaskShape::of(&[(0, 4)], None, &|| Some(4), 5), Ok(None));
+    assert_eq!(
+        HardMaskShape::of(&[(2, 4)], None, &|| Some(4), 4),
+        Ok(tail(2, 4))
+    );
+    assert_eq!(
+        HardMaskShape::of(&[(0, 4)], None, &|| Some(4), 4),
+        Ok(tail(0, 4))
+    );
+    assert_eq!(HardMaskShape::of(&[(1, 3)], None, &|| Some(3), 4), Ok(None));
     // The length that cannot be read ends the check.
-    assert_eq!(HardMaskShape::of(&[(100, 300)], &|| None, 11), Err(()));
+    assert_eq!(
+        HardMaskShape::of(&[(100, 300)], None, &|| None, 11),
+        Err(())
+    );
+    // The bounds of the length that the index gives (review 2 S4): the length is read only where
+    // the shape differs between them (a mask that runs to the end, here at 300 or at 1201 of
+    // 1200-1203), not where it is the same at all four (none, or a refusal read off the chunks).
+    let bounded = |masks: &[(u32, u32)], bounds: (usize, usize), length: usize| {
+        let reads = Cell::new(0);
+        let read = || {
+            reads.set(reads.get() + 1);
+            Some(length)
+        };
+        (
+            HardMaskShape::of(masks, Some(bounds), &read, 11).unwrap(),
+            reads.get(),
+        )
+    };
+    assert_eq!(bounded(&[(100, 300)], (300, 303), 300), (tail(100, 300), 1));
+    assert_eq!(
+        bounded(&[(1000, 1201)], (1200, 1203), 1201),
+        (tail(1000, 1201), 1)
+    );
+    assert_eq!(bounded(&[(100, 200)], (1200, 1203), 1201), (None, 0));
+    assert_eq!(
+        bounded(&[(1001, 1002)], (1200, 1203), 1202),
+        (short(1001, 1002), 0)
+    );
+    // The final chunk 1000-1012 to 1000-1015 holds a word of 11 letters from 1013 on.
+    assert_eq!(bounded(&[(1001, 1002)], (1012, 1015), 1012), (None, 1));
 }
 
 // blast_app_util.cpp:644-651 and local_db_adapter.cpp:54-58 (quoted at `strategy_params`): after

@@ -711,21 +711,26 @@ with the masked letters cut out, as NCBI BLAST+ 2.17.0 does, byte for byte:
   sequence whose masks NCBI's chunks do not handle; the error names it by its OID and volume:
   masks stored out of order or overlapping (hand-made mask data), whose result NCBI ties to the
   slices of its partial fetch; a chunk from the sequence's start that a mask running to its end
-  follows (all masked, or one masked tail such as a poly-A tail, also after masks of no letters
-  at 0), which NCBI scans over the whole sequence past the chunk, in a sequence of at least the
+  follows (the first mask with letters, with at most 5,000,000 letters and no other mask before
+  it than masks of no letters at 0: all masked, or one masked tail such as a poly-A tail),
+  which NCBI scans over the whole sequence past the chunk, in a sequence of at least the
   word's letters (the template's for dc-megablast; NCBI scans every BLASTN subject, however
   short): a normal-looking result, or a corrupt heap and a crash (question Q1 of line NP to the
-  Owner); and a last mask after which the final chunk starts before the end of the chunk before
-  the mask (the mask is shorter than the 1 to 3 letters before its end that the final chunk
-  starts with), where the overlap that NCBI reads past its list of ranges decides a merge across
-  the mask.
+  Owner); after a mask of no letters elsewhere, or after more than 5,000,000 letters, the
+  chunk from 0 is one of NCBI's normal chunks and the sequence is searched; and a last mask
+  after which the final chunk starts before the end of an earlier chunk of another stretch (the
+  mask is shorter than the 1 to 3 letters before its end that the final chunk starts with),
+  where both chunks hold a word, so that the overlap that NCBI reads past its list of ranges
+  decides which of their alignments merge across the mask. The chunk of a stretch of 0 to 3
+  letters between two masks holds no word and so no alignment to merge, and NCBI does not merge
+  a final chunk without one: such sequences are searched (review 2 of M4a-2b, 2026-11-15).
 - That overlap, read one range past the list after a sequence's final chunk (another sequence's
   mask end, or memory never set), is `dbseq_chunk_overlap` (100) in LOSAT, as the search without
   masks already takes it after every sequence over 5,000,000 letters (NCBI reads
-  `(&full_range)[1]` there). LOSAT refuses it only where it decides a merge across a mask, a
-  shape that only hand-made mask data give; where the last stretch between masks is longer
-  than 5,000,000 letters, its final chunk merges with the full chunk before it in the same
-  stretch, as in a sequence without masks, and is searched.
+  `(&full_range)[1]` there). LOSAT refuses it only where it can decide a merge across a mask
+  (above), a shape that only hand-made mask data give; where the last stretch between masks is
+  longer than 5,000,000 letters, its final chunk merges with the full chunk before it in the
+  same stretch, as in a sequence without masks, and is searched.
 - These refusals come before the first line of output, where every limit of LOSAT is checked,
   so they apply also where NCBI would stop earlier at an error of the query batch or find no
   word to start a hit (a `-query_loc` outside the query, a query of `N` only).

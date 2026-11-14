@@ -3,10 +3,17 @@
 //! `mask_type == eHardSubjMasking`, and the overlap of the merge after each chunk
 //! (blast_engine.c:579-584), as arithmetic on the hard ranges.
 //!
-//! The one owner of that rule (series NP, M4a-2b review S1): BLASTN's preliminary stage searches
-//! these chunks (`algorithm::blastn::blast_engine::run::next_hard_chunk` turns each into the
-//! engine's chunk), and LOSAT's refusals of `-db_hard_mask` read them
-//! (`blastinput::db_mask::HardMaskShape::of`), so the two cannot disagree.
+//! The one owner of the hard chunks (series NP, M4a-2b review S1): BLASTN's preliminary stage
+//! searches these chunks (`algorithm::blastn::blast_engine::run::next_hard_chunk` turns each into
+//! the engine's chunk), and LOSAT's refusals of `-db_hard_mask` read them
+//! (`blastinput::db_mask::HardMaskShape::of`), so the two cannot disagree. The chunks of a subject
+//! without hard ranges (unmasked or soft-masked, `run::SubjectSplitState::next_chunk`) keep their
+//! own copy of the same arithmetic on `&full_range`, for the default path's code: the one
+//! function for both cost the chunk loop's closure 280,200 more instructions (14 per subject) in
+//! a 20,000-subject megablast search (callgrind, release builds; review 2 S1 of M4a-2b), and
+//! `run::tests::hard_masked_chunks_follow_ncbi_s_get_next_subject_chunk` holds both copies to one
+//! C model of `s_GetNextSubjectChunk`. [`MAX_DBSEQ_LEN`] and [`DBSEQ_CHUNK_OVERLAP`] are the one
+//! copy of NCBI's two macros for every program.
 
 use crate::core::blast_encoding::COMPRESSION_RATIO;
 

@@ -236,7 +236,8 @@ enum SubjectSource<'a> {
 // ```c
 // #define MAX_DBSEQ_LEN 5000000
 // ```
-const MAX_DBSEQ_LEN: usize = 5_000_000;
+// The one copy of the macro (`core::subject_split`).
+use crate::core::subject_split::MAX_DBSEQ_LEN;
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:54
 // ```c
@@ -460,7 +461,8 @@ fn x_soft_scan_letters<'a>(
 // /** Size of overlap in splitting query or database sequence */
 // #define DBSEQ_CHUNK_OVERLAP 100
 // ```
-const DBSEQ_CHUNK_OVERLAP: usize = 100;
+// The one copy of the macro (`core::subject_split`).
+use crate::core::subject_split::DBSEQ_CHUNK_OVERLAP;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1534-1539
 // ```c

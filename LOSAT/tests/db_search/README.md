@@ -1416,3 +1416,15 @@ subject, and its scan of the whole sequence reads a word when the sequence has a
 makeblastdb -in subj.fna -dbtype nucl -out edge4 -title "edge masks 4" -blastdb_version 4 -mask_data edge_e0tail.asnt,edge_e0mid.asnt
 makeblastdb -in wb.fna -dbtype nucl -out edgew -title "edge masks word" -blastdb_version 4 -mask_data edge_wb.asnt
 ```
+
+The second review fixes of M4a-2b (ad-M4a-6, 2026-11-15) added `edge5`: last masks shorter than the letters before their
+end that the final chunk starts with, refused only where NCBI's merge after that chunk can take an alignment of an earlier
+chunk by the overlap it reads past its list of ranges (review 2 F1). Algorithm 11 (`edge_ov.asnt`: `s5`'s one-letter
+masks 300 and 302; the chunk between them scans no word) and 12 (`edge_em.asnt`: 700-701, then a mask of no letters at
+702, `from 702, to 701`) are searched; 13 (`edge_ovr.asnt`: 301 and 302; the chunk 0-301 ends after the final chunk's
+offset 300) is refused; 14 (`edge_fw.asnt`: `s4`'s mask 289; the final chunk 288-300 is scanned from 290) is searched at
+words of 11 and 28 letters and refused at blastn-short's 7:
+
+```
+makeblastdb -in subj.fna -dbtype nucl -out edge5 -title "edge masks 5" -blastdb_version 4 -mask_data edge_ov.asnt,edge_em.asnt,edge_ovr.asnt,edge_fw.asnt
+```

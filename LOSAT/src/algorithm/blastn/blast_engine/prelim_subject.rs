@@ -1056,33 +1056,74 @@ fn job_takes(letters: usize, chunk: &SubjectChunk) -> bool {
     letters + chunk.length <= MAX_DBSEQ_LEN
 }
 
-/// The jobs of a chunk batch (`job_takes`), in chunk order.
+/// The next batch of a subject's chunks for the pool (`collect_subject_prelim`, `HARD`
+/// instance) and its partition into jobs: up to `max_jobs` jobs (`job_takes`), from `kept` (the
+/// chunk that would have started one more job of the batch before) and then the chunks that
+/// `next_chunk` cuts (`None`: the subject's chunks are done), into `chunks` in order, with the end
+/// of each job in `chunks` into `job_ends` (both replaced). The chunk that would start job
+/// `max_jobs + 1` goes to `kept` for the next batch. Returns whether `next_chunk` ended (no batch
+/// follows). A batch of one job is searched serially on the subject's scratch, its jobs on the
+/// pool otherwise ([`batch_jobs`]).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-fn chunk_jobs(chunks: &[SubjectChunk]) -> Vec<&[SubjectChunk]> {
-    let mut jobs = Vec::new();
-    let (mut start, mut letters) = (0usize, 0usize);
-    for (index, chunk) in chunks.iter().enumerate() {
-        if index > start && !job_takes(letters, chunk) {
-            jobs.push(&chunks[start..index]);
-            (start, letters) = (index, 0);
+fn next_chunk_batch(
+    chunks: &mut Vec<SubjectChunk>,
+    job_ends: &mut Vec<usize>,
+    kept: &mut Option<SubjectChunk>,
+    max_jobs: usize,
+    mut next_chunk: impl FnMut() -> Option<SubjectChunk>,
+) -> bool {
+    chunks.clear();
+    job_ends.clear();
+    let mut job_letters = 0usize;
+    loop {
+        let Some(chunk) = kept.take().or_else(&mut next_chunk) else {
+            if !chunks.is_empty() {
+                job_ends.push(chunks.len());
+            }
+            return true;
+        };
+        if chunks.is_empty() || !job_takes(job_letters, &chunk) {
+            if !chunks.is_empty() {
+                job_ends.push(chunks.len());
+            }
+            if job_ends.len() == max_jobs {
+                *kept = Some(chunk);
+                return false;
+            }
+            job_letters = 0;
         }
-        letters += chunk.length;
+        job_letters += chunk.length;
+        chunks.push(chunk);
     }
-    if start < chunks.len() {
-        jobs.push(&chunks[start..]);
-    }
-    jobs
+}
+
+/// The jobs of a batch of `next_chunk_batch`: `chunks` cut at `job_ends`, in order.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn batch_jobs<'a>(chunks: &'a [SubjectChunk], job_ends: &[usize]) -> Vec<&'a [SubjectChunk]> {
+    let mut start = 0;
+    job_ends
+        .iter()
+        .map(|&end| {
+            let job = &chunks[start..end];
+            start = end;
+            job
+        })
+        .collect()
 }
 
 /// The preliminary search of one subject's chunks and the merge of their lists: the chunks that
 /// `split_state` cuts (`SubjectSplitState::next_chunk`, skipping a chunk without a range), each
 /// searched by `prelim_chunk_hits` with the subject's scratches on this thread, or, with a pool of
 /// two threads or more (`requested_parallel`), taken in batches of up to twice the pool's threads
-/// jobs (`job_takes`: runs of consecutive chunks of at most `MAX_DBSEQ_LEN` letters in all): a
-/// batch of one job, or the serial chunks of LOSAT_X_BNFEWSUBJ, on this thread; else the batch's
+/// jobs (`job_takes`: runs of consecutive chunks of at most `MAX_DBSEQ_LEN` letters in all;
+/// `next_chunk_batch` for a hard-masked subject's): a batch of one job, or the serial chunks of
+/// LOSAT_X_BNFEWSUBJ, on this thread; else the batch's
 /// jobs on the pool, a scratch per worker, each job's chunks in order, their lists collected in
 /// chunk order. Each chunk's list is merged into the subject's (`merge_prelim_hit_lists`, with the
 /// chunk's offset and overlap), then the subject best-hit filter (`-subject_besthit`). Returns the
@@ -1172,50 +1213,38 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
             //     ...
             // }
             // ```
-            // A batch holds up to `max_in_flight` jobs (`chunk_jobs`). The chunks of an unmasked or
-            // soft-masked subject are jobs of one chunk each (`job_takes`), so its instance takes
-            // `max_in_flight` chunks as they come; a hard-masked subject's (`HARD`) takes chunks
-            // while they fit the jobs, and keeps the chunk that would start one more for the
-            // next batch.
+            // A batch holds up to `max_in_flight` jobs. The chunks of an unmasked or soft-masked
+            // subject are jobs of one chunk each (`job_takes`: every chunk but the last has
+            // `MAX_DBSEQ_LEN` letters), so its instance takes `max_in_flight` chunks as they
+            // come; a hard-masked subject's (`HARD`) are partitioned by `next_chunk_batch`.
             let max_in_flight = num_threads.max(1) * 2;
             let mut chunk_batch: Vec<SubjectChunk> = Vec::with_capacity(max_in_flight);
+            let mut job_ends: Vec<usize> = Vec::new();
             let mut kept: Option<SubjectChunk> = None;
             let mut done = false;
             loop {
-                chunk_batch.clear();
                 let jobs = if HARD {
-                    let (mut jobs, mut job_letters) = (0usize, 0usize);
-                    loop {
-                        let chunk = match kept.take() {
-                            Some(chunk) => chunk,
-                            None if done => break,
-                            None => match next_subject_chunk::<HARD>(
+                    done = next_chunk_batch(
+                        &mut chunk_batch,
+                        &mut job_ends,
+                        &mut kept,
+                        max_in_flight,
+                        || loop {
+                            match next_subject_chunk::<HARD>(
                                 split_state,
                                 &mut subject_scratch.db_hard_split,
                                 subject_masked,
                                 dbseq_chunk_overlap,
                             ) {
-                                SubjectChunkStatus::Done => {
-                                    done = true;
-                                    break;
-                                }
+                                SubjectChunkStatus::Done => return None,
                                 SubjectChunkStatus::NoRange => continue,
-                                SubjectChunkStatus::Ok(chunk) => chunk,
-                            },
-                        };
-                        if jobs == 0 || !job_takes(job_letters, &chunk) {
-                            if jobs == max_in_flight {
-                                kept = Some(chunk);
-                                break;
+                                SubjectChunkStatus::Ok(chunk) => return Some(chunk),
                             }
-                            jobs += 1;
-                            job_letters = 0;
-                        }
-                        job_letters += chunk.length;
-                        chunk_batch.push(chunk);
-                    }
-                    jobs
+                        },
+                    );
+                    job_ends.len()
                 } else {
+                    chunk_batch.clear();
                     while chunk_batch.len() < max_in_flight && !done {
                         match next_subject_chunk::<HARD>(
                             split_state,
@@ -1334,7 +1363,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                         // own loop searches them.
                         let mut job_results: Vec<Vec<(usize, usize, Vec<PrelimHit>)>> =
                             Vec::with_capacity(jobs);
-                        chunk_jobs(&chunk_batch)
+                        batch_jobs(&chunk_batch, &job_ends)
                             .par_iter()
                             .map_init(new_scratches, |state, job| {
                                 job.iter()
@@ -1463,33 +1492,116 @@ mod tests {
         }
     }
 
-    // The jobs of the pool's chunk batches (review F4 of M4a-2b): runs of consecutive chunks of
-    // at most MAX_DBSEQ_LEN letters in all, at least one chunk each. A hard-masked subject's short
-    // chunks (chunks of no letters too) are one job; full chunks are a job each, as are the chunks
-    // of a range over MAX_DBSEQ_LEN letters after a short one (`hard1` of
+    /// The batches of `next_chunk_batch` of the chunks of `lengths` with at most `max_jobs` jobs
+    /// each: per batch the lengths of each job's chunks. Fails if a batch is empty or the chunks
+    /// come out of order, or if `next_chunk` is called after it ended.
+    fn batches(lengths: &[usize], max_jobs: usize) -> Vec<Vec<Vec<usize>>> {
+        let mut source = lengths.iter().enumerate();
+        let mut ended = false;
+        let (mut chunks, mut job_ends, mut kept) = (Vec::new(), Vec::new(), None);
+        let mut found = Vec::new();
+        let mut order = Vec::new();
+        loop {
+            let done = next_chunk_batch(&mut chunks, &mut job_ends, &mut kept, max_jobs, || {
+                assert!(!ended, "a chunk asked for after the last");
+                let next = source.next().map(|(index, &length)| SubjectChunk {
+                    offset: index,
+                    ..chunk(length)
+                });
+                ended = next.is_none();
+                next
+            });
+            if chunks.is_empty() {
+                assert!(done && kept.is_none());
+                break;
+            }
+            assert!(job_ends.len() <= max_jobs && job_ends.last() == Some(&chunks.len()));
+            order.extend(chunks.iter().map(|chunk| chunk.offset));
+            found.push(
+                batch_jobs(&chunks, &job_ends)
+                    .iter()
+                    .map(|job| job.iter().map(|chunk| chunk.length).collect())
+                    .collect(),
+            );
+            if done {
+                assert!(kept.is_none());
+                break;
+            }
+        }
+        assert_eq!(order, (0..lengths.len()).collect::<Vec<_>>());
+        found
+    }
+
+    // The batches of the pool's chunk jobs (review F4 of M4a-2b, review 2 S2 and T2): jobs are
+    // runs of consecutive chunks of at most MAX_DBSEQ_LEN letters in all, at least one chunk
+    // each, and a batch holds up to `max_jobs` of them; the chunk that would start one more job
+    // is kept for the next batch. A hard-masked subject's short chunks (chunks of no letters
+    // too) are one job, searched serially; full chunks are a job each, as are the chunks of a
+    // range over MAX_DBSEQ_LEN letters after a short one (`hard1` of
     // `tests/blastn_db_hard_long.rs`: 1,001, 5,000,000 and 299,100 letters).
     #[test]
-    fn chunk_jobs_hold_at_most_ncbi_s_chunk_length() {
-        let jobs = |lengths: &[usize]| {
-            let chunks: Vec<SubjectChunk> = lengths.iter().map(|&length| chunk(length)).collect();
-            chunk_jobs(&chunks)
-                .iter()
-                .map(|job| job.iter().map(|chunk| chunk.length).collect::<Vec<_>>())
-                .collect::<Vec<_>>()
+    fn chunk_batches_hold_jobs_of_at_most_ncbi_s_chunk_length() {
+        const MAX: usize = MAX_DBSEQ_LEN;
+        assert_eq!(batches(&[1000, 0, 2000], 4), [vec![vec![1000, 0, 2000]]]);
+        assert_eq!(
+            batches(&[MAX, MAX, 500_100], 8),
+            [vec![vec![MAX], vec![MAX], vec![500_100]]]
+        );
+        assert_eq!(
+            batches(&[MAX - 10, 10, 0, 1], 4),
+            [vec![vec![MAX - 10, 10, 0], vec![1]]]
+        );
+        assert_eq!(
+            batches(&[1001, MAX, 299_100], 4),
+            [vec![vec![1001], vec![MAX], vec![299_100]]]
+        );
+        assert!(batches(&[], 4).is_empty());
+        // The kept chunk: five jobs at two jobs per batch (two threads' worth of the probe `jb`
+        // of review 2 at one thread), the chunk that starts the third job of a batch opens the
+        // next one, with the chunks that join it.
+        assert_eq!(
+            batches(&[MAX, MAX, MAX - 5, 5, 3, MAX, 7], 2),
+            [
+                vec![vec![MAX], vec![MAX]],
+                vec![vec![MAX - 5, 5], vec![3]],
+                vec![vec![MAX], vec![7]],
+            ]
+        );
+        assert_eq!(
+            batches(&[2, 3, MAX, 4], 1),
+            [vec![vec![2, 3]], vec![vec![MAX]], vec![vec![4]]]
+        );
+        // Random lengths: the jobs are the greedy runs (a chunk opens a new job only when the job
+        // before cannot take it), every batch but the last is full.
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = |bound: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % bound) as usize
         };
-        assert_eq!(jobs(&[1000, 0, 2000]), [vec![1000, 0, 2000]]);
-        assert_eq!(
-            jobs(&[MAX_DBSEQ_LEN, MAX_DBSEQ_LEN, 500_100]),
-            [vec![MAX_DBSEQ_LEN], vec![MAX_DBSEQ_LEN], vec![500_100]]
-        );
-        assert_eq!(
-            jobs(&[MAX_DBSEQ_LEN - 10, 10, 0, 1]),
-            [vec![MAX_DBSEQ_LEN - 10, 10, 0], vec![1]]
-        );
-        assert_eq!(
-            jobs(&[1001, MAX_DBSEQ_LEN, 299_100]),
-            [vec![1001], vec![MAX_DBSEQ_LEN], vec![299_100]]
-        );
-        assert!(jobs(&[]).is_empty());
+        for _ in 0..2000 {
+            let lengths: Vec<usize> = (0..next(30))
+                .map(|_| match next(4) {
+                    0 => MAX,
+                    1 => next(MAX as u64 + 1),
+                    _ => next(5_000),
+                })
+                .collect();
+            let max_jobs = 1 + next(6);
+            let found = batches(&lengths, max_jobs);
+            let jobs: Vec<&Vec<usize>> = found.iter().flatten().collect();
+            for (index, batch) in found.iter().enumerate() {
+                assert!(!batch.is_empty() && batch.len() <= max_jobs);
+                assert!(index + 1 == found.len() || batch.len() == max_jobs);
+            }
+            for (index, job) in jobs.iter().enumerate() {
+                let letters: usize = job.iter().sum();
+                assert!(job.len() == 1 || letters <= MAX, "{lengths:?}");
+                if let Some(following) = jobs.get(index + 1) {
+                    assert!(letters + following[0] > MAX, "{lengths:?} {max_jobs}");
+                }
+            }
+        }
     }
 }

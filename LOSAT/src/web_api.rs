@@ -667,6 +667,7 @@ fn parse_blastp_args(
         archive: None,
         export_search_strategy: None,
         strategy: None,
+        request_inputs: None,
         app: blastp::args::BlastpApp::Blastp,
         subject_taxdb: None,
         inclusion_ethresh: None,

@@ -757,7 +757,7 @@ fn write_run(
                         batch: archive::CallBatch {
                             options,
                             queries,
-                            requests: &archive::requests(subject_records),
+                            requests: &archive::requests(subject_records, "BLASTX"),
                             batches: results,
                         },
                         subjects: call_subjects,

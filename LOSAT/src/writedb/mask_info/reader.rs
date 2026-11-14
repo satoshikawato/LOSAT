@@ -1225,18 +1225,18 @@ impl MaskFileReader {
     //     default:
     //         NCBI_THROW(CInvalidDataException, eInvalidInput, string("Unknown encoding for ") + msg);
     // ```
-    /// Opens the file and guesses its format from its first bytes. The text of the error for a
-    /// file in neither format is NCBI's. A file that cannot be opened or read is a failed stream
-    /// for the format guess (`x_TestInput`), which answers `eUnknown`: the same error. A text
-    /// file is then read in blocks as its objects are read; a binary file is read whole (a read
-    /// error there is the same error).
+    /// [`open_named`](Self::open_named) for a file that messages call by its path.
     #[cfg(test)]
     pub(crate) fn open(path: &Path) -> Result<Self, MaskFileError> {
         Self::open_named(path, path)
     }
 
-    /// [`open`](Self::open) for a file that messages call `name` (the name on makeblastdb's
-    /// command line).
+    /// Opens the file and guesses its format from its first bytes; messages call the file
+    /// `name` (the name on makeblastdb's command line). The text of the error for a file in
+    /// neither format is NCBI's. A file that cannot be opened or read is a failed stream for the
+    /// format guess (`x_TestInput`), which answers `eUnknown`: the same error. A text file is
+    /// then read in blocks as its objects are read; a binary file is read whole (a read error
+    /// there is the same error).
     pub(crate) fn open_named(path: &Path, name: &Path) -> Result<Self, MaskFileError> {
         match std::fs::File::open(path) {
             Ok(file) => Self::from_reader(name, Box::new(file)),

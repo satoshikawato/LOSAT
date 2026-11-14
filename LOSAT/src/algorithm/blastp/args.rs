@@ -605,6 +605,11 @@ pub struct BlastpArgs {
     /// (`strategy::StrategyExport::for_run`).
     #[arg(skip)]
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
+    /// The recorded options of the search strategy's requests of an application whose search is
+    /// BLASTP's (psiblast, rpsblast: `archive::option_inputs`), made by its command line from its
+    /// own arguments as given, with `-export_search_strategy`; `None` for BLASTP's.
+    #[arg(skip)]
+    pub request_inputs: Option<Box<crate::report::archive::options::OptionInputs>>,
     /// The application whose search this is: psiblast's command line sets it
     /// (`algorithm/psiblast`).
     #[arg(skip)]

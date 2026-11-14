@@ -1007,7 +1007,7 @@ fn link_group<'g, K: LinkKey>(
 
     let c = [cutoffs.cutoff_small_gap, cutoffs.cutoff_big_gap];
     let gap_prob = cutoffs.gap_prob;
-    let ignore_small_gaps = cutoffs.ignore_small_gaps;
+    let ignore_small_gaps = cutoffs.ignore_small_gaps();
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:545-550
     // ```c
@@ -1862,8 +1862,10 @@ impl<K: LinkKey> LinkRounds<'_, K> {
             if let Some(bi) = best[0] {
                 addback(tree, 0, bi, stats);
                 addback_hsps.push(bi as u32);
-                // NCBI's Int2 count: a wrapped (negative) count is not "> 1" (link_hsps.c:918),
-                // and BLAST_GapDecayDivisor takes it as an unsigned.
+                // NCBI's Int2 count: a wrapped (negative) count is not "> 1" (link_hsps.c:918).
+                // BLAST_GapDecayDivisor takes it as an unsigned and raises the rate to the Int4
+                // `nsegs - 1`; `as usize` sign-extends and gap_decay_divisor truncates
+                // `num_segments - 1` to the same i32.
                 let k = num[0][bi];
                 let divisor = gap_decay_divisor(gap_decay_rate, k as usize);
                 prob[0] = small_gap_sum_e(

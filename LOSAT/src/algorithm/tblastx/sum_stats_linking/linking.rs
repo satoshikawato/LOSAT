@@ -685,7 +685,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
         eprintln!("  cutoff_small_gap: {}", cutoffs.cutoff_small_gap);
         eprintln!("  cutoff_big_gap: {}", cutoffs.cutoff_big_gap);
         eprintln!("  gap_prob: {:.6}", cutoffs.gap_prob);
-        eprintln!("  ignore_small_gaps: {}", cutoffs.ignore_small_gaps);
+        eprintln!("  ignore_small_gaps: {}", cutoffs.ignore_small_gaps());
         eprintln!("  WINDOW_SIZE: {}", WINDOW_SIZE);
         eprintln!("  TRIM_SIZE: {}", TRIM_SIZE);
         eprintln!("===================================");
@@ -1628,7 +1628,7 @@ fn link_hsp_group_ncbi(
     let cutoff_small = cutoffs.cutoff_small_gap;
     let cutoff_big = cutoffs.cutoff_big_gap;
     let gap_prob = cutoffs.gap_prob;
-    let ignore_small_gaps = cutoffs.ignore_small_gaps;
+    let ignore_small_gaps = cutoffs.ignore_small_gaps();
 
     // Statistics for filtering analysis (long sequences only)
     let stats_index0_filtered = 0usize;
@@ -1844,7 +1844,7 @@ fn link_hsp_group_ncbi(
     // NCBI `link_hsps.c` sets `gap_prob = link_hsp_params->gap_prob;` (:468) regardless of
     // `ignore_small_gaps` (cutoff[0]==0, :495). With small gaps the E-values of sets of more than
     // one HSP are divided by `gap_prob` and `1-gap_prob` (:918-935); with large gaps only they are
-    // not divided (:939-952). gap_prob is 0 for small search spaces (blast_parameters.c:1081).
+    // not divided (:939-952). gap_prob is 0 for small search spaces (blast_parameters.c:1076).
 
     while remaining > 0 {
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:603-652
@@ -2122,7 +2122,7 @@ fn link_hsp_group_ncbi(
                     //                     H->hsp_link.num[index] = H_hsp_num+1;
                     // ```
                     // `H_hsp_num` is an Int4 and `num` an Int2: the store keeps the low 16 bits, so
-                    // the count of a set of more than 32,767 HSPs wraps (DECISIONS Q3c-1, Q3e).
+                    // the count of a set of more than 32,767 HSPs wraps (as in `core::link_hsps`).
                     let new_num = h_num.wrapping_add(1);
 
                     // is_target_hsp is already defined at line 1085, reuse it here
@@ -2406,7 +2406,9 @@ fn link_hsp_group_ncbi(
                 maximum_tree.update(bi, DualMaximum::active(bi, pool_hsp_links[bi].sum));
 
                 // The count is NCBI's Int2: a wrapped (negative) count is not "> 1"
-                // (link_hsps.c:918), and BLAST_GapDecayDivisor takes it as an unsigned.
+                // (link_hsps.c:918). BLAST_GapDecayDivisor takes it as an unsigned and raises the
+                // rate to the Int4 `nsegs - 1`; `as usize` sign-extends and gap_decay_divisor
+                // truncates `num_segments - 1` to the same i32.
                 let num = pool_hsp_links[bi].num[0];
                 let xsum = pool_hsp_links[bi].xsum[0];
                 let divisor = gap_decay_divisor(gap_decay_rate, num as usize);
@@ -3620,7 +3622,6 @@ mod tests {
                 cutoff_small_gap: 20,
                 cutoff_big_gap: 20,
                 gap_prob: 0.5,
-                ignore_small_gaps: false,
             },
         };
         let hits: Vec<_> = (0..96)
@@ -3795,7 +3796,6 @@ mod tests {
             cutoff_small_gap: 41,
             cutoff_big_gap: 44,
             gap_prob: 0.5,
-            ignore_small_gaps: false,
         }
     }
 
@@ -4143,19 +4143,16 @@ mod tests {
                 cutoff_small_gap: 20,
                 cutoff_big_gap: 20,
                 gap_prob: 0.5,
-                ignore_small_gaps: false,
             },
             LinkHspCutoffs {
                 cutoff_small_gap: 0,
                 cutoff_big_gap: 30,
                 gap_prob: 0.0,
-                ignore_small_gaps: true,
             },
             LinkHspCutoffs {
                 cutoff_small_gap: 30,
                 cutoff_big_gap: 25,
                 gap_prob: 0.5,
-                ignore_small_gaps: false,
             },
         ];
 
@@ -4339,28 +4336,14 @@ mod tests {
             }
         };
 
-        // (cutoff[0], cutoff[1], gap_prob, ignore_small_gaps, scores from, to)
-        let settings: [(i32, i32, f64, bool, i64, i64); 6] = [
-            (41, 44, 0.5, false, 300_000_000, 1_100_000_000),
-            (41, 44, 0.5, false, 45, 900_000_000),
-            (
-                600_000_000,
-                700_000_000,
-                0.5,
-                false,
-                700_000_001,
-                1_700_000_000,
-            ),
-            (0, 500_000_000, 0.0, true, 500_000_001, 1_500_000_000),
-            (41, -300_000_000, 0.5, false, 200_000_000, 900_000_000),
-            (
-                900_000_000,
-                950_000_000,
-                0.5,
-                false,
-                950_000_001,
-                1_300_000_000,
-            ),
+        // (cutoff[0], cutoff[1], gap_prob, scores from, to); cutoff[0] == 0 ignores small gaps.
+        let settings: [(i32, i32, f64, i64, i64); 6] = [
+            (41, 44, 0.5, 300_000_000, 1_100_000_000),
+            (41, 44, 0.5, 45, 900_000_000),
+            (600_000_000, 700_000_000, 0.5, 700_000_001, 1_700_000_000),
+            (0, 500_000_000, 0.0, 500_000_001, 1_500_000_000),
+            (41, -300_000_000, 0.5, 200_000_000, 900_000_000),
+            (900_000_000, 950_000_000, 0.5, 950_000_001, 1_300_000_000),
         ];
         let mut rng = Rng(0xD1B5_4A32_D192_ED03);
         let cases: usize = std::env::var("LOSAT_FUZZ_CASES")
@@ -4370,13 +4353,13 @@ mod tests {
         // Groups without / with a pass value outside Int4.
         let mut cases_of = [0usize; 2];
         for case in 0..cases {
-            let (c0, c1, gap_prob, ignore_small_gaps, lo, hi) = settings[case % settings.len()];
+            let (c0, c1, gap_prob, lo, hi) = settings[case % settings.len()];
             let cutoffs = LinkHspCutoffs {
                 cutoff_small_gap: c0,
                 cutoff_big_gap: c1,
                 gap_prob,
-                ignore_small_gaps,
             };
+            let ignore_small_gaps = cutoffs.ignore_small_gaps();
             let n = 1 + rng.below(if case % 40 == 0 { 120 } else { 14 }) as usize;
             let span = [60u64, 200, 1200][case % 3];
             let mut hits: Vec<UngappedHit> = Vec::with_capacity(n);
@@ -4463,14 +4446,13 @@ mod tests {
             cutoff_small_gap: 2_000_000_000,
             cutoff_big_gap: 2_050_000_000,
             gap_prob: 0.5,
-            ignore_small_gaps: false,
         };
         let (_, stats) = link_with_both_kernels(chain(2_100_000_000), &cutoffs, plain, "(b)");
         assert_eq!(stats.wide_groups, 0, "{stats:?}");
         assert!(stats.clamped > 0, "{stats:?}");
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:756,871,918,932
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:756,871,918,931
     // ```c
     //                     H->hsp_link.num[index] = H_hsp_num+1;
     // ...
@@ -4552,7 +4534,6 @@ mod tests {
             cutoff_small_gap: 0,
             cutoff_big_gap: 30,
             gap_prob,
-            ignore_small_gaps: true,
         };
         for options in VERIFIED {
             let (with_zero, _) =

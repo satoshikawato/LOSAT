@@ -175,6 +175,10 @@ pub(crate) fn mapped_query_nucleotide(raw_from: i32, frame: i8) -> i32 {
     }
 }
 
+/// The refusal of outfmt 0 with `-sorthits` or `-sorthsps` where an HSP of length 0 is only past the
+/// description table (`report::pairwise::EmptyRowsStop::Sorted`).
+pub(crate) const UNPORTED_SORTED: &str = "BLASTX -ungapped -window_size 0 with -sorthits or -sorthsps: a one-hit ungapped alignment of length 0 past the description table of -outfmt 0, whose ranges NCBI BLAST+'s sorts may read (it then stops with an exception), which LOSAT does not support";
+
 /// LOSAT's refusal of a report of an ungapped HSP of length 0 whose form LOSAT does not
 /// reproduce: not an error of NCBI's engine or formatters.
 #[derive(Debug)]
@@ -277,4 +281,37 @@ pub(crate) fn refuse_mapped_at_subject_start(
         return Err(EmptyRowsRefusal(UNPORTED_SUBJECT_START.to_string()).into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ncbi_exception::NCBI_BUILD_ROOT;
+
+    // NCBI BLAST+ 2.17.0 (the official Linux x64 release), rows db.x2g.bx.f0616.0 and
+    // db.x2g.bx.f0616.subj.6: `CATCH_ALL`'s report of the two exceptions.
+    #[test]
+    fn the_exceptions_are_ncbis_reports() {
+        assert_eq!(
+            crate::cli::NativeError::exception(&row_is_empty()).message,
+            format!(
+                "Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/objects/seq/../seqalign/Seq_align.cpp\", line 227: Error: (CSeqalignException::eInvalidAlignment) CSeq_align::GetSeqRange(): Row is empty\n\n"
+            )
+        );
+        assert_eq!(
+            crate::cli::NativeError::exception(&std_seg_lengths_not_accurate()).message,
+            format!(
+                "Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/objects/seq/../seqalign/Seq_align.cpp\", line 801: Error: (CSeqalignException::eInvalidInputAlignment) CreateDensegFromStdseg(): Std-seg segment lengths not accurate!\n\n"
+            )
+        );
+    }
+
+    // X/SURVEY_X2g_formats.md 1: p0095 (frame -1, raw query row (119, 118)) maps to 118..118;
+    // a plus frame keeps its start.
+    #[test]
+    fn the_mapped_nucleotide_follows_the_strand() {
+        assert_eq!(mapped_query_nucleotide(119, -1), 118);
+        assert_eq!(mapped_query_nucleotide(81, 1), 81);
+        assert_eq!(mapped_query_nucleotide(0, 1), 0);
+    }
 }

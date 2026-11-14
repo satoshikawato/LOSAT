@@ -302,6 +302,9 @@ pub(crate) enum EmptyRowsStop {
     /// Only a subject past the table (`-num_descriptions` below `-num_alignments`) holds one,
     /// whose `-subject` alignment throws before anything of the HSP is written.
     Alignments,
+    /// Only a subject past the table holds one, and the report sorts (`-sorthits`, `-sorthsps`),
+    /// whose comparators may read its ranges: LOSAT's refusal.
+    Sorted,
 }
 
 impl std::fmt::Display for EmptyRowsStop {
@@ -6557,6 +6560,19 @@ pub fn write_blastx_pairwise_report<W: Write>(
             {
                 writer.flush()?;
                 return Err(io::Error::other(EmptyRowsStop::Descriptions));
+            }
+            // No NCBI counterpart: `-sorthits` and `-sorthsps` sort the whole hit list before the
+            // table (`SortSeqalignForSortableFormat`, blast_format.cpp:1522-1530), and several of
+            // their comparators read the alignments' ranges (`GetMasterCoverage`,
+            // `GetSeqAlignSetCalcParams`, `GetSeqStart`), so that NCBI can stop at an HSP with
+            // empty rows past the table too (`EmptyRowsStop::Sorted`).
+            if config.sort.sorts()
+                && order
+                    .iter()
+                    .any(|oid| grouped[oid].iter().any(|hit| hit.rows_empty()))
+            {
+                writer.flush()?;
+                return Err(io::Error::other(EmptyRowsStop::Sorted));
             }
             write_subject_summary_table_with_sum_n(
                 &mut writer,

@@ -741,7 +741,9 @@ would port:
   HSP at the first letter of the searched range, which the mapper cuts into two alignments
   without scores. NCBI's output there is partly not defined (on the 4 GiB limit of the line's
   probes `BLAST ran out of memory`, exit status 4, for a segment of about 2^32 letters), and the
-  rest comes from `CAlnVec` over alignments that the mapper makes by accident.
+  rest comes from `CAlnVec` over alignments that the mapper makes by accident. LOSAT also refuses
+  outfmt 0 with `-sorthits` or `-sorthsps` where such an HSP lies only past the description table:
+  NCBI's sorts may read its ranges (`SortSeqalignForSortableFormat`), which LOSAT does not model.
 - `-evalue` with a signed infinity or NaN (`+inf`, `-nan`, `+nan(1)`, `1e999`): NCBI's
   `CArg_Double` reads them with `strtod` and its option check (`<= 0`) lets them pass;
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT

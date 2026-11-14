@@ -1819,6 +1819,10 @@ fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
         Some(EmptyRowsStop::Alignments) => {
             NativeError::exception(&super::empty_rows::std_seg_lengths_not_accurate()).into()
         }
+        Some(EmptyRowsStop::Sorted) => {
+            super::empty_rows::EmptyRowsRefusal(super::empty_rows::UNPORTED_SORTED.to_string())
+                .into()
+        }
         None => error.into(),
     }
 }

@@ -594,14 +594,21 @@ pub(crate) fn reported_subjects(
     let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
     let mut sources = Vec::new();
     for (rank, &ordinal) in ordinals.iter().enumerate() {
-        let header = titles
-            .get(&ordinal)
-            .with_context(|| format!("database sequence {ordinal} has no title read"))?;
+        let header = titles.get(&ordinal).with_context(|| {
+            format!(
+                "database sequence {} has no title read",
+                database.db.oid(ordinal)
+            )
+        })?;
         let title = match header {
             ReportedHeader::Stored(stored) => {
-                shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                shared::check_reported_title(
+                    stored.replaced_bytes,
+                    || database.db.oid(ordinal),
+                    PROGRAM,
+                )?;
                 if shown.pairwise {
-                    stored.check_shown_source(ordinal, PROGRAM)?;
+                    stored.check_shown_source(|| database.db.oid(ordinal), PROGRAM)?;
                 }
                 shared::keep_source(&mut sources, rank, ordinals.len(), stored.source.clone());
                 stored.title.clone()
@@ -628,15 +635,21 @@ pub(crate) fn reported_subjects(
         };
         lengths.push(match stores {
             Some(stores) => {
-                let store = stores
-                    .get(&ordinal)
-                    .with_context(|| format!("database sequence {ordinal} was not read"))?;
+                let store = stores.get(&ordinal).with_context(|| {
+                    format!(
+                        "database sequence {} was not read",
+                        database.db.oid(ordinal)
+                    )
+                })?;
                 kept.push(Arc::clone(store));
                 u32::try_from(store.len()).expect("a database sequence's length fits Int4")
             }
-            None => *read_lengths
-                .get(&ordinal)
-                .with_context(|| format!("database sequence {ordinal} was not read"))?,
+            None => *read_lengths.get(&ordinal).with_context(|| {
+                format!(
+                    "database sequence {} was not read",
+                    database.db.oid(ordinal)
+                )
+            })?,
         });
         records.push(FastaRecord {
             // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
@@ -670,6 +683,7 @@ pub(crate) fn reported_subjects(
                     let subject = parsed[rank as usize].as_deref()?;
                     Some((ordinals[rank as usize], subject))
                 }),
+                database.db.oid_map(),
                 PROGRAM,
             )?;
             start = end;

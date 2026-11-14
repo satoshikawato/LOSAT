@@ -586,6 +586,13 @@ plus the first ordinal id of the volume, so its own number finds the sequence, w
 parsed Seq-ids; another n finds no sequence or another one, which LOSAT refuses in the formats that read the
 Bioseq. No record names `gnl|BL_ORD_ID|0`: makeblastdb stores it with a string tag.
 
+Aliases that restrict a database with parsed Seq-ids by `FIRST_OID` and `LAST_OID` (line DBID ordnum; rows
+`db.id.on.*`): `make_ids.py` writes `ids/pfound_r.pal` (OIDs 1 to 9 of `ids/pfound_v5`), `ids/refuse_r.pal` (OIDs 1
+to 5 of `ids/refuse_v5`) and `ids/njoined_r.nal` (`nfound_v4`, `njoined_a` and `njoined_b`, OIDs 2 and 3 only: the
+pair of `ids/njoined`), and the list `ids/pfound_nsl.txt` (AAA00001.1, OID 0 of `ids/pfound_v5`, for
+`-negative_seqidlist`). The rank of a searched sequence is its OID less the OIDs left out before it; LOSAT's refusals
+name the OID, as `blastdbcmd -outfmt %o` prints it (with `taxfilter/tfe_nr` and `taxfilter/tfe_pr`, OIDs 1 to 3).
+
 Seq-align ids that NCBI's formatters look up like any other (line DBID N2b; rows `db.id.*.look.*`): `make_ids.py`
 writes, from the FASTA of `ids/make_look_fasta.py`, `ids/plook_v5` and `ids/plook_v4` from `ids/plook.faa` (an
 accession, `bbs|123`, `nat|NA000001.1|`, `lcl|777`, `gnl|PIG|124`, `bbs|300` then `lcl|300` and `lcl|301` then

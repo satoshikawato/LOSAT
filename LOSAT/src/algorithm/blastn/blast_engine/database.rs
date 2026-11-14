@@ -1720,12 +1720,12 @@ pub(super) fn reported_subjects(
     let record = |&ordinal: &u32| -> Result<Reported> {
         let header = titles
             .get(&ordinal)
-            .with_context(|| format!("database sequence {ordinal} has no title read"))?;
+            .with_context(|| format!("database sequence {} has no title read", db.oid(ordinal)))?;
         let (title, subject, source) = match header {
             ReportedHeader::Stored(stored) => {
-                shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                shared::check_reported_title(stored.replaced_bytes, || db.oid(ordinal), PROGRAM)?;
                 if shown.pairwise {
-                    stored.check_shown_source(ordinal, PROGRAM)?;
+                    stored.check_shown_source(|| db.oid(ordinal), PROGRAM)?;
                 }
                 (stored.title.clone(), None, stored.source.clone())
             }
@@ -1789,6 +1789,7 @@ pub(super) fn reported_subjects(
                         let rank = hsp_list.oid as usize;
                         Some((ordinals[rank], parsed[rank].as_deref()?))
                     }),
+                db.oid_map(),
                 PROGRAM,
             )?;
         }

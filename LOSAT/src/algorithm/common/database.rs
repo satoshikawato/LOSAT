@@ -548,7 +548,8 @@ pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<Pa
             .read_block(range)
             .map_err(|error| search_read_error(error, program))?;
         for i in 0..block.len() {
-            let (length, runs) = stored_parts(&block, i, range.first_ordinal + i as u32, program)?;
+            let ordinal = range.first_ordinal + i as u32;
+            let (length, runs) = stored_parts(&block, i, || db.oid(ordinal), program)?;
             stores.push(PackedNucleotide::from_stored(
                 block.nucleotide_packed(i),
                 length,
@@ -603,7 +604,7 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<XCh
                 refusal(
                     &format!(
                         "the ambiguity data of database sequence {} cannot be read ({error})",
-                        range.first_ordinal
+                        db.oid(range.first_ordinal)
                     ),
                     program,
                 )
@@ -616,7 +617,8 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<XCh
             .read_block(range)
             .map_err(|error| search_read_error(error, program))?;
         for i in 0..block.len() {
-            let (length, _) = stored_parts(&block, i, range.first_ordinal + i as u32, program)?;
+            let ordinal = range.first_ordinal + i as u32;
+            let (length, _) = stored_parts(&block, i, || db.oid(ordinal), program)?;
             checked.add(length as u32);
         }
         next_ordinal = range.end_ordinal();
@@ -667,7 +669,7 @@ pub(crate) fn x_read_nucleotide_store(
         db.read_sequence(ordinal)
     }
     .map_err(|error| search_read_error(error, program))?;
-    let (length, runs) = stored_parts(&block, 0, ordinal, program)?;
+    let (length, runs) = stored_parts(&block, 0, || db.oid(ordinal), program)?;
     let packed = block.x_into_nucleotide_packed();
     if crate::utils::x_mapped::x_is_mapped(packed.capacity()) {
         crate::utils::x_mapped::X_BYTES.x_disown(&packed);
@@ -677,27 +679,28 @@ pub(crate) fn x_read_nucleotide_store(
     ))
 }
 
-/// The length and the ambiguity runs (as stored) of sequence `i` of `block` (ordinal id
-/// `ordinal`), with the errors of the sequence's store (`x_read_nucleotide_store`), without the
-/// store.
+/// The length and the ambiguity runs (as stored) of sequence `i` of `block` (`oid` gives its
+/// OID, which a refusal names), with the errors of the sequence's store
+/// (`x_read_nucleotide_store`), without the store.
 pub(crate) fn x_nucleotide_parts_in(
     block: &crate::seqdb::SequenceBlock,
     i: usize,
-    ordinal: u32,
+    oid: impl Fn() -> crate::seqdb::Oid,
     program: &str,
 ) -> Result<(usize, Vec<crate::seqdb::AmbiguityRun>)> {
-    stored_parts(block, i, ordinal, program)
+    stored_parts(block, i, oid, program)
 }
 
-/// The length and the ambiguity runs of sequence `i` of `block` (ordinal id `ordinal`), with the
-/// errors of `read_nucleotide_stores` (which reads every sequence through it). NCBI's preliminary
+/// The length and the ambiguity runs of sequence `i` of `block` (`oid` gives its OID, which a
+/// refusal names), with the errors of `read_nucleotide_stores` (which reads every sequence
+/// through it). NCBI's preliminary
 /// search reads the 2-bit data only; it reads the ambiguity data in the traceback, of the
 /// reported sequences. LOSAT reads them for every sequence, so data it cannot read are LOSAT's
 /// refusal, not an NCBI error.
 fn stored_parts(
     block: &crate::seqdb::SequenceBlock,
     i: usize,
-    ordinal: u32,
+    oid: impl Fn() -> crate::seqdb::Oid,
     program: &str,
 ) -> Result<(usize, Vec<crate::seqdb::AmbiguityRun>)> {
     let length = block
@@ -705,7 +708,10 @@ fn stored_parts(
         .map_err(|error| search_read_error(error, program))?;
     let runs = block.ambiguity_runs(i).map_err(|error| {
         refusal(
-            &format!("the ambiguity data of database sequence {ordinal} cannot be read ({error})"),
+            &format!(
+                "the ambiguity data of database sequence {} cannot be read ({error})",
+                oid()
+            ),
             program,
         )
     })?;
@@ -831,27 +837,32 @@ pub(crate) struct StoredTitle {
 }
 
 impl StoredTitle {
-    /// LOSAT's refusal of the sequence `ordinal` (`program` names the program) whose title NCBI
-    /// makes from a source that LOSAT refuses (`SourceTaxname::Refused`), for a report that shows
-    /// that title where it cannot refuse it itself: outfmt 0 (the tabular subject ids refuse it in
-    /// `tabular_subject_id`, outfmt 18 in `report::tax_report`).
-    pub(crate) fn check_shown_source(&self, ordinal: u32, program: &str) -> Result<()> {
-        source_name(&self.source, ordinal, program).map(drop)
+    /// LOSAT's refusal of the sequence (`oid` gives its OID, which the refusal names; `program`
+    /// names the program) whose title NCBI makes from a source that LOSAT refuses
+    /// (`SourceTaxname::Refused`), for a report that shows that title where it cannot refuse it
+    /// itself: outfmt 0 (the tabular subject ids refuse it in `tabular_subject_id`, outfmt 18 in
+    /// `report::tax_report`).
+    pub(crate) fn check_shown_source(
+        &self,
+        oid: impl Fn() -> crate::seqdb::Oid,
+        program: &str,
+    ) -> Result<()> {
+        source_name(&self.source, oid, program).map(drop)
     }
 }
 
-/// The name of the source `source` of the database sequence `ordinal` without parsed Seq-ids (its
-/// ordinal id, or its `seqdb::Oid` where the refusal names the OID), from which NCBI makes its
-/// empty title; `Err` with LOSAT's refusal of a source that it refuses
-/// (`SourceTaxname::Refused`; `program` names the program).
+/// The name of the source `source` of a database sequence without parsed Seq-ids (`oid` gives its
+/// OID, which a refusal names), from which NCBI makes its empty title; `Err` with LOSAT's refusal
+/// of a source that it refuses (`SourceTaxname::Refused`; `program` names the program).
 pub(crate) fn source_name(
     source: &crate::report::defline::SourceTaxname,
-    ordinal: impl std::fmt::Display,
+    oid: impl Fn() -> crate::seqdb::Oid,
     program: &str,
 ) -> Result<Option<std::sync::Arc<[u8]>>> {
     source.name().map_err(|reason| {
         anyhow::anyhow!(
-            "database sequence {ordinal} has {reason}; this is not supported by LOSAT's {program}"
+            "database sequence {} has {reason}; this is not supported by LOSAT's {program}",
+            oid()
         )
     })
 }
@@ -871,14 +882,15 @@ pub(crate) fn source_name(
 // NCBI reference for the titles:
 // c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:970-1017 (`s_GetBioseqTitle`: the
 // title of the first definition line, the others appended as ` >id title`).
-/// Reads the definition line of the database sequence `ordinal` for a report, where the
-/// hit list of query `query` reaches it; `deflines` are its definition lines as read
+/// Reads the definition line of a database sequence (`oid` gives its OID, which a refusal names)
+/// for a report, where the hit list of query `query` reaches it; `deflines` are its definition
+/// lines as read
 /// (`SeqDb::deflines`, or `SeqDb::visit_deflines` with the same results). A reader error of
 /// NCBI's own is a `HeaderReadError` that names the query (NCBI fails that query's batch);
 /// LOSAT's refusals (`program` names the program) are errors of their own.
 pub(crate) fn stored_title(
     deflines: std::result::Result<Vec<crate::seqdb::OrdinalDefline>, crate::seqdb::SeqDbError>,
-    ordinal: u32,
+    oid: impl Fn() -> crate::seqdb::Oid,
     query: usize,
     program: &str,
 ) -> Result<StoredTitle> {
@@ -887,7 +899,8 @@ pub(crate) fn stored_title(
     // shows the others of a sequence as ` >id title` after the first.
     if deflines.len() != 1 {
         bail!(
-            "database sequence {ordinal} has {} definition lines; a sequence with more or fewer than one is not supported by LOSAT's {program}",
+            "database sequence {} has {} definition lines; a sequence with more or fewer than one is not supported by LOSAT's {program}",
+            oid(),
             deflines.len()
         );
     }
@@ -1515,7 +1528,7 @@ impl<'a> HeaderReader<'a> {
     ) -> (
         Option<crate::report::db_subject::FoundInstead>,
         Option<crate::report::db_subject::WeakMatch>,
-        Option<u32>,
+        Option<crate::seqdb::DbSequence>,
     ) {
         use crate::report::db_subject::FoundInstead;
         if matches!(subject.alignment_id(), crate::seqid::ParsedSeqId::Giim(_)) {
@@ -1578,9 +1591,13 @@ impl<'a> HeaderReader<'a> {
             let other = self.db.ordinal_of(first);
             match copy(other) {
                 Some(RecordCopy::Apart(cause)) => {
-                    return (Some(FoundInstead::CopyApart(other, cause)), None, None);
+                    return (
+                        Some(FoundInstead::CopyApart(self.db.sequence(other), cause)),
+                        None,
+                        None,
+                    );
                 }
-                Some(_) => given = Some(FoundInstead::Sequence(other)),
+                Some(_) => given = Some(FoundInstead::Sequence(self.db.sequence(other))),
                 None => {}
             }
         }
@@ -1638,14 +1655,24 @@ impl<'a> HeaderReader<'a> {
                 continue;
             }
             if given.is_some() {
-                also_held = Some(other);
+                also_held = Some(self.db.sequence(other));
                 break;
             }
             match copy(other) {
                 Some(RecordCopy::Apart(cause)) => {
-                    return (Some(FoundInstead::CopyApart(other, cause)), None, None);
+                    return (
+                        Some(FoundInstead::CopyApart(self.db.sequence(other), cause)),
+                        None,
+                        None,
+                    );
                 }
-                Some(_) => return (Some(FoundInstead::AlsoHeld(other)), None, None),
+                Some(_) => {
+                    return (
+                        Some(FoundInstead::AlsoHeld(self.db.sequence(other))),
+                        None,
+                        None,
+                    )
+                }
                 None => {}
             }
         }
@@ -1664,9 +1691,12 @@ impl<'a> HeaderReader<'a> {
         let found = given.or_else(|| {
             title_apart
                 .map(|other| {
-                    FoundInstead::CopyApart(other, crate::report::db_subject::CopyApart::Title)
+                    FoundInstead::CopyApart(
+                        self.db.sequence(other),
+                        crate::report::db_subject::CopyApart::Title,
+                    )
                 })
-                .or(other_taxids.map(FoundInstead::OtherTaxids))
+                .or(other_taxids.map(|other| FoundInstead::OtherTaxids(self.db.sequence(other))))
         });
         (found, weak, also_held)
     }
@@ -1690,7 +1720,7 @@ impl<'a> HeaderReader<'a> {
     // `blastdb-ids-20261021/R/weak/REVIEW_weak_1.md` H1). A version 4 database's ISAM keys are in
     // lower case without the alternative.
     /// For `found_instead` where NCBI's formatters may read the reported sequences one by one:
-    /// another sequence of the database, by ordinal id, that holds an id the Seq-align id `id` of
+    /// another sequence of the database (`DbSequence`) that holds an id the Seq-align id `id` of
     /// the sequence `ordinal` matches weakly (`seqid::id_scope::weak_keys`), found among the
     /// sequences that NCBI's lookup gives for `id` (`oids`: in both versions an accession without a
     /// version gives its versions, in version 4 a name its holders) and for its name alone. In
@@ -1745,7 +1775,7 @@ impl<'a> HeaderReader<'a> {
                 self.holds_key(other, &keys, crate::seqid::id_scope::kind_keys)
                     && self.copy_of(subject, ordinal, other) == RecordCopy::Differs
             })
-            .map(WeakMatch::Held))
+            .map(|other| WeakMatch::Held(self.db.sequence(other))))
     }
 
     /// Whether a Seq-id of the sequence `ordinal` is one `CSeq_id_Handle` with the key `handle`
@@ -1932,7 +1962,7 @@ fn reported_header(
     match header {
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
             crate::report::db_subject::ParsedSubject::new(set)
-                .map_err(|reason| parsed_refusal(ordinal, &reason, program))
+                .map_err(|reason| parsed_refusal(db.oid(ordinal), &reason, program))
                 .map(|subject| {
                     let (found, weak, also_held) = headers.found_instead(&subject, ordinal);
                     ReportedHeader::Parsed(std::sync::Arc::new(
@@ -1947,7 +1977,7 @@ fn reported_header(
                 })
         }
         Ok(crate::seqdb::SequenceHeader::Ordinal(deflines)) => {
-            let mut stored = stored_title(Ok(deflines), ordinal, query, program)?;
+            let mut stored = stored_title(Ok(deflines), || db.oid(ordinal), query, program)?;
             stored.source = headers.stored_source(&stored.title, ordinal);
             Ok(ReportedHeader::Stored(stored))
         }
@@ -1961,16 +1991,17 @@ fn reported_header(
 /// `-in_pssm` whose Seq-id is not one local id): NCBI's scope finds the query instead, so its
 /// reports show the query's title and letters for the database sequence (`dropin-survey-20261029/DI7/DECISIONS.md` 8). Every report
 /// of a query batch asks for its own scope, also of a sequence whose header an earlier batch read.
+/// `oid` gives the sequence's OID, which the refusal names.
 pub(crate) fn refuse_id_of_a_query(
     subject: &crate::report::db_subject::ParsedSubject,
-    ordinal: u32,
+    oid: impl Fn() -> crate::seqdb::Oid,
     queries: &crate::blastinput::query_batch::QueryScope,
     program: &str,
 ) -> Result<()> {
     let keys = subject.query_scope_keys();
     if queries.has_key(&keys.own) {
         return Err(parsed_refusal(
-            ordinal,
+            oid(),
             "has the Seq-id of a query read with -parse_deflines (or of the PSSM query of \
              -in_pssm) in the query batch that reports it (in any with outfmt 5; NCBI BLAST+ shows \
              the query for it)",
@@ -1979,7 +2010,7 @@ pub(crate) fn refuse_id_of_a_query(
     }
     if queries.has_key(&keys.weak) {
         return Err(parsed_refusal(
-            ordinal,
+            oid(),
             &format!(
                 "has the Seq-align id {}, which NCBI BLAST+'s scope can match weakly to the id \
                  of a query read with -parse_deflines (or of the PSSM query of -in_pssm) in the \
@@ -1995,18 +2026,24 @@ pub(crate) fn refuse_id_of_a_query(
 }
 
 /// `refuse_id_of_a_query` of each reported sequence of `reported` (a searched query, by its index
-/// in `scopes`, and a sequence that its report names, by ordinal id) whose header `titles` holds
-/// with parsed Seq-ids, with the scope of that query. A program calls it for each query batch
+/// in `scopes`, and a sequence that its report names, by ordinal id; `oids` the database's OIDs)
+/// whose header `titles` holds with parsed Seq-ids, with the scope of that query. A program calls it for each query batch
 /// after it reads the batch's titles: its cache of the titles keeps those of the batches before.
 pub(crate) fn refuse_reported_ids_of_queries(
     titles: &std::collections::BTreeMap<u32, ReportedHeader>,
     reported: impl IntoIterator<Item = (usize, u32)>,
+    oids: crate::seqdb::OidMap<'_>,
     scopes: &crate::blastinput::query_batch::QueryScopes,
     program: &str,
 ) -> Result<()> {
     for (query, ordinal) in reported {
         if let Some(ReportedHeader::Parsed(subject)) = titles.get(&ordinal) {
-            refuse_id_of_a_query(subject, ordinal, scopes.of_query(query), program)?;
+            refuse_id_of_a_query(
+                subject,
+                || oids.oid(ordinal),
+                scopes.of_query(query),
+                program,
+            )?;
         }
     }
     Ok(())
@@ -2027,11 +2064,11 @@ impl std::fmt::Display for ParsedRefusal {
 
 impl std::error::Error for ParsedRefusal {}
 
-/// LOSAT's refusal of the database sequence `ordinal` with parsed Seq-ids for `reason` (what the
+/// LOSAT's refusal of the database sequence `oid` with parsed Seq-ids for `reason` (what the
 /// sequence has, `ParsedSubject`).
-pub(crate) fn parsed_refusal(ordinal: u32, reason: &str, program: &str) -> anyhow::Error {
+pub(crate) fn parsed_refusal(oid: crate::seqdb::Oid, reason: &str, program: &str) -> anyhow::Error {
     anyhow::Error::new(ParsedRefusal(format!(
-        "database sequence {ordinal} {reason}; this is not supported by LOSAT's {program}"
+        "database sequence {oid} {reason}; this is not supported by LOSAT's {program}"
     )))
 }
 
@@ -2059,17 +2096,20 @@ fn check_seqids(db: &SeqDb, settings: &ApplicationSettings, program: &str) -> Re
 /// their alignments as one hit, and its tabular `qcovs` and `qcovus` the coverage of both on the
 /// first row (`N/A` on the other), which LOSAT does only for copies. `subjects` gives the ordinal
 /// id and the parsed subject of each HSP list of the hit list, in its order (`None` for a
-/// sequence without parsed Seq-ids).
+/// sequence without parsed Seq-ids); `oids` the OIDs, by which the refusal names them.
 pub(crate) fn refuse_joined_hits<'a>(
     query: usize,
     subjects: impl IntoIterator<Item = Option<(u32, &'a crate::report::db_subject::ParsedSubject)>>,
+    oids: crate::seqdb::OidMap<'_>,
     program: &str,
 ) -> Result<()> {
     let mut previous: Option<(u32, &crate::report::db_subject::ParsedSubject)> = None;
     for subject in subjects {
         if let Some((before, ordinal)) = joined_apart(previous, subject) {
             return Err(anyhow::Error::new(ParsedRefusal(format!(
-                "database sequences {before} and {ordinal} follow each other in the hits of query {} and have Seq-align ids that NCBI BLAST+ takes for one sequence (its XML and outfmt 0 reports show their alignments as one hit, its tabular qcovs and qcovus count them as one) but are not copies of one record; this is not supported by LOSAT's {program}",
+                "database sequences {} and {} follow each other in the hits of query {} and have Seq-align ids that NCBI BLAST+ takes for one sequence (its XML and outfmt 0 reports show their alignments as one hit, its tabular qcovs and qcovus count them as one) but are not copies of one record; this is not supported by LOSAT's {program}",
+                oids.oid(before),
+                oids.oid(ordinal),
                 query + 1
             ))));
         }
@@ -2090,8 +2130,8 @@ pub(crate) fn refuse_joined_hits<'a>(
 //                  break;
 //             }
 // ```
-/// The number of HSP lists of a hit list (query `query`; `subjects`, as `refuse_joined_hits`
-/// takes them) that its cut to `max_target_seqs` subjects keeps, as NCBI's formatter cuts it
+/// The number of HSP lists of a hit list (query `query`; `subjects` and `oids`, as
+/// `refuse_joined_hits` takes them) that its cut to `max_target_seqs` subjects keeps, as NCBI's formatter cuts it
 /// (`PruneSeqalign`): it counts following Seq-aligns whose Seq-align ids match as those of one
 /// subject. A copy of one record that follows another (`joins_as_copy`) is kept with it; two
 /// other parsed subjects that the count reaches with matching Seq-align ids are LOSAT's refusal.
@@ -2100,6 +2140,7 @@ pub(crate) fn joined_cut<'a>(
     query: usize,
     max_target_seqs: usize,
     subjects: impl IntoIterator<Item = Option<(u32, &'a crate::report::db_subject::ParsedSubject)>>,
+    oids: crate::seqdb::OidMap<'_>,
     program: &str,
 ) -> Result<usize> {
     let mut previous: Option<(u32, &crate::report::db_subject::ParsedSubject)> = None;
@@ -2108,7 +2149,9 @@ pub(crate) fn joined_cut<'a>(
     for subject in subjects {
         if let Some((before, ordinal)) = joined_apart(previous, subject) {
             return Err(anyhow::Error::new(ParsedRefusal(format!(
-                "database sequences {before} and {ordinal} follow each other in the hits of query {} that the cut to -max_target_seqs {max_target_seqs} counts and have Seq-align ids that NCBI BLAST+ takes for one sequence but are not copies of one record (it counts them as one sequence and keeps one more); this is not supported by LOSAT's {program}",
+                "database sequences {} and {} follow each other in the hits of query {} that the cut to -max_target_seqs {max_target_seqs} counts and have Seq-align ids that NCBI BLAST+ takes for one sequence but are not copies of one record (it counts them as one sequence and keeps one more); this is not supported by LOSAT's {program}",
+                oids.oid(before),
+                oids.oid(ordinal),
                 query + 1
             ))));
         }
@@ -2147,7 +2190,8 @@ fn joined_apart(
 }
 
 /// LOSAT's refusals of the outfmt 0 description and alignment heading of the subject with
-/// parsed Seq-ids `subject` (the database sequence `ordinal`; `protein` for a protein database)
+/// parsed Seq-ids `subject` (`oid` gives its OID, which a refusal names; `protein` for a protein
+/// database)
 /// that it does not write as NCBI: a protein title of punctuation that NCBI's `x_CleanAndCompress`
 /// reads past the end of (NCBI BLAST+ 2.17.0 crashes or does not end; approved exception 2 of
 /// PD-LOSAT-NCBI-DEFECTS has BLASTN, TBLASTN and TBLASTX stop such a nucleotide title at the end
@@ -2163,7 +2207,7 @@ pub(crate) fn check_shown_parsed_subject(
     subject: &crate::report::db_subject::ParsedSubject,
     protein: bool,
     taxdb_found: bool,
-    ordinal: u32,
+    oid: impl Fn() -> crate::seqdb::Oid,
     program: &str,
 ) -> Result<()> {
     let generated = subject.heading_generates_title();
@@ -2175,7 +2219,7 @@ pub(crate) fn check_shown_parsed_subject(
                 .is_ok_and(|defline| defline.reads_past_end);
         if title.reads_past_end || heading_reads_past_end {
             return Err(parsed_refusal(
-                ordinal,
+                oid(),
                 "has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0)",
                 program,
             ));
@@ -2193,7 +2237,7 @@ pub(crate) fn check_shown_parsed_subject(
     // line with spaces without end (probe of the ID2a review, `tests/db_search/ids/refuse.faa`).
     if subject.description_start().len() > 65 {
         return Err(parsed_refusal(
-            ordinal,
+            oid(),
             "has an outfmt 0 description id longer than 65 bytes (NCBI BLAST+ 2.17.0 pads the description line without end)",
             program,
         ));
@@ -2201,17 +2245,17 @@ pub(crate) fn check_shown_parsed_subject(
     if subject.pairwise_title_reads_source(protein, taxdb_found) {
         subject
             .generated_title_fetched()
-            .map_err(|reason| parsed_refusal(ordinal, &reason, program))?;
+            .map_err(|reason| parsed_refusal(oid(), &reason, program))?;
     }
     if generated && subject.title_suffix_adjusted(protein) {
         return Err(parsed_refusal(
-            ordinal,
+            oid(),
             "has a definition line without a title and a title ending in ']' that NCBI BLAST+'s outfmt 0 heading rewrites from the taxids (x_AdjustProteinTitleSuffix)",
             program,
         ));
     }
     if let Err(reason) = subject.source().name() {
-        return Err(parsed_refusal(ordinal, &format!("has {reason}"), program));
+        return Err(parsed_refusal(oid(), &format!("has {reason}"), program));
     }
     Ok(())
 }
@@ -2344,18 +2388,20 @@ pub(crate) fn check_reported_parsed(
     if shown.reads_bioseq() {
         subject
             .fetched(shown.taxonomy, shown.one_by_one)
-            .map_err(|reason| parsed_refusal(ordinal, &reason, program))?;
+            .map_err(|reason| parsed_refusal(db.oid(ordinal), &reason, program))?;
     } else if shown.prefetched {
         check_prefetched_parsed(db, subject, ordinal, program)?;
     }
     if shown.pairwise {
-        check_shown_parsed_subject(subject, protein, taxdb_found, ordinal, program)?;
+        check_shown_parsed_subject(subject, protein, taxdb_found, || db.oid(ordinal), program)?;
     }
     if shown.tabular {
         subject
             .check_tabular_ids(protein)
             .and_then(|()| subject.check_printed_word(protein, shown.words))
-            .map_err(|problem| parsed_refusal(ordinal, &format!("has {problem}"), program))?;
+            .map_err(|problem| {
+                parsed_refusal(db.oid(ordinal), &format!("has {problem}"), program)
+            })?;
     }
     Ok(())
 }
@@ -2393,9 +2439,9 @@ pub(crate) fn tabular_subject_ids(
         .enumerate()
         .map(|(rank, (record, &ordinal))| {
             let id = match parsed.get(rank).and_then(Option::as_deref) {
-                Some(subject) => subject
-                    .tabular_saccver(protein)
-                    .map_err(|problem| parsed_refusal(ordinal, &format!("has {problem}"), program)),
+                Some(subject) => subject.tabular_saccver(protein).map_err(|problem| {
+                    parsed_refusal(oids.oid(ordinal), &format!("has {problem}"), program)
+                }),
                 None => tabular_subject_id(
                     &record.title,
                     sources
@@ -2575,7 +2621,7 @@ pub(crate) fn reports_may_refuse(
      -> std::result::Result<(), ReportRefusal> {
         match reported_header(headers, header, ordinal, 0, program) {
             Ok(ReportedHeader::Stored(stored)) => {
-                check_reported_title(stored.replaced_bytes, ordinal, program)
+                check_reported_title(stored.replaced_bytes, || db.oid(ordinal), program)
                     .map_err(|_| ReportRefusal::Headers)?;
                 if shown.tabular {
                     tabular_subject_id(
@@ -2589,7 +2635,7 @@ pub(crate) fn reports_may_refuse(
                 }
                 if shown.pairwise {
                     stored
-                        .check_shown_source(ordinal, program)
+                        .check_shown_source(|| db.oid(ordinal), program)
                         .map_err(|_| ReportRefusal::Headers)?;
                 }
                 if prefetch {
@@ -2612,7 +2658,7 @@ pub(crate) fn reports_may_refuse(
                 )
                 .map_err(|_| ReportRefusal::Headers)?;
                 if let Some(queries) = queries {
-                    refuse_id_of_a_query(&subject, ordinal, queries, program)
+                    refuse_id_of_a_query(&subject, || db.oid(ordinal), queries, program)
                         .map_err(|_| ReportRefusal::Headers)?;
                 }
                 if shown.joined {
@@ -2763,18 +2809,19 @@ fn taxids_may_refuse(db: &SeqDb, taxids: &[i32]) -> bool {
 // default outfmt 6, three times for `6 sseqid stitle`, five times for outfmt 0. The
 // number of readings is the formatter's, not ported; makeblastdb and `losat makeblastdb`
 // store `#` for such a byte, so only a header file written otherwise holds one.
-/// LOSAT's rejection of the reported database sequence `ordinal` (one with rows in the
-/// final hit lists) whose stored title held a byte outside ' ' ..= '~' (`replaced_bytes`,
+/// LOSAT's rejection of a reported database sequence (one with rows in the final hit lists;
+/// `oid` gives its OID, which the rejection names, where it rejects) whose stored title held a byte outside ' ' ..= '~' (`replaced_bytes`,
 /// `StoredTitle`): NCBI writes an error message for the byte each time its formatter
 /// reads the definition line.
 pub(crate) fn check_reported_title(
     replaced_bytes: bool,
-    ordinal: u32,
+    oid: impl Fn() -> crate::seqdb::Oid,
     program: &str,
 ) -> Result<()> {
     if replaced_bytes {
         bail!(
-            "database sequence {ordinal} has a stored title with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line); this is not supported by LOSAT's {program}"
+            "database sequence {} has a stored title with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line); this is not supported by LOSAT's {program}",
+            oid()
         );
     }
     Ok(())
@@ -2841,7 +2888,8 @@ pub(crate) fn tabular_subject_id(
     protein: bool,
     program: &str,
 ) -> Result<TabularSubjectId> {
-    let facts = crate::report::defline::BioseqFacts::of_source(source_name(source, oid, program)?);
+    let facts =
+        crate::report::defline::BioseqFacts::of_source(source_name(source, || oid, program)?);
     match crate::report::defline::database_subject_id(title, &facts, protein) {
         Ok(Some(word)) => Ok(TabularSubjectId::Word(word)),
         Ok(None) => Ok(TabularSubjectId::General(oid)),
@@ -2878,12 +2926,12 @@ pub(crate) fn tabular_seqid<'a>(
     std::borrow::Cow::Borrowed(accession)
 }
 
-/// LOSAT's rejection of the outfmt 0 title `title` of the protein database sequence without
-/// parsed Seq-ids `ordinal` that it does not write as NCBI: a title of punctuation that NCBI's
-/// `x_CleanAndCompress` reads past the end of when it makes the title of the description table
-/// (NCBI BLAST+ 2.17.0 crashes there), as for the records of a subject set
-/// (`check_shown_subject_titles`). Approved exception 2 of PD-LOSAT-NCBI-DEFECTS covers the
-/// nucleotide subjects of BLASTN, so BLASTN does not use it.
+/// LOSAT's rejection of the outfmt 0 title `title` of a protein database sequence without parsed
+/// Seq-ids (`oid` gives its OID, which the rejection names) that it does not write as NCBI: a
+/// title of punctuation that NCBI's `x_CleanAndCompress` reads past the end of when it makes the
+/// title of the description table (NCBI BLAST+ 2.17.0 crashes there), as for the records of a
+/// subject set (`check_shown_subject_titles`). Approved exception 2 of PD-LOSAT-NCBI-DEFECTS
+/// covers the nucleotide subjects of BLASTN, so BLASTN does not use it.
 ///
 /// The name of the Bioseq's source does not change the answer, so none is asked for: the title
 /// is made from the source only where the stored one is empty, and the Bioseq of a sequence
@@ -2894,7 +2942,11 @@ pub(crate) fn tabular_seqid<'a>(
 /// such a sequence asks (the block search's check of the titles, `x_titles_allow_blocks`, takes
 /// none: its definition lines are not `SeqDb::deflines`). Pinned by the unit test
 /// `a_stored_protein_title_from_any_source_ends_in_its_own_text`.
-pub(crate) fn check_shown_protein_title(title: &[u8], ordinal: u32, program: &str) -> Result<()> {
+pub(crate) fn check_shown_protein_title(
+    title: &[u8],
+    oid: impl Fn() -> crate::seqdb::Oid,
+    program: &str,
+) -> Result<()> {
     let reads_past_end = crate::report::defline::generate_bioseq_defline(
         title,
         true,
@@ -2904,7 +2956,8 @@ pub(crate) fn check_shown_protein_title(title: &[u8], ordinal: u32, program: &st
     .is_ok_and(|defline| defline.reads_past_end);
     if reads_past_end {
         bail!(
-            "database sequence {ordinal} has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0); this is not supported by LOSAT's {program}"
+            "database sequence {} has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0); this is not supported by LOSAT's {program}",
+            oid()
         );
     }
     Ok(())
@@ -2926,19 +2979,21 @@ const NCBISTDAA_GAP: u8 = 0;
 // kernels score it: an ungapped extension stops at it and a gapped alignment goes round it
 // with a gap. A byte that is no NCBIstdaa residue (28 or more) indexes NCBI's matrix past
 // its rows and is rejected.
-/// LOSAT's refusal of the protein database sequence `ordinal` (`with_sentinels`: its
-/// residues with the byte before and the byte after them in the sequence file) when
+/// LOSAT's refusal of a protein database sequence (`oid` gives its OID, which the refusal names;
+/// `with_sentinels`: its residues with the byte before and the byte after them in the sequence
+/// file) when
 /// `program` cannot search it as NCBI does: a sequence not between two 0 bytes, or one
 /// with a byte that is no NCBIstdaa residue.
 pub(crate) fn check_protein_sequence(
     with_sentinels: &[u8],
-    ordinal: u64,
+    oid: impl Fn() -> crate::seqdb::Oid,
     program: &str,
 ) -> Result<()> {
     let (first, last) = (with_sentinels[0], with_sentinels[with_sentinels.len() - 1]);
     if first != NCBISTDAA_GAP || last != NCBISTDAA_GAP {
         bail!(
-            "database sequence {ordinal} is not between two NUL bytes in its sequence file (the volume is damaged), which is not supported by LOSAT's {program}"
+            "database sequence {} is not between two NUL bytes in its sequence file (the volume is damaged), which is not supported by LOSAT's {program}",
+            oid()
         );
     }
     let residues = &with_sentinels[1..with_sentinels.len() - 1];
@@ -2955,7 +3010,8 @@ pub(crate) fn check_protein_sequence(
         .position(|&residue| usize::from(residue) >= crate::utils::matrix::BLASTAA_SIZE)
     {
         bail!(
-            "database sequence {ordinal} holds a byte that is no NCBIstdaa residue at position {}, which is not supported by LOSAT's {program}",
+            "database sequence {} holds a byte that is no NCBIstdaa residue at position {}, which is not supported by LOSAT's {program}",
+            oid(),
             position + 1
         );
     }
@@ -2990,7 +3046,7 @@ pub(crate) fn x_check_protein_stores(
         for i in 0..block.len() {
             let with_sentinels = block.protein_with_sentinels(i);
             let ordinal = range.first_ordinal + i as u32;
-            check_protein_sequence(with_sentinels, u64::from(ordinal), program)?;
+            check_protein_sequence(with_sentinels, || db.oid(ordinal), program)?;
             each(ordinal, with_sentinels.len() - 2);
         }
         next_ordinal = range.end_ordinal();
@@ -3096,7 +3152,10 @@ mod tests {
             let stored = BioseqFacts::of_source(Some(std::sync::Arc::from(name)));
             assert!(!reads_past_end(b"", &stored), "{name:?}");
         }
-        assert!(check_shown_protein_title(b"", 0, "BLASTP").is_ok());
+        assert!(
+            check_shown_protein_title(b"", || crate::seqdb::Oid::of_unrestricted(0), "BLASTP")
+                .is_ok()
+        );
         for name in [&b", ,"[..], b"; ;", b"~, ,", b", , ,", b"&#44; ,"] {
             let refseq = BioseqFacts {
                 refseq_chromosome_or_ncrna: true,
@@ -3106,7 +3165,12 @@ mod tests {
         }
         // A stored title of punctuation is not made from the source: it is refused whatever the
         // source is.
-        assert!(check_shown_protein_title(b", ,", 7, "BLASTP").is_err());
+        assert!(check_shown_protein_title(
+            b", ,",
+            || crate::seqdb::Oid::of_unrestricted(7),
+            "BLASTP"
+        )
+        .is_err());
         assert!(!crate::report::defline::bioseq_title_from_source(
             b", ,",
             BioseqFacts::default
@@ -3248,16 +3312,43 @@ mod tests {
         };
         for (max, kept) in [(1, 1), (2, 2), (3, 4), (4, 5), (5, 6), (6, 8), (7, 8)] {
             assert_eq!(
-                joined_cut(0, max, hits(), "PSIBLAST").unwrap(),
+                joined_cut(
+                    0,
+                    max,
+                    hits(),
+                    crate::seqdb::OidMap::unrestricted(),
+                    "PSIBLAST"
+                )
+                .unwrap(),
                 kept,
                 "{max}"
             );
         }
-        assert_eq!(joined_cut(0, 0, hits(), "PSIBLAST").unwrap(), 0);
-        refuse_joined_hits(0, hits(), "BLASTP").unwrap();
+        assert_eq!(
+            joined_cut(
+                0,
+                0,
+                hits(),
+                crate::seqdb::OidMap::unrestricted(),
+                "PSIBLAST"
+            )
+            .unwrap(),
+            0
+        );
+        refuse_joined_hits(0, hits(), crate::seqdb::OidMap::unrestricted(), "BLASTP").unwrap();
         // A subject without parsed Seq-ids between copies parts them.
         let parted = [Some((3, &s[3])), None, Some((0, &s[0]))];
-        assert_eq!(joined_cut(0, 1, parted, "PSIBLAST").unwrap(), 1);
+        assert_eq!(
+            joined_cut(
+                0,
+                1,
+                parted,
+                crate::seqdb::OidMap::unrestricted(),
+                "PSIBLAST"
+            )
+            .unwrap(),
+            1
+        );
         let f = parsed_subjects("pfound_v5");
         let pair = f
             .iter()
@@ -3266,24 +3357,45 @@ mod tests {
             .map(|(ordinal, subject)| Some((ordinal as u32, subject)))
             .collect::<Vec<_>>();
         assert_eq!(pair.len(), 2);
-        let error = refuse_joined_hits(1, pair.clone(), "BLASTP")
-            .unwrap_err()
-            .to_string();
+        let error = refuse_joined_hits(
+            1,
+            pair.clone(),
+            crate::seqdb::OidMap::unrestricted(),
+            "BLASTP",
+        )
+        .unwrap_err()
+        .to_string();
         assert!(
             error.contains("but are not copies of one record"),
             "{error}"
         );
         // The cut to one subject reaches the second of the pair: NCBI would keep both.
-        let error = joined_cut(1, 1, pair.clone(), "PSIBLAST")
-            .unwrap_err()
-            .to_string();
+        let error = joined_cut(
+            1,
+            1,
+            pair.clone(),
+            crate::seqdb::OidMap::unrestricted(),
+            "PSIBLAST",
+        )
+        .unwrap_err()
+        .to_string();
         assert!(
             error.contains("the cut to -max_target_seqs 1 counts"),
             "{error}"
         );
         // A cut that ends before the pair does not reach it.
         let before = [Some((7, &s[7]))].into_iter().chain(pair);
-        assert_eq!(joined_cut(1, 1, before, "PSIBLAST").unwrap(), 1);
+        assert_eq!(
+            joined_cut(
+                1,
+                1,
+                before,
+                crate::seqdb::OidMap::unrestricted(),
+                "PSIBLAST"
+            )
+            .unwrap(),
+            1
+        );
     }
 
     /// The residues between the two sentinel bytes.
@@ -3295,7 +3407,12 @@ mod tests {
     }
 
     fn check(residues: &[u8]) -> std::result::Result<(), String> {
-        check_protein_sequence(&stored(residues), 7, "blastx").map_err(|e| e.to_string())
+        check_protein_sequence(
+            &stored(residues),
+            || crate::seqdb::Oid::of_unrestricted(7),
+            "blastx",
+        )
+        .map_err(|e| e.to_string())
     }
 
     /// The check as an `all` over the residues.
@@ -3335,8 +3452,18 @@ mod tests {
             }
         }
         // The sentinels.
-        assert!(check_protein_sequence(&[1, first, 0], 7, "blastx").is_err());
-        assert!(check_protein_sequence(&[0, first, 1], 7, "blastx").is_err());
+        assert!(check_protein_sequence(
+            &[1, first, 0],
+            || crate::seqdb::Oid::of_unrestricted(7),
+            "blastx"
+        )
+        .is_err());
+        assert!(check_protein_sequence(
+            &[0, first, 1],
+            || crate::seqdb::Oid::of_unrestricted(7),
+            "blastx"
+        )
+        .is_err());
     }
 
     // Random residues around the letters' bounds: the single pass accepts exactly what an `all`
@@ -3880,12 +4007,12 @@ fn slot_refusal(
     let read = if cause.again {
         format!(
             "reads database sequence {} of the volume {volume_name}, which holds it, again",
-            cause.ordinal
+            db.oid(cause.ordinal)
         )
     } else {
         format!(
             "fetches database sequence {} of the volume {volume_name}, which holds it,",
-            cause.ordinal
+            db.oid(cause.ordinal)
         )
     };
     let after = match cause.after {
@@ -3896,13 +4023,17 @@ fn slot_refusal(
             ordinal,
             taxid,
             again: false,
-        }) => format!("after the run's fetch of database sequence {ordinal} with taxid {taxid}"),
+        }) => format!(
+            "after the run's fetch of database sequence {} with taxid {taxid}",
+            db.oid(ordinal)
+        ),
         Some(SlotFetch {
             ordinal,
             taxid,
             again: true,
         }) => format!(
-            "after the run read database sequence {ordinal} again, whose load looks up taxid {taxid}"
+            "after the run read database sequence {} again, whose load looks up taxid {taxid}",
+            db.oid(ordinal)
         ),
         None => "after another taxid".to_string(),
     };
@@ -3913,7 +4044,7 @@ fn slot_refusal(
         }
         Some(fetch) => format!(
             "there or not as its scope loaded database sequence {} again or kept it",
-            fetch.ordinal
+            db.oid(fetch.ordinal)
         ),
         None => "there or not as its scope kept the sequences read before".to_string(),
     };
@@ -4427,7 +4558,7 @@ pub(crate) fn subject_read_texts<'s, K>(
             Some(subject) => match prefetch_reads(db, ordinal, subject, true, program)? {
                 Ok(Some(blob)) => Some(blob),
                 Ok(None) => None,
-                Err(reason) => return Err(parsed_refusal(ordinal, &reason, program)),
+                Err(reason) => return Err(parsed_refusal(db.oid(ordinal), &reason, program)),
             },
             None => Some(ordinal),
         };
@@ -4618,7 +4749,7 @@ pub(crate) fn batch_prefetch<'s>(
     // Seq-align fails the prefetch.
     if let Some((ordinal, reason)) = uncertain.filter(|_| !fails) {
         return Err(parsed_refusal(
-            ordinal,
+            db.oid(ordinal),
             &format!("{reason}, and has a Seq-align on the query's minus strand and its plus strand, whose length NCBI BLAST+ 2.17.0's prefetch asks for"),
             program,
         ));
@@ -4627,7 +4758,7 @@ pub(crate) fn batch_prefetch<'s>(
     if let Some((ordinal, id)) = &failed_lookup {
         if !text.is_empty() {
             return Err(parsed_refusal(
-                *ordinal,
+                db.oid(*ordinal),
                 &format!(
                     "has the Seq-align id {id}, whose lookup in the database fails where NCBI BLAST+ 2.17.0's prefetch loads the batch's subjects, in an order that LOSAT does not reproduce: the taxonomy database's texts of the other subjects of the batch, which the prefetch may load before or not at all, are not known"
                 ),
@@ -4758,6 +4889,7 @@ pub(crate) fn prefetch_reads(
             reason,
         } => (other, or_itself, reason),
     };
+    let other = other.ordinal();
     let set = db
         .defline_set(other)
         .map_err(|error| database_error(error, program))?;
@@ -4816,7 +4948,7 @@ pub(crate) fn check_prefetched_parsed(
     match prefetch_reads(db, ordinal, subject, false, program)? {
         Ok(_) => Ok(()),
         Err(reason) => Err(parsed_refusal(
-            ordinal,
+            db.oid(ordinal),
             &format!("{reason}, {PREFETCH_READS_IT}"),
             program,
         )),
@@ -4873,8 +5005,9 @@ fn prefetch_gets_no_bioseq(
     let id = || String::from_utf8_lossy(&subject.alignment_fasta()).into_owned();
     if let Some(other) = read.blob.filter(|_| read.throws) {
         return Ok(Err(format!(
-            "has the Seq-align id {}, by which NCBI BLAST+'s lookup gives database sequence {other}, whose definition lines do not hold that id: NCBI BLAST+ 2.17.0's prefetch stops there (oid headers do not contain target gi/seq_id)",
-            id()
+            "has the Seq-align id {}, by which NCBI BLAST+'s lookup gives database sequence {}, whose definition lines do not hold that id: NCBI BLAST+ 2.17.0's prefetch stops there (oid headers do not contain target gi/seq_id)",
+            id(),
+            db.oid(other)
         )));
     }
     match read.instead {
@@ -4967,12 +5100,12 @@ pub(crate) struct ScopeBioseq {
     /// `CSeqDBException` (`oid headers do not contain target gi/seq_id`) before the taxonomy of
     /// the blob is looked up.
     pub(crate) throws: bool,
-    /// Another sequence, by ordinal id, that holds an id the scope takes for the Seq-align id
-    /// besides `blob` (`ParsedSubject::other_holder`): where the scope holds its Bioseq from an
-    /// earlier read, it can get that one instead (psiblast's PSSM refuses every such read,
+    /// Another sequence that holds an id the scope takes for the Seq-align id besides `blob`
+    /// (`ParsedSubject::other_holder`): where the scope holds its Bioseq from an earlier read, it
+    /// can get that one instead (psiblast's PSSM refuses every such read,
     /// `ParsedSubject::pssm_read`; the prefetch's handle where `blob` is none,
     /// `prefetch_gets_no_bioseq`).
-    pub(crate) instead: Option<u32>,
+    pub(crate) instead: Option<crate::seqdb::DbSequence>,
 }
 
 impl ScopeBioseq {
@@ -5039,9 +5172,9 @@ pub(crate) fn scope_bioseq(
     match subject.found() {
         Some(FoundInstead::Sequence(other)) => {
             let set = db
-                .defline_set(*other)
+                .defline_set(other.ordinal())
                 .map_err(|error| database_error(error, program))?;
-            Ok(other_bioseq(&set, *other, subject).unwrap_or(none))
+            Ok(other_bioseq(&set, other.ordinal(), subject).unwrap_or(none))
         }
         Some(FoundInstead::Nothing | FoundInstead::ThrowsOnId(_) | FoundInstead::Failed(_)) => {
             Ok(none)
@@ -6148,7 +6281,9 @@ mod taxdb_prepass_tests {
                 assert_eq!(stored.source, want, "{name} {taxdb:?}");
             }
             assert_eq!(
-                stored.check_shown_source(0, "BLASTP").is_err(),
+                stored
+                    .check_shown_source(|| crate::seqdb::Oid::of_unrestricted(0), "BLASTP")
+                    .is_err(),
                 refused,
                 "{name} {taxdb:?}"
             );

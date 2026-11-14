@@ -270,8 +270,8 @@ fn blocks_read_alike() {
         let n = held.num_oids();
         for first in 0..n {
             for end in first + 1..=n {
-                let a = held.read_block(first, end, 7).unwrap();
-                let b = read.read_block(first, end, 7).unwrap();
+                let a = held.read_block(first, end, 7, 7).unwrap();
+                let b = read.read_block(first, end, 7, 7).unwrap();
                 assert_eq!(format!("{a:?}"), format!("{b:?}"), "{name} {first}..{end}");
             }
             assert_eq!(
@@ -564,7 +564,7 @@ fn an_index_file_changed_after_the_open_gives_errors_not_panics() {
             overwrite_entries(&index, arrays, num_oids, array, words);
             let n = num_oids as u32;
             let label = format!("{name}, array {array} set to {:?}..", &words[..2]);
-            let block = volume.read_block(0, n, 0);
+            let block = volume.read_block(0, n, 0, 0);
             if array != 0 {
                 let error = block.expect_err(&label).to_string();
                 assert!(error.contains("the file changed"), "{label}: {error}");
@@ -572,7 +572,7 @@ fn an_index_file_changed_after_the_open_gives_errors_not_panics() {
             for first in 0..n {
                 let _ = volume.block_end(first, 64);
                 let _ = volume.block_bytes(first, n);
-                let _ = volume.read_block(first, first + 1, first);
+                let _ = volume.read_block(first, first + 1, first, first);
             }
             let mut visited = 0;
             volume.visit_deflines(0, n, 1 << 20, &mut |_, _| {

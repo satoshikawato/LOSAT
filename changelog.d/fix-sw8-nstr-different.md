@@ -10,7 +10,7 @@
   SEG's default; BLAST XML's `Parameters_filter` prints them as NCBI does, `S 12 inf 2.5;`, `S 12 2.2 -nan;`).
 - segmasker takes a `-locut` or `-hicut` with more than 18 digits or 15 decimal places before a final `e`, with
   NCBI's value; it was refused.
-- A `-in_pssm` file (psiblast, tblastn) or a rpsbproc archive with a REAL of more than 18 significant digits is read
+- A `-in_pssm` file (psiblast, tblastn) or a rpsbproc archive or XML input with a REAL of more than 18 significant digits is read
   with NCBI's value, and one whose exponent overflows NCBI's 32-bit arithmetic (`1.55e-2147483647`, undefined in
   NCBI) with the value of the exact exponent (0, or the smallest normal double where NCBI clamps); both were refused.
 - `-in_pssm` (psiblast, tblastn) counts a vertical tab as white space, as NCBI does: an ASN.1 text PSSM with vertical

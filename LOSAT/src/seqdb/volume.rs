@@ -233,6 +233,47 @@ impl Volume {
             .ok_or_else(|| self.index.sequence_changed(oid, 2))
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1774-1803 and
+    // c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:700-722,748-752
+    // ```c++
+    // int CSeqDBVol::x_GetSequence(int              oid,
+    //                              const char    ** buffer) const
+    // ...
+    //     m_Idx->GetSeqStartEnd(oid, start_offset, end_offset);
+    // ...
+    //         end_offset --;
+    //
+    //         length = int(end_offset - start_offset);
+    // ...
+    //         *buffer = m_Seq->GetFileDataPtr(start_offset-1) + 1;
+    // ...
+    //                 m_MappedFile = m_Atlas.GetMemoryFile(m_Filename);
+    // ...
+    //             m_DataPtr = (char *)(m_MappedFile->GetPtr());
+    // ...
+    //     const char *GetFileDataPtr(const string   & fname,TIndx offset)
+    //     {
+    //         Init(fname);
+    //
+    //         return(const char *)(m_DataPtr + offset);
+    // ```
+    /// The bytes of the sequence file after the sentinel byte of protein `oid` (volume-relative):
+    /// the volume's next sequences with their sentinels. NCBI's search reads a protein of a
+    /// database where the volume's sequence file is mapped whole, so these are the bytes it holds
+    /// after the protein's sentinel.
+    pub fn protein_bytes_after(&self, oid: u32) -> Result<u64, SeqDbError> {
+        assert!(
+            self.index.seqtype == SeqType::Protein,
+            "protein bytes of a nucleotide volume"
+        );
+        self.check_range(oid, oid.saturating_add(1))?;
+        let next = self.index.sequence_start(oid + 1)?;
+        self.seq_file()?
+            .len()
+            .checked_sub(next)
+            .ok_or_else(|| self.index.sequence_changed(oid, 2))
+    }
+
     /// Bytes of the sequence file that a block of the sequences `first..end`
     /// occupies (protein: with the sentinel bytes around them; nucleotide:
     /// with their ambiguity data).

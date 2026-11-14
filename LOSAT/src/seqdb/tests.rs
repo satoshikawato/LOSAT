@@ -612,6 +612,41 @@ fn the_first_header_check_reads_the_stored_lines() {
     assert!(!db.has_parsed_seqids().unwrap());
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1774-1803 (quoted
+// at `Volume::protein_bytes_after`)
+/// After a protein's sentinel byte the volume's sequence file holds the volume's next proteins,
+/// each with its sentinel, to the end of the file: nothing after a volume's last protein, nothing
+/// of the next volume.
+#[test]
+fn a_proteins_bytes_after_are_the_rest_of_its_volume() {
+    for name in ["prot_v4", "prot_mv"] {
+        let db = SeqDb::open(&db_name(name), SeqType::Protein).unwrap();
+        let mut seen_last = 0;
+        for ordinal in 0..db.num_seqs() {
+            let at = db.find_volume(ordinal).unwrap();
+            let vol = &db.volumes()[at.volume];
+            let expected: u64 = (at.vol_oid + 1..vol.num_oids())
+                .map(|oid| u64::from(vol.protein_length(oid).unwrap()) + 1)
+                .sum();
+            let after = db.protein_bytes_after(ordinal).unwrap();
+            assert_eq!(after, expected, "{name} {ordinal}");
+            if at.vol_oid == 0 {
+                // The file's first byte (a sentinel), the protein and its sentinel, the rest.
+                let psq = volume::with_extension(vol.base(), SeqType::Protein, "sq");
+                let psq = std::fs::metadata(psq).unwrap().len();
+                let length = u64::from(vol.protein_length(0).unwrap());
+                assert_eq!(1 + length + 1 + after, psq, "{name} {ordinal}");
+            }
+            if at.vol_oid + 1 == vol.num_oids() {
+                assert_eq!(after, 0, "{name} {ordinal}");
+                seen_last += 1;
+            }
+        }
+        assert_eq!(seen_last, db.volumes().len(), "{name}");
+        assert_eq!(db.volumes().len() > 1, name == "prot_mv");
+    }
+}
+
 #[test]
 fn databases_that_need_unread_data_are_rejected() {
     // A database with parsed Seq-ids opens and says so; the decoder of the ordinal ids

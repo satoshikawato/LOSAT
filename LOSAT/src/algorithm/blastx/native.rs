@@ -1749,6 +1749,7 @@ pub(super) fn database_search_error(
     // already (the exception of a query split size that NCBI cannot convert, `split::split_sizes`).
     if error.is::<super::parameters::SearchSpaceOverflow>()
         || error.is::<super::split::QuerySplitRefusal>()
+        || error.is::<super::preliminary::OneHitWindowRefusal>()
         || error.is::<NativeError>()
     {
         return error;
@@ -2620,15 +2621,18 @@ impl XReaderPrep {
         if self.failed.load(Ordering::Acquire) {
             slots.iter_mut().for_each(|slot| **slot = None);
         } else if let Some(layout) = &self.layout {
-            let shape = std::sync::Arc::new(ReaderBatchShape::reduce(
+            let shape = ReaderBatchShape::reduce(
                 layout,
                 slots
                     .iter()
                     .map(|slot| slot.as_ref().expect("a prepared unit")),
-            ));
-            for slot in &mut slots {
-                attach(slot.as_mut().expect("a prepared unit"), &shape);
-            }
+            );
+            attach(
+                slots
+                    .iter_mut()
+                    .map(|slot| slot.as_mut().expect("a prepared unit")),
+                &shape,
+            );
         }
         drop(slots);
         let mut gate = self.gate.lock().expect("the reader batch's gate");

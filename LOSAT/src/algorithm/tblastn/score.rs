@@ -27,7 +27,7 @@ use crate::algorithm::blastp::extension::{
 };
 use crate::algorithm::blastp::gapalign::{
     blast_gapped_alignment_with_traceback_in_window, blastp_get_start_for_gapped_alignment,
-    blastp_score_only_gapped_alignment_with_scratch, BlastpGapAlignResult,
+    blastp_score_only_gapped_alignment_with_scratch, gapped_start_int4, BlastpGapAlignResult,
     BlastpGappedAlignmentMode, BlastpScoreOnlyGappedAlignment, GapAlignScratch,
 };
 use crate::algorithm::pssm_search::gapalign::{
@@ -37,7 +37,7 @@ use crate::algorithm::pssm_search::gapalign::{
 use crate::algorithm::pssm_search::rows::{PssmRows, QueryPssm};
 use crate::algorithm::pssm_search::ungapped::{pssm_extend_one_hit, pssm_extend_two_hit};
 use crate::config::ScoringMatrix;
-use crate::utils::matrix::{standard_score, BLASTAA_SIZE};
+use crate::utils::matrix::BLASTAA_SIZE;
 use anyhow::Result;
 
 /// The score source of the stage functions of a TBLASTN search: the matrix (`MatrixScore`) or the
@@ -256,8 +256,9 @@ impl TbnScore for MatrixScore {
     // ```
     // A negative Int4 length read as Uint4 is above HSP_MAX_WINDOW, and q_start + MIN(q_length,
     // s_length) wraps back to q_start + length, so only the first window is scored: its sum over
-    // the bytes NCBI reads gives q_start + 5 when above 0, else q_start. BLASTP's own function for
-    // this (`blastp::blast_engine`) reads its sequences with the letters past them as the sentinel
+    // the bytes NCBI reads gives q_start + 5 when above 0, else q_start (`gapped_start_int4` of
+    // `blastp::gapalign`, which BLASTX shares). BLASTP's own function for this
+    // (`blastp::blast_engine`) reads its sequences with the letters past them as the sentinel
     // (PD-LOSAT-NCBI-DEFECTS 1.3 item 3) and stays where BLASTP's gapped stage inlines it.
     fn gapped_start_int4(
         self,
@@ -267,18 +268,13 @@ impl TbnScore for MatrixScore {
         length: i32,
         matrix: ScoringMatrix,
     ) -> Result<usize> {
-        const HSP_MAX_WINDOW: usize = 11;
         debug_assert!(length < 0);
-        let score: i32 = query_window
-            .iter()
-            .zip(subject_window)
-            .map(|(&q, &s)| standard_score(matrix, q, s))
-            .sum();
-        Ok(if score > 0 {
-            q_start + HSP_MAX_WINDOW - 1 - HSP_MAX_WINDOW / 2
-        } else {
-            q_start
-        })
+        Ok(gapped_start_int4(
+            query_window,
+            subject_window,
+            q_start,
+            matrix,
+        ))
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4171-4189,4257-4258,4295

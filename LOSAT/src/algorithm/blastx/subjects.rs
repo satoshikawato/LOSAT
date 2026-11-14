@@ -172,6 +172,37 @@ impl<'a> Subjects<'a> {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:885-893,919,1236-1239
+    // and c++/src/algo/blast/api/seqsrc_seqdb.cpp:375
+    // ```c++
+    //     buflen = CalculateSeqBufferLength(sv.size(), eBlastEncodingProtein);
+    //     _ASSERT(buflen != 0);
+    //     buf = buf_var = (Uint1*) malloc(sizeof(Uint1)*buflen);
+    // ...
+    //     *buf_var++ = GetSentinelByte(eBlastEncodingProtein);
+    // ...
+    //     *buf_var++ = GetSentinelByte(eBlastEncodingProtein);
+    // ...
+    //     case eBlastEncodingProtein:
+    //         _ASSERT(sentinel == eSentinels);
+    //         _ASSERT(strand == eNa_strand_unknown);
+    //         retval = sequence_length + 2;
+    // ...
+    //         len = seqdb.GetSequence(oid, &buf);
+    // ```
+    /// The bytes that NCBI's buffer of subject `oid` holds after the sentinel byte that follows its
+    /// residues: none for a record of `-subject` (`GetSequenceProtein` allocates the residues and a
+    /// sentinel byte on each side, `CalculateSeqBufferLength`), and for a database sequence the
+    /// rest of its volume's sequence file, which NCBI maps whole (`XStreamDb::bytes_after`). The
+    /// second item names the buffer in a refusal.
+    pub(crate) fn buffer_after(&self, oid: usize) -> Result<(usize, &'static str)> {
+        match self {
+            Subjects::Fasta(_) => Ok((0, "subject")),
+            Subjects::Stream(stream) => Ok((stream.db.bytes_after(oid)?, "database volume")),
+            Subjects::Unreadable => unreachable!("no subject is read from an unreadable database"),
+        }
+    }
+
     /// The NCBIstdaa residues of subject `oid` (what the linking, the redo and the
     /// traceback read), as `encoded_with_sentinel` without the byte 0.
     pub(crate) fn encoded(&self, oid: usize) -> Cow<'a, [u8]> {

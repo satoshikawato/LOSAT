@@ -12,9 +12,10 @@ use anyhow::Result;
 use std::{ops::Range, sync::Arc};
 
 /// What the units of one reader batch share (phase 1 of the search of a reader batch of several
-/// units; `ReaderBatchShape::reduce`). A reader batch of one unit has none: its unit computes
-/// each value itself, from its own contexts, which are then the batch's.
-#[derive(Debug)]
+/// units; `ReaderBatchShape::reduce`), and where a unit lies in the batch's query buffer
+/// (`buffer_after`, each unit's own copy of the shape, `attach`). A reader batch of one unit has
+/// none: its unit computes each value itself, from its own contexts, which are then the batch's.
+#[derive(Debug, Clone)]
 pub(crate) struct ReaderBatchShape {
     /// NCBI's `num_queries` of the batch: with more than one the batch is not split.
     pub(crate) query_count: usize,
@@ -38,6 +39,9 @@ pub(crate) struct ReaderBatchShape {
     /// ungapped search: the message of each query of the batch (`query_setup::unknown_matrix_message`),
     /// which every unit's preparation raises (`query_setup::prepare_unit_queries`).
     pub(crate) matrix_error: Option<Arc<str>>,
+    /// The bytes of NCBI's query buffer after the unit's own (the letters and NULLBs of the
+    /// contexts of the units after it, `attach`); 0 in the layout and the reduced shape.
+    pub(crate) buffer_after: usize,
 }
 
 /// One unit of a reader batch, prepared in phase 1: its queries, translated and filtered, and
@@ -53,6 +57,43 @@ pub(crate) struct UnitPrep {
 }
 
 impl PreparedQueryBatch {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:245-250 and
+    // c++/src/algo/blast/api/blast_setup_cxx.cpp:500-501
+    // ```c
+    // Uint4
+    // QueryInfo_GetSeqBufLen(const BlastQueryInfo* qinfo)
+    // {
+    //     BlastContextInfo * cinfo = & qinfo->contexts[qinfo->last_context];
+    //     return cinfo->query_offset + cinfo->query_length + (cinfo->query_length ? 2 : 1);
+    // }
+    // ...
+    //     int buflen = QueryInfo_GetSeqBufLen(qinfo);
+    //     TAutoUint1Ptr buf((Uint1*) calloc(buflen+1, sizeof(Uint1)));
+    // ```
+    // NCBI's query buffer is `calloc(buflen + 1)` and `query->sequence` starts one byte into it
+    // (after the first NULLB), so `query->sequence[i]` lies inside it for `i < buflen`: the
+    // contexts with their NULLBs, then calloc's last byte (0). A reader batch searched in units
+    // holds the units' contexts one after another (`query_offset` advances by a positive length
+    // + 1 across them as within a unit), so from a unit's first context the buffer holds the
+    // unit's own bytes and then the next units' (`ReaderBatchShape::buffer_after`).
+    /// `QueryInfo_GetSeqBufLen` of the batch NCBI searches, counted from this unit's first
+    /// context: `query->sequence` (from the unit's first context) is inside NCBI's buffer below
+    /// it.
+    pub(crate) fn batch_buffer_length(&self) -> usize {
+        self.unit_buffer_length()
+            + self
+                .reader_shape
+                .as_deref()
+                .map_or(0, |shape| shape.buffer_after)
+    }
+
+    /// `QueryInfo_GetSeqBufLen` of this unit's contexts alone.
+    fn unit_buffer_length(&self) -> usize {
+        self.contexts.last().map_or(1, |last| {
+            last.offset + last.length + if last.length > 0 { 2 } else { 1 }
+        })
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:954-957
     // ```c
     //          Int4 concat_qlen =
@@ -158,6 +199,7 @@ impl ReaderBatchShape {
             matrix_error: options
                 .unknown_matrix
                 .then(|| super::query_setup::matrix_error_message(records, options).into()),
+            buffer_after: 0,
         }
     }
 
@@ -183,6 +225,7 @@ impl ReaderBatchShape {
             word_cutoff_min: None,
             redo_cutoff_min: None,
             matrix_error: layout.matrix_error.clone(),
+            buffer_after: 0,
         };
         for unit in units {
             for p in unit.params.iter().filter(|p| p.valid) {
@@ -298,9 +341,31 @@ pub(crate) fn prepare_lone_unit(
     })
 }
 
-/// The end of phase 1 for one unit: the batch's shape replaces the layout.
-pub(crate) fn attach(unit: &mut UnitPrep, shape: &Arc<ReaderBatchShape>) {
-    unit.prepared.reader_shape = Some(Arc::clone(shape));
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:71-88 (quoted above
+// `ReaderBatchShape::layout`)
+// ```c++
+//         Uint4 shift = prev_len ? prev_len + 1 : 0;
+//
+//         qinfo->contexts[index].query_offset = prev_loc + shift;
+// ```
+// The units' contexts follow one another in NCBI's buffer of the reader batch, so the bytes after
+// a unit's are the bytes of the units after it (each its `QueryInfo_GetSeqBufLen` less the first
+// NULLB, `PreparedQueryBatch::batch_buffer_length`).
+/// The end of phase 1 for the units of a reader batch, in order: the batch's shape replaces the
+/// layout, each unit's copy with the bytes of NCBI's query buffer after the unit's
+/// (`ReaderBatchShape::buffer_after`).
+pub(crate) fn attach<'u>(
+    units: impl DoubleEndedIterator<Item = &'u mut UnitPrep>,
+    shape: &ReaderBatchShape,
+) {
+    let mut after = 0;
+    for unit in units.rev() {
+        unit.prepared.reader_shape = Some(Arc::new(ReaderBatchShape {
+            buffer_after: after,
+            ..shape.clone()
+        }));
+        after += unit.prepared.unit_buffer_length() - 1;
+    }
 }
 
 /// Phase 1 of the search of a reader batch of `ranges.len()` > 1 units, all at once (with a pool
@@ -337,10 +402,8 @@ pub(crate) fn prepare_reader_batch(
         ranges.iter().map(prepare).collect::<Result<Vec<_>>>()?
     };
     super::x_timing::batch(super::x_timing::Batch::QuerySetup, x_t);
-    let shape = Arc::new(ReaderBatchShape::reduce(&layout, &units));
-    for unit in &mut units {
-        attach(unit, &shape);
-    }
+    let shape = ReaderBatchShape::reduce(&layout, &units);
+    attach(units.iter_mut(), &shape);
     Ok(units)
 }
 
@@ -409,6 +472,21 @@ mod tests {
                 );
                 assert_eq!(unit.prepared.batch_context_count(), shape.contexts);
             }
+            // From each unit's first context NCBI's buffer of the batch holds the unit's bytes and
+            // then the next units' (`buffer_after`), up to the batch's `QueryInfo_GetSeqBufLen`.
+            let mut before = 0;
+            for unit in &units {
+                assert_eq!(
+                    before + unit.prepared.batch_buffer_length(),
+                    whole.prepared.batch_buffer_length(),
+                    "{strand}"
+                );
+                before += unit.prepared.unit_buffer_length() - 1;
+            }
+            assert_eq!(
+                units.last().unwrap().prepared.batch_buffer_length(),
+                units.last().unwrap().prepared.unit_buffer_length()
+            );
         }
     }
 
@@ -470,6 +548,7 @@ mod tests {
             word_cutoff_min: None,
             redo_cutoff_min: None,
             matrix_error: None,
+            buffer_after: 0,
         }));
         assert_eq!(
             split_queries(&records, &full, &options, DEFAULT_SIZES)

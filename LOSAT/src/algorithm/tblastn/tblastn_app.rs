@@ -421,6 +421,7 @@ impl TblastnArgs {
         } else {
             args.outfmt.clone()
         };
+        let strategy = args.strategy.clone();
         let result = {
             let mut outputs =
                 ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
@@ -436,6 +437,8 @@ impl TblastnArgs {
                 settings,
             )
         };
+        // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
+        let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
         // NCBI writes an error archive after the archives of the batches before when the
         // application stops with one of its own errors, and when the run ends with messages that
         // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status).

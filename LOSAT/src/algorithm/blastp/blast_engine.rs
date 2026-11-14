@@ -5305,6 +5305,7 @@ pub fn run(
         choice.normalized()
     };
     let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report);
+    let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
@@ -5318,6 +5319,8 @@ pub fn run(
             settings,
         )
     };
+    // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
+    let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
     // NCBI writes an error archive after the archives of the batches before when the
     // application stops with one of its own errors, and when the run ends with messages that
     // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status).
@@ -8859,7 +8862,15 @@ fn search_split_query_batches(
             );
             // A chunk's search that fails is its batch's (`preliminary_search_error`): the
             // requests of the call's batches up to it come before the error (NCBI searched the
-            // batches before it, one at a time, and wrote their requests).
+            // batches before it, one at a time, and wrote their requests). No NCBI error reaches
+            // here today: a chunk reads the database only for a valid context of its parts, whose
+            // query is valid in the call, so the call's own search above has read the same
+            // database and made the same checks first (`first_oid_read_fails`, the reads,
+            // `OLD_FSC`'s average length; RG K4b review M1b, probe K/k4b/agent6/m1b: an all-X query
+            // longer than a chunk, a query whose second chunk is all X, an empty database and one
+            // without its sequence file, 28 cases equal to NCBI). Such an error would write no
+            // reader messages of its batch, and the reports of the batches before it would be
+            // missing.
             if let Err(error) = searched {
                 if let Some(call) = call {
                     call.end_at(range.end)?;

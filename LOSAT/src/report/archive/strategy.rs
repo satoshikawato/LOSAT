@@ -466,6 +466,38 @@ impl StrategyExport {
     }
 }
 
+// No NCBI counterpart: NCBI posts while it writes the request, so no post can wait there.
+/// The end of a run of a program with `-export_search_strategy` (`strategy`; `None` without
+/// it): a run that ends as NCBI's (`result` is `Ok` or one of NCBI's errors, `cli::NativeError`)
+/// has written every post of its requests at its batch's start (`StrategyExport::take_posts`),
+/// so a post still waiting is LOSAT's internal error instead of output that silently lacks it.
+/// LOSAT's refusals (any other error) are not NCBI's output and keep their own text. Each
+/// program calls this once, where its run's result is known (`blastn`, `blastp` for psiblast
+/// and rpsblast too, `blastx` for rpstblastn too, `tblastn`, `tblastx`).
+pub fn end_run(strategy: Option<&StrategyExport>, result: Result<()>) -> Result<()> {
+    let Some(strategy) = strategy else {
+        return result;
+    };
+    let as_ncbi = match &result {
+        Ok(()) => true,
+        Err(error) => error.is::<crate::cli::NativeError>(),
+    };
+    if !as_ncbi {
+        return result;
+    }
+    let waiting = strategy.with_state(|state| state.pending.first().map(|&(first, _)| first));
+    match waiting {
+        Some(first) => Err(anyhow::anyhow!(
+            "LOSAT internal error: the run ended ({}) with NCBI's posts of the search strategy request of the batch from query {first} not written",
+            match &result {
+                Ok(()) => "exit status 0".to_string(),
+                Err(error) => error.to_string().trim_end().to_string(),
+            }
+        )),
+        None => result,
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
 // ```c++
 // void CBlastAppDiagHandler::Post(const SDiagMessage & mess)
@@ -749,6 +781,40 @@ mod tests {
             |searched| crate::report::archive::tests::search_space(&handle.request_sets(searched));
         assert_eq!(space(None), None);
         assert_eq!(space(Some(5)), Some(0));
+    }
+
+    /// A post of a request that no batch start wrote is LOSAT's internal error at the end of a run
+    /// that ends as NCBI's (`Ok` or NCBI's error); a refusal of LOSAT's keeps its text.
+    #[test]
+    fn a_post_left_at_the_end_of_a_run_is_an_internal_error() {
+        let (export, _) = export(None);
+        let queries = [BioseqInput {
+            title: b"q caf\xe9",
+            defline: std::borrow::Cow::Borrowed(b">q caf\xe9"),
+            ..protein("Query_1", b"MWCHWCMWCHWC")
+        }];
+        export.write_request(0..1, &request(&queries, &[])).unwrap();
+        let native = || -> Result<()> {
+            Err(crate::cli::NativeError {
+                exit: 3,
+                message: "BLAST engine error: x\n".to_string(),
+            }
+            .into())
+        };
+        for result in [Ok(()), native()] {
+            let error = end_run(Some(&export), result).unwrap_err();
+            assert!(
+                error.to_string().starts_with("LOSAT internal error"),
+                "{error}"
+            );
+        }
+        let refusal = end_run(Some(&export), Err(anyhow::anyhow!("not supported"))).unwrap_err();
+        assert_eq!(refusal.to_string(), "not supported");
+        assert!(!export.take_all_posts().is_empty());
+        end_run(Some(&export), Ok(())).unwrap();
+        let error = end_run(Some(&export), native()).unwrap_err();
+        assert!(error.is::<crate::cli::NativeError>());
+        end_run(None, Ok(())).unwrap();
     }
 
     /// `-` and a file that is also `-out` are refused; a path that cannot be created is NCBI's

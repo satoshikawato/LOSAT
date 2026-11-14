@@ -293,6 +293,7 @@ fn run_inner(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     output: &mut Option<crate::cli::NcbiOstream<'static>>,
     archive_slot: &mut Option<crate::report::archive::ArchiveHandle>,
+    strategy_slot: &mut Option<crate::report::archive::strategy::StrategyExport>,
 ) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
     // ```c
@@ -375,6 +376,7 @@ fn run_inner(
             &options_handle,
         )
     });
+    strategy_slot.clone_from(&strategy);
     // Preserve explicit product refusals; defer supported semantic failures
     // until subject and standard query/output streams have been extracted.
     let mut resolution = args.resolve();
@@ -2244,7 +2246,10 @@ pub fn run(
 ) -> Result<()> {
     let mut output: Option<crate::cli::NcbiOstream<'static>> = None;
     let mut archive: Option<crate::report::archive::ArchiveHandle> = None;
-    let result = run_inner(args, settings, &mut output, &mut archive);
+    let mut strategy = None;
+    let result = run_inner(args, settings, &mut output, &mut archive, &mut strategy);
+    // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
+    let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
     if let (Some(handle), Some(writer)) = (&archive, output.as_mut()) {
         match &result {
             Err(error) => {

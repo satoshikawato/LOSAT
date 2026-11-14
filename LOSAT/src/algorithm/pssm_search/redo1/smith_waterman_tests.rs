@@ -275,6 +275,36 @@ fn alignments_of_score_zero_fail_or_never_end() {
     assert_eq!(outcome.unwrap().map(|list| list.len()), Some(1));
 }
 
+// The regime of a significant score 0 with two or more HSPs is decided at the first alignment by
+// profile row 0 against the subject's first letter: positive, NCBI never ends (the refusal);
+// otherwise NCBI makes every positive alignment, then fails and drops the match. With a score of 0
+// not significant (a large search space) the same windows run the loop as usual.
+#[test]
+fn a_significant_score_zero_is_decided_by_the_first_cell() {
+    let two = [hsp((0, 2), (0, 2), 11), hsp((0, 2), (0, 2), 11)];
+    let outcome = |profile: &str, subject: &str, search_space: i64| {
+        let consensus = encode(profile);
+        let info = info_of(&consensus);
+        redo_match(&info, consensus.len(), search_space, 10.0)
+            .redo_one_match_smith_waterman(
+                &mut run_of(&consensus),
+                &mut SwRedoScratch::new(),
+                &mut BlastCompoHeap::new(500, 0.002),
+                0,
+                &two,
+                &encode(subject),
+            )
+            .map(|list| list.map(|list| list.len()))
+    };
+    // W against W first: never ends in NCBI.
+    assert_eq!(outcome("WCWC", "WCWC", 1), Err(SwEndless));
+    // A against K first (negative), W against W after: every positive alignment, then the
+    // failed redo.
+    assert_eq!(outcome("AWCH", "KWCH", 1), Ok(None));
+    // The score of 0 not significant: the positive alignments.
+    assert!(matches!(outcome("AWCH", "KWCH", 1_000), Ok(Some(n)) if n >= 1));
+}
+
 // `s_EvalueFromScore` reads the search space whatever the Gumbel block.
 #[test]
 fn the_evalue_of_a_score_is_karlin_altschuls() {

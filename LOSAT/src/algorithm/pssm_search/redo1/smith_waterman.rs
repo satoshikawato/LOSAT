@@ -80,10 +80,10 @@ impl Default for SwRedoScratch {
     }
 }
 
-/// NCBI's redo of a match whose Smith-Waterman loop does not end: a later alignment of score 0
-/// passes the e-value threshold and repeats the one before it (`Blast_RedoOneMatchSmithWaterman`
-/// pushes a range that forbids nothing new, then finds the same alignment), which NCBI keeps until
-/// its memory runs out.
+/// NCBI's redo of a match whose Smith-Waterman loop does not end: the score of 0 is significant,
+/// the window has two or more HSPs and profile row 0 scores the subject's first letter positive.
+/// After every positive alignment NCBI makes the alignment of that one cell again and again; its
+/// range changes no score that the scan sees, and the loop stops only when an allocation fails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SwEndless;
 
@@ -108,13 +108,13 @@ impl RedoMatch<'_> {
     /// asks (`BlastCompo_HeapWouldInsert`); `Ok(None)` when no HSP is left, also where NCBI's
     /// redo of the match fails (an alignment without an edit script).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1290-1305
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1542-1548
     /// ```c
-    ///     function_level_cleanup:
+    /// function_level_cleanup:
     ///     if (status != 0) {
     ///         for (query_index = 0;  query_index < numQueries;  query_index++) {
     ///             BlastCompo_AlignmentsFree(&alignments[query_index],
-    ///                     callbacks->free_align_traceback);
+    ///                                       callbacks->free_align_traceback);
     ///         }
     ///     }
     /// ```
@@ -200,7 +200,7 @@ impl RedoMatch<'_> {
         hsps: &[BlastpPreliminaryHsp],
         subject: &[u8],
     ) -> Result<Option<Vec<Align>>, SwEndless> {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3250-3256
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3261-3264
         // ```c
         //         if(smithWaterman) {
         // 	   forbidden_tld[i] = calloc(1,sizeof(Blast_ForbiddenRanges));
@@ -397,6 +397,65 @@ impl RedoMatch<'_> {
             if !alignment_is_significant {
                 break;
             }
+            // The regime of a significant score 0, decided at the first alignment. When the score
+            // of 0 passes the threshold (`s_EvalueFromScore(0, ..) = searchsp * K < cutoff_e`) and
+            // the window has two or more HSPs, every round is significant (a later score is at
+            // least 0, its e-value at most that of 0, and the heap is asked at the first round
+            // only), and every round of a positive score forbids its start cell, which was free
+            // and whose diagonal step is positive (the reverse scan's first best comes from the
+            // diagonal), so the loop makes every positive alignment and comes to a round of score
+            // 0. That round's score-only scan ends at (0, 0) (`bestQueryPos = bestMatchSeqPos = 0`,
+            // a best only for `>`), its find-start stops at (0, 0) (`bestScore >= score_in` with
+            // 0), and `s_SWFindFinalEndsUsingXdrop` aligns the 1 x 1 rectangle there: profile row 0
+            // against the subject's first letter after SEG. A positive score makes one
+            // substitution, prepends it and pushes `[0, 1]` onto row 0 again, which changes no
+            // score the scan sees (every cell scores 0 already): the next round is the same, and
+            // NCBI makes it until an allocation fails (`SwEndless`, the refusal). Otherwise
+            // `ALIGN_EX` makes no operation, `GapEditScriptNew(0)` is NULL, the X-drop callback
+            // returns -1 and NCBI frees the window's alignments: the match keeps no HSP. Both
+            // outcomes follow from the cell, so they are answered here, without the rounds.
+            //
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:437-446
+            // ```c
+            //             if (newScore > bestScore) {
+            //                 bestScore = newScore;
+            //                 bestQueryPos = queryPos;
+            //                 bestMatchSeqPos = matchSeqPos;
+            //             }
+            //             if (bestScore >= score_in)
+            //                 break;
+            //         }
+            //         if (bestScore >= score_in)
+            //             break;
+            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:428-432
+            // ```c
+            //     if (x_dropoff < gap_open_extend)
+            //         x_dropoff = gap_open_extend;
+            //
+            //     if(N <= 0 || M <= 0)
+            //         return 0;
+            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/gapinfo.c:61-62
+            // ```c
+            //     if (size <= 0)
+            //        return NULL;
+            // ```
+            if alignments.is_empty()
+                && hspcnt > 1
+                && evalue_from_score(0, run.karlin.lambda, run.log_k, searchsp) < self.expect_value
+            {
+                // `ALIGN_EX`'s cell (1, 1): `pssm[0]` (`query_offset = queryStart - 1`) against
+                // `B[1]`, the subject's first letter (`sw.subject[1]`; the sentinel when it has none).
+                let first_cell = rows
+                    .first()
+                    .map_or(0, |row| row[usize::from(sw.subject[1])]);
+                return if first_cell > 0 {
+                    Err(SwEndless)
+                } else {
+                    Ok(None)
+                };
+            }
             let start = smith_waterman_find_start(
                 letters,
                 |pos| &rows[pos],
@@ -458,13 +517,10 @@ impl RedoMatch<'_> {
             if hspcnt <= 1 {
                 break;
             }
-            // Each alignment of a positive score starts at a cell that the scans did not forbid
-            // and that its range forbids, so the loop ends. An alignment of score 0 (the start
-            // and end at (0, 0), whose positive cell an earlier range forbids) forbids nothing
-            // new: NCBI makes it again and again.
-            if end.score == 0 {
-                return Err(SwEndless);
-            }
+            // A score of 0 is not significant here (the regime of a significant 0 is decided
+            // above), so this round's score is positive and its range forbids its free start cell:
+            // the loop ends.
+            debug_assert!(end.score > 0);
             sw.forbidden
                 .push(query_start, query_end, match_start, match_end);
         }

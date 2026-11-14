@@ -76,13 +76,13 @@ pub(crate) struct RpsRedoParams<'a> {
     ///    const Boolean kSmithWaterman = (ext_options->eTbackExt ==
     ///                                    eSmithWatermanTbckFull);
     /// ```
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1211-1216
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1210-1214
     /// ```c++
     /// inline void
     /// CBlastOptionsLocal::SetSmithWatermanMode(bool m)
     /// {
-    ///     if (m)
-    ///         m_ExtnOpts->eTbackExt = eSmithWatermanTbck;
+    ///     if (m == true)
+    ///        m_ExtnOpts->eTbackExt = eSmithWatermanTbck;
     /// ```
     pub(crate) smith_waterman: bool,
 }
@@ -271,7 +271,7 @@ impl RpsTraceback<'_> {
             }
             let redone = redone.map_err(|SwEndless| {
                 anyhow::anyhow!(
-                    "a profile whose Smith-Waterman redo (-use_sw_tback) finds an alignment of score 0 below the E-value threshold after an earlier alignment, which NCBI BLAST+ 2.17.0 makes again and again without end, is not supported by LOSAT's RPSBLAST"
+                    "a profile whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the profile has several preliminary HSPs and its first position scores the query's first letter above 0) is not supported by LOSAT's RPSBLAST"
                 )
             })?;
             scratch.pssm.rows = matrix.rows;

@@ -322,20 +322,114 @@ fn cell(
     *new_score = score;
 }
 
-/// The row's score of subject position `match_pos` (letter `letter`), or `None` where a range of
-/// `ranges` holds the position.
+/// Whether a range of `ranges` (the forbidden ranges of one query position) holds subject position
+/// `match_pos`.
 #[inline(always)]
-fn substitution(
+fn forbidden_at(ranges: &[(i32, i32)], match_pos: usize) -> bool {
+    let position = match_pos as i64;
+    ranges
+        .iter()
+        .any(|&(start, end)| position >= i64::from(start) && position <= i64::from(end))
+}
+
+/// The row's score of subject letter `letter`, or `None` (`COMPO_SCORE_MIN` in the cell) where
+/// `CHECKED` and a range of `ranges` holds subject position `match_pos`. A row without ranges runs
+/// without the test (NCBI's basic scans); the letters are NCBIstdaa (below 28), so the `min` only
+/// lets the compiler drop the bound check of the row.
+#[inline(always)]
+fn substitution<const CHECKED: bool>(
     row: &[i32; BLASTAA_SIZE],
     ranges: &[(i32, i32)],
     match_pos: usize,
     letter: u8,
 ) -> Option<i32> {
-    let position = match_pos as i64;
-    let forbidden = ranges
+    if CHECKED && forbidden_at(ranges, match_pos) {
+        None
+    } else {
+        Some(row[usize::from(letter).min(BLASTAA_SIZE - 1)])
+    }
+}
+
+/// One row of the score-only scan (subject positions up) after the cells of the rows before it,
+/// whose best score is `best`: the row's first cell above it and its score, if any.
+#[inline(always)]
+fn score_only_row<const CHECKED: bool>(
+    subject: &[u8],
+    row: &[i32; BLASTAA_SIZE],
+    ranges: &[(i32, i32)],
+    score_vector: &mut [SwGapInfo],
+    (gap_open, gap_extend): (i32, i32),
+    mut best: i32,
+) -> Option<(i32, usize)> {
+    let new_gap_cost = gap_open + gap_extend;
+    let mut found = None;
+    let mut new_score = 0;
+    let mut prev_score_no_gap_match_seq = 0;
+    let mut prev_score_gap_match_seq = -gap_open;
+    for (match_seq_pos, (&letter, column)) in
+        subject.iter().zip(score_vector.iter_mut()).enumerate()
+    {
+        cell(
+            &mut new_score,
+            &mut prev_score_gap_match_seq,
+            &mut prev_score_no_gap_match_seq,
+            column,
+            substitution::<CHECKED>(row, ranges, match_seq_pos, letter),
+            new_gap_cost,
+            gap_extend,
+        );
+        if new_score > best {
+            best = new_score;
+            found = Some((best, match_seq_pos));
+        }
+    }
+    found
+}
+
+/// One row of the find-start scan (subject positions from `match_end` down) after the rows before
+/// it, whose best score is `best`: the row's last new best cell and its score, if any, and whether
+/// the best score reached `score_in` (the scan stops there).
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn find_start_row<const CHECKED: bool>(
+    subject: &[u8],
+    row: &[i32; BLASTAA_SIZE],
+    ranges: &[(i32, i32)],
+    score_vector: &mut [SwGapInfo],
+    match_end: usize,
+    (gap_open, gap_extend): (i32, i32),
+    mut best: i32,
+    score_in: i32,
+) -> (Option<(i32, usize)>, bool) {
+    let new_gap_cost = gap_open + gap_extend;
+    let mut found = None;
+    let mut new_score = 0;
+    let mut prev_score_no_gap_match_seq = 0;
+    let mut prev_score_gap_match_seq = -gap_open;
+    for (match_seq_pos, (&letter, column)) in subject[..=match_end]
         .iter()
-        .any(|&(start, end)| position >= i64::from(start) && position <= i64::from(end));
-    (!forbidden).then(|| row[letter as usize])
+        .zip(score_vector[..=match_end].iter_mut())
+        .enumerate()
+        .rev()
+    {
+        cell(
+            &mut new_score,
+            &mut prev_score_gap_match_seq,
+            &mut prev_score_no_gap_match_seq,
+            column,
+            substitution::<CHECKED>(row, ranges, match_seq_pos, letter),
+            new_gap_cost,
+            gap_extend,
+        );
+        if new_score > best {
+            best = new_score;
+            found = Some((best, match_seq_pos));
+        }
+        if best >= score_in {
+            return (found, true);
+        }
+    }
+    (found, false)
 }
 
 /// `Blast_SmithWatermanScoreOnly`: the score of the locally optimal alignment of the
@@ -375,6 +469,8 @@ fn substitution(
 ///     *queryEnd = bestQueryPos;
 ///     *score = bestScore;
 /// ```
+// One call per scan, out of line: the row loop keeps its values in registers.
+#[inline(never)]
 pub(crate) fn smith_waterman_score_only<'r, F>(
     subject: &[u8],
     query_length: usize,
@@ -388,33 +484,22 @@ where
     F: Fn(usize) -> &'r [i32; BLASTAA_SIZE],
 {
     let score_vector = scratch.score_vector(subject.len(), gap_open);
-    let new_gap_cost = gap_open + gap_extend;
     let mut best_score = 0;
     let mut best_query_pos = 0;
     let mut best_match_seq_pos = 0;
     for query_pos in 0..query_length {
         let row = rows(query_pos);
         let ranges = forbidden.at(query_pos);
-        let mut new_score = 0;
-        let mut prev_score_no_gap_match_seq = 0;
-        let mut prev_score_gap_match_seq = -gap_open;
-        for (match_seq_pos, (&letter, column)) in
-            subject.iter().zip(score_vector.iter_mut()).enumerate()
-        {
-            cell(
-                &mut new_score,
-                &mut prev_score_gap_match_seq,
-                &mut prev_score_no_gap_match_seq,
-                column,
-                substitution(row, ranges, match_seq_pos, letter),
-                new_gap_cost,
-                gap_extend,
-            );
-            if new_score > best_score {
-                best_score = new_score;
-                best_query_pos = query_pos;
-                best_match_seq_pos = match_seq_pos;
-            }
+        let gaps = (gap_open, gap_extend);
+        let found = if ranges.is_empty() {
+            score_only_row::<false>(subject, row, ranges, score_vector, gaps, best_score)
+        } else {
+            score_only_row::<true>(subject, row, ranges, score_vector, gaps, best_score)
+        };
+        if let Some((score, match_seq_pos)) = found {
+            best_score = score;
+            best_query_pos = query_pos;
+            best_match_seq_pos = match_seq_pos;
         }
     }
     SwEnd {
@@ -464,6 +549,8 @@ where
 ///     *queryStart = bestQueryPos;
 ///     *score_out = bestScore;
 /// ```
+// One call per scan, out of line: the row loop keeps its values in registers.
+#[inline(never)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn smith_waterman_find_start<'r, F>(
     subject: &[u8],
@@ -479,35 +566,53 @@ pub(crate) fn smith_waterman_find_start<'r, F>(
 where
     F: Fn(usize) -> &'r [i32; BLASTAA_SIZE],
 {
+    // The scan reads subject positions `match_end` down to 0; a subject without letters has no
+    // alignment to start (no caller asks: it has no HSP).
+    if subject.is_empty() {
+        return SwStart {
+            score: 0,
+            match_start: 0,
+            query_start: 0,
+        };
+    }
     let score_vector = scratch.score_vector(subject.len(), gap_open);
-    let new_gap_cost = gap_open + gap_extend;
     let mut best_score = 0;
     let mut best_query_pos = 0;
     let mut best_match_seq_pos = 0;
-    'rows: for query_pos in (0..=query_end).rev() {
+    for query_pos in (0..=query_end).rev() {
         let row = rows(query_pos);
         let ranges = forbidden.at(query_pos);
-        let mut new_score = 0;
-        let mut prev_score_no_gap_match_seq = 0;
-        let mut prev_score_gap_match_seq = -gap_open;
-        for match_seq_pos in (0..=match_end).rev() {
-            cell(
-                &mut new_score,
-                &mut prev_score_gap_match_seq,
-                &mut prev_score_no_gap_match_seq,
-                &mut score_vector[match_seq_pos],
-                substitution(row, ranges, match_seq_pos, subject[match_seq_pos]),
-                new_gap_cost,
-                gap_extend,
-            );
-            if new_score > best_score {
-                best_score = new_score;
-                best_query_pos = query_pos;
-                best_match_seq_pos = match_seq_pos;
-            }
-            if best_score >= score_in {
-                break 'rows;
-            }
+        let gaps = (gap_open, gap_extend);
+        let (found, reached) = if ranges.is_empty() {
+            find_start_row::<false>(
+                subject,
+                row,
+                ranges,
+                score_vector,
+                match_end,
+                gaps,
+                best_score,
+                score_in,
+            )
+        } else {
+            find_start_row::<true>(
+                subject,
+                row,
+                ranges,
+                score_vector,
+                match_end,
+                gaps,
+                best_score,
+                score_in,
+            )
+        };
+        if let Some((score, match_seq_pos)) = found {
+            best_score = score;
+            best_query_pos = query_pos;
+            best_match_seq_pos = match_seq_pos;
+        }
+        if reached {
+            break;
         }
     }
     SwStart {

@@ -34,6 +34,7 @@ use crate::report::outfmt6::{
     format_bitscore_ncbi, format_evalue_ncbi_tabular, format_percent_identity_ncbi,
     write_outfmt7_query_line,
 };
+use crate::report::pairwise::end_gap_span;
 
 /// NCBI's `ETabularField`: the fields of a tabular report.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1352,8 +1353,8 @@ impl TabularWriter<'_> {
                 QueryEnd => push_num(out, hsp.q_end),
                 SubjectStart => push_num(out, hsp.s_start),
                 SubjectEnd => push_num(out, hsp.s_end),
-                QuerySeq => out.extend_from_slice(hsp.rows.map_or(&[][..], |rows| rows.0)),
-                SubjectSeq => out.extend_from_slice(hsp.rows.map_or(&[][..], |rows| rows.1)),
+                QuerySeq => push_alignment_row(out, hsp.rows.map_or(&[][..], |rows| rows.0)),
+                SubjectSeq => push_alignment_row(out, hsp.rows.map_or(&[][..], |rows| rows.1)),
                 Evalue => out.extend_from_slice(format_evalue_ncbi_tabular(hsp.evalue).as_bytes()),
                 BitScore => out.extend_from_slice(format_bitscore_ncbi(hsp.bit_score).as_bytes()),
                 Score => push_num(out, hsp.score),
@@ -1675,9 +1676,14 @@ fn push_coverage(out: &mut Vec<u8>, value: i32) {
 ///                     btop_string += m_QuerySeq[i];
 ///                     btop_string += m_SubjectSeq[i];
 /// ```
+/// The rows' end gaps are spaces (`push_alignment_row`), so an end-gap column is the pair of a
+/// letter and a space.
 pub fn write_btop(out: &mut Vec<u8>, qrow: &[u8], srow: &[u8]) {
+    let (q_span, s_span) = (end_gap_span(qrow, |_| false), end_gap_span(srow, |_| false));
     let mut matches = 0usize;
-    for (&q, &s) in qrow.iter().zip(srow) {
+    for (column, (&q, &s)) in qrow.iter().zip(srow).enumerate() {
+        let q = end_char(q, column, q_span);
+        let s = end_char(s, column, s_span);
         if q == s {
             matches += 1;
         } else {
@@ -1692,6 +1698,39 @@ pub fn write_btop(out: &mut Vec<u8>, qrow: &[u8], srow: &[u8]) {
     if matches > 0 {
         push_num(out, matches);
     }
+}
+
+/// The letter of column `column` of a row whose columns between its end gaps are `span`
+/// (`end_gap_span`): NCBI's end character, a space, outside them.
+fn end_char(letter: u8, column: usize, span: (usize, usize)) -> u8 {
+    if column < span.0 || column >= span.1 {
+        b' '
+    } else {
+        letter
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
+// ```c++
+//         alnVec->SetGapChar('-');
+//         alnVec->SetGenCode(m_QueryGeneticCode, 0);
+//         alnVec->SetGenCode(m_DbGeneticCode, 1);
+//         alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
+//         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
+// ```
+/// `qseq` or `sseq`: the row with `-` for its inner gaps and a space (NCBI's end character, which
+/// the tabular writer does not set) for its end gaps (`end_gap_span`).
+fn push_alignment_row(out: &mut Vec<u8>, row: &[u8]) {
+    let span = end_gap_span(row, |_| false);
+    if span == (0, row.len()) {
+        out.extend_from_slice(row);
+        return;
+    }
+    out.extend(
+        row.iter()
+            .enumerate()
+            .map(|(column, &letter)| end_char(letter, column, span)),
+    );
 }
 
 /// `seq_percent_coverage` of one subject (`qcovs`) from the query intervals of its HSPs
@@ -2285,5 +2324,23 @@ mod tests {
         let mut out = Vec::new();
         write_btop(&mut out, b"ACGT-A", b"ACCTTA");
         assert_eq!(out, b"2GC1-T1");
+    }
+
+    // tabular.cpp:982-1027 (quoted at `push_alignment_row` and `write_btop`): a row's end gaps
+    // are spaces, its inner gaps `-`; an end-gap column of `btop` is a letter and a space.
+    #[test]
+    fn end_gaps_are_spaces_in_the_rows_and_btop() {
+        let mut out = Vec::new();
+        push_alignment_row(&mut out, b"---AC-DE--");
+        assert_eq!(out, b"   AC-DE  ");
+        out.clear();
+        push_alignment_row(&mut out, b"MKV-L");
+        assert_eq!(out, b"MKV-L");
+        out.clear();
+        write_btop(&mut out, b"MQLAC-D", b"---ACKD");
+        assert_eq!(out, b"M Q L 2-K1");
+        out.clear();
+        write_btop(&mut out, b"AC-DKK", b"ACGD--");
+        assert_eq!(out, b"2-G1K K ");
     }
 }

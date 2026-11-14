@@ -51,7 +51,7 @@ use crate::report::serial::pssm::{PssmWithParameters, SeqData};
 use super::pssm::{AsciiPssmDiagnostics, PssmRequest};
 #[cfg(test)]
 use crate::algorithm::pssm_search::in_pssm::with_computed_scores;
-use crate::algorithm::pssm_search::in_pssm::InPssmFile;
+use crate::algorithm::pssm_search::in_pssm::{refuse_skipped_members, InPssmFile};
 
 /// The query PSSM of psiblast's rounds with `-in_pssm` (`rounds::PsiRoundPlan::input`): when a
 /// PSSM file is written, the object that `SavePssmToFile` writes. (The Seq-id that the PSSM of
@@ -76,18 +76,13 @@ pub(crate) struct InPssmRounds {
 ///   the missing matrix or reads past the vectors: undefined behaviour).
 ///
 /// A PSSM that `CPsiBlastValidate::Pssm` refuses gets NCBI's error when the search starts, before
-/// any file (the batch stop, `blast_engine::psiblast_stop_at_invalid_pssm`).
+/// any file (the batch stop, `blast_engine::psiblast_stop_at_pssm_query`).
 pub(crate) fn rounds_input(file: InPssmFile, request: &PssmRequest) -> Result<InPssmRounds> {
     if !file.valid {
         return Ok(InPssmRounds { object: None });
     }
     if request.asn_path.is_some() {
-        if !file.skipped.is_empty() {
-            bail!(
-                "a PSSM file with members that LOSAT's reader does not keep ({}), which NCBI BLAST+ writes back with -out_pssm, is not supported by LOSAT's PSIBLAST",
-                file.skipped.join(", ")
-            );
-        }
+        refuse_skipped_members(&file.skipped, "-out_pssm", "PSIBLAST")?;
         let rpsdbparams = file
             .object
             .params

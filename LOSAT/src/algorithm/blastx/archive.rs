@@ -119,20 +119,23 @@ pub(crate) fn handle_for(
 
 /// The refusal of a title that the archive cannot write as NCBI does
 /// (`report::archive::ArchiveEncoding::writes_text`: in text and binary a byte outside
-/// `0x20..=0x7E`, in XML a control byte) for BLASTX's records, before the first byte.
-pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    crate::report::archive::check_titles(records, role, "BLASTX")
+/// `0x20..=0x7E`, in XML a control byte) for BLASTX's records, before the first byte; `label`
+/// names the program (`ProgramName::upper`: BLASTX, RPSTBLASTN).
+pub(crate) fn check_titles(records: &[FastaRecord], role: &str, label: &str) -> Result<()> {
+    crate::report::archive::check_titles(records, role, label)
 }
 
 /// `report::archive::check_request_titles` for BLASTX's records: the archive's (`archive`) and
-/// the search strategy's (`strategy`, as `RunRequests::write` checks them).
+/// the search strategy's (`strategy`, as `RunRequests::write` checks them); `label` names the
+/// program (`ProgramName::upper`).
 pub(crate) fn check_request_titles(
     records: &[FastaRecord],
     role: &str,
+    label: &str,
     archive: bool,
     strategy: bool,
 ) -> Result<()> {
-    crate::report::archive::check_request_titles(records, role, "BLASTX", archive, strategy)
+    crate::report::archive::check_request_titles(records, role, label, archive, strategy)
 }
 
 pub(crate) use crate::report::archive::error_lines;
@@ -225,12 +228,13 @@ pub(crate) fn batches_may_refuse(
     read: &mut dyn FnMut(&mut dyn FnMut(&[FastaRecord]) -> Result<()>) -> Result<()>,
 ) -> bool {
     let mut found = false;
+    let label = options.program().upper;
     let _ = read(&mut |batch| {
         let written = written_batch(batch, options);
         if (strategy
             && !batch.is_empty()
-            && check_request_titles(batch, "query", false, true).is_err())
-            || (archive && written && check_titles(batch, "query").is_err())
+            && check_request_titles(batch, "query", label, false, true).is_err())
+            || (archive && written && check_titles(batch, "query", label).is_err())
         {
             found = true;
             anyhow::bail!("a title the requests cannot write");
@@ -449,10 +453,11 @@ pub(crate) fn check_batch_titles(
     queries: &[FastaRecord],
     subjects: Option<&[FastaRecord]>,
     first: bool,
+    label: &str,
 ) -> Result<()> {
-    check_titles(queries, "query")?;
+    check_titles(queries, "query", label)?;
     match subjects {
-        Some(subjects) if first => check_titles(subjects, "subject"),
+        Some(subjects) if first => check_titles(subjects, "subject", label),
         _ => Ok(()),
     }
 }

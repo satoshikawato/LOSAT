@@ -40,7 +40,7 @@
 
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 use super::rows::QueryPssm;
 use super::{PsiSearch, PssmStats};
@@ -225,10 +225,11 @@ fn text_asn(buffer: &[u8]) -> bool {
     false
 }
 
-/// Who reads `-in_pssm`: the program that LOSAT's refusals name, and the options' matrix, with
+/// Who reads `-in_pssm`: the program that LOSAT's refusals name, the options' matrix, with
 /// which NCBI's PSSM engine computes the scores of a PSSM of frequency ratios only
-/// (`scores_from_freq_ratios`). psiblast reads with `PSIBLAST` (BLOSUM62: its `-in_pssm` refuses
-/// the other matrices, DECISIONS 11 of line PS); tblastn's PSI-TBLASTN with its own options
+/// (`scores_from_freq_ratios`), and whether a search strategy's request holds the PSSM
+/// (`request`). psiblast reads with `PSIBLAST` (BLOSUM62: its `-in_pssm` refuses the other
+/// matrices, DECISIONS 11 of line PS); tblastn's PSI-TBLASTN with its own options
 /// (`algorithm::tblastn::in_pssm`, DECISIONS 35).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PssmReader<'a> {
@@ -236,6 +237,11 @@ pub(crate) struct PssmReader<'a> {
     pub(crate) program: &'static str,
     /// The options' matrix name (`opts.GetMatrixName()`).
     pub(crate) matrix_name: &'a str,
+    /// Whether the run writes a search strategy whose request holds the PSSM
+    /// (`-export_search_strategy` with `-db`; with `-subject` NCBI stops before it writes one,
+    /// "Remote PSI-BL2SEQ is not supported"): the search keeps the PSSM as read
+    /// (`PsiSearch::request`). Only such a run pays for that copy.
+    pub(crate) request: bool,
 }
 
 impl PssmReader<'static> {
@@ -243,6 +249,7 @@ impl PssmReader<'static> {
     pub(crate) const PSIBLAST: Self = Self {
         program: "PSIBLAST",
         matrix_name: "BLOSUM62",
+        request: false,
     };
 }
 
@@ -873,6 +880,26 @@ pub(crate) fn psi_search_and_object(
             "a PSSM whose gapped Karlin-Altschul parameter {name} is negative (NCBI BLAST+ 2.17.0 goes on with a Karlin-Altschul block that it holds invalid)"
         )));
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:533-534,555-556
+    // ```c++
+    //     // Throw exception if pssm is invalid
+    //     CPsiBlastValidate::Pssm(*pssm);
+    //     ...
+    //     CRef<CBlast4_queries> queries_p(new CBlast4_queries);
+    //     queries_p->SetPssm(*pssm);
+    // ```
+    // The search strategy's request holds the object that the application read, which
+    // `SaveSearchStrategy` serializes before `CPsiBlastImpl` computes the scores of a PSSM of
+    // frequency ratios only (psiblast_app.cpp:340, tblastn_app.cpp:307): the object as read, kept
+    // for a request that NCBI writes (a PSSM that NCBI's check refuses writes none). A member that
+    // the reader skipped would be missing from it: LOSAT's refusal (`refuse_skipped_members`).
+    let request = match (reader.request, &validation_error) {
+        (true, None) => {
+            refuse_skipped_members(&skipped, "-export_search_strategy", reader.program)?;
+            Some(std::sync::Arc::new(pssm.clone()))
+        }
+        _ => None,
+    };
     let search = PsiSearch {
         pssm: QueryPssm { rows },
         freq_ratios,
@@ -885,6 +912,7 @@ pub(crate) fn psi_search_and_object(
         validation_error,
         setup_messages: Vec::new(),
         warning_title: Some(warning_title),
+        request,
     };
     let mut pssm = pssm;
     if let Some(gapped) = computed {
@@ -1052,6 +1080,29 @@ pub(crate) fn convert_2_matrix<T: Copy>(
         }
     }
     rows
+}
+
+/// LOSAT's refusal of a PSSM file with members that the reader skipped (`skipped`,
+/// `blastinput::pssm_text::read_pssm_with_parameters_and_skips`: the descriptors of the query other
+/// than titles, its `annot`, the members of its `Seq-inst` other than `repr`, `mol`, `length` and
+/// `seq-data`, the `constraints` and `annotatedSites` of the parameters) where NCBI writes the
+/// object it read back (`option`): psiblast's `-out_pssm` (`SavePssmToFile` in round 1,
+/// `algorithm::psiblast::in_pssm_files::rounds_input`) and the search strategy's request
+/// (`-export_search_strategy`, `psi_search_and_object`). NCBI's object keeps such members and
+/// writes them (NCBI 2.17.0 probes of line PS PS5b, and `p9.pp.ps5_rnd_comment.db.f6`,
+/// `p9.pp.ps5_rnd_molinfo.db.f6` of line RG F1b); `program` names LOSAT's program.
+pub(crate) fn refuse_skipped_members(
+    skipped: &[&'static str],
+    option: &str,
+    program: &str,
+) -> Result<()> {
+    if !skipped.is_empty() {
+        bail!(
+            "a PSSM file with members that LOSAT's reader does not keep ({}), which NCBI BLAST+ writes back with {option}, is not supported by LOSAT's {program}",
+            skipped.join(", ")
+        );
+    }
+    Ok(())
 }
 
 /// The PSSM file of `-in_pssm` as `read_in_pssm` reads it: the

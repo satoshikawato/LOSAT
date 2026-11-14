@@ -775,6 +775,7 @@ impl TblastnArgs {
             Some(path) => Some(std::sync::Arc::new(super::in_pssm::read(
                 path,
                 &matrix_name,
+                self.export_search_strategy.is_some() && self.db.is_some(),
             )?)),
             None => None,
         };

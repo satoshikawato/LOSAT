@@ -89,6 +89,11 @@ pub struct PsiSearch {
     /// (`CBlastQuerySourceBioseqSet::GetTitle`, `algorithm::pssm_search::in_pssm`); `None` for a FASTA
     /// query's later rounds, whose label keeps the record's title.
     pub(crate) warning_title: Option<Vec<u8>>,
+    /// The PSSM of `-in_pssm` as NCBI's application read it (before `CPsiBlastImpl` computes the
+    /// scores of a PSSM of frequency ratios only), which the search strategy's request holds
+    /// (`report::archive::requests::RunRequests::with_pssm_query`): kept only for a run that writes
+    /// one (`in_pssm::PssmReader::request`); `None` otherwise and for a FASTA query's later rounds.
+    pub(crate) request: Option<std::sync::Arc<crate::report::serial::pssm::PssmWithParameters>>,
 }
 
 impl PsiSearch {
@@ -274,6 +279,7 @@ impl PsiSearch {
             validation_error: None,
             setup_messages,
             warning_title: None,
+            request: None,
         }
     }
 }

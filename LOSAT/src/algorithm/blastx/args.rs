@@ -493,10 +493,13 @@ pub(crate) trait RpsTblastnSearch: std::fmt::Debug + Send + Sync {
     /// The run's search over `database`, once per run before the first byte of the reports
     /// (`native::run_inner`): LOSAT's refusals of the database's files and of the options come
     /// there, NCBI's own errors of the files where NCBI's search of a batch raises them.
+    /// `strategy` is whether the run writes a search strategy, whose requests hold what the
+    /// search's set-up writes into the options handle (`handle_sets`).
     fn for_database(
         &self,
         options: &ResolvedOptions,
         database: Option<&super::database::BlastxDatabase>,
+        strategy: bool,
     ) -> Result<std::sync::Arc<dyn RpsTblastnSearch>>;
     /// `native::run_query_batches` of RPSTBLASTN: the query batches of `read`, searched against
     /// the profile volumes of `database`, each handed to `take` (the search strategy's request,

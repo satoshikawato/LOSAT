@@ -33,7 +33,7 @@ use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::masks::{Frame, MaskEntry};
-use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::options::{Filter, OptionInputs, RequestKind};
 use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
@@ -46,9 +46,16 @@ use crate::utils::seg::SegParams;
 
 /// The recorded options of a TBLASTN run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
-/// always sets it (`S/DESIGN_OF8.md` 2.2).
+/// always sets it (`S/DESIGN_OF8.md` 2.2). A run of `-in_pssm` is PSI-TBLASTN's
+/// (`RequestKind::PsiTblastn`: psiblast's handle, whose rules `algorithm_options` applies to the
+/// same arguments).
 pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
-    let mut inputs = OptionInputs::new(Program::Tblastn, &args.task);
+    let kind = if args.in_pssm.is_some() {
+        RequestKind::PsiTblastn
+    } else {
+        RequestKind::from(Program::Tblastn)
+    };
+    let mut inputs = OptionInputs::new(kind, &args.task);
     inputs.dbsize = args.dbsize;
     inputs.searchsp = args.searchsp;
     inputs.evalue = args.evalue;

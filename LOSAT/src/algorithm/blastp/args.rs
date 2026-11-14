@@ -1259,7 +1259,7 @@ impl BlastpArgs {
         // ```
         // psiblast's `-in_pssm` is read by the same handler, after the checks of its PSSM
         // files (`algorithm::psiblast::in_pssm`); the file as read goes to the rounds' plan
-        // (`in_pssm_files`).
+        // (`in_pssm_files`), and to the search strategy's request with `-db` (`PssmReader::request`).
         let mut in_pssm_file = None;
         let psi_search = match self
             .psiblast_pssm
@@ -1269,7 +1269,10 @@ impl BlastpArgs {
             Some(path) => {
                 let (mut search, file) = crate::algorithm::pssm_search::in_pssm::read_in_pssm(
                     path,
-                    crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST,
+                    crate::algorithm::pssm_search::in_pssm::PssmReader {
+                        request: self.export_search_strategy.is_some() && self.db.is_some(),
+                        ..crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST
+                    },
                 )?;
                 in_pssm_file = Some(file);
                 search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(

@@ -6557,9 +6557,14 @@ fn psiblast_check_subject_letters(subjects: &[FastaRecord]) -> Result<()> {
     Ok(())
 }
 
-/// psiblast `-in_pssm`: a PSSM that NCBI's `CPsiBlastValidate::Pssm` refuses stops the run at its
-/// one query batch, after the outfmt 0 prolog, with NCBI's engine error (the PSSM is checked
-/// before the query's Karlin-Altschul parameters, `psiblast_stop_at_invalid_query`).
+/// psiblast `-in_pssm`: what stops the run at its one query batch before the PSSM's search, after
+/// the outfmt 0 prolog, with NCBI's error: a PSSM that NCBI's `CPsiBlastValidate::Pssm` refuses
+/// (the engine error; the PSSM is checked before the query's Karlin-Altschul parameters,
+/// `psiblast_stop_at_invalid_query`), and before it, with `-export_search_strategy` and
+/// `-subject` (no database, `database`), the search strategy's "Remote PSI-BL2SEQ is not
+/// supported" (the options error, exit status 1; without the strategy NCBI runs the search). No
+/// request is written then (`QueryBatches::stop_batch` cleared): with `-db` the request makes the
+/// same check of the PSSM before it is written (`x_Process_Pssm`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:58-67
 /// ```c++
@@ -6574,17 +6579,31 @@ fn psiblast_check_subject_letters(subjects: &[FastaRecord]) -> Result<()> {
 ///     x_CreatePssmScoresFromFrequencyRatios();
 /// }
 /// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:279-304
+/// ```c++
+///     CRef<CSearchDatabase> search_db = db_args->GetSearchDatabase();
+///     if (search_db.NotEmpty())
+///     {
+///     ...
+///     else
+///     {
+///         if (pssm.NotEmpty())
+///         {
+///             NCBI_THROW(CInputException, eInvalidInput,
+///                        "Remote PSI-BL2SEQ is not supported");
+///         }
+/// ```
+/// (`SaveSearchStrategy` comes first in `DoIterations`, psiblast_app.cpp:340, before the local
+/// rounds make `CPsiBlast`; NCBI 2.17.0 `p9.pp.sub.f0`, `p9.pp.sub.f6`, `p9.pp.err.ps4_rnd_*` of
+/// line RG F1b.)
 #[cold]
 #[inline(never)]
-fn psiblast_stop_at_invalid_pssm(
+fn psiblast_stop_at_pssm_query(
     args: &ResolvedBlastpArgs,
+    database: Option<&database::BlastpDatabase>,
     mut batches: crate::blastinput::query_batch::QueryBatches,
 ) -> crate::blastinput::query_batch::QueryBatches {
-    let Some(message) = args
-        .psi_search
-        .as_deref()
-        .and_then(|psi| psi.validation_error.as_deref())
-    else {
+    let Some(error) = psiblast_pssm_query_error(args, database.is_some()) else {
         return batches;
     };
     let warnings = batches
@@ -6595,8 +6614,26 @@ fn psiblast_stop_at_invalid_pssm(
     batches.starts.clear();
     batches.input_done = 0;
     batches.searched_done = 0;
-    batches.stop = Some((warnings, crate::blastinput::app::engine_error(message)));
+    batches.stop = Some((warnings, error));
+    batches.stop_batch = None;
     batches
+}
+
+/// The error that stops a psiblast `-in_pssm` run before the PSSM's search
+/// (`psiblast_stop_at_pssm_query`; `database`: whether the run searches `-db`), `None` for a run
+/// that searches. The round driver tells NCBI's errors of the search itself from these, which come
+/// before round 1 writes the input PSSM's files (`psi_round::search_rounds`).
+fn psiblast_pssm_query_error(args: &ResolvedBlastpArgs, database: bool) -> Option<anyhow::Error> {
+    let psi = args.psi_search.as_deref()?;
+    if args.strategy.is_some() && !database {
+        Some(crate::blastinput::app::options_error(
+            "Remote PSI-BL2SEQ is not supported",
+        ))
+    } else {
+        psi.validation_error
+            .as_deref()
+            .map(crate::blastinput::app::engine_error)
+    }
 }
 
 /// The search of `run_local` and of the CLI, after NCBI's processing of the options and
@@ -6788,9 +6825,9 @@ fn search(
     if let Some(refusal) = batches.query_refusal.take() {
         return Err(refusal);
     }
-    // psiblast `-in_pssm`: NCBI's check of the PSSM stops the run at its query
-    // (`psiblast_stop_at_invalid_pssm`).
-    let batches = psiblast_stop_at_invalid_pssm(&args, batches);
+    // psiblast `-in_pssm`: NCBI's check of the PSSM, or the search strategy's request without a
+    // database, stops the run at its query (`psiblast_stop_at_pssm_query`).
+    let batches = psiblast_stop_at_pssm_query(&args, database, batches);
     // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch: a run
     // that stops at its first batch (`batches.starts` empty) gives NCBI's error.
     if !batches.starts.is_empty() {
@@ -7379,6 +7416,7 @@ fn search(
                     .then(|| subject_source.fasta_records()),
                 args.lcase_masking,
                 args.app.name(),
+                args.psi_search.as_ref().and_then(|psi| psi.request.clone()),
             )
             .write(
                 strategy,
@@ -8363,6 +8401,7 @@ impl<'a> CallRequests<'a> {
                     .then(|| subject_source.fasta_records()),
                 args.lcase_masking,
                 args.app.name(),
+                args.psi_search.as_ref().and_then(|psi| psi.request.clone()),
             ),
             records: query_records,
             placements: &ranges.query_input.placements,
@@ -14379,6 +14418,7 @@ fn run_call(
         lcase_masking: args.lcase_masking,
         unsearched: &query_batch_skipped,
         spans: &[],
+        label: args.app.name(),
     };
     // The search strategy's requests of the call's batches (`-export_search_strategy`): NCBI has
     // written every one of them before it formats them (`CallRequests`, released where the call

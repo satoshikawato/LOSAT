@@ -174,10 +174,29 @@ impl<'h> QueryGroup<'h> {
         subject_titles: &[Arc<[u8]>],
         sections: &S,
     ) -> Option<Self> {
-        let mut group = Self::new(query_hits, subject_titles, |previous, s_idx| {
-            sections.joins(previous, s_idx)
-        })?;
         let (sort, tblastx) = sections.sort();
+        Self::sorted(
+            query_hits,
+            subject_titles,
+            |previous, s_idx| sections.joins(previous, s_idx),
+            sort,
+            tblastx,
+        )
+    }
+
+    /// The group of `query_hits` grouped by `joins` (`new`) and sorted by `sort` (`sort`): the
+    /// one place where the writer's grouping and order of one query's subjects are built, for
+    /// the report itself (`for_sections`) and for what is decided before it is written (the
+    /// described subjects of BLASTP's refusals, `pairwise::blastp_report_group`), so that the
+    /// refusal model cannot drift from the report.
+    pub(crate) fn sorted(
+        query_hits: &[(HspIndex, &'h PairwiseHit)],
+        subject_titles: &[Arc<[u8]>],
+        joins: impl Fn(u32, u32) -> bool,
+        sort: super::hit_sort::ReportSort,
+        tblastx: bool,
+    ) -> Option<Self> {
+        let mut group = Self::new(query_hits, subject_titles, joins)?;
         group.sort(sort, tblastx);
         Some(group)
     }

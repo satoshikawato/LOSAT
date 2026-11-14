@@ -14719,7 +14719,8 @@ fn run_call(
     // (`id_scope`) unless it is the query's own record (the abort above). NCBI's display of such a
     // sequence in outfmt 0, 6 and 7 (the query's title and letters) is line RG item X7's, the
     // owner of this behaviour for every format. The refusal runs in the search of all queries,
-    // before any byte of the run's reports: such a sequence has parsed Seq-ids, and the block
+    // before any byte of the call's reports (in a psiblast round after the first, after the
+    // earlier rounds' output): such a sequence has parsed Seq-ids, and the block
     // search never takes a database with them (`database::x_titles_allow_blocks`). Were a block
     // search to reach it, it would refuse in the call of the query's block as the abort above,
     // after the reports of the blocks before (NCBI's bytes for their queries).
@@ -14757,7 +14758,8 @@ fn run_call(
     // with the refusals above, before any format is written
     // (`ListedTitles::refuse_display_ids_of_queries`; by its Seq-align id in every format,
     // `ListedTitles::refuse_ids_of_queries`). It runs in the search of all queries, as the
-    // refusal above.
+    // refusal above: before any byte of the call, in a psiblast round after the first after the
+    // earlier rounds' output.
     if let (false, Some(titles), Some(scopes)) = (
         pairwise_views.is_empty(),
         listed_titles.as_ref(),

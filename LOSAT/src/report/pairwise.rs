@@ -2784,7 +2784,8 @@ pub(crate) fn blastp_section_aborts(
     super::query_anchored::ncbi_aborts(&blastp_section_hsps(num_alignments, &group, is_query))
 }
 
-/// The group of query `q_idx` of BLASTP's report (`QueryGroup::for_sections`), `rows` the rows
+/// The group of query `q_idx` of BLASTP's report (`QueryGroup::sorted`, which `for_sections` also
+/// calls), `rows` the rows
 /// of the call's hits in the final order: its subjects grouped by `joins` (copies of a database
 /// record, `QuerySections::joins`) and sorted by `sort` (`PairwiseConfig::sort`). `None` for a
 /// query without hits.
@@ -2800,9 +2801,7 @@ fn blastp_report_group<'h>(
         .enumerate()
         .filter(|(_, hit)| hit.hit.q_idx as usize == q_idx)
         .collect();
-    let mut group = super::x_pairwise_par::QueryGroup::new(&query_hits, subject_titles, joins)?;
-    group.sort(sort, false);
-    Some(group)
+    super::x_pairwise_par::QueryGroup::sorted(&query_hits, subject_titles, joins, sort, false)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:686-700

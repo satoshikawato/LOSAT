@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.22
+- Version: 1.23
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -41,7 +41,10 @@
   X2b);
   1.22 2026-11-14 (the explicit rejection of BLASTP's query-anchored section that NCBI's merge
   aborts on, rule 3, line RG item T3a; Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07)
+  2026-10-07);
+  1.23 2026-11-14 (the rule-2 rejection of a query's id widened to the display id and to generated
+  ids, line RG item T3a; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07,
+  within the class the maintainer accepted with 1.10 on 2026-11-02)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -646,8 +649,11 @@ would port:
   LOSAT shows in one hit as NCBI does): NCBI shows them as one hit, writes their tabular `qcovs`
   and `qcovus` as one subject's, and PSIBLAST's cut to `-max_target_seqs` counts them as one
   subject.
-- A reported sequence with the id of a query read with `-parse_deflines` in the query batch that
-  reports it (with outfmt 5, in any batch): NCBI shows the query's title and letters for it.
+- A reported sequence with the id, or the display id of its description line (outfmt 0 to 4 of
+  BLASTP, PSIBLAST and RPSBLAST), of a query read with `-parse_deflines` in the query batch that
+  reports it (with outfmt 5, in any batch), and in outfmt 1 to 4 of BLASTP with the id or display
+  id `lcl|Query_N` of a query read without it: NCBI shows the query's title and letters for the
+  id (its second lookup, by the display id, the query's title in that line).
 - A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
   each time it reads the definition line.
 - Titles NCBI takes from the tax ids, where a report shows them (outfmt 0, a printed tabular id

@@ -7,10 +7,10 @@
 //! each volume ([`super::column`]): its metadata maps the volume's algorithm ids to
 //! descriptions; the blob of a sequence holds, per algorithm, a list of ranges.
 //!
-//! The reader of `losat blastdbcmd`, and of BLASTN's `-db_soft_mask` (`blastinput::db_mask`):
-//! NCBI's searches read the columns only with a masking algorithm named by `-db_soft_mask`,
-//! `-db_hard_mask` or an imported search strategy (LOSAT refuses the last two), and so do
-//! LOSAT's. The columns are opened on first use.
+//! The reader of `losat blastdbcmd`, and of BLASTN's `-db_soft_mask` and `-db_hard_mask`
+//! (`blastinput::db_mask`): NCBI's searches read the columns only with a masking algorithm named
+//! by `-db_soft_mask`, `-db_hard_mask` or an imported search strategy (LOSAT refuses the last),
+//! and so do LOSAT's. The columns are opened on first use.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -1212,6 +1212,58 @@ impl SeqDb {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321 (quoted at
     // `MaskBlock::ranges`): the search reads the masks of the sequences it searches only.
+    /// The first sequence that the search reads (by ordinal id: those the list and the alias
+    /// files' ranges include) whose masks of the filtering algorithm `algo_id`, as stored, `test`
+    /// finds a refusal in, with its NCBI OID (as `blastdbcmd`'s `%o`) and its volume's path.
+    /// `test` gets the masks (never empty) and a function that reads the sequence's length (the
+    /// sequence's index and its last byte; `None` when they cannot be read, and `test` then
+    /// gives `Err(())`). No NCBI counterpart:
+    /// a check of the masks before the search for LOSAT's refusals (`blastinput::db_mask`,
+    /// series NP, M4a-2b), with `-db_hard_mask` only. The masks are read 4,096 sequences at a
+    /// time (`SeqDb::read_mask_block`); a sequence whose masks or length cannot be read ends the
+    /// walk without a finding (the search meets that read error first, as `searches_a_blob_of`).
+    pub fn first_searched_masks<T>(
+        &self,
+        algo_id: i32,
+        mut test: impl FnMut(&[(u32, u32)], &dyn Fn() -> Option<usize>) -> Result<Option<T>, ()>,
+    ) -> Option<(u32, PathBuf, T)> {
+        const WALK_BLOCK: u32 = 4096;
+        let mut block = MaskBlock::default();
+        let mut ordinal = 0u32;
+        let end_ordinal = self.num_seqs();
+        while let Some(run) =
+            self.x_block_range(ordinal, end_ordinal.min(ordinal.saturating_add(WALK_BLOCK)))
+        {
+            self.read_mask_block(run, algo_id, &mut block);
+            for vol_oid in run.first..run.end {
+                let seq_ordinal = run.first_ordinal + (vol_oid - run.first);
+                let masks = match block.ranges(vol_oid) {
+                    Ok(BlockMasks::Ranges(masks)) => masks,
+                    // Refused before (`check_search_masks`).
+                    Ok(BlockMasks::AlgorithmNotInVolume) => continue,
+                    Err(_) => return None,
+                };
+                if masks.is_empty() {
+                    continue;
+                }
+                let length = || self.nucleotide_length(seq_ordinal).ok();
+                match test(masks, &length) {
+                    Ok(None) => {}
+                    Ok(Some(found)) => {
+                        return Some((
+                            self.volume_starts[run.volume] + vol_oid,
+                            self.volumes[run.volume].base().to_path_buf(),
+                            found,
+                        ))
+                    }
+                    Err(()) => return None,
+                }
+            }
+            ordinal = run.end_ordinal();
+        }
+        None
+    }
+
     /// Whether the search reads a blob of the mask column `column` of volume `volume`: one of its
     /// searched sequences (those the list and the alias files' ranges include) has one, by the
     /// offset array, before a sequence whose entries cannot be read (the search fails there

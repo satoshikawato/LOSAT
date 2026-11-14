@@ -563,12 +563,89 @@ const DIAGHASH_CHAIN_LENGTH: usize = 256;
 // ```
 struct SubjectSplitState {
     full_right: i32,
-    hard_ranges: [(i32, i32); 1],
+    hard_ranges: HardRanges,
     soft_ranges: Vec<(i32, i32)>,
+    /// Whether the subject's mask type is `eSoftSubjMasking` (its soft ranges are the complement
+    /// of its masks: `-db_soft_mask`, or the lowercase of a `-subject` record).
+    soft_masking: bool,
     hm_index: usize,
     sm_index: usize,
     offset: i32,
     next: i32,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:158-176
+// ```c
+//     backup->hard_ranges = &(backup->full_range);
+//     backup->num_hard_ranges = 1;
+//     backup->hm_index = 0;
+//     ...
+//     } else if (subject->mask_type == eHardSubjMasking) {
+//         ASSERT (backup->seq_ranges);
+//         ASSERT (backup->num_seq_ranges >= 1);
+//         backup->hard_ranges = backup->seq_ranges;
+//         backup->num_hard_ranges = backup->num_seq_ranges;
+//     }
+// ```
+/// The hard ranges of a subject (`SubjectSplitStruct::hard_ranges`): its one full range, or with
+/// `-db_hard_mask` the complement of its stored masks in the order they are stored
+/// (`BlastnDatabase::seq_ranges_into`; series NP, M4a-2b decision H1), a buffer of the worker's
+/// scratch. The default path keeps the full range inline (no buffer).
+enum HardRanges {
+    Full,
+    List(Vec<(i32, i32)>),
+}
+
+impl SubjectSplitState {
+    /// `backup->num_hard_ranges`.
+    #[inline]
+    fn num_hard_ranges(&self) -> usize {
+        match &self.hard_ranges {
+            HardRanges::Full => 1,
+            HardRanges::List(ranges) => ranges.len(),
+        }
+    }
+
+    /// `backup->hard_ranges[index]` of an index below `num_hard_ranges`.
+    #[inline]
+    fn hard_range(&self, index: usize) -> (i32, i32) {
+        match &self.hard_ranges {
+            HardRanges::Full => (0, self.full_right),
+            HardRanges::List(ranges) => ranges[index],
+        }
+    }
+
+    /// The buffer of the hard ranges (`HardRanges::List`), given back to the worker's scratch.
+    fn take_hard_ranges(&mut self) -> Option<Vec<(i32, i32)>> {
+        match std::mem::replace(&mut self.hard_ranges, HardRanges::Full) {
+            HardRanges::Full => None,
+            HardRanges::List(ranges) => Some(ranges),
+        }
+    }
+}
+
+/// The ranges of a database sequence of a masked search, in the buffers of the worker's scratch
+/// (`SubjectScratch::{db_soft_ranges, db_hard_ranges}`): `-db_soft_mask`'s soft ranges, or
+/// `-db_hard_mask`'s full range (the soft ranges) and hard ranges.
+enum DbSeqRanges {
+    Soft(Vec<(i32, i32)>),
+    Hard {
+        full: Vec<(i32, i32)>,
+        hard: Vec<(i32, i32)>,
+    },
+}
+
+impl DbSeqRanges {
+    /// Gives the buffers back to `scratch`.
+    fn give_back(self, scratch: &mut SubjectScratch) {
+        match self {
+            DbSeqRanges::Soft(ranges) => scratch.db_soft_ranges = ranges,
+            DbSeqRanges::Hard { full, hard } => {
+                scratch.db_soft_ranges = full;
+                scratch.db_hard_ranges = hard;
+            }
+        }
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-276
@@ -682,18 +759,40 @@ impl SubjectSplitState {
     // backup->offset = backup->hard_ranges[0].left;
     // backup->next = backup->offset;
     // ```
-    fn new(subject_len: usize, soft_ranges: Vec<(i32, i32)>) -> Self {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:177-179
+    // ```c
+    //     backup->offset = backup->hard_ranges[0].left;
+    //     backup->next = backup->offset;
+    //     subject->chunk = -1;
+    // ```
+    /// The split of a subject of `subject_len` letters: its soft ranges (`soft_masking`: they are
+    /// the complement of its soft masks; else unread, or the full range of a hard-masked subject)
+    /// and its hard ranges (`None`: the full range, NCBI's `&(backup->full_range)`, no buffer).
+    /// The first hard range starts at 0 (`BlastSeqBlkSetSeqRanges` sets `tmp[0].left = 0`).
+    fn new(
+        subject_len: usize,
+        soft_ranges: Vec<(i32, i32)>,
+        soft_masking: bool,
+        hard_ranges: Option<Vec<(i32, i32)>>,
+    ) -> Self {
         let full_right = subject_len as i32;
-        Self {
+        let hard_ranges = match hard_ranges {
+            Some(ranges) => HardRanges::List(ranges),
+            None => HardRanges::Full,
+        };
+        let mut state = Self {
             full_right,
-            // One range, as NCBI's `&(backup->full_range)`: an array, not a vector per subject.
-            hard_ranges: [(0, full_right)],
+            hard_ranges,
             soft_ranges,
+            soft_masking,
             hm_index: 0,
             sm_index: 0,
             offset: 0,
             next: 0,
-        }
+        };
+        state.offset = state.hard_range(0).0;
+        state.next = state.offset;
+        state
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:221-310
@@ -735,20 +834,23 @@ impl SubjectSplitState {
         self.offset = self.next - residual as i32;
         let offset = self.offset;
 
-        let hard_right = self
-            .hard_ranges
-            .get(self.hm_index)
-            .map(|r| r.1)
-            .unwrap_or(self.full_right);
+        // `hm_index` is below `num_hard_ranges` here: the last hard range ends at the full
+        // range's end, after which `next` is that end (DONE above).
+        let hard_right = self.hard_range(self.hm_index).1;
 
         let length = if offset + (MAX_DBSEQ_LEN as i32) < hard_right {
             self.next = offset + MAX_DBSEQ_LEN as i32 - chunk_overlap as i32;
             MAX_DBSEQ_LEN
         } else {
+            // A hard range of no letters (a mask at 0, masks that touch) is a chunk of length
+            // 0, searched for nothing, whose `Blast_ExtendWordExit` still moves the diagonal
+            // offset on by the window. The hard ranges of a searched sequence never go back
+            // (`SeqDb::check_hard_masks` refuses overlapping or unsorted masks, decision H4), so
+            // the length is never negative.
             let len = (hard_right - offset).max(0) as usize;
             self.hm_index = self.hm_index.saturating_add(1);
-            self.next = if self.hm_index < self.hard_ranges.len() {
-                self.hard_ranges[self.hm_index].0
+            self.next = if self.hm_index < self.num_hard_ranges() {
+                self.hard_range(self.hm_index).0
             } else {
                 self.full_right
             };
@@ -779,7 +881,7 @@ impl SubjectSplitState {
                     range: (0, length as i32),
                 }
             }
-        } else if !subject_masked {
+        } else if !subject_masked || !self.soft_masking {
             SeqRanges::Inline {
                 range: (residual as i32, length as i32),
             }
@@ -820,8 +922,14 @@ impl SubjectSplitState {
         // overlap = (backup.offset == backup.hard_ranges[backup.hm_index].left) ?
         //           0 : dbseq_chunk_overlap;
         // ```
-        let range_start = if self.hm_index < self.hard_ranges.len() {
-            self.hard_ranges[self.hm_index].0
+        // After the last hard range NCBI reads one `SSeqRange` past the used ones (`&full_range`
+        // + 1, or past a database sequence's ranges in its `TSequenceRanges` buffer: another
+        // sequence's mask end or unset memory; SURVEY §7.3 of M4a-2). LOSAT takes the full
+        // range's end, which no chunk starts at: the overlap is `dbseq_chunk_overlap`. That value
+        // can change the merge only where the last mask is shorter than its end's residual,
+        // which `SeqDb::check_hard_masks` refuses (decision H5).
+        let range_start = if self.hm_index < self.num_hard_ranges() {
+            self.hard_range(self.hm_index).0
         } else {
             self.full_right
         };
@@ -4366,12 +4474,15 @@ struct SubjectScratch {
     //                                 (SSeqRange*) datap->seq_ranges.get_data(),
     //                                 datap->seq_ranges.size() + 1, false, datap->mask_type) != 0) {
     // ```
-    // The buffers of a database search with `-db_soft_mask` (decision D4 of M4a-2): the masks of
-    // the block of the database sequence being searched (read once for all the block's
-    // sequences, review 1 F3 of M4a-2a) and its soft ranges, kept from one sequence to the next as
-    // NCBI keeps one `TSequenceRanges` per thread. Empty, and never touched, without the option.
+    // The buffers of a database search with `-db_soft_mask` or `-db_hard_mask` (decision D4 of
+    // M4a-2): the masks of the block of the database sequence being searched (read once for all
+    // the block's sequences, review 1 F3 of M4a-2a), its soft ranges (the complement of its masks;
+    // with `-db_hard_mask` its one full range, NCBI's `&(backup->full_range)`) and its hard ranges
+    // (the complement, `-db_hard_mask` only; M4a-2b), kept from one sequence to the next as NCBI
+    // keeps one `TSequenceRanges` per thread. Empty, and never touched, without the options.
     db_masks: crate::seqdb::MaskBlock,
     db_soft_ranges: Vec<(i32, i32)>,
+    db_hard_ranges: Vec<(i32, i32)>,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:77-81
     // ```c
     // typedef struct BLAST_DiagTable {
@@ -4492,6 +4603,7 @@ impl SubjectScratch {
             seq_ranges_scratch: Vec::new(),
             db_masks: crate::seqdb::MaskBlock::default(),
             db_soft_ranges: Vec::new(),
+            db_hard_ranges: Vec::new(),
             hit_level_array: Vec::new(),
             hit_len_array: Vec::new(),
             diag_hash: DiagHashTable::new(window_size as i32),
@@ -5829,8 +5941,8 @@ struct BlastnReportInputs<'a> {
     /// The opened database of a database search, which the XML2 and JSON formats read the taxids
     /// of the reported sequences from; `None` for a subject set.
     database_reader: Option<&'a database::BlastnDatabase>,
-    /// The algorithm of a database search with `-db_soft_mask` (`ResolvedMask::id`), whose masks
-    /// outfmt 0 shows in lowercase (`database::BlastnDatabase::display_masks`); `None` otherwise.
+    /// The algorithm of a database search with `-db_soft_mask` or `-db_hard_mask`
+    /// (`ResolvedMask::id`), whose masks outfmt 0 shows in lowercase (`database::BlastnDatabase::display_masks`); `None` otherwise.
     database_mask: Option<i32>,
     /// The reported sequences with parsed Seq-ids of a database search, by rank
     /// (`database::ReportedSubjects::parsed`; empty without them): their ids and titles come from
@@ -8878,7 +8990,24 @@ fn search(
     check_losat_limits(&args)?;
     megablast_index.check()?;
     if let (Subjects::Database(database), Some(mask)) = (subjects, args.db_mask_resolved.as_ref()) {
-        database.check_mask_limits(mask)?;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1625-1633
+        // ```c
+        //         if (lookup->discontiguous) {
+        //             word_length = lookup->template_length;
+        //             lut_word_length = lookup->template_length;
+        //         } else {
+        //             word_length = lookup->word_length;
+        //             lut_word_length = lookup->lut_word_length;
+        //         }
+        // ```
+        // The words that the scan reads: the discontiguous template's, else the word size.
+        let template_length = super::super::coordination::determine_template(&args).1;
+        let scanned_word = if template_length > 0 {
+            usize::from(template_length)
+        } else {
+            super::super::coordination::determine_effective_word_size(&args)
+        };
+        database.check_mask_limits(mask, scanned_word)?;
     }
     app::check_search_environment("BLASTN", !matches!(subjects, Subjects::Database(_)))?;
     // The variables' error stops the run after the outfmt 0 prolog (`run_in_pool`).
@@ -12466,20 +12595,24 @@ fn search_query_batch<const UNGAPPED: bool>(
     let good_init_extends = std::sync::atomic::AtomicU64::new(0);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321 (quoted at
     // `SubjectScratch::db_mask_read`)
-    // A database search with `-db_soft_mask` (the formatter's `ResolvedMask`; `-db_hard_mask` was
-    // refused before the search): the database and the algorithm whose masks every database
-    // sequence's preliminary search reads (`BlastnDatabase::soft_ranges_into`), and the first
-    // error of those reads by ordinal id, which the batch returns after the preliminary stage
-    // (`process_subject` returns nothing).
-    let db_soft_mask: Option<(&database::BlastnDatabase, i32)> =
-        match (subjects, args.db_mask_resolved.as_ref()) {
-            (SubjectSource::Database(database), Some(mask))
-                if mask.kind == crate::blastinput::db_mask::MaskKind::Soft =>
-            {
-                Some((database, mask.id))
-            }
-            _ => None,
-        };
+    // A database search with `-db_soft_mask` or `-db_hard_mask` (the formatter's `ResolvedMask`):
+    // the database, the algorithm whose masks every database sequence's preliminary search reads
+    // (`BlastnDatabase::seq_ranges_into`) and the kind, and the first error of those reads by
+    // ordinal id, which the batch returns after the preliminary stage (`process_subject` returns
+    // nothing).
+    let db_mask: Option<(
+        &database::BlastnDatabase,
+        i32,
+        crate::blastinput::db_mask::MaskKind,
+    )> = match (subjects, args.db_mask_resolved.as_ref()) {
+        (SubjectSource::Database(database), Some(mask)) => Some((database, mask.id, mask.kind)),
+        _ => None,
+    };
+    // The algorithm of `-db_hard_mask`, whose masked letters the traceback and the ungapped
+    // re-evaluation read as 'B' (`database::mask_hard_letters`; decision H2).
+    let db_hard_mask: Option<i32> = db_mask
+        .filter(|&(_, _, kind)| kind == crate::blastinput::db_mask::MaskKind::Hard)
+        .map(|(_, algo_id, _)| algo_id);
     let db_mask_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> = std::sync::Mutex::new(None);
     let process_subject = |s_idx: usize,
                            subject: BlastnSubjectRef<'_>,
@@ -12618,15 +12751,23 @@ fn search_query_batch<const UNGAPPED: bool>(
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:399-405 (quoted at
         // `SubjectScratch::db_mask_read`)
-        // With `-db_soft_mask` every database sequence is a masked subject (its mask type is set
-        // whether or not it has masks; decision D3 of M4a-2): its soft ranges are the complement
-        // of its stored masks (`BlastnDatabase::soft_ranges_into`), read by the preliminary stage
-        // only (the traceback scans nothing).
-        let db_soft_ranges = match db_soft_mask.filter(|_| prelim_source.is_none()) {
-            Some((database, algo_id)) => {
-                let mut ranges = std::mem::take(&mut subject_scratch.db_soft_ranges);
+        // With `-db_soft_mask` or `-db_hard_mask` every database sequence is a masked subject
+        // (its mask type is set whether or not it has masks; decision D3 of M4a-2): the
+        // complement of its stored masks (`BlastnDatabase::seq_ranges_into`), read by the
+        // preliminary stage only (the traceback scans nothing), is its soft ranges or, with
+        // `-db_hard_mask`, its hard ranges (series NP, M4a-2b decision H1).
+        let db_seq_ranges = match db_mask.filter(|_| prelim_source.is_none()) {
+            Some((database, algo_id, kind)) => {
+                let mut ranges = std::mem::take(match kind {
+                    crate::blastinput::db_mask::MaskKind::Soft => {
+                        &mut subject_scratch.db_soft_ranges
+                    }
+                    crate::blastinput::db_mask::MaskKind::Hard => {
+                        &mut subject_scratch.db_hard_ranges
+                    }
+                });
                 let read = match subject.block {
-                    Some(block) => database.soft_ranges_into(
+                    Some(block) => database.seq_ranges_into(
                         block,
                         s_idx as u32,
                         algo_id,
@@ -12638,6 +12779,21 @@ fn search_query_batch<const UNGAPPED: bool>(
                         "LOSAT internal error: database sequence {s_idx} was searched without its block"
                     )),
                 };
+                let ranges = match kind {
+                    crate::blastinput::db_mask::MaskKind::Soft => DbSeqRanges::Soft(ranges),
+                    crate::blastinput::db_mask::MaskKind::Hard => {
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:162-164
+                        // ```c
+                        //     backup->soft_ranges = &(backup->full_range);
+                        //     backup->num_soft_ranges = 1;
+                        //     backup->sm_index = 0;
+                        // ```
+                        let mut full = std::mem::take(&mut subject_scratch.db_soft_ranges);
+                        full.clear();
+                        full.push((0, s_len_full as i32));
+                        DbSeqRanges::Hard { full, hard: ranges }
+                    }
+                };
                 if let Err(error) = read {
                     let mut first = db_mask_error
                         .lock()
@@ -12648,28 +12804,34 @@ fn search_query_batch<const UNGAPPED: bool>(
                     {
                         *first = Some((s_idx as u32, error));
                     }
-                    subject_scratch.db_soft_ranges = ranges;
+                    ranges.give_back(subject_scratch);
                     return;
                 }
                 Some(ranges)
             }
             None => None,
         };
-        let db_masked = db_soft_ranges.is_some();
+        let db_masked = db_seq_ranges.is_some();
         let subject_masked = db_masked || !subject_masks.is_empty();
         // Unmasked, every chunk carries its range inline (`SeqRanges::Inline`) and no one reads
         // the soft ranges, so none are made (NCBI points them at `full_range`).
-        let soft_ranges = match db_soft_ranges {
-            Some(ranges) => ranges,
-            None if subject_masked => {
-                build_subject_seq_ranges_from_masks(subject_masks.as_slice(), s_len_full)
-            }
-            None => Vec::new(),
+        let (soft_ranges, soft_masking, hard_ranges) = match db_seq_ranges {
+            Some(DbSeqRanges::Soft(ranges)) => (ranges, true, None),
+            Some(DbSeqRanges::Hard { full, hard }) => (full, false, Some(hard)),
+            None if subject_masked => (
+                build_subject_seq_ranges_from_masks(subject_masks.as_slice(), s_len_full),
+                true,
+                None,
+            ),
+            None => (Vec::new(), false, None),
         };
 
         if s_len_full < effective_word_size {
             if db_masked {
                 subject_scratch.db_soft_ranges = soft_ranges;
+                if let Some(hard) = hard_ranges {
+                    subject_scratch.db_hard_ranges = hard;
+                }
             }
             return;
         }
@@ -12710,7 +12872,8 @@ fn search_query_batch<const UNGAPPED: bool>(
         );
 
         let dbseq_chunk_overlap = DBSEQ_CHUNK_OVERLAP;
-        let mut split_state = SubjectSplitState::new(s_len_full, soft_ranges);
+        let mut split_state =
+            SubjectSplitState::new(s_len_full, soft_ranges, soft_masking, hard_ranges);
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:336-377
         // ```c
@@ -13703,9 +13866,12 @@ fn search_query_batch<const UNGAPPED: bool>(
                     }
                 }
             }
-            // The soft ranges' buffer goes back to the scratch for the next database sequence.
+            // The ranges' buffers go back to the scratch for the next database sequence.
             if db_masked {
                 subject_scratch.db_soft_ranges = std::mem::take(&mut split_state.soft_ranges);
+                if let Some(hard) = split_state.take_hard_ranges() {
+                    subject_scratch.db_hard_ranges = hard;
+                }
             }
 
             if !UNGAPPED && !combined_prelim_hits.is_empty() {
@@ -14228,7 +14394,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             if hits.is_empty() {
                 return Ok(());
             }
-            database.with_blastna(ordinal, |s_blastna| {
+            database.with_blastna(ordinal, db_hard_mask, |s_blastna| {
                 ungapped_subject_stage(
                     hits,
                     s_blastna,
@@ -14549,6 +14715,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             let listed = listed_prelim_hits(prelim_lists);
             let found = database::traceback_listed(
                 database,
+                db_hard_mask,
                 parallel_pool,
                 use_parallel,
                 &listed,
@@ -16408,6 +16575,255 @@ mod tests {
                 );
             }
             assert_eq!(rows(&by_query), rows(&joined));
+        }
+    }
+
+    /// One chunk of NCBI's `s_GetNextSubjectChunk` model: offset, length, the seq_ranges and
+    /// the overlap of `Blast_HSPListsMerge`.
+    type ModelChunk = (i32, i32, Vec<(i32, i32)>, i32);
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-310 (quoted at
+    // `SubjectSplitState::next_chunk`), 579-584 (the overlap), 145-179 (`s_BackupSubject`).
+    /// NCBI's chunks of a nucleotide subject of `length` letters with the hard ranges `hard`
+    /// (`None`: `&full_range`) and the soft ranges `soft` (`None`: `&full_range`), statement by
+    /// statement in `Int4` (the mask type is hard with `hard`, soft with `soft`). The overlap
+    /// after the last hard range reads one range past the list in NCBI (stale memory); the model
+    /// reads the full range's end there, LOSAT's choice (decision H5).
+    fn ncbi_chunks(
+        length: i32,
+        hard: Option<&[(i32, i32)]>,
+        soft: Option<&[(i32, i32)]>,
+    ) -> Vec<ModelChunk> {
+        const MAX: i32 = 5_000_000;
+        const OVERLAP: i32 = 100;
+        let full = [(0, length)];
+        let hard_ranges = hard.unwrap_or(&full);
+        let soft_ranges = soft.unwrap_or(&full);
+        let soft_masking = soft.is_some();
+        let (mut hm_index, mut sm_index) = (0usize, 0usize);
+        let mut offset = hard_ranges[0].0;
+        let mut next = offset;
+        let mut chunks = Vec::new();
+        loop {
+            if next >= length {
+                return chunks;
+            }
+            let residual = next % 4;
+            offset = next - residual;
+            let subject_length;
+            if offset + MAX < hard_ranges[hm_index].1 {
+                subject_length = MAX;
+                next = offset + MAX - OVERLAP;
+            } else {
+                subject_length = hard_ranges[hm_index].1 - offset;
+                hm_index += 1;
+                next = if hm_index < hard_ranges.len() {
+                    hard_ranges[hm_index].0
+                } else {
+                    length
+                };
+            }
+            let seq_ranges: Vec<(i32, i32)> = if offset == 0 && residual == 0 && next == length {
+                soft_ranges.to_vec()
+            } else if !soft_masking {
+                vec![(residual, subject_length)]
+            } else {
+                let start = offset;
+                let end = start + subject_length;
+                let mut i = sm_index;
+                while soft_ranges[i].1 < start {
+                    i += 1;
+                }
+                let first = i;
+                while i < soft_ranges.len() && soft_ranges[i].0 < end {
+                    i += 1;
+                }
+                let len = i - first;
+                sm_index = i - 1;
+                if len == 0 {
+                    continue;
+                }
+                let mut ranges: Vec<(i32, i32)> = soft_ranges[first..first + len]
+                    .iter()
+                    .map(|&(left, right)| (left - offset, right - offset))
+                    .collect();
+                if ranges[0].0 < 0 {
+                    ranges[0].0 = 0;
+                }
+                if ranges[len - 1].1 > subject_length {
+                    ranges[len - 1].1 = subject_length;
+                }
+                ranges
+            };
+            let range_left = if hm_index < hard_ranges.len() {
+                hard_ranges[hm_index].0
+            } else {
+                length
+            };
+            let overlap = if offset == range_left { 0 } else { OVERLAP };
+            chunks.push((offset, subject_length, seq_ranges, overlap));
+        }
+    }
+
+    /// `SubjectSplitState`'s chunks, as the model gives them.
+    fn losat_chunks(
+        length: i32,
+        hard: Option<&[(i32, i32)]>,
+        soft: Option<&[(i32, i32)]>,
+    ) -> Vec<ModelChunk> {
+        let masked = hard.is_some() || soft.is_some();
+        let soft_ranges = match (hard, soft) {
+            (_, Some(soft)) => soft.to_vec(),
+            (Some(_), None) => vec![(0, length)],
+            (None, None) => Vec::new(),
+        };
+        let mut state = SubjectSplitState::new(
+            length as usize,
+            soft_ranges,
+            soft.is_some(),
+            hard.map(<[(i32, i32)]>::to_vec),
+        );
+        let mut scratch = Vec::new();
+        let mut chunks = Vec::new();
+        loop {
+            match state.next_chunk(masked, DBSEQ_CHUNK_OVERLAP) {
+                SubjectChunkStatus::Done => return chunks,
+                SubjectChunkStatus::NoRange => continue,
+                SubjectChunkStatus::Ok(chunk) => {
+                    let ranges = chunk
+                        .seq_ranges
+                        .as_slice(
+                            &state.soft_ranges,
+                            &mut scratch,
+                            chunk.offset as i32,
+                            chunk.length as i32,
+                        )
+                        .to_vec();
+                    chunks.push((
+                        chunk.offset as i32,
+                        chunk.length as i32,
+                        ranges,
+                        chunk.overlap as i32,
+                    ));
+                }
+            }
+        }
+    }
+
+    /// The complement of sorted, disjoint masks (`database::complement_soft_ranges`).
+    fn complement(masks: &[(i32, i32)], length: i32) -> Vec<(i32, i32)> {
+        let mut ranges = Vec::new();
+        let mut left = 0;
+        for &(start, end) in masks {
+            ranges.push((left, start));
+            left = end;
+        }
+        ranges.push((left, length));
+        ranges
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-310, 579-584 (quoted
+    // at `SubjectSplitState::next_chunk`)
+    // `-db_hard_mask`'s chunks (series NP, M4a-2b decision H1) against the model of NCBI's
+    // `s_GetNextSubjectChunk` above: a mask at 0 (a chunk of no letters), adjacent masks, residuals
+    // 0 to 3 (the chunk starts up to three masked letters before its range), one-letter masks, a
+    // range longer than MAX_DBSEQ_LEN (full chunks with the overlap 100, the first of a range that
+    // starts on a multiple of four with 0), masks at the end; then random sorted masks. The soft and
+    // unmasked chunks of the same subjects stay NCBI's too.
+    #[test]
+    fn hard_masked_chunks_follow_ncbi_s_get_next_subject_chunk() {
+        let check = |length: i32, masks: &[(i32, i32)]| {
+            let hard = complement(masks, length);
+            let found = losat_chunks(length, Some(&hard), None);
+            assert_eq!(
+                found,
+                ncbi_chunks(length, Some(&hard), None),
+                "{length} {masks:?}"
+            );
+            for chunk in &found {
+                assert!(chunk.1 >= 0, "{length} {masks:?}: {chunk:?}");
+            }
+            let soft = complement(masks, length);
+            assert_eq!(
+                losat_chunks(length, None, Some(&soft)),
+                ncbi_chunks(length, None, Some(&soft)),
+                "soft {length} {masks:?}"
+            );
+            assert_eq!(
+                losat_chunks(length, None, None),
+                ncbi_chunks(length, None, None)
+            );
+            found
+        };
+        // A mask at 0: a chunk of length 0 at 0, then the chunk after the mask (residual 2).
+        assert_eq!(
+            check(1200, &[(0, 102)]),
+            [(0, 0, vec![(0, 0)], 100), (100, 1100, vec![(2, 1100)], 100)]
+        );
+        // Adjacent masks: the hard range between them has no letters (residual 0, length 0).
+        assert_eq!(
+            check(1200, &[(100, 200), (200, 300)]),
+            [
+                (0, 100, vec![(0, 100)], 100),
+                (200, 0, vec![(0, 0)], 100),
+                (300, 900, vec![(0, 900)], 100),
+            ]
+        );
+        for residual in 0..4 {
+            let end = 600 + residual;
+            let found = check(1200, &[(500, end)]);
+            assert_eq!(found[1].0, 600);
+            assert_eq!(found[1].2, vec![(residual, 600)]);
+        }
+        // One-letter masks whose chunks start before them (their HSP lists can merge).
+        check(1200, &[(301, 302), (500, 503), (703, 706)]);
+        // A range longer than MAX_DBSEQ_LEN: full chunks of it, the first with the overlap 0.
+        let long = check(12_000_000, &[(100, 204), (11_000_000, 11_000_010)]);
+        assert_eq!(long[1], (204, 5_000_000, vec![(0, 5_000_000)], 0));
+        assert_eq!(long[2].0, 204 + 5_000_000 - 100);
+        assert_eq!(long[2].3, 100);
+        check(12_000_000, &[(100, 202)]);
+        // A last mask at the end (the empty last range is not a chunk), masks at both ends.
+        check(1200, &[(10, 20), (1100, 1200)]);
+        check(1200, &[(0, 100), (1100, 1200)]);
+        // Random sorted, disjoint masks (empty ones too), the shapes refused by
+        // `HardMaskShape` left out.
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = |bound: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % bound) as i32
+        };
+        for case in 0..2000 {
+            let length = if case % 50 == 0 {
+                5_000_000 + next(3_000_000)
+            } else {
+                1 + next(3000)
+            };
+            let mut masks = Vec::new();
+            let mut at = 0;
+            for _ in 0..next(6) {
+                let start = at + next(400) * (1 + length / 3000);
+                let end = start + next(60);
+                if end > length {
+                    break;
+                }
+                masks.push((start, end));
+                at = end;
+            }
+            let shape = crate::blastinput::db_mask::HardMaskShape::of(
+                &masks
+                    .iter()
+                    .map(|&(start, end)| (start as u32, end as u32))
+                    .collect::<Vec<_>>(),
+                &|| Some(length as usize),
+                11,
+            );
+            if !matches!(shape, Ok(None)) {
+                continue;
+            }
+            check(length, &masks);
         }
     }
 }

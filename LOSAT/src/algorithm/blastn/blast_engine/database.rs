@@ -231,16 +231,25 @@ impl BlastnDatabase {
     /// Calls `use_letters` with the letters of database sequence `ordinal` in BLASTNA, without
     /// the sentinel bytes: the subject that an ungapped (`-ungapped`) search re-evaluates its
     /// HSPs on in the preliminary stage (NCBI gets the sequence again, unpacked, for a sequence
-    /// whose HSP list is not empty). The letters stay in the kernel's buffer with its sentinel
-    /// bytes (no copy). A read error is the preliminary search's.
+    /// whose HSP list is not empty), with `-db_hard_mask` (the algorithm `hard_mask`) its masked
+    /// letters 'B' (`mask_hard_letters`; NCBI's fetch in BLASTNA applies the masks). The letters
+    /// stay in the kernel's buffer with its sentinel bytes (no copy). A read error is the
+    /// preliminary search's.
     pub(super) fn with_blastna<T>(
         &self,
         ordinal: u32,
+        hard_mask: Option<i32>,
         use_letters: impl FnOnce(&[u8]) -> T,
     ) -> Result<T> {
         let block = x_read_sequence(&self.db, ordinal).map_err(search_read_error)?;
         let length = block.nucleotide_len(0).map_err(search_read_error)?;
-        let blastna = x_blastna(&block).map_err(search_read_error)?;
+        let mut blastna = x_blastna(&block).map_err(search_read_error)?;
+        if let Some(algo_id) = hard_mask {
+            let mut masks = MaskBlock::default();
+            let stored =
+                self.sequence_masks(ordinal, algo_id, &mut masks, shared::search_read_error_of)?;
+            mask_hard_letters(&mut blastna, stored, &[(0, length)]);
+        }
         // The kernel's BLASTNA has a sentinel byte at each end.
         let result = use_letters(&blastna[1..=length]);
         x_done_bytes(blastna);
@@ -732,9 +741,10 @@ impl BlastnDatabase {
         shared::check_accession_tables(&self.db, PROGRAM)
     }
 
-    /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`).
-    pub(super) fn check_mask_limits(&self, mask: &ResolvedMask) -> Result<()> {
-        mask.check_losat_limits(&self.db, PROGRAM)
+    /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`),
+    /// whose scan reads words of `scanned_word` letters.
+    pub(super) fn check_mask_limits(&self, mask: &ResolvedMask, scanned_word: usize) -> Result<()> {
+        mask.check_losat_limits(&self.db, PROGRAM, scanned_word)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:197-218
@@ -771,12 +781,13 @@ impl BlastnDatabase {
     // masks in the order they are stored, the `TSeqPos` values read as `Int4`. Unsorted or
     // overlapping masks give inverted members, which the scan skips (`masksubj.inl:43-60`);
     // nothing is sorted or merged (decision D3 of M4a-2).
-    /// The soft ranges (`seq_ranges`) of database sequence `ordinal` of length `length`, read in
-    /// the block `block` of the preliminary stage (`block_subject`), in a search with
-    /// `-db_soft_mask` (the algorithm `algo_id`): the complement of its masks, which `masks`
+    /// The ranges (`seq_ranges`) of database sequence `ordinal` of length `length`, read in the
+    /// block `block` of the preliminary stage (`block_subject`), in a search with `-db_soft_mask`
+    /// or `-db_hard_mask` (the algorithm `algo_id`): the complement of its masks, which `masks`
     /// reads with the masks of the whole block (`SeqDb::read_mask_block`, once for all its
-    /// sequences), into `ranges`, which it replaces.
-    pub(super) fn soft_ranges_into(
+    /// sequences), into `ranges`, which it replaces. They are the subject's soft ranges or, with
+    /// `-db_hard_mask`, its hard ranges (blast_engine.c:165-176).
+    pub(super) fn seq_ranges_into(
         &self,
         block: BlockRange,
         ordinal: u32,
@@ -825,6 +836,22 @@ impl BlastnDatabase {
             .collect())
     }
 
+    /// The stored masks of database sequence `ordinal` for the algorithm `algo_id`, read alone
+    /// (a block of one sequence in `masks`), with the reader's errors as `error` reports them
+    /// (`stored_masks`): those of the letters of a hard-masked search's fetch.
+    fn sequence_masks<'m>(
+        &self,
+        ordinal: u32,
+        algo_id: i32,
+        masks: &'m mut MaskBlock,
+        error: fn(&SeqDbError, &str) -> anyhow::Error,
+    ) -> Result<&'m [(u32, u32)]> {
+        let Some(block) = self.db.x_block_range(ordinal, ordinal.saturating_add(1)) else {
+            anyhow::bail!("LOSAT internal error: sequence {ordinal} is not in the database");
+        };
+        self.stored_masks(block, ordinal, algo_id, masks, error)
+    }
+
     /// The stored masks of database sequence `ordinal` of the block `block` for the algorithm
     /// `algo_id` (`SeqDb::read_mask_block`, `MaskBlock::ranges`), with the reader's errors as
     /// `error` reports them: the preliminary search's (`shared::search_read_error_of`, as its
@@ -860,6 +887,73 @@ fn complement_soft_ranges(masks: &[(u32, u32)], length: usize, ranges: &mut Vec<
         left = end as i32;
     }
     ranges.push((left, length as i32));
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1518-1538
+// ```c++
+// static void s_SeqDBMaskSequence(char                    * seq,
+//                                 CSeqDB::TSequenceRanges * masks,
+//                                 char                      mask_letter,
+//                                 const SSeqDBSlice       & range)
+// {
+//     if (!masks || masks->empty()) return;
+//
+//     // TODO This could be optimized with binary search
+//     unsigned int i(0);
+//     unsigned int begin(range.begin);
+//     unsigned int end(range.end);
+//
+//     while (i < masks->size() && (*masks)[i].second <= begin) ++i;
+//
+//     while (i < masks->size() && (*masks)[i].first < end) {
+//         for (size_t j = max((*masks)[i].first, begin);
+//                  j < min((*masks)[i].second, end); ++j) {
+//             seq[j] = mask_letter;
+//         }
+//         ++i;
+//     }
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1665-1673
+// ```c++
+//         if (!use_range_set) {
+//             s_SeqDBMapNA2ToNA8(tmp, seq, range);
+//             s_SeqDBRebuildDNA_NA8(seq, ambchars, range);
+//             s_SeqDBMaskSequence(seq, masks, (char)14, range);
+//             if (sentinel) s_SeqDBMapNcbiNA8ToBlastNA8(seq, range);
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:590-606
+// ```c++
+// unsigned SeqDB_ncbina8_to_blastna8[] = {
+//     ...
+//     10, /* B,  14 */
+// ```
+/// BLASTNA 'B' (NCBI4na 14 mapped to BLASTNA).
+const HARD_MASK_BLASTNA: u8 = 10;
+
+/// With `-db_hard_mask`, NCBI's fetch of a sequence in BLASTNA (the traceback's, the ungapped
+/// re-evaluation's) writes the mask letter NCBI4na 14 over every masked position after the
+/// ambiguities, before the BLASTNA mapping: the letters are 'B' (BLASTNA 10) there (series NP,
+/// M4a-2b decision H2). `blastna` has a sentinel byte before the first letter; `masks` are the
+/// sequence's stored masks (`[start, end)`, sorted and disjoint: `SeqDb::check_hard_masks`
+/// refuses the others, whose result NCBI's scan of sorted masks decides); `ranges` are the decoded
+/// parts (`[from, to)`: the whole sequence, or the slices of the partial decode), and only their
+/// letters are masked, as NCBI masks each slice.
+fn mask_hard_letters(blastna: &mut [u8], masks: &[(u32, u32)], ranges: &[(usize, usize)]) {
+    for &(begin, end) in ranges {
+        let mut i = 0;
+        while i < masks.len() && masks[i].1 as usize <= begin {
+            i += 1;
+        }
+        while i < masks.len() && (masks[i].0 as usize) < end {
+            let from = (masks[i].0 as usize).max(begin);
+            let to = (masks[i].1 as usize).min(end);
+            if from < to {
+                blastna[1 + from..1 + to].fill(HARD_MASK_BLASTNA);
+            }
+            i += 1;
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1401-1405
@@ -1226,12 +1320,18 @@ where
 /// tasks of `map_init`, which also traced runs of sequences that change from one execution to
 /// the next.
 ///
+/// With `-db_hard_mask` (the algorithm `hard_mask`) the masked letters of each decoded part are
+/// 'B' (`mask_hard_letters`; NCBI's fetch with `check_oid_exclusion` applies the masks,
+/// seqsrc_seqdb.cpp:324-353), the masks read with the sequence (`BlastnDatabase::sequence_masks`).
+///
 /// EXPERIMENT (LOSAT_X_BNTBRANGE): a sequence of at least `x_tb_range_min` bases is decoded in
 /// the ranges of its kept HSPs only (`spans`: `[from, to)` on the sequence; `x_partial_ranges`),
 /// with fences; when a traceback alignment meets one, the sequence is decoded whole and traced
 /// again from `kept`.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn traceback_listed<T, P, R, I, K, S>(
     database: &BlastnDatabase,
+    hard_mask: Option<i32>,
     pool: &SearchPool<'_>,
     parallel: bool,
     listed: &[(u32, P)],
@@ -1250,7 +1350,33 @@ where
     let db = &database.db;
     let x_ranged = super::x_bn_tb_range();
     let x_min = super::x_tb_range_min();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-353
+    // ```c++
+    //     if (datap->mask_type != eNoSubjMasking) {
+    //         ASSERT(datap->mask_algo_id != -1);
+    //         seqdb.GetMaskData(oid, datap->mask_algo_id, datap->seq_ranges);
+    //     }
+    //     ...
+    //           len = seqdb.GetAmbigSeqAlloc(oid,
+    //                                  const_cast<char **>(&buf),
+    //                                  has_sentinel_byte,
+    //                                  eMalloc,
+    //                                  ((datap->mask_type == eHardSubjMasking) ?
+    //                                 		 &(datap->seq_ranges) : NULL));
+    // ```
+    // The masks are read before the letters, and outside the handler of the preliminary
+    // search's read errors, as the letters are.
+    let hard_masks = |ordinal: u32| -> Result<Vec<(u32, u32)>> {
+        let Some(algo_id) = hard_mask else {
+            return Ok(Vec::new());
+        };
+        let mut masks = MaskBlock::default();
+        Ok(database
+            .sequence_masks(ordinal, algo_id, &mut masks, shared::database_error_of)?
+            .to_vec())
+    };
     let one = |scratch: &mut T, &(ordinal, ref kept): &(u32, P)| -> Result<Option<R>> {
+        let masks = hard_masks(ordinal)?;
         let stored = x_read_sequence(db, ordinal).map_err(database_error)?;
         let length = stored.nucleotide_len(0).map_err(database_error)?;
         let x_in_ranges = x_ranged && length >= x_min;
@@ -1259,9 +1385,10 @@ where
         }
         if x_in_ranges {
             let ranges = x_partial_ranges(spans(kept), length);
-            let blastna = stored
+            let mut blastna = stored
                 .x_nucleotide_blastna_ranges(0, &ranges)
                 .map_err(database_error)?;
+            mask_hard_letters(&mut blastna, &masks, &ranges);
             let fenced = std::sync::atomic::AtomicBool::new(false);
             let subject = BlastnSubjectRef {
                 length,
@@ -1281,7 +1408,7 @@ where
                 return Ok(result);
             }
         }
-        let result = x_traceback_whole(&stored, length, scratch, ordinal, kept, traceback)?;
+        let result = x_traceback_whole(&stored, length, &masks, scratch, ordinal, kept, traceback)?;
         x_done_block(stored);
         Ok(result)
     };
@@ -1331,9 +1458,11 @@ where
 }
 
 /// The traceback of `traceback_listed` on the whole sequence of `stored`.
+/// `hard_masks`: the masks of a search with `-db_hard_mask` (`mask_hard_letters`), else empty.
 fn x_traceback_whole<T, P, R, K>(
     stored: &SequenceBlock,
     length: usize,
+    hard_masks: &[(u32, u32)],
     scratch: &mut T,
     ordinal: u32,
     kept: &P,
@@ -1342,7 +1471,8 @@ fn x_traceback_whole<T, P, R, K>(
 where
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>, &P) -> Option<R>,
 {
-    let blastna = x_blastna(stored).map_err(database_error)?;
+    let mut blastna = x_blastna(stored).map_err(database_error)?;
+    mask_hard_letters(&mut blastna, hard_masks, &[(0, length)]);
     let subject = BlastnSubjectRef {
         length,
         packed: stored.nucleotide_packed(0),
@@ -1902,6 +2032,14 @@ mod tests {
             .unwrap_or_else(|error| panic!("{name}: {error:#}"))
     }
 
+    fn open_dbmask(name: &str) -> BlastnDatabase {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/db_search/dbmask")
+            .join(name);
+        BlastnDatabase::open(path.to_str().unwrap(), &ApplicationSettings::default())
+            .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+    }
+
     // blast_util.c:197-218 and seqdb.hpp:286-306 (quoted at `soft_ranges_into`): the soft ranges
     // of a masked database sequence are the complement of its masks in stored order, inverted
     // members included; a sequence without masks has the one range of its letters.
@@ -1933,6 +2071,120 @@ mod tests {
     // blastdbcmd `-outfmt "%o %m11"` reads `600-700;100-200;` for sequence 4): read with the masks
     // of the block that holds the sequence (one read for all its sequences, review 1 F3 of
     // M4a-2a), the soft ranges in stored order, the display masks as stored.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1518-1538,
+    // 1665-1673, 1694-1700 (quoted at `mask_hard_letters`)
+    // `-db_hard_mask`'s traceback letters (series NP, M4a-2b decision H2): after the decode, every
+    // masked position of a decoded part is BLASTNA 'B' (10), as `s_SeqDBMaskSequence` writes
+    // NCBI4na 14 before `SeqDB_ncbina8_to_blastna8`, on the whole sequence and on each slice of
+    // the partial decode; the other letters (and the fences, the sentinel bytes) stay. Against a
+    // model of the C loop per slice, for random sorted masks and slices, then on a5's s1 (masks
+    // 1000-1100 and 2000-2024) through `traceback_listed` (whole) and the ranged decode.
+    #[test]
+    fn hard_masked_letters_are_b_in_each_decoded_part() {
+        let model = |letters: &[u8], masks: &[(u32, u32)], slices: &[(usize, usize)]| {
+            let mut seq = letters.to_vec();
+            for &(begin, end) in slices {
+                let mut i = 0;
+                while i < masks.len() && masks[i].1 as usize <= begin {
+                    i += 1;
+                }
+                while i < masks.len() && (masks[i].0 as usize) < end {
+                    for j in (masks[i].0 as usize).max(begin)..(masks[i].1 as usize).min(end) {
+                        seq[1 + j] = 10;
+                    }
+                    i += 1;
+                }
+            }
+            seq
+        };
+        let mut seed = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = |bound: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % bound) as usize
+        };
+        for _ in 0..500 {
+            let length = 1 + next(400);
+            let letters: Vec<u8> = (0..length + 2).map(|_| next(16) as u8).collect();
+            let mut masks = Vec::new();
+            let mut at = 0usize;
+            while masks.len() < 5 {
+                let start = at + next(80);
+                let end = start + next(30);
+                if end > length {
+                    break;
+                }
+                masks.push((start as u32, end as u32));
+                at = end;
+            }
+            let mut slices = Vec::new();
+            let mut at = 0usize;
+            while at < length {
+                let begin = at + next(60);
+                let end = (begin + 1 + next(120)).min(length);
+                if begin >= end {
+                    break;
+                }
+                slices.push((begin, end));
+                at = end + 1;
+            }
+            for parts in [&[(0, length)][..], &slices] {
+                let mut found = letters.clone();
+                mask_hard_letters(&mut found, &masks, parts);
+                assert_eq!(found, model(&letters, &masks, parts), "{masks:?} {parts:?}");
+            }
+        }
+
+        let database = open_dbmask("a5");
+        let stored = database.db.read_sequence(0).unwrap();
+        let length = stored.nucleotide_len(0).unwrap();
+        let whole = stored.nucleotide_blastna(0).unwrap();
+        let masked =
+            |position: usize| (1000..1100).contains(&position) || (2000..2024).contains(&position);
+        let found = crate::utils::threading::with_search_pool(1, "blastn", |pool| {
+            traceback_listed(
+                &database,
+                Some(11),
+                pool,
+                false,
+                &[(0u32, ())],
+                &|| (),
+                &|_: &mut (), _: u32, subject: BlastnSubjectRef<'_>, _: &()| {
+                    Some(subject.blastna.expect("the traceback's letters").to_vec())
+                },
+                &|_: &()| Vec::new(),
+            )
+        })
+        .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].len(), length);
+        for (position, &code) in found[0].iter().enumerate() {
+            let want = if masked(position) {
+                10
+            } else {
+                whole[1 + position]
+            };
+            assert_eq!(code, want, "position {position}");
+        }
+        // The ranged decode: slices across both masks and between them, fences kept.
+        let ranges = [(900usize, 1050usize), (1080, 1500), (1990, 2010)];
+        let mut ranged = stored.x_nucleotide_blastna_ranges(0, &ranges).unwrap();
+        let before = ranged.clone();
+        mask_hard_letters(&mut ranged, &[(1000, 1100), (2000, 2024)], &ranges);
+        for position in 0..length {
+            let decoded = ranges
+                .iter()
+                .any(|&(from, to)| (from..to).contains(&position));
+            let want = if decoded && masked(position) {
+                10
+            } else {
+                before[1 + position]
+            };
+            assert_eq!(ranged[1 + position], want, "position {position}");
+        }
+    }
+
     #[test]
     fn a_masked_search_reads_each_sequence_s_masks() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1946,23 +2198,23 @@ mod tests {
         let mut masks = MaskBlock::default();
         let mut ranges = Vec::new();
         database
-            .soft_ranges_into(block, 4, 11, 1200, &mut masks, &mut ranges)
+            .seq_ranges_into(block, 4, 11, 1200, &mut masks, &mut ranges)
             .unwrap();
         assert_eq!(ranges, [(0, 600), (700, 100), (200, 1200)]);
         // Sequence 0 has no masks of algorithm 11.
         database
-            .soft_ranges_into(block, 0, 11, 3000, &mut masks, &mut ranges)
+            .seq_ranges_into(block, 0, 11, 3000, &mut masks, &mut ranges)
             .unwrap();
         assert_eq!(ranges, [(0, 3000)]);
         // Another algorithm reads the block again.
         database
-            .soft_ranges_into(block, 4, 15, 1200, &mut masks, &mut ranges)
+            .seq_ranges_into(block, 4, 15, 1200, &mut masks, &mut ranges)
             .unwrap();
         assert_eq!(ranges, [(0, 301), (302, 500), (503, 703), (706, 1200)]);
         // A block of one sequence gives its masks alike.
         let one = database.db.x_block_range(4, 5).unwrap();
         database
-            .soft_ranges_into(one, 4, 11, 1200, &mut masks, &mut ranges)
+            .seq_ranges_into(one, 4, 11, 1200, &mut masks, &mut ranges)
             .unwrap();
         assert_eq!(ranges, [(0, 600), (700, 100), (200, 1200)]);
         let shown = database.display_masks(4, 12, &mut masks).unwrap();
@@ -2240,6 +2492,7 @@ mod tests {
             let found = crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
                 traceback_listed(
                     &database,
+                    None,
                     pool,
                     threads > 1,
                     &listed,
@@ -2297,6 +2550,7 @@ mod tests {
             let found = crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
                 traceback_listed(
                     &database,
+                    None,
                     pool,
                     threads > 1,
                     &listed,

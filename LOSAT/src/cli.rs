@@ -790,7 +790,7 @@ fn render_rpsbproc_text(text: &str) -> String {
 // (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
 // (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range`, `-no_greedy`
 // (DI-6), `-min_raw_gapped_score` (DI-6b) and the database masks (`blastinput::db_mask`, series
-// NP M4a-2; a search that `-db_hard_mask` masks is refused where it starts, `RUN_REFUSALS`).
+// NP M4a-2).
 const UNPORTED_BLASTN_ARGS: &[&str] = &[
     "best_hit_overhang",
     "best_hit_score_edge",
@@ -936,15 +936,6 @@ fn refuses_option(scope: &clap::Command, name: &str) -> bool {
 /// what the refusal says the argument is (`run_refusal`). `-xmlhelp` leaves them out of NCBI's XML
 /// as it leaves the parser's refusals (`refuses_option`).
 pub(crate) const RUN_REFUSALS: &[(&str, &str, &str)] = &[
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2350-2354 (quoted at
-    // `blastinput::db_mask::DbMaskArgs`): its errors and warning are NCBI's
-    // (`DbMaskOption::validate_at_open`, `resolve`); a search that it masks is refused (series
-    // NP, M4a-2b).
-    (
-        "blastn",
-        "db_hard_mask",
-        "hard masking of the database sequences",
-    ),
     ("blastp", "ungapped", "an ungapped search"),
     ("blastp", "use_sw_tback", "the Smith-Waterman traceback"),
     ("psiblast", "use_sw_tback", "the Smith-Waterman traceback"),

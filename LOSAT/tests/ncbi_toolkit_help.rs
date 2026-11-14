@@ -197,9 +197,8 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
             assert!(text.ends_with("</arguments>\n</ncbi_application>\n"));
             // Each argument left out is refused by name: by the parser (`-name 1 -h`), or by the
             // run of a search (blastp's and psiblast's `-use_sw_tback`, blastp's and tblastn's
-            // `-ungapped` with `-comp_based_stats 0`, blastn's `-db_hard_mask 11` on a database
-            // with that algorithm; rpstblastn's `-ungapped`, which needs a database, is in
-            // `cli::RUN_REFUSALS` with them). The arguments left in are read
+            // `-ungapped` with `-comp_based_stats 0`; rpstblastn's `-ungapped`, which needs a
+            // database, is in `cli::RUN_REFUSALS` with them). The arguments left in are read
             // (`ncbi_xmlhelp_tests`).
             let kept = argument_names(&xml.stdout);
             for name in argument_names(&ncbi) {
@@ -216,17 +215,7 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
                 let refused = run_in(&dir, program, &words);
                 let mut message = String::from_utf8_lossy(&refused.stderr).into_owned();
                 let subject = if program == "tblastn" { "n.fa" } else { "p.fa" };
-                if refused.status.code() == Some(0) && program == "blastn" && name == "db_hard_mask"
-                {
-                    // A database option with a value (series NP, M4a-2a): its errors and warning
-                    // are NCBI's, and LOSAT refuses the search that it masks.
-                    let db = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/db_search/dbmask/a5");
-                    let query =
-                        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/db_search/dbmask/q1.fna");
-                    let words = ["-query", query, "-db", db, &word, "11"];
-                    message =
-                        String::from_utf8_lossy(&run_in(&dir, program, &words).stderr).into_owned();
-                } else if refused.status.code() == Some(0) && program != "rpstblastn" {
+                if refused.status.code() == Some(0) && program != "rpstblastn" {
                     let search = ["-query", "p.fa", "-subject", subject, &word];
                     let cbs = ["-comp_based_stats", "0"];
                     let words = [&search[..], if name == "ungapped" { &cbs } else { &[] }].concat();

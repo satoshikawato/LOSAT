@@ -1613,8 +1613,8 @@ fn unported_ncbi_options_are_rejected_explicitly() {
 // `blastinput::db_mask::DbMaskArgs`)
 // BLASTN's `-db_soft_mask` and `-db_hard_mask` (series NP, M4a-2): strings, each excluding the
 // other, `-subject` and `-subject_loc` (conflicts of LOSAT's parser, where NCBI prints its usage;
-// probes o04, o05, o06 of the M4a-2 survey); the run refuses a search that `-db_hard_mask` masks
-// (`RUN_REFUSALS`).
+// probes o04, o05, o06 of the M4a-2 survey); `-db_hard_mask` is not a refusal of the run
+// (`RUN_REFUSALS`, series NP, M4a-2b).
 #[test]
 fn blastn_takes_the_database_masks() {
     let blastn = |words: &[&str]| {
@@ -1651,9 +1651,9 @@ fn blastn_takes_the_database_masks() {
             "{words:?}"
         );
     }
-    assert!(crate::cli::run_refusal("BLASTN", "db_hard_mask").contains(
-        "-db_hard_mask (hard masking of the database sequences) is not supported by LOSAT's BLASTN"
-    ));
+    assert!(!crate::cli::RUN_REFUSALS
+        .iter()
+        .any(|&(program, name, _)| program == "blastn" && name == "db_hard_mask"));
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2191-2199

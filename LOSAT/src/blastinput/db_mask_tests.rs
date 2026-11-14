@@ -281,7 +281,7 @@ fn each_name_of_the_list_needs_the_id_in_its_own_database() {
     // The search's table puts `a5` first (NCBI sorts the volumes by name): its 11 is `a5`'s
     // dust, which `b5`'s volume does not have (NCBI's stale volume-algorithm cache, M/DECISIONS
     // 9): LOSAT refuses the search (decision D5).
-    let error = resolved.check_losat_limits(&db, "BLASTN").unwrap_err();
+    let error = resolved.check_losat_limits(&db, "BLASTN", 11).unwrap_err();
     assert!(
         format!("{error:#}")
             .contains("the volume has mask data without the filtering algorithm 11"),
@@ -332,21 +332,130 @@ fn the_archive_writes_the_key_of_a_name_or_the_id() {
     );
 }
 
-// The search that `-db_hard_mask` masks is refused where NCBI starts it (series NP, M4a-2b).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:241-268 and 579-584 (quoted
+// at `HardMaskShape::of`)
+// A search with `-db_hard_mask` is refused, before anything is written, at the first searched
+// sequence whose masks NCBI's hard chunks do not handle (series NP, M4a-2b decisions H3-H5): a5's
+// s4 (OID 3) is masked whole ([0, 300): the "no chunking" branch scans the full range of a chunk
+// of no letters); edge1's algorithm 11 holds s5's masks out of order, 12 overlapping ones; 13
+// (adjacent masks: a hard range of no letters), 14 (masks at both ends) and 15 (one-letter masks)
+// are searched; edge2's 14 (a tail mask) and 16 (s4 masked whole, OID 3 before s5) are refused.
+// `-db_soft_mask` keeps every shape.
 #[test]
-fn a_hard_masked_search_is_refused() {
-    let (a5, _) = open(&[dbmask("a5")]);
-    let mask = ResolvedMask {
-        kind: MaskKind::Hard,
-        id: 11,
+fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
+    let mask = |kind, id| ResolvedMask {
+        kind,
+        id,
         key: None,
         shown: Vec::new(),
     };
-    let error = mask.check_losat_limits(&a5, "BLASTN").unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        "-db_hard_mask (hard masking of the database sequences) is not supported by LOSAT's BLASTN"
+    let refusal = |db: &SeqDb, id| {
+        mask(MaskKind::Hard, id)
+            .check_losat_limits(db, "BLASTN", 11)
+            .map_err(|error| error.to_string())
+    };
+    let (a5, _) = open(&[dbmask("a5")]);
+    let error = refusal(&a5, 11).unwrap_err();
+    assert!(
+        error.starts_with("-db_hard_mask: the sequence of OID 3 (volume ")
+            && error.contains(
+                "a5) has its only mask, [0, 300), running to its end, for which NCBI BLAST+ 2.17.0 \
+             scans the masked letters past the chunk before the mask"
+            )
+            && error.ends_with("LOSAT's BLASTN does not search such a database with -db_hard_mask"),
+        "{error}"
     );
+    mask(MaskKind::Soft, 11)
+        .check_losat_limits(&a5, "BLASTN", 11)
+        .unwrap();
+    let (edge1, _) = open(&[dbmask("edge1")]);
+    let error = refusal(&edge1, 11).unwrap_err();
+    assert!(
+        error.contains("OID 4 ")
+            && error.contains("has masks out of order ([100, 200) after [600, 700))"),
+        "{error}"
+    );
+    let error = refusal(&edge1, 12).unwrap_err();
+    assert!(error.contains("([200, 400) after [100, 300))"), "{error}");
+    for id in [13, 14, 15] {
+        refusal(&edge1, id).unwrap();
+    }
+    let (edge2, _) = open(&[dbmask("edge2")]);
+    let error = refusal(&edge2, 14).unwrap_err();
+    assert!(
+        error.contains("OID 4 ") && error.contains("[1000, 1200), running to its end"),
+        "{error}"
+    );
+    let error = refusal(&edge2, 16).unwrap_err();
+    assert!(
+        error.contains("OID 3 ") && error.contains("[0, 300), running"),
+        "{error}"
+    );
+    for id in 11..=16 {
+        mask(MaskKind::Soft, id)
+            .check_losat_limits(&edge2, "BLASTN", 11)
+            .unwrap();
+    }
+}
+
+// The shapes of `HardMaskShape::of` (blast_engine.c:241-268, 579-584, 1318-1331; na_ungapped.c:
+// 1647-1668): the first mask's end at the subject's end with its start at or below MAX_DBSEQ_LEN, in
+// a subject of a word or more and at least 5 letters (empty masks at the end may follow), masks
+// that go back, and a last mask shorter than its end's residual before the subject's end. The
+// length is read only for the first and the last.
+#[test]
+fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
+    use std::cell::Cell;
+    let shape = |masks: &[(u32, u32)], length: usize| {
+        let reads = Cell::new(0);
+        let read = || {
+            reads.set(reads.get() + 1);
+            Some(length)
+        };
+        (HardMaskShape::of(masks, &read, 11).unwrap(), reads.get())
+    };
+    let tail = |start, end| Some(HardMaskShape::TailMask { start, end });
+    assert_eq!(shape(&[(100, 300)], 300), (tail(100, 300), 1));
+    assert_eq!(shape(&[(0, 300)], 300), (tail(0, 300), 1));
+    assert_eq!(shape(&[(100, 300), (300, 300)], 300), (tail(100, 300), 1));
+    assert_eq!(
+        shape(&[(5_000_000, 6_000_000)], 6_000_000),
+        (tail(5_000_000, 6_000_000), 1)
+    );
+    // Above MAX_DBSEQ_LEN the first chunk is a full chunk: NCBI chunks it as any other.
+    assert_eq!(shape(&[(5_000_001, 6_000_000)], 6_000_000), (None, 0));
+    // An empty mask at the end, a mask before the end, two masks.
+    assert_eq!(shape(&[(300, 300)], 300), (None, 0));
+    assert_eq!(shape(&[(100, 299)], 300), (None, 1));
+    assert_eq!(shape(&[(0, 100), (200, 300)], 300), (None, 0));
+    let unsorted = |before, mask| Some(HardMaskShape::Unsorted { before, mask });
+    assert_eq!(
+        shape(&[(600, 700), (100, 200)], 1200),
+        (unsorted((600, 700), (100, 200)), 0)
+    );
+    assert_eq!(
+        shape(&[(100, 300), (200, 400)], 1200),
+        (unsorted((100, 300), (200, 400)), 0)
+    );
+    assert_eq!(shape(&[(50, 40)], 1200), (unsorted((50, 40), (50, 40)), 0));
+    assert_eq!(shape(&[(100, 200), (200, 300)], 1200), (None, 0));
+    let short = |start, end| Some(HardMaskShape::ShortLastMask { start, end });
+    // 1002 % 4 = 2 letters before the end in the last chunk, a mask of 1.
+    assert_eq!(shape(&[(1001, 1002)], 1200), (short(1001, 1002), 1));
+    assert_eq!(shape(&[(1000, 1002)], 1200), (None, 1));
+    assert_eq!(shape(&[(1003, 1003)], 1200), (short(1003, 1003), 1));
+    // The last mask at the end: the last hard range is empty and the loop ends before it.
+    assert_eq!(shape(&[(10, 20), (1199, 1199)], 1199), (None, 1));
+    // A middle mask shorter than its residual merges with an overlap that NCBI reads in bounds.
+    assert_eq!(shape(&[(301, 302), (500, 503)], 1200), (None, 0));
+    // A subject that the scan reads no word of: shorter than the word, or than 5 letters (the
+    // engine skips it).
+    assert_eq!(shape(&[(0, 10)], 10), (None, 1));
+    assert_eq!(shape(&[(5, 11)], 11), (tail(5, 11), 1));
+    assert_eq!(HardMaskShape::of(&[(0, 4)], &|| Some(4), 4), Ok(None));
+    assert_eq!(HardMaskShape::of(&[(0, 5)], &|| Some(5), 4), Ok(tail(0, 5)));
+    // The length that cannot be read ends the check.
+    assert_eq!(HardMaskShape::of(&[(100, 300)], &|| None, 11), Err(()));
 }
 
 // blast_app_util.cpp:644-651 and local_db_adapter.cpp:54-58 (quoted at `strategy_params`): after
@@ -425,7 +534,7 @@ fn a_volume_without_the_algorithm_is_refused_only_where_the_search_reads_its_mas
             ]
         );
         resolved
-            .check_losat_limits(db, "BLASTN")
+            .check_losat_limits(db, "BLASTN", 11)
             .err()
             .map(|error| format!("{error:#}"))
     };

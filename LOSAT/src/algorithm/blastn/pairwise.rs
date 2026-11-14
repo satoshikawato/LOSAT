@@ -217,6 +217,30 @@ impl Rows<'_> {
                 displayed_rows(hsp, query.seq(), subject_length, |from, to| {
                     subjects.upper_letters(s_idx, from, to)
                 })?;
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1796-1798
+            // ```c++
+            //     x_FillIdentityInfo(aln_vec_info->alnRowInfo->sequence[0],
+            //                        aln_vec_info->alnRowInfo->sequence[1],
+            //                        aln_vec_info->match,
+            // ```
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2127-2140
+            // ```c++
+            //     int min_length=min<int>((int)sequence_standard.size(), (int)sequence.size());
+            //     ...
+            //     for(int i=0; i<min_length; i++){
+            //         if(sequence_standard[i]==sequence[i]){
+            //     ...
+            //             match ++;
+            // ```
+            // The identities that outfmt 0 shows are those of the displayed rows (the stored
+            // letters in upper case, before the masks' lower case), counted again (series NP,
+            // M4a-2b decision H6): with `-db_hard_mask` the engine's `num_ident` counts a masked
+            // letter ('B' in the traceback) as a mismatch. Elsewhere the two counts are equal.
+            let displayed_ident = query_row
+                .iter()
+                .zip(&subject_row)
+                .filter(|(query, subject)| query == subject)
+                .count();
             lowercase_masked(
                 &mut query_row,
                 hsp.q_start,
@@ -232,8 +256,10 @@ impl Rows<'_> {
                 .chain(&subject_row)
                 .filter(|&&residue| residue == b'-')
                 .count();
+            let mut hit = hsp.clone().into_hit();
+            hit.num_ident = displayed_ident;
             hits.push(PairwiseHit {
-                hit: hsp.clone().into_hit(),
+                hit,
                 query_seq: Some(String::from_utf8(query_row).context("BLASTN query row")?),
                 subject_seq: Some(String::from_utf8(subject_row).context("BLASTN subject row")?),
                 query_frame: None,
@@ -252,8 +278,7 @@ impl Rows<'_> {
                 sum_n: None,
                 subject_stored_gaps: Vec::new(),
                 // The Seq-align's `num_ident` (`seqalign::query_records` writes the same
-                // `hsp.num_ident`), which `into_hit` copies to `hit.num_ident` as well: BLASTN's
-                // rows are not counted again.
+                // `hsp.num_ident`): the engine's count, which "Max ident" and the sorts read.
                 seqalign_num_ident: hsp.num_ident,
             });
         }

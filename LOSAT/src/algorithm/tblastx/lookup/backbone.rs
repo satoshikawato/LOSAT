@@ -1455,10 +1455,12 @@ pub(crate) fn x_lookup_table_for_profile_in(
         false,
     );
     // Dispatch point (LOSAT_X_TBNLUTLEAN, in the strict set): the same table without chains, every
-    // temporary freed by the build (`x_lut_direct::x_build_lean`); in diagnostics mode, whose prints
-    // read the chains, and with `=0`, the chain builder.
+    // temporary freed by the build (`x_lut_direct::x_build_lean`; 4-letter words, whose backbone
+    // index is wider than its 16 bits: the joint builder, `x_full_wide_table`, on `pool`'s threads
+    // when it has two or more, as the lean build's lists; item X2e of line RG); in diagnostics
+    // mode, whose prints read the chains, and with `=0`, the chain builder.
     let prepared = if x_tbn_lut_lean() {
-        match x_lut_direct::x_build_lean_in(prepared, threshold, matrix, word_length, pool) {
+        match x_table_without_chains(prepared, threshold, matrix, word_length, pool) {
             Ok(table) => {
                 x_count_tbn_lut(0);
                 return table;
@@ -1472,6 +1474,34 @@ pub(crate) fn x_lookup_table_for_profile_in(
     build_lookup_from_prepared(prepared, threshold, matrix, word_length).0
 }
 
+// No NCBI counterpart: which LOSAT builder makes a table without chains (the table is the
+// reference builder's either way).
+/// The table of `prepared` without chains, every temporary freed by the build: the lean build
+/// (`x_lut_direct::x_build_lean_in`, its lists on `pool`'s threads when it has two or more) or, for
+/// 4-letter words, whose backbone index is wider than its 16 bits, the joint builder
+/// (`x_full_wide_table`, its tasks on the same threads; item X2e of line RG). TBLASTN's tables and
+/// TBLASTX's full table of another matrix than BLOSUM62 or another word length than 3.
+/// `Err(prepared)` in diagnostics mode, whose prints read the chains.
+fn x_table_without_chains(
+    prepared: PreparedLookupQuery,
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+    pool: Option<&crate::utils::threading::SearchPool<'_>>,
+) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
+    let prepared =
+        match x_lut_direct::x_build_lean_in(prepared, threshold, matrix, word_length, pool) {
+            Ok(table) => return Ok(table),
+            Err(prepared) => prepared,
+        };
+    match pool.filter(|pool| pool.enabled() && pool.threads() > 1) {
+        Some(pool) => pool.install(|| {
+            x_full_wide_table(prepared, threshold, matrix, word_length, pool.threads())
+        }),
+        None => x_full_wide_table(prepared, threshold, matrix, word_length, 1),
+    }
+}
+
 // No NCBI counterpart (memory only; the table is the one `build_lookup_from_prepared` builds):
 // LOSAT_X_TBNLUTLEAN, in the strict set (on unless `LOSAT_X_TBNLUTLEAN=0`).
 /// Whether TBLASTN builds its lookup tables with `x_lut_direct::x_build_lean`.
@@ -1481,11 +1511,12 @@ fn x_tbn_lut_lean() -> bool {
 }
 
 // No NCBI counterpart: LOSAT_X_STATS counters; they do not change any value NCBI computes.
-/// TBLASTN tables built by `x_build_lean` (`[0]`) and by the chain builder (`[1]`).
+/// TBLASTN tables built without chains (`[0]`: `x_build_lean`, or the joint builder for 4-letter
+/// words) and by the chain builder (`[1]`).
 static X_TBN_LUT_BUILDS: [std::sync::atomic::AtomicU64; 2] =
     [const { std::sync::atomic::AtomicU64::new(0) }; 2];
 
-/// Counts one TBLASTN table built by `x_build_lean` (`which` 0) or the chain builder (1) for the
+/// Counts one TBLASTN table built without chains (`which` 0) or by the chain builder (1) for the
 /// `[X_STATS] TBNLUTLEAN` line (`LOSAT_X_STATS` set).
 fn x_count_tbn_lut(which: usize) {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -2272,6 +2303,9 @@ fn blast_aa_add_word_hits(
 ///                                   lookup->charsize, lookup->word_length,
 ///                                   query, location);
 /// ```
+/// (The tests' reference; every search builds its table with `build_ncbi_lookup_for_profile` or a
+/// builder without chains.)
+#[cfg(test)]
 pub fn build_ncbi_lookup(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
@@ -2298,7 +2332,8 @@ pub fn build_ncbi_lookup(
 //         }
 //     }
 // ```
-/// [`build_ncbi_lookup`] for BLASTP: the table is filled in place from the per-cell counts, in
+/// `build_ncbi_lookup` (the BLOSUM62 3-letter table of [`build_ncbi_lookup_for_profile`]) for BLASTP:
+/// the table is filled in place from the per-cell counts, in
 /// the same append order as the loop above and BlastAaLookupFinalize (x_lut_direct.rs), so the
 /// chains of the reference builder are never held.
 pub(crate) fn x_bp_build_ncbi_lookup(
@@ -2332,25 +2367,36 @@ pub(crate) fn x_bp_build_ncbi_lookup_as(
 // sfree(lookup->thin_backbone[i]);
 // lookup->thin_backbone[i] = NULL;
 // ```
-/// EXPERIMENT (LOSAT_X_TBXLUT): [`build_ncbi_lookup`] for the full table
-/// of a TBLASTX query batch. With the switch the table is filled in place from the per-cell counts,
-/// in the same append order as the reference builder and BlastAaLookupFinalize (x_lut_direct.rs),
-/// so no chain is held: NCBI frees each chain as it copies it (above), the reference builder here
-/// holds all of them, and the arena's blocks, until the table is complete.
+/// EXPERIMENT (LOSAT_X_TBXLUT): [`build_ncbi_lookup_for_profile`] for the full table of a TBLASTX
+/// query batch, of the words of the search's `matrix` and word size (`word_length`). With the
+/// switch the table is filled in place from the per-cell counts, in the same append order as the
+/// reference builder and BlastAaLookupFinalize (x_lut_direct.rs; another matrix or word length:
+/// TBLASTN's builders, `x_table_without_chains`, 4-letter words the joint builder of
+/// `x_pair_lut_wide.rs`), so no chain is held: NCBI frees each chain as it copies it (above), the
+/// reference builder here holds all of them, and the arena's blocks, until the table is complete
+/// (item X2e of line RG: `-window_size 0 -word_size 4 -threshold 1` held 1.3-1.5x NCBI's memory).
 pub(crate) fn x_tbx_build_ncbi_lookup(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     karlin_params: &crate::stats::KarlinParams,
     check_ideal: bool,
+    matrix: ScoringMatrix,
+    word_length: usize,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
-    x_lut_direct::x_tbx_build_lookup(queries, threshold, karlin_params, check_ideal)
+    x_lut_direct::x_tbx_build_lookup(
+        queries,
+        threshold,
+        karlin_params,
+        check_ideal,
+        matrix,
+        word_length,
+    )
 }
 
 // NCBI c++/src/algo/blast/core/blast_aalookup.c:227-245,438-465:
 // lookup->word_length = opt->word_size; lookup->threshold = opt->threshold;
 // row_max[i] = MAX(row_max[i], matrix[i][j]);
 // s_AddWordHits(lookup, matrix, query->sequence, ...);
-#[allow(dead_code)]
 pub(crate) fn build_ncbi_lookup_for_profile(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
@@ -2524,19 +2570,43 @@ fn build_ncbi_lookup_with(
         Err(prepared) => prepared,
     };
     // A backbone index wider than the direct builder's 16 bits (`-word_size 4`, item SC9 of line
-    // NP; for BLOSUM62's 3 letters a constant false): the joint builder of 32-bit indices
-    // (`x_pair_lut_wide.rs`) with the batch's lookup locations as its one table, which is the
-    // reference builder's table, on `parts` tasks. Diagnostics mode keeps the reference builder.
+    // NP; for BLOSUM62's 3 letters a constant false): the joint builder, on `parts` tasks.
+    // Diagnostics mode keeps the reference builder.
+    let prepared = match x_full_wide_table(prepared, threshold, matrix, word_length, parts) {
+        Ok(table) => return XBxTable::Wide(table),
+        Err(prepared) => prepared,
+    };
+    XBxTable::Wide(build_lookup_from_prepared(prepared, threshold, matrix, word_length).0)
+}
+
+// No NCBI counterpart: which LOSAT builder makes the table of a backbone index wider than 16 bits
+// (the table is the reference builder's either way, `x_pair_lut_wide.rs` module comment).
+/// The table of `prepared` from the joint builder of 32-bit backbone indices (`x_pair_lut_wide.rs`,
+/// the query's lookup locations as its one table) on `parts` tasks, where the 16-bit direct builder
+/// does not cover `word_length` (`-word_size 4`, item SC9 of line NP; BLASTX's table and TBLASTX's
+/// full table, item X2e of line RG); `Err(prepared)` for other word lengths and in diagnostics mode
+/// (whose prints read the reference builder's chains).
+#[inline(always)]
+fn x_full_wide_table(
+    prepared: PreparedLookupQuery,
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+    parts: usize,
+) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
     if !x_pair_lut::x_direct_covers(word_length)
         && x_pair_lut::x_pair_lut_wide::x_wide_covers(word_length)
         && !diagnostics_enabled()
     {
-        return XBxTable::Wide(
-            x_pair_lut::XPairLutQuery::x_from_prepared(prepared, threshold, matrix, word_length)
-                .x_build_full_wide(parts),
-        );
+        return Ok(x_pair_lut::XPairLutQuery::x_from_prepared(
+            prepared,
+            threshold,
+            matrix,
+            word_length,
+        )
+        .x_build_full_wide(parts));
     }
-    XBxTable::Wide(build_lookup_from_prepared(prepared, threshold, matrix, word_length).0)
+    Err(prepared)
 }
 
 /// The reference builder's table of a BLASTX lookup query (the inputs `build_ncbi_lookup_with`

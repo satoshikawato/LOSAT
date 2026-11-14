@@ -974,14 +974,14 @@ fn no_files_means_no_side_file_for_a_caller_that_has_no_output_file() {
     }
 }
 
-/// A receiver of side files (`SideFileReceiver`) that keeps them in memory, failing at a name.
+/// A receiver of side files (`report::run_files::FileReceiver`) that keeps them in memory, failing at a name.
 #[derive(Default)]
 struct Received {
     files: std::sync::Mutex<Vec<(Vec<u8>, Vec<u8>)>>,
     fail_at: Option<&'static [u8]>,
 }
 
-impl super::SideFileReceiver for Received {
+impl crate::report::run_files::FileReceiver for Received {
     fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
         if self.fail_at == Some(name) {
             return Err(std::io::Error::other("full"));

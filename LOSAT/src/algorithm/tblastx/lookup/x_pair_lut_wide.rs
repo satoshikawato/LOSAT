@@ -2,7 +2,8 @@
 //! index does not fit 16 bits (`-word_size 4`: 20 bits), built for all the batch's tables at once,
 //! with 32-bit indices, by counting and filling on the search pool. BLASTX's table of 4-letter words
 //! is its table of one list of all the query's lookup locations (`x_build_full_wide`, item SC9 of
-//! line NP). A child module of
+//! line NP), and so are TBLASTX's full table of a batch and TBLASTN's table of 4-letter words
+//! (`backbone.rs` `x_full_wide_table`, item X2e of line RG). A child module of
 //! `x_pair_lut.rs`, whose `x_build_group` (16-bit neighbour lists) keeps building the tables of
 //! words of 2 and 3 letters.
 //!
@@ -93,7 +94,8 @@
 //! Memory: the tables, the lists T(s) of the batch's sources by stripe (2 bytes a cell of a list
 //! and 8 a block, freed when the tables are built; no memo is kept across batches: at 4 letters the
 //! lists of a batch take tens to hundreds of megabytes), the counts of step 3 (4 bytes a backbone cell and
-//! table: TBLASTX builds at most 6 tables at once, x_pair_par.rs `X_MAX_GROUPS`, BLASTX one), and
+//! table: TBLASTX's unit path builds at most 6 tables at once, x_pair_par.rs `X_MAX_GROUPS`; a full
+//! table, of BLASTX, TBLASTN or TBLASTX's reference frame loop, is one), and
 //! for a while the sources' words in step 1 (20 bytes a query word) and a range's lists as made
 //! before they are put by stripe (step 2). No chain is made: the reference builder holds the chains
 //! and the table at once.
@@ -1027,12 +1029,12 @@ impl XPairLutQuery {
         self.x_build_tables_wide_with(tables, XWideOn::Pool(pool), mapped, None, true)
     }
 
-    /// BLASTX's lookup table of 4-letter words (`-word_size 4`, item SC9 of line NP), whose backbone
-    /// index the 16-bit direct builder does not cover: the table of one list of lookup locations,
-    /// all of the query's, which is `build_lookup_from_prepared`'s table (module comment: the full
-    /// table filtered to its own locations), in `BlastAaLookupFinalize`'s layout and never
-    /// compacted (BLASTX's scans index the whole backbone), built in tasks for `parts` threads of
-    /// the pool the build runs on.
+    /// The lookup table of 4-letter words (`-word_size 4`) of BLASTX (item SC9 of line NP), TBLASTN
+    /// and TBLASTX's reference frame loop (item X2e of line RG), whose backbone index the 16-bit
+    /// direct builder does not cover: the table of one list of lookup locations, all of the query's,
+    /// which is `build_lookup_from_prepared`'s table (module comment: the full table filtered to its
+    /// own locations), in `BlastAaLookupFinalize`'s layout and never compacted (their scans index the
+    /// whole backbone), built in tasks for `parts` threads of the pool the build runs on.
     pub(crate) fn x_build_full_wide(&self, parts: usize) -> BlastAaLookupTable {
         self.x_build_full_wide_with(XWideOn::Here(parts))
     }

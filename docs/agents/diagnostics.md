@@ -6225,8 +6225,10 @@ Scheduling (each value computed by one thread with the original function; order 
   Another matrix than BLOSUM62 or another word size than 3 (item X2e of line RG, 2026-11-14; before, those tables
   always took the chain builder): TBLASTN's builders without chains (`backbone.rs` `x_table_without_chains`: the lean
   build, no neighbour memo kept after it, and for `-word_size 4` the joint builder of 32-bit indices, one task).
-  `-window_size 0 -word_size 4 -threshold 1` on the arch pair (one thread, ws): max RSS 484 -> 210 MB (NCBI BLAST+
-  2.17.0 368 MB), 4.53 -> 0.84 s; `-threshold 2` 340 -> 160 MB (NCBI 281). `tests/tblastx_ref_lut.rs`
+  `-window_size 0 -word_size 4 -threshold 1` on the arch pair (one thread, ws, medians of 3): max RSS 483 -> 210 MB
+  (NCBI BLAST+ 2.17.0 368 MB), 3.95 -> 0.62 s; `-threshold 2` 341 -> 159 MB (NCBI 281); `-word_size 2` and BLOSUM45
+  at `-threshold 1` no more memory and less time (0.26 -> 0.17 s, 0.24 -> 0.20 s). The default paths' instructions
+  x0.99999-x1.00002 of dev (five programs, five runs each). `tests/tblastx_ref_lut.rs`
   `the_one_hit_loop_reports_the_same_at_other_word_sizes_and_matrices` (word sizes 4 and 2, BLOSUM45, one and four
   threads) and the unit test `tblastx_and_tblastn_tables_of_other_matrices_and_word_lengths_equal_the_chain_builders`.
   Measured: 3 kb of the option-sweep query against the sweep subjects at `-threshold +inf` with the

@@ -365,7 +365,7 @@ pub(super) fn speculative_batch(traceback_ctx: &TracebackCtx<'_>, batch: Specula
     let SpeculativeBatch {
         prelim_hits,
         prelim_index,
-        batch_size: SPECULATIVE_TRACEBACK_BATCH_SIZE,
+        batch_size,
         interval_tree,
         num_threads,
         parallel_pool,
@@ -373,7 +373,7 @@ pub(super) fn speculative_batch(traceback_ctx: &TracebackCtx<'_>, batch: Specula
         speculative_results,
         speculative_scratch,
     } = batch;
-    let batch_end = (prelim_index + SPECULATIVE_TRACEBACK_BATCH_SIZE).min(prelim_hits.len());
+    let batch_end = (prelim_index + batch_size).min(prelim_hits.len());
     speculative_jobs.clear();
     speculative_jobs.extend((prelim_index..batch_end).filter(|&index| {
         let p = &prelim_hits[index];

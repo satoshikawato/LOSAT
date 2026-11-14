@@ -133,10 +133,13 @@ static TOOL: Tool = Tool {
 //     return SegMaskerApplication().AppMain(argc, argv);
 // }
 // ```
-/// Runs `segmasker` with `words` (the command line after `losat segmasker`) on the process's
-/// standard streams; the exit status.
-pub(crate) fn run(words: &[OsString]) -> i32 {
-    crate::ncbi_app::run(&TOOL, words, work::run)
+/// Runs `segmasker` with `words` (the command line after `losat segmasker`), after its
+/// application start `start`, on the process's standard streams; the exit status.
+pub(crate) fn run(
+    words: &[OsString],
+    start: &crate::blastinput::ncbi_environment::ApplicationStart,
+) -> i32 {
+    crate::ncbi_app::run(&TOOL, words, start, work::run)
 }
 
 /// The run of one command line with `input` as its standard input, its output on `out` and its
@@ -408,26 +411,47 @@ mod tests {
         }
     }
 
-    // The file of `-conffile` is read, and `-dryrun` run, by the command line's application
-    // start; the library API, which these runs are (no start), refuses them as dustmasker's does.
+    // The library API's run (`run_with`) runs NCBI's application start as the command line's
+    // does (line RG item E1w-2): the file of `-conffile` is loaded in place of `segmasker.ini` (a
+    // name that is not a file is NCBI's critical post and abort, exit status 255: the table's row
+    // `conf_missing`), and `-dryrun` ends the run after the arguments, reading no input.
     #[test]
-    fn conffile_and_dryrun_are_refused_without_the_command_line_s_application_start() {
-        for (line, word) in [
-            (&["-conffile", "x.ini"][..], "-conffile"),
-            (&["-dryrun"], "-dryrun"),
+    fn conffile_and_dryrun_run_as_on_the_command_line() {
+        let missing = "losat-segmasker-unit-missing.ini";
+        assert_eq!(
+            run_words(&["-conffile", missing], b""),
+            (
+                255,
+                String::new(),
+                format!("Critical: (106.23) Registry file \"{missing}\" not found, aborting.\n")
+            )
+        );
+        let dir = std::env::temp_dir().join(format!(
+            "losat-segmasker-unit-conffile-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let conffile = dir.join("c.ini");
+        std::fs::write(&conffile, "[BLAST]\n").unwrap();
+        let conffile = conffile.to_str().unwrap();
+        let missing_input = dir.join("missing.fa");
+        let missing_input = missing_input.to_str().unwrap();
+        let record = b">p\nMKKLLPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPGGGGGHHHH\n";
+        for line in [
+            &["-dryrun"][..],
+            &["-in", missing_input, "-dryrun"],
+            &["-conffile", conffile, "-dryrun"],
         ] {
             assert_eq!(
-                run_words(line, b""),
-                (
-                    1,
-                    String::new(),
-                    format!(
-                        "Error: {}\n",
-                        crate::cli::toolkit_file_word_refusal("segmasker", word)
-                    )
-                ),
+                run_words(line, record),
+                (0, String::new(), String::new()),
                 "{line:?}"
             );
         }
+        // A file that loads changes nothing.
+        let plain = run_words(&[], record);
+        assert!(!plain.1.is_empty());
+        assert_eq!(run_words(&["-conffile", conffile], record), plain);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

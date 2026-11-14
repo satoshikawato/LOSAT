@@ -1,0 +1,13 @@
+0	Zero taxid sp.	zero common	zeroblast	Eukaryota
+562	Escherichia coli		enterobacteria	Bacteria
+4932	Saccharomyces cerevisiae	Saccharomyces cerevisiae	ascomycetes	Eukaryota
+7777	Quote "x", y; z	a,b	c"d	K;L
+8888	Tok <@taxid@> <@common_name@> sp.	<@blast_name@> c <@numhits@>	<@depth@>b<@next_taxid@>	Eukaryota
+8889	Bl <@bl_taxid@> sp.	bl common	blblast	Eukaryota
+8890	Url <@taxBrowserURL@> rid <@rid@> sp.	url common	urlblast	Eukaryota
+9606	Homo sapiens	human	primates	Eukaryota
+10090	Mus musculus	house mouse	rodents	Eukaryota
+12908	unclassified sequences		unclassified	unclassified
+32630	synthetic construct		-	-
+55555	Longus nominus xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	long common name yyyyyyyyyyyyyyyyyyyyyyyyyyyyyy	longblast	Eukaryota
+99990	Last entry sp.	last common	lastblast	Eukaryota

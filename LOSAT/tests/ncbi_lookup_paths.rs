@@ -12,6 +12,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use crate::library_examples::example_binary;
+
+mod temp_support;
+use temp_support::TempFile;
+
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 const INPUTS: &str = "tests/fasta/outfmt11";
 
@@ -50,13 +55,13 @@ fn run_in(
     }
     let home = dir.join("home");
     fs::create_dir_all(&home).unwrap();
+    // The worker log of this run (one thread: the probe writes none): removed with the run, kept
+    // when the test panics.
+    let log = TempFile::keep_on_failure("losat_ncbi_lookup_paths_worker", "worker.log");
     command
         .env("HOME", &home)
         .env("APPDATA", &home)
-        .env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat_ncbi_lookup_paths_worker.log"),
-        )
+        .env("LOSAT_BLASTX_WORKER_LOG", &log)
         .envs(envs.iter().copied())
         .current_dir(dir)
         .args(args)
@@ -125,6 +130,29 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
         }
     };
     let data_path = format!("{}{dp}", if cfg!(windows) { ";;" } else { "::" });
+    // The subjects as databases too, for the library's database searches (`run_local_database`).
+    for (fasta, dbtype, name) in [
+        ("arch_tbx_s.fna", "nucl", "TBLASTX"),
+        ("arch_bx_s.faa", "prot", "BLASTX"),
+    ] {
+        let out = dir.join("db").join(name).display().to_string();
+        let made = run_in(
+            Path::new(BIN),
+            &[
+                "makeblastdb",
+                "-in",
+                &input(fasta),
+                "-dbtype",
+                dbtype,
+                "-out",
+                &out,
+            ],
+            &dir,
+            &[],
+            b"",
+        );
+        assert_eq!(made.status.code(), Some(0), "{made:?}");
+    }
     for (program, words) in matrix_runs() {
         let mut args: Vec<&str> = words.iter().map(String::as_str).collect();
         let query = input(if program == "TBLASTX" {
@@ -135,6 +163,11 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
         args.extend(["-matrix", "mymat", "-num_threads", "1"]);
         let mut with_query = args.clone();
         with_query.extend(["-query", &query]);
+        // The same search of the database of the subject.
+        let db = dir.join("db").join(program).display().to_string();
+        let mut with_db = with_query.clone();
+        with_db[1] = "-db";
+        with_db[2] = &db;
         for (at, envs) in [
             ("bm/MYMAT", vec![("BLASTMAT", bm.as_str())]),
             ("bm/nt/MYMAT", vec![("BLASTMAT", bm.as_str())]),
@@ -164,6 +197,14 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
                     && stderr.contains(&format!("not supported by LOSAT's {program}")),
                 "{program} {at}: {stderr}"
             );
+            check_library(&with_query, &dir, &envs, &output, program);
+            let output = run_in(Path::new(BIN), &with_db, &dir, &envs, b"");
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("-matrix mymat is not a matrix of NCBI BLAST+'s tables"),
+                "{program} {at} -db: {output:?}"
+            );
+            check_library(&with_db, &dir, &envs, &output, program);
             // No query, no batch: NCBI reads no matrix (an empty pipe: the report without
             // queries).
             let mut empty = args.clone();
@@ -187,9 +228,46 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
                 stderr.starts_with("BLAST engine error: Error: Unknown error code -1"),
                 "{program} {envs:?}: {stderr}"
             );
+            check_library(&with_query, &at, &envs, &output, program);
+            let output = run_in(Path::new(BIN), &with_db, &at, &envs, b"");
+            check_library(&with_db, &at, &envs, &output, program);
         }
     }
     let _ = fs::remove_dir_all(&dir);
+}
+
+/// The library API's search of the same words (`examples/library_command_line`, line RG item
+/// E1w-2): a search of records with a `-matrix` that NCBI's tables do not have runs the
+/// application start and looks the file up with its settings, as the command line does
+/// (`TblastxArgs::find_matrix_file`, `ResolvedOptions::find_matrix_file`). Its error is the
+/// command line's text (the example writes a failure's message, status 1; TBLASTX's refusal
+/// without the command line's `Error: `), and BLASTX's prolog is the same.
+fn check_library(args: &[&str], dir: &Path, envs: &[(&str, &str)], cli: &Output, program: &str) {
+    let library = run_in(
+        &example_binary("library_command_line"),
+        args,
+        dir,
+        envs,
+        b"",
+    );
+    let stderr = String::from_utf8_lossy(&library.stderr).into_owned();
+    let stderr = match program {
+        "TBLASTX" if cli.status.code() == Some(1) => format!("Error: {stderr}"),
+        _ => stderr,
+    };
+    assert_eq!(
+        (
+            library.status.code(),
+            stderr,
+            String::from_utf8_lossy(&library.stdout)
+        ),
+        (
+            Some(1),
+            String::from_utf8_lossy(&cli.stderr).into_owned(),
+            String::from_utf8_lossy(&cli.stdout)
+        ),
+        "{program} {args:?} {envs:?}: the library"
+    );
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1650-1652 (a file found that

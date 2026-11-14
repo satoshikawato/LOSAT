@@ -656,8 +656,9 @@ struct Facility {
 // sort, which `try_std_sort` follows step by step, is then still defined while it reads inside the
 // vector, and LOSAT gives its order. The comparison stays irreflexive and asymmetric with a NaN, so
 // the median-of-three and partition sentinels of `__unguarded_partition` hold; the walk of the
-// final insertion sort past the first 16 has a sentinel left of it in every part made by a
-// partition, but not inside a part that the depth limit hands to the heap sort. Where a loop would
+// final insertion sort past the first 16 has a sentinel left of it in every part right of a
+// partition, but not in the leftmost part when the depth limit hands it to the heap sort (no input
+// with rpsbproc's comparison was found that reaches it: PS16d delta review S3-1). Where a loop would
 // read outside the vector (`OutOfRange`), NCBI's result is its undefined read: refused, `Err` with
 // the refusal. PS16d review S3-3; the permutations against libstdc++ 13 in
 // `utils::std_sort` tests.)

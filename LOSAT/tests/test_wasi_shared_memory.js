@@ -413,7 +413,7 @@ test("verifyGuarded rejects an unguarded atomic, a forged helper and a wrong ato
 // A wait keeps its timeout while the host has not ended the memory's workers, and records its address
 // in the guard's table; once the host set WAITS_ENDING (or while the table is full) it waits in slices
 // and calls sched_yield between them, where WebKit ends a worker (the header of wasi_shared_memory.js).
-// The host ends waits as web/app/src/infra/reactor/shared-memory.ts endWaits does: WAITS_ENDING, then a
+// The host ends waits as web/packages/losat/src/infra/reactor/shared-memory.ts endWaits does: WAITS_ENDING, then a
 // notify of every recorded address until the table is empty. The results are the instruction's.
 const WAIT_CHILD = `
   const { Worker } = require("node:worker_threads");

@@ -9,10 +9,11 @@ use crate::ncbi_app::args::{ArgException, Args};
 use crate::ncbi_app::files::{file_exception, open_input_file, Cin, Ostream};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{err_post_x, NcbiException};
+use crate::seqdb::mask::FilterProgram;
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 use crate::seqid::rank::{best_rank_score, find_best};
 use crate::seqmasks_io::run::{finish, serial_write_failure, write_failure, RunFailure};
-use crate::seqmasks_io::writer::{FilterProgram, MaskInfoWriter, MaskWriter, Serial, WriteError};
+use crate::seqmasks_io::writer::{MaskInfoWriter, MaskWriter, Serial, WriteError};
 use crate::writedb::fasta_source::reader::{FastaReader, ReadError, ReaderFlags};
 
 /// How a run stops early.
@@ -103,7 +104,7 @@ pub(super) fn run(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
-    match run_masks(args, stdin, out) {
+    match run_masks(args, stdin, out, diag) {
         Ok(()) => 0,
         Err(Failure::Caught(exception)) => {
             diag.cerr(format!("{}\n", exception.what()).as_bytes());
@@ -121,7 +122,12 @@ pub(super) fn run(
 }
 
 /// The body of `Run`'s `try` block, and the writer's destruction after it.
-fn run_masks(args: &Args, stdin: &mut Cin<'_>, out: &mut dyn Write) -> Result<(), Failure> {
+fn run_masks(
+    args: &Args,
+    stdin: &mut Cin<'_>,
+    out: &mut dyn Write,
+    diag: &mut Diag,
+) -> Result<(), Failure> {
     let value = |name| {
         args.value(name)
             .expect("a key with a default or a mandatory key")
@@ -148,6 +154,7 @@ fn run_masks(args: &Args, stdin: &mut Cin<'_>, out: &mut dyn Write) -> Result<()
     finish(
         MaskWriter::MaskInfo(writer),
         &mut out,
+        diag,
         result,
         outfmt,
         super::PROGRAM,

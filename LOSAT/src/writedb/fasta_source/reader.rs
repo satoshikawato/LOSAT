@@ -13,16 +13,14 @@ use std::io::Read;
 use super::defline_ids;
 use super::line_reader::BufferedLineReader;
 use super::pack::{self, Coding, Segment};
-use super::title::printable_string;
 use crate::blastinput::fasta_reader::reader::{
     canonicalize_string, convert_bad_indexes_to_string, gap_type_info, linkage_evidence_value,
     seq_data_in_title_warning, GapType, LinkEvid, Problem, LINKAGE_UNSPECIFIED,
 };
-use crate::blastinput::fasta_reader::stream::{
-    input_space, trim_input_end, trim_input_space, trim_input_start,
-};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::ncbi_str::{is_space, string_to_uint, truncate_spaces};
+use crate::ncbi_str::{
+    is_blank, is_space, printable_string, string_to_uint, truncate_spaces, truncate_spaces_begin,
+};
 use crate::seqid::accguide::{identify_seq_id, parse_flags, SeqIdWarning, F_NUC, F_PROT};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 use crate::seqid::rank::{best_rank_score, find_best};
@@ -792,9 +790,9 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// With `ReaderFlags::mask_from_fasta`, `CMaskFromFasta::GetMask()` of the record that
-    /// `read_one_seq` returned last: the intervals of its lower case letters and of its
-    /// interval lines (0-based, inclusive), in the order in which they were closed or read;
-    /// empty otherwise. The intervals stay with the reader (not in `Record`) so that the
+    /// `read_one_seq` read last (after an error, what it had read of that record): the
+    /// intervals of its lower case letters and of its interval lines (0-based, inclusive), in
+    /// the order in which they were closed or read; empty otherwise. The intervals stay with the reader (not in `Record`) so that the
     /// records of the other programs, which never have any, are not made larger.
     pub(crate) fn take_masks(&mut self) -> Vec<(u32, u32)> {
         std::mem::take(&mut self.state.masks)
@@ -958,7 +956,8 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// `read_one_seq` with `ReaderFlags::mask_from_fasta` as `MASK_FROM_FASTA`: the records of
-    /// the other readers take no step of convert2blastmask's masks (one choice per record).
+    /// the other readers take no step of convert2blastmask's masks but `close_mask`, which has
+    /// nothing open to close for them (one choice per record).
     fn read_one_seq_of<const MASK_FROM_FASTA: bool>(
         &mut self,
         warn: ReaderWarn<'_>,
@@ -1009,7 +1008,8 @@ impl<R: Read> FastaReader<R> {
             self.lines.next_line();
             let line_number = self.lines.line_number();
             let raw = self.lines.line();
-            let line = trim_input_space(raw);
+            // `NStr::TruncateSpaces_Unsafe(line)` (`eTrunc_Both`, fasta.cpp:376).
+            let line = truncate_spaces(raw);
             if line.is_empty() || matches!(line[0], b'!' | b'#' | b';') {
                 continue;
             }
@@ -1199,10 +1199,10 @@ impl RecordState {
         self.hist_old_id = None;
         let len = defline.len();
         let mut has_range = false;
-        if len > 1 && !defline[1..].iter().all(|&byte| input_space(byte)) {
+        if len > 1 && !is_blank(&defline[1..]) {
             let start = 1 + defline[1..]
                 .iter()
-                .position(|&byte| !input_space(byte))
+                .position(|&byte| !is_space(byte))
                 .unwrap_or(len - 1);
             let mut title_start = start;
             if self.flags.parse_ids {
@@ -1244,7 +1244,7 @@ impl RecordState {
                 }
                 let (range_len, _, _) = defline_ids::parse_range(&defline[start..pos]);
                 let id_string = &defline[start..pos - range_len];
-                if id_string.iter().all(|&byte| input_space(byte)) {
+                if is_blank(id_string) {
                     return Err(ParseError::new(
                         Thrower::ParseDefline,
                         ErrCode::Format,
@@ -1263,7 +1263,7 @@ impl RecordState {
                 )?;
                 has_range = range_len > 0;
             }
-            while title_start < len && input_space(defline[title_start]) {
+            while title_start < len && is_space(defline[title_start]) {
                 title_start += 1;
             }
             if title_start < len {
@@ -1455,7 +1455,7 @@ impl RecordState {
                 }
             } else if c == b'-' {
                 good += 1;
-            } else if input_space(c) || c.is_ascii_digit() {
+            } else if is_space(c) || c.is_ascii_digit() {
                 // White space and digits are neutral.
             } else if c == b';' {
                 break;
@@ -1723,8 +1723,8 @@ impl RecordState {
     /// }
     /// ```
     /// `CMaskFromFasta` keeps its own copy of each interval (`x_OpenMask`, `x_CloseMask`,
-    /// quoted at `close_mask`).
-    #[cold]
+    /// quoted at `close_mask`). Only `parse_data_line::<true>` (convert2blastmask) calls it,
+    /// once for each run of residues, so it is not cold: the other readers' instance has no call.
     fn mask_run(&mut self, run: &[u8]) {
         let base = self.current_pos_with_gaps();
         for (i, byte) in run.iter().enumerate() {
@@ -2085,21 +2085,18 @@ impl RecordState {
     fn parse_gap_line(&mut self, line: &[u8], line_number: u64, warn: ReaderWarn<'_>) {
         self.close_gap(false, self.seq_data.len(), 0);
 
-        let mut remaining = trim_input_space(&line[2..]);
+        let mut remaining = truncate_spaces(&line[2..]);
         let position = self.seq_data.len();
         if let Some(rest) = remaining.strip_prefix(b"unk") {
-            remaining = trim_input_start(rest);
+            remaining = truncate_spaces_begin(rest);
         }
         let digits = remaining
             .iter()
             .position(|byte| !byte.is_ascii_digit())
             .unwrap_or(remaining.len());
-        // `NStr::StringToUInt` with `fConvErr_NoThrow`: 0 for an empty string and for a
-        // value above 4,294,967,295.
-        let mut gap_size = std::str::from_utf8(&remaining[..digits])
-            .ok()
-            .and_then(|text| text.parse::<u32>().ok())
-            .unwrap_or(0);
+        // `NStr::StringToUInt(sDigits, NStr::fConvErr_NoThrow)`: 0 for an empty string and for
+        // a value above 4,294,967,295.
+        let mut gap_size = string_to_uint(&remaining[..digits]).unwrap_or(0);
         if gap_size == 0 {
             post_warning(
                 self.flags.ignored_problems,
@@ -2109,7 +2106,7 @@ impl RecordState {
             );
             gap_size = 1;
         }
-        remaining = trim_input_start(&remaining[digits..]);
+        remaining = truncate_spaces_begin(&remaining[digits..]);
 
         let mut mods: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
         while !remaining.is_empty() {
@@ -2137,10 +2134,10 @@ impl RecordState {
                 );
                 break;
             };
-            let key = trim_input_space(&remaining[1..equal]).to_vec();
-            let value = trim_input_space(&remaining[equal + 1..close]).to_vec();
+            let key = truncate_spaces(&remaining[1..equal]).to_vec();
+            let value = truncate_spaces(&remaining[equal + 1..close]).to_vec();
             mods.push((key, value));
-            remaining = trim_input_start(&remaining[close + 1..]);
+            remaining = truncate_spaces_begin(&remaining[close + 1..]);
         }
         // `multimap` iterates in key order (the order of insertion for equal keys).
         mods.sort_by(|left, right| left.0.cmp(&right.0));
@@ -2560,7 +2557,8 @@ impl RecordState {
                 warn,
             );
         }
-        let processed_title = trim_input_end(trim_input_start(text));
+        // `NStr::TruncateSpacesInPlace(processed_title)` (`eTrunc_Both`, fasta.cpp:2038).
+        let processed_title = truncate_spaces(text);
         if !processed_title.is_empty() {
             self.title_descr = Some(processed_title.to_vec());
         }

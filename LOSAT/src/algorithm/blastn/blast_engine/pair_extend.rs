@@ -1,11 +1,12 @@
 //! The steps of the offset pairs of a blastn subject chunk's two-stage scan, as
-//! `search_query_batch`'s `collect_prelim_hits_for_chunk` runs them for each batch of pairs its
-//! scan collects, in the order of the pairs, on one thread (`extend_offset_pairs`): for each pair
-//! the word extension of the lookup table hit of a two-stage table (`TwoStageLookup`) to
+//! `two_stage_scan::scan_two_stage_lookup` (the two-stage branch of
+//! `collect_prelim_hits_for_chunk`) runs them for each batch of pairs its scan collects, in the
+//! order of the pairs, on one thread (`extend_offset_pairs`): for each pair the word extension of
+//! the lookup table hit of a two-stage table (`TwoStageLookup`) to
 //! `word_length` letters (`word_extend_pair`), the diagonal's last hit, the word type, the
 //! off-diagonal search of a single word in two-hit mode (`off_diagonal_found`, which the scan of
-//! the other tables, `na_lookup` and `pv_direct_lookup`, calls too), the ungapped extension and
-//! the save of the initial hit.
+//! the other tables, `na_lookup` and `pv_direct_lookup`, calls too: `na_scan::scan_na_lookup`),
+//! the ungapped extension and the save of the initial hit.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1143-1150,1160-1161 (the end of
 //! the loop of `s_BlastNaExtend`, :1052-1174; `s_BlastSmallNaExtend`, :1486-1593, ends the same
@@ -56,8 +57,8 @@ use crate::algorithm::blastn::lookup::TwoStageLookup;
 /// tables), whether its aligned one-byte form applies, whether the chunk is masked, the word and
 /// lookup word lengths, the packed subject, the query with its sentinels and the switch of the
 /// debug counters; then what the other steps read, in groups below. Built once per chunk by
-/// `collect_prelim_hits_for_chunk` before the scan, with the names there; every field is a shared
-/// reference or a `Copy` value.
+/// `two_stage_scan::scan_two_stage_lookup` before the scan, with the names there; every field is a
+/// shared reference or a `Copy` value.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1052-1060,1064,1081
 /// (`s_BlastNaExtend`) and :651,656,658 (`s_BlastnDiagTableExtendInitialHit`; the hash's
@@ -142,9 +143,9 @@ pub(super) struct PairExtendInputs<'a> {
 /// What the steps write: the chunk's initial hits, the diagonal table (the array's levels and
 /// lengths, or the hash), and the debug counters (the seeds in the debug window, the word
 /// extension's left and right steps, the ungapped extensions, the hits under the cutoff and the
-/// hits saved). Built once per chunk by `collect_prelim_hits_for_chunk` after `PairExtendInputs`,
-/// from its scratch and its counters (references only, the types the steps had as a closure), and
-/// held by the scan's callbacks for the whole scan.
+/// hits saved). Built once per chunk by `two_stage_scan::scan_two_stage_lookup` after
+/// `PairExtendInputs`, from its scratch and its counters (references only, the types the steps had
+/// as a closure), and held by the scan's callbacks for the whole scan.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1058-1059 (`s_BlastNaExtend`),
 /// :641-642 (`s_BlastnDiagTableExtendInitialHit`) and :809 (`s_BlastnDiagHashExtendInitialHit`)
@@ -1383,8 +1384,8 @@ pub(super) fn word_extend_pair(
 /// window, the off-diagonal range (`scan_range`, NCBI's `scan_range` of the word options) and the
 /// word length, the array's length, mask and size, the array's levels and lengths and the hash
 /// (read only), and the seed's diagonal (masked for the array), start and end in the table's
-/// coordinates. Built at each call, from the names of the caller (the na branch passes `safe_k`
-/// as the word length).
+/// coordinates. Built at each call, from the names of the caller (`na_scan::scan_na_lookup`
+/// passes `safe_k` as the word length).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:658,663-669
 /// ```c

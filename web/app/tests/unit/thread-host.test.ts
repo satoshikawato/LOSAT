@@ -1,10 +1,10 @@
-// ThreadHost (src/infra/engine-worker/thread-host.ts) with fake thread workers: preparing
+// ThreadHost (web/packages/losat/src/infra/engine-worker/thread-host.ts) with fake thread workers: preparing
 // them, starting a thread, a thread worker that does not start in time, the keeper of the
 // shared memory, and the use count of the threads. The real thread workers run in the
 // browsers (tests/e2e/engine.spec.ts).
 import { Worker as NodeWorker } from 'node:worker_threads';
 import { describe, expect, it, vi } from 'vitest';
-import { InstanceUse } from '../../src/infra/engine-worker/instance-use';
+import { InstanceUse } from '../../../packages/losat/src/infra/engine-worker/instance-use';
 import {
   SLOT_ENDED,
   SLOT_FAILED,
@@ -16,8 +16,8 @@ import {
   type KeeperCommand,
   type ThreadCommand,
   type ThreadFault,
-} from '../../src/infra/engine-worker/protocol';
-import { ThreadHost, ThreadHostError } from '../../src/infra/engine-worker/thread-host';
+} from '../../../packages/losat/src/infra/engine-worker/protocol';
+import { ThreadHost, ThreadHostError } from '../../../packages/losat/src/infra/engine-worker/thread-host';
 
 type Behaviour = 'ready-and-start' | 'ready-never-start' | 'never-ready';
 

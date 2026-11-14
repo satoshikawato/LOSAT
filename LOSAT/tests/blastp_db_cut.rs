@@ -28,6 +28,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 mod reach_support;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
@@ -53,6 +56,8 @@ fn fixture(name: &str) -> PathBuf {
 
 /// What one run printed: the report and standard error.
 struct Run {
+    /// The run\'s worker log, when the test made one: kept until the caller drops the run.
+    _log: Option<TempFile>,
     code: Option<i32>,
     stdout: Vec<u8>,
     stderr: String,
@@ -117,12 +122,7 @@ fn blastp_any_exit(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bpdbcut-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastp_db_cut_worker");
     let output = command
         .arg("blastp")
         .args(["-task", task])
@@ -140,6 +140,7 @@ fn blastp_any_exit(
         .output()
         .expect("run LOSAT");
     Run {
+        _log: log,
         code: output.status.code(),
         stdout: output.stdout,
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),

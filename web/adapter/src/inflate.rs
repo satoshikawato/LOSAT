@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use LOSAT::web_adapter::{compression_of_name, Compression, PushInflater};
+use losat::web_adapter::{compression_of_name, Compression, PushInflater};
 
 use crate::emit::{emit, STREAM_INFLATED};
 

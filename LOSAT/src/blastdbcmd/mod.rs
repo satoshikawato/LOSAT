@@ -61,10 +61,13 @@ static TOOL: Tool = Tool {
     post_prefix: Some("blastdbcmd"),
 };
 
-/// Runs `blastdbcmd` with `words` (the command line after `losat blastdbcmd`) on the process's
-/// standard streams; the exit status.
-pub fn run(words: &[OsString]) -> i32 {
-    crate::ncbi_app::run(&TOOL, words, run_body)
+/// Runs `blastdbcmd` with `words` (the command line after `losat blastdbcmd`), after its
+/// application start `start`, on the process's standard streams; the exit status.
+pub fn run(
+    words: &[OsString],
+    start: &crate::blastinput::ncbi_environment::ApplicationStart,
+) -> i32 {
+    crate::ncbi_app::run(&TOOL, words, start, run_body)
 }
 
 /// The run of one command line with `input` as its standard input (a batch file `-`), its

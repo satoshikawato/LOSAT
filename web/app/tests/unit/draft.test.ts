@@ -1,15 +1,15 @@
 import { gzipSync, zstdCompressSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
+import { sha256Hex } from 'losat';
+import type { InputRole } from 'losat/domain';
+import type { EnginePrepareHint, ValidationResult } from 'losat/ports';
 import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { SearchDraft, type DraftSource } from '../../src/application/draft';
-import type { InputRole } from '../../src/domain/programs';
-import { sha256Hex } from '../../src/infra/browser/platform';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
-import type { EnginePrepareHint, ValidationResult } from '../../src/ports/engine';
 import { NodeInflater } from './support/node-inflater';
 
 function setup(

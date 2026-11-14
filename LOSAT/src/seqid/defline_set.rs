@@ -328,21 +328,13 @@ impl DeflineSet {
     //     case e_Local:
     //         SetLocal().SetStrOrId(acc);
     // ```
-    // `TruncateSpaces` drops the bytes that C's `isspace` takes; `SetStrOrId` gives an
-    // integer tag for a label that reads as one, which `compare` treats as the same tag.
+    // `TruncateSpaces_Unsafe` (`eTrunc_Both`) is `ncbi_str::truncate_spaces`; `SetStrOrId` gives
+    // an integer tag for a label that reads as one, which `compare` treats as the same tag.
     pub fn bioseq_defline(&self, target: &ParsedSeqId) -> Option<usize> {
         let mut label = Vec::new();
         content(target, true, &mut label);
-        let is_space = |c: &u8| matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r');
-        let start = label
-            .iter()
-            .position(|c| !is_space(c))
-            .unwrap_or(label.len());
-        let end = label
-            .iter()
-            .rposition(|c| !is_space(c))
-            .map_or(start, |end| end + 1);
-        let local = ParsedSeqId::Local(ObjectId::Str(label[start..end].to_vec()));
+        let acc = crate::ncbi_str::truncate_spaces(&label);
+        let local = ParsedSeqId::Local(ObjectId::Str(acc.to_vec()));
         self.deflines
             .iter()
             .position(|defline| seqid_in(&defline.ids, target) || seqid_in(&defline.ids, &local))

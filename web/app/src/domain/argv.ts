@@ -1,7 +1,7 @@
 // Search conditions are represented only as a LOSAT CLI argv (plan §5.3). The same argv
 // is validated and run by the engine, shown as the CLI command, and stored in sessions.
-import { CUSTOM_OUTPUT, FILES_OUT, isFilesOutput, OUTFMT_FLAG, outfmtOption, type RunOutput } from './output-format';
-import type { ProgramId } from './programs';
+import { CUSTOM_OUTPUT, type ProgramId, type RunOutput } from 'losat/domain';
+import { FILES_OUT, isFilesOutput, OUTFMT_FLAG, outfmtOption } from './output-format';
 
 /**
  * Flags that the application manages itself; users cannot set them. A run writes outfmt 0, 6

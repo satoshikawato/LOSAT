@@ -37,6 +37,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
 /// `0`, the default before, unless the search sets it: every search here runs as it was written,
 /// with the switches off that it does not name (the default runs in `default_bundle.rs`).
@@ -125,6 +128,8 @@ impl RedoPar {
 /// search the path ran), the lists the redo freed (`[TIMING] x_bppfree:`, summed), and
 /// standard error.
 struct Run {
+    /// The run\'s worker log, when the test made one: kept until the caller drops the run.
+    _log: Option<TempFile>,
     stdout: Vec<u8>,
     redo_par: Vec<RedoPar>,
     freed_lists: usize,
@@ -152,12 +157,7 @@ fn blastp(query: &Path, threads: u32, vars: &[(&str, &str)], args: &[&str]) -> R
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bpredopar-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastp_redo_par_worker");
     let output = command
         .arg("blastp")
         .arg("-query")
@@ -197,6 +197,7 @@ fn blastp(query: &Path, threads: u32, vars: &[(&str, &str)], args: &[&str]) -> R
         })
         .reduce(|sum, count| sum + count);
     Run {
+        _log: log,
         stdout: output.stdout,
         redo_par,
         freed_lists,

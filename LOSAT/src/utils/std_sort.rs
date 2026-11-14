@@ -13,8 +13,9 @@
 //! own: the first scan of `__unguarded_partition` (stopped by a sentinel that the median of three
 //! and the swaps leave) and the walk of `__unguarded_linear_insert` in `__final_insertion_sort`
 //! after the first 16 elements (stopped by an element that a partition left before it). A
-//! comparison that is not irreflexive and asymmetric, or a part sorted by the heap sort, can take
-//! them past the vector's ends, where NCBI reads outside it (undefined): `try_std_sort` gives
+//! comparison that is not irreflexive and asymmetric, or the leftmost part when the depth limit
+//! hands it to the heap sort (every other part has a partition's pivot left of it), can take them
+//! past the vector's ends, where NCBI reads outside it (undefined): `try_std_sort` gives
 //! `OutOfRange` before such a read. (`introsort_loop` compares positions as libstdc++'s signed
 //! differences.)
 

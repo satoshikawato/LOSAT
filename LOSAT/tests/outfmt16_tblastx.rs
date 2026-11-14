@@ -17,6 +17,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+mod temp_support;
+use temp_support::{home_and_worker_log, Finished, RunFiles};
+
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/outfmt16")
 }
@@ -35,7 +38,9 @@ fn temp_dir(stem: &str) -> PathBuf {
     dir
 }
 
-fn command(env: &[(&str, &str)]) -> Command {
+/// LOSAT with an empty home, a worker log and `env`: the home and the log are removed when the
+/// returned files are dropped (the log is kept when the test panics).
+fn command(env: &[(&str, &str)]) -> (Command, RunFiles) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") {
@@ -52,28 +57,25 @@ fn command(env: &[(&str, &str)]) -> Command {
     for name in ["BATCH_SIZE", "CHUNK_SIZE", "BLASTDB"] {
         command.env_remove(name);
     }
-    let home = std::env::temp_dir().join("losat_outfmt16_home");
-    fs::create_dir_all(&home).expect("empty home");
-    command.env("HOME", &home).env("USERPROFILE", &home);
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_outfmt16_worker.log"),
-    );
+    let files = home_and_worker_log(&mut command, "losat_outfmt16");
     command.envs(env.iter().copied());
-    command
+    (command, files)
 }
 
-fn run_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
-    command(env)
+fn run_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Finished<Output> {
+    let (mut command, files) = command(env);
+    let output = command
         .current_dir(dir)
         .args(args)
         .output()
-        .expect("run LOSAT")
+        .expect("run LOSAT");
+    Finished::new(output, files)
 }
 
-fn run_with_stdin(args: &[&str], stdin: &[u8]) -> Output {
+fn run_with_stdin(args: &[&str], stdin: &[u8]) -> Finished<Output> {
     use std::io::Write;
-    let mut child = command(&[])
+    let (mut command, files) = command(&[]);
+    let mut child = command
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -81,7 +83,7 @@ fn run_with_stdin(args: &[&str], stdin: &[u8]) -> Output {
         .spawn()
         .expect("run LOSAT");
     child.stdin.take().unwrap().write_all(stdin).unwrap();
-    child.wait_with_output().expect("wait for LOSAT")
+    Finished::new(child.wait_with_output().expect("wait for LOSAT"), files)
 }
 
 const SUBJECT: &str = "snucl.fna";

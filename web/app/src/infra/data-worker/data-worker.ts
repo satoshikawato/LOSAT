@@ -3,16 +3,25 @@
 // keeps the saved copies of Example sets (OPFS examples/, line WF-2).
 // Only this worker uses OPFS synchronous access handles. It holds its own instance of the
 // serial reactor, separate from the Engine worker's, for the index scan, the input check and the
-// engine's describe/validate (src/infra/reactor/control.ts); the inflation of compressed sources
-// and of downloaded Example sets (src/infra/reactor/inflater.ts) runs on an instance of its own
+// engine's describe/validate (web/packages/losat/src/infra/reactor/control.ts); the inflation of compressed sources
+// and of downloaded Example sets (the package's src/infra/reactor/inflater.ts) runs on an instance of its own
 // for each file, dropped at its end. This module is the worker's composition root.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
+import {
+  instantiateSerial,
+  loadReactor,
+  reactorControl,
+  ReactorInflater,
+  ReactorInputChecker,
+  ReactorScanner,
+  reopening,
+  sha256Hex,
+  type EngineControl,
+  type ReactorAbi,
+} from 'losat';
+import type { FileInflater, InputChecker, RecordScanner, WholeFileInflater } from 'losat/ports';
 import type { CountsStore } from '../../ports/counts';
 import type { ExampleStore } from '../../ports/example';
-import type { FileInflater, WholeFileInflater } from '../../ports/inflate';
-import type { InputChecker } from '../../ports/input-check';
-import type { RecordScanner } from '../../ports/scan';
-import { sha256Hex } from '../browser/platform';
 import { DataService } from '../data/data-service';
 import { opfsCountsStore } from '../data/counts-store';
 import { opfsExampleStore } from '../data/example-store';
@@ -20,12 +29,6 @@ import { inflateFile } from '../data/inflate';
 import { opfsAccess } from '../data/opfs-block-store';
 import { startDataSession, type SessionLocks } from '../data/session';
 import { FakeInputChecker, FakeScanner } from '../fake/fake-fasta';
-import type { ReactorAbi } from '../reactor/abi';
-import { ReactorInputChecker } from '../reactor/checker';
-import { reactorControl, type EngineControl } from '../reactor/control';
-import { ReactorInflater } from '../reactor/inflater';
-import { instantiateSerial, loadReactor } from '../reactor/instance';
-import { ReactorScanner, reopening } from '../reactor/scanner';
 import { COUNTS_STORE_METHODS, DATA_GATEWAY_METHODS, DATA_WORKER_METHODS, EXAMPLE_STORE_METHODS, type DataWorkerApi } from './methods';
 import { serveRpc, type RpcEndpoint } from './rpc';
 

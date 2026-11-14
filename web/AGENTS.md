@@ -33,19 +33,26 @@ still governs everything under `LOSAT/`, including engine changes made for LOSAT
    not load scripts from other origins in documents that handle research data. The
    response headers, including the CSP (`connect-src` names the fetch hosts), are
    defined once in `web/app/public/_headers`.
-5. Keep the layers of `web/app/src` (plan §3.3): `domain` depends on nothing;
-   `application` depends on `domain` and `ports`; `infra` implements `ports`; `ui`
-   acts through `application` and may import only types and constants from `domain`
-   and `ports`. Only `src/main.ts` and `src/composition.ts` may import every layer.
-   ESLint enforces this, and `tests/unit/layers.test.ts` tests the rule itself.
+5. Keep the layers of `web/app/src` (plan §3.3): `domain` depends on nothing but the
+   package's domain (`losat/domain`); `application` depends on `domain` and `ports` (the
+   package's `losat/ports` included); `infra` implements `ports`; `ui` acts through
+   `application` and may import only types and constants from `domain` and `ports`. The
+   package's infra (`losat`) is imported only by `infra` and the composition root, and
+   only `src/main.ts` and `src/composition.ts` may import every layer. The npm package
+   `losat` (`web/packages/losat`: the host of the reactors, the Engine worker, the thread
+   host and the WASI shim; plan LIB-4) keeps the same layers in its `src` (`domain`
+   depends on nothing, `ports` on `domain`, `infra` implements `ports`) and imports
+   nothing of the application or Vue. ESLint enforces this (the configurations of both),
+   and `web/app/tests/unit/layers.test.ts` tests the rules themselves.
 6. User-facing text, help and errors are in English.
 7. The FakeEngine is for development and tests only. Its outputs must say they are not
    search results, and the UI must show a banner while it is in use.
-8. Pin exact dependency versions and commit `package-lock.json`. Justify any new
-   runtime dependency in the commit message.
+8. Pin exact dependency versions and commit `web/package-lock.json`, the one lock file
+   of the npm workspaces `web/app` and `web/packages/losat` (`web/package.json`).
+   Justify any new runtime dependency in the commit message.
 9. Keep application commits separate from engine (`LOSAT/`) commits.
-10. The adapter (`web/adapter`) names the engine through `LOSAT::api` and the hidden
-    façade `LOSAT::web_adapter` (`LOSAT/src/web_adapter.rs`) only. An engine item that the
+10. The adapter (`web/adapter`) names the engine through `losat::api` and the hidden
+    façade `losat::web_adapter` (`LOSAT/src/web_adapter.rs`) only. An engine item that the
     adapter needs is named there on its own (no glob, no module), and the façade keeps only
     items that the adapter uses; `web/adapter/tests/engine_boundary.rs` checks this. A
     function there must also be sound for every input a safe caller can give (review).
@@ -54,9 +61,19 @@ still governs everything under `LOSAT/`, including engine changes made for LOSAT
 
 ```bash
 cd web/app
-npm ci
-npm run check   # typecheck, lint, unit tests, production build
+npm ci          # installs the whole workspace into web/node_modules
+npm run check   # the package's typecheck and lint, then the app's typecheck, lint, unit tests, production build
 npm run e2e     # Playwright against `vite preview` (production headers)
 ```
 
-Run both before committing changes under `web/app`.
+Run both before committing changes under `web/app` or `web/packages/losat`. The package's
+build (`dist/`, what `npm pack` and `npm publish` take) needs the reactors of
+`web/adapter/tools/build_reactors.py`:
+
+```bash
+cd web/packages/losat
+LOSAT_WEB_REACTORS=<output dir> npm run build
+npm test        # the packed files, the manifest, the ABI table, the README's example
+```
+
+Publishing the package is the maintainer's act.

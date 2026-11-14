@@ -1,0 +1,106 @@
+Blast-db-mask-info ::= {
+  algo-id 0,
+  algo-program other,
+  algo-options "-x y",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 30,
+          to 59,
+          id local id 1
+        },
+        {
+          from 100,
+          to 119,
+          id local id 1
+        }
+      },
+      packed-int {
+        {
+          from 30,
+          to 59,
+          id local id 2
+        },
+        {
+          from 100,
+          to 119,
+          id local id 2
+        }
+      },
+      packed-int {
+        {
+          from 30,
+          to 59,
+          id local id 3
+        },
+        {
+          from 100,
+          to 119,
+          id local id 3
+        }
+      },
+      packed-int {
+        {
+          from 30,
+          to 59,
+          id local id 4
+        },
+        {
+          from 100,
+          to 119,
+          id local id 4
+        }
+      },
+      packed-int {
+        {
+          from 30,
+          to 59,
+          id local id 5
+        },
+        {
+          from 100,
+          to 119,
+          id local id 5
+        }
+      },
+      packed-int {
+        {
+          from 30,
+          to 59,
+          id local id 6
+        },
+        {
+          from 100,
+          to 119,
+          id local id 6
+        }
+      },
+      packed-int {
+        {
+          from 30,
+          to 59,
+          id local id 7
+        },
+        {
+          from 100,
+          to 119,
+          id local id 7
+        }
+      },
+      packed-int {
+        {
+          from 30,
+          to 59,
+          id local id 8
+        },
+        {
+          from 100,
+          to 119,
+          id local id 8
+        }
+      }
+    },
+    more FALSE
+  }
+}

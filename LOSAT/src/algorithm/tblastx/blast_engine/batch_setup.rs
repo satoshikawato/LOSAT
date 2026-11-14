@@ -448,12 +448,15 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
             threshold: crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
             window,
             subjects,
-            debugging: trace_hsp_target().is_some()
+            reference_loop: trace_hsp_target().is_some()
                 || scan_debug_range.is_some()
                 || extension_debug_enabled
                 || diag_enabled
                 || debug_hsp_saving
-                || x_soft_subjects,
+                || x_soft_subjects
+                // The one-hit word finder (`-window_size 0`) runs in the reference frame loop
+                // only (`scan_chunk_one_hit`).
+                || window == 0,
             requested_parallel,
             use_serial_scan_chunks,
             pool: parallel_pool,

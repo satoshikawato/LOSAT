@@ -1,4 +1,4 @@
-//! The TBLASTX search of `LOSAT::api` (which calls the shared entry `run_local`) writes several
+//! The TBLASTX search of `losat::api` (which calls the shared entry `run_local`) writes several
 //! output formats from one search. Every format must be byte-identical to the CLI run that
 //! requests only that format, the warnings must equal that run's standard error, and the hit
 //! records must be the final HSP list. With `-num_threads 2` the native search reduces its
@@ -12,8 +12,8 @@ mod run_local_support;
 
 use std::process::Command;
 
+use losat::api::{Outcome, Program};
 use run_local_support::{cli_out_path, fixture_sequence, Files, TempFasta};
-use LOSAT::api::{Outcome, Program};
 
 /// The last three are the custom tabular reports of the shared writer (line CLI C2, PR 2).
 const FORMATS: [&str; 13] = [
@@ -158,18 +158,20 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
     );
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:86-88
-// ```c
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:85-91 (the query
+// batch size, read where `CBlastInput` is made, before the formatter: tblastx_app.cpp:136-137)
+// ```c++
 //     char* batch_sz_str = getenv("BATCH_SIZE");
 //     if (batch_sz_str) {
 //         retval = NStr::StringToInt(batch_sz_str);
 // ```
-// NCBI stops with a CStringException (exit 255, with the path of its build in the message);
-// LOSAT rejects the value, before the prolog as NCBI.
+// A value that NCBI cannot convert ends the program with its `CStringException` (`CATCH_ALL`,
+// exit 255) before anything is written (env parity probe h_probe of 2026-11-12, cases
+// `BATCH_SIZE.*.tblastx-*`), also before the records without a title are searched.
 #[test]
-fn a_batch_size_that_is_not_an_integer_is_rejected() {
+fn a_batch_size_that_ncbi_cannot_convert_stops_before_anything() {
     let inputs = Inputs::new();
-    for value in ["abc", " ", "12x"] {
+    for (value, line, pos) in [("abc", 861, 0), (" ", 861, 0), ("12x", 870, 2)] {
         let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("tblastx")
             .arg("-query")
@@ -181,18 +183,13 @@ fn a_batch_size_that_is_not_an_integer_is_rejected() {
             .env_remove("LOSAT_TIMING")
             .output()
             .expect("run LOSAT CLI");
-        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert_eq!(output.status.code(), Some(255), "{output:?}");
         assert!(output.stdout.is_empty(), "no prolog: {output:?}");
         assert_eq!(
             String::from_utf8_lossy(&output.stderr),
-            format!(
-                "Error: the BATCH_SIZE value '{value}' is not an integer; NCBI stops with a \
-                 CStringException for it, which is not supported by LOSAT's TBLASTX\n"
-            )
+            run_local_support::string_to_int_exception(value, line, pos)
         );
     }
-    // NCBI reads the batch size before the queries are searched (tblastx_app.cpp:136-137):
-    // it fails before the records without a title are searched.
     let sequence = fixture_sequence("LC738884.fasta");
     let empty_defline = TempFasta::new("tblastx_empty_defline.fna", &[("", &sequence[0..900])]);
     for (query, subject) in [
@@ -210,45 +207,26 @@ fn a_batch_size_that_is_not_an_integer_is_rejected() {
             .env_remove("LOSAT_TIMING")
             .output()
             .expect("run LOSAT CLI");
-        assert_eq!(output.status.code(), Some(1), "{output:?}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).starts_with("Error: the BATCH_SIZE value"),
-            "{output:?}"
+        assert_eq!(output.status.code(), Some(255), "{output:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            run_local_support::string_to_int_exception("abc", 861, 0)
         );
     }
 }
 
 // NCBI reference: c++/src/algo/blast/api/local_blast.cpp:54-62,
 // c++/src/algo/blast/api/split_query_aux_priv.cpp:53-60 and
-// c++/src/app/blast/blast_app_util.cpp:206-210,732-737: NCBI converts CHUNK_SIZE,
-// OVERLAP_CHUNK_SIZE and PRE_FETCH_SEQS_LIMIT with NStr::StringToInt (its CStringException
-// names its build's source files) and searches each subject on its own with BL2SEQ_LEGACY.
+// c++/src/app/blast/blast_app_util.cpp:206-210,732-737: NCBI converts CHUNK_SIZE and
+// OVERLAP_CHUNK_SIZE in the first batch's query splitter and PRE_FETCH_SEQS_LIMIT before the
+// first batch's report with NStr::StringToInt, whose `CStringException` ends the program (exit
+// 255; outfmt 6 writes nothing before it), and searches each subject on its own with
+// BL2SEQ_LEGACY, which LOSAT refuses (env parity probe h_probe of 2026-11-12).
 #[test]
-fn environment_that_ncbi_cannot_convert_or_reports_otherwise_is_rejected() {
+fn environment_that_ncbi_cannot_convert_or_reports_otherwise_stops_the_run() {
     let inputs = Inputs::new();
-    for (variable, value, text) in [
-        (
-            "CHUNK_SIZE",
-            "abc",
-            "the environment variable CHUNK_SIZE has the value \"abc\"",
-        ),
-        (
-            "OVERLAP_CHUNK_SIZE",
-            "1e3",
-            "the environment variable OVERLAP_CHUNK_SIZE has the value \"1e3\"",
-        ),
-        (
-            "PRE_FETCH_SEQS_LIMIT",
-            "",
-            "the environment variable PRE_FETCH_SEQS_LIMIT has the value \"\"",
-        ),
-        (
-            "BL2SEQ_LEGACY",
-            "0",
-            "the environment variable BL2SEQ_LEGACY",
-        ),
-    ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
+    let run = |variable: &str, value: &str| {
+        Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("tblastx")
             .arg("-query")
             .arg(&inputs.query.0)
@@ -258,16 +236,31 @@ fn environment_that_ncbi_cannot_convert_or_reports_otherwise_is_rejected() {
             .env(variable, value)
             .env_remove("LOSAT_TIMING")
             .output()
-            .expect("run LOSAT CLI");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(output.status.code(), Some(1), "{variable}: {output:?}");
-        assert!(
-            output.stdout.is_empty()
-                && stderr.contains(text)
-                && stderr.contains("not supported by LOSAT's TBLASTX"),
-            "{variable}: {stderr}"
+            .expect("run LOSAT CLI")
+    };
+    for (variable, value, line, pos) in [
+        ("CHUNK_SIZE", "abc", 861, 0),
+        ("OVERLAP_CHUNK_SIZE", "1e3", 870, 1),
+        ("PRE_FETCH_SEQS_LIMIT", "", 861, 0),
+    ] {
+        let output = run(variable, value);
+        assert_eq!(output.status.code(), Some(255), "{variable}: {output:?}");
+        assert!(output.stdout.is_empty(), "{variable}: {output:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            run_local_support::string_to_int_exception(value, line, pos),
+            "{variable}"
         );
     }
+    let output = run("BL2SEQ_LEGACY", "0");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(
+        output.stdout.is_empty()
+            && stderr.contains("the environment variable BL2SEQ_LEGACY")
+            && stderr.contains("not supported by LOSAT's TBLASTX"),
+        "{stderr}"
+    );
 }
 
 // A standard output that the caller opened on /dev/null, read and write (as Python's

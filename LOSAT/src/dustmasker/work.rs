@@ -4,12 +4,14 @@
 use std::io::Write;
 
 use crate::ncbi_app::files::{open_input_file, Cin, Ostream};
+use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{err_post_x, NcbiException};
+use crate::seqdb::mask::FilterProgram;
 use crate::seqdb::SeqType;
 use crate::seqid::ParsedSeqId;
 use crate::seqmasks_io::bdb_reader::{prints_title, BdbError, MaskBdbReader};
 use crate::seqmasks_io::run::{finish, serial_write_failure, write_failure, RunFailure};
-use crate::seqmasks_io::writer::{FilterProgram, MaskWriter, MaskedBioseq, Serial, WriteError};
+use crate::seqmasks_io::writer::{MaskWriter, MaskedBioseq, Serial, WriteError};
 
 use super::masker::dust_masks_skip_ns;
 
@@ -252,13 +254,21 @@ pub(super) fn run(
     options: &Options<'_>,
     stdin: &mut Cin<'_>,
     out: &mut dyn Write,
+    diag: &mut Diag,
 ) -> Result<(), Failure> {
     let mut writer = writer(options)?;
     // A failed write leaves NCBI's stream bad, and the text writers go on silently (exit 0):
     // `out` drops the bytes after the first failed write.
     let mut out = Ostream::new(out);
-    let result = masks_of_input(options, stdin, &mut writer, &mut out);
-    finish(writer, &mut out, result, options.outfmt, super::PROGRAM)
+    let result = masks_of_input(options, stdin, &mut writer, &mut out, diag);
+    finish(
+        writer,
+        &mut out,
+        diag,
+        result,
+        options.outfmt,
+        super::PROGRAM,
+    )
 }
 
 fn masks_of_input(
@@ -266,6 +276,7 @@ fn masks_of_input(
     stdin: &mut Cin<'_>,
     writer: &mut MaskWriter,
     out: &mut Ostream<'_>,
+    diag: &mut Diag,
 ) -> Result<(), Failure> {
     let mut source = reader(options, stdin)?;
     let level = options.level as u32;
@@ -282,7 +293,7 @@ fn masks_of_input(
             iupac: &record.iupac,
             protein: false,
         };
-        writer.print(&seq, &mask, options.parse_seqids, out)?;
+        writer.print(&seq, &mask, options.parse_seqids, out, diag)?;
         serial_write_failure::<Failure>(out, options.outfmt, super::PROGRAM)?;
     }
     Ok(())

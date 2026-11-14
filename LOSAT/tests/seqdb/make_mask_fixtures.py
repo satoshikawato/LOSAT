@@ -179,7 +179,7 @@ def main():
             shutil.copyfile(path, db_out / path.name)
     shutil.copyfile(work / "mask_nucl.fna", out / "mask_nucl.fna")
     shutil.copyfile(work / "mask_prot.faa", out / "mask_prot.faa")
-    for f in ("wm.asnt", "wm_opts.asnt", "wm_colon.asnt"):
+    for f in ("wm.asnt", "wm_opts.asnt", "wm_colon.asnt", "dust.asnb", "seg.asnb"):
         shutil.copyfile(work / f, out / f"mask_{f}")
 
 

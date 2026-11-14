@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-use LOSAT::api::Program;
+use losat::api::Program;
 
 const PIECE: usize = 6_000;
 
@@ -198,7 +198,7 @@ fn run(
         .expect("run LOSAT")
 }
 
-/// One `run_local` search (LOSAT Web's and the library's entry, which `LOSAT::api` calls) in this
+/// One `run_local` search (LOSAT Web's and the library's entry, which `losat::api` calls) in this
 /// process: the records as the CLI's reader reads them, `options` as on the command line with
 /// `-outfmt <n>` first. Returns the report and the messages.
 fn run_local(query: &Path, subjects: &Path, options: &[&str]) -> (Vec<u8>, String) {

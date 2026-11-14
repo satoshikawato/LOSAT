@@ -58,6 +58,8 @@ mod ncbi_toolkit_file_options;
 mod ncbi_toolkit_help;
 #[path = "../ncbi_toolkit_version.rs"]
 mod ncbi_toolkit_version;
+#[path = "../ncbi_windows_paths.rs"]
+mod ncbi_windows_paths;
 #[path = "../newton_lanes8_default.rs"]
 mod newton_lanes8_default;
 #[path = "../outfmt11_blastn.rs"]
@@ -116,6 +118,8 @@ mod seq_id_first_line;
 mod seqalign_samples;
 #[path = "../suite_layout.rs"]
 mod suite_layout;
+#[path = "../tax_report_streams.rs"]
+mod tax_report_streams;
 #[path = "../taxonomy_read_order.rs"]
 mod taxonomy_read_order;
 #[path = "../web_v1_search_space.rs"]

@@ -1,5 +1,5 @@
 [package]
-name = "LOSAT"
+name = "losat"
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.92"
@@ -17,13 +17,19 @@ exclude = [
     "**/*.pyc",
     "**/*.tmp",
     "**/*.orig",
-    "/matrix",
 ]
 
+# docs.rs documents the default features for Linux x86-64.
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+# The cdylib is the ABI v1 WASI reactor (`cargo build --lib --target wasm32-wasip1`).
 [lib]
 crate-type = ["rlib", "cdylib"]
 
-# The command is `losat` (`losat.exe`, `losat.wasm`); the package and the library crate stay `LOSAT`.
+# The command is `losat` (`losat.exe`, `losat.wasm`), as are the package and the library crate
+# (`use losat::api`). The reactor and the WASI command are both `losat.wasm`: a WASI build names
+# its target (`--lib` or `--bin losat`), so that Cargo copies only that one to `release/`.
 [[bin]]
 name = "losat"
 path = "src/main.rs"
@@ -179,11 +185,6 @@ opt-level = 1
 # Lint levels of every target of the package (lib, bins, tests, examples).
 # A lint is allowed here only with a reason. A single place that keeps a lint's shape on purpose
 # uses `#[expect(lint, reason = "...")]` at that item instead of an entry here.
-
-[lints.rust]
-# The library crate is named LOSAT, the product's name (`use LOSAT::...` in web/adapter, examples
-# and the binaries). Renaming the crate is the library line's decision.
-non_snake_case = "allow"
 
 [lints.clippy]
 # NCBI's C functions are ported argument by argument (e.g. Blast_SemiGappedAlign,

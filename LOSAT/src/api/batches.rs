@@ -37,10 +37,10 @@ use super::run::{
     CountingWriter, HspRecord, QueryStats,
 };
 use super::search::Search;
+use super::start::{CallStart, RunLog};
 use super::view::{self, QueryHits};
 use crate::algorithm::blastn::blast_engine::QueryBatchSizes;
 use crate::blastinput::app::query_batch_size;
-use crate::blastinput::ncbi_environment::check_ncbi_application_settings;
 use crate::blastinput::seq_range::{next_ranged_batch_end, record_interval, RecordInterval};
 use crate::cli::Commands;
 use crate::report::blast_xml::XmlStats;
@@ -105,22 +105,26 @@ impl BatchSizes {
     }
 }
 
-/// The batch sizes of `command`, as each program's application reads them (`GetQueryBatchSize`).
-fn batch_sizes(command: &Commands, inputs: Inputs<'_>) -> anyhow::Result<BatchSizes> {
+/// The batch sizes of `command`, as each program's application reads them (`GetQueryBatchSize`);
+/// BLASTN's of a database reads the call's settings (`start`, its messages on `diagnostics`).
+fn batch_sizes(
+    command: &Commands,
+    inputs: Inputs<'_>,
+    start: &mut CallStart,
+    diagnostics: &mut dyn io::Write,
+) -> anyhow::Result<BatchSizes> {
     Ok(match command {
         Commands::Blastn(args) => BatchSizes::Blastn(match args.database_name() {
             Some(name) => {
-                let settings =
-                    check_ncbi_application_settings("blastn").map_err(anyhow::Error::msg)?;
+                let settings = start.settings(diagnostics)?;
                 QueryBatchSizes::of_database(args, name, &settings)?
             }
             None => QueryBatchSizes::new(args, inputs.subject)?,
         }),
-        Commands::Blastp(_) => BatchSizes::Fixed(query_batch_size("BLASTP", 10000)?),
-        Commands::Tblastn(_) => BatchSizes::Fixed(query_batch_size("TBLASTN", 20000)?),
-        Commands::Tblastx(_) => BatchSizes::Fixed(query_batch_size("TBLASTX", 10002)?),
+        Commands::Blastp(_) => BatchSizes::Fixed(query_batch_size(10000)?),
+        Commands::Tblastn(_) => BatchSizes::Fixed(query_batch_size(20000)?),
+        Commands::Tblastx(_) => BatchSizes::Fixed(query_batch_size(10002)?),
         Commands::Blastx(_) => BatchSizes::Fixed(query_batch_size(
-            "BLASTX",
             crate::algorithm::blastx::QUERY_BATCH_SIZE as u32,
         )?),
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:468-468
@@ -187,6 +191,14 @@ pub struct Batches<'a> {
     hsps_before: usize,
     searched_one: bool,
     finished: bool,
+    /// The call's application start, which the batches share.
+    start: CallStart,
+    /// The `-logfile` target of the batches' run messages (tblastx's).
+    log: RunLog,
+    /// What the start wrote, which comes with the first batch.
+    start_messages: Vec<u8>,
+    /// Whether the call is a dry run: one batch of no query, with the start's messages.
+    dry_run: bool,
 }
 
 /// Searches the queries one of NCBI's query batches at a time and returns the batches as an
@@ -203,6 +215,31 @@ pub struct Batches<'a> {
 /// `-num_threads` threads; of a database, each opens the database again, so what NCBI writes once
 /// per run about a taxonomy database comes with every batch that reads one.
 pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches<'a>, Error> {
+    let mut start_messages = Vec::new();
+    let mut start = CallStart::new(search, inputs, &mut start_messages)?;
+    let lengths: Vec<usize> = inputs
+        .query
+        .iter()
+        .map(|record| record.seq().len())
+        .collect();
+    if start.dry_run() {
+        let log = start.take_log();
+        return Ok(Batches {
+            search,
+            inputs,
+            sizes: BatchSizes::Fixed(0),
+            skipped: vec![false; lengths.len()],
+            lengths,
+            next_query: 0,
+            hsps_before: 0,
+            searched_one: false,
+            finished: false,
+            start,
+            log,
+            start_messages,
+            dry_run: true,
+        });
+    }
     check_inputs(search, inputs)?;
     // Under `-parse_deflines` with `-subject`, NCBI's scope keeps every batch's queries
     // (`query_batch::QueryScopes`): two queries of the run with one id are refused before the
@@ -224,13 +261,9 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         .map_err(|error| Error::search(&error))?;
     }
     let command = search.command(inputs)?;
-    let sizes = batch_sizes(&command, inputs).map_err(|error| Error::search(&error))?;
+    let sizes = batch_sizes(&command, inputs, &mut start, &mut start_messages)
+        .map_err(|error| Error::search(&error))?;
     let query_range = query_range_of(&command);
-    let lengths: Vec<usize> = inputs
-        .query
-        .iter()
-        .map(|record| record.seq().len())
-        .collect();
     let skipped = lengths
         .iter()
         .map(|&length| {
@@ -248,6 +281,10 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         hsps_before: 0,
         searched_one: false,
         finished: false,
+        log: start.take_log(),
+        start,
+        start_messages,
+        dry_run: false,
     })
 }
 
@@ -302,20 +339,33 @@ impl Batches<'_> {
         };
         let mut collected: Option<Arc<Vec<PairwiseHit>>> = None;
         let mut report = io::sink();
+        // The batch's messages are gathered, so that a later batch's repeat of the run's own
+        // messages is cut before they go where the run's messages go (`RunLog::route`: tblastx's
+        // `-logfile` file), on the way of a failure too.
         let result = {
             let mut on_hits = |hits| collected = Some(hits);
+            let mut sink = self.log.sink(&mut diagnostics, false);
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: "6",
                     sink: OutputSink::Writer(&mut report),
                 }],
-                diagnostics: &mut diagnostics,
+                diagnostics: &mut sink,
                 hits: Some(&mut on_hits),
                 observer: Some(&mut observer),
             };
-            run_local(command, inputs, &mut outputs)
+            run_local(command, inputs, &mut outputs, &mut self.start)
         };
-        result.map_err(|error| Error::search(&error))?;
+        // The run's own messages come once, with the first batch, after the start's.
+        let mut bytes = diagnostics.bytes;
+        if self.searched_one {
+            bytes.drain(..observer.queries_begin.unwrap_or(0));
+        }
+        let mut bytes = self.log.route(bytes);
+        if !self.searched_one {
+            bytes.splice(0..0, std::mem::take(&mut self.start_messages));
+        }
+        result.map_err(|error| self.log.failed(&error))?;
         let ordinals = ordinals.as_deref();
         let mut hsps = match &collected {
             Some(hits) => records(
@@ -339,11 +389,6 @@ impl Batches<'_> {
                 *slot = *stats;
             }
         }
-        // The run's own messages come once, with the first batch.
-        let mut bytes = diagnostics.bytes;
-        if self.searched_one {
-            bytes.drain(..observer.queries_begin.unwrap_or(0));
-        }
         if let (BatchSizes::Blastn(sizes), Some(extensions)) =
             (&mut self.sizes, observer.extensions)
         {
@@ -362,6 +407,19 @@ impl Iterator for Batches<'_> {
     type Item = Result<Batch, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // A dry run searches nothing (`Search::dry_run`).
+        if self.dry_run {
+            if self.finished {
+                return None;
+            }
+            self.finished = true;
+            return Some(Ok(Batch {
+                query_indices: 0..0,
+                hsps: Vec::new(),
+                query_stats: Vec::new(),
+                diagnostics: std::mem::take(&mut self.start_messages),
+            }));
+        }
         // Queries without a record are one call: NCBI's `Query is Empty!`.
         let done = self.next_query >= self.lengths.len() && self.searched_one;
         if self.finished || done {

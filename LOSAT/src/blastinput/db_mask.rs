@@ -20,6 +20,7 @@
 use anyhow::Result;
 
 use crate::cli::NativeError;
+use crate::core::subject_split::HardSplitState;
 use crate::report::archive::options::{Param, ParamValue};
 use crate::seqdb::{MaskAlgorithm, NameMaskError, SeqDb, SeqDbError};
 
@@ -526,52 +527,33 @@ mod db_mask_tests;
 /// A searched sequence's masks that `-db_hard_mask` refuses (`ResolvedMask::check_losat_limits`;
 /// series NP, M4a-2b, ncbi-parity-20261019/M/m4a2/SURVEY.md §7.1-7.3): NCBI's hard chunks
 /// (`s_GetNextSubjectChunk`, blast_engine.c:221-310) give no result that LOSAT can check for them.
-/// The one place of these rules: the answer of Owner question Q1 for the first shape (an approved
-/// NCBI defect instead of the refusal) removes `TailMask` here and changes the chunker's "no
-/// chunking" branch for hard ranges (`HardSplitState::next_chunk`).
+/// The shapes are read off the chunks themselves (`core::subject_split::HardSplitState`, the
+/// chunker that the search runs; review S1 of M4a-2b), except `Unsorted`, a check of the stored
+/// masks. The answer of Owner question Q1 for the first shape (an approved NCBI defect instead of
+/// the refusal) removes `TailMask` here and changes the chunks of the "no chunking" branch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HardMaskShape {
-    /// The first mask `[start, end)` runs to the subject's end and starts before it, at or below
-    /// `MAX_DBSEQ_LEN`, in a subject that the scan reads a word of.
+    /// The mask `[start, end)` runs to the subject's end after a chunk from the subject's start
+    /// (only empty masks at 0 before it), which takes NCBI's "no chunking" branch and so scans
+    /// the full range past the chunk, in a subject that the scan reads a word of.
     TailMask { start: u32, end: u32 },
     /// A mask that ends before it starts, or that starts before the end of the mask before it.
     Unsorted {
         before: (u32, u32),
         mask: (u32, u32),
     },
-    /// The last mask `[start, end)` ends before the subject's end and is shorter than the
-    /// `end % 4` letters that the last chunk starts with.
+    /// The last mask `[start, end)`, after which the subject's final chunk (one chunk for the
+    /// last hard range) starts before the end of the chunk before the mask: the mask is shorter
+    /// than the `end % 4` letters that the final chunk starts with, and the overlap that NCBI
+    /// reads past its list of ranges decides a merge across the mask.
     ShortLastMask { start: u32, end: u32 },
 }
 
 impl HardMaskShape {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:241-268
-    // ```c
-    //     if (backup->offset + MAX_DBSEQ_LEN <
-    //         backup->hard_ranges[backup->hm_index].right) {
-    //
-    //         subject->length = MAX_DBSEQ_LEN;
-    //         backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
-    //
-    //     } else {
-    //
-    //         subject->length = backup->hard_ranges[backup->hm_index].right
-    //                         - backup->offset;
-    //         backup->hm_index++;
-    //         backup->next = (backup->hm_index < backup->num_hard_ranges) ?
-    //                         backup->hard_ranges[backup->hm_index].left :
-    //                         backup->full_range.right;
-    //     }
-    //
-    //     (subject->chunk)++;
-    //
-    //     /* if no chunking is performed */
-    //     if (backup->offset == 0 && residual == 0 && backup->next == backup->full_range.right) {
-    //         subject->seq_ranges = backup->soft_ranges;
-    //         subject->num_seq_ranges = backup->num_soft_ranges;
-    //         return SUBJECT_SPLIT_OK;
-    //     }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276 and 579-584
+    // (quoted at `core::subject_split::HardSplitState::next_chunk`): the chunks, the "no
+    // chunking" branch, and the overlap after each chunk, read one range past the list after the
+    // last one.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1647-1668
     // ```c
     //     /* if sequence is masked, fall back to generic scanner and extender */
@@ -582,28 +564,26 @@ impl HardMaskShape {
     //         scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
     //     }
     // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1318-1331, 1429-1432
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1354, 1368-1370
     // ```c
-    // static Int4 s_GetMinimumSubjSeqLen(LookupTableWrap* lookup_wrap)
-    // {
-    //     Int4 word_length = 1;
+    //     Int4 min_subj_seq_length = 1;
     //     ...
-    //     return word_length * 3 + 2;
-    // }
-    //     ...
-    //        if (seq_arg.seq->length < min_subj_seq_length) {
-    //            BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
-    //            continue;
-    //        }
+    //     if (Blast_SubjectIsTranslated(program_number)) {
+    //         min_subj_seq_length = s_GetMinimumSubjSeqLen(lookup_wrap);
+    //     }
     // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:579-584
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2890-2911, 2956
     // ```c
-    //         Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-    //         overlap = (backup.offset == backup.hard_ranges[backup.hm_index].left) ?
-    //                   0 : dbseq_chunk_overlap;
-    //         status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
-    //                      kHspNumMax, &(backup.offset), INT4_MIN,
-    //                      overlap, score_options->gapped_calculation,
+    //    if (contexts_per_query < 0) {      /* subject seq is split */
+    //       for (index1 = 0; index1 < combined_hsp_list->hspcnt; index1++) {
+    //          hsp1 = combined_hsp_list->hsp_array[index1];
+    //          if (hsp1->subject.end > split_offsets[0]) {
+    //       ...
+    //       for (index2 = 0; index2 < hsp_list->hspcnt; index2++) {
+    //          hsp2 = hsp_list->hsp_array[index2];
+    //          if (hsp2->subject.offset < split_offsets[0] + chunk_overlap_size) {
+    //    ...
+    //    if (hspcnt1 > 0 && hspcnt2 > 0) {
     // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1527-1537
     // (quoted at blastn's `database::mask_hard_letters`): the partial fetch's slices are masked by
@@ -611,56 +591,32 @@ impl HardMaskShape {
     /// The shape of the stored masks `masks` (`[start, end)`, as stored, not empty) of a sequence
     /// whose length `length` gives, that `-db_hard_mask` refuses in a search whose scan reads words
     /// of `scanned_word` letters (the word size, or the discontiguous template's length), or
-    /// `None`; `Err(())` when the length cannot be read (`SeqDb::first_searched_masks`). The hard
-    /// ranges are the complement in stored order (`BlastSeqBlkSetSeqRanges`), whose first starts
-    /// at 0:
-    /// - the first chunk (offset 0, residual 0) ends where the first mask starts unless that is
-    ///   above `MAX_DBSEQ_LEN`; when the first mask runs to the end, `next` is the end and the
-    ///   "no chunking" branch scans the full range `[0, length)` of a chunk of `start` letters:
-    ///   NCBI reads seeds past the chunk (SURVEY §7.1: rows like the input with the mask one letter
-    ///   shorter, or a corrupt heap; an empty last mask after it changes nothing). A subject
-    ///   shorter than the word (the scan of `[0, length)` reads none) or than 5 letters (the
-    ///   engine skips it, `min_subj_seq_length` of a nucleotide lookup) is not scanned;
-    /// - masks out of order give hard ranges that go back (negative chunk lengths, which move the
-    ///   diagonal offset back) and slices that NCBI's partial fetch masks by a scan of sorted
-    ///   masks (§7.2);
-    /// - after the last hard range NCBI reads the overlap from one range past the list (another
-    ///   sequence's mask end, or unset memory, §7.3); it decides the merge when the previous
-    ///   chunk's HSPs can end after the last chunk's offset `end - end % 4`, i.e. when the last
-    ///   mask is shorter than `end % 4` (the last hard range is not empty: `end` before the
-    ///   subject's end).
+    /// `None`; `Err(())` when the length cannot be read (`SeqDb::first_searched_masks`):
+    /// - masks out of order (a check of the masks, before the chunks): hard ranges that go back
+    ///   (negative chunk lengths, which move the diagonal offset back) and slices that NCBI's
+    ///   partial fetch masks by a scan of sorted masks (§7.2);
+    /// - else the sequence's chunks (`HardSplitState` on the complement of the masks, the
+    ///   search's own chunker, with `DBSEQ_CHUNK_OVERLAP`): a chunk that takes the "no chunking"
+    ///   branch while it is shorter than the sequence (so a mask with letters follows it) scans
+    ///   the full range `[0, length)` past the chunk, which reads a word when `length >=
+    ///   scanned_word` (`min_subj_seq_length` is 1 for BLASTN, so every subject is scanned):
+    ///   NCBI reads seeds past the chunk (§7.1: rows of the input with the mask one letter
+    ///   shorter, or a corrupt heap);
+    /// - the final chunk, after which NCBI reads the overlap one range past the list (another
+    ///   sequence's mask end, or unset memory, §7.3), when it starts before the end of the chunk
+    ///   before it and that chunk is of the hard range before the mask: the previous chunks' HSPs
+    ///   can then end after its offset, so the overlap decides the merge across the mask. Where
+    ///   the chunk before is a full chunk of the same long range (a last range over
+    ///   `MAX_DBSEQ_LEN` letters), the merge is within the range and LOSAT's overlap
+    ///   (`dbseq_chunk_overlap`) is kept, as the unmasked search keeps it (decision B-d).
     pub fn of(
         masks: &[(u32, u32)],
         length: &dyn Fn() -> Option<usize>,
         scanned_word: usize,
     ) -> Result<Option<HardMaskShape>, ()> {
-        const MAX_DBSEQ_LEN: u32 = 5_000_000;
-        let Some(&(first_start, first_end)) = masks.first() else {
+        use crate::core::subject_split::{complement_masks, HardChunk, DBSEQ_CHUNK_OVERLAP};
+        if masks.is_empty() {
             return Ok(None);
-        };
-        // The length, read once and only for the shapes that need it.
-        let mut known: Option<usize> = None;
-        let mut length = || -> Result<usize, ()> {
-            if known.is_none() {
-                known = Some(length().ok_or(())?);
-            }
-            Ok(known.unwrap_or_default())
-        };
-        // A first mask that runs to the end leaves only empty masks after it (or masks out of
-        // order): read the length only then.
-        let tail_candidate = first_start <= MAX_DBSEQ_LEN
-            && first_start < first_end
-            && masks[1..]
-                .iter()
-                .all(|&(start, end)| start == first_end && end == first_end);
-        if tail_candidate && {
-            let length = length()?;
-            length == first_end as usize && length >= scanned_word.max(5)
-        } {
-            return Ok(Some(HardMaskShape::TailMask {
-                start: first_start,
-                end: first_end,
-            }));
         }
         let mut before: Option<(u32, u32)> = None;
         for &mask in masks {
@@ -672,12 +628,28 @@ impl HardMaskShape {
             }
             before = Some(mask);
         }
-        let (last_start, last_end) = masks[masks.len() - 1];
-        if last_end - last_start < last_end % 4 && (last_end as usize) < length()? {
-            return Ok(Some(HardMaskShape::ShortLastMask {
-                start: last_start,
-                end: last_end,
-            }));
+        let length = length().ok_or(())?;
+        let mut ranges = Vec::with_capacity(masks.len() + 1);
+        complement_masks(masks, length, &mut ranges);
+        let mut split = HardSplitState::default();
+        split.start(length, ranges);
+        let mut previous: Option<HardChunk> = None;
+        while let Some(chunk) = split.next_chunk(DBSEQ_CHUNK_OVERLAP) {
+            // The chunk's range ends where the mask of the same index starts.
+            if chunk.full_range && chunk.length < length && length >= scanned_word {
+                let (start, end) = masks[chunk.range];
+                return Ok(Some(HardMaskShape::TailMask { start, end }));
+            }
+            if chunk.overlap_past_list
+                && previous.is_some_and(|previous| {
+                    previous.range != chunk.range
+                        && chunk.offset < previous.offset + previous.length
+                })
+            {
+                let (start, end) = masks[chunk.range - 1];
+                return Ok(Some(HardMaskShape::ShortLastMask { start, end }));
+            }
+            previous = Some(chunk);
         }
         Ok(None)
     }
@@ -686,9 +658,9 @@ impl HardMaskShape {
     pub fn text(&self) -> String {
         match *self {
             HardMaskShape::TailMask { start, end } => format!(
-                "has its only mask, [{start}, {end}), running to its end, for which NCBI BLAST+ \
-                 2.17.0 scans the masked letters past the chunk before the mask (it reads past \
-                 its buffer: rows of a near input, or a corrupt heap)"
+                "has a mask, [{start}, {end}), running to its end after the chunk from its start, \
+                 for which NCBI BLAST+ 2.17.0 scans the masked letters past that chunk (it reads \
+                 past its buffer: rows of a near input, or a corrupt heap)"
             ),
             HardMaskShape::Unsorted { before, mask } => format!(
                 "has masks out of order ([{}, {}) after [{}, {})), whose hard masking NCBI BLAST+ \

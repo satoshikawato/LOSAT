@@ -1403,3 +1403,16 @@ makeblastdb -in subj.fna -dbtype nucl -out edge3 -title "edge masks 3" -blastdb_
 ```
 
 `edge_short.asnt` is `edge_tail.asnt` with `algo-options "edge short"` and `from 1001, to 1001`.
+
+The review fixes of M4a-2b (ad-M4a-6) added `edge4` and `edgew`. `edge4` holds two masks of `s5` with an empty mask
+at 0 first (`from 0, to 4294967295`, which makeblastdb stores as `[0, 0)`): algorithm 11 (`edge_e0tail.asnt`, then
+1000-1199: the chunk after the empty mask starts at 0 and the next mask runs to the end, refused; review F1) and 12
+(`edge_e0mid.asnt`, then 500-599: searched). `edgew` holds four sequences of 3 to 6 letters (`wb.fna`, `w3`-`w6`) whose
+mask runs to their end (`edge_wb.asnt`: 1-2, 2-3, 3-4 and 3-5), searched alone through `zw_s3.nal`, `zw_s4.nal` and
+`zw_s5.nal` (OIDs 1, 2 and 3) with the query `qw.fna` at words 4, 5 and 7 (review F2: NCBI scans every BLASTN
+subject, and its scan of the whole sequence reads a word when the sequence has at least the word's letters):
+
+```
+makeblastdb -in subj.fna -dbtype nucl -out edge4 -title "edge masks 4" -blastdb_version 4 -mask_data edge_e0tail.asnt,edge_e0mid.asnt
+makeblastdb -in wb.fna -dbtype nucl -out edgew -title "edge masks word" -blastdb_version 4 -mask_data edge_wb.asnt
+```

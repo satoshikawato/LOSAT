@@ -14,6 +14,8 @@
 //! - **HSP filters** (`blast_hits`: `-max_hsps`, `-qcov_hsp_perc`; `hspfilter_culling`:
 //!   `-culling_limit`)
 //! - **HSP stream** (`blast_hspstream`): the preliminary stage's close with `ADAPTIVE_CBS`
+//! - **Subject chunks with hard ranges** (`subject_split`, NCBI core/blast_engine.c's
+//!   `s_GetNextSubjectChunk`): BLASTN's `-db_hard_mask` search and its refusals
 //! - **PSI-BLAST's PSSM engine** (`psi`, NCBI core/blast_psi.c and blast_psi_priv.c): psiblast's
 //!   `-out_ascii_pssm` and `-out_pssm`
 
@@ -41,6 +43,10 @@ pub mod blast_hits;
 // The close of the preliminary stage's HSP stream with `ADAPTIVE_CBS` (NCBI core/blast_hspstream.c)
 pub(crate) mod blast_hspstream;
 pub mod hspfilter_culling;
+
+// The chunks of a database sequence with hard ranges (NCBI core/blast_engine.c's
+// `s_GetNextSubjectChunk`): BLASTN's `-db_hard_mask` search and its refusals
+pub mod subject_split;
 
 // PSI-BLAST's PSSM engine (NCBI core/blast_psi.c, blast_psi_priv.c)
 pub(crate) mod psi;

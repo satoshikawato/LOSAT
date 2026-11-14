@@ -515,13 +515,13 @@ const MAX_TOTAL_GAPS: i32 = 3000;
 // ```c
 // #define MAX_DBSEQ_LEN 5000000
 // ```
-const MAX_DBSEQ_LEN: usize = 5_000_000;
-
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:192
 // ```c
 // #define DBSEQ_CHUNK_OVERLAP 100
 // ```
-const DBSEQ_CHUNK_OVERLAP: usize = 100;
+// The constants of NCBI's chunks and the chunks of hard ranges have one owner,
+// `core::subject_split`, which the refusals of `-db_hard_mask` read too.
+use crate::core::subject_split::{HardSplitState, DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/lookup_wrap.h:119
 // ```c
 // #define OFFSET_ARRAY_SIZE 4096
@@ -576,39 +576,6 @@ struct SubjectSplitState {
     hm_index: usize,
     sm_index: usize,
     offset: i32,
-    next: i32,
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:171-179
-// ```c
-//     } else if (subject->mask_type == eHardSubjMasking) {
-//         ASSERT (backup->seq_ranges);
-//         ASSERT (backup->num_seq_ranges >= 1);
-//         backup->hard_ranges = backup->seq_ranges;
-//         backup->num_hard_ranges = backup->num_seq_ranges;
-//     }
-//
-//     backup->offset = backup->hard_ranges[0].left;
-//     backup->next = backup->offset;
-// ```
-/// The chunks of a database sequence of a search with `-db_hard_mask` (series NP, M4a-2b decision
-/// H1): `SubjectSplitStruct` with the hard ranges of the sequence, the complement of its stored
-/// masks in the order they are stored (`BlastnDatabase::seq_ranges_into`); its soft ranges are the
-/// full range (blast_engine.c:162-164), which the subject's `SubjectSplitState` holds. It lives in
-/// the worker's scratch (`SubjectScratch::db_hard_split`), its ranges empty outside a hard-masked
-/// sequence, so that the default path keeps its `SubjectSplitState` and its locals as they were;
-/// the chunk loop of a hard-masked sequence is an instance of its own
-/// (`prelim_subject::collect_subject_prelim::<_, true>`, `next_subject_chunk`), so the other
-/// subjects' loops test nothing per chunk: hard state in the closure's locals cost 66 to 78
-/// instructions per subject on 20,000 subjects, a test of the hard ranges at each chunk 40 (M4a-2b
-/// callgrind, `M/m4a2b/callgrind/syn_*`).
-/// The first hard range starts at 0 (`BlastSeqBlkSetSeqRanges` sets `tmp[0].left = 0`), so `next`
-/// starts at 0.
-#[derive(Default)]
-struct HardSplitState {
-    full_right: i32,
-    ranges: Vec<(i32, i32)>,
-    hm_index: usize,
     next: i32,
 }
 
@@ -882,114 +849,42 @@ impl SubjectSplitState {
     }
 }
 
-impl HardSplitState {
-    /// The hard ranges `ranges` (never empty: the complement has one range more than the masks)
-    /// of a subject of `subject_len` letters, from its first chunk.
-    fn start(&mut self, subject_len: usize, ranges: Vec<(i32, i32)>) {
-        debug_assert!(!ranges.is_empty());
-        self.full_right = subject_len as i32;
-        self.ranges = ranges;
-        self.hm_index = 0;
-        self.next = 0;
-    }
-
-    /// The end of the subject's chunks: no hard ranges (the buffer is kept).
-    fn end(&mut self) {
-        self.ranges.clear();
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276 (quoted at
-    // `next_chunk`), with `mask_type == eHardSubjMasking`
-    // ```c
-    //     if (backup->offset + MAX_DBSEQ_LEN <
-    //         backup->hard_ranges[backup->hm_index].right) {
-    //         subject->length = MAX_DBSEQ_LEN;
-    //         backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
-    //     } else {
-    //         subject->length = backup->hard_ranges[backup->hm_index].right
-    //                         - backup->offset;
-    //         backup->hm_index++;
-    //         backup->next = (backup->hm_index < backup->num_hard_ranges) ?
-    //                         backup->hard_ranges[backup->hm_index].left :
-    //                         backup->full_range.right;
-    //     }
-    //     ...
-    //     /* if no chunking is performed */
-    //     if (backup->offset == 0 && residual == 0 && backup->next == backup->full_range.right) {
-    //         subject->seq_ranges = backup->soft_ranges;
-    //         subject->num_seq_ranges = backup->num_soft_ranges;
-    //         return SUBJECT_SPLIT_OK;
-    //     }
-    //
-    //     /* if soft masking is off */
-    //     if (subject->mask_type != eSoftSubjMasking) {
-    //         s_AllocateSeqRange(subject, backup, 1);
-    //         subject->seq_ranges[0].left = residual;
-    //         subject->seq_ranges[0].right = subject->length;
-    //         return SUBJECT_SPLIT_OK;
-    //     }
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:579-584
-    // ```c
-    //         overlap = (backup.offset == backup.hard_ranges[backup.hm_index].left) ?
-    //                   0 : dbseq_chunk_overlap;
-    // ```
-    /// `SubjectSplitState::next_chunk` of a subject with hard ranges (`-db_hard_mask`): one chunk per
-    /// hard range (a range above `MAX_DBSEQ_LEN` in NCBI's overlapping chunks), from `next - next
-    /// % 4`, scanned from the residual (`SeqRanges::Inline`), of `right - offset` letters: 0 for
-    /// a hard range of no letters (a mask at 0, masks that touch), whose `Blast_ExtendWordExit`
-    /// still moves the diagonal offset on by the window (`collect_prelim_hits_for_chunk`). The
-    /// hard ranges of a searched sequence never go back (`HardMaskShape` refuses masks out of
-    /// order, decision H4), so no length is negative. The "no chunking" branch scans the soft
-    /// ranges, the full range: reached only by a sequence without masks, or with masks that end
-    /// at its end (`HardMaskShape::TailMask` refuses those with a scanned word, decision H3; Owner
-    /// question Q1). After the last hard range NCBI reads the overlap one `SSeqRange` past the
-    /// list (another sequence's mask end, or unset memory; SURVEY §7.3 of M4a-2): LOSAT takes the
-    /// full range's end, which no chunk starts at, so `dbseq_chunk_overlap`; that value decides
-    /// the merge only where the last mask is shorter than its end's residual, which
-    /// `HardMaskShape::ShortLastMask` refuses (decision H5).
-    #[cold]
-    #[inline(never)]
-    fn next_chunk(&mut self, chunk_overlap: usize) -> SubjectChunkStatus {
-        let hard = self.ranges.as_slice();
-        if self.next >= self.full_right {
-            return SubjectChunkStatus::Done;
-        }
-        let residual = (self.next as usize) % COMPRESSION_RATIO;
-        let offset = self.next - residual as i32;
-        let hard_right = hard[self.hm_index].1;
-        let length = if offset + (MAX_DBSEQ_LEN as i32) < hard_right {
-            self.next = offset + MAX_DBSEQ_LEN as i32 - chunk_overlap as i32;
-            MAX_DBSEQ_LEN
-        } else {
-            let length = (hard_right - offset).max(0) as usize;
-            self.hm_index += 1;
-            self.next = hard
-                .get(self.hm_index)
-                .map_or(self.full_right, |&(left, _)| left);
-            length
-        };
-        let seq_ranges = if offset == 0 && residual == 0 && self.next == self.full_right {
-            SeqRanges::SoftRangesFull
-        } else {
-            SeqRanges::Inline {
-                range: (residual as i32, length as i32),
-            }
-        };
-        let range_start = hard
-            .get(self.hm_index)
-            .map_or(self.full_right, |&(left, _)| left);
-        SubjectChunkStatus::Ok(SubjectChunk {
-            offset: offset as usize,
-            length,
-            seq_ranges,
-            masked: true,
-            overlap: if offset == range_start {
-                0
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:264-276 (quoted at
+// `SubjectSplitState::next_chunk`): the "no chunking" branch takes the soft ranges, the full
+// range of a hard-masked subject (blast_engine.c:162-164); else `[residual, length)`.
+/// `SubjectSplitState::next_chunk` of a subject with hard ranges (`-db_hard_mask`, series NP,
+/// M4a-2b decision H1): the next chunk that the worker's `db_hard_split` cuts (NCBI's arithmetic,
+/// `core::subject_split::HardSplitState::next_chunk`, which the refusals of `HardMaskShape` read
+/// too), scanned over the full range in the "no chunking" branch (`SeqRanges::SoftRangesFull`:
+/// reached only by a sequence without masks, or whose masks `HardMaskShape::TailMask` refuses
+/// where the scan reads a word, decision H3, Owner question Q1), else from its residual
+/// (`SeqRanges::Inline`), of `right - offset` letters: 0 for a hard range of no letters (a mask
+/// at 0, masks that touch), whose `Blast_ExtendWordExit` still moves the diagonal offset on by
+/// the window (`collect_prelim_hits_for_chunk`). After the last hard range NCBI reads the overlap
+/// one `SSeqRange` past the list (another sequence's mask end, or unset memory; SURVEY §7.3 of
+/// M4a-2): LOSAT takes `dbseq_chunk_overlap` there, as the unmasked search does for every
+/// sequence over `MAX_DBSEQ_LEN` letters (`(&full_range)[1]`); it decides a merge across a mask
+/// only in the shape `HardMaskShape::ShortLastMask` refuses (decision H5), while the final chunk
+/// of a last range over `MAX_DBSEQ_LEN` letters merges with the chunk before it in the same range
+/// (decision B-d). Cold and out of line: the other subjects' chunk loops never call it.
+#[cold]
+#[inline(never)]
+fn next_hard_chunk(hard: &mut HardSplitState, chunk_overlap: usize) -> SubjectChunkStatus {
+    match hard.next_chunk(chunk_overlap) {
+        None => SubjectChunkStatus::Done,
+        Some(chunk) => SubjectChunkStatus::Ok(SubjectChunk {
+            offset: chunk.offset,
+            length: chunk.length,
+            seq_ranges: if chunk.full_range {
+                SeqRanges::SoftRangesFull
             } else {
-                chunk_overlap
+                SeqRanges::Inline {
+                    range: (chunk.residual as i32, chunk.length as i32),
+                }
             },
-        })
+            masked: true,
+            overlap: chunk.overlap,
+        }),
     }
 }
 /// The next chunk of a subject: of its hard ranges (`HARD`: a database sequence of a search with
@@ -1004,7 +899,7 @@ fn next_subject_chunk<const HARD: bool>(
     chunk_overlap: usize,
 ) -> SubjectChunkStatus {
     if HARD {
-        hard.next_chunk(chunk_overlap)
+        next_hard_chunk(hard, chunk_overlap)
     } else {
         split.next_chunk(subject_masked, chunk_overlap)
     }
@@ -16150,7 +16045,7 @@ mod tests {
         }
     }
 
-    /// The complement of sorted, disjoint masks (`database::complement_soft_ranges`).
+    /// The complement of sorted, disjoint masks (as `core::subject_split::complement_masks`).
     fn complement(masks: &[(i32, i32)], length: i32) -> Vec<(i32, i32)> {
         let mut ranges = Vec::new();
         let mut left = 0;
@@ -16226,8 +16121,12 @@ mod tests {
         // A last mask at the end (the empty last range is not a chunk), masks at both ends.
         check(1200, &[(10, 20), (1100, 1200)]);
         check(1200, &[(0, 100), (1100, 1200)]);
-        // Random sorted, disjoint masks (empty ones too), the shapes refused by
-        // `HardMaskShape` left out.
+        // Empty masks at 0 before a mask that runs to the end (review F1 of M4a-2b): the chunk
+        // from 0 takes the "no chunking" branch, as NCBI's does, whatever the refusals do.
+        let found = check(1200, &[(0, 0), (1000, 1200)]);
+        assert_eq!(found[1], (0, 1000, vec![(0, 1200)], 100));
+        // Random sorted, disjoint masks (empty ones too, some sets starting with empty masks at
+        // 0), every shape: the chunks are NCBI's arithmetic, refused or not.
         let mut seed = 0x9E37_79B9_7F4A_7C15u64;
         let mut next = |bound: u64| {
             seed ^= seed << 13;
@@ -16241,7 +16140,7 @@ mod tests {
             } else {
                 1 + next(3000)
             };
-            let mut masks = Vec::new();
+            let mut masks = vec![(0, 0); (next(4) - 1).max(0) as usize];
             let mut at = 0;
             for _ in 0..next(6) {
                 let start = at + next(400) * (1 + length / 3000);
@@ -16252,18 +16151,91 @@ mod tests {
                 masks.push((start, end));
                 at = end;
             }
-            let shape = crate::blastinput::db_mask::HardMaskShape::of(
-                &masks
-                    .iter()
-                    .map(|&(start, end)| (start as u32, end as u32))
-                    .collect::<Vec<_>>(),
-                &|| Some(length as usize),
-                11,
-            );
-            if !matches!(shape, Ok(None)) {
-                continue;
-            }
             check(length, &masks);
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-310, 579-584 (quoted
+    // at `SubjectSplitState::next_chunk`); na_ungapped.c:1647-1668 (quoted at `HardMaskShape::of`)
+    // The refusals of `-db_hard_mask` against NCBI's chunks (the model above, not the chunker
+    // that the refusals run; reviews F1-F3 and T1 of M4a-2b), for random sorted masks of
+    // sequences of 1 to 64 letters, with empty masks at 0 in front of a third of the sets, and
+    // words of 4 to 16 letters: a shape is refused as `TailMask` exactly when a chunk shorter
+    // than the sequence scans the full range and the scan reads a word (`length >= word`), and as
+    // `ShortLastMask` exactly when the chunk of the last hard range starts before the end of the
+    // chunk before it; an accepted shape has neither. In 1 to 64 letters every hard range is one
+    // chunk.
+    #[test]
+    fn hard_mask_refusals_are_the_chunks_that_ncbi_reads_past() {
+        use crate::blastinput::db_mask::HardMaskShape;
+        let mut seed = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = |bound: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % bound) as i32
+        };
+        let (mut tails, mut shorts, mut accepted) = (0, 0, 0);
+        for _ in 0..20_000 {
+            let length = 1 + next(64);
+            let word = 4 + next(13);
+            let mut masks = vec![
+                (0, 0);
+                if next(3) == 0 {
+                    1 + next(3) as usize
+                } else {
+                    0
+                }
+            ];
+            let mut at = 0;
+            for _ in 0..1 + next(4) {
+                let start = at + next(8);
+                let end = (start + next(12)).min(length);
+                if start > length {
+                    break;
+                }
+                masks.push((start, end));
+                at = end;
+            }
+            let hard = complement(&masks, length);
+            let chunks = ncbi_chunks(length, Some(&hard), None);
+            let scans_past = chunks
+                .iter()
+                .any(|chunk| chunk.1 < length && chunk.2 == [(0, length)] && length >= word);
+            // The chunk of the last hard range ends at the sequence's end; it is the final one
+            // when the last range has letters (`masks`' last end before `length`).
+            let last_end = masks.last().map_or(0, |&(_, end)| end);
+            let merges_across = last_end < length
+                && chunks.len() >= 2
+                && chunks[chunks.len() - 1].0 < {
+                    let before = &chunks[chunks.len() - 2];
+                    before.0 + before.1
+                };
+            let stored: Vec<(u32, u32)> = masks
+                .iter()
+                .map(|&(start, end)| (start as u32, end as u32))
+                .collect();
+            let shape = HardMaskShape::of(&stored, &|| Some(length as usize), word as usize);
+            match shape {
+                Ok(Some(HardMaskShape::TailMask { .. })) => tails += 1,
+                Ok(Some(HardMaskShape::ShortLastMask { .. })) => shorts += 1,
+                Ok(None) => accepted += 1,
+                other => panic!("{length} {masks:?}: {other:?}"),
+            }
+            assert_eq!(
+                matches!(shape, Ok(Some(HardMaskShape::TailMask { .. }))),
+                scans_past,
+                "{length} {masks:?} word {word}: {chunks:?}"
+            );
+            assert_eq!(
+                matches!(shape, Ok(Some(HardMaskShape::ShortLastMask { .. }))),
+                merges_across && !scans_past,
+                "{length} {masks:?} word {word}: {chunks:?}"
+            );
+        }
+        assert!(
+            tails > 300 && shorts > 300 && accepted > 1000,
+            "{tails} {shorts} {accepted}"
+        );
     }
 }

@@ -753,40 +753,10 @@ impl BlastnDatabase {
         mask.check_losat_limits(&self.db, PROGRAM, scanned_word)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:197-218
-    // ```c
-    //     } else {
-    //         // CSeqDB has allocated one more space before and after seq_range
-    //         seq_blk->seq_ranges_allocated = FALSE;
-    //         tmp = seq_ranges;
-    //     }
-    //
-    //     // Fill out the boundary of the sequence to compliment the masks
-    //     tmp[0].left = 0;
-    //     tmp[num_seq_ranges - 1].right = seq_blk->length;
-    //     seq_blk->seq_ranges = tmp;
-    //     seq_blk->num_seq_ranges = num_seq_ranges;
-    //     seq_blk->mask_type = mask_type;
-    //     return 0;
-    // ```
-    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdb.hpp:286-306
-    // ```c++
-    //         value_type& operator[](size_type i) { return (value_type &)_data[1+ 2*i]; }
-    //
-    //         value_type * get_data() const { return (value_type *) _data; }
-    //     ...
-    //         void append(const void *src, size_type num_elements) {
-    //             reserve(_size + num_elements);
-    //             memcpy(&_data[1+ 2*_size], src, num_elements * sizeof(value_type));
-    //             _size += num_elements;
-    //         }
-    // ```
-    // `get_data()` starts one `TSeqPos` before the first mask, so its `SSeqRange` pairs are
-    // (the spare value, start 0), (end 0, start 1), ..., (end n-1, the spare value after the
-    // last): with `tmp[0].left = 0` and the last `right` the length, the complement of the
-    // masks in the order they are stored, the `TSeqPos` values read as `Int4`. Unsorted or
-    // overlapping masks give inverted members, which the scan skips (`masksubj.inl:43-60`);
-    // nothing is sorted or merged (decision D3 of M4a-2).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:197-218 and
+    // c++/include/objtools/blast/seqdb_reader/seqdb.hpp:286-306 (quoted at
+    // `core::subject_split::complement_masks`): the complement of the masks in the order they
+    // are stored, nothing sorted or merged (decision D3 of M4a-2).
     /// The ranges (`seq_ranges`) of database sequence `ordinal` of length `length`, read in the
     /// block `block` of the preliminary stage (`block_subject`), in a search with `-db_soft_mask`
     /// or `-db_hard_mask` (the algorithm `algo_id`): the complement of its masks, which `masks`
@@ -804,7 +774,7 @@ impl BlastnDatabase {
     ) -> Result<()> {
         let stored =
             self.stored_masks(block, ordinal, algo_id, masks, shared::search_read_error_of)?;
-        complement_soft_ranges(stored, length, ranges);
+        crate::core::subject_split::complement_masks(stored, length, ranges);
         Ok(())
     }
 
@@ -881,18 +851,6 @@ impl BlastnDatabase {
             Err(read) => Err(error(read.error(), PROGRAM)),
         }
     }
-}
-
-/// The complement of the stored masks `masks` of a sequence of `length` letters in their stored
-/// order, NCBI's soft ranges of a masked database sequence (`BlastnDatabase::seq_ranges_into`).
-fn complement_soft_ranges(masks: &[(u32, u32)], length: usize, ranges: &mut Vec<(i32, i32)>) {
-    ranges.clear();
-    let mut left = 0i32;
-    for &(start, end) in masks {
-        ranges.push((left, start as i32));
-        left = end as i32;
-    }
-    ranges.push((left, length as i32));
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1518-1538
@@ -2096,7 +2054,7 @@ mod tests {
             ),
             (&[(0, 1200)], &[(0, 0), (1200, 1200)]),
         ] {
-            complement_soft_ranges(masks, 1200, &mut ranges);
+            crate::core::subject_split::complement_masks(masks, 1200, &mut ranges);
             assert_eq!(ranges, expected, "{masks:?}");
         }
     }

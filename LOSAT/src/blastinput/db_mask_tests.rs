@@ -359,8 +359,8 @@ fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
     assert!(
         error.starts_with("-db_hard_mask: the sequence of OID 3 (volume ")
             && error.contains(
-                "a5) has its only mask, [0, 300), running to its end, for which NCBI BLAST+ 2.17.0 \
-             scans the masked letters past the chunk before the mask"
+                "a5) has a mask, [0, 300), running to its end after the chunk from its start, for \
+                 which NCBI BLAST+ 2.17.0 scans the masked letters past that chunk"
             )
             && error.ends_with("LOSAT's BLASTN does not search such a database with -db_hard_mask"),
         "{error}"
@@ -398,11 +398,14 @@ fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
     }
 }
 
-// The shapes of `HardMaskShape::of` (blast_engine.c:241-268, 579-584, 1318-1331; na_ungapped.c:
-// 1647-1668): the first mask's end at the subject's end with its start at or below MAX_DBSEQ_LEN, in
-// a subject of a word or more and at least 5 letters (empty masks at the end may follow), masks
-// that go back, and a last mask shorter than its end's residual before the subject's end. The
-// length is read only for the first and the last.
+// The shapes of `HardMaskShape::of`, read off the chunks (blast_engine.c:221-276, 579-584, 1354,
+// 1368-1370; na_ungapped.c:1647-1668): a mask that runs to the end after the chunk from 0 (empty
+// masks at 0 or at the end around it; the first range at or below MAX_DBSEQ_LEN), in a subject of
+// a word or more (`min_subj_seq_length` is 1 for BLASTN: 4 letters at word 4, review F2); masks
+// that go back; a last mask after which the final chunk starts before the end of the chunk of the
+// range before it, not where the last range is longer than MAX_DBSEQ_LEN and its final chunk
+// follows a full chunk of the same range (review F3). The length is read for every sequence with
+// sorted masks (the chunks need it), never for masks out of order.
 #[test]
 fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
     use std::cell::Cell;
@@ -418,16 +421,23 @@ fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
     assert_eq!(shape(&[(100, 300)], 300), (tail(100, 300), 1));
     assert_eq!(shape(&[(0, 300)], 300), (tail(0, 300), 1));
     assert_eq!(shape(&[(100, 300), (300, 300)], 300), (tail(100, 300), 1));
+    // Empty masks at 0 before it (review F1): the chunk after them starts at 0 as well.
+    assert_eq!(shape(&[(0, 0), (1000, 1200)], 1200), (tail(1000, 1200), 1));
+    assert_eq!(
+        shape(&[(0, 0), (0, 0), (0, 1200)], 1200),
+        (tail(0, 1200), 1)
+    );
+    assert_eq!(shape(&[(0, 0)], 1200), (None, 1));
     assert_eq!(
         shape(&[(5_000_000, 6_000_000)], 6_000_000),
         (tail(5_000_000, 6_000_000), 1)
     );
     // Above MAX_DBSEQ_LEN the first chunk is a full chunk: NCBI chunks it as any other.
-    assert_eq!(shape(&[(5_000_001, 6_000_000)], 6_000_000), (None, 0));
+    assert_eq!(shape(&[(5_000_001, 6_000_000)], 6_000_000), (None, 1));
     // An empty mask at the end, a mask before the end, two masks.
-    assert_eq!(shape(&[(300, 300)], 300), (None, 0));
+    assert_eq!(shape(&[(300, 300)], 300), (None, 1));
     assert_eq!(shape(&[(100, 299)], 300), (None, 1));
-    assert_eq!(shape(&[(0, 100), (200, 300)], 300), (None, 0));
+    assert_eq!(shape(&[(0, 100), (200, 300)], 300), (None, 1));
     let unsorted = |before, mask| Some(HardMaskShape::Unsorted { before, mask });
     assert_eq!(
         shape(&[(600, 700), (100, 200)], 1200),
@@ -438,22 +448,29 @@ fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
         (unsorted((100, 300), (200, 400)), 0)
     );
     assert_eq!(shape(&[(50, 40)], 1200), (unsorted((50, 40), (50, 40)), 0));
-    assert_eq!(shape(&[(100, 200), (200, 300)], 1200), (None, 0));
+    assert_eq!(shape(&[(100, 200), (200, 300)], 1200), (None, 1));
     let short = |start, end| Some(HardMaskShape::ShortLastMask { start, end });
-    // 1002 % 4 = 2 letters before the end in the last chunk, a mask of 1.
+    // 1002 % 4 = 2 letters before the end in the final chunk, a mask of 1.
     assert_eq!(shape(&[(1001, 1002)], 1200), (short(1001, 1002), 1));
     assert_eq!(shape(&[(1000, 1002)], 1200), (None, 1));
     assert_eq!(shape(&[(1003, 1003)], 1200), (short(1003, 1003), 1));
+    // The last range over MAX_DBSEQ_LEN letters (review F3): the chunk after the mask is a full
+    // chunk with an overlap read in bounds, and the final chunk follows a chunk of its own range
+    // (decision B-d); at exactly MAX_DBSEQ_LEN letters after the offset it is the final chunk.
+    assert_eq!(shape(&[(1001, 1002)], 5_300_000), (None, 1));
+    assert_eq!(shape(&[(1001, 1002)], 5_001_100), (None, 1));
+    assert_eq!(shape(&[(1001, 1002)], 5_001_000), (short(1001, 1002), 1));
     // The last mask at the end: the last hard range is empty and the loop ends before it.
     assert_eq!(shape(&[(10, 20), (1199, 1199)], 1199), (None, 1));
     // A middle mask shorter than its residual merges with an overlap that NCBI reads in bounds.
-    assert_eq!(shape(&[(301, 302), (500, 503)], 1200), (None, 0));
-    // A subject that the scan reads no word of: shorter than the word, or than 5 letters (the
-    // engine skips it).
+    assert_eq!(shape(&[(301, 302), (500, 503)], 1200), (None, 1));
+    // A subject that the scan reads no word of: shorter than the word.
     assert_eq!(shape(&[(0, 10)], 10), (None, 1));
     assert_eq!(shape(&[(5, 11)], 11), (tail(5, 11), 1));
-    assert_eq!(HardMaskShape::of(&[(0, 4)], &|| Some(4), 4), Ok(None));
-    assert_eq!(HardMaskShape::of(&[(0, 5)], &|| Some(5), 4), Ok(tail(0, 5)));
+    assert_eq!(HardMaskShape::of(&[(0, 4)], &|| Some(4), 5), Ok(None));
+    assert_eq!(HardMaskShape::of(&[(2, 4)], &|| Some(4), 4), Ok(tail(2, 4)));
+    assert_eq!(HardMaskShape::of(&[(0, 4)], &|| Some(4), 4), Ok(tail(0, 4)));
+    assert_eq!(HardMaskShape::of(&[(1, 3)], &|| Some(3), 4), Ok(None));
     // The length that cannot be read ends the check.
     assert_eq!(HardMaskShape::of(&[(100, 300)], &|| None, 11), Err(()));
 }

@@ -4,7 +4,7 @@
 use super::*;
 
 /// A PSSM row source: `rows[query_pos]`.
-fn pssm(rows: &[[i32; BLASTAA_SIZE]]) -> impl Fn(usize) -> &[i32; BLASTAA_SIZE] + '_ {
+fn pssm<'a>(rows: &'a [[i32; BLASTAA_SIZE]]) -> impl Fn(usize) -> &'a [i32; BLASTAA_SIZE] + 'a {
     move |pos| &rows[pos]
 }
 

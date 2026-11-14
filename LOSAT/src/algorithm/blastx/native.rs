@@ -1763,6 +1763,7 @@ pub(super) fn database_search_error(
     // already (the exception of a query split size that NCBI cannot convert, `split::split_sizes`).
     if error.is::<super::parameters::SearchSpaceOverflow>()
         || error.is::<super::split::QuerySplitRefusal>()
+        || error.is::<super::results::ZeroLengthHspRefusal>()
         || error.is::<NativeError>()
     {
         return error;

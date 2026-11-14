@@ -881,7 +881,13 @@ pub(crate) fn subject_besthit(hsps: &mut Vec<Hsp>) -> Vec<Hsp> {
         }
         let a = &hsps[i].hsp;
         let begin = (a.q_start - 3).max(0);
-        let end = a.q_end + 3;
+        // `if (e < 0) e = hsp_array[i]->query.end;` (blast_hits.c:2569): only the end of an
+        // HSP of length -4 or less near the start of its context (the one-hit word finder with
+        // `-window_size 0`, aa_ungapped.c:1054,1083) lies below -3.
+        let mut end = a.q_end + 3;
+        if end < 0 {
+            end = a.q_end;
+        }
         for j in i + 1..hsps.len() {
             let b = &hsps[j].hsp;
             if !removed[j] && a.context == b.context && b.q_start >= begin && b.q_end <= end {
@@ -900,6 +906,75 @@ pub(crate) fn subject_besthit(hsps: &mut Vec<Hsp>) -> Vec<Hsp> {
         keep
     });
     discarded
+}
+
+/// LOSAT's refusal of a batch whose reports show an ungapped HSP of length 0
+/// (`refuse_reported_zero_length`): not an error of NCBI's engine.
+#[derive(Debug)]
+pub(crate) struct ZeroLengthHspRefusal(String);
+
+impl std::fmt::Display for ZeroLengthHspRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ZeroLengthHspRefusal {}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1349-1356
+// ```c++
+//     if (hsp->query.frame == 0) {
+//        query_loc->SetInt().SetFrom(hsp->query.offset);
+//        query_loc->SetInt().SetTo(hsp->query.end - 1);
+//     } else if (hsp->query.frame > 0) {
+//        query_loc->SetInt().SetFrom(CODON_LENGTH*(hsp->query.offset) +
+//                                    hsp->query.frame - 1);
+//        query_loc->SetInt().SetTo(CODON_LENGTH*(hsp->query.end) +
+//                                  hsp->query.frame - 2);
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:800-803
+// ```c++
+//                     } else if (row_len != seg_len) {
+//                         NCBI_THROW(CSeqalignException, eInvalidInputAlignment,
+//                                    "CreateDensegFromStdseg(): "
+//                                    "Std-seg segment lengths not accurate!");
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:225-227
+// ```c++
+//             if (rng.Empty()) {
+//                 NCBI_THROW(CSeqalignException, eInvalidAlignment,
+//                            "CSeq_align::GetSeqRange(): Row is empty");
+// ```
+// No NCBI counterpart: LOSAT does not write NCBI's reports of an ungapped HSP of length 0 yet.
+// NCBI keeps such an HSP (`Blast_HSPTest` deletes only a negative length) and makes a Std-seg of
+// it whose rows end one before they start. Its formatters then write it in a way of their own
+// for each format and subject: a tabular row of empty ranges with `-db`, the
+// `CreateDensegFromStdseg` exception (exit 255) after the rows before it with `-subject`, whose
+// Seq-loc mapper rewrites the rows; the `GetSeqRange` exception in the pairwise reports; the
+// caught error of the XML and JSON reports; the Std-seg itself in the ASN.1 formats. Until LOSAT
+// writes them, a batch whose final hit lists (the Seq-aligns that every report of the batch
+// receives) hold one is refused, before any report of it.
+/// Refuses the batch whose hit lists `queries` (each query's, cut to the hit list size) hold an
+/// ungapped HSP of length 0.
+#[cold]
+#[inline(never)]
+pub(crate) fn refuse_reported_zero_length(
+    queries: &[HitList],
+    options: &ResolvedOptions,
+) -> Result<()> {
+    let reported = queries
+        .iter()
+        .flat_map(|query| &query.lists)
+        .flat_map(|list| &list.hsps)
+        .any(|h| h.hsp.q_end == h.hsp.q_start);
+    if !reported {
+        return Ok(());
+    }
+    Err(ZeroLengthHspRefusal(format!(
+        "{} -ungapped with -window_size 0: a one-hit ungapped alignment of length 0 is among the hits to report (NCBI BLAST+ reports it as an empty range, or stops with an exception, depending on the format and on -subject or -db), which LOSAT does not reproduce yet",
+        options.program().upper
+    ))
+    .into())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:399-421
@@ -2539,5 +2614,87 @@ mod boundary_tests {
             }
         }
         assert_eq!(actual, expected);
+    }
+}
+
+#[cfg(test)]
+mod zero_length_tests {
+    use super::*;
+
+    fn hsp(context: usize, score: i32, q_start: i32, length: i32) -> Hsp {
+        Hsp {
+            hsp: PreliminaryHsp {
+                context,
+                frame: 1,
+                score,
+                q_start,
+                q_end: q_start + length,
+                q_gapped_start: q_start,
+                s_start: 5,
+                s_end: 5 + length,
+                s_gapped_start: 5,
+            },
+            num: 1,
+            evalue: 1.0,
+            bit_score: 0.0,
+            identity: 0,
+            positive: 0,
+            edit_script: Vec::new(),
+            composition_method: 0,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2565-2569
+    // ```c
+    //       o = hsp_array[i]->query.offset - range_diff;
+    //       e = hsp_array[i]->query.end + range_diff;
+    //       if (o < 0) o = 0;
+    //       if (e < 0) e = hsp_array[i]->query.end;
+    // ```
+    /// An HSP of length -4 at the start of its context ends at -4: its end + 3 is below 0, so
+    /// NCBI's range ends at -4 itself and keeps a weaker HSP ending at -2 (an end + 3 of -1
+    /// would remove it), and removes one that ends at -4 or before.
+    #[test]
+    fn subject_besthit_keeps_the_end_below_minus_three() {
+        let mut hsps = vec![hsp(0, 9, 0, -4), hsp(0, 5, 1, -3), hsp(0, 4, 0, -5)];
+        let removed = subject_besthit(&mut hsps);
+        assert_eq!(removed.len(), 1);
+        assert_eq!((removed[0].hsp.q_start, removed[0].hsp.q_end), (0, -5));
+        assert_eq!(
+            hsps.iter()
+                .map(|h| (h.hsp.q_start, h.hsp.q_end))
+                .collect::<Vec<_>>(),
+            vec![(0, -4), (1, -2)]
+        );
+        // An end + 3 of 0 or more is the range's end, as before.
+        let mut hsps = vec![hsp(0, 9, 0, -3), hsp(0, 5, 1, -2)];
+        assert_eq!(subject_besthit(&mut hsps).len(), 1);
+    }
+
+    fn hit_list(hsps: Vec<Hsp>) -> HitList {
+        let mut list = HitList::new(10);
+        list.lists.push(HspList {
+            query_index: 0,
+            oid: 0,
+            hsps,
+            best_evalue: 1.0,
+        });
+        list
+    }
+
+    /// A batch whose hit lists hold an HSP of length 0 is refused, with LOSAT's refusal (no
+    /// engine error); lists without one pass.
+    #[test]
+    fn a_reported_hsp_of_length_0_is_refused() {
+        let options = super::super::stage_c_tests::options();
+        let queries = [
+            hit_list(vec![hsp(0, 9, 3, 4)]),
+            hit_list(vec![hsp(1, 9, 3, 4), hsp(1, 5, 7, 0)]),
+        ];
+        let error = refuse_reported_zero_length(&queries, &options).unwrap_err();
+        assert!(error.is::<ZeroLengthHspRefusal>());
+        assert!(error.to_string().contains("length 0"));
+        assert!(refuse_reported_zero_length(&queries[..1], &options).is_ok());
+        assert!(refuse_reported_zero_length(&[], &options).is_ok());
     }
 }

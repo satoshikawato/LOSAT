@@ -519,6 +519,7 @@ pub(crate) fn x_search_unit_in_pool<'a>(
         stream: None,
         chunk: None,
         output: Vec::new(),
+        zero_length_hsps: false,
     };
     search_core(records, subjects, options, &mut pipeline, pool, prep)?;
     Ok(pipeline.output)
@@ -569,6 +570,7 @@ pub(crate) fn search_internal_observed<'a>(
         stream: None,
         chunk: None,
         output: Vec::new(),
+        zero_length_hsps: false,
     };
     crate::utils::threading::with_search_pool(options.num_threads as usize, "BLASTX", |pool| {
         search_core(records, subjects, options, &mut pipeline, pool, None)
@@ -591,6 +593,10 @@ struct Runtime<'a> {
     stream: Option<HspStream>,
     chunk: Option<HspStream>,
     output: Vec<BatchResults>,
+    /// No NCBI counterpart: an ungapped HSP of length 0 has left the `-ungapped` subject stage of
+    /// the batch (`subject`), so the batch's end looks for one among the reported HSPs
+    /// (`results::refuse_reported_zero_length`).
+    zero_length_hsps: bool,
 }
 
 impl Runtime<'_> {
@@ -1128,24 +1134,65 @@ impl PreliminarySink for Runtime<'_> {
             //    Blast_HSPListAdjustOddBlastnScores(hsp_list, FALSE, sbp);
             //    return 0;
             // ```
-            // BLASTX has protein subjects: ambiguity rescoring is inactive.
-            // The accepted option profile has percent_identity/min_hit_length
-            // at zero, so Blast_HSPTest cannot delete an HSP here.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:774-788
+            // ```c++
+            //    if (!hsp->gap_info) {
+            //       /* Ungapped case. Check that lengths are the same in query and subject,
+            //          then count number of matches. */
+            //       if (q_length != s_length)
+            //          return -1;
+            //       align_length = q_length;
+            //       for (i=0; i<align_length; i++) {
+            //          if (*q == *s)
+            //             num_ident++;
+            //          else if (NULL != matrix) {
+            //         	 if (matrix[*q][*s] > 0)
+            //         		 num_pos ++;
+            //              }
+            //          q++;
+            //          s++;
+            //       }
+            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1448
+            // ```c++
+            //    *options = (BlastHitSavingOptions*) calloc(1, sizeof(BlastHitSavingOptions));
+            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:72-73
+            // ```c++
+            //     arg.Reset(new CGenericSearchArgs( !kQueryIsProtein ));
+            // ```
+            // BLASTX has protein subjects: ambiguity rescoring is inactive. Every HSP's query and
+            // subject lengths are equal (`q_end - q_start`, NCBI's `Int4`), so its alignment length
+            // is that difference. BLASTX shows no `-perc_identity` (`CGenericSearchArgs`' default
+            // `show_perc_identity` false) and no minimal hit length (calloc's 0), so
+            // `Blast_HSPTest` (`core::blast_hits::hsp_test`) runs with both at 0: it deletes the
+            // HSPs of negative length that the one-hit word finder saves with `-window_size 0` and
+            // a low `-threshold` (aa_ungapped.c:1054,1083), whose identity loop does not run, here,
+            // after they took part in the first link and the reap above; it keeps those of length
+            // 0, which are linked again and reported.
             let mut payloads: Vec<_> = linked
                 .hsps
                 .into_iter()
-                .map(|h| {
-                    let redone = super::kappa::RedoneHsp {
-                        hsp: h.hsp.clone(),
-                        edit_script: vec![crate::common::GapEditOp::Sub(
-                            (h.hsp.q_end - h.hsp.q_start) as u32,
-                        )],
-                        composition_method: 0,
-                        identity_matrix: None,
+                .filter_map(|h| {
+                    let align_length = h.hsp.q_end - h.hsp.q_start;
+                    let (identity, positive) = match u32::try_from(align_length) {
+                        Ok(length) => identity_and_positive(
+                            &super::kappa::RedoneHsp {
+                                hsp: h.hsp.clone(),
+                                edit_script: vec![crate::common::GapEditOp::Sub(length)],
+                                composition_method: 0,
+                                identity_matrix: None,
+                            },
+                            batch,
+                            &encoded,
+                            self.options.scoring,
+                        ),
+                        Err(_) => (0, 0),
                     };
-                    let (identity, positive) =
-                        identity_and_positive(&redone, batch, &encoded, self.options.scoring);
-                    Hsp {
+                    if crate::core::blast_hits::hsp_test(identity as i32, align_length, 0.0, 0) {
+                        return None;
+                    }
+                    Some(Hsp {
                         hsp: h.hsp,
                         num: h.num,
                         evalue: h.evalue,
@@ -1154,7 +1201,7 @@ impl PreliminarySink for Runtime<'_> {
                         positive,
                         edit_script: Vec::new(),
                         composition_method: 0,
-                    }
+                    })
                 })
                 .collect();
             payloads.sort_by(|a, b| super::preliminary::compare_score(&a.hsp, &b.hsp));
@@ -1279,7 +1326,13 @@ impl PreliminarySink for Runtime<'_> {
                     payload.evalue = h.evalue;
                     payload
                 })
-                .collect();
+                .collect::<Vec<Hsp>>();
+            // No NCBI counterpart: marks the batch whose reports may show an HSP of length 0
+            // (kept by `Blast_HSPTest` above), which LOSAT refuses at the batch's end until it
+            // writes NCBI's reports of one (`results::refuse_reported_zero_length`).
+            if hsps.iter().any(|h| h.hsp.q_end == h.hsp.q_start) {
+                self.zero_length_hsps = true;
+            }
             self.chunk
                 .as_mut()
                 .expect("chunk stream")
@@ -2513,6 +2566,11 @@ impl PreliminarySink for Runtime<'_> {
         }
         for (q, query) in queries.iter().enumerate() {
             self.observer.targets("OUT", q, &query.lists);
+        }
+        // No NCBI counterpart: the batch's lists are the hits that every report of the batch
+        // shows; LOSAT refuses an ungapped HSP of length 0 among them (marked by `subject`).
+        if std::mem::take(&mut self.zero_length_hsps) {
+            super::results::refuse_reported_zero_length(&queries, self.options)?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-101
         // ```c++

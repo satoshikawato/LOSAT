@@ -3,7 +3,43 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c
 //!
 //! The filters of `s_FilterBlastResults` that every program shares (`-max_hsps`,
-//! `-qcov_hsp_perc`).
+//! `-qcov_hsp_perc`), and `Blast_HSPTest` on NCBI's `Int4` alignment length.
+
+/// Whether an HSP fails NCBI's percent identity or minimal hit length test (`Blast_HSPTest`,
+/// `s_HSPTest`: the HSP is deleted), on NCBI's `Int4` alignment length, which is negative for an
+/// ungapped HSP whose end lies before its start (the one-hit word finder's HSPs of length below 0
+/// with `-window_size 0`, `aa_ungapped.c:1054,1083`): `align_length < min_hit_length` holds
+/// there for every `min_hit_length` of 0 or more. The identity test multiplies the length by
+/// `percent_identity` in `double`, as NCBI does.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:993-1000,1027-1032
+/// ```c
+/// static Boolean s_HSPTest(const BlastHSP* hsp,
+///                          const BlastHitSavingOptions* hit_options,
+///                          Int4 align_length)
+/// {
+/// 	   return ((hsp->num_ident * 100.0 <
+/// 			   align_length * hit_options->percent_identity) ||
+/// 			   align_length < hit_options->min_hit_length) ;
+///
+/// }
+/// ...
+/// Boolean Blast_HSPTest(BlastHSP* hsp,
+/// 		 	 	 	  const BlastHitSavingOptions* hit_options,
+/// 		 	 	 	  Int4 align_length)
+/// {
+/// 	return s_HSPTest(hsp, hit_options, align_length);
+/// }
+/// ```
+pub fn hsp_test(
+    num_ident: i32,
+    align_length: i32,
+    percent_identity: f64,
+    min_hit_length: i32,
+) -> bool {
+    f64::from(num_ident) * 100.0 < f64::from(align_length) * percent_identity
+        || align_length < min_hit_length
+}
 
 /// The query coverage of an HSP in percent: its query extent (`offset` to `end`, end
 /// exclusive, in the letters of its context) over the length of its context, plus 0.5 below
@@ -153,6 +189,24 @@ mod tests {
         assert!(reap_by_query_coverage(&mut hsps, 9.5, extent));
         assert_eq!(hsps, vec![(0, 95), (10, 100)]);
         assert!(!reap_by_query_coverage(&mut hsps, 9.5, extent));
+    }
+
+    #[test]
+    fn hsp_test_deletes_a_negative_length_at_the_default_options() {
+        // BLASTX's options: percent_identity 0 and min_hit_length 0. A negative length (an
+        // ungapped HSP whose end lies before its start) is deleted, a length of 0 is kept: the
+        // identity test is `0.0 < -0.0` there, false.
+        for length in [-4, -1] {
+            assert!(hsp_test(0, length, 0.0, 0));
+        }
+        assert!(!hsp_test(0, 0, 0.0, 0));
+        assert!(!hsp_test(3, 7, 0.0, 0));
+        // The identity test: 3 of 7 is 42.9 %, below 50 and not below 40.
+        assert!(hsp_test(3, 7, 50.0, 0));
+        assert!(!hsp_test(3, 7, 40.0, 0));
+        // The minimal hit length.
+        assert!(hsp_test(7, 7, 0.0, 8));
+        assert!(!hsp_test(7, 7, 0.0, 7));
     }
 
     #[test]

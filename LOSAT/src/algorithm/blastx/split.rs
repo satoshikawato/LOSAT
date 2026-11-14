@@ -894,6 +894,10 @@ fn absolute_length(chunks: &[QueryChunk], index: isize, absolute: i32) -> i32 {
 //    return FALSE;
 // }
 // ```
+// The divisor is never 0 here, unlike in TBLASTX's merge across subject chunks
+// (`ChunkMergeUndefined`): only the one-hit word finder's ungapped HSPs can have a length of 0 or
+// less, and an ungapped search is never split (`split_queries`, split_query_cxx.cpp:60-61), so
+// the HSPs of a split query are gapped ones, each of positive length.
 pub(crate) fn merge_two(a: &mut PreliminaryHsp, b: &PreliminaryHsp) -> bool {
     let inside = |q, s| a.q_start <= q && a.q_end >= q && a.s_start <= s && a.s_end >= s;
     if !inside(b.q_start, b.s_start) && !inside(b.q_end, b.s_end) {

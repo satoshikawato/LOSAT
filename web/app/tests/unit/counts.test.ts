@@ -103,7 +103,7 @@ function draftSetup() {
     cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),
   });
   const fake = new FakeEngine();
-  const engine = { describe: fake.describe.bind(fake), validate: fake.validate.bind(fake), prepare: () => undefined };
+  const engine = { describe: fake.describe.bind(fake), start: fake.start.bind(fake), validate: fake.validate.bind(fake), prepare: () => undefined };
   let id = 0;
   const coordinator = new Coordinator({
     engine: { ...engine, run: fake.run.bind(fake), cancel: fake.cancel.bind(fake) },

@@ -5,13 +5,15 @@
 // the sections and labels of the program's descriptor, with the engine's defaults, choices
 // and help (`describe`); a row of two fields with NCBI's select of their pairs is a
 // ParameterPair. The last section ends with "Additional options": the other options of the
-// command line, as typed there, which the engine's `validate` reads (DW-42). The task and the
-// genetic codes are shown elsewhere (SearchPanel, InputPanel).
-import { computed } from 'vue';
+// command line, as typed there, which the engine's `validate` reads (DW-42), and, when they give
+// `-conffile NAME` (the engine's start reads the name), the row that chooses the file read as NAME
+// (line RG E1w-3b). The task and the genetic codes are shown elsewhere (SearchPanel, InputPanel).
+import { computed, ref } from 'vue';
 import type { CountsLoader } from '../application/counts';
 import type { DraftState, SearchDraft } from '../application/draft';
 import { fieldRows, pairRows, sectionShown, sectionsAt, type PairRow } from '../domain/parameters';
 import { programById, type ParameterField as Field } from '../domain/programs';
+import { formatBytes } from './format';
 import HelpTip from './HelpTip.vue';
 import ParameterField from './ParameterField.vue';
 import ParameterPair from './ParameterPair.vue';
@@ -36,6 +38,19 @@ const extra = computed(() => props.state.extra[props.state.program]);
 const extraChanged = computed(() => extra.value.trim() !== '');
 /** A refusal of a word typed there, or of its text, marks the row's text box (WA2-AX-05). */
 const extraRefused = computed(() => refusal(props.state)?.extra === true);
+/** The name that the argv's -conffile gives, as the engine's start read it; undefined without one. */
+const conffileName = computed(() => props.state.start?.conffile ?? undefined);
+/** The file chosen for it. */
+const conffile = computed(() => props.state.conffiles[props.state.program]);
+const conffileInput = ref<HTMLInputElement | null>(null);
+
+function onConffile(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (file !== undefined) props.draft.setConffile(file);
+  // The same file can be chosen again after it is removed.
+  input.value = '';
+}
 </script>
 
 <template>
@@ -100,6 +115,47 @@ const extraRefused = computed(() => refusal(props.state)?.extra === true);
             id="param-extra"
             label="About Additional options"
             text="Other options of the losat command line, written as there: -qcov_hsp_perc 50 -ungapped"
+          />
+        </div>
+      </div>
+      <!-- The file that -conffile names, chosen as the counts file of a row is (ParameterField): the search reads it under that name. -->
+      <div
+        v-if="index === sections.length - 1 && conffileName !== undefined"
+        class="param-row"
+        :class="{ changed: conffile !== undefined }"
+        data-kind="conffile"
+        data-testid="param-conffile"
+      >
+        <span id="param-conffile-label" class="param-label">
+          <span v-if="conffile" class="changed-mark" aria-hidden="true">♦</span>
+          <span class="flag">-conffile</span> <span data-testid="param-conffile-argv">{{ conffileName }}</span>
+        </span>
+        <div class="param-control">
+          <span class="file-pick">
+            <button type="button" aria-describedby="param-conffile-label" data-testid="param-conffile-choose" @click="conffileInput?.click()">
+              {{ conffile ? 'Change file…' : 'Choose file…' }}
+            </button>
+            <!-- Opened by the button: out of the accessibility tree, as the inputs' file field (WA2-AX-13). -->
+            <input
+              ref="conffileInput"
+              class="visually-hidden"
+              type="file"
+              tabindex="-1"
+              aria-hidden="true"
+              aria-label="The file of -conffile"
+              data-testid="param-conffile-file"
+              @change="onConffile"
+            />
+            <template v-if="conffile">
+              <span class="file-name" data-testid="param-conffile-name">{{ conffile.name }} ({{ formatBytes(conffile.size) }})</span>
+              <button type="button" class="link" data-testid="param-conffile-remove" @click="draft.setConffile(undefined)">Remove</button>
+            </template>
+            <span v-else class="file-missing" role="status" data-testid="param-conffile-missing">Choose the file that the search reads as {{ conffileName }}.</span>
+          </span>
+          <HelpTip
+            id="param-conffile"
+            label="About -conffile"
+            text="The settings file that the losat command line reads with -conffile, in place of the program's .ini file: the search reads the file chosen here under the name in Additional options."
           />
         </div>
       </div>

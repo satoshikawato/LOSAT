@@ -1,6 +1,6 @@
 // Run records (plan §5.2). A RunSnapshot is fixed when a job is queued and never
 // changes; what actually happened is appended to the RunRecord.
-import type { CountsFile, CountsUse, ProgramId, RecordKey } from 'losat/domain';
+import type { CountsFile, CountsUse, ProgramId, RecordKey, RunFile } from 'losat/domain';
 import type { CountsOrigin } from './counts';
 
 export type RunStatus =
@@ -47,6 +47,19 @@ export interface CountsRecord extends CountsUse {
   readonly origin?: CountsOrigin;
 }
 
+/**
+ * The registry file of `-conffile` (Additional options; line RG E1w-3b), read when the run was
+ * submitted: the run registers its bytes under the name that the argv gives, whatever the chosen
+ * file is called. It lives in the working session only, as the run does.
+ */
+export interface ConffileSnapshot {
+  /** The name that the argv's `-conffile` gives (the engine's start reads it). */
+  readonly name: string;
+  /** The name of the file that the user chose. */
+  readonly fileName: string;
+  readonly bytes: Uint8Array;
+}
+
 export interface RunSnapshot {
   readonly runId: string;
   /** 1-based position in this working session, used for display and file names. */
@@ -63,6 +76,10 @@ export interface RunSnapshot {
   readonly requestedThreads: number | 'auto';
   /** The counts file of `-window_masker_db`; absent without the option (BLASTN only). */
   readonly windowMasker?: CountsSnapshot;
+  /** The registry file of the argv's `-conffile`, when one was chosen. */
+  readonly conffile?: ConffileSnapshot;
+  /** The argv has `-dryrun` (the engine's start says so): the run reads the arguments and the settings and searches nothing. */
+  readonly dryRun?: true;
   readonly queuedAt: number;
   /**
    * The group of runs queued together as separate searches (plan §5.2, Separate): one
@@ -95,6 +112,11 @@ export interface RunRecord {
   readonly subjectRetained?: boolean;
   /** What the run did with its WindowMasker counts file. */
   readonly windowMasker?: CountsRecord;
+  /**
+   * The files that the run made besides its outputs (the file of `-logfile`), as the engine wrote
+   * them: kept for a completed run and for a failed one (TBLASTX's file then holds NCBI's error).
+   */
+  readonly runFiles?: readonly RunFile[];
   readonly startedAt?: number;
   /** When each engine phase started. */
   readonly phaseTimes?: { readonly preparing?: number; readonly running?: number; readonly finalizing?: number };

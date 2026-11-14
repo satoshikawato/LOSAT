@@ -3,7 +3,7 @@
 // keeps the saved copies of Example sets (OPFS examples/, line WF-2).
 // Only this worker uses OPFS synchronous access handles. It holds its own instance of the
 // serial reactor, separate from the Engine worker's, for the index scan, the input check and the
-// engine's describe/validate (web/packages/losat/src/infra/reactor/control.ts); the inflation of compressed sources
+// engine's describe/start/validate (web/packages/losat/src/infra/reactor/control.ts); the inflation of compressed sources
 // and of downloaded Example sets (the package's src/infra/reactor/inflater.ts) runs on an instance of its own
 // for each file, dropped at its end. This module is the worker's composition root.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
@@ -50,6 +50,7 @@ if (ENGINE_ASSETS === null) {
   checker = new FakeInputChecker();
   control = {
     describe: () => Promise.reject(new Error('this build has no engine')),
+    start: () => Promise.reject(new Error('this build has no engine')),
     validate: () => Promise.reject(new Error('this build has no engine')),
   };
 } else {
@@ -141,7 +142,8 @@ const endpoint = Promise.all([service, examples, counts]).then(
     ...delegate(savedCounts, COUNTS_STORE_METHODS),
     inflateFile: (file, maxBytes) => whole.inflateFile(file, maxBytes),
     describe: (program) => control.describe(program),
-    validate: (argv) => control.validate(argv),
+    start: (argv) => control.start(argv),
+    validate: (argv, registry) => control.validate(argv, registry),
   }),
 );
 

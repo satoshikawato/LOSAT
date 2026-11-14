@@ -1,13 +1,16 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { RunOutputWriter, sha256Hex } from 'losat';
-import { CUSTOM_OUTPUT } from 'losat/domain';
+import { CUSTOM_OUTPUT, type RegistryFile, type RunFile } from 'losat/domain';
 import {
   DIAGNOSTICS_STREAM,
+  withRunFiles,
   type EngineGateway,
   type EnginePhase,
   type EngineRunRequest,
   type RuntimeInfo,
+  type StartInfo,
+  type StartResult,
   type ValidationResult,
 } from 'losat/ports';
 import { Coordinator, type SearchRequest } from '../../src/application/coordinator';
@@ -75,26 +78,36 @@ function waitFor(coordinator: Coordinator, runId: string, status: RunStatus): Pr
 /** An engine whose runs finish only when the test releases them. */
 class ManualEngine implements EngineGateway {
   readonly started: string[] = [];
-  private readonly pending = new Map<string, { resolve: () => void; reject: (e: Error) => void }>();
+  readonly requests: EngineRunRequest[] = [];
+  /** The registry files that `validate` was given, in order. */
+  readonly registries: Array<RegistryFile | undefined> = [];
+  /** What the engine's start reads of every argv, or its message. */
+  startResult: StartResult = { ok: true, start: { conffile: null, logFile: null, dryRun: false } };
+  private readonly pending = new Map<string, { resolve: (runFiles?: readonly RunFile[]) => void; reject: (e: Error) => void }>();
   lateFinish?: () => void;
 
   async describe() {
     return { program: 'blastn' as const, formats: [6] as const, parameters: [] };
   }
-  async validate(): Promise<ValidationResult> {
+  async start(): Promise<StartResult> {
+    return this.startResult;
+  }
+  async validate(_argv?: readonly string[], registry?: RegistryFile): Promise<ValidationResult> {
+    this.registries.push(registry);
     return { ok: true };
   }
   run(req: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {
     this.started.push(req.runId);
+    this.requests.push(req);
     onPhase('running');
     return new Promise((resolve, reject) => {
       this.pending.set(req.runId, {
-        resolve: () => {
+        resolve: (runFiles) => {
           const writer = new RunOutputWriter(output);
           writer.write(6, new TextEncoder().encode(`${req.runId}\n`));
           writer.write(DIAGNOSTICS_STREAM, new TextEncoder().encode(`Warning: ${req.runId}\n`));
           writer.end();
-          resolve({ path: 'fake', threads: 1, engineBuild: 'manual' });
+          resolve({ path: 'fake', threads: 1, engineBuild: 'manual', ...(runFiles === undefined ? {} : { runFiles }) });
         },
         reject,
       });
@@ -103,13 +116,19 @@ class ManualEngine implements EngineGateway {
     });
   }
   cancel(): void {}
-  finish(runId: string) {
-    this.pending.get(runId)?.resolve();
+  /** Ends a run, with the files that it made besides its outputs. */
+  finish(runId: string, runFiles?: readonly RunFile[]) {
+    this.pending.get(runId)?.resolve(runFiles);
   }
-  fail(runId: string, message: string) {
-    this.pending.get(runId)?.reject(new Error(message));
+  /** Fails a run, with the files that it made besides its outputs. */
+  fail(runId: string, message: string, runFiles?: readonly RunFile[]) {
+    const error = new Error(message);
+    this.pending.get(runId)?.reject(runFiles === undefined ? error : withRunFiles(error, runFiles));
   }
 }
+
+const startOf = (start: Partial<StartInfo>): StartResult => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, ...start } });
+const logFile = (text: string): RunFile => ({ name: 'run.log', bytes: new TextEncoder().encode(text) });
 
 describe('Coordinator', () => {
   it('runs one job at a time in FIFO order and stores the outputs and diagnostics', async () => {
@@ -304,6 +323,90 @@ describe('Coordinator', () => {
     const { coordinator } = setup(engine);
     expect(await coordinator.enqueue(request)).toEqual({ ok: false, message: 'bad option' });
     expect(coordinator.state.get().runs).toHaveLength(0);
+  });
+
+  // NCBI's application start (line RG E1w-3b): the engine's start of the argv names the registry
+  // file of -conffile and tells a dry run; enqueue validates with the chosen file under the argv's
+  // name, and the snapshot freezes its bytes.
+  it("reads the engine's start at enqueue: the -conffile file under the argv's name, frozen with its bytes, and the dry run", async () => {
+    const engine = new ManualEngine();
+    engine.startResult = startOf({ conffile: 'settings.ini', dryRun: true });
+    const { coordinator } = setup(engine);
+    const chosen = new File(['[BLAST]\n'], 'my settings.ini');
+    const runId = (await coordinator.enqueue({ ...request, extra: ['-conffile', 'settings.ini', '-dryrun'], conffile: chosen })).runId!;
+    const bytes = new TextEncoder().encode('[BLAST]\n');
+    expect(engine.registries).toEqual([{ name: 'settings.ini', bytes }]);
+    const snapshot = viewOf(coordinator, runId)!.snapshot;
+    expect(snapshot.conffile).toEqual({ name: 'settings.ini', fileName: 'my settings.ini', bytes });
+    expect(Object.isFrozen(snapshot.conffile)).toBe(true);
+    expect(snapshot.dryRun).toBe(true);
+    await waitFor(coordinator, runId, 'running');
+    expect(engine.requests[0]!.conffile).toEqual({ name: 'settings.ini', bytes });
+    engine.finish(runId);
+    await waitFor(coordinator, runId, 'completed');
+
+    // An argv without -conffile does not read a chosen file, and a run that is not a dry run says nothing of one.
+    engine.startResult = startOf({});
+    const plain = (await coordinator.enqueue({ ...request, conffile: chosen })).runId!;
+    expect(engine.registries.at(-1)).toBeUndefined();
+    expect('conffile' in viewOf(coordinator, plain)!.snapshot).toBe(false);
+    expect('dryRun' in viewOf(coordinator, plain)!.snapshot).toBe(false);
+    await waitFor(coordinator, plain, 'running');
+    expect('conffile' in engine.requests[1]!).toBe(false);
+    engine.finish(plain);
+    await waitFor(coordinator, plain, 'completed');
+  });
+
+  it('does not queue a request whose argv the engine cannot start, with its message', async () => {
+    const engine = new ManualEngine();
+    engine.startResult = { ok: false, message: "error: unexpected argument '-version' found" };
+    const { coordinator } = setup(engine);
+    expect(await coordinator.enqueue({ ...request, extra: ['-version'] })).toEqual({ ok: false, message: "error: unexpected argument '-version' found" });
+    expect(engine.registries).toEqual([]);
+    expect(coordinator.state.get().runs).toHaveLength(0);
+  });
+
+  // ABI v2 stream 8 (line RG E1w-3b): the file of -logfile comes with the engine's answer, also when
+  // the run fails, and the run keeps it; a cancelled run keeps none.
+  it('keeps the files that a run made besides its outputs, of a completed and of a failed run, and none of a cancelled one', async () => {
+    const engine = new ManualEngine();
+    const { coordinator, saved } = setup(engine);
+    const completed = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, completed, 'running');
+    engine.finish(completed, [logFile('Warning: [tblastx] Examining 5 or more matches is recommended\n')]);
+    await waitFor(coordinator, completed, 'completed');
+    expect(viewOf(coordinator, completed)!.record.runFiles).toEqual([logFile('Warning: [tblastx] Examining 5 or more matches is recommended\n')]);
+
+    const failed = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, failed, 'running');
+    engine.fail(failed, 'BLAST engine error: The average subject length is too short', [logFile('BLAST engine error: The average subject length is too short\n')]);
+    await waitFor(coordinator, failed, 'failed');
+    expect(viewOf(coordinator, failed)!.record).toMatchObject({
+      error: 'BLAST engine error: The average subject length is too short',
+      runFiles: [logFile('BLAST engine error: The average subject length is too short\n')],
+    });
+
+    const plain = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, plain, 'running');
+    engine.fail(plain, 'no files');
+    await waitFor(coordinator, plain, 'failed');
+    expect('runFiles' in viewOf(coordinator, plain)!.record).toBe(false);
+
+    const cancelled = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, cancelled, 'running');
+    coordinator.cancel(cancelled);
+    engine.finish(cancelled, [logFile('late\n')]);
+    await waitFor(coordinator, cancelled, 'cancelled');
+    expect('runFiles' in viewOf(coordinator, cancelled)!.record).toBe(false);
+
+    // A file is saved byte for byte under the run's names (a program without a default task here), a failed run's too.
+    await coordinator.exportRunFile(completed, 0);
+    await coordinator.exportRunFile(failed, 0);
+    expect(saved).toEqual([
+      { fileName: 'losat-run1-blastn-19700101T000001Z.run.log', text: 'Warning: [tblastx] Examining 5 or more matches is recommended\n', type: 'text/plain' },
+      { fileName: 'losat-run2-blastn-19700101T000001Z.run.log', text: 'BLAST engine error: The average subject length is too short\n', type: 'text/plain' },
+    ]);
+    await expect(coordinator.exportRunFile(plain, 0)).rejects.toThrow('the run has no such file');
   });
 
   it('exports a completed output byte for byte under a name with the task and the time of the run (WA-RS-05)', async () => {

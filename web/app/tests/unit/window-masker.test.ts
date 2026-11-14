@@ -84,7 +84,7 @@ function draftSetup() {
     cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),
   });
   const fake = new FakeEngine();
-  const engine = { describe: fake.describe.bind(fake), validate: fake.validate.bind(fake), prepare: () => undefined };
+  const engine = { describe: fake.describe.bind(fake), start: fake.start.bind(fake), validate: fake.validate.bind(fake), prepare: () => undefined };
   let id = 0;
   const coordinator = new Coordinator({
     engine: { ...engine, run: fake.run.bind(fake), cancel: fake.cancel.bind(fake) },
@@ -202,7 +202,7 @@ describe('the gateway and the counts file', () => {
     };
     const engine = new WasmEngine({
       assets,
-      control: { describe: () => Promise.reject(new Error('unused')), validate: () => Promise.reject(new Error('unused')) },
+      control: { describe: () => Promise.reject(new Error('unused')), start: () => Promise.reject(new Error('unused')), validate: () => Promise.reject(new Error('unused')) },
       hardwareConcurrency: 8,
       createWorker: () => worker as unknown as Worker,
       loadModules: async () => ({ serial: { asset: assets.serial }, threads: { asset: assets.threads } }),

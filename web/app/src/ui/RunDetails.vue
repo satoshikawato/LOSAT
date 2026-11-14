@@ -61,6 +61,15 @@ const inputs = computed(() => [
             <span class="muted small">SHA-256 {{ input.sha256 }}</span>
           </dd>
         </template>
+        <template v-if="snapshot.conffile">
+          <!-- The registry file of -conffile (line RG E1w-3b): the name that the argv gives, and the file read under it. -->
+          <dt>-conffile</dt>
+          <dd data-testid="run-conffile">{{ snapshot.conffile.name }}: {{ snapshot.conffile.fileName }}, {{ formatBytes(snapshot.conffile.bytes.length) }}</dd>
+        </template>
+        <template v-if="snapshot.dryRun">
+          <dt>-dryrun</dt>
+          <dd data-testid="run-dry-run">a dry run: no search</dd>
+        </template>
         <dt>Threads requested</dt>
         <dd>{{ snapshot.requestedThreads === 'auto' ? 'Auto' : snapshot.requestedThreads }}</dd>
         <dt>Submitted</dt>

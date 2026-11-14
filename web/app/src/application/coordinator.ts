@@ -7,20 +7,22 @@
 // Inputs go through the data layer (plan §5.4): each input becomes a source, the source
 // gets a record table (a dataset revision), and the run snapshot holds the bytes of the
 // included records with their IDs and lengths, which the engine checks at `register`.
-import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type ProgramId, type RunOutput } from 'losat/domain';
+import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type ProgramId, type RunFile, type RunOutput } from 'losat/domain';
 import {
   RunCancelledError,
+  runFilesOf,
   type EngineGateway,
   type EngineInput,
   type EnginePhase,
   type HspRecord,
+  type StartResult,
   type ValidationResult,
 } from 'losat/ports';
 import { buildArgv, optionValue, PASTED_NAMES } from '../domain/argv';
 import { countsName, parseTaxid, type CountsOrigin } from '../domain/counts';
-import { outputFileName, outputMediaType, runOutputs } from '../domain/output-format';
+import { outputFileName, outputMediaType, runFileName, runOutputs } from '../domain/output-format';
 import { fastaParser, programById } from '../domain/programs';
-import { isTerminal, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
+import { isTerminal, type ConffileSnapshot, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
 import { taskOf } from './results';
@@ -55,6 +57,12 @@ export interface SearchRequest {
   readonly windowMasker?: File;
   /** Where the counts of a taxonomy ID came from; the run records it. */
   readonly windowMaskerOrigin?: CountsOrigin;
+  /**
+   * The file chosen for the argv's `-conffile` (Additional options; line RG E1w-3b): the run reads
+   * its bytes under the name that the engine's start reads of the argv. Not used by an argv without
+   * `-conffile`.
+   */
+  readonly conffile?: File;
 }
 
 export interface RunView {
@@ -129,14 +137,32 @@ export class Coordinator {
       } catch (error) {
         return { ok: false, message: errorMessage(error) };
       }
+      // NCBI's application start first: the name of the registry file that the argv reads, and
+      // whether the run is a dry run (line RG E1w-3b).
+      let start: StartResult;
+      try {
+        start = await this.deps.engine.start(argv);
+      } catch (error) {
+        return { ok: false, message: `The options could not be checked: ${errorMessage(error)}` };
+      }
+      if (!start.ok) return start;
+      let conffile: ConffileSnapshot | undefined;
+      const { conffile: conffileName, dryRun } = start.start;
+      if (conffileName !== null && request.conffile !== undefined) {
+        try {
+          conffile = Object.freeze({ name: conffileName, fileName: request.conffile.name, bytes: new Uint8Array(await request.conffile.arrayBuffer()) });
+        } catch (error) {
+          return { ok: false, message: `The file of -conffile ${conffileName} (${request.conffile.name}) could not be read: ${errorMessage(error)}` };
+        }
+      }
       let validation: ValidationResult;
       try {
-        validation = await this.deps.engine.validate(argv);
+        validation = await this.deps.engine.validate(argv, conffile === undefined ? undefined : { name: conffile.name, bytes: conffile.bytes });
       } catch (error) {
         return { ok: false, message: `The options could not be checked: ${errorMessage(error)}` };
       }
       if (!validation.ok) return validation;
-      prepared.push({ request, argv, queryName, subjectName });
+      prepared.push({ request, argv, queryName, subjectName, conffile, dryRun });
     }
 
     // The snapshots hold what the runs need: the sources made here from text and files are
@@ -155,7 +181,7 @@ export class Coordinator {
   private async freeze(prepared: readonly Prepared[], made: Made): Promise<EnqueueAllResult> {
     const snapshots: RunSnapshot[] = [];
     const groupId = prepared.length > 1 ? this.deps.newRunId() : undefined;
-    for (const [index, { request, argv, queryName, subjectName }] of prepared.entries()) {
+    for (const [index, { request, argv, queryName, subjectName, conffile, dryRun }] of prepared.entries()) {
       const program = programById(request.program);
       let query: InputSnapshot;
       let subject: InputSnapshot;
@@ -190,6 +216,8 @@ export class Coordinator {
           subject,
           requestedThreads: request.requestedThreads,
           ...(windowMasker === undefined ? {} : { windowMasker }),
+          ...(conffile === undefined ? {} : { conffile }),
+          ...(dryRun ? { dryRun: true as const } : {}),
           queuedAt: this.deps.now(),
           ...(groupId === undefined ? {} : { group: Object.freeze({ groupId, position: index + 1, size: prepared.length }) }),
         }),
@@ -237,13 +265,28 @@ export class Coordinator {
     const view = this.find(runId);
     if (view?.status !== 'completed') throw new Error('only completed runs can be exported');
     const { number, program, argv, queuedAt } = view.snapshot;
-    const [bytes, description] = await Promise.all([
-      this.deps.data.readOutput(runId, output),
-      // Without the engine's default task the name has none; the output is still saved.
-      this.deps.engine.describe(program).catch(() => undefined),
-    ]);
-    const { task } = description === undefined ? { task: optionValue(argv, '-task') } : taskOf(argv, description);
+    const [bytes, task] = await Promise.all([this.deps.data.readOutput(runId, output), this.taskOf(view.snapshot)]);
     this.deps.downloader.save(outputFileName({ number, program, task, queuedAt, argv }, output), bytes, outputMediaType(argv, output));
+  }
+
+  /**
+   * Saves a file that a run made besides its outputs (RunRecord.runFiles: the file of `-logfile`), its
+   * bytes as the engine wrote them, named by runFileName. A failed run keeps its files too.
+   */
+  async exportRunFile(runId: string, index: number): Promise<void> {
+    const view = this.find(runId);
+    const file: RunFile | undefined = view?.record.runFiles?.[index];
+    if (view === undefined || file === undefined) throw new Error('the run has no such file');
+    const { number, program, argv, queuedAt } = view.snapshot;
+    const task = await this.taskOf(view.snapshot);
+    this.deps.downloader.save(runFileName({ number, program, task, queuedAt, argv }, file.name), file.bytes, 'text/plain');
+  }
+
+  /** The task of a run for its files' names: the argv's, or the engine's default; none without the engine's description. */
+  private async taskOf(snapshot: RunSnapshot): Promise<string | undefined> {
+    // Without the engine's default task the name has none; the file is still saved.
+    const description = await this.deps.engine.describe(snapshot.program).catch(() => undefined);
+    return description === undefined ? optionValue(snapshot.argv, '-task') : taskOf(snapshot.argv, description).task;
   }
 
   /** Opens one output of a completed run without reading it (a binary one, which is not shown): rejects as `readOutput` when it cannot be read. */
@@ -339,6 +382,8 @@ export class Coordinator {
     const { snapshot } = view;
     let staged = false;
     const startedAt = this.deps.now();
+    // The files that the run made besides its outputs, which a completed and a failed run keep.
+    let runFiles: readonly RunFile[] | undefined;
     try {
       this.update(runId, { status: 'preparing', record: { startedAt } });
       const output = await this.deps.data.openRun(runId, runOutputs(snapshot.argv));
@@ -356,10 +401,15 @@ export class Coordinator {
           subject: engineInput(snapshot.subject),
           requestedThreads: snapshot.requestedThreads,
           ...(snapshot.windowMasker === undefined ? {} : { windowMasker: snapshot.windowMasker }),
+          ...(snapshot.conffile === undefined ? {} : { conffile: { name: snapshot.conffile.name, bytes: snapshot.conffile.bytes } }),
         },
         output,
         (phase) => this.onPhase(runId, phase),
-      );
+      ).catch((error: unknown) => {
+        runFiles = runFilesOf(error);
+        throw error;
+      });
+      runFiles = runtime.runFiles;
       if (this.cancelRequested.has(runId)) throw new RunCancelledError(runId);
       this.update(runId, { status: 'finalizing' });
       const result = await this.deps.data.commitRun(runId);
@@ -378,6 +428,7 @@ export class Coordinator {
           ...(runtime.windowMasker === undefined
             ? {}
             : { windowMasker: { ...runtime.windowMasker, ...(snapshot.windowMasker?.origin === undefined ? {} : { origin: snapshot.windowMasker.origin }) } }),
+          ...(runFiles === undefined ? {} : { runFiles }),
         },
       });
     } catch (error) {
@@ -388,6 +439,7 @@ export class Coordinator {
         record: {
           endedAt: this.deps.now(),
           ...(cancelled ? {} : { error: errorMessage(error) }),
+          ...(cancelled || runFiles === undefined ? {} : { runFiles }),
         },
       });
     } finally {
@@ -424,12 +476,15 @@ export class Coordinator {
   }
 }
 
-/** A request that the engine validated, with its argv and the names of its inputs. */
+/** A request that the engine validated, with its argv, the names of its inputs, and what the engine's start read of it. */
 interface Prepared {
   readonly request: SearchRequest;
   readonly argv: readonly string[];
   readonly queryName: string;
   readonly subjectName: string;
+  /** The registry file of the argv's `-conffile`, read from the chosen file. */
+  readonly conffile: ConffileSnapshot | undefined;
+  readonly dryRun: boolean;
 }
 
 /** What one enqueueAll made: sources of text and files, and the cached run inputs of dataset revisions. */

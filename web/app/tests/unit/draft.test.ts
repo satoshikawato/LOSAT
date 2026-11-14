@@ -1,8 +1,8 @@
 import { gzipSync, zstdCompressSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { sha256Hex } from 'losat';
-import type { InputRole } from 'losat/domain';
-import type { EnginePrepareHint, ValidationResult } from 'losat/ports';
+import type { InputRole, RegistryFile } from 'losat/domain';
+import type { EnginePrepareHint, StartResult, ValidationResult } from 'losat/ports';
 import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { SearchDraft, type DraftSource } from '../../src/application/draft';
 import { DataService } from '../../src/infra/data/data-service';
@@ -14,7 +14,9 @@ import { NodeInflater } from './support/node-inflater';
 
 function setup(
   options: {
-    validate?: (argv: readonly string[]) => ValidationResult;
+    validate?: (argv: readonly string[], registry?: RegistryFile) => ValidationResult;
+    /** The engine's start of an argv; by default none of its files and no dry run. */
+    start?: (argv: readonly string[]) => StartResult;
     useCoordinator?: boolean;
     checkInput?: DataService['checkInput'];
     fetcher?: FakeAccessionFetcher;
@@ -38,12 +40,17 @@ function setup(
   };
   const fake = new FakeEngine();
   const validated: Array<readonly string[]> = [];
+  /** The registry file that each validation was given (undefined for none). */
+  const registries: Array<RegistryFile | undefined> = [];
   const prepared: EnginePrepareHint[] = [];
   const engine = {
     describe: fake.describe.bind(fake),
-    validate: async (argv: readonly string[]): Promise<ValidationResult> => {
+    start: async (argv: readonly string[]): Promise<StartResult> =>
+      options.start?.(argv) ?? { ok: true, start: { conffile: null, logFile: null, dryRun: false } },
+    validate: async (argv: readonly string[], registry?: RegistryFile): Promise<ValidationResult> => {
       validated.push(argv);
-      return options.validate?.(argv) ?? { ok: true };
+      registries.push(registry);
+      return options.validate?.(argv, registry) ?? { ok: true };
     },
     prepare: (hint: EnginePrepareHint) => void prepared.push(hint),
   };
@@ -81,7 +88,7 @@ function setup(
       revisionSources: [...new Set([...inner.revisions.values()].map((revision) => revision.sourceId))].sort(),
     };
   };
-  return { draft, data, requests, validated, prepared, coordinator, checks, dropped, held };
+  return { draft, data, requests, validated, registries, prepared, coordinator, checks, dropped, held };
 }
 
 const file = (name: string, text: string) => new File([text], name, { type: 'text/plain' });
@@ -1306,6 +1313,68 @@ describe('SearchDraft submit', () => {
     await draft.idle();
     expect(draft.state.get().validation).toEqual({ state: 'invalid', message: 'BLAST query/options error: bad' });
     expect(validated.at(-1)).toEqual(['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-word_size', '3']);
+  });
+
+  // NCBI's application start (line RG E1w-3b): the engine's start of the argv names the file of
+  // -conffile; the form asks for it, and the validation and the run read the chosen file's bytes under
+  // the argv's name. Without a file, the engine's message stands.
+  it("asks for the file of the argv's -conffile, validates with its bytes under the argv's name, and runs with it", async () => {
+    const missing = 'Critical: (106.23) Registry file "settings.ini" not found, aborting.';
+    const { draft, registries, requests } = setup({
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false } }),
+      validate: (argv, registry) => (argv.includes('-conffile') && registry === undefined ? { ok: false, message: missing } : { ok: true }),
+    });
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    expect(draft.state.get().start).toEqual({ conffile: null, logFile: null, dryRun: false });
+    draft.setExtra('-conffile settings.ini');
+    await draft.idle();
+    expect(draft.state.get().start?.conffile).toBe('settings.ini');
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: missing });
+    expect(registries.at(-1)).toBeUndefined();
+    // A file of any name is read as the argv's.
+    const chosen = file('my.ini', '[BLAST]\n');
+    draft.setConffile(chosen);
+    await draft.idle();
+    expect(draft.state.get().conffiles.blastn).toBe(chosen);
+    expect(draft.state.get().validation).toEqual({ state: 'ok' });
+    expect(registries.at(-1)).toEqual({ name: 'settings.ini', bytes: new TextEncoder().encode('[BLAST]\n') });
+    expect((await draft.submit()).ok).toBe(true);
+    expect(requests.at(-1)![0]!.conffile).toBe(chosen);
+    // Another program has its own Additional options and file.
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(draft.state.get().start?.conffile).toBeNull();
+    expect(registries.at(-1)).toBeUndefined();
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(registries.at(-1)).toEqual({ name: 'settings.ini', bytes: new TextEncoder().encode('[BLAST]\n') });
+    // Without -conffile the chosen file is not read, nor sent with the run.
+    draft.setExtra('');
+    await draft.idle();
+    expect(registries.at(-1)).toBeUndefined();
+    expect((await draft.submit()).ok).toBe(true);
+    expect('conffile' in requests.at(-1)![0]!).toBe(false);
+    // Let go, the file is not read again.
+    draft.setExtra('-conffile settings.ini');
+    draft.setConffile(undefined);
+    await draft.idle();
+    expect(draft.state.get().conffiles.blastn).toBeUndefined();
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: missing });
+  });
+
+  it('shows the message of an argv that the engine cannot start, and validates nothing of it', async () => {
+    const { draft, validated } = setup({
+      start: (argv) => (argv.includes('-version') ? { ok: false, message: "error: unexpected argument '-version' found" } : { ok: true, start: { conffile: null, logFile: null, dryRun: false } }),
+    });
+    await draft.idle();
+    const before = validated.length;
+    draft.setExtra('-version');
+    await draft.idle();
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: "error: unexpected argument '-version' found" });
+    expect(draft.state.get().start).toBeUndefined();
+    expect(validated).toHaveLength(before);
   });
 
   it('queues runs in the coordinator, a group with shared subject bytes', async () => {

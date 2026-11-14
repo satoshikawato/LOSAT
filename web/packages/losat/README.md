@@ -75,6 +75,12 @@ stream; `RunOutputReceiver` reads them on the other end of a `MessageChannel`. `
 holds the ID and length of every record of the input. `ReactorScanner` produces them, and the
 engine checks them before it searches.
 
+`engine.start(argv)` reads what the command line reads before its arguments: the file that
+`-conffile` names, the file that `-logfile` names, and whether the argv has `-dryrun`. Give the
+file of `-conffile` under that name to `engine.validate(argv, registry)` and as
+`EngineRunRequest.conffile`. A run returns the `-logfile` file in `RuntimeInfo.runFiles`. When a
+run fails, `runFilesOf(error)` returns it.
+
 In a worker or in Node, the serial module can also be called directly:
 
 ```ts

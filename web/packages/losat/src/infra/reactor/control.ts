@@ -1,17 +1,19 @@
-// `describe` and `validate` over a serial reactor (docs/web/abi_v2.md §4, §9). The Data
+// `describe`, `start` and `validate` over a serial reactor (docs/web/abi_v2.md §4, §9). The Data
 // worker answers them with its own serial instance, so that the application can check a
 // search while the Engine worker is inside a long `run` (the Engine worker's thread is
 // then busy). Validation there gives the same result as in the module that runs the
 // search: the argv of the application has no -num_threads, the only option whose
 // validation depends on the build; the Engine worker validates the argv it runs, with its
-// -num_threads, again before the search.
+// -num_threads, again before the search. The registry file of `-conffile` is registered for
+// one validation only (line RG E1w-3b): the start of every later call of the instance would read
+// a registered file named `.ncbirc` or `<program>.ini` as the CLI reads one in its directory.
 import { OUTPUT_FORMATS, type OutputFormat } from '../../domain/output-format.js';
 import type { ResolvedDefault } from '../../domain/parameters.js';
 import type { ProgramId } from '../../domain/programs.js';
-import type { EngineGateway, ParameterDescription, ProgramDescription, ValidationResult } from '../../ports/engine.js';
-import type { ReactorAbi } from './abi.js';
+import type { EngineGateway, ParameterDescription, ProgramDescription, StartResult, ValidationResult } from '../../ports/engine.js';
+import { FILE_REGISTRY, type ReactorAbi } from './abi.js';
 
-export type EngineControl = Pick<EngineGateway, 'describe' | 'validate'>;
+export type EngineControl = Pick<EngineGateway, 'describe' | 'start' | 'validate'>;
 
 interface DescribeJson {
   readonly program: ProgramId;
@@ -97,8 +99,18 @@ export function reactorControl(reactor: () => Promise<ReactorAbi>): EngineContro
     async describe(program) {
       return toProgramDescription((await reactor()).describe(program));
     },
-    async validate(argv): Promise<ValidationResult> {
-      const message = (await reactor()).validate(argv);
+    async start(argv): Promise<StartResult> {
+      return (await reactor()).start(argv);
+    },
+    async validate(argv, registry): Promise<ValidationResult> {
+      const abi = await reactor();
+      const file = registry === undefined ? undefined : abi.registerFile(FILE_REGISTRY, registry.name, registry.bytes);
+      let message: string | undefined;
+      try {
+        message = abi.validate(argv);
+      } finally {
+        if (file !== undefined && abi.stoppedBy === undefined) abi.fileRelease(file.handle);
+      }
       return message === undefined ? { ok: true } : { ok: false, message };
     },
   };

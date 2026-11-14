@@ -1,0 +1,7 @@
+Error: (803.7) [tblastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 23
+u1 unsearched query café
+Error: (803.7) [tblastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 23
+u1 unsearched query café
+BLAST engine error: Database memory map file error

@@ -437,8 +437,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         run = subprocess.run(command, cwd=ENGINE, capture_output=True, env=row_env(row, env), timeout=TIMEOUT)
     if row["kind"] == "losat-rejection":
         # The library reads the whole query before it searches: a reader error ends the call before
-        # the batch that the command line refuses (an outfmt 11 title the archive cannot write, in a
-        # batch before the reader error), with the reader's message.
+        # the batch that the command line refuses, with the reader's message.
         if library and run.returncode != 0 and run.stdout == b"" and run.stderr.startswith(b"BLAST query error:") \
                 and expected_text(row).encode() not in run.stderr:
             return "library-input-error", ""

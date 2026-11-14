@@ -1,0 +1,204 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt11/arch_tbn_s.fna).
+           3 sequences; 1,122 total letters
+
+
+
+Query= qp1 query protein one
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sn1 plus strand gene                                                  245     3e-89
+sn2 minus strand gene                                                 184     2e-65
+
+
+> sn1 plus strand gene
+Length=501
+
+ Score = 245 bits (625),  Expect = 3e-89, Method: Compositional matrix adjust.
+ Identities = 121/140 (86%), Positives = 124/140 (89%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVLKA FAV RKVMDDPKIRDGP AVMKGWENYCWPANMSWKVLM YEFSSDIHP
+Sbjct  61   MWMEHSVLKAVFAVRRKVMDDPKIRDGPEAVMKGWENYCWPANMSWKVLMTYEFSSDIHP  240
+
+Query  61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+               W CWIPKE  TPGWW TDTLHM+EMGLWMHKYPKCMCVMVR TDQSLRHW+I  DAN
+Sbjct  241  ---WWCWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDAN  411
+
+Query  121  FEKLKIFHYMVGHGRTASEG  140
+            FE LKI H+MVGHGRTASEG
+Sbjct  412  FEILKILHHMVGHGRTASEG  471
+
+
+ Score = 18.1 bits (35),  Expect = 0.12, Method: Compositional matrix adjust.
+ Identities = 5/12 (42%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+ Frame = -1
+
+Query  124  LKIFHYMVGHGR  135
+             +I HY+  HG+
+Sbjct  129  FRIIHYLPPHGK  94
+
+
+ Score = 14.2 bits (25),  Expect = 2.3, Method: Compositional matrix adjust.
+ Identities = 7/18 (39%), Positives = 9/18 (50%), Gaps = 0/18 (0%)
+ Frame = +3
+
+Query  6    SVLKANFAVLRKVMDDPK  23
+            SVLK      R+   DP+
+Sbjct  372  SVLKTLGD*YRRQFRDPQ  425
+
+
+> sn2 minus strand gene
+Length=471
+
+ Score = 184 bits (467),  Expect = 2e-65, Method: Compositional matrix adjust.
+ Identities = 98/143 (69%), Positives = 104/143 (73%), Gaps = 6/143 (4%)
+ Frame = -3
+
+Query  2    WMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWP----ANMSWKVLMKYEFSSD  57
+            WMEHSVLKA+   LRKVMDDPKIRDGPMAVMK WE+YC+     ANM   VLMKYEF S 
+Sbjct  448  WMEHSVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMGAHVLMKYEFQSG  269
+
+Query  58   IHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMH  117
+            IHPCN W CWIPK MA PGW  TDTL +SEMGLWMH  P  MC MVR T  +LRHWKI  
+Sbjct  268  IHPCNQWTCWIPKYMAVPGWCYTDTLDVSEMGLWMHCEP--MCHMVRETTHALRHWKINE  95
+
+Query  118  DANFEKLKIFHYMVGHGRTASEG  140
+              NFEKLK F Y V  GR A+EG
+Sbjct  94   ICNFEKLKAFPYQVPMGRAANEG  26
+
+
+ Score = 14.6 bits (26),  Expect = 1.8, Method: Compositional matrix adjust.
+ Identities = 9/37 (24%), Positives = 15/37 (41%), Gaps = 1/37 (3%)
+ Frame = +3
+
+Query  69   PKEMATP-GWWNTDTLHMSEMGLWMHKYPKCMCVMVR  104
+            P   A P G W  +  + S++ +         CV+ R
+Sbjct  27   PSLAALPIGTW*GNAFNFSKLQISFIFQCLSACVVSR  137
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 37009
+
+
+Query= t2 second batch bta
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sn1 plus strand gene                                                  245     3e-89
+sn2 minus strand gene                                                 184     2e-65
+
+
+> sn1 plus strand gene
+Length=501
+
+ Score = 245 bits (625),  Expect = 3e-89, Method: Compositional matrix adjust.
+ Identities = 121/140 (86%), Positives = 124/140 (89%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVLKA FAV RKVMDDPKIRDGP AVMKGWENYCWPANMSWKVLM YEFSSDIHP
+Sbjct  61   MWMEHSVLKAVFAVRRKVMDDPKIRDGPEAVMKGWENYCWPANMSWKVLMTYEFSSDIHP  240
+
+Query  61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+               W CWIPKE  TPGWW TDTLHM+EMGLWMHKYPKCMCVMVR TDQSLRHW+I  DAN
+Sbjct  241  ---WWCWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDAN  411
+
+Query  121  FEKLKIFHYMVGHGRTASEG  140
+            FE LKI H+MVGHGRTASEG
+Sbjct  412  FEILKILHHMVGHGRTASEG  471
+
+
+ Score = 18.1 bits (35),  Expect = 0.12, Method: Compositional matrix adjust.
+ Identities = 5/12 (42%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+ Frame = -1
+
+Query  124  LKIFHYMVGHGR  135
+             +I HY+  HG+
+Sbjct  129  FRIIHYLPPHGK  94
+
+
+ Score = 14.2 bits (25),  Expect = 2.3, Method: Compositional matrix adjust.
+ Identities = 7/18 (39%), Positives = 9/18 (50%), Gaps = 0/18 (0%)
+ Frame = +3
+
+Query  6    SVLKANFAVLRKVMDDPK  23
+            SVLK      R+   DP+
+Sbjct  372  SVLKTLGD*YRRQFRDPQ  425
+
+
+> sn2 minus strand gene
+Length=471
+
+ Score = 184 bits (467),  Expect = 2e-65, Method: Compositional matrix adjust.
+ Identities = 98/143 (69%), Positives = 104/143 (73%), Gaps = 6/143 (4%)
+ Frame = -3
+
+Query  2    WMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWP----ANMSWKVLMKYEFSSD  57
+            WMEHSVLKA+   LRKVMDDPKIRDGPMAVMK WE+YC+     ANM   VLMKYEF S 
+Sbjct  448  WMEHSVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMGAHVLMKYEFQSG  269
+
+Query  58   IHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMH  117
+            IHPCN W CWIPK MA PGW  TDTL +SEMGLWMH  P  MC MVR T  +LRHWKI  
+Sbjct  268  IHPCNQWTCWIPKYMAVPGWCYTDTLDVSEMGLWMHCEP--MCHMVRETTHALRHWKINE  95
+
+Query  118  DANFEKLKIFHYMVGHGRTASEG  140
+              NFEKLK F Y V  GR A+EG
+Sbjct  94   ICNFEKLKAFPYQVPMGRAANEG  26
+
+
+ Score = 14.6 bits (26),  Expect = 1.8, Method: Compositional matrix adjust.
+ Identities = 9/37 (24%), Positives = 15/37 (41%), Gaps = 1/37 (3%)
+ Frame = +3
+
+Query  69   PKEMATP-GWWNTDTLHMSEMGLWMHKYPKCMCVMVR  104
+            P   A P G W  +  + S++ +         CV+ R
+Sbjct  27   PSLAALPIGTW*GNAFNFSKLQISFIFQCLSACVVSR  137
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 37009
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt11/arch_tbn_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 1,122
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

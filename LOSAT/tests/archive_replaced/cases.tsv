@@ -1,0 +1,53 @@
+# case	program	env	args (one per cell after this; %XX is a byte; {out} {ss} {log} are the files the test makes)
+blastn_qe_txt	blastn	-	-query	in/n_e.fa	-subject	in/s_n.fa	-outfmt	11	-out	{out}
+blastn_qe_bin	blastn	ARCHIVE_FORMAT=bin	-query	in/n_e.fa	-subject	in/s_n.fa	-outfmt	11	-out	{out}
+blastn_se_txt	blastn	-	-query	in/n_plain.fa	-subject	in/s_n_e.fa	-outfmt	11	-out	{out}
+blastn_strat	blastn	-	-query	in/n_e.fa	-subject	in/s_n.fa	-outfmt	6	-export_search_strategy	{ss}	-out	{out}
+blastn_strat11	blastn	-	-query	in/n_e.fa	-subject	in/s_n.fa	-outfmt	11	-export_search_strategy	{ss}	-out	{out}
+blastp_qe_txt	blastp	-	-query	in/p_e.fa	-subject	in/s_p.fa	-outfmt	11	-out	{out}
+blastp_qe_bin	blastp	ARCHIVE_FORMAT=bin	-query	in/p_e.fa	-subject	in/s_p.fa	-outfmt	11	-out	{out}
+blastp_se_txt	blastp	-	-query	in/p_plain.fa	-subject	in/s_p_e.fa	-outfmt	11	-out	{out}
+blastp_strat	blastp	-	-query	in/p_e.fa	-subject	in/s_p.fa	-outfmt	6	-export_search_strategy	{ss}	-out	{out}
+blastp_strat11	blastp	-	-query	in/p_e.fa	-subject	in/s_p.fa	-outfmt	11	-export_search_strategy	{ss}	-out	{out}
+blastx_qe_txt	blastx	-	-query	in/n_e.fa	-subject	in/s_p.fa	-outfmt	11	-out	{out}
+blastx_qe_bin	blastx	ARCHIVE_FORMAT=bin	-query	in/n_e.fa	-subject	in/s_p.fa	-outfmt	11	-out	{out}
+blastx_se_txt	blastx	-	-query	in/n_plain.fa	-subject	in/s_p_e.fa	-outfmt	11	-out	{out}
+blastx_strat	blastx	-	-query	in/n_e.fa	-subject	in/s_p.fa	-outfmt	6	-export_search_strategy	{ss}	-out	{out}
+blastx_strat11	blastx	-	-query	in/n_e.fa	-subject	in/s_p.fa	-outfmt	11	-export_search_strategy	{ss}	-out	{out}
+tblastn_qe_txt	tblastn	-	-query	in/p_e.fa	-subject	in/s_n.fa	-outfmt	11	-out	{out}
+tblastn_qe_bin	tblastn	ARCHIVE_FORMAT=bin	-query	in/p_e.fa	-subject	in/s_n.fa	-outfmt	11	-out	{out}
+tblastn_se_txt	tblastn	-	-query	in/p_plain.fa	-subject	in/s_n_e.fa	-outfmt	11	-out	{out}
+tblastn_strat	tblastn	-	-query	in/p_e.fa	-subject	in/s_n.fa	-outfmt	6	-export_search_strategy	{ss}	-out	{out}
+tblastn_strat11	tblastn	-	-query	in/p_e.fa	-subject	in/s_n.fa	-outfmt	11	-export_search_strategy	{ss}	-out	{out}
+tblastx_qe_txt	tblastx	-	-query	in/n_e.fa	-subject	in/s_n.fa	-outfmt	11	-out	{out}
+tblastx_qe_bin	tblastx	ARCHIVE_FORMAT=bin	-query	in/n_e.fa	-subject	in/s_n.fa	-outfmt	11	-out	{out}
+tblastx_se_txt	tblastx	-	-query	in/n_plain.fa	-subject	in/s_n_e.fa	-outfmt	11	-out	{out}
+tblastx_strat	tblastx	-	-query	in/n_e.fa	-subject	in/s_n.fa	-outfmt	6	-export_search_strategy	{ss}	-out	{out}
+tblastx_strat11	tblastx	-	-query	in/n_e.fa	-subject	in/s_n.fa	-outfmt	11	-export_search_strategy	{ss}	-out	{out}
+blastn_qe_xml	blastn	ARCHIVE_FORMAT=xml	-query	in/n_e.fa	-subject	in/s_n.fa	-outfmt	11	-out	{out}
+blastn_se_bin	blastn	ARCHIVE_FORMAT=bin	-query	in/n_plain.fa	-subject	in/s_n_e.fa	-outfmt	11	-out	{out}
+n_del_txt	blastn	-	-query	in/n_del.fa	-subject	in/s_n.fa	-outfmt	11	-out	{out}
+n_del_bin	blastn	ARCHIVE_FORMAT=bin	-query	in/n_del.fa	-subject	in/s_n.fa	-outfmt	11	-out	{out}
+n_ff_txt	blastn	-	-query	in/n_ff.fa	-subject	in/s_n.fa	-outfmt	11	-out	{out}
+n_ctrl_txt	blastn	-	-query	in/n_ctrl.fa	-subject	in/s_n.fa	-outfmt	11	-out	{out}
+n_long_txt	blastn	-	-query	in/n_long.fa	-subject	in/s_n.fa	-outfmt	11	-out	{out}
+n_long_bin	blastn	ARCHIVE_FORMAT=bin	-query	in/n_long.fa	-subject	in/s_n.fa	-outfmt	11	-out	{out}
+n_lcl_del_txt	blastn	-	-query	in/n_lcl_del.fa	-subject	in/s_n.fa	-outfmt	11	-parse_deflines	-out	{out}
+n_lcl_del_bin	blastn	ARCHIVE_FORMAT=bin	-query	in/n_lcl_del.fa	-subject	in/s_n.fa	-outfmt	11	-parse_deflines	-out	{out}
+n_lcl_del_xml	blastn	ARCHIVE_FORMAT=xml	-query	in/n_lcl_del.fa	-subject	in/s_n.fa	-outfmt	11	-parse_deflines	-out	{out}
+n_lcl_del_strat	blastn	-	-query	in/n_lcl_del.fa	-subject	in/s_n.fa	-outfmt	6	-parse_deflines	-export_search_strategy	{ss}	-out	{out}
+n_batch_txt	blastn	BATCH_SIZE=100	-query	in/n_two_e.fa	-subject	in/s_n.fa	-outfmt	11	-out	{out}
+n_batch_bin	blastn	ARCHIVE_FORMAT=bin;BATCH_SIZE=100	-query	in/n_two_e.fa	-subject	in/s_n.fa	-outfmt	11	-out	{out}
+n_batch_strat11	blastn	BATCH_SIZE=100	-query	in/n_two_e.fa	-subject	in/s_n.fa	-outfmt	11	-export_search_strategy	{ss}	-out	{out}
+n_db_txt	blastn	-	-query	in/n_plain.fa	-db	in/d%C3%A9/ndb	-outfmt	11	-out	{out}
+n_db_bin	blastn	ARCHIVE_FORMAT=bin	-query	in/n_plain.fa	-db	in/d%C3%A9/ndb	-outfmt	11	-out	{out}
+n_db_xml	blastn	ARCHIVE_FORMAT=xml	-query	in/n_plain.fa	-db	in/d%C3%A9/ndb	-outfmt	11	-out	{out}
+n_db_strat	blastn	-	-query	in/n_plain.fa	-db	in/d%C3%A9/ndb	-outfmt	6	-export_search_strategy	{ss}	-out	{out}
+p_db_txt	blastp	-	-query	in/p_plain.fa	-db	in/d%C3%A9/pdb	-outfmt	11	-out	{out}
+n_wm_txt	blastn	-	-query	in/n_plain.fa	-subject	in/s_n.fa	-window_masker_db	in/w%C3%A9/counts.obinary	-outfmt	11	-out	{out}
+n_wm_bin	blastn	ARCHIVE_FORMAT=bin	-query	in/n_plain.fa	-subject	in/s_n.fa	-window_masker_db	in/w%C3%A9/counts.obinary	-outfmt	11	-out	{out}
+n_wm_strat	blastn	-	-query	in/n_plain.fa	-subject	in/s_n.fa	-window_masker_db	in/w%C3%A9/counts.obinary	-outfmt	6	-export_search_strategy	{ss}	-out	{out}
+n_wmctrl_txt	blastn	-	-query	in/n_plain.fa	-subject	in/s_n.fa	-window_masker_db	in/w%01/counts.obinary	-outfmt	11	-out	{out}
+n_wmctrl_xml	blastn	ARCHIVE_FORMAT=xml	-query	in/n_plain.fa	-subject	in/s_n.fa	-window_masker_db	in/w%01/counts.obinary	-outfmt	11	-out	{out}
+n_e_stdout	blastn	-	-query	in/n_e.fa	-subject	in/s_n.fa	-outfmt	11
+n_e_log	blastn	-	-query	in/n_e.fa	-subject	in/s_n.fa	-outfmt	11	-logfile	{log}	-out	{out}

@@ -64,8 +64,9 @@ pub(crate) struct PssmStats {
 }
 
 /// A query given as a PSSM (psiblast `-in_pssm`): its rows, the statistical values of its file,
-/// the query record made from its Bioseq, and NCBI's validation error of the PSSM, which NCBI
-/// raises when the search starts (after the outfmt 0 prolog).
+/// the query record made from its Bioseq, and NCBI's errors of the PSSM before its search
+/// (`stop_before_search`: the check of the PSSM, the PSSM engine's scores), which NCBI raises after
+/// the outfmt 0 prolog.
 #[derive(Debug, Clone)]
 pub struct PsiSearch {
     pub(crate) pssm: rows::QueryPssm,
@@ -80,7 +81,12 @@ pub struct PsiSearch {
     /// its Seq-aligns, the later rounds' PSSMs and the warnings take; the reports show them as
     /// `query_record` makes them. Empty for a FASTA query's later rounds (`from_engine`).
     pub(crate) query_ids: Vec<crate::seqid::ParsedSeqId>,
+    /// `CPsiBlastValidate::Pssm`'s error (`in_pssm::validation_error`).
     pub(crate) validation_error: Option<String>,
+    /// The PSSM engine's error for the scores of a PSSM of frequency ratios only
+    /// (`PsiBlastComputePssmScores` in `CPsiBlastImpl`'s constructor; `in_pssm::psi_search_and_object`),
+    /// which comes after the search strategy's request (`PssmQueryStop::Scores`).
+    pub(crate) scores_error: Option<String>,
     /// The warnings of `PsiBlastSetupScoreBlock` for the search's options (the frequency ratios
     /// all zero, the composition-based statistics reset to mode 1), which the query's warning
     /// line carries (`algorithm::psiblast::in_pssm::setup_messages`).
@@ -89,14 +95,157 @@ pub struct PsiSearch {
     /// (`CBlastQuerySourceBioseqSet::GetTitle`, `algorithm::pssm_search::in_pssm`); `None` for a FASTA
     /// query's later rounds, whose label keeps the record's title.
     pub(crate) warning_title: Option<Vec<u8>>,
-    /// The PSSM of `-in_pssm` as NCBI's application read it (before `CPsiBlastImpl` computes the
-    /// scores of a PSSM of frequency ratios only), which the search strategy's request holds
-    /// (`report::archive::requests::RunRequests::with_pssm_query`): kept only for a run that writes
-    /// one (`in_pssm::PssmReader::request`); `None` otherwise and for a FASTA query's later rounds.
-    pub(crate) request: Option<std::sync::Arc<crate::report::serial::pssm::PssmWithParameters>>,
+    /// What the search strategy's request holds of the PSSM (`PssmQueryRequest`): kept only for a
+    /// run that writes one (`in_pssm::PssmReader::strategy`, `pssm_request_written`) of a PSSM that
+    /// NCBI's check passes; `None` otherwise and for a FASTA query's later rounds.
+    pub(crate) request: Option<PssmQueryRequest>,
+}
+
+/// The PSSM of `-in_pssm` as NCBI's application read it (before `CPsiBlastImpl` computes the
+/// scores of a PSSM of frequency ratios only), which the search strategy's request holds
+/// (`report::archive::requests::RunRequests::with_pssm_query`), and the members of the file that
+/// LOSAT's reader skipped, which NCBI writes back into it (`PsiSearch::refuse_request_members`).
+#[derive(Debug, Clone)]
+pub(crate) struct PssmQueryRequest {
+    pub(crate) pssm: std::sync::Arc<crate::report::serial::pssm::PssmWithParameters>,
+    pub(crate) skipped: Vec<&'static str>,
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:279-304
+// ```c++
+//     CRef<CSearchDatabase> search_db = db_args->GetSearchDatabase();
+//     if (search_db.NotEmpty())
+//     {
+//         if (pssm.NotEmpty())
+//         {
+//             _ASSERT(queries.Empty());
+//             if(num_iters != 0)
+//             	retval.Reset(new blast::CExportStrategy(pssm, opts_hndl, search_db, client_id, num_iters));
+//     ...
+//     else
+//     {
+//         if (pssm.NotEmpty())
+//         {
+//             NCBI_THROW(CInputException, eInvalidInput,
+//                        "Remote PSI-BL2SEQ is not supported");
+//         }
+// ```
+/// Whether NCBI writes the search strategy's request of a PSSM query (`s_InitializeExportStrategy`
+/// of psiblast and tblastn): with `-export_search_strategy` (`strategy`) and a database
+/// (`database`: `-db`); with `-subject` it stops instead ("Remote PSI-BL2SEQ is not supported").
+pub(crate) fn pssm_request_written(strategy: bool, database: bool) -> bool {
+    strategy && database
+}
+
+/// What stops a PSSM query's run before its search, after the outfmt 0 prolog, in NCBI's order
+/// (`PsiSearch::stop_before_search`): the search strategy's request of a run with `-subject`, NCBI's
+/// check of the PSSM, then the PSSM engine's scores.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PssmQueryStop {
+    /// "Remote PSI-BL2SEQ is not supported" (`s_InitializeExportStrategy`): the options error, no
+    /// request.
+    Bl2seq,
+    /// `CPsiBlastValidate::Pssm`'s error, which the request makes too before it is written
+    /// (`x_Process_Pssm`): the engine error, no request.
+    Invalid(String),
+    /// The PSSM engine's error for the scores of a PSSM of frequency ratios only, in
+    /// `CPsiBlastImpl`'s constructor, after `SaveSearchStrategy` wrote the request: the engine
+    /// error, after the request (`after_request`).
+    Scores(String),
+}
+
+impl PssmQueryStop {
+    /// NCBI's error (exit status 1 for the options error, 3 for the engine's).
+    pub(crate) fn error(&self) -> anyhow::Error {
+        match self {
+            PssmQueryStop::Bl2seq => {
+                crate::blastinput::app::options_error("Remote PSI-BL2SEQ is not supported")
+            }
+            PssmQueryStop::Invalid(message) | PssmQueryStop::Scores(message) => {
+                crate::blastinput::app::engine_error(message)
+            }
+        }
+    }
+
+    /// Whether NCBI has written the search strategy's request when it stops (a run that writes
+    /// one, `pssm_request_written`).
+    pub(crate) fn after_request(&self) -> bool {
+        matches!(self, PssmQueryStop::Scores(_))
+    }
 }
 
 impl PsiSearch {
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:338-340 and
+    // c++/src/app/blast/tblastn_app.cpp:307,324 (the request, then the search object)
+    // ```c++
+    //     CRef<IQueryFactory> query_factory(s_MakeQueryFactory(pssm, query));
+    //
+    //     SaveSearchStrategy(args, m_CmdLineArgs, query_factory, opts_hndl, pssm, kNumIterations);
+    // ...
+    //             SaveSearchStrategy(args, m_CmdLineArgs, query_factory, m_OptsHndl, pssm);
+    // ...
+    //                 CRef<CPsiBlast> psiblast(new CPsiBlast(pssm, db_adapter, psi_opts));
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:533-534
+    // ```c++
+    //     // Throw exception if pssm is invalid
+    //     CPsiBlastValidate::Pssm(*pssm);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:58-67
+    // ```c++
+    // CPsiBlastImpl::CPsiBlastImpl(CRef<objects::CPssmWithParameters> pssm,
+    //                              CRef<CLocalDbAdapter> subject,
+    //                              CConstRef<CPSIBlastOptionsHandle> options)
+    // : m_Pssm(pssm), m_Query(0), m_Subject(subject), m_OptsHandle(options),
+    //     m_ResultType(eDatabaseSearch)
+    // {
+    //     x_Validate();
+    //     x_ExtractQueryFromPssm();
+    //     x_CreatePssmScoresFromFrequencyRatios();
+    // }
+    // ```
+    /// What stops the run of this PSSM query before its search (psiblast's and tblastn's one rule):
+    /// with `-export_search_strategy` (`strategy`) and no database (`database`), the request's
+    /// "Remote PSI-BL2SEQ" before anything else; then NCBI's check of the PSSM (the request makes
+    /// it, and `CPsiBlastImpl` without one); then the PSSM engine's scores of a PSSM of frequency
+    /// ratios only, which `CPsiBlastImpl` computes after the request was written. `None` for a run
+    /// that searches.
+    pub(crate) fn stop_before_search(
+        &self,
+        strategy: bool,
+        database: bool,
+    ) -> Option<PssmQueryStop> {
+        if strategy && !pssm_request_written(strategy, database) {
+            return Some(PssmQueryStop::Bl2seq);
+        }
+        if let Some(message) = &self.validation_error {
+            return Some(PssmQueryStop::Invalid(message.clone()));
+        }
+        self.scores_error.clone().map(PssmQueryStop::Scores)
+    }
+
+    /// The PSSM that the search strategy's request holds (`PssmQueryRequest`), `None` without one.
+    pub(crate) fn request_pssm(
+        &self,
+    ) -> Option<std::sync::Arc<crate::report::serial::pssm::PssmWithParameters>> {
+        self.request.as_ref().map(|request| request.pssm.clone())
+    }
+
+    /// LOSAT's refusal of a request whose PSSM file has members that the reader skipped, which
+    /// NCBI writes back into the request (`in_pssm::refuse_skipped_members`, the predicate of
+    /// `-out_pssm`'s refusal); `program` names LOSAT's program. Made after the database is opened
+    /// (a database NCBI cannot open stops it first) and before the first byte of output.
+    pub(crate) fn refuse_request_members(&self, program: &str) -> anyhow::Result<()> {
+        match &self.request {
+            Some(request) => in_pssm::refuse_skipped_members(
+                &request.skipped,
+                "-export_search_strategy",
+                program,
+            ),
+            None => Ok(()),
+        }
+    }
+
     /// `kbp_psi[0]`: the file's ungapped values, or those of `kbp_std` (the query's composition
     /// with the search's matrix, which NCBI also computes for `kbp_psi` before it overwrites them).
     ///
@@ -277,6 +426,7 @@ impl PsiSearch {
             query,
             query_ids: Vec::new(),
             validation_error: None,
+            scores_error: None,
             setup_messages,
             warning_title: None,
             request: None,

@@ -40,8 +40,9 @@ pub(super) const PROGRAM: &str = "PSITBLASTN";
 
 /// Reads `-in_pssm path` for tblastn: psiblast's reader (NCBI's `CPsiBlastArgs`, the same handler
 /// for both programs), whose refusals name LOSAT's TBLASTN and whose scores of a PSSM of
-/// frequency ratios only are made with the options' matrix (`matrix_name`); `request` is whether a
-/// search strategy's request holds the PSSM (`PssmReader::request`, `PsiSearch::request`).
+/// frequency ratios only are made with the options' matrix (`matrix_name`); `strategy` and
+/// `database` are whether the run writes a search strategy and searches `-db`
+/// (`PssmReader::strategy`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:128-130
 /// ```c++
@@ -49,13 +50,19 @@ pub(super) const PROGRAM: &str = "PSITBLASTN";
 ///     arg.Reset(m_PsiBlastArgs);
 ///     m_Args.push_back(arg);
 /// ```
-pub(super) fn read(path: &Path, matrix_name: &str, request: bool) -> Result<PsiSearch> {
+pub(super) fn read(
+    path: &Path,
+    matrix_name: &str,
+    strategy: bool,
+    database: bool,
+) -> Result<PsiSearch> {
     let (search, _file) = read_in_pssm(
         path,
         PssmReader {
             program: "TBLASTN",
             matrix_name,
-            request,
+            strategy,
+            database,
         },
     )?;
     Ok(search)
@@ -120,8 +127,16 @@ pub(super) fn check_limits(
     //         m_FormatType <= CFormattingArgs::eCommaSeparatedValues) {
     //         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, m_CustomDelim);
     // ```
-    // The pairwise report and the tabular formats 6, 7 and 10 (their field lists too).
-    if !matches!(outfmt, 0 | 6 | 7 | 10) {
+    // The pairwise report and the tabular formats 6, 7 and 10 (their field lists too). A run that
+    // NCBI stops before the search (`PsiSearch::stop_before_search`: the search strategy's "Remote
+    // PSI-BL2SEQ" with `-subject`, NCBI's check of the PSSM, the PSSM engine's scores) writes the
+    // prolog of its format and NCBI's error, with outfmt 11 the error archive (NCBI 2.17.0, line
+    // RG F1b-2 fix 1: `t.sub.f*`, `t.scaled.db.f11`, `t.ratios45.f11`; review 4 R5-6): these
+    // refusals of the search's reports do not apply to it.
+    let searched = psi
+        .stop_before_search(args.strategy.is_some(), args.db.is_some())
+        .is_none();
+    if searched && !matches!(outfmt, 0 | 6 | 7 | 10) {
         bail!(
             "output format {outfmt} with -in_pssm is not supported by LOSAT's TBLASTN yet{}",
             if outfmt == 11 {
@@ -140,6 +155,9 @@ pub(super) fn check_limits(
     // chunks of a split query are set up without the PSSM)
     // A PSSM query that NCBI splits is searched with the matrix in its preliminary stage, as
     // psiblast's (`algorithm::psiblast::in_pssm::check_in_pssm_options`).
+    if !searched {
+        return Ok(());
+    }
     let sizes =
         crate::algorithm::blastp::protein_query_split::protein_query_split_sizes("TBLASTN", 10000)?;
     let length = psi.query.seq().len();

@@ -1,5 +1,6 @@
 //! `-export_search_strategy FILE` of blastn, blastp, blastx, tblastn and tblastx (line RG, item F1),
-//! and of psiblast with a FASTA query, rpsblast and rpstblastn (item F1b-1), against the bytes
+//! of psiblast with a FASTA query, rpsblast and rpstblastn (item F1b-1), and of psiblast and tblastn
+//! `-in_pssm` (item F1b-2), against the bytes
 //! that NCBI BLAST+ 2.17.0 `-num_threads 1` writes: the strategy file (one
 //! `Blast4-request` per query batch, written before the batch's search), the standard output, the
 //! standard error and the exit status, with `-subject` and `-db`, several batches (`BATCH_SIZE`;
@@ -15,9 +16,13 @@
 //! name its XML data does not know). psiblast's request of each query (before its rounds, with the
 //! search space of the query before; `Web_StepNumber`), rpsblast's and rpstblastn's (the profile
 //! database's length and `.aux` costs in the requests after the first; `-mt_mode 1` at 4 and 8
-//! threads writes NCBI's `-num_threads 1` file, DECISIONS F1b-2). The rows that LOSAT refuses
-//! (DECISIONS 15, 21 and 26 of line RG; `-in_pssm` of tblastn and psiblast, item F1b-2) check the
-//! refusal. blastp's query blocks and the `0` side of
+//! threads writes NCBI's `-num_threads 1` file, DECISIONS F1b-2). A PSSM query's request with
+//! `-db` holds the PSSM as read (a PSSM of frequency ratios only without the engine's scores; the
+//! PSSM engine's error after the request), with `-subject` NCBI's "Remote PSI-BL2SEQ is not
+//! supported" after the prolog writes none (also with a subject title the requests could not
+//! hold, and before NCBI's check of the PSSM). The rows that LOSAT refuses (DECISIONS 15, 21 and 26
+//! of line RG; the PSSM members that LOSAT's reader skips, item F1b-2) check the refusal. blastp's
+//! query blocks and the `0` side of
 //! the default-on switches that the strategy's paths cross write the same files.
 //!
 //! The cases are the rows of `tests/fixtures/strategy/cases.tsv` (its header says what the

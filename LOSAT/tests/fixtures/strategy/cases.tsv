@@ -348,3 +348,13 @@ tblastn.db.in_pssm.opts	tblastn	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rn
 tblastn.db.in_pssm.scaled	tblastn	-	-in_pssm tests/fasta/strategy/pssm_scaled.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
 tblastn.sub.in_pssm.scaled	tblastn	-	-in_pssm tests/fasta/strategy/pssm_scaled.asn -subject tests/db_search/tslice.fna -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
 tblastn.db.in_pssm.comment	tblastn	-	-in_pssm tests/fasta/strategy/pssm_comment.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	refuse	1	-	which NCBI BLAST+ writes back with -export_search_strategy, is not supported by LOSAT's TBLASTN
+psiblast.pssm.db.ratio30	psiblast	-	-in_pssm tests/fasta/strategy/pssm_ratio30.asn -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.db.in_pssm.ratio30	tblastn	-	-in_pssm tests/fasta/strategy/pssm_ratio30.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastn.db.in_pssm.ratio30.m45	tblastn	-	-in_pssm tests/fasta/strategy/pssm_ratio30.asn -db tests/db_search/tslice -matrix BLOSUM45 -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+psiblast.pssm.sub.utf8.it2	psiblast	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -subject tests/fasta/strategy/sub_utf8.faa -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
+psiblast.pssm.sub.f10	psiblast	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 10 -export_search_strategy {ss}	ncbi	1	-	-
+tblastn.sub.in_pssm.f11	tblastn	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -subject tests/db_search/tslice.fna -outfmt 11 -export_search_strategy {ss}	ncbi	1	-	-
+tblastn.db.in_pssm.ratio30.m45.f11	tblastn	-	-in_pssm tests/fasta/strategy/pssm_ratio30.asn -db tests/db_search/tslice -matrix BLOSUM45 -outfmt 11 -export_search_strategy {ss}	ncbi	3	-	-
+psiblast.pssm.comment.nodb	psiblast	-	-in_pssm tests/fasta/strategy/pssm_comment.asn -db tests/db_search/none -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
+tblastn.db.in_pssm.comment.nodb	tblastn	-	-in_pssm tests/fasta/strategy/pssm_comment.asn -db tests/db_search/none -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
+psiblast.pssm.sub.2titles	psiblast	-	-in_pssm tests/fasta/strategy/pssm_2titles.asn -subject tests/fasta/outfmt11/arch_bp_s.faa -export_search_strategy {ss}	ncbi	1	-	-

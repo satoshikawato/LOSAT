@@ -746,6 +746,9 @@ fn search_cli(
     // FASTA input, no `Query is Empty!` and no query batches (one search of the PSSM,
     // tblastn_app.cpp:305-327).
     if let Some(psi) = resolved.pssm.clone() {
+        // A request whose PSSM file has members that the reader skipped: refused once the database
+        // is opened (NCBI's error of a database it cannot open comes first), before any output.
+        psi.refuse_request_members("TBLASTN")?;
         super::in_pssm::check_limits(&args, &resolved, &psi, choice.number)?;
         drop(query_input);
         crate::blastinput::input_files::write_empty_subject_warnings_by_length(
@@ -1414,33 +1417,21 @@ fn search(
     // scores of a PSSM of frequency ratios only (`PsiBlastComputePssmScores`) fail when the search
     // object is made, after the outfmt 0 prolog (tblastn_app.cpp:270, 322) and before any
     // subject is read.
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:279-304
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:307,324
     // ```c++
-    //     CRef<CSearchDatabase> search_db = db_args->GetSearchDatabase();
-    //     if (search_db.NotEmpty())
-    //     {
-    //     ...
-    //     else
-    //     {
-    //         if (pssm.NotEmpty())
-    //         {
-    //             NCBI_THROW(CInputException, eInvalidInput,
-    //                        "Remote PSI-BL2SEQ is not supported");
-    //         }
+    //             SaveSearchStrategy(args, m_CmdLineArgs, query_factory, m_OptsHndl, pssm);
+    // ...
+    //                 CRef<CPsiBlast> psiblast(new CPsiBlast(pssm, db_adapter, psi_opts));
     // ```
-    // With `-export_search_strategy` the request is made first (`SaveSearchStrategy`,
-    // tblastn_app.cpp:307, before `CPsiBlast`): a PSSM query with `-subject` stops there with
-    // NCBI's options error after the prolog (exit status 1, the strategy file empty; NCBI 2.17.0
-    // `tbn.pssm.sub*` of line RG F1d probe 7), before the PSSM's checks, which a request with
-    // `-db` makes in their place (`x_Process_Pssm`, the same error; no request is written).
-    let pssm_stop = match pssm.as_deref() {
-        Some(_) if args.strategy.is_some() && database.is_none() => Some(
-            crate::blastinput::app::options_error("Remote PSI-BL2SEQ is not supported"),
-        ),
-        Some(psi) => psi.validation_error.as_deref().map(app::engine_error),
-        None => None,
-    };
-    if let Some(error) = pssm_stop {
+    // With `-export_search_strategy` the request is made first: with `-subject` it stops the run
+    // ("Remote PSI-BL2SEQ is not supported", exit status 1, the strategy file empty; NCBI 2.17.0
+    // `tbn.pssm.sub*` of line RG F1d probe 7) before the PSSM's check, which a request with `-db`
+    // makes (no request then); the PSSM engine's error comes after the request is written
+    // (`PsiSearch::stop_before_search`, psiblast's rule too).
+    let pssm_stop = pssm
+        .as_deref()
+        .and_then(|psi| psi.stop_before_search(args.strategy.is_some(), database.is_some()));
+    if let Some(stop) = pssm_stop {
         write_first_batch_prologs(
             outputs,
             subject_path.map(|path| path.as_path()),
@@ -1450,7 +1441,19 @@ fn search(
             args.tabular_taxdb.unwrap_or(false),
             super::in_pssm::PROGRAM,
         )?;
-        return Err(error);
+        // The request of the one PSSM query, which NCBI wrote before its constructor failed.
+        if let (true, Some(strategy)) = (stop.after_request(), args.strategy.as_ref()) {
+            super::archive::requests(
+                database.is_none().then_some(subject_records),
+                resolved.lcase_masking,
+            )
+            .with_pssm_query(
+                pssm.as_deref()
+                    .and_then(crate::algorithm::pssm_search::PsiSearch::request_pssm),
+            )
+            .write(strategy, 0, input_records, None)?;
+        }
+        return Err(stop.error());
     }
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`); with
     // `-in_pssm`, of the PSSM's query when the reports show its ids (`PsiSearch::query_record`).
@@ -1493,7 +1496,10 @@ fn search(
             database.is_none().then_some(subject_records),
             resolved.lcase_masking,
         )
-        .with_pssm_query(pssm.as_deref().and_then(|psi| psi.request.clone()))
+        .with_pssm_query(
+            pssm.as_deref()
+                .and_then(crate::algorithm::pssm_search::PsiSearch::request_pssm),
+        )
     });
     // The titles that the BLAST archive (outfmt 11) cannot write are refused after the batches
     // are searched (below): the batch that stops the run here, and one whose search fails, write

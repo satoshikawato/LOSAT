@@ -98,11 +98,14 @@ pub(super) fn search_rounds(
                 .then(|| subject_source.fasta_records()),
             args.lcase_masking,
             args.app.name(),
-            args.psi_search.as_ref().and_then(|psi| psi.request.clone()),
+            args.psi_search.as_ref().and_then(|psi| psi.request_pssm()),
         )
     });
+    // Only requests that are written are looked at: a run that stops before its first batch's
+    // request (the PSSM query's "Remote PSI-BL2SEQ is not supported", `psiblast_stop_at_pssm_query`)
+    // has none, whatever its subjects' titles.
     if let Some(requests) = requests.as_ref() {
-        if titles_may_refuse {
+        if titles_may_refuse && batches.searched_done > 0 {
             requests.check_titles(&searched_queries[..batches.searched_done])?;
         }
         if let Some(span) = batches.stop_batch.clone() {
@@ -135,12 +138,17 @@ pub(super) fn search_rounds(
             // cannot be opened, `psiblast_stop_at_invalid_query`) comes after round 1 has written
             // the input PSSM's files; NCBI's check of the PSSM (`validation_error`) stops before
             // (NCBI 2.17.0, probes `y.*`, `y2.*` of the PS5c review; line PS DECISIONS 31), and so
-            // does the search strategy's request without a database
-            // (`psiblast_pssm_query_error`, `SaveSearchStrategy` before the rounds).
+            // do the search strategy's request without a database and the PSSM engine's scores
+            // (`PsiSearch::stop_before_search`: `SaveSearchStrategy` and `CPsiBlast` before the
+            // rounds).
             let search_error = error.downcast_ref::<crate::cli::NativeError>().is_some()
-                && args.psi_search.is_some()
-                && super::psiblast_pssm_query_error(args, subject_source.database().is_some())
-                    .is_none();
+                && args.psi_search.as_deref().is_some_and(|psi| {
+                    psi.stop_before_search(
+                        args.strategy.is_some(),
+                        subject_source.database().is_some(),
+                    )
+                    .is_none()
+                });
             if let Some(input) = plan.input.as_ref().filter(|_| search_error) {
                 let (asn, ascii) = input.files(&plan.request)?;
                 RoundFiles::new(

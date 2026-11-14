@@ -1,0 +1,19 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "BLAST query/options error: Remote PSI-BL2SEQ is not supported"
+    },
+    {
+      code 2,
+      message "Please refer to the BLAST+ user manual."
+    }
+  }
+}

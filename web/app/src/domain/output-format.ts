@@ -62,6 +62,10 @@ function configures(value: string): boolean {
 /** BLAST+'s names of the formats (its -outfmt help), for "Download All". */
 export const FORMAT_NAMES: Readonly<Record<number, string>> = Object.freeze({
   0: 'Pairwise',
+  1: 'Query-anchored showing identities',
+  2: 'Query-anchored no identities',
+  3: 'Flat query-anchored showing identities',
+  4: 'Flat query-anchored no identities',
   5: 'BLAST XML',
   6: 'Tabular',
   7: 'Tabular with comment lines',

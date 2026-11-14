@@ -73,3 +73,6 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
 - `q4b_lc1_200.faa` (line RG, series Q, Q4b): the letters of `tk.faa` with letters 1-200 in lower case; with
   `-lcase_masking` round 1 masks them, and NCBI's later rounds index them again (round 1's filtering takes the
   lower-case mask out of the query's sequence block), so the later rounds find alignments in them.
+  `q4b_inv.faa`: 20 lower-case letters, then `WCYHWCYHWC`; `q4b_inv_s.faa`: two subjects with `WCYHWCYHWC`. With
+  `-lcase_masking -seg yes` round 1 masks the lower case only; round 2's SEG on those X letters masks the island too,
+  so round 2 has no Karlin-Altschul parameters (NCBI 2.17.0 psiblast crashes there, exit 139).

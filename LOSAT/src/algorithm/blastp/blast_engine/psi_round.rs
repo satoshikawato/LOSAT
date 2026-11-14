@@ -374,6 +374,31 @@ fn run_queries(
                     Some(before) => before.next(args),
                     None => RoundQuery::first(args, &records[0]).next(args),
                 };
+                // A later round whose letters give no Karlin-Altschul parameters (SEG again on the
+                // letters that the rounds before masked can mask every letter left): NCBI's
+                // setup crashes there, after this round's PSSM files, as for a PSSM query
+                // (`INVALID_PSSM_QUERY_REFUSAL`).
+                //
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2782-2799
+                // ```c
+                //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+                //       if (loop_status) {
+                //           contexts[context].is_valid = FALSE;
+                //           sbp->sfp[context] = Blast_ScoreFreqFree(sbp->sfp[context]);
+                //           sbp->kbp_std[context] = Blast_KarlinBlkFree(sbp->kbp_std[context]);
+                //           if (!Blast_QueryIsTranslated(program) ) {
+                //              Blast_MessageWrite(blast_message, eBlastSevWarning, context,
+                //              kBlastErrMsg_CantCalculateUngappedKAParams);
+                //           }
+                //           continue;
+                //       }
+                //       ...
+                //       sbp->kbp_psi[context] = Blast_KarlinBlkNew();
+                // ```
+                let frames = [vec![query_now.frame.clone()]];
+                if !super::pssm_hooks::psi_contexts(args, &frames)[0].is_valid {
+                    bail!(super::INVALID_PSSM_QUERY_REFUSAL);
+                }
                 search.round_query = Some(query_now.frame.clone());
                 round_query = Some(query_now);
                 round_args.psi_search = Some(Arc::new(search));
@@ -516,7 +541,7 @@ fn run_queries(
 ///     return m_LocalQueryData;
 /// }
 /// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:206-219
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:206-210
 /// ```c++
 /// CObjMgr_LocalQueryData::GetSequenceBlk()
 /// {

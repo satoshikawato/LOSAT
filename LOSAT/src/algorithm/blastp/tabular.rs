@@ -792,8 +792,8 @@ fn write_tabular_rows<const RPS: bool>(
                 };
                 row_index += 1;
                 let mut row = tabular_hsp(hsp, searched_length, rows);
-                // Outside NCBI's alignment block (which `nident` opens only on a Seq-align's
-                // count that is not 0) `nident` keeps that count.
+                // Outside NCBI's alignment block `nident` is the 0 of `x_ResetFields`: with
+                // `nident` the block stays closed only on a Seq-align count of 0, which is that 0.
                 if !spec.opens_counts(&seqalign_num_ident) {
                     row.num_ident = seqalign_num_ident;
                 }

@@ -716,7 +716,7 @@ mod tests {
             db: {
                 let mut db =
                     SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
-                db.read_name_records(path.to_str().unwrap()).unwrap();
+                db.read_name_records(path.to_str().unwrap(), false).unwrap();
                 db
             },
             name: name.to_string(),

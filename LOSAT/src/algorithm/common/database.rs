@@ -180,7 +180,7 @@ pub(crate) fn restrict_database(
     if let Some(mask) = mask {
         mask.validate_at_open(db, name, db.seqtype() == SeqType::Nucleotide, program)?;
     }
-    db.read_name_records(name)
+    db.read_name_records(name, mask.is_some())
         .map_err(|error| database_error(error, program))?;
     db.check_accession_tables()
         .map_err(|error| database_error(error, program))?;
@@ -314,6 +314,11 @@ pub(crate) fn note_archive_database_masking(
 /// exit status 2; everything else is LOSAT's refusal, in LOSAT's wording (`program` is
 /// the program that refuses).
 pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error {
+    database_error_of(&error, program)
+}
+
+/// [`database_error`] of an error that its owner keeps (`seqdb::NameMaskError::Table`).
+pub(crate) fn database_error_of(error: &SeqDbError, program: &str) -> anyhow::Error {
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
     // ```c++
     //     catch (const CException& e) {                                           \
@@ -638,22 +643,62 @@ impl std::error::Error for HeaderReadError {}
 /// name of its `-db` list (`SeqDb::name_records`), that database's title (its name for an
 /// empty title), date and real totals, also with `-dbsize` or a list.
 pub(crate) fn pairwise_database(db: &SeqDb) -> PairwiseDatabase {
+    pairwise_database_masked(db, None)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:394-406
+// ```c++
+//     // Process the filtering algorithm IDs
+//     info.filt_algorithm_name.clear();
+//     info.filt_algorithm_options.clear();
+//     if (dbfilt_algorithm == -1) {
+//         return true;
+//     }
+//     ...
+//     seqdb->GetMaskAlgorithmDetails(dbfilt_algorithm,
+//                                    filtering_algorithm,
+//                                    info.filt_algorithm_name,
+//                                    info.filt_algorithm_options);
+// ```
+/// [`pairwise_database`] of a search masked with an algorithm whose details in each name's
+/// database are `shown` (`SeqDb::name_mask_details`, one per name record; `None` without database
+/// masking, `dbfilt_algorithm == -1`): the `Masked using:` lines of each name.
+pub(crate) fn pairwise_database_masked(
+    db: &SeqDb,
+    shown: Option<&[crate::seqdb::MaskAlgorithm]>,
+) -> PairwiseDatabase {
+    let records = db.name_records();
+    if let Some(shown) = shown {
+        // One algorithm per name (`name_mask_details` reads them from these records): a list of
+        // another length would drop or shift the names' `Masked using:` lines.
+        assert_eq!(
+            shown.len(),
+            records.len(),
+            "one masking algorithm per name of the -db list"
+        );
+    }
     PairwiseDatabase::new(
-        db.name_records()
+        records
             .iter()
-            .map(|record| DatabaseInfo {
-                definition: if record.title.is_empty() {
-                    record.name.as_bytes().to_vec()
-                } else {
-                    record.title.clone()
-                },
-                date: record.date.clone(),
-                num_sequences: u64::from(record.num_seqs),
-                total_letters: record.total_length,
-                // A search without database masking (`dbfilt_algorithm == -1`); a BLASTN search
-                // with it fills them (`BlastnDatabase::pairwise_database_masked`).
-                filt_algorithm_name: String::new(),
-                filt_algorithm_options: String::new(),
+            .enumerate()
+            .map(|(index, record)| {
+                let algorithm = shown.map(|shown| &shown[index]);
+                DatabaseInfo {
+                    definition: if record.title.is_empty() {
+                        record.name.as_bytes().to_vec()
+                    } else {
+                        record.title.clone()
+                    },
+                    date: record.date.clone(),
+                    num_sequences: u64::from(record.num_seqs),
+                    total_letters: record.total_length,
+                    filt_algorithm_name: algorithm
+                        .map(|algorithm| algorithm.program_name.clone())
+                        .unwrap_or_default(),
+                    filt_algorithm_options: algorithm
+                        .map(|algorithm| algorithm.options.clone())
+                        .unwrap_or_default(),
+                }
             })
             .collect(),
     )

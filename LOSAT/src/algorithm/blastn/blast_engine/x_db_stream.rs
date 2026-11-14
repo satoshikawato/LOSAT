@@ -255,7 +255,7 @@ where
         let mut kept = Vec::new();
         for j in 0..block.len() {
             let ordinal = range.first_ordinal + j as u32;
-            if let Some(result) = search(scratch, ordinal, block_subject(&block, j)?) {
+            if let Some(result) = search(scratch, ordinal, block_subject(&block, range, j)?) {
                 kept.push((ordinal, result));
             }
         }

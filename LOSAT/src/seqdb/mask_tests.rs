@@ -1328,3 +1328,88 @@ fn splits_follow_ncbi() {
         assert_eq!(ncbi_split(text), items, "{text:?}");
     }
 }
+
+// Review 1 F3 of M4a-2a: a search reads the blobs of a block of sequences with one read of the
+// offset array's entries and one of the data (`Column::read_blobs`); each sequence's blob, or
+// error, is the one `Column::blob` reads alone (NCBI's `GetBlob`, seqdbcol.cpp:322-352): the
+// sequences before the first that fails read, it and those after it give its error.
+#[test]
+fn a_block_of_blobs_gives_each_sequence_s_blob_or_the_first_error() {
+    let blobs: Vec<Vec<u8>> = [&b"aa"[..], b"", b"bbb", b"c", b"", b"dddd", b"e", b"ff"]
+        .iter()
+        .map(|blob| blob.to_vec())
+        .collect();
+    let (dir, name) = made_column(&[("7", "20:window=12")], &blobs);
+    let index = dir.path("mask_nucl_v4.naa");
+    let same_as_alone = |what: &str| {
+        let db = open_masked(&name).unwrap();
+        let column = db.volumes()[0].mask_column().unwrap().unwrap();
+        let alone: Vec<Result<Vec<u8>, String>> = (0..8)
+            .map(|oid| column.blob(oid).map_err(|error| error.to_string()))
+            .collect();
+        let mut block = column::ColumnBlobs::default();
+        for first in 0..8u32 {
+            for end in first + 1..=8 {
+                column.read_blobs(first, end, &mut block);
+                let first_error = alone[first as usize..end as usize]
+                    .iter()
+                    .position(|blob| blob.is_err())
+                    .map(|at| first + at as u32);
+                for oid in first..end {
+                    let expected = match first_error {
+                        Some(failed) if oid >= failed => {
+                            Err(alone[failed as usize].clone().unwrap_err())
+                        }
+                        _ => alone[oid as usize].clone(),
+                    };
+                    let read = block
+                        .blob(oid)
+                        .map(<[u8]>::to_vec)
+                        .map_err(|error| error.to_string());
+                    assert_eq!(
+                        read, expected,
+                        "{what}: block {first}..{end}, sequence {oid}"
+                    );
+                }
+            }
+        }
+        alone
+    };
+    let alone = same_as_alone("as written");
+    assert!(alone
+        .iter()
+        .zip(&blobs)
+        .all(|(read, blob)| read.as_ref() == Ok(blob)));
+    // The data file cut inside the blob of sequence 7.
+    let data = dir.path("mask_nucl_v4.nac");
+    let written = std::fs::read(&data).unwrap();
+    std::fs::write(&data, &written[..written.len() - 1]).unwrap();
+    let alone = same_as_alone("a cut data file");
+    assert!(alone[6].is_ok());
+    assert!(alone[7]
+        .as_ref()
+        .unwrap_err()
+        .contains("passes the end of the file"));
+    std::fs::write(&data, &written).unwrap();
+    // The entry of sequence 6 below that of 5: sequence 5's range ends before it starts.
+    let mut bytes = std::fs::read(&index).unwrap();
+    let entries = bytes.len() - 4 * 9;
+    let six = entries + 4 * 6;
+    bytes[six..six + 4].copy_from_slice(&2i32.to_be_bytes());
+    std::fs::write(&index, &bytes).unwrap();
+    let alone = same_as_alone("an entry below the one before it");
+    assert!(alone[5]
+        .as_ref()
+        .unwrap_err()
+        .contains("the data range of sequence 5 ends (2)"));
+    assert!(alone[4].is_ok() && alone[6].is_ok());
+    // The offset array cut after the entry of sequence 4: sequences 4 to 7 lack their end.
+    bytes.truncate(entries + 4 * 5);
+    std::fs::write(&index, &bytes).unwrap();
+    let alone = same_as_alone("a cut offset array");
+    assert!(alone[3].is_ok());
+    assert!(alone[4]
+        .as_ref()
+        .unwrap_err()
+        .contains("the offset array of the column ends before the entry of sequence 4"));
+}

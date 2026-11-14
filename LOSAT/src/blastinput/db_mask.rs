@@ -20,7 +20,7 @@ use anyhow::Result;
 
 use crate::cli::NativeError;
 use crate::report::archive::options::{Param, ParamValue};
-use crate::seqdb::{MaskAlgorithm, SeqDb, SeqDbError};
+use crate::seqdb::{MaskAlgorithm, NameMaskError, SeqDb, SeqDbError};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2342-2356
 // ```c++
@@ -347,9 +347,10 @@ impl DbMaskOption {
     /// the database's volumes, `MaskAlgorithms::id_of`). A name that the database does not have
     /// (or that NCBI's reader of the table fails on) and the id -1 write NCBI's warning to
     /// `warning` and give `None`: the search is not masked. Any other id is looked up in the
-    /// database of each name of the `-db` list (`SeqDb::name_mask_details`): an id that one of
-    /// them does not have is NCBI's database error, exit 2 (the id 0, an id below -1, or a
-    /// name's id that a database of the list lacks).
+    /// database of each name of the `-db` list (`SeqDb::name_mask_details`, the tables that the
+    /// database's name records keep): an id that one of them does not have is NCBI's database
+    /// error, exit 2 (the id 0, an id below -1, or a name's id that a database of the list
+    /// lacks).
     pub fn resolve(
         &self,
         db: &SeqDb,
@@ -383,16 +384,25 @@ impl DbMaskOption {
             )?;
             return Ok(None);
         };
-        let shown = db
-            .name_mask_details(db_name, id)
-            .map_err(|error| match error {
+        let shown = db.name_mask_details(id).map_err(|error| {
+            let error = match &error {
+                NameMaskError::Table(error) => *error,
+                NameMaskError::Details(error) => error,
+                NameMaskError::NotRead => {
+                    return anyhow::anyhow!(
+                        "LOSAT internal error: the database's names were read without their mask algorithms"
+                    )
+                }
+            };
+            match error {
                 SeqDbError::Range(text) => NativeError {
                     exit: 2,
                     message: format!("BLAST Database error: {text}\n"),
                 }
                 .into(),
-                error => crate::algorithm::common::database::database_error(error, program),
-            })?;
+                error => crate::algorithm::common::database::database_error_of(error, program),
+            }
+        })?;
         Ok(Some(ResolvedMask {
             kind: self.kind,
             id,

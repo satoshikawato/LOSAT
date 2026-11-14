@@ -23,7 +23,7 @@ fn open(names: &[PathBuf]) -> (SeqDb, String) {
         .collect::<Vec<_>>()
         .join(" ");
     let mut db = SeqDb::open(&name, SeqType::Nucleotide).unwrap();
-    db.read_name_records(&name).unwrap();
+    db.read_name_records(&name, true).unwrap();
     (db, name)
 }
 
@@ -374,4 +374,125 @@ fn the_strategy_keeps_a_name_the_database_does_not_know() {
         names(soft("+11").strategy_params(Some(&mask))),
         ["DbFilteringAlgorithmId", "SubjectMaskingType"]
     );
+}
+
+/// `open` of `names` restricted to the text seqid list `ids` (`-seqidlist`), as
+/// `restrict_database` restricts a search's database before it reads the names' records.
+fn open_listed(names: &[PathBuf], ids: &[&str]) -> (SeqDb, String) {
+    let name = names
+        .iter()
+        .map(|path| path.to_str().unwrap())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let text: Vec<u8> = ids
+        .iter()
+        .flat_map(|id| format!("{id}\n").into_bytes())
+        .collect();
+    let file = crate::seqdb::seqidlist::read_si_list(&text, &mut Vec::new()).unwrap();
+    let list = crate::seqdb::DbList::Seqids(crate::seqdb::SeqidList {
+        negative: false,
+        file,
+    });
+    let mut db = SeqDb::open(&name, SeqType::Nucleotide).unwrap();
+    db.restrict(&list, &mut Vec::new()).unwrap();
+    db.read_name_records(&name, true).unwrap();
+    (db, name)
+}
+
+// Review 1 F2 of M4a-2a (probes d5_sid, d5_sid_n4, d5_nosid): `zz5` (the subjects as `t1`-`t5`,
+// dust `-level 40 -window 32` alone: its own 11) lacks the list's algorithm 11 (`p5`'s dust; the
+// list's 12 is zz5's). NCBI reads a sequence's masks only when it searches it (seqsrc_seqdb.cpp:
+// 318-321) and translates the algorithm of a volume only for a blob that is not empty
+// (seqdbimpl.cpp:2531-2546): a search that reads no blob of zz5 is NCBI's defined search (rc 0,
+// 4 rows), one that reads one of them meets the stale volume-algorithm cache (decision D5).
+#[test]
+fn a_volume_without_the_algorithm_is_refused_only_where_the_search_reads_its_masks() {
+    let names = [dbmask("p5"), dbmask("zz5")];
+    let refused = |db: &SeqDb, name: &str| {
+        let (resolved, _) = resolve(&soft("11"), db, name);
+        let resolved = resolved.unwrap().unwrap();
+        // Each name's own 11: p5's dust, zz5's dust40.
+        let shown: Vec<_> = resolved
+            .shown
+            .iter()
+            .map(|algorithm| algorithm.options.as_str())
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                "window=64; level=20; linker=1",
+                "window=32; level=40; linker=1"
+            ]
+        );
+        resolved
+            .check_losat_limits(db, "BLASTN")
+            .err()
+            .map(|error| format!("{error:#}"))
+    };
+    // p5's sequences alone (probe d5_sid), and zz5's t2 and t5, which have no mask data.
+    for ids in [&["s1", "s2", "s3"][..], &["s1", "t2", "t5"], &["t2"]] {
+        let (db, name) = open_listed(&names, ids);
+        assert_eq!(refused(&db, &name), None, "{ids:?}");
+    }
+    // A searched sequence of zz5 with mask data (t1, t3, t4), or the whole list (probe d5_nosid).
+    for ids in [&["s1", "t1"][..], &["t4"]] {
+        let (db, name) = open_listed(&names, ids);
+        let error = refused(&db, &name).expect("refused");
+        assert!(
+            error.contains("zz5: unsupported database: the volume has mask data without the filtering algorithm 11"),
+            "{ids:?}: {error}"
+        );
+    }
+    let (db, name) = open(&names);
+    assert!(refused(&db, &name).is_some());
+}
+
+// Review 1 S1 and T6 of M4a-2a: the formatter's algorithm of each name comes from the table that
+// the name's record keeps (`read_name_records` opens each name once), one per record, and the
+// pairwise report's `Masked using:` lines pair them with the names' `Database:` lines.
+#[test]
+fn each_name_s_masked_using_line_comes_from_its_own_record() {
+    let (db, name) = open(&[dbmask("b5"), dbmask("a5"), dbmask("b5")]);
+    assert!(db
+        .name_records()
+        .iter()
+        .all(|record| matches!(record.mask_algorithms, Some(Ok(_)))));
+    let (resolved, _) = resolve(&soft("11"), &db, &name);
+    let resolved = resolved.unwrap().unwrap();
+    let pairwise =
+        crate::algorithm::common::database::pairwise_database_masked(&db, Some(&resolved.shown));
+    let lines: Vec<_> = pairwise
+        .databases
+        .iter()
+        .map(|database| {
+            (
+                String::from_utf8(database.definition.clone()).unwrap(),
+                database.filt_algorithm_options.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            ("dust40 only".to_string(), "window=32; level=40; linker=1"),
+            ("mask probe v5".to_string(), "window=64; level=20; linker=1"),
+            ("dust40 only".to_string(), "window=32; level=40; linker=1"),
+        ]
+    );
+    // Records read without the tables (another program's search) have none to give.
+    let mut plain = SeqDb::open(&name, SeqType::Nucleotide).unwrap();
+    plain.read_name_records(&name, false).unwrap();
+    assert!(matches!(
+        plain.name_mask_details(11),
+        Err(crate::seqdb::NameMaskError::NotRead)
+    ));
+}
+
+#[test]
+#[should_panic(expected = "one masking algorithm per name of the -db list")]
+fn a_masked_using_list_of_another_length_than_the_names_is_a_bug() {
+    let (db, name) = open(&[dbmask("b5"), dbmask("a5")]);
+    let (resolved, _) = resolve(&soft("11"), &db, &name);
+    let resolved = resolved.unwrap().unwrap();
+    crate::algorithm::common::database::pairwise_database_masked(&db, Some(&resolved.shown[..1]));
 }

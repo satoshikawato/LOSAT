@@ -657,56 +657,162 @@ impl Column {
     //     }
     // }
     // ```
-    /// The blob of the sequence `oid` (volume-relative); empty when the sequence has none.
+    /// The blob of the sequence `oid` (volume-relative); empty when the sequence has none
+    /// ([`Column::read_blobs`] of the one sequence).
     pub fn blob(&self, oid: u32) -> Result<Vec<u8>, SeqDbError> {
-        let mut blob = Vec::new();
-        self.blob_into(oid, &mut blob)?;
-        Ok(blob)
+        let mut blobs = ColumnBlobs::default();
+        self.read_blobs(oid, oid.saturating_add(1), &mut blobs);
+        blobs.take_blob(oid)
     }
 
-    /// [`Column::blob`] into `out`, whose bytes it replaces (its capacity is kept): a search's
-    /// mask reads (`SeqDb::mask_ranges_into`) reuse one buffer per worker. No NCBI counterpart:
-    /// only where the bytes are kept (NCBI's `CBlastDbBlob` points into its mapping).
-    pub fn blob_into(&self, oid: u32, out: &mut Vec<u8>) -> Result<(), SeqDbError> {
-        out.clear();
-        if i64::from(oid) >= i64::from(self.num_oids) {
-            return Err(SeqDbError::Range(format!(
-                "sequence {oid} is outside the column ({} sequences)",
-                self.num_oids
-            )));
+    /// Whether a sequence of `first..end` (volume-relative) has a blob, by the offset array
+    /// alone, read a window at a time: `Some(true)` at the first that has one whose data range
+    /// reads, `Some(false)` when a sequence before it cannot be read ([`Column::read_blobs`]'s
+    /// checks: a reader of the blobs in order meets that error first), `None` when every one has
+    /// an empty blob.
+    pub fn first_blob_in(&self, first: u32, end: u32) -> Option<bool> {
+        const WINDOW: u32 = 1 << 14;
+        let entries_end = {
+            let entries = (self.index.len() as i64 - i64::from(self.offset_array_start) - 4) / 4;
+            u32::try_from(entries.max(0)).unwrap_or(u32::MAX)
+        };
+        let num_oids = u32::try_from(self.num_oids.max(0)).unwrap_or(0);
+        let mut bytes = Vec::new();
+        let mut window = first;
+        while window < end {
+            let window_end = end.min(window.saturating_add(WINDOW));
+            let read_end = window_end.min(num_oids).min(entries_end).max(window);
+            if read_end > window {
+                let istart = i64::from(self.offset_array_start) + 4 * i64::from(window);
+                bytes.resize(4 * (read_end - window + 1) as usize, 0);
+                if self.index.read_exact_at(&mut bytes, istart as u64).is_err() {
+                    return Some(false);
+                }
+                let offsets: Vec<i32> = bytes
+                    .chunks_exact(4)
+                    .map(|entry| i32::from_be_bytes([entry[0], entry[1], entry[2], entry[3]]))
+                    .collect();
+                for pair in offsets.windows(2) {
+                    let (dstart, dend) = (pair[0], pair[1]);
+                    if dend < dstart {
+                        return Some(false);
+                    }
+                    if dend > dstart {
+                        return Some(
+                            dstart >= 0
+                                && self.data.x_check_range(dstart as u64, dend as u64).is_ok(),
+                        );
+                    }
+                }
+            }
+            if read_end < window_end {
+                return Some(false);
+            }
+            window = window_end;
         }
-        let istart = i64::from(self.offset_array_start) + 4 * i64::from(oid);
-        let iend = istart + 8;
+        None
+    }
+
+    /// The blobs of the sequences `first..end` (volume-relative, `first < end`) into `blobs`,
+    /// whose buffers it reuses: one read of the offset array's entries of the sequences and one
+    /// of the data range of their blobs, as `Volume::read_block` reads a block's sequences (NCBI
+    /// maps the files and points into them, `GetBlob` per sequence). Each sequence has
+    /// [`Column::blob`]'s checks in the order of the sequences; the first that fails keeps its
+    /// error for itself and the sequences after it ([`ColumnBlobs::blob`]). A read of the data
+    /// range that fails is the error of its first sequence with a blob.
+    pub fn read_blobs(&self, first: u32, end: u32, blobs: &mut ColumnBlobs) {
+        blobs.first = first;
+        blobs.offsets.clear();
+        blobs.data.clear();
+        blobs.data_start = 0;
+        blobs.error = None;
+        // The sequences whose two entries the offset array holds: `GetBlob`'s
         // `SEQDB_FILE_ASSERT(m_Length >= end)` of the index file.
-        if iend > self.index.len() as i64 {
-            return Err(self.format_error(format!(
-                "the offset array of the column ends before the entry of sequence {oid}"
-            )));
+        let entries_end = {
+            let entries = (self.index.len() as i64 - i64::from(self.offset_array_start) - 4) / 4;
+            u32::try_from(entries.max(0)).unwrap_or(u32::MAX)
+        };
+        let num_oids = u32::try_from(self.num_oids.max(0)).unwrap_or(0);
+        let read_end = end.min(num_oids).min(entries_end).max(first);
+        if read_end < end {
+            let oid = read_end;
+            blobs.error = Some((
+                oid,
+                if oid >= num_oids {
+                    SeqDbError::Range(format!(
+                        "sequence {oid} is outside the column ({} sequences)",
+                        self.num_oids
+                    ))
+                } else {
+                    self.format_error(format!(
+                        "the offset array of the column ends before the entry of sequence {oid}"
+                    ))
+                },
+            ));
         }
-        let mut offsets = [0u8; 8];
-        self.index.read_exact_at(&mut offsets, istart as u64)?;
-        let mut blob = Blob::new(&offsets, 0);
-        let dstart = blob.read_i32().map_err(|e| self.format_error(e))?;
-        let dend = blob.read_i32().map_err(|e| self.format_error(e))?;
-        if dend < dstart {
-            return Err(self.format_error(format!(
-                "the data range of sequence {oid} ends ({dend}) before it starts ({dstart})"
-            )));
+        if read_end == first {
+            return;
         }
-        if dend == dstart {
-            return Ok(());
+        let istart = i64::from(self.offset_array_start) + 4 * i64::from(first);
+        let mut bytes = vec![0u8; 4 * (read_end - first + 1) as usize];
+        if let Err(error) = self.index.read_exact_at(&mut bytes, istart as u64) {
+            blobs.error = Some((first, error));
+            return;
         }
-        // A negative start is undefined in NCBI (a pointer before the mapping); a range
-        // past the end of the data file fails `SEQDB_FILE_ASSERT(m_Length >= end)`.
-        if dstart < 0 {
-            return Err(self.format_error(format!(
-                "the data range of sequence {oid} starts at {dstart}"
-            )));
+        let mut entries = Blob::new(&bytes, 0);
+        for _ in first..=read_end {
+            match entries.read_i32() {
+                Ok(offset) => blobs.offsets.push(offset),
+                Err(error) => {
+                    blobs.error = Some((first, self.format_error(error)));
+                    return;
+                }
+            }
         }
-        // The checks of `DbFile::read_range` before its buffer is sized, with its errors.
-        self.data.x_check_range(dstart as u64, dend as u64)?;
-        out.resize((dend - dstart) as usize, 0);
-        self.data.read_exact_at(out, dstart as u64)
+        // The checks of each sequence in order; the data range of those before the first that
+        // fails.
+        let mut data: Option<(i32, i32, u32)> = None;
+        for oid in first..read_end {
+            let i = (oid - first) as usize;
+            let (dstart, dend) = (blobs.offsets[i], blobs.offsets[i + 1]);
+            let failed = if dend < dstart {
+                Some(self.format_error(format!(
+                    "the data range of sequence {oid} ends ({dend}) before it starts ({dstart})"
+                )))
+            } else if dend == dstart {
+                None
+            } else if dstart < 0 {
+                // A negative start is undefined in NCBI (a pointer before the mapping); a
+                // range past the end of the data file fails `SEQDB_FILE_ASSERT(m_Length >=
+                // end)`.
+                Some(self.format_error(format!(
+                    "the data range of sequence {oid} starts at {dstart}"
+                )))
+            } else {
+                // The checks of `DbFile::read_range` before its buffer is sized, with its
+                // errors.
+                self.data.x_check_range(dstart as u64, dend as u64).err()
+            };
+            if let Some(error) = failed {
+                blobs.error = Some((oid, error));
+                break;
+            }
+            if dend > dstart {
+                data = Some(match data {
+                    None => (dstart, dend, oid),
+                    Some((low, high, at)) => (low.min(dstart), high.max(dend), at),
+                });
+            }
+        }
+        if let Some((low, high, at)) = data {
+            blobs.data.resize((high - low) as usize, 0);
+            if let Err(error) = self.data.read_exact_at(&mut blobs.data, low as u64) {
+                blobs.data.clear();
+                blobs.error = Some((at, error));
+                return;
+            }
+            blobs.data_start = low;
+        }
     }
 }
 
@@ -887,4 +993,60 @@ pub(super) fn open_all(
         columns.push(column);
     }
     Ok(columns)
+}
+
+/// The blobs of a run of sequences of one column ([`Column::read_blobs`]): the offset array's
+/// entries of the run and the data range of their blobs, kept to be read again (a search's
+/// worker reuses one per block of its preliminary stage). No NCBI counterpart: NCBI points into
+/// its mapping of the files.
+#[derive(Debug, Default)]
+pub struct ColumnBlobs {
+    /// The first sequence of the run (volume-relative).
+    first: u32,
+    /// The offset array's entries from `first` on: sequence `first + i` has the data
+    /// `offsets[i]..offsets[i + 1]`.
+    offsets: Vec<i32>,
+    /// The data file's bytes from `data_start` on: the blobs of the sequences before `error`.
+    data: Vec<u8>,
+    data_start: i32,
+    /// The first sequence whose blob cannot be read, and its error, which the sequences after it
+    /// share.
+    error: Option<(u32, SeqDbError)>,
+}
+
+impl ColumnBlobs {
+    /// The blob of the sequence `oid` of the run (empty when it has none), or the error of the
+    /// first sequence of the run that cannot be read, at it or before it.
+    pub fn blob(&self, oid: u32) -> Result<&[u8], &SeqDbError> {
+        if let Some((failed, error)) = &self.error {
+            if oid >= *failed {
+                return Err(error);
+            }
+        }
+        let i = (oid - self.first) as usize;
+        let (dstart, dend) = (self.offsets[i], self.offsets[i + 1]);
+        if dend == dstart {
+            return Ok(&[]);
+        }
+        Ok(&self.data[(dstart - self.data_start) as usize..(dend - self.data_start) as usize])
+    }
+
+    /// [`ColumnBlobs::blob`] of `oid`, owned.
+    fn take_blob(self, oid: u32) -> Result<Vec<u8>, SeqDbError> {
+        if let Ok(blob) = self.blob(oid) {
+            return Ok(blob.to_vec());
+        }
+        Err(self.into_error(oid))
+    }
+
+    /// The error that [`ColumnBlobs::blob`] gives `oid`, owned (`oid` is at or after the first
+    /// sequence that cannot be read).
+    pub(super) fn into_error(self, oid: u32) -> SeqDbError {
+        match self.error {
+            Some((failed, error)) if oid >= failed => error,
+            _ => SeqDbError::Range(format!(
+                "LOSAT internal error: the blob of sequence {oid} was read"
+            )),
+        }
+    }
 }

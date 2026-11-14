@@ -4349,10 +4349,11 @@ struct SubjectScratch {
     //                                 (SSeqRange*) datap->seq_ranges.get_data(),
     //                                 datap->seq_ranges.size() + 1, false, datap->mask_type) != 0) {
     // ```
-    // The buffers of a database search with `-db_soft_mask` (decision D4 of M4a-2): the mask
-    // reads and the soft ranges of each database sequence, kept from one sequence to the next as
+    // The buffers of a database search with `-db_soft_mask` (decision D4 of M4a-2): the masks of
+    // the block of the database sequence being searched (read once for all the block's
+    // sequences, review 1 F3 of M4a-2a) and its soft ranges, kept from one sequence to the next as
     // NCBI keeps one `TSequenceRanges` per thread. Empty, and never touched, without the option.
-    db_mask_read: crate::seqdb::MaskReadScratch,
+    db_masks: crate::seqdb::MaskBlock,
     db_soft_ranges: Vec<(i32, i32)>,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:77-81
     // ```c
@@ -4472,7 +4473,7 @@ impl SubjectScratch {
             //                                sizeof(SSeqRange));
             // ```
             seq_ranges_scratch: Vec::new(),
-            db_mask_read: crate::seqdb::MaskReadScratch::default(),
+            db_masks: crate::seqdb::MaskBlock::default(),
             db_soft_ranges: Vec::new(),
             hit_level_array: Vec::new(),
             hit_len_array: Vec::new(),
@@ -6566,11 +6567,11 @@ fn post_process_hits_and_write(
         report.database_ordinals,
     ) {
         (true, Some(algo_id), Some(reader), Some(ordinals)) => {
-            let mut read = crate::seqdb::MaskReadScratch::default();
+            let mut masks = crate::seqdb::MaskBlock::default();
             Some(
                 ordinals
                     .iter()
-                    .map(|&ordinal| reader.display_masks(ordinal, algo_id, &mut read))
+                    .map(|&ordinal| reader.display_masks(ordinal, algo_id, &mut masks))
                     .collect::<Result<Vec<_>>>()?,
             )
         }
@@ -9481,6 +9482,10 @@ struct BlastnSubjectRef<'a> {
     /// traceback alignment met a fence (`alignment::x_fence`): the traceback stops, and
     /// `database::traceback_listed` traces the sequence again whole. `None` otherwise.
     x_fenced: Option<&'a std::sync::atomic::AtomicBool>,
+    /// The block of the preliminary stage that a database sequence was read in
+    /// (`database::block_subject`), whose masks a search with `-db_soft_mask` reads once for all
+    /// its sequences (`database::BlastnDatabase::soft_ranges_into`). `None` otherwise.
+    block: Option<crate::seqdb::BlockRange>,
 }
 
 impl<'a> BlastnSubjectRef<'a> {
@@ -9493,6 +9498,7 @@ impl<'a> BlastnSubjectRef<'a> {
             blastna: None,
             store: None,
             x_fenced: None,
+            block: None,
         }
     }
 
@@ -9506,6 +9512,7 @@ impl<'a> BlastnSubjectRef<'a> {
             blastna: None,
             store: Some(store),
             x_fenced: None,
+            block: None,
         }
     }
 }
@@ -12505,13 +12512,20 @@ fn search_query_batch<const UNGAPPED: bool>(
         let db_soft_ranges = match db_soft_mask.filter(|_| prelim_source.is_none()) {
             Some((database, algo_id)) => {
                 let mut ranges = std::mem::take(&mut subject_scratch.db_soft_ranges);
-                if let Err(error) = database.soft_ranges_into(
-                    s_idx as u32,
-                    algo_id,
-                    s_len_full,
-                    &mut subject_scratch.db_mask_read,
-                    &mut ranges,
-                ) {
+                let read = match subject.block {
+                    Some(block) => database.soft_ranges_into(
+                        block,
+                        s_idx as u32,
+                        algo_id,
+                        s_len_full,
+                        &mut subject_scratch.db_masks,
+                        &mut ranges,
+                    ),
+                    None => Err(anyhow::anyhow!(
+                        "LOSAT internal error: database sequence {s_idx} was searched without its block"
+                    )),
+                };
+                if let Err(error) = read {
                     let mut first = db_mask_error
                         .lock()
                         .expect("the error cell is not poisoned");
@@ -16178,6 +16192,59 @@ fn merge_prelim_hit_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1647-1668 (quoted at
+    // `scan_subject_kmers_with_ranges`); SURVEY §10 of M4a-2, review 1 T3 of M4a-2a. With
+    // `-db_soft_mask` every database sequence is a masked subject, those without masks too
+    // (decision D3: `subject_masked` is the option, seqsrc_seqdb.cpp:399-405): its one range
+    // `[0, length)` is scanned from `word_length - lut_word_length` with the scanner of any
+    // stride, where an unmasked subject is scanned from 0 with the scanner of the lookup width
+    // and stride (the aligned one of a stride of four bases). Both visit every `scan_step`-th
+    // offset to `length - lut_word_length`.
+    #[test]
+    fn a_masked_subject_without_masks_starts_its_scan_after_the_word_s_head() {
+        let letters: Vec<u8> = (0..403u32)
+            .map(|i| b"ACGT"[((i * 7 + i / 3 + i / 11) % 4) as usize])
+            .collect();
+        let packed = crate::core::blast_encoding::encode_subject_ncbi2na_packed(&letters);
+        let length = letters.len();
+        let whole = [(0i32, length as i32)];
+        // (word_length, lut_word_length, scan_step): megablast with lookup widths 11 and 12,
+        // blastn (8-base lookup, aligned scan), blastn-short (7 and 7).
+        for (word_length, lut_word_length, scan_step) in
+            [(28, 11, 18), (28, 12, 17), (11, 8, 4), (7, 7, 1)]
+        {
+            let starts = |masked: bool| {
+                let mut starts = Vec::new();
+                scan_subject_kmers_with_ranges(
+                    &packed,
+                    length,
+                    word_length,
+                    lut_word_length,
+                    scan_step,
+                    &whole,
+                    masked,
+                    select_mb_scan_kind(lut_word_length, scan_step, masked),
+                    |start, _, _| starts.push(start),
+                );
+                starts
+            };
+            let last = length - lut_word_length;
+            let case = (word_length, lut_word_length, scan_step);
+            assert_eq!(
+                starts(false),
+                (0..=last).step_by(scan_step).collect::<Vec<_>>(),
+                "unmasked {case:?}"
+            );
+            assert_eq!(
+                starts(true),
+                (word_length - lut_word_length..=last)
+                    .step_by(scan_step)
+                    .collect::<Vec<_>>(),
+                "masked {case:?}"
+            );
+        }
+    }
 
     // `-soft_masking false`: each context's masks become Ns in the buffer (the minus context's
     // are its own, already reversed), the returned copy keeps the letters, and the contexts no

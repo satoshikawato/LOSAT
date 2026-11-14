@@ -689,9 +689,11 @@ that `makeblastdb -mask_data` stored in the database, as NCBI BLAST+ 2.17.0 does
   The other formats change only through the results.
 
 Refused: `-db_hard_mask` where it would mask the search (its errors and its warning are NCBI's;
-line NP, M4a-2b), a database with a volume that has masks but not the algorithm (NCBI reads the
-masks of another volume's algorithm through a cache, or an unset value; M/DECISIONS 9 of line NP)
-and a volume whose mask column has its big-endian file alone (NCBI reads its numbers reversed).
+line NP, M4a-2b), a search that reads the masks of a volume that has masks but not the algorithm
+(NCBI reads the masks of another volume's algorithm through a cache, or an unset value; M/DECISIONS
+9 of line NP) or of a volume whose mask column has its big-endian file alone (NCBI reads its
+numbers reversed). Such a volume is searched when no sequence that the search reads from it
+(after `-seqidlist`, `-taxids` and the like) has mask data, as NCBI then reads none of it.
 LOSAT Web refuses both options until it searches databases.
 
 ## What BLASTX `-db` of stage DB-5 does and rejects

@@ -189,7 +189,7 @@ pub(super) fn x_one_thread_error(db: &SeqDb, error: anyhow::Error) -> anyhow::Er
             Err(first) => return search_read_error(first),
         };
         for i in 0..block.len() {
-            if let Err(first) = block_subject(&block, i) {
+            if let Err(first) = block_subject(&block, range, i) {
                 return first;
             }
         }

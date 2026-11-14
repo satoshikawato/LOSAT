@@ -1321,12 +1321,20 @@ rm xb4.nac
 blastdb_aliastool -dblist "a5 nm5" -dbtype nucl -out al_a_nm -title "a5 and nm5"
 blastdb_aliastool -dblist "a5 b5" -dbtype nucl -out al_a_b -title "a5 and b5"
 blastdb_aliastool -dblist "b5 a5" -dbtype nucl -out al_b_a -title "b5 and a5"
+sed 's/^>s/>t/' subj.fna > t.fna
+dustmasker -in t.fna -infmt fasta -level 40 -window 32 -parse_seqids -outfmt maskinfo_asn1_bin -out t_dust40.asnb
+makeblastdb -in t.fna -dbtype nucl -out zz5 -title "zz dust40" -parse_seqids -mask_data t_dust40.asnb
+rm t.fna
 ```
 
 (`wm.counts` is not kept.) `a5` and `a4` have the algorithms 11 (dust, defaults), 12 (dust `window=32; level=40;
 linker=1`) and 30 (windowmasker, default options); `b5` has the second dust as its 11; `k5` has 100 (`mydust`) and 101
 (`mywm`); `p5` has the dust of `-parse_seqids` ids as 11; `nm5` has no mask data; `xb4` is a mask column without its
-little-endian `.nac`, which LOSAT refuses for a search (NCBI reads its ranges byte-reversed, M/DECISIONS 9). The rows
+little-endian `.nac`, which LOSAT refuses for a search (NCBI reads its ranges byte-reversed, M/DECISIONS 9); `zz5`
+(review 1 of M4a-2a, F2) holds the same subjects as `t1`-`t5` with the second dust alone (its 11), so that in the list
+`p5 zz5` the algorithm 11 is `p5`'s dust and `zz5` lacks it: NCBI reads no mask of `zz5` when `-seqidlist`
+(`ids_s1s2s3.txt`) searches `p5`'s sequences only, and LOSAT refuses the search only where it would read one. The seqid
+lists `ids_s1.txt`, `ids_s1s2s3.txt` and `ids_s3s5.txt` hold those local ids, one per line. The rows
 also use `../seqdb/db/mask_nucl_colon_id` (`-mask_id c:id`, stored with 0x01 for the colon),
 `../seqdb/db/mask_nucl_mv` (two volumes, dust 11 and windowmasker 30) and `../fasta/outfmt11/arch_empty.fna`
 (an empty query).

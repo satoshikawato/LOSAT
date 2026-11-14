@@ -77,7 +77,7 @@ use crate::seqid::{DeflineSet, ParsedSeqId};
 
 pub use alias::SearchPath;
 pub use header::Defline;
-pub use mask::{MaskAlgorithm, MaskAlgorithms, MaskRanges, MaskReadScratch};
+pub use mask::{BlockMasks, MaskAlgorithm, MaskAlgorithms, MaskBlock, MaskRanges, NameMaskError};
 pub use volume::{AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, VolumeHeader};
 #[cfg(test)]
 pub use volume::{BLASTNA_SENTINEL, FENCE_SENTRY};
@@ -551,7 +551,7 @@ pub(crate) struct LocatedDatabase {
 /// database of that name opened alone and without a list. The `Database:` lines of the
 /// pairwise report, the database counts of XML and JSON and the title of the Seq-annot
 /// formats are made of these, one per name.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct NameRecord {
     /// The name as the reports take it (`alias::report_names`): `GetDBNameList`.
     pub name: String,
@@ -563,6 +563,11 @@ pub struct NameRecord {
     pub num_seqs: u32,
     /// `GetTotalLength`.
     pub total_length: u64,
+    /// The filtering algorithms of the name's database, which the formatter of a search with a
+    /// database mask reads (`GetMaskAlgorithmDetails`, `SeqDb::name_mask_details`), or the error
+    /// of reading them, met only where the formatter asks for them; read with the record when
+    /// the search has a database mask (`read_name_records`), `None` otherwise.
+    pub mask_algorithms: Option<Result<MaskAlgorithms, SeqDbError>>,
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
@@ -736,8 +741,11 @@ impl SeqDb {
     // database with its lists and after `Query is Empty!`; `blastdbcmd` makes none.
     /// Reads what the reports show of each name of the `-db` value `name` (`NameRecord`,
     /// `name_records`): each name of the list is opened again, alone, along the search path
-    /// the database was opened with; a database of one name is this one, before any list.
-    pub fn read_name_records(&mut self, name: &str) -> Result<(), SeqDbError> {
+    /// the database was opened with; a database of one name is this one, before any list. With
+    /// `masks` (a search with `-db_soft_mask` or `-db_hard_mask`) each record also keeps its
+    /// database's filtering algorithms (`NameRecord::mask_algorithms`): the one opening of each
+    /// name of the formatter (`GetBlastDbInfo`).
+    pub fn read_name_records(&mut self, name: &str, masks: bool) -> Result<(), SeqDbError> {
         let names = alias::report_names(name);
         self.name_records = match names.as_slice() {
             [one] if one == name => {
@@ -748,7 +756,7 @@ impl SeqDb {
                     self.walk_errors(&[WalkKey::Nseq, WalkKey::Length, WalkKey::MinSeqLength])?;
                     self.check_printed_counts()?;
                 }
-                vec![self.name_record(one)]
+                vec![self.name_record(one, masks)]
             }
             _ => {
                 let path = match &self.search_path {
@@ -760,7 +768,7 @@ impl SeqDb {
                 let mut records = Vec::with_capacity(names.len());
                 for one in &names {
                     let mut alone = Self::open_in(one, self.seqtype, &path)?;
-                    alone.read_name_records(one)?;
+                    alone.read_name_records(one, masks)?;
                     records.append(&mut alone.name_records);
                 }
                 records
@@ -769,14 +777,16 @@ impl SeqDb {
         Ok(())
     }
 
-    /// What the reports read of this database under the name `name`, before any list.
-    fn name_record(&self, name: &str) -> NameRecord {
+    /// What the reports read of this database under the name `name`, before any list; with
+    /// `masks`, its filtering algorithms too ([`SeqDb::mask_algorithms`], a copy of the table).
+    fn name_record(&self, name: &str, masks: bool) -> NameRecord {
         NameRecord {
             name: name.to_string(),
             title: self.title.clone(),
             date: self.date.clone(),
             num_seqs: self.printed_num_seqs(),
             total_length: self.printed_total_length(),
+            mask_algorithms: masks.then(|| self.mask_algorithms().cloned()),
         }
     }
 

@@ -735,10 +735,23 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // ```
     // `Error: NCBI C++ Exception:` is that report of an exception of NCBI's C++ Toolkit
     // (BLASTN's `-window_masker_db` file that cannot be opened).
-    const PREFIXES: [&str; 5] = [
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-220
+    // ```c++
+    //     catch (const blast::CBlastException& e) {                               \
+    //         const string& msg = e.GetMsg();                                     \
+    //         if (e.GetErrCode() == CBlastException::eInvalidOptions) {           \
+    //             LOG_POST(Error << "BLAST options error: " << e.GetMsg());       \
+    //             exit_code = BLAST_INPUT_ERROR;                                  \
+    // ```
+    // `BLAST options error:` is that report of an options error that the search raises inside
+    // `Run`: BLASTN's database mask that the database lacks (`DbMaskOption::validate_at_open`,
+    // review 1 F1 of M4a-2a) and PSIBLAST's PSSM options (`IPssmInputData`; LOSAT's PSIBLAST
+    // refuses `-outfmt 11`).
+    const PREFIXES: [&str; 6] = [
         "BLAST query error:",
         "BLAST Database error:",
         "BLAST engine error:",
+        "BLAST options error:",
         "BLAST query/options error:",
         "Error: NCBI C++ Exception:",
     ];

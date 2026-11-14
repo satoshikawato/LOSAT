@@ -203,6 +203,7 @@ fn search_records(
         // already (`native::database_search_error`).
         if error.is::<super::parameters::SearchSpaceOverflow>()
             || error.is::<super::split::QuerySplitRefusal>()
+            || error.is::<super::preliminary::OneHitWindowRefusal>()
             || error.is::<crate::cli::NativeError>()
         {
             error

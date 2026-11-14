@@ -121,10 +121,12 @@ pub(crate) fn search_sets(
     let volumes = RpsVolumeSet::of(db);
     let mut sets = Vec::new();
     if volumes.order.len() > 1 && searchsp.unwrap_or(0) == 0 && dbsize.unwrap_or(0) == 0 {
-        // `check_alias_keys` refuses `STATS_TOTLEN`, so the length is `GetTotalLength`.
+        // `check_alias_keys` refuses `STATS_TOTLEN`, so the length is `GetTotalLength`, the `Uint8`
+        // that `SetDbLength(Int8)` takes as NCBI's `Int8` (negative for an alias `LENGTH` of 2^63
+        // or more): `DbStatistics::engine_db_length`.
         sets.push(Param {
             name: "DbLength",
-            value: ParamValue::BigInteger(i64::try_from(db.total_length()).unwrap_or(i64::MAX)),
+            value: ParamValue::BigInteger(db.statistics().engine_db_length),
         });
     }
     if let Some((matrix, gap_open, gap_extend)) = costs {

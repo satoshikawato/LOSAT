@@ -396,6 +396,10 @@ writes (`Error: [blastn] ...`).
   `LOSAT_X_BPQBLOCK` of 50,000 letters and two with a value of at most 10,000, which
   `tests/blastp_query_blocks_fmt.rs` runs against these frozen bytes), the first 30 of that length in file order. Rows `db.sa.bpqb.{5,8,9,12}`: `blastp -db paja -evalue 0.1
   -max_target_seqs 2 -max_hsps 1` (9 rows of outfmt 6: some queries have hits, some do not).
+- `bpqb5.faa` (rows `db.cnt.l0paja.*`, review 7 R7-S2 of D1a-3): `bpqb_q.faa` five times, each record's id suffixed
+  `_c0` to `_c4` in turn (`for c in 0 1 2 3 4; do sed "s/^>\([^ ]*\)/>\1_c$c/" bpqb_q.faa; done > bpqb5.faa`): 150
+  records, 59,700 letters, six query batches of NCBI's default size, which LOSAT searches as two blocks at the default
+  `LOSAT_X_BPQBLOCK` of 50,000 letters (batches 1 to 5, and 6).
 
 ## -culling_limit rows (line NP, O3b)
 
@@ -1437,7 +1441,10 @@ them; `-xdrop_gap_final 15` keeps the traceback from joining the parts). Frozen 
 build (2026-11-14 and 2026-11-15). `l0txr.nal` is `LENGTH 0` over `../txrand` (rows `db.cnt.l0txr.*`: tblastx at
 `-num_threads 1`, whose frame loop saves the two-hit extensions against each subject's word cutoffs, not the setup's, which
 are 1 for a database length of 0; review 6 R6-M1 of D1a-3). Frozen with the local NCBI BLAST+ 2.17.0 release build
-(2026-11-15). `l2p63b.pal` is `LENGTH
+(2026-11-15). `l0paja.pal` is `LENGTH 0` over `../paja` (`DBLIST ../paja`; rows `db.cnt.l0paja.*` with `bpqb5.faa` and
+`-evalue 0.01`: blastp's preliminary stage in blocks (outfmt 10) and its block search (outfmt 6, blastp and psiblast's one
+round), each block's call with the statistics of each subject; a build whose blocks take the setup's statistics prints 130
+rows instead of 95; review 7 R7-S2 of D1a-3). Frozen with the local NCBI BLAST+ 2.17.0 release build (2026-11-15). `l2p63b.pal` is `LENGTH
 9223372036854775808` over `../bslice` (row `db.cnt.l2p63b.bx_c0.16`: a database without parsed Seq-ids or taxonomy, so that
 only the report sums can make BLASTX's library hold its XML2 start before the refusal; review 3 R3-S1 of D1a-3).
 

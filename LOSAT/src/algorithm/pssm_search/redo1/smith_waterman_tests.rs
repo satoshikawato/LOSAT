@@ -105,14 +105,14 @@ fn hsp(q: (i32, i32), s: (i32, i32), score: i32) -> BlastpPreliminaryHsp {
 
 const PROFILE: &str = "MKVLWAALLVTFLAGCQAKVEQAVETEPEPELRQQTEWQSGQRWELALGRFWDYLRWVQTLSEQVQEELLSSQ";
 
-/// The subject: the profile's letters twice, the second copy with two changes, between other
-/// letters.
+/// The subject: the profile's letters twice, the second copy with two changes, between letters
+/// that SEG leaves (`segmasker -window 10 -locut 1.8 -hicut 2.1` masks none of the subject).
 fn two_copies() -> Vec<u8> {
     let first = PROFILE;
     let second = PROFILE
         .replacen("WAAL", "WGAL", 1)
         .replacen("RQQ", "RNQ", 1);
-    encode(&format!("GSGSGSNPNP{first}GGSSGGSSPPNNGG{second}NPNPGSGS"))
+    encode(&format!("HRDYCWTENI{first}WDKHNCPYTRFIGM{second}YCHWRDTN"))
 }
 
 // Two preliminary HSPs: the redo finds the two copies, the first copy first (the higher score);

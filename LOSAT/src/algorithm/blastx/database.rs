@@ -341,60 +341,48 @@ struct ReportedTabular {
     names: Option<crate::report::tabular::TabularNames>,
 }
 
+/// The titles of a query batch's reported sequences (`ReportedSubjects::read_titles`), by ordinal
+/// id: `None` for a listed sequence that no report shows; the sequences with parsed Seq-ids.
+pub(crate) struct BatchTitles {
+    listed: BTreeMap<usize, Option<Arc<[u8]>>>,
+    parsed: BTreeMap<usize, Arc<ParsedSubject>>,
+}
+
 impl ReportedSubjects {
-    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
     // ```c++
-    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
-    //                 		                            fmt_args->GetFormattedOutputChoice());
-    //             	ITERATE(CSearchResultSet, result, *results) {
-    //                	    formatter.PrintOneResultSet(**result, query_batch);
-    //             	}
+    //     CRef<ILocalQueryData> qdata = m_QueryFactory->MakeLocalQueryData(m_Options);
+    //
+    //     vector<TSeqLocInfoVector> subj_masks;
+    //     TSeqAlignVector aligns =
+    //         LocalBlastResults2SeqAlign(hsp_results,
+    //                                    *qdata,
+    //                                    *m_SeqInfoSrc,
+    //                                    m_OptsMemento->m_ProgramType,
+    //                                    m_Options->GetGappedMode(),
+    //                                    m_Options->GetOutOfFrameMode(),
+    //                                    subj_masks,
+    //                                    m_ResultType);
     // ```
-    /// The reported sequences of the batches `batches` (one query batch: the results of
-    /// one search), with their hit lists renamed from ordinal ids to ranks. The titles are
-    /// read before any report of the batch (NCBI fetches the batch's sequences first),
-    /// query by query in hit-list order; NCBI's reader error stops the run at this batch
-    /// (`HeaderReadError`), and a title LOSAT does not show as NCBI is its refusal
-    /// (`check_reported_title`; with `tabular`, `tabular_subject_id`; with `pairwise`,
-    /// `check_shown_stored_title` and `check_shown_protein_title`). A sequence with parsed Seq-ids is read with every Seq-id
-    /// (`shared::read_header`), with LOSAT's refusals of `ParsedSubject::fetched`, of
-    /// `shared::check_shown_parsed_subject` (with `pairwise`), of `shared::refuse_joined_hits`
-    /// (with `joined`: outfmt 0, 5 and 13 to 16) and of `ParsedSubject::tabular_ids` (with
-    /// `tabular_reads`, and `ParsedSubject::check_printed_word` of the ids it prints, `words`).
-    /// `tabular`: a tabular report, which takes every reported sequence's ids
-    /// (`tabular_ids`); `tabular_reads`: one whose fields read the sequence found by the
-    /// subject's Seq-align id (`report::tabular::reads_subject`), the only kind that refuses the
-    /// ids. `structured`: outfmt 5 or 13 to 16, which read the Bioseq. `taxonomy`: whether the
-    /// report writes the sequences' taxids or their names (13 to 16, a table of taxonomy fields;
-    /// `ParsedSubject::fetched`). `prefetched`: whether the batch's prefetch reads the subjects
-    /// (`shared::prefetches_subjects`, and the batch's Seq-aligns do not outnumber a positive
-    /// `PRE_FETCH_SEQS_LIMIT`, `shared::prefetch_off`), which where no report reads their Bioseqs
-    /// refuses what it cannot read as NCBI does (`shared::check_prefetched_parsed`).
-    /// `one_by_one`: whether the batch's prefetch is off, so that its reports read the subjects
-    /// one by one (`shared::ParsedShown::one_by_one`).
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn for_batch(
+    /// The titles of the reported sequences of the batches `batches` (one query batch), read
+    /// query by query in hit-list order where NCBI's traceback makes the batch's Seq-aligns
+    /// (their Seq-ids), before the batch's prefetch: NCBI's reader error stops the run at this
+    /// batch (`HeaderReadError`). A sequence with parsed Seq-ids is read with every Seq-id
+    /// (`shared::read_header`). A title LOSAT does not show as NCBI is its refusal
+    /// (`check_reported_title`; with `pairwise`, `check_shown_stored_title`). The rest of the
+    /// batch's reported sequences is `for_batch`.
+    pub(crate) fn read_titles(
         database: &BlastxDatabase,
-        subjects: Subjects<'_>,
-        batches: &mut [BatchResults],
+        batches: &[BatchResults],
         gapped: bool,
-        tabular: bool,
-        tabular_reads: bool,
         pairwise: bool,
-        structured: bool,
-        taxids: bool,
-        joined: bool,
-        taxonomy: bool,
-        words: crate::report::tabular::PrintedIds,
-        prefetched: bool,
-        one_by_one: bool,
-    ) -> Result<Self> {
+    ) -> Result<BatchTitles> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
         // up before it filters the HSPs); only the reported ones have their titles read.
         let mut listed: BTreeMap<usize, Option<Arc<[u8]>>> = BTreeMap::new();
         let mut parsed: BTreeMap<usize, Arc<ParsedSubject>> = BTreeMap::new();
         let headers = shared::HeaderReader::new(&database.db);
-        for batch in batches.iter() {
+        for batch in batches {
             for (qidx, lists) in batch.queries.iter().enumerate() {
                 for list in lists {
                     let reported = super::report::reported(list, gapped);
@@ -437,6 +425,55 @@ impl ReportedSubjects {
                 }
             }
         }
+        Ok(BatchTitles { listed, parsed })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
+    // ```c++
+    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+    //                 		                            fmt_args->GetFormattedOutputChoice());
+    //             	ITERATE(CSearchResultSet, result, *results) {
+    //                	    formatter.PrintOneResultSet(**result, query_batch);
+    //             	}
+    // ```
+    /// The reported sequences of the batches `batches` (one query batch: the results of
+    /// one search), with their hit lists renamed from ordinal ids to ranks, from their titles
+    /// (`titles`, `read_titles`), before any report of the batch: a title LOSAT does not show as
+    /// NCBI is its refusal (with `tabular`, `tabular_subject_id`; with `pairwise`,
+    /// `check_shown_protein_title`). A sequence with parsed Seq-ids has LOSAT's refusals of `ParsedSubject::fetched`, of
+    /// `shared::check_shown_parsed_subject` (with `pairwise`), of `shared::refuse_joined_hits`
+    /// (with `joined`: outfmt 0, 5 and 13 to 16) and of `ParsedSubject::tabular_ids` (with
+    /// `tabular_reads`, and `ParsedSubject::check_printed_word` of the ids it prints, `words`).
+    /// `tabular`: a tabular report, which takes every reported sequence's ids
+    /// (`tabular_ids`); `tabular_reads`: one whose fields read the sequence found by the
+    /// subject's Seq-align id (`report::tabular::reads_subject`), the only kind that refuses the
+    /// ids. `structured`: outfmt 5 or 13 to 16, which read the Bioseq. `taxonomy`: whether the
+    /// report writes the sequences' taxids or their names (13 to 16, a table of taxonomy fields;
+    /// `ParsedSubject::fetched`). `prefetched`: whether the batch's prefetch reads the subjects
+    /// (`shared::prefetches_subjects`, and the batch's Seq-aligns do not outnumber a positive
+    /// `PRE_FETCH_SEQS_LIMIT`, `shared::prefetch_off`), which where no report reads their Bioseqs
+    /// refuses what it cannot read as NCBI does (`shared::check_prefetched_parsed`).
+    /// `one_by_one`: whether the batch's prefetch is off, so that its reports read the subjects
+    /// one by one (`shared::ParsedShown::one_by_one`).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn for_batch(
+        database: &BlastxDatabase,
+        subjects: Subjects<'_>,
+        batches: &mut [BatchResults],
+        titles: BatchTitles,
+        gapped: bool,
+        tabular: bool,
+        tabular_reads: bool,
+        pairwise: bool,
+        structured: bool,
+        taxids: bool,
+        joined: bool,
+        taxonomy: bool,
+        words: crate::report::tabular::PrintedIds,
+        prefetched: bool,
+        one_by_one: bool,
+    ) -> Result<Self> {
+        let BatchTitles { listed, parsed } = titles;
         if joined && !parsed.is_empty() {
             for batch in batches.iter() {
                 for (qidx, lists) in batch.queries.iter().enumerate() {
@@ -1110,6 +1147,7 @@ mod tests {
             let longest = database.x_check_stores().unwrap();
             let stream = super::super::x_db_stream::XStreamDb::new(&database.db, longest);
             let mut batches = one_query(lists);
+            let titles = ReportedSubjects::read_titles(database, &batches, true, false).unwrap();
             let reported = ReportedSubjects::for_batch(
                 database,
                 Subjects::Stream(super::super::x_db_stream::XStream {
@@ -1117,6 +1155,7 @@ mod tests {
                     block: None,
                 }),
                 &mut batches,
+                titles,
                 true,
                 false,
                 false,
@@ -1175,6 +1214,7 @@ mod tests {
             let mut second = one_query(&[(1, 50), (0, 40)]);
             second[0].query_ordinal = 1;
             batches.append(&mut second);
+            let titles = ReportedSubjects::read_titles(&database, &batches, true, false).unwrap();
             let mut reported = ReportedSubjects::for_batch(
                 &database,
                 Subjects::Stream(super::super::x_db_stream::XStream {
@@ -1182,6 +1222,7 @@ mod tests {
                     block: None,
                 }),
                 &mut batches,
+                titles,
                 true,
                 false,
                 false,

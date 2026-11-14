@@ -464,6 +464,11 @@ pub struct BlastxArgs {
     /// BLASTX's search of the query batches; `None` in every BLASTX run.
     #[arg(skip)]
     pub(crate) rpstblastn: Option<std::sync::Arc<dyn RpsTblastnSearch>>,
+    /// The recorded options of RPSTBLASTN's search strategy requests (`archive::option_inputs`),
+    /// made by its command line from its own arguments as given, with `-export_search_strategy`;
+    /// `None` in every BLASTX run.
+    #[arg(skip)]
+    pub(crate) request_inputs: Option<Box<crate::report::archive::options::OptionInputs>>,
     /// The taxonomy database of a `-subject` search's organism report (outfmt 18), which a
     /// library call (`api::run`) reads from the application settings, as the command line
     /// does (`common::database::SubjectTaxdb`); `None` elsewhere. Not a public option.
@@ -494,8 +499,9 @@ pub(crate) trait RpsTblastnSearch: std::fmt::Debug + Send + Sync {
         database: Option<&super::database::BlastxDatabase>,
     ) -> Result<std::sync::Arc<dyn RpsTblastnSearch>>;
     /// `native::run_query_batches` of RPSTBLASTN: the query batches of `read`, searched against
-    /// the profile volumes of `database`, each handed to `render` in the reader's order. Returns
-    /// the number of queries reported.
+    /// the profile volumes of `database`, each handed to `take` (the search strategy's request,
+    /// before its search) and to `render` in the reader's order. Returns the number of queries
+    /// reported.
     #[allow(clippy::too_many_arguments)]
     fn run_query_batches(
         &self,
@@ -505,7 +511,17 @@ pub(crate) trait RpsTblastnSearch: std::fmt::Debug + Send + Sync {
         diagnostics: &mut dyn std::io::Write,
         search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
         render: &mut super::native::BatchRender<'_>,
+        take: &mut dyn FnMut(&[super::input::FastaRecord], usize) -> Result<()>,
     ) -> Result<usize>;
+    /// What each query batch's set-up of the search writes into NCBI's options handle beyond the
+    /// batch's search space (`rps_search::volumes::search_sets`; `-searchsp` and `-dbsize` as
+    /// given), which the search strategy's requests after the first hold.
+    fn handle_sets(
+        &self,
+        database: Option<&super::database::BlastxDatabase>,
+        searchsp: Option<i64>,
+        dbsize: Option<i64>,
+    ) -> Vec<crate::report::archive::options::Param>;
     /// Whether the batches' results are merged over a database of several volumes, as NCBI's
     /// `CLocalRPSBlast` merges them: the merge keeps only NCBI's messages of error severity (no
     /// query warning, `report::query_warning`) and gives a batch that was not searched an empty

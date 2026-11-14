@@ -41,20 +41,21 @@ pub const API_OWNED: &[&str] = &["query", "subject", "db", "out", "outfmt"];
 // outside those the API owns (`API_OWNED`): a file the caller did not give. The command line
 // writes them (`algorithm::psiblast::pssm`).
 /// psiblast's options that write a PSSM file, which the library API refuses, and `-in_pssm`, the
-/// query as a PSSM file (its queries are records; line PS, DECISIONS 11, as 8 and 10).
-const PSSM_FILES: &[&str] = &[
+/// query as a PSSM file (its queries are records; line PS, DECISIONS 11, as 8 and 10); and its
+/// search strategy file (`STRATEGY_FILES`, line RG item F1b-1).
+const PSIBLAST_FILES: &[&str] = &[
     "out_pssm",
     "out_ascii_pssm",
     "save_pssm_after_last_round",
     "save_each_pssm",
     "in_pssm",
+    "export_search_strategy",
 ];
 
 // No NCBI counterpart: the search strategy file (`-export_search_strategy`,
 // `report::archive::strategy`) is an output outside those the API owns too: a file the caller
 // did not give. The command line writes it.
-/// The options that write the search strategy file (line RG-F1; psiblast's command line refuses
-/// it, item F1b).
+/// The options that write the search strategy file (line RG-F1).
 const STRATEGY_FILES: &[&str] = &["export_search_strategy"];
 
 /// tblastn's `-in_pssm` (PSI-TBLASTN, line PS item PS7), refused for the same reason as psiblast's,
@@ -62,14 +63,14 @@ const STRATEGY_FILES: &[&str] = &["export_search_strategy"];
 const TBLASTN_FILES: &[&str] = &["in_pssm", "export_search_strategy"];
 
 /// The options of `program`'s command line that write a file the library API does not write (a
-/// PSSM, `PSSM_FILES`, or the search strategy, `STRATEGY_FILES`) or read the query from one: they
+/// PSSM, `PSIBLAST_FILES`, or the search strategy, `STRATEGY_FILES`) or read the query from one: they
 /// are not in an argv that `validate` accepts, and `describe` leaves them out.
 /// The searches of records of LOSAT Web take none of them either (the browser refuses `-in_pssm`
 /// until line PS's PSW1), and its `describe` leaves them out through the same list
 /// (`web_adapter::records_refused_options`).
 pub(crate) fn file_options(program: Program) -> &'static [&'static str] {
     match program {
-        Program::Psiblast => PSSM_FILES,
+        Program::Psiblast => PSIBLAST_FILES,
         Program::Tblastn => TBLASTN_FILES,
         Program::Blastn | Program::Blastp | Program::Blastx | Program::Tblastx => STRATEGY_FILES,
     }

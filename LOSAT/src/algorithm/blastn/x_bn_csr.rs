@@ -89,8 +89,9 @@
 //! build and freed with the table (BNLUTDROP, graduated, frees it before the traceback), and a build
 //! laid out as CSR frees the table the keep holds, so the loop never holds a kept table beside it.
 //! Every reader of the chains of a contiguous table goes through `MbLookupTable::x_csr`: the strip
-//! scan of PAIRPAR (`x_pair_seed.rs`, `scan_strip_csr`), the reference scan of `search_query_batch`
-//! (`run.rs`, its `x_on_word_csr`; the chains' `on_word` stays as it was), both reading their words
+//! scan of PAIRPAR (`x_pair_seed.rs`, `scan_strip_csr`), the reference scan of a two-stage table
+//! (`two_stage_scan.rs` `scan_two_stage_lookup`, its `x_on_word_csr`; the chains' `on_word` stays as
+//! it was), both reading their words
 //! with hits through `x_dc_csr::Ring` (with LOSAT_X_BNCSRPACK through the ring of the head's form,
 //! chosen once per table: `x_dc_csr::XHead`), and `for_each_hit`, `contains_hit` and `count_hits`
 //! where the table has no chains.

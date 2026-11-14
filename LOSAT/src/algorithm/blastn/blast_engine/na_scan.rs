@@ -206,12 +206,10 @@ pub(super) struct NaScanState<'s> {
 ///         }
 ///     }
 /// ```
-/// `#[inline(always)]`: the branch of `collect_prelim_hits_for_chunk` that this was stays in that
-/// closure's code. Called out of line, the call with its two struct literals changed the closure's
-/// register allocation, and its dc-megablast scan loop (LOSAT_X_BNDCONE=0) kept one value of the
-/// template word on the stack: four more instructions per subject byte (+0.57 % for a 3,000-letter
-/// query, callgrind, n1). The scan's callback stays a function of its own, as it was.
-#[inline(always)]
+/// No `#[inline]`: one call site, the branch of `collect_prelim_hits_for_chunk` it was. Called out
+/// of line, it moves the instructions of no measured case by 0.1 % (callgrind, n1; SW7 bn-10, whose
+/// move of the two-stage scan ended the register spill this was `#[inline(always)]` for). The
+/// scan's callback stays a function of its own, as it was.
 pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) {
     let &NaScanInputs {
         search_seq_packed,

@@ -31,6 +31,10 @@
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+mod temp_support;
+use temp_support::TempPath;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -57,6 +61,35 @@ struct Run {
     /// The `[TIMING] x_bppfree` lines: one per search of a query set, also of a run that failed
     /// (the `blastp_total` line comes only from a run that ended well).
     frees: usize,
+    /// The run's empty home and worker log: they live as long as the `Run`, so the test's
+    /// assertions on it are done before they are removed, and the log is kept when one fails.
+    _files: (TempPath, Option<TempPath>),
+}
+
+/// Gives `command` an empty `HOME` (no `~/.ncbirc` names a taxonomy database or a BLASTDB:
+/// outfmt 15 and 16 look for one) and, when the test's environment names no worker log, a worker
+/// log: files of this run alone, removed when the returned guards are dropped (the log is kept
+/// when the test panics).
+fn run_files(command: &mut Command) -> (TempPath, Option<TempPath>) {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let tag = format!(
+        "{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
+    let home = TempPath::new(std::env::temp_dir().join(format!("losat-bpqblockfmt-home-{tag}")));
+    std::fs::create_dir_all(&home).expect("empty home");
+    command.env("HOME", &home).env("USERPROFILE", &home);
+    let log = std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+        .is_none()
+        .then(|| {
+            let log = TempPath::keep_on_failure(
+                std::env::temp_dir().join(format!("losat-bpqblockfmt-worker-{tag}.log")),
+            );
+            command.env("LOSAT_BLASTX_WORKER_LOG", &log);
+            log
+        });
+    (home, log)
 }
 
 /// `blastp -query <query> <subject...> -evalue 0.001 -num_threads <threads> <extra...>` with the
@@ -86,15 +119,7 @@ fn blastp(
         }
     }
     // No `~/.ncbirc` names a taxonomy database or a BLASTDB (outfmt 15 and 16 look for one).
-    let home = std::env::temp_dir().join(format!("losat-bpqblockfmt-home-{}", std::process::id()));
-    std::fs::create_dir_all(&home).expect("empty home");
-    command.env("HOME", &home).env("USERPROFILE", &home);
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bpqblockfmt-worker.log"),
-        );
-    }
+    let _files = run_files(&mut command);
     let output = command
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .arg("blastp")
@@ -132,6 +157,7 @@ fn blastp(
         stderr,
         searches,
         frees,
+        _files,
     }
 }
 
@@ -1044,16 +1070,7 @@ fn the_frozen_ncbi_rows_of_two_query_batches_are_written_by_two_blocks() {
                 }
             }
             // No `~/.ncbirc` names a taxonomy database or a BLASTDB.
-            let home =
-                std::env::temp_dir().join(format!("losat-bpqblockfmt-home-{}", std::process::id()));
-            std::fs::create_dir_all(&home).unwrap();
-            command.env("HOME", &home).env("USERPROFILE", &home);
-            if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-                command.env(
-                    "LOSAT_BLASTX_WORKER_LOG",
-                    std::env::temp_dir().join("losat-bpqblockfmt-worker.log"),
-                );
-            }
+            let _files = run_files(&mut command);
             // A `BLASTDB=DIR` token is the environment variable of the run (a `taxdb.bti`'s
             // directory, relative to LOSAT/, where the run starts), not an argument.
             let (variables, arguments): (Vec<&str>, Vec<&str>) = cells[extra]
@@ -1919,16 +1936,8 @@ fn the_frozen_ncbi_rows_of_outfmt_13_and_14_are_written_by_two_blocks() {
                     command.env_remove(name);
                 }
             }
-            let home =
-                std::env::temp_dir().join(format!("losat-bpqblockfmt-home-{}", std::process::id()));
-            std::fs::create_dir_all(&home).unwrap();
-            command.env("HOME", &home).env("USERPROFILE", &home);
-            if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-                command.env(
-                    "LOSAT_BLASTX_WORKER_LOG",
-                    std::env::temp_dir().join("losat-bpqblockfmt-worker.log"),
-                );
-            }
+            // No `~/.ncbirc` names a taxonomy database or a BLASTDB.
+            let _files = run_files(&mut command);
             for variable in &variables {
                 command.env("BLASTDB", variable.trim_start_matches("BLASTDB="));
             }

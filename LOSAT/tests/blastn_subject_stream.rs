@@ -8,6 +8,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 /// One FASTA file of 300 subjects cut from the NZ_CP006932 genome (2,000 bases each, the
 /// first starting at 0, then every 2,100 bases, wrapping), and a query of three of them.
 fn inputs() -> (PathBuf, PathBuf) {
@@ -48,19 +51,14 @@ fn blastn(
     threads: u32,
     extra: &[&str],
     switches: &[(&str, &str)],
-) -> Vec<u8> {
+) -> (Vec<u8>, Option<TempFile>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bnstream-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastn_subject_stream_worker");
     let output = command
         .arg("blastn")
         .arg("-query")
@@ -78,7 +76,7 @@ fn blastn(
         "{task} {extra:?} {switches:?} threads {threads}: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    output.stdout
+    (output.stdout, log)
 }
 
 #[test]
@@ -89,11 +87,11 @@ fn the_report_does_not_depend_on_when_subjects_reach_the_hit_lists() {
     // well (a release build gives NCBI's bytes); the hit-list path under test is shared by all tasks.
     for task in ["megablast", "dc-megablast"] {
         for extra in [&[][..], &["-max_target_seqs", "5"][..]] {
-            let expected = blastn(&query, &subjects, task, 1, extra, &[]);
+            let (expected, _log) = blastn(&query, &subjects, task, 1, extra, &[]);
             assert!(!expected.is_empty(), "{task} {extra:?}: no hits");
             for threads in [2, 4] {
                 for switches in [&[][..], &[("LOSAT_X_BNSTREAM", "0")][..]] {
-                    let report = blastn(&query, &subjects, task, threads, extra, switches);
+                    let (report, _log) = blastn(&query, &subjects, task, threads, extra, switches);
                     assert_eq!(
                         report, expected,
                         "{task} {extra:?} {switches:?} threads {threads}"

@@ -248,13 +248,17 @@ fn write_ka_block<E: Encoder>(enc: &mut E, block: &KaBlock) {
 /// Writes the `body` member of a `Blast4-request`: the `queue-search` request of one query
 /// batch. The archive (`write_search_archive`) and the search strategy file
 /// (`strategy::StrategyExport::write_request`) share it, as NCBI builds both with
-/// `CExportStrategy`. `search_space_option` is the `EffectiveSearchSpace` option that the
-/// request has when it is written.
+/// `CExportStrategy`. `sets` is what the options handle holds beyond the command line's options
+/// when the request is written (`OptionsHandle::request_sets`: the `EffectiveSearchSpace` option
+/// the batches before left, RPS's database length and `.aux` costs, ...), applied onto the
+/// request's options as NCBI's `x_AttachValue` applied them: a parameter of the command line is
+/// replaced in its place (`-searchsp` keeps its place with the batch's value, `-searchsp 0`
+/// too), the others follow in their order.
 fn write_request_body<E: Encoder>(
     out: &mut ArchiveOut<'_, E>,
     request: &super::ArchiveRequest,
     batch: &RequestInputs<'_>,
-    search_space_option: Option<i64>,
+    sets: &[Param],
     database_params: &[Param],
 ) {
     out.enc.member("body", 1);
@@ -344,31 +348,17 @@ fn write_request_body<E: Encoder>(
     out.enc.member("algorithm-options", 5);
     out.enc.begin_named("Blast4-parameters");
     out.enc.begin_list(false);
-    let mut written_search_space = false;
+    let set = |name: &str| sets.iter().find(|param| param.name == name);
     for param in &request.algorithm {
-        // `-searchsp` holds the option's place; its value is the batch's (`-searchsp 0` too).
-        if let ("EffectiveSearchSpace", Some(space)) = (param.name, search_space_option) {
-            written_search_space = true;
-            write_param(
-                &mut out.enc,
-                &Param {
-                    name: param.name,
-                    value: ParamValue::BigInteger(space),
-                },
-            );
-            continue;
-        }
-        written_search_space |= param.name == "EffectiveSearchSpace";
-        write_param(&mut out.enc, param);
+        write_param(&mut out.enc, set(param.name).unwrap_or(param));
     }
-    if let (Some(space), false) = (search_space_option, written_search_space) {
-        write_param(
-            &mut out.enc,
-            &Param {
-                name: "EffectiveSearchSpace",
-                value: ParamValue::BigInteger(space),
-            },
-        );
+    for param in sets.iter().filter(|param| {
+        !request
+            .algorithm
+            .iter()
+            .any(|recorded| recorded.name == param.name)
+    }) {
+        write_param(&mut out.enc, param);
     }
     out.enc.end_list();
     out.enc.end_named();
@@ -418,6 +408,35 @@ fn write_request_body<E: Encoder>(
         out.enc.end_named();
         out.enc.end_member();
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:745-755
+    // ```c++
+    // void CExportStrategy::x_AddPsiNumOfIterationsToFormatOptions(unsigned int num_iters)
+    // {
+    // 	CRef<CBlast4_parameter> p(new CBlast4_parameter);
+    // 	p->SetName(CBlast4Field::GetName(eBlastOpt_Web_StepNumber));
+    //
+    // 	CRef<CBlast4_value> v(new CBlast4_value);
+    // 	v->SetInteger(num_iters);
+    // 	p->SetValue(*v);
+    //
+    // 	m_QueueSearchRequest->SetFormat_options().Set().push_back(p);
+    // }
+    // ```
+    if let Some(step) = request.step_number {
+        out.enc.member("format-options", 7);
+        out.enc.begin_named("Blast4-parameters");
+        out.enc.begin_list(false);
+        write_param(
+            &mut out.enc,
+            &Param {
+                name: "Web_StepNumber",
+                value: ParamValue::Integer(step),
+            },
+        );
+        out.enc.end_list();
+        out.enc.end_named();
+        out.enc.end_member();
+    }
     out.enc.end_sequence();
     out.enc.end_variant();
     out.enc.end_member();
@@ -427,7 +446,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     out: &mut ArchiveOut<'_, E>,
     request: &super::ArchiveRequest,
     batch: &BatchArchive<'_>,
-    search_space_option: Option<i64>,
+    sets: &[Param],
     database_params: &[Param],
     messages: &[Message],
     aligns: &mut A,
@@ -440,13 +459,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     // The request's `ident` is `CBlastVersion::Print()` (`crate::NCBI_BLAST_VERSION`).
     out.enc.visible_str(crate::NCBI_BLAST_VERSION.as_bytes());
     out.enc.end_member();
-    write_request_body(
-        out,
-        request,
-        &batch.request,
-        search_space_option,
-        database_params,
-    );
+    write_request_body(out, request, &batch.request, sets, database_params);
     out.enc.end_sequence();
     out.enc.end_member();
 
@@ -507,12 +520,12 @@ pub(super) fn write_strategy_document<E: Encoder>(
     out: &mut ArchiveOut<'_, E>,
     request: &super::ArchiveRequest,
     batch: &RequestInputs<'_>,
-    search_space_option: Option<i64>,
+    sets: &[Param],
     database_params: &[Param],
 ) {
     out.enc.begin_document("Blast4-request");
     out.enc.begin_sequence("Blast4-request");
-    write_request_body(out, request, batch, search_space_option, database_params);
+    write_request_body(out, request, batch, sets, database_params);
     out.enc.end_sequence();
     out.enc.end_document();
 }
@@ -567,7 +580,7 @@ pub fn write_archive<A: AlignSource>(
     sink: &mut dyn Write,
 ) -> Result<()> {
     let messages = handle.take_messages();
-    let space = handle.search_space_option(batch.searched_space);
+    let sets = handle.request_sets(batch.searched_space);
     let params = handle.options().database_params();
     let request = handle.request();
     match handle.encoding() {
@@ -579,7 +592,7 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 io_error: None,
             };
-            write_search_archive(&mut out, request, batch, space, &params, &messages, aligns)?;
+            write_search_archive(&mut out, request, batch, &sets, &params, &messages, aligns)?;
             out.finish()
         }
         ArchiveEncoding::Text => {
@@ -589,7 +602,7 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 io_error: None,
             };
-            write_search_archive(&mut out, request, batch, space, &params, &messages, aligns)?;
+            write_search_archive(&mut out, request, batch, &sets, &params, &messages, aligns)?;
             out.finish()
         }
         ArchiveEncoding::Binary => {
@@ -599,7 +612,7 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 io_error: None,
             };
-            write_search_archive(&mut out, request, batch, space, &params, &messages, aligns)?;
+            write_search_archive(&mut out, request, batch, &sets, &params, &messages, aligns)?;
             out.finish()
         }
     }

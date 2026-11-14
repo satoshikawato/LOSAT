@@ -23,6 +23,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod temp_support;
+use temp_support::TempPath;
+
 const REFERENCE_TABLE: (&str, &str) = ("LOSAT_X_BPCLUT", "0");
 const NO_UNIT_RULE: (&str, &str) = ("LOSAT_X_BXCLUTCAP", "0");
 const NO_KEPT_VECTORS: (&str, &str) = ("LOSAT_X_BXCLUTPOOL", "0");
@@ -35,8 +38,9 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// A directory that no other test of this process uses.
-fn temp_dir(tag: &str) -> PathBuf {
+/// A directory that no other test of this process uses, removed with what is in it (the worker log
+/// too) when the value is dropped, unless the test panics.
+fn temp_dir(tag: &str) -> TempPath {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
         "losat_blastx_fast_flat_{}_{}_{tag}",
@@ -44,7 +48,7 @@ fn temp_dir(tag: &str) -> PathBuf {
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    TempPath::keep_on_failure(dir)
 }
 
 /// The binary with `env` as its only variables that choose a code path. `LOSAT_BLASTX_WORKER_LOG`
@@ -203,7 +207,6 @@ fn the_flat_table_gives_the_reference_tables_report() {
             assert_eq!(flat, reference, "{target:?} n{threads}");
         }
     }
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -242,5 +245,4 @@ fn the_units_at_a_time_do_not_change_the_report() {
         unit_rule_sides(&dir, &query, &["-subject", one.to_str().unwrap()], "4"),
         (false, true)
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }

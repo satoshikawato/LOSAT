@@ -70,25 +70,63 @@ pub(super) fn search_rounds(
     // chunks of a split query are set up without the PSSM; `in_pssm::check_in_pssm_options`)
     // A query long enough to be split would have its later rounds' chunks searched without
     // their PSSM: refused before the search, as a PSSM query of that length (DESIGN_ps5 §6).
-    let sizes = crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(
-        args.app.name(),
-        10000,
-    )?;
-    for &(_, query) in &batches.starts {
-        let length = searched_queries[query].seq().len();
-        if crate::algorithm::blastp::protein_query_split::split_protein_batch(&[length], sizes)
-            .is_some()
-        {
-            bail!(
+    // Sizes that NCBI cannot convert stop the first batch (`batches.stop`, below), which no
+    // batch is searched before.
+    if !batches.starts.is_empty() {
+        let sizes =
+            crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(10000)?;
+        for &(_, query) in &batches.starts {
+            let length = searched_queries[query].seq().len();
+            if crate::algorithm::blastp::protein_query_split::split_protein_batch(&[length], sizes)
+                .is_some()
+            {
+                bail!(
                 "a query of {length} letters, which NCBI BLAST+ splits into chunks that its later rounds search without the PSSM, with -num_iterations {} is not supported by LOSAT's PSIBLAST",
                 plan.num_iterations
             );
+            }
         }
     }
     let epilog = batches.stop.is_none();
+    // The search strategy's requests (`-export_search_strategy`): one per query, written before
+    // its first round (`run_queries`), and the one of the batch that stops the run
+    // (`QueryBatches::stop_batch`). Each query's report comes before the next query's request, so
+    // a title that the requests cannot write is refused before any output.
+    let requests = args.strategy.as_ref().map(|_| {
+        crate::algorithm::blastp::archive::requests(
+            subject_source
+                .database()
+                .is_none()
+                .then(|| subject_source.fasta_records()),
+            args.lcase_masking,
+            args.app.name(),
+        )
+    });
+    if let Some(requests) = requests.as_ref() {
+        if titles_may_refuse {
+            requests.check_titles(&searched_queries[..batches.searched_done])?;
+        }
+        if let Some(span) = batches.stop_batch.clone() {
+            requests.check_titles(&searched_queries[span])?;
+        }
+    }
+    let write_stop_request = || -> Result<()> {
+        match (
+            args.strategy.as_ref(),
+            requests.as_ref(),
+            batches.stop_batch.clone(),
+        ) {
+            (Some(strategy), Some(requests), Some(span)) => {
+                requests.write(strategy, span.start, &searched_queries[span], None)
+            }
+            _ => Ok(()),
+        }
+    };
     if batches.searched_done == 0 {
         // As `search`: the first batch's stop after the prolog, or the reports of no query.
         if let Some((_, error)) = batches.stop.as_ref() {
+            // The request of a batch that NCBI made a query factory of, before any output.
+            write_stop_request()?;
             write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
             // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (quoted at
             // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM
@@ -129,8 +167,12 @@ pub(super) fn search_rounds(
                 pool,
                 epilog,
                 titles_may_refuse,
+                requests.as_ref(),
             )
         })?;
+        // The request of the batch that stops the run follows the queries' rounds (NCBI wrote it
+        // before the search that fails).
+        write_stop_request()?;
     }
     if let Some((warnings, error)) = batches.stop {
         outputs.diagnostics.write_all(&warnings)?;
@@ -192,6 +234,7 @@ fn run_queries(
     pool: &crate::utils::threading::SearchPool<'_>,
     epilog: bool,
     titles_may_refuse: bool,
+    requests: Option<&crate::report::archive::requests::RunRequests<'_, FastaRecord>>,
 ) -> Result<()> {
     let mut files = RoundFiles::new(
         &plan.request,
@@ -229,6 +272,20 @@ fn run_queries(
         // `kbp_psi[0]` and `kbp_gap_psi[0]` of the input PSSM's search, after a round 1 without
         // alignments (`in_pssm_files::InPssmRounds::written_back`).
         let mut searched_input = None;
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:337-339
+        // ```c++
+        //     CRef<IQueryFactory> query_factory(s_MakeQueryFactory(pssm, query));
+        //
+        //     SaveSearchStrategy(args, m_CmdLineArgs, query_factory, opts_hndl, pssm, kNumIterations);
+        // ```
+        // The query's search strategy request, before its first round (also when round 1 fails
+        // with a header file NCBI cannot read). Round 1's call notes the query's searched space
+        // (`CallRequests`, which finds the request written); the later rounds' calls find both
+        // done. NCBI's handle keeps the last round's space, which is round 1's: every round's
+        // effective lengths read the same `kbp_gap_std` (blast_setup.c:766-768).
+        if let (Some(strategy), Some(requests)) = (args.strategy.as_ref(), requests) {
+            requests.write(strategy, query, records, None)?;
+        }
         while state.go() {
             let round = state.number();
             match (&pssm, input_files.as_mut()) {

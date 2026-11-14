@@ -13,6 +13,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::library_examples::example_binary;
 
+mod temp_support;
+use temp_support::TempPath;
+
 use losat::api::{
     describe, read_fasta, read_inputs, run, run_batches, run_blastdbcmd, run_collect,
     run_dustmasker, run_makeblastdb, run_to_file, validate, Error, FastaRecord, HspRecord, Inputs,
@@ -1621,7 +1624,8 @@ fn a_masked_database_made_through_the_library_equals_the_command_lines() {
     let fasta = seqdb.join("mask_nucl.fna");
     let masks = seqdb.join("mask_writer/dust.asnt");
     let (fasta, masks) = (fasta.to_str().unwrap(), masks.to_str().unwrap());
-    let directory = temp_path("masked");
+    // Removed when the test passes, kept when it fails (the databases to compare).
+    let directory = TempPath::keep_on_failure(temp_path("masked"));
     std::fs::create_dir_all(&directory).unwrap();
     let library = directory.join("library");
     let binary = directory.join("binary");

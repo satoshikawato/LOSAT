@@ -132,9 +132,9 @@ pub(crate) fn open_database(
 /// alias files' counts (`SeqDb::check_alias_values`), the id of a database mask (`mask`, BLASTN's
 /// `-db_soft_mask` / `-db_hard_mask`: `DbMaskOption::validate_at_open`), the formatter's
 /// reopening of each name (`SeqDb::read_name_records`), then the first headers (`check_seqids`,
-/// whose answer it returns: whether the database has parsed Seq-ids). LOSAT's refusal of mixed
-/// accession tables, which NCBI meets only at its reports, comes later
-/// (`check_accession_tables`).
+/// whose answer it returns: whether the database has parsed Seq-ids). A version 5 list that mixes
+/// files with and without the accession table opens as in NCBI: the lookup of a parsed Seq-id
+/// fails only where a report or the prefetch looks it up (`FoundInstead::Failed`).
 pub(crate) fn restrict_database(
     db: &mut SeqDb,
     name: &str,
@@ -185,24 +185,6 @@ pub(crate) fn restrict_database(
     // A database with parsed Seq-ids is read (line DBID), unless a variable changes NCBI's choice
     // of its Seq-ids.
     check_seqids(db, settings, program)
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:208-211
-// ```c++
-//         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())) {
-//            	ERR_POST(Warning << "Query is Empty!");
-//            	return BLAST_EXIT_SUCCESS;
-//         }
-// ```
-/// LOSAT's refusal of a search database whose version 5 files mix files with and without the
-/// accession table (`SeqDb::check_accession_tables`): NCBI searches it and fails at the reports
-/// of a hit with a parsed Seq-id, so a program refuses it with its other limits, where NCBI
-/// starts the search: after `Query is Empty!` (NCBI then ends with exit status 0) and the
-/// formatter's errors (BLASTN's `-db_soft_mask` id that a name of the list lacks; review 2 F2 of
-/// series NP, M4a-2a).
-pub(crate) fn check_accession_tables(db: &SeqDb, program: &str) -> Result<()> {
-    db.check_accession_tables()
-        .map_err(|error| database_error(error, program))
 }
 
 /// `restrict_database` with a list.
@@ -732,8 +714,10 @@ impl std::fmt::Display for PreliminaryReadError {
 impl std::error::Error for PreliminaryReadError {}
 
 /// A reader error of NCBI's own while the definition lines of the final hit lists are
-/// read (`stored_title`): `query` is the query whose hit list reached it. NCBI fails that
-/// query's batch, after the reports of the batches before.
+/// read (`stored_title`), or while rpsblast's traceback of a batch reads a profile volume's
+/// sequence file (`rps_hooks::failed_batch_error`): `query` is the query whose hit list reached
+/// it (rpsblast: the batch's first query). NCBI fails that query's batch, after the reports of
+/// the batches before.
 #[derive(Debug)]
 pub(crate) struct HeaderReadError {
     pub(crate) query: usize,
@@ -1423,7 +1407,10 @@ impl<'a> HeaderReader<'a> {
     /// (the third value: another sequence that holds a scope key of the Seq-align id, which
     /// psiblast's PSSM read refuses, `ParsedSubject::pssm_read`). A subject whose Bioseq NCBI's
     /// formatters do not find (`unfetchable`) is looked up too, for that read (its reports refuse
-    /// it whatever the lookup gives); a giim id never (NCBI's handles never take it again).
+    /// it whatever the lookup gives). A giim id of a version 5 database is looked up only for a
+    /// lookup that fails: NCBI's handles never take another sequence for it, but its prefetch looks
+    /// it up as a string id in every LMDB file of the list, which stops at a file without the
+    /// accession table (review 1 of line DBID mixdb, H1); of a version 4 database never.
     fn found_instead(
         &self,
         subject: &crate::report::db_subject::ParsedSubject,
@@ -1434,7 +1421,8 @@ impl<'a> HeaderReader<'a> {
         Option<crate::seqdb::DbSequence>,
     ) {
         use crate::report::db_subject::FoundInstead;
-        if matches!(subject.alignment_id(), crate::seqid::ParsedSeqId::Giim(_)) {
+        let giim = matches!(subject.alignment_id(), crate::seqid::ParsedSeqId::Giim(_));
+        if giim && !self.db.is_version5() {
             return (None, None, None);
         }
         let failed = |error: SeqDbError| {
@@ -1458,6 +1446,7 @@ impl<'a> HeaderReader<'a> {
         };
         let id = subject.alignment_id();
         let oids = match lookup.seqid_to_oids(id, true) {
+            Ok(_) if giim => return (None, None, None),
             Ok(oids) => oids,
             Err(error) => {
                 return match lookup.throws_on_id(id) {
@@ -1924,6 +1913,64 @@ pub(crate) fn refuse_id_of_a_query(
         ));
     }
     Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1588-1589, 432-433, 497-498
+// ```c++
+//         const CBioseq_Handle& handle = m_ScopeRef->GetBioseqHandle(*id);
+//         x_FillDeflineAndId(handle, *id, use_this_seqid, sdl, blast_rank);
+//     ...
+//     sdl->id = CAlignFormatUtil::GetDisplayIds(handle,aln_id,use_this_seqid,&sdl->gi,&sdl->taxid,&sdl->textSeqID);
+//     ...
+//     sdl->defline = CDeflineGenerator().GenerateDefline(m_ScopeRef->GetBioseqHandle(*(sdl->id)), sequence::CDeflineGenerator::fLeavePrefixSuffix);
+// ```
+/// LOSAT's refusal of a database sequence that a description table shows (outfmt 0 to 4, the
+/// first `-num_descriptions` subjects) whose display id (`ParsedSubject::display_id`, the id of its
+/// description line) is, or is matched weakly by NCBI's scope to, the id of a query of the scope
+/// `queries` (`QueryScopeKeys::display`): the description line looks its title up again by that
+/// id, a second lookup after the one by the Seq-align id (`refuse_id_of_a_query`, every format),
+/// and NCBI's scope finds the query, so NCBI BLAST+ shows the query's title there (`gi|779|lcl|abc`
+/// and a query `lcl|abc`; review 3 of line RG item T3a). `queries` holds the ids of queries read
+/// with `-parse_deflines` (or of the PSSM query of `-in_pssm`), or, with `generated`, the local
+/// ids `Query_N` of queries read without it, which BLASTP refuses in outfmt 1 to 4 only (line RG
+/// item X7 owns NCBI's behaviour for them in outfmt 0).
+pub(crate) fn refuse_display_id_of_a_query(
+    subject: &crate::report::db_subject::ParsedSubject,
+    oid: crate::seqdb::Oid,
+    queries: &crate::blastinput::query_batch::QueryScope,
+    generated: bool,
+    program: &str,
+) -> Result<()> {
+    if !queries.has_key(&subject.query_scope_keys().display) {
+        return Ok(());
+    }
+    let mut display = Vec::new();
+    if let Some(id) = subject.display_id() {
+        crate::seqid::label::fasta(id, &mut display);
+    }
+    let (queries, weak, formats) = if generated {
+        (
+            "without -parse_deflines",
+            "",
+            "the query-anchored formats, outfmt 1 to 4",
+        )
+    } else {
+        (
+            "with -parse_deflines (or of the PSSM query of -in_pssm)",
+            ", or an id that NCBI BLAST+'s scope matches weakly to it",
+            "outfmt 0 to 4",
+        )
+    };
+    Err(parsed_refusal(
+        oid,
+        &format!(
+            "has the display id {} (the id of its description line), the id of a query read \
+             {queries} in the query batch that reports it{weak}: NCBI BLAST+ shows that query's \
+             title in its description line ({formats})",
+            String::from_utf8_lossy(&display)
+        ),
+        program,
+    ))
 }
 
 /// `refuse_id_of_a_query` of each reported sequence of `reported` (a searched query, by its index
@@ -5092,7 +5139,7 @@ pub(crate) fn seq_annots_prefetch(outfmt: Option<i32>) -> bool {
 }
 
 /// Whether the first format of a call is one whose batches prefetch their reported subjects
-/// and that shows no taxonomy of them (`prefetch_messages`): outfmt 0, 5, 6, 7 and 17, and with
+/// and that shows no taxonomy of them (`prefetch_messages`): outfmt 0 to 7 and 17, and with
 /// `PRE_FETCH_SEQS_LIMIT=2147483647` the Seq-annots 8, 9 and 12 too (`s_PreFetchSeqs`, quoted at
 /// [`prefetch_may_be_off`], returns before its test of the format). The query warnings, which
 /// the batch's messages go with, are written with the first format (the Seq-annots write only
@@ -5102,7 +5149,8 @@ pub(crate) fn seq_annots_prefetch(outfmt: Option<i32>) -> bool {
 /// outfmt 8, 9, 11 and 12).
 pub(crate) fn prefetches_subjects(outfmt: Option<i32>) -> bool {
     match outfmt {
-        Some(0 | 5 | 6 | 7 | 17) => true,
+        // `s_IsPrefetchFormat` takes the query-anchored formats 1 to 4 as 0 (DECISIONS T3-4).
+        Some(0..=7 | 17) => true,
         Some(8 | 9 | 12) => prefetch_seqs_limit() == Some(i32::MAX),
         _ => false,
     }

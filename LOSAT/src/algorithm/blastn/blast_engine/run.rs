@@ -9054,11 +9054,7 @@ fn search(
     // crashes when it writes the title of such a subject with hits); LOSAT stops at the end
     // of the title (`report/defline.rs`, approved exception 2 of PD-LOSAT-NCBI-DEFECTS).
     // LOSAT's limits come where NCBI starts the search, after its checks and its
-    // `Query is Empty!` success (the database's mixed accession tables after the formatter's
-    // errors of a database mask too).
-    if let Subjects::Database(database) = subjects {
-        database.check_accession_tables()?;
-    }
+    // `Query is Empty!` success.
     check_losat_limits(&args)?;
     megablast_index.check()?;
     if let (Subjects::Database(database), Some(mask)) = (subjects, args.db_mask_resolved.as_ref()) {

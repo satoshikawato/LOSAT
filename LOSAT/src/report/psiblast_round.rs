@@ -304,8 +304,10 @@ impl RoundSections<'_> {
     // ```
     /// The two-part table: the Seq-aligns (HSPs) in the report's order, each in the part of its
     /// subject, counted after it is put there, up to `-num_descriptions` (so the bound counts
-    /// HSPs, and `-num_descriptions 0` keeps the first); each part is a table of its own over its
-    /// HSPs (its own column widths), whose rows are its subjects; then the blank line of
+    /// HSPs, and `-num_descriptions 0` keeps the first: `QueryGroup::first_hsps`, which also
+    /// gives the subjects whose description lines the table shows,
+    /// `pairwise::blastp_described_subjects`); each part is a table of its own over its HSPs (its
+    /// own column widths), whose rows are its subjects; then the blank line of
     /// `x_DisplayDeflines`. `x_ConfigCShowBlastDefline` is called without the number of
     /// descriptions, so neither part leaves its header out.
     fn write_two_part_table<W: Write>(
@@ -317,26 +319,19 @@ impl RoundSections<'_> {
     ) -> io::Result<()> {
         let mut repeated: Vec<(u32, Vec<&PairwiseHit>)> = Vec::new();
         let mut new: Vec<(u32, Vec<&PairwiseHit>)> = Vec::new();
-        let mut count = 0usize;
-        'walk: for &shown in &group.subject_order {
-            for &hit in &group.subject_hits[&shown] {
-                let part = if found_before
-                    .get(hit.hit.s_idx as usize)
-                    .copied()
-                    .unwrap_or(false)
-                {
-                    &mut repeated
-                } else {
-                    &mut new
-                };
-                match part.last_mut() {
-                    Some((last, hits)) if *last == shown => hits.push(hit),
-                    _ => part.push((shown, vec![hit])),
-                }
-                count += 1;
-                if count >= self.report.num_descriptions {
-                    break 'walk;
-                }
+        for (shown, hit) in group.first_hsps(self.report.num_descriptions) {
+            let part = if found_before
+                .get(hit.hit.s_idx as usize)
+                .copied()
+                .unwrap_or(false)
+            {
+                &mut repeated
+            } else {
+                &mut new
+            };
+            match part.last_mut() {
+                Some((last, hits)) if *last == shown => hits.push(hit),
+                _ => part.push((shown, vec![hit])),
             }
         }
         self.write_part(writer, group, &repeated, true, &mut *read)?;

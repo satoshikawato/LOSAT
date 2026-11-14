@@ -81,6 +81,8 @@ pub(crate) fn file_options(program: Program) -> &'static [&'static str] {
 pub struct Search {
     program: Program,
     argv: Vec<String>,
+    /// The `-out` of [`run_to_file`](super::run_to_file)'s searches (`Search::writing_to`).
+    out: Option<std::path::PathBuf>,
 }
 
 impl Search {
@@ -123,10 +125,21 @@ impl Search {
     /// reader's options come from here before the search refuses what the API does not take
     /// (`parse`).
     fn any_subject(&self) -> Commands {
-        let names = ["query", "subject"];
-        parse_words(self.program, &self.argv, names[0], SUBJECT, names[1])
-            .or_else(|_| parse_words(self.program, &self.argv, names[0], DATABASE, names[1]))
-            .expect("validated argv")
+        parse_words(
+            self.program,
+            &self.argv,
+            ["query", SUBJECT, "subject"],
+            None,
+        )
+        .or_else(|_| {
+            parse_words(
+                self.program,
+                &self.argv,
+                ["query", DATABASE, "subject"],
+                None,
+            )
+        })
+        .expect("validated argv")
     }
 
     /// Whether the search's argv has `-parse_deflines` (`read_inputs`).
@@ -163,18 +176,31 @@ impl Search {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87
+    // (quoted at `blastinput::value_parsers::blastn_output_path`)
+    /// The search of `run_to_file`, whose `-out` is `path`: the parser checks it as the command
+    /// line's `-out` (a file name of 256 bytes or more is NCBI's `Illegal value`, dry run or not),
+    /// and the arguments carry it to the search, which makes the file where the command line makes
+    /// it (`ReportOutputs::open_out`).
+    pub(crate) fn writing_to(&self, path: &std::path::Path) -> Search {
+        Search {
+            out: Some(path.to_path_buf()),
+            ..self.clone()
+        }
+    }
+
     /// The parsed arguments of the search of `inputs`: the command line's `-query` and
-    /// `-subject` or `-db` values. An option can hold for one kind of subject only (`-subject_loc`
-    /// excludes `-db`, `-seqidlist` excludes `-subject`), so this can fail with the parser's
-    /// message where `validate`, which knows no inputs, could not.
+    /// `-subject` or `-db` values, and `-out` for `run_to_file` (`Search::writing_to`). An option
+    /// can hold for one kind of subject only (`-subject_loc` excludes `-db`, `-seqidlist` excludes
+    /// `-subject`), so this can fail with the parser's message where `validate`, which knows no
+    /// inputs, could not.
     pub(crate) fn command(&self, inputs: Inputs<'_>) -> Result<Commands, Error> {
         let subject_flag = if inputs.database { DATABASE } else { SUBJECT };
         parse(
             self.program,
             &self.argv,
-            inputs.query_name,
-            subject_flag,
-            inputs.subject_name,
+            [inputs.query_name, subject_flag, inputs.subject_name],
+            self.out.as_deref(),
         )
     }
 }
@@ -199,9 +225,8 @@ fn option_name(key: &str) -> Option<&str> {
 fn parse(
     program: Program,
     argv: &[String],
-    query: &str,
-    subject_flag: &str,
-    subject: &str,
+    inputs: [&str; 3],
+    out: Option<&std::path::Path>,
 ) -> Result<Commands, Error> {
     for word in argv {
         let key = key(word);
@@ -221,7 +246,7 @@ fn parse(
             )));
         }
     }
-    let command = parse_words(program, argv, query, subject_flag, subject)?;
+    let command = parse_words(program, argv, inputs, out)?;
     // No NCBI counterpart: NCBI has no library API. psiblast's rounds (`-num_iterations` other
     // than 1) run on the command line (`algorithm::psiblast::rounds`); the library's results
     // (`QueryHits`, the hit records and the observer's events) have no round, so the library
@@ -238,14 +263,14 @@ fn parse(
 }
 
 /// Parses the argv with the command line's parser, as `losat <program> -query <query>
-/// <subject_flag> <subject> <argv...>`.
+/// <subject_flag> <subject> [-out <out>] <argv...>` (`inputs`: query, subject flag, subject).
 fn parse_words(
     program: Program,
     argv: &[String],
-    query: &str,
-    subject_flag: &str,
-    subject: &str,
+    [query, subject_flag, subject]: [&str; 3],
+    out: Option<&std::path::Path>,
 ) -> Result<Commands, Error> {
+    use std::ffi::OsStr;
     let words = [
         "losat",
         program.name(),
@@ -254,8 +279,13 @@ fn parse_words(
         subject_flag,
         subject,
     ];
+    let out = out.map(|path| [OsStr::new("-out"), path.as_os_str()]);
     let cli: Cli = crate::cli::try_parse_from_library(
-        words.iter().copied().chain(argv.iter().map(String::as_str)),
+        words
+            .iter()
+            .map(OsStr::new)
+            .chain(out.iter().flatten().copied())
+            .chain(argv.iter().map(OsStr::new)),
     )
     .map_err(|error| Error::Argv(crate::cli::render_message(&error)))?;
     Ok(cli.command)
@@ -295,10 +325,14 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
     // ```
     // An argv is checked before the inputs are known: it holds if it holds for one kind of
     // subject, and the search parses it again for the kind it has (`Search::command`).
-    if let Err(error) = parse(program, &argv, "query", SUBJECT, "subject") {
-        parse(program, &argv, "query", DATABASE, "subject").map_err(|_| error)?;
+    if let Err(error) = parse(program, &argv, ["query", SUBJECT, "subject"], None) {
+        parse(program, &argv, ["query", DATABASE, "subject"], None).map_err(|_| error)?;
     }
-    Ok(Search { program, argv })
+    Ok(Search {
+        program,
+        argv,
+        out: None,
+    })
 }
 
 #[cfg(test)]
@@ -448,6 +482,7 @@ mod tests {
                 "-out_ascii_pssm".to_string(),
                 "p.txt".to_string(),
             ],
+            out: None,
         };
         let refused = writes_no_pssm_file("-save_pssm_after_last_round");
         let query = crate::api::read_fasta(
@@ -501,6 +536,7 @@ mod tests {
         let search = Search {
             program: Program::Psiblast,
             argv: vec!["-num_iterations".to_string(), "3".to_string()],
+            out: None,
         };
         let query = crate::api::read_fasta(
             Program::Psiblast,

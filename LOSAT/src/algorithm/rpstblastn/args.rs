@@ -335,7 +335,7 @@ impl RpstblastnArgs {
             comp_based_stats: requested_cbs.to_string(),
             rpstblastn: Some(Arc::new(search)),
             request_inputs,
-            subject_taxdb: None,
+            taxdb_setting: None,
             matrix_search: None,
         })
     }

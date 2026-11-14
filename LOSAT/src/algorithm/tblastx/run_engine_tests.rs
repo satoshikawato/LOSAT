@@ -67,6 +67,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         strategy: None,
         tabular_taxdb: None,
         subject_taxdb: None,
+        taxdb_setting: None,
         first_query_ordinal: 0,
         matrix_file: None,
     };

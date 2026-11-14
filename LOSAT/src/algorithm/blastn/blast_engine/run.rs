@@ -7693,17 +7693,11 @@ fn write_run_error_archive(
 
 /// The `-out` file, created (`-`: standard output).
 fn open_out_file(args: &BlastnArgs) -> Result<Option<std::io::BufWriter<std::fs::File>>> {
-    if let Some(path) = args.out.as_deref() {
-        check_utf8_file_name(path, "out", "BLASTN")?;
-    }
-    Ok(
-        match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
-            Some(path) => Some(std::io::BufWriter::new(
-                std::fs::File::create(path).map_err(|_| crate::cli::inaccessible("out", path))?,
-            )),
-            None => None,
-        },
-    )
+    args.out
+        .as_deref()
+        .filter(|path| path.as_os_str() != "-")
+        .map(|path| crate::cli::create_out_file(path, Some("BLASTN")).map(std::io::BufWriter::new))
+        .transpose()
 }
 
 struct CliSubjects {
@@ -7875,29 +7869,27 @@ fn open_search_database(
     //     ...
     //    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
     // ```
-    // A tabular field list that shows a name of the taxonomy database asks whether `taxdb.bti`
-    // is on the search path: its formatters warn without it (the plural names), and LOSAT
-    // refuses a name of a subject with a taxid with it (`algorithm::blastn::tabular`).
-    if output_formats
-        .iter()
-        .filter_map(|format| format.tabular_spec())
-        .any(|spec| spec.needs().taxonomy_names)
-    {
-        args.tabular_taxdb = Some(match database.as_ref() {
-            Some(database) => database.taxdb_found(),
-            // The organism report's lookups open the run's own database.
-            None if output_formats.iter().any(|format| {
-                format
-                    .tabular_spec()
-                    .is_some_and(|spec| spec.kind == crate::report::tabular::TabularKind::TaxReport)
-            }) =>
+    // A tabular field list that looks every taxid up (the plural names of the taxonomy database,
+    // the organism report) asks whether `taxdb.bti` is on the search path: the plural names'
+    // formatters warn without it (`algorithm::blastn::tabular`). A `-db` search asks its
+    // database, a `-subject` search the search path of NCBI's databases (`subject_taxonomy`).
+    match database.as_ref() {
+        Some(database) => {
+            if output_formats
+                .iter()
+                .filter_map(|format| format.tabular_spec())
+                .any(|spec| spec.looks_up_every_taxid())
             {
-                args.subject_taxdb =
-                    crate::algorithm::common::database::SubjectTaxdb::of(settings, "BLASTN")?;
-                args.subject_taxdb.is_some()
+                args.tabular_taxdb = Some(database.taxdb_found());
             }
-            None => super::super::tabular::subject_taxdb_found(settings)?,
-        });
+        }
+        None => subject_taxonomy(
+            args,
+            Some(&crate::algorithm::common::database::TaxdbSetting::of(
+                settings,
+            )),
+            output_formats,
+        )?,
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -7912,6 +7904,27 @@ fn open_search_database(
         }
     }
     Ok(database)
+}
+
+/// What the reports `output_formats` of a `-subject` search ask of the taxonomy database,
+/// through `setting` (`common::database::subject_taxonomy`): asked by the command line
+/// (`open_search_database`) and by a search of records (`run_local_formats`) at the same point,
+/// after the options are processed.
+fn subject_taxonomy(
+    args: &mut BlastnArgs,
+    setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
+    output_formats: &[BlastnOutputFormat],
+) -> Result<()> {
+    let taxonomy = crate::algorithm::common::database::subject_taxonomy(
+        setting,
+        "BLASTN",
+        output_formats
+            .iter()
+            .filter_map(|format| format.tabular_spec()),
+    )?;
+    args.subject_taxdb = taxonomy.taxdb;
+    args.tabular_taxdb = taxonomy.found;
+    Ok(())
 }
 
 /// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`,
@@ -8218,29 +8231,20 @@ fn cli_output_formats(
 }
 
 /// The requested output formats of `run_local`, each read as the CLI reads its single
-/// `-outfmt` (`cli_output_formats`); a format that NCBI rejects later fails here with NCBI's
-/// error, as in the other programs' `run_local`. `out`: the file of `api::run_to_file`, or the
-/// `-out` of the caller's receiver of the side files of a format (`FormatOutput::side_out`).
+/// `-outfmt` (`cli_output_formats`): NCBI's parse and LOSAT's refusals, before `-out` is opened. A
+/// format without a report (`app::report_format`: one that NCBI rejects later) is left out, as on
+/// the command line: NCBI's formatting handler rejects it after `-out` is opened
+/// (`process_options`), or `search` (the XInclude formats without a file). `out`: the file of
+/// `api::run_to_file`, or the `-out` of the caller's receiver of the side files of a format
+/// (`FormatOutput::side_out`).
 fn parse_output_formats<'a>(
     formats: impl IntoIterator<Item = (&'a str, Option<&'a std::path::Path>)>,
 ) -> Result<Vec<BlastnOutputFormat>> {
-    formats
-        .into_iter()
-        .map(|(outfmt, out)| {
-            let choice = app::parse_formatting_string(outfmt)?;
-            match app::report_format(&choice, Program::Blastn, out)? {
-                Some(format) => BlastnOutputFormat::of(format, &choice),
-                None => {
-                    app::formatting_handler_check(&choice, Program::Blastn)?;
-                    app::xinclude_check(&choice)?;
-                    anyhow::bail!(
-                        "output format {} is not supported by LOSAT's BLASTN",
-                        choice.number
-                    )
-                }
-            }
-        })
-        .collect()
+    let mut output_formats = Vec::new();
+    for (outfmt, out) in formats {
+        output_formats.extend(cli_output_formats(outfmt, out)?);
+    }
+    Ok(output_formats)
 }
 
 /// NCBI's processing of the options after the query and the output are opened
@@ -8394,6 +8398,8 @@ fn run_local_formats(
             .iter()
             .map(|format| (format.outfmt, format.side_out(args.out.as_deref()))),
     )?;
+    // The thread count is checked before the inputs are read, as on the command line (`run`).
+    crate::utils::threading::validate_threads(args.num_threads)?;
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
     let subject_range =
@@ -8407,10 +8413,15 @@ fn run_local_formats(
         None => (subject_records, Placements::default()),
     };
     check_subjects_not_empty(searched_subjects)?;
+    // `-out` (`run_to_file`) is made where the command line opens it (`run`).
+    outputs.open_out()?;
     args.resolve_dust()?;
     args.resolve_window_masker()?;
     let query_range = parse_query_range(&args)?;
     process_options(&mut args, outputs)?;
+    // The taxonomy database of the reports, where the command line asks (`open_search_database`).
+    let setting = args.taxdb_setting.take();
+    subject_taxonomy(&mut args, setting.as_ref(), &output_formats)?;
     search(
         args,
         SearchQueries::Records(query_records),
@@ -8502,6 +8513,8 @@ fn search_database(
     let list = args
         .db_filter
         .resolve(&settings, &mut *outputs.diagnostics)?;
+    // `-out` (`run_to_file`) is made where the command line opens it (`run`).
+    outputs.open_out()?;
     args.resolve_dust()?;
     args.window_masker_registry = Some(settings.window_masker_registry.clone());
     args.resolve_window_masker()?;

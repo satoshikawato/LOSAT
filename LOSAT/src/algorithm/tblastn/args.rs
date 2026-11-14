@@ -336,16 +336,23 @@ pub struct TblastnArgs {
     #[arg(skip)]
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
-    /// by the command line before the search where a tabular field list shows a name of the
-    /// taxonomy database (`algorithm::tblastn::tabular`); `None` elsewhere (`run_local`'s callers
-    /// give no search path: not found, DECISIONS 7 of line CLI C2). Not a public option.
+    /// before the search where a tabular field list looks every taxid up (the plural names of the
+    /// taxonomy database, the organism report; `algorithm::tblastn::tabular`), by the command line
+    /// and the library (`common::database::subject_taxonomy`); `None` elsewhere (LOSAT Web has no
+    /// files: not found). Not a public option.
     #[arg(skip)]
     pub tabular_taxdb: Option<bool>,
-    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made by the
-    /// command line with `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere.
-    /// Not a public option.
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made with
+    /// `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere. Not a public option.
     #[arg(skip)]
     pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
+    /// The `[BLAST] BLASTDB` setting through which a `-subject` search's tabular reports look for
+    /// the taxonomy database (`common::database::subject_taxonomy`), which a search of records of
+    /// the library (`api::run`) reads from the call's application settings when a report looks
+    /// every taxid up; `None` elsewhere (the command line passes its settings, LOSAT Web has no
+    /// files). Not a public option.
+    #[arg(skip)]
+    pub taxdb_setting: Option<crate::algorithm::common::database::TaxdbSetting>,
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
     // ```c++
     //     int GetLocalIdCounterInitValue() const { return m_LocalIdCounter; }

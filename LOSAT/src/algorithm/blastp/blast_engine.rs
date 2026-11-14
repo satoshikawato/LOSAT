@@ -3696,7 +3696,10 @@ fn displayed_letter(letter: char, input: Option<u8>) -> char {
 }
 
 /// Recounts the identities, mismatches and positives of the HSPs whose query or subject has
-/// pyrrolysine (O), or whose subject has a gap character (`-`, stored in a protein database).
+/// pyrrolysine (O), or whose subject has a gap character (`-`, stored in a protein database), and
+/// of every HSP of a search that read other letters than the query record's
+/// (`searched_other_letters`: psiblast's later rounds, whose engine counts on the letters that
+/// the rounds before masked, `psi_round::RoundQuery`).
 /// The search reads O as X (`encode_protein_sequence`), but NCBI's reports compare the letters
 /// of the alignment as read, where O is identical only to O (and O and X are not identical).
 /// A stored `-` shows as the letter of a gap, so a column of a gap in the query and that
@@ -3727,6 +3730,7 @@ fn recount_shown_identities(
     query_records: &[FastaRecord],
     subjects: ShownSubjects<'_>,
     matrix: ScoringMatrix,
+    searched_other_letters: bool,
     engine_counts: &mut super::seqalign::EngineCounts,
 ) {
     let has_o = |sequence: &[u8]| {
@@ -3756,7 +3760,11 @@ fn recount_shown_identities(
             ) else {
                 continue;
             };
-            if !(has_o(query.seq()) || subject.has_o() || subject.has_gap()) {
+            if !(searched_other_letters
+                || has_o(query.seq())
+                || subject.has_o()
+                || subject.has_gap())
+            {
                 continue;
             }
             let implicit = [GapEditOp::Sub(hsp.length as u32)];
@@ -6553,6 +6561,13 @@ fn resolve_for_formats(
 ///         NCBI_THROW(CSeqDBException, eFileErr, msg);
 ///     }
 /// ```
+/// LOSAT's refusal of a PSSM search whose query letters give no Karlin-Altschul parameters
+/// (`kbp_std`): NCBI's psiblast crashes where `PsiBlastSetupScoreBlock` reads the `kbp_psi` block
+/// that `Blast_ScoreBlkKbpUngappedCalc` did not make (2.17.0, exit 139): a PSSM query
+/// (`psiblast_stop_at_invalid_query`), and a later round whose masks leave no letter
+/// (`psi_round::run_queries`).
+const INVALID_PSSM_QUERY_REFUSAL: &str = "a PSSM query whose letters give no Karlin-Altschul parameters (with which NCBI BLAST+'s psiblast crashes) is not supported by LOSAT's PSIBLAST";
+
 fn psiblast_stop_at_invalid_query(
     args: &ResolvedBlastpArgs,
     searched_queries: &[FastaRecord],
@@ -6611,9 +6626,9 @@ fn psiblast_stop_at_invalid_query(
         // Karlin-Altschul parameters: NCBI's psiblast crashes (2.17.0, exit 139) where
         // `PsiBlastSetupScoreBlock` reads the `kbp_psi` block that `Blast_ScoreBlkKbpUngappedCalc`
         // did not make (psiblast_aux_priv.cpp:89-107, blast_stat.c:2783-2799).
-        Ok(_) if args.psi_search.is_some() && !contexts[batch].is_valid => anyhow::anyhow!(
-            "a PSSM query whose letters give no Karlin-Altschul parameters (with which NCBI BLAST+'s psiblast crashes) is not supported by LOSAT's PSIBLAST"
-        ),
+        Ok(_) if args.psi_search.is_some() && !contexts[batch].is_valid => {
+            anyhow::anyhow!(INVALID_PSSM_QUERY_REFUSAL)
+        }
         // Its letters give them, but the file's ungapped values make `kbp_psi` invalid.
         Ok(_) if args.psi_search.is_some() => crate::blastinput::app::engine_error(
             crate::report::query_warnings::INVALID_QUERY_MESSAGE,
@@ -9946,6 +9961,9 @@ fn run_call(
     let mut x_prebuilt = x_ahead.take_prebuilt(query_records);
     let query_frames: Vec<Vec<QueryFrame>> = match x_prebuilt.as_mut() {
         Some(prebuilt) => prebuilt.take_query_frames(),
+        // psiblast's later rounds: the query as the rounds before left it
+        // (`psi_round::RoundQuery`).
+        None if psi_round::searched_other_letters(&args) => psi_round::round_query_frames(&args),
         // Diagnostic (LOSAT_TIMING): this call's encoding and SEG go to the common line
         // (utils/xtiming.rs); frames built ahead (LOSAT_X_BPLKPAHEAD) are not marked. No NCBI
         // counterpart.
@@ -14069,6 +14087,7 @@ fn run_call(
         query_records,
         shown_subjects,
         args.scoring.matrix,
+        psi_round::searched_other_letters(&args),
         &mut engine_counts,
     );
 
@@ -14149,6 +14168,9 @@ fn run_call(
     // cannot be rendered), so making them while the reports are written changes no run's output,
     // as BLASTN's (`blastn::blast_engine::run`).
     let x_rows_pool = crate::report::x_pairwise_par::pool(blastp_parallel_pool);
+    // psiblast's later rounds: the reports read the record's letters
+    // (`psi_round::report_contexts`).
+    let report_contexts = psi_round::report_contexts(&args, &contexts, query_records);
     let rows_of = |window: std::ops::Range<usize>| -> Result<Vec<PairwiseHit>> {
         let end = window.end.min(hit_lists.len());
         let first = window.start.min(end);
@@ -14164,7 +14186,7 @@ fn run_call(
         }
         let mut rows = build_pairwise_hits(
             hits,
-            &contexts,
+            &report_contexts,
             subjects,
             args.scoring.matrix,
             true,
@@ -15565,7 +15587,7 @@ fn run_call(
                     let anchored_sequences = (view
                         != crate::report::pairwise::PairwiseView::Pairwise)
                         .then(|| anchored::AnchoredSequences {
-                            contexts: &contexts,
+                            contexts: &report_contexts,
                             query_records,
                             query_placements: &ranges.query_input.placements,
                             subjects,
@@ -15752,6 +15774,7 @@ fn run_call(
                         None => args.subject_taxdb_found,
                     },
                     names: names.as_ref(),
+                    engine_counts: &engine_counts,
                 };
                 // Outfmt 18, the organism report: the `Query=` block shows the query record's
                 // length, also with `-query_loc` (as outfmt 0's, `pairwise_queries`).

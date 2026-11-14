@@ -805,17 +805,23 @@ mod tests {
             "the rounds of a range run"
         );
         assert!(ranged.query_range.is_some(), "the range reaches the rounds");
-        let error = parse(&["-num_iterations", "3", "-seg", "yes"])
-            .unwrap()
-            .into_blastp_args()
-            .unwrap()
-            .resolve()
-            .unwrap_err()
-            .to_string();
-        assert!(
-            error.contains("-seg and -soft_masking true with -num_iterations 3"),
-            "{error}"
-        );
+        for masks in [
+            &["-seg", "yes"][..],
+            &["-soft_masking", "true"],
+            &["-seg", "yes", "-soft_masking", "true"],
+        ] {
+            let masked = parse(&[&["-num_iterations", "3"][..], masks].concat())
+                .unwrap()
+                .into_blastp_args()
+                .unwrap()
+                .resolve()
+                .unwrap();
+            assert_eq!(
+                masked.psi_rounds.as_ref().map(|plan| plan.num_iterations),
+                Some(3),
+                "the rounds of a masked query run ({masks:?})"
+            );
+        }
         for format in ["1", "3", "5", "8", "11", "13", "15", "16", "18"] {
             let error = parse(&["-outfmt", format])
                 .unwrap()

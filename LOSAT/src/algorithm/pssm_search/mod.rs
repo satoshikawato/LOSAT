@@ -99,6 +99,11 @@ pub struct PsiSearch {
     /// run that writes one (`in_pssm::PssmReader::strategy`, `pssm_request_written`) of a PSSM that
     /// NCBI's check passes; `None` otherwise and for a FASTA query's later rounds.
     pub(crate) request: Option<PssmQueryRequest>,
+    /// The query that a later round of psiblast searches (`blast_engine::psi_round::RoundQuery`):
+    /// the letters that the rounds before masked (X), filtered again without the lower-case mask
+    /// that round 1 took; `None` for a query's first round, whose query frame is its record's
+    /// (`blast_engine::blastp_query_frames`).
+    pub(crate) round_query: Option<crate::algorithm::tblastx::translation::QueryFrame>,
 }
 
 /// The PSSM of `-in_pssm` as NCBI's application read it (before `CPsiBlastImpl` computes the
@@ -463,6 +468,7 @@ impl PsiSearch {
             setup_messages,
             warning_title: None,
             request: None,
+            round_query: None,
         }
     }
 }

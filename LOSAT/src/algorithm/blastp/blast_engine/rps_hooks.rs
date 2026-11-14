@@ -465,6 +465,9 @@ pub(super) fn rps_search(
     let mut setup = RpsVolumeSetup::new("RPSBLAST", args.window_size as i32);
     // The workers' scratch, kept from volume to volume (`RpsWorkers`).
     let workers = RpsWorkers::new(pool.threads());
+    // The first failing batch (its number and error) of the volumes searched so far.
+    let spans: Vec<usize> = run.batches.iter().map(|batch| batch.len()).collect();
+    let mut failed: Option<(usize, anyhow::Error)> = None;
     for (position, &index) in order.iter().enumerate() {
         let volume = &db_volumes[index];
         let num_seqs = volume.num_oids();
@@ -592,11 +595,14 @@ pub(super) fn rps_search(
             );
         }
         // The run's query batches (`run.batches`) in NCBI's order: each batch's first refusal of
-        // its cutoffs, else its first search error in query order, and the first failing batch
-        // in batch order ends the run (`RpsVolumeResults::batches`).
-        let spans: Vec<usize> = run.batches.iter().map(|batch| batch.len()).collect();
+        // its cutoffs, else its first search error in query order (`RpsVolumeResults::batches`).
+        // NCBI finishes batch 0 over every volume before it sets up batch 1, so a failing batch
+        // ends the run only when it is batch 0; otherwise the later volumes go on for the
+        // batches before it (one of them may fail there first), as `search_window` of
+        // RPSTBLASTN does.
+        let live = failed.as_ref().map_or(spans.len(), |(batch, _)| *batch);
         let mut traced = Vec::new();
-        for batch in engine
+        for (number, batch) in engine
             .search_volume(
                 &files,
                 &Consensus::new(&setup, volume, &files),
@@ -604,8 +610,17 @@ pub(super) fn rps_search(
                 &workers,
             )?
             .batches(&spans)
+            .into_iter()
+            .take(live)
+            .enumerate()
         {
-            traced.extend(batch?);
+            match batch {
+                Ok(results) => traced.extend(results),
+                Err(error) => {
+                    failed = Some((number, error));
+                    break;
+                }
+            }
         }
         // The volume's mappings and per-volume data go before the next volume is opened (and
         // before its lists are merged): at most one volume's pages are resident.
@@ -613,6 +628,14 @@ pub(super) fn rps_search(
         drop(masked);
         let aux_karlin_k = files.aux.karlin_k.clone();
         drop(files);
+        if let Some((batch, _)) = &failed {
+            // Nothing of this volume is merged: the run ends with the failing batch's error, and
+            // the later volumes only look for an earlier batch's error.
+            if *batch == 0 {
+                break;
+            }
+            continue;
+        }
         // The volume's local ordinal ids become the database's.
         let start = starts[index];
         let mut lists: Vec<Option<BlastpHitList>> = Vec::with_capacity(traced.len());
@@ -644,6 +667,9 @@ pub(super) fn rps_search(
             // Merged into the running lists at once: no later volume's lists are held.
             merge_volume(hit_lists, lists);
         }
+    }
+    if let Some((_, error)) = failed {
+        return Err(error);
     }
     Ok(RpsSearched {
         gapped_k,

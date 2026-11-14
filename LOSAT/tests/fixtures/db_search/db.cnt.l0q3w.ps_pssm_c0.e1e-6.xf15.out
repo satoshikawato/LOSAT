@@ -1,0 +1,127 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: t
+           3 sequences; 0 total letters
+
+Results from round 1
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+weak10 tk.faa 1-110, a barrier of 30, tk.faa 118-127                  202     5e-56
+weak11 tk.faa 1-110, a barrier of 30, tk.faa 115-125                  205     1e-57
+gap7 tk.faa 1-110, a barrier of 30, tk.faa 118-124, W, tk.faa 125...  207     3e-58
+
+
+>weak10 tk.faa 1-110, a barrier of 30, tk.faa 118-127
+Length=190
+
+ Score = 202 bits (515),  Expect(2) = 5e-56
+ Identities = 110/110 (100%), Positives = 110/110 (100%), Gaps = 0/110 (0%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  21   MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  80
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRL  110
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRL
+Sbjct  81   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRL  130
+
+
+ Score = 21.1 bits (43),  Expect(2) = 5e-56
+ Identities = 10/10 (100%), Positives = 10/10 (100%), Gaps = 0/10 (0%)
+
+Query  118  VIAALDGTSD  127
+            VIAALDGTSD
+Sbjct  161  VIAALDGTSD  170
+
+
+>weak11 tk.faa 1-110, a barrier of 30, tk.faa 115-125
+Length=191
+
+ Score = 205 bits (521),  Expect = 1e-57
+ Identities = 120/152 (79%), Positives = 120/152 (79%), Gaps = 26/152 (17%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  21   MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  80
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVN------------  108
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVN            
+Sbjct  81   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLWWFCWWWDGD  140
+
+Query  109  ----------RLADKG----KRIVIAALDGTS  126
+                           G    KRIVIAALDGT 
+Sbjct  141  WWCIFPCFCDDWWWCGDWFCKRIVIAALDGTW  172
+
+
+>gap7 tk.faa 1-110, a barrier of 30, tk.faa 118-124, W, tk.faa 
+125-131
+Length=195
+
+ Score = 207 bits (526),  Expect = 3e-58
+ Identities = 122/156 (78%), Positives = 125/156 (80%), Gaps = 26/156 (17%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  21   MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  80
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNR-----------  109
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNR           
+Sbjct  81   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLWWWLWWGGWW  140
+
+Query  110  -------------LADKGKRIVIAALDG-TSDQQMF  131
+                            +G  ++ AALDG TSDQQMF
+Sbjct  141  FGCPFWWGGDPWGWLCEGFGVI-AALDGWTSDQQMF  175
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.139    0.421    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0426    0.140     1.90     42.6     43.6 
+
+Effective search space used: 61545
+
+
+  Database: t
+    Posted date:  Nov 15, 2026  1:00 AM
+  Number of letters in database: 0
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

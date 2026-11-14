@@ -72,6 +72,13 @@ FASTA files:
   pseudo-random generator), whose HSPs with that query form linked sets: two parts far apart (`split2`), close
   (`split2_close`) and in reverse order (`reversed2`), three parts (`split3`), overlapping parts (`overlap`), two weak
   parts (`weak2`), one part (`single`) and one part three times (`tandem`).
+- `q3b_weak.faa` (rows `db.cnt.l0q3w.*` through `dbcounts/l0q3w.pal`, review 4 R4-S1 of D1a-3): three subjects, each
+  20 random letters, `LOSAT/tests/fasta/psiblast/tk.faa` 1-110 (the strong part), 30 letters chosen to score lowest
+  against the query letters they meet on the two parts' diagonals (a barrier: no gapped extension crosses it with an
+  X-drop of 15 bits), a weak part (`weak10`: tk.faa 118-127, `weak11`: tk.faa 115-125, `gap7`: tk.faa 118-124, `W`,
+  tk.faa 125-131, two stretches that each score below the gap trigger; a few letters after the strong part in the query
+  and 30 after it in the subject, so the two HSPs link with a small gap) and a barrier tail (a fixed pseudo-random
+  generator for the random letters: `remaining-gaps-20261112/D/logs/fix5_d1a3/make_q3b_weak.py`).
 - `q3b_long.faa` (rows `db.ps.q3b.long.*` and `db.oldfsc.blastp.split.6`): one protein of 21,000 random letters (a fixed
   pseudo-random generator) with `LOSAT/tests/fasta/psiblast/tk.faa` planted at 500, 9,800, 14,000 and 20,500 (cut at the
   end), a query that NCBI splits into chunks of 10,000 that overlap by 100.
@@ -96,6 +103,8 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "proteins planted in bxchunk_q.fna" -blastdb_version 4
     makeblastdb -in tests/db_search/q3b_chains.faa -dbtype prot -out tests/db_search/q3b_chains \
         -title "subjects whose HSPs with tests/fasta/psiblast/tk.faa form linked sets" -blastdb_version 4
+    makeblastdb -in tests/db_search/q3b_weak.faa -dbtype prot -out tests/db_search/q3b_weak \
+        -title "subjects whose weak HSPs with tests/fasta/psiblast/tk.faa link with small gaps" -blastdb_version 4
 
 `wm_s60k` (rows `db.wm.*`, line NP M2: `-window_masker_db`) is the subject `s60k.fa` of
 `LOSAT/tests/blastn_regression_fixtures.py`, with only `.nin .nsq .nhr` kept:
@@ -1297,9 +1306,16 @@ random protein (`random.Random(1002)` choices of `ACDEFGHIKLMNPQRSTVWY`), for th
 `db.cnt.*.bp_c0.split.fsc.inv`: with `CHUNK_SIZE=80` a chunk's first context is a part of the random query while the
 batch's first query is the invalid one (review 2 R2-M1 of D1a-3). Frozen with the local NCBI BLAST+ 2.17.0 release build
 (2026-11-14). `l0q3b.pal` is `LENGTH 0` over `../q3b_chains` (`DBLIST ../q3b_chains`; rows `db.cnt.l0q3b.*`: psiblast
-`-sum_stats true` with the statistics of each subject, whose HSPs with `tests/fasta/psiblast/tk.faa` form linked sets: each
-subject's hit-saving cutoff is lowered at its own length and its linking reads its own small-gap cutoff; review 3 R3-M1 of
-D1a-3). Frozen with the local NCBI BLAST+ 2.17.0 release build (2026-11-14). `l2p63b.pal` is `LENGTH
+`-sum_stats true` with the statistics of each subject, whose HSPs with `tests/fasta/psiblast/tk.faa` form linked sets:
+the rounds with the matrix guard the linking's small-gap cutoff at each subject's length, the `-in_pssm` rows the linking's
+search space at each subject's length; review 3 R3-M1 of D1a-3). At their `-evalue` of 100 and 1000 the hit-saving cutoff is
+already below the sum statistics' cutoff, so its lowering does not act there (review 4 R4-S1). `l0q3w.pal` is `LENGTH 0`
+over `../q3b_weak` (rows `db.cnt.l0q3w.*`: at `-evalue 1e-6` each subject's weak part scores below the hit-saving cutoff
+and above the sum statistics' cutoff at the subject's length, so only that lowering keeps it for the preliminary stage,
+which links it to the strong part with a small gap; `-xdrop_gap_final 15` keeps the traceback from joining the two parts;
+a build without the lowering prints the strong parts only; `gap7`'s weak part is never extended, as the initial words'
+cutoff reads the hit-saving cutoff before the lowering: a build whose words read the lowered cutoff prints it). Frozen with the local NCBI BLAST+ 2.17.0 release build
+(2026-11-14 and 2026-11-15). `l2p63b.pal` is `LENGTH
 9223372036854775808` over `../bslice` (row `db.cnt.l2p63b.bx_c0.16`: a database without parsed Seq-ids or taxonomy, so that
 only the report sums can make BLASTX's library hold its XML2 start before the refusal; review 3 R3-S1 of D1a-3).
 

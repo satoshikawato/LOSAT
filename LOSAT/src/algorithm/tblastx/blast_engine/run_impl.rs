@@ -5000,8 +5000,6 @@ fn search_query_batch<S: TbxScore>(
                 subject_len_nucl,
                 link_db_length_nucl,
                 cutoff_score_min,
-                1.0,
-                BLAST_GAP_DECAY_RATE,
                 &linking_params_for_cutoff,
             ),
         };

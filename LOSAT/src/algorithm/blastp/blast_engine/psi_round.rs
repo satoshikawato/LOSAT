@@ -290,6 +290,7 @@ fn run_queries(
             query_input: &query_input,
             subject_placements: &subjects.placements,
             x_ordinal_base: ordinal,
+            searched_base: query,
             split_search_spaces: None,
         };
         let mut state = IterationState::new(plan.num_iterations);

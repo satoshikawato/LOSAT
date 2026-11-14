@@ -2075,10 +2075,25 @@ impl Oid {
         format!("gnl|BL_ORD_ID|{}", self.0)
     }
 
+    /// `BL_ORD_ID:n`, the content label of the general id `gnl|BL_ORD_ID|n`
+    /// (`CSeq_id::GetLabel(eContent)`, `GetSeqIdString(true)`): the accession that the tabular
+    /// formats print for it (`sacc`, `saccver`) and the name that SAM gives it.
+    pub(crate) fn content_label(self) -> String {
+        format!("BL_ORD_ID:{}", self.0)
+    }
+
     /// The OID `oid` of a test's database that is not restricted.
     #[cfg(test)]
     pub(crate) fn of_unrestricted(oid: u32) -> Self {
         Oid(oid)
+    }
+}
+
+/// The OID as LOSAT's refusals name the sequence ("database sequence n"), so that no refusal
+/// names a sequence by its rank in a list that restricts the search.
+impl std::fmt::Display for Oid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 

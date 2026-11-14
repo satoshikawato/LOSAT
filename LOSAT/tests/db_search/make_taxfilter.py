@@ -4,7 +4,7 @@
 
 Usage: make_taxfilter.py MAKEBLASTDB TAXONOMY4BLAST_SQLITE   (writes taxfilter/{tfp,tfn,tfu_n,tfu_p}.*,
 taxfilter/taxonomy4blast.sqlite3 and taxfilter/root/taxonomy4blast.sqlite3), or
-make_taxfilter.py --unparsed-only MAKEBLASTDB   (taxfilter/tfu_n.*, tfu_p.*, tfu_nr.nal, tfu_pr.pal)
+make_taxfilter.py --unparsed-only MAKEBLASTDB   (taxfilter/tfu_n.*, tfu_p.*, tfu_nr.nal, tfu_pr.pal, and tfe_*)
 
 - `tfp`: version 5 protein database of `tfp.faa` (23 globins of mammals, birds, reptiles, amphibians and fishes;
   four records carry a second definition line of another species), taxids from `tfp.map`.
@@ -26,6 +26,10 @@ make_taxfilter.py --unparsed-only MAKEBLASTDB   (taxfilter/tfu_n.*, tfu_p.*, tfu
   them. `tfu_nr.nal` and `tfu_pr.pal` read OIDs 1 to 3 of them (`FIRST_OID 2`, `LAST_OID 4`, which count from 1), and
   `tfu_ord0.txt` is the Seq-id list `gnl|BL_ORD_ID|0` (`-negative_seqidlist` keeps OIDs 1 to 3).
   `make_taxfilter.py --unparsed-only MAKEBLASTDB` builds only these.
+- `tfe_n` and `tfe_p` (line DBID ordname): the same records and taxids under the titles `zebrafish hbaa1 cDNA`, ` `,
+  `  ` and the empty one (`tfe.fna`, `tfe.faa`), whose first words NCBI's tabular formats print: the titles of spaces
+  and a nucleotide's empty title give none, and NCBI prints the general id (`gnl|BL_ORD_ID|n`, `BL_ORD_ID:n`); a
+  protein's empty title gives `unnamed`. `tfe_nr.nal` and `tfe_pr.pal` read OIDs 1 to 3 of them, as `tfu_*r`.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -102,29 +106,41 @@ def fasta_records(name):
     return {key: "".join(lines) for key, lines in records.items()}
 
 
+# The titles of `tfe_n` and `tfe_p` in OID order (line DBID ordname).
+EMPTY_TITLES = ["zebrafish hbaa1 cDNA", " ", "  ", ""]
+
+
 def build_unparsed(binary):
+    for stem, line, titles in (("tfu", "ordtax", None), ("tfe", "ordname", EMPTY_TITLES)):
+        build_unparsed_set(binary, stem, line, titles)
+
+
+def build_unparsed_set(binary, stem, line, titles):
     for kind, dbtype, extension, alias in (("n", "nucl", "fna", "nal"), ("p", "prot", "faa", "pal")):
         parts, fasta = [], []
         for i, (source, key, title, taxid) in enumerate(UNPARSED[kind]):
+            if titles is not None:
+                title = titles[i]
             letters = fasta_records(source)[key]
             record = f">{title}\n" + "".join(letters[at:at + 60] + "\n" for at in range(0, len(letters), 60))
             fasta.append(record)
-            part = f"tfu_{kind}{i}"
+            part = f"{stem}_{kind}{i}"
             with open(os.path.join(HERE, part + ".tmp"), "w") as f:
                 f.write(record)
             makeblastdb(binary, "-in", part + ".tmp", "-dbtype", dbtype, "-out", part, "-blastdb_version", "5",
                         "-taxid", str(taxid), "-title", part)
             parts.append(part)
-        with open(os.path.join(HERE, f"tfu.{extension}"), "w") as f:
+        with open(os.path.join(HERE, f"{stem}.{extension}"), "w") as f:
             f.write("".join(fasta))
-        makeblastdb(binary, "-in", " ".join(parts), "-input_type", "blastdb", "-dbtype", dbtype, "-out", f"tfu_{kind}",
-                    "-blastdb_version", "5", "-title", f"tfu_{kind}")
+        makeblastdb(binary, "-in", " ".join(parts), "-input_type", "blastdb", "-dbtype", dbtype,
+                    "-out", f"{stem}_{kind}", "-blastdb_version", "5", "-title", f"{stem}_{kind}")
         for name in os.listdir(HERE):
             if any(name.startswith(part + ".") for part in parts):
                 os.remove(os.path.join(HERE, name))
-        os.remove(os.path.join(HERE, f"tfu_{kind}.{dbtype[0]}js"))
-        with open(os.path.join(HERE, f"tfu_{kind}r.{alias}"), "w") as f:
-            f.write(f"#\n# Alias file of line DBID, ordtax\n#\nTITLE tfu_{kind}r\nDBLIST tfu_{kind}\nFIRST_OID 2\nLAST_OID 4\n")
+        os.remove(os.path.join(HERE, f"{stem}_{kind}.{dbtype[0]}js"))
+        with open(os.path.join(HERE, f"{stem}_{kind}r.{alias}"), "w") as f:
+            f.write(f"#\n# Alias file of line DBID, {line}\n#\nTITLE {stem}_{kind}r\nDBLIST {stem}_{kind}\n"
+                    "FIRST_OID 2\nLAST_OID 4\n")
     # The Seq-id list of OID 0 (`-negative_seqidlist` keeps OIDs 1 to 3).
     with open(os.path.join(HERE, "tfu_ord0.txt"), "w") as f:
         f.write("gnl|BL_ORD_ID|0\n")

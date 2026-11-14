@@ -2382,6 +2382,7 @@ fn write_tblastx_outputs(
     let subject_ids = if output_formats.iter().any(|format| format.is_tabular()) {
         match &run.database {
             Some(database) => database.reported.tabular_subject_ids(
+                database.oids,
                 output_formats
                     .iter()
                     .any(|format| format.tabular_reads_subject()),

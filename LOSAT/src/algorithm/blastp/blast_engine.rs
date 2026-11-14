@@ -14315,7 +14315,9 @@ fn run_call(
                     ids.into()
                 }
                 (Some(titles), _) => {
+                    let database = database.expect("listed titles are a database's");
                     let (ids, accessions) = titles.tabular_subject_ids(
+                        database.oid_map(),
                         &hit_lists,
                         format_plans
                             .iter()

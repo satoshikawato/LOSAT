@@ -476,11 +476,17 @@ pub(crate) use punctuation_title;
 /// title `title`: the first word of the title that `GenerateDefline` makes of it
 /// (flags 0), which `GetSeqIdList` puts in the place of the id.
 ///
+/// `None` for a title whose generated first word is empty (a title of spaces; a nucleotide's
+/// empty title): NCBI keeps the general id and writes it in two forms, `gnl|BL_ORD_ID|n` for
+/// `sseqid` and `BL_ORD_ID:n` for `sacc` and `saccver`, n the sequence's OID
+/// (`algorithm::common::database::TabularSubjectId`). This reads no source: where the taxonomy
+/// database names the taxid of a nucleotide with an empty title, NCBI makes the title from it
+/// (`bioseq_title_from_source`), which LOSAT refuses before
+/// (`algorithm::common::database::check_shown_stored_title`).
+///
 /// `Err` names what LOSAT does not write as NCBI: a title whose encoding NCBI cannot
-/// guess (`GenerateDefline` throws), a title of punctuation that NCBI's
-/// `x_CleanAndCompress` reads past the end of (NCBI crashes), and a title whose generated
-/// first word is empty (NCBI keeps the general id and writes it in two forms,
-/// `gnl|BL_ORD_ID|n` for `sseqid` and `BL_ORD_ID:n` for `sacc` and `saccver`).
+/// guess (`GenerateDefline` throws), and a title of punctuation that NCBI's
+/// `x_CleanAndCompress` reads past the end of (NCBI crashes).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:218-242
 /// ```c++
@@ -527,19 +533,14 @@ pub(crate) use punctuation_title;
 /// The Bioseq of a database sequence carries its stored title as its title descriptor
 /// (seqdbvol.cpp:1445-1463) and no source, so `GenerateDefline` reads the title as it
 /// reads the one of a FASTA record (`generate_defline`).
-pub fn database_subject_id(title: &[u8], protein: bool) -> Result<Vec<u8>, &'static str> {
+pub fn database_subject_id(title: &[u8], protein: bool) -> Result<Option<Vec<u8>>, &'static str> {
     let defline = generate_defline(title, protein, false)
         .map_err(|UnknownEncoding| "in no encoding that NCBI BLAST+ recognises")?;
     if defline.reads_past_end {
         return Err(punctuation_title!());
     }
     let token = first_word(&defline.text);
-    if token.is_empty() {
-        return Err(
-            "from which NCBI BLAST+ makes no subject id (it writes gnl|BL_ORD_ID|n and BL_ORD_ID:n)",
-        );
-    }
-    Ok(token.to_vec())
+    Ok((!token.is_empty()).then(|| token.to_vec()))
 }
 
 /// `NStr::Split(text, " ", tokens)[0]`: the bytes before the first space.
@@ -1445,21 +1446,24 @@ mod tests {
             (",;,x y", ",;,x"),
         ] {
             assert_eq!(
-                database_subject_id(title.as_bytes(), true).as_deref(),
-                Ok(id.as_bytes()),
+                database_subject_id(title.as_bytes(), true),
+                Ok(Some(id.as_bytes().to_vec())),
                 "{title:?}"
             );
         }
     }
 
     // The same oracle: a title of one space keeps the general id (NCBI writes
-    // `gnl|BL_ORD_ID|0` for sseqid and `BL_ORD_ID:0` for sacc and saccver), and NCBI
-    // dies of SIGSEGV on the titles `, ,` and `; ;` (exit status 139): LOSAT names them.
+    // `gnl|BL_ORD_ID|0` for sseqid and `BL_ORD_ID:0` for sacc and saccver), as do titles of
+    // spaces and a nucleotide's empty title (NCBI BLAST+ 2.17.0 `blastn`, `tblastn`, `blastp`,
+    // `blastx` on databases without parsed Seq-ids and taxids, line DBID ordname,
+    // `blastdb-ids-20261021/R/ordname/out/*.{nes,ner,pes,per}.x.f5.ncbi.out`), and NCBI dies of
+    // SIGSEGV on the titles `, ,` and `; ;` (exit status 139): LOSAT names them.
     #[test]
     fn database_subject_id_names_the_titles_that_it_does_not_write() {
-        assert!(database_subject_id(b" ", true)
-            .unwrap_err()
-            .contains("makes no subject id"));
+        for (title, protein) in [(" ", true), ("  ", true), (" ", false), ("  ", false), ("", false)] {
+            assert_eq!(database_subject_id(title.as_bytes(), protein), Ok(None), "{title:?}");
+        }
         for title in [", ,", "; ;"] {
             assert!(
                 database_subject_id(title.as_bytes(), true)

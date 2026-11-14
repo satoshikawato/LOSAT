@@ -102,10 +102,7 @@ impl SeqId<'_> {
     pub fn sam_name(&self, out: &mut Vec<u8>) {
         match *self {
             SeqId::Local(id) => out.extend_from_slice(id.as_bytes()),
-            SeqId::BlOrdId(oid) => {
-                out.extend_from_slice(b"BL_ORD_ID:");
-                out.extend_from_slice(oid.get().to_string().as_bytes());
-            }
+            SeqId::BlOrdId(oid) => out.extend_from_slice(oid.content_label().as_bytes()),
             SeqId::Db(id) => crate::seqid::label::content(id, true, out),
         }
     }

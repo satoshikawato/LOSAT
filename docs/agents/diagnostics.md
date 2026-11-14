@@ -7309,6 +7309,11 @@ Scheduling (each value computed by one thread with the original function; order 
   sentinel scores -128 against every code and the largest score is at most 31, so the argument holds with a
   query batch of at most `i32::MAX / 32` letters), and its reference is `extend_two_hit` with the matrix; the
   walks' matrix is a type (`XSent<S: BxScoring>`), so BLOSUM62's loops keep their code.
+  The word size 2 and 4 instances add about 0.8 MB of machine code (text 16.27 -> 17.04 MB on dev 159c675a6);
+  word size 3 runs the same instructions as before, but its peak memory can rise by up to about 0.25 MB, the
+  added code's pages mapped with its own (50 cDNAs x yeast proteins, one thread: VmHWM +248 kB, +1.66 %, on dev
+  716faaaaa; +57 to +163 kB on dev 159c675a6). The Owner accepted this as an exception to the rule that the
+  memory may rise by no more than the time falls (2026-11-14).
   Measured 2026-10-23 on the workstation (node 1, CPU 40 with its HT sibling and CPUs 41-47 idle, warmed 3 s
   before every run, arm order reversed every other round, one warm-up round + 5 rounds (4 for the UniRef50
   case, 3 for SwissProt), medians of the per-round ratios against dev cd8e0f89, the binary before the switch;

@@ -478,9 +478,8 @@ class TblastxOptions(TypedDict, total=False):
     xdrop_ungap: float
     """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
     window_size: int
-    """Two-hit window size for triggering ungapped extension (default: 40, or the matrix's
-    suggestion; `window`). Smaller values are more strict, larger values are more sensitive. 0
-    (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX"""
+    """Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's
+    suggestion]"""
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""

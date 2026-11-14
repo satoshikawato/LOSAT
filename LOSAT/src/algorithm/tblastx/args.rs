@@ -271,10 +271,9 @@ pub struct TblastxArgs {
     #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = tblastx_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
     pub xdrop_ungap: Option<f64>,
 
-    /// Two-hit window size for triggering ungapped extension (default: 40, or the matrix's
-    /// suggestion; `window`). Smaller values are more strict, larger values are more sensitive.
-    /// 0 (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX.
-    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    // The window of the two-hit word finder (`window`); 0 takes the one-hit word finder. The help is
+    // NCBI's, as tblastn's.
+    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
     pub window_size: Option<i32>,
 
     /// Output format: 0 (pairwise), 6 or 7 (tabular), without custom fields.

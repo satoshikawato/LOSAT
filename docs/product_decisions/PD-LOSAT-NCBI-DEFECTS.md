@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.17
+- Version: 1.18
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -29,7 +29,9 @@
   1.16 2026-11-13 (the explicit rejections of `losat rpsbproc` for nucleotide queries, rule 3,
   line PS item PS16c);
   1.17 2026-11-13 (the explicit rejections of `losat rpsbproc` in the XML input, rule 3, line PS
-  item PS16d)
+  item PS16d);
+  1.18 2026-11-14 (the explicit rejections of TBLASTN's one-hit gapped start past NCBI's buffers
+  and of the endless split it can cause, rule 3, line RG item X2)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -518,6 +520,37 @@ of exception 9 (PS16a) did.
     the vector only after the heap sort of the leftmost part, when it reaches the depth limit). The
     permutations of 86 NaN inputs equal libstdc++ 13's (unit vectors); the fixture rows
     `x.h_*nan*`, `nan_hit`, `nan_threshold` equal NCBI.
+
+- TBLASTN with `-window_size 0` (version 1.18, 2026-11-14, line RG item X2, Owner-delegated): with
+  a low `-threshold`, NCBI's one-hit ungapped extension can give a negative `Int4` length, which
+  `BlastGetStartForGappedAlignment` reads as `Uint4` (`aa_ungapped.c:1054,1083`,
+  `blast_gapalign.c:3393-3413`): it scores the first window of 11 letters from the HSP's start,
+  which may pass the end of its context and its frame. Inside NCBI's buffers the window reads the
+  NULLB and then the next contexts' or frames' letters, and LOSAT reads the same bytes. LOSAT
+  refuses (exit 1) where the window reads outside them:
+  - past the byte after the last context's NULLB of the query batch (`calloc(buflen+1)` with
+    `buflen` from `QueryInfo_GetSeqBufLen`, `blast_setup_cxx.cpp:500-501`,
+    `blast_query_info.c:246-250`);
+  - past the NULLB after frame -3 of the subject's translation (`BLAST_GetAllTranslations` writes
+    frames 1, 2, 3, -1, -2, -3 into `2*(nucl_length+1)+2` bytes and leaves the last one unset,
+    `blast_util.c:1058,1063,1098-1101`);
+  - with `-in_pssm`, past the PSSM's last position (`pssm->data` holds one row per position).
+
+  It also refuses a result of such a gapped start that NCBI does not finish: two gapped starts
+  past the end of their chunk of the frame (the window of a chunk that is not the frame's last),
+  whose HSPs start past the preliminary interval tree's `s_max` (the chunk's length + 1,
+  `blast_gapalign.c:3829-3830`) in one subject subtree. `BlastIntervalTreeAddHSP` sends both
+  right at every node, splits the node `[s_max, s_max]` into `[s_max + 1, s_max]`, whose middle is
+  `s_max` again, and repeats that split while its node pool doubles (`blast_itree.c:57-112,
+  603-793`), so the search never returns. A gapped start at the chunk's last letter or past it can
+  also give an alignment of score 0 whose right extension did not run (its start one past its end,
+  kept by a cutoff of 0: `blast_gapalign.c:4290-4295`, `blast_stat.c:5236-5266`); such a range
+  never straddles a node's middle, and two of them split a node `[p, p]` the same way. LOSAT stops
+  where that first inverted node would be made; ranges in order inside the tree's bounds never
+  make one, and only this word finder's HSPs are out of order or leave them.
+
+  BLASTP's approved exception 3 (version 1.3), which reads such letters as the sentinel, is not
+  extended to TBLASTN.
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

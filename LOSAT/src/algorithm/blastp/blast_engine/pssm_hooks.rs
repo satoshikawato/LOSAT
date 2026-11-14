@@ -33,7 +33,7 @@ use crate::algorithm::blastp::hsp::BlastpHitList;
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::blastp::x_redo_subjects::XRedoSubjects;
 use crate::algorithm::pssm_search::evalue::EvalueStats;
-use crate::algorithm::pssm_search::lookup::build_pssm_lookup;
+use crate::algorithm::pssm_search::lookup::build_pssm_lookup_in;
 use crate::algorithm::pssm_search::prelim::{PssmPrelim, PssmSubjectScratch};
 use crate::algorithm::pssm_search::redo1;
 use crate::algorithm::pssm_search::traceback0::PssmTraceback0;
@@ -47,8 +47,48 @@ use crate::core::link_hsps::{EvenGapLinkParams, LinkContext};
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 
-/// The lookup table of the PSSM and the query's contexts ([`psi_contexts`]).
+/// The lookup table of the PSSM and the query's contexts ([`psi_contexts`]): the PSSM's words
+/// over the query's lookup segments, the complement of its masks (`-seg`, `-lcase_masking`; with
+/// `-soft_masking true` the masks keep words out of the table only), which blastp's query
+/// preparation computes for its own table (`prepare_matrix_lookup_query_for_word_size`). The
+/// query frames are blastp's (`blastp_query_frames`): a hard mask's letters are X there, which
+/// `kbp_std` reads (`psi_contexts`), and the PSSM search reads them where NCBI reads the masked
+/// query (the gap trigger, the position-based scaling of `pssm_redo`). The PSSM itself is made
+/// of the query's letters unmasked (`psi_round::next_pssm`).
 ///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:170-214
+/// ```c++
+///     BlastSeqLoc* lookup_segments = NULL;
+///     BlastScoreBlk* sbp = NULL;
+///     try {
+///         sbp =
+///         CSetupFactory::CreateScoreBlock(opts_memento.get(), query_data,
+///                                         &lookup_segments, retval->m_Messages,
+///     ...
+///     if (pssm.NotEmpty()) {
+///     ...
+///         PsiBlastSetupScoreBlock(sbp, pssm, retval->m_Messages, options);
+///     }
+///     ...
+///     // 5. Create the lookup table
+///     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
+///         LookupTableWrap* lut =
+///             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
+///                                              sbp, lookup_segments_wrap,
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-637 (the masked letters,
+/// then the complement of the masks)
+/// ```c
+///     if (!mask_at_hash) {
+///         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
+///                              program_number);
+///     }
+///     ...
+///     if (lookup_segments) {
+///         BLAST_ComplementMaskLocations(program_number, query_info,
+///                                       filter_maskloc, lookup_segments);
+///     }
+/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:86-95 (quoted at
 /// `pssm_search::lookup`)
 #[cold]
@@ -61,11 +101,12 @@ pub(super) fn pssm_lookup(
         .psi_search
         .as_deref()
         .expect("the lookup table of a PSSM search");
-    let contexts = psi_contexts(args, query_frames);
-    let table = build_pssm_lookup(
+    let (lookup_segments, contexts) = psi_query(args, query_frames);
+    let table = build_pssm_lookup_in(
         &psi.pssm,
         args.word_size,
         crate::core::blast_util::ncbi_int4_from_double(args.threshold),
+        &lookup_segments,
     );
     (BlastpRuntimeLookup::Aa(table), contexts)
 }
@@ -93,14 +134,23 @@ pub(super) fn psi_contexts(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
 ) -> Vec<QueryContext> {
-    let (_, _, contexts) = prepare_matrix_lookup_query_for_word_size(
+    psi_query(args, query_frames).1
+}
+
+/// The query's lookup segments (inclusive offsets, NCBI's `lookup_segments` of the query's one
+/// context) and its contexts ([`psi_contexts`]), as blastp's query preparation computes them.
+fn psi_query(
+    args: &ResolvedBlastpArgs,
+    query_frames: &[Vec<QueryFrame>],
+) -> (Vec<(i32, i32)>, Vec<QueryContext>) {
+    let (_, lookup_segments, contexts) = prepare_matrix_lookup_query_for_word_size(
         query_frames,
         args.word_size,
         false,
         args.scoring.matrix,
         None,
     );
-    contexts
+    (lookup_segments, contexts)
 }
 
 /// The Karlin blocks of a PSSM search: `kbp_psi[0]` and `kbp_gap_psi[0]`.

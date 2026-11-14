@@ -293,29 +293,20 @@ fn cell(
     new_gap_cost: i32,
     gap_extend: i32,
 ) {
-    let opened = *new_score - new_gap_cost;
-    *prev_score_gap_match_seq -= gap_extend;
-    if opened > *prev_score_gap_match_seq {
-        *prev_score_gap_match_seq = opened;
-    }
-    let opened = column.no_gap - new_gap_cost;
-    let mut continue_gap_score = column.gap_exists - gap_extend;
-    if opened > continue_gap_score {
-        continue_gap_score = opened;
-    }
-    let mut score = match substitution {
+    // NCBI's `if (a > b) b = a` and `if (s < t) s = t` are the maxima of integers: written as
+    // `max`, which the compiler keeps free of branches (the scores make the comparisons
+    // unpredictable).
+    *prev_score_gap_match_seq =
+        (*prev_score_gap_match_seq - gap_extend).max(*new_score - new_gap_cost);
+    let continue_gap_score = (column.gap_exists - gap_extend).max(column.no_gap - new_gap_cost);
+    let diagonal = match substitution {
         None => COMPO_SCORE_MIN,
         Some(substitution) => *prev_score_no_gap_match_seq + substitution,
     };
-    if score < 0 {
-        score = 0;
-    }
-    if score < *prev_score_gap_match_seq {
-        score = *prev_score_gap_match_seq;
-    }
-    if score < continue_gap_score {
-        score = continue_gap_score;
-    }
+    let score = diagonal
+        .max(0)
+        .max(*prev_score_gap_match_seq)
+        .max(continue_gap_score);
     *prev_score_no_gap_match_seq = column.no_gap;
     column.no_gap = score;
     column.gap_exists = continue_gap_score;

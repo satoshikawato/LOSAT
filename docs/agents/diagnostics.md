@@ -4174,7 +4174,11 @@ Scheduling (each value computed by one thread with the original function; order 
   and hundreds), and `LOSAT/tests/blastn_seed_piece.rs` (dc-megablast, blastn, megablast and blastn-short: the
   default at 2 and 4 threads and pieces of 3 to 97 seeds at 2 and 3 threads against `=0`, with the sides of
   `LOSAT_X_REACH`).
-  Evidence: (to be measured, line EB s13).
+  Evidence (line EB s20, 590657d1 against dev 159c675a, 16 threads, 8 rounds, same output): peak memory blastn-short of
+  30,000 short queries x 3 Mb 0.59 (182 -> 107 MiB), dc-megablast Sakai x EDL933 0.86, dc-megablast and blastn of 31,168
+  cDNAs x 3 Mb 0.88 / 0.96 (`-subject`) and 0.94 / 0.97 (`-db`), megablast within the null arm's range; run time within the
+  null arm's range except blastn-short +0.9-1.1 % (its folds' loads miss L1 evenly more: a fold unit per piece, 2.3 per
+  strip) and blastn cDNA x 3 Mb at 4 threads +0.5 % (the store mapped again in every query batch: +27 % page faults).
 - `LOSAT_X_BNCSR=1` (BLASTN `-task blastn` and every task with word size 9, 10 or 11 that builds the contiguous
   two-stage table of `build_mb_lookup`, `-subject` and `-db`, any thread count, speed; in the strict set from the pull
   request that added it, 2026-10-25 (perf/bn-csr, evidence at the end of this entry): on unless it is `0`) lays out the

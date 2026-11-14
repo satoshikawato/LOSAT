@@ -306,7 +306,9 @@ fn runs_here(case: &Case) -> bool {
 
 /// `losat blastn` from LOSAT/ without the variables that change NCBI's batches, reports, registry
 /// or WindowMasker directory (a case sets its own), and the worker log of the run (removed when the
-/// caller drops it, kept when the test panics).
+/// caller drops it, kept when the test panics). `BLAST_USAGE_REPORT` is one of them: with a false
+/// value NCBI's usage report reads no `.ncbirc`, so the registry's first messages (the cases
+/// `taxid_rc_*`) go missing; a shell that exports it for NCBI probes made the test fail.
 fn blastn() -> (Command, TempFile) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     command.current_dir(engine()).arg("blastn");
@@ -322,6 +324,7 @@ fn blastn() -> (Command, TempFile) {
                     | "BLASTDB"
                     | "ARCHIVE_FORMAT"
                     | "WINDOW_MASKER_PATH"
+                    | "BLAST_USAGE_REPORT"
                     | "BL2SEQ_LEGACY"
                     | "CTOOLKIT_COMPATIBLE"
                     | "OLD_FSC"

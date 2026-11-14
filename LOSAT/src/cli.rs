@@ -857,12 +857,11 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 // ```
 /// psiblast's NCBI arguments that LOSAT does not run: the MSA inputs (series PS6; the ASCII and
 /// ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
-/// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), the search strategy file (item F1b of line
-/// RG), and the arguments that blastp's engine does not run either (`is_unported_blastp_arg`;
-/// psiblast has no database masks and no `-mt_mode`).
+/// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), and the arguments that blastp's engine does
+/// not run either (`is_unported_blastp_arg`; psiblast has no database masks and no `-mt_mode`).
+/// The search strategy file of a FASTA query is written (item F1b-1 of line RG; with `-in_pssm`
+/// it is refused, `PsiblastArgs::into_blastp_args`).
 const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
-    // Line RG-F1 ported it to BLASTP's search, not to PSIBLAST's (item F1b).
-    "export_search_strategy",
     "ignore_msa_master",
     "in_msa",
     "msa_master_idx",
@@ -877,10 +876,10 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (quoted at
 // `algorithm::rpsblast::args`)
 /// rpsblast's NCBI arguments that LOSAT does not run: `-use_sw_tback` (the Smith-Waterman
-/// redo, PS11c-3), `-html` (PS15a) and the remote and search strategy options of every program.
+/// redo, PS11c-3), `-html` (PS15a) and the remote options and `-import_search_strategy` of every
+/// program.
 const UNPORTED_RPSBLAST_ARGS: &[&str] = &[
     "entrez_query",
-    "export_search_strategy",
     "html",
     "import_search_strategy",
     "remote",
@@ -893,13 +892,13 @@ fn is_unported_rpsblast_arg(name: &str) -> bool {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:44-110 (quoted at
 // `algorithm::rpstblastn::args`)
-/// rpstblastn's NCBI arguments that LOSAT does not run: `-html` (PS15a) and the remote and search
-/// strategy options of every program. The composition-based statistics of a later item are
-/// refused once per run (`rpstblastn::search::TranslatedRpsSearch::check_options`).
+/// rpstblastn's NCBI arguments that LOSAT does not run: `-html` (PS15a) and the remote options
+/// and `-import_search_strategy` of every program. The composition-based statistics of a later
+/// item are refused once per run (`rpstblastn::search::TranslatedRpsSearch::check_options`).
 fn is_unported_rpstblastn_arg(name: &str) -> bool {
     matches!(
         name,
-        "entrez_query" | "export_search_strategy" | "html" | "import_search_strategy" | "remote"
+        "entrez_query" | "html" | "import_search_strategy" | "remote"
     )
 }
 

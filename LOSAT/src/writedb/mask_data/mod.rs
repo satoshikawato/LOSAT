@@ -12,7 +12,7 @@
 //!   the set of ranges.
 //! * [`registry`]: `CMaskInfoRegistry`, the id of each algorithm.
 //! * [`range_set`]: `CMaskedRangeSet`, the ranges of each sequence.
-//! * [`column`]: `CWriteDB_Column`, the files of the column of a volume.
+//! * [`column`](mod@column): `CWriteDB_Column`, the files of the column of a volume.
 //! * [`MaskWriter`]: the part of `CWriteDB_Impl` that registers algorithms
 //!   and builds the two blobs of a sequence; `WriteDb` holds one.
 //!

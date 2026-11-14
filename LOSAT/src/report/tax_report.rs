@@ -192,7 +192,7 @@ impl Text {
 
     /// `out << text`: one insertion of NCBI's, streamed (`cli::insert_streamed`), so that a run
     /// of spaces is never held whole.
-    fn insert_into(&self, out: &mut dyn Write) -> io::Result<()> {
+    fn insert_into(&self, out: &mut crate::cli::NcbiOstream<'_>) -> io::Result<()> {
         crate::cli::insert_streamed(out, self.len(), |insertion| {
             for seg in &self.0 {
                 match seg {
@@ -1006,7 +1006,7 @@ impl TaxReport {
     pub fn write_query(
         &self,
         q_idx: usize,
-        out: &mut dyn Write,
+        out: &mut crate::cli::NcbiOstream<'_>,
         diagnostics: &mut dyn Write,
         mut reads: Option<(&mut ReadCursor<'_>, usize)>,
         title: &[u8],
@@ -1081,7 +1081,7 @@ impl TaxReport {
 /// texts of the subjects' reads (`QueryWarnings::with_subject_reads`) and of the lookups go to the
 /// warnings' sink (none without it).
 pub fn write_report(
-    writer: &mut dyn Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
     queries: &[TaxQuery<'_>],
     report: &TaxReport,

@@ -408,7 +408,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         .collect();
     let writers = formats
         .iter_mut()
-        .map(|format| format.sink.open())
+        .map(|format| format.sink.ostream())
         .collect::<io::Result<Vec<_>>>()?;
     // The archive (outfmt 11) refuses a title where it writes the batch, after its search
     // (`archive::check_batch_titles`, below): when a batch that the search may write has a query
@@ -448,12 +448,14 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                 None => super::blast_xml::subjects_may_be_refused(subjects),
             });
     let hold = (titles_may_refuse || xml_may_refuse).then(archive::ArchiveHold::new);
-    let mut writers: Vec<Box<dyn Write + '_>> = match &hold {
+    // The hold comes between a format's stream and the caller's writer, which has no stream of
+    // NCBI's (`cli::NcbiOstream`): it keeps the bytes in order.
+    let mut writers: Vec<crate::cli::NcbiOstream<'_>> = match &hold {
         Some(hold) => {
             hold.hold();
             writers
                 .into_iter()
-                .map(|writer| Box::new(hold.writer(writer)) as Box<dyn Write + '_>)
+                .map(|writer| crate::cli::NcbiOstream::new(Box::new(hold.writer(writer))))
                 .collect()
         }
         None => writers,
@@ -518,7 +520,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
 /// (`wants_hits`) and the database sequences it names.
 fn write_run(
     run: &RunReports<'_>,
-    writers: &mut [Box<dyn Write + '_>],
+    writers: &mut [crate::cli::NcbiOstream<'_>],
     documents: &mut [Option<super::blast_xml::RunXml2>],
     titles_may_refuse: bool,
     wants_hits: bool,
@@ -887,6 +889,7 @@ pub fn run_local_database(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::BLASTX_TASK.check(&mut args.task)?;
+    args.matrix_search = Some(settings.matrix_search.clone());
     let requested = requested_formats(&args, outputs);
     let (choices, resolutions) = read_format_options(&args, &requested)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
@@ -1196,6 +1199,14 @@ fn read_format_options(
         match args.resolve_with_format(choice) {
             Err(error) if error.downcast_ref::<SemanticOptionsError>().is_none() => {
                 return Err(error)
+            }
+            // The file of an unknown matrix, looked up where the command line looks it up
+            // (`native::run`), with the settings of the library's start.
+            Ok(mut options) => {
+                if let Some(search) = &args.matrix_search {
+                    options.find_matrix_file(search)?;
+                }
+                resolutions.push(Ok(options));
             }
             resolution => resolutions.push(resolution),
         }

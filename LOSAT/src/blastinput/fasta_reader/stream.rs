@@ -42,7 +42,7 @@ pub(crate) fn stream_is_empty<R: Read + Seek>(stream: &mut FastaStream<R>) -> bo
     loop {
         match input.read(&mut byte) {
             Ok(0) | Err(_) => return true,
-            Ok(_) if input_space(byte[0]) => {}
+            Ok(_) if crate::ncbi_str::is_space(byte[0]) => {}
             Ok(_) => {
                 // IsIStreamEmpty restores position only after successful extraction.
                 // NCBI unconditionally clears seekg failure and restores orig_state.
@@ -1044,65 +1044,6 @@ fn find_delimiter(haystack: &[u8], delimiters: &[u8]) -> Option<usize> {
         }
         _ => haystack.iter().position(|byte| delimiters.contains(byte)),
     }
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:930-931
-// ```c++
-//         case '\t': case '\n': case '\v': case '\f': case '\r': case ' ':
-//             continue;
-// ```
-pub(crate) const fn input_space(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
-}
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3153-3161
-// ```c++
-//     SIZE_TYPE beg = 0;
-//     if (where == NStr::eTrunc_Begin  ||  where == NStr::eTrunc_Both) {
-//         _ASSERT(beg < length);
-//         while ( isspace((unsigned char) str[beg]) ) {
-//             if (++beg == length) {
-//                 return empty_str;
-//             }
-//         }
-//     }
-// ```
-pub(crate) fn trim_input_start(bytes: &[u8]) -> &[u8] {
-    let start = bytes
-        .iter()
-        .position(|&byte| !input_space(byte))
-        .unwrap_or(bytes.len());
-    &bytes[start..]
-}
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3162-3172
-// ```c++
-//     SIZE_TYPE end = length;
-//     if ( where == NStr::eTrunc_End  ||  where == NStr::eTrunc_Both ) {
-//         _ASSERT(beg < end);
-//         while (isspace((unsigned char) str[--end])) {
-//             if (beg == end) {
-//                 return empty_str;
-//             }
-//         }
-//         _ASSERT(beg <= end  &&  !isspace((unsigned char) str[end]));
-//         ++end;
-//     }
-// ```
-pub(crate) fn trim_input_end(bytes: &[u8]) -> &[u8] {
-    let end = bytes
-        .iter()
-        .rposition(|&byte| !input_space(byte))
-        .map_or(0, |p| p + 1);
-    &bytes[..end]
-}
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3187-3190
-// ```c++
-// CTempString NStr::TruncateSpaces_Unsafe(const CTempString str, ETrunc where)
-// {
-//     return s_TruncateSpaces(str, where, CTempString());
-// }
-// ```
-pub(crate) fn trim_input_space(bytes: &[u8]) -> &[u8] {
-    trim_input_end(trim_input_start(bytes))
 }
 
 /// NCBI's `CStreamLineReader` over a `FastaStream`: the current line, the line number

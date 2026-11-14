@@ -435,39 +435,16 @@ impl SeqDbError {
 //         m_SearchDb.Reset(new CSearchDatabase( local_dblist,
 //                                              mol_type));
 // ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3153-3172
-// ```c++
-//     SIZE_TYPE beg = 0;
-//     if (where == NStr::eTrunc_Begin  ||  where == NStr::eTrunc_Both) {
-//         _ASSERT(beg < length);
-//         while ( isspace((unsigned char) str[beg]) ) {
-//             if (++beg == length) {
-//                 return empty_str;
-//             }
-//         }
-//     }
-//     SIZE_TYPE end = length;
-//     if ( where == NStr::eTrunc_End  ||  where == NStr::eTrunc_Both ) {
-//         _ASSERT(beg < end);
-//         while (isspace((unsigned char) str[--end])) {
-//             if (beg == end) {
-//                 return empty_str;
-//             }
-//         }
-//         _ASSERT(beg <= end  &&  !isspace((unsigned char) str[end]));
-//         ++end;
-//     }
-// ```
-// `isspace` in the "C" locale: space, tab, line feed, vertical tab, form feed
-// and carriage return. The reader itself (`CSeqDB`, `SeqDb::open_in`) takes
-// the name as it is given: a name of spaces alone is "No database names were
-// passed to CSeqDB::CSeqDB()." there, while the programs, which trim first,
-// report "Database name is required.".
+// `NStr::TruncateSpaces` (`eTrunc_Both`) is `ncbi_str::truncate_spaces_str`: the `isspace` of
+// the "C" locale (space, tab, line feed, vertical tab, form feed and carriage return). The
+// reader itself (`CSeqDB`, `SeqDb::open_in`) takes the name as it is given: a name of spaces
+// alone is "No database names were passed to CSeqDB::CSeqDB()." there, while the programs,
+// which trim first, report "Database name is required.".
 /// The database name that a BLAST program hands to the reader for the value
 /// of its `-db` argument: the value without the white space at its ends.
 /// A search program passes the result to [`SeqDb::open_in`].
 pub fn db_argument_name(value: &str) -> &str {
-    value.trim_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r'])
+    crate::ncbi_str::truncate_spaces_str(value)
 }
 
 /// A contiguous range of sequences inside one volume, as planned by

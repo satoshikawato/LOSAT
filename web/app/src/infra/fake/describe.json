@@ -2257,7 +2257,7 @@
    },
    {
     "flag": "-window_size",
-    "help": "Two-hit window size for triggering ungapped extension (default: 40, or the matrix's suggestion; `window`). Smaller values are more strict, larger values are more sensitive. 0 (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX",
+    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]",
     "takes_value": true
    },
    {

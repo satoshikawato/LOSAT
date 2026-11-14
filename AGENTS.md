@@ -409,7 +409,7 @@ cd LOSAT && cargo fmt
   state (`set_var`, `remove_var`, `set_current_dir`, `set_hook`, `take_hook`, rayon's
   `build_global`, the global allocator `#[global_allocator]`) gets its own `[[test]]` in `LOSAT/Cargo.toml` instead, since the tests of a suite
   share one process; `tests/suite_layout.rs` checks both. An integration test reaches the engine
-  through `LOSAT::api` and the `losat` binary only (every other module is `pub(crate)`); a test of
+  through `losat::api` and the `losat` binary only (every other module is `pub(crate)`); a test of
   an engine item that `api` does not expose lives in the crate, as above.
 - Integration tests must compare output with NCBI BLAST+ and verify hit counts,
   bit scores, E-values, and coordinates, on real short and long sequences.
@@ -478,7 +478,7 @@ web/                       # LOSAT Web (browser application)
 ├── adapter/               # Rust crate: Wasm ABI v2 over the LOSAT library (added in session S05)
 └── app/                   # Vite + Vue 3 + TypeScript application
 
-python/                    # pylosat: the Python binding of LOSAT::api (PyO3, its own Cargo root)
+python/                    # pylosat: the Python binding of losat::api (PyO3, its own Cargo root)
 ├── AGENTS.md              # Rules for code under python/
 ├── src/                   # Rust crate: the extension module
 ├── pylosat/               # Python package

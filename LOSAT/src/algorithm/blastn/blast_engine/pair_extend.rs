@@ -4,8 +4,8 @@
 //! the word extension of the lookup table hit of a two-stage table (`TwoStageLookup`) to
 //! `word_length` letters (`word_extend_pair`), the diagonal's last hit, the word type, the
 //! off-diagonal search of a single word in two-hit mode (`off_diagonal_found`, which the scan of
-//! the other tables, `na_lookup` and `pv_direct_lookup`, calls too), the ungapped extension and
-//! the save of the initial hit.
+//! the other tables, `na_lookup` and `pv_direct_lookup`, calls too: `na_scan::scan_na_lookup`),
+//! the ungapped extension and the save of the initial hit.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1143-1150,1160-1161 (the end of
 //! the loop of `s_BlastNaExtend`, :1052-1174; `s_BlastSmallNaExtend`, :1486-1593, ends the same
@@ -1383,8 +1383,8 @@ pub(super) fn word_extend_pair(
 /// window, the off-diagonal range (`scan_range`, NCBI's `scan_range` of the word options) and the
 /// word length, the array's length, mask and size, the array's levels and lengths and the hash
 /// (read only), and the seed's diagonal (masked for the array), start and end in the table's
-/// coordinates. Built at each call, from the names of the caller (the na branch passes `safe_k`
-/// as the word length).
+/// coordinates. Built at each call, from the names of the caller (`na_scan::scan_na_lookup`
+/// passes `safe_k` as the word length).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:658,663-669
 /// ```c

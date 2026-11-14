@@ -2,7 +2,7 @@
 //! BLAST+'s FASTA input source reads, as the engine reads them
 //! (the engine's `fasta_reader`, the port of `CBlastFastaInputSource`, `CFastaReader` and
 //! `CStreamLineReader`), from the bytes of a file
-//! (`LOSAT::web_adapter::FastaInputSource::from_bytes`), with the data loaders on (the CLI's
+//! (`losat::web_adapter::FastaInputSource::from_bytes`), with the data loaders on (the CLI's
 //! default).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:319-345
@@ -1497,7 +1497,7 @@ impl Records {
 /// without its white space at the start) as a Seq-id: the engine's reader decides
 /// (`ReadError::Unsupported` for such a line, `seq_id.rs`).
 fn seq_id_line(line: &[u8], protein: bool) -> bool {
-    use LOSAT::web_adapter::{FastaInputSource, ReadError, ReaderConfig};
+    use losat::web_adapter::{FastaInputSource, ReadError, ReaderConfig};
     let mut bytes = Vec::with_capacity(line.len() + 1);
     bytes.extend_from_slice(line);
     bytes.push(b'\n');

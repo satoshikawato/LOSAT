@@ -21,6 +21,8 @@
 
 use std::fmt;
 
+use crate::ncbi_str::{is_space, string_to_int8};
+
 /// Error of `database_date`: NCBI's CTime rejects one of two differing volume dates.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DateError {
@@ -215,19 +217,6 @@ impl Time {
     }
 }
 
-/// C `isspace` in the "C" locale: space, `\t`, `\n`, `\v`, `\f`, `\r`.
-///
-/// `x_Init` calls the C library's `isspace`. The NCBI C++ Toolkit code that BLAST+ runs does
-/// not call `setlocale`, so the "C" locale is in effect.
-// NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:460-461
-// ```c++
-// #define SKIP_SPACES(s) \
-//     while (isspace((unsigned char)(*s))) ++s;
-// ```
-fn is_c_space(c: u8) -> bool {
-    matches!(c, b' ' | b'\t' | b'\n' | 0x0B | 0x0C | b'\r')
-}
-
 /// `*sss` of a NUL-terminated C string: the byte at `pos`, or 0 at the end.
 fn byte_at(s: &[u8], pos: usize) -> u8 {
     s.get(pos).copied().unwrap_or(0)
@@ -256,19 +245,26 @@ fn byte_at(s: &[u8], pos: usize) -> u8 {
 //         S2N_CONVERT_ERROR_INVAL(Int8);
 //     }
 // ```
-fn read_number(s: &[u8], sss: &mut usize, mut len: usize) -> Result<i64, ParseFailure> {
-    let mut value: i64 = 0;
-    let mut digits = 0;
-    while len > 0 && byte_at(s, *sss).is_ascii_digit() {
-        value = value * 10 + i64::from(byte_at(s, *sss) - b'0');
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:658-666
+// ```c++
+// long NStr::StringToLong(const CTempString str, TStringToNumFlags flags, int base)
+// {
+//     S2N_CONVERT_GUARD_EX(flags);
+//     Int8 value = StringToInt8(str, flags, base);
+//     if ( value < kMin_Long  ||  value > kMax_Long ) {
+//         S2N_CONVERT_ERROR(long, "overflow", ERANGE, 0);
+//     }
+//     return (long) value;
+// }
+// ```
+// `StringToInt8` with flags 0 is `ncbi_str::string_to_int8`; 4 digits at most do not overflow
+// a 64-bit `long`.
+fn read_number(s: &[u8], sss: &mut usize, len: usize) -> Result<i64, ParseFailure> {
+    let start = *sss;
+    while *sss - start < len && byte_at(s, *sss).is_ascii_digit() {
         *sss += 1;
-        digits += 1;
-        len -= 1;
     }
-    if digits == 0 {
-        return Err(ParseFailure::StringException);
-    }
-    Ok(value)
+    string_to_int8(&s[start..*sss], 0).map_err(|_| ParseFailure::StringException)
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:149-156
@@ -397,13 +393,21 @@ fn parse_blast_db_date(text: &str) -> Result<Time, ParseFailure> {
             //                 is_format_space = false;
             //             }
             // ```
-            if is_c_space(f) {
+            // `x_Init` calls the C library's `isspace` (`ncbi_str::is_space`): the NCBI C++
+            // Toolkit code that BLAST+ runs does not call `setlocale`, so the "C" locale is in
+            // effect.
+            if is_space(f) {
                 is_format_space = true;
                 continue;
             }
-            if is_c_space(byte_at(s, sss)) {
+            if is_space(byte_at(s, sss)) {
                 if is_format_space {
-                    while is_c_space(byte_at(s, sss)) {
+                    // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:460-461
+                    // ```c++
+                    // #define SKIP_SPACES(s) \
+                    //     while (isspace((unsigned char)(*s))) ++s;
+                    // ```
+                    while is_space(byte_at(s, sss)) {
                         sss += 1;
                     }
                 } else {

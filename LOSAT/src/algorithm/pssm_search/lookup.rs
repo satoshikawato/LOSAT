@@ -82,10 +82,11 @@ pub(crate) fn build_pssm_lookup<R: PssmRows>(
 
 /// `build_pssm_lookup` over the lookup segments `locations` (NCBI's `lookup_segments`, inclusive
 /// `[left, right]` ranges of query offsets; one with `left > right` adds no word): the
-/// complement of the query's filtering locations (`tblastx::lookup::build_lookup_segments_for_context`),
-/// which the query's masks (`-seg`, `-lcase_masking`, also with `-soft_masking true`) keep out
-/// of the table: psiblast's PSSM searches (`blastp::blast_engine::pssm_hooks::pssm_lookup`) and
-/// tblastn `-in_pssm` (`algorithm::tblastn::in_pssm`).
+/// complement of the query's filtering locations
+/// (`tblastx::lookup::build_lookup_segments_for_context`), whose masks (`-seg`,
+/// `-lcase_masking`, also with `-soft_masking true`) keep words out of the table: psiblast's
+/// PSSM searches (`blastp::blast_engine::pssm_hooks::pssm_lookup`) and tblastn `-in_pssm`
+/// (`algorithm::tblastn::in_pssm`).
 pub(crate) fn build_pssm_lookup_in<R: PssmRows>(
     rows: &R,
     word_length: usize,

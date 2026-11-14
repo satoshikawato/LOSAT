@@ -581,7 +581,12 @@ pub(super) fn reported_subjects(
                 }
                 if shown.tabular {
                     let oid = database.db.oid(ordinal);
-                    shared::check_tabular_stored_title(stored.taxonomy_title, oid, PROGRAM)?;
+                    shared::check_tabular_stored_title(
+                        stored.taxonomy_title,
+                        shown.words,
+                        oid,
+                        PROGRAM,
+                    )?;
                 }
                 stored.title.clone()
             }

@@ -482,7 +482,7 @@ pub(crate) use punctuation_title;
 /// (`algorithm::common::database::TabularSubjectId`). This reads no source: where the taxonomy
 /// database names the taxid of a nucleotide with an empty title, NCBI makes the title from it
 /// (`bioseq_title_from_source`), which LOSAT refuses before
-/// (`algorithm::common::database::check_shown_stored_title`).
+/// (`algorithm::common::database::check_tabular_stored_title`).
 ///
 /// `Err` names what LOSAT does not write as NCBI: a title whose encoding NCBI cannot
 /// guess (`GenerateDefline` throws), and a title of punctuation that NCBI's
@@ -1460,8 +1460,20 @@ mod tests {
     // `blastdb-ids-20261021/R/ordname/out/*.{nes,ner,pes,per}.x.f5.ncbi.out`), and NCBI dies of
     // SIGSEGV on the titles `, ,` and `; ;` (exit status 139): LOSAT names them.
     #[test]
-    fn database_subject_id_names_the_titles_that_it_does_not_write() {
-        for (title, protein) in [(" ", true), ("  ", true), (" ", false), ("  ", false), ("", false)] {
+    fn database_subject_id_keeps_the_general_id_and_names_the_titles_it_does_not_write() {
+        // So do `TPA:` and `TPA:TSA: `, whose prefixes the alignment title loses (review 1 of
+        // ordname, `R/ordname/review1`).
+        for (title, protein) in [
+            (" ", true),
+            ("  ", true),
+            (" ", false),
+            ("  ", false),
+            ("", false),
+            ("TPA:", true),
+            ("TPA:", false),
+            ("TPA:TSA: ", true),
+            ("TPA:TSA: ", false),
+        ] {
             assert_eq!(database_subject_id(title.as_bytes(), protein), Ok(None), "{title:?}");
         }
         for title in [", ,", "; ;"] {

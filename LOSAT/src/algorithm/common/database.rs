@@ -2139,7 +2139,9 @@ pub(crate) fn tabular_subject_ids(
 /// the id of the default tabular report (`tabular_subject_ids`) of the sequence `ordinal` with the
 /// stored title `title` (with parsed Seq-ids: `parsed`), and `length` letters. A sequence whose
 /// tabular id LOSAT refuses shows the first word of its title: only a tabular report refuses
-/// that id, not the search.
+/// that id, not the search. A nucleotide's empty title whose taxid the taxonomy database names
+/// (`check_tabular_stored_title`, which the hits alone do not ask) shows the general id's
+/// `BL_ORD_ID:n`, which NCBI prints where the database does not name it.
 pub(crate) fn library_subject(
     db: &SeqDb,
     title: &[u8],
@@ -2280,7 +2282,8 @@ pub(crate) fn reports_may_refuse(
                     tabular_subject_id(&stored.title, db.oid(ordinal), protein, program)
                         .map_err(|_| ReportRefusal::Headers)?;
                     if !protein {
-                        check_tabular_stored_title(stored.taxonomy_title, db.oid(ordinal), program)
+                        let oid = db.oid(ordinal);
+                        check_tabular_stored_title(stored.taxonomy_title, shown.words, oid, program)
                             .map_err(|_| ReportRefusal::Headers)?;
                     }
                 }
@@ -2494,18 +2497,20 @@ pub(crate) fn check_shown_stored_title(
 
 /// LOSAT's refusal of the tabular subject id of a nucleotide database sequence `oid` without
 /// parsed Seq-ids whose empty title NCBI makes from its taxid and the taxonomy database
-/// (`StoredTitle::taxonomy_title`): NCBI prints the first word of the organism's name (`Homo`
-/// for taxid 9606, `Uncultured` for `uncultured bacterium`) where the title gives no word
-/// (`report::defline::database_subject_id`), as for a sequence with parsed Seq-ids
-/// (`ParsedSubject::check_printed_word`); LOSAT does not make titles from the taxonomy database,
-/// as in outfmt 0 (`check_shown_stored_title`). A protein's empty title gives `unnamed` with or
-/// without a source, which LOSAT writes.
+/// (`StoredTitle::taxonomy_title`), where a tabular report prints a subject id (`printed`:
+/// `sseqid`, `sacc`, `saccver`, `sallseqid`, `sallacc`): NCBI prints the first word of the
+/// organism's name (`Homo` for taxid 9606, `Uncultured` for `uncultured bacterium`) in the place
+/// of the id, as for a sequence with parsed Seq-ids (`ParsedSubject::check_printed_word`); the
+/// other fields show the stored title (`N/A`) and the taxonomy as without it. LOSAT does not make
+/// titles from the taxonomy database, as in outfmt 0 (`check_shown_stored_title`). A protein's
+/// empty title gives `unnamed` with or without a source, which LOSAT writes.
 pub(crate) fn check_tabular_stored_title(
     taxonomy_title: bool,
+    printed: crate::report::tabular::PrintedIds,
     oid: crate::seqdb::Oid,
     program: &str,
 ) -> Result<()> {
-    if taxonomy_title {
+    if taxonomy_title && (printed.subject || printed.all) {
         bail!(
             "database sequence {oid} has an empty title that NCBI BLAST+ 2.17.0 makes from its taxid with the taxonomy database (which names that taxid, or whose lookup of it fails), whose first word is the subject id of the tabular formats; this is not supported by LOSAT's {program}"
         );
@@ -2709,6 +2714,47 @@ pub(crate) fn x_check_protein_stores(
 
 #[cfg(test)]
 mod tests {
+
+    // NCBI BLAST+ 2.17.0 (review 1 of line DBID ordname, `R/ordname/review1`): a title of a
+    // space at OID 1 prints `gnl|BL_ORD_ID|1` for sseqid and `BL_ORD_ID:1` for sacc; the title
+    // `BL_ORD_ID:1 own` at OID 1 prints its first word `BL_ORD_ID:1` for both.
+    #[test]
+    fn the_general_id_has_two_forms_and_a_word_of_that_form_stays_a_word() {
+        let oid = crate::seqdb::Oid::of_unrestricted(1);
+        let general = tabular_subject_id(b" ", oid, false, "BLASTN").unwrap();
+        assert_eq!(general, TabularSubjectId::General(oid));
+        assert_eq!(&*general.id(), b"gnl|BL_ORD_ID|1");
+        assert_eq!(&*general.accession(), b"BL_ORD_ID:1");
+        assert_eq!(&*tabular_seqid(&general.accession(), oid, b" ", false), b"gnl|BL_ORD_ID|1");
+        let word = tabular_subject_id(b"BL_ORD_ID:1 own", oid, false, "BLASTN").unwrap();
+        assert_eq!(word, TabularSubjectId::Word(b"BL_ORD_ID:1".to_vec()));
+        assert_eq!(
+            &*tabular_seqid(&word.accession(), oid, b"BL_ORD_ID:1 own", false),
+            b"BL_ORD_ID:1"
+        );
+        // Another sequence's accession of that form is a word of its title.
+        let other = crate::seqdb::Oid::of_unrestricted(2);
+        assert_eq!(&*tabular_seqid(b"BL_ORD_ID:1", other, b"BL_ORD_ID:1", false), b"BL_ORD_ID:1");
+        assert!(tabular_subject_id(b", ,", oid, true, "BLASTP")
+            .unwrap_err()
+            .to_string()
+            .starts_with("database sequence 1 has a title"));
+    }
+
+    #[test]
+    fn the_tabular_taxonomy_refusal_needs_a_printed_subject_id() {
+        use crate::report::tabular::PrintedIds;
+        let oid = crate::seqdb::Oid::of_unrestricted(3);
+        let ids = PrintedIds { subject: true, all: false };
+        let all = PrintedIds { subject: false, all: true };
+        assert!(check_tabular_stored_title(true, ids, oid, "BLASTN")
+            .unwrap_err()
+            .to_string()
+            .starts_with("database sequence 3 has an empty title"));
+        assert!(check_tabular_stored_title(true, all, oid, "BLASTN").is_err());
+        assert!(check_tabular_stored_title(true, PrintedIds::default(), oid, "BLASTN").is_ok());
+        assert!(check_tabular_stored_title(false, ids, oid, "BLASTN").is_ok());
+    }
     use super::*;
     use crate::utils::matrix::BLASTAA_SIZE;
 

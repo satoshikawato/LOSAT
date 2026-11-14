@@ -595,7 +595,12 @@ pub(crate) fn reported_subjects(
                 }
                 if shown.tabular {
                     let oid = database.db.oid(ordinal);
-                    shared::check_tabular_stored_title(stored.taxonomy_title, oid, PROGRAM)?;
+                    shared::check_tabular_stored_title(
+                        stored.taxonomy_title,
+                        shown.words,
+                        oid,
+                        PROGRAM,
+                    )?;
                 }
                 stored.title.clone()
             }
@@ -678,9 +683,10 @@ pub(crate) fn reported_subjects(
 }
 
 impl ReportedSubjects {
-    /// The subject ids of the tabular reports, by rank: the first word of the stored title, or
-    /// the id of a sequence with parsed Seq-ids (`common::database::tabular_subject_ids`; an id
-    /// LOSAT cannot write is empty where no tabular report `reads` the subject).
+    /// The subject ids of the tabular reports (`saccver`), by rank: the first word of the stored
+    /// title or the general id's `BL_ORD_ID:n` (`oids`), or the id of a sequence with parsed
+    /// Seq-ids (`common::database::tabular_subject_ids`; an id LOSAT cannot write is empty where no
+    /// tabular report `reads` the subject).
     pub(crate) fn tabular_subject_ids(
         &self,
         oids: crate::seqdb::OidMap<'_>,

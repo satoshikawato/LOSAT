@@ -2089,8 +2089,8 @@ impl Oid {
     }
 }
 
-/// The OID as LOSAT's refusals name the sequence ("database sequence n"), so that no refusal
-/// names a sequence by its rank in a list that restricts the search.
+/// The OID as LOSAT's refusals that take an `Oid` name the sequence ("database sequence n"),
+/// not by its rank in a list that restricts the search.
 impl std::fmt::Display for Oid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)

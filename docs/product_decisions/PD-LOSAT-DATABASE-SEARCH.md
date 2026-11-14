@@ -58,7 +58,8 @@
   subject id of a sequence without parsed Seq-ids whose title gives no word (a title of spaces, a
   nucleotide's empty title) as NCBI does, the general id `gnl|BL_ORD_ID|n` and `BL_ORD_ID:n` with
   its OID, which version 1.0 refused, and refused it where the taxonomy database names the tax id
-  of a nucleotide's empty title, from which NCBI makes the id, as line DBID H3 refused outfmt 0)
+  of a nucleotide's empty title, from which NCBI makes the id, as line DBID H3 refused outfmt 0,
+  only for a table that prints a subject id, which version 1.0 refused for every table)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -616,7 +617,7 @@ Rejected explicitly, besides what BLASTP `-db` and the reader reject (the same r
 | Rejected | Why |
 | --- | --- |
 | `-searchsp`, `-db_soft_mask`, `-db_hard_mask` | a stage of its own; masks are not read (P4) |
-| In the tabular formats, a reported subject with an empty title and a tax id that the taxonomy database names (line DBID ordname) | NCBI makes the title from the tax id, as in outfmt 0 (line DBID H3, the row of BLASTP), and prints its first word, the organism's (`Homo` for 9606). A title of spaces, and an empty title without such a tax id, give no word: NCBI prints the general id, `gnl|BL_ORD_ID|n` for `sseqid` and `BL_ORD_ID:n` for `sacc` and `saccver` with n the sequence's OID, as LOSAT does (for a protein an empty title gives `unnamed`) |
+| In the tabular formats that print a subject id (the default fields, `sseqid`, `sacc`, `saccver`, `sallseqid`, `sallacc`), a reported subject with an empty title and a tax id that the taxonomy database names (line DBID ordname) | NCBI makes the title from the tax id, as in outfmt 0 (line DBID H3, the row of BLASTP), and prints its first word, the organism's (`Homo` for 9606), in the place of the id; the other fields show the stored title (`N/A`) and the taxonomy as LOSAT does. A title of spaces, and an empty title without such a tax id, give no word: NCBI prints the general id, `gnl|BL_ORD_ID|n` for `sseqid` and `BL_ORD_ID:n` for `sacc` and `saccver` with n the sequence's OID, as LOSAT does (for a protein an empty title gives `unnamed`) |
 | `-dbsize` whose effective search space overflows NCBI's `Int8` | NCBI's arithmetic overflows |
 | A database of more letters than the target's `usize` (32-bit targets) | |
 

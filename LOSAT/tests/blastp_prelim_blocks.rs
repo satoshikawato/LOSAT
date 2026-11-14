@@ -196,14 +196,16 @@ fn same_as_one_table(
 // The reports that only the search of all queries writes, with `-subject`, in blocks of the
 // preliminary stage: each lookup table (exact blastp's words of 3 and of 4, blastp-fast's
 // compressed table), one thread and four, blocks of one batch (`1`) and of several (`TWO_BLOCKS`);
-// outfmt 10 (CSV), 18 (the organism report) and 20 (CSV with a header line). One case per path (CI
+// outfmt 10 (CSV), 18 (the organism report) and 20 (CSV with a header line), and the ordinary
+// traceback of `-comp_based_stats 0`, which reads each HSP's query context. One case per path (CI
 // time).
 #[test]
 fn reports_of_the_search_of_all_queries_with_blocks_of_the_preliminary_stage() {
     let subject = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     let (query, _dir) = queries("subject", 4);
-    let cases: [(&[&str], u32, &str); 6] = [
+    let cases: [(&[&str], u32, &str); 7] = [
+        (&["-comp_based_stats", "0", "-outfmt", "10"], 1, TWO_BLOCKS),
         (&["-outfmt", "10"], 1, "1"),
         (&["-outfmt", "18"], 4, TWO_BLOCKS),
         (&["-outfmt", "20 qseqid sseqid evalue bitscore"], 4, "1"),

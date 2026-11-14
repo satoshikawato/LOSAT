@@ -16,9 +16,9 @@
 //! `advance_tblastx_diag_offset`, `adjust_tblastx_chunk_subject_offsets`, the `-lcase_masking`
 //! ranges). The frame loop (`frame_chunks::search_subject_frames`) calls `scan_chunk` for each
 //! chunk. The helpers are the statements the scans have in common, in their order; each scan keeps
-//! what only it does (plain: the `-lcase_masking` ranges, the order check and the scan dump;
-//! bucketed: the buckets and their flushes; one-hit: its loop) and the order in which it calls
-//! them.
+//! what only it does (plain: the `-lcase_masking` ranges, which the one-hit scan also reads, the
+//! order check and the scan dump; bucketed: the buckets and their flushes; one-hit: its loop) and
+//! the order in which it calls them.
 
 use super::{
     adjust_tblastx_chunk_subject_offsets, advance_tblastx_diag_offset, atomic_max_i32,
@@ -88,6 +88,8 @@ pub(super) struct FrameCx<'a> {
     // nothing writes during the call), its fields were held in registers across the scan loops,
     // and the bucketed order spilled a register in its push loop: +0.85 % instructions on its
     // frame-loop run, -0.32 % this way (callgrind n1, SW7 tx-6).
+    // The tx-5 helpers (`begin_chunk_scan`, `scan_next_hits`, `two_hit_one_hit`,
+    // `finish_chunk_scan`) still take `cx` as a parameter; every caller passes `frame.cx`.
     pub(super) cx: &'a WordFinderCx<'a>,
     pub(super) lookup_ref: &'a BlastAaLookupTable,
     pub(super) s_idx: usize,
@@ -136,9 +138,13 @@ pub(super) struct ChunkStart<'s> {
 /// word has no hit: its diagonal offset is advanced as after a scan, and its empty result is the
 /// `Err`, which the scan returns.
 ///
+/// Callers pass `frame.cx` as `cx`.
+///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:243-256 (the chunk of
 /// `s_GetNextSubjectChunk`) and c++/src/algo/blast/core/aa_ungapped.c:614 (`Blast_ExtendWordExit`,
-/// c++/src/algo/blast/core/blast_extend.c:162-185).
+/// c++/src/algo/blast/core/blast_extend.c:162-185); for the one-hit word finder
+/// (`s_BlastAaWordFinder_OneHit`), :762-766 (the scan range, whose `while` is not entered for a
+/// subject shorter than a word) and :807 (its `Blast_ExtendWordExit`).
 pub(super) fn begin_chunk_scan<'s>(
     cx: &WordFinderCx<'_>,
     frame: &FrameCx<'s>,
@@ -166,8 +172,9 @@ pub(super) fn begin_chunk_scan<'s>(
 
     if subject.len() < wordsize as usize {
         // NCBI still advances the diagonal table offset even when no hits can be found.
-        // References: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:499-500 (the clamp of the empty scan
-        // range) and :614 (the advance),
+        // References: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:499-500 (two-hit: the clamp
+        // of the empty scan range; one-hit: the loop is not entered, :762-766) and :614 (two-hit)
+        // or :807 (one-hit) (the advance),
         // ncbi-blast/c++/src/algo/blast/core/blast_extend.c:167-173
         advance_tblastx_diag_offset(diag_offset, diag_array, window, chunk.length);
         return Err(TblastxChunkScanResult {
@@ -189,10 +196,13 @@ pub(super) fn begin_chunk_scan<'s>(
 /// and duplicate check. `None` when the call found no hit and did not move from `prev_scan_left`,
 /// where it started: the caller's scan ends there.
 ///
+/// Callers pass `frame.cx` as `cx`.
+///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-507 (`scansub` in the scan
 /// loop of `s_BlastAaWordFinder_TwoHit`).
-// `#[inline(always)]` (SW7 DECISIONS 5): out of line, the scan it calls left the closure of the
-// bucketed order, which inlines it: +0.36 % on its frame-loop run (callgrind n1, SW7 tx-5).
+// `#[inline(always)]` (SW7 DECISIONS 5): out of line, the scan it calls left the bucketed order
+// (`scan_chunk_bucketed`, then a closure), which inlines it: +0.36 % on its frame-loop run
+// (callgrind n1, SW7 tx-5).
 #[inline(always)]
 pub(super) fn scan_next_hits(
     cx: &WordFinderCx<'_>,
@@ -285,6 +295,8 @@ pub(super) fn scan_next_hits(
 /// `scan_chunk_plain` runs it on the hits in scan order and `scan_chunk_bucketed` bucket by bucket:
 /// it reads and writes only the hit's cell, the sequences and the matrix, so both orders give each
 /// diagonal the same sequence of states.
+///
+/// Callers pass `frame.cx` as `cx`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-607 (the body of the hit
 /// loop of `s_BlastAaWordFinder_TwoHit`, :440-619; `s_BlastAaExtendTwoHit`, :1089)
@@ -697,10 +709,12 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
 /// score and converts them to the chunk's HSP list (`hsp_list`: `get_ungapped_hsp_list` for the
 /// two-hit scans, `get_ungapped_hsp_list_int4` for the one-hit one) in the frame's subject offsets.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:614 (`Blast_ExtendWordExit`)
-/// and :234 (`Blast_InitHitListSortByScore` in `BlastAaWordFinder`, :200-236),
-/// c++/src/algo/blast/core/blast_engine.c:561-562 (`BLAST_GetUngappedHSPList`) and :578
-/// (`Blast_HSPListAdjustOffsets`).
+/// Callers pass `frame.cx` as `cx`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:614 (`Blast_ExtendWordExit`;
+/// for the one-hit word finder, :807) and :234 (`Blast_InitHitListSortByScore` in
+/// `BlastAaWordFinder`, :200-236), c++/src/algo/blast/core/blast_engine.c:561-562
+/// (`BLAST_GetUngappedHSPList`) and :578 (`Blast_HSPListAdjustOffsets`).
 pub(super) fn finish_chunk_scan<L>(
     cx: &WordFinderCx<'_>,
     frame: &FrameCx<'_>,
@@ -771,11 +785,12 @@ where
 // ```
 // This function is the reference loop: the port of the C loop above. The dispatcher
 // `scan_chunk` below chooses between it, `scan_chunk_bucketed` and `scan_chunk_one_hit`.
-// The chunk's start, the scan calls, the per-hit body and the chunk's end are the
-// functions above, which the two two-hit scans share.
+// The chunk's start and end are shared by the three scans; the scan calls and the per-hit body by
+// the two two-hit scans.
 /// Scans `chunk` of the frame with NCBI's two-hit word finder, the hits of each scan call in scan
-/// order, and returns the chunk's HSP list. The `-lcase_masking` ranges (`FrameCx::x_soft_calls`),
-/// the order check and the scan dump (LOSAT_DEBUG_SCAN_SOFF) are its own.
+/// order, and returns the chunk's HSP list. The `-lcase_masking` ranges (`FrameCx::x_soft_calls`,
+/// which the one-hit scan also reads), the order check and the scan dump (LOSAT_DEBUG_SCAN_SOFF)
+/// are its own.
 fn scan_chunk_plain<S: TbxScore>(
     frame: &FrameCx<'_>,
     chunk: SubjectChunk,
@@ -1177,7 +1192,7 @@ fn scan_chunk_bucketed<S: TbxScore>(
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:760-807
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:762-807
 // ```c
 //     scan_range[0] = 0;
 //     scan_range[1] = subject->seq_ranges[0].left;
@@ -1272,7 +1287,7 @@ fn scan_chunk_one_hit<S: TbxScore>(
         ..
     } = frame;
     // The chunk's letters and its empty lists; a chunk shorter than a word ends here
-    // (`begin_chunk_scan`, as in `scan_chunk_plain`: aa_ungapped.c:760-764, `scan_range[2] <
+    // (`begin_chunk_scan`, as in `scan_chunk_plain`: aa_ungapped.c:762-766, `scan_range[2] <
     // scan_range[1]`, no scan; blast_extend.c:167-173). The one-hit extension takes no sentinel
     // walks (`tbx_sent` false).
     let ChunkStart {
@@ -1430,7 +1445,7 @@ fn scan_chunk_one_hit<S: TbxScore>(
         }
     }
     // [C] Blast_ExtendWordExit(ewp, subject->length);
-    // aa_ungapped.c:232 `Blast_InitHitListSortByScore`, then the conversion of
+    // aa_ungapped.c:234 `Blast_InitHitListSortByScore`, then the conversion of
     // `scan_chunk_plain` (blast_engine.c:561-584; `finish_chunk_scan`).
     // The list keeps NCBI's `Int4` ends of an HSP of length 0 or less
     // (`get_ungapped_hsp_list_int4`, `adjust_tblastx_chunk_subject_offsets`).
@@ -1536,8 +1551,8 @@ pub(super) fn scan_chunk<S: TbxScore>(
 }
 
 // No NCBI counterpart: a call boundary; it computes no value NCBI computes.
-/// Calls `f` in a function of its own that is never inlined, so that a closure that calls it
-/// (`scan_chunk`'s one-hit scan, `-window_size 0`) does not take `f`'s code.
+/// Calls `f` in a function of its own that is never inlined, so that the function that calls it
+/// (`scan_chunk`, for the one-hit scan of `-window_size 0`) does not take `f`'s code.
 #[inline(never)]
 fn x_out_of_line<R>(f: impl FnOnce() -> R) -> R {
     f()

@@ -3867,14 +3867,13 @@ mod tests {
 
     /// The reference two-hit stage of one subject on one masked table shared by the frames (the
     /// frame loop, `frame_chunks::search_subject_frames`, with `scan_chunk_plain`): the batch
-    /// lookup, `(q - s) &
-    /// mask`, the same per-hit body, the diagonal offset advanced after every frame
-    /// (`Blast_ExtendWordExit`). Returns the sorted init-HSP list of every frame, how often each
-    /// branch was taken, and how many hits met a cell whose flag 1 was written by a right extension
-    /// on another raw diagonal (the masked-aliasing case of module doc item 3). The scores and the
-    /// word length are those of `sc` (the extensions of the reference loop without the sentinel
-    /// walks: `extend_hit_two_hit_fitting` for BLOSUM62's instance, `extend_hit_two_hit_with` for
-    /// the other).
+    /// lookup, `(q - s) & mask`, the same per-hit body, the diagonal offset advanced after every
+    /// frame (`Blast_ExtendWordExit`). Returns the sorted init-HSP list of every frame, how often
+    /// each branch was taken, and how many hits met a cell whose flag 1 was written by a right
+    /// extension on another raw diagonal (the masked-aliasing case of module doc item 3). The
+    /// scores and the word length are those of `sc` (the extensions of the reference loop without
+    /// the sentinel walks: `extend_hit_two_hit_fitting` for BLOSUM62's instance,
+    /// `extend_hit_two_hit_with` for the other).
     #[allow(clippy::too_many_arguments)]
     fn masked_reference<M: TbxScore>(
         sc: M,

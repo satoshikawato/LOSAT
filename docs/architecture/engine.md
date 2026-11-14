@@ -342,15 +342,14 @@ sets up a query batch with `batch_setup.rs`, `context_cutoffs.rs` and `seed_tabl
 subject loop with `subject_loop.rs` and ends with `batch_finish.rs`; its `process_subject`
 prepares a subject with `subject_prep.rs` (the preliminary frames and the unit path), runs the
 frame loop of `frame_chunks.rs`, which drives the chunks of each frame and scans each with the
-word finder of `word_finder.rs` (the one-hit scan of `-window_size 0`, and the two two-hit scans,
-NCBI's order and SEEDBUCKET's, which share a chunk's start and end, its scan calls, and the
-two-hit test and extension of each hit), and ends a subject with `subject_link.rs` (the seed
-stage's end,
-the linking calls, the reap and the re-evaluation), `subject_report.rs` (the report hits) and
-`subject_debug.rs` (their debugging output). rpsblast has no driver of its own: it runs
-blastp's (`BlastpApp::Rpsblast`), which hands the search to `rps_search` from
-`blastp/blast_engine/rps_hooks.rs`. In RPS the roles are swapped as in NCBI: the profiles are the
-"query" and the user's query is the "subject".
+word finder of `word_finder.rs` (the one-hit scan of `-window_size 0` and the two two-hit scans,
+NCBI's order and SEEDBUCKET's; all three share a chunk's start and end, and the two-hit ones also
+share its scan calls and the two-hit test and extension of each hit), and ends a subject with
+`subject_link.rs` (the seed stage's end, the linking calls, the reap and the re-evaluation),
+`subject_report.rs` (the report hits) and `subject_debug.rs` (their debugging output). rpsblast has
+no driver of its own: it runs blastp's (`BlastpApp::Rpsblast`), which hands the search to
+`rps_search` from `blastp/blast_engine/rps_hooks.rs`. In RPS the roles are swapped as in NCBI: the
+profiles are the "query" and the user's query is the "subject".
 
 | | blastx | tblastn | tblastx | rpsblast |
 | :--- | :--- | :--- | :--- | :--- |

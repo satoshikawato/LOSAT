@@ -1077,6 +1077,19 @@ fn report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) ->
     Ok(())
 }
 
+// NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:267-270 (quoted at `search_cli`)
+/// The XInclude formats written without a file fail after the formatter is made (after
+/// `Query is Empty!` and `before_prolog`), as the command line's `-outfmt` (`search_cli`).
+fn xinclude_checks(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<()> {
+    for format in &outputs.formats {
+        crate::blastinput::app::xinclude_check_for(
+            &crate::blastinput::app::parse_formatting_string(format.outfmt)?,
+            format.side_out(out),
+        )?;
+    }
+    Ok(())
+}
+
 /// The numbers of the requested formats, each read as on the command line. `out`: the file of
 /// `api::run_to_file` (a format with the caller's receiver of side files takes that receiver's,
 /// `FormatOutput::side_out`).
@@ -1085,9 +1098,10 @@ fn read_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> R
     let mut outfmts = Vec::with_capacity(outputs.formats.len());
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
+        // A format without a report: NCBI's formatting handler refuses SAM, AIRR and FASTA here;
+        // the XInclude formats without a file come after `Query is Empty!` (`xinclude_checks`).
         if app::report_format(&choice, app::Program::Tblastn, format.side_out(out))?.is_none() {
             app::formatting_handler_check(&choice, app::Program::Tblastn)?;
-            app::xinclude_check(&choice)?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2887
         // ```c++
@@ -1173,6 +1187,7 @@ fn search_database(
         return Ok(());
     }
     let batch_size = before_prolog(&[], None, outputs.diagnostics)?;
+    xinclude_checks(outputs, args.out.as_deref())?;
     search(
         &args,
         resolved,
@@ -1234,6 +1249,7 @@ fn run_local_formats(
     };
     // The caller owns the records: their letters are read in place.
     let batch_size = before_prolog(searched_subjects, None, outputs.diagnostics)?;
+    xinclude_checks(outputs, args.out.as_deref())?;
     search(
         &args,
         resolved,

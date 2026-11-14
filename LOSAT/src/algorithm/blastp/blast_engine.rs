@@ -6033,6 +6033,7 @@ fn run_local_formats(
     let mut resolved = resolve_for_formats(&args, outputs)?;
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
     subject_taxonomy(&args, &mut resolved, args.taxdb_setting.as_ref(), outputs)?;
+    let xinclude = xinclude_format(&args, outputs)?;
     let args = resolved;
     if args.app == BlastpApp::Psiblast {
         psiblast_check_subject_letters(&subjects.records)?;
@@ -6045,7 +6046,7 @@ fn run_local_formats(
         None,
         subject_label,
         outputs,
-        None,
+        xinclude.as_ref(),
     )
 }
 
@@ -6112,6 +6113,7 @@ fn search_database(
     let mut resolved = resolve_for_formats(&args, outputs)?;
     let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?
         .ok_or_else(crate::blastinput::app::missing_subject_error)?;
+    let xinclude = xinclude_format(&args, outputs)?;
     search(
         resolved,
         query_records,
@@ -6123,8 +6125,27 @@ fn search_database(
         Some(&database),
         "",
         outputs,
-        None,
+        xinclude.as_ref(),
     )
+}
+
+/// The first requested format that has no report after the formatting handler's checks (an
+/// XInclude format, 13 or 14, without a file: `app::report_format`), which `search` refuses where
+/// the command line refuses its `-outfmt` (after `Query is Empty!` and the subjects without
+/// letters).
+fn xinclude_format(
+    args: &BlastpArgs,
+    outputs: &ReportOutputs<'_>,
+) -> Result<Option<crate::blastinput::app::FormatChoice>> {
+    use crate::blastinput::app;
+    for format in &outputs.formats {
+        let choice = app::parse_formatting_string(format.outfmt)?;
+        let out = format.side_out(args.out.as_deref());
+        if app::report_format(&choice, app::Program::Blastp, out)?.is_none() {
+            return Ok(Some(choice));
+        }
+    }
+    Ok(None)
 }
 
 /// LOSAT's rejection of a protein subject title of punctuation that NCBI's
@@ -6281,9 +6302,11 @@ fn resolve_for_formats(
         let choice = crate::blastinput::app::parse_formatting_string(&requested.outfmt)?;
         let program = crate::blastinput::app::Program::Blastp;
         let out = format.side_out(args.out.as_deref());
+        // A format without a report: NCBI's formatting handler refuses SAM, AIRR and FASTA here;
+        // the XInclude formats without a file come after `Query is Empty!`, in `search`
+        // (`xinclude_format`).
         if crate::blastinput::app::report_format(&choice, program, out)?.is_none() {
             crate::blastinput::app::formatting_handler_check(&choice, program)?;
-            crate::blastinput::app::xinclude_check(&choice)?;
         }
         // The options handlers of every format (`check_options`, also through `resolve`) make
         // the formatting handler's checks, the custom delimiter's among them.

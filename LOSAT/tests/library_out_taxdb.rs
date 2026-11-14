@@ -288,7 +288,28 @@ fn run_to_file_makes_out_where_the_command_line_does() {
                 text(&library.stderr).contains("Illegal value, expected file name length < 256"),
                 "{program} {dry}: {library:?}"
             );
-            assert!(!dir.join(&long).exists());
+        }
+        // The BLAST archive (outfmt 11) of an error before `-out` is made (the empty subjects):
+        // NCBI's `PrintErrorArchive` makes the file and writes the error archive, also when
+        // `ARCHIVE_FORMAT` names no encoding (an empty file then). The same file from both.
+        let archive = words(&[
+            program, "-query", query, "-subject", "empty.fa", "-out", "out.asn", "-outfmt", "11",
+        ]);
+        for envs in [vec![], vec![("ARCHIVE_FORMAT", OsString::from("foo"))]] {
+            let mut files = Vec::new();
+            for binary in [PathBuf::from(BIN), example_binary("library_command_line")] {
+                let _ = fs::remove_file(dir.join("out.asn"));
+                let run = run_binary_in(&binary, &dir, &archive, &envs);
+                assert_ne!(run.status.code(), Some(0), "{program} {binary:?} {envs:?}");
+                files.push(fs::read(dir.join("out.asn")).ok());
+            }
+            // psiblast writes no BLAST archive (LOSAT refuses outfmt 11 there before any file).
+            assert_eq!(
+                files[0].is_some(),
+                program != "psiblast",
+                "{program} {envs:?}: the command line's file"
+            );
+            assert_eq!(files[1], files[0], "{program} {envs:?}: outfmt 11");
         }
     }
     let _ = fs::remove_dir_all(&dir);

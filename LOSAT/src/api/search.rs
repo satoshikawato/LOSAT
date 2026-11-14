@@ -263,14 +263,16 @@ fn parse(
 }
 
 /// Parses the argv with the command line's parser, as `losat <program> -query <query>
-/// <subject_flag> <subject> [-out <out>] <argv...>` (`inputs`: query, subject flag, subject).
+/// <subject_flag> <subject> [-out=<out>] <argv...>` (`inputs`: query, subject flag, subject). The
+/// `-out` value is one word with its option, so that NCBI's reading of its toolkit's words
+/// (`ncbi_environment::preparse`: `-dryrun`, the versions, `--`) takes no file name for one; the
+/// parser keeps the bytes of a name that is not UTF-8.
 fn parse_words(
     program: Program,
     argv: &[String],
     [query, subject_flag, subject]: [&str; 3],
     out: Option<&std::path::Path>,
 ) -> Result<Commands, Error> {
-    use std::ffi::OsStr;
     let words = [
         "losat",
         program.name(),
@@ -279,13 +281,17 @@ fn parse_words(
         subject_flag,
         subject,
     ];
-    let out = out.map(|path| [OsStr::new("-out"), path.as_os_str()]);
+    let out = out.map(|path| {
+        let mut word = std::ffi::OsString::from("-out=");
+        word.push(path);
+        word
+    });
     let cli: Cli = crate::cli::try_parse_from_library(
         words
             .iter()
-            .map(OsStr::new)
-            .chain(out.iter().flatten().copied())
-            .chain(argv.iter().map(OsStr::new)),
+            .map(|word| std::ffi::OsString::from(*word))
+            .chain(out)
+            .chain(argv.iter().map(std::ffi::OsString::from)),
     )
     .map_err(|error| Error::Argv(crate::cli::render_message(&error)))?;
     Ok(cli.command)
@@ -547,6 +553,50 @@ mod tests {
         let inputs = Inputs::new(&query, &query).named("q.faa", "s.faa");
         assert!(
             matches!(search.command(inputs), Err(Error::Argv(message)) if message.starts_with("-num_iterations 3 "))
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87
+    // (quoted at `blastinput::value_parsers::blastn_output_path`)
+    /// `run_to_file`'s file is the parser's `-out` (`Search::writing_to`): any name, one that looks
+    /// like a toolkit word (`-dryrun`, `--`) or is not UTF-8 among them, is the file and leaves the
+    /// argv as it is; a name of 256 bytes or more is NCBI's error.
+    #[test]
+    fn the_file_of_run_to_file_is_the_parsers_out() {
+        let search = validate(Program::Blastn, &["-ungapped"]).unwrap();
+        let inputs = Inputs::new(&[], &[]).named("q.fna", "s.fna");
+        let mut names = vec![
+            std::ffi::OsString::from("-dryrun"),
+            std::ffi::OsString::from("--"),
+            std::ffi::OsString::from("-version"),
+            std::ffi::OsString::from("dir/o.out"),
+        ];
+        #[cfg(unix)]
+        names.push(
+            <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(b"o\xff.out")
+                .to_os_string(),
+        );
+        for name in names {
+            let writing = search.writing_to(std::path::Path::new(&name));
+            assert!(!writing.dry_run(), "{name:?}");
+            match writing.command(inputs).unwrap() {
+                Commands::Blastn(args) => {
+                    assert_eq!(args.out.as_deref(), Some(std::path::Path::new(&name)));
+                    assert!(args.ungapped, "{name:?}");
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        let long = "a".repeat(256);
+        let Err(Error::Argv(message)) = search
+            .writing_to(std::path::Path::new(&long))
+            .command(inputs)
+        else {
+            panic!("a name of 256 bytes");
+        };
+        assert!(
+            message.contains("Illegal value, expected file name length < 256"),
+            "{message}"
         );
     }
 }

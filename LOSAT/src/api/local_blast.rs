@@ -678,6 +678,13 @@ impl ReportOutputs<'_> {
             lines,
             self.formats.iter_mut().find(|format| format.is_archive()),
         ) {
+            // `PrintErrorArchive` opens `-out` before the archive's encoding is read
+            // (`ARCHIVE_FORMAT`, which can write nothing), and ignores a file it cannot open: the
+            // file of `run_to_file` is made here when the search ended before making it.
+            if let (OutputSink::Out(out), true) = (&mut format.sink, handle.error_archive_enabled())
+            {
+                let _ = out.make();
+            }
             let mut writer = format.sink.open()?;
             let written = crate::report::archive::write_error_archive(handle, &lines, &mut writer)
                 .and_then(|()| writer.flush().map_err(anyhow::Error::from));
@@ -711,7 +718,7 @@ impl ReportOutputs<'_> {
                         OutputSink::Stdout => OutputSink::Stdout,
                         OutputSink::File(path) => OutputSink::File(path),
                         OutputSink::Writer(writer) => OutputSink::Writer(&mut **writer),
-                        OutputSink::Out(out) => OutputSink::Out(&mut **out),
+                        OutputSink::Out(out) => OutputSink::Out(out),
                         OutputSink::Files(writer, sink) => {
                             OutputSink::Files(&mut **writer, sink.clone())
                         }

@@ -231,7 +231,6 @@ fn search_records(
     )
 }
 
-/// A `-db` search's part of `report_batches`.
 /// What the reports `resolved` of a `-subject` search ask of the taxonomy database, through
 /// `setting` (`common::database::subject_taxonomy`): asked by the command line (`native::run`)
 /// and by a search of records (`search_records`) at the same point, after the options are
@@ -252,6 +251,7 @@ pub(super) fn subject_taxonomy(
     Ok(())
 }
 
+/// A `-db` search's part of `report_batches`.
 struct DatabaseReports<'a> {
     database: &'a BlastxDatabase,
     pairwise: &'a crate::report::pairwise::PairwiseDatabase,

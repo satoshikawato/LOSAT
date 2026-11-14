@@ -16535,19 +16535,13 @@ mod tests {
                 }
             }
         }
-        // `run_local` has no output file; its formats that NCBI rejects later fail at once.
-        for (outfmt, error) in [
-            ("13", "Please provide a file name for outfmt 13."),
-            ("14", "Please provide a file name for outfmt 14."),
-            (
-                "19",
-                "AIRR rearrangement format is only applicable to igblastn",
-            ),
-            ("21", "FASTA output format is only applicable to magicblast"),
-        ] {
+        // `run_local`'s formats that NCBI rejects later are left out, as the command line's
+        // (`cli_output_formats`): NCBI's formatting handler (`process_options`, above) and
+        // `search` (the XInclude formats without a file) raise their errors after `-out` is made.
+        for outfmt in ["13", "14", "19", "21"] {
             assert_eq!(
-                native(parse_output_formats([("6", None), (outfmt, None)]).unwrap_err()),
-                options(error),
+                parse_output_formats([("6", None), (outfmt, None)]).unwrap(),
+                [BlastnOutputFormat::Tabular],
                 "{outfmt}"
             );
         }

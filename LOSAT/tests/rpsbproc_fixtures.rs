@@ -299,7 +299,11 @@ fn widened_rows_are_their_nearby_rows_moved_back() {
         }
         assert_eq!(out, read("widened", case, "out"), "{case}: stdout");
         assert_eq!(err, read("widened", case, "err"), "{case}: stderr");
-        assert_eq!(read("oracle", nearby, "rc"), read("widened", case, "rc"), "{case}: rc");
+        assert_eq!(
+            read("oracle", nearby, "rc"),
+            read("widened", case, "rc"),
+            "{case}: rc"
+        );
         pairs += 1;
     }
     let widened = rows.iter().filter(|row| row[1] == "widened").count();

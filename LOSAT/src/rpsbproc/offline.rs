@@ -56,6 +56,43 @@ pub(crate) struct Hsp {
     pub(crate) align_len: Option<i32>,
     pub(crate) qseq: Vec<u8>,
     pub(crate) hseq: Vec<u8>,
+    /// The length of `Hsp_midline` when the document has it (read, not kept).
+    pub(crate) midline_len: Option<usize>,
+}
+
+/// The bytes of an `Hsp`'s strings that NCBI's rpsbproc holds at once: `Hsp_qseq`, `Hsp_hseq` and
+/// `Hsp_midline` (when the document has it) in its `CBlastOutput`, which holds the whole document
+/// while `ParseBlastOutput` reads it, and, with `hseq_copy`, the copy of `Hsp_hseq` that
+/// `ParseBlastOutput` makes for an HSP that passes the E-value cutoff; each with its terminating 0.
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:198
+// ```c++
+// 					const string &qseq = (*iterHsp)->GetQseq(), hseq = (*iterHsp)->GetHseq();
+// ```
+// (`hseq` is a `const string`, not a reference: a copy. `ParseAlignStrings` takes both by
+// reference and makes no copy of them. The document's other members are a few numbers.)
+pub(crate) fn hsp_strings(
+    qseq: usize,
+    hseq: usize,
+    midline: Option<usize>,
+    hseq_copy: bool,
+) -> u64 {
+    let string = |len: usize| len as u64 + 1;
+    string(qseq)
+        + string(hseq)
+        + midline.map_or(0, string)
+        + if hseq_copy { string(hseq) } else { 0 }
+}
+
+/// The refusal of an `Hsp` whose strings NCBI holds at once come to `total` bytes, 1 GiB or more
+/// (`hsp_strings`): NCBI's allocations then succeed or throw `std::bad_alloc` by the host's memory
+/// (DECISIONS 40; PS16-Q1 review S3-2). Below 1 GiB the positions of `Hsp_qseq` stay within
+/// NCBI's `int`.
+pub(crate) fn hsp_memory_refusal(total: u64) -> Option<String> {
+    (total >= MEMORY_LIMIT).then(|| {
+        format!(
+            "an Hsp whose strings NCBI's rpsbproc holds at once (Hsp_qseq, Hsp_hseq, Hsp_midline and the copy of Hsp_hseq that ParseBlastOutput makes, with their terminating 0) come to {total} bytes (1 GiB or more; NCBI's result depends on the host's memory) in the XML input is not supported by LOSAT's rpsbproc"
+        )
+    })
 }
 
 fn unsupported(what: &str) -> ProcessError {
@@ -415,7 +452,14 @@ impl OfflineQuery {
             self.pr_commit()?;
         }
         let (qseq, hseq) = (&hsp.qseq[..], &hsp.hseq[..]);
-        let aln_len = alignment_length(qseq.len())?;
+        // The copy of `hseq` (quoted at `hsp_strings`); the document's strings alone were checked
+        // when the HSP was read (`blastxml::read_hsp`).
+        let held = hsp_strings(qseq.len(), hseq.len(), hsp.midline_len, true);
+        if let Some(refusal) = hsp_memory_refusal(held) {
+            return Err(ProcessError::Unsupported(refusal));
+        }
+        // `SeqLen_t alnLen = qseq.size()`: below 1 GiB.
+        let aln_len = qseq.len() as u32;
         let mut aln_res_idx: i32 = 0;
         while (aln_res_idx as u32) < aln_len
             && (qseq[aln_res_idx as usize] == b'-' || hseq_at(hseq, aln_res_idx)? == b'-')
@@ -749,21 +793,6 @@ impl OfflineQuery {
         }
         Ok(query)
     }
-}
-
-/// `SeqLen_t alnLen = qseq.size()` of an `Hsp_qseq` below 2^31 letters. One of 2^31 letters or
-/// more is refused under the memory rule (DECISIONS 37, 40; PD-LOSAT-NCBI-DEFECTS 1.17 and 1.19):
-/// NCBI's `CBlastOutput` holds it with its `Hsp_hseq` (as long, or one letter shorter: a shorter one
-/// is read past its end), 4 GiB or more at once, so NCBI's result depends on the host's memory.
-/// (Its `SeqPos_t` positions past `INT_MAX`, `++start` of `ParseAlignStrings` quoted at
-/// `OfflineQuery::parse_hsp`, would overflow too.)
-fn alignment_length(len: usize) -> Result<u32, ProcessError> {
-    if len > i32::MAX as usize {
-        return Err(unsupported(
-            "an Hsp_qseq of 2^31 or more letters (NCBI's rpsbproc holds it and its Hsp_hseq, 4 GiB or more at once; NCBI's result depends on the host's memory)",
-        ));
-    }
-    Ok(len as u32)
 }
 
 /// `hseq[i]` of a `const std::string` at an index of `qseq`: its terminating 0 at its length,

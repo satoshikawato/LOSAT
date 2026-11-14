@@ -142,7 +142,9 @@ impl DomAlign {
 // ```c++
 // 	std::vector<SeqPos_t> m_vecSStarts;
 // ```
-#[derive(Clone, Debug, PartialEq, Eq)]
+// (No equality of two of them: the storage is not part of the value. The tests compare the values
+// with a list, `PartialEq<Vec<i64>>`.)
+#[derive(Clone, Debug)]
 pub(crate) enum SubjectStarts {
     Narrow(Vec<i32>),
     Wide(Vec<i64>),
@@ -190,6 +192,8 @@ impl SubjectStarts {
     }
 }
 
+/// The starts' values against a list, whatever the storage (for the tests).
+#[cfg(test)]
 impl PartialEq<Vec<i64>> for SubjectStarts {
     fn eq(&self, other: &Vec<i64>) -> bool {
         self.len() == other.len()

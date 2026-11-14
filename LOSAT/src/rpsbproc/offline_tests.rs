@@ -18,6 +18,7 @@ fn hsp(from: i32, to: i32, frame: i32, qseq: &[u8], hseq: &[u8]) -> Hsp {
         align_len: Some(qseq.len() as i32),
         qseq: qseq.to_vec(),
         hseq: hseq.to_vec(),
+        midline_len: None,
     }
 }
 
@@ -308,21 +309,32 @@ fn domain_positions_that_overflow_int() {
     );
 }
 
-// `SeqLen_t alnLen = qseq.size()`: an `Hsp_qseq` of 2^31 letters or more is refused under the
-// memory rule (NCBI holds it and its `Hsp_hseq`, 4 GiB or more at once).
+// The strings of an `Hsp` that NCBI holds at once (offl_cd_align_proc.cpp:198, quoted at
+// `hsp_strings`): `Hsp_qseq`, `Hsp_hseq`, `Hsp_midline` when the document has it, and the copy of
+// `Hsp_hseq` of an HSP that passes the E-value cutoff, each with its terminating 0. From 1 GiB
+// they are refused under the memory rule (DECISIONS 40; PS16-Q1 review S3-2), which replaces the
+// refusal of an `Hsp_qseq` of 2^31 letters.
 #[test]
-fn alignment_lengths_beyond_int() {
+fn hsp_strings_from_1_gib_are_refused() {
+    let half = 1usize << 29;
+    assert_eq!(hsp_strings(3, 3, None, false), 8);
+    assert_eq!(hsp_strings(3, 3, Some(3), true), 16);
+    // The document's two strings: 2^29 + 1 and 2^29 - 2 bytes (just below), then 2^29 - 1.
     assert_eq!(
-        alignment_length(i32::MAX as usize).ok(),
-        Some(i32::MAX as u32)
+        hsp_memory_refusal(hsp_strings(half, half - 3, None, false)),
+        None
     );
-    let Err(ProcessError::Unsupported(message)) = alignment_length(1 << 31) else {
-        panic!("refused");
-    };
+    let at = hsp_strings(half, half - 2, None, false);
+    assert_eq!(at, 1 << 30);
     assert_eq!(
-        message,
-        "an Hsp_qseq of 2^31 or more letters (NCBI's rpsbproc holds it and its Hsp_hseq, 4 GiB or more at once; NCBI's result depends on the host's memory) in the XML input is not supported by LOSAT's rpsbproc"
+        hsp_memory_refusal(at).unwrap(),
+        "an Hsp whose strings NCBI's rpsbproc holds at once (Hsp_qseq, Hsp_hseq, Hsp_midline and the copy of Hsp_hseq that ParseBlastOutput makes, with their terminating 0) come to 1073741824 bytes (1 GiB or more; NCBI's result depends on the host's memory) in the XML input is not supported by LOSAT's rpsbproc"
     );
+    // With `Hsp_midline` and the copy of `Hsp_hseq`: four strings of 2^28 - 1 letters reach it.
+    let quarter = (1usize << 28) - 1;
+    assert_eq!(hsp_strings(quarter, quarter, Some(quarter), true), 1 << 30);
+    assert!(hsp_memory_refusal(hsp_strings(quarter, quarter, Some(quarter - 1), true)).is_none());
+    assert!(hsp_memory_refusal(hsp_strings(quarter, quarter, Some(quarter), true)).is_some());
 }
 
 // `m_dimTranslated[rfidx][qf] = '\0'` at the string's length is the defined write of the

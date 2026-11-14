@@ -871,8 +871,21 @@ fn blastp_redo_cutoff_score(
 //     params->restricted_align = TRUE;
 // }
 // ```
-fn blastp_restricted_align_enabled(expect_value: f64) -> bool {
-    expect_value <= 10.0
+//
+// The program is blastp's only: psiblast's first round of a FASTA query runs this engine, but
+// its program is `eBlastTypePsiBlast` and its gapped alignments are exact.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:50
+// ```c++
+//     m_Opts->SetProgram(ePSIBlast);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:739-741
+// ```c++
+//     case ePSIBlast:
+//     case eDeltaBlast:
+//         return eBlastTypePsiBlast;
+// ```
+fn blastp_restricted_align_enabled(app: BlastpApp, expect_value: f64) -> bool {
+    app == BlastpApp::Blastp && expect_value <= 10.0
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:932-940
@@ -11138,7 +11151,7 @@ fn run_call(
         // }
         // ```
         let mut restricted_align_array = std::mem::take(&mut scratch.restricted_align_array);
-        if blastp_restricted_align_enabled(args.evalue) {
+        if blastp_restricted_align_enabled(args.app, args.evalue) {
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3735-3789
             // ```c
             // if (hit_params->restricted_align && !score_params->options->is_ooframe) {

@@ -181,6 +181,19 @@ const CASES: &[Case] = &[
     ("T505", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/pclean", "-entry", "all"], 0),
     ("T506", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/pclean", "-entry", "all", "-long_seqids", "-outfmt", "%f"], 0),
     ("T507", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/nclean", "-entry", "all", "-long_seqids", "-target_only"], 0),
+    // Fix 1 of the review of T5 (`make_t5.py --mix-only`): several definition lines with other
+    // taxids and titles, and every Seq-id kind; with `-target_only` the Bioseq keeps the target's
+    // line for its ids and title, and its first source is the first positive taxid of every line,
+    // the target's first (`x_GetTaxDefline`): of the other line where the target's has none
+    // (T510, T511), the target's before the line stored first (T513, T514), and the suffix
+    // `, partial [name]` rewritten from the other line's source (T512).
+    ("T508", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/nmix", "-entry", "all", "-long_seqids"], 0),
+    ("T509", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/pmix", "-entry", "all", "-long_seqids"], 0),
+    ("T510", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/nmix", "-entry", "AB311001.1", "-target_only", "-long_seqids"], 0),
+    ("T511", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/pmix", "-entry", "AB312001.1", "-target_only", "-long_seqids"], 0),
+    ("T512", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/psuffix", "-entry", "AB362001.1", "-target_only", "-long_seqids"], 0),
+    ("T513", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/nmix", "-entry", "AB301002.1", "-target_only", "-long_seqids"], 0),
+    ("T514", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/pmix", "-entry", "AB302002.1", "-target_only", "-long_seqids"], 0),
 ];
 
 /// The probe's cases that LOSAT refuses (one line naming LOSAT's BLASTDBCMD, exit status 1,

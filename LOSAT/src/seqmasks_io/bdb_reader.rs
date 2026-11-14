@@ -158,21 +158,11 @@ impl MaskBdbReader {
         let title = set.bioseq_title();
         // NCBI makes the title of a sequence without one from its BioSource (the taxonomy
         // names of a definition line with a taxid; seqdbvol.cpp:1100-1188).
-        let has_source = set
-            .deflines
-            .iter()
-            .any(|defline| defline.taxid.is_some_and(|taxid| taxid > 0));
         let taxname = if self.title_printed
-            && has_source
+            && set.first_source_taxid(None).is_some()
             && bioseq_title_from_source(&title, &bioseq_facts(&ids))
         {
-            let taxids: Vec<i32> = set
-                .deflines
-                .iter()
-                .filter_map(|defline| defline.taxid)
-                .filter(|&taxid| taxid > 0)
-                .collect();
-            self.source_taxname(oid, &taxids)?
+            self.source_taxname(oid, &set)?
         } else {
             None
         };
@@ -217,21 +207,23 @@ impl MaskBdbReader {
     //             }
     // ```
     // `GetBioseq` looks up the taxid of each definition line, in the order of the definition
-    // lines (without a target id), and the first source names the organism
-    // (`report::defline::SourceTaxname::of_names`). The texts that a lookup writes (those of
-    // opening a damaged taxonomy database, the offset error) and a lookup that reads past the
-    // mapped end of `taxdb.btd` (NCBI reads unmapped memory) are LOSAT's refusals, as blastdbcmd's
-    // (`blastdbcmd::retrieve::Source::tax_names`).
+    // lines (without a target id: `DeflineSet::taxonomy_lookups(None)`), and the first source
+    // names the organism (`DeflineSet::first_source_taxid`, `report::defline::SourceTaxname::of_names`).
+    // The texts that a lookup writes (those of opening a damaged taxonomy database, the offset
+    // error) and a lookup that reads past the mapped end of `taxdb.btd` (NCBI reads unmapped
+    // memory) are LOSAT's refusals, as blastdbcmd's (`blastdbcmd::retrieve::Source::tax_names`).
     /// The name of the organism of the first source of the sequence `oid`, whose definition lines
-    /// have the positive taxids `taxids` (in their order), from which NCBI makes its empty title.
+    /// are `set`, from which NCBI makes its empty title.
     fn source_taxname(
         &self,
         oid: u32,
-        taxids: &[i32],
+        set: &crate::seqid::DeflineSet,
     ) -> Result<Option<std::sync::Arc<[u8]>>, BdbError> {
         let Some(taxdb) = &self.taxdb else {
             return Ok(None);
         };
+        let first_source = set.first_source_taxid(None);
+        let taxids = set.taxonomy_lookups(None);
         let mut first = None;
         for (index, &taxid) in taxids.iter().enumerate() {
             if taxids[..index].contains(&taxid) {
@@ -250,7 +242,7 @@ impl MaskBdbReader {
                      whose lookup in the taxonomy database writes a diagnostic ({message}),"
                 )));
             }
-            if index == 0 {
+            if Some(taxid) == first_source {
                 first = crate::report::defline::SourceTaxname::of_names(names.as_ref())
                     .name()
                     .unwrap_or_default();

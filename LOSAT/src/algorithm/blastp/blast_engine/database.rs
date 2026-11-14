@@ -1914,14 +1914,8 @@ impl ListedTitles<'_> {
                     self.program,
                 )?,
                 None => {
-                    let source = self.source(rank);
-                    shared::check_shown_protein_title(
-                        self.title(rank),
-                        source,
-                        ordinal,
-                        self.program,
-                    )?;
-                    shared::source_name(source, ordinal, self.program)?;
+                    shared::check_shown_protein_title(self.title(rank), ordinal, self.program)?;
+                    shared::source_name(self.source(rank), ordinal, self.program)?;
                 }
             }
         }
@@ -2002,13 +1996,15 @@ pub(super) fn x_titles_allow_blocks(
                 deflines.len() == 1
                     && deflines[0].replaced_title_bytes == 0
                     && if pairwise {
-                        // An empty title is made from the name of its taxid
-                        // (`StoredTitle::source`), never of punctuation alone; a lookup that
-                        // LOSAT refuses is ruled out with `taxids` (`taxdb_may_refuse`), and
-                        // without `taxdb.bti` nothing is looked up.
+                        // The check of the search of all queries (`ListedTitles::check_shown_titles`),
+                        // which the name of an empty title's source does not change
+                        // (`check_shown_protein_title`); a lookup that LOSAT refuses is ruled out
+                        // with `taxids` (`taxdb_may_refuse`), and without `taxdb.bti` nothing is
+                        // looked up. A sequence with parsed Seq-ids is not `deflines` (`Err`): the
+                        // search of all queries checks its title from its own source
+                        // (`check_shown_parsed_subject`).
                         shared::check_shown_protein_title(
                             &deflines[0].title,
-                            &crate::report::defline::UNNAMED_SOURCE,
                             ordinal,
                             database.program,
                         )
@@ -4090,7 +4086,29 @@ mod tests {
         });
         assert_eq!(pairwise_allowed, [true, true]);
         assert_eq!(allowed(&bare), [true, true]);
-        drop((missing, bad, punctuation, bare));
+        // A database with parsed Seq-ids (line DBID; RefSeq records among them, whose title made
+        // from the source is the name alone and can read past its end): its definition lines are
+        // not `SeqDb::deflines`, so the blocks never take it and the search of all queries checks
+        // each title from its own source (`check_shown_parsed_subject`).
+        let parsed = BlastpDatabase::open(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/db_search/ids/prot_v4")
+                .to_str()
+                .unwrap(),
+            &Default::default(),
+            "BLASTP",
+        )
+        .unwrap();
+        for pairwise in [false, true] {
+            let parsed_allowed = [1, 4].map(|threads| {
+                crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                    Ok(x_titles_allow_blocks(&parsed, pairwise, false, pool))
+                })
+                .unwrap()
+            });
+            assert_eq!(parsed_allowed, [false, false], "pairwise {pairwise}");
+        }
+        drop((missing, bad, punctuation, bare, parsed));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -460,7 +460,7 @@ impl ReportedSubjects {
             let title = title.clone().unwrap_or_else(|| Arc::from(&b""[..]));
             let source = sources.remove(&oid).unwrap_or_default();
             if pairwise && shown && !parsed.contains_key(&oid) {
-                shared::check_shown_protein_title(&title, &source, ordinal, database.program)?;
+                shared::check_shown_protein_title(&title, ordinal, database.program)?;
             }
             if let Some(subject) = parsed.get(&oid) {
                 // The formats that read the subject's Bioseq; the Seq-annots and the archive

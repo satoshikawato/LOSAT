@@ -1,0 +1,30 @@
+
+                                          Tax BLAST report                                          
+
+Query= ndq query of the duplicated nucleotide record
+
+Length=660
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                  A &amp; B &lt;x&gt; &#65; () [x]                                  
+ seq11     A & B <x> A                                                                 1219  0.0     
+
+                                 uncultured bacterium () [bacteria]                                 
+ Subject_1 Uncultured bacterium                                                        1219  0.0     
+ 1XY1      uncultured bacterium                                                        1219  0.0     
+ BK310041  TPA: uncultured bacterium                                                   1219  0.0     
+ AB331001  first title                                                                 1219  0.0     
+ AB321002  second title                                                                1219  0.0     
+ AB301001  Uncultured bacterium                                                        1219  0.0     
+
+                                    Bacillus sp. () [firmicutes]                                    
+ 1XZ1_A    Chain A                                                                     1219  0.0     
+ AB341061  Bacillus sp.                                                                1219  0.0     
+ AB331002  first title                                                                 1219  0.0     
+ AB321001  Bacillus sp.                                                                1219  0.0     
+ AB301002  Uncultured bacterium                                                        1219  0.0     
+
+                                      TPA: tpa organism () [x]                                      
+ CA310051  Tpa organism                                                                1219  0.0     

@@ -465,7 +465,7 @@ pub enum TaxPlain<'a> {
     /// A `-subject` record: its local id `Subject_N` and title.
     Record { local_id: &'a [u8], title: &'a [u8] },
     /// The database sequence `ordinal`: its stored title, the name of its source (from which
-    /// NCBI makes an empty title, `StoredTitle::source_name`) and its taxid.
+    /// NCBI makes an empty title, `algorithm::common::database::source_name`) and its taxid.
     Stored {
         ordinal: u32,
         title: &'a [u8],

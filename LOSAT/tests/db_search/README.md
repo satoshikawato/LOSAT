@@ -510,7 +510,18 @@ decode), `ntab` (the named taxids: an empty nucleotide title has no subject id) 
 title from the name (`CDeflineGenerator`: a nucleotide's name without white space at its ends and its first letter
 upper-cased, a protein's `unnamed protein product [name]`; the heading drops a `TPA:` or `MAG` prefix, the description
 keeps it). The same databases serve `blastdbcmd -long_seqids` (`../blastdbcmd_discovery.rs`, cases `T501`-`T507`) and
-`dustmasker` and `segmasker` (`-conffile conf/t5.ini`, rows `db_t5_*`).
+`dustmasker` and `segmasker` (`-conffile conf/t5.ini`, rows `db_t5_*`). `t5/make_t5.py NCBI_BIN --mix-only` writes
+the version 5 databases `t5/nmix` and `t5/pmix` (rows `db.t5.mix.*`, blastdbcmd cases `T508`-`T514`): with
+`-parse_seqids` and a `-taxid_map` of `t5.tsv`'s taxids, one sequence per record, records of two definition lines
+(taxids 100001 and 100002; the first without a taxid; the first untitled and the second titled; the other way round)
+and one line of each Seq-id kind whose title NCBI makes from the source (`tpg`, `emb`, `gi` for `-show_gis`, `pdb`
+without and with a chain, `lcl|Subject_1`, `gnl`; in `pmix` also `sp`, `ref|NP_`, `ref|WP_`), and the version 4
+database `t5/psuffix` (blastdbcmd only) of one record whose first line, without a taxid, has a title ending in
+`, partial [Bacillus sp.]` (the search programs refuse its outfmt 0 heading, `ParsedSubject::title_suffix_adjusted`).
+The title is made from the Bioseq's first source, the first
+positive taxid in `x_GetTaxDefline`'s order of the lines that the taxid list keeps (`-taxids 100002` and
+`-negative_taxids 100001` with `-no_taxid_expansion`, which NCBI applies to a version 5 database only), with
+`blastdbcmd -target_only` the target's line first and the others after it.
 
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title

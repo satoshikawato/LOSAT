@@ -291,9 +291,8 @@ pub enum SourceTaxname {
     },
     /// LOSAT's refusal where a report shows the title, with what the sequence has (after
     /// "database sequence N has"): a lookup of the taxid that reads past the mapped end of
-    /// `taxdb.btd` (NCBI BLAST+ reads unmapped memory), a definition line whose taxid does not
-    /// read, or a named RefSeq record whose title `x_SetTitleFromNC`, `x_SetTitleFromNM` or
-    /// `x_SetTitleFromNR` would make (not ported).
+    /// `taxdb.btd` (NCBI BLAST+ reads unmapped memory), or a definition line whose taxid does not
+    /// read.
     Refused(&'static str),
 }
 

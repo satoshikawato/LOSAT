@@ -449,14 +449,22 @@ impl ParsedSubject {
     // (review 1 of line DBID N1b L1, `blastdb-ids-20261021/R/titlesrc/review1/r2.tsv`).
     // A RefSeq chromosome, mRNA or ncRNA record gets its title from the source too: NCBI's own
     // functions for them make nothing of a database Bioseq (`report::defline::source_title`).
-    /// The subject with the name of its Bioseq's first source (`names` of the taxids its volume
-    /// looks up, `volume_taxids`, asked only where `title_from_taxonomy`), from which its generated
+    /// The subject with the name of its Bioseq's first source (`names` of its taxid,
+    /// `first_source_taxid`, asked only where `title_from_taxonomy`), from which its generated
     /// title is made (`source`, `bioseq_title`).
-    pub fn with_source(mut self, names: impl FnOnce(&[i32]) -> SourceTaxname) -> Self {
+    pub fn with_source(mut self, names: impl FnOnce(i32) -> SourceTaxname) -> Self {
         if self.title_from_taxonomy() {
-            self.source = names(&self.volume_taxids());
+            if let Some(taxid) = self.first_source_taxid() {
+                self.source = names(taxid);
+            }
         }
         self
+    }
+
+    /// The taxid of the subject Bioseq's first source where NCBI fetches it by its Seq-align id
+    /// (`DeflineSet::first_source_taxid`, the first of `volume_lookups`).
+    pub fn first_source_taxid(&self) -> Option<i32> {
+        self.set.first_source_taxid(Some(&self.alignment_id))
     }
 
     /// The name of the organism of the subject Bioseq's first source (`with_source`).
@@ -895,7 +903,7 @@ impl ParsedSubject {
     /// Whether the subject Bioseq has a source: some definition line has a positive taxid
     /// (`CSeqDBVol::x_GetTaxonomy` makes a source of each, seqdbvol.cpp:1136).
     fn has_source(&self) -> bool {
-        !self.volume_taxids().is_empty()
+        self.first_source_taxid().is_some()
     }
 
     /// The lookups of the volume's taxonomy cache when NCBI fetches the subject Bioseq by its
@@ -903,7 +911,7 @@ impl ParsedSubject {
     /// `CSeqDBVol::x_GetTaxonomy` (`x_GetTaxDefline` puts the line that holds the id first,
     /// `DeflineSet::taxonomy_lookups`), a taxid of several lines once for each.
     pub fn volume_lookups(&self) -> Vec<i32> {
-        self.set.taxonomy_lookups(&self.alignment_id)
+        self.set.taxonomy_lookups(Some(&self.alignment_id))
     }
 
     /// The positive taxids that the volume looks up when it fetches the subject Bioseq, each once,
@@ -1301,8 +1309,10 @@ impl ParsedSubject {
     /// and the others after a space, with its id (`alignment_line_id`) and its title wrapped at
     /// 60 bytes. `every_line`: the Seq-align has no `ext` when the report is made, so nothing
     /// limits the lines: a Seq-align of an ungapped search with two or more HSPs, which the
-    /// formatter splits into new ones (`PrepareBlastUngappedSeqalign` above).
-    pub fn heading(&self, protein: bool, every_line: bool) -> Vec<u8> {
+    /// formatter splits into new ones (`PrepareBlastUngappedSeqalign` above). The generated title
+    /// is made once, for the first line without a title; where it throws, `Err` with the Seq-id
+    /// text of NCBI's line in place of each alignment (`heading_skipped_id`).
+    pub fn heading(&self, protein: bool, every_line: bool) -> Result<Vec<u8>, Vec<u8>> {
         let mut out = Vec::new();
         let mut generated = None;
         let mut first = true;
@@ -1318,17 +1328,26 @@ impl ParsedSubject {
             }
             first = false;
             let title = match defline.title.as_deref() {
-                Some(title) if !title.is_empty() && !self.record => title,
-                _ => generated.get_or_insert_with(|| {
-                    self.bioseq_title(protein, false)
-                        .map(|defline| defline.text)
-                        .unwrap_or_default()
-                }),
+                Some(title) if !self.heading_generates(title) => title,
+                _ => match &generated {
+                    Some(text) => text,
+                    None => match self.bioseq_title(protein, false) {
+                        Ok(defline) => generated.insert(defline.text),
+                        Err(UnknownEncoding) => return Err(self.skipped_id()),
+                    },
+                },
             };
             wrap_title(title, &mut out);
             out.push(b'\n');
         }
-        out
+        Ok(out)
+    }
+
+    /// Whether the heading shows the generated title for a definition line with the title
+    /// `title` (`x_FillDispParams`: an empty one; every line of a `-subject` record, whose
+    /// title is the record's own, as `heading_skipped_id` has it).
+    fn heading_generates(&self, title: &[u8]) -> bool {
+        title.is_empty() || self.record
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1976-1981
@@ -1351,17 +1370,22 @@ impl ParsedSubject {
     /// place of the alignments of a subject whose heading (`heading`, with `every_line`) shows the
     /// generated title and NCBI cannot make it (`UnknownEncoding`); `None` otherwise.
     pub fn heading_skipped_id(&self, protein: bool, every_line: bool) -> Option<Vec<u8>> {
-        let generated = self.record
-            || self.set.deflines.iter().any(|defline| {
-                (every_line || self.heading_shows(defline))
-                    && defline.title.as_deref().is_none_or(<[u8]>::is_empty)
-            });
+        let generated = self.set.deflines.iter().any(|defline| {
+            (every_line || self.heading_shows(defline))
+                && self.heading_generates(defline.title.as_deref().unwrap_or_default())
+        });
         if !generated || self.bioseq_title(protein, false).is_ok() {
             return None;
         }
+        Some(self.skipped_id())
+    }
+
+    /// `CSeq_id::GetSeqIdString` of the Seq-align id: the id of NCBI's line in place of each
+    /// alignment of a subject whose heading it cannot make (`heading_skipped_id`).
+    fn skipped_id(&self) -> Vec<u8> {
         let mut id = Vec::new();
         label::content(&self.alignment_id, false, &mut id);
-        Some(id)
+        id
     }
 
     /// Whether the `Score`-best id of the subject Bioseq is a local id (XML2 then writes no
@@ -1994,7 +2018,7 @@ mod tests {
             "DAA10002.1 unnamed protein product"
         );
         assert_eq!(
-            text(&subject("tpg|DAA10002.1|").heading(true, false)),
+            text(&subject("tpg|DAA10002.1|").heading(true, false).unwrap()),
             ">DAA10002.1 TPA: unnamed protein product\n"
         );
         assert_eq!(description("pdb|2XYZ|B"), "2XYZ_B Chain B");
@@ -2005,7 +2029,7 @@ mod tests {
         );
         assert_eq!(description("ref|NC_100013.1|"), "NC_100013.1 ");
         assert_eq!(
-            text(&subject("ref|NC_100013.1|").heading(true, false)),
+            text(&subject("ref|NC_100013.1|").heading(true, false).unwrap()),
             ">NC_100013.1 \n"
         );
         assert_eq!(
@@ -2014,16 +2038,16 @@ mod tests {
         );
         assert_eq!(description("lcl|Subject_27"), "subject seven title");
         assert_eq!(
-            text(&subject("lcl|Subject_30").heading(true, false)),
+            text(&subject("lcl|Subject_30").heading(true, false).unwrap()),
             ">Subject_30 unnamed protein product\n"
         );
         assert_eq!(description("pdb|5ABC|D"), "5ABC_D Chain D");
         assert_eq!(
-            text(&subject("pdb|5ABC|D").heading(true, false)),
+            text(&subject("pdb|5ABC|D").heading(true, false).unwrap()),
             ">5ABC_D Chain D\n XP_100015.1 second\n"
         );
         assert_eq!(
-            text(&subject("lcl|Subject_36").heading(true, false)),
+            text(&subject("lcl|Subject_36").heading(true, false).unwrap()),
             ">Subject_36 unnamed protein product\n DAA10016.1 tpa second\n"
         );
         // A title from the source: the taxonomy database can name its organism.
@@ -2137,13 +2161,16 @@ mod tests {
         let subject = subject.under_positive_list(true);
         assert_eq!(strings(&subject), ["seqid:AF000001.1"]);
         // The heading leaves out the line the strings do not name, and `>` goes to the next.
-        assert_eq!(subject.heading(true, false), b">AF000001.1 t\n");
+        assert_eq!(subject.heading(true, false).unwrap(), b">AF000001.1 t\n");
         // An ungapped Seq-align of two HSPs reaches the report without the strings.
-        assert_eq!(subject.heading(true, true), b">loc t\n AF000001.1 t\n");
+        assert_eq!(
+            subject.heading(true, true).unwrap(),
+            b">loc t\n AF000001.1 t\n"
+        );
         // A local id alone: no string, every line in the heading.
         let subject = lines(vec![vec![local()]]).under_positive_list(true);
         assert!(subject.use_this_seqid().is_empty());
-        assert_eq!(subject.heading(true, false), b">loc t\n");
+        assert_eq!(subject.heading(true, false).unwrap(), b">loc t\n");
         // A Seq-align id that is a GI: only GIs are named, and a line without one is left out.
         let subject = lines(vec![
             vec![ParsedSeqId::Gi(888), gb("GG000001", 1)],
@@ -2153,7 +2180,7 @@ mod tests {
         .under_positive_list(true);
         assert_eq!(strings(&subject), ["gi:888", "gi:890"]);
         assert_eq!(
-            subject.heading(true, false),
+            subject.heading(true, false).unwrap(),
             b">GG000001.1 t\n GG000003.1 t\n"
         );
         // A name without an accession is not named; a PDB id is.
@@ -2173,7 +2200,10 @@ mod tests {
         let subject =
             lines(vec![vec![local()], vec![gb("AF000001", 1)]]).under_positive_list(false);
         assert!(subject.use_this_seqid().is_empty());
-        assert_eq!(subject.heading(true, false), b">loc t\n AF000001.1 t\n");
+        assert_eq!(
+            subject.heading(true, false).unwrap(),
+            b">loc t\n AF000001.1 t\n"
+        );
     }
 
     #[test]
@@ -2569,8 +2599,8 @@ mod tests {
                 }],
             })
             .unwrap()
-            .with_source(|taxids| {
-                assert_eq!(taxids, [9606]);
+            .with_source(|taxid| {
+                assert_eq!(taxid, 9606);
                 source
             })
         };
@@ -2649,15 +2679,31 @@ mod tests {
             bad.heading_skipped_id(false, false).as_deref(),
             Some(&b"AB000010"[..])
         );
+        // The heading's own making of the title gives the same id (one GenerateDefline).
+        assert_eq!(
+            bad.heading(false, false).unwrap_err(),
+            bad.heading_skipped_id(false, false).unwrap()
+        );
         assert_eq!(text(&bad.description(false).1.text), "Unknown");
         assert_eq!(
             subject(None, b"Homo sapiens").heading_skipped_id(false, false),
             None
         );
         assert_eq!(
+            text(
+                &subject(None, b"Homo sapiens")
+                    .heading(false, false)
+                    .unwrap()
+            ),
+            ">AB000010.1 Homo sapiens\n"
+        );
+        assert_eq!(
             subject(Some(b"stored"), b"Bad \x81 name").heading_skipped_id(true, false),
             None
         );
+        assert!(subject(Some(b"stored"), b"Bad \x81 name")
+            .heading(true, false)
+            .is_ok());
     }
 
     #[test]
@@ -2830,7 +2876,11 @@ mod tests {
             assert_eq!(text(&all_ids[0].id), all, "{defline}");
             assert_eq!(subject.shown_as_record(), local, "{defline}");
             if !local {
-                assert_eq!(text(&subject.heading(protein, false)), heading, "{defline}");
+                assert_eq!(
+                    text(&subject.heading(protein, false).unwrap()),
+                    heading,
+                    "{defline}"
+                );
                 assert!(subject.first_title().is_empty() || defline.contains(' '));
             }
         }

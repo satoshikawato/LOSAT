@@ -237,7 +237,16 @@ ntshort2.doms	compare	-	data-with:nt	-i arch/ntshort2.asn -d nt -t doms
 refuse_ntshort2	refuse	-	data-with:nt	-i arch/ntshort2.asn -d nt -t both
 refuse_natoprot	refuse	-	-	-i arch/natoprot.asn -d data -t both -m std
 refuse_ntnoids1	refuse	-	data-with:nt	-i arch/ntnoids1.asn -d nt -t doms
-refuse_ntplusmax	refuse	-	data-with:nt	-i arch/ntplusmax.asn -d nt -t doms -m std
+ntplusmax.doms.std	widened	-	data-with:nt	-i arch/ntplusmax.asn -d nt -t doms -m std
+ntplusmax3.doms.std	compare	-	data-with:nt	-i arch/ntplusmax3.asn -d nt -t doms -m std
+ntplusmax.doms.rep.f	widened	-	data-with:nt	-i arch/ntplusmax.asn -d nt -t doms -m rep -f
+ntplusmax3.doms.rep.f	compare	-	data-with:nt	-i arch/ntplusmax3.asn -d nt -t doms -m rep -f
+ntminusmax.doms.std	widened	-	data-with:nt	-i arch/ntminusmax.asn -d nt -t doms -m std
+ntminusmax1.doms.std	compare	-	data-with:nt	-i arch/ntminusmax1.asn -d nt -t doms -m std
+ntslen.both.std	compare	-	data-with:nt	-i arch/ntslen.asn -d nt -t both -m std
+ntslen1.both.std	compare	-	data-with:nt	-i arch/ntslen1.asn -d nt -t both -m std
+ntmotifmax.feats.std	widened	-	data-with:nt+ntmot	-i arch/ntmotifmax.asn -d ntmot -t feats -m std
+ntmotifmax3.feats.std	compare	-	data-with:nt+ntmot	-i arch/ntmotifmax3.asn -d ntmot -t feats -m std
 x.three.both.rep	compare	-	-	-i arch/x_three.xml -d data -t both -m rep
 x.three.both.full.f	compare	-	-	-i arch/x_three.xml -d data -t both -m full -f
 x.three.doms.std	compare	-	-	-i arch/x_three.xml -d data -t doms -m std
@@ -377,4 +386,15 @@ x.h_ntnanall.full	compare	-	data-with:nt	-i arch/x_h_n_nanall.xml -d nt -t doms 
 x.h_ntbitnan.both	compare	-	data-with:nt	-i arch/x_h_n_bitnan.xml -d nt -t both -m full -e 10
 nan_threshold	compare	-	-	-i arch/bad/a_nan.asn -d data -t doms -m std
 nan_hit	compare	-	-	-i arch/bad/a_nanhit.asn -d data -t both
-refuse_xcoordmin	refuse	-	-	-i arch/x_h_p_coordmin.xml -d data -t doms
+x.h_qfmin.doms	widened	-	-	-i arch/x_h_p_coordmin.xml -d data -t doms
+x.h_qfmin1.doms	compare	-	-	-i arch/x_h_p_qfmin1.xml -d data -t doms
+x.h_qtmin.full	compare	-	-	-i arch/x_h_p_qtmin.xml -d data -t doms -m full
+x.h_qtmin1.full	compare	-	-	-i arch/x_h_p_qtmin1.xml -d data -t doms -m full
+x.h_qtmin.rep	widened	-	-	-i arch/x_h_p_qtmin.xml -d data -t doms -m rep
+x.h_qtmin1.rep	compare	-	-	-i arch/x_h_p_qtmin1.xml -d data -t doms -m rep
+x.h_hfmin.std	widened	-	-	-i arch/x_h_p_hfmin.xml -d data -t doms -m std
+x.h_hfmin1.std	compare	-	-	-i arch/x_h_p_hfmin1.xml -d data -t doms -m std
+x.h_hfmax.both	compare	-	-	-i arch/x_h_p_hfmax.xml -d data -t both -m std
+x.h_hfmax5.both	compare	-	-	-i arch/x_h_p_hfmax5.xml -d data -t both -m std
+x.h_span.doms	compare	-	-	-i arch/x_h_p_span.xml -d data -t doms
+x.h_span1.doms	compare	-	-	-i arch/x_h_p_span1.xml -d data -t doms

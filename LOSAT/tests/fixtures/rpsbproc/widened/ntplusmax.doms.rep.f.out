@@ -1,0 +1,40 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/ntplusmax.asn
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits
+#Output format -- tab-delimited table
+#Show superfamilies: YES
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	tblastn	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	5000	mg00067_330001-335000
+DOMAINS
+1	Query_1[1]	Specific	214491	2698	3420	1.20804e-94	305.681	smart00052	EAL	-	531754
+1	Query_1[1]	Specific	99777	2446	2610	5.90383e-09	53.6924	cd06170	LuxR_C_like	-	532797
+1	Query_1[3]	Non-specific	507226	3	2147483648	0	1021.94	NF007399	PRK09928	N	-
+1	Query_1[-1]	Specific	440348	3555	4406	7.48505e-41	151.943	COG0583	LysR	-	-
+1	Query_1[-3]	Specific	517306	4564	4995	2.01694e-14	71.8738	pfam06496	DUF1097	-	-
+ENDDOMAINS
+SUPERFAMILIES
+1	Query_1	Superfamily	0	2698	3420	1.20804e-94	305.681	cl29561	EAL	-	-
+1	Query_1	Superfamily	0	2446	2610	5.90383e-09	53.6924	cl46857	HTH_ARSR	-	-
+ENDSUPERFAMILIES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

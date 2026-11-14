@@ -10735,7 +10735,7 @@ fn run_in_pool(
         // LOSAT's refusal of a reported sequence with the id of a query of its scope, after
         // NCBI's own errors of the batch (the prefetch's above): the warnings of the batches read
         // so far, as for a refusal of a title (above).
-        if let (SubjectSource::Database(_), Some(scopes)) = (source, query_scopes.as_ref()) {
+        if let (SubjectSource::Database(database), Some(scopes)) = (source, query_scopes.as_ref()) {
             let refused = crate::algorithm::common::database::refuse_reported_ids_of_queries(
                 &titles,
                 batch_hit_lists
@@ -10749,6 +10749,7 @@ fn run_in_pool(
                                 .map(move |hsp_list| (start + query, hsp_list.oid))
                         })
                     }),
+                database.oid_map(),
                 scopes,
                 "BLASTN",
             );

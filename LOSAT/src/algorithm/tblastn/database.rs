@@ -582,21 +582,31 @@ pub(super) fn reported_subjects(
     // Seq-ids that outfmt 0 shows.
     let mut taxdb_found: Option<bool> = None;
     for (rank, &ordinal) in ordinals.iter().enumerate() {
-        let header = titles
-            .get(&ordinal)
-            .with_context(|| format!("database sequence {ordinal} has no title read"))?;
+        let header = titles.get(&ordinal).with_context(|| {
+            format!(
+                "database sequence {} has no title read",
+                database.db.oid(ordinal)
+            )
+        })?;
         let title = match header {
             ReportedHeader::Stored(stored) => {
-                shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                shared::check_reported_title(
+                    stored.replaced_bytes,
+                    || database.db.oid(ordinal),
+                    PROGRAM,
+                )?;
                 if shown.pairwise {
-                    shared::check_shown_stored_title(stored.taxonomy_title, ordinal, PROGRAM)?;
+                    shared::check_shown_stored_title(
+                        stored.taxonomy_title,
+                        || database.db.oid(ordinal),
+                        PROGRAM,
+                    )?;
                 }
                 if shown.tabular {
-                    let oid = database.db.oid(ordinal);
                     shared::check_tabular_stored_title(
                         stored.taxonomy_title,
                         shown.words,
-                        oid,
+                        || database.db.oid(ordinal),
                         PROGRAM,
                     )?;
                 }
@@ -636,9 +646,12 @@ pub(super) fn reported_subjects(
             let SubjectLetters::Packed(stores) = stores else {
                 unreachable!("a -db search holds its sequences")
             };
-            stores
-                .get(ordinal as usize)
-                .with_context(|| format!("database sequence {ordinal} was not read"))
+            stores.get(ordinal as usize).with_context(|| {
+                format!(
+                    "database sequence {} was not read",
+                    database.db.oid(ordinal)
+                )
+            })
         };
         lengths.push(if letters {
             let store = match stores {
@@ -667,6 +680,7 @@ pub(super) fn reported_subjects(
                         let rank = usize::try_from(list.oid).ok()?;
                         Some((ordinals[rank], parsed[rank].as_deref()?))
                     }),
+                database.db.oid_map(),
                 PROGRAM,
             )?;
         }

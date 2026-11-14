@@ -4031,6 +4031,7 @@ fn run_batch_loop(
                     ordered
                         .iter()
                         .map(|hsp| (start + hsp.hit.q_idx as usize, hsp.hit.s_idx)),
+                    database.oid_map(),
                     scopes,
                     "TBLASTX",
                 )?;

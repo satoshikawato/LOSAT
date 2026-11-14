@@ -175,10 +175,12 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     //     m_Outfile.exceptions(NcbiBadbit);
     // ```
     if error.is::<super::blast_xml::XmlRefusal>()
+        || error.is::<crate::algorithm::common::database::ReportSumRefusal>()
         || crate::report::pairwise::is_total_score_refusal(&error)
         || error.is::<crate::report::tax_report::TaxReportRefusal>()
     {
-        // LOSAT's refusal of a title NCBI's XML cannot write, of a `-sorthits` table whose
+        // LOSAT's refusal of a title NCBI's XML cannot write, of the database counts a report
+        // would print where NCBI's sums overflow (`ReportSumRefusal`), of a `-sorthits` table whose
         // last total NCBI pads without end (`TotalScoreRefusal`, an `io::Error` of the report's
         // writes), or of an organism report (outfmt 18, made before its first byte): not an
         // error of NCBI's engine or of its output stream.
@@ -892,8 +894,23 @@ fn run_inner(
         let database_may_refuse = database
             .as_ref()
             .is_some_and(|database| database.later_batch_may_refuse(!prefetch));
+        // The database counts that the reports would print where NCBI's sums overflow are refused
+        // at the first report (`write_blastx_xml`), after NCBI's own errors of the search, which
+        // stop the run after the document's start (written with the prolog below): the run holds
+        // the start until then.
+        let sums_refused = database.as_ref().is_some_and(|database| {
+            let pairwise = database.pairwise_database();
+            crate::algorithm::common::database::report_sum_refusal(
+                pairwise.num_sequences,
+                pairwise.total_letters,
+                pairwise.total_letters_overflow,
+                choice.number,
+            )
+            .is_some()
+        });
         if scan.messages_may_be_refused
             || database_may_refuse
+            || sums_refused
             || super::blast_xml::subjects_may_be_refused(&subjects)
         {
             held.hold();
@@ -1130,7 +1147,9 @@ fn run_inner(
     // A refusal of a title (BLAST XML) found while a batch is reported drops what the run holds.
     let refused = |error: anyhow::Error| -> anyhow::Error {
         let error = report_error(error);
-        if error.is::<super::blast_xml::XmlRefusal>() {
+        if error.is::<super::blast_xml::XmlRefusal>()
+            || error.is::<crate::algorithm::common::database::ReportSumRefusal>()
+        {
             if let Some(held) = &held {
                 held.discard();
             }

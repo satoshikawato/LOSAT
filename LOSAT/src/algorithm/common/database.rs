@@ -704,7 +704,40 @@ pub(crate) fn report_sum_refusal(
 // XML and JSON documents when it formats a query's report: a search that fails before (an engine
 // error of the setup, "The average subject length is too short", probe p5_pr_sum2#6 of line RG
 // D1a-3) never reaches the documents' sums. The documents' refusals are LOSAT's report writers'
-// (`report::blast_xml::writer`, `report::blast_xml2::writer`).
+// (`StructuredXml::start` of `report::blast_xml::writer` and `report::blast_xml2::writer`), made
+// before the first byte of the document (the XML2 and JSON documents' start included, which NCBI
+// writes before the search: BLASTX holds it, `blastx::blast_xml::HeldOutput`).
+/// LOSAT's refusal of the database counts of the report of `outfmt` that NCBI's sums overflow
+/// (`report_sum_refusal`): its own type, so that a run that holds its document drops it
+/// (`blastx::blast_xml::drops_held_document`) and the refusal follows no byte.
+#[derive(Debug)]
+pub(crate) struct ReportSumRefusal(String);
+
+impl std::fmt::Display for ReportSumRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ReportSumRefusal {}
+
+/// LOSAT's refusal (`ReportSumRefusal`) of the database counts that the report of `outfmt` would
+/// print where NCBI's sums overflow (`report_sum_refusal`), for `program` (its name in the
+/// message): `num_sequences`, `total_letters` and `total_letters_overflow` are the
+/// `PairwiseDatabase` sums of the `-db` list.
+pub(crate) fn check_sums_of(
+    num_sequences: i64,
+    total_letters: i64,
+    total_letters_overflow: bool,
+    outfmt: i32,
+    program: &str,
+) -> Result<()> {
+    match report_sum_refusal(num_sequences, total_letters, total_letters_overflow, outfmt) {
+        Some(reason) => Err(ReportSumRefusal(refusal(reason, program).to_string()).into()),
+        None => Ok(()),
+    }
+}
+
 /// LOSAT's refusals of the counts of the pairwise prolog of `outfmt` (`report_sum_refusal` for
 /// outfmt 0 to 4, which NCBI writes before the search) for the `-db` list's databases `database`.
 pub(crate) fn check_report_sums(
@@ -715,15 +748,13 @@ pub(crate) fn check_report_sums(
     if !(0..=4).contains(&outfmt) {
         return Ok(());
     }
-    match report_sum_refusal(
+    check_sums_of(
         database.num_sequences,
         database.total_letters,
         database.total_letters_overflow,
         outfmt,
-    ) {
-        Some(reason) => Err(refusal(reason, program)),
-        None => Ok(()),
-    }
+        program,
+    )
 }
 
 /// The stored title of a database sequence, as the reports read it (`stored_title`).

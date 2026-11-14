@@ -120,12 +120,14 @@ impl XmlRefusal {
 
 /// Whether `error` is one of LOSAT's refusals for which a run that holds its BLAST XML, XML2 or
 /// JSON document drops what it holds, so that the refusal follows no byte: a title or name NCBI's
-/// XML stream cannot write (`XmlRefusal`), a reported database sequence with parsed Seq-ids
+/// XML stream cannot write (`XmlRefusal`), the database counts of the reports that NCBI's sums
+/// overflow (`ReportSumRefusal`), a reported database sequence with parsed Seq-ids
 /// (`ParsedRefusal`), or a taxonomy database name or record (`TaxonomyRefusal`). After any other
 /// error the run writes what it holds, the bytes of the batches before it, as the run without a
 /// hold does (the command line's `HeldOutput`; a library call's `archive::ArchiveHold`).
 pub(super) fn drops_held_document(error: &anyhow::Error) -> bool {
     error.is::<XmlRefusal>()
+        || error.is::<crate::algorithm::common::database::ReportSumRefusal>()
         || error.is::<crate::algorithm::common::database::ParsedRefusal>()
         || error.is::<TaxonomyRefusal>()
 }
@@ -987,6 +989,13 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         stops,
         document.holds_back(),
     );
+    // The refusal of the database counts that the written reports would print, before any byte
+    // of the batch (`StructuredXml::start`; the XML2 and JSON documents' start came with the
+    // prolog, which a run that may refuse them holds, `native::run_inner`).
+    let mut buf: Vec<u8> = Vec::new();
+    document.start((reports > 0).then_some(&run), &mut buf)?;
+    writer.write_all(&buf)?;
+    buf.clear();
     let mut texts: Vec<QueryText> = Vec::new();
     let mut subject_cache: HashMap<usize, SubjectNames> = HashMap::new();
     for batch in batches {
@@ -1018,7 +1027,6 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         ShownSubjects::Fasta { .. } => &no_notes,
     }
     .printer();
-    let mut buf: Vec<u8> = Vec::new();
     // The rows of one HSP at a time, reused.
     let (mut qrow, mut srow): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
     let mut texts = texts.iter();

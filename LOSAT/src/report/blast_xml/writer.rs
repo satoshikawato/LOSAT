@@ -173,11 +173,14 @@ pub trait StructuredXml {
     /// Appends what `PrintProlog` writes of the document, once: the start of the XML2 and JSON
     /// documents of outfmt 16 and 15 (nothing for BLAST XML, whose header comes with its first
     /// query, and for the side-file forms). NCBI writes it before it reads the first query
-    /// batch, so a program's report writes it before the warnings of its first query, after
-    /// its refusals of what NCBI could write (DECISIONS 20).
-    fn start(&mut self, out: &mut Vec<u8>) {
-        let _ = out;
-    }
+    /// batch, so a program's report calls this before the warnings of its first query, after
+    /// its refusals of what NCBI could write (DECISIONS 20). `reported` is the run of the
+    /// reports that the call writes after it (`None` for a call that writes none, a run without
+    /// a query): its database counts that the reports would print where NCBI's sums overflow,
+    /// which NCBI sums when it formats the first query's report (after its own errors of the
+    /// search), are refused here, before the first byte (`common::database::check_sums_of`;
+    /// BLASTX, which writes the start with the prolog, holds it, `blastx::blast_xml::HeldOutput`).
+    fn start(&mut self, reported: Option<&XmlRun<'_>>, out: &mut Vec<u8>) -> Result<()>;
 
     /// Whether the document holds each query's report back until the next query's arrives, so
     /// that a run that stops (no epilog) never writes the report of the last query it formats:
@@ -283,19 +286,6 @@ impl StructuredXml for BlastXmlWriter {
     where
         F: FnOnce(&mut HitSink<'_>) -> Result<()>,
     {
-        // NCBI sums the database counts of the document when it formats a query's report
-        // (`common::database::check_report_sums`): LOSAT refuses the sums NCBI overflows here.
-        if let Some(reason) = crate::algorithm::common::database::report_sum_refusal(
-            run.db_num,
-            run.db_len,
-            run.db_len_overflow,
-            5,
-        ) {
-            return Err(crate::algorithm::common::database::refusal(
-                reason,
-                &run.program.to_ascii_uppercase(),
-            ));
-        }
         if self.iterations == 0 {
             if let Some(error) = write_header(out, run, query) {
                 return Err(error.into());
@@ -342,6 +332,11 @@ impl StructuredXml for BlastXmlWriter {
     ///         m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl;
     /// ```
     /// (`m_SerialXmlEnd` is set by the first formatted query, blastxml_format.cpp:755-763.)
+    fn start(&mut self, reported: Option<&XmlRun<'_>>, out: &mut Vec<u8>) -> Result<()> {
+        let _ = out;
+        reported.map_or(Ok(()), |run| run.check_sums(5))
+    }
+
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()> {
         if self.iterations > 0 {
             out.extend_from_slice(b"\n</BlastOutput_iterations>\n</BlastOutput>\n\n");

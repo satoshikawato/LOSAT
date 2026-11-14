@@ -500,26 +500,6 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
     where
         H: FnOnce(&mut HitSink<'_>) -> Result<()>,
     {
-        // NCBI sums the database counts of the document when it formats a query's report
-        // (`common::database::check_report_sums`): LOSAT refuses the sums NCBI overflows here,
-        // before the framing writes anything.
-        let outfmt = match self.document.kind() {
-            Xml2Kind::Files13 => 13,
-            Xml2Kind::Files14 => 14,
-            Xml2Kind::Single15 => 15,
-            Xml2Kind::Single16 => 16,
-        };
-        if let Some(reason) = crate::algorithm::common::database::report_sum_refusal(
-            run.db_num,
-            run.db_len,
-            run.db_len_overflow,
-            outfmt,
-        ) {
-            return Err(crate::algorithm::common::database::refusal(
-                reason,
-                &run.program.to_ascii_uppercase(),
-            ));
-        }
         let (params, scratch) = (&self.params, &mut self.scratch);
         let kind = self.document.kind();
         // The report is made after the framing's separator, where the `Hit`s load their subjects
@@ -545,8 +525,17 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
             })
     }
 
-    fn start(&mut self, out: &mut Vec<u8>) {
+    fn start(&mut self, reported: Option<&XmlRun<'_>>, out: &mut Vec<u8>) -> Result<()> {
+        if let Some(run) = reported {
+            run.check_sums(match self.document.kind() {
+                Xml2Kind::Files13 => 13,
+                Xml2Kind::Files14 => 14,
+                Xml2Kind::Single15 => 15,
+                Xml2Kind::Single16 => 16,
+            })?;
+        }
         self.document.start(out);
+        Ok(())
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()> {

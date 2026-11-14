@@ -414,25 +414,7 @@ impl PreparedXml {
         ranges: &ReportRanges<'_>,
         mut warnings: Option<&mut QueryWarnings<'_>>,
     ) -> Result<()> {
-        // The document's start (`StructuredXml::start`), before the first query's warnings, also
-        // for a run that stops before its first report (its first batch fails) and for a run
-        // without a query.
-        let mut buf: Vec<u8> = Vec::new();
-        document.start(&mut buf);
-        writer.write_all(&buf)?;
-        buf.clear();
-        let Some(positives) = &self.positives else {
-            // A run without a query (with one, `prepare` refuses) and a matrix the formatting
-            // table does not know (`-matrix blosum62`: TBLASTN runs it, the table does not):
-            // NCBI never builds the table and writes the epilog alone (for outfmt 5 its end of
-            // line).
-            if ranges.epilog {
-                document.finish(&mut buf)?;
-                writer.write_all(&buf)?;
-            }
-            return Ok(());
-        };
-        let run = XmlRun {
+        let run = self.positives.as_ref().map(|positives| XmlRun {
             program: "tblastn",
             version: concat!("TBLASTN ", crate::ncbi_blast_version!()),
             reference: REFERENCE_GAPPED_BLAST,
@@ -448,6 +430,25 @@ impl PreparedXml {
             db_len_overflow: self.db_len_overflow,
             positives: Some(positives),
             mask_char: b'X',
+        });
+        // The document's start (`StructuredXml::start`), before the first query's warnings, after
+        // the refusal of the database counts that the written reports would print, also for a run
+        // that stops before its first report (its first batch fails) and for a run without a
+        // query.
+        let mut buf: Vec<u8> = Vec::new();
+        document.start(run.as_ref().filter(|_| !self.texts.is_empty()), &mut buf)?;
+        writer.write_all(&buf)?;
+        buf.clear();
+        let Some(run) = run else {
+            // A run without a query (with one, `prepare` refuses) and a matrix the formatting
+            // table does not know (`-matrix blosum62`: TBLASTN runs it, the table does not):
+            // NCBI never builds the table and writes the epilog alone (for outfmt 5 its end of
+            // line).
+            if ranges.epilog {
+                document.finish(&mut buf)?;
+                writer.write_all(&buf)?;
+            }
+            return Ok(());
         };
         let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
         let mut taxdb_printer = self.taxa_notes.printer();

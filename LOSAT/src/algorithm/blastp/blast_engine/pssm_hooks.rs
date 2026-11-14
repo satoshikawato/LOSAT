@@ -115,10 +115,10 @@ pub(super) struct PsiKarlin {
 /// `ResolvedBlastpArgs::old_fsc`) the effective search space of the query's one context,
 /// `exact_search_spaces[0]`, which `run_resolved_in_pool` computed for blastp.
 ///
-/// Called for a valid context only (`pssm_prelim`, `pssm_traceback`): without the Gumbel block
-/// the space is then exact (`exact_search_space` holds with `old_fsc`), and its one `None`, a
-/// subject set without letters, has been NCBI's engine error before the search ("The average
-/// subject length is too short").
+/// Called for a valid context only (`pssm_prelim`, `pssm_traceback`): the space is then exact
+/// (`exact_search_spaces` holds every context's), and its one `None`, a subject set without
+/// letters, has been NCBI's engine error before the search ("The average subject length is too
+/// short").
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1885-1889
 /// ```c
@@ -132,9 +132,8 @@ fn psi_stats<'a>(
     exact_search_spaces: &[Option<i64>],
 ) -> EvalueStats<'a> {
     match gumbel {
-        // With the block the search space is 0, which is not a value: nothing of a psiblast
-        // search reads it then (`e_value` and `hit_cutoff` do not; `-use_sw_tback`, whose
-        // Smith-Waterman redo would, is refused), and a `-subject` search has no exact one.
+        // With the block nothing of a psiblast search reads the search space (`e_value` and
+        // `hit_cutoff` do not; `-use_sw_tback`, whose Smith-Waterman redo would, is refused).
         // A reader that needs it with the block (series PR, item PS11c-3) fills it first.
         Some(gumbel) => EvalueStats::spouge(gumbel),
         None => EvalueStats::new(

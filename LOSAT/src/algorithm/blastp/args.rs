@@ -805,10 +805,6 @@ pub struct ResolvedBlastpArgs {
     /// No Gumbel block (finite-size correction): `-searchsp` at any value, or BLASTP,
     /// PSIBLAST and RPSBLAST with the environment variable `OLD_FSC` (`app::old_fsc_environment`).
     pub old_fsc: bool,
-    /// The lengths of the queries of the batch that a query chunk's search belongs to
-    /// (`search_split_query_batches`), whose options' spaces the chunk reads by its own context
-    /// index (`SplitQuery_SetEffectiveSearchSpace`); `None` for the search of a whole batch.
-    pub chunk_batch_lengths: Option<std::sync::Arc<[usize]>>,
     pub task: String,
     pub evalue: f64,
     pub threshold: f64,
@@ -1416,7 +1412,6 @@ impl BlastpArgs {
             // ```
             // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307); every app reads the variable.
             old_fsc: self.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
-            chunk_batch_lengths: None,
             task: self.task.clone(),
             evalue: options.evalue,
             threshold: options.threshold,

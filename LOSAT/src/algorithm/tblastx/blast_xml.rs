@@ -328,8 +328,9 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     let mut masks: Vec<QueryMask> = Vec::new();
     let (mut window, mut query_row, mut subject_row): (Vec<u8>, Vec<u8>, Vec<u8>) =
         (Vec::new(), Vec::new(), Vec::new());
-    // The document's start (`StructuredXml::start`), before the first query's warnings.
-    document.start(&mut buf);
+    // The document's start (`StructuredXml::start`), before the first query's warnings, after the
+    // refusal of the database counts that the written reports would print.
+    document.start((reports > 0).then_some(&xml_run), &mut buf)?;
     writer.write_all(&buf)?;
     buf.clear();
     for (q_idx, query) in queries.iter().enumerate() {

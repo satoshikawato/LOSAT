@@ -33,17 +33,32 @@ pub struct XmlRun<'a> {
     /// sums over the names of the `-db` list, `PairwiseDatabase`); 0 and 0 for `-subject`. The
     /// number is the `Int8` sum that XML2 and JSON write (data4xml2format.hpp:215-217); BLAST
     /// XML sums NCBI's `int` (data4xmlformat.hpp:276), equal where that sum does not overflow,
-    /// which LOSAT refuses (`common::database::check_report_sums`).
+    /// which LOSAT refuses (`XmlRun::check_sums`).
     pub db_num: i64,
     pub db_len: i64,
     /// Whether the sum of `db_len` passes NCBI's `Int8` (`PairwiseDatabase::total_letters_overflow`),
-    /// which LOSAT refuses when it writes a document (`common::database::report_sum_refusal`).
+    /// which LOSAT refuses when it writes a document (`XmlRun::check_sums`).
     pub db_len_overflow: bool,
     /// The positives table of the recount; `None` for BLASTN (a nucleotide search shows `|`).
     pub positives: Option<&'a FormattingMatrix>,
     /// The letter of a masked query position: `N` for BLASTN, `X` otherwise
     /// (blastxml_format.cpp:280-283).
     pub mask_char: u8,
+}
+
+impl XmlRun<'_> {
+    /// LOSAT's refusal of the database counts that a report of `outfmt` (5, 13 to 16) of this
+    /// run would print where NCBI's sums overflow (`common::database::check_sums_of`), made by
+    /// the documents' `StructuredXml::start` before their first byte.
+    pub(crate) fn check_sums(&self, outfmt: i32) -> anyhow::Result<()> {
+        crate::algorithm::common::database::check_sums_of(
+            self.db_num,
+            self.db_len,
+            self.db_len_overflow,
+            outfmt,
+            &self.program.to_ascii_uppercase(),
+        )
+    }
 }
 
 /// The `Statistics` of a query.

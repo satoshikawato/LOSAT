@@ -124,8 +124,9 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
     }
     let mut taxdb_printer = xml.taxdb_notes.printer();
     let mut buf: Vec<u8> = Vec::new();
-    // The document's start (`StructuredXml::start`), before the first query's warnings.
-    document.start(&mut buf);
+    // The document's start (`StructuredXml::start`), before the first query's warnings, after the
+    // refusal of the database counts that the written reports would print.
+    document.start((reports > 0).then_some(&xml.run), &mut buf)?;
     writer.write_all(&buf)?;
     buf.clear();
     for (q_idx, hit_list) in hit_lists.iter().enumerate() {

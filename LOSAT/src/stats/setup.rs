@@ -227,8 +227,13 @@ pub(crate) fn length_adjustment(
 //         BLAST_CalcEffLengths(m_Program, opts_memento->m_ScoringOpts,
 //                              eff_len_params, sbp, m_QueryInfo, NULL);
 // ```
-// The calculator's query information is a new one of the whole query (its spaces start at 0),
-// and its setup has no fallback to the length of OID 0: with a total length of 0 (an alias
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/query_data.cpp:52-58 and
+// blast_aux_priv.cpp:150-152 (`MakeLocalQueryData` caches the query data; the setup's
+// `m_QueryInfo` is its query information).
+// The calculator's query information is the setup's own of the whole query, whose `is_valid` the
+// score block has set (`CSetupFactory::CreateScoreBlock`, before the search) and whose spaces no
+// setup has computed yet (they start at 0): a context that is not valid keeps 0, and the
+// calculator has no fallback to the length of OID 0: with a total length of 0 (an alias
 // file's `LENGTH 0`, a list whose scan totals nothing) `BLAST_CalcEffLengths` returns before the
 // contexts (`eff_lengths_database`) unless `-dbsize` is given, and every option space is 0 (the
 // options then count as unset, `BlastEffectiveLengthsOptions_IsSearchSpaceSet`); with a negative

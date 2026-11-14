@@ -1464,6 +1464,10 @@ fn emit_hit_records(hits: &[PairwiseHit], recorder: &RangeRecorder, ordinals: Op
 }
 
 #[cfg(test)]
+#[path = "run_start_tests.rs"]
+mod start_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

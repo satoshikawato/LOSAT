@@ -518,7 +518,12 @@ mod tests {
         let (file, response) = register("twice.binary", &bytes, 1 << 16);
         assert!(response.contains("\"stat_type\":\"binary\""));
         assert!(begin(KIND_WINDOW_MASKER_COUNTS, "twice.binary", 1).is_err());
-        assert!(begin(2, "other", 1).is_err());
+        // One name is one file, of one kind.
+        assert!(begin(KIND_REGISTRY, "twice.binary", 1).is_err());
+        assert_eq!(
+            begin(3, "other", 1).unwrap_err(),
+            "unknown input file kind 3"
+        );
         assert!(begin(KIND_WINDOW_MASKER_COUNTS, "", 1).is_err());
         release(file).expect("release");
         assert!(release(file).is_err());

@@ -229,7 +229,7 @@ reports' counts and spaces are the setup's (Spouge's database factor 1), and the
 results is the one-thread traceback's. The overflowing sums of BLAST XML, XML2 and JSON are refused
 where NCBI formats them (after the search: its own errors of the search come first). Refused until
 item D1a-4: OID ranges, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH` and a total length of 0 or less
-(`LENGTH` 0 or of 2^63 or more, a list that visits no sequence) in RPSBLAST databases (NCBI's RPS search has no
+(`LENGTH` 0 or of 2^63 or more) in RPSBLAST databases (NCBI's RPS search has no
 loop over subjects and opens each volume alone, whose statistics then read the volume's own length). Refused for
 good: a statistics count of 0 (an alias file's `NSEQ 0`, or its `LENGTH` or `STATS_TOTLEN` over
 volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without the Gumbel block

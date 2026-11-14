@@ -67,6 +67,16 @@
 use super::encoder::{Encoder, Replaced, SerialError, StreamPosition};
 use super::real::write_xml_double;
 
+/// Whether `type_name`, the name that a writer gives `begin_sequence` or `variant`, stands for an
+/// anonymous ASN.1 type (NCBI's `GetName()` is empty for it): the writers pass the open member's
+/// tag (`Score_value`), which has an underscore, where a named type's name (`Seq-align`) has
+/// none. The object mode writes no tag of its own for it (`begin_object_sequence`, `variant`),
+/// and `encoder::Traced` keeps its `.E` frame (`WillHaveName`).
+#[inline(always)]
+pub(crate) fn anonymous_type(type_name: &str) -> bool {
+    type_name.contains('_')
+}
+
 /// What the stream writes at the start and end of a document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Piece {
@@ -398,7 +408,7 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
     /// `begin_sequence` of the object mode: `<Type>`, unless the type is anonymous (its name,
     /// the open member's tag, has an underscore), which writes nothing.
     fn begin_object_sequence(&mut self, type_name: &str) {
-        if type_name.contains('_') {
+        if anonymous_type(type_name) {
             debug_assert!(!self.pending_elem);
             debug_assert_eq!(
                 &self.names[self.marks.last().copied().unwrap_or(0)..],
@@ -567,7 +577,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// writes an element LOSAT's outfmt 5 never needs.
     fn variant(&mut self, type_name: &str, name: &str, tag: u8) {
         if OBJECT {
-            if type_name.contains('_') {
+            if anonymous_type(type_name) {
                 // An anonymous CHOICE: the member's tag is already open.
                 debug_assert!(!self.pending_elem);
                 debug_assert_eq!(

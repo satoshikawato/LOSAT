@@ -128,12 +128,11 @@ impl Diag<'_> {
 
     /// `err_post` of a message that is not UTF-8.
     pub(crate) fn err_post_bytes(&mut self, message: &[u8]) {
-        let mut line = b"Error: ".to_vec();
-        if let Some(prefix) = self.tool.post_prefix {
-            line.extend_from_slice(format!("[{prefix}] ").as_bytes());
-        }
-        line.extend_from_slice(message);
-        self.post_bytes(&line);
+        self.write_text(&crate::ncbi_exception::error_post_line(
+            None,
+            self.tool.post_prefix,
+            message,
+        ));
     }
 
     /// The posts of the bytes that NCBI's object stream replaced while it wrote an object

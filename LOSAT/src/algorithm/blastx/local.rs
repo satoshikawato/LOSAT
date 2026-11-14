@@ -411,7 +411,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         .collect::<io::Result<Vec<_>>>()?;
     // A run in which a `-subject` title (refused with its first hit) or the message of a query
     // (refused where NCBI does not search its batch) could still be refused by the BLAST XML,
-    // XML2 or JSON documents holds every format in order (`archive::ArchiveHold`), as the command
+    // XML2 or JSON documents holds every format in order (`blast_xml::HeldFormats`), as the command
     // line holds its document (`blast_xml::HeldOutput`), so that the refusal follows no byte. So does a `-db` run
     // in which a later batch could still refuse the taxonomy database or a subject with parsed
     // Seq-ids (`BlastxDatabase::later_batch_may_refuse`; the scientific names are those of the
@@ -427,7 +427,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                 Some(run) => run.database.later_batch_may_refuse(writes_names),
                 None => super::blast_xml::subjects_may_be_refused(subjects),
             });
-    let hold = xml_may_refuse.then(archive::ArchiveHold::new);
+    let hold = xml_may_refuse.then(super::blast_xml::HeldFormats::new);
     // The hold comes between a format's stream and the caller's writer, which has no stream of
     // NCBI's (`cli::NcbiOstream`): it keeps the bytes in order.
     let mut writers: Vec<crate::cli::NcbiOstream<'_>> = match &hold {
@@ -470,7 +470,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     );
     // What the hold kept. A run that ends: every format, in order. A run that stops with an
     // error: nothing after one of the documents' refusals and the bytes of the batches before
-    // after any other error (`ArchiveHold::end_document_with`), as the command line.
+    // after any other error (`HeldFormats::end_document_with`), as the command line.
     // The observer's events of a held run come before its bytes reach their sinks, so a position
     // read from a sink at an event is not that of the event (`FormatObserver`): the same for every
     // hold of this function, a `-subject` run's too.

@@ -163,22 +163,18 @@ impl<'s, E: Encoder> ArchiveOut<'s, E> {
 
 impl<E: Encoder> ArchiveOut<'_, Traced<E>> {
     /// `finish` of a document written through `Traced` without a post function (the search
-    /// strategy's, whose file is apart from the output), after `post` of all the bytes that its
-    /// stream replaced (what was handed to the sink goes first). Another error of the encoder
-    /// posts nothing.
-    fn finish_posting(
+    /// strategy's, whose file is apart from the output): `collect` gets all the bytes that its
+    /// stream replaced, whose posts the run writes where the request's batch starts
+    /// (`strategy::StrategyExport::take_posts`), so nothing here waits for the sink. Another
+    /// error of the encoder gives nothing.
+    fn finish_collecting(
         mut self,
-        post: impl FnOnce(&[ReplacedChar]) -> std::io::Result<()>,
+        collect: impl FnOnce(&[ReplacedChar]) -> std::io::Result<()>,
     ) -> Result<()> {
         if self.enc.error().is_none() {
             let replaced = self.enc.take_replaced_chars();
             if !replaced.is_empty() {
-                if self.io_error.is_none() {
-                    if let Err(error) = self.sink.flush() {
-                        self.io_error = Some(error);
-                    }
-                }
-                post(&replaced)?;
+                collect(&replaced)?;
             }
         }
         self.finish()
@@ -577,14 +573,14 @@ fn write_strategy_document<E: Encoder>(
 /// Writes the search strategy's request of one query batch (`write_strategy_document`) to `sink`
 /// in ASN.1 text (the strategy file is always ASN.1 text), through `Traced` when ASN.1 text does
 /// not write one of its strings as it is (`ArchiveRequest::written_as_is`,
-/// `RequestInputs::written_as_is`): `post` then gets the bytes that it replaced.
+/// `RequestInputs::written_as_is`): `collect` then gets the bytes that it replaced.
 pub(super) fn write_strategy_request(
     sink: &mut dyn Write,
     request: &super::ArchiveRequest,
     batch: &RequestInputs<'_>,
     sets: &[Param],
     database_list: Option<&Param>,
-    post: impl FnOnce(&[ReplacedChar]) -> std::io::Result<()>,
+    collect: impl FnOnce(&[ReplacedChar]) -> std::io::Result<()>,
 ) -> Result<()> {
     let mut buf = Vec::new();
     let encoding = ArchiveEncoding::Text;
@@ -595,7 +591,7 @@ pub(super) fn write_strategy_request(
     } else {
         let mut out = ArchiveOut::new(Traced::new(AsnTextEncoder::new(&mut buf), 0), sink);
         write_strategy_document(&mut out, request, batch, sets, database_list);
-        out.finish_posting(post)
+        out.finish_collecting(collect)
     }
 }
 

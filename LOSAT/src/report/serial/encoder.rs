@@ -208,16 +208,14 @@ impl ReplacedChar {
 
     /// The text of the post on the diagnostics stream: `Error: (803.7) `, the application's
     /// prefix (`SetDiagPostPrefix`) in brackets when it has one, the message and an end of line
-    /// (the severity, code, prefix and text of `SDiagMessage::x_OldWrite`).
+    /// (`ncbi_exception::error_post_line`, `SDiagMessage::x_OldWrite`).
     pub fn post(&self, prefix: Option<&str>) -> Vec<u8> {
         let (code, subcode) = Self::ERR_CODE;
-        let mut text = format!("Error: ({code}.{subcode}) ").into_bytes();
-        if let Some(prefix) = prefix {
-            text.extend_from_slice(format!("[{prefix}] ").as_bytes());
-        }
-        text.extend_from_slice(&self.message());
-        text.push(b'\n');
-        text
+        crate::ncbi_exception::error_post_line(
+            Some(&format!("{code}.{subcode}")),
+            prefix,
+            &self.message(),
+        )
     }
 }
 
@@ -589,8 +587,10 @@ impl<E: Encoder, P> Traced<E, P> {
     /// }
     /// ```
     /// (`WriteContainerContents`, 1255-1316, pushes `eFrameArrayElement` under the same test.)
+    /// An anonymous type (an empty name, or the open member's tag that the writers pass for one,
+    /// `xml::anonymous_type`) has no name, so its element keeps its frame.
     fn name_element(&mut self, type_name: &str) {
-        if self.xml && !type_name.is_empty() {
+        if self.xml && !type_name.is_empty() && !super::xml::anonymous_type(type_name) {
             if let Some(Frame::Element { shown }) = self.frames.last_mut() {
                 *shown = false;
             }
@@ -676,6 +676,13 @@ impl<E: Encoder, P> Traced<E, P> {
     fn hand_to(&mut self, sink: &mut dyn std::io::Write, target: u64) -> std::io::Result<()> {
         if target > self.handed {
             let count = (target - self.handed) as usize + std::mem::take(&mut self.foreign);
+            // NCBI's buffer never writes more than the encoder holds: a larger count is a model
+            // (`out_buffer`) that drifted from the encoder.
+            debug_assert!(
+                count <= self.inner.held().len(),
+                "Traced hands on {count} bytes of the {} held",
+                self.inner.held().len()
+            );
             let count = count.min(self.inner.held().len());
             self.inner.hand_on(sink, count)?;
             self.handed = target;

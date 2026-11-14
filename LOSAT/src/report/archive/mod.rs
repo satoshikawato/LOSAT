@@ -51,6 +51,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::diag_log::{DiagLog, Message, ERROR, WARNING};
+use crate::report::serial::encoder::Stream;
 use crate::stats::tables::KarlinParams;
 use options::OptionInputs;
 
@@ -117,21 +118,20 @@ impl ArchiveEncoding {
         Self::of(std::env::var_os("ARCHIVE_FORMAT").as_deref())
     }
 
-    /// Whether this encoding writes every byte of `text` into a VisibleString of the archive
-    /// as it is, without a diagnostic.
-    ///
-    /// Text and binary: only `0x20..=0x7E` (`GoodVisibleChar`); NCBI writes `#` for any other
-    /// byte and posts error 803.7 for each (`encoder::ReplacedChar`). XML: the archive's stream
-    /// has no encoding, so every byte is written as it is (TAB, LF and CR as character
-    /// references) except `0x01..=0x1F` without those three, which `x_VerifyChar` (`BAD_CHAR`)
-    /// replaces by `#` with the post (objostrxml.cpp:548-565).
+    /// Whether this encoding's stream writes `text` into a VisibleString of the archive without
+    /// replacing a byte by `#` with NCBI's post 803.7 (`encoder::ReplacedChar`): the stream's own
+    /// rule (`serial::encoder::Stream::replaces`). Text and binary replace any byte outside
+    /// `0x20..=0x7E` (`GoodVisibleChar`). XML: the archive's stream has no encoding, so it writes
+    /// every other byte as it is (TAB, LF and CR as character references) and replaces
+    /// `0x01..=0x1F` without those three (`x_VerifyChar`, `BAD_CHAR`; objostrxml.cpp:548-565).
+    /// `Nothing` writes no archive; it reads the text rule.
     pub fn writes_text(self, text: &[u8]) -> bool {
-        match self {
-            ArchiveEncoding::Xml => !text
-                .iter()
-                .any(|byte| matches!(byte, 0x01..=0x08 | 0x0b | 0x0c | 0x0e..=0x1f)),
-            _ => text.iter().all(|byte| (0x20..=0x7E).contains(byte)),
-        }
+        let stream = match self {
+            ArchiveEncoding::Xml => Stream::Xml,
+            ArchiveEncoding::Binary => Stream::AsnBinary,
+            ArchiveEncoding::Text | ArchiveEncoding::Nothing => Stream::AsnText,
+        };
+        !text.iter().any(|&byte| stream.replaces(byte))
     }
 }
 
@@ -821,6 +821,71 @@ impl Write for DiagTee<'_> {
 mod tests {
     use super::*;
     use crate::blastinput::app::Program;
+
+    /// `writes_text` and the encoders decide the same bytes: for every byte and each stream, a
+    /// one-byte VisibleString that `writes_text` accepts is written by the default encoder
+    /// without an error and by the replacing one with nothing replaced, and one that it refuses
+    /// is the default encoder's `NonVisibleChar` and the replacing one's single replaced byte.
+    #[test]
+    fn writes_text_is_what_each_encoder_writes_as_it_is() {
+        use crate::report::serial::asn_ber::AsnBinaryEncoder;
+        use crate::report::serial::asn_text::AsnTextEncoder;
+        use crate::report::serial::encoder::{Encoder, SerialError};
+        use crate::report::serial::xml::XmlEncoder;
+        for byte in 0..=u8::MAX {
+            for encoding in [
+                ArchiveEncoding::Text,
+                ArchiveEncoding::Binary,
+                ArchiveEncoding::Xml,
+            ] {
+                let as_is = encoding.writes_text(&[byte]);
+                let (error, replaced) = match encoding {
+                    ArchiveEncoding::Text => {
+                        let mut buf = Vec::new();
+                        let mut plain = AsnTextEncoder::new(&mut buf);
+                        plain.visible_str(&[byte]);
+                        let error = plain.error();
+                        let mut buf = Vec::new();
+                        let mut replacing = AsnTextEncoder::new(&mut buf);
+                        replacing.visible_str_replacing(&[byte]);
+                        (error, replacing.take_replaced())
+                    }
+                    ArchiveEncoding::Binary => {
+                        let mut buf = Vec::new();
+                        let mut plain = AsnBinaryEncoder::new(&mut buf);
+                        plain.visible_str(&[byte]);
+                        let error = plain.error();
+                        let mut buf = Vec::new();
+                        let mut replacing = AsnBinaryEncoder::new(&mut buf);
+                        replacing.visible_str_replacing(&[byte]);
+                        (error, replacing.take_replaced())
+                    }
+                    _ => {
+                        let mut buf = Vec::new();
+                        let mut plain = XmlEncoder::archive(&mut buf);
+                        plain.visible_str(&[byte]);
+                        let error = plain.error();
+                        let mut buf = Vec::new();
+                        let mut replacing = XmlEncoder::archive(&mut buf);
+                        replacing.visible_str_replacing(&[byte]);
+                        (error, replacing.take_replaced())
+                    }
+                };
+                if as_is {
+                    assert_eq!(error, None, "{encoding:?} 0x{byte:02X}");
+                    assert!(replaced.is_empty(), "{encoding:?} 0x{byte:02X}");
+                } else {
+                    assert_eq!(
+                        error,
+                        Some(SerialError::NonVisibleChar(byte)),
+                        "{encoding:?} 0x{byte:02X}"
+                    );
+                    assert_eq!(replaced.len(), 1, "{encoding:?} 0x{byte:02X}");
+                    assert_eq!(replaced[0].byte, byte);
+                }
+            }
+        }
+    }
 
     #[test]
     fn archive_format_is_read_like_print_archive() {

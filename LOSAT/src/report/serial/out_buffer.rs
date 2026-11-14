@@ -134,6 +134,36 @@ impl Stream {
             Stream::AsnBinary => 0,
         }
     }
+
+    /// Whether the stream writes `#` for the byte `byte` of a VisibleString and posts it
+    /// (`ReplaceVisibleChar` with `eFNP_ReplaceAndWarn`, `encoder::ReplacedChar`): the one rule
+    /// that the encoders (`write_string` of `asn_text` and `asn_ber`; `xml`'s match arms, which
+    /// a test holds to it) and the archive's check of its strings
+    /// (`archive::ArchiveEncoding::writes_text`) read. Text and binary: a byte outside
+    /// `' '..='~'` (`GoodVisibleChar`); XML: a control byte other than NUL, TAB, LF and CR
+    /// (`BAD_CHAR`, with NCBI's signed `char`: no byte from 0x80 on).
+    ///
+    /// NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:455-459
+    /// ```c++
+    /// inline
+    /// bool GoodVisibleChar(char c)
+    /// {
+    ///     return c >= ' ' && c <= '~';
+    /// }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:548-550
+    /// ```c++
+    /// inline bool BAD_CHAR(char x) {
+    ///     return (x < 0x20 && x > 0x0 && x != 0x9 && x != 0xA && x != 0xD);
+    /// }
+    /// ```
+    #[inline(always)]
+    pub const fn replaces(self, byte: u8) -> bool {
+        match self {
+            Stream::AsnText | Stream::AsnBinary => !matches!(byte, 0x20..=0x7e),
+            Stream::Xml => matches!(byte, 0x01..=0x08 | 0x0b | 0x0c | 0x0e..=0x1f),
+        }
+    }
 }
 
 /// What one `Encoder` call wrote, which decides NCBI's buffer calls for its bytes.
@@ -765,6 +795,106 @@ mod tests {
         assert_eq!(
             written_at(Stream::AsnBinary, before, Piece::Str, &string, &[4 + 1000]),
             [3504]
+        );
+    }
+
+    /// The buffer after a number of `before` digits (one `Skip` in ASN.1 text and XML) and the
+    /// calls of `piece`.
+    fn after(stream: Stream, before: usize, piece: Piece, bytes: &[u8]) -> OutBuffer {
+        let mut buffer = OutBuffer::new(stream);
+        buffer.put(Piece::Number, &vec![b'1'; before], &[], &mut Vec::new());
+        buffer.put(piece, bytes, &[], &mut Vec::new());
+        buffer
+    }
+
+    #[test]
+    fn asn_text_header_enum_and_real_are_split_as_ncbi_calls_them() {
+        // `WriteFileHeader`: `WriteId(name)` (14 bytes fit at 4080) and `PutString(" ::= ")`,
+        // which flushes 4094 - 80 bytes; one call of 19 bytes would flush at 4080.
+        let buffer = after(Stream::AsnText, 4080, Piece::Header, b"Blast4-archive ::= ");
+        assert_eq!((buffer.written(), buffer.used), (4014, 85));
+        // `WriteEnum`: `PutChar` of the first letter (the 4096th byte), then `PutString` of the
+        // rest, which flushes.
+        let buffer = after(Stream::AsnText, 4095, Piece::Enum, b"plus");
+        assert_eq!((buffer.written(), buffer.used), (4016, 83));
+        // `WriteDouble2`: `{ ` fits at 4090, the 9 digits flush 4092 - 80 bytes; then `, 10, `,
+        // the exponent and ` }`.
+        let buffer = after(Stream::AsnText, 4090, Piece::Real, b"{ 123456789, 10, -9 }");
+        assert_eq!((buffer.written(), buffer.used), (4012, 99));
+        // A negative mantissa puts its sign alone.
+        let buffer = after(Stream::AsnText, 4093, Piece::Real, b"{ -12, 10, 3 }");
+        assert_eq!((buffer.written(), buffer.used), (4016, 80 + 2 + 6 + 1 + 2));
+        // Zero is one `PutString`, which flushes before it.
+        let buffer = after(Stream::AsnText, 4090, Piece::Real, b"{ 0, 10, 0 }");
+        assert_eq!((buffer.written(), buffer.used), (4010, 92));
+    }
+
+    #[test]
+    fn asn_text_octets_wrap_with_one_byte_calls() {
+        // `BeginBytes` (`'`), two `PutChar`s per byte with `WrapAt(78, false)`'s end of line
+        // (`PutEol(false)`: `Reserve(1)`, no indentation) between them, then `PutString("'H")`:
+        // the 97th of the one-byte calls flushes 4096 - 80 bytes.
+        let mut octets = b"'".to_vec();
+        octets.extend(b"AB".repeat(39));
+        octets.push(b'\n');
+        octets.extend(b"CD".repeat(10));
+        octets.extend(b"'H");
+        let buffer = after(Stream::AsnText, 4000, Piece::Octets, &octets);
+        assert_eq!((buffer.written(), buffer.used), (4016, 80 + 4 + 2));
+    }
+
+    #[test]
+    fn a_text_post_after_a_wrap_of_its_string_counts_the_wrap() {
+        // The string's wrap (`PutEolAtWordEnd`) inserted one end of line, `Reserve(1)`, before
+        // the replaced byte: the post after 112 one-byte calls follows the flush at the 107th.
+        let mut string = b"\"".to_vec();
+        string.extend([b'a'; 90]);
+        string.push(b'\n');
+        string.extend([b'b'; 20]);
+        string.extend(b"#\"");
+        let before: &[(Piece, &[u8])] = &[(Piece::Markup, &[b'x'; 3990])];
+        assert_eq!(
+            written_at(Stream::AsnText, before, Piece::Str, &string, &[112]),
+            [4016]
+        );
+        // Without the flush: the same string at the start of the buffer.
+        assert_eq!(
+            written_at(Stream::AsnText, &[], Piece::Str, &string, &[112]),
+            [0]
+        );
+    }
+
+    #[test]
+    fn an_xml_character_reference_is_a_put_string_and_one_byte_calls() {
+        // `&#x9;`: `PutString("&#x")` fits at 4092, `PutChar('9')` ends the buffer and
+        // `PutChar(';')` flushes 4095 bytes (XML keeps 1); one call of 5 bytes would flush at
+        // 4092.
+        let buffer = after(Stream::Xml, 4092, Piece::Str, b"&#x9;");
+        assert_eq!((buffer.written(), buffer.used), (4095, 2));
+        // An entity of a markup character is one `PutString`.
+        let buffer = after(Stream::Xml, 4093, Piece::Str, b"&amp;");
+        assert_eq!((buffer.written(), buffer.used), (4092, 6));
+    }
+
+    #[test]
+    fn a_call_larger_than_the_buffer_doubles_it() {
+        // `DoReserve`: a `Skip` of 5000 bytes flushes and doubles the buffer to 8192; the next
+        // call that does not fit flushes again and keeps that size.
+        let mut buffer = after(Stream::AsnText, 100, Piece::Markup, &[b'n'; 5000]);
+        assert_eq!(
+            (buffer.written(), buffer.used, buffer.capacity),
+            (20, 5080, 8192)
+        );
+        buffer.put(Piece::Markup, &[b'n'; 4000], &[], &mut Vec::new());
+        assert_eq!(
+            (buffer.written(), buffer.used, buffer.capacity),
+            (5020, 4080, 8192)
+        );
+        // Two doublings for a call of more than twice the buffer.
+        let buffer = after(Stream::AsnText, 0, Piece::Markup, &[b'n'; 9000]);
+        assert_eq!(
+            (buffer.written(), buffer.used, buffer.capacity),
+            (0, 9000, 16384)
         );
     }
 

@@ -28,9 +28,12 @@
 //! ```
 //! The back limit keeps at least the last 80 bytes in the buffer when it is flushed; the
 //! string wrap below looks back at most one line (79 columns), so it always finds the bytes
-//! in the buffer, and the whole document stands for the buffer here.
+//! in the buffer. The encoder's `out` holds the document from its start, or under
+//! `encoder::Traced` from where NCBI's buffer was last flushed (`Traced` hands on only what
+//! NCBI wrote, `out_buffer::OutBuffer`, which keeps those 80 bytes): either way it holds every
+//! byte that the wrap looks at.
 
-use super::encoder::{Encoder, Replaced, SerialError, StreamPosition};
+use super::encoder::{Encoder, Replaced, SerialError, Stream, StreamPosition};
 use super::real::write_asn_text_double;
 
 /// The column after which a VisibleString is wrapped (`WrapAt(78, true)`).
@@ -733,7 +736,7 @@ impl AsnTextEncoder<'_> {
     fn write_string<const REPLACE: bool>(&mut self, value: &[u8]) {
         self.put(b"\"");
         for &byte in value {
-            let byte = if (0x20..=0x7e).contains(&byte) {
+            let byte = if !Stream::AsnText.replaces(byte) {
                 byte
             } else if REPLACE {
                 self.replace(byte);

@@ -32,7 +32,7 @@
 //! }
 //! ```
 
-use super::encoder::{Encoder, Replaced, SerialError, StreamPosition};
+use super::encoder::{Encoder, Replaced, SerialError, Stream, StreamPosition};
 use super::real::double_to_string_posix;
 
 /// `DBL_DIG`: the precision of `WriteDouble` (`WriteDouble2(data, DBL_DIG)`).
@@ -118,7 +118,7 @@ impl<'b> AsnBinaryEncoder<'b> {
         self.out.push(TAG_VISIBLE_STRING);
         self.length(value.len());
         for &byte in value {
-            if (0x20..=0x7e).contains(&byte) {
+            if !Stream::AsnBinary.replaces(byte) {
                 self.out.push(byte);
             } else {
                 if REPLACE {

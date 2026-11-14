@@ -380,7 +380,42 @@ fn post_error(id: &str, message: &str) -> String {
 
 /// `post_error` of a message that is bytes: NCBI's diagnostic stream writes them as they are.
 fn post_error_bytes(id: &str, message: &[u8]) -> Vec<u8> {
-    let mut line = format!("Error: ({id}) ").into_bytes();
+    error_post_line(Some(id), None, message)
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:5685-5694, 5749-5755
+// ```c++
+//     // (<err_code>.<err_subcode>) or (err_text)
+//     if ((m_ErrCode  ||  m_ErrSubCode || m_ErrText)  &&
+//         IsSetDiagPostFlag(eDPF_ErrorID, m_Flags)) {
+//         os << '(';
+//         ...
+//         os << ") ";
+//     }
+//     ...
+//     // [<prefix1>::<prefix2>::.....]
+//     if (m_Prefix  &&  *m_Prefix  &&  IsSetDiagPostFlag(eDPF_Prefix, m_Flags))
+//         os << '[' << m_Prefix << "] ";
+//
+//     // <message>
+//     if (m_BufferLen)
+//         os.write(m_Buffer, m_BufferLen);
+// ```
+/// A post of severity `Error` as `SDiagMessage::x_OldWrite` writes it with NCBI's default flags
+/// (quoted above and at [`NcbiException::report_default_ex`]): `Error: `, the error id `(<id>) `
+/// when the post has one (`<err_code>.<err_subcode>` or `m_ErrText`), the application's prefix
+/// `[<prefix>] ` when it set one (`SetDiagPostPrefix`), the message as it is, and a line feed.
+/// The one place that makes this line: the exception reports here, the posts of the bytes that
+/// NCBI's object streams replace (`report::serial::encoder::ReplacedChar::post`) and the
+/// applications' `ERR_POST(Error << ...)` (`ncbi_app::Diag::err_post_bytes`).
+pub(crate) fn error_post_line(id: Option<&str>, prefix: Option<&str>, message: &[u8]) -> Vec<u8> {
+    let mut line = b"Error: ".to_vec();
+    if let Some(id) = id {
+        line.extend_from_slice(format!("({id}) ").as_bytes());
+    }
+    if let Some(prefix) = prefix {
+        line.extend_from_slice(format!("[{prefix}] ").as_bytes());
+    }
     line.extend_from_slice(message);
     line.push(b'\n');
     line

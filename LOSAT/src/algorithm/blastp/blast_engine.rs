@@ -8565,6 +8565,7 @@ fn write_reports_without_queries(
                     &[],
                     &[],
                     &[],
+                    &[],
                     &report,
                     None,
                     pairwise_database.as_ref(),
@@ -15195,6 +15196,11 @@ fn run_call(
     let listed_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = listed_titles
         .as_ref()
         .map_or(records_parsed.as_slice(), |titles| &titles.parsed);
+    // The sources from which NCBI makes the empty stored titles of the others, by rank (empty
+    // without them; `report::pairwise::stored_source`).
+    let listed_sources: &[crate::report::defline::SourceTaxname] = listed_titles
+        .as_ref()
+        .map_or(&[][..], |titles| &titles.sources);
     // The warnings are written once, with the first format (`QueryWarnings`).
     // NCBI makes each query's PSSM after the query's report (`psiblast_pssms`): the warnings of
     // its reads come before the next query's warnings, and the last query's after its report,
@@ -15954,6 +15960,7 @@ fn run_call(
                             &query_titles,
                             &subject_titles,
                             listed_parsed,
+                            listed_sources,
                             &pairwise_report,
                             pairwise_database.as_ref(),
                             probe.as_mut(),
@@ -15977,6 +15984,7 @@ fn run_call(
                         &query_titles,
                         &subject_titles,
                         listed_parsed,
+                        listed_sources,
                         &pairwise_report,
                         // rpsblast: the gapped K of the RPS traceback (`rps_hooks::rps_search`).
                         rps_gapped_k.as_deref(),
@@ -16040,6 +16048,7 @@ fn run_call(
                         oids: database.oid_map(),
                         titles: &subject_stitles,
                         parsed: listed_parsed,
+                        sources: listed_sources,
                         length: &subject_length,
                         taxonomy: &taxonomy,
                     },

@@ -7,16 +7,26 @@
 // i32 as a signed number, so a pointer of 2 GiB or more arrives negative: every pointer
 // and length is converted with `>>> 0` before it is used as an offset into the memory.
 import type { RecordKey } from '../../domain/dataset.js';
+import { FileReadError, type StartResult } from '../../ports/engine.js';
 import type { Compression } from '../../ports/inflate.js';
 
-/** Stream 2: the JSON response of describe, register, scan_end and inflate_begin. */
+/** Stream 2: the JSON response of describe, register, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
 export const INFLATED_STREAM = 5;
+/**
+ * Stream 8: the files of a run besides its outputs (the file of `-logfile`), a ZIP archive of stored
+ * entries that the engine sends after the run, also when the run fails (ABI v2 §5; line RG E1w-3b).
+ */
+export const RUN_FILES_STREAM = 8;
 export const ROLE_QUERY = 0;
 export const ROLE_SUBJECT = 1;
 /** The kind of a named input file (`file_begin`, ABI v2 §4): a WindowMasker unit counts file, BLASTN's `-window_masker_db`. */
 export const FILE_WINDOW_MASKER_COUNTS = 1;
+/** The kind of a named input file (`file_begin`, ABI v2 §4): a registry file of NCBI's application start, the file of `-conffile`. */
+export const FILE_REGISTRY = 2;
+/** Bytes of a named input file given to the engine at a time, through one buffer of engine memory (`loadFile`). */
+export const FILE_CHUNK_BYTES = 8 * 1024 * 1024;
 
 type Export = (...args: number[]) => number;
 
@@ -28,6 +38,7 @@ export interface AbiExports {
   readonly losat_web2_last_error_ptr: Export;
   readonly losat_web2_last_error_len: Export;
   readonly losat_web2_describe: Export;
+  readonly losat_web2_start: Export;
   readonly losat_web2_validate: Export;
   readonly losat_web2_register: Export;
   readonly losat_web2_release: Export;
@@ -86,18 +97,30 @@ export interface RegisteredInput {
 /**
  * The *file* JSON of `file_end` (ABI v2 §9). The contents of the file do not fail `file_end`: a
  * counts file that BLASTN cannot read has `stat_type` other than `obinary` and `binary`, or an
- * `error`, and the run that names it reports the CLI's own message.
+ * `error`, and the run that names it reports the CLI's own message; the start of `validate` and
+ * `run` reads a registry file (kind 2) and reports it where the CLI does.
  */
-export interface FileInfo {
+export type FileInfo = CountsFileInfo | RegistryFileInfo;
+
+interface FileInfoOfAnyKind {
   readonly handle: number;
   readonly name: string;
-  readonly kind: 'windowmasker_counts';
   readonly size: number;
   /** Lower-case hex SHA-256 of the bytes that the engine received. */
   readonly sha256: string;
+}
+
+/** The *file* JSON of a WindowMasker unit counts file (kind 1). */
+export interface CountsFileInfo extends FileInfoOfAnyKind {
+  readonly kind: 'windowmasker_counts';
   readonly stat_type: 'obinary' | 'binary' | 'ascii' | 'oascii' | 'unknown' | null;
   readonly unit_size: number | null;
   readonly error: string | null;
+}
+
+/** The *file* JSON of a registry file (kind 2). */
+export interface RegistryFileInfo extends FileInfoOfAnyKind {
+  readonly kind: 'registry';
 }
 
 /** Memory of the instance for the chunks of a file, taken once and used for every chunk (`chunkBuffer`). */
@@ -162,6 +185,18 @@ export class ReactorAbi {
   describe(program: string): unknown {
     this.check(this.call(this.exports.losat_web2_describe, [encoder.encode(program)]));
     return this.response();
+  }
+
+  /**
+   * The *start* JSON of an argv (ABI v2 §4 `losat_web2_start`, §9): the registry file of its
+   * `-conffile`, the file of its `-logfile` and whether it is a dry run; or the CLI's message for an
+   * argv that the engine cannot start (a version word, a program that ABI v2 does not run).
+   */
+  start(argv: readonly string[]): StartResult {
+    const status = this.call(this.exports.losat_web2_start, [encoder.encode(argv.join('\0'))]);
+    if (status < 0) return { ok: false, message: this.lastError() };
+    const json = this.response() as { conffile: string | null; log_file: string | null; dry_run: boolean };
+    return { ok: true, start: { conffile: json.conffile, logFile: json.log_file, dryRun: json.dry_run } };
   }
 
   /** Undefined if the argv is valid, else the CLI's error text. */
@@ -373,6 +408,65 @@ export class ReactorAbi {
       }
       this.stopped = new EngineStoppedError(stopMessage(error, this.output()), { cause: error });
       throw this.stopped;
+    }
+  }
+}
+
+/** The calls of `loadFile` into an instance. */
+export type FileLoader = Pick<ReactorAbi, 'stoppedBy' | 'fileBegin' | 'chunkBuffer' | 'fileChunk' | 'fileEnd' | 'fileRelease' | 'freeChunkBuffer'>;
+
+/**
+ * Gives the engine a named input file (ABI v2 §4: a WindowMasker counts file, kind 1, or a registry
+ * file, kind 2) and returns its *file* JSON: `file_begin` with the file's size, its bytes in chunks of
+ * at most `FILE_CHUNK_BYTES` read from the Blob one at a time and given through one buffer of engine
+ * memory taken once, `file_end`. A file that the engine refuses (a chunk or its end), or that cannot
+ * be read (`FileReadError`, with the browser's reason), is released, unless the instance stopped, so
+ * that its name is free again; the buffer is given back in every case. `call` wraps each call into
+ * the instance (the Engine worker counts them as uses of the threaded instance). The reads wait:
+ * other calls of the instance may run between the chunks, so a file that must meet no other call
+ * goes to an instance of its own.
+ */
+export async function loadFile(
+  abi: FileLoader,
+  kind: number,
+  name: string,
+  file: Blob,
+  call: <T>(body: () => T) => T = (body) => body(),
+): Promise<FileInfo> {
+  const size = file.size;
+  const handle = call(() => abi.fileBegin(kind, name, size));
+  let buffer: ChunkBuffer | undefined;
+  try {
+    buffer = call(() => abi.chunkBuffer(Math.max(1, Math.min(FILE_CHUNK_BYTES, size))));
+    for (let offset = 0; offset < size; offset += FILE_CHUNK_BYTES) {
+      let bytes: Uint8Array;
+      try {
+        bytes = new Uint8Array(await file.slice(offset, Math.min(size, offset + FILE_CHUNK_BYTES)).arrayBuffer());
+      } catch (error) {
+        throw new FileReadError(error instanceof Error ? error.message : String(error), { cause: error });
+      }
+      call(() => abi.fileChunk(handle, bytes, buffer!));
+    }
+    return call(() => abi.fileEnd(handle));
+  } catch (error) {
+    // The engine drops a file whose chunk or end it refused; one that it still holds (the file could
+    // not be read) is released. Not after a stop, nor when the caller's instance is ending.
+    if (abi.stoppedBy === undefined) {
+      try {
+        call(() => abi.fileRelease(handle));
+      } catch {
+        // Already dropped by the engine, or the instance is ending.
+      }
+    }
+    throw error;
+  } finally {
+    if (buffer !== undefined) {
+      const taken = buffer;
+      try {
+        call(() => abi.freeChunkBuffer(taken));
+      } catch {
+        // The instance is ending: its memory goes with it.
+      }
     }
   }
 }

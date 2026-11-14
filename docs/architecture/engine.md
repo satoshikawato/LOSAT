@@ -292,8 +292,8 @@ their stages over files (blastx `preliminary.rs`, `traceback.rs`, `runtime.rs`; 
   `run_in_pool`, which loops
   over the query batches and calls `search_query_batch::<UNGAPPED>` for each. The const generic
   `UNGAPPED` (for `-ungapped`) makes two copies of the function. Its closure `process_subject` runs
-  twice per subject: with `prelim_source` `None` it does the preliminary search, with `Some` the
-  traceback.
+  twice per subject: with `prelim_source` `None` it does the preliminary search (the subject's
+  chunks and the search of each, `prelim_subject.rs`), with `Some` the traceback.
 - **blastp** (`algorithm/blastp/blast_engine.rs`): `run` → `search_cli` → `search` →
   `run_resolved_in_pool`, once for the queries of every batch that NCBI does not split (a blastp
   query's preliminary hit list does not depend on the other queries of its batch), once per query

@@ -3,6 +3,7 @@
 import type { NoHspReason } from '../application/results';
 
 export const NO_HSP_TEXT: Readonly<Record<NoHspReason, string>> = {
+  'dry-run': 'This run was a dry run (-dryrun): LOSAT read the arguments and the settings and ran no search.',
   'empty-query': 'The query has no sequences.',
   'no-tabular-hits': '-num_alignments 0 leaves the hit list of outfmt 6 and 7 empty.',
   'no-queries': 'No queries match the query filters.',

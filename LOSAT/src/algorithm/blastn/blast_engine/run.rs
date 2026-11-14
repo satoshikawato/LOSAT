@@ -245,8 +245,16 @@ mod na_scan;
 #[path = "two_stage_scan.rs"]
 mod two_stage_scan;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:422-602
+// (`s_BlastSearchEngineOneContext`: the chunk loop, :478-593, and one chunk's word finder and
+// HSP list, :487-563).
+// The preliminary search of one subject's chunks: the chunk loop with its merge, and the search of
+// one chunk (a child module, so that it uses the private types of this file).
+#[path = "prelim_subject.rs"]
+mod prelim_subject;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:503-578 (the chunk loop of
-// `s_BlastSearchEngineCore` after the word finder),
+// `s_BlastSearchEngineOneContext` after the word finder),
 // c++/src/algo/blast/core/blast_gapalign.c:3664-4114 (`BLAST_GetGappedScore`; :3850 is the loop
 // on the initial hits) and :4719-4775 (`BLAST_GetUngappedHSPList`).
 // The preliminary HSP list of one subject chunk from its initial hits: the gapped search's loop,
@@ -1475,7 +1483,7 @@ fn scan_subject_kmers_range_mb_any<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     if subject_len < lut_word_length || !(9..=12).contains(&lut_word_length) {
         return;
@@ -1499,13 +1507,17 @@ fn scan_subject_kmers_range_mb_any<F>(
                 | ((packed[byte_idx + 1] as u32) << 8)
                 | (packed[byte_idx + 2] as u32);
             let kmer = ((idx >> shift) as u64) & mask;
-            on_kmer(byte_idx * COMPRESSION_RATIO, kmer);
+            if !on_kmer(byte_idx * COMPRESSION_RATIO, kmer) {
+                return;
+            }
             byte_idx = byte_idx.saturating_add(step_bytes);
         }
         let mut pos = byte_idx * COMPRESSION_RATIO;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, lut_word_length);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -1525,12 +1537,16 @@ fn scan_subject_kmers_range_mb_any<F>(
                     | ((packed[byte_idx + 2] as u32) << 8)
                     | (packed[byte_idx + 3] as u32);
                 let kmer = ((idx >> shift) as u64) & mask;
-                on_kmer(pos, kmer);
+                if !on_kmer(pos, kmer) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
             }
             while pos <= end {
                 let kmer = packed_kmer_at(packed, pos, lut_word_length);
-                on_kmer(pos, kmer);
+                if !on_kmer(pos, kmer) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
             }
             return;
@@ -1547,12 +1563,16 @@ fn scan_subject_kmers_range_mb_any<F>(
                 | ((packed[byte_idx + 1] as u32) << 8)
                 | (packed[byte_idx + 2] as u32);
             let kmer = ((idx >> shift) as u64) & mask;
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, lut_word_length);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -1561,7 +1581,9 @@ fn scan_subject_kmers_range_mb_any<F>(
     let mut pos = start;
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, lut_word_length);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -1602,7 +1624,7 @@ fn scan_subject_kmers_range_mb_9_1<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     const LUT_WORD_LENGTH: usize = 9;
     debug_assert_eq!(scan_step, 1);
@@ -1615,7 +1637,9 @@ fn scan_subject_kmers_range_mb_9_1<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -1642,25 +1666,33 @@ fn scan_subject_kmers_range_mb_9_1<F>(
         match state {
             0 => {
                 let index = ((init_index >> 6) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 1;
             }
             1 => {
                 let index = ((init_index >> 4) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 2;
             }
             2 => {
                 let index = ((init_index >> 2) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 3;
             }
             _ => {
                 let index = (init_index as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 0;
                 byte_idx = byte_idx.saturating_add(1);
@@ -1671,7 +1703,9 @@ fn scan_subject_kmers_range_mb_9_1<F>(
 
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -1708,7 +1742,7 @@ fn scan_subject_kmers_range_mb_9_2<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     const LUT_WORD_LENGTH: usize = 9;
     debug_assert_eq!(scan_step, 2);
@@ -1721,7 +1755,9 @@ fn scan_subject_kmers_range_mb_9_2<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -1747,12 +1783,16 @@ fn scan_subject_kmers_range_mb_9_2<F>(
 
         if !use_shift2 {
             let index = ((init_index >> 6) as u64) & mask;
-            on_kmer(pos, index);
+            if !on_kmer(pos, index) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
             use_shift2 = true;
         } else {
             let index = ((init_index >> 2) as u64) & mask;
-            on_kmer(pos, index);
+            if !on_kmer(pos, index) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
             byte_idx = byte_idx.saturating_add(1);
             init_valid = false;
@@ -1762,7 +1802,9 @@ fn scan_subject_kmers_range_mb_9_2<F>(
 
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -1804,7 +1846,7 @@ fn scan_subject_kmers_range_mb_10_1<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     const LUT_WORD_LENGTH: usize = 10;
     debug_assert_eq!(scan_step, 1);
@@ -1817,7 +1859,9 @@ fn scan_subject_kmers_range_mb_10_1<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -1844,19 +1888,25 @@ fn scan_subject_kmers_range_mb_10_1<F>(
         match state {
             0 => {
                 let index = ((init_index >> 4) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 1;
             }
             1 => {
                 let index = ((init_index >> 2) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 2;
             }
             2 => {
                 let index = (init_index as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 3;
             }
@@ -1867,7 +1917,9 @@ fn scan_subject_kmers_range_mb_10_1<F>(
                 let s3 = packed[byte_idx + 3] as u32;
                 init_index = (init_index << 8) | s3;
                 let index = ((init_index >> 6) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 0;
                 byte_idx = byte_idx.saturating_add(1);
@@ -1878,7 +1930,9 @@ fn scan_subject_kmers_range_mb_10_1<F>(
 
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -1915,7 +1969,7 @@ fn scan_subject_kmers_range_mb_10_2<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     const LUT_WORD_LENGTH: usize = 10;
     debug_assert_eq!(scan_step, 2);
@@ -1928,7 +1982,9 @@ fn scan_subject_kmers_range_mb_10_2<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -1954,12 +2010,16 @@ fn scan_subject_kmers_range_mb_10_2<F>(
 
         if !use_shift0 {
             let index = ((init_index >> 4) as u64) & mask;
-            on_kmer(pos, index);
+            if !on_kmer(pos, index) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
             use_shift0 = true;
         } else {
             let index = (init_index as u64) & mask;
-            on_kmer(pos, index);
+            if !on_kmer(pos, index) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
             byte_idx = byte_idx.saturating_add(1);
             init_valid = false;
@@ -1969,7 +2029,9 @@ fn scan_subject_kmers_range_mb_10_2<F>(
 
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -2016,7 +2078,7 @@ fn scan_subject_kmers_range_mb_10_3<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     const LUT_WORD_LENGTH: usize = 10;
     debug_assert_eq!(scan_step, 3);
@@ -2029,7 +2091,9 @@ fn scan_subject_kmers_range_mb_10_3<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -2084,7 +2148,9 @@ fn scan_subject_kmers_range_mb_10_3<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -2103,7 +2169,9 @@ fn scan_subject_kmers_range_mb_10_3<F>(
                     | ((packed[idx1] as u32) << 8)
                     | (packed[idx2] as u32);
                 let index = ((init_index >> 4) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 1;
             }
@@ -2114,13 +2182,17 @@ fn scan_subject_kmers_range_mb_10_3<F>(
                 }
                 init_index = (init_index << 8) | (packed[idx3 as usize] as u32);
                 let index = ((init_index >> 6) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 2;
             }
             2 => {
                 let index = (init_index as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 3;
             }
@@ -2131,7 +2203,9 @@ fn scan_subject_kmers_range_mb_10_3<F>(
                 }
                 init_index = (init_index << 8) | (packed[idx4 as usize] as u32);
                 let index = ((init_index >> 2) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx += 3;
                 state = 0;
@@ -2141,7 +2215,9 @@ fn scan_subject_kmers_range_mb_10_3<F>(
 
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -2188,7 +2264,7 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     const LUT_WORD_LENGTH: usize = 11;
     debug_assert_eq!(scan_step % COMPRESSION_RATIO, 1);
@@ -2201,7 +2277,9 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -2223,7 +2301,9 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
                     | ((packed[byte_idx + 1] as u32) << 8)
                     | (packed[byte_idx + 2] as u32);
                 let index = ((idx >> 2) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx = byte_idx.saturating_add(scan_step_byte);
                 state = 1;
@@ -2236,7 +2316,9 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
                     | ((packed[byte_idx + 1] as u32) << 8)
                     | (packed[byte_idx + 2] as u32);
                 let index = (idx as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx = byte_idx.saturating_add(scan_step_byte);
                 state = 2;
@@ -2250,7 +2332,9 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
                     | ((packed[byte_idx + 2] as u32) << 8)
                     | (packed[byte_idx + 3] as u32);
                 let index = ((idx >> 6) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx = byte_idx.saturating_add(scan_step_byte);
                 state = 3;
@@ -2264,7 +2348,9 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
                     | ((packed[byte_idx + 2] as u32) << 8)
                     | (packed[byte_idx + 3] as u32);
                 let index = ((idx >> 4) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx = byte_idx.saturating_add(scan_step_byte + 1);
                 state = 0;
@@ -2274,7 +2360,9 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
 
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -2313,7 +2401,7 @@ fn scan_subject_kmers_range_mb_11_2mod4<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     const LUT_WORD_LENGTH: usize = 11;
     debug_assert_eq!(scan_step % COMPRESSION_RATIO, 2);
@@ -2326,7 +2414,9 @@ fn scan_subject_kmers_range_mb_11_2mod4<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -2352,7 +2442,9 @@ fn scan_subject_kmers_range_mb_11_2mod4<F>(
                 | ((packed[byte_idx + 1] as u32) << 8)
                 | (packed[byte_idx + 2] as u32);
             let index = ((idx >> top_shift) as u64) & mask;
-            on_kmer(pos, index);
+            if !on_kmer(pos, index) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
             byte_idx = byte_idx.saturating_add(scan_step_byte);
             use_bottom = true;
@@ -2365,7 +2457,9 @@ fn scan_subject_kmers_range_mb_11_2mod4<F>(
                 | ((packed[byte_idx + 2] as u32) << 8)
                 | (packed[byte_idx + 3] as u32);
             let index = ((idx >> bottom_shift) as u64) & mask;
-            on_kmer(pos, index);
+            if !on_kmer(pos, index) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
             byte_idx = byte_idx.saturating_add(scan_step_byte + 1);
             use_bottom = false;
@@ -2374,7 +2468,9 @@ fn scan_subject_kmers_range_mb_11_2mod4<F>(
 
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -2425,7 +2521,7 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     const LUT_WORD_LENGTH: usize = 11;
     debug_assert_eq!(scan_step % COMPRESSION_RATIO, 3);
@@ -2438,7 +2534,9 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -2475,7 +2573,9 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
                     | ((packed[idx1] as u32) << 8)
                     | (packed[idx2] as u32);
                 let index = ((idx >> 2) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx += scan_step_byte as i32;
                 state = 1;
@@ -2494,7 +2594,9 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
                     | ((packed[idx2] as u32) << 8)
                     | (packed[idx3u] as u32);
                 let index = ((idx >> 4) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx += scan_step_byte as i32;
                 state = 2;
@@ -2513,7 +2615,9 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
                     | ((packed[idx3] as u32) << 8)
                     | (packed[idx4u] as u32);
                 let index = ((idx >> 6) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx += scan_step_byte as i32;
                 state = 3;
@@ -2530,7 +2634,9 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
                     | ((packed[idx3] as u32) << 8)
                     | (packed[idx4u] as u32);
                 let index = (idx as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx += (scan_step_byte + 3) as i32;
                 state = 0;
@@ -2540,7 +2646,9 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
 
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -2700,7 +2808,7 @@ fn scan_subject_kmers_range<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     if subject_len < lut_word_length || lut_word_length == 0 {
         return;
@@ -2751,13 +2859,17 @@ fn scan_subject_kmers_range<F>(
                 while byte_idx <= end_byte_idx {
                     let idx = ((packed[byte_idx] as u16) << 8) | packed[byte_idx + 1] as u16;
                     let kmer = ((idx >> shift) as u64) & mask;
-                    on_kmer(byte_idx * COMPRESSION_RATIO, kmer);
+                    if !on_kmer(byte_idx * COMPRESSION_RATIO, kmer) {
+                        return;
+                    }
                     byte_idx += step_bytes;
                 }
                 let mut pos = byte_idx * COMPRESSION_RATIO;
                 while pos <= end {
                     let kmer = packed_kmer_at(packed, pos, lut_word_length);
-                    on_kmer(pos, kmer);
+                    if !on_kmer(pos, kmer) {
+                        return;
+                    }
                     pos = pos.saturating_add(scan_step);
                 }
                 return;
@@ -2785,12 +2897,16 @@ fn scan_subject_kmers_range<F>(
                         | ((packed[byte_idx + 1] as u32) << 8)
                         | (packed[byte_idx + 2] as u32);
                     let kmer = ((idx >> shift) as u64) & mask;
-                    on_kmer(pos, kmer);
+                    if !on_kmer(pos, kmer) {
+                        return;
+                    }
                     pos = pos.saturating_add(scan_step);
                 }
                 while pos <= end {
                     let kmer = packed_kmer_at(packed, pos, lut_word_length);
-                    on_kmer(pos, kmer);
+                    if !on_kmer(pos, kmer) {
+                        return;
+                    }
                     pos = pos.saturating_add(scan_step);
                 }
                 return;
@@ -2816,12 +2932,16 @@ fn scan_subject_kmers_range<F>(
                     let shift = 2 * (8 - ((pos % COMPRESSION_RATIO) + lut_word_length));
                     let idx = ((packed[byte_idx] as u16) << 8) | packed[byte_idx + 1] as u16;
                     let kmer = ((idx >> shift) as u64) & mask;
-                    on_kmer(pos, kmer);
+                    if !on_kmer(pos, kmer) {
+                        return;
+                    }
                     pos = pos.saturating_add(scan_step);
                 }
                 while pos <= end {
                     let kmer = packed_kmer_at(packed, pos, lut_word_length);
-                    on_kmer(pos, kmer);
+                    if !on_kmer(pos, kmer) {
+                        return;
+                    }
                     pos = pos.saturating_add(scan_step);
                 }
                 return;
@@ -2843,7 +2963,9 @@ fn scan_subject_kmers_range<F>(
     let mut pos = start;
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, lut_word_length);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -2969,7 +3091,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     subject_masked,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -2986,7 +3111,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     scan_step,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -3003,7 +3131,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     scan_step,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -3020,7 +3151,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     scan_step,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -3037,7 +3171,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     scan_step,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -3054,7 +3191,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     scan_step,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -3071,7 +3211,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     scan_step,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -3088,7 +3231,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     scan_step,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -3105,7 +3251,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     scan_step,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -3124,7 +3273,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     subject_masked,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -4355,6 +4507,23 @@ struct SubjectScratch {
     //                                sizeof(SSeqRange));
     // ```
     seq_ranges_scratch: Vec<(i32, i32)>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321,399-405
+    // ```c++
+    //     if (datap->mask_type != eNoSubjMasking) {
+    //         ASSERT(datap->mask_algo_id != -1);
+    //         seqdb.GetMaskData(oid, datap->mask_algo_id, datap->seq_ranges);
+    //     }
+    //     ...
+    //         if (BlastSeqBlkSetSeqRanges(args->seq,
+    //                                 (SSeqRange*) datap->seq_ranges.get_data(),
+    //                                 datap->seq_ranges.size() + 1, false, datap->mask_type) != 0) {
+    // ```
+    // The buffers of a database search with `-db_soft_mask` (decision D4 of M4a-2): the masks of
+    // the block of the database sequence being searched (read once for all the block's
+    // sequences, review 1 F3 of M4a-2a) and its soft ranges, kept from one sequence to the next as
+    // NCBI keeps one `TSequenceRanges` per thread. Empty, and never touched, without the option.
+    db_masks: crate::seqdb::MaskBlock,
+    db_soft_ranges: Vec<(i32, i32)>,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:77-81
     // ```c
     // typedef struct BLAST_DiagTable {
@@ -4473,6 +4642,8 @@ impl SubjectScratch {
             //                                sizeof(SSeqRange));
             // ```
             seq_ranges_scratch: Vec::new(),
+            db_masks: crate::seqdb::MaskBlock::default(),
+            db_soft_ranges: Vec::new(),
             hit_level_array: Vec::new(),
             hit_len_array: Vec::new(),
             diag_hash: DiagHashTable::new(window_size as i32),
@@ -5811,6 +5982,9 @@ struct BlastnReportInputs<'a> {
     /// of the reported sequences from and whose OIDs name the sequences without parsed Seq-ids
     /// (`oid_map`); `None` for a subject set.
     database_reader: Option<&'a database::BlastnDatabase>,
+    /// The algorithm of a database search with `-db_soft_mask` (`ResolvedMask::id`), whose masks
+    /// outfmt 0 shows in lowercase (`database::BlastnDatabase::display_masks`); `None` otherwise.
+    database_mask: Option<i32>,
     /// The reported sequences with parsed Seq-ids of a database search, by rank
     /// (`database::ReportedSubjects::parsed`; empty without them): their ids and titles come from
     /// their definition lines. Of a subject set, the records whose ids `-parse_deflines` read, by
@@ -6539,6 +6713,40 @@ fn post_process_hits_and_write(
             ),
         }
     });
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1580-1584
+    // ```c++
+    //     display.SetSeqLocChar(CDisplaySeqalign::eLowerCase);
+    //     TSeqLocInfoVector subj_masks;
+    //     results.GetSubjectMasks(subj_masks);
+    //     display.SetSubjectMasks(subj_masks);
+    //     display.DisplaySeqalign(m_Outfile);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_db_adapter.cpp:154-157
+    // ```c++
+    //         if (m_DbInfo.NotEmpty()) {
+    //             m_SeqInfoSrc = new CSeqDbSeqInfoSrc(m_DbInfo->GetSeqDb());
+    //             dynamic_cast<CSeqDbSeqInfoSrc *>(&*m_SeqInfoSrc)
+    //                  ->SetFilteringAlgorithmId(m_DbInfo->GetFilteringAlgorithm());
+    // ```
+    // The stored masks of the reported sequences of a masked database search, by rank: the
+    // displayed rows show the letters of those that meet an HSP in lowercase (`pairwise::Rows`).
+    let database_masks = match (
+        wants_rows,
+        report.database_mask,
+        report.database_reader,
+        report.database_ordinals,
+    ) {
+        (true, Some(algo_id), Some(reader), Some(ordinals)) => {
+            let mut masks = crate::seqdb::MaskBlock::default();
+            Some(
+                ordinals
+                    .iter()
+                    .map(|&ordinal| reader.display_masks(ordinal, algo_id, &mut masks))
+                    .collect::<Result<Vec<_>>>()?,
+            )
+        }
+        _ => None,
+    };
     // The shown masks of every query and subject, made once for every window of queries.
     let rows = wants_rows.then(|| {
         PairwiseRows::new(
@@ -6548,6 +6756,7 @@ fn post_process_hits_and_write(
                 query: report.query_masks,
                 query_offsets: &report.ranges.queries.placements,
                 subject: subject_masks.as_deref(),
+                database: database_masks.as_deref(),
             },
         )
     });
@@ -7871,6 +8080,7 @@ fn open_search_database(
                 name,
                 settings,
                 list,
+                args.db_mask.option().as_ref(),
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis);
@@ -8734,7 +8944,7 @@ fn megablast_index(
 }
 
 fn search(
-    args: BlastnArgs,
+    mut args: BlastnArgs,
     queries: SearchQueries<'_>,
     reading: QueryReading,
     ranges: Ranges<'_>,
@@ -8766,6 +8976,29 @@ fn search(
         Subjects::Database(database) => megablast_index(&args, database, outputs.diagnostics)?,
         Subjects::Records(_) => MegablastIndex::NotAsked,
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (quoted at
+    // `blastinput::db_mask::DbMaskOption::resolve`)
+    // The formatter resolves the database masking (`-db_soft_mask`, `-db_hard_mask`): its warning
+    // (one diagnostic, which the archive saves as one message) or its database error, before its
+    // other work; the archive and the search strategy write the result's program options.
+    if let (Subjects::Database(database), Some(option)) = (subjects, args.db_mask.option()) {
+        let archive = args.archive.clone();
+        let diagnostics = &mut *outputs.diagnostics;
+        let resolved = database.resolve_mask_option(&option, &mut |text| match &archive {
+            Some(handle) => handle.write_warning(diagnostics, text),
+            None => diagnostics.write_all(text),
+        })?;
+        crate::algorithm::common::database::note_archive_database_masking(
+            args.archive.as_ref(),
+            args.strategy.as_ref(),
+            resolved
+                .as_ref()
+                .map(crate::blastinput::db_mask::ResolvedMask::archive_params)
+                .unwrap_or_default(),
+            option.strategy_params(resolved.as_ref()),
+        )?;
+        args.db_mask_resolved = resolved;
+    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:129-136
     // ```c
     //     if(m_IsDbScan) {
@@ -8821,9 +9054,16 @@ fn search(
     // crashes when it writes the title of such a subject with hits); LOSAT stops at the end
     // of the title (`report/defline.rs`, approved exception 2 of PD-LOSAT-NCBI-DEFECTS).
     // LOSAT's limits come where NCBI starts the search, after its checks and its
-    // `Query is Empty!` success.
+    // `Query is Empty!` success (the database's mixed accession tables after the formatter's
+    // errors of a database mask too).
+    if let Subjects::Database(database) = subjects {
+        database.check_accession_tables()?;
+    }
     check_losat_limits(&args)?;
     megablast_index.check()?;
+    if let (Subjects::Database(database), Some(mask)) = (subjects, args.db_mask_resolved.as_ref()) {
+        database.check_mask_limits(mask)?;
+    }
     app::check_search_environment("BLASTN", !matches!(subjects, Subjects::Database(_)))?;
     // The variables' error stops the run after the outfmt 0 prolog (`run_in_pool`).
     let batching = query_batching_from_environment(
@@ -9392,7 +9632,7 @@ impl ShownSubjects {
                 name: database.name().to_string(),
                 num_seqs: metadata.db_num_seqs,
                 total_letters: metadata.db_len_total,
-                database: Some(database.pairwise_database()),
+                database: Some(database.pairwise_database_masked(args.db_mask_resolved.as_ref())),
                 tabular_taxdb_found: args.tabular_taxdb.unwrap_or(false),
             },
         }
@@ -9437,6 +9677,10 @@ struct BlastnSubjectRef<'a> {
     /// traceback alignment met a fence (`alignment::x_fence`): the traceback stops, and
     /// `database::traceback_listed` traces the sequence again whole. `None` otherwise.
     x_fenced: Option<&'a std::sync::atomic::AtomicBool>,
+    /// The block of the preliminary stage that a database sequence was read in
+    /// (`database::block_subject`), whose masks a search with `-db_soft_mask` reads once for all
+    /// its sequences (`database::BlastnDatabase::soft_ranges_into`). `None` otherwise.
+    block: Option<&'a crate::seqdb::BlockRange>,
 }
 
 impl<'a> BlastnSubjectRef<'a> {
@@ -9449,6 +9693,7 @@ impl<'a> BlastnSubjectRef<'a> {
             blastna: None,
             store: None,
             x_fenced: None,
+            block: None,
         }
     }
 
@@ -9462,6 +9707,7 @@ impl<'a> BlastnSubjectRef<'a> {
             blastna: None,
             store: Some(store),
             x_fenced: None,
+            block: None,
         }
     }
 }
@@ -11410,6 +11656,7 @@ fn write_reports_untimed(
         query_masks: results.query_masks,
         archive_dust: &archive_dust,
         lcase_masking: args.lcase_masking,
+        database_mask: args.db_mask_resolved.as_ref().map(|mask| mask.id),
         query_eff_searchsp: results.query_eff_searchsp,
         first_context: QueryStrand::from_option(&args.strand).first_context(),
         megablast,
@@ -11627,6 +11874,56 @@ fn check_batch_window(args: &BlastnArgs, records: &[FastaRecord]) -> Result<()> 
         i32::try_from(window).unwrap_or(i32::MAX),
         "BLASTN",
     )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321 (quoted at
+// `SubjectScratch::db_masks`)
+/// The soft ranges of database sequence `s_idx` (length `s_len_full`) of a search with
+/// `-db_soft_mask` (the algorithm `algo_id`): the complement of its stored masks, read with the
+/// masks of its block (`BlastnDatabase::soft_ranges_into`) into the worker's buffer, which the
+/// caller gives back after the sequence's chunks. A read error goes to `error_cell` (the first by
+/// ordinal id, which the batch returns after the preliminary stage), and `None` ends the
+/// sequence's search. Out of line and cold: the per-sequence path of a search without the option
+/// only tests the option.
+#[cold]
+#[inline(never)]
+fn read_db_soft_ranges(
+    database: &database::BlastnDatabase,
+    algo_id: i32,
+    block: Option<&crate::seqdb::BlockRange>,
+    s_idx: usize,
+    s_len_full: usize,
+    subject_scratch: &mut SubjectScratch,
+    error_cell: &std::sync::Mutex<Option<(u32, anyhow::Error)>>,
+) -> Option<Vec<(i32, i32)>> {
+    let mut ranges = std::mem::take(&mut subject_scratch.db_soft_ranges);
+    let read = match block {
+        Some(&block) => database.soft_ranges_into(
+            block,
+            s_idx as u32,
+            algo_id,
+            s_len_full,
+            &mut subject_scratch.db_masks,
+            &mut ranges,
+        ),
+        None => Err(anyhow::anyhow!(
+            "LOSAT internal error: database sequence {s_idx} was searched without its block"
+        )),
+    };
+    match read {
+        Ok(()) => Some(ranges),
+        Err(error) => {
+            let mut first = error_cell.lock().expect("the error cell is not poisoned");
+            if first
+                .as_ref()
+                .is_none_or(|(smallest, _)| (s_idx as u32) < *smallest)
+            {
+                *first = Some((s_idx as u32, error));
+            }
+            subject_scratch.db_soft_ranges = ranges;
+            None
+        }
+    }
 }
 
 /// Searches one query batch against the subjects, with the query block, lookup table and
@@ -12288,8 +12585,8 @@ fn search_query_batch<const UNGAPPED: bool>(
         x_drop_final,
         scan_range,
         min_diag_separation,
-        // Read only by the chunk strips of `process_subject`, which a build without the parallel
-        // feature (or serial Wasm) does not have.
+        // Read only by the chunk strips of `prelim_subject::collect_subject_prelim`, which a build
+        // without the parallel feature (or serial Wasm) does not have.
         #[cfg_attr(
             not(all(
                 feature = "parallel",
@@ -12406,6 +12703,78 @@ fn search_query_batch<const UNGAPPED: bool>(
     // The initial hits that the word finder saved in every subject chunk of the batch; they
     // size the next batch.
     let good_init_extends = std::sync::atomic::AtomicU64::new(0);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321 (quoted at
+    // `SubjectScratch::db_masks`)
+    // A database search with `-db_soft_mask` (the formatter's `ResolvedMask`; `-db_hard_mask` was
+    // refused before the search): the database and the algorithm whose masks every database
+    // sequence's preliminary search reads (`BlastnDatabase::soft_ranges_into`), and the first
+    // error of those reads by ordinal id, which the batch returns after the preliminary stage
+    // (`process_subject` returns nothing).
+    let db_soft_mask: Option<(&database::BlastnDatabase, i32)> =
+        match (subjects, args.db_mask_resolved.as_ref()) {
+            (SubjectSource::Database(database), Some(mask))
+                if mask.kind == crate::blastinput::db_mask::MaskKind::Soft =>
+            {
+                Some((database, mask.id))
+            }
+            _ => None,
+        };
+    let db_mask_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> = std::sync::Mutex::new(None);
+    // What the preliminary search of a subject's chunks reads that is the same for every subject of
+    // the batch (`prelim_subject::PrelimBatch`), built once.
+    let prelim_batch = prelim_subject::PrelimBatch {
+        query_context_index: &query_context_index,
+        query_concat_length,
+        diag_container_query_length,
+        encoded_query_concat_blastna,
+        encoded_query_concat_blastna_with_sentinels,
+        encoded_queries_blastna: &encoded_queries_blastna,
+        query_lengths: &query_lengths,
+        effective_word_size,
+        scan_step,
+        scan_range,
+        window_size,
+        offset_array_size,
+        use_direct_lookup,
+        small_na_compressed_query: &small_na_compressed_query,
+        small_na_aligned_one_byte,
+        min_ungapped_score,
+        diag_array_length,
+        diag_mask,
+        score_matrix: &score_matrix,
+        nucl_score_table: &nucl_score_table,
+        reward,
+        penalty,
+        gap_open,
+        gap_extend,
+        use_dp,
+        x_drop_gapped,
+        min_diag_separation,
+        good_init_extends: &good_init_extends,
+        requested_parallel,
+        use_parallel,
+        num_threads,
+        parallel_pool,
+        x_qgroup_batch,
+        x_ahead_window,
+        x_greedy_spec,
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        x_strips,
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        x_kind,
+        subject_besthit,
+        debug_mode,
+        blastn_debug,
+        blastn_trace_enabled,
+        verbose,
+        debug_window,
+    };
     let process_subject = |s_idx: usize,
                            subject: BlastnSubjectRef<'_>,
                            gap_scratch: &mut GapAlignScratch,
@@ -12535,23 +12904,51 @@ fn search_query_batch<const UNGAPPED: bool>(
         //                                        use_lcase_masks, subjects, m_IsMapper);
         // ```
         // The lowercase masks of the subjects are those of the FASTA records of
-        // `-subject`; a database sequence has none (its masks would come from
-        // `-db_soft_mask`, which LOSAT does not implement).
+        // `-subject`; a database sequence has none.
         let subject_masks = match (subject.letters, subject.store) {
             (Some(letters), _) if lcase_masking => collect_lowercase_masks(letters),
             (None, Some(store)) if lcase_masking => store.lowercase().to_vec(),
             _ => Vec::new(),
         };
-        let subject_masked = !subject_masks.is_empty();
         // Unmasked, every chunk carries its range inline (`SeqRanges::Inline`) and no one reads
         // the soft ranges, so none are made (NCBI points them at `full_range`).
-        let soft_ranges = if subject_masked {
+        let mut subject_masked = !subject_masks.is_empty();
+        let mut soft_ranges = if subject_masked {
             build_subject_seq_ranges_from_masks(subject_masks.as_slice(), s_len_full)
         } else {
             Vec::new()
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:399-405 (quoted at
+        // `SubjectScratch::db_masks`)
+        // With `-db_soft_mask` every database sequence is a masked subject (its mask type is set
+        // whether or not it has masks; decision D3 of M4a-2): its soft ranges are the complement
+        // of its stored masks (`BlastnDatabase::soft_ranges_into`), read by the preliminary stage
+        // only (the traceback scans nothing).
+        // The read is out of line (`read_db_soft_ranges`, cold): a search without the option
+        // pays one test of `db_soft_mask` per sequence and keeps its registers.
+        let db_masked = db_soft_mask.is_some() && prelim_source.is_none();
+        if let (true, Some((database, algo_id))) = (db_masked, db_soft_mask) {
+            match read_db_soft_ranges(
+                database,
+                algo_id,
+                subject.block,
+                s_idx,
+                s_len_full,
+                subject_scratch,
+                &db_mask_error,
+            ) {
+                Some(ranges) => {
+                    soft_ranges = ranges;
+                    subject_masked = true;
+                }
+                None => return,
+            }
+        }
 
         if s_len_full < effective_word_size {
+            if db_masked {
+                subject_scratch.db_soft_ranges = soft_ranges;
+            }
             return;
         }
 
@@ -12631,958 +13028,55 @@ fn search_query_batch<const UNGAPPED: bool>(
             );
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-        // ```c
-        // /* Delete if not done in last loop iteration to prevent memory leak. */
-        // hsp_list = Blast_HSPListFree(hsp_list);
-        //
-        // BlastInitHitListReset(init_hitlist);
-        // ```
-        let collect_prelim_hits_for_chunk = |chunk: &SubjectChunk,
-                                             soft_ranges: &[(i32, i32)],
-                                             gap_scratch: &mut GapAlignScratch,
-                                             subject_scratch: &mut SubjectScratch,
-                                             reuse_prelim_hits: bool|
-         -> Vec<PrelimHit> {
-            let hits = &mut subject_scratch.hits;
-            hits.clear();
-            let prelim_hits = &mut subject_scratch.prelim_hits;
-            prelim_hits.clear();
-            let greedy_align_scratch = &mut subject_scratch.greedy_align_scratch;
-
-            let s_len = chunk.length;
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-307
-            // ```c
-            // if (backup->offset == 0 && residual == 0 && backup->next == backup->full_range.right) {
-            //     subject->seq_ranges = backup->soft_ranges;
-            //     subject->num_seq_ranges = backup->num_soft_ranges;
-            //     return SUBJECT_SPLIT_OK;
-            // }
-            // ...
-            // for (i=0; i<len; i++) {
-            //     subject->seq_ranges[i].left = backup->soft_ranges[i+start].left - backup->offset;
-            //     subject->seq_ranges[i].right = backup->soft_ranges[i+start].right - backup->offset;
-            // }
-            // ```
-            let seq_ranges_scratch = &mut subject_scratch.seq_ranges_scratch;
-            let subject_seq_ranges = chunk.seq_ranges.as_slice(
-                soft_ranges,
-                seq_ranges_scratch,
-                chunk.offset as i32,
-                s_len as i32,
-            );
-            let subject_masked = chunk.masked;
-
-            let packed_offset = chunk.offset / COMPRESSION_RATIO;
-            let s_seq_packed = &s_seq_packed_full[packed_offset..];
-
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
-            // ```c
-            // for (; s <= s_end; s += scan_step) {
-            //     num_hits = s_BlastLookupGetNumHits(lookup, index);
-            //     if (num_hits == 0)
-            //         continue;
-            //     s_BlastLookupRetrieve(lookup,
-            //                           index,
-            //                           offset_pairs + total_hits,
-            //                           ...);
-            //     total_hits += num_hits;
-            // }
-            // ```
-            let debug_enabled = debug_mode || blastn_debug;
-
-            // Debug counters for this subject (only updated when debug_enabled)
-            let mut dbg_total_s_positions = 0usize;
-            let dbg_ambiguous_skipped = 0usize;
-            let dbg_no_lookup_match = 0usize;
-            let mut dbg_seeds_found = 0usize;
-            let mut dbg_ungapped_low = 0usize;
-            let dbg_two_hit_failed = 0usize;
-            let mut dbg_gapped_attempted = 0usize;
-            let mut dbg_window_seeds = 0usize;
-
-            let safe_k = effective_word_size.min(31);
-
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:147-259
-            // ```c
-            // /* Scan the compressed subject sequence */
-            // index = s[0] << 16 | s[1] << 8 | s[2];
-            // index = (index >> shift) & mask;
-            // ```
-
-            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:866-869 (query blastna, subject ncbi2na)
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847 (subject blastna + ncbi2na)
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2949-3016 (packed subject for score-only DP)
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:806-833 (GetReverseNuclSequence uses ncbi4na/blastna)
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:148-349 (packed ncbi2na used for ungapped extension)
-
-            // NCBI reference: blast_gapalign.c:3826-3831 Blast_IntervalTreeInit
-            // Initialize interval tree for HSP containment checking
-            // Tree is indexed by query offsets (primary) and subject offsets (midpoint subtrees)
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3811-3831
-            // ```c
-            // tree = Blast_IntervalTreeInit(0, query->length+1,
-            //                               0, subject->length+1);
-            // ```
-            // query->length is the concatenated length for both strands (2*len + 1).
-            // The tree is the scratch's (`x_tree`), given this chunk's ranges.
-            let interval_tree = &mut subject_scratch.x_tree;
-            interval_tree.reset_with_bounds(
-                0,                                // q_min
-                (query_concat_length + 1) as i32, // q_max
-                0,                                // s_min
-                (s_len + 1) as i32,               // s_max
-            );
-
-            // NCBI architecture: Collect all ungapped hits first, then process in score-descending order
-            // NCBI reference: blast_gapalign.c:3824 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))
-            // This is critical for correct containment checking: high-score HSPs must be processed first
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-            // ```c
-            // hsp_list = Blast_HSPListFree(hsp_list);
-            // BlastInitHitListReset(init_hitlist);
-            // ```
-            let ungapped_hits = &mut subject_scratch.ungapped_hits;
-            ungapped_hits.clear();
-
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-64
-            // ```c
-            // diag_array_length = 1;
-            // while (diag_array_length < (qlen+window_size))
-            //     diag_array_length = diag_array_length << 1;
-            // diag_table->diag_array_length = diag_array_length;
-            // diag_table->diag_mask = diag_array_length-1;
-            // diag_table->offset = window_size;
-            // ```
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1002-1003
-            // ```c
-            // if ((status = BlastExtendWordNew(query->length, word_params,
-            //                                 &aux_struct->ewp)) != 0)
-            // ```
-            // One diagonal table for the whole query block (every query and both
-            // strands): `query->length` is the last context's offset plus its
-            // length, `query_concat_length` here, and the diagonals use offsets in
-            // the concatenated query.
-            let (diag_table_length, diag_table_mask) = (diag_array_length, diag_mask as isize);
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:166-233
-            // ```c
-            // const int kQueryLenForHashTable = 8000; /* For blastn, use hash table rather
-            //                                         than diag array for any query longer
-            //                                         than this */
-            // if (Blast_ProgramIsNucleotide(program_number) &&
-            //     !Blast_QueryIsPattern(program_number) &&
-            //     (query_info->contexts[query_info->last_context].query_offset +
-            //      query_info->contexts[query_info->last_context].query_length) > kQueryLenForHashTable)
-            //     p->container_type = eDiagHash;
-            // else
-            //     p->container_type = eDiagArray;
-            // ```
-            let use_diag_hash = diag_container_query_length > 8000;
-            let use_array_indexing = !use_diag_hash;
-            let diag_window = window_size as i32;
-
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:786-833
-            // ```c
-            // first_context = 1;
-            // last_context = 1;
-            // ...
-            // subject->frame = context;
-            // ```
-            // BLASTN scans subject plus strand only; query contexts cover both strands.
-            for _subject_strand in [false] {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
-                // ```c
-                // BlastSeqBlkSetSequence(subj, sequence.data.release(),
-                //    ((sentinels == eSentinels) ? sequence.length - 2 :
-                //     sequence.length));
-                // ...
-                // BlastSeqBlkSetCompressedSequence(subj,
-                //                                  compressed_seq.data.release());
-                // ```
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:148-349 (packed subject used by ungapped extension)
-                let search_seq_packed: &[u8] = s_seq_packed;
-
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:656-662
-                // ```c
-                // s_off_pos = s_off + diag_table->offset;
-                // ```
-                let diag_offset = if use_array_indexing {
-                    subject_scratch.diag_table_offset as isize
-                } else {
-                    subject_scratch.diag_hash.offset as isize
-                };
-                let diag_array_size = if use_array_indexing {
-                    diag_table_length
-                } else {
-                    0
-                };
-
-                // NCBI BLAST does NOT use a separate mask array for diagonal suppression
-                // NCBI only uses last_hit in hit_level_array (checked at line 753)
-                // This mask_array/mask_hash was LOSAT-specific and caused excessive filtering
-                // REMOVED to match NCBI BLAST behavior
-
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:84-105
-                // ```c
-                // n = diag->diag_array_length;
-                // diag->offset = diag->window;
-                // diag_struct_array = diag->hit_level_array;
-                // for (i = 0; i < n; i++) {
-                //     diag_struct_array[i].flag = 0;
-                //     diag_struct_array[i].last_hit = -diag->window;
-                //     if (diag->hit_len_array) diag->hit_len_array[i] = 0;
-                // }
-                // ```
-                // NCBI reference: blast_extend.h:77-80, na_ungapped.c:660-666
-                // Two-hit tracking: DiagStruct array for tracking last_hit and flag per diagonal
-                // hit_level_array[diag] contains {last_hit, flag} (equivalent to NCBI's DiagStruct)
-                // hit_len_array[diag] contains hit length (0 = no hit, >0 = hit length)
-                // For single query: use Vec for O(1) access, otherwise use HashMap
-                let hit_level_array = &mut subject_scratch.hit_level_array;
-                let hit_len_array = &mut subject_scratch.hit_len_array;
-                let diag_hash = &mut subject_scratch.diag_hash;
-                // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the two retrieves of the
-                // diagonal hash in the scans called below (`two_stage_scan::scan_two_stage_lookup`,
-                // through `pair_extend::extend_offset_pairs`, for a two-stage table,
-                // `na_scan::scan_na_lookup` for the other tables) skip the walk of
-                // a bucket whose cells all lie below the level bound, unless diagnostics print what
-                // they read.
-                let x_lv_ref = diag_hash.x_lv_on()
-                    && !(debug_enabled || blastn_trace_enabled || debug_window.is_some());
-                if diag_hash.x_lv_on() {
-                    crate::utils::xreach::x_reach!("LOSAT_X_DIAGLV", use_diag_hash && x_lv_ref);
-                    // EXPERIMENT (LOSAT_X_DIAGLV2): the reference folds called below
-                    // (`pair_extend::extend_offset_pairs`, `na_scan::scan_na_lookup`) never read
-                    // the memo (the strips stage of dc-megablast records its own side).
-                    if x_diag_lv::lv2_on() {
-                        crate::utils::xreach::x_reach!("LOSAT_X_DIAGLV2", false);
-                    }
-                }
-                if use_array_indexing {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:145-149
-                    // ```c
-                    // diag_table->hit_level_array = (DiagStruct *)
-                    //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-                    // if (word_params->options->window_size) {
-                    //     diag_table->hit_len_array = (Uint1 *)
-                    //          calloc(diag_table->diag_array_length, sizeof(Uint1));
-                    // }
-                    // ```
-                    if hit_level_array.len() != diag_array_size {
-                        let had_entries = !hit_level_array.is_empty();
-                        let diag_default = DiagStruct::default();
-                        hit_level_array.resize(diag_array_size, diag_default);
-                        if had_entries {
-                            hit_level_array.fill(diag_default);
-                        }
-                    }
-                    if window_size > 0 {
-                        if hit_len_array.len() != diag_array_size {
-                            let had_entries = !hit_len_array.is_empty();
-                            hit_len_array.resize(diag_array_size, 0);
-                            if had_entries {
-                                hit_len_array.fill(0);
-                            }
-                        }
-                    } else if !hit_len_array.is_empty() {
-                        hit_len_array.clear();
-                    }
-                } else {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-182
-                    // ```c
-                    // if (ewp->hash_table->offset >= INT4_MAX / 4) {
-                    //     ewp->hash_table->occupancy = 1;
-                    //     ewp->hash_table->offset = ewp->hash_table->window;
-                    //     memset(ewp->hash_table->backbone, 0,
-                    //            ewp->hash_table->num_buckets * sizeof(Int4));
-                    // } else {
-                    //     ewp->hash_table->offset += subject_length + ewp->hash_table->window;
-                    // }
-                    // ```
-                    // Hash-based diagonals persist across chunks; only clear on offset overflow.
-                    hit_level_array.clear();
-                    hit_len_array.clear();
-                }
-
-                if s_len < effective_word_size {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
-                    // ```c
-                    // if (ewp->diag_table->offset >= INT4_MAX / 4) {
-                    //     ewp->diag_table->offset = ewp->diag_table->window;
-                    //     s_BlastDiagClear(ewp->diag_table);
-                    // } else {
-                    //     ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-                    // }
-                    // ```
-                    advance_diag_table_offset(
-                        &mut subject_scratch.diag_table_offset,
-                        diag_window,
-                        s_len,
-                        use_array_indexing,
-                        hit_level_array,
-                        hit_len_array,
-                        diag_hash,
-                    );
-                    return Vec::new();
-                }
-
-                // TWO-STAGE LOOKUP: Use separate rolling k-mer for lut_word_length
-                if let Some(two_stage) = two_stage_lookup_ref {
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-                    // ```c
-                    //     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-                    //
-                    //         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-                    // ...
-                    //         hits_extended += extend(offset_pairs, hitsfound, word_params,
-                    //                                 lookup_wrap, query, subject, matrix,
-                    //                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
-                    //     }
-                    // ```
-                    // Dispatch point of PAIRPAR: `x_pair_seed::run` does what
-                    // `two_stage_scan::scan_two_stage_lookup` does (scan, word extension, diagonal
-                    // table, ungapped extension; in the scopes of `x_pair_seed.rs` and, for a
-                    // discontiguous table, `x_pair_seed_disc.rs`) with the subject scan in strips
-                    // and the pairs folded by this thread in the scan order; `continue` ends the
-                    // one-iteration strand loop. Otherwise `two_stage_scan::scan_two_stage_lookup`
-                    // runs.
-                    if x_pair_seed::run(
-                        &x_pair_seed::Inputs {
-                            two_stage,
-                            search_seq_packed,
-                            s_len,
-                            subject_seq_ranges,
-                            subject_masked,
-                            scan_step,
-                            query_context_index: &query_context_index,
-                            query_contexts,
-                            encoded_query_concat_blastna,
-                            encoded_query_concat_blastna_with_sentinels,
-                            cutoff_scores,
-                            x_dropoff_scores,
-                            reduced_cutoff_scores,
-                            score_matrix: &score_matrix,
-                            nucl_score_table: &nucl_score_table,
-                            diag_offset,
-                            diag_hash_window: diag_hash_insert_window(
-                                window_size,
-                                scan_range,
-                                two_stage.word_length(),
-                            ),
-                            use_array_indexing,
-                            window_size,
-                            scan_range,
-                            small_na_word: !small_na_compressed_query.is_empty(),
-                            diagnostics: debug_enabled
-                                || blastn_trace_enabled
-                                || debug_window.is_some(),
-                            one_subject_owner: !use_parallel && reuse_prelim_hits,
-                            timing: timing_ref,
-                        },
-                        diag_hash,
-                        x_pair_seed::DiagArray {
-                            levels: &mut *hit_level_array,
-                            lens: &mut *hit_len_array,
-                            length: diag_table_length as isize,
-                            mask: diag_table_mask,
-                            size: diag_array_size,
-                        },
-                        ungapped_hits,
-                        &mut subject_scratch.x_pair_fold,
-                    ) {
-                        continue;
-                    }
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-498
-                    // ```c
-                    //         if (aux_struct->WordFinder) {
-                    //             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
-                    //                                    word_params, aux_struct->ewp,
-                    //                                    aux_struct->offset_pairs,
-                    //                                    kScanSubjectOffsetArraySize,
-                    //                                    init_hitlist, ungapped_stats);
-                    // ```
-                    // The reference scan of this chunk and the steps of the offset pairs it collects
-                    // (`two_stage_scan::scan_two_stage_lookup`), with what they read and write, built once per
-                    // chunk.
-                    two_stage_scan::scan_two_stage_lookup(
-                        &two_stage_scan::TwoStageScanInputs {
-                            two_stage,
-                            search_seq_packed,
-                            s_len,
-                            scan_step,
-                            subject_seq_ranges,
-                            subject_masked,
-                            offset_array_size,
-                            small_na_compressed_query: &small_na_compressed_query,
-                            small_na_aligned_one_byte,
-                            encoded_query_concat_blastna_with_sentinels,
-                            query_context_index: &query_context_index,
-                            query_contexts,
-                            cutoff_scores,
-                            chunk,
-                            use_array_indexing,
-                            diag_table_length,
-                            diag_table_mask,
-                            diag_array_size,
-                            diag_offset,
-                            x_lv_ref,
-                            window_size,
-                            scan_range,
-                            encoded_query_concat_blastna,
-                            x_dropoff_scores,
-                            reduced_cutoff_scores,
-                            score_matrix: &score_matrix,
-                            nucl_score_table: &nucl_score_table,
-                            debug_enabled,
-                            debug_mode,
-                            blastn_debug,
-                            debug_window,
-                            blastn_trace_enabled,
-                            s_idx,
-                            s_id,
-                            min_ungapped_score,
-                            timing_enabled,
-                            timing_ref,
-                        },
-                        &mut two_stage_scan::TwoStageScanState {
-                            ungapped_hits: &mut *ungapped_hits,
-                            hit_level_array: &mut *hit_level_array,
-                            hit_len_array: &mut *hit_len_array,
-                            diag_hash: &mut *diag_hash,
-                            offset_pairs: &mut subject_scratch.offset_pairs,
-                            dbg_total_s_positions: &mut dbg_total_s_positions,
-                            dbg_seeds_found: &mut dbg_seeds_found,
-                            dbg_window_seeds: &mut dbg_window_seeds,
-                            dbg_ungapped_low: &mut dbg_ungapped_low,
-                            dbg_gapped_attempted: &mut dbg_gapped_attempted,
-                        },
-                    );
-                }
-                if two_stage_lookup_ref.is_none() {
-                    // Original lookup method (for non-two-stage lookup)
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
-                    // ```c
-                    // for (; s <= s_end; s += scan_step) {
-                    //     num_hits = s_BlastLookupGetNumHits(lookup, index);
-                    //     if (num_hits == 0)
-                    //         continue;
-                    //     s_BlastLookupRetrieve(lookup,
-                    //                           index,
-                    //                           offset_pairs + total_hits,
-                    //                           ...);
-                    //     total_hits += num_hits;
-                    // }
-                    // ```
-                    // Dispatch point of LOSAT_X_PAIRPARNA: `x_pair_seed::run_na` does what
-                    // `na_scan::scan_na_lookup` does (scan, diagonal hash, ungapped extension;
-                    // one-hit diagonal-hash scope only) with the subject scan in strips on the pool
-                    // threads and the pairs folded in the scan order; `continue` ends the
-                    // one-iteration strand loop. Otherwise `na_scan::scan_na_lookup` runs.
-                    if x_pair_seed::run_na(
-                        &x_pair_seed::NaInputs {
-                            pv_direct_lookup: pv_direct_lookup_ref,
-                            na_lookup: na_lookup_ref,
-                            use_direct_lookup,
-                            word_length: safe_k,
-                            search_seq_packed,
-                            s_len,
-                            subject_seq_ranges,
-                            subject_masked,
-                            scan_step,
-                            query_context_index: &query_context_index,
-                            query_contexts,
-                            encoded_queries_blastna: &encoded_queries_blastna,
-                            cutoff_scores,
-                            x_dropoff_scores,
-                            reduced_cutoff_scores,
-                            score_matrix: &score_matrix,
-                            nucl_score_table: &nucl_score_table,
-                            diag_offset,
-                            diag_hash_window: diag_hash_insert_window(
-                                window_size,
-                                scan_range,
-                                safe_k,
-                            ),
-                            use_array_indexing,
-                            window_size,
-                            scan_range,
-                            diagnostics: debug_enabled
-                                || blastn_trace_enabled
-                                || debug_window.is_some(),
-                            one_subject_owner: !use_parallel && reuse_prelim_hits,
-                            timing: timing_ref,
-                        },
-                        diag_hash,
-                        ungapped_hits,
-                        &mut subject_scratch.x_pair_fold,
-                    ) {
-                        continue;
-                    }
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-                    // ```c
-                    //     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-                    //
-                    //         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-                    // ...
-                    //         hits_extended += extend(offset_pairs, hitsfound, word_params,
-                    // ...
-                    //     }
-                    // ```
-                    // The reference scan of this chunk and the steps of the seeds it finds
-                    // (`na_scan::scan_na_lookup`), with what they read and write, built once per
-                    // chunk.
-                    na_scan::scan_na_lookup(
-                        &na_scan::NaScanInputs {
-                            search_seq_packed,
-                            s_len,
-                            safe_k,
-                            scan_step,
-                            subject_seq_ranges,
-                            subject_masked,
-                            use_direct_lookup,
-                            pv_direct_lookup_ref,
-                            na_lookup_ref,
-                            query_context_index: &query_context_index,
-                            query_contexts,
-                            encoded_queries_blastna: &encoded_queries_blastna,
-                            cutoff_scores,
-                            chunk,
-                            use_array_indexing,
-                            diag_table_length,
-                            diag_table_mask,
-                            diag_array_size,
-                            diag_offset,
-                            x_lv_ref,
-                            window_size,
-                            scan_range,
-                            x_dropoff_scores,
-                            reduced_cutoff_scores,
-                            score_matrix: &score_matrix,
-                            nucl_score_table: &nucl_score_table,
-                            debug_enabled,
-                            debug_window,
-                            blastn_trace_enabled,
-                            s_idx,
-                            s_id,
-                            debug_mode,
-                            min_ungapped_score,
-                            timing_enabled,
-                            timing_ref,
-                        },
-                        &mut na_scan::NaScanState {
-                            ungapped_hits: &mut *ungapped_hits,
-                            hit_level_array: &mut *hit_level_array,
-                            hit_len_array: &mut *hit_len_array,
-                            diag_hash: &mut *diag_hash,
-                            dbg_total_s_positions: &mut dbg_total_s_positions,
-                            dbg_seeds_found: &mut dbg_seeds_found,
-                            dbg_window_seeds: &mut dbg_window_seeds,
-                            dbg_ungapped_low: &mut dbg_ungapped_low,
-                            dbg_gapped_attempted: &mut dbg_gapped_attempted,
-                        },
-                    );
-                } // end of if/else for two-stage vs original lookup
-            } // end of strand loop
-
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:560-563
-            // ```c
-            //         } else {
-            //             BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-            //                     hit_params->options, &hsp_list);
-            //         }
-            // ```
-            // An ungapped (`-ungapped`) search makes the chunk's HSP list from its initial hits
-            // (`prelim_hsp_list::ungapped_hsp_list`); the diagonal table then moves on, as after
-            // a gapped search's chunk.
-            if UNGAPPED {
-                let chunk_prelim_hits =
-                    prelim_hsp_list::ungapped_hsp_list(ungapped_hits, chunk, &good_init_extends);
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
-                // (the diagonal table's offset moves on after each chunk, as below)
-                advance_diag_table_offset(
-                    &mut subject_scratch.diag_table_offset,
-                    diag_window,
-                    s_len,
-                    use_array_indexing,
-                    &mut subject_scratch.hit_level_array,
-                    &mut subject_scratch.hit_len_array,
-                    &mut subject_scratch.diag_hash,
-                );
-                return chunk_prelim_hits;
-            }
-
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1688-1692
-            // ```c
-            //     Blast_UngappedStatsUpdate(ungapped_stats, total_hits, hits_extended,
-            //                               init_hitlist->total);
-            //
-            //     if (word_params->ungapped_extension)
-            //         Blast_InitHitListSortByScore(init_hitlist);
-            // ```
-            // The initial hits sorted by score for the gapped loop, or grouped by query for its
-            // query group tasks (LOSAT_X_QGROUPPAR), and counted
-            // (`prelim_hsp_list::sort_ungapped_hits_for_gapped`).
-            let (x_counts, x_order, total_ungapped) =
-                prelim_hsp_list::sort_ungapped_hits_for_gapped(
-                    ungapped_hits,
-                    x_qgroup_batch,
-                    reuse_prelim_hits,
-                    queries,
-                    &good_init_extends,
-                );
-            let gapped_start_time = std::time::Instant::now();
-
-            // The values the gapped preliminary loop of this chunk
-            // (`prelim_hsp_list::gapped_score_list`) and one hit's extension
-            // (`prelim_hsp_list::x_prelim_extend`) read, for the query group tasks and the
-            // look-ahead helpers on the pool as for this thread.
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3664-3674
-            // ```c
-            // Int2 BLAST_GetGappedScore (EBlastProgramType program_number,
-            //         BLAST_SequenceBlk* query, BlastQueryInfo* query_info,
-            //         BLAST_SequenceBlk* subject,
-            //         BlastGapAlignStruct* gap_align,
-            //         const BlastScoringParameters* score_params,
-            //         const BlastExtensionParameters* ext_params,
-            //         const BlastHitSavingParameters* hit_params,
-            //         const BlastInitialWordParameters* word_params,
-            //         BlastInitHitList* init_hitlist,
-            //         BlastHSPList** hsp_list_ptr, BlastGappedStats* gapped_stats,
-            //         Boolean * fence_hit)
-            // ```
-            // No NCBI counterpart: the look-ahead's schedule (scheduling only).
-            let gapped = prelim_hsp_list::GappedPrelim {
-                blastn_trace_enabled,
-                verbose,
-                s_idx,
-                s_id,
-                x_prelim_subject: &x_prelim_subject,
-                chunk,
-                s_seq_packed,
-                s_len,
-                encoded_queries_blastna: &encoded_queries_blastna,
-                query_contexts,
-                hit_saving_cutoff_scores,
-                reward,
-                penalty,
-                gap_open,
-                gap_extend,
-                score_matrix: &score_matrix,
-                use_dp,
-                x_drop_gapped,
-                min_diag_separation,
-                reuse_prelim_hits,
-                total_ungapped,
-                x_ahead_window,
-                x_greedy_spec,
-                num_threads,
-            };
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:522-526,545,555
-            // ```c
-            //         if (aux_struct->GetGappedScore) {
-            //             status = aux_struct->GetGappedScore(program_number, query,
-            //                     query_info,
-            //                     subject, gap_align, score_params, ext_params, hit_params,
-            //                     word_params, init_hitlist, &hsp_list, gapped_stats, NULL);
-            // ...
-            //             Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
-            // ...
-            //         Blast_HSPListSortByScore(hsp_list);
-            // ```
-            // The chunk's gapped HSP list (`prelim_hsp_list::gapped_hsp_list`): the gapped loop per
-            // query on the pool (LOSAT_X_QGROUPPAR) or over the chunk's list on this thread with
-            // the subject's scratch, then the purge, the sort and the chunk's offset.
-            let chunk_prelim_hits = prelim_hsp_list::gapped_hsp_list(
-                &gapped,
-                &prelim_hsp_list::GappedDrive {
-                    x_counts: &x_counts,
-                    x_order: &x_order,
-                    queries,
-                    query_concat_length,
-                    parallel_pool,
-                    timing_ref,
-                    gapped_start_time,
-                },
-                ungapped_hits,
-                prelim_hsp_list::GappedListState {
-                    interval_tree,
-                    gap_scratch,
-                    greedy_align_scratch,
-                    x_helper_scratch: Some(&mut subject_scratch.x_ahead_scratch),
-                    prelim_hits,
-                },
-            );
-            // Suppress unused variable warnings when not in debug mode
-            let _ = (
-                dbg_total_s_positions,
-                dbg_ambiguous_skipped,
-                dbg_no_lookup_match,
-                dbg_seeds_found,
-                dbg_ungapped_low,
-                dbg_two_hit_failed,
-                dbg_gapped_attempted,
-                dbg_window_seeds,
-                total_ungapped,
-            );
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
-            // ```c
-            // if (ewp->diag_table->offset >= INT4_MAX / 4) {
-            //     ewp->diag_table->offset = ewp->diag_table->window;
-            //     s_BlastDiagClear(ewp->diag_table);
-            // } else {
-            //     ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-            // }
-            // ```
-            let hit_level_array = &mut subject_scratch.hit_level_array;
-            let hit_len_array = &mut subject_scratch.hit_len_array;
-            let diag_hash = &mut subject_scratch.diag_hash;
-            advance_diag_table_offset(
-                &mut subject_scratch.diag_table_offset,
-                diag_window,
-                s_len,
-                use_array_indexing,
-                hit_level_array,
-                hit_len_array,
-                diag_hash,
-            );
-            chunk_prelim_hits
-        };
-
         let mut combined_prelim_hits: Vec<PrelimHit> = Vec::new();
         if let Some(kept) = prelim_source {
             // The traceback of the HSPs that the preliminary stage kept (`search_subjects`).
             combined_prelim_hits.clone_from(kept);
         } else {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-483,593-599
             // ```c
-            // if (num_threads > 1) {
-            //     SetNumberOfThreads(num_threads);
-            // }
+            //     while (TRUE) {
+            //         status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+            //                                        dbseq_chunk_overlap);
+            //
+            //         if (status == SUBJECT_SPLIT_DONE) break;
+            //         if (status == SUBJECT_SPLIT_NO_RANGE) continue;
+            // ...
+            //     } /* End loop on chunks of subject sequence */
+            // ...
+            //     *hsp_list_out_ptr = combined_hsp_list;
             // ```
-            // NCBI reference: c++/src/algo/blast/core/blast_engine.c:478-536
-            // status = s_GetNextSubjectChunk(subject, &backup, kNucleotide, ...);
-            // A single subject can contain independent chunks. Pool availability
-            // is separate from the outer subject traversal's number of jobs.
-            if requested_parallel {
-                #[cfg(all(
-                    feature = "parallel",
-                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                ))]
-                {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
-                    // ```c
-                    // while (TRUE) {
-                    //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-                    //                                    dbseq_chunk_overlap);
-                    //     if (status == SUBJECT_SPLIT_DONE) break;
-                    //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
-                    //     ...
-                    // }
-                    // ```
-                    let max_in_flight = num_threads.max(1) * 2;
-                    let mut chunk_batch: Vec<SubjectChunk> = Vec::with_capacity(max_in_flight);
-                    let mut done = false;
-                    loop {
-                        chunk_batch.clear();
-                        while chunk_batch.len() < max_in_flight && !done {
-                            match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
-                                SubjectChunkStatus::Done => done = true,
-                                SubjectChunkStatus::NoRange => continue,
-                                SubjectChunkStatus::Ok(chunk) => chunk_batch.push(chunk),
-                            }
-                        }
-                        if chunk_batch.is_empty() {
-                            break;
-                        }
-
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-268
-                        // ```c
-                        // subject->seq_ranges = backup->soft_ranges;
-                        // subject->num_seq_ranges = backup->num_soft_ranges;
-                        // return SUBJECT_SPLIT_OK;
-                        // ```
-                        // NCBI reference: c++/src/algo/blast/core/blast_engine.c:478-500
-                        // status = s_GetNextSubjectChunk(subject, &backup, ...);
-                        // EXPERIMENT (LOSAT_X_BNFEWSUBJ): a batch whose longest chunk is a large
-                        // part of its letters (`x_few_subj::serial_chunks`), which this subject's
-                        // owner searches by itself, searches its chunks in order as one-chunk
-                        // batches do (strips for each chunk), with the one-thread loop's
-                        // statements below.
-                        let x_serial_chunks = !use_parallel
-                            && !subject_masked
-                            && x_strips
-                            && x_few_subj::serial_chunks(
-                                chunk_batch.iter().map(|chunk| chunk.length),
-                                num_threads,
-                                x_kind,
-                            );
-                        if !use_parallel && !subject_masked && x_strips && chunk_batch.len() > 1 {
-                            crate::utils::xreach::x_reach!("LOSAT_X_BNFEWSUBJ", x_serial_chunks);
-                        }
-                        crate::utils::threading::report_stage(
-                            "blastn",
-                            "subject_chunks",
-                            chunk_batch.len(),
-                            chunk_batch.len() > 1 && !x_serial_chunks,
-                        );
-                        let soft_ranges = split_state.soft_ranges.as_slice();
-                        if chunk_batch.len() == 1 || x_serial_chunks {
-                            for chunk in chunk_batch.iter() {
-                                let hits = collect_prelim_hits_for_chunk(
-                                    chunk,
-                                    soft_ranges,
-                                    gap_scratch,
-                                    subject_scratch,
-                                    true,
-                                );
-                                let hits = merge_prelim_hit_lists(
-                                    &mut combined_prelim_hits,
-                                    hits,
-                                    HspListSplit::Subject {
-                                        offset: chunk.offset,
-                                    },
-                                    chunk.overlap,
-                                    !UNGAPPED,
-                                );
-                                if subject_besthit {
-                                    prelim_subject_best_hit(
-                                        &mut combined_prelim_hits,
-                                        &query_lengths,
-                                    );
-                                }
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-                                // ```c
-                                // /* Delete if not done in last loop iteration to prevent memory leak. */
-                                // hsp_list = Blast_HSPListFree(hsp_list);
-                                //
-                                // BlastInitHitListReset(init_hitlist);
-                                // ```
-                                subject_scratch.prelim_hits = hits;
-                            }
-                        } else {
-                            let mut chunk_results: Vec<(usize, usize, Vec<PrelimHit>)> =
-                                Vec::with_capacity(chunk_batch.len());
-                            chunk_batch
-                                .par_iter()
-                                .map_init(
-                                    || {
-                                        (
-                                            GapAlignScratch::new(),
-                                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-                                            // ```c
-                                            // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-                                            // ...
-                                            // aux_struct->offset_pairs =
-                                            //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-                                            // ```
-                                            SubjectScratch::new(offset_array_size, window_size),
-                                        )
-                                    },
-                                    |state, chunk| {
-                                        let (gap_scratch, subject_scratch) = state;
-                                        let hits = collect_prelim_hits_for_chunk(
-                                            chunk,
-                                            soft_ranges,
-                                            gap_scratch,
-                                            subject_scratch,
-                                            false,
-                                        );
-                                        (chunk.offset, chunk.overlap, hits)
-                                    },
-                                )
-                                .collect_into_vec(&mut chunk_results);
-                            for (offset, overlap, hits) in chunk_results {
-                                let _ = merge_prelim_hit_lists(
-                                    &mut combined_prelim_hits,
-                                    hits,
-                                    HspListSplit::Subject { offset },
-                                    overlap,
-                                    !UNGAPPED,
-                                );
-                                if subject_besthit {
-                                    prelim_subject_best_hit(
-                                        &mut combined_prelim_hits,
-                                        &query_lengths,
-                                    );
-                                }
-                            }
-                        }
-
-                        if done {
-                            break;
-                        }
-                    }
-                }
-                #[cfg(any(
-                    not(feature = "parallel"),
-                    all(target_arch = "wasm32", not(feature = "wasm-threads"))
-                ))]
-                {
-                    unreachable!("use_parallel is false when parallel threads are disabled");
-                }
-            } else {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
-                // ```c
-                // while (TRUE) {
-                //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-                //                                    dbseq_chunk_overlap);
-                //     if (status == SUBJECT_SPLIT_DONE) break;
-                //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
-                //     ...
-                // }
-                // ```
-                loop {
-                    match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
-                        SubjectChunkStatus::Done => break,
-                        SubjectChunkStatus::NoRange => continue,
-                        SubjectChunkStatus::Ok(chunk) => {
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-268
-                            // ```c
-                            // subject->seq_ranges = backup->soft_ranges;
-                            // subject->num_seq_ranges = backup->num_soft_ranges;
-                            // return SUBJECT_SPLIT_OK;
-                            // ```
-                            // NCBI reference: c++/src/algo/blast/core/blast_engine.c:478-500
-                            // status = s_GetNextSubjectChunk(subject, &backup, ...);
-                            crate::utils::threading::report_stage(
-                                "blastn",
-                                "subject_chunks",
-                                1,
-                                false,
-                            );
-                            let soft_ranges = split_state.soft_ranges.as_slice();
-                            let hits = collect_prelim_hits_for_chunk(
-                                &chunk,
-                                soft_ranges,
-                                gap_scratch,
-                                subject_scratch,
-                                true,
-                            );
-                            let hits = merge_prelim_hit_lists(
-                                &mut combined_prelim_hits,
-                                hits,
-                                HspListSplit::Subject {
-                                    offset: chunk.offset,
-                                },
-                                chunk.overlap,
-                                !UNGAPPED,
-                            );
-                            if subject_besthit {
-                                prelim_subject_best_hit(&mut combined_prelim_hits, &query_lengths);
-                            }
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-                            // ```c
-                            // /* Delete if not done in last loop iteration to prevent memory leak. */
-                            // hsp_list = Blast_HSPListFree(hsp_list);
-                            //
-                            // BlastInitHitListReset(init_hitlist);
-                            // ```
-                            subject_scratch.prelim_hits = hits;
-                        }
-                    }
-                }
+            // The subject's chunks searched and their lists merged
+            // (`prelim_subject::collect_subject_prelim`), with what the search of its chunks reads,
+            // built once per subject.
+            combined_prelim_hits = prelim_subject::collect_subject_prelim::<UNGAPPED>(
+                &prelim_batch,
+                &prelim_subject::PrelimSubject {
+                    s_idx,
+                    s_id,
+                    s_seq_packed_full,
+                    x_prelim_subject: &x_prelim_subject,
+                    subject_masked,
+                    dbseq_chunk_overlap,
+                    two_stage_lookup_ref,
+                    pv_direct_lookup_ref,
+                    na_lookup_ref,
+                    queries,
+                    query_contexts,
+                    cutoff_scores,
+                    hit_saving_cutoff_scores,
+                    x_dropoff_scores,
+                    reduced_cutoff_scores,
+                    timing_ref,
+                    timing_enabled,
+                },
+                &mut split_state,
+                gap_scratch,
+                subject_scratch,
+            );
+            // The soft ranges' buffer goes back to the scratch for the next database sequence.
+            if db_masked {
+                subject_scratch.db_soft_ranges = std::mem::take(&mut split_state.soft_ranges);
             }
 
             if !UNGAPPED && !combined_prelim_hits.is_empty() {
@@ -14373,6 +13867,21 @@ fn search_query_batch<const UNGAPPED: bool>(
             }
         },
     };
+    // The first error of the database masks' reads (`db_mask_error`), as the preliminary stage's
+    // read errors are reported (`database_search_error`).
+    let db_mask_error = db_mask_error
+        .lock()
+        .expect("the error cell is not poisoned")
+        .take();
+    if let Some((_, error)) = db_mask_error {
+        return Err(database_search_error(
+            error,
+            first_batch,
+            reborrow_outputs(&mut outputs),
+            megablast,
+            &shown,
+        ));
+    }
     if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
@@ -14875,6 +14384,59 @@ fn merge_prelim_hit_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1647-1668 (quoted at
+    // `scan_subject_kmers_with_ranges`); SURVEY §10 of M4a-2, review 1 T3 of M4a-2a. With
+    // `-db_soft_mask` every database sequence is a masked subject, those without masks too
+    // (decision D3: `subject_masked` is the option, seqsrc_seqdb.cpp:399-405): its one range
+    // `[0, length)` is scanned from `word_length - lut_word_length` with the scanner of any
+    // stride, where an unmasked subject is scanned from 0 with the scanner of the lookup width
+    // and stride (the aligned one of a stride of four bases). Both visit every `scan_step`-th
+    // offset to `length - lut_word_length`.
+    #[test]
+    fn a_masked_subject_without_masks_starts_its_scan_after_the_word_s_head() {
+        let letters: Vec<u8> = (0..403u32)
+            .map(|i| b"ACGT"[((i * 7 + i / 3 + i / 11) % 4) as usize])
+            .collect();
+        let packed = crate::core::blast_encoding::encode_subject_ncbi2na_packed(&letters);
+        let length = letters.len();
+        let whole = [(0i32, length as i32)];
+        // (word_length, lut_word_length, scan_step): megablast with lookup widths 11 and 12,
+        // blastn (8-base lookup, aligned scan), blastn-short (7 and 7).
+        for (word_length, lut_word_length, scan_step) in
+            [(28, 11, 18), (28, 12, 17), (11, 8, 4), (7, 7, 1)]
+        {
+            let starts = |masked: bool| {
+                let mut starts = Vec::new();
+                scan_subject_kmers_with_ranges(
+                    &packed,
+                    length,
+                    word_length,
+                    lut_word_length,
+                    scan_step,
+                    &whole,
+                    masked,
+                    select_mb_scan_kind(lut_word_length, scan_step, masked),
+                    |start, _, _| starts.push(start),
+                );
+                starts
+            };
+            let last = length - lut_word_length;
+            let case = (word_length, lut_word_length, scan_step);
+            assert_eq!(
+                starts(false),
+                (0..=last).step_by(scan_step).collect::<Vec<_>>(),
+                "unmasked {case:?}"
+            );
+            assert_eq!(
+                starts(true),
+                (word_length - lut_word_length..=last)
+                    .step_by(scan_step)
+                    .collect::<Vec<_>>(),
+                "masked {case:?}"
+            );
+        }
+    }
 
     // `-soft_masking false`: each context's masks become Ns in the buffer (the minus context's
     // are its own, already reversed), the returned copy keeps the letters, and the contexts no

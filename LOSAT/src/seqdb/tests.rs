@@ -907,7 +907,7 @@ fn alias_value_errors_come_in_ncbis_order() {
     .unwrap();
     db.x_keep_oids(|oid| oid < 3);
     db.check_alias_values().unwrap();
-    assert!(what(db.read_name_records(&name).unwrap_err()).contains("'n1'"));
+    assert!(what(db.read_name_records(&name, false).unwrap_err()).contains("'n1'"));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -1488,8 +1488,24 @@ fn a_name_is_a_list_as_for_ncbi() {
     let prot_old = db_name("prot_old");
     let alone = |name: &str| {
         let mut db = SeqDb::open(name, SeqType::Protein).unwrap();
-        db.read_name_records(name).unwrap();
+        db.read_name_records(name, false).unwrap();
         db
+    };
+    // What the reports show of a record (its table is read only with masks).
+    let shown = |records: &[super::NameRecord]| {
+        records
+            .iter()
+            .map(|record| {
+                assert!(record.mask_algorithms.is_none());
+                (
+                    record.name.clone(),
+                    record.title.clone(),
+                    record.date.clone(),
+                    record.num_seqs,
+                    record.total_length,
+                )
+            })
+            .collect::<Vec<_>>()
     };
     let (v4, old) = (alone(&prot_v4), alone(&prot_old));
     for (list, first, second) in [
@@ -1504,11 +1520,8 @@ fn a_name_is_a_list_as_for_ncbi() {
             "{list}"
         );
         assert_eq!(
-            both.name_records(),
-            [
-                first.name_records()[0].clone(),
-                second.name_records()[0].clone()
-            ],
+            shown(both.name_records()),
+            [shown(first.name_records()), shown(second.name_records())].concat(),
             "{list}"
         );
     }
@@ -1517,7 +1530,7 @@ fn a_name_is_a_list_as_for_ncbi() {
     let twice = alone(&format!("{prot_v4} {prot_v4}"));
     assert_eq!(twice.num_seqs(), v4.num_seqs());
     assert_eq!(twice.name_records().len(), 2);
-    assert_eq!(twice.name_records()[1], v4.name_records()[0]);
+    assert_eq!(shown(&twice.name_records()[1..]), shown(v4.name_records()));
     // A quoted name keeps its quotes in its record (`GetBlastDbInfo` splits with them).
     let quoted_db = alone(&quoted);
     assert_eq!(quoted_db.name_records()[0].name, quoted);

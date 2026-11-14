@@ -250,10 +250,10 @@ pub enum Commands {
 // Translate registered canonical keys only. Consume each value once so a path
 // or a quoted filtering specification can never be interpreted as another key.
 /// Parses `argv` (`losat <program> <words>`) for a caller that runs no NCBI application start
-/// (the Web engine): the toolkit's words that the start reads (`-logfile`, `-conffile`,
-/// `-dryrun`) are refused (`toolkit_file_word_error`; makeblastdb keeps its own `-logfile`
-/// argument), and so are the versions (`version_word_error`) and `-xmlhelp`
-/// (`xml_help_refusal`).
+/// (LOSAT Web's ABI v1, and the engine's own parses of an argv): the toolkit's words that the
+/// start reads (`-logfile`, `-conffile`, `-dryrun`) are refused (`toolkit_file_word_error`;
+/// makeblastdb keeps its own `-logfile` argument), and so are the versions (`version_word_error`)
+/// and `-xmlhelp` (`xml_help_refusal`).
 pub fn try_parse_from<T, I, S>(argv: I) -> Result<T, clap::Error>
 where
     T: Parser + CommandFactory,
@@ -263,17 +263,17 @@ where
     try_parse_from_command(T::command(), argv)
 }
 
-/// `try_parse_from` for the library API, whose calls run an NCBI application start of their own
-/// (`api::start`): `-logfile`, `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp`,
-/// whose texts only the command line writes, are refused (`version_word_error`,
-/// `xml_help_refusal`).
-pub(crate) fn try_parse_from_library<T, I, S>(argv: I) -> Result<T, clap::Error>
+/// `try_parse_from` for a caller whose calls run an NCBI application start of their own: the
+/// library API (`api::start`) and LOSAT Web's ABI v2 (`web_adapter::start_run`). `-logfile`,
+/// `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp`, whose texts only the command
+/// line writes, are refused (`version_word_error`, `xml_help_refusal`).
+pub(crate) fn try_parse_with_own_start<T, I, S>(argv: I) -> Result<T, clap::Error>
 where
     T: Parser + CommandFactory,
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    parse_command(T::command(), argv, Reader::Library)
+    parse_command(T::command(), argv, Reader::OwnStart)
 }
 
 /// `try_parse_from` after the command line's application start `start` of the program that
@@ -310,18 +310,19 @@ where
 /// Who reads an argv (`parse_command`), which decides what NCBI's toolkit words do there.
 #[derive(Clone, Copy)]
 enum Reader<'a> {
-    /// A caller that runs no NCBI application start (the Web engine): the toolkit's words, the
-    /// versions and `-xmlhelp` are refused.
+    /// A caller that runs no NCBI application start (LOSAT Web's ABI v1): the toolkit's words,
+    /// the versions and `-xmlhelp` are refused.
     NoStart,
-    /// The library API, whose calls run a start of their own (`api::start`): `-logfile`,
-    /// `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp` are refused.
-    Library,
+    /// The library API and LOSAT Web's ABI v2, whose calls run a start of their own
+    /// (`api::start`, `web_adapter::start_run`): `-logfile`, `-conffile` and `-dryrun` are taken;
+    /// the versions and `-xmlhelp` are refused.
+    OwnStart,
     /// The command line's entry with its application start: `-xmlhelp` is the request whose XML
     /// the entry prints.
     CommandLine(&'a crate::blastinput::ncbi_environment::ApplicationStart),
 }
 
-/// The reader of `try_parse_from`, `try_parse_from_library`, `try_parse_from_start` and
+/// The reader of `try_parse_from`, `try_parse_with_own_start`, `try_parse_from_start` and
 /// `try_parse_from_command`.
 fn parse_command<T, I, S>(
     command: clap::Command,
@@ -601,7 +602,7 @@ where
             let program = xml_help.unwrap_or_default();
             return Err(match reader {
                 Reader::CommandLine(_) => xml_help_request(program),
-                Reader::NoStart | Reader::Library => clap::Error::raw(
+                Reader::NoStart | Reader::OwnStart => clap::Error::raw(
                     ErrorKind::InvalidValue,
                     xml_help_refusal(&refusal_program_name(&program)),
                 ),
@@ -789,12 +790,11 @@ fn render_rpsbproc_text(text: &str) -> String {
 // The options of NCBI blastn 2.17.0+ (-help) that LOSAT's BLASTN does not implement
 // (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
 // (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range`, `-no_greedy`
-// (DI-6) and `-min_raw_gapped_score` (DI-6b); the database masks are not.
+// (DI-6), `-min_raw_gapped_score` (DI-6b) and the database masks (`blastinput::db_mask`, series
+// NP M4a-2; a search that `-db_hard_mask` masks is refused where it starts, `RUN_REFUSALS`).
 const UNPORTED_BLASTN_ARGS: &[&str] = &[
     "best_hit_overhang",
     "best_hit_score_edge",
-    "db_hard_mask",
-    "db_soft_mask",
     "entrez_query",
     "filtering_db",
     "gilist",
@@ -937,6 +937,15 @@ fn refuses_option(scope: &clap::Command, name: &str) -> bool {
 /// what the refusal says the argument is (`run_refusal`). `-xmlhelp` leaves them out of NCBI's XML
 /// as it leaves the parser's refusals (`refuses_option`).
 pub(crate) const RUN_REFUSALS: &[(&str, &str, &str)] = &[
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2350-2354 (quoted at
+    // `blastinput::db_mask::DbMaskArgs`): its errors and warning are NCBI's
+    // (`DbMaskOption::validate_at_open`, `resolve`); a search that it masks is refused (series
+    // NP, M4a-2b).
+    (
+        "blastn",
+        "db_hard_mask",
+        "hard masking of the database sequences",
+    ),
     ("blastp", "ungapped", "an ungapped search"),
     ("blastp", "use_sw_tback", "the Smith-Waterman traceback"),
     ("psiblast", "use_sw_tback", "the Smith-Waterman traceback"),
@@ -1169,11 +1178,12 @@ fn toolkit_word_as_written<'a>(tokens: &'a [OsString], name: &str) -> Option<&'a
 }
 
 // No NCBI counterpart: NCBI has no library API or Web engine. The application start of the
-// command line (`cli::main_entry`, `ncbi_environment::ApplicationStart`) and of each library
-// call (`api::start`) reads `-logfile` and `-conffile` before the arguments, and both end a
-// `-dryrun` after them; the Web engine runs none, so it does not take them (line RG item E1w).
+// command line (`cli::main_entry`, `ncbi_environment::ApplicationStart`), of each library call
+// (`api::start`) and of each run of LOSAT Web's ABI v2 (`web_adapter::start_run`) reads `-logfile`
+// and `-conffile` before the arguments, and each ends a `-dryrun` after them; ABI v1 runs none, so
+// it does not take them (line RG items E1w, E1w-3a).
 /// LOSAT's refusal of the toolkit option `word` (`-logfile`, `-conffile`, `-dryrun`) in
-/// `program` when the parser's caller runs no application start: the Web engine.
+/// `program` when the parser's caller runs no application start: LOSAT Web's ABI v1.
 fn toolkit_file_word_error(program: &str, word: &str) -> clap::Error {
     clap::Error::raw(
         ErrorKind::InvalidValue,
@@ -1186,13 +1196,20 @@ pub(crate) fn toolkit_file_word_refusal(program: &str, word: &str) -> String {
     let name = toolkit_option_name(word);
     let shown = refusal_program_name(program);
     let places = match library_part(program) {
+        LibraryPart::Search if WEB_V2_PROGRAMS.contains(&program) => {
+            "the command line, in the library API and in the Web engine's ABI v2"
+        }
         LibraryPart::Search | LibraryPart::Tool => "the command line and in the library API",
         LibraryPart::Absent => "the command line",
     };
     format!(
-        "the NCBI C++ Toolkit option -{name} runs on {places} of LOSAT's {shown} only: the Web engine runs no NCBI application start, which reads it"
+        "the NCBI C++ Toolkit option -{name} runs on {places} of LOSAT's {shown} only: the Web engine's ABI v1 runs no NCBI application start, which reads it"
     )
 }
+
+/// The programs that LOSAT Web's ABI v2 runs (`web/adapter/src/run.rs` `Program`, whose tests
+/// check this list), whose runs take the toolkit's words (`toolkit_file_word_refusal`).
+pub const WEB_V2_PROGRAMS: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
 
 /// What LOSAT's library API runs of the command line's `program`.
 enum LibraryPart {

@@ -1,0 +1,12 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_1	LN:900
+@SQ	SN:Query_2	LN:700
+@SQ	SN:Query_3	LN:600
+@SQ	SN:Query_4	LN:600
+@SQ	SN:Query_5	LN:1000
+@PG	ID:0	VN:2.17.0+	CL:/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn -db tests/db_search/dbmask/a5 -query tests/db_search/dbmask/q.fna -db_soft_mask 11 -outfmt 17 -num_threads 1 	PN:blastn
+BL_ORD_ID:0	0	Query_1	1	255	600H900M1500H	*	0	0	*	*	AS:i:822	EV:f:0	NM:i:0	PI:f:97.11	BS:f:1519.07
+BL_ORD_ID:1	0	Query_2	1	255	200H700M600H	*	0	0	*	*	AS:i:661	EV:f:0	NM:i:0	PI:f:98.14	BS:f:1221.76
+BL_ORD_ID:2	0	Query_3	1	255	600M760H	*	0	0	*	*	AS:i:570	EV:f:0	NM:i:0	PI:f:98.33	BS:f:1053.71
+BL_ORD_ID:0	0	Query_4	1	255	1700H600M700H	*	0	0	*	*	AS:i:582	EV:f:0	NM:i:0	PI:f:99.00	BS:f:1075.87
+BL_ORD_ID:4	0	Query_5	1	255	100H1000M100H	*	0	0	*	*	AS:i:940	EV:f:0	NM:i:0	PI:f:98.00	BS:f:1736.97

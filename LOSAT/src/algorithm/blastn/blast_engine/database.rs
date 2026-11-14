@@ -41,12 +41,16 @@ use crate::algorithm::blastn::coordination::SubjectMetadata;
 use crate::algorithm::blastn::hsp::{BlastnHitList, BlastnOutputFormat};
 use crate::algorithm::common::database::{self as shared, ParsedShown, ReportedHeader};
 pub(super) use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
+use crate::blastinput::db_mask::{DbMaskOption, ResolvedMask};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
 use crate::report::tabular::PrintedIds;
-use crate::seqdb::{BlockRange, NucleotideAmbiguity, SeqDb, SeqDbError, SeqType, SequenceBlock};
+use crate::seqdb::{
+    BlockMasks, BlockRange, MaskBlock, NucleotideAmbiguity, SeqDb, SeqDbError, SeqType,
+    SequenceBlock,
+};
 use crate::sequence::packed_subject::PackedNucleotide;
 use crate::utils::threading::SearchPool;
 
@@ -387,21 +391,23 @@ impl BlastnDatabase {
     /// with the command line's errors. The total length is NCBI's `Int8`; one that the
     /// engine cannot hold in a `usize` (a 32-bit target) is LOSAT's refusal.
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name, settings, None, &mut std::io::sink())
+        Self::open_restricted(name, settings, None, None, &mut std::io::sink())
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
-    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
+    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`), and the id of the
+    /// database mask `mask` checked as NCBI checks it there (`DbMaskOption::validate_at_open`).
     pub(super) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
+        mask: Option<&DbMaskOption>,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed_seqids =
-            shared::restrict_database(&mut db, name, list, diagnostics, settings, PROGRAM)?;
+            shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, PROGRAM)?;
         // BLASTN has no Gumbel block: NCBI's average subject length divides by the statistics'
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;
@@ -710,6 +716,156 @@ impl BlastnDatabase {
     pub(super) fn pairwise_database(&self) -> PairwiseDatabase {
         shared::pairwise_database(&self.db)
     }
+
+    /// `pairwise_database` of a search masked with `mask` (`None`: not masked): each name's
+    /// algorithm, which the `Masked using:` lines show (`shared::pairwise_database_masked`).
+    pub(super) fn pairwise_database_masked(&self, mask: Option<&ResolvedMask>) -> PairwiseDatabase {
+        shared::pairwise_database_masked(&self.db, mask.map(|mask| mask.shown.as_slice()))
+    }
+
+    /// The formatter's resolution of `option` (`DbMaskOption::resolve`; its warning goes to
+    /// `warning`), and LOSAT's refusals of the masked search (`ResolvedMask::check_losat_limits`).
+    pub(super) fn resolve_mask_option(
+        &self,
+        option: &DbMaskOption,
+        warning: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
+    ) -> Result<Option<ResolvedMask>> {
+        option.resolve(&self.db, &self.name, PROGRAM, warning)
+    }
+
+    /// LOSAT's refusal of mixed accession tables (`shared::check_accession_tables`).
+    pub(super) fn check_accession_tables(&self) -> Result<()> {
+        shared::check_accession_tables(&self.db, PROGRAM)
+    }
+
+    /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`).
+    pub(super) fn check_mask_limits(&self, mask: &ResolvedMask) -> Result<()> {
+        mask.check_losat_limits(&self.db, PROGRAM)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:197-218
+    // ```c
+    //     } else {
+    //         // CSeqDB has allocated one more space before and after seq_range
+    //         seq_blk->seq_ranges_allocated = FALSE;
+    //         tmp = seq_ranges;
+    //     }
+    //
+    //     // Fill out the boundary of the sequence to compliment the masks
+    //     tmp[0].left = 0;
+    //     tmp[num_seq_ranges - 1].right = seq_blk->length;
+    //     seq_blk->seq_ranges = tmp;
+    //     seq_blk->num_seq_ranges = num_seq_ranges;
+    //     seq_blk->mask_type = mask_type;
+    //     return 0;
+    // ```
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdb.hpp:286-306
+    // ```c++
+    //         value_type& operator[](size_type i) { return (value_type &)_data[1+ 2*i]; }
+    //
+    //         value_type * get_data() const { return (value_type *) _data; }
+    //     ...
+    //         void append(const void *src, size_type num_elements) {
+    //             reserve(_size + num_elements);
+    //             memcpy(&_data[1+ 2*_size], src, num_elements * sizeof(value_type));
+    //             _size += num_elements;
+    //         }
+    // ```
+    // `get_data()` starts one `TSeqPos` before the first mask, so its `SSeqRange` pairs are
+    // (the spare value, start 0), (end 0, start 1), ..., (end n-1, the spare value after the
+    // last): with `tmp[0].left = 0` and the last `right` the length, the complement of the
+    // masks in the order they are stored, the `TSeqPos` values read as `Int4`. Unsorted or
+    // overlapping masks give inverted members, which the scan skips (`masksubj.inl:43-60`);
+    // nothing is sorted or merged (decision D3 of M4a-2).
+    /// The soft ranges (`seq_ranges`) of database sequence `ordinal` of length `length`, read in
+    /// the block `block` of the preliminary stage (`block_subject`), in a search with
+    /// `-db_soft_mask` (the algorithm `algo_id`): the complement of its masks, which `masks`
+    /// reads with the masks of the whole block (`SeqDb::read_mask_block`, once for all its
+    /// sequences), into `ranges`, which it replaces.
+    pub(super) fn soft_ranges_into(
+        &self,
+        block: BlockRange,
+        ordinal: u32,
+        algo_id: i32,
+        length: usize,
+        masks: &mut MaskBlock,
+        ranges: &mut Vec<(i32, i32)>,
+    ) -> Result<()> {
+        let stored =
+            self.stored_masks(block, ordinal, algo_id, masks, shared::search_read_error_of)?;
+        complement_soft_ranges(stored, length, ranges);
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:121-133
+    // ```c++
+    //     CSeqDB::TSequenceRanges ranges;
+    //     m_iSeqDb->GetMaskData(index, m_FilteringAlgoId, ranges);
+    //     ITERATE(CSeqDB::TSequenceRanges, itr, ranges) {
+    //         for (size_t it=0; it<target.size(); it++) {
+    //             if (target[it] != TSeqRange::GetEmpty() &&
+    //                 target[it].IntersectingWith(*itr)) {
+    //                 CRef<CSeq_interval> si
+    //                     (new CSeq_interval(*id, itr->first, itr->second-1));
+    // ```
+    /// The stored masks of database sequence `ordinal` for the algorithm `algo_id`, in the order
+    /// they are stored (`[start, end)`), which the reports of a masked search show in lowercase
+    /// where they meet an HSP (`pairwise::Rows`); `masks` is the reports' block buffer.
+    pub(super) fn display_masks(
+        &self,
+        ordinal: u32,
+        algo_id: i32,
+        masks: &mut MaskBlock,
+    ) -> Result<Vec<crate::utils::dust::MaskedInterval>> {
+        let Some(block) = self.db.x_block_range(ordinal, ordinal.saturating_add(1)) else {
+            anyhow::bail!(
+                "LOSAT internal error: the reported sequence {ordinal} is not in the database"
+            );
+        };
+        Ok(self
+            .stored_masks(block, ordinal, algo_id, masks, shared::database_error_of)?
+            .iter()
+            .map(|&(start, end)| {
+                crate::utils::dust::MaskedInterval::new(start as usize, end as usize)
+            })
+            .collect())
+    }
+
+    /// The stored masks of database sequence `ordinal` of the block `block` for the algorithm
+    /// `algo_id` (`SeqDb::read_mask_block`, `MaskBlock::ranges`), with the reader's errors as
+    /// `error` reports them: the preliminary search's (`shared::search_read_error_of`, as its
+    /// reads of the sequences: NCBI reads the masks in the search's `GetSequence`), the reports'
+    /// (`shared::database_error_of`). A volume without the algorithm is a refusal that the search
+    /// made before it started (`SeqDb::check_search_masks`).
+    fn stored_masks<'m>(
+        &self,
+        block: BlockRange,
+        ordinal: u32,
+        algo_id: i32,
+        masks: &'m mut MaskBlock,
+        error: fn(&SeqDbError, &str) -> anyhow::Error,
+    ) -> Result<&'m [(u32, u32)]> {
+        self.db.read_mask_block(block, algo_id, masks);
+        match masks.ranges(block.first + (ordinal - block.first_ordinal)) {
+            Ok(BlockMasks::Ranges(stored)) => Ok(stored),
+            Ok(BlockMasks::AlgorithmNotInVolume) => Err(anyhow::anyhow!(
+                "LOSAT internal error: the volume of sequence {ordinal} has no mask algorithm {algo_id}"
+            )),
+            Err(read) => Err(error(read.error(), PROGRAM)),
+        }
+    }
+}
+
+/// The complement of the stored masks `masks` of a sequence of `length` letters in their stored
+/// order, NCBI's soft ranges of a masked database sequence (`BlastnDatabase::soft_ranges_into`).
+fn complement_soft_ranges(masks: &[(u32, u32)], length: usize, ranges: &mut Vec<(i32, i32)>) {
+    ranges.clear();
+    let mut left = 0i32;
+    for &(start, end) in masks {
+        ranges.push((left, start as i32));
+        left = end as i32;
+    }
+    ranges.push((left, length as i32));
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1401-1405
@@ -742,8 +898,15 @@ impl BlastnDatabase {
 // subject set's packed letters (four bases per byte from the high bits down, the count of
 // the last byte's bases in its two low bits; `encode_subject_ncbi2na_packed`).
 /// Sequence `i` of a block as the preliminary stage reads it: its length and its stored
-/// 2-bit data.
-fn block_subject(block: &SequenceBlock, i: usize) -> Result<BlastnSubjectRef<'_>> {
+/// 2-bit data, and the block (`range`), whose masks a search with `-db_soft_mask` reads once for
+/// all its sequences (`BlastnDatabase::soft_ranges_into`). The block is lent, not copied: every
+/// sequence of every database search carries it, and a copy of its 24 bytes into each sequence's
+/// reference cost megablast's default path 0.3 % of its instructions (ws, SILVA, ad-M4a-5).
+fn block_subject<'a>(
+    block: &'a SequenceBlock,
+    range: &'a BlockRange,
+    i: usize,
+) -> Result<BlastnSubjectRef<'a>> {
     let length = block.nucleotide_len(i).map_err(search_read_error)?;
     Ok(BlastnSubjectRef {
         length,
@@ -752,6 +915,7 @@ fn block_subject(block: &SequenceBlock, i: usize) -> Result<BlastnSubjectRef<'_>
         blastna: None,
         store: None,
         x_fenced: None,
+        block: Some(range),
     })
 }
 
@@ -902,7 +1066,9 @@ where
                     let mut kept = Vec::new();
                     for i in 0..block.len() {
                         let ordinal = range.first_ordinal + i as u32;
-                        if let Some(result) = search(scratch, ordinal, block_subject(&block, i)?) {
+                        if let Some(result) =
+                            search(scratch, ordinal, block_subject(&block, &range, i)?)
+                        {
                             kept.push((ordinal, result));
                         }
                     }
@@ -990,7 +1156,7 @@ where
         let block = x_read_block(db, range).map_err(search_read_error)?;
         for i in 0..block.len() {
             let ordinal = range.first_ordinal + i as u32;
-            if let Some(result) = search(&mut scratch, ordinal, block_subject(&block, i)?) {
+            if let Some(result) = search(&mut scratch, ordinal, block_subject(&block, &range, i)?) {
                 merge(ordinal, result);
             }
         }
@@ -1112,6 +1278,7 @@ where
                 blastna: Some(&blastna[1..=length]),
                 store: None,
                 x_fenced: Some(&fenced),
+                block: None,
             };
             let result = traceback(scratch, ordinal, subject, kept);
             drop(blastna);
@@ -1192,6 +1359,7 @@ where
         blastna: Some(&blastna[1..=length]),
         store: None,
         x_fenced: None,
+        block: None,
     };
     let result = traceback(scratch, ordinal, subject, kept);
     x_done_bytes(blastna);
@@ -1754,6 +1922,79 @@ mod tests {
     fn open(name: &str) -> BlastnDatabase {
         BlastnDatabase::open(&fixture(name), &ApplicationSettings::default())
             .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+    }
+
+    // blast_util.c:197-218 and seqdb.hpp:286-306 (quoted at `soft_ranges_into`): the soft ranges
+    // of a masked database sequence are the complement of its masks in stored order, inverted
+    // members included; a sequence without masks has the one range of its letters.
+    #[test]
+    fn soft_ranges_are_the_complement_of_the_masks_in_stored_order() {
+        let mut ranges = vec![(5, 6)];
+        for (masks, expected) in [
+            (&[][..], &[(0, 1200)][..]),
+            (
+                &[(600, 700), (100, 200)],
+                &[(0, 600), (700, 100), (200, 1200)],
+            ),
+            (
+                &[(100, 300), (200, 400)],
+                &[(0, 100), (300, 200), (400, 1200)],
+            ),
+            (
+                &[(0, 100), (1100, 1200)],
+                &[(0, 0), (100, 1100), (1200, 1200)],
+            ),
+            (&[(0, 1200)], &[(0, 0), (1200, 1200)]),
+        ] {
+            complement_soft_ranges(masks, 1200, &mut ranges);
+            assert_eq!(ranges, expected, "{masks:?}");
+        }
+    }
+
+    // The masks of the M4a-2 edge database `edge1` (NCBI's makeblastdb of hand-made maskinfo; NCBI's
+    // blastdbcmd `-outfmt "%o %m11"` reads `600-700;100-200;` for sequence 4): read with the masks
+    // of the block that holds the sequence (one read for all its sequences, review 1 F3 of
+    // M4a-2a), the soft ranges in stored order, the display masks as stored.
+    #[test]
+    fn a_masked_search_reads_each_sequence_s_masks() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/db_search/dbmask/edge1")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let database = BlastnDatabase::open(&path, &ApplicationSettings::default()).unwrap();
+        let block = database.db.x_block_range(0, 5).unwrap();
+        assert_eq!((block.first, block.end), (0, 5));
+        let mut masks = MaskBlock::default();
+        let mut ranges = Vec::new();
+        database
+            .soft_ranges_into(block, 4, 11, 1200, &mut masks, &mut ranges)
+            .unwrap();
+        assert_eq!(ranges, [(0, 600), (700, 100), (200, 1200)]);
+        // Sequence 0 has no masks of algorithm 11.
+        database
+            .soft_ranges_into(block, 0, 11, 3000, &mut masks, &mut ranges)
+            .unwrap();
+        assert_eq!(ranges, [(0, 3000)]);
+        // Another algorithm reads the block again.
+        database
+            .soft_ranges_into(block, 4, 15, 1200, &mut masks, &mut ranges)
+            .unwrap();
+        assert_eq!(ranges, [(0, 301), (302, 500), (503, 703), (706, 1200)]);
+        // A block of one sequence gives its masks alike.
+        let one = database.db.x_block_range(4, 5).unwrap();
+        database
+            .soft_ranges_into(one, 4, 11, 1200, &mut masks, &mut ranges)
+            .unwrap();
+        assert_eq!(ranges, [(0, 600), (700, 100), (200, 1200)]);
+        let shown = database.display_masks(4, 12, &mut masks).unwrap();
+        assert_eq!(
+            shown,
+            [
+                crate::utils::dust::MaskedInterval::new(100, 300),
+                crate::utils::dust::MaskedInterval::new(200, 400)
+            ]
+        );
     }
 
     // DECISIONS 3 Q8 of line DBID: NCBI's choice of the Seq-ids of a database with parsed
@@ -2455,7 +2696,7 @@ mod tests {
             SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
         let path = tests.join("db_search").join(name);
         let mut db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
-        db.read_name_records(path.to_str().unwrap()).unwrap();
+        db.read_name_records(path.to_str().unwrap(), false).unwrap();
         let parsed_seqids = db.has_parsed_seqids().unwrap();
         BlastnDatabase {
             metadata: SubjectMetadata {

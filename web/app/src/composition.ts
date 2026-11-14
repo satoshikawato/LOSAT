@@ -1,7 +1,7 @@
 // Composition root: the only module that chooses implementations for the ports.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
 import { VERIFICATION_TABLE } from 'virtual:losat-verification';
-import { WasmEngine, type RenewalLimits, type RuntimeEnd } from 'losat';
+import { sha256Hex, WasmEngine, type RenewalLimits, type RuntimeEnd } from 'losat';
 import type { EngineGateway } from 'losat/ports';
 import { Attention } from './application/attention';
 import { Coordinator } from './application/coordinator';
@@ -66,6 +66,7 @@ export function createApp(options: AppOptions = {}): App {
     downloader: options.downloader ?? browserDownloader,
     now: () => Date.now(),
     newRunId: () => crypto.randomUUID(),
+    digest: sha256Hex,
   });
   const draft = new SearchDraft({
     engine,

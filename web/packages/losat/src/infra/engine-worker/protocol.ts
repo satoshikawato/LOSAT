@@ -4,6 +4,7 @@
 // thread drops messages of an older one.
 import type { RecordKey } from '../../domain/dataset.js';
 import type { CountsUse } from '../../domain/counts.js';
+import type { RegistryFile, RunFile } from '../../domain/run-files.js';
 import type { EnginePhase } from '../../ports/engine.js';
 import type { OutputStream } from '../../ports/run-output.js';
 import type { ReactorArtifact } from '../reactor/artifact.js';
@@ -71,6 +72,11 @@ export interface WorkerRun {
   readonly query: WorkerInput;
   readonly subject: WorkerInput;
   readonly windowMasker?: WorkerCounts;
+  /**
+   * The registry file of `-conffile` (EngineRunRequest.conffile): registered before the argv is
+   * validated and released after the run; no later search of the instance reads it.
+   */
+  readonly conffile?: RegistryFile;
   readonly output: MessagePort;
 }
 
@@ -132,6 +138,8 @@ export interface WorkerRunResult {
   readonly windowMasker?: CountsUse;
   /** The bytes of the counts file that the instance holds after the run (the renewal's high-water mark allows for them); absent when it holds none. */
   readonly countsBytes?: number;
+  /** The files that the run made besides its outputs (stream 8), when it made any. */
+  readonly runFiles?: readonly RunFile[];
 }
 
 export interface WorkerError {
@@ -142,6 +150,8 @@ export interface WorkerError {
   readonly detail?: string;
   /** The instance stopped; the worker must not be used again. */
   readonly stopped?: boolean;
+  /** The files that the failed run made besides its outputs (stream 8; `runFilesOf`). */
+  readonly runFiles?: readonly RunFile[];
 }
 
 export type EngineEvent =

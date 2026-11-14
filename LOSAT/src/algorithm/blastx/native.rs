@@ -1261,23 +1261,23 @@ fn run_inner(
     let requests = strategy
         .as_ref()
         .map(|_| archive::requests(database.is_none().then_some(&subjects[..])));
-    // NCBI's posts of the bytes that its stream replaces in the request go to the run's
-    // diagnostics (`diagnostics`, where the loop takes the batch) and are messages of the archive.
+    // NCBI's posts of the bytes that its stream replaced in the request go to the run's
+    // diagnostics (`diagnostics`, where the loop takes the batch: after the batch's reader
+    // messages, before its search) and are messages of the archive (`StrategyExport::take_posts`).
     let mut take = |diagnostics: &mut dyn Write,
                     queries: &[FastaRecord],
                     queries_before: usize|
      -> Result<()> {
-        match (&strategy, &requests) {
-            (Some(strategy), Some(requests)) => requests.write(
-                strategy,
-                queries_before,
-                queries,
-                queries.first().map(FastaRecord::placement),
-                diagnostics,
-                archive.as_ref(),
-            ),
-            _ => Ok(()),
-        }
+        let (Some(strategy), Some(requests)) = (&strategy, &requests) else {
+            return Ok(());
+        };
+        requests.write(
+            strategy,
+            queries_before,
+            queries,
+            queries.first().map(FastaRecord::placement),
+        )?;
+        Ok(strategy.write_posts(diagnostics, archive.as_ref())?)
     };
     // RPSTBLASTN's search of the query batches takes the place of BLASTX's, once per run
     // (`args::RpsTblastnSearch`, DECISIONS 38 D1).

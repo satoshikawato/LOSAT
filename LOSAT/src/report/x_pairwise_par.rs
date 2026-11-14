@@ -1042,11 +1042,14 @@ mod tests {
             Vec::new(),
             vec![(5, b"T5\n".to_vec()), (6, b"T6\n".to_vec())],
         ];
-        let before = vec![b"W0\n".to_vec(), b"W1\n".to_vec(), b"W2\n".to_vec()];
+        let before: Vec<crate::report::diag_log::Posts> = [b"W0\n", b"W1\n", b"W2\n"]
+            .map(|lines| crate::report::diag_log::Posts::of_lines(lines.to_vec()))
+            .into();
         let run = |parallel: Option<(usize, usize)>| -> String {
             let log = Log::default();
             let (mut report, mut sink) = (log.clone(), log.clone());
-            let mut warnings = QueryWarnings::new(&before, &mut sink).with_subject_reads(&reads);
+            let mut warnings =
+                QueryWarnings::of_posts(&before, None, &mut sink).with_subject_reads(&reads);
             match parallel {
                 None => write_serial(
                     &mut report,

@@ -9,6 +9,7 @@ use crate::algorithm::tblastx::database::DatabaseTitles;
 use crate::algorithm::tblastx::hit_collector::HitCollector;
 use crate::algorithm::tblastx::subjects::{SubjectSetNumbers, Subjects, SubjectsUnreadable};
 use crate::blastinput::report_counts::ReportCounts;
+use crate::report::diag_log::Posts;
 use crate::report::tabular::SubjectFetch;
 use std::sync::Arc;
 
@@ -2040,9 +2041,10 @@ pub(crate) struct TblastxReportRun<'a> {
     /// A list kept no sequence of the database: the messages of the queries of the searched
     /// batches have `EMPTY_DATABASE_MESSAGE` (`SeqDb::filtered_empty`).
     pub filtered_empty: bool,
-    /// The warnings written before each query's report (`QueryWarnings`): the reader's
-    /// messages of the query's batch (before its first query) and the query's own.
-    pub warnings: &'a [Vec<u8>],
+    /// The posts written before each query's report (`QueryWarnings`): the reader's messages of
+    /// the query's batch and NCBI's posts of the bytes replaced in its search strategy request
+    /// (before its first query), and the query's own warnings.
+    pub warnings: &'a [Posts],
     /// The texts of the subjects that each query's report reads one by one (its batch's
     /// prefetch off), by query, which the first format's writer places where it reads them
     /// (`QueryWarnings::subject_read`).
@@ -2422,8 +2424,9 @@ fn write_tblastx_outputs(
             ))
         .then(|| {
             let first = warning_lines.take();
-            let warnings = crate::report::query_warnings::QueryWarnings::new(
+            let warnings = crate::report::query_warnings::QueryWarnings::of_posts(
                 first.unwrap_or(&[]),
+                run.args.archive.as_ref(),
                 &mut *outputs.diagnostics,
             );
             // The first format's writer also writes the texts of the subjects that the reports
@@ -2755,9 +2758,9 @@ fn write_tblastx_outputs(
         handle.set_muted(false);
     }
     // Without an output format the warnings are written all at once.
-    if let Some(lines) = warning_lines {
-        for query_warnings in lines {
-            outputs.diagnostics.write_all(query_warnings)?;
+    if let Some(posts) = warning_lines {
+        for query_posts in posts {
+            query_posts.write(&mut *outputs.diagnostics, run.args.archive.as_ref())?;
         }
     }
     Ok(())
@@ -3341,8 +3344,8 @@ fn run_batch_loop(
     let query_records = query_runs.records;
     let input = query_runs.input;
     let mut done = SearchedBatches::default();
-    // The warnings written before each query's report (`QueryWarnings`).
-    let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); query_records.len()];
+    // The posts written before each query's report (`QueryWarnings`).
+    let mut warnings: Vec<Posts> = vec![Posts::new(); query_records.len()];
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`), added as the
     // loop reads the batches. A streamed run has none that refuses (`report_stream::check`).
     // With outfmt 5 against a database, every query's ids from the start (`with_whole_run_of`).
@@ -3466,10 +3469,14 @@ fn run_batch_loop(
         // `CFastaReader` writes its messages about a batch's queries (their lines and
         // titles) when it reads them, after the report of the batch before: before the
         // report of the batch's first query (`QueryWarnings`). Skipped records are read too.
-        let batch_warnings: Vec<u8> = query_runs.input_records[input_start..input_end]
-            .iter()
-            .flat_map(|record| record.warnings.iter().copied())
-            .collect();
+        // NCBI's posts of the bytes replaced in the batch's search strategy request follow them
+        // (below), so every error of the batch writes both.
+        let mut batch_warnings = Posts::of_lines(
+            query_runs.input_records[input_start..input_end]
+                .iter()
+                .flat_map(|record| record.warnings.iter().copied())
+                .collect(),
+        );
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input.cpp:146-152
         // ```c
         //         try { q.Reset(m_Source->GetNextSequence(scope)); }
@@ -3492,7 +3499,7 @@ fn run_batch_loop(
             } = std::mem::replace(&mut reading, QueryReading::End)
             {
                 reports.write_before_failed_batch(outputs, done, &warnings)?;
-                outputs.diagnostics.write_all(&batch_warnings)?;
+                batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                 outputs.diagnostics.write_all(&error_warnings)?;
                 return Err(error.into_app_error());
             }
@@ -3509,7 +3516,7 @@ fn run_batch_loop(
         // batch (its records' messages).
         if start == end {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
-            outputs.diagnostics.write_all(&batch_warnings)?;
+            batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             return Err(crate::cli::NativeError {
                 exit: 3,
                 message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
@@ -3526,16 +3533,16 @@ fn run_batch_loop(
         // The batch's search strategy request (`-export_search_strategy`): once its query factory
         // is made, before its set-up and search, so every error of the batch from here on follows
         // it (the file is apart from the reports). Its `EffectiveSearchSpace` option is the one
-        // the batch before left (`note_searched` below).
+        // the batch before left (`note_searched` below). NCBI's posts of the bytes replaced in it
+        // follow the reader's messages of the batch (`batch_warnings`).
         if let (Some(strategy), Some(requests)) = (args.strategy.as_ref(), requests.as_ref()) {
             requests.write(
                 strategy,
                 start,
                 &query_records[start..end],
                 input.placements.get(start),
-                &mut *outputs.diagnostics,
-                args.archive.as_ref(),
             )?;
+            batch_warnings.append(&strategy.take_all_posts());
         }
         // The query splitter reads its environment variables for every batch, before the
         // queries are set up (`check_query_split_environment`); the first batch meets an
@@ -3545,7 +3552,7 @@ fn run_batch_loop(
                 crate::blastinput::app::check_query_split_environment("TBLASTX", true, true)?
             {
                 reports.write_before_failed_batch(outputs, done, &warnings)?;
-                outputs.diagnostics.write_all(&batch_warnings)?;
+                batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                 return Err(error);
             }
         }
@@ -3609,7 +3616,7 @@ fn run_batch_loop(
                 .all(|record| record.seq().len() < CODON_LENGTH)
         {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
-            outputs.diagnostics.write_all(&batch_warnings)?;
+            batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             let mut message = String::from("BLAST engine error: ");
             for _ in 0..no_data_queries {
                 message.push_str("Warning: ");
@@ -3645,7 +3652,7 @@ fn run_batch_loop(
         // (`CSearchMessage::operator<`, blast_types.hpp:295-304).
         if args.scoring_matrix() == TblastxMatrix::Unknown {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
-            outputs.diagnostics.write_all(&batch_warnings)?;
+            batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             let mut message = String::from("BLAST engine error: ");
             for record in batch_queries {
                 message.push_str("Error: Unknown error code -1 ");
@@ -3676,10 +3683,10 @@ fn run_batch_loop(
             args.matrix_name(),
         ) {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
-            outputs.diagnostics.write_all(&batch_warnings)?;
+            batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
         }
-        warnings[start].extend_from_slice(&batch_warnings);
+        warnings[start].append(&batch_warnings);
         let batch = match take(start..end) {
             Ok(batch) => {
                 // LOSAT_TIMING: the batch's block, kept in its result by a search of the pipe
@@ -3716,7 +3723,7 @@ fn run_batch_loop(
                 let read_error =
                     error.downcast::<crate::algorithm::common::database::PreliminaryReadError>()?;
                 reports.write_before_failed_batch(outputs, done, &warnings)?;
-                outputs.diagnostics.write_all(&batch_warnings)?;
+                batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                 return Err(crate::blastinput::app::engine_error(read_error.0));
             }
             Err(error) => match error.downcast::<ErrorAfterBatchReports>() {
@@ -3735,7 +3742,7 @@ fn run_batch_loop(
                 // before its search), then the error, which skips `PrintEpilog`.
                 Ok(ErrorAfterBatchReports(error)) => {
                     reports.write_before_failed_batch(outputs, done, &warnings)?;
-                    outputs.diagnostics.write_all(&batch_warnings)?;
+                    batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                     return Err(error);
                 }
                 Err(error) => return Err(error),
@@ -3772,7 +3779,7 @@ fn run_batch_loop(
                 match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
                     Ok(failure) => {
                         reports.write_before_failed_batch(outputs, done, &warnings)?;
-                        outputs.diagnostics.write_all(&batch_warnings)?;
+                        batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                         return Err(failure.error);
                     }
                     Err(error) => return Err(error),
@@ -3818,7 +3825,7 @@ fn run_batch_loop(
                         .downcast::<crate::algorithm::common::database::PreliminaryReadError>(
                     )?;
                     reports.write_before_failed_batch(outputs, done, &warnings)?;
-                    outputs.diagnostics.write_all(&batch_warnings)?;
+                    batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                     return Err(crate::blastinput::app::engine_error(read_error.0));
                 }
             }
@@ -3947,7 +3954,7 @@ fn run_batch_loop(
                     if plural_names && !ordered.is_empty() {
                         database.open_for_tabular_rows()?;
                     }
-                    warnings[start].extend(messages);
+                    warnings[start].lines(&messages);
                 }
             }
         }
@@ -3994,7 +4001,7 @@ fn run_batch_loop(
             if reports.filtered_empty && batch.searched {
                 messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
             }
-            warnings[index].extend(crate::report::query_warnings::query_warning(
+            warnings[index].lines(&crate::report::query_warnings::query_warning(
                 "tblastx",
                 reports.args.first_query_ordinal + input.ordinal(index),
                 query,
@@ -4002,7 +4009,7 @@ fn run_batch_loop(
             ));
         }
         for (offset, messages) in query_fetches.into_iter().enumerate() {
-            warnings[start + offset].extend(messages);
+            warnings[start + offset].lines(&messages);
         }
         if stream {
             // The batch's reports, written now, as NCBI's loop prints a batch's result sets
@@ -4020,7 +4027,7 @@ fn run_batch_loop(
             reports.stores.borrow_mut().clear();
             reports.lengths.borrow_mut().clear();
             for query_warnings in &mut warnings[start..end] {
-                *query_warnings = Vec::new();
+                *query_warnings = Posts::new();
             }
         } else {
             // The batch numbers its queries from 0.
@@ -4098,7 +4105,7 @@ impl BatchReports<'_> {
         &self,
         outputs: &mut ReportOutputs<'_>,
         done: SearchedBatches,
-        warnings: &[Vec<u8>],
+        warnings: &[Posts],
         epilog: bool,
     ) -> Result<()> {
         // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); written
@@ -4316,7 +4323,7 @@ impl BatchReports<'_> {
         &self,
         outputs: &mut ReportOutputs<'_>,
         done: SearchedBatches,
-        warnings: &[Vec<u8>],
+        warnings: &[Posts],
     ) -> Result<()> {
         if self.queries_written.get() > 0 {
             Ok(())

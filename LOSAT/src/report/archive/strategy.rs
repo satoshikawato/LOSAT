@@ -66,7 +66,8 @@ use anyhow::Result;
 
 use super::options::OptionInputs;
 use super::writer::{write_strategy_request, RequestInputs};
-use super::{ArchiveHandle, ArchiveRequest, OptionsHandle, SearchSpaceCarry};
+use super::{ArchiveRequest, OptionsHandle, SearchSpaceCarry};
+use crate::report::diag_log::{Posts, ERROR};
 
 struct State {
     sink: Box<dyn Write + Send>,
@@ -79,6 +80,10 @@ struct State {
     noted_through: usize,
     /// No request starts at or after this query (`stop_after`; `usize::MAX` without a stop).
     stop: usize,
+    /// NCBI's posts of the bytes that ASN.1 text replaced in the requests written, by the run's
+    /// first query of their batch, until the run writes them where its batch starts
+    /// (`take_posts`).
+    pending: Vec<(usize, Posts)>,
 }
 
 struct Shared {
@@ -246,6 +251,7 @@ impl StrategyExport {
                 next_query: 0,
                 noted_through: 0,
                 stop: usize::MAX,
+                pending: Vec::new(),
             }),
         }))
     }
@@ -301,17 +307,14 @@ impl StrategyExport {
     /// it: after the batch is read and made a query factory, before its search. `make` builds the
     /// request (from the batch's records, `requests::RunRequests`) and hands it to its argument,
     /// which writes it with the `EffectiveSearchSpace` option the batches before left
-    /// (`note_searched`), all under one lock. NCBI's posts of the bytes that ASN.1 text replaces
-    /// in it go to `diagnostics` and are messages of the run's archive `archive`
-    /// (`super::post_replaced`). Returns false, calling nothing, when the request is not to be
-    /// written (`takes`). The requests are written in the run's order, each starting where the
-    /// one before ended, after the batch before was noted; anything else is LOSAT's internal
-    /// error.
+    /// (`note_searched`), all under one lock. NCBI's posts of the bytes that ASN.1 text replaced
+    /// in it (`replaced_posts`) wait for the run to write them where the batch starts
+    /// (`take_posts`). Returns false, calling nothing, when the request is not to be written
+    /// (`takes`). The requests are written in the run's order, each starting where the one
+    /// before ended, after the batch before was noted; anything else is LOSAT's internal error.
     pub fn write_with(
         &self,
         queries: Range<usize>,
-        diagnostics: &mut dyn Write,
-        archive: Option<&ArchiveHandle>,
         make: impl FnOnce(&mut dyn FnMut(&RequestInputs<'_>) -> Result<()>) -> Result<()>,
     ) -> Result<bool> {
         self.with_state(|state| {
@@ -325,6 +328,7 @@ impl StrategyExport {
                 state.noted_through
             );
             let shared = &self.0;
+            let mut posts = Posts::new();
             make(&mut |request| {
                 let written = write_strategy_request(
                     &mut *state.sink,
@@ -333,13 +337,8 @@ impl StrategyExport {
                     state.carry.option(),
                     shared.options.database_list(),
                     |replaced| {
-                        super::post_replaced(
-                            &mut *diagnostics,
-                            archive,
-                            true,
-                            shared.request.program,
-                            replaced,
-                        )
+                        posts = replaced_posts(shared.request.program, replaced);
+                        Ok(())
                     },
                 );
                 // The file is complete after every request: the command line's exit does not run
@@ -350,18 +349,64 @@ impl StrategyExport {
                 flushed?;
                 Ok(())
             })?;
+            if !posts.is_empty() {
+                state.pending.push((queries.start, posts));
+            }
             Ok(true)
         })
     }
 
-    /// `write_with` of a request already made, without an archive.
+    /// `write_with` of a request already made.
+    #[cfg(test)]
     pub fn write_request(
         &self,
         queries: Range<usize>,
         request: &RequestInputs<'_>,
-        diagnostics: &mut dyn Write,
     ) -> Result<bool> {
-        self.write_with(queries, diagnostics, None, |write| write(request))
+        self.write_with(queries, |write| write(request))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-282
+    // ```c++
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+    // 	    BLAST_PROF_START( APP.LOOP.PRE );
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    //
+    //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
+    // ```
+    /// Takes the posts of the requests written for the batches whose first query (the run's) is
+    /// below `before`, in the run's order, each with that query. NCBI posts them when it writes
+    /// the request: after it read the batch (the reader's messages of its records) and before
+    /// the batch's search, so after the reports of the batch before; the run writes them there,
+    /// with the posts before the first query's report (`QueryWarnings`), or before the error
+    /// that stops the batch.
+    pub fn take_posts(&self, before: usize) -> Vec<(usize, Posts)> {
+        self.with_state(|state| {
+            let taken = state.pending.partition_point(|&(first, _)| first < before);
+            state.pending.drain(..taken).collect()
+        })
+    }
+
+    /// Every post that `take_posts` would take, as one sequence.
+    pub fn take_all_posts(&self) -> Posts {
+        let mut all = Posts::new();
+        for (_, posts) in self.take_posts(usize::MAX) {
+            all.append(&posts);
+        }
+        all
+    }
+
+    /// Writes every post waiting (`take_all_posts`) to the run's diagnostics `diagnostics`, each
+    /// whole post a message of the run's archive `archive` (`Posts::write`): where the run writes
+    /// the start of the batch whose request was written last, after its reader's messages and
+    /// before its error.
+    pub fn write_posts(
+        &self,
+        diagnostics: &mut dyn Write,
+        archive: Option<&super::ArchiveHandle>,
+    ) -> std::io::Result<()> {
+        self.take_all_posts().write(diagnostics, archive)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:177-181
@@ -409,6 +454,37 @@ impl StrategyExport {
     pub fn stop_after(&self, queries_end: usize) {
         self.with_state(|state| state.stop = state.stop.min(queries_end));
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
+// ```c++
+// void CBlastAppDiagHandler::Post(const SDiagMessage & mess)
+// {
+// 	if(m_handler != NULL) {
+// 		m_handler->Post(mess);
+// 	}
+// 	if(m_save) {
+// 		CRef<CBlast4_error> d(new CBlast4_error);
+// 		string m;
+// 		mess.Write(m);
+// 		d->SetMessage(NStr::Sanitize(m));
+// 		d->SetCode((int)mess.m_Severity);
+// ```
+/// NCBI's posts of the bytes that ASN.1 text replaced in a request of a run of `program`
+/// (`encoder::ReplacedChar`, with the application's prefix): one error post each, which the
+/// application's handler also saves as a message of the batch's archive (outfmt 11) when it
+/// writes one (`Posts::write`; the archive's own posts are not saved, `super::post_replaced`).
+/// NCBI posts them while it writes the request, after it read the batch (whose reader messages
+/// come first) and before the batch's search: blastn_app.cpp:277-282.
+fn replaced_posts(
+    program: &str,
+    replaced: &[crate::report::serial::encoder::ReplacedChar],
+) -> Posts {
+    let mut posts = Posts::new();
+    for byte in replaced {
+        posts.post(ERROR, byte.post(Some(program)));
+    }
+    posts
 }
 
 impl State {
@@ -505,14 +581,12 @@ mod tests {
     fn each_batch_is_a_request_with_the_search_space_of_the_batch_before() {
         let (export, sink) = export(None);
         let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
-        assert!(export
-            .write_request(0..1, &request(&queries, &[]), &mut std::io::sink())
-            .unwrap());
+        assert!(export.write_request(0..1, &request(&queries, &[])).unwrap());
         assert_eq!(sink.text(), FIRST);
         export.note_searched(0..1, Some(817_380)).unwrap();
         for (at, searched) in [(1, None), (2, Some(5)), (3, None)] {
             assert!(export
-                .write_request(at..at + 1, &request(&queries, &[]), &mut std::io::sink())
+                .write_request(at..at + 1, &request(&queries, &[]))
                 .unwrap());
             export.note_searched(at..at + 1, searched).unwrap();
         }
@@ -541,21 +615,13 @@ mod tests {
             intervals: vec![(2, 5)],
         };
         export
-            .write_request(
-                0..1,
-                &request(&queries, std::slice::from_ref(&mask)),
-                &mut std::io::sink(),
-            )
+            .write_request(0..1, &request(&queries, std::slice::from_ref(&mask)))
             .unwrap();
         export.note_searched(0..1, Some(1_000_000)).unwrap();
         export.options().set_database_filter(None, true).unwrap();
-        export
-            .write_request(1..2, &request(&queries, &[]), &mut std::io::sink())
-            .unwrap();
+        export.write_request(1..2, &request(&queries, &[])).unwrap();
         export.note_searched(1..2, Some(77)).unwrap();
-        export
-            .write_request(2..3, &request(&queries, &[]), &mut std::io::sink())
-            .unwrap();
+        export.write_request(2..3, &request(&queries, &[])).unwrap();
         export.note_searched(2..3, None).unwrap();
         let all = sink.text();
         let docs: Vec<&str> = all.split("Blast4-request ::= ").skip(1).collect();
@@ -586,21 +652,15 @@ mod tests {
         let (export, sink) = export(None);
         let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
         assert!(export.takes(0..2));
-        assert!(export
-            .write_request(0..2, &request(&queries, &[]), &mut std::io::sink())
-            .unwrap());
+        assert!(export.write_request(0..2, &request(&queries, &[])).unwrap());
         export.note_searched(0..2, Some(5)).unwrap();
         // The same batch, and a part of it: not taken, nothing written.
         assert!(!export.takes(0..2));
         assert!(!export.takes(1..2));
-        assert!(!export
-            .write_request(0..2, &request(&queries, &[]), &mut std::io::sink())
-            .unwrap());
+        assert!(!export.write_request(0..2, &request(&queries, &[])).unwrap());
         export.note_searched(0..2, Some(9)).unwrap();
         assert_eq!(sink.text(), FIRST);
-        assert!(export
-            .write_request(2..3, &request(&queries, &[]), &mut std::io::sink())
-            .unwrap());
+        assert!(export.write_request(2..3, &request(&queries, &[])).unwrap());
         assert_eq!(sink.text(), [FIRST.to_string(), with_space(5)].concat());
     }
 
@@ -610,14 +670,10 @@ mod tests {
         let (export, sink) = export(None);
         let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
         export.stop_after(1);
-        assert!(export
-            .write_request(0..1, &request(&queries, &[]), &mut std::io::sink())
-            .unwrap());
+        assert!(export.write_request(0..1, &request(&queries, &[])).unwrap());
         export.note_searched(0..1, Some(5)).unwrap();
         assert!(!export.takes(1..2));
-        assert!(!export
-            .write_request(1..2, &request(&queries, &[]), &mut std::io::sink())
-            .unwrap());
+        assert!(!export.write_request(1..2, &request(&queries, &[])).unwrap());
         export.note_searched(1..2, Some(6)).unwrap();
         assert_eq!(sink.text(), FIRST);
     }
@@ -628,12 +684,10 @@ mod tests {
     fn a_gap_between_requests_is_an_error() {
         let (export, _) = export(None);
         let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
-        export
-            .write_request(0..1, &request(&queries, &[]), &mut std::io::sink())
-            .unwrap();
+        export.write_request(0..1, &request(&queries, &[])).unwrap();
         export.note_searched(0..1, None).unwrap();
         let gap = export
-            .write_request(2..3, &request(&queries, &[]), &mut std::io::sink())
+            .write_request(2..3, &request(&queries, &[]))
             .unwrap_err();
         assert!(gap.to_string().contains("LOSAT internal error"), "{gap}");
         // A batch noted out of order too.
@@ -671,13 +725,9 @@ mod tests {
             .set_database_filter(Some(list), true)
             .unwrap();
         let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
-        export
-            .write_request(0..1, &request(&queries, &[]), &mut std::io::sink())
-            .unwrap();
+        export.write_request(0..1, &request(&queries, &[])).unwrap();
         export.note_searched(0..1, Some(5)).unwrap();
-        export
-            .write_request(1..2, &request(&queries, &[]), &mut std::io::sink())
-            .unwrap();
+        export.write_request(1..2, &request(&queries, &[])).unwrap();
         let all = sink.text();
         assert_eq!(all.matches("name \"TaxidList\"").count(), 2, "{all}");
         assert!(all.contains("value big-integer 0\n"), "{all}");

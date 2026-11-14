@@ -244,24 +244,19 @@ impl<'a> RunRequests<'a> {
     /// Writes the search strategy's request of the batch of `queries` (`with_batch`), whose first
     /// query is the run's query `first_query`, where NCBI writes it (`StrategyExport::write_with`):
     /// a request already written (a search of the batches again) or after the run's stop is not
-    /// made. NCBI's posts of the bytes that ASN.1 text replaces in it go to `diagnostics` and are
-    /// messages of the run's archive `archive` (`super::post_replaced`).
+    /// made. NCBI's posts of the bytes that ASN.1 text replaced in it wait in `strategy` for the
+    /// run to write them where the batch starts (`StrategyExport::take_posts`).
     pub(crate) fn write<R: RequestRecord>(
         &self,
         strategy: &StrategyExport,
         first_query: usize,
         queries: &[R],
         first_placement: Option<RecordPlacement>,
-        diagnostics: &mut dyn std::io::Write,
-        archive: Option<&super::ArchiveHandle>,
     ) -> Result<()> {
         strategy
-            .write_with(
-                first_query..first_query + queries.len(),
-                diagnostics,
-                archive,
-                |write| self.with_batch(queries, first_placement, |request| write(request)),
-            )
+            .write_with(first_query..first_query + queries.len(), |write| {
+                self.with_batch(queries, first_placement, |request| write(request))
+            })
             .map(drop)
     }
 }
@@ -308,21 +303,18 @@ mod tests {
 
     /// A title that ASN.1 text does not write as it is: the request holds `#` and the byte is
     /// posted (NCBI 2.17.0, probe RG K/k4b/probe case blastp_strat: `Error: (803.7) [blastp]
-    /// Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title`); with
-    /// the run's archive the post is a message of it; a subject's title the same; a request
-    /// after the run's stop is not made and posts nothing.
+    /// Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title`), one
+    /// error post that the run's archive saves as a message; a subject's title the same; a
+    /// request after the run's stop is not made and posts nothing.
     #[test]
     fn a_title_with_a_replaced_byte_is_written_with_a_post() {
         let good = [FastaRecord::new("Query_1", b"q", b"MKV")];
         let bad = [FastaRecord::new("Query_2", b"b\x7fta", b"MKV")];
         let requests = RunRequests::new::<FastaRecord>(PROTEIN, None);
         let (strategy, sink) = export();
-        let mut diagnostics = Vec::new();
-        requests
-            .write(&strategy, 0, &good, None, &mut diagnostics, None)
-            .unwrap();
+        requests.write(&strategy, 0, &good, None).unwrap();
         strategy.note_searched(0..1, None).unwrap();
-        assert!(diagnostics.is_empty());
+        assert!(strategy.take_posts(usize::MAX).is_empty());
         let handle = crate::report::archive::ArchiveHandle::new(
             crate::report::archive::ArchiveEncoding::Text,
             crate::report::archive::ArchiveRequest {
@@ -333,10 +325,15 @@ mod tests {
             },
             OptionsHandle::default(),
         );
-        requests
-            .write(&strategy, 1, &bad, None, &mut diagnostics, Some(&handle))
-            .unwrap();
+        requests.write(&strategy, 1, &bad, None).unwrap();
         strategy.note_searched(1..2, None).unwrap();
+        // The posts wait for the batch's start, by its first query.
+        assert!(strategy.take_posts(1).is_empty());
+        let taken = strategy.take_posts(2);
+        assert_eq!(taken.len(), 1);
+        assert_eq!(taken[0].0, 1);
+        let mut diagnostics = Vec::new();
+        taken[0].1.write(&mut diagnostics, Some(&handle)).unwrap();
         let text = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
         assert!(text.contains("title \"b#ta\""), "{text}");
         let post = "Error: (803.7) [blastp] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title\nBad char [0x7F] in string at line 21\nb\x7fta\n";
@@ -351,21 +348,21 @@ mod tests {
         // After a stop no request is made.
         strategy.stop_after(2);
         let written = sink.0.lock().unwrap().len();
-        requests
-            .write(&strategy, 2, &bad, None, &mut diagnostics, None)
-            .unwrap();
+        requests.write(&strategy, 2, &bad, None).unwrap();
         assert_eq!(sink.0.lock().unwrap().len(), written);
-        assert_eq!(diagnostics.len(), post.len());
+        assert!(strategy.take_all_posts().is_empty());
         // A subject's title: posted with each request that holds it.
         let subjects = [FastaRecord::new("Subject_1", b"s\x7f", b"MKV")];
         let requests = RunRequests::new(PROTEIN, Some(&subjects[..]));
         let (strategy, sink) = export();
-        let mut diagnostics = Vec::new();
-        requests
-            .write(&strategy, 0, &good, None, &mut diagnostics, None)
-            .unwrap();
+        requests.write(&strategy, 0, &good, None).unwrap();
         let text = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
         assert!(text.contains("title \"s#\""), "{text}");
+        let mut diagnostics = Vec::new();
+        strategy
+            .take_all_posts()
+            .write(&mut diagnostics, None)
+            .unwrap();
         let posted = String::from_utf8(diagnostics).unwrap();
         assert!(
             posted.starts_with(

@@ -1494,7 +1494,8 @@ fn search(
     });
     if batches.searched_done == 0 && batches.stop.is_some() {
         // A first batch whose set-up fails has its search strategy request, written before the
-        // prolog.
+        // prolog (NCBI's posts of the bytes replaced in it follow the batch's reader messages,
+        // before its error, below).
         if let (Some(strategy), Some(requests), Some(span)) = (
             args.strategy.as_ref(),
             requests.as_ref(),
@@ -1505,8 +1506,6 @@ fn search(
                 span.start,
                 &searched_queries[span.clone()],
                 query_input.placements.get(span.start),
-                &mut *outputs.diagnostics,
-                args.archive.as_ref(),
             )?;
         }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
@@ -1738,15 +1737,15 @@ fn search(
             // factory is made, before any error of the batch is acted on (`x_search_batches` may
             // have searched it ahead; only the order of the file and of what the run writes
             // matters, and the file is apart from the reports). Its `EffectiveSearchSpace` option
-            // is the one the batch before left (`note_searched` below).
+            // is the one the batch before left (`note_searched` below). NCBI's posts of the bytes
+            // replaced in it wait for the batch's start (`query_posts` below, or before the
+            // batch's error).
             if let (Some(strategy), Some(requests)) = (args.strategy.as_ref(), requests.as_ref()) {
                 requests.write(
                     strategy,
                     range.start,
                     &queries[range.clone()],
                     query_input.placements.get(range.start),
-                    &mut *outputs.diagnostics,
-                    args.archive.as_ref(),
                 )?;
             }
             let (mut batch_results, batch_lengths, batch_karlin, batch_validity) = {
@@ -2332,6 +2331,16 @@ fn search(
                 handle,
                 spans: &batch_spans,
             });
+        // The posts before each query's report: NCBI's posts of the bytes replaced in the search
+        // strategy request of each reported batch follow the reader's messages of the batch, in
+        // its first query (`query_warnings::query_posts`).
+        let query_posts = crate::report::query_warnings::query_posts(
+            query_warning_lines,
+            args.strategy
+                .as_ref()
+                .map_or_else(Vec::new, |strategy| strategy.take_posts(queries.len())),
+            |query| batches.warnings[query].len(),
+        );
         // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); it is
         // written after all batches are searched. No NCBI counterpart.
         let t_output = crate::utils::xtiming::clock();
@@ -2358,7 +2367,7 @@ fn search(
             resolved.db_gencode,
             seg.as_ref(),
             resolved.lcase_masking,
-            &query_warning_lines,
+            &query_posts,
             subject_reads.queries(),
             &super::stage_e_report::ReportRanges {
                 queries: &query_input.placements,
@@ -2391,11 +2400,14 @@ fn search(
             pssm.as_deref(),
         )?;
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);
-        // The failed batch's reading messages (its search strategy request was written before its
-        // search), then its error.
+        // The failed batch's reading messages, NCBI's posts of the bytes replaced in its search
+        // strategy request (written before its search), then its error.
         if let Some((range, error)) = failed {
             for warnings in &batches.warnings[range] {
                 outputs.diagnostics.write_all(warnings)?;
+            }
+            if let Some(strategy) = args.strategy.as_ref() {
+                strategy.write_posts(&mut *outputs.diagnostics, args.archive.as_ref())?;
             }
             return Err(error);
         }
@@ -2413,12 +2425,14 @@ fn search(
             span.start,
             &searched_queries[span.clone()],
             query_input.placements.get(span.start),
-            &mut *outputs.diagnostics,
-            args.archive.as_ref(),
         )?;
     }
+    // The batch's reader messages, NCBI's posts of the bytes replaced in its request, its error.
     if let Some((warnings, error)) = batches.stop {
         outputs.diagnostics.write_all(&warnings)?;
+        if let Some(strategy) = args.strategy.as_ref() {
+            strategy.write_posts(&mut *outputs.diagnostics, args.archive.as_ref())?;
+        }
         return Err(error);
     }
     Ok(())

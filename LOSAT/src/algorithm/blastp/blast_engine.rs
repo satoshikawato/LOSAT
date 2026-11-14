@@ -7314,8 +7314,9 @@ fn search(
     }
     // The search strategy's request of a batch outside every call (`-export_search_strategy`): the
     // batch that stops or fails the run when no batch before it was searched, written before any
-    // output of the run (`CallRequests` releases the others), its posts on `diagnostics`.
-    let write_alone = |span: std::ops::Range<usize>, diagnostics: &mut dyn Write| -> Result<()> {
+    // output of the run (`CallRequests` releases the others); NCBI's posts of the bytes replaced
+    // in it follow the batch's reader messages, before its error (`write_request_posts`).
+    let write_alone = |span: std::ops::Range<usize>| -> Result<()> {
         match args.strategy.as_ref() {
             Some(strategy) => super::archive::requests(
                 subject_source
@@ -7329,8 +7330,6 @@ fn search(
                 span.start,
                 &searched_queries[span.clone()],
                 query_input.placements.get(span.start),
-                diagnostics,
-                args.archive.as_ref(),
             ),
             None => Ok(()),
         }
@@ -7392,12 +7391,13 @@ fn search(
                     Some(next_request(span)),
                 )?;
             } else {
-                write_alone(span, &mut *outputs.diagnostics)?;
+                write_alone(span)?;
                 write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
             }
             outputs
                 .diagnostics
                 .write_all(&batches.warnings[searched_start])?;
+            write_request_posts(&args, &mut *outputs.diagnostics)?;
             Err(failure.error)
         })?;
     } else if batches.stop.is_some() {
@@ -7409,7 +7409,7 @@ fn search(
         // without letters) has its search strategy request: NCBI made its query factory before
         // the search (`QueryBatches::stop_batch`); it is written before the prolog.
         if let Some(span) = batches.stop_batch.clone() {
-            write_alone(span, &mut *outputs.diagnostics)?;
+            write_alone(span)?;
         }
         write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
     } else {
@@ -7417,8 +7417,11 @@ fn search(
         // no query (an empty pipe, or `-query -` after `-subject -`).
         write_reports_without_queries(&args, subject_source, subject_label, outputs)?;
     }
+    // The stopping batch's reader messages, NCBI's posts of the bytes replaced in its request
+    // (released after the reports of the batches before, or written alone), its error.
     if let Some((warnings, error)) = batches.stop {
         outputs.diagnostics.write_all(&warnings)?;
+        write_request_posts(&args, &mut *outputs.diagnostics)?;
         return Err(error);
     }
     Ok(())
@@ -8172,7 +8175,8 @@ fn preliminary_search_error(
     let written = (|| -> Result<()> {
         // The failed batch's search strategy request (a chunk's is that of its query's batch,
         // `search_split_query_batches`): the call's first, whose search fails; it is written
-        // before the prolog.
+        // before the prolog, and NCBI's posts of the bytes replaced in it after the batch's
+        // reader messages.
         if let (Some(call), Some(batch)) = (
             reports.call_requests,
             query_batches
@@ -8180,11 +8184,7 @@ fn preliminary_search_error(
                 .find(|batch| !batch.searched.is_empty())
                 .filter(|_| !chunk),
         ) {
-            call.end_at(
-                batch.searched.end,
-                &mut *outputs.diagnostics,
-                args.archive.as_ref(),
-            )?;
+            call.end_at(batch.searched.end)?;
         }
         // EXPERIMENT (LOSAT_X_BPQBLOCK): a block after the first of the block search follows
         // the prolog that the first block wrote.
@@ -8194,7 +8194,7 @@ fn preliminary_search_error(
         if let Some(first_batch_messages) = reports.reader_warnings.first() {
             outputs.diagnostics.write_all(first_batch_messages)?;
         }
-        Ok(())
+        write_request_posts(args, &mut *outputs.diagnostics)
     })();
     match written {
         Ok(()) => crate::blastinput::app::engine_error(text),
@@ -8259,7 +8259,12 @@ struct NextRequest<'a> {
 /// the call's requests in one place (`release`): on success every batch's (those that no mark
 /// wrote) and the request of the batch that follows the call (`NextRequest`). A call that ends
 /// with an NCBI error without a mark is LOSAT's internal error, so that no error path drops
-/// requests silently.
+/// requests silently. NCBI's posts of the bytes replaced in a request wait in the run's export
+/// until the run writes the start of the request's batch (`StrategyExport::take_posts`): the
+/// formats place those of the call's batches before their first queries' reports (`take_posts`),
+/// and an error of a batch writes those of its batch after its reader messages
+/// (`write_request_posts`), wherever the request was written (a search of the batches again
+/// places those of an earlier attempt).
 struct CallRequests<'a> {
     strategy: crate::report::archive::strategy::StrategyExport,
     requests: crate::report::archive::requests::RunRequests<'a>,
@@ -8330,15 +8335,10 @@ impl<'a> CallRequests<'a> {
     /// The call ends at its query `through`: NCBI has written the requests of the batches before
     /// it (every batch before the formats; the batch an NCBI error belongs to), so they are
     /// written now (`write_through`), before the output of the call's end, and the place is
-    /// marked. NCBI's posts of the bytes that ASN.1 text replaces in them go to `diagnostics` and
-    /// are messages of the run's archive `archive` (`RunRequests::write`).
-    fn end_at(
-        &self,
-        through: usize,
-        diagnostics: &mut dyn std::io::Write,
-        archive: Option<&crate::report::archive::ArchiveHandle>,
-    ) -> Result<()> {
-        self.write_through(through, diagnostics, archive)?;
+    /// marked. NCBI's posts of the bytes that ASN.1 text replaced in them wait for the starts of
+    /// their batches (`take_posts`, `write_request_posts`).
+    fn end_at(&self, through: usize) -> Result<()> {
+        self.write_through(through)?;
         *self
             .through
             .lock()
@@ -8346,14 +8346,19 @@ impl<'a> CallRequests<'a> {
         Ok(())
     }
 
+    /// Takes NCBI's posts of the bytes replaced in the requests written of the call's batches,
+    /// each with the call's index of its batch's first query (`StrategyExport::take_posts`).
+    fn take_posts(&self) -> Vec<(usize, crate::report::diag_log::Posts)> {
+        self.strategy
+            .take_posts(self.base + self.records.len())
+            .into_iter()
+            .map(|(first, posts)| (first.saturating_sub(self.base), posts))
+            .collect()
+    }
+
     /// Writes the requests of the call's batches that start before its query `through` (those
     /// written already are not made again), each followed by its batch's searched space.
-    fn write_through(
-        &self,
-        through: usize,
-        diagnostics: &mut dyn std::io::Write,
-        archive: Option<&crate::report::archive::ArchiveHandle>,
-    ) -> Result<()> {
+    fn write_through(&self, through: usize) -> Result<()> {
         let searched = self
             .searched
             .lock()
@@ -8369,8 +8374,6 @@ impl<'a> CallRequests<'a> {
                 queries.start,
                 &self.records[span.clone()],
                 self.placements.get(span.start),
-                &mut *diagnostics,
-                archive,
             )?;
             self.strategy.note_searched(queries, space)?;
         }
@@ -8378,16 +8381,11 @@ impl<'a> CallRequests<'a> {
     }
 
     /// Writes the requests of the call that ended with `result` (`end_at` wrote those up to its
-    /// mark): on success every batch's and the next one's, the next one's posts after the call's
-    /// reports (`diagnostics`, `archive` as `end_at`'s); after an error those up to the call's
-    /// mark. A call that stops with a header file NCBI cannot read writes none (`search` searches
-    /// the batches before it again), and so does a refusal of LOSAT's.
-    fn release(
-        &self,
-        result: &Result<()>,
-        diagnostics: &mut dyn std::io::Write,
-        archive: Option<&crate::report::archive::ArchiveHandle>,
-    ) -> Result<()> {
+    /// mark): on success every batch's and the next one's, whose posts the caller writes after
+    /// that batch's reader messages (`write_request_posts`); after an error those up to the
+    /// call's mark. A call that stops with a header file NCBI cannot read writes none (`search`
+    /// searches the batches before it again), and so does a refusal of LOSAT's.
+    fn release(&self, result: &Result<()>) -> Result<()> {
         let mark = *self
             .through
             .lock()
@@ -8403,19 +8401,36 @@ impl<'a> CallRequests<'a> {
                 return Ok(());
             }
         };
-        self.write_through(through, &mut *diagnostics, archive)?;
+        self.write_through(through)?;
         if let (Ok(()), Some(next)) = (result, self.next) {
             self.requests.write(
                 &self.strategy,
                 next.first_query,
                 next.records,
                 next.placement,
-                diagnostics,
-                archive,
             )?;
         }
         Ok(())
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-276
+// ```c++
+//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+//
+//             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
+//             ...
+//                 results = lcl_blast.Run();
+// ```
+/// Writes NCBI's posts of the bytes replaced in the search strategy requests written whose
+/// batches' starts are not written (`StrategyExport::write_posts`): those of the batch whose
+/// error follows, after the batch's reader messages and before the error.
+fn write_request_posts(args: &ResolvedBlastpArgs, diagnostics: &mut dyn Write) -> Result<()> {
+    if let Some(strategy) = args.strategy.as_ref() {
+        strategy.write_posts(diagnostics, args.archive.as_ref())?;
+    }
+    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
@@ -8495,13 +8510,11 @@ fn unsearched_batches_then_engine_error(
         split_search_spaces: None,
     };
     // The first searched batch's search strategy request follows those of the batches before
-    // (`CallRequests`), written before their reports.
+    // (`CallRequests`), written before their reports; the reports of those batches place NCBI's
+    // posts of the bytes replaced in their requests, and the failed batch's follow its reader
+    // messages.
     if let Some(call) = reports.call_requests {
-        if let Err(error) = call.end_at(
-            batch.searched.end,
-            &mut *outputs.diagnostics,
-            args.archive.as_ref(),
-        ) {
+        if let Err(error) = call.end_at(batch.searched.end) {
             return error;
         }
     }
@@ -8542,6 +8555,9 @@ fn unsearched_batches_then_engine_error(
         if let Err(error) = outputs.diagnostics.write_all(messages) {
             return error.into();
         }
+    }
+    if let Err(error) = write_request_posts(args, &mut *outputs.diagnostics) {
+        return error;
     }
     crate::blastinput::app::engine_error(text)
 }
@@ -8828,7 +8844,8 @@ fn search_split_query_batches(
             // batches before it, one at a time, and wrote their requests).
             if let Err(error) = searched {
                 if let Some(call) = call {
-                    call.end_at(range.end, &mut *outputs.diagnostics, args.archive.as_ref())?;
+                    call.end_at(range.end)?;
+                    write_request_posts(args, &mut *outputs.diagnostics)?;
                 }
                 return Err(error);
             }
@@ -9362,7 +9379,6 @@ fn run_resolved_in_pool(
         call_requests: call.as_ref(),
         ..*reports
     };
-    let archive = args.archive.clone();
     let result = run_call(
         args,
         query_records,
@@ -9377,9 +9393,7 @@ fn run_resolved_in_pool(
         x_ahead,
     );
     match &call {
-        Some(call) => call
-            .release(&result, &mut *outputs.diagnostics, archive.as_ref())
-            .and(result),
+        Some(call) => call.release(&result).and(result),
         None => result,
     }
 }
@@ -14193,11 +14207,18 @@ fn run_call(
     // pssmread, H4), where the first format's writer puts them
     // (`QueryWarnings::after_last_query`; the others have no epilog: after the reports).
     let mut pssm_read_warnings_after = Vec::new();
+    // The bytes of those warnings at the start of each query's lines, before the reader's messages
+    // of its batch (`query_posts` below).
+    let mut pssm_reads_before: Vec<usize> = Vec::new();
     if let Some(files) = psiblast_pssms.as_mut() {
         let queries = query_warning_lines.len();
         for (query, warnings) in files.take_read_warnings() {
             match query_warning_lines.get_mut(query + 1) {
                 Some(next) => {
+                    if pssm_reads_before.len() <= query + 1 {
+                        pssm_reads_before.resize(query + 2, 0);
+                    }
+                    pssm_reads_before[query + 1] += warnings.len();
                     next.splice(0..0, warnings);
                 }
                 None if format_plans
@@ -14211,7 +14232,6 @@ fn run_call(
             }
         }
     }
-    let mut warning_lines: Option<&[Vec<u8>]> = Some(&query_warning_lines);
     // Each requested format prints the same final result without searching again.
     let mut output_result: Result<()> = Ok(());
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
@@ -14301,12 +14321,23 @@ fn run_call(
     // a matrix name that the XML formats do not know stops them after the run's first batch,
     // `search`).
     if let Some(call) = reports.call_requests {
-        call.end_at(
-            query_records.len(),
-            &mut *outputs.diagnostics,
-            args.archive.as_ref(),
-        )?;
+        call.end_at(query_records.len())?;
     }
+    // The posts before each query's report: NCBI's posts of the bytes replaced in the search
+    // strategy request of each of the call's batches follow the reader's messages of the batch
+    // (after psiblast's warnings of the PSSM reads of the query before), in its first query
+    // (`query_warnings::query_posts`).
+    let query_posts = crate::report::query_warnings::query_posts(
+        query_warning_lines,
+        reports
+            .call_requests
+            .map_or_else(Vec::new, CallRequests::take_posts),
+        |query| {
+            pssm_reads_before.get(query).copied().unwrap_or(0)
+                + reports.reader_warnings.get(query).map_or(0, Vec::len)
+        },
+    );
+    let mut warning_lines: Option<&[crate::report::diag_log::Posts]> = Some(&query_posts);
     // Every structured format of the call is XML2 or JSON: none writes the report that a
     // `-subject` document holds back (`blast_xml::write_blastp_xml`).
     let xml_only_xml2 = !format_plans.contains(&BlastpReport::Xml);
@@ -14340,8 +14371,9 @@ fn run_call(
                     if spec.kind == crate::report::tabular::TabularKind::TaxReport
             ))
         .then(|| {
-            let warnings = crate::report::query_warnings::QueryWarnings::new(
+            let warnings = crate::report::query_warnings::QueryWarnings::of_posts(
                 first_lines.unwrap_or(&[]),
+                args.archive.as_ref(),
                 &mut *outputs.diagnostics,
             );
             match first_lines {
@@ -14499,13 +14531,18 @@ fn run_call(
                     }
                     None => {
                         // The prolog is written before the search (`PrintProlog`); the report
-                        // data's constructor throws for the first query.
+                        // data's constructor throws for the first query, after the reader's
+                        // messages of its batch and NCBI's posts of the bytes replaced in the
+                        // batch's search strategy request (`query_posts`).
                         if let Some(kind) = xml2_kind {
                             let mut writer = format.sink.open()?;
                             writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(
                                 kind,
                             ))?;
                             writer.flush()?;
+                        }
+                        if let Some(warnings) = warnings.as_mut() {
+                            warnings.before_query(0, &mut std::io::sink())?;
                         }
                         return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
                     }

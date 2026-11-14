@@ -9914,15 +9914,16 @@ fn run_in_pool(
         // is made, before its set-up (the masks of `-window_masker_db` first) and search, so every
         // error of the batch from here on follows it (the file is apart from the reports). Its
         // `EffectiveSearchSpace` option is the one the batch before left (`note_searched` below).
+        // NCBI's posts of the bytes it replaces follow the reader's messages of the batch, before
+        // anything of its set-up, search and reports (`batch_title_warnings`).
         if let (Some(strategy), Some(requests)) = (args.strategy.as_ref(), requests.as_ref()) {
             requests.write(
                 strategy,
                 start,
                 batch_records.searched(),
                 query_input.placements.get(start),
-                &mut *outputs.diagnostics,
-                archive,
             )?;
+            batch_title_warnings.append(&strategy.take_all_posts());
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:518-530
         // ```c

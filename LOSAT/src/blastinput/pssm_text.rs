@@ -129,9 +129,10 @@ fn enumerated(value: &Value, ty: u16, name: &str) -> (&'static str, i32) {
         unreachable!("{name} is an ENUMERATED")
     };
     let name = values
+        .values()
         .iter()
-        .find(|(_, value)| value == number)
-        .map(|(name, _)| *name)
+        .find(|value| value.value == *number)
+        .map(|value| value.name())
         .expect("an ENUMERATED number has a name");
     (name, *number)
 }
@@ -178,7 +179,7 @@ fn pssm(value: &Value) -> Result<Pssm, String> {
 /// The query's `Seq-entry`: its `seq` variant, a Bioseq.
 fn seq_entry(value: &Value) -> Result<PssmQuery, String> {
     let (variant, bioseq) = choice(value);
-    let name = members(named::SEQ_ENTRY)[variant].name;
+    let name = members(named::SEQ_ENTRY)[variant].name();
     if name != "seq" {
         return Err(format!(
             "a query Seq-entry {name} is not supported by LOSAT's PSSM reader"
@@ -194,7 +195,7 @@ fn seq_entry(value: &Value) -> Result<PssmQuery, String> {
         descr: get("descr").map(|descr| {
             list(descr, |descriptor| {
                 let (variant, value) = choice(descriptor);
-                match members(named::SEQDESC)[variant].name {
+                match members(named::SEQDESC)[variant].name() {
                     "title" => Seqdesc::Title(string(value)),
                     _ => Seqdesc::Other(descriptor.clone()),
                 }
@@ -212,7 +213,7 @@ fn seq_inst(value: &Value) -> Result<SeqInst, String> {
         None => None,
         Some(data) => {
             let (variant, value) = choice(data);
-            Some(match members(named::SEQ_DATA)[variant].name {
+            Some(match members(named::SEQ_DATA)[variant].name() {
                 "iupacaa" => SeqData::Iupacaa(string(value)),
                 "ncbieaa" => SeqData::Ncbieaa(string(value)),
                 "ncbistdaa" => SeqData::Ncbistdaa(match value {

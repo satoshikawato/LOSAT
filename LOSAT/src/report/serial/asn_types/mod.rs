@@ -55,25 +55,78 @@ pub(crate) const DEFAULT: u8 = 2;
 /// skipped with the skip functions and kept as the text read (`Value::Delayed`).
 pub(crate) const DELAYED: u8 = 4;
 
+/// A name of the table: its offset and length in `table::NAMES` (the table holds no pointer, so
+/// the dynamic loader has nothing of it to relocate when the program starts).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Name(u32, u16);
+
+impl Name {
+    pub(crate) fn get(self) -> &'static str {
+        let start = self.0 as usize;
+        &table::NAMES[start..start + usize::from(self.1)]
+    }
+}
+
+/// The members of a SEQUENCE or CHOICE (`table::MEMBERS`) or the values of an ENUMERATED
+/// (`table::VALUES`): the first and the count.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Span(u16, u16);
+
+impl Span {
+    fn range(self) -> std::ops::Range<usize> {
+        usize::from(self.0)..usize::from(self.0) + usize::from(self.1)
+    }
+
+    /// The members or variants of a SEQUENCE or CHOICE.
+    pub(crate) fn members(self) -> &'static [Member] {
+        &table::MEMBERS[self.range()]
+    }
+
+    /// The named values of an ENUMERATED or INTEGER.
+    pub(crate) fn values(self) -> &'static [EnumValue] {
+        &table::VALUES[self.range()]
+    }
+}
+
+/// A named value of an ENUMERATED or INTEGER.
+#[derive(Debug)]
+pub(crate) struct EnumValue {
+    name: Name,
+    pub(crate) value: i32,
+}
+
+impl EnumValue {
+    pub(crate) fn name(&self) -> &'static str {
+        self.name.get()
+    }
+}
+
 /// One ASN.1 type of the table.
 #[derive(Debug)]
 pub(crate) struct TypeInfo {
     /// The ASN.1 name; empty for an anonymous type (a member's own SEQUENCE, CHOICE, ENUMERATED,
     /// SEQUENCE OF or SET OF), as NCBI's internal type information reports it.
-    pub(crate) name: &'static str,
+    name: Name,
     /// The module of a named type (for the writers of line RG item D3-2, which name it in XML).
     #[allow(dead_code)]
-    pub(crate) module: &'static str,
+    module: Name,
     pub(crate) kind: Kind,
+}
+
+impl TypeInfo {
+    /// The ASN.1 name (empty for an anonymous type).
+    pub(crate) fn name(&self) -> &'static str {
+        self.name.get()
+    }
 }
 
 /// What a type is.
 #[derive(Debug)]
 pub(crate) enum Kind {
     /// SEQUENCE: its members in module order.
-    Sequence(&'static [Member]),
+    Sequence(Span),
     /// CHOICE: its variants in module order.
-    Choice(&'static [Member]),
+    Choice(Span),
     /// SEQUENCE OF (`set` false) or SET OF (`set` true): the element type. A named one
     /// (`Seq-descr ::= SET OF Seqdesc`) is NCBI's implicit class, read as its list.
     List {
@@ -89,7 +142,7 @@ pub(crate) enum Kind {
     /// ENUMERATED (`integer` false) or INTEGER with named values (`integer` true).
     Enumerated {
         integer: bool,
-        values: &'static [(&'static str, i32)],
+        values: Span,
     },
     Boolean,
     Null,
@@ -101,7 +154,7 @@ pub(crate) enum Kind {
 /// A member of a SEQUENCE or a variant of a CHOICE.
 #[derive(Debug)]
 pub(crate) struct Member {
-    pub(crate) name: &'static str,
+    name: Name,
     /// The tag (NCBI's automatic tags: the position from 0), which `[n]` names in ASN.1 text.
     pub(crate) tag: u8,
     /// The type's index in `table::TYPES`.
@@ -111,10 +164,15 @@ pub(crate) struct Member {
     /// The DEFAULT value as the module writes it (for the writers of line RG item D3-2: a DEFAULT
     /// member that was read is written, whatever its value).
     #[allow(dead_code)]
-    pub(crate) default: Option<&'static str>,
+    default: Option<Name>,
 }
 
 impl Member {
+    /// The member's or variant's name.
+    pub(crate) fn name(&self) -> &'static str {
+        self.name.get()
+    }
+
     /// Whether NCBI's reader takes the member as optional (OPTIONAL or DEFAULT).
     pub(crate) fn optional(&self) -> bool {
         self.flags & (OPTIONAL | DEFAULT) != 0
@@ -163,7 +221,7 @@ pub(crate) fn resolved(mut ty: u16) -> &'static TypeInfo {
 /// The members or variants of the SEQUENCE or CHOICE `ty`.
 pub(crate) fn members(ty: u16) -> &'static [Member] {
     match resolved(ty).kind {
-        Kind::Sequence(members) | Kind::Choice(members) => members,
+        Kind::Sequence(members) | Kind::Choice(members) => members.members(),
         _ => &[],
     }
 }
@@ -172,8 +230,8 @@ pub(crate) fn members(ty: u16) -> &'static [Member] {
 pub(crate) fn member_index(ty: u16, name: &str) -> usize {
     members(ty)
         .iter()
-        .position(|member| member.name == name)
-        .unwrap_or_else(|| panic!("{} has no member {name}", type_info(ty).name))
+        .position(|member| member.name() == name)
+        .unwrap_or_else(|| panic!("{} has no member {name}", type_info(ty).name()))
 }
 
 /// A value read under the table: the shape of its type, the members of a SEQUENCE by their

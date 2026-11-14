@@ -23,7 +23,7 @@
 //! `CATCH_ALL`); and an end of the text directly in the root object, a `CEofException` that NCBI's
 //! stack passes on.
 
-use super::{resolved, Kind, Member, Storage, StringKind, Value};
+use super::{resolved, EnumValue, Kind, Member, Storage, StringKind, Value};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::serial::asn_text_reader::{
     real_of_parts, AsnSource, AsnTextError, AsnTextErrorKind, MemberId, Reader, SliceSource,
@@ -401,7 +401,7 @@ impl TypedReader<'_> {
     // }
     // ```
     fn document(&mut self, root: u16) -> R<Value> {
-        let name = super::type_info(root).name;
+        let name = super::type_info(root).name();
         self.push(FrameKind::Named, Some(name), false);
         let header = self
             .r
@@ -429,12 +429,16 @@ impl TypedReader<'_> {
         let info = resolved(ty);
         let target = alias_target(ty);
         let value = match info.kind {
-            Kind::Sequence(members) => self.sequence(target, info.name, members, skip)?,
-            Kind::Choice(variants) => self.choice(info.name, variants, skip)?,
+            Kind::Sequence(members) => {
+                self.sequence(target, info.name(), members.members(), skip)?
+            }
+            Kind::Choice(variants) => self.choice(info.name(), variants.members(), skip)?,
             Kind::List { element, .. } => self.list(element, skip)?,
             Kind::Alias(_) => unreachable!("resolved"),
             Kind::Integer(storage) => self.integer(storage, skip)?,
-            Kind::Enumerated { integer, values } => self.enumerated(values, integer, skip)?,
+            Kind::Enumerated { integer, values } => {
+                self.enumerated(values.values(), integer, skip)?
+            }
             Kind::Boolean => Value::Bool(self.r.boolean()?),
             Kind::Null => {
                 self.r.null()?;
@@ -521,7 +525,7 @@ impl TypedReader<'_> {
         while self.r.next_element(&mut block_start)? {
             let index = self.item_index(members, pos, true)?;
             let member = &members[index];
-            self.set_member(member.name);
+            self.set_member(member.name());
             for missing in &members[pos..index] {
                 expected_member(missing)?;
             }
@@ -571,7 +575,7 @@ impl TypedReader<'_> {
                 }
                 items[pos..]
                     .iter()
-                    .position(|item| item.name.as_bytes() == id)
+                    .position(|item| item.name().as_bytes() == id)
                     .map(|at| at + pos)
             }
             MemberId::Tag(range) => {
@@ -666,7 +670,7 @@ impl TypedReader<'_> {
         }
         let index = self.item_index(variants, 0, false)?;
         let variant = &variants[index];
-        self.set_member(variant.name);
+        self.set_member(variant.name());
         let value = self.value(variant.ty, skip)?;
         Ok(Value::Choice(index as u16, Box::new(value)))
     }
@@ -969,12 +973,7 @@ impl TypedReader<'_> {
     //     }
     // ```
     // (`SkipEnum`, 468-484, reads the value the same way and rethrows at 478.)
-    fn enumerated(
-        &mut self,
-        values: &'static [(&'static str, i32)],
-        integer: bool,
-        skip: bool,
-    ) -> R<Value> {
+    fn enumerated(&mut self, values: &'static [EnumValue], integer: bool, skip: bool) -> R<Value> {
         let result = self.enum_value(values, integer);
         result.map(Value::Enum).map_err(|error| match error {
             ReadError::Exception(e) => {
@@ -994,19 +993,19 @@ impl TypedReader<'_> {
         })
     }
 
-    fn enum_value(&mut self, values: &'static [(&'static str, i32)], integer: bool) -> R<i32> {
+    fn enum_value(&mut self, values: &'static [EnumValue], integer: bool) -> R<i32> {
         let c = self.r.skip_white_space()?;
         let id = self.r.scan_end_of_id(c.is_ascii_lowercase())?;
         if !id.is_empty() {
             let id = self.r.bytes(id);
             return values
                 .iter()
-                .find(|(name, _)| name.as_bytes() == id)
-                .map(|&(_, number)| number)
+                .find(|value| value.name().as_bytes() == id)
+                .map(|value| value.value)
                 .ok_or_else(|| ReadError::Serial("invalid value of enumerated type".into()));
         }
         let value = self.int4()?;
-        if !integer && !values.iter().any(|&(_, number)| number == value) {
+        if !integer && !values.iter().any(|named| named.value == value) {
             return Err(ReadError::Serial("invalid value of enumerated type".into()));
         }
         Ok(value)
@@ -1279,7 +1278,7 @@ fn expected_member(member: &Member) -> R<()> {
     }
     Err(ReadError::Serial(format!(
         "member {} expected",
-        member.name
+        member.name()
     )))
 }
 

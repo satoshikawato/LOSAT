@@ -135,7 +135,7 @@ impl Seqdesc {
             Seqdesc::Other(Value::Choice(index, _)) => {
                 super::asn_types::members(super::asn_types::table::named::SEQDESC)
                     [usize::from(*index)]
-                .name
+                .name()
             }
             Seqdesc::Other(_) => unreachable!("a Seqdesc is a CHOICE"),
         }
@@ -174,7 +174,7 @@ impl PssmQuery {
             .flatten()
             .filter_map(|annot| match annot.member(data) {
                 Some(Value::Choice(variant, _)) => {
-                    Some(members(data_ty)[usize::from(*variant)].name)
+                    Some(members(data_ty)[usize::from(*variant)].name())
                 }
                 _ => None,
             })

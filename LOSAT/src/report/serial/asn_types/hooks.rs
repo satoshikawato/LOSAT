@@ -74,7 +74,7 @@ pub(super) fn pre_read_member(
     let dim = get("dim").unwrap_or(2) as i32 as i64 as u64;
     let numseg = get("numseg").unwrap_or(0) as i32 as i64 as u64;
     const MAX_SIZE: u64 = (i64::MAX as u64) / 4;
-    let size = match super::members(ty)[member].name {
+    let size = match super::members(ty)[member].name() {
         "starts" | "strands" => dim.wrapping_mul(numseg),
         "lens" => numseg,
         _ => return Ok(()),

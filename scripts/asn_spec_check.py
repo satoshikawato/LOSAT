@@ -11,9 +11,18 @@ The companion of `asn_spec_gen.py` (a maintainer tool; LOSAT's build runs neithe
   3. every value list (ENUMERATED and INTEGER with named values) against its
      `BEGIN_NAMED_ENUM_*INFO` block: the names and numbers in order, and whether it is an INTEGER;
   4. the C++ storage of every INTEGER member and list element against the `typedef` of the
-     generated `*_.hpp` (`TSeqPos` Uint4, `int` Int4, `Int8`/`TGi`/`TEntrezId` Int8, ...);
+     generated `*_.hpp` (`TSeqPos` Uint4, `int` Int4, `Int8`/`TGi`/`TEntrezId` Int8, ...), and of
+     every named INTEGER against its `BEGIN_ALIAS_INFO` (`PubMedId` Int8);
   5. no class of the table is read in random order (`SetRandomOrder(true)`) and all are
-     `DataSpec(EDataSpec::eASN)` where the block names a data spec.
+     `DataSpec(EDataSpec::eASN)` where the block names a data spec;
+  6. the kind of every member's and variant's value (VisibleString, UTF8String, StringStore,
+     REAL, BOOLEAN, NULL, OCTET STRING, INTEGER, ENUMERATED, or the class it names) against the
+     `ADD_NAMED_*` macro of the block, the `BEGIN_ALIAS_INFO` of a named alias and the typedef
+     of the generated header;
+  7. no type that a delayed member reaches is a named alias or a named SEQUENCE OF / SET OF:
+     NCBI's skip of a delayed value pushes an `eFrameNamed` frame for them (`SkipNamedType`,
+     objistr.cpp:1302-1312), which the typed reader does not (it reads, and skips, the
+     member's value with the frames of its class, choice and list types only).
 
 Usage:
   asn_spec_check.py <NCBI c++ source dir> [--table <table.rs>]
@@ -28,7 +37,7 @@ import re
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Optional
+from typing import Any, Optional
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -52,6 +61,8 @@ ENUM = re.compile(
     re.S)
 INTERNAL = re.compile(r'SET_(?:ENUM_)?INTERNAL_NAME\("([^"]*)", "([^"]*)"\)')
 ITEM = re.compile(r'ADD_NAMED_[A-Z_]*(?:MEMBER|VARIANT)\("([^"]+)"')
+ITEM_ARGS = re.compile(r'(ADD_NAMED_[A-Z_]*(?:MEMBER|VARIANT))\("[^"]+"(.*)$')
+ALIAS = re.compile(r'BEGIN_ALIAS_INFO\("[^"]*", (\w+), (\w+), \(([^)]*)\)\)')
 VALUE = re.compile(r'ADD_ENUM_VALUE\("([^"]+)",\s*([^)]*)\)')
 TYPEDEF = re.compile(r'^\s*typedef (.+?) T(\w+);', re.M)
 
@@ -66,6 +77,77 @@ CXX_STORAGE = {
 }
 ENUM_CONST = re.compile(r"\b(e\w+)\s*=\s*(-?\d+)")
 
+# The value kind of a C++ type of the generated code (check 6), in the table's words.
+CXX_KIND = {
+    "string": "String:Visible", "std::string": "String:Visible", "double": "Real",
+    "bool": "Boolean", **{cxx: "Integer" for cxx in CXX_STORAGE},
+}
+
+
+def kind_of_args(args: str, aliases: dict[str, tuple[str, str]]) -> Optional[str]:
+    """The value kind that the type arguments of an `ADD_NAMED_*` macro give, or None."""
+    if "CStringUTF8" in args:
+        return "String:Utf8"
+    if "StringStore" in args:
+        return "String:Store"
+    if "STL_CHAR_vector" in args:
+        return "Octets"
+    if "(ENUM," in args:
+        return "Enumerated|Integer"
+    if re.search(r"\bC_\w+", args):
+        return "class:anon"
+    m = re.search(r"STD, \(([^)]*)\)", args)
+    if m:
+        return CXX_KIND.get(m.group(1).strip(), "STD:" + m.group(1).strip())
+    found = [c for c in re.findall(r"\b(C[A-Z]\w*)\b", args) if c != "CLASS"]
+    if not found:
+        return None
+    cls = found[-1]
+    if cls in aliases:
+        kind, arg = aliases[cls]
+        if kind == "STD":
+            return CXX_KIND.get(arg.strip("() "), "STD:" + arg)
+        if kind == "StringStore":
+            return "String:Store"
+        if kind == "STL_CHAR_vector":
+            return "Octets"
+        if kind == "CLASS":
+            return "class:" + arg.strip("() ")
+    return "class:" + str(cls)
+
+
+def table_kind(table: Any, ty: int) -> str:
+    """The value kind of table entry `ty` (through aliases and anonymous lists), in the words of
+    `kind_of_args`."""
+    e = table.entries[ty]
+    while e.kind == "Alias":
+        e = table.entries[e.element]
+    while e.kind == "List" and not e.name:
+        e = table.entries[e.element]
+        while e.kind == "Alias":
+            e = table.entries[e.element]
+    if e.kind == "String":
+        return "String:" + str(e.string)
+    if e.kind in ("Sequence", "Choice", "List") and e.name:
+        return "class:C" + str(e.name).replace("-", "_")
+    if e.kind in ("Sequence", "Choice"):
+        return "anon"
+    if e.kind == "Enumerated":
+        return "Integer" if e.integer else "Enumerated"
+    return str(e.kind)
+
+
+def kind_agrees(mine: str, ncbi: str) -> bool:
+    if mine == ncbi:
+        return True
+    # a named INTEGER is generated as an ENUM member too (with an `IsInteger` list)
+    if ncbi == "Enumerated|Integer" and mine in ("Enumerated", "Integer"):
+        return True
+    if mine == "anon" and ncbi in ("class:anon", "?"):
+        return True
+    # a member whose typedefs name several C++ types agrees with any of their kinds
+    return ncbi.startswith("?") and mine.replace("String:", "") in ncbi
+
 
 def header_constants(include: Path, type_name: str) -> dict[str, int]:
     """The enum constants (`eRepr_raw = 2`) of the generated header of `type_name`."""
@@ -76,13 +158,18 @@ def header_constants(include: Path, type_name: str) -> dict[str, int]:
     return out
 
 
-def blocks_by_key(objects: Path) -> tuple[dict[str, list[str]], dict[str, list[tuple[str, str]]]]:
+def blocks_by_key(objects: Path) -> tuple[
+        dict[str, list[str]], dict[str, list[tuple[str, str]]], dict[str, tuple[str, str]]]:
     """The class/choice blocks and the enum blocks of the generated files, by type name, or by
-    `Owner.member` for an anonymous type (`SET_INTERNAL_NAME`)."""
+    `Owner.member` for an anonymous type (`SET_INTERNAL_NAME`); and the named aliases
+    (`BEGIN_ALIAS_INFO`), C++ class -> (kind macro, its argument)."""
     classes: dict[str, list[str]] = {}
     enums: dict[str, list[tuple[str, str]]] = {}
+    aliases: dict[str, tuple[str, str]] = {}
     for path in sorted(objects.glob("*/*_.cpp")):
         text = path.read_text(encoding="latin-1")
+        for m in ALIAS.finditer(text):
+            aliases[m.group(1)] = (m.group(2), m.group(3).strip())
         for m in BLOCK.finditer(text):
             name, body = m.group(1), m.group(2)
             internal = INTERNAL.search(body)
@@ -93,7 +180,7 @@ def blocks_by_key(objects: Path) -> tuple[dict[str, list[str]], dict[str, list[t
             internal = INTERNAL.search(body)
             key = name if name else (f"{internal.group(1)}.{internal.group(2)}" if internal else "")
             enums.setdefault(key, []).append((integer, body))
-    return classes, enums
+    return classes, enums, aliases
 
 
 def header_typedefs(include: Path, type_name: str) -> dict[str, set[str]]:
@@ -130,8 +217,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     objects = args.source / "src" / "objects"
     include = args.source / "include" / "objects"
-    classes, enums = blocks_by_key(objects)
-    checked = {"classes": 0, "lists": 0, "storage": 0}
+    classes, enums, aliases = blocks_by_key(objects)
+    checked = {"classes": 0, "lists": 0, "storage": 0, "kinds": 0}
 
     def owner_of(entry_path: str) -> str:
         return entry_path.split(".", 1)[0]
@@ -166,6 +253,24 @@ def main(argv: Optional[list[str]] = None) -> int:
                     marks.append("data spec")
                 if marks:
                     problems.append(f"{key}: " + ", ".join(marks))
+                # 6. The kind of each member's value.
+                typedefs = header_typedefs(include, e.name or owner_of(e.path))
+                for (spec, ty, _), ln in zip(e.members, lines):
+                    macro, rest = ITEM_ARGS.search(ln).groups()  # type: ignore[union-attr]
+                    if "NULL" in macro:
+                        ncbi = "Null"
+                    elif "ENUM" in macro:
+                        ncbi = "Enumerated|Integer"
+                    elif "_STD_" in macro:
+                        kinds = {CXX_KIND.get(t, "STD:" + t)
+                                 for t in typedefs.get(typedef_name(spec.name), set())}
+                        ncbi = kinds.pop() if len(kinds) == 1 else "?" + "|".join(sorted(kinds))
+                    else:
+                        ncbi = kind_of_args(rest, aliases) or "?"
+                    mine = table_kind(table, ty)
+                    if not kind_agrees(mine, ncbi):
+                        problems.append(f"{key}.{spec.name}: value kind {mine}, NCBI {ncbi}")
+                    checked["kinds"] += 1
                 found = True
                 break
             if not found:
@@ -189,6 +294,13 @@ def main(argv: Optional[list[str]] = None) -> int:
                         if got and got != {element.storage}:
                             problems.append(f"{key}.{spec.name}.E: storage {element.storage}, NCBI {sorted(cxx)}")
                         checked["storage"] += 1 if got else 0
+        elif e.kind == "Integer" and e.name:
+            # 4. The storage of a named INTEGER (`PubMedId ::= INTEGER`), from its alias info.
+            kind, arg = aliases.get("C" + e.name.replace("-", "_"), ("", ""))
+            alias_storage = CXX_STORAGE.get(arg.strip("() ")) if kind == "STD" else None
+            if alias_storage != e.storage:
+                problems.append(f"{key}: storage {e.storage}, NCBI alias {kind} {arg}")
+            checked["storage"] += 1
         elif e.kind == "Enumerated":
             candidates_enum = enums.get(key, [])
             if not candidates_enum:
@@ -212,10 +324,31 @@ def main(argv: Optional[list[str]] = None) -> int:
                 problems.append(f"{key}: the value list or its INTEGER mark differs from NCBI's")
             checked["lists"] += 1
 
+    # 7. The types a delayed member reaches.
+    reached: set[int] = set()
+    todo = [ty for e in table.entries if e.kind == "Sequence"
+            for _, ty, delayed in e.members if delayed]
+    while todo:
+        ty = todo.pop()
+        if ty in reached:
+            continue
+        reached.add(ty)
+        e = table.entries[ty]
+        if e.kind == "Alias" or (e.kind == "List" and e.name):
+            problems.append(f"{e.name or e.path}: reached by a delayed member, a named "
+                            f"{'alias' if e.kind == 'Alias' else 'list'} (SkipNamedType's frame)")
+        if e.kind in ("Sequence", "Choice"):
+            todo.extend(ty for _, ty, _ in e.members)
+        elif e.kind in ("List", "Alias"):
+            todo.append(e.element)
+    checked["delayed"] = len(reached)
+
     for problem in problems:
         print(problem)
     print(f"{checked['classes']} SEQUENCE/CHOICE types, {checked['lists']} value lists, "
-          f"{checked['storage']} INTEGER storages checked: {len(problems)} differences")
+          f"{checked['storage']} INTEGER storages, {checked['kinds']} member value kinds, "
+          f"{checked['delayed']} types under delayed members checked: "
+          f"{len(problems)} differences")
     return 1 if problems else 0
 
 

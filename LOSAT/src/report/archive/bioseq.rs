@@ -39,6 +39,26 @@ pub struct BioseqInput<'a> {
     pub protein: bool,
 }
 
+impl BioseqInput<'_> {
+    /// Whether `encoding` writes the strings of the Bioseq (`write_bioseq`) and of its Seq-loc
+    /// (`write_seq_loc`) as they are (`ArchiveEncoding::writes_text`): the title and the
+    /// Seq-ids. (The `DefLine` field is `NStr::PrintableString` of the line: visible.) The masks
+    /// and the Seq-aligns of the record use the same Seq-ids.
+    pub fn written_as_is(&self, encoding: super::ArchiveEncoding) -> bool {
+        use super::seq_id_written_as_is;
+        encoding.writes_text(self.title)
+            && match self.ids {
+                Some(ids) => ids
+                    .iter()
+                    .all(|id| seq_id_written_as_is(encoding, SeqId::Db(id))),
+                None => seq_id_written_as_is(encoding, SeqId::Local(self.id)),
+            }
+            && self
+                .seq_loc
+                .is_none_or(|loc| seq_id_written_as_is(encoding, SeqId::Db(loc.id)))
+    }
+}
+
 /// The strand of a query's Seq-loc (`CBlastFastaInputSource::x_FastaToSeqLoc`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SeqLocStrand {

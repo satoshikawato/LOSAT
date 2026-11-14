@@ -10,7 +10,7 @@
 
 use super::options::OptionInputs;
 use super::strategy::{hitlist_size, HitlistArgs};
-use super::{ArchiveEncoding, ArchiveRequest};
+use super::ArchiveRequest;
 use crate::cli::{Cli, Commands};
 
 /// A change of the default request: the parameter in its place, a new one after another, or a
@@ -49,8 +49,7 @@ fn parse(program: &str, words: &[&str]) -> Result<Commands, String> {
 
 /// The request's options, `HitlistSize` included, and `Web_StepNumber` last.
 fn render(inputs: &OptionInputs, database: Option<&str>) -> Vec<String> {
-    let request =
-        ArchiveRequest::for_inputs(ArchiveEncoding::Text, inputs, database, "TEST", "-x").unwrap();
+    let request = ArchiveRequest::for_inputs(inputs, database);
     let mut listed: Vec<String> = request
         .algorithm
         .iter()

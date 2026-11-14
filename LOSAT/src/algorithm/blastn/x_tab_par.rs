@@ -492,7 +492,7 @@ mod tests {
         subject_ids: Vec<Arc<[u8]>>,
         query_titles: Vec<Arc<[u8]>>,
         unsearched: Vec<bool>,
-        warnings: Vec<Vec<u8>>,
+        warnings: Vec<crate::report::diag_log::Posts>,
     }
 
     fn case(rng: &mut Rng, queries: usize, max_rows: u64) -> Case {
@@ -505,9 +505,11 @@ mod tests {
             warnings: (0..queries)
                 .map(|q| {
                     if rng.below(5) == 0 {
-                        format!("Warning: [blastn] Query_{q} warning\n").into_bytes()
+                        crate::report::diag_log::Posts::of_lines(
+                            format!("Warning: [blastn] Query_{q} warning\n").into_bytes(),
+                        )
                     } else {
-                        Vec::new()
+                        crate::report::diag_log::Posts::new()
                     }
                 })
                 .collect(),
@@ -570,7 +572,7 @@ mod tests {
             log: log.clone(),
             sink: true,
         };
-        let mut warnings = QueryWarnings::new(&case.warnings, &mut sink);
+        let mut warnings = QueryWarnings::of_posts(&case.warnings, None, &mut sink);
         let args = (
             &case.hit_lists[..],
             &case.query_ids[..],

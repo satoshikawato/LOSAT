@@ -15,7 +15,7 @@ use crate::report::defline::generate_bioseq_defline;
 use crate::report::seqid::SeqId;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
-use crate::report::serial::encoder::{Encoder, ReplacedChar, SerialError, Traced};
+use crate::report::serial::encoder::{Encoder, Posted, SerialError, Traced};
 use crate::report::serial::xml::XmlEncoder;
 use crate::seqdb::mask::FilterProgram;
 use crate::seqid::label::bioseq_fasta;
@@ -343,7 +343,8 @@ enum Document<'a> {
 /// `os << MSerial_<format> << object`: one document in `serial` appended to `out`. A byte that
 /// NCBI's stream writes as `#` with an error message (`ReplacedChar`) makes the encoder report
 /// `NonVisibleChar`; such a document is written again through `Traced` and its messages are
-/// posted (`rewrite_and_post`), before the caller writes `out` to `stream`.
+/// posted (`rewrite_and_post`, which writes the start of the document to `stream` before them),
+/// before the caller writes the rest of `out` to `stream`.
 fn write_document(
     serial: Serial,
     document: &Document<'_>,
@@ -361,7 +362,7 @@ fn write_document(
         ),
     };
     if let Some(SerialError::NonVisibleChar(_)) = error {
-        error = rewrite_and_post(serial, document, out, start, stream, diag);
+        error = rewrite_and_post(serial, document, out, start, stream, diag)?;
     }
     match error {
         None => Ok(()),
@@ -381,11 +382,10 @@ fn module(document: &Document<'_>) -> &'static str {
 
 /// `document` written again from `start` of `out` through `Traced`, and NCBI's posts of the
 /// bytes that its stream replaced (`Diag::post_replaced`), which come while the document is
-/// written: the output written before goes first (NCBI's `cerr` is tied to `cout`), then the
-/// posts, then the document. (NCBI's serial buffer, `COStreamBuffer` of 4096 bytes, hands the
-/// start of a longer document to the output while it writes it, so with the output and the
-/// diagnostics in one file NCBI's posts of later bytes come after that start; LOSAT does not
-/// reproduce those flush points.) The error of the second writing, if any.
+/// written, NCBI's `cerr` tied to `cout`: each after the output written before and the bytes of
+/// the document that NCBI's serial buffer (`COStreamBuffer`, `Traced`) had written to the output
+/// by then (`Posted::written`), which go to `stream` first and leave `out`. The error of the
+/// second writing, if any.
 #[cold]
 #[inline(never)]
 fn rewrite_and_post(
@@ -395,34 +395,41 @@ fn rewrite_and_post(
     start: usize,
     stream: &mut dyn Write,
     diag: &mut Diag,
-) -> Option<SerialError> {
+) -> io::Result<Option<SerialError>> {
     out.truncate(start);
-    let (error, replaced) = match serial {
-        Serial::AsnText => encode_traced(AsnTextEncoder::new(out), start, document),
-        Serial::AsnBinary => encode_traced(AsnBinaryEncoder::new(out), start, document),
+    let (error, posted) = match serial {
+        Serial::AsnText => encode_traced(Traced::new(AsnTextEncoder::new(out), start), document),
+        Serial::AsnBinary => {
+            encode_traced(Traced::new(AsnBinaryEncoder::new(out), start), document)
+        }
         Serial::Xml => encode_traced(
-            XmlEncoder::ncbi_object(out, module(document)),
-            start,
+            Traced::xml(XmlEncoder::ncbi_object(out, module(document)), start),
             document,
         ),
     };
     if error.is_none() {
-        let _ = stream.flush();
-        diag.post_replaced(&replaced);
+        let mut handed = start;
+        for posted in &posted {
+            let written = start + posted.written as usize;
+            if written > handed {
+                stream.write_all(&out[handed..written])?;
+                handed = written;
+            }
+            let _ = stream.flush();
+            diag.post_replaced(std::slice::from_ref(&posted.replaced));
+        }
+        out.drain(start..handed);
     }
-    error
+    Ok(error)
 }
 
-/// `encode` through `Traced` of `enc`, which appends to a buffer of `start` bytes, and the
-/// replaced bytes.
+/// `encode` through `enc` and the replaced bytes.
 fn encode_traced<E: Encoder>(
-    enc: E,
-    start: usize,
+    mut enc: Traced<E>,
     document: &Document<'_>,
-) -> (Option<SerialError>, Vec<ReplacedChar>) {
-    let mut enc = Traced::new(enc, start);
+) -> (Option<SerialError>, Vec<Posted>) {
     let error = encode(&mut enc, document);
-    (error, enc.take_replaced_chars())
+    (error, enc.take_posted())
 }
 
 /// Writes `document` through `enc` and returns the encoder's error.

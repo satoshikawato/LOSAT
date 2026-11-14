@@ -64,7 +64,6 @@ pub(super) fn search_rounds(
     subject_source: BlastpSubjectSource<'_>,
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
-    titles_may_refuse: bool,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:191-196 (the
     // chunks of a split query are set up without the PSSM; `in_pssm::check_in_pssm_options`)
@@ -90,8 +89,10 @@ pub(super) fn search_rounds(
     let epilog = batches.stop.is_none();
     // The search strategy's requests (`-export_search_strategy`): one per query, written before
     // its first round (`run_queries`), and the one of the batch that stops the run
-    // (`QueryBatches::stop_batch`). Each query's report comes before the next query's request, so
-    // a title that the requests cannot write is refused before any output.
+    // (`QueryBatches::stop_batch`). NCBI's posts of the bytes replaced in a query's request follow
+    // the reader's messages of its batch: round 1's call places them before the query's report
+    // (`CallRequests::take_posts`), and an error of the batch after those messages
+    // (`write_request_posts`).
     let requests = args.strategy.as_ref().map(|_| {
         crate::algorithm::blastp::archive::requests(
             subject_source
@@ -99,17 +100,8 @@ pub(super) fn search_rounds(
                 .is_none()
                 .then(|| subject_source.fasta_records()),
             args.lcase_masking,
-            args.app.name(),
         )
     });
-    if let Some(requests) = requests.as_ref() {
-        if titles_may_refuse {
-            requests.check_titles(&searched_queries[..batches.searched_done])?;
-        }
-        if let Some(span) = batches.stop_batch.clone() {
-            requests.check_titles(&searched_queries[span])?;
-        }
-    }
     let write_stop_request = || -> Result<()> {
         match (
             args.strategy.as_ref(),
@@ -166,7 +158,6 @@ pub(super) fn search_rounds(
                 outputs,
                 pool,
                 epilog,
-                titles_may_refuse,
                 requests.as_ref(),
             )
         })?;
@@ -174,8 +165,11 @@ pub(super) fn search_rounds(
         // before the search that fails).
         write_stop_request()?;
     }
+    // The stopping batch's reader messages, NCBI's posts of the bytes replaced in its request
+    // (written above, after the rounds of the queries before), its error.
     if let Some((warnings, error)) = batches.stop {
         outputs.diagnostics.write_all(&warnings)?;
+        super::write_request_posts(args, &mut *outputs.diagnostics)?;
         return Err(error);
     }
     Ok(())
@@ -233,8 +227,7 @@ fn run_queries(
     outputs: &mut ReportOutputs<'_>,
     pool: &crate::utils::threading::SearchPool<'_>,
     epilog: bool,
-    titles_may_refuse: bool,
-    requests: Option<&crate::report::archive::requests::RunRequests<'_, FastaRecord>>,
+    requests: Option<&crate::report::archive::requests::RunRequests<'_>>,
 ) -> Result<()> {
     let mut files = RoundFiles::new(
         &plan.request,
@@ -280,9 +273,11 @@ fn run_queries(
         // ```
         // The query's search strategy request, before its first round (also when round 1 fails
         // with a header file NCBI cannot read). Round 1's call notes the query's searched space
-        // (`CallRequests`, which finds the request written); the later rounds' calls find both
-        // done. NCBI's handle keeps the last round's space, which is round 1's: every round's
-        // effective lengths read the same `kbp_gap_std` (blast_setup.c:766-768).
+        // (`CallRequests`, which finds the request written) and writes NCBI's posts of the bytes
+        // replaced in it after the reader's messages of the query's batch, before its report
+        // (`CallRequests::take_posts`); the later rounds' calls find all three done. NCBI's
+        // handle keeps the last round's space, which is round 1's: every round's effective
+        // lengths read the same `kbp_gap_std` (blast_setup.c:766-768).
         if let (Some(strategy), Some(requests)) = (args.strategy.as_ref(), requests) {
             requests.write(strategy, query, records, None)?;
         }
@@ -368,7 +363,6 @@ fn run_queries(
                     last_call: false,
                     psi_round: Some(&io),
                     stopped_pssms: None,
-                    titles_may_refuse,
                     query_scopes: batches
                         .query_scopes
                         .as_ref()
@@ -393,6 +387,9 @@ fn run_queries(
                     }
                     if round == 1 {
                         outputs.diagnostics.write_all(&batches.warnings[query])?;
+                        // NCBI's posts of the bytes replaced in the query's request, which
+                        // round 1's report did not place.
+                        super::write_request_posts(args, &mut *outputs.diagnostics)?;
                     }
                     return Err(failure.error);
                 }

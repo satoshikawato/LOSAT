@@ -162,6 +162,27 @@ impl RequestKind {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:418-421
+    // ```c++
+    //         // Allow the fasta reader to complain on invalid sequence input
+    //         SetDiagPostLevel(eDiag_Warning);
+    //         SetDiagPostPrefix("psiblast");
+    //         SetDiagHandler(&m_bah, false);
+    // ```
+    /// The application's name, which NCBI's diagnostics write as the prefix of its posts
+    /// (`[psiblast]`; rpsblast_app.cpp:119, rpstblastn_app.cpp:119, and the program of the five
+    /// search programs). rpstblastn's `-mt_mode 1` with several threads posts as `rpstblastn_mt`
+    /// (rpstblastn_app.cpp:254), a run whose output LOSAT writes as `-num_threads 1`'s
+    /// (DECISIONS F1b-2 of line RG).
+    pub fn application(self) -> &'static str {
+        match self {
+            RequestKind::Psiblast => "psiblast",
+            RequestKind::Rpsblast => "rpsblast",
+            RequestKind::Rpstblastn => "rpstblastn",
+            kind => kind.program(),
+        }
+    }
+
     /// Whether the handle is an RPS search's.
     fn is_rps(self) -> bool {
         matches!(self, RequestKind::Rpsblast | RequestKind::Rpstblastn)

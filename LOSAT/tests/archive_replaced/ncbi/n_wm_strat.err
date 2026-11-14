@@ -1,0 +1,6 @@
+Error: (803.7) [blastn] Blast4-request.body.queue-search.algorithm-options.E.value.string
+Bad char [0xC3] in string at line 94
+in/wé/counts.obinary
+Error: (803.7) [blastn] Blast4-request.body.queue-search.algorithm-options.E.value.string
+Bad char [0xA9] in string at line 94
+in/wé/counts.obinary

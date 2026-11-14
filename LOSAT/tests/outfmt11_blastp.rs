@@ -328,10 +328,10 @@ fn the_out_file_receives_the_archive() {
 
 /// In the text and binary archives a title with a byte outside `0x20..=0x7E` (0x80 and above,
 /// and 0x7F) is written as `#` by NCBI, with a diagnostic per byte (in XML NCBI writes the byte,
-/// and so does LOSAT): LOSAT refuses it (query, `-subject` and a `-db` name)
-/// before the first byte.
+/// and so does LOSAT), query and `-subject`; a `-db` name names a database that does not exist.
+/// NCBI's bytes are frozen in `tests/archive_replaced/`.
 #[test]
-fn non_ascii_titles_and_database_names_are_refused() {
+fn non_ascii_titles_and_database_names_are_written_as_ncbi_writes_them() {
     let dir = std::env::temp_dir().join(format!("losat_outfmt11_bp_title_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let plain = engine().join(input("arch_bp_s.faa"));
@@ -356,13 +356,10 @@ fn non_ascii_titles_and_database_names_are_refused() {
             let mut full = args.clone();
             full.extend_from_slice(&["-outfmt", "11"]);
             let output = run(&[], &full, "1");
-            assert_ne!(output.status.code(), Some(0), "{role}");
-            assert!(output.stdout.is_empty(), "{role}: nothing is written");
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(stderr.contains("visible ASCII"), "{name} {role}: {stderr}");
-            assert!(stderr.contains("-outfmt 11"), "{name} {role}: {stderr}");
+            assert_eq!(output.status.code(), Some(0), "{name} {role}");
+            crate::outfmt11_titles::assert_replaced(name, &output, &format!("{name} {role}"));
         }
-        // The same title is fine in outfmt 8: only the archive refuses it.
+        // The same title is plain text in outfmt 8.
         let output = run(
             &[],
             &["-query", titled, "-subject", plain, "-outfmt", "8"],
@@ -376,12 +373,7 @@ fn non_ascii_titles_and_database_names_are_refused() {
             &["-query", plain, "-db", database, "-outfmt", "11"],
             "1",
         );
-        assert_ne!(output.status.code(), Some(0), "{database:?}");
-        assert!(output.stdout.is_empty(), "{database:?}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("-db name"),
-            "{database:?}"
-        );
+        crate::outfmt11_titles::assert_missing_database(&output, database);
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

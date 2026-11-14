@@ -67,6 +67,16 @@
 use super::encoder::{Encoder, Replaced, SerialError, StreamPosition};
 use super::real::write_xml_double;
 
+/// Whether `type_name`, the name that a writer gives `begin_sequence` or `variant`, stands for an
+/// anonymous ASN.1 type (NCBI's `GetName()` is empty for it): the writers pass the open member's
+/// tag (`Score_value`), which has an underscore, where a named type's name (`Seq-align`) has
+/// none. The object mode writes no tag of its own for it (`begin_object_sequence`, `variant`),
+/// and `encoder::Traced` keeps its `.E` frame (`WillHaveName`).
+#[inline(always)]
+pub(crate) fn anonymous_type(type_name: &str) -> bool {
+    type_name.contains('_')
+}
+
 /// What the stream writes at the start and end of a document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Piece {
@@ -225,9 +235,9 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
 
     /// `x_VerifyChar` of the control character `byte`: `ReplaceVisibleChar` without the
     /// string, reported at the line (`Replaced`, `encoder::Traced`); `write_string` then writes
-    /// `#`. The line is 1 + the ends of line of the document that the encoder holds (all of it
-    /// through `Traced`), counted on from the last call: the XML stream only appends (the `>`
-    /// that `value_attribute` takes back is no end of line).
+    /// `#`. The line is 1 + the ends of line that the encoder holds (`Traced` adds those that
+    /// `flush_to` handed on, which starts the count again), counted on from the last call: the XML
+    /// stream only appends (the `>` that `value_attribute` takes back is no end of line).
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:548-554
     /// ```c++
@@ -256,6 +266,7 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
             byte,
             position: StreamPosition::Line(1 + self.lines),
             with_string: false,
+            at: self.out.len() - self.start,
         });
     }
 
@@ -397,7 +408,7 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
     /// `begin_sequence` of the object mode: `<Type>`, unless the type is anonymous (its name,
     /// the open member's tag, has an underscore), which writes nothing.
     fn begin_object_sequence(&mut self, type_name: &str) {
-        if type_name.contains('_') {
+        if anonymous_type(type_name) {
             debug_assert!(!self.pending_elem);
             debug_assert_eq!(
                 &self.names[self.marks.last().copied().unwrap_or(0)..],
@@ -421,6 +432,8 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
 }
 
 impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
+    const STREAM: Option<super::encoder::Stream> = Some(super::encoder::Stream::Xml);
+
     /// `WriteFileHeader`: the declaration and the DOCTYPE of a document.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:232-276
@@ -564,7 +577,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// writes an element LOSAT's outfmt 5 never needs.
     fn variant(&mut self, type_name: &str, name: &str, tag: u8) {
         if OBJECT {
-            if type_name.contains('_') {
+            if anonymous_type(type_name) {
                 // An anonymous CHOICE: the member's tag is already open.
                 debug_assert!(!self.pending_elem);
                 debug_assert_eq!(
@@ -809,7 +822,22 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
         if end > self.start {
             sink.write_all(&self.out[self.start..end])?;
             self.out.drain(self.start..end);
+            // `replace` counts again from the bytes held (`encoder::Traced` adds those handed on).
+            (self.lines_to, self.lines) = (self.start, 0);
         }
+        Ok(())
+    }
+
+    fn held(&self) -> &[u8] {
+        &self.out[self.start..]
+    }
+
+    fn hand_on(&mut self, sink: &mut dyn std::io::Write, count: usize) -> std::io::Result<()> {
+        let end = self.start + count;
+        sink.write_all(&self.out[self.start..end])?;
+        self.out.drain(self.start..end);
+        // `replace` counts again from the bytes held (`encoder::Traced` adds those handed on).
+        (self.lines_to, self.lines) = (self.start, 0);
         Ok(())
     }
 

@@ -6843,7 +6843,9 @@ fn post_process_hits_and_write(
             };
             archive::write_blastn_archives(
                 &call,
-                format_warnings.as_mut(),
+                format_warnings
+                    .as_mut()
+                    .expect("the BLAST archive writes its posts to the diagnostics"),
                 &|first| archive_first_context(report, query_lengths, first),
                 &mut writer,
             )?;
@@ -7430,8 +7432,7 @@ pub fn run(
         "BLASTN",
     )?;
     let output_formats = cli_output_formats(&args.outfmt, args.out.as_deref())?;
-    // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot
-    // write, before anything is read or written.
+    // The BLAST archive (outfmt 11): its request, before anything is read or written.
     let archive_requested = output_formats.contains(&BlastnOutputFormat::Archive);
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
     // The run's options handle, which its archive and its search strategy share.
@@ -7441,13 +7442,12 @@ pub fn run(
         args.dust_filtering.as_deref(),
         archive_requested,
         &options,
-    )?
+    )
     .map(|handle| handle.with_outfmt_text(&args.outfmt));
-    // The search strategy's request, with the refusals of the archive's, and the archive's
-    // options handle.
+    // The search strategy's request, with the archive's options handle.
     args.strategy = strategy_file
         .map(|file| {
-            crate::report::archive::strategy::StrategyExport::for_run(
+            anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
                 file,
                 archive::option_inputs(&args, args.dust_filtering.as_deref()),
                 app::parse_formatting_string(&args.outfmt)?.number,
@@ -7457,9 +7457,8 @@ pub fn run(
                     num_alignments: args.num_alignments,
                 },
                 args.database_name(),
-                "BLASTN",
                 &options,
-            )
+            ))
         })
         .transpose()?;
     // LOSAT's thread capability is checked before any input or output, as before.
@@ -7614,6 +7613,7 @@ pub fn run(
             .is_some_and(|spec| spec.kind == crate::report::tabular::TabularKind::TaxReport)
     });
     let mut report = crate::cli::ReportStream::of_cli(out_file, tax_report);
+    let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut report), &mut *diagnostics);
@@ -7635,6 +7635,8 @@ pub fn run(
             settings,
         )
     };
+    // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
+    let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
     // NCBI writes an error archive after the archives of the batches before when the
     // application stops with one of its own errors, and when the run ends with messages that
     // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status:
@@ -8090,10 +8092,6 @@ fn search_cli(
             query_config,
             query_range.as_ref(),
             args.num_threads,
-            crate::report::archive::request_title_encoding(
-                args.archive.is_some(),
-                args.strategy.is_some(),
-            ),
         )?;
         (Vec::new(), end, store)
     } else if x_store_acts && x_query_drop::parts_on() {
@@ -8364,9 +8362,8 @@ pub fn run_local(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     crate::algorithm::blastn::args::BLASTN_TASK.check(&mut args.task)?;
-    // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what
-    // LOSAT cannot write (the titles with the batches NCBI completes, `run_in_pool`), and a
-    // diagnostics stream that saves the messages.
+    // The BLAST archive (outfmt 11) among the formats: its request and a diagnostics stream
+    // that saves the messages.
     let archive_requested = outputs.formats.iter().any(|format| {
         app::parse_formatting_string(format.outfmt)
             .is_ok_and(|choice| choice.number == app::output_format::ARCHIVE_FORMAT)
@@ -8378,7 +8375,7 @@ pub fn run_local(
             args.dust_filtering.as_deref(),
             true,
             &crate::report::archive::OptionsHandle::default(),
-        )?
+        )
         .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
@@ -8513,7 +8510,7 @@ pub fn run_local_database(
         args.dust_filtering.as_deref(),
         output_formats.contains(&BlastnOutputFormat::Archive),
         &crate::report::archive::OptionsHandle::default(),
-    )?
+    )
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
     match args.archive.clone() {
@@ -9740,8 +9737,6 @@ fn run_in_pool(
         query_input,
         &lengths,
         batching,
-        (args.archive.is_some() || args.strategy.is_some())
-            && queries.archive_title(args.archive.is_some(), args.strategy.is_some()),
     );
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
     // (`lookup::x_mb_lut_keep`), freed when the loop ends.
@@ -9958,6 +9953,8 @@ fn run_in_pool(
         // is made, before its set-up (the masks of `-window_masker_db` first) and search, so every
         // error of the batch from here on follows it (the file is apart from the reports). Its
         // `EffectiveSearchSpace` option is the one the batch before left (`note_searched` below).
+        // NCBI's posts of the bytes it replaces follow the reader's messages of the batch, before
+        // anything of its set-up, search and reports (`batch_title_warnings`).
         if let (Some(strategy), Some(requests)) = (args.strategy.as_ref(), requests.as_ref()) {
             requests.write(
                 strategy,
@@ -9965,6 +9962,7 @@ fn run_in_pool(
                 batch_records.searched(),
                 query_input.placements.get(start),
             )?;
+            batch_title_warnings.append(&strategy.take_all_posts());
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.hpp:104-106
         // ```c++
@@ -10765,34 +10763,6 @@ fn run_in_pool(
         // For a caller that sizes the batches itself (`QueryBatchSizes`).
         if let Some(observer) = outputs.observer.as_deref_mut() {
             observer.batch_extensions(batch.good_init_extends as u32 as i32);
-        }
-        // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:279-305
-        // ```c++
-        //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-        //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-        //     ...
-        //                 results = lcl_blast.Run();
-        //     ...
-        //             if (isArchiveFormat) {
-        //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-        // ```
-        // NCBI completes this batch here and writes its BLAST archive (outfmt 11): its queries
-        // and, with `-subject`, every subject. The batch that stops the run (a reader error,
-        // `Empty CBlastQueryVector`, an error of its search, all above) writes neither, and the
-        // error archive holds no sequence. So a title the archive cannot write is refused here,
-        // for the batch's queries and, in the first batch, the subjects, before the batch's
-        // reports and the reader's messages that come with them. It comes before the first byte:
-        // the reports of the batches before are written after the loop where a query's title is
-        // refused (`x_rpt_stream::Off::ArchiveTitle`), and the first batch's are the first.
-        // (The search strategy's requests check their titles where they are written, above.)
-        if args.archive.is_some() {
-            archive::check_titles(batch_records.searched(), "query")?;
-            if let (0, SubjectSource::Prepared(prepared)) = (start, source) {
-                archive::check_titles(
-                    subject_ranges.records.unwrap_or(prepared.records),
-                    "subject",
-                )?;
-            }
         }
         // EXPERIMENT (LOSAT_X_RPTSTREAM): the batch's reports, written now, after the mixer
         // has its gie, as NCBI's loop prints a batch's result sets (`x_rpt_stream.rs`). The

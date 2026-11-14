@@ -103,28 +103,23 @@ pub(crate) fn handle_for(
     args: &TblastnArgs,
     archive_requested: bool,
     options: &crate::report::archive::OptionsHandle,
-) -> Result<Option<ArchiveHandle>> {
+) -> Option<ArchiveHandle> {
     if !archive_requested {
-        return Ok(None);
+        return None;
     }
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
-    ArchiveHandle::for_program(
+    Some(ArchiveHandle::for_program(
         &option_inputs(args),
         args.database_name(),
-        "TBLASTN",
         options,
-    )
-    .map(Some)
+    ))
 }
 
 /// The requests of a run's batches (`RunRequests`): protein queries, nucleotide subjects (the
 /// `-subject` records `subjects`, `None` for `-db`), and with `-lcase_masking` (`mask_lowercase`)
 /// one `notset` mask of each query's lower-case runs.
-pub(super) fn requests(
-    subjects: Option<&[FastaRecord]>,
-    mask_lowercase: bool,
-) -> RunRequests<'_, FastaRecord> {
+pub(super) fn requests(subjects: Option<&[FastaRecord]>, mask_lowercase: bool) -> RunRequests<'_> {
     RunRequests::new(
         RequestPolicy {
             query_protein: true,
@@ -132,14 +127,7 @@ pub(super) fn requests(
             lcase: mask_lowercase.then_some(LcaseFrames::NotSet),
         },
         subjects,
-        "TBLASTN",
     )
-}
-
-/// `report::archive::check_titles` for TBLASTN's records (the archive's; the search strategy's
-/// requests check theirs where they are written, `RunRequests::write`).
-pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    crate::report::archive::check_titles(records, role, "TBLASTN")
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
@@ -383,12 +371,13 @@ fn for_each_batch(
 
 /// Writes the archive of each batch of `render` to `writer`; `warnings` writes the warnings of a
 /// batch's queries (to the diagnostics, which saves them as the batch's messages) before its
-/// archive.
+/// archive, and its sink gets NCBI's posts of the bytes that the archive's stream replaces
+/// (`write_archive`).
 pub(super) fn write_tblastn_archives(
     handle: &ArchiveHandle,
     render: &ArchiveRender<'_>,
     data: &ArchiveData<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
     writer: &mut dyn Write,
 ) -> Result<()> {
     let run = RunRecord {
@@ -397,10 +386,8 @@ pub(super) fn write_tblastn_archives(
         gapped: true,
     };
     for_each_batch(data, render.spans, |span, batch| {
-        if let Some(warnings) = warnings.as_deref_mut() {
-            for index in span.clone() {
-                warnings.before_query(index, &mut *writer)?;
-            }
+        for index in span.clone() {
+            warnings.before_query(index, &mut *writer)?;
         }
         let first = span.start;
         let mut aligns = TblastnAligns {
@@ -417,7 +404,13 @@ pub(super) fn write_tblastn_archives(
             shown: data.shown,
             ranges: data.ranges,
         };
-        write_archive(handle, batch, &mut aligns, &mut *writer)
+        write_archive(
+            handle,
+            batch,
+            &mut aligns,
+            &mut *writer,
+            &mut *warnings.sink,
+        )
     })
 }
 

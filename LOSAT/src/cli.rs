@@ -2012,8 +2012,7 @@ impl NcbiReportBuffer {
     }
 
     /// Standard output, glibc's buffer (`NcbiStdio::cout`, line-buffered on a terminal), tied to
-    /// standard error (`tie_standard_output`), writing to `inner` (the process's standard output,
-    /// or a hold of it, `report_destination_through`).
+    /// standard error (`tie_standard_output`), writing to `inner` (the process's standard output).
     pub fn standard_output(inner: Box<dyn std::io::Write + Send>) -> Self {
         // NCBI's Windows (MSVC) and macOS (libc++, BSD stdio) builds buffer otherwise: there
         // the exit status of a failing write is unverified (this model is their Linux builds').
@@ -2146,10 +2145,6 @@ impl<W: std::io::Write + ?Sized> Insertion<'_, W> {
 /// and the hold of a library call (`held`).
 pub struct NcbiOstream<'a>(Box<dyn std::io::Write + 'a>);
 
-/// The hold of blastx's command line (`archive::ArchiveHold`), whose streams are the process's
-/// standard output and error or the `-out` file.
-type CliHold = crate::algorithm::blastx::ArchiveHold<Box<dyn std::io::Write + Send>>;
-
 impl<'a> NcbiOstream<'a> {
     fn new(stream: Box<dyn std::io::Write + 'a>) -> Self {
         NcbiOstream(stream)
@@ -2168,28 +2163,21 @@ impl<'a> NcbiOstream<'a> {
     }
 
     /// The organism report's standard output on blastx's command line: NCBI's buffer of `cout`
-    /// (`NcbiReportBuffer::standard_output`), whose writes go through the run's hold, where the run
-    /// holds its output (`hold`), to the process's standard output (`report_standard_output`).
-    /// Nothing comes before the buffer; the hold keeps what the buffer writes and releases it in
-    /// the order and with the flushes of the run without it (`ArchiveHold::release`).
-    pub(crate) fn standard_output(hold: Option<&CliHold>) -> Self {
-        Self::new(report_destination_through(None, true, through(hold)))
+    /// (`NcbiReportBuffer::standard_output`) before the process's standard output
+    /// (`report_standard_output`). Nothing comes before the buffer or between it and the device.
+    pub(crate) fn standard_output() -> Self {
+        Self::new(report_destination(None, true))
     }
 
     /// The organism report's `-out` file `file` on blastx's command line: NCBI's `basic_filebuf`
-    /// (`NcbiReportBuffer::file`), whose writes go through the run's hold (`hold`) to the file, as
-    /// `standard_output`'s.
-    pub(crate) fn file(file: std::fs::File, hold: Option<&CliHold>) -> Self {
-        Self::new(report_destination_through(
-            Some(Box::new(file)),
-            true,
-            through(hold),
-        ))
+    /// (`NcbiReportBuffer::file`) before the file, as `standard_output`'s.
+    pub(crate) fn file(file: std::fs::File) -> Self {
+        Self::new(report_destination(Some(Box::new(file)), true))
     }
 
     /// The stream of a format other than the organism report on blastx's command line
     /// (`native::run_inner`): LOSAT's buffer of 8 KiB (`BufWriter`) before `destination` (the file
-    /// or standard output, behind the hold and the held document). NCBI's buffers of these formats
+    /// or standard output, behind the held document, `blast_xml::HeldOutput`). NCBI's buffers of these formats
     /// are not modelled (the order of their texts against the report is item T8 of line RG); the
     /// organism report never gets this stream (`run_inner` chooses by the format).
     pub(crate) fn buffered(destination: Box<dyn std::io::Write + 'a>) -> Self {
@@ -2197,21 +2185,13 @@ impl<'a> NcbiOstream<'a> {
     }
 
     /// A format's stream (`sink`'s) behind the hold of a library call (`local::report_batches`,
-    /// `archive::ArchiveHold`), which passes the writes and flushes on in their order (at the
+    /// `blast_xml::HeldFormats`), which passes the writes and flushes on in their order (at the
     /// release, while it holds). The caller's writer has no stream of NCBI's (`sink`), so no buffer
     /// of NCBI's comes after the hold.
-    pub(crate) fn held(stream: crate::algorithm::blastx::HoldWriter<NcbiOstream<'a>>) -> Self {
+    pub(crate) fn held(
+        stream: crate::algorithm::blastx::HeldFormatWriter<NcbiOstream<'a>>,
+    ) -> Self {
         Self::new(Box::new(stream))
-    }
-}
-
-/// What puts a device behind blastx's command-line hold `hold` (the device itself without one).
-fn through(
-    hold: Option<&CliHold>,
-) -> impl FnOnce(Box<dyn std::io::Write + Send>) -> Box<dyn std::io::Write + Send> + '_ {
-    move |device| match hold {
-        Some(hold) => Box::new(hold.writer(device)),
-        None => device,
     }
 }
 
@@ -2244,14 +2224,13 @@ pub fn tie_standard_output() -> std::io::Result<()> {
 }
 
 /// The command line's standard error, tied to the organism report's standard output
-/// (`tie_standard_output`): the process's (`process`), or a stream of the run's standard error
-/// (`through`: blastx's hold of a run whose later batch may be refused, `archive::ArchiveHold`),
-/// so that what standard output writes before a text is written before it where the text is
-/// made. A whole message is written with one `write_all` of the stream, which `std::io::Stderr`
-/// writes under one lock of standard error, so that no other thread's message comes inside it.
-/// An empty write is no write of NCBI's to `cerr` (a query without warnings, whose `ERR_POST`
-/// NCBI does not make): it writes nothing of the report.
-pub struct CliStderr<W: std::io::Write = std::io::Stderr>(W);
+/// (`tie_standard_output`): the process's (`process`), so that what standard output writes before
+/// a text is written before it where the text is made. A whole message is written with one
+/// `write_all` of the stream, which `std::io::Stderr` writes under one lock of standard error, so
+/// that no other thread's message comes inside it. An empty write is no write of NCBI's to `cerr`
+/// (a query without warnings, whose `ERR_POST` NCBI does not make): it writes nothing of the
+/// report.
+pub struct CliStderr(std::io::Stderr);
 
 impl CliStderr {
     /// The process's standard error.
@@ -2260,14 +2239,7 @@ impl CliStderr {
     }
 }
 
-impl<W: std::io::Write> CliStderr<W> {
-    /// The run's standard error `stream`.
-    pub fn through(stream: W) -> Self {
-        CliStderr(stream)
-    }
-}
-
-impl<W: std::io::Write> std::io::Write for CliStderr<W> {
+impl std::io::Write for CliStderr {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if buf.is_empty() {
             return Ok(0);
@@ -2299,25 +2271,11 @@ pub fn report_destination(
     file: Option<Box<dyn std::io::Write + Send>>,
     tax_report: bool,
 ) -> Box<dyn std::io::Write + Send> {
-    report_destination_through(file, tax_report, |device| device)
-}
-
-/// `report_destination` with the file or standard output behind `through` (blastx's hold of a run
-/// whose later batch may be refused, `archive::ArchiveHold`, `NcbiOstream::standard_output` and
-/// `file`): NCBI's buffer comes before it, so that what it holds is what the buffer writes, where
-/// the buffer writes it.
-fn report_destination_through(
-    file: Option<Box<dyn std::io::Write + Send>>,
-    tax_report: bool,
-    through: impl FnOnce(Box<dyn std::io::Write + Send>) -> Box<dyn std::io::Write + Send>,
-) -> Box<dyn std::io::Write + Send> {
     match (file, tax_report) {
-        (Some(file), true) => Box::new(NcbiReportBuffer::file(through(file))),
-        (Some(file), false) => through(file),
-        (None, true) => Box::new(NcbiReportBuffer::standard_output(through(
-            report_standard_output(),
-        ))),
-        (None, false) => through(report_standard_output()),
+        (Some(file), true) => Box::new(NcbiReportBuffer::file(file)),
+        (Some(file), false) => file,
+        (None, true) => Box::new(NcbiReportBuffer::standard_output(report_standard_output())),
+        (None, false) => report_standard_output(),
     }
 }
 

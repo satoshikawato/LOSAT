@@ -998,8 +998,10 @@ mod tests {
             names: None,
         };
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let before = [b"Warning: q1\n".to_vec()];
-        let mut warnings = QueryWarnings::new(&before, &mut err);
+        let before = [crate::report::diag_log::Posts::of_lines(
+            b"Warning: q1\n".to_vec(),
+        )];
+        let mut warnings = QueryWarnings::of_posts(&before, None, &mut err);
         write_blastp_tabular(&tab, hit_lists, &mut out, Some(&mut warnings), None, None).unwrap();
         drop(warnings);
         (

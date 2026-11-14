@@ -16,8 +16,10 @@
 //! search space of the query before; `Web_StepNumber`), rpsblast's and rpstblastn's (the profile
 //! database's length and `.aux` costs in the requests after the first; `-mt_mode 1` at 4 and 8
 //! threads writes NCBI's `-num_threads 1` file, DECISIONS F1b-2). The rows that LOSAT refuses
-//! (DECISIONS 15, 21 and 26 of line RG; `-in_pssm` of tblastn and psiblast, item F1b-2) check the
-//! refusal. blastp's query blocks and the `0` side of
+//! (DECISIONS 15 and 21 of line RG; `-in_pssm` of tblastn and psiblast, item F1b-2) check the
+//! refusal. A title or a name with a byte that NCBI's serial stream replaces is written as NCBI
+//! writes it (`#` in the file, `Bad char` on standard error; the `.title.` and `.order.` rows).
+//! blastp's query blocks and the `0` side of
 //! the default-on switches that the strategy's paths cross write the same files.
 //!
 //! The cases are the rows of `tests/fixtures/strategy/cases.tsv` (its header says what the
@@ -377,21 +379,27 @@ fn switches_off_write_the_same_strategy_files() {
     }
 }
 
-/// blastx and rpstblastn (BLASTX's driver) refuse a query that is not a regular file (a pipe) with
-/// the strategy, as with outfmt 11 (DECISIONS 26 of line RG): the titles of the whole input are
-/// read before the first batch. The refusal names the program (review 3 of F1b-1, R3-4).
+/// blastx and rpstblastn (BLASTX's driver) read a query that is not a regular file (a pipe) as they
+/// read the same bytes from a regular file: the strategy file, the standard output, the standard
+/// error and the exit status are the same. (The title that NCBI's stream replaces bytes of is
+/// written, as in `cases.tsv`, in both.)
 #[test]
-fn a_piped_query_is_refused() {
+fn a_piped_query_runs_as_the_regular_file() {
     use std::io::Write;
     let dir = std::env::temp_dir().join(format!("losat_strategy_pipe_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let ss = dir.join("s.ss");
     let rps = rps_databases("rps_mini", &dir);
-    let runs: [(&str, &str, &[&str], Option<&Path>); 2] = [
+    let runs: [(&str, &str, &[&str], Option<&Path>); 4] = [
         (
             "blastx",
             "tests/fasta/outfmt11/arch_bx_q.fna",
+            &["-subject", "tests/fasta/outfmt11/arch_bx_s.faa"],
+            None,
+        ),
+        (
+            "blastx",
+            "tests/fasta/strategy/title_b2_blastx.fna",
             &["-subject", "tests/fasta/outfmt11/arch_bx_s.faa"],
             None,
         ),
@@ -401,39 +409,65 @@ fn a_piped_query_is_refused() {
             &["-db", "rps_mini", "-comp_based_stats", "0"],
             Some(&rps),
         ),
+        (
+            "rpstblastn",
+            "tests/fasta/strategy/title_b2_blastx.fna",
+            &["-db", "rps_mini", "-comp_based_stats", "0"],
+            Some(&rps),
+        ),
     ];
-    for (program, query, target, blastdb) in runs {
-        let query = std::fs::read(engine().join(query)).unwrap();
-        let mut command = Command::new(BIN);
-        command
-            .current_dir(engine())
-            .args([program, "-query", "-"])
-            .args(target)
-            .args([
-                "-outfmt",
-                "6",
-                "-export_search_strategy",
-                ss.to_str().unwrap(),
-            ])
-            .env_remove("BLASTDB")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        if let Some(blastdb) = blastdb {
-            command.env("BLASTDB", blastdb);
+    for (n, (program, path, target, blastdb)) in runs.into_iter().enumerate() {
+        let query = std::fs::read(engine().join(path)).unwrap();
+        let mut results = Vec::new();
+        for piped in [false, true] {
+            let ss = dir.join(format!("s{n}_{piped}.ss"));
+            let mut command = Command::new(BIN);
+            command
+                .current_dir(engine())
+                .args([program, "-query", if piped { "-" } else { path }])
+                .args(target)
+                .args(["-outfmt", "6", "-export_search_strategy"])
+                .arg(&ss)
+                .env_remove("BLASTDB")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            for (name, _) in std::env::vars() {
+                if name.starts_with("LOSAT_X_") || name == "BATCH_SIZE" {
+                    command.env_remove(name);
+                }
+            }
+            command.env("BATCH_SIZE", "1");
+            if let Some(blastdb) = blastdb {
+                command.env("BLASTDB", blastdb);
+            }
+            let output = if piped {
+                let mut child = command.stdin(Stdio::piped()).spawn().expect("run losat");
+                child.stdin.take().unwrap().write_all(&query).unwrap();
+                child.wait_with_output().unwrap()
+            } else {
+                command.stdin(Stdio::null()).output().expect("run losat")
+            };
+            results.push((
+                std::fs::read(&ss).ok(),
+                output.stdout,
+                output.stderr,
+                output.status.code(),
+            ));
         }
-        let mut child = command.spawn().expect("run losat");
-        // The refusal may come before the whole input is read.
-        let _ = child.stdin.take().unwrap().write_all(&query);
-        let output = child.wait_with_output().unwrap();
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(output.status.code(), Some(1), "{program}: {stderr}");
-        assert!(output.stdout.is_empty(), "{program}");
-        let expected = format!(
-            "unsupported {} query input for -export_search_strategy",
-            program.to_uppercase()
+        let (file, pipe) = (&results[0], &results[1]);
+        let stderr = String::from_utf8_lossy(&pipe.2);
+        assert!(
+            file.0.is_some(),
+            "{program} {path}: the strategy file of the regular file"
         );
-        assert!(stderr.contains(&expected), "{program}: {stderr}");
+        assert!(
+            !stderr.contains("query input"),
+            "{program} {path}: {stderr}"
+        );
+        assert_eq!(file.0, pipe.0, "{program} {path}: strategy file");
+        assert_eq!(file.1, pipe.1, "{program} {path}: standard output");
+        assert_eq!(file.2, pipe.2, "{program} {path}: standard error");
+        assert_eq!(file.3, pipe.3, "{program} {path}: exit status");
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

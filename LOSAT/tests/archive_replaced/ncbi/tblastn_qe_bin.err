@@ -1,0 +1,6 @@
+Error: (803.7) [tblastn] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at byte 192
+q1 café title
+Error: (803.7) [tblastn] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at byte 193
+q1 café title

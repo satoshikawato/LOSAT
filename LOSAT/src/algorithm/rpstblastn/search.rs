@@ -113,7 +113,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         diagnostics: &mut dyn Write,
         search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
         render: &mut BatchRender<'_>,
-        take: &mut dyn FnMut(&[FastaRecord], usize) -> Result<()>,
+        take: &mut dyn FnMut(&mut dyn Write, &[FastaRecord], usize) -> Result<()>,
     ) -> Result<usize> {
         let Some(database) = database else {
             bail!("a search without -db is not supported by LOSAT's {PROGRAM}");
@@ -145,8 +145,9 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
                         return Err(engine("Empty CBlastQueryVector"));
                     }
                     // The batch's search strategy request (`SaveSearchStrategy`, quoted in the
-                    // module's header), before its search.
-                    take(queries, processed)?;
+                    // module's header), before its search; NCBI's posts of the bytes replaced in
+                    // it follow the batch's reader messages (written by `read` before the batch).
+                    take(&mut **diagnostics.borrow_mut(), queries, processed)?;
                     let mut results = vec![self
                         .search_batch(
                             queries,

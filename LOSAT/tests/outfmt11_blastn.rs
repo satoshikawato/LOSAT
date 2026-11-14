@@ -363,10 +363,10 @@ fn the_out_file_receives_the_archive() {
 
 /// In the text and binary archives a title with a byte outside `0x20..=0x7E` (0x80 and above,
 /// and 0x7F) is written as `#` by NCBI, with a diagnostic per byte (in XML NCBI writes the byte,
-/// and so does LOSAT): LOSAT refuses it (query, `-subject` and a `-db` name)
-/// before the first byte.
+/// and so does LOSAT), query and `-subject`; a `-db` name names a database that does not exist.
+/// NCBI's bytes are frozen in `tests/archive_replaced/`.
 #[test]
-fn non_ascii_titles_and_database_names_are_refused() {
+fn non_ascii_titles_and_database_names_are_written_as_ncbi_writes_them() {
     let dir = std::env::temp_dir().join(format!("losat_outfmt11_title_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let plain = engine().join(input("arch_s.fna"));
@@ -391,13 +391,10 @@ fn non_ascii_titles_and_database_names_are_refused() {
             let mut full = args.clone();
             full.extend_from_slice(&["-outfmt", "11"]);
             let output = run(&[], &full, "1");
-            assert_ne!(output.status.code(), Some(0), "{role}");
-            assert!(output.stdout.is_empty(), "{role}: nothing is written");
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(stderr.contains("visible ASCII"), "{name} {role}: {stderr}");
-            assert!(stderr.contains("-outfmt 11"), "{name} {role}: {stderr}");
+            assert_eq!(output.status.code(), Some(0), "{name} {role}");
+            crate::outfmt11_titles::assert_replaced(name, &output, &format!("{name} {role}"));
         }
-        // The same title is fine in outfmt 8: only the archive refuses it.
+        // The same title is plain text in outfmt 8.
         let output = run(
             &[],
             &["-query", titled, "-subject", plain, "-outfmt", "8"],
@@ -411,12 +408,7 @@ fn non_ascii_titles_and_database_names_are_refused() {
             &["-query", plain, "-db", database, "-outfmt", "11"],
             "1",
         );
-        assert_ne!(output.status.code(), Some(0), "{database:?}");
-        assert!(output.stdout.is_empty(), "{database:?}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("-db name"),
-            "{database:?}"
-        );
+        crate::outfmt11_titles::assert_missing_database(&output, database);
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -467,34 +459,48 @@ fn a_utf8_window_masker_path_is_written_as_it_is_in_xml() {
             "threads {threads}"
         );
     }
-    // The text and binary archives cannot hold the bytes (NCBI writes `#` and a diagnostic per
-    // byte): refused before the first byte.
+    // The text and binary archives write `#` for each byte and report each (`Bad char [0xC3]`,
+    // `[0xA9]`): NCBI's bytes are frozen in `tests/archive_replaced/`.
     for format in ["", "bin"] {
         let output = run_in(&dir, &[("ARCHIVE_FORMAT", format)], &args, "1");
-        assert_ne!(output.status.code(), Some(0), "{format:?}");
-        assert!(output.stdout.is_empty(), "{format:?}: nothing is written");
         let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(0), "{format:?}: {stderr}");
         assert!(
-            stderr.contains("-window_masker_db path"),
+            output
+                .stdout
+                .windows(b"wm##/mg1655_u9.obinary".len())
+                .any(|window| window == b"wm##/mg1655_u9.obinary"),
+            "{format:?}: the path as `wm##/...` in the archive"
+        );
+        assert_eq!(
+            stderr.matches("Bad char [").count(),
+            2,
+            "{format:?}: {stderr}"
+        );
+        assert!(
+            stderr.contains("Bad char [0xC3] in string at"),
+            "{format:?}: {stderr}"
+        );
+        assert!(
+            stderr.contains("Bad char [0xA9] in string at"),
             "{format:?}: {stderr}"
         );
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A control byte in the `-window_masker_db` path (other than TAB, LF and CR in XML) is
-/// written as `#` by NCBI with a diagnostic in every encoding: refused before the first byte,
-/// with nothing on standard output and an empty `-out` file.
+/// A control byte in a `-window_masker_db` path that does not name a masker file: NCBI fails to
+/// open it (the same failure as for a path without the byte, status 255, an error archive) in
+/// every encoding, and LOSAT does not refuse the path. (NCBI's bytes for existing masker files
+/// with such paths are frozen in `tests/archive_replaced/`.)
 #[test]
-fn a_window_masker_path_with_a_control_byte_is_refused_before_the_first_byte() {
+fn a_window_masker_path_with_a_control_byte_fails_as_a_missing_masker_file_does() {
     let dir = std::env::temp_dir().join(format!("losat_outfmt11_wmctl_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let query = input("arch_wm_q.fna");
     let subject = input("arch_wm_s.fna");
     for format in ["", "bin", "xml"] {
-        for path in ["wm\x01/mg.obinary", "wm\x1f", "wm\x0b"] {
-            let file = dir.join("refused.asn");
-            let _ = std::fs::remove_file(&file);
+        let search = |path: &str| {
             let args = [
                 "-query",
                 &query,
@@ -506,24 +512,22 @@ fn a_window_masker_path_with_a_control_byte_is_refused_before_the_first_byte() {
                 path,
                 "-outfmt",
                 "11",
-                "-out",
-                file.to_str().unwrap(),
             ];
-            let output = run(&[("ARCHIVE_FORMAT", format)], &args, "1");
+            run(&[("ARCHIVE_FORMAT", format)], &args, "1")
+        };
+        let plain = search("wmx/mg.obinary");
+        for path in ["wm\x01/mg.obinary", "wm\x1f", "wm\x0b"] {
+            let output = search(path);
             let label = format!("ARCHIVE_FORMAT={format:?} {path:?}");
-            assert_ne!(output.status.code(), Some(0), "{label}");
-            assert!(
-                output.stdout.is_empty(),
-                "{label}: nothing on standard output"
-            );
-            assert!(
-                std::fs::read(&file).map_or(true, |bytes| bytes.is_empty()),
-                "{label}: nothing in the -out file"
-            );
             let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(
-                stderr.contains("-window_masker_db path"),
+            assert_eq!(
+                output.status.code(),
+                plain.status.code(),
                 "{label}: {stderr}"
+            );
+            assert!(
+                !stderr.contains("-window_masker_db path"),
+                "{label}: refused: {stderr}"
             );
         }
     }

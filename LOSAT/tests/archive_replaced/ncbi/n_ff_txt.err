@@ -1,0 +1,3 @@
+Error: (803.7) [blastn] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xFF] in string at line 23
+q1 ÿ

@@ -1,0 +1,13 @@
+Error: (803.7) [tblastn] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 21
+q1 oneé
+Error: (803.7) [tblastn] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 21
+q1 oneé
+Error: (803.7) [tblastn] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 21
+q2 twoé
+Error: (803.7) [tblastn] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 21
+q2 twoé
+Warning: [tblastn] Query_2 q2 twoé: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 

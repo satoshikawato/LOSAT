@@ -26,7 +26,7 @@ use super::{ArchiveEncoding, ArchiveHandle};
 use crate::report::diag_log::Message;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
-use crate::report::serial::encoder::Encoder;
+use crate::report::serial::encoder::{Encoder, ReplacedChar, Traced};
 use crate::report::serial::xml::XmlEncoder;
 
 /// The bytes that an encoder holds before its buffer is handed to the sink.
@@ -70,6 +70,19 @@ pub struct RequestInputs<'a> {
     pub lcase_masks: &'a [MaskEntry],
 }
 
+impl RequestInputs<'_> {
+    /// Whether `encoding` writes the strings of the request's Bioseqs and Seq-locs as they are
+    /// (`BioseqInput::written_as_is`); the `LCaseMask` parameters, the masks and the Seq-aligns
+    /// of the archive hold the same Seq-ids (the subjects of `-db` have the database's, which
+    /// its reader refuses or replaces where NCBI would post).
+    pub fn written_as_is(&self, encoding: ArchiveEncoding) -> bool {
+        self.queries
+            .iter()
+            .chain(self.subjects)
+            .all(|bioseq| bioseq.written_as_is(encoding))
+    }
+}
+
 /// What one archive holds, besides the request's options (`ArchiveHandle::request`).
 pub struct BatchArchive<'a> {
     /// The batch's request.
@@ -93,7 +106,16 @@ pub struct ArchiveOut<'s, E: Encoder> {
     io_error: Option<std::io::Error>,
 }
 
-impl<E: Encoder> ArchiveOut<'_, E> {
+impl<'s, E: Encoder> ArchiveOut<'s, E> {
+    /// The encoder `enc` over `sink`.
+    fn new(enc: E, sink: &'s mut dyn Write) -> Self {
+        ArchiveOut {
+            enc,
+            sink,
+            io_error: None,
+        }
+    }
+
     /// Hands the encoder's final bytes to the sink once enough have gathered. Call it after
     /// each element of a long list.
     pub fn flush_if_large(&mut self) {
@@ -136,6 +158,26 @@ impl<E: Encoder> ArchiveOut<'_, E> {
             Some(error) => Err(error.into()),
             None => Ok(()),
         }
+    }
+}
+
+impl<E: Encoder> ArchiveOut<'_, Traced<E>> {
+    /// `finish` of a document written through `Traced` without a post function (the search
+    /// strategy's, whose file is apart from the output): `collect` gets all the bytes that its
+    /// stream replaced, whose posts the run writes where the request's batch starts
+    /// (`strategy::StrategyExport::take_posts`), so nothing here waits for the sink. Another
+    /// error of the encoder gives nothing.
+    fn finish_collecting(
+        mut self,
+        collect: impl FnOnce(&[ReplacedChar]) -> std::io::Result<()>,
+    ) -> Result<()> {
+        if self.enc.error().is_none() {
+            let replaced = self.enc.take_replaced_chars();
+            if !replaced.is_empty() {
+                collect(&replaced)?;
+            }
+        }
+        self.finish()
     }
 }
 
@@ -514,7 +556,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
 /// Writes the `Blast4-request` of one query batch as a document of its own: the search strategy
 /// file's (`-export_search_strategy`). NCBI's applications give `CExportStrategy` no client id
 /// (blast_app_util.cpp:335-337), so the request has no `ident`.
-pub(super) fn write_strategy_document<E: Encoder>(
+fn write_strategy_document<E: Encoder>(
     out: &mut ArchiveOut<'_, E>,
     request: &super::ArchiveRequest,
     batch: &RequestInputs<'_>,
@@ -528,15 +570,28 @@ pub(super) fn write_strategy_document<E: Encoder>(
     out.enc.end_document();
 }
 
-/// The text encoder over `sink` (the strategy file is always ASN.1 text).
-pub(super) fn text_out<'s, 'b>(
-    buf: &'b mut Vec<u8>,
-    sink: &'s mut dyn Write,
-) -> ArchiveOut<'s, AsnTextEncoder<'b>> {
-    ArchiveOut {
-        enc: AsnTextEncoder::new(buf),
-        sink,
-        io_error: None,
+/// Writes the search strategy's request of one query batch (`write_strategy_document`) to `sink`
+/// in ASN.1 text (the strategy file is always ASN.1 text), through `Traced` when ASN.1 text does
+/// not write one of its strings as it is (`ArchiveRequest::written_as_is`,
+/// `RequestInputs::written_as_is`): `collect` then gets the bytes that it replaced.
+pub(super) fn write_strategy_request(
+    sink: &mut dyn Write,
+    request: &super::ArchiveRequest,
+    batch: &RequestInputs<'_>,
+    sets: &[Param],
+    database_list: Option<&Param>,
+    collect: impl FnOnce(&[ReplacedChar]) -> std::io::Result<()>,
+) -> Result<()> {
+    let mut buf = Vec::new();
+    let encoding = ArchiveEncoding::Text;
+    if request.written_as_is(encoding) && batch.written_as_is(encoding) {
+        let mut out = ArchiveOut::new(AsnTextEncoder::new(&mut buf), sink);
+        write_strategy_document(&mut out, request, batch, sets, database_list);
+        out.finish()
+    } else {
+        let mut out = ArchiveOut::new(Traced::new(AsnTextEncoder::new(&mut buf), 0), sink);
+        write_strategy_document(&mut out, request, batch, sets, database_list);
+        out.finish_collecting(collect)
     }
 }
 
@@ -570,49 +625,104 @@ fn write_error_document<E: Encoder>(out: &mut ArchiveOut<'_, E>, messages: &[Mes
 
 /// Writes the archive of one query batch to `sink` and takes the messages saved since the
 /// previous archive. `ARCHIVE_FORMAT` values that NCBI does not write leave the sink
-/// untouched.
+/// untouched. A document with a string that the encoding does not write as it is
+/// (`ArchiveRequest::written_as_is`, `RequestInputs::written_as_is`) is written through `Traced`,
+/// and NCBI's posts of the bytes that its stream replaced go to `diagnostics` (`post_replaced`)
+/// as NCBI writes them: each after the bytes of the document that NCBI's buffer had written to
+/// the output by then (`Traced::posting`; NCBI's `cerr` is tied to `cout`).
 pub fn write_archive<A: AlignSource>(
     handle: &ArchiveHandle,
     batch: &BatchArchive<'_>,
     aligns: &mut A,
     sink: &mut dyn Write,
+    diagnostics: &mut dyn Write,
 ) -> Result<()> {
     let messages = handle.take_messages();
     let sets = handle.request_sets(batch.searched_space);
     let list = handle.options().database_list();
     let request = handle.request();
-    match handle.encoding() {
-        ArchiveEncoding::Nothing => Ok(()),
-        ArchiveEncoding::Xml => {
-            let mut buf = Vec::new();
-            let mut out = ArchiveOut {
-                enc: XmlEncoder::archive(&mut buf),
+    let encoding = handle.encoding();
+    let as_is = request.written_as_is(encoding) && batch.request.written_as_is(encoding);
+    let post = |replaced: &ReplacedChar| {
+        super::post_replaced(
+            diagnostics,
+            handle,
+            request.application,
+            std::slice::from_ref(replaced),
+        )?;
+        diagnostics.flush()
+    };
+    let mut buf = Vec::new();
+    let write = SearchArchive {
+        request,
+        batch,
+        sets: &sets,
+        database_list: list,
+        messages: &messages,
+    };
+    match (encoding, as_is) {
+        (ArchiveEncoding::Nothing, _) => Ok(()),
+        (ArchiveEncoding::Xml, true) => write
+            .to(XmlEncoder::archive(&mut buf), sink, aligns)?
+            .finish(),
+        (ArchiveEncoding::Xml, false) => write
+            .to(
+                Traced::xml(XmlEncoder::archive(&mut buf), 0).posting(post),
                 sink,
-                io_error: None,
-            };
-            write_search_archive(&mut out, request, batch, &sets, list, &messages, aligns)?;
-            out.finish()
-        }
-        ArchiveEncoding::Text => {
-            let mut buf = Vec::new();
-            let mut out = ArchiveOut {
-                enc: AsnTextEncoder::new(&mut buf),
+                aligns,
+            )?
+            .finish(),
+        (ArchiveEncoding::Text, true) => write
+            .to(AsnTextEncoder::new(&mut buf), sink, aligns)?
+            .finish(),
+        (ArchiveEncoding::Text, false) => write
+            .to(
+                Traced::new(AsnTextEncoder::new(&mut buf), 0).posting(post),
                 sink,
-                io_error: None,
-            };
-            write_search_archive(&mut out, request, batch, &sets, list, &messages, aligns)?;
-            out.finish()
-        }
-        ArchiveEncoding::Binary => {
-            let mut buf = Vec::new();
-            let mut out = ArchiveOut {
-                enc: AsnBinaryEncoder::new(&mut buf),
+                aligns,
+            )?
+            .finish(),
+        (ArchiveEncoding::Binary, true) => write
+            .to(AsnBinaryEncoder::new(&mut buf), sink, aligns)?
+            .finish(),
+        (ArchiveEncoding::Binary, false) => write
+            .to(
+                Traced::new(AsnBinaryEncoder::new(&mut buf), 0).posting(post),
                 sink,
-                io_error: None,
-            };
-            write_search_archive(&mut out, request, batch, &sets, list, &messages, aligns)?;
-            out.finish()
-        }
+                aligns,
+            )?
+            .finish(),
+    }
+}
+
+/// What `write_search_archive` writes besides the encoder and the Seq-aligns.
+struct SearchArchive<'a> {
+    request: &'a super::ArchiveRequest,
+    batch: &'a BatchArchive<'a>,
+    sets: &'a [Param],
+    database_list: Option<&'a Param>,
+    messages: &'a [Message],
+}
+
+impl SearchArchive<'_> {
+    /// The document written through `enc` to `sink`, not finished.
+    fn to<'s, E: Encoder, A: AlignSource>(
+        &self,
+        enc: E,
+        sink: &'s mut dyn Write,
+        aligns: &mut A,
+    ) -> Result<ArchiveOut<'s, E>> {
+        let mut out = ArchiveOut::new(enc, sink);
+        write_search_archive(
+            &mut out,
+            self.request,
+            self.batch,
+            self.sets,
+            self.database_list,
+            self.messages,
+            aligns,
+        )?;
+        Ok(out)
     }
 }
 
@@ -633,31 +743,19 @@ pub fn write_error_archive(
         ArchiveEncoding::Nothing => Ok(()),
         ArchiveEncoding::Xml => {
             let mut buf = Vec::new();
-            let mut out = ArchiveOut {
-                enc: XmlEncoder::archive(&mut buf),
-                sink,
-                io_error: None,
-            };
+            let mut out = ArchiveOut::new(XmlEncoder::archive(&mut buf), sink);
             write_error_document(&mut out, &messages);
             out.finish()
         }
         ArchiveEncoding::Text => {
             let mut buf = Vec::new();
-            let mut out = ArchiveOut {
-                enc: AsnTextEncoder::new(&mut buf),
-                sink,
-                io_error: None,
-            };
+            let mut out = ArchiveOut::new(AsnTextEncoder::new(&mut buf), sink);
             write_error_document(&mut out, &messages);
             out.finish()
         }
         ArchiveEncoding::Binary => {
             let mut buf = Vec::new();
-            let mut out = ArchiveOut {
-                enc: AsnBinaryEncoder::new(&mut buf),
-                sink,
-                io_error: None,
-            };
+            let mut out = ArchiveOut::new(AsnBinaryEncoder::new(&mut buf), sink);
             write_error_document(&mut out, &messages);
             out.finish()
         }

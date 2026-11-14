@@ -1,0 +1,136 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">s1 first subject"
+                  }
+                }
+              },
+              title "s1 first subject"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na '13706D8E03AFA0595755C5717B5F7439EED933F0A147E4
+D28BA66454330F79AE5186D755D1A6FB94187684EE84C613BD0798627530AA842993825112AEC1
+ED52662459095192C4878034B1'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">s2 second subject caf\303\251"
+                  }
+                }
+              },
+              title "s2 second subject caf##"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na 'CEE23A1433EC7A4F866BC4C9080FCC3A48C78D08BB43DA
+4E42375C062E83ECC45A740FE43ED80091A0873733A2BBE7F1EDFEC78F9060988850D510FD8598
+7762E5E98225B5FE6A92603047'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">s3 third subject"
+                  }
+                }
+              },
+              title "s3 third subject"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na '31C95775373EE752BE03CA15AB73F93824FF410FD1786E
+FF47D28131DFFB01EA798ED6E5371EAB08A22344DA8F6B33950A6D1BEF34BAD73477611380D663
+3FECDE01E7FC677A95E7BC20CF'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/arch_snucl",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 272527
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 272527",
+      "Effective search space used: 272527",
+      "Length adjustment: 11"
+    }
+  }
+}

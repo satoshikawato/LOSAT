@@ -28,9 +28,12 @@
 //! ```
 //! The back limit keeps at least the last 80 bytes in the buffer when it is flushed; the
 //! string wrap below looks back at most one line (79 columns), so it always finds the bytes
-//! in the buffer, and the whole document stands for the buffer here.
+//! in the buffer. The encoder's `out` holds the document from its start, or under
+//! `encoder::Traced` from where NCBI's buffer was last flushed (`Traced` hands on only what
+//! NCBI wrote, `out_buffer::OutBuffer`, which keeps those 80 bytes): either way it holds every
+//! byte that the wrap looks at.
 
-use super::encoder::{Encoder, Replaced, SerialError, StreamPosition};
+use super::encoder::{Encoder, Replaced, SerialError, Stream, StreamPosition};
 use super::real::write_asn_text_double;
 
 /// The column after which a VisibleString is wrapped (`WrapAt(78, true)`).
@@ -86,14 +89,14 @@ impl<'b> AsnTextEncoder<'b> {
             byte,
             position: StreamPosition::Line(line),
             with_string: true,
+            at: self.out.len() - self.start,
         });
     }
 
-    /// `m_Output.GetLine()`: 1 + the ends of line of the document that the encoder holds (all of
-    /// it through `encoder::Traced`). The count goes on from the start of the line of the last
-    /// call: the string wrap inserts its end of line in the current line only, and the lines
-    /// before it are final. (After a flush that dropped bytes, which `Traced` prevents, it
-    /// counts the bytes held.)
+    /// `m_Output.GetLine()`: 1 + the ends of line that the encoder holds (`encoder::Traced` adds
+    /// those that `flush_to` handed on, which starts the count again). The count goes on from the
+    /// start of the line of the last call: the string wrap inserts its end of line in the current
+    /// line only, and the lines before it are final.
     fn line(&mut self) -> u64 {
         if self.lines_to < self.start || self.lines_to > self.out.len() {
             self.lines_to = self.start;
@@ -331,6 +334,8 @@ impl<'b> AsnTextEncoder<'b> {
 }
 
 impl Encoder for AsnTextEncoder<'_> {
+    const STREAM: Option<super::encoder::Stream> = Some(super::encoder::Stream::AsnText);
+
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:105-111
     /// ```c++
     /// void CObjectOStreamAsn::WriteFileHeader(TTypeInfo type)
@@ -696,6 +701,21 @@ impl Encoder for AsnTextEncoder<'_> {
         }
         sink.write_all(&self.out[self.start..keep_from])?;
         self.out.drain(self.start..keep_from);
+        // `line` counts again from the bytes held (`encoder::Traced` adds those handed on).
+        (self.lines_to, self.lines) = (self.start, 0);
+        Ok(())
+    }
+
+    fn held(&self) -> &[u8] {
+        &self.out[self.start..]
+    }
+
+    fn hand_on(&mut self, sink: &mut dyn std::io::Write, count: usize) -> std::io::Result<()> {
+        let end = self.start + count;
+        sink.write_all(&self.out[self.start..end])?;
+        self.out.drain(self.start..end);
+        // `line` counts again from the bytes held (`encoder::Traced` adds those handed on).
+        (self.lines_to, self.lines) = (self.start, 0);
         Ok(())
     }
 
@@ -716,7 +736,7 @@ impl AsnTextEncoder<'_> {
     fn write_string<const REPLACE: bool>(&mut self, value: &[u8]) {
         self.put(b"\"");
         for &byte in value {
-            let byte = if (0x20..=0x7e).contains(&byte) {
+            let byte = if !Stream::AsnText.replaces(byte) {
                 byte
             } else if REPLACE {
                 self.replace(byte);

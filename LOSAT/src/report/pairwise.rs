@@ -6731,14 +6731,16 @@ mod tblastx_tests {
             .map(|s_idx| Arc::from(format!("s{s_idx} subject {s_idx}").as_bytes()))
             .collect();
         // The warnings written before queries 0 and 2 (`QueryWarnings`, by query index).
-        let before: Vec<Vec<u8>> = (0..queries.len())
+        let before: Vec<crate::report::diag_log::Posts> = (0..queries.len())
             .map(|q_idx| match q_idx {
-                0 | 2 => format!(
-                    "Warning: [tblastx] Query_{} q{q_idx}: a warning\n",
-                    q_idx + 1
-                )
-                .into_bytes(),
-                _ => Vec::new(),
+                0 | 2 => crate::report::diag_log::Posts::of_lines(
+                    format!(
+                        "Warning: [tblastx] Query_{} q{q_idx}: a warning\n",
+                        q_idx + 1
+                    )
+                    .into_bytes(),
+                ),
+                _ => crate::report::diag_log::Posts::new(),
             })
             .collect();
         crate::utils::threading::with_search_pool(4, "test", |pool| {
@@ -6762,8 +6764,9 @@ mod tblastx_tests {
                         &report,
                         None,
                         None,
-                        Some(&mut crate::report::query_warnings::QueryWarnings::new(
+                        Some(&mut crate::report::query_warnings::QueryWarnings::of_posts(
                             &before,
+                            None,
                             &mut diagnostics,
                         )),
                         x_pool,

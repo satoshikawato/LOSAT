@@ -502,8 +502,9 @@ pub(crate) trait RpsTblastnSearch: std::fmt::Debug + Send + Sync {
     ) -> Result<std::sync::Arc<dyn RpsTblastnSearch>>;
     /// `native::run_query_batches` of RPSTBLASTN: the query batches of `read`, searched against
     /// the profile volumes of `database`, each handed to `take` (the search strategy's request,
-    /// before its search) and to `render` in the reader's order. Returns the number of queries
-    /// reported.
+    /// before its search, and NCBI's posts of the bytes replaced in it to the diagnostics, after
+    /// the batch's reader messages) and to `render` in the reader's order. Returns the number of
+    /// queries reported.
     #[allow(clippy::too_many_arguments)]
     fn run_query_batches(
         &self,
@@ -513,7 +514,11 @@ pub(crate) trait RpsTblastnSearch: std::fmt::Debug + Send + Sync {
         diagnostics: &mut dyn std::io::Write,
         search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
         render: &mut super::native::BatchRender<'_>,
-        take: &mut dyn FnMut(&[super::input::FastaRecord], usize) -> Result<()>,
+        take: &mut dyn FnMut(
+            &mut dyn std::io::Write,
+            &[super::input::FastaRecord],
+            usize,
+        ) -> Result<()>,
     ) -> Result<usize>;
     /// What each query batch's set-up of the search writes into NCBI's options handle beyond the
     /// batch's search space (`rps_search::volumes::search_sets`; `-searchsp` and `-dbsize` as

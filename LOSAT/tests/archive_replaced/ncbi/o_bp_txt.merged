@@ -1,0 +1,913 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q1 plain"
+                  }
+                }
+              },
+              title "q1 plain"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 60,
+              seq-data ncbieaa "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGE
+NTGMFRLGFPKFIG"
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s0 plain t"
+                }
+              }
+            },
+            title "s0 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENT
+GMFRLGFPKFIG"
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s1 plain t"
+                }
+              }
+            },
+            title "s1 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MCVQSFPIGRWNQIWACNRFHCPKNLLENRAWDPCPEEEKGGTYKMLI
+HQWVDKQDTNWP"
+          }
+        },
+        {
+          id {
+            local str "Subject_3"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s2 plain t"
+                }
+              }
+            },
+            title "s2 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MCRVQFPDLTWYAVCHTQNSDAVMAYTVTSNNTFFNEQAEDPHRYTGG
+MNGWWWHPCFMT"
+          }
+        },
+        {
+          id {
+            local str "Subject_4"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s3 plain t"
+                }
+              }
+            },
+            title "s3 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MTFIQTFYRPMHFPWTSFNDWANQTYQVKVDVLFIKCCRCSKNQDWML
+LLYYGIMLICAD"
+          }
+        },
+        {
+          id {
+            local str "Subject_5"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s4 plain t"
+                }
+              }
+            },
+            title "s4 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MSIVFSGPTLGMCMNQMVTVQHMYSHISEIKSLAILGRALGYGLNTNT
+CNTVTTIATYNH"
+          }
+        },
+        {
+          id {
+            local str "Subject_6"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s5 plain t"
+                }
+              }
+            },
+            title "s5 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MERVLWLKNIINIMCRFKCYVCIDYHNQHFQDEAINKAMQTYGYHEAC
+QNIGCHNSRWDV"
+          }
+        },
+        {
+          id {
+            local str "Subject_7"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s6 plain t"
+                }
+              }
+            },
+            title "s6 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MVNWNLDPACLFGNISCPFCVFAPDFNMGGHEYPNVFPIAWTKPYWIC
+NGMNTVYPHRPR"
+          }
+        },
+        {
+          id {
+            local str "Subject_8"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s7 plain t"
+                }
+              }
+            },
+            title "s7 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MAMRVSRDNDPSCHFDCDHVVPIQAIHPAESHSHMTGPPPATWLSGKG
+RPHDHNTKDKSC"
+          }
+        },
+        {
+          id {
+            local str "Subject_9"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s8 plain t"
+                }
+              }
+            },
+            title "s8 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MVYWWIWVKVLNYVHKMDFNAAVITAWEKIMNRTIDKCLCRRDGMNLN
+HIMTHFMSQCNQ"
+          }
+        },
+        {
+          id {
+            local str "Subject_10"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s9 plain t"
+                }
+              }
+            },
+            title "s9 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MSHHYPNYRSLRFMWNIYDYNNCKGEMEKIEFVAGKYHSRAYPYMHKH
+RKERWGQCMYHE"
+          }
+        },
+        {
+          id {
+            local str "Subject_11"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s10 plain t"
+                }
+              }
+            },
+            title "s10 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MIKNPGWWTAWGTTPWVSFDITRGHVYNDLKNSLQCLTHHLICKKRLH
+QQMVPDRLQFDT"
+          }
+        },
+        {
+          id {
+            local str "Subject_12"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s11 plain t"
+                }
+              }
+            },
+            title "s11 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MGTQNICVKRWLWEKWVLFDPSFHHLTWSKQHVSLHCNSHMPAKDVAF
+THHPMSGMDSLK"
+          }
+        },
+        {
+          id {
+            local str "Subject_13"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s12 plain t"
+                }
+              }
+            },
+            title "s12 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MLREWNFQSGHGNARVHIAFIPIHIVYSQGYKQWFHRTGLFCWRDYRA
+MSYPWKLDPLQQ"
+          }
+        },
+        {
+          id {
+            local str "Subject_14"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s13 plain t"
+                }
+              }
+            },
+            title "s13 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MQGQQEDLSSRMCYFMNHDNEAACYCRCEQPFYIKPAHWWWNKFFVEC
+MRFAGYYIHCMM"
+          }
+        },
+        {
+          id {
+            local str "Subject_15"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s14 plain t"
+                }
+              }
+            },
+            title "s14 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MTACLIRIKCKSKIFSKWNCHDVYNWWVWCMRCVSVDNHSGCVGNSIL
+IGDTAHFGRGLR"
+          }
+        },
+        {
+          id {
+            local str "Subject_16"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s15 plain t"
+                }
+              }
+            },
+            title "s15 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MIKEEFWCKCIHWPYQIEMNHSQVYRAKFIWMCPEGDGFNKEACIDEH
+AVKCRRNRWQVE"
+          }
+        },
+        {
+          id {
+            local str "Subject_17"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s16 plain t"
+                }
+              }
+            },
+            title "s16 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MCMNENAFNWCADMVTIDCSDFPHYCSPQESFKEIQNGCVWPCFAWQN
+ALDNELWDTCYK"
+          }
+        },
+        {
+          id {
+            local str "Subject_18"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s17 plain t"
+                }
+              }
+            },
+            title "s17 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MYPGLWYPGKCVHAFPHVIVVCKAIHAIQIVEEREHCVDPERMGKSDE
+DLPAGEVDTHAC"
+          }
+        },
+        {
+          id {
+            local str "Subject_19"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s18 plain t"
+                }
+              }
+            },
+            title "s18 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MVFSRVFMANSHVTPEMIQQYNQTIKACYEAMGLGQTYQRPHADELCG
+AYSRHNIPTRYG"
+          }
+        },
+        {
+          id {
+            local str "Subject_20"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s19 plain t"
+                }
+              }
+            },
+            title "s19 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MDKGNAPIEMTADCFLERAVVWLHFICADMEKMCEHMCINDSKWVYNG
+GVENAHIGKSFP"
+          }
+        },
+        {
+          id {
+     Error: (803.7) [blastp] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x7F] in string at line 530
+s20 bd t
+       local str "Subject_21"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s20 b\177d t"
+                }
+              }
+            },
+            title "s20 b#d t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MALTCRGKAVARMSNSFEHYSQNMQMMYSKKYNYHKDKDVRPPQSKYK
+QWVGFWTVFGKM"
+          }
+        },
+        {
+          id {
+            local str "Subject_22"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s21 plain t"
+                }
+              }
+            },
+            title "s21 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MVVAVVAFHHADWWCPICHYPPAGIRNNWMRDMYGMFNASQFMTCITN
+RNCPSSIELAQK"
+          }
+        },
+        {
+          id {
+            local str "Subject_23"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s22 plain t"
+                }
+              }
+            },
+            title "s22 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MEDCLCGGNLLCSTRSCQSQKCIDICDGMYQVTLKQHLYDGGILEWLT
+KCAYTLSIEKPE"
+          }
+        },
+        {
+          id {
+            local str "Subject_24"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s23 plain t"
+                }
+              }
+            },
+            title "s23 plain t"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MEYLHIHCDHPIAKAERMMCIAGESMRCMHQMTCEWSGFMDVEMIRPH
+HMCLAMFSGFEP"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 36504
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 320
+          },
+          {
+            id str "blast_score",
+            value int 320
+          },
+          {
+            id str "e_value",
+            value real { 387951543800564, 10, -59 }
+          },
+          {
+            id str "bit_score",
+            value real { 127872096573597, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 60
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 60
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_1"
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            60
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 39
+          },
+          {
+            id str "blast_score",
+            value int 39
+          },
+          {
+            id str "e_value",
+            value real { 219292636293945, 10, -16 }
+          },
+          {
+            id str "bit_score",
+            value real { 196310157408208, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 7
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 15
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 438333333333333, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_12"
+          },
+          starts {
+            2,
+            25
+          },
+          lens {
+            26
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 25
+          },
+          {
+            id str "blast_score",
+            value int 25
+          },
+          {
+            id str "e_value",
+            value real { 220400265006688, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 142382216779778, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 5
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 9
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 221666666666667, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_17"
+          },
+          starts {
+            24,
+            43
+          },
+          lens {
+            13
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 22
+          },
+          {
+            id str "blast_score",
+            value int 22
+          },
+          {
+            id str "e_value",
+            value real { 599200415933909, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 130826229502258, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 3
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 5
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 121666666666667, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_10"
+          },
+          starts {
+            20,
+            8
+          },
+          lens {
+            7
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 328359279567946, 10, -15 },
+        k { 144910240972546, 10, -15 },
+        h { 509847547870379, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 36504",
+      "Effective search space used: 36504",
+      "Length adjustment: 21"
+    }
+  }
+}

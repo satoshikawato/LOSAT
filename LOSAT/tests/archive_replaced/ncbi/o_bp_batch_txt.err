@@ -1,0 +1,12 @@
+Error: (803.7) [blastp] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 23
+q1 oneé
+Error: (803.7) [blastp] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 23
+q1 oneé
+Error: (803.7) [blastp] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 23
+q3 thrée
+Error: (803.7) [blastp] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 23
+q3 thrée

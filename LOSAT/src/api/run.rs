@@ -1009,18 +1009,7 @@ pub fn run_to_file(
             };
             run_local(command, inputs, &mut outputs, &mut start)
         };
-        result.map_err(|error| {
-            // TBLASTX's command line removes a `-out` that it made and left empty after a title
-            // that the archive cannot hold (`run`).
-            if search.program() == Program::Tblastx
-                && error
-                    .downcast_ref::<crate::report::archive::TitleRefusal>()
-                    .is_some()
-            {
-                file.remove_new_empty();
-            }
-            sink.failed(&error)
-        })
+        result.map_err(|error| sink.failed(&error))
     })?;
     file.flush()
         .map_err(|error| Error::search(&anyhow::Error::from(error)))

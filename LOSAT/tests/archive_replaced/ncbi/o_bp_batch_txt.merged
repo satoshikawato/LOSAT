@@ -1,0 +1,645 @@
+Error: (803.7) [blastp] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 23
+q1 oneé
+Error: (803.7) [blastp] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 23
+q1 oneé
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q1 one\303\251"
+                  }
+                }
+              },
+              title "q1 one##"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 60,
+              seq-data ncbieaa "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGE
+NTGMFRLGFPKFIG"
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s1 subject"
+                }
+              }
+            },
+            title "s1 subject"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENT
+GMFRLGFPKFIG"
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s2 other"
+                }
+              }
+            },
+            title "s2 other"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 50,
+            seq-data ncbieaa "MGPDESREAQKMDRNPLYSVRFGKAIEDDKDTPFDHQMDVYQTTPLEC
+IL"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 5088
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 320
+          },
+          {
+            id str "blast_score",
+            value int 320
+          },
+          {
+            id str "e_value",
+            value real { 296351873736542, 10, -60 }
+          },
+          {
+            id str "bit_score",
+            value real { 127872096573597, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 60
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 60
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_1"
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            60
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 328359279567946, 10, -15 },
+        k { 144910240972546, 10, -15 },
+        h { 509847547870379, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 5088",
+      "Effective search space used: 5088",
+      "Length adjustment: 7"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q2 two"
+                  }
+                }
+              },
+              title "q2 two"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 60,
+              seq-data ncbieaa "MDIVWSTFSAOIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGE
+NTGMFRLGFPKFIG"
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s1 subject"
+                }
+              }
+            },
+            title "s1 subject"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENT
+GMFRLGFPKFIG"
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s2 other"
+                }
+              }
+            },
+            title "s2 other"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 50,
+            seq-data ncbieaa "MGPDESREAQKMDRNPLYSVRFGKAIEDDKDTPFDHQMDVYQTTPLEC
+IL"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 5088
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 314
+          },
+          {
+            id str "blast_score",
+            value int 314
+          },
+          {
+            id str "e_value",
+            value real { 266767417033066, 10, -59 }
+          },
+          {
+            id str "bit_score",
+            value real { 125560899118093, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 59
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 59
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_2",
+            local str "Subject_1"
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            60
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 32788844484236, 10, -14 },
+        k { 144831044642819, 10, -15 },
+        h { 510339341986648, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 5088",
+      "Effective search space used: 5088",
+      "Length adjustment: 7"
+    }
+  }
+}
+Error: (803.7) [blastp] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 23
+q3 thrée
+Error: (803.7) [blastp] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 23
+q3 thrée
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q3 thr\303\251e"
+                  }
+                }
+              },
+              title "q3 thr##e"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 60,
+              seq-data ncbieaa "MDIVWSTFSAOIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGE
+NTGMFRLGFPKFIG"
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s1 subject"
+                }
+              }
+            },
+            title "s1 subject"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENT
+GMFRLGFPKFIG"
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s2 other"
+                }
+              }
+            },
+            title "s2 other"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 50,
+            seq-data ncbieaa "MGPDESREAQKMDRNPLYSVRFGKAIEDDKDTPFDHQMDVYQTTPLEC
+IL"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 5088
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 314
+          },
+          {
+            id str "blast_score",
+            value int 314
+          },
+          {
+            id str "e_value",
+            value real { 266767417033066, 10, -59 }
+          },
+          {
+            id str "bit_score",
+            value real { 125560899118093, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 59
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 59
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_3",
+            local str "Subject_1"
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            60
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 32788844484236, 10, -14 },
+        k { 144831044642819, 10, -15 },
+        h { 510339341986648, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 5088",
+      "Effective search space used: 5088",
+      "Length adjustment: 7"
+    }
+  }
+}

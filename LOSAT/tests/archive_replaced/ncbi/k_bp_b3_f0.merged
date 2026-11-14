@@ -1,0 +1,141 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: in/s_p.fa).
+           2 sequences; 110 total letters
+
+Error: (803.7) [blastp] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 21
+q1 oneé
+Error: (803.7) [blastp] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 21
+q1 oneé
+
+
+Query= q1 oneé
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 subject                                                            127     3e-46
+
+
+> s1 subject
+Length=60
+
+ Score = 127 bits (320),  Expect = 3e-46, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+
+Query  1   MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+           MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1   MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+
+Lambda      K        H        a         alpha
+   0.328    0.145    0.510    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 5088
+Warning: [blastp] Query_2 q2 two: One or more O characters replaced by X for alignment score calculations at positions 10 
+
+
+Query= q2 two
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 subject                                                            125     3e-45
+
+
+> s1 subject
+Length=60
+
+ Score = 125 bits (314),  Expect = 3e-45, Method: Compositional matrix adjust.
+ Identities = 59/60 (98%), Positives = 59/60 (98%), Gaps = 0/60 (0%)
+
+Query  1   MDIVWSTFSAOIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+           MDIVWSTFSA IQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1   MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+
+Lambda      K        H        a         alpha
+   0.328    0.145    0.510    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 5088
+Error: (803.7) [blastp] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 21
+q3 thrée
+Error: (803.7) [blastp] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 21
+q3 thrée
+Warning: [blastp] Query_3 q3 thrée: One or more O characters replaced by X for alignment score calculations at positions 10 
+
+
+Query= q3 thrée
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 subject                                                            125     3e-45
+
+
+> s1 subject
+Length=60
+
+ Score = 125 bits (314),  Expect = 3e-45, Method: Compositional matrix adjust.
+ Identities = 59/60 (98%), Positives = 59/60 (98%), Gaps = 0/60 (0%)
+
+Query  1   MDIVWSTFSAOIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+           MDIVWSTFSA IQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1   MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+
+Lambda      K        H        a         alpha
+   0.328    0.145    0.510    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 5088
+
+
+  Database: User specified sequence set (Input: in/s_p.fa).
+    Posted date:  Unknown
+  Number of letters in database: 110
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

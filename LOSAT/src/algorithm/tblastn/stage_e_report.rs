@@ -203,7 +203,7 @@ pub(super) fn render(
     // locut the locut): BLAST XML's `Parameters_filter`.
     seg_filter: Option<(i32, f64, f64)>,
     mask_lowercase: bool,
-    query_warning_lines: &[Vec<u8>],
+    query_posts: &[crate::report::diag_log::Posts],
     // The texts of the subjects that each query's report reads one by one (its batch's prefetch
     // off), by query, which the first format's writer places where it reads them
     // (`QueryWarnings::subject_read`).
@@ -244,7 +244,8 @@ pub(super) fn render(
     //
     // NCBI writes the XML2 and JSON documents' start before the search (`PrintProlog`) and
     // fails for a matrix of its formatting table's that it does not know when it makes the
-    // first report's data: the start alone is written then (probe `tblastn_sub_lcmatrix`).
+    // first report's data: the start alone is written then (probe `tblastn_sub_lcmatrix`), and
+    // the first query's posts.
     // (The search strategy's file holds the first batch's request alone: `search` stops the
     // requests after it with the same decision, `StrategyExport::stop_after`.)
     if crate::report::blast_xml::matrix::xml_formatting_fails(
@@ -258,6 +259,14 @@ pub(super) fn render(
                 writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
                 writer.flush()?;
             }
+        }
+        // The first query's posts (the reader's messages of its batch and NCBI's posts of the
+        // bytes replaced in the batch's search strategy request) come before the error.
+        if let Some(posts) = query_posts.first() {
+            posts.write(
+                &mut *outputs.diagnostics,
+                archive.map(|render| render.handle),
+            )?;
         }
         return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
     }
@@ -357,7 +366,7 @@ pub(super) fn render(
     // The warnings of each query are written before its report, once, with the first
     // format (`QueryWarnings`); the taxonomy database's messages of XML2 and JSON go to the
     // diagnostics at every format.
-    let mut warning_lines = Some(query_warning_lines);
+    let mut warning_lines = Some(query_posts);
     let observer = &mut outputs.observer;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
     // ```c++
@@ -419,8 +428,9 @@ pub(super) fn render(
                 .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid))
         .then(|| {
             let first = warning_lines.take();
-            let warnings = crate::report::query_warnings::QueryWarnings::new(
+            let warnings = crate::report::query_warnings::QueryWarnings::of_posts(
                 first.unwrap_or(&[]),
+                archive.map(|render| render.handle),
                 &mut *outputs.diagnostics,
             );
             // The first format's writer also writes the texts of the subjects that the reports
@@ -581,7 +591,9 @@ pub(super) fn render(
                     render.handle,
                     render,
                     &archive_data(),
-                    warnings.as_mut(),
+                    warnings
+                        .as_mut()
+                        .expect("the BLAST archive writes its posts to the diagnostics"),
                     &mut writer,
                 )?
             }

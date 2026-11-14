@@ -716,14 +716,26 @@ fn defaults_and_task_overrides_remain_distinct() {
         );
         crate::algorithm::blastp::blast_engine::check_options(&a).unwrap();
     }
-    // Word size 4 keeps the lookup table, which LOSAT's BLASTP implements at 2 and 3.
-    let Commands::Blastp(a) = parse("blastp", &["-word_size", "4"]).unwrap().command else {
-        panic!()
-    };
-    assert!(crate::algorithm::blastp::blast_engine::check_options(&a)
-        .unwrap_err()
-        .to_string()
-        .contains("-word_size 4 (the lookup table) is not supported by LOSAT's BLASTP"));
+    // Word size 4 keeps the lookup table with each task's threshold, and runs (item SC8b).
+    for (task, threshold) in [
+        ("blastp", 11.0),
+        ("blastp-fast", 20.0),
+        ("blastp-short", 16.0),
+    ] {
+        let Commands::Blastp(a) = parse("blastp", &["-task", task, "-word_size", "4"])
+            .unwrap()
+            .command
+        else {
+            panic!()
+        };
+        let resolved = a.resolve().unwrap();
+        assert_eq!(
+            (resolved.word_size, resolved.threshold),
+            (4, threshold),
+            "{task}"
+        );
+        crate::algorithm::blastp::blast_engine::check_options(&a).unwrap();
+    }
     // TBLASTN takes both of its tasks (tblastn-fast: the compressed lookup table).
     parse("tblastn", &["-task", "tblastn"]).unwrap();
     parse("tblastn", &["-task", "tblastn-fast"]).unwrap();

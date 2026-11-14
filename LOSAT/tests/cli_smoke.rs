@@ -151,7 +151,7 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
         .arg(&missing_query)
         .arg("-subject")
         .arg(&missing_subject)
-        .args(["-word_size", "4"])
+        .arg("-use_sw_tback")
         .output()
         .expect("run unsupported blastp");
     assert!(!output.status.success(), "a missing subject should fail");
@@ -161,8 +161,8 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
         "the subject is read before the options are checked: {stderr}"
     );
 
-    let query = temp_path("word4_query", "faa");
-    let subject = temp_path("word4_subject", "faa");
+    let query = temp_path("swtback_query", "faa");
+    let subject = temp_path("swtback_subject", "faa");
     std::fs::write(&query, ">q\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
     std::fs::write(&subject, ">s\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
     let output = clean_losat_command()
@@ -170,7 +170,7 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
         .arg(&query)
         .arg("-subject")
         .arg(&subject)
-        .args(["-word_size", "4"])
+        .arg("-use_sw_tback")
         .output()
         .expect("run unsupported blastp");
     let _ = std::fs::remove_file(&query);
@@ -178,7 +178,9 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
     assert!(!output.status.success(), "unsupported blastp should fail");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("-word_size 4 (the lookup table) is not supported by LOSAT's BLASTP"),
+        stderr.contains(
+            "-use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's BLASTP"
+        ),
         "unsupported error should name program, option, and reason: {stderr}"
     );
     assert!(output.stdout.is_empty(), "nothing is written: {stderr}");

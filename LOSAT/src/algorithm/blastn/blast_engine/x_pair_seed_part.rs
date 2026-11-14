@@ -2621,8 +2621,9 @@ mod tests {
                                 "{at}: {used} arenas"
                             );
                             // a piece takes the slot of one every partition has folded before a
-                            // slot no piece has used: one thread folds each piece before it makes
-                            // the next one, so it holds at most two
+                            // slot no piece has used, and a strip's next piece in the same turn
+                            // only a slot given back: one thread folds a turn's pieces before it
+                            // makes the next turn's, so it holds at most two
                             if threads == 1 {
                                 assert!(used <= 2, "{at}: {used} arenas on one thread");
                             }

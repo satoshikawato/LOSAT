@@ -4158,11 +4158,12 @@ Scheduling (each value computed by one thread with the original function; order 
     lock of the strip's list of slots and of the slot, taken by every partition for every piece, wrote lines the
     others read: blastn-short of 30,000 short queries x 3 Mb at 16 threads, the participants' loads served from another
     core's cache x4 those of the strips stage);
-  - a participant makes a strip's pieces one after another while the pool has a slot for the next one and parks the
-    rest of the strip when it has none (any participant goes on with it), so no helper waits holding a strip
-    half-scanned and a thread leaves a strip's scan for its folds no more often than in the strips stage (one piece per
-    turn cut blastn-short's strips into 2.3 turns on average and its folds took +1.2 % cycles at the same
-    instructions, their loads missing L1 evenly more); a partition folds the pieces of a strip in order, then the next strip, and
+  - a participant makes a strip's pieces one after another while the pool has a slot a piece gave back for the next
+    one, and parks the rest of the strip when it has none (any participant goes on with it), so no helper waits
+    holding a strip half-scanned, the stage's arenas grow only at a turn's first piece, and a thread leaves a strip's
+    scan for its folds only when the pool has no slot for the strip's next piece (one piece per turn cut
+    blastn-short's strips into 2.3 turns on average and its folds took +1.2 % cycles at the same instructions, their
+    loads missing L1 evenly more); a partition folds the pieces of a strip in order, then the next strip, and
     the positions count on across a strip's pieces, so the keys, the hits' order and the appended cells' numbers are
     those of the strips.
   `x_reach!` at each such stage, always the switch's side while it is on. Tests: the part tests of

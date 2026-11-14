@@ -51,9 +51,10 @@
 //! slowest partition is in (the lowest strip a partition has not folded all of) alone may take
 //! the last `RESERVED` slots, so that it can always go on (no wait for a piece
 //! nobody frees). A participant makes a strip's pieces one after another while the pool has a
-//! slot for the next one and parks the rest of the strip when it has none, so that a helper never
-//! waits holding a strip half-scanned (it can leave a stalled stage at any turn), and a thread
-//! leaves a strip's scan for its folds no more often than the strips stage does.
+//! slot a piece gave back for the next one, and parks the rest of the strip when it has none, so
+//! that a helper never waits holding a strip half-scanned (it can leave a stalled stage at any
+//! turn), and a thread leaves a strip's scan for its folds only when the pool has no slot for the
+//! strip's next piece.
 //!
 //! Why the output is the same: a partition folds the pieces of a strip in order and the strips
 //! in order, a piece's seeds of the partition in scan order (the blocks of its chain), so each
@@ -807,7 +808,8 @@ where
     };
 
     // The pieces of the lowest parked strip, or of the next strip within `ahead` strips of the
-    // slowest partition's (`low`), while a slot of the pool is free for them; `false` if none was.
+    // slowest partition's (`low`), while the pool has a slot for them (after the first, a slot a
+    // piece gave back); `false` if it had none for the first.
     // (One piece per turn made a participant leave a strip's scan for its folds after each piece:
     // BLASTN-short of 30,000 short queries x 3 Mb at 16 threads cut a strip into 2.3 pieces on
     // average, and its folds took +1.2 % cycles at the same instructions, their loads missing L1
@@ -910,14 +912,16 @@ where
             let Some(next) = next else {
                 return true;
             };
-            // the strip's next piece in a slot of the pool if one is free for it (as above),
-            // else the strip is parked, so that no participant waits holding it
-            if given_n.load(Ordering::Relaxed) == 0 {
+            // the strip's next piece in a slot a piece gave back, if the pool has one for it (the
+            // test above); a slot no piece has used only at a turn's first piece, so that the
+            // stage's arenas grow as they did with one piece per turn; else the strip is parked,
+            // so that no participant waits holding it
+            if given_n.load(Ordering::Relaxed) == 0 || free_n.load(Ordering::Relaxed) <= RESERVED {
                 slowest();
             }
             let mut s = lock(&sched);
             let avail = s.avail(slots_n);
-            if avail > RESERVED || (strip == low && avail > 0) {
+            if !s.free.is_empty() && (avail > RESERVED || strip == low) {
                 slot = s.take();
                 free_n.store(s.avail(slots_n), Ordering::Relaxed);
                 given_n.store(s.free.len(), Ordering::Relaxed);

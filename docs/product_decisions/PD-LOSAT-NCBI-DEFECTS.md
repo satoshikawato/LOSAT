@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.17
+- Version: 1.18
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -29,7 +29,8 @@
   1.16 2026-11-13 (the explicit rejections of `losat rpsbproc` for nucleotide queries, rule 3,
   line PS item PS16c);
   1.17 2026-11-13 (the explicit rejections of `losat rpsbproc` in the XML input, rule 3, line PS
-  item PS16d)
+  item PS16d);
+  1.18 2026-11-14 (the explicit rejections of `-outfmt 18`, rule 3, line RG items T2 and T2c)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -444,6 +445,15 @@ of exception 9 (PS16a) did.
   cannot fetch, in the default tabular fields), pads the line without end (an outfmt 0
   description id of 65 bytes or more) or crashes (a protein title of punctuation): version 1.10,
   the table in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md).
+
+- `-outfmt 18`, the organism report (version 1.18, 2026-11-14, line RG item T2c; all five
+  programs): a query batch that NCBI does not search (no query of it has a valid context, "Could
+  not calculate ungapped Karlin-Altschul parameters"): NCBI's `x_PrintTaxReport` reads the null
+  Seq-align-set of the batch (`blast_format.cpp:893`, `:898-899`) and stops with a null pointer
+  exception and a stack trace of its build, exit status 255; LOSAT writes NCBI's bytes up to the
+  query's `Length=` line and then the error. Also (line RG item T2, 2026-11-13): a taxonomy name
+  with `<@bl_taxid@>` (NCBI prints the uninitialised `STaxInfo::blNameTaxid`, `taxFormat.hpp:142`)
+  and a `./.ncbirc` with a syntax error (NCBI's report stops at it with exit status 255).
 
 - `losat rpsbproc` (version 1.15, 2026-11-12, line PS items PS16a and PS16b, line PS
   `DECISIONS.md` 37 and 40, Owner-delegated): where NCBI's rpsbproc 0.5.1 reads memory outside

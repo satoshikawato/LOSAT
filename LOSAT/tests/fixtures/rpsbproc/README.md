@@ -277,6 +277,15 @@ bioconda's gave the same bytes in every case.
     same bytes).
   - `x.h_hfmin.std` (`x_h_p_hfmin.xml`, `Hsp_hit-from` -2147483648: NCBI's wrapped domain start marks the hit `N`,
     LOSAT's -2^31 - 1 does not): nearby `x.h_hfmin1.std` (-2147483647, the same bytes).
+  - `x.h_ntmqfmin.rep` (`x_h_n_mqfmin.xml`: `x_ntpair.xml` whose first minus-frame HSP has `Hsp_query-from`
+    -2147483648; NCBI's wrapped range reclassifies the hit and drops its line, LOSAT prints it with start
+    `-2147483648`): nearby `x.h_ntmqfmin1.rep` (-2147483647, start `-2147483647`; shift 1). `x.h_ntphfmin.rep`
+    (`x_h_n_phfmin.xml`: the first plus-frame HSP's `Hsp_hit-from` -2147483648; NCBI marks the hit `N`, LOSAT does
+    not): nearby `x.h_ntphfmin1.rep` (the same bytes). The PS16-Q1 review's oracle `nx` (both builds, full CDD v3.22
+    data; the cut data `nt` gives the same bytes).
+  - `widened/PAIRS.tsv` names each `widened` row's nearby row and its shift (the numbers that move, as `old=>new`);
+    the test `widened_rows_are_their_nearby_rows_moved_back` makes each `widened` row from NCBI's bytes of its
+    nearby row (`oracle/`) with that shift and the input's name, and compares.
 - `compare` rows whose limit gives NCBI's bytes too (the overflow ends in an `unsigned int` or is not printed):
   `ntslen.both.std` / `ntslen1.both.std` (`nt67.asn` whose first subject interval runs from 2^32 - 5 to 2^31 - 2,
   `t - f + 1` = 2^31 + 4, and to 2^31 - 7, 2^31 - 1), `x.h_qtmin.full` / `x.h_qtmin1.full` (the hit of `x_h_p_qtmin.xml`
@@ -284,3 +293,9 @@ bioconda's gave the same bytes in every case.
   column 11 and `Hsp_hit-from` 2147483638, so that `++hf` passes 2^31 - 1, and 2147483633), `x.h_span.doms` /
   `x.h_span1.doms` (a query of length 0, `Hsp_query-from` 0 and `Hsp_query-to` 2147483647: "see if NA"'s span 2^31,
   and 2147483646).
+- `mse86.both`, `mse76.both` (`compare`, NCBI's bytes; PD-LOSAT-NCBI-DEFECTS rule 2): the PS16-Q1 review's oracle `mse`,
+  `three.asn` whose three 199908 Dense-segs have their subject starts moved by K, with 199908's site positions moved
+  by K in the layers `data_with/mse86` and `data_with/mse76` (`cddannot.dat`, `cddannot_generic.dat`). At K =
+  2147483586 (`arch/mse86.asn`) the last segment passes model position 2^31 - 1: NCBI's `MapSegSet` end, an
+  `unsigned int` sum stored in an `int`, wraps, two of the eight Zn sites stay unmapped and no SITES line is printed;
+  at K = 2147483576 (`arch/mse76.asn`) the SITES line is printed. Both builds the same.

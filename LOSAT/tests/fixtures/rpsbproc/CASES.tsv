@@ -398,3 +398,9 @@ x.h_hfmax.both	compare	-	-	-i arch/x_h_p_hfmax.xml -d data -t both -m std
 x.h_hfmax5.both	compare	-	-	-i arch/x_h_p_hfmax5.xml -d data -t both -m std
 x.h_span.doms	compare	-	-	-i arch/x_h_p_span.xml -d data -t doms
 x.h_span1.doms	compare	-	-	-i arch/x_h_p_span1.xml -d data -t doms
+mse86.both	compare	-	data-with:mse86	-i arch/mse86.asn -d mse86
+mse76.both	compare	-	data-with:mse76	-i arch/mse76.asn -d mse76
+x.h_ntmqfmin.rep	widened	-	data-with:nt	-i arch/x_h_n_mqfmin.xml -d nt -t both -m rep
+x.h_ntmqfmin1.rep	compare	-	data-with:nt	-i arch/x_h_n_mqfmin1.xml -d nt -t both -m rep
+x.h_ntphfmin.rep	widened	-	data-with:nt	-i arch/x_h_n_phfmin.xml -d nt -t both -m rep
+x.h_ntphfmin1.rep	compare	-	data-with:nt	-i arch/x_h_n_phfmin1.xml -d nt -t both -m rep

@@ -245,7 +245,7 @@ fn compare_rows(stem: &str, usage: &str, expected: &str) -> usize {
 
 #[test]
 fn rpsbproc_gives_ncbis_bytes() {
-    assert_eq!(compare_rows("compare", "compare", "oracle"), 377);
+    assert_eq!(compare_rows("compare", "compare", "oracle"), 381);
 }
 
 // The rows where NCBI's `int` coordinate arithmetic overflows (undefined; NCBI's 0.5.1 builds wrap
@@ -253,7 +253,57 @@ fn rpsbproc_gives_ncbis_bytes() {
 // NCBI's for the row's nearby input (a `compare` row) moved back by the shift that README.md names.
 #[test]
 fn rpsbproc_widens_ncbis_int_overflows() {
-    assert_eq!(compare_rows("widened", "widened", "widened"), 7);
+    assert_eq!(compare_rows("widened", "widened", "widened"), 9);
+}
+
+// Each `widened` row's bytes are NCBI's bytes of its nearby `compare` row moved back by the shift
+// that `widened/PAIRS.tsv` names (the input file's name, and the printed numbers it lists, each of
+// which must occur): the evidence of PD-LOSAT-NCBI-DEFECTS exception 11 kept as a check, so that
+// `widened/` cannot drift from NCBI's nearby bytes.
+#[test]
+fn widened_rows_are_their_nearby_rows_moved_back() {
+    let rows = cases();
+    let row = |case: &str| {
+        rows.iter()
+            .find(|row| row[0] == case)
+            .unwrap_or_else(|| panic!("{case}: no row"))
+            .clone()
+    };
+    let input = |case: &str| {
+        let arguments = row(case)[4].clone();
+        let words: Vec<&str> = arguments.split(' ').collect();
+        let at = words.iter().position(|&word| word == "-i").unwrap();
+        words[at + 1].to_string()
+    };
+    let read = |dir: &str, case: &str, suffix: &str| {
+        fs::read_to_string(fixtures().join(dir).join(format!("{case}.{suffix}"))).unwrap()
+    };
+    let table = fs::read_to_string(fixtures().join("widened").join("PAIRS.tsv")).unwrap();
+    let mut pairs = 0;
+    for line in table.lines().skip(1).filter(|line| !line.is_empty()) {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let (case, nearby) = (fields[0], fields[1]);
+        assert_eq!(row(case)[1], "widened", "{case}");
+        assert_eq!(row(nearby)[1], "compare", "{nearby}");
+        let mut out = read("oracle", nearby, "out").replace(&input(nearby), &input(case));
+        let mut err = read("oracle", nearby, "err").replace(&input(nearby), &input(case));
+        for shift in &fields[2..] {
+            let (old, new) = shift.split_once("=>").unwrap();
+            let (old, new) = (old.replace("\\t", "\t"), new.replace("\\t", "\t"));
+            assert!(
+                out.contains(&old) || err.contains(&old),
+                "{case}: {old:?} is not in {nearby}"
+            );
+            out = out.replace(&old, &new);
+            err = err.replace(&old, &new);
+        }
+        assert_eq!(out, read("widened", case, "out"), "{case}: stdout");
+        assert_eq!(err, read("widened", case, "err"), "{case}: stderr");
+        assert_eq!(read("oracle", nearby, "rc"), read("widened", case, "rc"), "{case}: rc");
+        pairs += 1;
+    }
+    let widened = rows.iter().filter(|row| row[1] == "widened").count();
+    assert_eq!((pairs, widened), (9, 9));
 }
 
 // The rows of `use` `linux`: `-logfile /dev/stdout` writes the diagnostics into the pipe of the

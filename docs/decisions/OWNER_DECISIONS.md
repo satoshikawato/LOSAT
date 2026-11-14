@@ -140,8 +140,8 @@ As of dev 6ecdb2bf2 (2026-11-06).
 ## Decisions cited by log entry
 
 The heading names the log (the work line's folder name, as the repository cites it); Entry is the
-entry's number in that log. 132 entries: 18 Owner, 3 Owner in part,
-105 Owner-delegated, 6 records.
+entry's number in that log. 133 entries: 18 Owner, 3 Owner in part,
+106 Owner-delegated, 6 records.
 
 ### `blastdb-ids-20261021`: line DBID
 
@@ -305,7 +305,8 @@ entry's number in that log. 132 entries: 18 Owner, 3 Owner in part,
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
 | --- | --- | --- | --- | --- | --- | --- |
 | 8 | 2026-11-05 | Owner-delegated |  | PS2's shape: `-num_iterations 1` with `-out_ascii_pssm`, `-save_pssm_after_last_round` and `-save_each_pssm`; `-out_pssm` and other iteration counts stay refused; a negative `-pseudocount` stops after the first report as NCBI does; the library API (and `pylosat`) refuses the three PSSM options before any search, because each call would restart `-save_each_pssm`'s numbering (added 2026-11-06). | psiblast ASCII PSSM (PS2) | `changelog.d/feature-ps-ps2.md:1` |
-| 57 | 2026-11-14 | Owner | 「Q1=B」 | The Owner chose option B of PS16c's question Q1 (PR #1081; PS16d's XML coordinates added by its review): every coordinate computation of `losat rpsbproc` that overflows NCBI's signed `int` (undefined in C++; NCBI's builds wrap it) is computed as its mathematical value, for protein queries (PS16a's widening), nucleotide queries and the XML input alike, under one approved exception in PD-LOSAT-NCBI-DEFECTS (exception 11, version 1.19), one rule for one expression, as the Owner's rule of 2026-10-10 widens signed overflows. Not taken: A, nucleotide queries and the XML input refuse the overflow while protein queries widen it; C, protein queries refuse it too. | `losat rpsbproc` coordinate arithmetic | `docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md:367`, `docs/decisions/LINE_IDS.md:174` |
+| 57 | 2026-11-14 | Owner | 「Q1=B」 | The Owner chose option B of PS16c's question Q1 (PR #1081; the XML input's coordinates added by PS16d's review): a hit whose coordinate overflows NCBI's signed `int` (`m_iFrom + COORDSBASE` and `m_iTo + COORDSBASE` of the DOMAINS and SUPERFAMILIES lines, with `Calculate`'s overlap sets of the hit), for protein and nucleotide queries alike, and the XML input's coordinates (`- COORDSBASE` of an HSP's coordinates and what follows from it) are computed as their mathematical values under one approved exception in PD-LOSAT-NCBI-DEFECTS (exception 11, version 1.19), one rule for one expression, as the Owner's rule of 2026-10-10 widens signed overflows. Not taken: A, nucleotide queries and the XML input refuse the overflow while protein queries widen it; C, protein queries refuse it too. The other `int` overflows of the same coordinate arithmetic were added to exception 11 by an Owner-delegated decision (entry 58). | `losat rpsbproc` coordinate arithmetic | `docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md:368`, `docs/decisions/LINE_IDS.md:174` |
+| 58 | 2026-11-14 | Owner-delegated |  | The Owner's 「Q1=B」 (entry 57) covers what the question named. The `int` overflows of the same coordinate arithmetic that it did not name are widened under the same exception 11 after a code check (implementer decision 3 of PS16-Q1; one rule for one kind of overflow): the site's `xres + COORDSBASE` and the motif's `GetLeft() + COORDSBASE`, `MinusPr2PlusNA`'s `pr - 1`, the set algebra of `CSegSet`, `CalcMasterGaps`, `GetTranslatedPosMap`'s `++c`, a `Std-seg`'s `t - f + 1` and `m_iTo + 1`, and the data files' `SetData` `seg.to + 1` and `GetMotifResPos` `++c`. PD-LOSAT-NCBI-DEFECTS and this file state the Owner's choice and these additions apart. Not taken: leaving them refused (two rules for one kind of overflow). | `losat rpsbproc` coordinate arithmetic | `docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md:37`, `docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md:377` |
 
 ### `release-v020-20261025`: line RL (the v0.2.0 release)
 

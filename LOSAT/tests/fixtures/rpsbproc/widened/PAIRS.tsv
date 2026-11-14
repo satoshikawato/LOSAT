@@ -1,0 +1,10 @@
+case	nearby	shifts (old=>new in the nearby row's standard output and error; \t is a TAB)
+ntplusmax.doms.std	ntplusmax3.doms.std	\t507226\t3\t2147483645\t=>\t507226\t3\t2147483648\t
+ntplusmax.doms.rep.f	ntplusmax3.doms.rep.f	\t507226\t3\t2147483645\t=>\t507226\t3\t2147483648\t
+ntminusmax.doms.std	ntminusmax1.doms.std	\t440348\t3555\t2147483647\t=>\t440348\t3555\t2147483648\t
+ntmotifmax.feats.std	ntmotifmax3.feats.std	[2]\tANK repeat\t2147483645\t2147483733\t=>[2]\tANK repeat\t2147483648\t2147483736\t	[2]\tANK repeat\t-2147483561\t2147483847\t=>[2]\tANK repeat\t-2147483558\t2147483850\t	[2]\tANK repeat\t-2147483447\t2147483928\t=>[2]\tANK repeat\t-2147483444\t2147483931\t
+x.h_qfmin.doms	x.h_qfmin1.doms	(which is 18446744071562067968)=>(which is 18446744071562067967)
+x.h_qtmin.rep	x.h_qtmin1.rep
+x.h_hfmin.std	x.h_hfmin1.std
+x.h_ntmqfmin.rep	x.h_ntmqfmin1.rep	\t522332\t-2147483647\t590\t=>\t522332\t-2147483648\t590\t
+x.h_ntphfmin.rep	x.h_ntphfmin1.rep

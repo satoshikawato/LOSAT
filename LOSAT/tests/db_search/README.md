@@ -1290,6 +1290,13 @@ Rows `db.cnt.*` (D1a-3 part 1, `remaining-gaps-20261112/D/SURVEY_D1a3.md`, `rema
 `l4294` `LENGTH 4294967295999999999`, `l5e18` `LENGTH 5000000000000000000`, `nsm5` `NSEQ -5`, `ns2p31` `NSEQ 2147483648`,
 `nsm1` `NSEQ 4294967295` (-1 as NCBI's `int`), `ns2e9` `NSEQ 2000000000`, and `avg2p32` (`NSEQ 23` / `16` with `LENGTH`
 23 x 2^32 / 16 x 2^32: an average whose `Int4` is 0). Frozen with the release build on the developer machine (2026-11-14).
+`l0b.pal` is `LENGTH 0` over `../bslice` (`DBLIST ../bslice`; rows `db.cnt.l0b.*`: `-subject_besthit` removes HSPs of
+`bslice_q.fna` there, which it does not over `tfp`). `x300r.faa` is a query of 300 `X` (no countable letter: NCBI's
+Karlin-Altschul setup fails on it, "Could not calculate ungapped Karlin-Altschul parameters") followed by a 142-letter
+random protein (`random.Random(1002)` choices of `ACDEFGHIKLMNPQRSTVWY`), for the split-query rows
+`db.cnt.*.bp_c0.split.fsc.inv`: with `CHUNK_SIZE=80` a chunk's first context is a part of the random query while the
+batch's first query is the invalid one (review 2 R2-M1 of D1a-3). Frozen with the local NCBI BLAST+ 2.17.0 release build
+(2026-11-14).
 
 ## psiblast's id options (line RG, series Q, Q1)
 

@@ -34,8 +34,8 @@
   and of the endless split it can cause, rule 3, line RG item X2);
   1.19 2026-11-14 (exception 11, the `losat rpsbproc` exception: coordinate arithmetic past NCBI's
   `int`, protein and nucleotide queries and the XML input alike; line PS item PS16-Q1, the Owner's
-  Q1 = B with the Owner-delegated additions of line PS `DECISIONS.md` 58; the XML input's HSP strings
-  of 1 GiB or more refused under the memory rule; `MapSegSet`'s segment end reproduced, rule 2)
+  Q1 = B with the Owner-delegated additions of line PS `DECISIONS.md` 58 and 59; `MapSegSet`'s segment
+  end reproduced, rule 2)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -378,7 +378,11 @@ were added to this exception after a code check by an Owner-delegated decision (
 COORDSBASE` and the motif's `GetLeft() + COORDSBASE`, `MinusPr2PlusNA`'s `pr - 1`, the set algebra of
 `CSegSet`, `CalcMasterGaps`, `GetTranslatedPosMap`'s `++c`, a `Std-seg`'s `t - f + 1` and `m_iTo + 1`,
 and the data files' `SetData` `seg.to + 1` and `GetMotifResPos` `++c` (rejected there: leaving them
-refused, two rules for one kind of overflow). The PR (PS16-Q1) asks the maintainer to accept version
+refused, two rules for one kind of overflow); and, by line PS `DECISIONS.md` 59 (Owner-delegated,
+after the delta review), `++alnResIdx` and `ParseAlignStrings`' `++start` of an `Hsp_qseq` of 2^31
+letters or more (rejected there: refusing such an `Hsp_qseq`, by its length or by the memory rule of
+`DECISIONS.md` 40, which measures what NCBI builds from a number or pattern in the input, not the
+strings the input carries). The PR (PS16-Q1) asks the maintainer to accept version
 1.19 with both parts. It moves the coordinate overflows that versions 1.16 and 1.17 rejected (rule 3)
 here, and names the widening that PS16a made for protein queries.
 
@@ -407,8 +411,11 @@ here, and names the widening that PS16a made for protein queries.
       lengths) and a minus-strand hit's `m_iTo + 1` (divided as an `unsigned int`); `MinusPr2PlusNA`'s
       `pr - 1` at `INT_MIN`;
     - the XML input's `- COORDSBASE` of an `Hsp_query-from`, `Hsp_query-to` or `Hsp_hit-from` of
-      -2147483648, "see if NA"'s `m_iTo - m_iFrom + 1`, and `ParseAlignStrings`' `++qf`, `--qf`, `++hf`
-      and `--hf` (`m_vecSStarts` holds the values: `rpsbproc::domains::SubjectStarts`);
+      -2147483648, "see if NA"'s `m_iTo - m_iFrom + 1`, `ParseAlignStrings`' `++qf`, `--qf`, `++hf`
+      and `--hf` (`m_vecSStarts` holds the values: `rpsbproc::domains::SubjectStarts`), and the
+      alignment strings' positions `++alnResIdx` and `++start` in an `Hsp_qseq` of 2^31 letters or more
+      (compared with the `unsigned int` length, used as `size_t` indices and in the `unsigned int`
+      `start - segLen`; the segment lengths are `unsigned int` already);
     - the data files' site positions (a hand-edited `cddannot.dat` with a position of 2^31 - 1):
       `SetData`'s `sorted[i] > seg.to + 1` (`common/impl/segset_impl.hpp:25-55`,
       `rpsbproc::data::site_data_segs`) and `GetMotifResPos`'s `for (SeqPos_t c = v->from; c <= v->to;
@@ -464,8 +471,14 @@ here, and names the widening that PS16a made for protein queries.
     `a_minus_strand_hit_that_ends_at_int_max`, `ends_that_overflow_int`, `frames_tests.rs`
     `frame_conversions`, `nucleotide_tests.rs` `codons_and_their_overflow`,
     `motif_ends_and_their_overflow`, `offline_tests.rs` `coordinates_of_int_min`,
-    `span_that_overflows_int`, `domain_positions_that_overflow_int`. The XML input's HSP strings of 1
-    GiB or more stay refused under the memory rule (rule 3, version 1.17 as amended by 1.19).
+    `span_that_overflows_int`, `domain_positions_that_overflow_int`, `string_reads_at_int_positions`.
+    An `Hsp_qseq` of 2^31 letters or more (PS16-Q1 fix round 2 oracle `q31`, ws): the fixture's `x_one.xml`
+    with L leading query gaps in `Hsp_qseq` and L letters in `Hsp_hseq` before the HSP's 70 columns, which
+    `++alnResIdx` trims, so the HSP's segments and residues are those of the 70 columns whatever L is. For
+    L = 2^31 - 128 (the nearby input, no overflow), LOSAT's stdout, stderr and exit code equal both NCBI 0.5.1
+    builds'. For L = 2^31 + 8 (the limit), LOSAT, in a build with overflow checks, prints the same bytes
+    except the line that echoes the input file's name. NCBI's binary prints the same there, because its
+    wrapped index is not visible in this output.
 
 ## Reproduced as NCBI (rule 2)
 
@@ -618,11 +631,10 @@ here, and names the widening that PS16a made for protein queries.
     GiB or more at once (`NACommit`'s six frames, `PRCommit`'s residues and their copy, in
     `unsigned int` lengths: a nucleotide query of 0 or 1 base gives frames of more than a billion
     residues; oracles `n_qlen1`, `n_noqlen` and `p_qlenneg` end with `basic_string::replace` or
-    `std::bad_alloc` by the address space), an HSP whose strings NCBI holds at once come to 1 GiB or
-    more (`Hsp_qseq`, `Hsp_hseq` and `Hsp_midline` in its `CBlastOutput`, which holds the whole
-    document, and the copy of `Hsp_hseq` that `ParseBlastOutput` makes, with their terminating 0;
-    version 1.19, the PS16-Q1 review S3-2 and `DECISIONS.md` 40: this replaces the refusal of an
-    `Hsp_qseq` of 2^31 letters, the overflow's threshold), and a REAL of more than 18
+    `std::bad_alloc` by the address space), an `Hsp_qseq` of 2^31 letters or more that "see if NA"
+    reads past its end (its `t0 = t1 + 1` stores a `size_t` of 2^31 or more in an `int`: a negative
+    index) or over which that loop starts over and never ends (2^32 - 1 letters or more; version 1.19,
+    which widens the rest of such an `Hsp_qseq`, exception 11), and a REAL of more than 18
     significant digits (the conversion LOSAT shares with its ASN.1 text readers). Of NCBI's XML
     reader, LOSAT refuses the constructs that NCBI's BLAST XML writers never produce and that NCBI
     reads with state LOSAT does not port: attributes (skipped, with NCBI's handling of `xmlns` and

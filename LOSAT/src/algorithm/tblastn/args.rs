@@ -659,7 +659,7 @@ impl TblastnArgs {
         //             const string& seg_opts = args[kArgSegFiltering].AsString();
         // ```
         let soft_masking = self.soft_masking.unwrap_or(false);
-        let seg = parse_seg_option(self.seg.as_deref().unwrap_or("12 2.2 2.5"), "TBLASTN")?;
+        let seg = parse_seg_option(self.seg.as_deref().unwrap_or("12 2.2 2.5"))?;
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:586-623 (the word
         // threshold handler: the matrix's suggestion replaces only tblastn's default 13)
         // ```c

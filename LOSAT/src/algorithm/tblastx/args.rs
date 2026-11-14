@@ -513,7 +513,7 @@ impl TblastxArgs {
     /// The -seg value as NCBI's filtering handler reads it (`check_options` reports its
     /// errors first).
     pub fn seg_spec(&self) -> anyhow::Result<SegSpec> {
-        crate::blastinput::app::parse_seg_option(&self.seg, "TBLASTX")
+        crate::blastinput::app::parse_seg_option(&self.seg)
     }
 
     /// `-soft_masking` (`mask_at_hash`): the SEG intervals keep words out of the lookup table but

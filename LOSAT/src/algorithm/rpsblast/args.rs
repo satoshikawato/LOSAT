@@ -436,10 +436,7 @@ impl RpsblastArgs {
         inputs.sum_stats = self.sum_stats;
         inputs.window_size = self.window_size;
         inputs.soft_masking = self.soft_masking;
-        inputs.seg = self
-            .seg
-            .as_deref()
-            .and_then(|value| seg_filter(value, "RPSBLAST"));
+        inputs.seg = self.seg.as_deref().and_then(seg_filter);
         inputs.comp_based_stats = i32::from(rps_composition_mode(&self.comp_based_stats));
         inputs
     }

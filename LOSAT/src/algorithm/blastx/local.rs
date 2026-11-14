@@ -1139,14 +1139,11 @@ fn parse_subject_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
 // ```
 /// The filtering handler (`CFilteringArgs`), which comes after the subjects are read and before
 /// the query options and formatting handlers: NCBI's error of `-seg` (`BlastxArgs::seg_spec`;
-/// `resolve_with_format` keeps it with the other deferred errors, LOSAT's refusal of a value that
-/// NCBI reads comes from `resolve_with_format`).
+/// `resolve_with_format` keeps it with the other deferred errors).
 pub(super) fn check_filtering(args: &BlastxArgs) -> Result<()> {
     match args.seg_spec() {
-        Err(app::SegOptionError::Ncbi(message)) => {
-            Err(options_error(SemanticOptionsError::from(message).into()))
-        }
-        Ok(_) | Err(app::SegOptionError::Losat(_)) => Ok(()),
+        Err(message) => Err(options_error(SemanticOptionsError::from(message).into())),
+        Ok(_) => Ok(()),
     }
 }
 

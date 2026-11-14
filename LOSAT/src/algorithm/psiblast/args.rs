@@ -658,10 +658,7 @@ impl PsiblastArgs {
             .map(crate::core::blast_util::ncbi_int4_from_double);
         inputs.window_size = self.window_size;
         inputs.soft_masking = self.soft_masking;
-        inputs.seg = self
-            .seg
-            .as_deref()
-            .and_then(|value| seg_filter(value, "PSIBLAST"));
+        inputs.seg = self.seg.as_deref().and_then(seg_filter);
         if let Ok((mode, unified_p)) =
             crate::blastinput::app::parse_comp_based_stats(&self.comp_based_stats, true, false)
         {

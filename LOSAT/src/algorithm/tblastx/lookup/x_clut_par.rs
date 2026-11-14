@@ -105,6 +105,14 @@
 //!   cleared and zero-filled. The hits are of the table's offset type `H` (`u16` for BLASTX's query
 //!   batches of at most `X_U16_LETTERS` letters, whose offsets are below 2^16): each stripe writes
 //!   `H::from_offset` of the offset it wrote as `i32`, the same number.
+//! - mapped scratch (line NP, SC9d; memory placement only): a task's targets in the appends pass and
+//!   its copy in the stripe fill have a capacity above glibc's largest mmap threshold
+//!   (`x_mapped_record_entries`, as the bucket fill's record), so that they are mappings of their own,
+//!   their untouched pages not resident and the touched ones returned when the task ends, whichever
+//!   thread ran it. Freed into the pool threads' arenas (glibc raises its mmap threshold to each
+//!   mapped block freed), BLASTX's builds of a table per query batch in parts left each pool thread
+//!   about 2 MiB (word size 5 at 8 threads: +15-20 MB of maximum RSS over the bucket fill on the
+//!   unit's thread; with `MALLOC_ARENA_MAX=1` or a fixed `MALLOC_MMAP_THRESHOLD_`, none).
 //! - kept segments (item SC2d-2, `XSegmentPool`, the block search's): the appends pass takes a kept
 //!   segment before it makes a new one, and the stripes pass keeps at most as many segments as threads
 //!   for the next build, in place of what the pool still holds. A segment's values are not read: each piece writes every entry of its range
@@ -185,9 +193,10 @@ const X_MAX_GUIDED_OFFSETS: usize = 4 * X_MIN_CHUNK_OFFSETS;
 /// the appends of the offset that passes it (512 KiB of targets, in a vector of 1 MiB once an offset
 /// passes it) whatever a chunk's offsets add (about 380 appends per offset with BLOSUM45 and
 /// blastp-fast's threshold, 12,800 at word size 7).
-/// A task's scratch stays in its pool thread's malloc arena after the pass, so that the threads keep
+/// A task's scratch stayed in its pool thread's malloc arena after the pass, so that the threads kept
 /// a piece each between builds: 2^20 appends (4 MiB) per thread raised the peak RSS of BLOSUM45
-/// blastp-fast at 8 threads by about 10 % (SC2d-2).
+/// blastp-fast at 8 threads by about 10 % (SC2d-2). Since SC9d of line NP the targets and the stripe
+/// fill's copy are mapped (module header): their pages go back when the task ends.
 const X_PIECE_APPENDS: usize = 1 << 17;
 /// The most (chunk, stripe) parts the stripe count allows: a stripe reads its part of every piece of
 /// every chunk, so the (piece, stripe) parts are this many times the pieces per chunk (one for
@@ -329,7 +338,9 @@ impl<'r> XAppendsScratch<'r> {
         pool: Option<&'r XSegmentPool>,
     ) -> Self {
         Self {
-            targets: Vec::new(),
+            // Line NP, SC9d: mapped (`x_mapped_record_entries`), so that the pages a task writes go
+            // back when it ends (module header).
+            targets: Vec::with_capacity(x_mapped_record_entries()),
             per_offset: Vec::new(),
             out: XSegmentOut::new(registry, segment, pool),
         }
@@ -1171,6 +1182,16 @@ fn x_stripe_build<H: XQueryOffset>(
 /// the cells' counts (then cursors), the cells of more than 5 offsets.
 type XFillScratch = (Vec<u32>, Vec<u32>, Vec<u32>);
 
+// No NCBI counterpart: memory placement only (line NP, SC9d; module header).
+/// A task's `XFillScratch`, its copy mapped (`x_mapped_record_entries`).
+fn x_fill_scratch() -> XFillScratch {
+    (
+        Vec::with_capacity(x_mapped_record_entries()),
+        Vec::new(),
+        Vec::new(),
+    )
+}
+
 // NCBI reference (598d8ae6): as `x_stripe_build` (blast_aalookup.c:787-849, :1197-1235)
 // ```c
 //     Int4 num_entries = backbone_cell->num_used;
@@ -1721,7 +1742,7 @@ fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
                 threads,
                 parts.len(),
                 0,
-                XFillScratch::default,
+                x_fill_scratch,
                 |scratch, stripe| {
                     let part = parts[stripe]
                         .lock()

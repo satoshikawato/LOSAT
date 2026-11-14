@@ -1641,7 +1641,8 @@ fn x_flat_pool<H: XPooledOffset>() -> std::sync::MutexGuard<'static, XFlatPool<H
 // own, and a wasm memory would keep the capacity. BLASTX's `u16` fill keeps no record; the chunks of
 // its appends (`XBucketChunks`, at most 63 entries more per bucket) are cut from an arena of this
 // capacity for the same reason.
-/// EXPERIMENT (LOSAT_X_BXCLUTPOOL): the capacity, in entries, of the record of a pooled bucket fill.
+/// EXPERIMENT (LOSAT_X_BXCLUTPOOL): the capacity, in entries, of the record of a pooled bucket fill;
+/// also of the parallel builder's per-task scratch (`x_clut_par.rs`, line NP SC9d).
 const fn x_mapped_record_entries() -> usize {
     if cfg!(all(target_os = "linux", target_env = "gnu")) {
         // glibc's largest dynamic mmap threshold (DEFAULT_MMAP_THRESHOLD_MAX on 64-bit), and one

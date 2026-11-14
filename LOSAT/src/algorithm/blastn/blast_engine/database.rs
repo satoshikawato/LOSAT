@@ -1366,17 +1366,17 @@ where
     // ```
     // The masks are read before the letters, and outside the handler of the preliminary
     // search's read errors, as the letters are.
-    let hard_masks = |ordinal: u32| -> Result<Vec<(u32, u32)>> {
-        let Some(algo_id) = hard_mask else {
-            return Ok(Vec::new());
-        };
+    let hard_masks = |ordinal: u32, algo_id: i32| -> Result<Vec<(u32, u32)>> {
         let mut masks = MaskBlock::default();
         Ok(database
             .sequence_masks(ordinal, algo_id, &mut masks, shared::database_error_of)?
             .to_vec())
     };
     let one = |scratch: &mut T, &(ordinal, ref kept): &(u32, P)| -> Result<Option<R>> {
-        let masks = hard_masks(ordinal)?;
+        let masks = match hard_mask {
+            Some(algo_id) => Some(hard_masks(ordinal, algo_id)?),
+            None => None,
+        };
         let stored = x_read_sequence(db, ordinal).map_err(database_error)?;
         let length = stored.nucleotide_len(0).map_err(database_error)?;
         let x_in_ranges = x_ranged && length >= x_min;
@@ -1388,7 +1388,9 @@ where
             let mut blastna = stored
                 .x_nucleotide_blastna_ranges(0, &ranges)
                 .map_err(database_error)?;
-            mask_hard_letters(&mut blastna, &masks, &ranges);
+            if let Some(masks) = &masks {
+                mask_hard_letters(&mut blastna, masks, &ranges);
+            }
             let fenced = std::sync::atomic::AtomicBool::new(false);
             let subject = BlastnSubjectRef {
                 length,
@@ -1408,7 +1410,15 @@ where
                 return Ok(result);
             }
         }
-        let result = x_traceback_whole(&stored, length, &masks, scratch, ordinal, kept, traceback)?;
+        let result = x_traceback_whole(
+            &stored,
+            length,
+            masks.as_deref(),
+            scratch,
+            ordinal,
+            kept,
+            traceback,
+        )?;
         x_done_block(stored);
         Ok(result)
     };
@@ -1458,11 +1468,11 @@ where
 }
 
 /// The traceback of `traceback_listed` on the whole sequence of `stored`.
-/// `hard_masks`: the masks of a search with `-db_hard_mask` (`mask_hard_letters`), else empty.
+/// `hard_masks`: the masks of a search with `-db_hard_mask` (`mask_hard_letters`).
 fn x_traceback_whole<T, P, R, K>(
     stored: &SequenceBlock,
     length: usize,
-    hard_masks: &[(u32, u32)],
+    hard_masks: Option<&[(u32, u32)]>,
     scratch: &mut T,
     ordinal: u32,
     kept: &P,
@@ -1472,7 +1482,9 @@ where
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>, &P) -> Option<R>,
 {
     let mut blastna = x_blastna(stored).map_err(database_error)?;
-    mask_hard_letters(&mut blastna, hard_masks, &[(0, length)]);
+    if let Some(masks) = hard_masks {
+        mask_hard_letters(&mut blastna, masks, &[(0, length)]);
+    }
     let subject = BlastnSubjectRef {
         length,
         packed: stored.nucleotide_packed(0),

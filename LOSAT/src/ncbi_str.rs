@@ -27,8 +27,7 @@ mod double;
 
 pub use data_size::string_to_uint8_data_size;
 pub(crate) use double::{
-    string_to_double, string_to_double_posix, string_to_double_posix_or_local, IntOverflow,
-    PosixOrLocalError,
+    string_to_double, string_to_double_posix, string_to_double_posix_or_local,
 };
 
 use std::borrow::Cow;

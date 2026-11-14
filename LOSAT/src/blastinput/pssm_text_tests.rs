@@ -96,14 +96,13 @@ fn reals_are_read_with_ncbis_arithmetic() {
     // (`fDecimalPosixFinite`).
     assert_eq!(real_of("0.005e2147483647"), f64::MAX);
     assert_eq!(real_of("-0.005e2147483647"), -f64::MAX);
-    // -3 - 2147483647 is not (NCBI's `int` overflows): the reader's error, no panic.
-    for bad in [
-        "{ 1, 3, 0 }",
-        "{ -, 10, 0 }",
-        "{ 1, 10 }",
-        "0.005e-2147483647",
-        "-0.005e-2147483647",
-    ] {
+    // -3 - 2147483647 is not: NCBI's `int` overflows (undefined behaviour; NCBI's corelib wraps
+    // it to 2147483647 and gives DBL_MAX). LOSAT's widened exponent, -2147483650, is below -614:
+    // 0, which the word form makes DBL_MIN (the Owner's rule of 2026-10-10 for NCBI's signed
+    // overflows; line SW, SW8).
+    assert_eq!(real_of("0.005e-2147483647"), f64::MIN_POSITIVE);
+    assert_eq!(real_of("-0.005e-2147483647"), -f64::MIN_POSITIVE);
+    for bad in ["{ 1, 3, 0 }", "{ -, 10, 0 }", "{ 1, 10 }"] {
         let document = format!(
             "PssmWithParameters ::= {{ pssm {{ numRows 1, numColumns 1, finalData {{ scores {{ 1 }}, lambda {bad}, kappa {{ 0, 10, 0 }}, h {{ 0, 10, 0 }} }} }} }}"
         );

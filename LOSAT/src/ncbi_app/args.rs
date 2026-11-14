@@ -61,11 +61,6 @@ impl Kind {
 enum Number {
     Integer(i32),
     Double(f64),
-    /// An `eDouble` value whose `int` arithmetic in NCBI's `StringToDoublePosix` overflows
-    /// (`ncbi_str::PosixOrLocalError::IntOverflow`, a value of 2^31 bytes or more; undefined
-    /// behaviour in NCBI): NCBI's reader accepts it, so LOSAT refuses it where the program reads
-    /// it (`Args::double`).
-    IntOverflow,
 }
 
 /// A constraint on a key's value (`CArgAllow`).
@@ -368,17 +363,10 @@ impl Args {
         }
     }
 
-    /// `AsDouble()` of the `eDouble` key `name`: given, or its default; `Err` with LOSAT's
-    /// refusal (a noun phrase that the program completes) of a value whose `int` arithmetic
-    /// overflows in NCBI (`Number::IntOverflow`). The arguments around it are read as NCBI reads
-    /// them (an error of another argument, `-h`, `-dryrun`), so the refusal waits for the
-    /// program's `Run`.
-    pub(crate) fn double(&self, name: &str) -> Option<Result<f64, String>> {
+    /// `AsDouble()` of the `eDouble` key `name`: given, or its default.
+    pub(crate) fn double(&self, name: &str) -> Option<f64> {
         match self.numbers.get(name) {
-            Some(&Number::Double(number)) => Some(Ok(number)),
-            Some(Number::IntOverflow) => Some(Err(format!(
-                "a value of -{name} whose digits overflow NCBI's int arithmetic"
-            ))),
+            Some(&Number::Double(number)) => Some(number),
             _ => None,
         }
     }
@@ -792,7 +780,7 @@ fn process_value(tool: &Tool, desc: &Desc, value: &str) -> Result<Option<Number>
         Some(Constraint::AtLeast(min)) => match number {
             Some(Number::Integer(number)) => i64::from(number) >= min,
             Some(Number::Double(number)) => number >= min as f64,
-            Some(Number::IntOverflow) | None => false,
+            None => false,
         },
     };
     match desc.constraint {
@@ -904,15 +892,11 @@ fn integer_value(tool: &Tool, desc: &Desc, value: &str) -> Result<i32, ArgsError
 // ```
 // As for `CArg_Int8`, the conversion's exception is the predecessor (its text is the first
 // message: `Cannot convert string 'abc' to double (m_Pos = 0)`).
-/// The number of an `eDouble` key (`CArg_Double`); `Number::IntOverflow` for a value whose `int`
-/// arithmetic overflows in NCBI's `StringToDoublePosix`, which the program refuses when it reads
-/// it.
+/// The number of an `eDouble` key (`CArg_Double`).
 fn double_value(desc: &Desc, value: &str) -> Result<Number, ArgsError> {
-    use crate::ncbi_str::{string_to_double_posix_or_local, PosixOrLocalError};
-    match string_to_double_posix_or_local(value.as_bytes()) {
+    match crate::ncbi_str::string_to_double_posix_or_local(value.as_bytes()) {
         Ok(number) => Ok(Number::Double(number)),
-        Err(PosixOrLocalError::IntOverflow) => Ok(Number::IntOverflow),
-        Err(PosixOrLocalError::Ncbi(error)) => Err(ArgsError::Invalid(ArgException {
+        Err(error) => Err(ArgsError::Invalid(ArgException {
             code: "eConvert",
             messages: vec![
                 error.text(),

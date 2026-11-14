@@ -217,8 +217,8 @@ mod tests {
             |line: &[&str]| -> Vec<String> { line.iter().map(|word| word.to_string()).collect() };
         let args = crate::ncbi_app::args::parse(&TOOL, &words(&[])).unwrap();
         assert_eq!(args.integer("window"), Some(12));
-        assert_eq!(args.double("locut"), Some(Ok(2.2)));
-        assert_eq!(args.double("hicut"), Some(Ok(2.5)));
+        assert_eq!(args.double("locut"), Some(2.2));
+        assert_eq!(args.double("hicut"), Some(2.5));
         assert_eq!(args.value("infmt"), Some("fasta"));
         assert_eq!(args.value("outfmt"), Some("interval"));
         let args = crate::ncbi_app::args::parse(
@@ -227,8 +227,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(args.integer("window"), Some(16));
-        assert_eq!(args.double("locut"), Some(Ok(2.0)));
-        let hicut = args.double("hicut").unwrap().unwrap();
+        assert_eq!(args.double("locut"), Some(2.0));
+        let hicut = args.double("hicut").unwrap();
         assert!(hicut.is_nan() && hicut.is_sign_negative());
         assert!(crate::ncbi_app::args::parse(&TOOL, &words(&["-locut", "2,2"])).is_err());
     }
@@ -257,7 +257,7 @@ mod tests {
             ),
         ] {
             let args = crate::ncbi_app::args::parse(&TOOL, &words(&["-locut", locut])).unwrap();
-            assert_eq!(args.double("locut").unwrap().unwrap().to_bits(), bits);
+            assert_eq!(args.double("locut").unwrap().to_bits(), bits);
             assert_eq!(
                 run_words(&["-locut", locut, "-hicut", "3.5"], input),
                 (

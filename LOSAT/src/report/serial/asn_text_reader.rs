@@ -21,7 +21,7 @@
 //! and those of the value being read are kept). The readers are generic over the source, so the
 //! slice reader is what it was before the stream existed.
 
-use crate::ncbi_str::{string_to_double_posix, IntOverflow};
+use crate::ncbi_str::string_to_double_posix;
 use std::io::Read;
 use std::ops::Range;
 
@@ -1163,12 +1163,6 @@ impl<S: AsnSource> Reader<S> {
         })
     }
 
-    /// The refusal of a REAL whose `int` arithmetic in `NStr::StringToDoublePosix` overflows
-    /// (`ncbi_str::IntOverflow`, undefined behaviour in NCBI).
-    fn real_refusal(&self, _: IntOverflow) -> AsnTextError {
-        self.not_supported("a REAL whose exponent is outside the range of NCBI's int arithmetic")
-    }
-
     /// `CObjectIStreamAsn::ReadDouble`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:801-857
     // ```c++
@@ -1240,13 +1234,7 @@ impl<S: AsnSource> Reader<S> {
             if self.starts_with_ignore_case(start, b"NOT-A-NUMBER") {
                 return Ok(f64::NAN);
             }
-            return match string_to_double_posix(self.bytes(word), true).value {
-                Ok(value) => Ok(value),
-                Err(refusal) => {
-                    let error = self.real_refusal(refusal);
-                    self.refuse(error, 0.0)
-                }
-            };
+            return Ok(string_to_double_posix(self.bytes(word), true).value);
         }
         self.pos += 1;
         let is_negative = self.skip_white_space()? == b'-';
@@ -1256,15 +1244,7 @@ impl<S: AsnSource> Reader<S> {
         }
         let mantissa_length = mantissa_range.len();
         let read = string_to_double_posix(self.bytes(mantissa_range), false);
-        let (mut mantissa, used) = match read.value {
-            Ok(mantissa) => (mantissa, read.end),
-            Err(refusal) => {
-                // The rest of the REAL is read as NCBI reads it; its value is not used.
-                let error = self.real_refusal(refusal);
-                self.refuse(error, ())?;
-                (0.0, read.end)
-            }
-        };
+        let (mut mantissa, used) = (read.value, read.end);
         if used != mantissa_length {
             return Err(self.error(format!("bad double in line {}", self.line)));
         }

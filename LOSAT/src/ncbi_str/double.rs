@@ -119,16 +119,6 @@ pub(crate) fn string_to_double(s: &[u8]) -> Result<f64, NcbiException> {
     Ok(value)
 }
 
-/// Why [`string_to_double_posix_or_local`] gave no number.
-#[derive(Debug, PartialEq)]
-pub(crate) enum PosixOrLocalError {
-    /// NCBI's `CStringException` (`eConvert`).
-    Ncbi(NcbiException),
-    /// A number whose `int` arithmetic in `StringToDoublePosix` overflows ([`IntOverflow`]): a
-    /// text of 2^31 bytes or more.
-    IntOverflow,
-}
-
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:724-737
 // ```c++
 // bool s_IsDecimalPoint(unsigned char ch, NStr::TStringToNumFlags  flags)
@@ -169,11 +159,9 @@ pub(crate) enum PosixOrLocalError {
 /// passes the check of the first byte (no number then starts there, and the error is that of
 /// no number), and NCBI's own reader `StringToDoublePosix` ([`string_to_double_posix`]) reads the
 /// text too; its number is taken where it reads further than `strtod`.
-pub(crate) fn string_to_double_posix_or_local(s: &[u8]) -> Result<f64, PosixOrLocalError> {
+pub(crate) fn string_to_double_posix_or_local(s: &[u8]) -> Result<f64, NcbiException> {
     let c_string = &s[..s.iter().position(|&b| b == 0).unwrap_or(s.len())];
-    let error = |site: ThrowSite, pos: usize| {
-        PosixOrLocalError::Ncbi(convert_error(c_string, "double", "", site, pos))
-    };
+    let error = |site: ThrowSite, pos: usize| convert_error(c_string, "double", "", site, pos);
     let at = |pos: usize| c_string.get(pos).copied().unwrap_or(0);
     let c = at(0);
     if !c.is_ascii_digit() && !matches!(c, b'.' | b',' | b'-' | b'+') {
@@ -182,9 +170,7 @@ pub(crate) fn string_to_double_posix_or_local(s: &[u8]) -> Result<f64, PosixOrLo
     let (mut value, mut used) = strtod_prefix(c_string);
     let posix = string_to_double_posix(c_string, false);
     if posix.end > used {
-        value = posix
-            .value
-            .map_err(|IntOverflow| PosixOrLocalError::IntOverflow)?;
+        value = posix.value;
         used = posix.end;
     }
     if used == 0 {
@@ -200,16 +186,9 @@ pub(crate) fn string_to_double_posix_or_local(s: &[u8]) -> Result<f64, PosixOrLo
 /// reader took (`*endptr - ptr`), which do not depend on the number.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PosixDouble {
-    pub(crate) value: Result<f64, IntOverflow>,
+    pub(crate) value: f64,
     pub(crate) end: usize,
 }
-
-/// An `int` of `StringToDoublePosix`'s arithmetic that overflows, whose result is undefined
-/// behaviour in NCBI's C++ (LOSAT refuses the number): `digits` or `dot_position` (a mantissa of
-/// 2^31 digits or leading zeros), `dot_position - digits` or the exponent `exponent - expvalue`
-/// (`1.55e-2147483647`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct IntOverflow;
 
 /// NCBI's `HUGE_VAL/HUGE_VAL` (`NCBI_FAKE_WARNING`), which GCC leaves to the run time (the
 /// division raises the invalid-operation flag): `divsd` of x86-64 gives its default NaN, the
@@ -219,8 +198,10 @@ const HUGE_VAL_DIV_HUGE_VAL: f64 = f64::from_bits(0xfff8_0000_0000_0000);
 
 /// The x87 `long double` constant `1e<n>L` of `StringToDoublePosix` (`NCBI_CONST_LONGDOUBLE`):
 /// `1e-15` to `1e15` and the multiples of 16 up to 256 of either sign.
-fn long_double_pow10(n: i32) -> X87 {
-    crate::report::serial::real::long_double_pow10(n)
+fn long_double_pow10(n: i64) -> X87 {
+    i32::try_from(n)
+        .ok()
+        .and_then(crate::report::serial::real::long_double_pow10)
         .expect("the long double literals of StringToDoublePosix")
 }
 
@@ -492,6 +473,17 @@ fn long_double_pow10(n: i32) -> X87 {
 /// whose x87 values pass the largest 80-bit value from some 4,900 digits on and become the
 /// infinity (`None` here). The `errno` it sets is not kept: NCBI's callers do not read it
 /// (`string_to_double_posix_or_local`, `CObjectIStreamAsn::ReadDouble`).
+///
+/// NCBI's `int` counters and exponent (`digits`, `dot_position`, `expvalue`, `exponent`) are
+/// `i64` here, and `expvalue * 10 + digit` and `exponent ± expvalue` saturate at its ends: where
+/// NCBI's `int` overflows (a signed overflow, undefined in C++; NCBI's corelib wraps
+/// `1.55e-2147483647`'s exponent to 2147483647 and gives the infinity), LOSAT computes the
+/// exponent without the wrap, as the Owner's rule of 2026-10-10 has it for NCBI's signed
+/// overflows (OWNER_DECISIONS 2026-10-10, NCBI parity DECISIONS 17 of 2026-10-22
+/// 「広い型になおしましょう」): `1.55e-2147483647` is 0 (`DBL_MIN` with `fDecimalPosixFinite`). Every
+/// exponent that NCBI's `int` holds is the same, and so is every result: a saturated exponent
+/// (beyond 2^63) is far outside -614..616, as the exact one is, and NCBI's guard
+/// (`newexpvalue > expvalue`) keeps every exponent that does not wrap.
 pub(crate) fn string_to_double_posix(text: &[u8], finite: bool) -> PosixDouble {
     // `*p` of the NUL-terminated string.
     let at = |p: usize| text.get(p).copied().unwrap_or(0);
@@ -517,10 +509,7 @@ pub(crate) fn string_to_double_posix(text: &[u8], finite: bool) -> PosixDouble {
         ptr += 1;
     }
     if c == 0 {
-        return PosixDouble {
-            value: Ok(0.0),
-            end: 0,
-        };
+        return PosixDouble { value: 0.0, end: 0 };
     }
     if at(ptr) == 0 && c.is_ascii_digit() {
         let result = f64::from(c - b'0');
@@ -533,36 +522,26 @@ pub(crate) fn string_to_double_posix(text: &[u8], finite: bool) -> PosixDouble {
         } else {
             result
         };
-        return PosixDouble {
-            value: Ok(value),
-            end: ptr,
-        };
+        return PosixDouble { value, end: ptr };
     }
     let (mut dot, mut expn, mut anydigits) = (false, false, false);
-    let (mut digits, mut dot_position): (i32, i32) = (0, 0);
+    // NCBI's `int digits, dot_position`, widened (see above).
+    let (mut digits, mut dot_position): (i64, i64) = (0, 0);
     let (mut first, mut second, mut first_mul): (u32, u32, u32) = (0, 0, 1);
     // `second_mul` and `third`, nonnegative; `None` is the x87 infinity.
     let ten = X87::from_u32(10);
     let (mut second_mul, mut third) = (Some(X87::from_u32(1)), Some(X87::ZERO));
-    // Whether an `int` overflowed (`IntOverflow`); the text is still read to NCBI's end.
-    let mut overflow = false;
     loop {
         if c.is_ascii_digit() {
             let d = c - b'0';
             anydigits = true;
-            let (next, wrapped) = digits.overflowing_add(1);
-            digits = next;
-            overflow |= wrapped;
-            if overflow {
-                // The number is refused; its digits are only read.
-            } else if first == 0 {
+            digits += 1;
+            if first == 0 {
                 first = u32::from(d);
                 if first == 0 {
                     digits -= 1;
                     if dot {
-                        let (next, wrapped) = dot_position.overflowing_sub(1);
-                        dot_position = next;
-                        overflow |= wrapped;
+                        dot_position -= 1;
                     }
                 }
             } else if digits <= 9 {
@@ -595,7 +574,7 @@ pub(crate) fn string_to_double_posix(text: &[u8], finite: bool) -> PosixDouble {
             if !anydigits {
                 if !dot && (c == b'n' || c == b'N') && starts_with_ignore_case(ptr, b"nan") {
                     return PosixDouble {
-                        value: Ok(HUGE_VAL_DIV_HUGE_VAL),
+                        value: HUGE_VAL_DIV_HUGE_VAL,
                         end: ptr + 3,
                     };
                 }
@@ -609,10 +588,7 @@ pub(crate) fn string_to_double_posix(text: &[u8], finite: bool) -> PosixDouble {
                     } else {
                         f64::INFINITY
                     };
-                    return PosixDouble {
-                        value: Ok(value),
-                        end,
-                    };
+                    return PosixDouble { value, end };
                 }
             }
             break;
@@ -621,19 +597,12 @@ pub(crate) fn string_to_double_posix(text: &[u8], finite: bool) -> PosixDouble {
         ptr += 1;
     }
     if !anydigits {
-        return PosixDouble {
-            value: Ok(0.0),
-            end: 0,
-        };
+        return PosixDouble { value: 0.0, end: 0 };
     }
-    let mut exponent: i32 = 0;
-    if dot {
-        let (next, wrapped) = dot_position.overflowing_sub(digits);
-        exponent = next;
-        overflow |= wrapped;
-    }
+    // `int exponent`, widened: both counters are at most the length of the text.
+    let mut exponent: i64 = if dot { dot_position - digits } else { 0 };
     if expn && at(ptr) != 0 {
-        let (mut expvalue, mut expsign, mut expnegate, mut expdigits) = (0i32, false, false, 0);
+        let (mut expvalue, mut expsign, mut expnegate, mut expdigits) = (0i64, false, false, 0u64);
         loop {
             let c = at(ptr);
             if c == b'-' || c == b'+' {
@@ -643,10 +612,13 @@ pub(crate) fn string_to_double_posix(text: &[u8], finite: bool) -> PosixDouble {
                 expsign = true;
                 expnegate = c == b'-';
             } else if c.is_ascii_digit() {
-                expdigits += 1;
-                // NCBI's guard against the overflow of `expvalue * 10`: the wrapped value is
-                // not taken (NCBI's corelib keeps 214748364 for `1e2147483648`).
-                let newexpvalue = expvalue.wrapping_mul(10).wrapping_add(i32::from(c - b'0'));
+                expdigits = expdigits.saturating_add(1);
+                // `expvalue*10 + (c-'0')`, widened and saturated: NCBI's guard keeps every value
+                // that does not wrap (NCBI's corelib keeps 214748364 for `1e2147483648`, which
+                // is the infinity either way).
+                let newexpvalue = expvalue
+                    .saturating_mul(10)
+                    .saturating_add(i64::from(c - b'0'));
                 if newexpvalue > expvalue {
                     expvalue = newexpvalue;
                 }
@@ -663,20 +635,12 @@ pub(crate) fn string_to_double_posix(text: &[u8], finite: bool) -> PosixDouble {
                 ptr -= 1;
             }
         } else {
-            let (next, wrapped) = if expnegate {
-                exponent.overflowing_sub(expvalue)
+            exponent = if expnegate {
+                exponent.saturating_sub(expvalue)
             } else {
-                exponent.overflowing_add(expvalue)
+                exponent.saturating_add(expvalue)
             };
-            exponent = next;
-            overflow |= wrapped;
         }
-    }
-    if overflow {
-        return PosixDouble {
-            value: Err(IntOverflow),
-            end: ptr,
-        };
     }
     // `(long double)first * first_mul + second` is exact (below 10^18 < 2^64).
     let mut ret = if first_mul > 1 {
@@ -742,10 +706,7 @@ pub(crate) fn string_to_double_posix(text: &[u8], finite: bool) -> PosixDouble {
         None if sign < 0 => f64::NEG_INFINITY,
         None => f64::INFINITY,
     };
-    PosixDouble {
-        value: Ok(value),
-        end: ptr,
-    }
+    PosixDouble { value, end: ptr }
 }
 
 /// glibc `strtod` of the start of `text` (no leading white space here) in the C locale and the
@@ -1038,7 +999,7 @@ mod tests {
         for row in table.lines().filter(|row| !row.starts_with('#')) {
             let (text, bits) = row.rsplit_once('\t').unwrap();
             match (string_to_double_posix_or_local(text.as_bytes()), bits) {
-                (Err(PosixOrLocalError::Ncbi(_)), "ERR") => {}
+                (Err(_), "ERR") => {}
                 (Ok(value), bits) if bits != "ERR" => {
                     assert_eq!(format!("{:016x}", value.to_bits()), bits, "{text:?}")
                 }
@@ -1057,11 +1018,7 @@ mod tests {
         let bits = |value: f64| format!("{:016x}", value.to_bits());
         let posix = |finite| {
             let read = string_to_double_posix(text, finite);
-            format!(
-                "{}:{}",
-                read.value.map_or("OVERFLOW".into(), bits),
-                read.end
-            )
+            format!("{}:{}", bits(read.value), read.end)
         };
         [
             string_to_double_posix_or_local(text).map_or("ERR".into(), bits),
@@ -1077,7 +1034,7 @@ mod tests {
     // than 15 places (`third`, `mul2`), exponents at the ends of NCBI's ranges, NaN (NCBI's
     // `HUGE_VAL/HUGE_VAL` has the sign bit), and random texts. The probe compared 900,184 texts
     // (these, 900,000 random ones and mantissas of up to 5,000 digits): all equal but the one
-    // whose `int` arithmetic overflows (below).
+    // whose `int` arithmetic overflows in NCBI (below).
     #[test]
     fn posix_values_and_ends_are_ncbis() {
         let table = include_str!("../../tests/unit/string_to_double_posix_vectors.tsv");
@@ -1202,21 +1159,39 @@ mod tests {
                 &text[..text.len().min(20)]
             );
         }
-        // NCBI's `exponent - expvalue` overflows `int` (its build gives the infinity, undefined
-        // behaviour): refused, at NCBI's end; `strtod` reads the whole text, so `CArg_Double`
-        // takes its number (0).
+        // NCBI's `exponent - expvalue` (-2 - 2147483647) overflows `int`: undefined behaviour,
+        // which NCBI's corelib wraps to 2147483647 (the infinity; DBL_MAX with
+        // `fDecimalPosixFinite`). LOSAT's widened exponent is -2147483649, below -614: 0, and
+        // DBL_MIN with `fDecimalPosixFinite` (the Owner's rule of 2026-10-10 for NCBI's signed
+        // overflows). `strtod` reads the whole text, so `CArg_Double` takes its 0 as NCBI does.
         assert_eq!(
             four_conversions(b"1.55e-2147483647"),
             [
                 "0000000000000000",
                 "0000000000000000",
-                "OVERFLOW:16",
-                "OVERFLOW:16"
+                "0000000000000000:16",
+                "0010000000000000:16"
             ]
         );
         assert_eq!(
-            string_to_double_posix(b"1.55e-2147483647", false).value,
-            Err(IntOverflow)
+            four_conversions(b"-1.55e-2147483647"),
+            [
+                "8000000000000000",
+                "8000000000000000",
+                "8000000000000000:17",
+                "8010000000000000:17"
+            ]
+        );
+        // `1e2147483648` and longer exponents: NCBI's guard keeps 214748364 where `expvalue * 10`
+        // wraps, LOSAT the whole (saturated) exponent; both are beyond 616 (the infinity).
+        assert_eq!(
+            four_conversions(b"1e99999999999999999999999999"),
+            [
+                "7ff0000000000000",
+                "7ff0000000000000",
+                "7ff0000000000000:28",
+                "7fefffffffffffff:28"
+            ]
         );
     }
 

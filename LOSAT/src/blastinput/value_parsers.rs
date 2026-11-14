@@ -218,9 +218,7 @@ pub fn ncbi_int8(value: &str) -> Result<i64, String> {
 /// digit, a point, a comma or a sign, glibc's `strtod` reads the number (decimal, hexadecimal,
 /// the infinities, NaN with its sign and `n-char-sequence`) or NCBI's own `StringToDoublePosix`
 /// where it reads further (a mantissa that ends in `e` or `E`, in x87 extended precision), and
-/// the number ends the value. LOSAT's messages: "expected a number" for NCBI's conversion error,
-/// and a refusal that names the program for a number whose `int` arithmetic in
-/// `StringToDoublePosix` overflows (a value of 2^31 bytes or more; undefined behaviour in NCBI).
+/// the number ends the value. LOSAT's message for NCBI's conversion error: "expected a number".
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:460-469
 /// ```c++
@@ -235,14 +233,9 @@ pub fn ncbi_int8(value: &str) -> Result<i64, String> {
 ///     }
 /// }
 /// ```
-pub fn ncbi_double(value: &str, program: &str) -> Result<f64, String> {
-    use crate::ncbi_str::{string_to_double_posix_or_local, PosixOrLocalError};
-    string_to_double_posix_or_local(value.as_bytes()).map_err(|error| match error {
-        PosixOrLocalError::Ncbi(_) => "expected a number".into(),
-        PosixOrLocalError::IntOverflow => format!(
-            "a number whose digits overflow NCBI BLAST+'s int arithmetic is not supported by LOSAT's {program}"
-        ),
-    })
+pub fn ncbi_double(value: &str) -> Result<f64, String> {
+    crate::ncbi_str::string_to_double_posix_or_local(value.as_bytes())
+        .map_err(|_| "expected a number".to_string())
 }
 
 /// An integer argument with a constraint: after the conversion, NCBI's constraint reads the
@@ -440,7 +433,7 @@ pub fn blastn_gap_cost(value: &str) -> Result<i32, String> {
 /// check rejects 0 or less (`blastn/scoring.rs`); an infinite or NaN e-value searches as in
 /// NCBI (`+inf`, `-nan`, `1e999`; `blastn/ncbi_cutoffs.rs`, E2g).
 pub fn blastn_evalue(value: &str) -> Result<f64, String> {
-    ncbi_double(value, "BLASTN")
+    ncbi_double(value)
 }
 /// A BLASTN percent identity, in 0..=100 (NaN is outside).
 ///
@@ -453,9 +446,9 @@ pub fn blastn_evalue(value: &str) -> Result<f64, String> {
 ///                                new CArgAllow_Doubles(0.0, 100.0));
 /// ```
 pub fn blastn_percentage(value: &str) -> Result<f64, String> {
-    percentage(value, "BLASTN")
+    percentage(value)
 }
-/// A percentage of `program`, in 0..=100 (NaN is outside): `-perc_identity`, and
+/// A percentage, in 0..=100 (NaN is outside): `-perc_identity`, and
 /// `-qcov_hsp_perc` of every program (the `*_query_coverage` parsers).
 ///
 /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:196-201
@@ -482,8 +475,8 @@ pub fn blastn_percentage(value: &str) -> Result<f64, String> {
 ///     return false;
 /// }
 /// ```
-fn percentage(value: &str, program: &str) -> Result<f64, String> {
-    let n = ncbi_double(value, program)?;
+fn percentage(value: &str) -> Result<f64, String> {
+    let n = ncbi_double(value)?;
     if !(0.0..=100.0).contains(&n) {
         return Err("expected a percentage in 0..=100".into());
     }
@@ -491,35 +484,35 @@ fn percentage(value: &str, program: &str) -> Result<f64, String> {
 }
 /// A BLASTN `-qcov_hsp_perc` value (`percentage`).
 pub fn blastn_query_coverage(value: &str) -> Result<f64, String> {
-    percentage(value, "BLASTN")
+    percentage(value)
 }
 /// A BLASTP `-qcov_hsp_perc` value (`percentage`).
 pub fn blastp_query_coverage(value: &str) -> Result<f64, String> {
-    percentage(value, "BLASTP")
+    percentage(value)
 }
 /// A PSIBLAST `-qcov_hsp_perc` value (`percentage`).
 pub fn psiblast_query_coverage(value: &str) -> Result<f64, String> {
-    percentage(value, "PSIBLAST")
+    percentage(value)
 }
 /// An RPSBLAST `-qcov_hsp_perc` value (`percentage`).
 pub fn rpsblast_query_coverage(value: &str) -> Result<f64, String> {
-    percentage(value, "RPSBLAST")
+    percentage(value)
 }
 /// An RPSTBLASTN `-qcov_hsp_perc` value (`percentage`).
 pub fn rpstblastn_query_coverage(value: &str) -> Result<f64, String> {
-    percentage(value, "RPSTBLASTN")
+    percentage(value)
 }
 /// A BLASTX `-qcov_hsp_perc` value (`percentage`).
 pub fn blastx_query_coverage(value: &str) -> Result<f64, String> {
-    percentage(value, "BLASTX")
+    percentage(value)
 }
 /// A TBLASTN `-qcov_hsp_perc` value (`percentage`).
 pub fn tblastn_query_coverage(value: &str) -> Result<f64, String> {
-    percentage(value, "TBLASTN")
+    percentage(value)
 }
 /// A TBLASTX `-qcov_hsp_perc` value (`percentage`).
 pub fn tblastx_query_coverage(value: &str) -> Result<f64, String> {
-    percentage(value, "TBLASTX")
+    percentage(value)
 }
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:995-1006
@@ -683,42 +676,42 @@ pub fn ncbi_output_path() -> impl clap::builder::TypedValueParser<Value = PathBu
 
 /// A real argument of BLASTP (`ncbi_double`).
 pub fn blastp_real(value: &str) -> Result<f64, String> {
-    ncbi_double(value, "BLASTP")
+    ncbi_double(value)
 }
 
 /// A real argument of PSIBLAST (`ncbi_double`).
 pub fn psiblast_real(value: &str) -> Result<f64, String> {
-    ncbi_double(value, "PSIBLAST")
+    ncbi_double(value)
 }
 
 /// A real argument of RPSBLAST (`ncbi_double`).
 pub fn rpsblast_real(value: &str) -> Result<f64, String> {
-    ncbi_double(value, "RPSBLAST")
+    ncbi_double(value)
 }
 
 /// A real argument of RPSTBLASTN (`ncbi_double`).
 pub fn rpstblastn_real(value: &str) -> Result<f64, String> {
-    ncbi_double(value, "RPSTBLASTN")
+    ncbi_double(value)
 }
 
 /// A real argument of TBLASTN (`ncbi_double`).
 pub fn tblastn_real(value: &str) -> Result<f64, String> {
-    ncbi_double(value, "TBLASTN")
+    ncbi_double(value)
 }
 
 /// A real argument of BLASTX (`ncbi_double`).
 pub fn blastx_real(value: &str) -> Result<f64, String> {
-    ncbi_double(value, "BLASTX")
+    ncbi_double(value)
 }
 
 /// A real argument of TBLASTX (`ncbi_double`).
 pub fn tblastx_real(value: &str) -> Result<f64, String> {
-    ncbi_double(value, "TBLASTX")
+    ncbi_double(value)
 }
 
 /// A real argument of BLASTN (`ncbi_double`).
 pub fn blastn_real(value: &str) -> Result<f64, String> {
-    ncbi_double(value, "BLASTN")
+    ncbi_double(value)
 }
 
 /// A `-threshold` value: NCBI's constraint reads it again with `NStr::StringToDouble` and its
@@ -753,8 +746,8 @@ pub fn blastn_real(value: &str) -> Result<f64, String> {
 ///             err = true;
 ///         }
 /// ```
-fn ncbi_threshold(value: &str, program: &str) -> Result<f64, String> {
-    let threshold = ncbi_double(value, program)?;
+fn ncbi_threshold(value: &str) -> Result<f64, String> {
+    let threshold = ncbi_double(value)?;
     // `value >= m_MinValue` (a NaN fails it).
     let allowed =
         crate::ncbi_str::string_to_double(value.as_bytes()).is_ok_and(|checked| checked >= 0.0);
@@ -766,27 +759,27 @@ fn ncbi_threshold(value: &str, program: &str) -> Result<f64, String> {
 
 /// A BLASTP `-threshold` value (`ncbi_threshold`).
 pub fn blastp_threshold(value: &str) -> Result<f64, String> {
-    ncbi_threshold(value, "BLASTP")
+    ncbi_threshold(value)
 }
 
 /// A BLASTX `-threshold` value (`ncbi_threshold`).
 pub fn blastx_threshold(value: &str) -> Result<f64, String> {
-    ncbi_threshold(value, "BLASTX")
+    ncbi_threshold(value)
 }
 
 /// A PSIBLAST `-threshold` value (`ncbi_threshold`).
 pub fn psiblast_threshold(value: &str) -> Result<f64, String> {
-    ncbi_threshold(value, "PSIBLAST")
+    ncbi_threshold(value)
 }
 
 /// A TBLASTN `-threshold` value (`ncbi_threshold`).
 pub fn tblastn_threshold_value(value: &str) -> Result<f64, String> {
-    ncbi_threshold(value, "TBLASTN")
+    ncbi_threshold(value)
 }
 
 /// A TBLASTX `-threshold` value (`ncbi_threshold`).
 pub fn tblastx_threshold(value: &str) -> Result<f64, String> {
-    ncbi_threshold(value, "TBLASTX")
+    ncbi_threshold(value)
 }
 
 /// A Boolean argument (`CArg_Boolean`, read with `NStr::StringToBool`:
@@ -1104,7 +1097,7 @@ mod tests {
             ("-NaN()", 0xfff8_0000_0000_0000),
             ("+nan(x_9)", 0x7ff8_0000_0000_0000),
         ] {
-            let read = ncbi_double(value, "BLASTN").unwrap_or_else(|e| panic!("{value}: {e}"));
+            let read = ncbi_double(value).unwrap_or_else(|e| panic!("{value}: {e}"));
             assert_eq!(read.to_bits(), bits, "{value}");
         }
         for value in [
@@ -1136,7 +1129,7 @@ mod tests {
             "-1éé",
         ] {
             assert_eq!(
-                ncbi_double(value, "BLASTN"),
+                ncbi_double(value),
                 Err("expected a number".into()),
                 "{value:?}"
             );

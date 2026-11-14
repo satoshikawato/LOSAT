@@ -335,9 +335,8 @@ pub(crate) fn read_in_pssm(path: &Path, reader: PssmReader<'_>) -> Result<(PsiSe
     let (pssm, skipped) =
         match crate::blastinput::pssm_text::read_pssm_with_parameters_and_skips(&bytes) {
             Ok(read) => read,
-            // The reader's own limits (a query Seq-entry set, Seq-ids and Seq-data it does not type,
-            // REAL numbers NCBI computes with undefined behaviour): LOSAT's
-            // refusal, where NCBI reads the file.
+            // The reader's own limits (a query Seq-entry set, Seq-ids and Seq-data it does not type):
+            // LOSAT's refusal, where NCBI reads the file.
             Err(error) if error.message.contains("is not supported by LOSAT") => {
                 return Err(reader.refuse(format!(
                     "a PSSM that LOSAT's reader does not read ({}, line {}: {})",

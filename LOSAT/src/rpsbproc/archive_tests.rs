@@ -113,27 +113,6 @@ fn objects_follow_each_other_and_a_bad_object_ends_the_input() {
 #[test]
 fn refusals_wait_for_the_whole_object() {
     let text = String::from_utf8(ONE.to_vec()).unwrap();
-    // A REAL whose exponent overflows NCBI's `int` arithmetic (`dot_position - digits - 2147483647`
-    // in `StringToDoublePosix`, undefined behaviour).
-    let long_real = text.replace("{ 504742318164089, 10, -57 }", "1.55e-2147483647");
-    assert_ne!(long_real, text);
-    let read = read_all(long_real.as_bytes());
-    assert_eq!(read.len(), 1);
-    let error = read[0].as_ref().unwrap_err();
-    assert_eq!(error.kind, AsnTextErrorKind::Unsupported);
-    assert!(error.message.contains("NCBI's int arithmetic"), "{error}");
-    // A mantissa of more than 18 digits is read as NCBI reads it (line SW, SW8).
-    let digits = text.replace(
-        "{ 504742318164089, 10, -57 }",
-        "{ 5047423181640891234, 10, -61 }",
-    );
-    assert_ne!(digits, text);
-    let read = read_all(digits.as_bytes());
-    assert_eq!(read.len(), 1);
-    assert!(read[0].is_ok());
-    let then_bad = long_real.replace("gapped FALSE", "gapped MAYBE");
-    assert_ne!(then_bad, long_real);
-    assert!(read_all(then_bad.as_bytes()).is_empty());
     // A byte outside the visible range in a VisibleString, here the title (NCBI replaces it by
     // '#' and posts an error).
     let invisible = text.replacen(
@@ -143,7 +122,23 @@ fn refusals_wait_for_the_whole_object() {
     );
     assert_ne!(invisible, text);
     let read = read_all(invisible.as_bytes());
-    assert!(read[0].as_ref().unwrap_err().message.contains("byte 0xc3"));
+    assert_eq!(read.len(), 1);
+    let error = read[0].as_ref().unwrap_err();
+    assert_eq!(error.kind, AsnTextErrorKind::Unsupported);
+    assert!(error.message.contains("byte 0xc3"), "{error}");
+    let then_bad = invisible.replace("gapped FALSE", "gapped MAYBE");
+    assert_ne!(then_bad, invisible);
+    assert!(read_all(then_bad.as_bytes()).is_empty());
+    // REALs that LOSAT once refused are read (line SW, SW8): a mantissa of more than 18 digits,
+    // as NCBI reads it, and an exponent that overflows NCBI's `int` (undefined behaviour), in
+    // LOSAT's widened arithmetic (0, which the word form's `fDecimalPosixFinite` makes DBL_MIN).
+    for real in ["{ 5047423181640891234, 10, -61 }", "1.55e-2147483647"] {
+        let read_real = text.replace("{ 504742318164089, 10, -57 }", real);
+        assert_ne!(read_real, text);
+        let read = read_all(read_real.as_bytes());
+        assert_eq!(read.len(), 1);
+        assert!(read[0].is_ok(), "{real}");
+    }
 }
 
 // The `CFastaReader` DefLine is a UTF8String, which NCBI reads with any byte (PS16a review

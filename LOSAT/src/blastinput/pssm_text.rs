@@ -28,7 +28,7 @@
 //! read (NCBI replaces a byte outside the visible range by `#` with an error message; a PSSM that
 //! LOSAT writes has none, `algorithm::psiblast::pssm`). LOSAT reads the forms below and refuses the others with an error
 //! naming its line: a query `Seq-entry` that is a `set`, `Seq-data` other than `iupacaa`, `ncbieaa`
-//! and `ncbistdaa`, and a REAL whose exponent overflows NCBI's `int` arithmetic. The query's Seq-ids, of every
+//! and `ncbistdaa`. The query's Seq-ids, of every
 //! alternative, are read by the shared Seq-id reader (`seqid::asn_text`).
 
 use crate::report::serial::asn_text_reader::{is_first_id_char, Reader, SliceSource};

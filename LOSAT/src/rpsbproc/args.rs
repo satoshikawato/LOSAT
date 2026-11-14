@@ -134,7 +134,7 @@ pub struct RpsbprocArgs {
 
 /// A real argument as NCBI's `CArg_Double` reads it (`ncbi_double`).
 fn rpsbproc_real(value: &str) -> Result<f64, String> {
-    crate::blastinput::value_parsers::ncbi_double(value, "rpsbproc")
+    crate::blastinput::value_parsers::ncbi_double(value)
 }
 
 /// The long forms of rpsbproc's arguments (`AddAlias`): `--infile` is `-i`, and so on.

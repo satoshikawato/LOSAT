@@ -7,6 +7,7 @@ pub mod diag_log;
 pub mod hit_sort;
 pub mod outfmt6;
 pub mod pairwise;
+pub(crate) mod query_anchored;
 pub mod query_warnings;
 pub mod record;
 pub mod sam;

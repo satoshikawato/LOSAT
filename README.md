@@ -66,10 +66,10 @@ The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blas
 | `-outfmt` | NCBI name | NCBI programs that write it | LOSAT |
 |:---|:---|:---|:---|
 | `0` | Pairwise | all five | all five programs |
-| `1` | Query-anchored showing identities | all five | not written |
-| `2` | Query-anchored no identities | all five | not written |
-| `3` | Flat query-anchored showing identities | all five | not written |
-| `4` | Flat query-anchored no identities | all five | not written |
+| `1` | Query-anchored showing identities | all five | `blastp` (with `-subject` and `-db`) |
+| `2` | Query-anchored no identities | all five | `blastp` (with `-subject` and `-db`) |
+| `3` | Flat query-anchored showing identities | all five | `blastp` (with `-subject` and `-db`) |
+| `4` | Flat query-anchored no identities | all five | `blastp` (with `-subject` and `-db`) |
 | `5` | BLAST XML | all five | all five programs (with `-subject` and `-db`) |
 | `6` | Tabular | all five | all five programs |
 | `7` | Tabular with comment lines | all five | all five programs |
@@ -480,7 +480,7 @@ The `LOSAT_X_*` environment variables, `LOSAT_TIMING`, `LOSAT_X_STATS`, `LOSAT_X
 LOSAT stops with an error for each option and value below; it does not run something else in its place. Use NCBI BLAST+ for them, except where an item says that NCBI BLAST+ fails there too. "All five programs" means `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 
 **Output**
-- `-outfmt 1`, `2`, `3` and `4`: all five programs.
+- `-outfmt 1`, `2`, `3` and `4`: `blastn`, `blastx`, `tblastn` and `tblastx` (`blastp` writes them).
 - `-html`: all five programs.
 - `-outfmt 18` with a taxonomy database that names a taxid of a shown group with the text `<@bl_taxid@>` (NCBI BLAST+ writes an uninitialised number there), with a `./.ncbirc` that has a syntax error (NCBI's report stops there with an exception) or `[NCBI] .Inherits` (NCBI's report reads the files it names), and with a shown row of a database sequence whose empty title NCBI makes from its taxids and the taxonomy database (as outfmt `0` refuses it): all five programs, before the query batch's first byte.
 - `-sorthits` with a description table that lists every subject and whose last subject alone has a total score above 99999 bits: all five programs. NCBI BLAST+ 2.17.0 pads that row with spaces without end, so it never finishes the report and has no output to use there either; LOSAT writes what NCBI writes before that table (the earlier queries' reports and the query's first lines) and then stops with the error.

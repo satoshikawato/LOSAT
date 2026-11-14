@@ -307,7 +307,9 @@ pub struct ReportedSubject {
 
 /// Reports which HSP a formatter is writing, so that a caller can relate each HSP to its
 /// bytes in every output, and the statistics of each query of the search. The written bytes do
-/// not change.
+/// not change. The query-anchored reports (outfmt 1 to 4) write one section of all of a query's
+/// HSPs merged, which has no part of one HSP or subject: they call none of the HSP and subject
+/// events.
 pub trait FormatObserver {
     /// The formatter for `ReportOutputs::formats[format]` starts the row (outfmt 6/7) or
     /// the alignment section (outfmt 0: the score lines and the alignment, without the

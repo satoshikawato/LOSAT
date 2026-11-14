@@ -860,6 +860,12 @@ impl ParsedSubject {
         forced_accession(&self.alignment_id, &self.target().ids)
     }
 
+    /// The label of the subject's rows in a query-anchored report (outfmt 1 to 4): the Bioseq's
+    /// Seq-ids as `x_FillSeqid` reads them, with `-show_gis` (`report::query_anchored::fill_seqid`).
+    pub(crate) fn anchored_label(&self, out: &mut Vec<u8>) {
+        crate::report::query_anchored::fill_seqid(&self.target().ids, self.show_gis, out);
+    }
+
     /// The definition lines.
     pub fn deflines(&self) -> &[BlastDefline] {
         &self.set.deflines

@@ -64,6 +64,9 @@ pub struct PairwiseConfig {
     /// columns of the description table (`SortColumns`). None for psiblast and rpsblast, whose
     /// applications do not hand them to the formatter.
     pub sort: super::hit_sort::ReportSort,
+    /// The alignment section: outfmt 0's alignments, or the query-anchored section of outfmt 1
+    /// to 4. The rest of the report is the same.
+    pub view: PairwiseView,
 }
 
 impl Default for PairwiseConfig {
@@ -74,6 +77,100 @@ impl Default for PairwiseConfig {
             program: "tblastx".to_string(),
             protein_matrix: ScoringMatrix::Blosum62,
             sort: Default::default(),
+            view: PairwiseView::Pairwise,
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1410-1590
+// (`PrintOneResultSet`: formats 0 to 4 write the same query header, description table and
+// footer; `s_SetFlags`, :633-649, gives formats 1 to 4 `eMergeAlign` in place of outfmt 0's
+// alignments, quoted at `report::query_anchored`.)
+/// What a pairwise report (outfmt 0 to 4) writes after each query's description table: outfmt
+/// 0's alignment of each HSP, or one query-anchored section of all of them
+/// (`report::query_anchored`): 1 with identities (`.` for a letter equal to the query's) and only
+/// the query's columns, 2 without identities, 3 and 4 likewise with every column ("flat").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PairwiseView {
+    #[default]
+    Pairwise,
+    QueryAnchored {
+        /// `eShowIdentity` (formats 1 and 3).
+        identity: bool,
+        /// `eMasterAnchored` (formats 1 and 2).
+        anchored: bool,
+    },
+}
+
+impl PairwiseView {
+    /// The view of a report format: outfmt 0 to 4; `None` for the others.
+    pub fn of(format: crate::blastinput::app::ReportFormat) -> Option<Self> {
+        use crate::blastinput::app::ReportFormat;
+        Some(match format {
+            ReportFormat::Pairwise => Self::Pairwise,
+            ReportFormat::QueryAnchoredIdentities => Self::QueryAnchored {
+                identity: true,
+                anchored: true,
+            },
+            ReportFormat::QueryAnchoredNoIdentities => Self::QueryAnchored {
+                identity: false,
+                anchored: true,
+            },
+            ReportFormat::FlatQueryAnchoredIdentities => Self::QueryAnchored {
+                identity: true,
+                anchored: false,
+            },
+            ReportFormat::FlatQueryAnchoredNoIdentities => Self::QueryAnchored {
+                identity: false,
+                anchored: false,
+            },
+            _ => return None,
+        })
+    }
+
+    /// The format's number (0 to 4).
+    pub fn outfmt(self) -> i32 {
+        match self {
+            Self::Pairwise => 0,
+            Self::QueryAnchored {
+                identity: true,
+                anchored: true,
+            } => 1,
+            Self::QueryAnchored {
+                identity: false,
+                anchored: true,
+            } => 2,
+            Self::QueryAnchored {
+                identity: true,
+                anchored: false,
+            } => 3,
+            Self::QueryAnchored {
+                identity: false,
+                anchored: false,
+            } => 4,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2980-2987
+    // ```c++
+    //     if(args.Exist(kArgSortHSPs) && args[kArgSortHSPs])
+    //     {
+    //         int hspsSortOption = args[kArgSortHSPs].AsInteger();
+    //         if(m_OutputFormat == ePairwise) {
+    //        	    m_HspsSortOption = hspsSortOption;
+    //         }
+    //         else {
+    //             ERR_POST(Warning << "The parameter -sorthsps is ignored for output formats != 0.");
+    // ```
+    /// `sort` as this format reads it: `-sorthits` for every view (formats 0 to 4), `-sorthsps`
+    /// for outfmt 0 only.
+    pub fn report_sort(self, sort: super::hit_sort::ReportSort) -> super::hit_sort::ReportSort {
+        match self {
+            Self::Pairwise => sort,
+            Self::QueryAnchored { .. } => super::hit_sort::ReportSort {
+                hits: sort.hits,
+                hsps: None,
+            },
         }
     }
 }
@@ -2447,13 +2544,16 @@ pub fn write_blastp_pairwise_report<W: Write>(
         prolog,
         epilog,
         x_pool,
+        None,
     )
 }
 
 /// The queries `query_range` of a BLASTP pairwise report, whose `hits` are those queries' (the
 /// rows of a caller that makes them a window of queries at a time, as BLASTN's and TBLASTX's
 /// do, `x_pairwise_par::query_windows`): the prolog with the report's first query, the epilog
-/// with its last.
+/// with its last. `anchored`: the sequences of the query-anchored sections (`config.view` of
+/// outfmt 1 to 4; `None` for outfmt 0).
+#[allow(clippy::too_many_arguments)]
 pub fn write_blastp_pairwise_window<W: Write>(
     hits: &[PairwiseHit],
     query_range: std::ops::Range<usize>,
@@ -2471,6 +2571,7 @@ pub fn write_blastp_pairwise_window<W: Write>(
     prolog: bool,
     epilog: bool,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    anchored: Option<&dyn super::query_anchored::ReportSequences>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
@@ -2518,6 +2619,7 @@ pub fn write_blastp_pairwise_window<W: Write>(
             query_gapped_k,
             database,
             parsed_subjects,
+            anchored,
         },
         query_range.start,
         &hits_by_query,
@@ -2563,6 +2665,8 @@ struct BlastpSections<'a> {
     database: Option<&'a PairwiseDatabase>,
     /// The subjects with parsed Seq-ids by subject (empty without them).
     parsed_subjects: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    /// The sequences of the query-anchored sections (outfmt 1 to 4).
+    anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
 }
 
 impl BlastpSections<'_> {
@@ -2727,6 +2831,49 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                 write_hsp_info(writer, hit, config)?;
                 write_alignment(writer, hit, config)
             },
+        )
+    }
+
+    fn merges_alignments(&self) -> bool {
+        self.config.view != PairwiseView::Pairwise
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
+    // ```c++
+    //     CSeq_align_set copy_aln_set;
+    //     CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_NumAlignments);
+    // ```
+    /// The query-anchored section of the first `num_alignments` subjects of the query's sorted
+    /// hits (`QueryGroup::aligned`), each with all its HSPs in their order. An HSP's Dense-seg is
+    /// its Seq-align's (`seqalign::protein_row_segments`); the subjects shown in one hit (copies
+    /// of a database record, `joins`) are the hit's subject, one Bioseq for NCBI's scope.
+    fn alignments<W: Write>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+        group: &super::x_pairwise_par::QueryGroup<'_>,
+    ) -> io::Result<()> {
+        let (PairwiseView::QueryAnchored { identity, anchored }, Some(sequences)) =
+            (self.config.view, self.anchored)
+        else {
+            return Err(io::Error::other(
+                "LOSAT internal error: a query-anchored report without its sequences",
+            ));
+        };
+        let mut hsps = super::query_anchored::Hsps::default();
+        let mut segments = super::serial::seqalign::Segments::default();
+        for &s_idx in group.aligned(self.report.num_alignments) {
+            for hit in &group.subject_hits[&s_idx] {
+                super::serial::seqalign::protein_row_segments(&hit.hit, &mut segments);
+                hsps.push_dense_seg(s_idx, segments.starts(), segments.lens(), 0, 0);
+            }
+        }
+        super::query_anchored::write_section(
+            writer,
+            super::query_anchored::View { identity, anchored },
+            self.config.line_length,
+            &hsps,
+            &super::query_anchored::OfQuery { sequences, q_idx },
         )
     }
 
@@ -4554,6 +4701,45 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:642-649 (`s_SetFlags`,
+    // quoted at `report::query_anchored`) and c++/src/algo/blast/blastinput/blast_args.cpp:2980-2987
+    // (quoted at `PairwiseView::report_sort`).
+    #[test]
+    fn the_views_of_formats_0_to_4_and_their_sorts() {
+        use crate::blastinput::app::ReportFormat;
+        let sort = crate::report::hit_sort::ReportSort {
+            hits: Some(3),
+            hsps: Some(1),
+        };
+        for number in 0..=4 {
+            let view = PairwiseView::of(ReportFormat::from_number(number).unwrap()).unwrap();
+            assert_eq!(view.outfmt(), number);
+            let expected = match number {
+                0 => sort,
+                _ => crate::report::hit_sort::ReportSort {
+                    hits: Some(3),
+                    hsps: None,
+                },
+            };
+            assert_eq!(view.report_sort(sort), expected);
+        }
+        assert_eq!(
+            PairwiseView::of(ReportFormat::QueryAnchoredIdentities),
+            Some(PairwiseView::QueryAnchored {
+                identity: true,
+                anchored: true
+            })
+        );
+        assert_eq!(
+            PairwiseView::of(ReportFormat::FlatQueryAnchoredNoIdentities),
+            Some(PairwiseView::QueryAnchored {
+                identity: false,
+                anchored: false
+            })
+        );
+        assert_eq!(PairwiseView::of(ReportFormat::Tabular), None);
+    }
 
     fn long_titled_database() -> PairwiseDatabase {
         PairwiseDatabase::new(vec![DatabaseInfo {
@@ -7370,6 +7556,7 @@ mod tblastx_tests {
             program: "rpsblast".to_string(),
             protein_matrix: ScoringMatrix::Blosum62,
             sort: Default::default(),
+            view: PairwiseView::Pairwise,
         };
         let gapped_k = [0.041, 0.047, 0.041, 0.041];
         let write = |range: std::ops::Range<usize>, rows: &[PairwiseHit], out: &mut Vec<u8>| {
@@ -7389,6 +7576,7 @@ mod tblastx_tests {
                 None,
                 true,
                 true,
+                None,
                 None,
             )
             .unwrap();

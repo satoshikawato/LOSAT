@@ -4501,7 +4501,7 @@ pub(crate) fn seq_annots_prefetch(outfmt: Option<i32>) -> bool {
 }
 
 /// Whether the first format of a call is one whose batches prefetch their reported subjects
-/// and that shows no taxonomy of them (`prefetch_messages`): outfmt 0, 5, 6, 7 and 17, and with
+/// and that shows no taxonomy of them (`prefetch_messages`): outfmt 0 to 7 and 17, and with
 /// `PRE_FETCH_SEQS_LIMIT=2147483647` the Seq-annots 8, 9 and 12 too (`s_PreFetchSeqs`, quoted at
 /// [`prefetch_may_be_off`], returns before its test of the format). The query warnings, which
 /// the batch's messages go with, are written with the first format (the Seq-annots write only
@@ -4511,7 +4511,8 @@ pub(crate) fn seq_annots_prefetch(outfmt: Option<i32>) -> bool {
 /// outfmt 8, 9, 11 and 12).
 pub(crate) fn prefetches_subjects(outfmt: Option<i32>) -> bool {
     match outfmt {
-        Some(0 | 5 | 6 | 7 | 17) => true,
+        // `s_IsPrefetchFormat` takes the query-anchored formats 1 to 4 as 0 (DECISIONS T3-4).
+        Some(0..=7 | 17) => true,
         Some(8 | 9 | 12) => prefetch_seqs_limit() == Some(i32::MAX),
         _ => false,
     }

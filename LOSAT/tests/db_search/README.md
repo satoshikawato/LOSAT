@@ -1294,3 +1294,48 @@ OID at the range's end). Frozen with the release build on the developer machine 
   `db.ps.q1.in.*`.
 - `tests/fixtures/pssm/q1_tfp_id5.asn.gz`: the same PSSM with its query's `local str "Query_1"` replaced by `local id 5`
   by hand (rows `db.ps.q1.in.id5.*`).
+
+Query-anchored inputs (rows `db.of1.bp.*`, line RG T3a: BLASTP `-outfmt 1` to `4`), in `of1/`, from the
+survey's probes (`T/t3/scripts/gen.py`, a seeded generator, and three hand-made records):
+
+- `qp.fa`: three queries: `qa` (150 letters), `qnone` (no hits with `sp`: two weak ones), `qc`; `qa.fa` and `qc.fa`
+  hold one of them each. `qgi.fa`: `qa` under `gi|7777|ref|XP_000009.1|` (with `-parse_deflines` its rows are
+  labelled `XP_000009.1`, with `-show_gis` too `7777`).
+- `sp.fa`: six subjects of `qa` and `qc`: `s_multi` (two HSPs with `qc` whose rows come in the order of their
+  longest segments, not of their E-values), `s_ins` (insertions and a deletion), `s_ins2` (an insertion at the
+  same place), `s_twice` (two HSPs on the same query range), `s_far` (weak), `s_c`. `sp_ids.fa`: the same with
+  Seq-ids of each kind (`ref`, `sp`, `gi|...|ref`, `gnl`, `lcl`, `pdb`); `s_multi.fa`: `s_multi` alone (with
+  `qc` its two HSPs leave the query stretch 11-37 between them, which the query row fills).
+- `q100.fa`, `s100.fa`: one identical pair of 100 letters (`-line_length 99`: the start column is two digits
+  wide, from the largest 0-based position 99).
+- `s_twice_lc.fa`: `s_twice` with the lower-case runs 85-92 (in the ranges of both HSPs with `qa`) and
+  120-125 (in the second's only). With `-lcase_masking` NCBI maps each run to the columns of the first row
+  of the subject whose letters it meets and puts those columns in lower case in every row of the subject
+  (the rows' own letters there are other positions of the subject):
+
+  NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4300-4327
+  ```c++
+          for (int i=0; i<m_AV->GetNumRows(); i++){
+          	const CSeq_interval& interval = (*iter)->GetInterval();
+              TSeqRange loc_range(interval.GetFrom(), interval.GetTo());
+              if(interval.GetId().Match(m_AV->GetSeqId(i)) &&
+                 m_AV->GetSeqRange(i).IntersectingWith(loc_range)){
+                  ...
+                  alnloc->aln_range.Set(actualAlnStart, actualAlnStop);
+                  has_valid_loc = true;
+                  break;
+              }
+          }
+  ```
+- `qseg.fa`, `sseg.fa`: `qa` with a run of 20 Q at 76-95, which `-seg yes` masks; `sseg` is the same with every
+  11th letter changed, and `s_ins`.
+- `sp_dupid.fa` (two subjects `lcl|dup1`) and `s_sameid.fa` (a subject `lcl|q100`, the id of `q100.fa`): the
+  `-parse_deflines` refusals (`db.of1.bp.dupid.reject`, `db.of1.bp.self.reject`).
+
+The databases (version 4; `.pjs` deleted). Run from `LOSAT/`:
+
+    makeblastdb -in tests/db_search/of1/sp.fa -dbtype prot -out tests/db_search/of1/sp \
+        -title "subjects of the query-anchored rows" -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/sp_ids.fa -dbtype prot -out tests/db_search/of1/sp_ids \
+        -title "subjects of the query-anchored rows with Seq-ids" -parse_seqids -blastdb_version 4
+    rm tests/db_search/of1/*.pjs

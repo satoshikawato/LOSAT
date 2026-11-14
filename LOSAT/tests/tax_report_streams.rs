@@ -26,7 +26,8 @@
 //! (`length`: the write of 8,198 fails, "BLAST failed to write output", exit 6) or 8,192
 //! (`query`: the write at `"= "` is the end of a later block, exit 0). And a query without
 //! warnings writes nothing to `cerr` (NCBI posts none), so it does not flush `cout` (fix 3's
-//! `T/t2/fix3/probe_tie.sh`, `blastx_tie.stdout.txt`).
+//! `T/t2/fix3/probe_tie.sh`, `blastx_tie.stdout.txt`), and a blastx run that holds its output for
+//! `-export_search_strategy` writes the same bytes (review 4 D1, `blastx_strategy.*`).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -321,4 +322,45 @@ fn a_query_without_warnings_leaves_standard_output_held() {
         (Some(0), "".into())
     );
     assert!(written == fixture("blastx_tie.stdout.txt")[..4200]);
+}
+
+/// blastx with `-export_search_strategy`, whose run holds its output while a later batch's title
+/// could still be refused (`archive::ArchiveHold`): NCBI's buffer comes before the hold and the
+/// texts go through it, so the merged stream is the run's without the option. NCBI BLAST+ 2.17.0
+/// (line RG T2 review 4, `T/t2/review4/probe_strategy.sh`; fix 4, `T/t2/fix4/
+/// probe_strategy_stdout.sh`), the `length` case of blastx (q2's title of 7,441 bytes): with
+/// `-out /dev/stdout` the first three texts come before the report, which the file's buffer still
+/// holds, and the fourth inside q2's `Length=`; on standard output each comes after the report
+/// written before it (the tie). 9,002 bytes, exit 0 both.
+#[cfg(unix)]
+#[test]
+fn a_held_blastx_report_is_written_where_ncbis_buffer_writes_it() {
+    for (name, options) in [
+        ("blastx_strategy.out.txt", &["-out", "/dev/stdout"][..]),
+        ("blastx_strategy.stdout.txt", &[][..]),
+    ] {
+        for threads in ["1", "4"] {
+            let dir = scratch(&format!("blastx-strategy-{}-{threads}", options.len()));
+            let query = titled_query("txr_q.fna", 7441, true, &dir);
+            let strategy = dir.join("search.strategy");
+            let mut run = search(
+                "blastx",
+                "txr_p",
+                &query,
+                "offset_last_past_end",
+                &dir,
+                threads,
+                options,
+            );
+            run.arg("-export_search_strategy").arg(&strategy);
+            let (bytes, exit) = merged(run);
+            std::fs::remove_dir_all(&dir).unwrap();
+            assert_eq!(exit, Some(0), "{name}");
+            assert!(
+                bytes == fixture(name),
+                "{name} at {threads} threads:\n{}",
+                String::from_utf8_lossy(&bytes)
+            );
+        }
+    }
 }

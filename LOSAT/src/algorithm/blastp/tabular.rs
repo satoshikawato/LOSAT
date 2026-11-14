@@ -466,7 +466,7 @@ pub(super) fn write_blastp_tax_report(
     tab: &BlastpTabular<'_>,
     record_lengths: &[usize],
     hit_lists: &[Option<BlastpHitList>],
-    writer: &mut dyn Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     use crate::report::tax_report::{report_batch, write_report, TaxHsp, TaxPlain, TaxQuery};

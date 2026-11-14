@@ -25,9 +25,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use losat::api::Program;
 use run_local_support::Files;
 use temp_support::{home_and_worker_log, Finished, RunFiles};
-use LOSAT::api::Program;
 
 fn engine() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()

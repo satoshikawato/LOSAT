@@ -3,6 +3,13 @@
 //! `remaining-gaps-20261112/E/SURVEY_E1b.md`, run with `env -i` in a fresh directory: the E1
 //! probe's `dry*` cases and the sweep of every argument definition of NCBI's `-xmlhelp`).
 //!
+//! The library API runs the same dry run in each call (line RG item E1w-2): the same words
+//! through `examples/library_command_line` (`losat::api::run`, `run_to_file`,
+//! `run_makeblastdb`, `run_blastdbcmd`) in the same directory and environment write nothing, make
+//! no file but the `-logfile` file and read no input; a failure's message is the text that the
+//! command line writes to its standard error (the example ends every failure with exit status
+//! 1). rpsblast and rpstblastn are not in the library (`api::Program`).
+//!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707, 292-296 (quoted at
 //! `cli::main_entry`) and 926-1001 (quoted at `ncbi_environment::preparse`).
 
@@ -12,6 +19,8 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+
+use crate::library_examples::example_binary;
 
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 
@@ -40,7 +49,22 @@ fn scratch(name: &str) -> PathBuf {
 
 /// `losat <words>` in `dir` with an environment of NCBI's probes (`env -i PATH HOME`) and `envs`.
 fn run_in(dir: &Path, words: &[&str], envs: &[(&str, &str)]) -> Output {
-    let mut command = Command::new(BIN);
+    run_binary_in(Path::new(BIN), dir, words, envs)
+}
+
+/// `run_in` through the library API: `examples/library_command_line <words>`.
+fn library_in(dir: &Path, words: &[&str], envs: &[(&str, &str)]) -> Output {
+    run_binary_in(&example_binary("library_command_line"), dir, words, envs)
+}
+
+/// Whether the library API runs `program` (the example's programs).
+fn in_library(program: &str) -> bool {
+    !matches!(program, "rpsblast" | "rpstblastn")
+}
+
+/// `run_in` of `binary` (the command line, or the library's example).
+fn run_binary_in(binary: &Path, dir: &Path, words: &[&str], envs: &[(&str, &str)]) -> Output {
+    let mut command = Command::new(binary);
     command
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
@@ -205,19 +229,38 @@ fn a_dry_run_reads_the_arguments_and_runs_nothing() {
                 "{words:?} {envs:?}"
             );
             assert_eq!(names(&dir), before, "{words:?}: a file was made");
+            if in_library(program) {
+                let library = library_in(&dir, words, envs);
+                assert_eq!(
+                    (
+                        library.status.code(),
+                        text(&library.stdout),
+                        text(&library.stderr)
+                    ),
+                    (Some(0), String::new(), String::new()),
+                    "{words:?} {envs:?}: the library"
+                );
+                assert_eq!(names(&dir), before, "{words:?}: the library made a file");
+            }
         }
         fs::write(dir.join("out.txt"), "OLD OUT\n").unwrap();
-        let run = run_in(
-            &dir,
-            &words_of(program, words, &["-out", "out.txt", "-dryrun"], false),
-            &[],
-        );
+        let out_words = words_of(program, words, &["-out", "out.txt", "-dryrun"], false);
+        let run = run_in(&dir, &out_words, &[]);
         assert_eq!(run.status.code(), Some(0), "{program}: {run:?}");
         assert_eq!(
             fs::read_to_string(dir.join("out.txt")).unwrap(),
             "OLD OUT\n",
             "{program}"
         );
+        if in_library(program) {
+            let library = library_in(&dir, &out_words, &[]);
+            assert_eq!(library.status.code(), Some(0), "{program}: {library:?}");
+            assert_eq!(
+                fs::read_to_string(dir.join("out.txt")).unwrap(),
+                "OLD OUT\n",
+                "{program}: the library"
+            );
+        }
         fs::remove_file(dir.join("out.txt")).unwrap();
         for (registry, envs) in [
             ("[BLAST]\nLONG_SEQID=1\n", &[][..]),
@@ -243,6 +286,28 @@ fn a_dry_run_reads_the_arguments_and_runs_nothing() {
                 (Some(1), text(&plain.stderr), 0),
                 "{program} {registry:?} {envs:?}"
             );
+            // The library's dry run refuses them too (the search programs' error is LOSAT's
+            // refusal without the command line's `Error: `; the tools write the command line's
+            // text themselves, which the example does not print again: `examples/
+            // library_command_line.rs`, `reported`).
+            if in_library(program) {
+                let dry_words = words_of(program, words, &["-dryrun"], false);
+                let library = library_in(&dir, &dry_words, envs);
+                let stderr = match *program {
+                    "makeblastdb" | "blastdbcmd" => text(&library.stderr),
+                    _ => format!("Error: {}", text(&library.stderr)),
+                };
+                assert_eq!(
+                    (library.status.code(), library.stdout.len()),
+                    (Some(1), 0),
+                    "{program} {registry:?} {envs:?}: the library"
+                );
+                assert_eq!(
+                    stderr,
+                    text(&dry.stderr),
+                    "{program} {registry:?} {envs:?}: the library"
+                );
+            }
             let _ = fs::remove_file(dir.join(".ncbirc"));
             let _ = fs::remove_file(dir.join("o"));
         }
@@ -268,6 +333,28 @@ fn a_dry_run_makes_the_logfile() {
         );
         assert_eq!(fs::read(dir.join("log.txt")).unwrap(), b"", "{program}");
         fs::remove_file(dir.join("log.txt")).unwrap();
+        if in_library(program) {
+            let library = library_in(
+                &dir,
+                &words_of(program, words, &["-dryrun", "-logfile", "log.txt"], false),
+                &[],
+            );
+            assert_eq!(
+                (
+                    library.status.code(),
+                    library.stdout.len(),
+                    library.stderr.len()
+                ),
+                (Some(0), 0, 0),
+                "{program}: {library:?}"
+            );
+            assert_eq!(
+                fs::read(dir.join("log.txt")).unwrap(),
+                b"",
+                "{program}: the library"
+            );
+            fs::remove_file(dir.join("log.txt")).unwrap();
+        }
     }
     let _ = fs::remove_dir_all(&dir);
 }
@@ -369,17 +456,27 @@ const SECTION_REPORT: &str = "Error: (CRegistryException::eSection) Invalid regi
 #[test]
 fn the_configuration_help_and_version_come_as_without_dryrun() {
     let dir = scratch("conf");
-    for (index, (program, words)) in RUNS.iter().enumerate() {
-        let missing = run_in(
-            &dir,
-            &words_of(
-                program,
-                words,
-                &["-dryrun", "-conffile", "missing.ini"],
-                false,
+    // The library's run of `words`: the command line's failure `cli` (exit status 1).
+    let library_fails_as = |words: &[&str], cli: &Output| {
+        let library = library_in(&dir, words, &[]);
+        assert_eq!(
+            (
+                library.status.code(),
+                text(&library.stdout),
+                text(&library.stderr)
             ),
-            &[],
+            (Some(1), text(&cli.stdout), text(&cli.stderr)),
+            "{words:?}: the library"
         );
+    };
+    for (index, (program, words)) in RUNS.iter().enumerate() {
+        let missing_words = words_of(
+            program,
+            words,
+            &["-dryrun", "-conffile", "missing.ini"],
+            false,
+        );
+        let missing = run_in(&dir, &missing_words, &[]);
         assert_eq!(
             (missing.status.code(), text(&missing.stderr)),
             (
@@ -389,27 +486,34 @@ fn the_configuration_help_and_version_come_as_without_dryrun() {
             ),
             "{program}"
         );
+        if in_library(program) {
+            library_fails_as(&missing_words, &missing);
+        }
         if index < SEARCHES {
             fs::write(dir.join("c.ini"), "[x\n").unwrap();
-            let bad = run_in(
-                &dir,
-                &words_of(program, words, &["-dryrun", "-conffile", "c.ini"], false),
-                &[],
-            );
+            let bad_words = words_of(program, words, &["-dryrun", "-conffile", "c.ini"], false);
+            let bad = run_in(&dir, &bad_words, &[]);
             assert_eq!(
                 (bad.status.code(), text(&bad.stderr)),
                 (Some(2), SECTION_REPORT.repeat(2)),
                 "{program} -conffile"
             );
+            if in_library(program) {
+                library_fails_as(&bad_words, &bad);
+            }
             fs::remove_file(dir.join("c.ini")).unwrap();
             let ini = dir.join(format!("{program}.ini"));
             fs::write(&ini, "[x\n").unwrap();
-            let bad = run_in(&dir, &words_of(program, words, &["-dryrun"], false), &[]);
+            let bad_words = words_of(program, words, &["-dryrun"], false);
+            let bad = run_in(&dir, &bad_words, &[]);
             assert_eq!(
                 (bad.status.code(), text(&bad.stderr)),
                 (Some(2), SECTION_REPORT.repeat(2)),
                 "{program} .ini"
             );
+            if in_library(program) {
+                library_fails_as(&bad_words, &bad);
+            }
             fs::remove_file(&ini).unwrap();
         }
         for word in ["-h", "-help", "-version"] {
@@ -421,6 +525,27 @@ fn the_configuration_help_and_version_come_as_without_dryrun() {
                 (dry.status.code(), &dry.stdout, &dry.stderr),
                 (plain.status.code(), &plain.stdout, &plain.stderr),
                 "{program} -dryrun {word}"
+            );
+        }
+        // The library's tools print the version as the command line does (`run_makeblastdb`,
+        // `run_blastdbcmd`); its search programs refuse it.
+        let library = library_in(&dir, &[program, "-dryrun", "-version"], &[]);
+        if matches!(*program, "makeblastdb" | "blastdbcmd") {
+            let plain = run_in(&dir, &[program, "-version"], &[]);
+            assert_eq!(
+                (library.status.code(), &library.stdout, &library.stderr),
+                (Some(0), &plain.stdout, &plain.stderr),
+                "{program} -dryrun -version: the library"
+            );
+        } else if in_library(program) {
+            assert_eq!(library.status.code(), Some(1), "{program}");
+            assert!(
+                text(&library.stderr).contains(
+                    "the NCBI C++ Toolkit option -version runs on the command line of LOSAT's"
+                ) && text(&library.stderr).contains(
+                    "the library API and the Web engine do not write NCBI's version text"
+                ),
+                "{program}: {library:?}"
             );
         }
     }

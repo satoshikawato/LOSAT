@@ -1,7 +1,7 @@
 //! The shared TBLASTN entry `run_local` in process: what the entry itself does, not what the
 //! command line writes. The saved NCBI BLAST+ 2.17.0 bytes of three searches, the observer's
 //! ranges, the entry's refusals and its sinks are checked here. The tests that compare the
-//! entry's reports with the `losat` binary go through `LOSAT::api`
+//! entry's reports with the `losat` binary go through `losat::api`
 //! (`LOSAT/tests/run_local_tblastn.rs`).
 //! (Identity with the previous release over the Stage G matrix is checked by
 //! docs/evidence/losat_web_e1a/capture_outputs.py.)
@@ -288,7 +288,7 @@ impl Drop for Inputs {
 // }
 // ```
 // This is the engine half of the test of the same name in `LOSAT/tests/run_local_tblastn.rs`,
-// which compares every format with the CLI run of that format through `LOSAT::api`. Here the
+// which compares every format with the CLI run of that format through `losat::api`. Here the
 // reference is the same entry in process: a search that requests every format together, with the
 // hit records and the observer, writes for each format the bytes of the search of that format
 // alone without them, and the observer and the hit records change neither the reports nor the

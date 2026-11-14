@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use LOSAT::api::{read_fasta, run_batches, validate, Inputs, Program, Role};
+use losat::api::{read_fasta, run_batches, validate, Inputs, Program, Role};
 
 mod temp_support;
 use temp_support::{Finished, TempFile};
@@ -264,7 +264,7 @@ fn a_database_name_outside_us_ascii_is_refused() {
 const QUERIES: usize = 150;
 
 /// The query batches of `many_queries` as the search makes them: the ranges of query numbers that
-/// `LOSAT::api::run_batches` gives for the same queries against one subject.
+/// `losat::api::run_batches` gives for the same queries against one subject.
 fn query_batches() -> Vec<std::ops::Range<usize>> {
     let mut text = Vec::new();
     for n in 0..QUERIES {

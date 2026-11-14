@@ -940,9 +940,6 @@ impl RedoMatch<'_> {
     /// /** Default instructions and mask residue for SEG filtering */
     /// #define BLASTP_MASK_INSTRUCTIONS "S 10 1.8 2.1"
     /// ```
-    // Inlined into each of its callers (the X-drop redo and the Smith-Waterman redo of PS11c-3),
-    // as into the X-drop redo when it was the only one: psiblast's redo keeps its machine code.
-    #[inline(always)]
     fn subject_range(
         &self,
         run: &RedoRun<'_>,
@@ -1394,9 +1391,6 @@ fn score_compare(a: &Align, b: &Align) -> std::cmp::Ordering {
 ///                 }
 /// ```
 /// Every HSP of a PSSM search has the query frame and subject frame 0.
-// Inlined into each of its callers (the X-drop redo and the Smith-Waterman redo of PS11c-3), as into
-// the X-drop redo when it was the only one: psiblast's redo keeps its machine code.
-#[inline(always)]
 fn reap_contained(redone: &mut Vec<Redone>) {
     let mut keep = vec![true; redone.len()];
     for iread in 1..redone.len() {

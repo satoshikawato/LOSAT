@@ -439,9 +439,6 @@ pub(crate) fn scale_pssm(
 /// `Blast_CompositionBasedStats` for a PSSM (`positionBased`, no composition p-value): `matrix`
 /// becomes the PSSM of `info` scaled for a subject of the letter probabilities `subject_prob`;
 /// returns the lambda ratio (`LambdaRatio`).
-// Inlined into each of its callers (the X-drop redo and the Smith-Waterman redo of PS11c-3), as into
-// the X-drop redo when it was the only one: psiblast's redo keeps its machine code.
-#[inline(always)]
 pub(crate) fn pssm_composition_based_stats(
     matrix: &mut [[i32; BLASTAA_SIZE]],
     info: &PosMatrixInfo,
@@ -458,6 +455,88 @@ pub(crate) fn pssm_composition_based_stats(
         subject_prob,
         scaled_lambda,
     );
+    ratio
+}
+
+/// `pssm_composition_based_stats` for the Smith-Waterman redo (`-use_sw_tback`; series PR, item
+/// PS11c-3): the same steps, written out once more. The X-drop redo is the only caller of
+/// `pssm_composition_based_stats`, `pssm_score_probs`, `score_range`, `lambda_ratio`,
+/// `scale_pssm`, `calc_x_score`, `freq_ratio_to_score` and `round_score`, so they are inlined into
+/// it; a second caller would take them out of line and change psiblast's redo (DECISIONS 11 of
+/// line PS: a default-path function that is not out of line gets no new caller, its code is
+/// copied). The NCBI lines are those quoted at each of these functions
+/// (composition_adjustment.c:922-940, 1025-1050, 1104-1158 and 403-415, `s_GetScoreRange`,
+/// `s_CalcXScore`, `s_RoundScoreMatrix`); `the_smith_waterman_copy_scales_as_the_x_drop_redo`
+/// checks the two against each other.
+pub(crate) fn pssm_composition_based_stats_sw(
+    matrix: &mut [[i32; BLASTAA_SIZE]],
+    info: &PosMatrixInfo,
+    subject_prob: &[f64; BLASTAA_SIZE],
+) -> f64 {
+    let start_matrix = &info.start_matrix;
+    // `s_GetScoreRange`.
+    let (mut obs_min, mut obs_max) = (0, 0);
+    for row in start_matrix {
+        for &jcol in &TRUE_CHAR_POSITIONS {
+            let score = row[jcol];
+            if score < obs_min && score > COMPO_SCORE_MIN {
+                obs_min = score;
+            }
+            if score > obs_max {
+                obs_max = score;
+            }
+        }
+    }
+    // `s_GetPssmScoreProbs`.
+    let mut probs = vec![0.0; (obs_max - obs_min + 1) as usize];
+    let one_pos_frac = 1.0 / (start_matrix.len() as f64);
+    for row in start_matrix {
+        for &jcol in &TRUE_CHAR_POSITIONS {
+            if row[jcol] >= obs_min {
+                probs[(row[jcol] - obs_min) as usize] += one_pos_frac * subject_prob[jcol];
+            }
+        }
+    }
+    // The lambda ratio without the composition p-value.
+    let correct_ungapped_lambda =
+        calc_lambda_of_score_probs(probs, obs_min, obs_max, info.ungapped_lambda);
+    let ratio = (correct_ungapped_lambda / info.ungapped_lambda)
+        .min(1.0)
+        .max(LAMBDA_RATIO_LOWER_BOUND);
+    // `s_ScalePSSM` at the scaled Lambda.
+    let lambda = info.ungapped_lambda / ratio;
+    for ((out, ratios), start) in matrix
+        .iter_mut()
+        .zip(&info.start_freq_ratios)
+        .zip(start_matrix)
+    {
+        let mut row = [0.0; BLASTAA_SIZE];
+        for (score, &freq_ratio) in row.iter_mut().zip(ratios) {
+            *score = if freq_ratio == 0.0 {
+                COMPO_SCORE_MIN as f64
+            } else {
+                freq_ratio.ln() / lambda
+            };
+        }
+        let mut x_score = 0.0;
+        for j in 0..BLASTAA_SIZE {
+            if TRUE_AMINO_ACID[j] {
+                x_score += row[j] * subject_prob[j];
+            }
+        }
+        let x_score = x_score.min(MAXIMUM_X_SCORE);
+        row[ncbistdaa::X as usize] = x_score;
+        row[ncbistdaa::U as usize] = row[ncbistdaa::C as usize];
+        row[ncbistdaa::O as usize] = x_score;
+        for (cell, &score) in out.iter_mut().zip(&row) {
+            *cell = if score < i32::MIN as f64 {
+                i32::MIN
+            } else {
+                (score + if score >= 0.0 { 0.5 } else { -0.5 }) as i64 as i32
+            };
+        }
+        out[ncbistdaa::STOP as usize] = start[ncbistdaa::STOP as usize];
+    }
     ratio
 }
 
@@ -631,6 +710,67 @@ mod tests {
         let info = PosMatrixInfo::new(&query, &search.freq_ratios, &sbp, 32.0, kbp_psi).unwrap();
         assert_eq!(info.ungapped_lambda, 0.31673860011845001 / 32.0);
         assert_eq!(info.gapped_k, 0.042574710048176159);
+    }
+
+    // The Smith-Waterman redo's copy (`pssm_composition_based_stats_sw`) scales every PSSM as the
+    // X-drop redo's function does, bit for bit: the tk PSSM against subjects of random letter
+    // probabilities (one letter only, a few letters, all), from the zero matrix and from another
+    // scaled matrix.
+    #[test]
+    fn the_smith_waterman_copy_scales_as_the_x_drop_redo() {
+        let pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(
+            "pssm/ps4_tk_paja.asn.gz",
+        ))
+        .unwrap();
+        let search = crate::algorithm::pssm_search::in_pssm::psi_search_of(pssm).unwrap();
+        let query: Vec<u8> = search
+            .query
+            .seq()
+            .iter()
+            .map(|&c| crate::utils::matrix::aa_char_to_ncbistdaa(c))
+            .collect();
+        let sbp = crate::algorithm::pssm_search::in_pssm::score_block(
+            crate::config::ScoringMatrix::Blosum62,
+            crate::core::psi::KarlinBlk {
+                lambda: 0.267,
+                k: 0.041,
+                h: 0.14,
+            },
+        )
+        .unwrap();
+        let info = PosMatrixInfo::new(
+            &query,
+            &search.freq_ratios,
+            &sbp,
+            32.0,
+            file_ungapped(&search),
+        )
+        .unwrap();
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut x_drop = vec![[0; BLASTAA_SIZE]; query.len()];
+        let mut sw = x_drop.clone();
+        for case in 0..12 {
+            let mut prob = [0.0; BLASTAA_SIZE];
+            let letters = [1, 3, 20][case % 3];
+            for _ in 0..letters {
+                let letter = TRUE_CHAR_POSITIONS[(next() % 20) as usize];
+                prob[letter] += (next() % 1000 + 1) as f64;
+            }
+            let total: f64 = prob.iter().sum();
+            for p in prob.iter_mut() {
+                *p /= total;
+            }
+            let a = pssm_composition_based_stats(&mut x_drop, &info, &prob);
+            let b = pssm_composition_based_stats_sw(&mut sw, &info, &prob);
+            assert_eq!(a.to_bits(), b.to_bits(), "case {case}");
+            assert_eq!(x_drop, sw, "case {case}");
+        }
     }
 
     #[test]

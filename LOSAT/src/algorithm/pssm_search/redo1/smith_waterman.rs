@@ -38,7 +38,7 @@
 //! its code (DECISIONS 11 and 16 of line PS).
 
 use super::{
-    blast_nint, preliminary_test_near_identical, reap_contained, score_compare, Align, RedoMatch,
+    blast_nint, contained_in_hsp, preliminary_test_near_identical, score_compare, Align, RedoMatch,
     RedoRun, Redone, SCALING_FACTOR,
 };
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
@@ -46,8 +46,11 @@ use crate::algorithm::blastp::hsp::{BlastCompoHeap, BlastpHspList};
 use crate::algorithm::pssm_search::gapalign::pssm_sw_xdrop_traceback;
 use crate::algorithm::pssm_search::traceback0::final_hsp;
 use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
-use crate::core::composition_adjustment::compo_scale::pssm_composition_based_stats;
+use crate::core::composition_adjustment::compo_scale::pssm_composition_based_stats_sw;
 use crate::core::composition_adjustment::redo_alignment::EMatrixAdjustRule;
+use crate::core::composition_adjustment::redo_alignment::{
+    test_near_identical, BlastCompoAlignment, BlastCompoSequenceData,
+};
 use crate::core::composition_adjustment::smith_waterman::{
     smith_waterman_find_start, smith_waterman_score_only, ForbiddenRanges, SwScratch,
 };
@@ -185,10 +188,9 @@ impl RedoMatch<'_> {
     ///         if ( !adjust_search_failed ) {
     /// ```
     /// The subject range's last argument is `NULL`: the subject is SEG-masked unless the window's
-    /// first alignment is near identical, as the X-drop redo's first range
-    /// (`RedoMatch::subject_range` with `subject_maybe_biased` true). The composition adjustment
-    /// is the X-drop redo's (`RedoMatch::redo_one_match`, `Blast_AdjustScores` of a position-based
-    /// search).
+    /// first alignment is near identical (`subject_range_sw`). The composition adjustment is the
+    /// X-drop redo's (`RedoMatch::redo_one_match`, `Blast_AdjustScores` of a position-based
+    /// search), on the copy `pssm_composition_based_stats_sw`.
     fn redo_one_match_smith_waterman(
         &self,
         run: &mut RedoRun<'_>,
@@ -228,14 +230,7 @@ impl RedoMatch<'_> {
             &window_align,
             run.near_identical_cutoff,
         );
-        let mut subject_maybe_biased = true;
-        let subject_data = self.subject_range(
-            run,
-            subject,
-            &window_align,
-            near_identical,
-            &mut subject_maybe_biased,
-        );
+        let subject_data = subject_range_sw(run, subject, &window_align, near_identical);
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1436-1442
         // ```c
         //     if (query_composition->numTrueAminoAcids == 0 ||
@@ -264,7 +259,7 @@ impl RedoMatch<'_> {
             return Ok(Some(Vec::new()));
         }
         let matrix_adjust_rule = EMatrixAdjustRule::CompoScaleOldMatrix;
-        pssm_composition_based_stats(&mut run.matrix.rows, self.info, &subject_composition.prob);
+        pssm_composition_based_stats_sw(&mut run.matrix.rows, self.info, &subject_composition.prob);
         // RPS-BLAST's bound of the adjusted matrix (`RedoRun::with_bound_check`): above `INT4_MAX`
         // NCBI's scores overflow and the caller refuses the search, so the scans do not run.
         if run.bound_check && run.bound_exceeded.is_none() {
@@ -499,7 +494,7 @@ impl RedoMatch<'_> {
             .collect();
         redone.sort_by(|a, b| score_compare(&a.align, &b.align));
         if redone.len() > 1 {
-            reap_contained(&mut redone);
+            reap_contained_sw(&mut redone);
         }
         let subject_length = subject.len() as i32;
         let (m, n) = if self.rps_roles {
@@ -564,6 +559,109 @@ impl RedoMatch<'_> {
         }
         Some((hsp_list, best_score, best_evalue))
     }
+}
+
+/// `s_SequenceGetProteinRange` for the whole subject with NCBI's `NULL` for `subject_maybe_biased`
+/// (`Blast_RedoOneMatchSmithWaterman`): its letters, masked by SEG ("S 10 1.8 2.1") unless the
+/// window's first alignment is near identical. The X-drop redo's `RedoMatch::subject_range` does
+/// the same for its first range; this is its copy, so that the X-drop redo keeps it inlined as
+/// its only caller (DECISIONS 11 of line PS).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1626-1638
+/// ```c
+///     if ( !(KAPPA_BLASTP_NO_SEG_SEQUENCE) ) {
+///         if (compo_adjust_mode
+///             && (!subject_maybe_biased || *subject_maybe_biased)) {
+///
+///             if ( (!shouldTestIdentical)
+///                  || (shouldTestIdentical
+///                      && (!s_TestNearIdentical(seqData, 0, queryData,
+///                                               q_range->begin, query_words,
+///                                               align)))) {
+///
+///                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
+///                                              subject_maybe_biased);
+///             }
+///         }
+///     }
+/// ```
+fn subject_range_sw(
+    run: &RedoRun<'_>,
+    subject: &[u8],
+    window_align: &Align,
+    near_identical: bool,
+) -> Vec<u8> {
+    let mut data = subject.to_vec();
+    let test_identical = near_identical && {
+        let align = BlastCompoAlignment {
+            score: window_align.score,
+            matrix_adjust_rule: window_align.rule,
+            query_index: 0,
+            query_start: window_align.query_start,
+            query_end: window_align.query_end,
+            match_start: window_align.match_start,
+            match_end: window_align.match_end,
+            frame: window_align.frame,
+            context: None,
+            next: None,
+        };
+        test_near_identical(
+            &BlastCompoSequenceData::from_ncbistdaa(subject),
+            0,
+            &run.query_data,
+            0,
+            Some(&run.query_words),
+            &align,
+        )
+    };
+    if !test_identical {
+        let intervals = crate::utils::seg::SegMasker::new(10, 1.8, 2.1).mask_sequence(&data);
+        for interval in &intervals {
+            data[interval.start..interval.end].fill(crate::utils::matrix::ncbistdaa::X);
+        }
+    }
+    data
+}
+
+/// `s_HitlistReapContained` (quoted at `reap_contained`, blast_kappa.c:233-262): an HSP whose
+/// ends lie in an earlier HSP and whose score is at most that HSP's is deleted. A copy of
+/// `reap_contained`, so that the X-drop redo keeps it inlined as its only caller (DECISIONS 11 of
+/// line PS).
+fn reap_contained_sw(redone: &mut Vec<Redone>) {
+    let mut keep = vec![true; redone.len()];
+    for iread in 1..redone.len() {
+        let hsp1 = &redone[iread].align;
+        for ireadback in 0..iread {
+            if !keep[ireadback] {
+                continue;
+            }
+            let hsp2 = &redone[ireadback].align;
+            if contained_in_hsp(
+                hsp2.query_start,
+                hsp2.query_end,
+                hsp1.query_start,
+                hsp2.match_start,
+                hsp2.match_end,
+                hsp1.match_start,
+            ) && contained_in_hsp(
+                hsp2.query_start,
+                hsp2.query_end,
+                hsp1.query_end,
+                hsp2.match_start,
+                hsp2.match_end,
+                hsp1.match_end,
+            ) && hsp1.score <= hsp2.score
+            {
+                keep[iread] = false;
+                break;
+            }
+        }
+    }
+    let mut index = 0;
+    redone.retain(|_| {
+        index += 1;
+        keep[index - 1]
+    });
 }
 
 #[cfg(test)]

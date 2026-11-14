@@ -248,6 +248,12 @@ impl BlastnDatabase {
     // ```c++
     //             "\tLN:" + NStr::UInt8ToString(refseq.GetBioseqLength()));
     // ```
+    /// The OIDs of the database's ordinal ids, which name the reported sequences without
+    /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
+    pub(super) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
+        self.db.oid_map()
+    }
+
     /// The length in bases of each of the database sequences `ordinals` (outfmt 17: the
     /// Bioseq's length for `@SQ` and the clips of a record), from the index and the last byte
     /// of each sequence's packed bases; no letters are read.
@@ -1567,7 +1573,7 @@ pub(super) fn reported_subjects(
         let record = FastaRecord {
             // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
             // (line DI-8).
-            local_id: format!("gnl|BL_ORD_ID|{}", db.oid(ordinal)),
+            local_id: db.oid(ordinal).fasta_id(),
             title,
             sequence: Vec::new(),
             warnings: Vec::new(),

@@ -239,9 +239,10 @@ pub(super) fn write_tblastn_tabular(
             length: &record_length,
             parsed,
         },
-        ShownSubjects::Database { reported, .. } => TabularSubjects::Database {
+        ShownSubjects::Database { reported, oids, .. } => TabularSubjects::Database {
             ids: tab.subject_ids,
             ordinals: &reported.ordinals,
+            oids: *oids,
             records: &reported.records,
             parsed: &reported.parsed,
             lengths: &lengths,

@@ -1257,7 +1257,7 @@ impl<'a> HeaderReader<'a> {
                 }
             }
         };
-        let own = self.db.oid(ordinal);
+        let own = self.db.oid(ordinal).get();
         let first = oids.first().copied();
         // What the lookup gives instead, where the scan of the other holders goes on.
         let mut given = first.is_none().then_some(FoundInstead::Nothing);
@@ -1443,7 +1443,7 @@ impl<'a> HeaderReader<'a> {
             };
             found.extend(lookup.seqid_to_oids(&name_alone, true)?);
         }
-        let own = self.db.oid(ordinal);
+        let own = self.db.oid(ordinal).get();
         Ok(found
             .iter()
             .filter(|&&oid| oid != own)
@@ -2157,7 +2157,7 @@ pub(crate) fn library_subject(
             .to_vec()
     });
     crate::api::local_blast::ReportedSubject {
-        oid: db.oid(ordinal),
+        oid: db.oid(ordinal).get(),
         id: std::sync::Arc::from(String::from_utf8_lossy(&id)),
         length,
     }

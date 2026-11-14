@@ -290,9 +290,11 @@ pub(crate) struct ReportedSubjects {
     records: Vec<FastaRecord>,
     titles: Vec<Arc<[u8]>>,
     tabular_ids: Vec<String>,
-    /// The ordinal id of each rank, ascending (the Seq-ids of the Seq-annots,
-    /// `general { db "BL_ORD_ID", tag id <oid> }`).
+    /// The ordinal id of each rank, ascending.
     ordinals: Vec<u32>,
+    /// The OID of each rank, which names a sequence without parsed Seq-ids (the Seq-ids of the
+    /// Seq-annots, `general { db "BL_ORD_ID", tag id <oid> }`).
+    oids: Vec<crate::seqdb::Oid>,
     /// By rank: the Blast-def-line taxid and what the taxonomy database says of it, and the
     /// taxonomy database's messages of the batch (XML2 and JSON with `-db` only; empty
     /// otherwise, which reads as no taxid).
@@ -561,10 +563,11 @@ impl ReportedSubjects {
                     .push(String::from_utf8_lossy(&id).into_owned());
             }
             let encoded = subjects.read_encoded(oid)?;
+            // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
+            // (line DI-8).
+            let db_oid = database.db.oid(ordinal);
             reported.records.push(FastaRecord {
-                // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the
-                // OID (line DI-8).
-                internal_id: format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
+                internal_id: db_oid.fasta_id(),
                 title: String::from_utf8_lossy(&title).into_owned(),
                 sequence: encoded
                     .iter()
@@ -576,6 +579,7 @@ impl ReportedSubjects {
             });
             reported.titles.push(title);
             reported.ordinals.push(ordinal);
+            reported.oids.push(db_oid);
         }
         // Ranks keep the order of the ordinal ids, so every tie broken by subject index
         // is broken as before.
@@ -881,6 +885,11 @@ impl ReportedSubjects {
     /// The ordinal id of rank `rank`.
     pub(crate) fn ordinal(&self, rank: usize) -> u32 {
         self.ordinals[rank]
+    }
+
+    /// The OID of rank `rank` (`gnl|BL_ORD_ID|n`).
+    pub(crate) fn oid(&self, rank: usize) -> crate::seqdb::Oid {
+        self.oids[rank]
     }
 
     /// The Blast-def-line taxid of the sequence of rank `rank` (0 for none, and for a run that

@@ -706,20 +706,20 @@ fn write_blastx_tax_report(
         ShownSubjects::Fasta { parsed, .. } => &parsed.subjects,
         ShownSubjects::Database { reported, .. } => reported.parsed(),
     };
-    let plain = |oid: usize| match shown {
+    let plain = |s_idx: usize| match shown {
         ShownSubjects::Fasta { .. } => TaxPlain::Record {
-            local_id: subjects[oid].internal_id.as_bytes(),
-            title: subjects[oid].title.as_bytes(),
+            local_id: subjects[s_idx].internal_id.as_bytes(),
+            title: subjects[s_idx].title.as_bytes(),
         },
         ShownSubjects::Database { reported, .. } => TaxPlain::Stored {
-            ordinal: reported.ordinal(oid),
+            oid: reported.oid(s_idx),
             title: reported
                 .stored_titles()
-                .get(oid)
+                .get(s_idx)
                 .map_or(&[][..], |title| title),
             taxid: reported
-                .tabular_taxonomy(oid)
-                .map_or_else(|| reported.taxid(oid), |taxonomy| taxonomy.taxid),
+                .tabular_taxonomy(s_idx)
+                .map_or_else(|| reported.taxid(s_idx), |taxonomy| taxonomy.taxid),
         },
     };
     // A `-subject` search's report looks names up in the run's database.

@@ -237,7 +237,7 @@ impl ParsedSubject {
     // `found_instead` ports, whatever kind of id it is: in version 5 `bbs|123`, `nat|X.1|` and
     // `lcl|777` by their LMDB keys, in version 4 the ISAM files that makeblastdb writes for neither
     // `bbs|` nor `nat|`, a `gnl|PIG|` id in the PIG files that it fills from no FASTA id, and a
-    // `gnl|BL_ORD_ID|n` as the stored n plus the first ordinal id of its volume
+    // `gnl|BL_ORD_ID|n` as the stored n plus the first OID of its volume
     // (`SeqDb::defline_set`), looked up from the start of each volume, so as its own sequence where
     // the stored n is its own number in its volume, also beside another id (probe of line DBID N2b,
     // `blastdb-ids-20261021/R/unfetch/p1`: 317 cases of NCBI 2.17.0, databases of NCBI's and

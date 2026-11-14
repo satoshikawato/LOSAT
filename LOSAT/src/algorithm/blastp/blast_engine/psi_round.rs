@@ -596,8 +596,8 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 // #define BLAST_EXPECT_VALUE 10.0 /**< by default, alignments whose expect
 // ```
 // The Seq-id of a subject is its key (`rounds::SetKey`, `SubjectKeys`): a `-subject` record's
-// index (`lcl|Subject_N`), a database sequence's ordinal id (`gnl|BL_ORD_ID|oid`, the hit lists
-// name it by its rank among the listed ones), or its parsed Seq-align id. The PSSM's multiple
+// index (`lcl|Subject_N`), a database sequence's OID (`gnl|BL_ORD_ID|oid`; the hit lists name it
+// by its rank among the listed ones, `SubjectKeys` maps the rank to the OID), or its parsed Seq-align id. The PSSM's multiple
 // alignment counts its rows by the same keys and joins following Seq-aligns whose ids `Match`
 // (`pssm::input_msa`). Keys that differ but that NCBI's handles can take for one are refused
 // where NCBI compares them (`rounds::HandleIndex`): in the inclusion sets before the round's
@@ -753,8 +753,9 @@ impl FoundBefore {
 /// PSSMs (`round_outcome`, `next_pssm`, `psiblast_pssms`).
 #[derive(Clone, Copy)]
 pub(super) struct SubjectKeys<'a> {
-    /// The ordinal ids of a database's listed subjects (`None` for `-subject` records).
-    pub(super) listed_ordinals: Option<&'a [u32]>,
+    /// The ordinal ids of a database's listed subjects with the database's OID of each
+    /// (`None` for `-subject` records).
+    pub(super) listed_ordinals: Option<(&'a [u32], crate::seqdb::OidMap<'a>)>,
     /// The parsed Seq-ids of a database's subjects by rank (empty without them).
     pub(super) parsed: &'a [Option<Arc<ParsedSubject>>],
     /// What the PSSM reads by those Seq-align ids where it is not the subject's own letters
@@ -816,10 +817,13 @@ impl SubjectKeys<'_> {
     pub(super) fn key(&self, s_idx: u32) -> SetKey {
         match self.listed_ordinals {
             None => SetKey::Index(s_idx),
-            Some(ordinals) => match self.parsed.get(s_idx as usize).and_then(Option::as_deref) {
-                Some(subject) => SetKey::Id(subject.alignment_id().clone()),
-                None => SetKey::Index(ordinals[s_idx as usize]),
-            },
+            Some((ordinals, oids)) => {
+                match self.parsed.get(s_idx as usize).and_then(Option::as_deref) {
+                    Some(subject) => SetKey::Id(subject.alignment_id().clone()),
+                    // The Seq-align id `gnl|BL_ORD_ID|<oid>` (`SetKey::ordinal_id`).
+                    None => SetKey::Index(oids.oid(ordinals[s_idx as usize]).get()),
+                }
+            }
         }
     }
 }

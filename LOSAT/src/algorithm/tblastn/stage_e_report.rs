@@ -50,6 +50,8 @@ pub(super) enum ShownSubjects<'a> {
         name: &'a str,
         pairwise: &'a PairwiseDatabase,
         reported: &'a super::database::ReportedSubjects,
+        /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
+        oids: crate::seqdb::OidMap<'a>,
     },
 }
 
@@ -79,11 +81,11 @@ impl ShownSubjects<'_> {
             .map(|pairwise| pairwise.definition.as_slice())
     }
 
-    /// The ordinal ID of the reported database sequence of rank `rank`, `None` for `-subject`.
-    pub(super) fn ordinal(&self, rank: usize) -> Option<u32> {
+    /// The OID of the reported database sequence of rank `rank`, `None` for `-subject`.
+    pub(super) fn oid(&self, rank: usize) -> Option<crate::seqdb::Oid> {
         match self {
             Self::Fasta { .. } => None,
-            Self::Database { reported, .. } => Some(reported.ordinals[rank]),
+            Self::Database { reported, oids, .. } => Some(oids.oid(reported.ordinals[rank])),
         }
     }
 

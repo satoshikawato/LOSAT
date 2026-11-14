@@ -1,0 +1,3 @@
+Error: (803.7) [blastx] Blast4-request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x7F] in string at line 98
+sp1 subject protein alpha bta

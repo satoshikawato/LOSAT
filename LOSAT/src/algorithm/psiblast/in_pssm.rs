@@ -105,12 +105,6 @@ pub(crate) fn check_in_pssm_options(args: &ResolvedBlastpArgs, psi: &Arc<PsiSear
     {
         return Ok(());
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:191-198 (the SEG mask
-    // of the query, then `PsiBlastSetupScoreBlock`)
-    // The query's SEG mask changes the PSSM search's hits (DESIGN_ps4 §1.6).
-    if args.seg.params().is_some() || args.soft_masking {
-        bail!("-seg and -soft_masking true with -in_pssm are not supported by LOSAT's PSIBLAST");
-    }
     // The outfmt 0, 6 and 7 reports (the others are item PS15b's).
     let choice = crate::blastinput::app::parse_formatting_string(&args.outfmt)?;
     if !matches!(choice.number, 0 | 6 | 7) {

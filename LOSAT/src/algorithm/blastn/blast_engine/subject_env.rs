@@ -51,8 +51,8 @@ pub(super) struct SubjectEnvInputs<'a> {
 
 /// The values of the batch's subject search that `process_subject` and the tail of
 /// `search_query_batch` read, which `search_query_batch` destructures into locals of the same
-/// names; `process_subject` is to take this struct as its argument when it becomes a function
-/// (SW7 bn-11).
+/// names; `process_subject`'s two stages read the ones they need through
+/// `prelim_subject::PrelimBatch` and `traceback_subject::TraceBatch`, built once per batch.
 pub(super) struct SubjectSearchEnv {
     pub(super) progress_bar: Option<ProgressBar>,
     pub(super) hitlist_size: usize,

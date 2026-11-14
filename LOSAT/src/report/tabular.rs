@@ -293,7 +293,7 @@ pub fn parse_fields(spec: &str) -> Vec<TabularField> {
 /// ```
 /// Returns NCBI's message; the field list (`spec`) is searched as text, as NCBI does.
 pub fn custom_delimiter_conflict(spec: &str, delimiter: &str) -> Option<String> {
-    let spec = super::outfmt6::truncate_spaces(spec.as_bytes());
+    let spec = crate::ncbi_str::truncate_spaces(spec.as_bytes());
     if spec.is_empty() {
         return None;
     }

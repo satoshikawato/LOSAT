@@ -475,7 +475,7 @@ change the process environment or process-wide state, `blastn_report_stream_api`
 next to the code, `cargo test --lib`). A test
 is named `<file>::<test>`. Run one file with `cargo test --all-features --test blastn blastn_strand::`
 (keep `--test <suite>`, since the filter is a substring: `blastx_hitbf::` alone also runs
-`tblastx_hitbf::`), or with nextest `-E 'test(/^blastn_strand::/)'` (the binary id is `LOSAT::blastn`). A
+`tblastx_hitbf::`), or with nextest `-E 'test(/^blastn_strand::/)'` (the binary id is `losat::blastn`). A
 new file goes into its program's suite root (`common` for the command line, the output formats and the
 shared parts) with two lines, `#[path = "../<file>.rs"]` and `mod <file>;`; `tests/suite_layout.rs`
 checks that every file is in exactly one binary. Plain `cargo test` runs a suite's tests together, up to

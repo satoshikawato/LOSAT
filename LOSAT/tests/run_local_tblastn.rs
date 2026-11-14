@@ -1,4 +1,4 @@
-//! The TBLASTN search of `LOSAT::api` (which calls the shared entry `run_local`) writes several
+//! The TBLASTN search of `losat::api` (which calls the shared entry `run_local`) writes several
 //! output formats from one search. Every format must be byte-identical to the CLI run that
 //! requests only that format, and the warnings must equal that run's standard error. A subject or
 //! a query without residues is kept, with NCBI's warnings, by the CLI. (The saved NCBI BLAST+
@@ -12,8 +12,8 @@ mod run_local_support;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use losat::api::{read_fasta, FastaRecord, Outcome, Program, Role};
 use run_local_support::{cli_out_path, temp_path, Files, TempFasta};
-use LOSAT::api::{read_fasta, FastaRecord, Outcome, Program, Role};
 
 /// The last three are the custom tabular reports of the shared writer (line CLI C2, PR 2).
 const FORMATS: [&str; 13] = [
@@ -130,7 +130,7 @@ fn cli(inputs: &Inputs, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
 //    hitlist_size = args[kArgMaxTargetSequences].AsInteger();
 // }
 // ```
-// This half compares `LOSAT::api`'s search with the CLI run of every format (reports and warnings);
+// This half compares `losat::api`'s search with the CLI run of every format (reports and warnings);
 // the half about the entry itself (the hit records and the observer change nothing) is the test of
 // the same name in `LOSAT/src/api/local_blast_tests/tblastn.rs`.
 #[test]

@@ -1445,11 +1445,13 @@ impl ParsedSubject {
             Some(id) => label::content(id, true, &mut label_of_id),
             None => {}
         }
-        let gi = defline.gi().to_string();
+        // `NStr::StringToNumeric<TGi>(useThisSeq)` (`NStr::StringToInt8`, flags 0) of a GI
+        // that `under_positive_list` wrote in decimal.
+        let gi = defline.gi();
         self.use_this_seqid
             .iter()
             .any(|string| match string.strip_prefix(b"gi:") {
-                Some(value) => value == gi.as_bytes(),
+                Some(value) => crate::ncbi_str::string_to_int8(value, 0).is_ok_and(|n| n == gi),
                 None => string.strip_prefix(b"seqid:") == Some(label_of_id.as_slice()),
             })
     }

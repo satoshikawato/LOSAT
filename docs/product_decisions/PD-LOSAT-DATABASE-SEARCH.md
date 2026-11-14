@@ -378,8 +378,6 @@ Version 5 and the options added to the writer:
   the same name in the current directory, which NCBI's reader finds first) adds nothing.
 - `-logfile` is read as makeblastdb's option, not wherever it stands in the command line
   (makeblastdb's corelib also finds it as the value of another option).
-- Of several `-in` files, one that exists and cannot be opened is an error (exit status 255)
-  that removes what the earlier files added; makeblastdb skips it without a word.
 - LMDB's lock files (`NAME.pdb-lock`, `NAME.ptf-lock`) are made as makeblastdb makes them:
   LMDB creates each when it opens its environment, before the data file, with 8192 bytes of a
   lock region that no transaction has used, and the writer removes it when it is destroyed,
@@ -408,9 +406,6 @@ Version 5 and the options added to the writer:
 
 Errors that makeblastdb does not detect, or detects elsewhere:
 
-- An input file that cannot be opened: makeblastdb does not test its stream and ends with
-  exit status 0 and a missing database. LOSAT removes the files of the build and ends with
-  `Error: <path>: <system error>` and exit status 255.
 - On Windows, an output directory that exists but is not writable: makeblastdb stops before
   its log (it reads the directory's access rights). LOSAT does not read them: a version 4
   build writes its files to nowhere, as any file that cannot be created, and ends where the

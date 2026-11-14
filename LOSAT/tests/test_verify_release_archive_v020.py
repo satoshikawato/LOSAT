@@ -174,8 +174,8 @@ class VerifyReleaseArchiveTests(unittest.TestCase):
         self.assertEqual(result["shared_memory_guard"]["fill"], 1)
 
     def test_source_crate_hash_and_layout_pass(self) -> None:
-        archive = self.temp / "LOSAT-0.2.0.crate"
-        write_tar(archive, {"LOSAT-0.2.0/Cargo.toml": b"[package]\n"})
+        archive = self.temp / "losat-0.2.0.crate"
+        write_tar(archive, {"losat-0.2.0/Cargo.toml": b"[package]\n"})
         write_sidecar(archive)
         code, message = run_main(self.argv(archive, "source"))
         self.assertEqual((code, message), (0, ""))

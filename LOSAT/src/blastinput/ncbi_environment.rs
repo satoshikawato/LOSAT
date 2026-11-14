@@ -12,6 +12,7 @@ use super::ncbi_registry::{
     error_reading_post, last_value, read_registry, repeated_entry_post, running_error_reading_post,
     running_syntax_error_notice, syntax_error_notice, Layer, RegistryEntry, RegistryRead,
 };
+use crate::ncbi_str::string_to_bool;
 use crate::report::diag_log::{Posts, CRITICAL, ERROR, WARNING};
 
 /// Registry entries (section, name; case-insensitive) that change no output of a search with
@@ -111,45 +112,6 @@ fn is_harmless_entry(section: &str, name: &str) -> bool {
     HARMLESS_ENTRIES
         .iter()
         .any(|(s, n)| section.eq_ignore_ascii_case(s) && name.eq_ignore_ascii_case(n))
-}
-
-/// `NStr::StringToBool`.
-///
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbistr.cpp:2817-2838
-/// ```c
-/// bool NStr::StringToBool(const CTempString str)
-/// {
-///     if ( str == "1"  ||
-///          AStrEquiv(str, s_kTrueString,  PNocase())  ||
-///          AStrEquiv(str, s_kTString,     PNocase())  ||
-///          AStrEquiv(str, s_kYesString,   PNocase())  ||
-///          AStrEquiv(str, s_kYString,     PNocase())  ||
-///          AStrEquiv(str, s_kOnString,    PNocase()) ) {
-///         errno = 0;
-///         return true;
-///     }
-///     if ( str == "0"  ||
-///          AStrEquiv(str, s_kFalseString, PNocase())  ||
-///          AStrEquiv(str, s_kFString,     PNocase())  ||
-///          AStrEquiv(str, s_kNoString,    PNocase())  ||
-///          AStrEquiv(str, s_kNString,     PNocase())  ||
-///          AStrEquiv(str, s_kOffString,   PNocase()) ) {
-///         errno = 0;
-///         return false;
-///     }
-///     NCBI_THROW2(CStringException, eConvert,
-///                 "String cannot be converted to bool", 0);
-/// }
-/// ```
-pub fn ncbi_string_to_bool(value: &str) -> Option<bool> {
-    let is = |word: &str| value.eq_ignore_ascii_case(word);
-    if value == "1" || is("true") || is("t") || is("yes") || is("y") || is("on") {
-        Some(true)
-    } else if value == "0" || is("false") || is("f") || is("no") || is("n") || is("off") {
-        Some(false)
-    } else {
-        None
-    }
 }
 
 /// Why LOSAT rejects an environment variable, or `None`.
@@ -2536,7 +2498,7 @@ fn rpsbproc_registry_refusal(path: &Path) -> String {
 /// `BLAST_USAGE_REPORT` as `NStr::StringToBool` reads it (`usage_report_reads_ncbirc`): `None`
 /// when it is not set, `Some(None)` for a value that is not a Boolean (NCBI aborts).
 fn usage_report_variable(env: &dyn Fn(&str) -> Option<OsString>) -> Option<Option<bool>> {
-    env("BLAST_USAGE_REPORT").map(|value| ncbi_string_to_bool(&value.to_string_lossy()))
+    env("BLAST_USAGE_REPORT").map(|value| string_to_bool(&value.to_string_lossy()))
 }
 
 /// Whether the environment turns `.ncbirc` off for every registry (`IncludeNcbircIfAllowed`,
@@ -2945,7 +2907,7 @@ fn usage_report_entry_refusal(
     env: &dyn Fn(&str) -> Option<OsString>,
     usage_read: Option<(&RegistryRead, &Path)>,
 ) -> Option<String> {
-    let not_a_boolean = |value: &str| ncbi_string_to_bool(value).is_none();
+    let not_a_boolean = |value: &str| string_to_bool(value).is_none();
     if let Some(value) = env("NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT") {
         let value = value.to_string_lossy();
         return not_a_boolean(&value).then(|| {
@@ -4103,23 +4065,6 @@ mod tests {
         std::fs::remove_file(&ini).unwrap();
         std::fs::remove_file(&ncbirc).unwrap();
         std::fs::remove_dir(&dir).unwrap();
-    }
-
-    #[test]
-    fn ncbis_booleans() {
-        for (text, value) in [
-            ("1", Some(true)),
-            ("TRUE", Some(true)),
-            ("t", Some(true)),
-            ("On", Some(true)),
-            ("0", Some(false)),
-            ("No", Some(false)),
-            ("off", Some(false)),
-            ("", None),
-            ("2", None),
-        ] {
-            assert_eq!(ncbi_string_to_bool(text), value, "{text:?}");
-        }
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:844-866 (quoted at `log_file`).

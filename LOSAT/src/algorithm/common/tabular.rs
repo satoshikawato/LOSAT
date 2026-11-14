@@ -420,7 +420,7 @@ pub(crate) fn write_tax_report(
     names: Option<&TabularNames>,
     program: &str,
     queries: &[crate::report::tax_report::TaxQuery<'_>],
-    writer: &mut dyn Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> Result<()> {
     use crate::report::tax_report::{report_batch, write_report};

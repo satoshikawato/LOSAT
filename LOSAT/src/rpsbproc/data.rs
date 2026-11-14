@@ -238,7 +238,7 @@ impl<'a> Line<'a> {
         DataError::Unsupported(format!(
             "a line of {} where NCBI's loader makes {what} is not supported by LOSAT's rpsbproc: '{}'",
             self.file,
-            printable_string(self.bytes)
+            String::from_utf8_lossy(&printable_string(self.bytes))
         ))
     }
 }

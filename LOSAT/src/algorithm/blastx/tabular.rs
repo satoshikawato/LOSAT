@@ -308,7 +308,7 @@ fn subject_values<'a>(
 /// stream failure of NCBI's formatter (`report::TabularFlushError`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_blastx_tabular(
-    writer: &mut impl Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     stderr: &mut dyn Write,
     options: &ResolvedOptions,
     spec: &TabularSpec,
@@ -653,7 +653,7 @@ pub(super) fn write_blastx_tabular(
 /// formats' abort (probe `T/t2/fix1` `f1.d5.blastx.*`).
 #[allow(clippy::too_many_arguments)]
 fn write_blastx_tax_report(
-    writer: &mut impl Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     stderr: &mut dyn Write,
     options: &ResolvedOptions,
     queries: &[FastaRecord],

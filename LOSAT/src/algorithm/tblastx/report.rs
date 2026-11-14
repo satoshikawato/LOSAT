@@ -1675,15 +1675,6 @@ impl TblastxOutputFormat {
         matches!(self, Self::CustomTabular(spec) if spec.needs().joins_subjects())
     }
 
-    /// Whether the format writes a query's own warnings to standard error
-    /// (`ReportFormat::writes_query_warnings`: not the structured formats).
-    pub(crate) fn writes_query_warnings(self) -> bool {
-        !matches!(
-            self,
-            Self::Seqalign(_) | Self::Xml | Self::Xml2(_) | Self::Archive
-        )
-    }
-
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
     /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6, 7, 10 and 20; with
     /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as
@@ -2500,13 +2491,11 @@ mod tests {
         ] {
             let format = output_format(outfmt);
             assert_eq!(format.reads_displayed_counts(), counts, "{outfmt}");
-            assert_eq!(format.writes_query_warnings(), counts, "{outfmt}");
         }
-        // The custom tabular reports make their own rows and write the query warnings.
+        // The custom tabular reports make their own rows.
         for outfmt in ["6 qseqid", "10", "20 std"] {
             let format = output_format(outfmt);
             assert!(!format.reads_displayed_counts(), "{outfmt}");
-            assert!(format.writes_query_warnings(), "{outfmt}");
             assert!(format.is_tabular(), "{outfmt}");
         }
         // DBID item T: the formats whose batches' prefetch writes the taxonomy database's

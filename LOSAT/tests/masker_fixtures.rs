@@ -5,7 +5,7 @@
 //! in `tests/<program>/ncbi/<name>.{out,err,rc}` (probes of line RG, items K1, K2 and K3,
 //! 2026-11-12 and 11-13, on ws and the local official release). A name the table repeats is
 //! compared on its last row, whose output the probe kept. NCBI is not run here. Every row runs
-//! through the library API too (`LOSAT::api::run_dustmasker`, `run_segmasker`,
+//! through the library API too (`losat::api::run_dustmasker`, `run_segmasker`,
 //! `run_convert2blastmask`, by `examples/library_command_line`), with the same bytes.
 
 use std::fs;
@@ -229,11 +229,16 @@ fn runs_here(case: &Case) -> bool {
         .position(|word| word == "-out")
         .and_then(|at| case.words.get(at + 1))
         .map(String::as_str);
-    match out {
-        Some("/dev/full") => cfg!(target_os = "linux"),
-        Some("/dev/null") => cfg!(unix),
-        _ => true,
-    }
+    // A table, not a `match` or an `if` chain: the `cfg!` are constants, which clippy would read
+    // as `matches!` (Windows) or as an `if` that is always true (Unix).
+    let devices = [
+        ("/dev/full", cfg!(target_os = "linux")),
+        ("/dev/null", cfg!(unix)),
+    ];
+    devices
+        .iter()
+        .find(|(device, _)| out == Some(*device))
+        .is_none_or(|&(_, here)| here)
 }
 
 /// The rows of `program` that run here (`runs_here`).

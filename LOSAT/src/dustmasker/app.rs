@@ -55,7 +55,7 @@ pub(super) fn run(
             Err(reason) => Err(reason.as_str()),
         },
     };
-    match work::run(&options, stdin, &mut output) {
+    match work::run(&options, stdin, &mut output, diag) {
         Ok(()) => 0,
         Err(failure) => match report(failure) {
             Report::Posts { lines, status } => {

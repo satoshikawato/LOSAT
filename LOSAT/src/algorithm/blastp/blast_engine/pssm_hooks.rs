@@ -211,13 +211,18 @@ fn psi_gapped_x_dropoffs(args: &ResolvedBlastpArgs, karlin: &PsiKarlin) -> (i32,
     )
 }
 
-/// The hit-saving cutoff of a PSSM search's context (`hit_params->cutoffs[0]`): `cutoff_score_max`
-/// from `-evalue` (the preliminary e-value) with `kbp_gap_psi`, which the initial words' cutoff
-/// reads, and `cutoff_score`, which psiblast's `-sum_stats true` lowers to the sum statistics'
-/// cutoff where that is smaller (`blast_engine::sum_stats_hit_cutoff` with `kbp_gap_psi`: NCBI's
-/// `kbp_array` is `sbp->kbp_gap`); without sum statistics the two are the same. The traceback's
-/// hit-saving parameters are made again from the same options (`BLAST_GapAlignSetUp`), so its
-/// `cutoff_score_min` is this `cutoff_score` (one context).
+/// The hit-saving cutoff of a PSSM search's context (`hit_params->cutoffs[0]`) at the subject
+/// length `cutoff_subject_length` and the e-value `prelim_evalue`: `cutoff_score_max` with
+/// `kbp_gap_psi`, which the initial words' cutoff reads, and `cutoff_score`, which psiblast's
+/// `-sum_stats true` lowers to the sum statistics' cutoff at that length where that is smaller
+/// (`blast_engine::sum_stats_hit_cutoff` with `kbp_gap_psi`: NCBI's `kbp_array` is
+/// `sbp->kbp_gap`); without sum statistics the two are the same. `psi_prelim_cutoffs` calls it
+/// with the setup's subject length and preliminary e-value, or with a subject's length and
+/// `-evalue` unstretched (the statistics of each subject). With the setup's (as `pssm_traceback`
+/// calls it), its `cutoff_score` is the traceback's `cutoff_score_min` (one context): the
+/// traceback's hit-saving parameters are made again from the same options
+/// (`BLAST_GapAlignSetUp`), and the update for each subject does not reach them
+/// (blast_traceback.c:1596-1628 updates the thread's copy).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:949-976 (quoted at
 /// `blast_engine::sum_stats_hit_cutoff`)
@@ -265,7 +270,8 @@ fn psi_link_context(
 /// (`kbp_std`) at most `cutoff_score_max` (`BlastInitialWordParametersUpdate`), the hit-saving
 /// cutoff is `psi_hit_cutoffs`' `cutoff_score`, and with psiblast's `-sum_stats true` the
 /// linking reads the words' cutoff as its small-gap cutoff (`BlastLinkHSPParametersUpdate`, one
-/// context: `EvenGapLinkParams::preliminary`) and the context at `search_space`.
+/// context: `EvenGapLinkParams::preliminary`) and the context at `search_space`. The matrix's
+/// counterpart is `blast_engine::blastp_prelim_cutoffs`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:625-646
 /// ```c
@@ -439,7 +445,7 @@ pub(super) fn pssm_prelim(
             return;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 and
-        // c++/src/algo/blast/core/blast_setup.c:1010-1024 (quoted at `run_resolved_in_pool`'s
+        // c++/src/algo/blast/core/blast_setup.c:1010-1024 (quoted at `run_call`'s
         // `subject_parameters`): the statistics of each subject, with the subject's length in the
         // hit-saving cutoff (no stretch of the e-value; with psiblast's `-sum_stats true` lowered
         // at the subject's length) and in the effective lengths, which the linking reads with the

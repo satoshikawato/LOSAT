@@ -448,8 +448,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
             problems.append(f"exit {run.returncode}, expected {row['rc']}")
         # A refusal follows no byte in either path (the library holds its output where the command
         # line holds it, BLASTX's XML documents through `blast_xml::documents_may_refuse`); the rows
-        # whose refusal comes after NCBI's reports are psiblast's PSSM file rows, which the library
-        # skips.
+        # whose refusal comes after NCBI's reports are psiblast's PSSM file and rounds rows, which the
+        # library skips.
         if row["stdout_bytes"]:
             out_path = FROZEN / f"{row['row_id']}.out"
             out = out_path.read_bytes() if out_path.exists() else b""

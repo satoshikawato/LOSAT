@@ -251,15 +251,14 @@ impl BlastpSubjectResult {
 // diag_table->offset = window_size;
 // ```
 /// The statistics of one subject that NCBI's preliminary search computes for a database length of
-/// 0 (`BLAST_OneSubjectUpdateParameters`, `run_resolved_in_pool`): each context's search space
-/// (the preliminary e-values without the Gumbel block and the linking), hit-saving cutoff and word
-/// cutoff, and with psiblast's `-sum_stats true` the subject's sum statistics (`BlastpSumStats` at
-/// the subject's length: the lowered hit-saving cutoffs and the linking's small-gap cutoff).
+/// 0 (`BLAST_OneSubjectUpdateParameters`, `run_call`'s `subject_parameters`): each context's search
+/// space (the preliminary e-values without the Gumbel block and the linking) and the cutoffs at
+/// the subject's length (`blastp_prelim_cutoffs`: hit-saving and word cutoffs, and with psiblast's
+/// `-sum_stats true` the subject's sum statistics, the lowered hit-saving cutoffs and the
+/// linking's small-gap cutoff).
 struct BlastpSubjectParameters {
     search_spaces: Vec<SearchSpace>,
-    hit_cutoff_scores: Vec<i32>,
-    word_cutoff_scores: Vec<i32>,
-    sum_stats: Option<BlastpSumStats>,
+    cutoffs: BlastpPrelimCutoffs,
 }
 
 struct BlastpSubjectScratch {
@@ -1550,6 +1549,77 @@ impl BlastpSumStats {
             }
         }
         cutoffs
+    }
+}
+
+/// The cutoffs of a BLASTP preliminary stage with the matrix at one subject length
+/// (`blastp_prelim_cutoffs`), for each context.
+struct BlastpPrelimCutoffs {
+    /// The hit-saving cutoffs (`hit_params->cutoffs[context].cutoff_score`), lowered by psiblast's
+    /// `-sum_stats true`.
+    hit_cutoff_scores: Vec<i32>,
+    /// The initial words' cutoffs (`word_params->cutoffs[context].cutoff_score`).
+    word_cutoff_scores: Vec<i32>,
+    /// psiblast's `-sum_stats true`: the sum statistics and the preliminary linking.
+    sum_stats: Option<BlastpSumStats>,
+}
+
+/// The cutoffs of a BLASTP preliminary stage with the matrix at one subject length: the setup's
+/// (`cutoff_subject_length`, `-comp_based_stats`, the preliminary stage's search spaces) or, with
+/// the statistics of each subject, the subject's (`BLAST_OneSubjectUpdateParameters`: its length,
+/// a composition-based statistics of 0, its search spaces). The hit-saving cutoffs
+/// (`cutoff_score_max`) come first, the words' cutoffs read them before the sum statistics lower
+/// them (`BlastInitialWordParametersUpdate` reads `cutoff_score_max`), and with psiblast's
+/// `-sum_stats true` the sum statistics at that length take the words' smallest cutoff as the
+/// linking's small-gap cutoff (`BlastLinkHSPParametersUpdate`) and lower each hit-saving cutoff to
+/// their own where that is smaller (`cutoff_score`). `exact_spaces` are the contexts' effective
+/// search spaces (0 where none is exact). The PSSM rounds' counterpart is
+/// `pssm_hooks::psi_prelim_cutoffs`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1010-1024 (quoted at
+/// `run_call`'s `subject_parameters`)
+fn blastp_prelim_cutoffs(
+    args: &ResolvedBlastpArgs,
+    contexts: &[QueryContext],
+    subject_length: i32,
+    mode: BlastpCompositionMode,
+    exact_spaces: &[Option<i64>],
+    gapped_params: &KarlinParams,
+    gapped_gumbel: Option<&BlastGumbelBlk>,
+) -> BlastpPrelimCutoffs {
+    let hit_cutoff_scores: Vec<i32> = contexts
+        .iter()
+        .zip(exact_spaces)
+        .map(|(ctx, space)| {
+            blastp_hit_cutoff_score_for_context(
+                ctx,
+                args.evalue,
+                subject_length,
+                mode,
+                gapped_params,
+                gapped_gumbel,
+                space.unwrap_or(0),
+            )
+        })
+        .collect();
+    let word_cutoff_scores: Vec<i32> = hit_cutoff_scores
+        .iter()
+        .zip(contexts)
+        .map(|(&hit_cutoff_score, ctx)| {
+            blastp_word_cutoff_score_for_context(hit_cutoff_score, ctx, args.gap_trigger_bits)
+        })
+        .collect();
+    let sum_stats = args
+        .sum_stats
+        .then(|| BlastpSumStats::new(contexts, subject_length, gapped_params, &word_cutoff_scores));
+    let hit_cutoff_scores = match &sum_stats {
+        Some(sum_stats) => sum_stats.lower_hit_cutoffs(contexts, hit_cutoff_scores),
+        None => hit_cutoff_scores,
+    };
+    BlastpPrelimCutoffs {
+        hit_cutoff_scores,
+        word_cutoff_scores,
+        sum_stats,
     }
 }
 
@@ -10327,44 +10397,22 @@ fn run_call(
         Some((spaces, exact)) => (spaces, exact),
         None => (&search_spaces, &exact_search_spaces),
     };
-    let hit_cutoff_scores: Vec<i32> = contexts
-        .iter()
-        .enumerate()
-        .map(|(context_idx, ctx)| {
-            blastp_hit_cutoff_score_for_context(
-                ctx,
-                args.evalue,
-                cutoff_subject_length,
-                args.comp_based_stats.mode,
-                &gapped_params,
-                gapped_gumbel.as_ref(),
-                preliminary_exact_spaces[context_idx].unwrap_or(0),
-            )
-        })
-        .collect();
-    // The words' cutoffs read `cutoff_score_max`, which sum statistics do not lower.
-    let word_cutoff_scores: Vec<i32> = hit_cutoff_scores
-        .iter()
-        .zip(contexts.iter())
-        .map(|(&hit_cutoff_score, ctx)| {
-            blastp_word_cutoff_score_for_context(hit_cutoff_score, ctx, args.gap_trigger_bits)
-        })
-        .collect();
-    // psiblast's `-sum_stats true`: the cutoff of the HSPs a search keeps (`cutoff_score`) is
-    // lowered to the sum statistics' cutoff where that is smaller, and the preliminary stage links
-    // the HSPs of each subject (`BlastpSumStats`).
-    let sum_stats = args.sum_stats.then(|| {
-        BlastpSumStats::new(
-            &contexts,
-            cutoff_subject_length,
-            &gapped_params,
-            &word_cutoff_scores,
-        )
-    });
-    let hit_cutoff_scores: Vec<i32> = match &sum_stats {
-        Some(sum_stats) => sum_stats.lower_hit_cutoffs(&contexts, hit_cutoff_scores),
-        None => hit_cutoff_scores,
-    };
+    // The setup's cutoffs; psiblast's `-sum_stats true` lowers the cutoff of the HSPs a search
+    // keeps (`cutoff_score`) to the sum statistics' cutoff where that is smaller, and the
+    // preliminary stage links the HSPs of each subject (`BlastpSumStats`).
+    let BlastpPrelimCutoffs {
+        hit_cutoff_scores,
+        word_cutoff_scores,
+        sum_stats,
+    } = blastp_prelim_cutoffs(
+        &args,
+        &contexts,
+        cutoff_subject_length,
+        args.comp_based_stats.mode,
+        preliminary_exact_spaces,
+        &gapped_params,
+        gapped_gumbel.as_ref(),
+    );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:978-990
     // ```c
     //       /* scale up the computed cutoffs, and find the smallest one */
@@ -10440,8 +10488,9 @@ fn run_call(
     //    }
     // ```
     // The statistics of one subject (`per_subject`): each context's effective lengths
-    // (`stats::setup::subject_eff_lengths`), the hit-saving cutoffs of `BlastHitSavingParametersUpdate`
-    // with the subject's length and a composition-based statistics of 0 (no stretch of the
+    // (`stats::setup::subject_eff_lengths`) and, through the setup's own `blastp_prelim_cutoffs`,
+    // the hit-saving cutoffs of `BlastHitSavingParametersUpdate` with the subject's length and a
+    // composition-based statistics of 0 (no stretch of the
     // e-value: `params->prelim_evalue = evalue`, blast_parameters.c:868, 937-938), and the
     // word cutoffs of `BlastInitialWordParametersUpdate` (gapped: the gap trigger, at most the
     // hit-saving cutoff before the sum statistics lower it, `cutoff_score_max`; the X-drops keep
@@ -10462,10 +10511,7 @@ fn run_call(
             .as_deref()
             .expect("the statistics of each subject have their preliminary option spaces");
         let mut search_spaces = preliminary_search_spaces.clone();
-        let mut exact_spaces: Vec<i64> = preliminary_exact_spaces
-            .iter()
-            .map(|space| space.unwrap_or(0))
-            .collect();
+        let mut exact_spaces = preliminary_exact_spaces.clone();
         for (ctx_idx, ctx) in contexts.iter().enumerate() {
             if !ctx.is_valid || ctx.aa_len == 0 {
                 continue;
@@ -10484,47 +10530,19 @@ fn run_call(
                 effective_space: lengths.eff_searchsp as f64,
                 length_adjustment: i64::from(lengths.length_adjustment),
             };
-            exact_spaces[ctx_idx] = lengths.eff_searchsp;
+            exact_spaces[ctx_idx] = Some(lengths.eff_searchsp);
         }
-        let hit_cutoff_scores: Vec<i32> = contexts
-            .iter()
-            .zip(exact_spaces.iter())
-            .map(|(ctx, &space)| {
-                blastp_hit_cutoff_score_for_context(
-                    ctx,
-                    args.evalue,
-                    subject_length as i32,
-                    BlastpCompositionMode::NoCompositionBasedStats,
-                    &gapped_params,
-                    gapped_gumbel.as_ref(),
-                    space,
-                )
-            })
-            .collect();
-        let word_cutoff_scores: Vec<i32> = hit_cutoff_scores
-            .iter()
-            .zip(contexts.iter())
-            .map(|(&hit_cutoff_score, ctx)| {
-                blastp_word_cutoff_score_for_context(hit_cutoff_score, ctx, args.gap_trigger_bits)
-            })
-            .collect();
-        let sum_stats = args.sum_stats.then(|| {
-            BlastpSumStats::new(
-                &contexts,
-                subject_length as i32,
-                &gapped_params,
-                &word_cutoff_scores,
-            )
-        });
-        let hit_cutoff_scores = match &sum_stats {
-            Some(sum_stats) => sum_stats.lower_hit_cutoffs(&contexts, hit_cutoff_scores),
-            None => hit_cutoff_scores,
-        };
         Ok(BlastpSubjectParameters {
             search_spaces,
-            hit_cutoff_scores,
-            word_cutoff_scores,
-            sum_stats,
+            cutoffs: blastp_prelim_cutoffs(
+                &args,
+                &contexts,
+                subject_length as i32,
+                BlastpCompositionMode::NoCompositionBasedStats,
+                &exact_spaces,
+                &gapped_params,
+                gapped_gumbel.as_ref(),
+            ),
         })
     };
     // `x_prelim_free.rs`.
@@ -10661,11 +10679,11 @@ fn run_call(
                     }
                 };
                 (
-                    &x_subject_parameters.word_cutoff_scores,
-                    &x_subject_parameters.hit_cutoff_scores,
+                    &x_subject_parameters.cutoffs.word_cutoff_scores,
+                    &x_subject_parameters.cutoffs.hit_cutoff_scores,
                     &x_subject_parameters.search_spaces,
                     args.evalue,
-                    &x_subject_parameters.sum_stats,
+                    &x_subject_parameters.cutoffs.sum_stats,
                 )
             } else {
                 (

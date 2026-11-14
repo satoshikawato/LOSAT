@@ -225,6 +225,10 @@ test('the file that -conffile names is chosen in the form and read under that na
   await page.getByTestId('param-extra').fill('-conffile settings.ini');
   await expect(page.getByTestId('param-conffile-missing')).toBeVisible();
   await expect(validation).toHaveText(missing);
+  // `-conffile=` names no file: no row asks for one, and the engine's message stands.
+  await page.getByTestId('param-extra').fill('-conffile=');
+  await expect(validation).toHaveText('Critical: (106.23) Registry file "" not found, aborting.');
+  await expect(row).toHaveCount(0);
 });
 
 // -dryrun: the run reads the arguments and the settings and searches nothing (NCBI BLAST+ 2.17.0); the

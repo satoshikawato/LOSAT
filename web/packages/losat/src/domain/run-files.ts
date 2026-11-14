@@ -3,10 +3,13 @@
 // engine (`file_begin` kind 2), and the files that a run makes besides its outputs (stream 8: the file
 // of `-logfile NAME`), which the engine sends after the run as a ZIP archive of stored entries.
 
-/** The registry file of `-conffile`: its bytes, under the name that the argv gives (the engine's *start*). */
+/**
+ * The registry file of `-conffile`: the file, under the name that the argv gives (the engine's
+ * *start*). A Blob crosses to a worker without a copy of its bytes; the engine reads it in chunks.
+ */
 export interface RegistryFile {
   readonly name: string;
-  readonly bytes: Uint8Array;
+  readonly file: Blob;
 }
 
 /** A file that a run made besides its outputs (stream 8): the file of `-logfile NAME`, named NAME. */

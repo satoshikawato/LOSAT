@@ -4,7 +4,7 @@ import { sha256Hex } from 'losat';
 import type { InputRole, RegistryFile } from 'losat/domain';
 import type { EnginePrepareHint, StartResult, ValidationResult } from 'losat/ports';
 import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
-import { SearchDraft, type DraftSource } from '../../src/application/draft';
+import { conffileName, SearchDraft, type DraftSource } from '../../src/application/draft';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
@@ -1334,7 +1334,8 @@ describe('SearchDraft submit', () => {
     expect(draft.state.get().start?.conffile).toBe('settings.ini');
     expect(draft.state.get().validation).toEqual({ state: 'invalid', message: missing });
     expect(registries.at(-1)).toBeUndefined();
-    // A file of any name is read as the argv's, once: every validation and run takes the bytes read when it was chosen.
+    // A file of any name is read as the argv's. The page keeps the File, not its bytes: the validation
+    // gets the File (the Data worker reads it on an instance of its own), and so does the run's request.
     const chosen = file('my.ini', '[BLAST]\n');
     let reads = 0;
     const read = chosen.arrayBuffer.bind(chosen);
@@ -1343,15 +1344,14 @@ describe('SearchDraft submit', () => {
     await draft.idle();
     expect(draft.state.get().conffiles.blastn).toBe(chosen);
     expect(draft.state.get().validation).toEqual({ state: 'ok' });
-    const bytes = new TextEncoder().encode('[BLAST]\n');
-    expect(registries.at(-1)).toEqual({ name: 'settings.ini', bytes });
+    expect(registries.at(-1)).toEqual({ name: 'settings.ini', file: chosen });
+    expect(registries.at(-1)!.file).toBe(chosen);
     draft.setField('-word_size', '16');
     await draft.idle();
-    expect(registries.at(-1)!.bytes).toBe(registries.at(-2)!.bytes);
+    expect(registries.at(-1)!.file).toBe(chosen);
     expect((await draft.submit()).ok).toBe(true);
-    expect(requests.at(-1)![0]!.conffile).toEqual({ name: 'my.ini', bytes });
-    expect(requests.at(-1)![0]!.conffile!.bytes).toBe(registries.at(-1)!.bytes);
-    expect(reads).toBe(1);
+    expect(requests.at(-1)![0]!.conffile).toBe(chosen);
+    expect(reads).toBe(0);
     // Another program has its own Additional options and file.
     draft.setProgram('blastp');
     await draft.idle();
@@ -1359,7 +1359,7 @@ describe('SearchDraft submit', () => {
     expect(registries.at(-1)).toBeUndefined();
     draft.setProgram('blastn');
     await draft.idle();
-    expect(registries.at(-1)).toEqual({ name: 'settings.ini', bytes: new TextEncoder().encode('[BLAST]\n') });
+    expect(registries.at(-1)).toEqual({ name: 'settings.ini', file: chosen });
     // Without -conffile the chosen file is not read, nor sent with the run.
     draft.setExtra('');
     await draft.idle();
@@ -1395,14 +1395,19 @@ describe('SearchDraft submit', () => {
     draft.setExtra('-conffile settings.ini');
     await draft.idle();
     expect(draft.state.get().start?.conffile).toBe('settings.ini');
+    expect(conffileName(draft.state.get())).toBe('settings.ini');
     draft.setProgram('blastp');
     expect(draft.state.get().start).toBeUndefined();
+    expect(conffileName(draft.state.get())).toBeUndefined();
     await draft.idle();
     expect(draft.state.get().start?.conffile).toBeNull();
+    expect(conffileName(draft.state.get())).toBeUndefined();
     draft.setProgram('blastn');
+    // `-conffile=`: the form asks for no file (conffileName, the row of ParameterForm), and the search reads none.
     draft.setExtra('-conffile=');
     await draft.idle();
     expect(draft.state.get().start?.conffile).toBe('');
+    expect(conffileName(draft.state.get())).toBeUndefined();
     expect(registries.at(-1)).toBeUndefined();
   });
 

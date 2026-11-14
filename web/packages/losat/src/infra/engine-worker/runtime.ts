@@ -140,9 +140,8 @@ export class EngineRuntime {
       // named `.ncbirc` or `<program>.ini` as the CLI reads one in its directory. After the counts
       // file, whose name it cannot take while the instance holds that file.
       if (request.conffile !== undefined) {
-        const { name, bytes } = request.conffile;
-        const info = await loadFile(loaded.instance.abi, FILE_REGISTRY, name, bytes.length, (start, end) => bytes.subarray(start, end), (body) => inUse(use, body));
-        registry = info.handle;
+        const { name, file } = request.conffile;
+        registry = (await loadFile(loaded.instance.abi, FILE_REGISTRY, name, file, (body) => inUse(use, body))).handle;
       }
     } catch (error) {
       // A trap while a file was given to the engine: the next search loads the module again
@@ -352,15 +351,7 @@ export class EngineRuntime {
 
   /** Gives the file to the engine in chunks (`loadFile`), ends it, and holds it. */
   private async loadCounts(loaded: Loaded, wanted: WorkerCounts, key: string, use: InstanceUse | undefined): Promise<FileInfo> {
-    const { blob } = wanted;
-    const info = await loadFile(
-      loaded.instance.abi,
-      FILE_WINDOW_MASKER_COUNTS,
-      wanted.name,
-      blob.size,
-      async (start, end) => new Uint8Array(await blob.slice(start, end).arrayBuffer()),
-      (body) => inUse(use, body),
-    );
+    const info = await loadFile(loaded.instance.abi, FILE_WINDOW_MASKER_COUNTS, wanted.name, wanted.blob, (body) => inUse(use, body));
     loaded.counts = { key, handle: info.handle, info };
     return info;
   }

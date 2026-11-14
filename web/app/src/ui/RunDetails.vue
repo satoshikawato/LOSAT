@@ -65,7 +65,7 @@ const inputs = computed(() => [
           <!-- The registry file of -conffile (line RG E1w-3b): the name that the argv gives, and the file read under it. -->
           <dt>-conffile</dt>
           <dd>
-            <span data-testid="run-conffile">{{ snapshot.conffile.name }}: {{ snapshot.conffile.fileName }}, {{ formatBytes(snapshot.conffile.bytes.length) }}</span><br />
+            <span data-testid="run-conffile">{{ snapshot.conffile.name }}: {{ snapshot.conffile.fileName }}, {{ formatBytes(snapshot.conffile.size) }}</span><br />
             <span class="muted small" data-testid="run-conffile-sha256">SHA-256 {{ snapshot.conffile.sha256 }}</span>
           </dd>
         </template>

@@ -50,15 +50,17 @@ export interface CountsRecord extends CountsUse {
 /**
  * The registry file of `-conffile` (Additional options; line RG E1w-3b), read when the run was
  * submitted: the run registers its bytes under the name that the argv gives, whatever the chosen
- * file is called. It lives in the working session only, as the run does.
+ * file is called. The coordinator holds the bytes until the run ends; the snapshot keeps what tells
+ * the file: its names, its size and its SHA-256.
  */
 export interface ConffileSnapshot {
   /** The name that the argv's `-conffile` gives (the engine's start reads it). */
   readonly name: string;
   /** The name of the file that the user chose. */
   readonly fileName: string;
-  readonly bytes: Uint8Array;
-  /** Lower-case hex SHA-256 of `bytes`. */
+  /** Bytes of the file that the run read. */
+  readonly size: number;
+  /** Lower-case hex SHA-256 of the bytes that the run read. */
   readonly sha256: string;
 }
 

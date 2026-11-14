@@ -327,26 +327,34 @@ describe('Coordinator', () => {
   });
 
   // NCBI's application start (line RG E1w-3b): the engine's start of the argv names the registry
-  // file of -conffile and tells a dry run; enqueue validates with the chosen file under the argv's
-  // name, and the snapshot freezes its bytes and their SHA-256 (once for a group, which shares them).
-  it("reads the engine's start at enqueue: the -conffile file under the argv's name, frozen with its bytes, and the dry run", async () => {
+  // file of -conffile and tells a dry run. Enqueue reads the chosen file once (once for a group), and
+  // validates and runs with those bytes under the argv's name; the snapshot keeps the file's names,
+  // size and SHA-256, and the bytes go when the run ends.
+  it("reads the engine's start at enqueue: the -conffile file read once, under the argv's name, and the dry run", async () => {
     const engine = new ManualEngine();
     engine.startResult = startOf({ conffile: 'settings.ini', dryRun: true });
     const { coordinator } = setup(engine);
-    const bytes = new TextEncoder().encode('[BLAST]\n');
-    const chosen = { name: 'my settings.ini', bytes };
-    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const text = '[BLAST]\n';
+    const sha256 = createHash('sha256').update(text).digest('hex');
+    let reads = 0;
+    const chosen = new File([text], 'my settings.ini');
+    const read = chosen.arrayBuffer.bind(chosen);
+    chosen.arrayBuffer = () => (reads++, read());
+    const held = (coordinator as unknown as { conffiles: Map<string, Blob> }).conffiles;
     const runId = (await coordinator.enqueue({ ...request, extra: ['-conffile', 'settings.ini', '-dryrun'], conffile: chosen })).runId!;
-    expect(engine.registries).toEqual([{ name: 'settings.ini', bytes }]);
+    expect(engine.registries.map((registry) => registry?.name)).toEqual(['settings.ini']);
+    expect(await engine.registries[0]!.file.text()).toBe(text);
     const snapshot = viewOf(coordinator, runId)!.snapshot;
-    expect(snapshot.conffile).toEqual({ name: 'settings.ini', fileName: 'my settings.ini', bytes, sha256 });
-    expect(snapshot.conffile!.bytes).toBe(bytes);
+    expect(snapshot.conffile).toEqual({ name: 'settings.ini', fileName: 'my settings.ini', size: 8, sha256 });
     expect(Object.isFrozen(snapshot.conffile)).toBe(true);
     expect(snapshot.dryRun).toBe(true);
     await waitFor(coordinator, runId, 'running');
-    expect(engine.requests[0]!.conffile).toEqual({ name: 'settings.ini', bytes });
+    // The run reads the bytes that enqueue read and validated.
+    expect(engine.requests[0]!.conffile!.name).toBe('settings.ini');
+    expect(engine.requests[0]!.conffile!.file).toBe(engine.registries[0]!.file);
     engine.finish(runId);
     await waitFor(coordinator, runId, 'completed');
+    expect(held.size).toBe(0);
 
     // An argv without -conffile does not read a chosen file, and a run that is not a dry run says nothing of one.
     engine.startResult = startOf({});
@@ -367,8 +375,9 @@ describe('Coordinator', () => {
     await waitFor(coordinator, empty, 'running');
     engine.finish(empty);
     await waitFor(coordinator, empty, 'completed');
+    expect(reads).toBe(1);
 
-    // A group shares the file's bytes, and its SHA-256 is counted once.
+    // A group reads the file once and shares its bytes; its SHA-256 is counted once. A cancelled run lets them go.
     engine.startResult = startOf({ conffile: 'settings.ini' });
     let digests = 0;
     (coordinator as unknown as { deps: { digest: (bytes: Uint8Array) => Promise<string> } }).deps.digest = async (b) => {
@@ -378,17 +387,24 @@ describe('Coordinator', () => {
     const group = await coordinator.enqueueAll([
       { ...request, extra: ['-conffile', 'settings.ini'], conffile: chosen },
       { ...request, extra: ['-conffile', 'settings.ini'], conffile: chosen },
+      { ...request, extra: ['-conffile', 'settings.ini'], conffile: chosen },
     ]);
-    const snapshots = group.runIds!.map((id) => viewOf(coordinator, id)!.snapshot);
-    expect(snapshots.map((s) => s.conffile?.bytes)).toEqual([bytes, bytes]);
-    expect(snapshots[0]!.conffile!.bytes).toBe(snapshots[1]!.conffile!.bytes);
-    expect(snapshots.map((s) => s.conffile?.sha256)).toEqual([sha256, sha256]);
+    expect(reads).toBe(2);
     expect(digests).toBe(1);
-    for (const id of group.runIds!) {
+    const ids = group.runIds!;
+    const snapshots = ids.map((id) => viewOf(coordinator, id)!.snapshot);
+    expect(snapshots.map((s) => s.conffile?.sha256)).toEqual([sha256, sha256, sha256]);
+    expect(new Set(ids.map((id) => held.get(id))).size).toBe(1);
+    coordinator.cancel(ids[2]!);
+    expect(held.has(ids[2]!)).toBe(false);
+    for (const id of ids.slice(0, 2)) {
       await waitFor(coordinator, id, 'running');
       engine.finish(id);
       await waitFor(coordinator, id, 'completed');
     }
+    // The runs of the group read the one copy.
+    expect(engine.requests.at(-2)!.conffile!.file).toBe(engine.requests.at(-1)!.conffile!.file);
+    expect(held.size).toBe(0);
   });
 
   it('does not queue a request whose argv the engine cannot start, with its message', async () => {

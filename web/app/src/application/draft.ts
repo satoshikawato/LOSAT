@@ -53,7 +53,7 @@ import { fastaParser, programById, PROGRAMS, sequenceKind } from '../domain/prog
 import { regionProblem, regionValue, type RegionText } from '../domain/region';
 import type { DataGateway } from '../ports/data';
 import type { AccessionFetcher, FetchResult } from '../ports/fetch';
-import type { ChosenFile, EnqueueAllResult, SearchRequest } from './coordinator';
+import type { EnqueueAllResult, SearchRequest } from './coordinator';
 import { SourceRace, type RaceStanding } from './source-race';
 import { SourceRefs } from './source-refs';
 import { Store } from './store';
@@ -251,11 +251,6 @@ export class SearchDraft {
   /** The running fetch of each role's accessions. */
   private readonly fetches = new Map<InputRole, AbortController>();
   private readonly race: SourceRace;
-  /**
-   * The bytes of each file chosen for `-conffile`, read once when it was chosen: every validation and
-   * every run of a group gives the engine these bytes, and a file that is let go takes them with it.
-   */
-  private readonly conffileBytes = new WeakMap<File, Promise<Uint8Array>>();
   /** The argv of the latest validation that the engine accepted (the prepare hint's argv). */
   private validArgv: readonly string[] | undefined;
   private nextKey = 1;
@@ -412,17 +407,15 @@ export class SearchDraft {
 
   /**
    * Chooses the file of the `-conffile` that the program's Additional options give (undefined lets
-   * it go): the validation and the run read its bytes under the argv's name, whatever the file is
-   * called.
+   * it go): the validation and the run read it under the argv's name, whatever the file is called.
+   * The page holds the File, not its bytes: a validation reads it on an instance of the engine of its
+   * own, and "Run LOSAT" reads it once for the runs (Coordinator.enqueueAll).
    */
   setConffile(file: File | undefined): void {
     const { program, conffiles } = this.state.get();
     const next = { ...conffiles };
     if (file === undefined) delete next[program];
-    else {
-      next[program] = file;
-      void this.bytesOf(file);
-    }
+    else next[program] = file;
     this.set({ conffiles: Object.freeze(next), message: undefined });
     this.scheduleValidation();
   }
@@ -944,18 +937,9 @@ export class SearchDraft {
     } catch (error) {
       return { ok: false, message: messageOf(error) };
     }
-    // The file of the argv's -conffile, which the engine's start named at the validation (idle): one
-    // read of it for every run of the group.
-    const { start, conffiles } = this.state.get();
-    const file = start?.conffile ? conffiles[program] : undefined;
-    let conffile: ChosenFile | undefined;
-    if (file !== undefined) {
-      try {
-        conffile = { name: file.name, bytes: await this.bytesOf(file) };
-      } catch (error) {
-        return { ok: false, message: `The file of -conffile (${file.name}) could not be read: ${messageOf(error)}` };
-      }
-    }
+    // The file of the argv's -conffile, which the engine's start named at the validation (idle).
+    const state = this.state.get();
+    const conffile = conffileName(state) === undefined ? undefined : state.conffiles[program];
     const resolved = {
       query: await Promise.all(groups.query.map((group) => this.resolveGroup(group))),
       subject: await Promise.all(groups.subject.map((group) => this.resolveGroup(group))),
@@ -1309,7 +1293,7 @@ export class SearchDraft {
         validation = { state: 'invalid', message: started.message };
       } else {
         start = started.start;
-        const result = await this.deps.engine.validate(argv, await this.registryFile(program, start));
+        const result = await this.deps.engine.validate(argv, this.registryFile(program, start));
         validation = result.ok ? { state: 'ok' } : { state: 'invalid', message: result.message };
       }
     } catch (error) {
@@ -1322,25 +1306,13 @@ export class SearchDraft {
   }
 
   /**
-   * The registry file of the argv's `-conffile`: the chosen file's bytes under the argv's name;
-   * undefined without either. An empty name (`-conffile=`) names no file that the engine can hold, and
-   * gets the engine's message.
+   * The registry file of the argv's `-conffile`: the chosen file under the argv's name; undefined
+   * without either. An empty name (`-conffile=`) names no file that the engine can hold, and gets the
+   * engine's message.
    */
-  private async registryFile(program: ProgramId, start: StartInfo): Promise<RegistryFile | undefined> {
+  private registryFile(program: ProgramId, start: StartInfo): RegistryFile | undefined {
     const file = this.state.get().conffiles[program];
-    return !start.conffile || file === undefined ? undefined : { name: start.conffile, bytes: await this.bytesOf(file) };
-  }
-
-  /** The bytes of a file chosen for `-conffile`, read at its first use (`conffileBytes`). */
-  private bytesOf(file: File): Promise<Uint8Array> {
-    let bytes = this.conffileBytes.get(file);
-    if (bytes === undefined) {
-      bytes = file.arrayBuffer().then((buffer) => new Uint8Array(buffer));
-      // A file that cannot be read is told by the validation and the run that need it.
-      bytes.catch(() => undefined);
-      this.conffileBytes.set(file, bytes);
-    }
-    return bytes;
+    return !start.conffile || file === undefined ? undefined : { name: start.conffile, file };
   }
 
   /**
@@ -1484,6 +1456,15 @@ function fetchProblem(result: Exclude<FetchResult, { ok: true }>, source: FetchS
         ? `${label} asks to wait (too many requests): fetch again in a moment.`
         : `${label} answered HTTP ${result.status} for ${accession}.`;
   }
+}
+
+/**
+ * The name that the argv's `-conffile` gives, as the engine's start read it, for which the form asks
+ * for a file and the search reads the one chosen; undefined without `-conffile`, and for an empty name
+ * (`-conffile=`), which names no file that the engine can hold (the engine's message stands).
+ */
+export function conffileName(state: DraftState): string | undefined {
+  return state.start?.conffile || undefined;
 }
 
 /** Whether the form holds inputs: a pasted text (accessions too) or a source of either role. */

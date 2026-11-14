@@ -78,7 +78,8 @@ if (ENGINE_ASSETS === null) {
   // A downloaded Example set takes the path of a source (inflate.ts), on an instance of its own.
   whole = { inflateFile: (file, maxBytes) => inflateFile(file, reactorInflater, maxBytes) };
   checker = new ReactorInputChecker(reactor);
-  control = reactorControl(reactor);
+  // A validation with the registry file of -conffile takes an instance of its own, as an inflation does.
+  control = reactorControl(reactor, instantiate);
 }
 
 const started = startDataSession({ token, locks, opfs: opfsAccess });

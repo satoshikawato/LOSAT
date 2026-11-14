@@ -9,8 +9,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { instantiateSerial, reactorControl, WasmEngine } from 'losat';
-import { readStoredZip, type RunFile } from 'losat/domain';
+import { instantiateSerial, reactorControl, reopening, WasmEngine } from 'losat';
+import { readStoredZip, type RegistryFile, type RunFile } from 'losat/domain';
 import { runFilesOf, withRunFiles, type EngineRunRequest } from 'losat/ports';
 import { findReactors } from '../../build/reactors';
 import { outputFileName, runFileName } from '../../src/domain/output-format';
@@ -204,10 +204,9 @@ describe('the ABI binding of the start and of a registry file', () => {
     expect(fakeExports({ start: 'fail' }).abi.start(['blastn', '-version'])).toEqual({ ok: false, message: "error: unexpected argument '-version' found" });
   });
 
-  it('loads a file held in memory as kind 2: begin with its size, its bytes, end; a file that the engine refuses is released', async () => {
-    const bytes = encode('[BLAST]\n');
+  it('loads a file as kind 2: begin with its size, its bytes, end; a file that the engine refuses is released', async () => {
     const { abi, log } = fakeExports();
-    expect(await loadFile(abi, FILE_REGISTRY, 'c.ini', bytes.length, (start, end) => bytes.subarray(start, end))).toEqual({
+    expect(await loadFile(abi, FILE_REGISTRY, 'c.ini', new Blob(['[BLAST]\n']))).toEqual({
       handle: 9,
       name: 'c.ini',
       kind: 'registry',
@@ -216,7 +215,7 @@ describe('the ABI binding of the start and of a registry file', () => {
     });
     expect(log).toEqual(['begin 2 c.ini 8', 'chunk 9 [BLAST]\n', 'end 9']);
     const failing = fakeExports({ failEnd: true });
-    await expect(loadFile(failing.abi, FILE_REGISTRY, 'c.ini', 3, () => encode('[x\n'))).rejects.toThrow(EngineCallError);
+    await expect(loadFile(failing.abi, FILE_REGISTRY, 'c.ini', new Blob(['[x\n']))).rejects.toThrow(EngineCallError);
     expect(failing.log).toEqual(['begin 2 c.ini 3', 'chunk 9 [x\n', 'end 9', 'release 9']);
   });
 
@@ -235,7 +234,7 @@ describe('the ABI binding of the start and of a registry file', () => {
     const bytes = new Uint8Array(FILE_CHUNK_BYTES + 3).fill(1);
     bytes[FILE_CHUNK_BYTES] = 2;
     let wrapped = 0;
-    await loadFile(loader, FILE_REGISTRY, 'c.ini', bytes.length, (start, end) => bytes.subarray(start, end), (body) => (wrapped++, body()));
+    await loadFile(loader, FILE_REGISTRY, 'c.ini', new Blob([bytes]), (body) => (wrapped++, body()));
     expect(calls).toEqual([
       `begin 2 c.ini ${FILE_CHUNK_BYTES + 3}`,
       `buffer ${FILE_CHUNK_BYTES}`,
@@ -281,34 +280,130 @@ function exportsOnlyModule(names: readonly string[]): Uint8Array {
   ]);
 }
 
+/**
+ * An instance for the control's tests that logs, under `label`, the files it is given and its
+ * validations with the files that it holds when it validates.
+ */
+function fakeInstance(label: string, log: string[]): ReactorAbi {
+  const held = new Set<string>();
+  const loading = new Map<number, string>();
+  let handle = 0;
+  return {
+    stoppedBy: undefined,
+    fileBegin: (kind: number, name: string, size: number) => {
+      log.push(`${label} begin ${kind} ${name} ${size}`);
+      loading.set(++handle, name);
+      return handle;
+    },
+    chunkBuffer: (capacity: number) => ({ ptr: 1, capacity }),
+    fileChunk: () => undefined,
+    fileEnd: (file: number) => {
+      held.add(loading.get(file)!);
+      return { handle: file, name: loading.get(file)!, kind: 'registry', size: 0, sha256: '' };
+    },
+    fileRelease: (file: number) => void held.delete(loading.get(file)!),
+    freeChunkBuffer: () => undefined,
+    validate: (argv: readonly string[]) => void log.push(`${label} validate ${argv.join(' ')} held=[${[...held].join(',')}]`),
+    describe: () => {
+      log.push(`${label} describe held=[${[...held].join(',')}]`);
+      return { program: 'blastn', formats: [0, 6, 7], parameters: [] };
+    },
+  } as unknown as ReactorAbi;
+}
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// DECISIONS E1w3b-4: a validation with the registry file of -conffile runs on an instance of its own,
+// opened for it and dropped after it; the Data worker's shared instance never holds the file.
 describe("the Data worker's validate with the registry file of -conffile", () => {
-  it('registers the file under the given name for that validation only, and releases it whatever the verdict', async () => {
-    const { abi, log } = fakeExports({ validate: 'BLAST query/options error: bad' });
-    const control = reactorControl(async () => abi);
-    expect(await control.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', bytes: encode('[BLAST]\n') })).toEqual({
+  it('validates on an instance of its own, opened for that validation; the shared instance is not called', async () => {
+    const log: string[] = [];
+    const shared = fakeInstance('shared', log);
+    let opened = 0;
+    const control = reactorControl(async () => shared, async () => fakeInstance(`own${++opened}`, log));
+    expect(await control.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true });
+    expect(await control.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true });
+    // Without a file, the shared instance validates.
+    await control.validate(['blastp']);
+    expect(log).toEqual([
+      'own1 begin 2 c.ini 8',
+      'own1 validate blastp -conffile c.ini held=[c.ini]',
+      'own2 begin 2 c.ini 8',
+      'own2 validate blastp -conffile c.ini held=[c.ini]',
+      'shared validate blastp held=[]',
+    ]);
+    expect(opened).toBe(2);
+    // The verdict and start are the engine's.
+    const { abi } = fakeExports({ validate: 'BLAST query/options error: bad' });
+    const engine = reactorControl(async () => abi, async () => fakeExports({ validate: 'BLAST query/options error: bad' }).abi);
+    expect(await engine.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({
       ok: false,
       message: 'BLAST query/options error: bad',
     });
-    expect(log).toEqual(['begin 2 c.ini 8', 'chunk 9 [BLAST]\n', 'end 9', 'validate blastp -conffile c.ini', 'release 9']);
-    log.length = 0;
-    // Without a file nothing is registered; start is the engine's.
-    await control.validate(['blastp']);
-    expect(log).toEqual(['validate blastp']);
-    expect(await control.start(['blastp', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true } });
+    expect(await engine.start(['blastp', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true } });
   });
 
-  it('does not validate with a file that the engine refuses, and calls an instance that stopped no more', async () => {
+  it('keeps the file away from every call of the shared instance, also from calls that wait with it for one opening of that instance', async () => {
+    const log: string[] = [];
+    const shared = fakeInstance('shared', log);
+    // The shared instance opens (or reopens after a trap) while every call waits for it (scanner.ts, `reopening`).
+    const opening = reopening(async () => {
+      await pause(5);
+      return shared;
+    });
+    let opened = 0;
+    const control = reactorControl(opening, async () => {
+      const label = `own${++opened}`;
+      await pause(1);
+      return fakeInstance(label, log);
+    });
+    const file = new Blob(['[BLAST]\n']);
+    const results = await Promise.all([
+      control.validate(['blastn', '-conffile', 'settings.ini'], { name: 'settings.ini', file }),
+      control.validate(['blastn', '-conffile', 'settings.ini'], { name: 'settings.ini', file }),
+      control.validate(['blastn']),
+      control.describe('blastn'),
+      control.validate(['blastn', '-conffile', '.ncbirc'], { name: '.ncbirc', file }),
+      control.validate(['blastn']),
+    ]);
+    expect(results.filter((result) => 'ok' in result)).toEqual([{ ok: true }, { ok: true }, { ok: true }, { ok: true }, { ok: true }]);
+    const of = (label: string) => log.filter((line) => line.startsWith(`${label} `)).sort();
+    expect(of('shared')).toEqual(['shared describe held=[]', 'shared validate blastn held=[]', 'shared validate blastn held=[]']);
+    expect([of('own1'), of('own2'), of('own3')].flat().sort()).toEqual(
+      [
+        'own1 begin 2 settings.ini 8',
+        'own1 validate blastn -conffile settings.ini held=[settings.ini]',
+        'own2 begin 2 settings.ini 8',
+        'own2 validate blastn -conffile settings.ini held=[settings.ini]',
+        'own3 begin 2 .ncbirc 8',
+        'own3 validate blastn -conffile .ncbirc held=[.ncbirc]',
+      ].sort(),
+    );
+    // Each own instance held its file alone.
+    for (const label of ['own1', 'own2', 'own3']) expect(of(label).filter((line) => line.includes(' begin '))).toHaveLength(1);
+  });
+
+  it('fails the validation when its instance cannot be opened, the file is refused or the instance stops, and leaves the shared instance alone', async () => {
+    const log: string[] = [];
+    const shared = fakeInstance('shared', log);
+    const registry = { name: 'c.ini', file: new Blob(['[BLAST]\n']) };
+    await expect(
+      reactorControl(
+        async () => shared,
+        async () => {
+          throw new Error('out of memory');
+        },
+      ).validate(['blastp', '-conffile', 'c.ini'], registry),
+    ).rejects.toThrow('the engine could not open an instance for the file of -conffile: out of memory');
     const refused = fakeExports({ failEnd: true });
-    await expect(reactorControl(async () => refused.abi).validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', bytes: encode('[x\n') })).rejects.toThrow(
+    await expect(reactorControl(async () => shared, async () => refused.abi).validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[x\n']) })).rejects.toThrow(
       'the input file ended after 1 of its 3 bytes',
     );
     expect(refused.log).toEqual(['begin 2 c.ini 3', 'chunk 9 [x\n', 'end 9', 'release 9']);
-    // A trap in the validation: the stopped instance's file is not released (ABI v2 §4, "After a trap").
     const trapped = fakeExports({ trapValidate: true });
-    await expect(reactorControl(async () => trapped.abi).validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', bytes: encode('[BLAST]\n') })).rejects.toThrow(
-      EngineStoppedError,
-    );
+    await expect(reactorControl(async () => shared, async () => trapped.abi).validate(['blastp', '-conffile', 'c.ini'], registry)).rejects.toThrow(EngineStoppedError);
     expect(trapped.log).toEqual(['begin 2 c.ini 8', 'chunk 9 [BLAST]\n', 'end 9', 'validate blastp -conffile c.ini']);
+    expect(log).toEqual([]);
   });
 });
 
@@ -392,7 +487,7 @@ function runtimeWith(abi: ReactorAbi) {
 }
 
 /** A run of `words` after the inputs, whose output port records what the Engine worker sent. */
-function workerRun(words: readonly string[], conffile?: { name: string; bytes: Uint8Array }) {
+function workerRun(words: readonly string[], conffile?: RegistryFile) {
   const channel = new MessageChannel();
   const received: Array<{ readonly type: string }> = [];
   channel.port2.onmessage = (event: MessageEvent<{ type: string }>) => received.push(event.data);
@@ -426,7 +521,7 @@ function workerRun(words: readonly string[], conffile?: { name: string; bytes: U
 }
 
 const LOG: RunFile = { name: 'run.log', bytes: encode('BLAST engine error: The average subject length is too short\n') };
-const CONFFILE = { name: 'c.ini', bytes: encode('[BLAST]\n') };
+const CONFFILE = { name: 'c.ini', file: new Blob(['[BLAST]\n']) };
 
 describe("the Engine worker's runtime and the files of a run", () => {
   it('registers the file of -conffile before validate, keeps stream 8 apart from the outputs, and releases the file before the end', async () => {
@@ -545,7 +640,7 @@ describe('the gateway and the files of a run', () => {
       query: input,
       subject: input,
       requestedThreads: 1,
-      conffile: { name: 'c.ini', bytes: encode('[BLAST]\n') },
+      conffile: CONFFILE,
     });
     const send = (event: EngineEvent) => worker.onmessage!({ data: event } as MessageEvent<EngineEvent>);
     const runPosted = async (count: number) => {
@@ -559,7 +654,10 @@ describe('the gateway and the files of a run', () => {
     const { engine, request, send, runPosted } = gateway();
     const channel = new MessageChannel();
     const completed = engine.run(request('r1'), channel.port1, () => undefined);
-    expect((await runPosted(1)).conffile).toEqual({ name: 'c.ini', bytes: encode('[BLAST]\n') });
+    // The Blob itself: it crosses to the Engine worker without a copy of its bytes.
+    const posted = (await runPosted(1)).conffile!;
+    expect(posted.name).toBe('c.ini');
+    expect(posted.file).toBe(CONFFILE.file);
     const result = { path: 'serial' as const, threads: 1, engineBuild: 'b', memory: { linearBytesBefore: 1, linearBytesAfter: 2, instanceRuns: 1 }, subjectRetained: false };
     send({ type: 'done', generation: 1, runId: 'r1', ok: true, result: { ...result, runFiles: [LOG] } });
     expect((await completed).runFiles).toEqual([LOG]);
@@ -659,14 +757,22 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
     expect(new TextDecoder().decode(file!.bytes)).toContain('The average subject length is too short');
   }, 120_000);
 
-  it('reads the registry file of -conffile for one validation, and refuses the name without it', async () => {
-    const { abi } = await instantiateSerial(module!);
-    const control = reactorControl(async () => abi);
+  // DECISIONS E1w3b-4: the file goes to an instance of the validation's own; the shared instance neither
+  // holds it nor grows, however large the file.
+  it('reads the registry file of -conffile on an instance of its own: the shared instance holds no file and does not grow', async () => {
+    const shared = (await instantiateSerial(module!)).abi;
+    const control = reactorControl(async () => shared, async () => (await instantiateSerial(module!)).abi);
     const argv = ['tblastx', '-query', 'q.fa', '-subject', 's.fa', '-conffile', 'settings.ini'];
-    expect(await control.validate(argv, { name: 'settings.ini', bytes: encode('[BLAST]\n') })).toEqual({ ok: true });
-    expect(await control.validate(argv)).toEqual({ ok: false, message: 'Critical: (106.23) Registry file "settings.ini" not found, aborting.' });
-    expect((await control.validate(argv, { name: 'settings.ini', bytes: encode('[x\n') })).ok).toBe(false);
-    // Released after each validation: the name is free again.
-    expect(await control.validate(argv, { name: 'settings.ini', bytes: encode('[BLAST]\n') })).toEqual({ ok: true });
+    const missing = { ok: false, message: 'Critical: (106.23) Registry file "settings.ini" not found, aborting.' };
+    expect(await control.validate(argv)).toEqual(missing);
+    const before = shared.memoryBytes();
+    expect(await control.validate(argv, { name: 'settings.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true });
+    expect((await control.validate(argv, { name: 'settings.ini', file: new Blob(['[x\n']) })).ok).toBe(false);
+    // A file of 24 MiB (three chunks): a section and comment lines.
+    const large = new Blob(['[BLAST]\n', '; a comment line of the registry file\n'.repeat(Math.ceil((24 * 1024 * 1024) / 38))]);
+    expect(large.size).toBeGreaterThan(3 * FILE_CHUNK_BYTES - 64);
+    expect(await control.validate(argv, { name: 'settings.ini', file: large })).toEqual({ ok: true });
+    expect(shared.memoryBytes()).toBe(before);
+    expect(await control.validate(argv)).toEqual(missing);
   }, 120_000);
 });

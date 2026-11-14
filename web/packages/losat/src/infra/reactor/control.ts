@@ -4,14 +4,17 @@
 // then busy). Validation there gives the same result as in the module that runs the
 // search: the argv of the application has no -num_threads, the only option whose
 // validation depends on the build; the Engine worker validates the argv it runs, with its
-// -num_threads, again before the search. The registry file of `-conffile` is registered for
-// one validation only (line RG E1w-3b): the start of every later call of the instance would read
-// a registered file named `.ncbirc` or `<program>.ini` as the CLI reads one in its directory.
+// -num_threads, again before the search. A validation with the registry file of `-conffile` runs on
+// an instance of its own (line RG E1w-3b, DECISIONS E1w3b-4), opened for it from the compiled module
+// and dropped after it, as each inflation is (inflater.ts): the shared instance never holds the
+// file, so no other call of it (a scan, a check, another validation) meets the file, whose start
+// would read a file named `.ncbirc` or `<program>.ini` as the CLI reads one in its directory, and
+// the memory that the file takes goes with that instance, however large the file chosen.
 import { OUTPUT_FORMATS, type OutputFormat } from '../../domain/output-format.js';
 import type { ResolvedDefault } from '../../domain/parameters.js';
 import type { ProgramId } from '../../domain/programs.js';
 import type { EngineGateway, ParameterDescription, ProgramDescription, StartResult, ValidationResult } from '../../ports/engine.js';
-import { FILE_REGISTRY, loadFile, type FileInfo, type ReactorAbi } from './abi.js';
+import { FILE_REGISTRY, loadFile, type ReactorAbi } from './abi.js';
 
 export type EngineControl = Pick<EngineGateway, 'describe' | 'start' | 'validate'>;
 
@@ -93,8 +96,12 @@ export function toProgramDescription(json: unknown): ProgramDescription {
   };
 }
 
-/** EngineControl over a serial reactor that `reactor` opens (and reopens after a stop). */
-export function reactorControl(reactor: () => Promise<ReactorAbi>): EngineControl {
+/**
+ * EngineControl over a serial reactor that `reactor` opens (and reopens after a stop), the shared
+ * instance; `instantiate` opens a new instance of the serial module, which a validation with a
+ * registry file takes for itself.
+ */
+export function reactorControl(reactor: () => Promise<ReactorAbi>, instantiate: () => Promise<ReactorAbi>): EngineControl {
   return {
     async describe(program) {
       return toProgramDescription((await reactor()).describe(program));
@@ -103,24 +110,23 @@ export function reactorControl(reactor: () => Promise<ReactorAbi>): EngineContro
       return (await reactor()).start(argv);
     },
     async validate(argv, registry): Promise<ValidationResult> {
-      const abi = await reactor();
-      // The file's bytes are in memory: its load, the validation and the release take no task between
-      // them, so no other call of this instance (a scan, a check, another validation) meets the file.
-      // The engine holds the file during the validation only; the memory that it took is used again
-      // by the next file, so a large file grows the instance once, to the largest file chosen. A file
-      // that the engine cannot hold is refused with its message (`not enough memory for the registry
-      // file ...`).
-      let file: FileInfo | undefined;
-      if (registry !== undefined) {
-        const { name, bytes } = registry;
-        file = await loadFile(abi, FILE_REGISTRY, name, bytes.length, (start, end) => bytes.subarray(start, end));
+      let abi: ReactorAbi;
+      if (registry === undefined) abi = await reactor();
+      else {
+        // The validation's own instance, never the shared one; one that cannot be opened fails the
+        // validation with its reason. The file is read in chunks from the Blob (`loadFile`); a file
+        // that the engine cannot hold is refused with its message (`not enough memory for the registry
+        // file ...`). Nothing is released: the instance goes after the validation, with the file.
+        try {
+          abi = await instantiate();
+        } catch (error) {
+          throw new Error(`the engine could not open an instance for the file of -conffile: ${error instanceof Error ? error.message : String(error)}`, {
+            cause: error,
+          });
+        }
+        await loadFile(abi, FILE_REGISTRY, registry.name, registry.file);
       }
-      let message: string | undefined;
-      try {
-        message = abi.validate(argv);
-      } finally {
-        if (file !== undefined && abi.stoppedBy === undefined) abi.fileRelease(file.handle);
-      }
+      const message = abi.validate(argv);
       return message === undefined ? { ok: true } : { ok: false, message };
     },
   };

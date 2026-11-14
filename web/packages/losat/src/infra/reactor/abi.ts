@@ -416,30 +416,29 @@ export class ReactorAbi {
 export type FileLoader = Pick<ReactorAbi, 'stoppedBy' | 'fileBegin' | 'chunkBuffer' | 'fileChunk' | 'fileEnd' | 'fileRelease' | 'freeChunkBuffer'>;
 
 /**
- * Gives the engine a named input file of `size` bytes (ABI v2 §4: a WindowMasker counts file, kind 1,
- * or a registry file, kind 2) and returns its *file* JSON: `file_begin`, the bytes from `read(start,
- * end)` in chunks of at most `FILE_CHUNK_BYTES` through one buffer of engine memory taken once,
- * `file_end`. A file that the engine refuses (a chunk or its end) is released, unless the instance
- * stopped, so that its name is free again; the buffer is given back in every case. `call` wraps each
- * call into the instance (the Engine worker counts them as uses of the threaded instance). Bytes that
- * `read` returns as they are (a file in memory) give no task between the calls: no other call of the
- * instance runs during the load.
+ * Gives the engine a named input file (ABI v2 §4: a WindowMasker counts file, kind 1, or a registry
+ * file, kind 2) and returns its *file* JSON: `file_begin` with the file's size, its bytes in chunks of
+ * at most `FILE_CHUNK_BYTES` read from the Blob one at a time and given through one buffer of engine
+ * memory taken once, `file_end`. A file that the engine refuses (a chunk or its end), or that cannot
+ * be read, is released, unless the instance stopped, so that its name is free again; the buffer is
+ * given back in every case. `call` wraps each call into the instance (the Engine worker counts them
+ * as uses of the threaded instance). The reads wait: other calls of the instance may run between the
+ * chunks, so a file that must meet no other call goes to an instance of its own.
  */
 export async function loadFile(
   abi: FileLoader,
   kind: number,
   name: string,
-  size: number,
-  read: (start: number, end: number) => Uint8Array | Promise<Uint8Array>,
+  file: Blob,
   call: <T>(body: () => T) => T = (body) => body(),
 ): Promise<FileInfo> {
+  const size = file.size;
   const handle = call(() => abi.fileBegin(kind, name, size));
   let buffer: ChunkBuffer | undefined;
   try {
     buffer = call(() => abi.chunkBuffer(Math.max(1, Math.min(FILE_CHUNK_BYTES, size))));
     for (let offset = 0; offset < size; offset += FILE_CHUNK_BYTES) {
-      const next = read(offset, Math.min(size, offset + FILE_CHUNK_BYTES));
-      const bytes = next instanceof Uint8Array ? next : await next;
+      const bytes = new Uint8Array(await file.slice(offset, Math.min(size, offset + FILE_CHUNK_BYTES)).arrayBuffer());
       call(() => abi.fileChunk(handle, bytes, buffer!));
     }
     return call(() => abi.fileEnd(handle));

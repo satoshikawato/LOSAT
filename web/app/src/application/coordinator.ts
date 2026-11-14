@@ -58,17 +58,11 @@ export interface SearchRequest {
   /** Where the counts of a taxonomy ID came from; the run records it. */
   readonly windowMaskerOrigin?: CountsOrigin;
   /**
-   * The file chosen for the argv's `-conffile` (Additional options; line RG E1w-3b), read when it was
-   * chosen: the run reads its bytes under the name that the engine's start reads of the argv. Not
-   * used by an argv without `-conffile`. The requests of a group share it, and their snapshots its bytes.
+   * The file chosen for the argv's `-conffile` (Additional options; line RG E1w-3b): read once when
+   * the runs are queued (once for the requests of a group that share it), the run reads its bytes under
+   * the name that the engine's start reads of the argv. Not used by an argv without `-conffile`.
    */
-  readonly conffile?: ChosenFile;
-}
-
-/** A file that the user chose, read once: its name and its bytes. */
-export interface ChosenFile {
-  readonly name: string;
-  readonly bytes: Uint8Array;
+  readonly conffile?: File;
 }
 
 export interface RunView {
@@ -115,6 +109,12 @@ export class Coordinator {
    * that removes runs must remove the entries that no run uses.
    */
   private readonly runInputs = new Map<string, Promise<RunInput>>();
+  /**
+   * The bytes of the registry file of each queued or running run whose argv has `-conffile` (read at
+   * enqueue, shared by a group), by run: the run's input until it ends, when they go; its snapshot
+   * keeps the name, the size and the SHA-256.
+   */
+  private readonly conffiles = new Map<string, Blob>();
   private active: string | undefined;
   private nextNumber = 1;
 
@@ -136,8 +136,8 @@ export class Coordinator {
   async enqueueAll(requests: readonly SearchRequest[]): Promise<EnqueueAllResult> {
     if (requests.length === 0) return { ok: false, message: 'There is nothing to search.' };
     const prepared: Prepared[] = [];
-    // The SHA-256 of each registry file, once for the requests of a group that share it.
-    const digests = new Map<Uint8Array, Promise<string>>();
+    // Each registry file read once, with its SHA-256, for the requests of a group that share it.
+    const reads = new Map<File, Promise<{ readonly file: Blob; readonly sha256: string }>>();
     for (const request of requests) {
       const queryName = inputName(request.query, PASTED_NAMES.query);
       const subjectName = inputName(request.subject, PASTED_NAMES.subject);
@@ -156,22 +156,23 @@ export class Coordinator {
         return { ok: false, message: `The options could not be checked: ${errorMessage(error)}` };
       }
       if (!start.ok) return start;
-      let conffile: ConffileSnapshot | undefined;
+      let conffile: Prepared['conffile'];
       const { conffile: conffileName, dryRun } = start.start;
       // An empty name (`-conffile=`) names no file that the engine can hold: its message stands.
       if (conffileName !== null && conffileName !== '' && request.conffile !== undefined) {
-        const { name: fileName, bytes } = request.conffile;
-        let digest = digests.get(bytes);
-        if (digest === undefined) digests.set(bytes, (digest = this.deps.digest(bytes)));
+        const chosen = request.conffile;
+        let read = reads.get(chosen);
+        if (read === undefined) reads.set(chosen, (read = this.readConffile(chosen)));
         try {
-          conffile = Object.freeze({ name: conffileName, fileName, bytes, sha256: await digest });
+          const { file, sha256 } = await read;
+          conffile = { snapshot: Object.freeze({ name: conffileName, fileName: chosen.name, size: file.size, sha256 }), file };
         } catch (error) {
-          return { ok: false, message: `The file of -conffile ${conffileName} (${fileName}) could not be read: ${errorMessage(error)}` };
+          return { ok: false, message: `The file of -conffile ${conffileName} (${chosen.name}) could not be read: ${errorMessage(error)}` };
         }
       }
       let validation: ValidationResult;
       try {
-        validation = await this.deps.engine.validate(argv, conffile === undefined ? undefined : { name: conffile.name, bytes: conffile.bytes });
+        validation = await this.deps.engine.validate(argv, conffile === undefined ? undefined : { name: conffile.snapshot.name, file: conffile.file });
       } catch (error) {
         return { ok: false, message: `The options could not be checked: ${errorMessage(error)}` };
       }
@@ -194,6 +195,8 @@ export class Coordinator {
 
   private async freeze(prepared: readonly Prepared[], made: Made): Promise<EnqueueAllResult> {
     const snapshots: RunSnapshot[] = [];
+    /** The bytes of the registry file of each snapshot, in their order. */
+    const conffiles: Array<Blob | undefined> = [];
     const groupId = prepared.length > 1 ? this.deps.newRunId() : undefined;
     for (const [index, { request, argv, queryName, subjectName, conffile, dryRun }] of prepared.entries()) {
       const program = programById(request.program);
@@ -230,12 +233,13 @@ export class Coordinator {
           subject,
           requestedThreads: request.requestedThreads,
           ...(windowMasker === undefined ? {} : { windowMasker }),
-          ...(conffile === undefined ? {} : { conffile }),
+          ...(conffile === undefined ? {} : { conffile: conffile.snapshot }),
           ...(dryRun ? { dryRun: true as const } : {}),
           queuedAt: this.deps.now(),
           ...(groupId === undefined ? {} : { group: Object.freeze({ groupId, position: index + 1, size: prepared.length }) }),
         }),
       );
+      conffiles.push(conffile?.file);
     }
     // Numbers are given only now, so that a request that fails leaves no gap.
     const numbered = snapshots.map((snapshot) => Object.freeze({ ...snapshot, number: this.nextNumber++ }));
@@ -243,7 +247,11 @@ export class Coordinator {
       ...this.state.get().runs,
       ...numbered.map((snapshot): RunView => ({ snapshot, status: 'queued', record: {} })),
     ]);
-    for (const snapshot of numbered) this.queue.push(snapshot.runId);
+    for (const [index, snapshot] of numbered.entries()) {
+      const file = conffiles[index];
+      if (file !== undefined) this.conffiles.set(snapshot.runId, file);
+      this.queue.push(snapshot.runId);
+    }
     this.pump();
     return { ok: true, runIds: numbered.map((snapshot) => snapshot.runId) };
   }
@@ -267,6 +275,7 @@ export class Coordinator {
     const queuedIndex = this.queue.indexOf(runId);
     if (queuedIndex >= 0) {
       this.queue.splice(queuedIndex, 1);
+      this.conffiles.delete(runId);
       this.update(runId, { status: 'cancelled', record: { ...view.record, endedAt: this.deps.now() } });
       return;
     }
@@ -294,6 +303,15 @@ export class Coordinator {
     const { number, program, argv, queuedAt } = view.snapshot;
     const task = await this.taskOf(view.snapshot);
     this.deps.downloader.save(runFileName({ number, program, task, queuedAt, argv }, file.name), file.bytes, 'text/plain');
+  }
+
+  /**
+   * Reads the file chosen for `-conffile` once: its bytes as a Blob (a copy that the file's later
+   * changes do not reach), the run's input, and their SHA-256.
+   */
+  private async readConffile(chosen: File): Promise<{ readonly file: Blob; readonly sha256: string }> {
+    const bytes = new Uint8Array(await chosen.arrayBuffer());
+    return { file: new Blob([bytes]), sha256: await this.deps.digest(bytes) };
   }
 
   /** The task of a run for its files' names: the argv's, or the engine's default; none without the engine's description. */
@@ -394,6 +412,7 @@ export class Coordinator {
     const view = this.find(runId);
     if (view === undefined) throw new Error(`missing run ${runId}`);
     const { snapshot } = view;
+    const conffile = this.conffiles.get(runId);
     let staged = false;
     const startedAt = this.deps.now();
     // The files that the run made besides its outputs, which a completed and a failed run keep.
@@ -415,7 +434,7 @@ export class Coordinator {
           subject: engineInput(snapshot.subject),
           requestedThreads: snapshot.requestedThreads,
           ...(snapshot.windowMasker === undefined ? {} : { windowMasker: snapshot.windowMasker }),
-          ...(snapshot.conffile === undefined ? {} : { conffile: { name: snapshot.conffile.name, bytes: snapshot.conffile.bytes } }),
+          ...(snapshot.conffile === undefined || conffile === undefined ? {} : { conffile: { name: snapshot.conffile.name, file: conffile } }),
         },
         output,
         (phase) => this.onPhase(runId, phase),
@@ -457,6 +476,8 @@ export class Coordinator {
         },
       });
     } finally {
+      // The run's registry file goes with its run; the snapshot keeps its name, size and SHA-256.
+      this.conffiles.delete(runId);
       this.cancelRequested.delete(runId);
       this.active = undefined;
       void this.refreshStorage();
@@ -496,8 +517,8 @@ interface Prepared {
   readonly argv: readonly string[];
   readonly queryName: string;
   readonly subjectName: string;
-  /** The registry file of the argv's `-conffile`, read from the chosen file. */
-  readonly conffile: ConffileSnapshot | undefined;
+  /** The registry file of the argv's `-conffile`, read from the chosen file: what the snapshot keeps of it, and its bytes. */
+  readonly conffile: { readonly snapshot: ConffileSnapshot; readonly file: Blob } | undefined;
   readonly dryRun: boolean;
 }
 

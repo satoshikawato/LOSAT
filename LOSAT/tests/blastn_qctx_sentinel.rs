@@ -23,6 +23,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::worker_log_if_unset;
+
 fn engine(path: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(path)
 }
@@ -40,12 +43,7 @@ fn check(case: &str, query: &str, threads: u32) {
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join(format!("losat-qctx-worker-{}.log", std::process::id())),
-        );
-    }
+    let _log = worker_log_if_unset(&mut command, "blastn_qctx_sentinel_worker");
     let output = command
         .arg("blastn")
         .arg("-query")

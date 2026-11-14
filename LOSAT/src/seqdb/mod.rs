@@ -56,6 +56,7 @@ pub mod taxdb;
 pub mod volume;
 
 pub use filter::{DbList, ListWarning, SeqidList, TaxidList};
+pub(crate) use filter::{Oid, OidMap};
 
 #[cfg(test)]
 mod damaged_files_tests;
@@ -1831,7 +1832,7 @@ impl SeqDb {
                 self.num_seqs
             )));
         }
-        let at = self.locate_oid(self.oid(ordinal))?;
+        let at = self.locate_oid(self.oid(ordinal).get())?;
         Ok(SeqLocation { id: ordinal, ..at })
     }
 
@@ -2180,7 +2181,7 @@ impl SeqDb {
     // ```
     /// The definition lines of `ordinal`: the title and `n` of
     /// `gnl|BL_ORD_ID|n`, where `n` is the stored number plus the first
-    /// ordinal id of the volume, as NCBI reports it.
+    /// OID of the volume, as NCBI reports it.
     pub fn deflines(&self, ordinal: u32) -> Result<Vec<OrdinalDefline>, SeqDbError> {
         let at = self.find_volume(ordinal)?;
         self.ordinal_deflines(

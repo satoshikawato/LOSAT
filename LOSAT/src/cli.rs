@@ -1534,6 +1534,26 @@ impl fmt::Display for NativeError {
 // ```
 impl std::error::Error for NativeError {}
 
+impl NativeError {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+    // ```c++
+    //     catch (const CException& e) {                                           \
+    //         LOG_POST(Error << "Error: " << e.what());                           \
+    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+    //     }                                                                       \
+    // ```
+    /// `CATCH_ALL`'s report of an exception of NCBI's C++ Toolkit (`CException`) that ends a
+    /// BLAST program: `Error: `, the exception's `what()` (which ends with a line feed) and the
+    /// post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`). The one producer of this
+    /// report: an exception of NCBI's that LOSAT raises where NCBI throws it becomes this error.
+    pub(crate) fn exception(e: &crate::ncbi_exception::NcbiException) -> NativeError {
+        NativeError {
+            exit: 255,
+            message: format!("Error: {}\n", e.what()),
+        }
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:118-119
 // ```c
 // {
@@ -2242,6 +2262,28 @@ pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
         ),
     }
     .into()
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
+// ```c
+// else {
+//     m_OutputStream = &args[kArgOutput].AsOutputFile();
+// }
+// ```
+/// The `-out` file `path` of a search, created where NCBI's argument handling opens it (after the
+/// subjects are read and the query is opened, before the options are processed): `inaccessible`
+/// when it cannot be made. `program` names the program whose file names must be UTF-8
+/// (`input_files::check_utf8_file_name`); `None` for BLASTX, which has no such check. The command
+/// line's programs (`open_out_file`) and the library's `run_to_file` (`api::local_blast::OutFile`)
+/// make the file here.
+pub(crate) fn create_out_file(
+    path: &std::path::Path,
+    program: Option<&str>,
+) -> anyhow::Result<std::fs::File> {
+    if let Some(program) = program {
+        crate::blastinput::input_files::check_utf8_file_name(path, "out", program)?;
+    }
+    std::fs::File::create(path).map_err(|_| inaccessible("out", path))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180

@@ -944,13 +944,12 @@ Rows `db.bxenv.*` search `bslice` with `bslice_q.fna` (BLASTX) with an environme
 stops with a `CStringException` (exit 255; with `-mt_mode 1` its nodes catch it, so NCBI writes nothing and exits 0) on a
 value it cannot convert, an empty one too; the archive of outfmt 11 is written without that call (`blastx_app.cpp:283-288`).
 `BL2SEQ_LEGACY` makes the subjects of `-subject` a search of each subject on its own (`blast_app_util.cpp:206-210`); a `-db`
-search ignores it. LOSAT refuses before the search: an error that NCBI raises in the first batch's search before the
-prefetch (a query record without letters, `-query_loc` past every record: `BLAST engine error`, exit 3) and a `-subject`
-search with `BL2SEQ_LEGACY` whose report would not change (no hits, or one subject record in outfmt 5, 6 or 10) are
-refused too. The three `losat-rejection` rows are `abc` in outfmt 6
-and 16 and an empty value in outfmt 0; the ncbi rows are `abc` in outfmt 11, the integer 5 in outfmt 6, and `BL2SEQ_LEGACY=1`
-in outfmt 0 and 6. The `-subject` cases are `environment_that_ncbi_reads_around_the_report_is_rejected_where_it_reads_it`
-in `tests/run_local_blastx.rs`.
+search ignores it. LOSAT stops where NCBI's first batch converts the value, after the batch's search and before its report
+(NCBI's exception, exit 255, after the outfmt 0 prolog; env parity H), and refuses `BL2SEQ_LEGACY` with `-subject`
+before the search (a search whose report would not change, no hits or one subject record in outfmt 5, 6 or 10, is
+refused too). The rows are `abc` in outfmt 6, 16 and 11, an empty value in outfmt 0, the integer 5 in outfmt 6, and
+`BL2SEQ_LEGACY=1` in outfmt 0 and 6, all of kind ncbi. The `-subject` cases are
+`environment_that_ncbi_reads_around_the_report_stops_where_ncbi_reads_it` in `tests/run_local_blastx.rs`.
 
 ## The same environment in the other programs (line DBID, N2e)
 
@@ -960,9 +959,26 @@ TBLASTX and BLASTN write the archive of outfmt 11 without the prefetch too (`bla
 `tblastn_app.cpp:294-299`, `tblastx_app.cpp:197-202`, `blastn_app.cpp:304-309`), so a value that NCBI cannot convert leaves it
 as without the variable; psiblast's iterations fetch ahead before they write an archive (`psiblast_app.cpp:262-266`), which
 LOSAT's PSIBLAST does not write. A `-db` search of each of them ignores `BL2SEQ_LEGACY`. NCBI's automatic split of a `-db`
-search by queries (`-num_threads` 2 or more, a large query file, a small database) catches the exception as `-mt_mode 1` does. The ncbi rows are `abc` (BLASTN: an
-empty value) in outfmt 11 and `BL2SEQ_LEGACY=1` in outfmt 6 (TBLASTN: 0); the `losat-rejection` row is BLASTN's `abc` in
-outfmt 6. The `-subject` cases of the five programs are `tests/search_environment.rs`.
+search by queries (`-num_threads` 2 or more, a large query file, a small database) catches the exception as `-mt_mode 1` does. The rows are `abc` (BLASTN: an
+empty value) in outfmt 11, `BL2SEQ_LEGACY=1` in outfmt 6 (TBLASTN: 0) and BLASTN's `abc` in outfmt 6 (NCBI's exception, exit
+255), all of kind ncbi. The `-subject` cases of the five programs are `tests/search_environment.rs`.
+
+## Values that NCBI cannot convert (env parity H)
+
+Rows `db.envconv.*` search the databases of the two sections above (`bslice` for BLASTX, `rps_mini` with `-comp_based_stats 0`
+for RPSBLAST) with a `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE`, `BATCH_SIZE` or `PRE_FETCH_SEQS_LIMIT` that `NStr::StringToInt`
+(flags 0: a sign and digits, no spaces, within an `int`) cannot convert. NCBI stops with its `CStringException`
+(`CATCH_ALL`: `Error: ` and its report, which names `ncbistr.cpp` in the build tree of the official Linux x64 release, exit
+255) where it reads the value: `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` in the query splitter of the first batch, after the
+outfmt 0 prolog (BLASTN reads `CHUNK_SIZE` first for its batch size mixer, after the prolog too); `BATCH_SIZE` before
+anything (BLASTN after the prolog; PSIBLAST does not read it); `PRE_FETCH_SEQS_LIMIT` before the first batch's report,
+except where every format is outfmt 11 (but in PSIBLAST). With outfmt 11 NCBI writes its error archive, 523 bytes for
+every input. The probe of every program, mode and value is `env-parity-20261108/h_probe/REPORT.md` (outside the tree).
+The `-subject` cases are `tests/search_environment.rs` and `tests/run_local_blastx.rs`. NCBI reads the titles of a
+batch's reported sequences in its traceback, before the prefetch: with `nophr`, `bnophr` or `nnophr` (no header file)
+and a query with hits it stops with the header file's error (exit 2) whatever `PRE_FETCH_SEQS_LIMIT` holds; the message
+names the file's absolute path, so these cases are `a_header_file_that_ncbi_cannot_read_comes_before_the_prefetch` in
+`tests/search_environment.rs`, not rows.
 
 ## TBLASTN `-query_loc` and the chunk masks (line NP, series SM)
 

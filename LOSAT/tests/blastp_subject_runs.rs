@@ -28,6 +28,9 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 mod reach_support;
 
 fn fixture(name: &str) -> PathBuf {
@@ -41,6 +44,8 @@ const SUBJECTS: u64 = 124;
 
 /// What one run printed: the report.
 struct Run {
+    /// The run\'s worker log, when the test made one: kept until the caller drops the run.
+    _log: Option<TempFile>,
     stdout: Vec<u8>,
 }
 
@@ -71,12 +76,7 @@ fn blastp(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bpsubjrun-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastp_subject_runs_worker");
     let output = command
         .arg("blastp")
         .args(["-task", task])
@@ -97,6 +97,7 @@ fn blastp(
         "{task} {vars:?} {extra:?} threads {threads}: {stderr}"
     );
     Run {
+        _log: log,
         stdout: output.stdout,
     }
 }

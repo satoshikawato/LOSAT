@@ -13,6 +13,9 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{unique_dir, TempPath};
+
 /// The binary with no `LOSAT_*` variable that chooses a code path (`LOSAT_BLASTX_WORKER_LOG`
 /// stays, as in `blastn_db_search.rs`).
 fn losat() -> Command {
@@ -25,14 +28,10 @@ fn losat() -> Command {
     command
 }
 
-/// A temporary directory of this test.
-fn temp_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "losat-parse-deflines-subject-{tag}-{}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+/// A temporary directory of its own (the tests of this file run in parallel), removed with what is
+/// in it when the value is dropped.
+fn temp_dir(tag: &str) -> TempPath {
+    unique_dir(&format!("losat-parse-deflines-subject-{tag}"))
 }
 
 const NUCLEOTIDES: &str =

@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "pcs_piracc_y",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pcs_piracc_y (parsed Seq-ids)",
+  "number-of-letters": 250,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-14T09:13:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49702,
+  "bytes-to-cache": 380,
+  "files": [
+    "pcs_piracc_y.pdb",
+    "pcs_piracc_y.phr",
+    "pcs_piracc_y.pin",
+    "pcs_piracc_y.pog",
+    "pcs_piracc_y.pos",
+    "pcs_piracc_y.pot",
+    "pcs_piracc_y.psq",
+    "pcs_piracc_y.ptf",
+    "pcs_piracc_y.pto"
+  ]
+}

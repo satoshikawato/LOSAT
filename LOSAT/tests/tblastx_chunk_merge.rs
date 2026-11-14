@@ -27,7 +27,7 @@
 //! - `r7_0148` (`tests/fasta/outfmt0/x2b_r7_0148_*`, PAM30 `-threshold 8 -evalue 1e30`): an HSP
 //!   of length 0 that both parts find, whose merge NCBI computes by dividing by a sum of lengths of
 //!   0 (its result is undefined): LOSAT refuses the search, exit 1 with its message
-//!   (PD-LOSAT-NCBI-DEFECTS 1.19, rule 3).
+//!   (PD-LOSAT-NCBI-DEFECTS 1.20, rule 3).
 //! - `tie2` (the default word finder, `-window_size` 40; `tests/fixtures/tblastx_chunk_merge/
 //!   tie2_q.fna`, `-seg no -evalue 1e30`): NCBI's order of HSPs that tie on score, offsets and
 //!   ends across the two 5,000,000-letter parts of a subject frame. The subject is 15,000,300 letters

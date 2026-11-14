@@ -132,14 +132,10 @@ impl fmt::Debug for WindowMasker {
 pub(crate) fn open(name: &str, source: &dyn CountsSource) -> Result<WindowMasker, NativeError> {
     match source.discover(name) {
         Ok(found) if matches!(found.stat_type, StatType::OBinary | StatType::Binary) => {}
-        Err(error) if error.discover_report().is_some() => {
-            return Err(NativeError {
-                exit: 255,
-                message: format!(
-                    "Error: {}\n",
-                    error.discover_report().expect("checked above")
-                ),
-            });
+        Err(error) if error.discover_exception().is_some() => {
+            return Err(NativeError::exception(
+                &error.discover_exception().expect("checked above"),
+            ));
         }
         Ok(_) | Err(_) => {
             return Err(NativeError {

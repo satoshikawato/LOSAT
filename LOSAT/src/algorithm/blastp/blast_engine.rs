@@ -8891,6 +8891,29 @@ struct BlastpReports<'a> {
     call_requests: Option<&'a CallRequests<'a>>,
 }
 
+impl<'a> BlastpReports<'a> {
+    /// The reports of a call of the preliminary stage only (`PrelimOnly`): none (the call of the
+    /// whole query or of all queries writes them, and the archive). `x_prolog`: an error of the
+    /// call's search is written after the outfmt 0 prolog (`preliminary_search_error`).
+    fn prelim_only(x_prolog: bool) -> Self {
+        Self {
+            reader_warnings: &[],
+            identity_warned: 0,
+            epilog: false,
+            x_prolog,
+            x_queries_before: 0,
+            x_xml2_carry: None,
+            last_call: false,
+            psi_round: None,
+            stopped_pssms: None,
+            titles_may_refuse: false,
+            query_scopes: None,
+            strategy_next: None,
+            call_requests: None,
+        }
+    }
+}
+
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
 /// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`). The values that NCBI
 /// converts in each query batch stop its first batch: `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` in its
@@ -9081,7 +9104,7 @@ fn search_split_query_batches(
                 subject_label,
                 outputs,
                 blastp_parallel_pool,
-                Some(&mut chunk_lists),
+                Some(PrelimOnly::Chunk(&mut chunk_lists)),
                 &BlastpRanges {
                     input_records: &parts,
                     query_input: &part_input,
@@ -9092,22 +9115,7 @@ fn search_split_query_batches(
                 // A chunk's search ends after its preliminary stage, before any report.
                 // EXPERIMENT (LOSAT_X_BPQBLOCK): a chunk of a block after the first follows the
                 // first block's outfmt 0 prolog (`preliminary_search_error`).
-                &BlastpReports {
-                    reader_warnings: &[],
-                    identity_warned: 0,
-                    epilog: false,
-                    x_prolog,
-                    x_queries_before: 0,
-                    x_xml2_carry: None,
-                    last_call: false,
-                    psi_round: None,
-                    stopped_pssms: None,
-                    // The call of the whole query writes the archive.
-                    titles_may_refuse: false,
-                    query_scopes: None,
-                    strategy_next: None,
-                    call_requests: None,
-                },
+                &BlastpReports::prelim_only(x_prolog),
                 x_lookup_ahead::XAheadBlock::none(),
             );
             // A chunk's search that fails is its batch's (`preliminary_search_error`): the
@@ -9648,9 +9656,24 @@ fn x_lookup_after_prelim(
     taken_later.then_some(lookup)
 }
 
+/// A call of the preliminary stage only, which writes no report and hands its hit lists to its
+/// caller: a query chunk of a split batch (`search_split_query_batches`), whose lists leave as
+/// lists of full HSPs.
+enum PrelimOnly<'a> {
+    Chunk(&'a mut Vec<Option<BlastpHitList>>),
+}
+
+impl PrelimOnly<'_> {
+    /// Whether the call is a query chunk's (its table is of one chunk: no 16-bit hits, no spare
+    /// vectors, `XLookupFor::QueryChunk`; its batch is searched).
+    fn is_chunk(&self) -> bool {
+        matches!(self, PrelimOnly::Chunk(_))
+    }
+}
+
 /// A call of the batches of `query_records` (`run_call`), and, with `-export_search_strategy`, the
 /// search strategy's requests of its batches, released where the call ends (`CallRequests`): one
-/// place for every way the call ends. A query chunk's call (`chunk_prelim`) has none.
+/// place for every way the call ends. A call of the preliminary stage only (`prelim`) has none.
 #[allow(clippy::too_many_arguments)]
 fn run_resolved_in_pool(
     args: ResolvedBlastpArgs,
@@ -9660,12 +9683,12 @@ fn run_resolved_in_pool(
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
     blastp_parallel_pool: &crate::utils::threading::SearchPool<'_>,
-    chunk_prelim: Option<&mut Vec<Option<BlastpHitList>>>,
+    prelim: Option<PrelimOnly<'_>>,
     ranges: &BlastpRanges<'_>,
     reports: &BlastpReports<'_>,
     x_ahead: x_lookup_ahead::XAheadBlock<'_>,
 ) -> Result<()> {
-    let call = match (args.strategy.clone(), chunk_prelim.is_none()) {
+    let call = match (args.strategy.clone(), prelim.is_none()) {
         (Some(strategy), true) => CallRequests::of_call(
             strategy,
             &args,
@@ -9688,7 +9711,7 @@ fn run_resolved_in_pool(
         subject_label,
         outputs,
         blastp_parallel_pool,
-        chunk_prelim,
+        prelim,
         ranges,
         &reports,
         x_ahead,
@@ -9708,7 +9731,7 @@ fn run_call(
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
     blastp_parallel_pool: &crate::utils::threading::SearchPool<'_>,
-    chunk_prelim: Option<&mut Vec<Option<BlastpHitList>>>,
+    prelim: Option<PrelimOnly<'_>>,
     ranges: &BlastpRanges<'_>,
     reports: &BlastpReports<'_>,
     mut x_ahead: x_lookup_ahead::XAheadBlock<'_>,
@@ -9724,6 +9747,8 @@ fn run_call(
     // in blocks below and, for the hit lists, after the preliminary stage).
     let subject_records = subject_source.fasta_records();
     let database = subject_source.database();
+    // A query chunk's search (`PrelimOnly::Chunk`).
+    let query_chunk = prelim.as_ref().is_some_and(PrelimOnly::is_chunk);
     let timing_enabled = blastp_timing_env_enabled();
     let kappa_range_counters_enabled = blastp_kappa_range_counters_env_enabled();
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1705
@@ -9988,15 +10013,10 @@ fn run_call(
                     &args,
                     &query_frames,
                     spare,
-                    chunk_prelim.is_some(),
+                    query_chunk,
                     blastp_parallel_pool,
                 ),
-                None => blastp_aa_lookup(
-                    &args,
-                    &query_frames,
-                    chunk_prelim.is_some(),
-                    blastp_parallel_pool,
-                ),
+                None => blastp_aa_lookup(&args, &query_frames, query_chunk, blastp_parallel_pool),
             },
         },
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
@@ -10015,12 +10035,12 @@ fn run_call(
                 &query_batches,
                 &query_lengths,
                 blastp_parallel_pool,
-                if chunk_prelim.is_some() {
+                if query_chunk {
                     super::x_query_blocks::XLookupFor::QueryChunk
                 } else {
                     super::x_query_blocks::XLookupFor::Search
                 },
-                if chunk_prelim.is_some() {
+                if query_chunk {
                     0
                 } else {
                     super::x_query_blocks::x_block_appends(blastp_parallel_pool, query_records)
@@ -10111,7 +10131,7 @@ fn run_call(
     // and the empty database: exit 0).
     if let Some(database) = database.filter(|database| {
         database.first_oid_read_fails()
-            && (chunk_prelim.is_some() || query_batch_skipped.iter().any(|skipped| !skipped))
+            && (query_chunk || query_batch_skipped.iter().any(|skipped| !skipped))
     }) {
         return Err(preliminary_search_error(
             &args,
@@ -10124,7 +10144,7 @@ fn run_call(
             reports,
             &query_batches,
             &query_batch_skipped,
-            chunk_prelim.is_some(),
+            query_chunk,
             database.name(),
             "Database memory map file error",
         ));
@@ -10277,7 +10297,7 @@ fn run_call(
             reports,
             &query_batches,
             &query_batch_skipped,
-            chunk_prelim.is_some(),
+            query_chunk,
             "",
             "The average subject length is too short",
         ));
@@ -11993,7 +12013,7 @@ fn run_call(
                     reports,
                     &query_batches,
                     &query_batch_skipped,
-                    chunk_prelim.is_some(),
+                    query_chunk,
                     database.name(),
                     read_error.0,
                 ),
@@ -12055,7 +12075,7 @@ fn run_call(
                     reports,
                     &query_batches,
                     &query_batch_skipped,
-                    chunk_prelim.is_some(),
+                    query_chunk,
                     database.name(),
                     read_error.0,
                 ),
@@ -12240,7 +12260,7 @@ fn run_call(
     // ```
     // A query chunk's preliminary stage ends here, before its stream is closed: its hit
     // lists merge into the batch's (`search_split_query_batches`).
-    if let Some(chunk_lists) = chunk_prelim {
+    if let Some(PrelimOnly::Chunk(chunk_lists)) = prelim {
         // A chunk's lists leave as `BlastpHitList`s of full HSPs, so the chunk merge
         // (`query_split.rs`) reads what it reads from a search without chunks.
         x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);

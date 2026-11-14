@@ -2864,7 +2864,15 @@ pub(super) fn x_bp_build_lookup(
     threshold: i32,
     check_ideal: bool,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
-    x_build_direct_or_reference(queries, threshold, check_ideal, |_| {}, x_bp_build_direct)
+    x_build_direct_or_reference(
+        queries,
+        threshold,
+        check_ideal,
+        |_| {},
+        x_bp_build_direct,
+        ScoringMatrix::Blosum62,
+        LOOKUP_WORD_LENGTH,
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
@@ -2929,7 +2937,7 @@ pub(super) fn x_bp_build_lookup_as(
 }
 
 /// EXPERIMENT (LOSAT_X_TBXLUT): `true` = TBLASTX's full table built in place by
-/// [`x_tbx_build_direct`], `false` = off (`build_ncbi_lookup`, the chain builder).
+/// [`x_tbx_build_direct`], `false` = off (`build_ncbi_lookup_for_profile`, the chain builder).
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result. A strict-set
 // switch (on unless it is `0`; `utils/xswitch.rs`).
 pub(super) fn x_tbxlut_on() -> bool {
@@ -2947,14 +2955,16 @@ pub(crate) fn x_tbxlut_reach_stub() {
     }
 }
 
-/// EXPERIMENT (LOSAT_X_TBXLUT): `build_ncbi_lookup` for the full table of
-/// a TBLASTX query batch (the table of the reference frame loop), with TBLASTX's switch; the same
-/// builder as BLASTP's [`x_bp_build_lookup`].
+/// EXPERIMENT (LOSAT_X_TBXLUT): `build_ncbi_lookup_for_profile(.., matrix, word_length)` for the
+/// full table of a TBLASTX query batch (the table of the reference frame loop), with TBLASTX's
+/// switch; the same builder as BLASTP's [`x_bp_build_lookup`].
 pub(super) fn x_tbx_build_lookup(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     karlin_params: &KarlinParams,
     check_ideal: bool,
+    matrix: ScoringMatrix,
+    word_length: usize,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
     x_build_ncbi_lookup_with(
         x_tbxlut_on(),
@@ -2964,6 +2974,8 @@ pub(super) fn x_tbx_build_lookup(
         check_ideal,
         |direct| crate::utils::xreach::x_reach!("LOSAT_X_TBXLUT", direct),
         x_tbx_build_direct,
+        matrix,
+        word_length,
     )
 }
 
@@ -3027,9 +3039,11 @@ type XBuildDirect = fn(
     usize,
 ) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery>;
 
-/// The body of [`x_tbx_build_lookup`]: with `direct` false it calls `build_ncbi_lookup`; with
-/// `direct` true it is [`x_build_direct_or_reference`] with `build_direct`. `reach` is called with
-/// `direct` true with whether the direct builder built the table (`LOSAT_X_REACH`).
+/// The body of [`x_tbx_build_lookup`]: with `direct` false it calls
+/// `build_ncbi_lookup_for_profile`; with `direct` true it is [`x_build_direct_or_reference`] with
+/// `build_direct`. `reach` is called with `direct` true with whether the table was built without
+/// the chains (`LOSAT_X_REACH`).
+#[allow(clippy::too_many_arguments)]
 fn x_build_ncbi_lookup_with(
     direct: bool,
     queries: &[Vec<QueryFrame>],
@@ -3038,37 +3052,63 @@ fn x_build_ncbi_lookup_with(
     check_ideal: bool,
     reach: fn(bool),
     build_direct: XBuildDirect,
+    matrix: ScoringMatrix,
+    word_length: usize,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
     if !direct {
-        return build_ncbi_lookup(queries, threshold, karlin_params, check_ideal);
+        return build_ncbi_lookup_for_profile(
+            queries,
+            threshold,
+            karlin_params,
+            check_ideal,
+            matrix,
+            word_length,
+        );
     }
-    x_build_direct_or_reference(queries, threshold, check_ideal, reach, build_direct)
+    x_build_direct_or_reference(
+        queries,
+        threshold,
+        check_ideal,
+        reach,
+        build_direct,
+        matrix,
+        word_length,
+    )
 }
 
 /// The table of [`x_bp_build_lookup`] and of [`x_build_ncbi_lookup_with`] with `direct` true: the
-/// query is prepared as `build_ncbi_lookup_for_profile(.., Blosum62, LOOKUP_WORD_LENGTH)` prepares
-/// it and the table is built with `build_direct` ([`x_tbx_build_direct`] for TBLASTX,
-/// [`x_bp_build_direct`] for BLASTP), falling back to the reference builder where that declines.
-/// `reach` is called with whether the direct builder built the table.
+/// query is prepared as `build_ncbi_lookup_for_profile(.., matrix, word_length)` prepares it and
+/// the table is built with `build_direct` ([`x_tbx_build_direct`] for TBLASTX,
+/// [`x_bp_build_direct`] for BLASTP); where that declines, a backbone index wider than 16 bits
+/// takes the joint builder (`x_full_wide_table`, as BLASTX's table) and diagnostics mode the
+/// reference builder. `reach` is called with whether the table was built without the chains.
 fn x_build_direct_or_reference(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     check_ideal: bool,
     reach: fn(bool),
     build_direct: XBuildDirect,
+    matrix: ScoringMatrix,
+    word_length: usize,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
-    let matrix = ScoringMatrix::Blosum62;
-    let prepared = x_bp_prepared_query(queries, check_ideal, matrix, LOOKUP_WORD_LENGTH);
+    let prepared = x_bp_prepared_query(queries, check_ideal, matrix, word_length);
     // build_lookup_from_prepared returns the prepared contexts unchanged.
     let contexts = prepared.contexts.clone();
-    match build_direct(prepared, threshold, matrix, LOOKUP_WORD_LENGTH) {
+    let prepared = match build_direct(prepared, threshold, matrix, word_length) {
+        Ok(table) => {
+            reach(true);
+            return (table, contexts);
+        }
+        Err(prepared) => prepared,
+    };
+    match x_full_wide_table(prepared, threshold, matrix, word_length, 1) {
         Ok(table) => {
             reach(true);
             (table, contexts)
         }
         Err(prepared) => {
             reach(false);
-            build_lookup_from_prepared(prepared, threshold, matrix, LOOKUP_WORD_LENGTH)
+            build_lookup_from_prepared(prepared, threshold, matrix, word_length)
         }
     }
 }

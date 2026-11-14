@@ -68,6 +68,9 @@ pub(crate) struct Hsps {
     segments: Vec<Segment>,
     /// Each HSP's subject and the end of its segments in `segments`.
     hsps: Vec<(u32, usize)>,
+    /// The subject that is the query's own Bioseq (one record read as the query and as a subject
+    /// with `-parse_deflines`), which `CAlnMix::Add` keeps on its own row (`fPreserveRows`).
+    query_bioseq: Option<u32>,
 }
 
 impl Hsps {
@@ -99,6 +102,11 @@ impl Hsps {
                 }),
         );
         self.hsps.push((subject, self.segments.len()));
+    }
+
+    /// Marks subject `subject` as the query's own Bioseq (`query_bioseq`).
+    pub(crate) fn set_query_bioseq(&mut self, subject: u32) {
+        self.query_bioseq = Some(subject);
     }
 
     /// Each HSP's subject and segments, in order.
@@ -139,6 +147,8 @@ pub(crate) trait Sequences {
 /// the subjects' indices in the report (a subject's masks are those of its HSP list with the
 /// query, `GetSubjectMasks` of the query's results).
 pub(crate) trait ReportSequences: Sync {
+    /// Whether subject `s_idx` is query `q_idx`'s own Bioseq (`Hsps::set_query_bioseq`).
+    fn subject_is_query(&self, q_idx: usize, s_idx: u32) -> bool;
     fn query_letters(&self, q_idx: usize, from: u32, to: u32, out: &mut Vec<u8>);
     fn subject_letters(&self, s_idx: u32, from: u32, to: u32, out: &mut Vec<u8>);
     fn query_label(&self, q_idx: usize, out: &mut Vec<u8>);

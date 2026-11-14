@@ -2863,6 +2863,9 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         let mut hsps = super::query_anchored::Hsps::default();
         let mut segments = super::serial::seqalign::Segments::default();
         for &s_idx in group.aligned(self.report.num_alignments) {
+            if sequences.subject_is_query(q_idx, s_idx) {
+                hsps.set_query_bioseq(s_idx);
+            }
             for hit in &group.subject_hits[&s_idx] {
                 super::serial::seqalign::protein_row_segments(&hit.hit, &mut segments);
                 hsps.push_dense_seg(s_idx, segments.starts(), segments.lens(), 0, 0);

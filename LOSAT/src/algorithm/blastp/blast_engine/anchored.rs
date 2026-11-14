@@ -60,6 +60,27 @@ fn push_masks(masks: &[(i32, i32)], out: &mut Vec<(u32, u32)>) {
 }
 
 impl ReportSequences for AnchoredSequences<'_> {
+    /// A `-subject` record read with `-parse_deflines` that is the query's record: the query is
+    /// one record with a subject (the same definition line and letters, `BelievedIds::shared`), and
+    /// this subject has its id (any other subject with the query's id is refused before the
+    /// reports, and so is a database sequence).
+    fn subject_is_query(&self, q_idx: usize, s_idx: u32) -> bool {
+        let Some(query) = self
+            .query_records
+            .get(q_idx)
+            .and_then(FastaRecord::believed)
+        else {
+            return false;
+        };
+        self.ordinals.is_none()
+            && query.shared.is_some()
+            && self
+                .subject_records
+                .get(s_idx as usize)
+                .and_then(FastaRecord::believed)
+                .is_some_and(|subject| subject.best == query.best)
+    }
+
     fn query_letters(&self, q_idx: usize, from: u32, to: u32, out: &mut Vec<u8>) {
         let shift = self.query_placements.offset(q_idx);
         let letters = query_nomask_sequence(&self.contexts[q_idx]);

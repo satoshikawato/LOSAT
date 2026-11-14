@@ -242,9 +242,38 @@ impl Mix {
     ///     }
     /// }
     /// ```
-    /// The `while (row_index != row)` loop (`m_AnotherRow`, a sequence aligned to itself) is not
-    /// reached: `SeqKey::Query` is only row 0 and `SeqKey::Subject` only row 1 (a query that is
-    /// also a subject is refused before the reports).
+    /// `SeqKey::Query` is only row 0 and `SeqKey::Subject` only row 1. A subject that is the
+    /// query's own Bioseq (`query_bioseq`) is the query's `CAlnMixSeq` in NCBI, so its row 1 takes
+    /// the `while (row_index != row)` branch: an `m_AnotherRow` that is a sequence of its own in
+    /// `m_Seqs` (as the subject's here) except for its `m_DsIdx`, which is the Dense-seg that made
+    /// it, where another subject's is 0 until its first match (`x_SecondRowFits`): the first HSP
+    /// added keeps the subject's first row, not the HSP of the longest segment.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:165-186
+    /// ```c++
+    ///             } else while (row_index != row) {
+    ///                 if (aln_seq->m_AnotherRow) {
+    ///                     aln_seq   = aln_seq->m_AnotherRow;
+    ///                     row_index = aln_seq->m_RowIdx;
+    ///                 } else {
+    ///                     CRef<CAlnMixSeq> another_row (new CAlnMixSeq);
+    ///
+    ///                     another_row->m_BioseqHandle = aln_seq->m_BioseqHandle;
+    ///                     another_row->m_SeqId        = aln_seq->m_SeqId;
+    ///                     another_row->m_Width        = aln_seq->m_Width;
+    ///                     another_row->m_SeqIdx       = aln_seq->m_SeqIdx;
+    ///                     another_row->m_ChildIdx     = aln_seq->m_ChildIdx + 1;
+    ///                     another_row->m_DsIdx        = int(m_DsCnt);
+    ///                     another_row->m_RowIdx       = row;
+    ///
+    ///                     m_Seqs.push_back(another_row);
+    ///
+    ///                     aln_seq = aln_seq->m_AnotherRow = another_row;
+    ///
+    ///                     break;
+    ///                 }
+    ///             }
+    /// ```
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmatch.cpp:120-252
     /// ```c++
@@ -306,7 +335,7 @@ impl Mix {
     ///         seg_off += ds.GetDim();
     ///     }
     /// ```
-    fn add(&mut self, subject: u32, segments: &[super::Segment]) {
+    fn add(&mut self, subject: u32, segments: &[super::Segment], query_bioseq: Option<u32>) {
         self.ds_cnt += 1;
         let mut ds_seq = [0; 2];
         for (row, key) in [SeqKey::Query, SeqKey::Subject(subject)]
@@ -316,6 +345,11 @@ impl Mix {
             let seq = self.identify(key);
             if self.seqs[seq].row_idx == -1 {
                 self.seqs[seq].row_idx = row as i32;
+                if row == 1 && query_bioseq == Some(subject) {
+                    // The query's `m_AnotherRow`.
+                    self.seqs[seq].child_idx = 1;
+                    self.seqs[seq].ds_idx = self.ds_cnt;
+                }
             }
             self.seqs[seq].ds_cnt += 1;
             ds_seq[row] = seq;
@@ -1670,7 +1704,7 @@ pub(crate) fn merge(hsps: &Hsps) -> Result<Denseg, MixError> {
         segments: Vec::new(),
     };
     for (subject, segments) in hsps.iter() {
-        mix.add(subject, segments);
+        mix.add(subject, segments, hsps.query_bioseq);
     }
     // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:89-98
     // ```c++

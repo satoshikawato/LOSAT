@@ -771,3 +771,49 @@ fn no_hsps_write_nothing() {
     .expect("the section");
     assert!(out.is_empty());
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:165-186 (quoted at `aln_mix::Mix::add`):
+// a subject that is the query's Bioseq is the query's `m_AnotherRow`, whose `m_DsIdx` is the
+// Dense-seg that made it, so its first row is the HSP added first, not the HSP of the longest
+// segment (bp.s.f1's two HSPs of s_twice with Query_1 swap their rows; BLASTP's self hit, the
+// longest and first, keeps its place either way: pd.self.blastp.off.0 of the broad sample).
+#[test]
+fn the_query_s_own_bioseq_keeps_its_first_hsp_on_its_first_row() {
+    let probe = probe(
+        "qa",
+        1,
+        &["s_multi", "s_ins", "s_ins2", "s_twice", "s_far", "s_c"],
+    );
+    let rows = [
+        (3, 3, 73, "VL1SNTSFLSMADRA2FG3VG3IQ14NY9NQ7FE1KA6SE7"),
+        (3, 11, 1, "15WN15DG8RH7GA2QDSDTD2PS3YINK1ND1HVSYSFFYMT1ETT-R-I-R-T-N-K-H-Y-W-S-R-Y-H-A-P-MLHWQNQSFLTMKDVANINQ2EQPY1RPQPEKEQ4"),
+    ];
+    let starts = |hsps: Hsps| {
+        let mut out = Vec::new();
+        write_section(
+            &mut out,
+            View {
+                identity: true,
+                anchored: true,
+            },
+            200,
+            &hsps,
+            &probe,
+        )
+        .expect("the section");
+        let text = String::from_utf8(out).expect("ASCII");
+        text.lines()
+            .filter(|line| line.starts_with("Subject_4"))
+            .map(|line| line.split_whitespace().nth(1).unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    let mut plain = Hsps::default();
+    let mut own = Hsps::default();
+    for &(subject, qstart, sstart, btop) in &rows {
+        push_btop(&mut plain, subject, qstart, sstart, btop);
+        push_btop(&mut own, subject, qstart, sstart, btop);
+    }
+    own.set_query_bioseq(3);
+    assert_eq!(starts(plain), ["1", "73"]);
+    assert_eq!(starts(own), ["73", "1"]);
+}

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use super::column::{self, Column, MASK_DATA_TITLE};
-use super::file::DbFile;
+use super::file::{DbFile, MAP_PAGE};
 use super::filter::{DeflineList, DeflineRule};
 use super::header::{decode_defline_taxids, decode_deflines_as, decode_full, Defline};
 use super::index::IndexFile;
@@ -231,6 +231,62 @@ impl Volume {
         offsets[1]
             .checked_sub(offsets[0])
             .and_then(|bytes| bytes.checked_sub(1))
+            .ok_or_else(|| self.index.sequence_changed(oid, 2))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1774-1803 and
+    // c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:700-722,748-752
+    // ```c++
+    // int CSeqDBVol::x_GetSequence(int              oid,
+    //                              const char    ** buffer) const
+    // ...
+    //     m_Idx->GetSeqStartEnd(oid, start_offset, end_offset);
+    // ...
+    //         end_offset --;
+    //
+    //         length = int(end_offset - start_offset);
+    // ...
+    //         *buffer = m_Seq->GetFileDataPtr(start_offset-1) + 1;
+    // ...
+    //                 m_MappedFile = m_Atlas.GetMemoryFile(m_Filename);
+    // ...
+    //             m_DataPtr = (char *)(m_MappedFile->GetPtr());
+    // ...
+    //     const char *GetFileDataPtr(const string   & fname,TIndx offset)
+    //     {
+    //         Init(fname);
+    //
+    //         return(const char *)(m_DataPtr + offset);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:114-127 and
+    // c++/src/corelib/ncbifile.cpp:5636-5638
+    // ```c++
+    // CMemoryFile* CSeqDBAtlas::GetMemoryFile(const string& fileName)
+    // ...
+    //     CAtlasMappedFile* file(new CAtlasMappedFile(fileName));
+    // ...
+    //     m_DataPtrReal = mmap(0, m_LengthReal, attrs.map_protect,
+    //                          attrs.map_access, handle.hMap, m_OffsetReal);
+    // ```
+    /// The bytes that NCBI's mapping of the volume's sequence file holds after the sentinel byte
+    /// of protein `oid` (volume-relative): the volume's next sequences with their sentinels, then
+    /// the rest of the file's last memory page. NCBI's search reads a protein of a database where
+    /// the volume's sequence file is mapped whole from offset 0; the system maps whole pages and
+    /// fills the part of the last page after the end of the file with zeros (POSIX `mmap`,
+    /// Windows `MapViewOfFile`), so those bytes are NCBI's too (`MAP_PAGE`).
+    pub fn protein_mapped_bytes_after(&self, oid: u32) -> Result<u64, SeqDbError> {
+        assert!(
+            self.index.seqtype == SeqType::Protein,
+            "protein bytes of a nucleotide volume"
+        );
+        self.check_range(oid, oid.saturating_add(1))?;
+        let next = self.index.sequence_start(oid + 1)?;
+        let length = self.seq_file()?.len();
+        length
+            .div_ceil(MAP_PAGE)
+            .saturating_mul(MAP_PAGE)
+            .checked_sub(next)
+            .filter(|_| next <= length)
             .ok_or_else(|| self.index.sequence_changed(oid, 2))
     }
 

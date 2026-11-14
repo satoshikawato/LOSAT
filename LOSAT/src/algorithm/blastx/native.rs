@@ -1760,6 +1760,7 @@ pub(super) fn database_search_error(
     // already (the exception of a query split size that NCBI cannot convert, `split::split_sizes`).
     if error.is::<super::parameters::SearchSpaceOverflow>()
         || error.is::<super::split::QuerySplitRefusal>()
+        || error.is::<super::preliminary::OneHitWindowRefusal>()
         || error.is::<NativeError>()
     {
         return error;
@@ -2631,15 +2632,18 @@ impl XReaderPrep {
         if self.failed.load(Ordering::Acquire) {
             slots.iter_mut().for_each(|slot| **slot = None);
         } else if let Some(layout) = &self.layout {
-            let shape = std::sync::Arc::new(ReaderBatchShape::reduce(
+            let shape = ReaderBatchShape::reduce(
                 layout,
                 slots
                     .iter()
                     .map(|slot| slot.as_ref().expect("a prepared unit")),
-            ));
-            for slot in &mut slots {
-                attach(slot.as_mut().expect("a prepared unit"), &shape);
-            }
+            );
+            attach(
+                slots
+                    .iter_mut()
+                    .map(|slot| slot.as_mut().expect("a prepared unit")),
+                shape,
+            );
         }
         drop(slots);
         let mut gate = self.gate.lock().expect("the reader batch's gate");
@@ -2775,8 +2779,16 @@ impl XUnit {
         match (taken, &prep.layout) {
             (Some(unit), _) => Ok(Some(unit)),
             (None, Some(layout)) => {
+                // Phase 1 failed: a unit's preparation fails the reader batch, as NCBI's set-up
+                // fails it before any search (and as with one thread), so nothing of this unit's
+                // search is written. Its one-hit windows of `-window_size 0` are then not refused
+                // at the buffer's end (`preliminary::refuse_window_past_buffers`), whose bytes
+                // after this unit are not known here: a refusal must not take the batch's error's
+                // place.
                 super::split::split_sizes(layout.query_count)?;
-                prepare_unit(self.queries(), layout, options, subjects).map(Some)
+                let mut unit = prepare_unit(self.queries(), layout, options, subjects)?;
+                unit.prepared.reader_buffer_after = usize::MAX;
+                Ok(Some(unit))
             }
             (None, None) => Ok(None),
         }

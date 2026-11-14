@@ -54,7 +54,7 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use super::file::DbFile;
+use super::file::{DbFile, MAP_PAGE};
 use super::{SearchPath, SeqDbError};
 
 /// Header of `taxdb.bti`: magic, count, four reserved words (seqdbtax.cpp,
@@ -62,9 +62,6 @@ use super::{SearchPath, SeqDbError};
 const HEADER_LEN: u64 = 4 + 4 + 16;
 /// One (taxid, offset) pair of `taxdb.bti` (`CSeqDBTaxId`).
 const ENTRY_LEN: u64 = 8;
-/// The page size of the oracle platform (Linux x86-64): NCBI's mapping of `taxdb.btd` reads zero
-/// bytes from the end of the file to the end of its last page.
-const MAP_PAGE: u64 = 4096;
 /// seqdbtax.cpp: `TAX_DB_MAGIC_NUMBER`.
 const MAGIC: u32 = 0x8739;
 

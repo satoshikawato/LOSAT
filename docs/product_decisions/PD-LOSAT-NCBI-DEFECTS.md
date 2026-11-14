@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.22
+- Version: 1.23
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -39,7 +39,9 @@
   1.21 2026-11-14 (TBLASTX's one-hit HSPs of length 0 or less ported, rule 4, and the explicit
   rejection of their merge across subject chunks with a sum of lengths of 0, rule 3, line RG item
   X2b);
-  1.22 2026-11-14 (a version 5 database list that mixes databases with and without accession
+  1.22 2026-11-14 (the explicit rejections of BLASTX's one-hit gapped start past NCBI's buffers,
+  rule 3, line RG item X2f);
+  1.23 2026-11-14 (a version 5 database list that mixes databases with and without accession
   tables is searched; the rejection of 1.9 keeps only a run whose reports look a parsed Seq-id up
   in a file without the table, rule 3, line DBID item mixdb, Owner-delegated)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
@@ -471,7 +473,7 @@ asks the maintainer to accept it, as the PRs of versions 1.5 and 1.13 did.
   6 programs, 20 formats, the prefetch on and off, 17 lists and alias files) and refuses a run
   whose reports or prefetch look a parsed Seq-id up in a file without the table (`... whose
   lookup in the database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0 stops)`).
-  Versions 1.9 to 1.21 refused every such list before the search (line DI-8 `DECISIONS.md` 31).
+  Versions 1.9 to 1.22 refused every such list before the search (line DI-8 `DECISIONS.md` 31).
 
 - A negative seqid list that excludes a sequence (every id of its `.nos`/`.pos` record
   listed) of a volume that the database does not hold, while the database holds other
@@ -602,6 +604,37 @@ asks the maintainer to accept it, as the PRs of versions 1.5 and 1.13 did.
 
   BLASTP's approved exception 3 (version 1.3), which reads such letters as the sentinel, is not
   extended to TBLASTN.
+
+- BLASTX with `-window_size 0` (version 1.22, 2026-11-14, line RG item X2f, Owner-delegated): with
+  a low `-threshold`, NCBI's one-hit ungapped extension can give a negative `Int4` length
+  (`aa_ungapped.c:1054,1083`), which `BlastGetStartForGappedAlignment` reads as `Uint4`: it scores
+  the first window of 11 letters from the HSP's start (`blast_gapalign.c:3394-3437`). A window that
+  passes the end of its context or of its subject holds that NULLB, which scores
+  `BLAST_SCORE_MIN` (`blast_stat.c:1559-1579`), so NCBI returns the HSP's start whatever bytes
+  follow, and so does LOSAT. LOSAT refuses (exit 1) where the window reads outside NCBI's buffers:
+  - past the byte after the last context's NULLB of the query batch (`calloc(buflen+1)` with
+    `buflen` from `QueryInfo_GetSeqBufLen`, `blast_setup_cxx.cpp:500-501`,
+    `blast_query_info.c:246-250`); a batch that LOSAT searches in parts (with `BATCH_SIZE` above
+    10002) is one buffer, and each chunk of a split query has its own;
+  - past the NULLB after a `-subject` protein (`malloc(len+2)`, `blast_setup_cxx.cpp:885-893,
+    1236-1239`);
+  - past the last memory page of a database volume's sequence file. NCBI maps the file whole from
+    offset 0 and reads the sequences in place (`seqdbvol.cpp:1802`, `seqdbatlas.hpp:700-722`,
+    `seqdbatlas.cpp:114-127`, `ncbifile.cpp:5636-5638`), and the system fills the rest of the
+    file's last page with zeros, which NCBI reads as NULLBs, as LOSAT does. So only a window from
+    the volume's last sequence in a file that ends within 10 bytes of a 4,096-byte page boundary
+    reaches past it.
+
+  NCBI indexes its matrix with the bytes it reads there. In 400 random searches with this setting
+  and `-subject` (one to three queries of 24 to 300 bases, one to three subjects of 12 to 150
+  letters, word sizes 2 to 5, `-threshold` 1 to 4), NCBI crashed (SIGSEGV) in 6, and in 2 its report
+  lost a line, in one of them only in some runs; 115 of the 366 gapped searches read past a buffer.
+  Under valgrind the 13 such searches checked (the 8 above among them) finish, with the output of
+  reading those bytes as NULLBs. With `-db`, a window past the volume's last sequence into the rest
+  of the page gave the same output in five runs and no invalid read under valgrind; one past the
+  page of a 4,096-byte file made valgrind report an invalid read and crash. BLASTP's
+  approved exception 3 (version 1.3), which reads such letters as the sentinel, is not extended to
+  BLASTX.
 
 - TBLASTX with `-window_size 0` (version 1.21, 2026-11-14, line RG item X2b, Owner-delegated): with
   a low `-threshold`, NCBI's one-hit word finder saves ungapped HSPs of length 0 or less

@@ -643,66 +643,114 @@ fn advance_tblastx_diag_offset(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits_priv.h:66-72
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits_priv.h:68-69
 // ```c
 // #define CONTAINED_IN_HSP(a,b,c,d,e,f) \
 //     (((a <= c && b >= c) && (d <= f && e >= f)) ? TRUE : FALSE)
 // ```
+// On NCBI's `Int4` offsets and ends.
 #[inline]
-fn contained_in_hsp(a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> bool {
+fn contained_in_hsp(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32) -> bool {
     a <= c && b >= c && d <= f && e >= f
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1488-1533
+/// A merge of two HSPs from two chunks of a subject frame whose result NCBI leaves undefined
+/// (`merge_two_tblastx_chunk_hsps`): their lengths add up to 0, which only an HSP of the one-hit
+/// word finder of length 0 or less can give (`TWO_HIT_CHUNK_MERGE_IS_DEFINED`).
+#[derive(Debug)]
+struct ChunkMergeUndefined;
+
+/// Why the chunk merge of a list of the two-hit word finder never returns `ChunkMergeUndefined`.
+/// A merge never shortens an HSP: the merged HSP takes the minimum start and the maximum end, so its
+/// length is at least the longer input's. A two-hit HSP merged again in a third chunk therefore
+/// still has a positive length, and the lengths of two HSPs of any chunk add up to at least 2.
+const TWO_HIT_CHUNK_MERGE_IS_DEFINED: &str = concat!(
+    "the two-hit word finder saves HSPs of positive length only (`convert_init_hsps_unsorted` ",
+    "asserts a positive span), so the lengths of two of them add up to at least 2 in a chunk merge"
+);
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1488-1531 (`s_BlastMergeTwoHSPs`)
 // ```c
-// static Boolean
-// s_BlastMergeTwoHSPs(BlastHSP* hsp1, BlastHSP* hsp2, Boolean allow_gap)
-// {
 //    if (!allow_gap &&
-//        hsp1->subject.offset - hsp2->subject.offset
-//        - hsp1->query.offset + hsp2->query.offset) return FALSE;
-//    if(hsp1->subject.frame != hsp2->subject.frame) return FALSE;
-//    if (CONTAINED_IN_HSP(...) || CONTAINED_IN_HSP(...)) {
-//       ...
+//        hsp1->subject.offset - hsp2->subject.offset -hsp1->query.offset + hsp2->query.offset)
+//    {
+//        return FALSE;
+//    }
+//
+//    if(hsp1->subject.frame != hsp2->subject.frame)
+// 	   return FALSE;
+//
+//    /* combine the boundaries of the two HSPs,
+//       assuming they intersect at all */
+//    if (CONTAINED_IN_HSP(hsp1->query.offset, hsp1->query.end,
+//                         hsp2->query.offset,
+//                         hsp1->subject.offset, hsp1->subject.end,
+//                         hsp2->subject.offset) ||
+//        CONTAINED_IN_HSP(hsp1->query.offset, hsp1->query.end,
+//                         hsp2->query.end,
+//                         hsp1->subject.offset, hsp1->subject.end,
+//                         hsp2->subject.end)) {
+//
+// 	  double score_density =  (hsp1->score + hsp2->score) *(1.0) /
+// 			                  ((hsp1->query.end - hsp1->query.offset) +
+// 			                   (hsp2->query.end - hsp2->query.offset));
+//       hsp1->query.offset = MIN(hsp1->query.offset, hsp2->query.offset);
+//       hsp1->subject.offset = MIN(hsp1->subject.offset, hsp2->subject.offset);
+//       hsp1->query.end = MAX(hsp1->query.end, hsp2->query.end);
+//       hsp1->subject.end = MAX(hsp1->subject.end, hsp2->subject.end);
+//       if (hsp2->score > hsp1->score) {
+//           hsp1->query.gapped_start = hsp2->query.gapped_start;
+//           hsp1->subject.gapped_start = hsp2->subject.gapped_start;
+// 	  hsp1->score = hsp2->score;
+//       }
+//
+//       hsp1->score = MAX((int) (score_density *(hsp1->query.end - hsp1->query.offset)), hsp1->score);
 //       return TRUE;
 //    }
+//
 //    return FALSE;
-// }
 // ```
-fn merge_two_tblastx_chunk_hsps(hsp1: &mut UngappedHit, hsp2: &UngappedHit) -> bool {
-    if hsp1.s_aa_start as isize - hsp2.s_aa_start as isize - hsp1.q_aa_start as isize
-        + hsp2.q_aa_start as isize
-        != 0
-    {
-        return false;
+// TBLASTX is ungapped (`allow_gap` is FALSE: the diagonal test runs). The offsets and ends are
+// NCBI's `Int4` (`UngappedHit::q_end_int4`): an HSP of the one-hit word finder (`-window_size 0`)
+// may have a length of 0 or less (aa_ungapped.c:1054,1083), and the lengths are NCBI's
+// differences, so such an HSP lowers the density's divisor: an HSP of length 0 contains the HSPs
+// that start or end at its point, one of negative length contains nothing, and a positive HSP
+// that absorbs one of negative length gets a higher density. The diagonal test is computed in
+// `i64`, the value NCBI's `Int4` arithmetic gives where it does not overflow. Lengths that add up
+// to 0 (an HSP of length 0 found by both chunks, or a positive HSP of length 1 or 2 that contains
+// the start or end of one of length -1 or -2) make the density `+inf` (both scores are at least
+// 1), and its product with the merged length `+inf`, or NaN when that length is 0: `(int)` of
+// either is undefined (C11 6.3.1.4; x86-64 gives INT_MIN), `Err`, which the search refuses
+// (PD-LOSAT-NCBI-DEFECTS 1.21, rule 3). Otherwise `(int)` of the finite product truncates toward
+// 0, as `as i32` does for a value in range (the lengths are at least -2, so the product stays
+// near the scores).
+fn merge_two_tblastx_chunk_hsps(
+    hsp1: &mut UngappedHit,
+    hsp2: &UngappedHit,
+) -> Result<bool, ChunkMergeUndefined> {
+    let (q_off1, s_off1) = (hsp1.q_aa_start as i32, hsp1.s_aa_start as i32);
+    let (q_off2, s_off2) = (hsp2.q_aa_start as i32, hsp2.s_aa_start as i32);
+    if i64::from(s_off1) - i64::from(s_off2) - i64::from(q_off1) + i64::from(q_off2) != 0 {
+        return Ok(false);
     }
     if hsp1.s_frame != hsp2.s_frame {
-        return false;
+        return Ok(false);
     }
-
-    if contained_in_hsp(
-        hsp1.q_aa_start as usize,
-        hsp1.q_aa_end as usize,
-        hsp2.q_aa_start as usize,
-        hsp1.s_aa_start as usize,
-        hsp1.s_aa_end as usize,
-        hsp2.s_aa_start as usize,
-    ) || contained_in_hsp(
-        hsp1.q_aa_start as usize,
-        hsp1.q_aa_end as usize,
-        hsp2.q_aa_end as usize,
-        hsp1.s_aa_start as usize,
-        hsp1.s_aa_end as usize,
-        hsp2.s_aa_end as usize,
-    ) {
-        let len1 = (hsp1.q_aa_end as usize).saturating_sub(hsp1.q_aa_start as usize) as f64;
-        let len2 = (hsp2.q_aa_end as usize).saturating_sub(hsp2.q_aa_start as usize) as f64;
-        let score_density = (hsp1.raw_score as f64 + hsp2.raw_score as f64) / (len1 + len2);
+    let (q_end1, s_end1) = (hsp1.q_end_int4(), hsp1.s_end_int4());
+    let (q_end2, s_end2) = (hsp2.q_end_int4(), hsp2.s_end_int4());
+    if contained_in_hsp(q_off1, q_end1, q_off2, s_off1, s_end1, s_off2)
+        || contained_in_hsp(q_off1, q_end1, q_end2, s_off1, s_end1, s_end2)
+    {
+        let length_sum = (q_end1 - q_off1) + (q_end2 - q_off2);
+        if length_sum == 0 {
+            return Err(ChunkMergeUndefined);
+        }
+        let score_density = (hsp1.raw_score as f64 + hsp2.raw_score as f64) / f64::from(length_sum);
 
         hsp1.q_aa_start = hsp1.q_aa_start.min(hsp2.q_aa_start);
         hsp1.s_aa_start = hsp1.s_aa_start.min(hsp2.s_aa_start);
-        hsp1.q_aa_end = hsp1.q_aa_end.max(hsp2.q_aa_end);
-        hsp1.s_aa_end = hsp1.s_aa_end.max(hsp2.s_aa_end);
+        let q_end = q_end1.max(q_end2);
+        hsp1.set_int4_ends(q_end, s_end1.max(s_end2));
 
         if hsp2.raw_score > hsp1.raw_score {
             hsp1.q_seed_off = hsp2.q_seed_off;
@@ -710,115 +758,243 @@ fn merge_two_tblastx_chunk_hsps(hsp1: &mut UngappedHit, hsp2: &UngappedHit) -> b
             hsp1.raw_score = hsp2.raw_score;
         }
 
-        let new_len = (hsp1.q_aa_end as usize).saturating_sub(hsp1.q_aa_start as usize) as f64;
-        hsp1.raw_score = hsp1.raw_score.max((score_density * new_len) as i32);
-        return true;
+        let new_length = q_end - hsp1.q_aa_start as i32;
+        hsp1.raw_score = hsp1
+            .raw_score
+            .max((score_density * f64::from(new_length)) as i32);
+        return Ok(true);
     }
 
-    false
+    Ok(false)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2857-2995
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2876-2881,2890-2911
 // ```c
-// if (contexts_per_query < 0) {      /* subject seq is split */
-//    if (hsp1->subject.end > split_offsets[0]) { ... }
-//    if (hsp2->subject.offset < split_offsets[0] + chunk_overlap_size) { ... }
-// }
+//    /* If no previous HSP list, just return a copy of the new one. */
+//    if (!combined_hsp_list) {
+//       *combined_hsp_list_ptr = hsp_list;
+//       *hsp_list_ptr = NULL;
+//       return 0;
+//    }
 // ...
-// if (!hsp2 || hsp1->context != hsp2->context) continue;
-// end_diag = s_HSPEndDiag(hsp1);
-// start_diag = s_HSPStartDiag(hsp2);
-// if (ABS(end_diag - start_diag) < OVERLAP_DIAG_CLOSE) {
-//    if (s_BlastMergeTwoHSPs(hsp1, hsp2, allow_gap)) { ... }
-// }
+//    if (contexts_per_query < 0) {      /* subject seq is split */
+//       for (index1 = 0; index1 < combined_hsp_list->hspcnt; index1++) {
+//          hsp1 = combined_hsp_list->hsp_array[index1];
+//          if (hsp1->subject.end > split_offsets[0]) {
+//             /* At least part of this HSP lies in the overlap strip. */
+//             hsp_var = combined_hsp_list->hsp_array[hspcnt1];
+//             combined_hsp_list->hsp_array[hspcnt1] = hsp1;
+//             combined_hsp_list->hsp_array[index1] = hsp_var;
+//             ++hspcnt1;
+//          }
+//       }
+//       for (index2 = 0; index2 < hsp_list->hspcnt; index2++) {
+//          hsp2 = hsp_list->hsp_array[index2];
+//          if (hsp2->subject.offset < split_offsets[0] + chunk_overlap_size) {
+//             /* At least part of this HSP lies in the overlap strip. */
+//             hsp_var = hsp_list->hsp_array[hspcnt2];
+//             hsp_list->hsp_array[hspcnt2] = hsp2;
+//             hsp_list->hsp_array[index2] = hsp_var;
+//             ++hspcnt2;
+//          }
+//       }
+//    }
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2961-3002,3029
+// ```c
+//    if (hspcnt1 > 0 && hspcnt2 > 0) {
+//       hspp1 = combined_hsp_list->hsp_array;
+//       hspp2 = hsp_list->hsp_array;
+//
+//       for (index1 = 0; index1 < hspcnt1; index1++) {
+//
+//          hsp1 = hspp1[index1];
+//
+//          for (index2 = 0; index2 < hspcnt2; index2++) {
+//
+//             hsp2 = hspp2[index2];
+//
+//             /* Skip already deleted HSPs, or HSPs from different contexts */
+//             if (!hsp2 || hsp1->context != hsp2->context)
+//                continue;
+// ...
+//             if (contexts_per_query < 0 || hsp1->query.frame >= 0) {
+//                end_diag = s_HSPEndDiag(hsp1);
+//                start_diag = s_HSPStartDiag(hsp2);
+//             }
+// ...
+//             if (ABS(end_diag - start_diag) < OVERLAP_DIAG_CLOSE) {
+//                if (s_BlastMergeTwoHSPs(hsp1, hsp2, allow_gap)) {
+//                   /* Free the second HSP. */
+//                   hspp2[index2] = Blast_HSPFree(hsp2);
+//                }
+//             }
+//          }
+//       }
+//
+//       /* Purge the nulled out HSPs from the new HSP list */
+//       Blast_HSPListPurgeNullHSPs(hsp_list);
+//    }
+// ...
+//    s_BlastHSPListsCombineByScore(hsp_list, combined_hsp_list, new_hspcnt);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2758-2766 (in
+// `s_BlastHSPListsCombineByScore`; `hsp_num_max` is `kHspNumMax`, which keeps every HSP)
+// ```c
+//    if (new_hspcnt >= hsp_list->hspcnt + combined_hsp_list->hspcnt) {
+//       /* All HSPs from both arrays are saved */
+//       for (index=combined_hsp_list->hspcnt, index1=0;
+//            index1<hsp_list->hspcnt; index1++) {
+//          if (hsp_list->hsp_array[index1] != NULL)
+//             combined_hsp_list->hsp_array[index++] = hsp_list->hsp_array[index1];
+//       }
+//       combined_hsp_list->hspcnt = new_hspcnt;
+//       Blast_HSPListSortByScore(combined_hsp_list);
+// ```
+// The merge of a chunk's list (`incoming`, its offsets adjusted) into the frame's list of the
+// chunks before it (`combined`), for every TBLASTX list. The swaps move the HSPs of each list that
+// reach the overlap strip to its front, in their order, and the HSPs they displace behind later
+// ones ([N1, N2, S] becomes [S, N2, N1]); the lists keep that order in the append, so the stable
+// score sort (`Blast_HSPListSortByScore`, glibc's merge sort) leaves HSPs that tie on all its
+// keys in NCBI's order. The ends are NCBI's `Int4` (the strip test of the earlier chunk's HSPs,
+// `s_HSPEndDiag`, the merge and the sort), as a list of the one-hit word finder needs; on a list of
+// the two-hit word finder every end is 0 or more, where the `Int4` and the `u32` are the same
+// number. A merge NCBI leaves undefined stops the merging (`Err`): the search is refused, and its
+// lists are not reported.
 fn merge_tblastx_subject_chunk_hits(
     combined: &mut Vec<UngappedHit>,
     mut incoming: Vec<UngappedHit>,
     split_offset: usize,
     chunk_overlap_size: usize,
-) {
+) -> Result<(), ChunkMergeUndefined> {
     if incoming.is_empty() {
-        return;
+        return Ok(());
     }
     if combined.is_empty() {
         combined.append(&mut incoming);
-        return;
+        return Ok(());
     }
+    let split = i64::try_from(split_offset)
+        .expect("a subject chunk's offset fits i64 (NCBI's split offset is Int4)");
+    let strip_end = split
+        + i64::try_from(chunk_overlap_size).expect("the chunk overlap fits i64 (NCBI's is Int4)");
 
-    let mut combined_overlap = Vec::new();
-    for (idx, hsp) in combined.iter().enumerate() {
-        if hsp.s_aa_end as usize > split_offset {
-            combined_overlap.push(idx);
+    let mut hspcnt1 = 0usize;
+    for index1 in 0..combined.len() {
+        if i64::from(combined[index1].s_end_int4()) > split {
+            combined.swap(hspcnt1, index1);
+            hspcnt1 += 1;
+        }
+    }
+    let mut hspcnt2 = 0usize;
+    for index2 in 0..incoming.len() {
+        if i64::from(incoming[index2].s_aa_start) < strip_end {
+            incoming.swap(hspcnt2, index2);
+            hspcnt2 += 1;
         }
     }
 
-    let mut incoming_overlap = Vec::new();
-    for (idx, hsp) in incoming.iter().enumerate() {
-        if (hsp.s_aa_start as usize) < split_offset.saturating_add(chunk_overlap_size) {
-            incoming_overlap.push(idx);
-        }
-    }
-
-    let mut deleted = vec![false; incoming.len()];
-    for &i in combined_overlap.iter() {
-        let hsp1_context = combined[i].ctx_idx;
-        for &j in incoming_overlap.iter() {
-            if deleted[j] || incoming[j].ctx_idx != hsp1_context {
-                continue;
+    let mut result = Ok(());
+    if hspcnt1 > 0 && hspcnt2 > 0 {
+        let mut deleted = vec![false; hspcnt2];
+        'merge: for index1 in 0..hspcnt1 {
+            for index2 in 0..hspcnt2 {
+                if deleted[index2] || incoming[index2].ctx_idx != combined[index1].ctx_idx {
+                    continue;
+                }
+                let end_diag = i64::from(combined[index1].q_end_int4())
+                    - i64::from(combined[index1].s_end_int4());
+                let start_diag =
+                    i64::from(incoming[index2].q_aa_start) - i64::from(incoming[index2].s_aa_start);
+                if (end_diag - start_diag).abs() < i64::from(OVERLAP_DIAG_CLOSE) {
+                    match merge_two_tblastx_chunk_hsps(&mut combined[index1], &incoming[index2]) {
+                        Ok(true) => deleted[index2] = true,
+                        Ok(false) => {}
+                        Err(undefined) => {
+                            result = Err(undefined);
+                            break 'merge;
+                        }
+                    }
+                }
             }
-            let end_diag = combined[i].q_aa_end as i32 - combined[i].s_aa_end as i32;
-            let start_diag = incoming[j].q_aa_start as i32 - incoming[j].s_aa_start as i32;
-            if (end_diag - start_diag).abs() < OVERLAP_DIAG_CLOSE
-                && merge_two_tblastx_chunk_hsps(&mut combined[i], &incoming[j])
-            {
-                deleted[j] = true;
-            }
         }
+        let mut index2 = 0usize;
+        incoming.retain(|_| {
+            let keep = index2 >= hspcnt2 || !deleted[index2];
+            index2 += 1;
+            keep
+        });
     }
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3000-3035
-    // ```c
-    // Blast_HSPListPurgeNullHSPs(hsp_list);
-    // ...
-    // s_BlastHSPListsCombineByScore(hsp_list, combined_hsp_list, new_hspcnt);
-    // hsp_list = Blast_HSPListFree(hsp_list);
-    // ```
-    let mut delete_idx = 0usize;
-    incoming.retain(|_| {
-        let keep = !deleted[delete_idx];
-        delete_idx += 1;
-        keep
-    });
     combined.append(&mut incoming);
-    if !ungapped_hits_is_sorted_by_score_ncbi(combined) {
-        sort_ungapped_hits_by_score_ncbi(combined);
-    }
+    sort_ungapped_hits_by_score_int4(combined);
+    result
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3038-3051
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3037-3051 (`Blast_HSPListAdjustOffsets`)
 // ```c
-// void Blast_HSPListAdjustOffsets(BlastHSPList* hsp_list, Int4 offset)
-// {
-//    if (offset == 0) return;
+//    if (offset == 0) {
+//        return;
+//    }
+//
 //    for (index=0; index<hsp_list->hspcnt; index++) {
+//       BlastHSP* hsp = hsp_list->hsp_array[index];
 //       hsp->subject.offset += offset;
 //       hsp->subject.end += offset;
 //       hsp->subject.gapped_start += offset;
 //    }
-// }
 // ```
+// For every TBLASTX chunk list; the subject end is NCBI's `Int4` (`UngappedHit::s_end_int4`: an
+// HSP of the one-hit word finder of length 0 or less may end before its start, below 0 in a
+// frame's first chunk).
 fn adjust_tblastx_chunk_subject_offsets(hits: &mut [UngappedHit], offset: usize) {
     if offset == 0 {
         return;
     }
+    let offset_int4 = i32::try_from(offset)
+        .expect("a subject chunk's offset fits i32 (NCBI's BlastSeg offset is Int4)");
     for hit in hits {
+        let q_end = hit.q_end_int4();
+        let s_end = hit
+            .s_end_int4()
+            .checked_add(offset_int4)
+            .expect("s_aa_end: a subject end fits i32 (NCBI's BlastSeg end is Int4)");
         hit.s_aa_start = u32::try_from(hit.s_aa_start as usize + offset)
             .expect("s_aa_start: a subject offset fits u32 (NCBI's BlastSeg offset is Int4)");
-        hit.s_aa_end = u32::try_from(hit.s_aa_end as usize + offset)
-            .expect("s_aa_end: a subject offset fits u32 (NCBI's BlastSeg end is Int4)");
+        hit.set_int4_ends(q_end, s_end);
         hit.s_seed_off = u32::try_from(hit.s_seed_off as usize + offset)
             .expect("s_seed_off: a subject offset fits u32 (NCBI's gapped_start is Int4)");
+    }
+}
+
+/// Where a chunk merge of the one-hit word finder (`-window_size 0`) reports a refusal: the
+/// search's failure and the subject's ordinal id (`frame_chunks::ChunkSums::one_hit`).
+#[derive(Clone, Copy)]
+struct OneHitChunkMerge<'a> {
+    failure: &'a crate::algorithm::tblastx::subjects::XReadFailure,
+    s_idx: usize,
+}
+
+impl OneHitChunkMerge<'_> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:581-584
+    // ```c
+    //         status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
+    //                      kHspNumMax, &(backup.offset), INT4_MIN,
+    //                      overlap, score_options->gapped_calculation,
+    //                      Blast_ProgramIsMapping(program_number));
+    // ```
+    // A chunk merge of a frame of the one-hit word finder whose result NCBI leaves undefined
+    // (`merge_tblastx_subject_chunk_hits`) fails the search (PD-LOSAT-NCBI-DEFECTS 1.21, rule 3),
+    // as the earliest such subject's error (`XReadFailure`).
+    /// Refuses the search of this subject.
+    #[cold]
+    #[inline(never)]
+    fn refuse(self, _undefined: ChunkMergeUndefined) {
+        self.failure.fail(
+            self.s_idx,
+            anyhow::anyhow!(
+                "TBLASTX -window_size 0: a one-hit ungapped alignment whose length is 0 or less meets another in the overlap of two 5,000,000-letter parts of a subject frame, and their lengths add up to 0 (NCBI BLAST+ divides by that sum when it merges them; its result is undefined), which LOSAT does not support"
+            ),
+        );
     }
 }
 
@@ -5737,54 +5913,38 @@ fn search_query_batch<S: TbxScore>(
                             // [C]     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
                             // [C]                      query_offset, subject_offset, hsp_len, score);
                             if hit.score >= cutoff_scores[ctx_idx] {
-                                if hit.length <= 0 {
-                                    // NCBI reference (598d8ae6):
-                                    // c++/src/algo/blast/core/aa_ungapped.c:1054,1083 and
-                                    // c++/src/algo/blast/core/blast_engine.c:870-873
-                                    // ```c
-                                    //     init_hit_width = q_right_off - q_left_off + 1;
-                                    // ...
-                                    //     *hsp_len = left_disp + right_disp + init_hit_width;
-                                    // ...
-                                    //     if (hit_params->link_hsp_params) {
-                                    //         status = BLAST_LinkHsps(program_number, hsp_list_out,
-                                    // ```
-                                    // A word whose running sum is reset after its best part
-                                    // (possible with a low -threshold) gives an HSP whose length
-                                    // is not positive. NCBI links it with the others before
-                                    // `Blast_HSPListReevaluateUngapped` deletes it, a
-                                    // deterministic result that LOSAT is still to port (the
-                                    // linking of LOSAT's TBLASTX takes HSPs of positive length
-                                    // only), so the search stops (the earliest such subject's
-                                    // error is reported, `XReadFailure`; the message names no
-                                    // value of the HSP, which may differ between chunks searched
-                                    // at the same time).
-                                    x_read_failure.fail(
-                                        s_idx,
-                                        anyhow::anyhow!(
-                                            "TBLASTX -window_size 0: the one-hit word finder saved an ungapped alignment whose length is not positive (a word whose running sum is reset after its best part, which a low -threshold allows); LOSAT does not support it yet (NCBI BLAST+ links it with the other alignments before its re-evaluation deletes it)"
-                                        ),
-                                    );
-                                } else {
-                                    let hsp_q_absolute = ctx.frame_base + hit.q_start;
-                                    init_hsps.push(InitHSP {
-                                        q_start_absolute: hsp_q_absolute,
-                                        q_end_absolute: hsp_q_absolute + hit.length,
-                                        s_start: hit.s_start,
-                                        s_end: hit.s_start + hit.length,
-                                        q_seed_absolute: query_offset as i32,
-                                        s_seed: subject_offset as i32,
-                                        score: hit.score,
-                                        ctx_idx,
-                                        s_f_idx,
-                                        q_idx: ctx.q_idx,
-                                        s_idx: s_idx as u32,
-                                        q_frame: ctx.frame,
-                                        s_frame: s_frame.frame,
-                                        q_orig_len: ctx.orig_len,
-                                        s_orig_len: s_len,
-                                    });
-                                }
+                                // NCBI reference (598d8ae6):
+                                // c++/src/algo/blast/core/aa_ungapped.c:1054,1083
+                                // ```c
+                                //     init_hit_width = q_right_off - q_left_off + 1;
+                                // ...
+                                //     *hsp_len = left_disp + right_disp + init_hit_width;
+                                // ```
+                                // A word whose running sum is reset after its best part (a low
+                                // -threshold allows it) gives a length of 0 or less, saved as any
+                                // other: its ends are at or before its starts, and below 0 near a
+                                // frame's start. NCBI links it with the others and its
+                                // re-evaluation deletes it; LOSAT keeps its `Int4` ends up to the
+                                // first linking call and drops it there (`chaining.rs`, the impl
+                                // of `UngappedHit`; `subject_link::link_subject_hits_int4`).
+                                let hsp_q_absolute = ctx.frame_base + hit.q_start;
+                                init_hsps.push(InitHSP {
+                                    q_start_absolute: hsp_q_absolute,
+                                    q_end_absolute: hsp_q_absolute + hit.length,
+                                    s_start: hit.s_start,
+                                    s_end: hit.s_start + hit.length,
+                                    q_seed_absolute: query_offset as i32,
+                                    s_seed: subject_offset as i32,
+                                    score: hit.score,
+                                    ctx_idx,
+                                    s_f_idx,
+                                    q_idx: ctx.q_idx,
+                                    s_idx: s_idx as u32,
+                                    q_frame: ctx.frame,
+                                    s_frame: s_frame.frame,
+                                    q_orig_len: ctx.orig_len,
+                                    s_orig_len: s_len,
+                                });
                             }
                             // [C] diag_array[diag_coord].last_hit =
                             // [C]     s_last_off - (wordsize - 1) + diag_offset;
@@ -5796,11 +5956,13 @@ fn search_query_batch<S: TbxScore>(
                 advance_tblastx_diag_offset(diag_offset, diag_array, window, chunk.length);
                 // aa_ungapped.c:232 `Blast_InitHitListSortByScore`, then the conversion of
                 // `scan_chunk_plain` (blast_engine.c:561-584).
+                // The list keeps NCBI's `Int4` ends of an HSP of length 0 or less
+                // (`get_ungapped_hsp_list_int4`, `adjust_tblastx_chunk_subject_offsets`).
                 sort_init_hsps_by_score_ncbi(&mut init_hsps);
                 let mut hits = if init_hsps.is_empty() {
                     Vec::new()
                 } else {
-                    get_ungapped_hsp_list(init_hsps, contexts_ref, s_frames_listed)
+                    get_ungapped_hsp_list_int4(init_hsps, contexts_ref, s_frames_listed)
                 };
                 adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
                 TblastxChunkScanResult { chunk, hits, stats }
@@ -5903,6 +6065,10 @@ fn search_query_batch<S: TbxScore>(
                     stats_hsp_saved: &mut stats_hsp_saved,
                     stats_hsp_filtered_by_cutoff: &mut stats_hsp_filtered_by_cutoff,
                     stats_score_distribution: &mut stats_score_distribution,
+                    one_hit: (window == 0).then_some(OneHitChunkMerge {
+                        failure: &x_read_failure,
+                        s_idx,
+                    }),
                 },
                 &scan_chunk,
                 sc,
@@ -5988,9 +6154,15 @@ fn search_query_batch<S: TbxScore>(
         // NCBI links and prelim-evalue-reaps the raw ungapped HSP list inside
         // s_BlastSearchEngineCore before the outer translated-subject path
         // reevaluates ambiguities and calls BLAST_LinkHsps again.
+        //
+        // A list of the one-hit word finder (`-window_size 0`) that holds an HSP of length 0 or
+        // less links with NCBI's `Int4` ends, and those HSPs are dropped after it
+        // (`subject_link::link_subject_hits_int4`).
         x_link_timer.arm(LinkCall::First);
         let prelinked_ungapped_hits = if combined_ungapped_hits.is_empty() {
             combined_ungapped_hits
+        } else if window == 0 && subject_link::holds_int4_inverted(&combined_ungapped_hits) {
+            subject_link::link_subject_hits_int4(&link_args, combined_ungapped_hits)
         } else {
             subject_link::link_subject_hits(&link_args, combined_ungapped_hits)
         };
@@ -6291,7 +6463,8 @@ mod tests {
         let mut combined = vec![make_chunk_hit(0, 0, 120, 0, 120, 100)];
         let incoming = vec![make_chunk_hit(0, 100, 220, 100, 220, 120)];
 
-        merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, DBSEQ_CHUNK_OVERLAP);
+        merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, DBSEQ_CHUNK_OVERLAP)
+            .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED);
 
         assert_eq!(combined.len(), 1);
         assert_eq!(combined[0].q_aa_start, 0);
@@ -6314,7 +6487,8 @@ mod tests {
         let mut combined = vec![make_chunk_hit(0, 0, 120, 0, 120, 100)];
         let incoming = vec![make_chunk_hit(1, 100, 220, 100, 220, 120)];
 
-        merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, DBSEQ_CHUNK_OVERLAP);
+        merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, DBSEQ_CHUNK_OVERLAP)
+            .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED);
 
         assert_eq!(combined.len(), 2);
     }
@@ -6360,7 +6534,8 @@ mod tests {
         let mut combined = vec![make_chunk_hit(0, 0, 90, 0, 90, 100)];
         let incoming = vec![make_chunk_hit(0, 100, 180, 100, 180, 120)];
 
-        merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, DBSEQ_CHUNK_OVERLAP);
+        merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, DBSEQ_CHUNK_OVERLAP)
+            .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED);
 
         assert_eq!(combined.len(), 2);
     }
@@ -6376,7 +6551,8 @@ mod tests {
         let mut combined = vec![make_chunk_hit(0, 0, 140, 0, 140, 100)];
         let incoming = vec![make_chunk_hit(0, 200, 260, 200, 260, 120)];
 
-        merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, DBSEQ_CHUNK_OVERLAP);
+        merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, DBSEQ_CHUNK_OVERLAP)
+            .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED);
 
         assert_eq!(combined.len(), 2);
     }
@@ -6394,7 +6570,8 @@ mod tests {
         let mut combined = vec![make_chunk_hit(0, 0, 190, 0, 190, 190)];
         let incoming = vec![make_chunk_hit(0, 120, 180, 120, 180, 60)];
 
-        merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, DBSEQ_CHUNK_OVERLAP);
+        merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, DBSEQ_CHUNK_OVERLAP)
+            .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED);
 
         assert_eq!(combined.len(), 1);
         assert_eq!(combined[0].q_aa_start, 0);
@@ -6419,7 +6596,8 @@ mod tests {
             vec![incoming_hit],
             100,
             DBSEQ_CHUNK_OVERLAP,
-        );
+        )
+        .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED);
 
         assert_eq!(combined.len(), 1);
         assert_eq!(combined[0].s_frame, -1);
@@ -6469,5 +6647,527 @@ mod tests {
         let right_emitted: Vec<i32> = (right[0].0..=right[0].1 - wordsize as i32).collect();
         assert_eq!(left_emitted, vec![0, 1, 2, 3]);
         assert_eq!(right_emitted, vec![4, 5]);
+    }
+
+    /// `make_chunk_hit` with NCBI's `Int4` ends of an HSP of the one-hit word finder.
+    fn make_int4_chunk_hit(
+        ctx_idx: usize,
+        q_start: usize,
+        q_end: i32,
+        s_start: usize,
+        s_end: i32,
+        score: i32,
+    ) -> UngappedHit {
+        let mut hit = make_chunk_hit(ctx_idx, q_start, q_start, s_start, s_start, score);
+        hit.set_int4_ends(q_end, s_end);
+        hit
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3037-3051
+    // ```c
+    //       hsp->subject.offset += offset;
+    //       hsp->subject.end += offset;
+    //       hsp->subject.gapped_start += offset;
+    // ```
+    // An end below 0 (an HSP of length -2 at the start of a chunk) moves as an `Int4`.
+    #[test]
+    fn chunk_offsets_move_an_end_below_zero() {
+        let mut hits = vec![
+            make_int4_chunk_hit(0, 1, -1, 0, -2, 7),
+            make_chunk_hit(0, 10, 40, 20, 50, 30),
+        ];
+        adjust_tblastx_chunk_subject_offsets(&mut hits, 500);
+        assert_eq!(hits[0].s_aa_start, 500);
+        assert_eq!(hits[0].s_end_int4(), 498);
+        assert_eq!(hits[0].s_seed_off, 500);
+        assert_eq!(hits[0].q_end_int4(), -1);
+        assert!(hits[0].is_int4_inverted());
+        assert_eq!(
+            (hits[1].s_aa_start, hits[1].s_aa_end, hits[1].s_seed_off),
+            (520, 550, 520)
+        );
+        assert_eq!((hits[1].q_aa_start, hits[1].q_aa_end), (10, 40));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1517-1527
+    // ```c
+    // 	  double score_density =  (hsp1->score + hsp2->score) *(1.0) /
+    // 			                  ((hsp1->query.end - hsp1->query.offset) +
+    // 			                   (hsp2->query.end - hsp2->query.offset));
+    // ...
+    //       hsp1->score = MAX((int) (score_density *(hsp1->query.end - hsp1->query.offset)), hsp1->score);
+    // ```
+    // A positive HSP of the earlier chunk absorbs an HSP of length -1 that starts inside it: its
+    // bounds stay, the density (100 + 7) / (20 - 1) raises its score to (int)(107/19*20) = 112.
+    #[test]
+    fn chunk_merge_absorbs_an_hsp_of_negative_length() {
+        let mut combined = vec![make_chunk_hit(0, 100, 120, 100, 120, 100)];
+        let incoming = vec![make_int4_chunk_hit(0, 110, 109, 110, 109, 7)];
+        assert!(merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, 100).is_ok());
+        assert_eq!(combined.len(), 1);
+        let hit = &combined[0];
+        assert_eq!((hit.q_aa_start, hit.q_end_int4()), (100, 120));
+        assert_eq!((hit.s_aa_start, hit.s_end_int4()), (100, 120));
+        assert_eq!(hit.raw_score, (107.0f64 / 19.0 * 20.0) as i32);
+        assert_eq!(hit.raw_score, 112);
+        assert_eq!((hit.q_seed_off, hit.s_seed_off), (100, 100));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits_priv.h:68-69
+    // ```c
+    // #define CONTAINED_IN_HSP(a,b,c,d,e,f) \
+    //     (((a <= c && b >= c) && (d <= f && e >= f)) ? TRUE : FALSE)
+    // ```
+    // An HSP of length 0 of the earlier chunk contains the HSP that starts at its point: it takes
+    // that HSP's bounds and seed (a higher score), and its score becomes (int)((5 + 30)/(0 + 10) *
+    // 10) = 35. An HSP of negative length contains nothing.
+    #[test]
+    fn chunk_merge_lets_an_hsp_of_length_zero_absorb_and_one_of_negative_length_not() {
+        let mut combined = vec![make_int4_chunk_hit(0, 110, 110, 120, 120, 5)];
+        let incoming = vec![make_chunk_hit(0, 110, 120, 120, 130, 30)];
+        assert!(merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, 100).is_ok());
+        assert_eq!(combined.len(), 1);
+        let hit = &combined[0];
+        assert!(!hit.is_int4_inverted());
+        assert_eq!((hit.q_aa_start, hit.q_end_int4()), (110, 120));
+        assert_eq!((hit.s_aa_start, hit.s_end_int4()), (120, 130));
+        assert_eq!(hit.raw_score, 35);
+        assert_eq!((hit.q_seed_off, hit.s_seed_off), (110, 120));
+
+        let mut combined = vec![make_int4_chunk_hit(0, 110, 109, 120, 119, 5)];
+        let incoming = vec![make_chunk_hit(0, 110, 120, 120, 130, 30)];
+        assert!(merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, 100).is_ok());
+        assert_eq!(combined.len(), 2);
+        assert!(combined.iter().any(UngappedHit::is_int4_inverted));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1517-1520
+    // ```c
+    // 	  double score_density =  (hsp1->score + hsp2->score) *(1.0) /
+    // 			                  ((hsp1->query.end - hsp1->query.offset) +
+    // 			                   (hsp2->query.end - hsp2->query.offset));
+    // ```
+    // Lengths that add up to 0 (an HSP of length 0 found by both chunks, or one of length 2 and
+    // one of length -2): NCBI's density is +inf and `(int)` of its product undefined, refused
+    // (rule 3). The HSPs of the later chunk are still put in the list, which the refused search
+    // never reports.
+    #[test]
+    fn chunk_merge_refuses_lengths_that_add_up_to_zero() {
+        let mut combined = vec![make_int4_chunk_hit(0, 110, 110, 120, 120, 5)];
+        let incoming = vec![make_int4_chunk_hit(0, 110, 110, 120, 120, 5)];
+        assert!(merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, 100).is_err());
+        assert_eq!(combined.len(), 2);
+
+        let mut combined = vec![make_chunk_hit(0, 110, 112, 120, 122, 9)];
+        let incoming = vec![make_int4_chunk_hit(0, 111, 109, 121, 119, 4)];
+        assert!(merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, 100).is_err());
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2893-2899
+    // ```c
+    //          if (hsp1->subject.end > split_offsets[0]) {
+    //             /* At least part of this HSP lies in the overlap strip. */
+    //             hsp_var = combined_hsp_list->hsp_array[hspcnt1];
+    //             combined_hsp_list->hsp_array[hspcnt1] = hsp1;
+    //             combined_hsp_list->hsp_array[index1] = hsp_var;
+    //             ++hspcnt1;
+    //          }
+    // ```
+    // Two HSPs of the earlier chunk that tie on every key of the score sort (two contexts, the
+    // same coordinates and score) ahead of a lower one in the overlap strip: the swap moves the
+    // strip HSP to the front and the first of the two behind the second ([N1, N2, S] becomes
+    // [S, N2, N1]), and the stable sort after the append keeps N2 before N1.
+    #[test]
+    fn chunk_merge_keeps_ncbis_order_of_tied_hsps() {
+        let mut combined = vec![
+            make_chunk_hit(0, 10, 20, 10, 20, 30),
+            make_chunk_hit(1, 10, 20, 10, 20, 30),
+            make_chunk_hit(2, 190, 250, 190, 250, 10),
+        ];
+        let incoming = vec![make_chunk_hit(0, 300, 320, 310, 330, 5)];
+        for (order, hit) in combined.iter_mut().enumerate() {
+            hit.hsp_list_order = order as u32;
+        }
+        assert!(merge_tblastx_subject_chunk_hits(&mut combined, incoming, 200, 100).is_ok());
+        let contexts: Vec<u32> = combined.iter().map(|hit| hit.ctx_idx).collect();
+        assert_eq!(contexts, vec![1, 0, 2, 0]);
+        assert_eq!(combined[3].raw_score, 5);
+    }
+
+    /// The fields of NCBI's `BlastHSP` that `Blast_HSPListsMerge` reads or writes, for the
+    /// transcription of NCBI's merge below; `id` names the record.
+    #[derive(Clone, Debug, PartialEq)]
+    struct NcbiHsp {
+        id: u32,
+        context: i32,
+        q_offset: i32,
+        q_end: i32,
+        s_offset: i32,
+        s_end: i32,
+        q_gapped_start: i32,
+        s_gapped_start: i32,
+        s_frame: i8,
+        score: i32,
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1353 (`ScoreCompareHSPs`)
+    // ```c
+    //    if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
+    //        0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
+    //        0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
+    //        0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
+    //        result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
+    //    }
+    // ```
+    fn ncbi_score_compare_hsps(hsp1: &NcbiHsp, hsp2: &NcbiHsp) -> std::cmp::Ordering {
+        hsp2.score
+            .cmp(&hsp1.score)
+            .then(hsp1.s_offset.cmp(&hsp2.s_offset))
+            .then(hsp2.s_end.cmp(&hsp1.s_end))
+            .then(hsp1.q_offset.cmp(&hsp2.q_offset))
+            .then(hsp2.q_end.cmp(&hsp1.q_end))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1488-1531 (`s_BlastMergeTwoHSPs`)
+    // ```c
+    //    if (!allow_gap &&
+    //        hsp1->subject.offset - hsp2->subject.offset -hsp1->query.offset + hsp2->query.offset)
+    //    {
+    //        return FALSE;
+    //    }
+    // ...
+    //       hsp1->score = MAX((int) (score_density *(hsp1->query.end - hsp1->query.offset)), hsp1->score);
+    // ```
+    // A statement-by-statement transcription with `allow_gap` FALSE; `None` where `(int)` gets a
+    // value that is not finite (undefined in C).
+    fn ncbi_merge_two_hsps(hsp1: &mut NcbiHsp, hsp2: &NcbiHsp) -> Option<bool> {
+        if hsp1.s_offset - hsp2.s_offset - hsp1.q_offset + hsp2.q_offset != 0 {
+            return Some(false);
+        }
+        if hsp1.s_frame != hsp2.s_frame {
+            return Some(false);
+        }
+        let contained = |a: i32, b: i32, c: i32, d: i32, e: i32, f: i32| {
+            (a <= c && b >= c) && (d <= f && e >= f)
+        };
+        if contained(
+            hsp1.q_offset,
+            hsp1.q_end,
+            hsp2.q_offset,
+            hsp1.s_offset,
+            hsp1.s_end,
+            hsp2.s_offset,
+        ) || contained(
+            hsp1.q_offset,
+            hsp1.q_end,
+            hsp2.q_end,
+            hsp1.s_offset,
+            hsp1.s_end,
+            hsp2.s_end,
+        ) {
+            let score_density = f64::from(hsp1.score + hsp2.score) * 1.0
+                / f64::from((hsp1.q_end - hsp1.q_offset) + (hsp2.q_end - hsp2.q_offset));
+            hsp1.q_offset = hsp1.q_offset.min(hsp2.q_offset);
+            hsp1.s_offset = hsp1.s_offset.min(hsp2.s_offset);
+            hsp1.q_end = hsp1.q_end.max(hsp2.q_end);
+            hsp1.s_end = hsp1.s_end.max(hsp2.s_end);
+            if hsp2.score > hsp1.score {
+                hsp1.q_gapped_start = hsp2.q_gapped_start;
+                hsp1.s_gapped_start = hsp2.s_gapped_start;
+                hsp1.score = hsp2.score;
+            }
+            let product = score_density * f64::from(hsp1.q_end - hsp1.q_offset);
+            if !product.is_finite() {
+                return None;
+            }
+            hsp1.score = (product as i32).max(hsp1.score);
+            return Some(true);
+        }
+        Some(false)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2876-2911,2961-3002,3029
+    // and :2758-2766, :2225-2247 (`Blast_HSPListPurgeNullHSPs`), :1355-1383
+    // ```c
+    //       for (index1 = 0; index1 < combined_hsp_list->hspcnt; index1++) {
+    //          hsp1 = combined_hsp_list->hsp_array[index1];
+    //          if (hsp1->subject.end > split_offsets[0]) {
+    //             hsp_var = combined_hsp_list->hsp_array[hspcnt1];
+    //             combined_hsp_list->hsp_array[hspcnt1] = hsp1;
+    //             combined_hsp_list->hsp_array[index1] = hsp_var;
+    //             ++hspcnt1;
+    // ...
+    //             if (ABS(end_diag - start_diag) < OVERLAP_DIAG_CLOSE) {
+    //                if (s_BlastMergeTwoHSPs(hsp1, hsp2, allow_gap)) {
+    //                   /* Free the second HSP. */
+    //                   hspp2[index2] = Blast_HSPFree(hsp2);
+    // ...
+    //       Blast_HSPListPurgeNullHSPs(hsp_list);
+    // ...
+    //          if (hsp_list->hsp_array[index1] != NULL)
+    //             combined_hsp_list->hsp_array[index++] = hsp_list->hsp_array[index1];
+    // ...
+    //       Blast_HSPListSortByScore(combined_hsp_list);
+    // ```
+    // `Blast_HSPListsMerge` of a split subject (`contexts_per_query` < 0), its pointer arrays as
+    // indices into `arena`, statement by statement; the qsort is glibc's merge sort (stable), the
+    // sort of `slice::sort_by`. `partition` false leaves out the swaps (the order LOSAT merged in
+    // before). `None`: a merge NCBI leaves undefined.
+    fn ncbi_hsp_lists_merge(
+        arena: &mut [NcbiHsp],
+        combined: Vec<usize>,
+        new: Vec<usize>,
+        split_offset: i32,
+        chunk_overlap_size: i32,
+        partition: bool,
+    ) -> Option<Vec<usize>> {
+        let mut combined_hsp_array = combined;
+        let mut hsp_array: Vec<Option<usize>> = new.into_iter().map(Some).collect();
+        let (mut hspcnt1, mut hspcnt2) = (0usize, 0usize);
+        for index1 in 0..combined_hsp_array.len() {
+            let hsp1 = combined_hsp_array[index1];
+            if arena[hsp1].s_end > split_offset {
+                if partition {
+                    let hsp_var = combined_hsp_array[hspcnt1];
+                    combined_hsp_array[hspcnt1] = hsp1;
+                    combined_hsp_array[index1] = hsp_var;
+                }
+                hspcnt1 += 1;
+            }
+        }
+        for index2 in 0..hsp_array.len() {
+            let hsp2 = hsp_array[index2].expect("no deleted HSP yet");
+            if arena[hsp2].s_offset < split_offset + chunk_overlap_size {
+                if partition {
+                    let hsp_var = hsp_array[hspcnt2];
+                    hsp_array[hspcnt2] = Some(hsp2);
+                    hsp_array[index2] = hsp_var;
+                }
+                hspcnt2 += 1;
+            }
+        }
+        // Without the swaps, the strip HSPs are those that pass the test, in list order.
+        let strip1: Vec<usize> = (0..combined_hsp_array.len())
+            .filter(|&i| partition || arena[combined_hsp_array[i]].s_end > split_offset)
+            .take(hspcnt1)
+            .collect();
+        let strip2: Vec<usize> = (0..hsp_array.len())
+            .filter(|&i| {
+                partition
+                    || arena[hsp_array[i].expect("not deleted")].s_offset
+                        < split_offset + chunk_overlap_size
+            })
+            .take(hspcnt2)
+            .collect();
+        if hspcnt1 > 0 && hspcnt2 > 0 {
+            for &index1 in &strip1 {
+                let hsp1 = combined_hsp_array[index1];
+                for &index2 in &strip2 {
+                    let Some(hsp2) = hsp_array[index2] else {
+                        continue;
+                    };
+                    if arena[hsp1].context != arena[hsp2].context {
+                        continue;
+                    }
+                    let end_diag = arena[hsp1].q_end - arena[hsp1].s_end;
+                    let start_diag = arena[hsp2].q_offset - arena[hsp2].s_offset;
+                    if (end_diag - start_diag).abs() < 10 {
+                        let second = arena[hsp2].clone();
+                        if ncbi_merge_two_hsps(&mut arena[hsp1], &second)? {
+                            hsp_array[index2] = None;
+                        }
+                    }
+                }
+            }
+            let mut index1 = 0usize;
+            for index in 0..hsp_array.len() {
+                if hsp_array[index].is_some() {
+                    hsp_array[index1] = hsp_array[index];
+                    index1 += 1;
+                }
+            }
+            hsp_array.truncate(index1);
+        }
+        for hsp in hsp_array.into_iter().flatten() {
+            combined_hsp_array.push(hsp);
+        }
+        let sorted = combined_hsp_array.windows(2).all(|pair| {
+            ncbi_score_compare_hsps(&arena[pair[0]], &arena[pair[1]]) != std::cmp::Ordering::Greater
+        });
+        if !sorted {
+            combined_hsp_array.sort_by(|&a, &b| ncbi_score_compare_hsps(&arena[a], &arena[b]));
+        }
+        Some(combined_hsp_array)
+    }
+
+    fn ungapped_from_ncbi(hsp: &NcbiHsp) -> UngappedHit {
+        let mut hit = make_int4_chunk_hit(
+            hsp.context as usize,
+            hsp.q_offset as usize,
+            hsp.q_end,
+            hsp.s_offset as usize,
+            hsp.s_end,
+            hsp.score,
+        );
+        hit.q_seed_off = hsp.q_gapped_start as u32;
+        hit.s_seed_off = hsp.s_gapped_start as u32;
+        hit.s_frame = hsp.s_frame;
+        hit.hsp_list_order = hsp.id;
+        hit
+    }
+
+    fn ncbi_from_ungapped(hit: &UngappedHit) -> NcbiHsp {
+        NcbiHsp {
+            id: hit.hsp_list_order,
+            context: hit.ctx_idx as i32,
+            q_offset: hit.q_aa_start as i32,
+            q_end: hit.q_end_int4(),
+            s_offset: hit.s_aa_start as i32,
+            s_end: hit.s_end_int4(),
+            q_gapped_start: hit.q_seed_off as i32,
+            s_gapped_start: hit.s_seed_off as i32,
+            s_frame: hit.s_frame,
+            score: hit.raw_score,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2857-3031 (`Blast_HSPListsMerge`)
+    // ```c
+    // Int2 Blast_HSPListsMerge(BlastHSPList** hsp_list_ptr,
+    //                    BlastHSPList** combined_hsp_list_ptr,
+    //                    Int4 hsp_num_max, Int4 *split_offsets,
+    //                    Int4 contexts_per_query, Int4 chunk_overlap_size,
+    //                    Boolean allow_gap, Boolean short_reads)
+    // ```
+    // The port against the transcription of NCBI's merge above, on random lists of two chunks
+    // (split 200, overlap 100) sorted by score as NCBI's are: HSPs of length -2 to 12, groups of
+    // records that tie on every key of the score sort (the same coordinates and score in up to
+    // four contexts), HSPs in and out of the overlap strip on both sides, HSPs of the later chunk
+    // on the diagonal of one of the earlier chunk (merged and deleted). Every list the
+    // transcription gives is the port's, record for record in its order; where the transcription
+    // meets an undefined merge, the port refuses. Some lists come out in another order than
+    // without the swaps (the order LOSAT merged in before), some merges delete HSPs and some are
+    // refused.
+    #[test]
+    fn chunk_merge_is_ncbis_merge() {
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move |n: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % n
+        };
+        let (split, overlap) = (200i32, 100i32);
+        let (mut reordered, mut merged, mut refused, mut compared) =
+            (0usize, 0usize, 0usize, 0usize);
+        for case in 0..3000 {
+            let mut arena: Vec<NcbiHsp> = Vec::new();
+            let push_group = |arena: &mut Vec<NcbiHsp>,
+                              next: &mut dyn FnMut(u64) -> u64,
+                              q_offset: i32,
+                              s_offset: i32,
+                              length: i32,
+                              s_frame: i8|
+             -> Vec<usize> {
+                let score = 1 + next(12) as i32;
+                let copies = 1 + next(4) as usize;
+                let first_context = next(3) as i32;
+                (0..copies)
+                    .map(|copy| {
+                        arena.push(NcbiHsp {
+                            id: arena.len() as u32,
+                            context: first_context + copy as i32,
+                            q_offset,
+                            q_end: q_offset + length,
+                            s_offset,
+                            s_end: s_offset + length,
+                            q_gapped_start: q_offset + length.max(1) / 2,
+                            s_gapped_start: s_offset + length.max(1) / 2,
+                            s_frame,
+                            score,
+                        });
+                        arena.len() - 1
+                    })
+                    .collect()
+            };
+            let length = |next: &mut dyn FnMut(u64) -> u64| next(15) as i32 - 2;
+            let frame = |next: &mut dyn FnMut(u64) -> u64| if next(4) == 0 { -1 } else { 1 };
+            let mut first: Vec<usize> = Vec::new();
+            for _ in 0..1 + next(6) {
+                // A quarter of the groups start at subject offset 0 or 1, so that their subject
+                // ends (offset + length, length -2 and up) can be below 0: an `Int4` end and a
+                // `u32` end tell apart in the strip test and in the final sort.
+                let s_offset = if next(4) == 0 {
+                    next(2) as i32
+                } else {
+                    170 + next(130) as i32
+                };
+                let q_offset = (s_offset - 170 + next(4) as i32).max(0);
+                let (len, s_frame) = (length(&mut next), frame(&mut next));
+                first.extend(push_group(
+                    &mut arena, &mut next, q_offset, s_offset, len, s_frame,
+                ));
+            }
+            let mut second: Vec<usize> = Vec::new();
+            for _ in 0..1 + next(6) {
+                let (q_offset, s_offset, s_frame) = if next(2) == 0 {
+                    // On the diagonal of an HSP of the earlier chunk, from its start on.
+                    let base = arena[first[next(first.len() as u64) as usize]].clone();
+                    let shift = next(4) as i32;
+                    (base.q_offset + shift, base.s_offset + shift, base.s_frame)
+                } else {
+                    let s_offset = 200 + next(130) as i32;
+                    (s_offset - 170 + next(4) as i32, s_offset, frame(&mut next))
+                };
+                let len = length(&mut next);
+                second.extend(push_group(
+                    &mut arena, &mut next, q_offset, s_offset, len, s_frame,
+                ));
+            }
+            let by_score = |arena: &[NcbiHsp], list: &mut Vec<usize>| {
+                list.sort_by(|&a, &b| ncbi_score_compare_hsps(&arena[a], &arena[b]));
+            };
+            by_score(&arena, &mut first);
+            by_score(&arena, &mut second);
+
+            let mut ncbi_arena = arena.clone();
+            let expected = ncbi_hsp_lists_merge(
+                &mut ncbi_arena,
+                first.clone(),
+                second.clone(),
+                split,
+                overlap,
+                true,
+            );
+            let mut combined: Vec<UngappedHit> = first
+                .iter()
+                .map(|&i| ungapped_from_ncbi(&arena[i]))
+                .collect();
+            let incoming: Vec<UngappedHit> = second
+                .iter()
+                .map(|&i| ungapped_from_ncbi(&arena[i]))
+                .collect();
+            let result =
+                merge_tblastx_subject_chunk_hits(&mut combined, incoming, split as usize, 100);
+            let Some(expected) = expected else {
+                assert!(result.is_err(), "case {case}: NCBI's merge is undefined");
+                refused += 1;
+                continue;
+            };
+            assert!(result.is_ok(), "case {case}: NCBI's merge is defined");
+            let actual: Vec<NcbiHsp> = combined.iter().map(ncbi_from_ungapped).collect();
+            let expected: Vec<NcbiHsp> = expected.iter().map(|&i| ncbi_arena[i].clone()).collect();
+            assert_eq!(actual, expected, "case {case}");
+            compared += 1;
+            merged += usize::from(expected.len() < first.len() + second.len());
+            let mut unswapped_arena = arena.clone();
+            let unswapped =
+                ncbi_hsp_lists_merge(&mut unswapped_arena, first, second, split, overlap, false)
+                    .expect("the same merges");
+            let unswapped: Vec<u32> = unswapped.iter().map(|&i| unswapped_arena[i].id).collect();
+            reordered +=
+                usize::from(unswapped != expected.iter().map(|h| h.id).collect::<Vec<_>>());
+        }
+        assert!(compared > 1000 && merged > 100 && refused > 10 && reordered > 10);
     }
 }

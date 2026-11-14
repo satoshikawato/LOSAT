@@ -528,7 +528,7 @@ mod db_mask_tests;
 /// (`s_GetNextSubjectChunk`, blast_engine.c:221-310) give no result that LOSAT can check for them.
 /// The one place of these rules: the answer of Owner question Q1 for the first shape (an approved
 /// NCBI defect instead of the refusal) removes `TailMask` here and changes the chunker's "no
-/// chunking" branch for hard ranges (`SubjectSplitState::next_chunk`).
+/// chunking" branch for hard ranges (`HardSplitState::next_chunk`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HardMaskShape {
     /// The first mask `[start, end)` runs to the subject's end and starts before it, at or below

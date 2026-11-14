@@ -326,6 +326,9 @@ rpsblast.3v.q40.dbsize	rpsblast	BLASTDB={rps:rps_mini3v}	-query tests/fasta/rps/
 rpsblast.3v.q40.ssp0	rpsblast	BLASTDB={rps:rps_mini3v}	-query tests/fasta/rps/q40.faa -db rps_mini3v -searchsp 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpstblastn.3v.nq.ssp0.dbs0.b2000	rpstblastn	BLASTDB={rps:rps_mini3v},BATCH_SIZE=2000	-query tests/fasta/rps/nq.fna -db rps_mini3v -searchsp 0 -dbsize 0 -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpstblastn.win.nopsq.b200	rpstblastn	BLASTDB={rps:rps_mini-psq},BATCH_SIZE=200	-query tests/fasta/rps/nwin.fna -db rps_mini -comp_based_stats 0 -evalue 1e-8 -outfmt 7%20qseqid%20sseqid%20evalue -export_search_strategy {ss}	ncbi	2	-	-
+rpsblast.nopsq	rpsblast	BLASTDB={rps:rps_mini-psq}	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
+rpsblast.3v.nopsq01.b1	rpsblast	BLASTDB={rps:rps_mini3v-01.psq},BATCH_SIZE=1	-query tests/fasta/rps/b2v01.faa -db rps_mini3v -comp_based_stats 0 -outfmt 6%20qseqid%20sseqid%20evalue -export_search_strategy {ss}	ncbi	2	-	-
+rpsblast.3v.nopsq01.batch	rpsblast	BLASTDB={rps:rps_mini3v-01.psq},BATCH_SIZE=50	-query tests/fasta/rps/hpv1.faa -db rps_mini3v -comp_based_stats 0 -xdrop_ungap 9.5e6 -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
 rpsblast.3vL.q40	rpsblast	BLASTDB={rps:rps_mini3v+tests/fasta/strategy/rps3vL.pal}	-query tests/fasta/rps/q40.faa -db rps3vL -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpsblast.mixed.b400	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=400	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpsblast.3v.mixed.b400	rpsblast	BLASTDB={rps:rps_mini3v},BATCH_SIZE=400	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini3v -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-

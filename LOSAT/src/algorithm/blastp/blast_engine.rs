@@ -7512,11 +7512,11 @@ fn search(
             //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
             //                 results = lcl_blast.Run();
             // ```
-            // A header file that NCBI cannot read fails the search of the batch whose
-            // hit lists reach it first (`database::HeaderReadError`), after the outfmt 0
-            // prolog, the reports of the batches before (without the epilog) and the
-            // reader's messages of that batch. LOSAT searches all batches together, so
-            // the batches before are searched again and reported alone.
+            // A header file that NCBI cannot read (or rpsblast's profile sequences, read by a
+            // batch's traceback) fails the batch whose hit lists reach it first
+            // (`database::HeaderReadError`), after the outfmt 0 prolog, the reports of the
+            // batches before (without the epilog) and that batch's reader messages. LOSAT
+            // searches all batches together: the batches before are searched again alone.
             let failure = match result {
                 Err(error) if error.is::<database::HeaderReadError>() => error
                     .downcast::<database::HeaderReadError>()

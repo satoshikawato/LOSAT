@@ -704,13 +704,46 @@ pub(super) fn rps_search(
             merge_volume(hit_lists, lists);
         }
     }
-    if let Some((_, error)) = failed {
-        return Err(error);
+    if let Some((batch, error)) = failed {
+        return Err(failed_batch_error(run, batch, error));
     }
     Ok(RpsSearched {
         gapped_k,
         volumes: order.len(),
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:193-213
+// ```c++
+//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+//
+//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+//
+//             SaveSearchStrategy(args, m_CmdLineArgs, queries, opts_hndl);
+//             ...
+//             	CLocalRPSBlast  local_search (query_batch, db_args->GetDatabaseName(), opts_hndl, args[kArgNumThreads].AsInteger() );
+//             	results = local_search.Run();
+// ```
+/// The run's error when the query batch `batch` of `run.batches` fails (`rps_search`). NCBI reads,
+/// writes the search strategy request of, searches and reports one batch before it reads the next,
+/// so an error of its own in a batch's search (a profile volume's sequence file that the batch's
+/// traceback reads, `Consensus`: `BLAST Database error`, exit status 2) ends the run after the
+/// reports of the batches before it (without the epilog) and after that batch's reader messages
+/// and request. That is the error of a header file that a batch reaches (`HeaderReadError`, named
+/// by the batch's first query), whose batches before blastp's driver searches again and reports
+/// alone (`search`). LOSAT's refusals end the run as they are.
+#[cold]
+#[inline(never)]
+fn failed_batch_error(run: &RpsSearchRun<'_>, batch: usize, error: anyhow::Error) -> anyhow::Error {
+    if !error.is::<crate::cli::NativeError>() {
+        return error;
+    }
+    database::HeaderReadError {
+        query: run.batches[batch].start,
+        error,
+    }
+    .into()
 }
 
 /// `MAX_DBSEQ_LEN`: the longest subject (here a user query) that NCBI's engine searches whole.

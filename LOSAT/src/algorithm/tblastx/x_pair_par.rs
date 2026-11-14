@@ -33,10 +33,12 @@
 //! ```
 //! NCBI runs the two-hit word finder once per subject frame (and per chunk of a frame longer than
 //! MAX_DBSEQ_LEN), with one scan stream that emits the hits of every query context, on one diagonal
-//! table shared by the frames. This path runs the same per-hit statements (`x_hit`, a copy of the
-//! reference loop body, `word_finder::two_hit_one_hit`, without its trace, debug and diagnostics
-//! branches) on units: for each (frame, chunk), one scan per query context with a lookup table that
-//! holds only that context's entries (`XGroup`), on a fresh diagonal table without masking. The
+//! table shared by the frames. This path runs the same two-hit logic (`x_hit`, the unit path's own
+//! form of `word_finder::two_hit_one_hit`: its two-hit statements on the unit's unmasked cell,
+//! without its trace, debug, diagnostics and HSP-saving statistics, which the gates send to the
+//! reference loop; the extension, sink and probe are its own) on units: for each (frame, chunk),
+//! one scan per query context with a lookup table that holds only that context's entries
+//! (`XGroup`), on a fresh diagonal table without masking. The
 //! unit lists are concatenated in context order and then go through the reference's own steps in
 //! the reference's order: the stable init-HSP score sort (`Blast_InitHitListSortByScore`),
 //! `BLAST_GetUngappedHSPList`, the chunk offset adjustment and merge, and the per-frame append and
@@ -52,7 +54,7 @@
 //!
 //! 1. Cell-local state. The two-hit test of a hit reads and writes only its own cell (`last_hit`
 //!    relative to D, and `flag`); cutoffs, x-drop and D are fixed during a chunk; the extension
-//!    reads only the two sequences (aa_ungapped.c:516-606; the extension of
+//!    reads only the two sequences (aa_ungapped.c:516-606; the doc of
 //!    `word_finder::two_hit_one_hit`). So a hit's decision depends only on the earlier hits of its
 //!    cell. All comparisons are of `last_hit - D` with `s`, so a unit starting at D = window and
 //!    the reference at any D agree whenever their cells hold the same `last_hit - D` and flag, and
@@ -3318,9 +3320,11 @@ fn x_unit_batch<
 //     }
 // }
 // ```
-// The per-hit body of the reference loop (`word_finder::two_hit_one_hit`) statement for statement,
-// without its trace, debug and diagnostics branches (the gates send those runs to the reference
-// loop) and with `continue` written as `return`. As in the reference, the cell is updated before
+// The unit path's own form of the per-hit body of the reference loop
+// (`word_finder::two_hit_one_hit`): its two-hit statements on the unit's unmasked cell, without
+// its trace, debug, diagnostics and HSP-saving statistics (the gates send those runs to the
+// reference loop), with `continue` written as `return`; the extension, the sink and the probe are
+// this path's own. As in the reference, the cell is updated before
 // the init HSP is saved (both read only local values, so the order is immaterial). The init HSP
 // goes to the caller's sink (today's `Vec<InitHSP>`, or the records of LOSAT_X_SEEDCOMPACT, section
 // above `XUnitHsp`), by the same push statement.

@@ -144,7 +144,8 @@ pub(super) fn begin_chunk_scan<'s>(
 
     if subject.len() < wordsize as usize {
         // NCBI still advances the diagonal table offset even when no hits can be found.
-        // References: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:445-446,
+        // References: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:499-500 (the clamp of the empty scan
+        // range) and :614 (the advance),
         // ncbi-blast/c++/src/algo/blast/core/blast_extend.c:167-173
         advance_tblastx_diag_offset(diag_offset, diag_array, window, chunk.length);
         return Err(TblastxChunkScanResult {
@@ -333,14 +334,14 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
     // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
     // NCBI uses Uint4 for offsets; apply unsigned wrapping.
     // References: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
-    //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:534
+    //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:516
     let diag_coord = (query_offset.wrapping_sub(subject_offset) & (diag_mask as u32)) as usize;
 
     // SAFETY: diag_coord is masked by diag_mask, which is < diag_array.len()
     let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
 
     // [C] if (diag_array[diag_coord].flag)
-    // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:536-553
+    // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:519-531
     if diag_entry.flag() != 0 {
         // [C] if ((Int4)(subject_offset + diag_offset) < diag_array[diag_coord].last_hit)
         let subject_plus_offset = subject_offset.wrapping_add(diag_offset as u32);
@@ -372,11 +373,11 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
         // [C] diff = subject_offset - last_hit;
         // NCBI uses Uint4 for subject_offset; compute with unsigned wrap.
         // References: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
-        //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:559-560
+        //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:535-536
         let diff = subject_offset.wrapping_sub(last_hit as u32) as i32;
 
         // [C] if (diff >= window)
-        // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:562-569
+        // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:538-544
         if diff >= window {
             if cx.diag_enabled {
                 cx.diagnostics
@@ -389,7 +390,7 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
         }
 
         // [C] if (diff < wordsize)
-        // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:573-580
+        // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:549-551
         if diff < wordsize {
             if cx.diag_enabled {
                 cx.diagnostics
@@ -403,7 +404,7 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
         // [C] curr_context = BSearchContextInfo(query_offset, query_info);
         // NCBI passes Uint4 query_offset into BSearchContextInfo (Int4).
         // References: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
-        //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:590
+        //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:560
         let ctx_idx = lookup_ref.get_context_idx(query_offset as i32);
         // SAFETY: `ctx_idx < contexts_ref.len()`: `get_context_idx`
         // gives at most `max(num_contexts, 1) - 1`, the builders set
@@ -419,7 +420,7 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
         let query = &query_full[1..query_full.len() - 1];
 
         // [C] if (query_offset - diff < query_info->contexts[curr_context].query_offset)
-        // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:592-606
+        // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:566-573
         let q_minus_diff = query_offset.wrapping_sub(diff as u32);
         if q_minus_diff < ctx.frame_base as u32 {
             if cx.diag_enabled {
@@ -532,7 +533,7 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
         }
 
         // NCBI: Update diagonal state based on right_extend
-        // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:636-648
+        // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:596-606
         // if (right_extend) {
         //     diag_array[diag_coord].flag = 1;
         //     diag_array[diag_coord].last_hit = s_last_off - (wordsize - 1) + diag_offset;

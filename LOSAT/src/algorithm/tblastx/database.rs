@@ -523,6 +523,9 @@ pub(crate) struct ReportedSubjects {
     /// The sequences with parsed Seq-ids by rank (empty when none is reported): their ids and
     /// titles come from their definition lines (`report::db_subject`).
     pub(crate) parsed: Vec<Option<Arc<ParsedSubject>>>,
+    /// The sources from which NCBI makes the empty stored titles of the others, by rank
+    /// (`shared::StoredTitle::source`; empty when none has one).
+    pub(crate) sources: Vec<crate::report::defline::SourceTaxname>,
 }
 
 /// The Seq-aligns of the hits `ordered` (in report order) that NCBI's prefetch counts against
@@ -583,6 +586,7 @@ pub(crate) fn reported_subjects(
     let mut lengths = Vec::with_capacity(ordinals.len());
     let mut kept = Vec::new();
     let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
+    let mut sources = Vec::new();
     for (rank, &ordinal) in ordinals.iter().enumerate() {
         let header = titles.get(&ordinal).with_context(|| {
             format!(
@@ -598,20 +602,9 @@ pub(crate) fn reported_subjects(
                     PROGRAM,
                 )?;
                 if shown.pairwise {
-                    shared::check_shown_stored_title(
-                        stored.taxonomy_title,
-                        || database.db.oid(ordinal),
-                        PROGRAM,
-                    )?;
+                    stored.check_shown_source(|| database.db.oid(ordinal), PROGRAM)?;
                 }
-                if shown.tabular {
-                    shared::check_tabular_stored_title(
-                        stored.taxonomy_title,
-                        shown.words,
-                        || database.db.oid(ordinal),
-                        PROGRAM,
-                    )?;
-                }
+                shared::keep_source(&mut sources, rank, ordinals.len(), stored.source.clone());
                 stored.title.clone()
             }
             ReportedHeader::Parsed(subject) => {
@@ -696,6 +689,7 @@ pub(crate) fn reported_subjects(
         lengths,
         stores: kept,
         parsed,
+        sources,
     })
 }
 
@@ -714,6 +708,7 @@ impl ReportedSubjects {
             &self.ordinals,
             oids,
             &self.parsed,
+            &self.sources,
             false,
             reads,
             PROGRAM,
@@ -730,6 +725,7 @@ impl ReportedSubjects {
             &self.records,
             &self.ordinals,
             &self.parsed,
+            &self.sources,
             |rank| self.lengths[rank] as usize,
             PROGRAM,
         )

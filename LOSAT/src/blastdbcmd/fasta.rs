@@ -109,25 +109,19 @@ impl FastaFormatter {
         // `GetBioseq(oid, gi, seqid)`: the target's line for the ids and the title, every line
         // the filter keeps for the sources (`x_GetTaxonomy` of `x_GetTaxDefline`, the target's
         // line first).
-        let (set, source_taxid) = match target {
-            Some(target) => {
-                let target_id = target_id(target)?;
-                let source_taxid = set.first_source_taxid(Some(&target_id));
-                let kept = target_set(&set, &target_id)?;
-                if bioseq {
-                    source.post_bioseq_texts(oid, &set, Some(&target_id), out)?;
-                }
-                (kept, source_taxid)
-            }
-            None => {
-                if bioseq {
-                    source.post_bioseq_texts(oid, &set, None, out)?;
-                }
-                let source_taxid = set.first_source_taxid(None);
-                (set, source_taxid)
-            }
+        let target_seqid = match target {
+            Some(target) => Some(target_id(target)?),
+            None => None,
         };
-        let Some(defline) = set.deflines.first() else {
+        let kept = match &target_seqid {
+            Some(target_seqid) => Some(target_set(&set, target_seqid)?),
+            None => None,
+        };
+        if bioseq {
+            source.post_bioseq_texts(oid, &set, target_seqid.as_ref(), out)?;
+        }
+        let shown = kept.as_ref().unwrap_or(&set);
+        let Some(defline) = shown.deflines.first() else {
             return Ok(());
         };
         if defline.ids.is_empty() {
@@ -142,9 +136,12 @@ impl FastaFormatter {
         let range = config.range.clipped(length);
         let mut text = Vec::new();
         if self.long_seqids {
-            self.long_header(source, &set, source_taxid, range, config, &mut text)?;
+            // The Bioseq's first source, from every line the filter keeps (the target's first),
+            // names the organism of a title made from it: the long header's alone.
+            let source_taxid = set.first_source_taxid(target_seqid.as_ref());
+            self.long_header(source, shown, source_taxid, range, config, &mut text)?;
         } else {
-            short_header(&set, range, config, &mut text)?;
+            short_header(shown, range, config, &mut text)?;
         }
         let mut letters = source.fasta_letters(oid, range)?;
         // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:463-477
@@ -853,7 +850,7 @@ fn generated_title(
     let ids = &set.deflines[0].ids;
     let mut bioseq_facts = crate::report::db_subject::bioseq_facts(ids);
     bioseq_facts.local_annots_only = true;
-    let from_source = bioseq_title_from_source(title, &bioseq_facts);
+    let from_source = bioseq_title_from_source(title, || bioseq_facts.clone());
     let mut title = title.to_vec();
     if let Some(taxid) = source_taxid.filter(|_| from_source || source.protein) {
         let names = source.tax_names(taxid)?;

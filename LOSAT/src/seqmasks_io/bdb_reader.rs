@@ -185,7 +185,7 @@ impl MaskBdbReader {
         // names of a definition line with a taxid; seqdbvol.cpp:1100-1188).
         let taxname = if self.title_printed
             && has_source
-            && bioseq_title_from_source(&title, &bioseq_facts(&ids))
+            && bioseq_title_from_source(&title, || bioseq_facts(&ids))
         {
             self.source_taxname(oid, &set)?
         } else {

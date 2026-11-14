@@ -56,7 +56,7 @@ pub mod taxdb;
 pub mod volume;
 
 pub use filter::{DbList, ListWarning, SeqidList, TaxidList};
-pub(crate) use filter::{Oid, OidMap};
+pub(crate) use filter::{DbSequence, Oid, OidMap};
 
 #[cfg(test)]
 mod damaged_files_tests;
@@ -501,7 +501,8 @@ pub struct SeqLocation {
     volume: usize,
     /// The sequence's OID in the volume.
     vol_oid: u32,
-    /// The id the caller gave (an ordinal id or an OID), for messages.
+    /// The id the caller gave (an ordinal id or an OID): the first ordinal id of the block that
+    /// `read_sequence_at` reads. The messages name the OID (`SeqDb::location_oid`).
     id: u32,
 }
 
@@ -1856,6 +1857,12 @@ impl SeqDb {
         Ok(SeqLocation { id: ordinal, ..at })
     }
 
+    /// The OID in the database of the sequence at `at`, which the readers' messages name (the id
+    /// that `at` was found by can be an ordinal id).
+    fn location_oid(&self, at: &SeqLocation) -> u32 {
+        self.volume_starts[at.volume] + at.vol_oid
+    }
+
     /// `end` cut at the first OID of `volume` from `first` on that a taxid list excludes:
     /// a block of a restricted database holds consecutive OIDs.
     fn included_end(&self, volume: usize, first: u32, end: u32) -> u32 {
@@ -2037,7 +2044,12 @@ impl SeqDb {
                 self.volumes.len()
             )));
         };
-        volume.read_block(range.first, range.end, range.first_ordinal)
+        volume.read_block(
+            range.first,
+            range.end,
+            range.first_ordinal,
+            self.volume_starts[range.volume] + range.first,
+        )
     }
 
     /// The length and the ambiguity data that
@@ -2054,7 +2066,12 @@ impl SeqDb {
                 self.volumes.len()
             )));
         };
-        volume.x_nucleotide_check(range.first, range.end, range.first_ordinal)
+        volume.x_nucleotide_check(
+            range.first,
+            range.end,
+            range.first_ordinal,
+            self.volume_starts[range.volume] + range.first,
+        )
     }
 
     /// Reads the one sequence `ordinal` (for traceback and reports).
@@ -2065,7 +2082,12 @@ impl SeqDb {
     /// Reads the one sequence at `at` (a block of one sequence whose first ordinal id is the id
     /// `at` was found by).
     pub fn read_sequence_at(&self, at: SeqLocation) -> Result<SequenceBlock, SeqDbError> {
-        self.volumes[at.volume].read_block(at.vol_oid, at.vol_oid + 1, at.id)
+        self.volumes[at.volume].read_block(
+            at.vol_oid,
+            at.vol_oid + 1,
+            at.id,
+            self.location_oid(&at),
+        )
     }
 
     /// The number of residues of protein `ordinal`, read from the index
@@ -2096,7 +2118,12 @@ impl SeqDb {
                 self.volumes.len()
             )));
         };
-        volume.x_read_block_mapped(range.first, range.end, range.first_ordinal)
+        volume.x_read_block_mapped(
+            range.first,
+            range.end,
+            range.first_ordinal,
+            self.volume_starts[range.volume] + range.first,
+        )
     }
 
     /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_block` with the bytes in `buf`
@@ -2120,14 +2147,25 @@ impl SeqDb {
                 self.volumes.len()
             )));
         };
-        volume.x_read_block_into(range.first, range.end, range.first_ordinal, buf)
+        volume.x_read_block_into(
+            range.first,
+            range.end,
+            range.first_ordinal,
+            self.volume_starts[range.volume] + range.first,
+            buf,
+        )
     }
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_sequence` with the bytes in a buffer that glibc maps
     /// from 1 MiB on.
     pub fn x_read_sequence_mapped(&self, ordinal: u32) -> Result<SequenceBlock, SeqDbError> {
         let at = self.find_volume(ordinal)?;
-        self.volumes[at.volume].x_read_block_mapped(at.vol_oid, at.vol_oid + 1, ordinal)
+        self.volumes[at.volume].x_read_block_mapped(
+            at.vol_oid,
+            at.vol_oid + 1,
+            ordinal,
+            self.location_oid(&at),
+        )
     }
 
     /// The length in bases of nucleotide `ordinal`, read from the index and the last byte of
@@ -2138,7 +2176,7 @@ impl SeqDb {
 
     /// [`SeqDb::nucleotide_length`] of the nucleotide at `at`.
     pub fn nucleotide_length_at(&self, at: SeqLocation) -> Result<usize, SeqDbError> {
-        self.volumes[at.volume].nucleotide_length(at.vol_oid, at.id)
+        self.volumes[at.volume].nucleotide_length(at.vol_oid, self.location_oid(&at))
     }
 
     /// The IUPAC letters `[from, to)` of nucleotide `ordinal`: the bases of the range and the
@@ -2159,14 +2197,14 @@ impl SeqDb {
         from: usize,
         to: usize,
     ) -> Result<Vec<u8>, SeqDbError> {
-        self.volumes[at.volume].nucleotide_iupac_range(at.vol_oid, at.id, from, to)
+        self.volumes[at.volume].nucleotide_iupac_range(at.vol_oid, self.location_oid(&at), from, to)
     }
 
     /// The length and the ambiguity runs of nucleotide `ordinal`, read once for any number of
     /// [`SeqDb::nucleotide_iupac_range_with`] calls on it.
     pub fn nucleotide_ambiguity(&self, ordinal: u32) -> Result<NucleotideAmbiguity, SeqDbError> {
         let at = self.find_volume(ordinal)?;
-        self.volumes[at.volume].nucleotide_ambiguity(at.vol_oid, ordinal)
+        self.volumes[at.volume].nucleotide_ambiguity(at.vol_oid, self.location_oid(&at))
     }
 
     /// [`SeqDb::nucleotide_iupac_range`] with the length and the runs of
@@ -2179,8 +2217,13 @@ impl SeqDb {
         ambiguity: &NucleotideAmbiguity,
     ) -> Result<Vec<u8>, SeqDbError> {
         let at = self.find_volume(ordinal)?;
-        self.volumes[at.volume]
-            .nucleotide_iupac_range_with(at.vol_oid, ordinal, from, to, ambiguity)
+        self.volumes[at.volume].nucleotide_iupac_range_with(
+            at.vol_oid,
+            self.location_oid(&at),
+            from,
+            to,
+            ambiguity,
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2222-2241
@@ -2213,7 +2256,7 @@ impl SeqDb {
         let at = self.find_volume(ordinal)?;
         self.ordinal_deflines(
             at.volume,
-            ordinal,
+            self.location_oid(&at),
             self.volumes[at.volume].deflines(at.vol_oid),
         )
     }
@@ -2247,24 +2290,25 @@ impl SeqDb {
         let at = self.find_volume(ordinal)?;
         self.sequence_header(
             at.volume,
-            ordinal,
+            self.location_oid(&at),
             self.volumes[at.volume].header(at.vol_oid),
         )
     }
 
-    /// The `SequenceHeader` of the header `header` of the sequence `ordinal` in `volume`.
+    /// The `SequenceHeader` of the header `header` of the sequence `oid` (its OID, which the
+    /// messages name) in `volume`.
     fn sequence_header(
         &self,
         volume: usize,
-        ordinal: u32,
+        oid: u32,
         header: Result<VolumeHeader, SeqDbError>,
     ) -> Result<SequenceHeader, SeqDbError> {
         match header? {
             VolumeHeader::Ordinal(deflines) => self
-                .ordinal_deflines(volume, ordinal, Ok(deflines))
+                .ordinal_deflines(volume, oid, Ok(deflines))
                 .map(SequenceHeader::Ordinal),
             VolumeHeader::Parsed(set) => self
-                .ordinal_set(volume, ordinal, set)
+                .ordinal_set(volume, oid, set)
                 .map(SequenceHeader::Parsed),
         }
     }
@@ -2280,16 +2324,16 @@ impl SeqDb {
     /// [`SeqDb::defline_set`] of the sequence at `at`.
     pub fn defline_set_at(&self, at: SeqLocation) -> Result<DeflineSet, SeqDbError> {
         let set = self.volumes[at.volume].defline_set(at.vol_oid)?;
-        self.ordinal_set(at.volume, at.id, set)
+        self.ordinal_set(at.volume, self.location_oid(&at), set)
     }
 
-    /// `set`, the definition lines of the sequence `ordinal` (the id its messages name) in
+    /// `set`, the definition lines of the sequence `oid` (its OID, which the messages name) in
     /// `volume`, with the tag of a `general` id `BL_ORD_ID` made its OID in the database
     /// (`defline_set`).
     fn ordinal_set(
         &self,
         volume: usize,
-        ordinal: u32,
+        oid: u32,
         mut set: DeflineSet,
     ) -> Result<DeflineSet, SeqDbError> {
         let volume_start = self.volume_starts[volume];
@@ -2314,12 +2358,12 @@ impl SeqDb {
             // `GetId` of a string tag throws in NCBI (an invalid CHOICE selection).
             let ObjectId::Id(tag) = dbtag.tag else {
                 return Err(format(format!(
-                    "BL_ORD_ID of sequence {ordinal} has a string tag"
+                    "BL_ORD_ID of sequence {oid} has a string tag"
                 )));
             };
             let Ok(adjusted) = i32::try_from(i64::from(volume_start) + i64::from(tag)) else {
                 return Err(format(format!(
-                    "BL_ORD_ID of sequence {ordinal} passes a signed 32-bit id"
+                    "BL_ORD_ID of sequence {oid} passes a signed 32-bit id"
                 )));
             };
             dbtag.tag = ObjectId::Id(adjusted);
@@ -2335,11 +2379,12 @@ impl SeqDb {
         self.volumes[at.volume].defline_taxids(at.vol_oid)
     }
 
-    /// The definition lines of a volume's sequence as `deflines` gives them for `ordinal`.
+    /// The definition lines of a volume's sequence as `deflines` gives them for the sequence
+    /// `oid` (its OID, which the messages name).
     fn ordinal_deflines(
         &self,
         volume: usize,
-        ordinal: u32,
+        oid: u32,
         deflines: Result<Vec<Defline>, SeqDbError>,
     ) -> Result<Vec<OrdinalDefline>, SeqDbError> {
         let volume_start = self.volume_starts[volume];
@@ -2351,9 +2396,7 @@ impl SeqDb {
                 if bl_ord_id > i32::MAX as u64 {
                     return Err(SeqDbError::Format {
                         path: vol.base().to_path_buf(),
-                        message: format!(
-                            "BL_ORD_ID of sequence {ordinal} passes a signed 32-bit id"
-                        ),
+                        message: format!("BL_ORD_ID of sequence {oid} passes a signed 32-bit id"),
                     });
                 }
                 Ok(OrdinalDefline {
@@ -2504,7 +2547,11 @@ impl SeqDb {
                 let Some(ordinal) = self.range_ordinal(range, oid) else {
                     return true;
                 };
-                let deflines = self.ordinal_deflines(range.volume, ordinal, deflines);
+                let deflines = self.ordinal_deflines(
+                    range.volume,
+                    self.volume_starts[range.volume] + oid,
+                    deflines,
+                );
                 visit(ordinal, deflines)
             },
         )
@@ -2595,7 +2642,8 @@ impl SeqDb {
             header_piece_bytes(),
             &mut |oid, header| match self.range_ordinal(range, oid) {
                 Some(ordinal) => {
-                    visit(ordinal, self.sequence_header(range.volume, ordinal, header))
+                    let oid = self.volume_starts[range.volume] + oid;
+                    visit(ordinal, self.sequence_header(range.volume, oid, header))
                 }
                 None => true,
             },

@@ -2936,6 +2936,44 @@ pub(super) fn x_bp_build_lookup_as(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
+// `x_build_direct_or_reference`)
+// ```c
+//     for (i = 0; i < lookup->backbone_size; i++) {
+//         if (exact_backbone[i] != NULL) {
+//             s_AddWordHits(lookup, matrix, query->sequence,
+//                           exact_backbone[i], query_bias, row_max);
+// ```
+/// BLASTP's lookup table of 4-letter words (`-word_size 4`, item SC8b of line NP), whose backbone
+/// index (20 bits) the 16-bit direct builders do not cover, and its contexts: the joint builder of
+/// 32-bit indices (`x_pair_lut_wide.rs`) with all the query's lookup locations as its one table,
+/// which is `build_lookup_from_prepared`'s table, built in tasks on `pool`'s threads, as BLASTX
+/// builds its table of 4-letter words (`XPairLutQuery::x_build_full_wide`). The query is prepared
+/// as [`x_bp_build_lookup_as`] prepares it (BLASTP: no ideal check). `None` for the word sizes the
+/// direct builders cover, and in diagnostics mode, where the callers keep their builders (there the
+/// reference builder).
+pub(crate) fn x_bp_build_wide_lookup(
+    queries: &[Vec<QueryFrame>],
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> Option<(BlastAaLookupTable, Vec<QueryContext>)> {
+    if x_pair_lut::x_direct_covers(word_length)
+        || !x_pair_lut::x_pair_lut_wide::x_wide_covers(word_length)
+        || diagnostics_enabled()
+    {
+        return None;
+    }
+    let prepared = x_bp_prepared_query(queries, false, matrix, word_length);
+    // build_lookup_from_prepared returns the prepared contexts unchanged.
+    let contexts = prepared.contexts.clone();
+    let table =
+        x_pair_lut::XPairLutQuery::x_from_prepared(prepared, threshold, matrix, word_length)
+            .x_build_full_wide_on(pool);
+    Some((table, contexts))
+}
+
 /// EXPERIMENT (LOSAT_X_TBXLUT): `true` = TBLASTX's full table built in place by
 /// [`x_tbx_build_direct`], `false` = off (`build_ncbi_lookup_for_profile`, the chain builder).
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result. A strict-set

@@ -1405,7 +1405,10 @@ impl<'a> HeaderReader<'a> {
     /// (the third value: another sequence that holds a scope key of the Seq-align id, which
     /// psiblast's PSSM read refuses, `ParsedSubject::pssm_read`). A subject whose Bioseq NCBI's
     /// formatters do not find (`unfetchable`) is looked up too, for that read (its reports refuse
-    /// it whatever the lookup gives); a giim id never (NCBI's handles never take it again).
+    /// it whatever the lookup gives). A giim id of a version 5 database is looked up only for a
+    /// lookup that fails: NCBI's handles never take another sequence for it, but its prefetch looks
+    /// it up as a string id in every LMDB file of the list, which stops at a file without the
+    /// accession table (review 1 of line DBID mixdb, H1); of a version 4 database never.
     fn found_instead(
         &self,
         subject: &crate::report::db_subject::ParsedSubject,
@@ -1416,7 +1419,8 @@ impl<'a> HeaderReader<'a> {
         Option<crate::seqdb::DbSequence>,
     ) {
         use crate::report::db_subject::FoundInstead;
-        if matches!(subject.alignment_id(), crate::seqid::ParsedSeqId::Giim(_)) {
+        let giim = matches!(subject.alignment_id(), crate::seqid::ParsedSeqId::Giim(_));
+        if giim && !self.db.is_version5() {
             return (None, None, None);
         }
         let failed = |error: SeqDbError| {
@@ -1440,6 +1444,7 @@ impl<'a> HeaderReader<'a> {
         };
         let id = subject.alignment_id();
         let oids = match lookup.seqid_to_oids(id, true) {
+            Ok(_) if giim => return (None, None, None),
             Ok(oids) => oids,
             Err(error) => {
                 return match lookup.throws_on_id(id) {

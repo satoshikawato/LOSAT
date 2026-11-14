@@ -458,14 +458,15 @@ asks the maintainer to accept it, as the PRs of versions 1.5 and 1.13 did.
   -parse_seqids`: NCBI searches it, and before it writes a batch's reports (every format but
   the Seq-annots and the archive) its BlastDb data loader looks each hit's Seq-id up in every
   LMDB file of the list (`BlastFormatter_PreFetchSequenceData`,
-  `CSeqDBLMDBSet::AccessionToOids`); a hit with a parsed Seq-id then stops the run with `BLAST
-  Database error: DB contains no accession info.` (exit 2), after the outfmt 0 header and the
-  earlier batches. Where `PRE_FETCH_SEQS_LIMIT` turns the prefetch off, the reports write
+  `CSeqDBLMDBSet::AccessionToOids`); a hit whose Seq-id it looks up as a string (an accession, a
+  name, a giim; not a gi, not `gnl|BL_ORD_ID|n`) then stops the run with `BLAST Database error:
+  DB contains no accession info.` (exit 2), after the outfmt 0 header and the earlier batches. Where `PRE_FETCH_SEQS_LIMIT` turns the prefetch off, the reports write
   `Unknown` for such a hit, and then the outfmt 0 alignments stop with that error, the tabular
   formats crash (`CCoreException`, exit 255) and the JSON and XML2 documents end with its trace.
   Without such a hit (a `gnl|BL_ORD_ID|n` of a database without parsed Seq-ids, or of one made
   with `-input_type blastdb`, needs no accession table), and for the Seq-annots and the archive,
-  NCBI runs to the end; `-seqidlist` and `-negative_seqidlist` stop it up front with the same
+  NCBI runs to the end (the Seq-annots too stop where `PRE_FETCH_SEQS_LIMIT=2147483647` prefetches
+  for them); `-seqidlist` and `-negative_seqidlist` of accessions stop it up front with the same
   error. LOSAT searches such a list as NCBI does (line DBID item mixdb, probe of 4,080 runs:
   6 programs, 20 formats, the prefetch on and off, 17 lists and alias files) and refuses a run
   whose reports or prefetch look a parsed Seq-id up in a file without the table (`... whose

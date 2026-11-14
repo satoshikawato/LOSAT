@@ -113,31 +113,6 @@ impl TblastnArgs {
         // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
         // there too. `GetExportSearchStrategyStream` comes first: it creates the search strategy
         // file (`strategy::open_strategy_file`), which an error after it leaves empty.
-        if args.export_search_strategy.is_some() {
-            // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:281-287,298-302
-            // ```c++
-            //         if (pssm.NotEmpty())
-            //         {
-            //             _ASSERT(queries.Empty());
-            //             if(num_iters != 0)
-            //             	retval.Reset(new blast::CExportStrategy(pssm, opts_hndl, search_db, client_id, num_iters));
-            //             else
-            //             	retval.Reset(new blast::CExportStrategy(pssm, opts_hndl, search_db, client_id));
-            // ...
-            //         if (pssm.NotEmpty())
-            //         {
-            //             NCBI_THROW(CInputException, eInvalidInput,
-            //                        "Remote PSI-BL2SEQ is not supported");
-            // ```
-            // A PSSM search's request is the PSSM one (program `blastp`, service `psi`, the
-            // whole `PssmWithParameters`; with `-subject` NCBI stops with that error after
-            // the prolog): item F1b-2 of line RG, with psiblast's.
-            if args.in_pssm.is_some() {
-                anyhow::bail!(
-                        "-export_search_strategy with -in_pssm is not supported by LOSAT's TBLASTN yet (NCBI writes a PSI-BLAST request with -db and stops with \"Remote PSI-BL2SEQ is not supported\" with -subject)"
-                    );
-            }
-        }
         let strategy_file = crate::report::archive::strategy::open_strategy_file(
             args.export_search_strategy.as_deref(),
             args.out.as_deref(),
@@ -784,6 +759,9 @@ fn search_cli(
     // FASTA input, no `Query is Empty!` and no query batches (one search of the PSSM,
     // tblastn_app.cpp:305-327).
     if let Some(psi) = resolved.pssm.clone() {
+        // A request whose PSSM file has members that the reader skipped: refused once the database
+        // is opened (NCBI's error of a database it cannot open comes first), before any output.
+        psi.refuse_request_members("TBLASTN")?;
         super::in_pssm::check_limits(&args, &resolved, &psi, choice.number)?;
         drop(query_input);
         crate::blastinput::input_files::write_empty_subject_warnings_by_length(
@@ -1491,10 +1469,21 @@ fn search(
     // scores of a PSSM of frequency ratios only (`PsiBlastComputePssmScores`) fail when the search
     // object is made, after the outfmt 0 prolog (tblastn_app.cpp:270, 322) and before any
     // subject is read.
-    if let Some(error) = pssm
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:307,324
+    // ```c++
+    //             SaveSearchStrategy(args, m_CmdLineArgs, query_factory, m_OptsHndl, pssm);
+    // ...
+    //                 CRef<CPsiBlast> psiblast(new CPsiBlast(pssm, db_adapter, psi_opts));
+    // ```
+    // With `-export_search_strategy` the request is made first: with `-subject` it stops the run
+    // ("Remote PSI-BL2SEQ is not supported", exit status 1, the strategy file empty; NCBI 2.17.0
+    // `tbn.pssm.sub*` of line RG F1d probe 7) before the PSSM's check, which a request with `-db`
+    // makes (no request then); the PSSM engine's error comes after the request is written
+    // (`PsiSearch::stop_before_search`, psiblast's rule too).
+    let pssm_stop = pssm
         .as_deref()
-        .and_then(|psi| psi.validation_error.as_deref())
-    {
+        .and_then(|psi| psi.stop_before_search(args.strategy.is_some(), database.is_some()));
+    if let Some(stop) = pssm_stop {
         write_first_batch_prologs(
             outputs,
             subject_path.map(|path| path.as_path()),
@@ -1504,7 +1493,19 @@ fn search(
             args.tabular_taxdb.unwrap_or(false),
             super::in_pssm::PROGRAM,
         )?;
-        return Err(app::engine_error(error));
+        // The request of the one PSSM query, which NCBI wrote before its constructor failed.
+        if let (true, Some(strategy)) = (stop.after_request(), args.strategy.as_ref()) {
+            super::archive::requests(
+                database.is_none().then_some(subject_records),
+                resolved.lcase_masking,
+            )
+            .with_pssm_query(
+                pssm.as_deref()
+                    .and_then(crate::algorithm::pssm_search::PsiSearch::request_pssm),
+            )
+            .write(strategy, 0, input_records, None)?;
+        }
+        return Err(stop.error());
     }
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`); with
     // `-in_pssm`, of the PSSM's query when the reports show its ids (`PsiSearch::query_record`).
@@ -1542,10 +1543,15 @@ fn search(
     // The search strategy's requests of the batches (`-export_search_strategy`), with every
     // `-subject` record: written in the loop below, and for the batch that stops the run (every
     // query without letters) after the batches before it.
+    // With `-in_pssm` every request holds the PSSM as read (`RunRequests::with_pssm_query`).
     let requests = args.strategy.as_ref().map(|_| {
         super::archive::requests(
             database.is_none().then_some(subject_records),
             resolved.lcase_masking,
+        )
+        .with_pssm_query(
+            pssm.as_deref()
+                .and_then(crate::algorithm::pssm_search::PsiSearch::request_pssm),
         )
     });
     // The titles that the BLAST archive (outfmt 11) cannot write are refused after the batches
@@ -1631,12 +1637,31 @@ fn search(
         // context fails after the database's first OID is found and before any sequence is read.
         // NCBI 2.17.0 (probe of line RG D1a, `db.ak.tbn.min1.6`): `BLAST engine error: The
         // average subject length is too short`, exit status 3.
+        // With `-in_pssm`, whether the read's failure comes before the batch's setup checks
+        // (`PsiSearchReadFailure::precedes_setup_checks`: the empty database).
+        let mut read_before_setup = false;
         let (database_stores, mut stores_error) = match database {
             Some(database) => {
+                // `-in_pssm` (PSI-TBLASTN): `CPsiBlast` reads the database without `CLocalBlast`'s
+                // catch, so its first read gives SeqDB's own error (`OID not found`, a sequence file
+                // not found; `shared::PsiSearchReadFailure`, psiblast's rule), where a FASTA query
+                // gets `Database memory map file error`.
+                let pssm_failure = resolved
+                    .pssm
+                    .as_ref()
+                    .and_then(|_| database.pssm_search_read_failure());
+                read_before_setup = pssm_failure
+                    .as_ref()
+                    .is_some_and(|failure| failure.precedes_setup_checks());
                 let read = if database.first_oid_read_fails() {
-                    Err(PreliminaryReadError("Database memory map file error").into())
+                    Err(match pssm_failure {
+                        Some(failure) => failure.error("TBLASTN"),
+                        None => PreliminaryReadError("Database memory map file error").into(),
+                    })
                 } else if !subject_set.old_fsc && database.numbers().min_length as u32 / 3 == 0 {
                     Err(PreliminaryReadError("The average subject length is too short").into())
+                } else if let Some(failure) = pssm_failure {
+                    Err(failure.error("TBLASTN"))
                 } else {
                     database.x_stream(resolved.num_threads).map(|stream| {
                         x_stream = Some(stream);
@@ -1860,6 +1885,24 @@ fn search(
                         }
                         report
                     }
+                    // NCBI's setup reads OID 0 before its checks (`BLAST_GapAlignSetUp`, quoted
+                    // at `PsiSearchReadFailure::precedes_setup_checks`): with `-in_pssm` an empty
+                    // database fails the batch before the PSSM's Karlin-Altschul check or the
+                    // average subject length would, as psiblast's
+                    // (`psiblast_stop_at_invalid_query`).
+                    Err(error)
+                        if read_before_setup
+                            && stores_error.is_some()
+                            && error.is::<super::stage_d_pipeline::SetupEngineError>() =>
+                    {
+                        failed = Some((
+                            range,
+                            stores_error
+                                .take()
+                                .expect("the database's read failure before the setup"),
+                        ));
+                        break;
+                    }
                     Err(error) => match batch_failure(error) {
                         Ok(failure) => {
                             failed = Some((range, failure));
@@ -1870,16 +1913,18 @@ fn search(
                 }
             };
             // `-db`: the first batch with a valid context reads the sequences (above); a
-            // reader error of NCBI's own fails it, LOSAT's refusal stops the run.
+            // reader error of NCBI's own fails it (the preliminary search's text, or with
+            // `-in_pssm` SeqDB's own error, `TblastnDatabase::pssm_search_read_failure`), LOSAT's
+            // refusal stops the run.
             if batch_validity.iter().any(|&valid| valid) {
                 if let Some(error) = stores_error.take() {
-                    match error.downcast::<PreliminaryReadError>() {
-                        Ok(read_error) => {
-                            failed = Some((range, app::engine_error(read_error.0)));
-                            break;
-                        }
+                    let error = match error.downcast::<PreliminaryReadError>() {
+                        Ok(read_error) => app::engine_error(read_error.0),
+                        Err(error) if error.is::<crate::cli::NativeError>() => error,
                         Err(error) => return Err(error),
-                    }
+                    };
+                    failed = Some((range, error));
+                    break;
                 }
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
@@ -2422,6 +2467,7 @@ fn search(
                         .as_ref()
                         .expect("a database search has its Database: lines"),
                     reported,
+                    oids: database.oid_map(),
                 },
             ),
             _ => (

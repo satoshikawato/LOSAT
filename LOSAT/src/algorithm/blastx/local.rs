@@ -436,7 +436,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         .collect();
     let writers = formats
         .iter_mut()
-        .map(|format| format.sink.ostream())
+        .map(|format| crate::cli::NcbiOstream::sink(&mut format.sink))
         .collect::<io::Result<Vec<_>>>()?;
     // The archive (outfmt 11) refuses a title where it writes the batch, after its search
     // (`archive::check_batch_titles`, below): when a batch that the search may write has a query
@@ -456,7 +456,8 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                 deliver,
                 &mut |_| Ok(()),
             )
-        }) || (database.is_none() && archive::check_titles(subjects, "subject").is_err()));
+        }) || (database.is_none()
+            && archive::check_titles(subjects, "subject", resolved[0].program().upper).is_err()));
     // A run in which a `-subject` title (refused with its first hit) or the message of a query
     // (refused where NCBI does not search its batch) could still be refused by those documents
     // holds every format in order, as the archive's titles do and as the command line holds its
@@ -477,13 +478,13 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
             });
     let hold = (titles_may_refuse || xml_may_refuse).then(archive::ArchiveHold::new);
     // The hold comes between a format's stream and the caller's writer, which has no stream of
-    // NCBI's (`cli::NcbiOstream`): it keeps the bytes in order.
+    // NCBI's (`cli::NcbiOstream::held`): it keeps the writes and flushes in order.
     let mut writers: Vec<crate::cli::NcbiOstream<'_>> = match &hold {
         Some(hold) => {
             hold.hold();
             writers
                 .into_iter()
-                .map(|writer| crate::cli::NcbiOstream::new(Box::new(hold.writer(writer))))
+                .map(|writer| crate::cli::NcbiOstream::held(hold.writer(writer)))
                 .collect()
         }
         None => writers,
@@ -523,13 +524,14 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     // `ReportOutputs::finish_archive`) and nothing after LOSAT's refusal (`ArchiveHold::end_with`);
     // when only the documents are, nothing after one of their refusals and the bytes of the
     // batches before after any other error (`ArchiveHold::end_document_with`), as the command line.
+    // A write that fails there is the run's error in place of the run's own, as without the hold.
     // The observer's events of a held run come before its bytes reach their sinks, so a position
     // read from a sink at an event is not that of the event (`FormatObserver`): the same for every
     // hold of this function, a `-subject` run's too.
     match (&hold, &written) {
         (Some(hold), Ok(_)) => hold.release()?,
-        (Some(hold), Err(error)) if titles_may_refuse => hold.end_with(error),
-        (Some(hold), Err(error)) => hold.end_document_with(error),
+        (Some(hold), Err(error)) if titles_may_refuse => hold.end_with(error)?,
+        (Some(hold), Err(error)) => hold.end_document_with(error)?,
         (None, _) => {}
     }
     let (run_hits, run_subjects) = written?;
@@ -725,6 +727,7 @@ fn write_run(
                 queries,
                 database.is_none().then_some(subjects),
                 queries_before == 0,
+                search_options.program().upper,
             )?;
         }
         let hits = match made_hits {

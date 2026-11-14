@@ -1,5 +1,6 @@
 //! Existing reactor ABI adapter; the search, batching and reports use BLASTX owners.
 use super::{args::BlastxArgs, input, native, query_setup::BATCH_SIZE, report, runtime};
+use crate::api::local_blast::OutputSink;
 use anyhow::{bail, Result};
 use std::{cell::RefCell, io::Write, path::Path};
 
@@ -299,7 +300,9 @@ pub(crate) fn run_pair(
                             let mut results =
                                 searched.next().expect("one search per queued batch")?;
                             report::render_queries(
-                                &mut crate::cli::NcbiOstream::new(Box::new(&mut output)),
+                                &mut crate::cli::NcbiOstream::sink(&mut OutputSink::Writer(
+                                    &mut output,
+                                ))?,
                                 &mut *diagnostics.borrow_mut(),
                                 &options,
                                 queries,
@@ -385,7 +388,7 @@ pub(crate) fn run_pair(
                 //                	    formatter.PrintOneResultSet(**result, query_batch);
                 // ```
                 report::render_queries(
-                    &mut crate::cli::NcbiOstream::new(Box::new(&mut output)),
+                    &mut crate::cli::NcbiOstream::sink(&mut OutputSink::Writer(&mut output))?,
                     &mut *diagnostics.borrow_mut(),
                     &options,
                     queries,

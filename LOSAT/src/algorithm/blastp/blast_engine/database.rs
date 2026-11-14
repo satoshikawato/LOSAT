@@ -110,6 +110,12 @@ pub(super) struct BlastpDatabase {
 }
 
 impl BlastpDatabase {
+    /// The OIDs of the database's ordinal ids, which name the reported sequences without
+    /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
+    pub(super) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
+        self.db.oid_map()
+    }
+
     /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
     pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
         self.db.set_reports_show_gis(show_gis);
@@ -970,7 +976,7 @@ impl ListedSubjects {
             records.push(FastaRecord::new(
                 // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the
                 // OID (line DI-8).
-                format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
+                database.db.oid(ordinal).fasta_id(),
                 &stored.title,
                 &letters,
             ));
@@ -1636,21 +1642,22 @@ impl ListedTitles<'_> {
     }
 
     /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of every
-    /// listed subject, by rank (`report::defline::database_subject_id`); a subject
-    /// without rows gets an empty id. A subject with rows whose id LOSAT cannot write as
-    /// NCBI is an error before any format is written where a tabular report `reads` the
+    /// listed subject, by rank (`shared::tabular_subject_id`, `oids` the database's OIDs); a
+    /// subject without rows gets an empty id. A subject with rows whose id LOSAT cannot write
+    /// as NCBI is an error before any format is written where a tabular report `reads` the
     /// subject (`report::tabular::reads_subject`), else its ids are empty: a table of fields
     /// that read nothing of the subject prints none of them.
     pub(super) fn tabular_subject_ids(
         &self,
+        oids: crate::seqdb::OidMap<'_>,
         hit_lists: &[Option<BlastpHitList>],
         reads: bool,
     ) -> Result<(Vec<Arc<[u8]>>, Vec<Option<[Arc<[u8]>; 2]>>)> {
         let reported = Self::reported(hit_lists);
         let ranks = self.listed.ordinals.len();
         let mut ids: Vec<Arc<[u8]>> = Vec::with_capacity(ranks);
-        // `sacc` and `saccver` of the subjects with parsed Seq-ids, by rank (empty without
-        // them; the others' are their `sseqid`).
+        // `sacc` and `saccver` of the subjects with parsed Seq-ids and of those with the general
+        // id, by rank (empty without them; the others' are their `sseqid`).
         let mut accessions: Vec<Option<[Arc<[u8]>; 2]>> = Vec::new();
         // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): one empty id for every subject without rows.
         let empty: Arc<[u8]> = Arc::from(&b""[..]);
@@ -1682,12 +1689,26 @@ impl ListedTitles<'_> {
                 accessions[rank] = Some([Arc::from(accession), Arc::from(version)]);
                 continue;
             }
-            let id = match shared::tabular_subject_id(self.title(rank), ordinal, true, self.program)
-            {
-                Err(_) if !reads => Vec::new(),
+            let id = match shared::tabular_subject_id(
+                self.title(rank),
+                oids.oid(ordinal),
+                true,
+                self.program,
+            ) {
+                Err(_) if !reads => {
+                    ids.push(Arc::from(&b""[..]));
+                    continue;
+                }
                 id => id?,
             };
-            ids.push(Arc::from(id));
+            ids.push(Arc::from(id.id()));
+            if let shared::TabularSubjectId::General(_) = id {
+                if accessions.is_empty() {
+                    accessions = vec![None; ranks];
+                }
+                let accession: Arc<[u8]> = Arc::from(id.accession());
+                accessions[rank] = Some([Arc::clone(&accession), accession]);
+            }
         }
         Ok((ids, accessions))
     }
@@ -3592,7 +3613,9 @@ mod tests {
         );
         assert_eq!(listed.encoded[3].aa_len, 300);
         // The tabular ids of the subjects with rows, the stored titles for `stitle`.
-        let (ids, accessions) = titles.tabular_subject_ids(&hit_lists, true).unwrap();
+        let (ids, accessions) = titles
+            .tabular_subject_ids(database.oid_map(), &hit_lists, true)
+            .unwrap();
         assert!(accessions.is_empty());
         assert_eq!(
             ids.iter().map(|id| id.as_ref()).collect::<Vec<_>>(),
@@ -3655,8 +3678,11 @@ mod tests {
         assert!(lean.title(2).is_empty() && lean.title(3).is_empty());
         assert!(Arc::ptr_eq(&lean_titles[2], &lean_titles[3]));
         assert_eq!(
-            lean.tabular_subject_ids(&hit_lists, true).unwrap(),
-            records.tabular_subject_ids(&hit_lists, true).unwrap()
+            lean.tabular_subject_ids(database.oid_map(), &hit_lists, true)
+                .unwrap(),
+            records
+                .tabular_subject_ids(database.oid_map(), &hit_lists, true)
+                .unwrap()
         );
         lean.check_shown_titles(&database, &[0usize, 1].into_iter().collect())
             .unwrap();

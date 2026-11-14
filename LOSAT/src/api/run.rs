@@ -131,7 +131,7 @@ pub struct HspRecord {
     /// keeps its place).
     pub q_idx: usize,
     /// 0-based index of the subject record in the inputs; for a database
-    /// (`Inputs::database`), the sequence's ordinal id (the `n` of `gnl|BL_ORD_ID|n`).
+    /// (`Inputs::database`), the sequence's OID (the `n` of `gnl|BL_ORD_ID|n`).
     pub s_idx: usize,
     /// 0-based position of the HSP among the HSPs of its query.
     pub rank: usize,

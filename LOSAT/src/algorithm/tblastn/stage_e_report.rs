@@ -50,6 +50,8 @@ pub(super) enum ShownSubjects<'a> {
         name: &'a str,
         pairwise: &'a PairwiseDatabase,
         reported: &'a super::database::ReportedSubjects,
+        /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
+        oids: crate::seqdb::OidMap<'a>,
     },
 }
 
@@ -79,11 +81,11 @@ impl ShownSubjects<'_> {
             .map(|pairwise| pairwise.definition.as_slice())
     }
 
-    /// The ordinal ID of the reported database sequence of rank `rank`, `None` for `-subject`.
-    pub(super) fn ordinal(&self, rank: usize) -> Option<u32> {
+    /// The OID of the reported database sequence of rank `rank`, `None` for `-subject`.
+    pub(super) fn oid(&self, rank: usize) -> Option<crate::seqdb::Oid> {
         match self {
             Self::Fasta { .. } => None,
-            Self::Database { reported, .. } => Some(reported.ordinals[rank]),
+            Self::Database { reported, oids, .. } => Some(oids.oid(reported.ordinals[rank])),
         }
     }
 
@@ -309,15 +311,16 @@ pub(super) fn render(
     let subject_ids = if outputs.formats.iter().any(shows_ids) {
         match shown {
             ShownSubjects::Fasta { .. } => tabular_subject_ids(hitlists, subject_records)?,
-            ShownSubjects::Database { reported, .. } => {
-                reported.tabular_subject_ids(outputs.formats.iter().any(|format| {
+            ShownSubjects::Database { reported, oids, .. } => reported.tabular_subject_ids(
+                *oids,
+                outputs.formats.iter().any(|format| {
                     shows_ids(format)
                         && crate::report::tabular::reads_subject(
                             super::tabular::tabular_spec(format.outfmt).as_ref(),
                             crate::blastinput::app::Program::Tblastn,
                         )
-                }))?
-            }
+                }),
+            )?,
         }
     } else {
         Vec::new()
@@ -429,7 +432,7 @@ pub(super) fn render(
         });
         // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
         let side_sink = format.sink.side_files().cloned();
-        let mut writer = format.sink.ostream()?;
+        let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
         match format_number(format.outfmt) {
             // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
             // (`tabular`); never the default 6 and 7 below.

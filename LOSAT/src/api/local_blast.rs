@@ -178,12 +178,6 @@ impl OutputSink<'_> {
         })
     }
 
-    /// Opens the sink as the stream of the format's report (`cli::NcbiOstream`, which the organism
-    /// report of outfmt 18 takes): `open`'s writer, passed on as it is.
-    pub(crate) fn ostream(&mut self) -> io::Result<crate::cli::NcbiOstream<'_>> {
-        self.open().map(crate::cli::NcbiOstream::new)
-    }
-
     /// The caller's receiver of the side files of outfmt 13 and 14 (`OutputSink::Files`).
     pub fn side_files(&self) -> Option<&crate::report::blast_xml2::SideFileSink> {
         match self {
@@ -416,8 +410,8 @@ pub type HspIndex = usize;
 /// A sequence of a database that a search reported (`FormatObserver::database_subjects`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReportedSubject {
-    /// The sequence's ordinal id in the database (the `n` of `gnl|BL_ORD_ID|n`), the same in
-    /// every search of the database.
+    /// The sequence's OID in the database (the `n` of `gnl|BL_ORD_ID|n`), the same in every
+    /// search of the database, also one that a taxid or Seq-id list restricts.
     pub oid: u32,
     /// The `saccver` of the default tabular report.
     pub id: std::sync::Arc<str>,

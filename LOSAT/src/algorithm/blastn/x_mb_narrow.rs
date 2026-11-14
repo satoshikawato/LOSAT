@@ -177,6 +177,16 @@ impl Narrow {
         }
     }
 
+    /// EXPERIMENT (LOSAT_X_SEEDPIECE): `each` from the chain's element `from` (not 0) on.
+    #[inline(always)]
+    pub(super) fn each_from(&self, from: u32, mut callback: impl FnMut(u32)) {
+        let mut q_off = from;
+        while q_off != 0 {
+            callback(q_off);
+            q_off = get(&self.chain, q_off as usize);
+        }
+    }
+
     /// `contains_hit`: whether the chain of `cell` holds `q_off_1` (the whole chain is walked,
     /// as the 4-byte table's test does).
     #[inline(always)]

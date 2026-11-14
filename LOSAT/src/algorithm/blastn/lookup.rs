@@ -968,6 +968,38 @@ impl MbLookupTable {
         }
     }
 
+    /// EXPERIMENT (LOSAT_X_SEEDPIECE): `for_each_hit` from the chain's element `from` (one of its
+    /// `q_off`s; 0: its head) on, as a seed piece's scan that stopped inside the chain goes on
+    /// (NCBI's scan never stops inside a chain: its offset array has room for `longest_chain`
+    /// pairs over its batch; a piece has a fixed size, and the walk goes on from where it stopped
+    /// instead of from the head).
+    #[inline(always)]
+    fn for_each_hit_from(&self, index: u64, from: u32, mut callback: impl FnMut(u32)) {
+        if from == 0 {
+            return self.for_each_hit(index, callback);
+        }
+        if self.hashtable.get(index as usize).is_none() {
+            return match self.x_narrow.as_ref() {
+                Some(narrow) => narrow.each_from(from, callback),
+                // (the run of a CSR cell from that offset on: offsets are not repeated in a cell)
+                None => {
+                    let mut on = false;
+                    self.x_csr_each(index, |q_off_1| {
+                        on |= q_off_1 == from;
+                        if on {
+                            callback(q_off_1);
+                        }
+                    })
+                }
+            };
+        }
+        let mut q_off = from;
+        while q_off != 0 {
+            callback(q_off);
+            q_off = self.next_pos[q_off as usize];
+        }
+    }
+
     /// EXPERIMENT (LOSAT_X_BNCSR): `for_each_hit` of a table laid out as CSR: the cell's run, the
     /// chain's offsets in the chain's order (`x_bn_csr.rs`; none without chains and CSR). The hot
     /// scans read the runs through `x_dc_csr::Ring` instead.
@@ -1150,6 +1182,34 @@ impl TwoStageLookup {
             callback(q_off);
             q_off = disc.next_pos2[q_off as usize];
         }
+    }
+
+    /// EXPERIMENT (LOSAT_X_SEEDPIECE): `for_each_hit2` from the second chain's element `from`
+    /// (one of its `q_off`s; 0: its head) on (`MbLookupTable::for_each_hit_from`).
+    #[inline(always)]
+    pub(crate) fn for_each_hit2_from(&self, index: u64, from: u32, mut callback: impl FnMut(u32)) {
+        if from == 0 {
+            return self.for_each_hit2(index, callback);
+        }
+        let Some(disc) = self.disc.as_ref() else {
+            return;
+        };
+        let mut q_off = from;
+        while q_off != 0 {
+            callback(q_off);
+            q_off = disc.next_pos2[q_off as usize];
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_SEEDPIECE): `for_each_hit` from the chain's element `from` on
+    /// (`MbLookupTable::for_each_hit_from`).
+    #[inline(always)]
+    pub(crate) fn for_each_hit_from(&self, lut_kmer: u64, from: u32, callback: impl FnMut(u32)) {
+        debug_assert!(
+            self.disc.as_ref().is_none_or(|d| d.x_csr.is_none()),
+            "a CSR table (LOSAT_X_DCCSR) has no chains"
+        );
+        self.mb_lookup.for_each_hit_from(lut_kmer, from, callback)
     }
 
     /// Visit hits for a lut_word_length k-mer. A discontiguous table laid out as CSR

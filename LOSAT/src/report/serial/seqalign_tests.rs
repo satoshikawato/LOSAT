@@ -192,8 +192,8 @@ fn blastp_documents(format: SerialFormat, db_title: Option<&[u8]>) -> Vec<u8> {
     };
     let subjects = match db_title {
         Some(_) => [
-            subject(SeqId::BlOrdId(0), 137),
-            subject(SeqId::BlOrdId(1), 150),
+            subject(SeqId::BlOrdId(crate::seqdb::Oid::of_unrestricted(0)), 137),
+            subject(SeqId::BlOrdId(crate::seqdb::Oid::of_unrestricted(1)), 150),
         ],
         None => [
             subject(SeqId::Local("Subject_1"), 137),

@@ -494,7 +494,9 @@ letters), `LOSAT_X_TBXUNITMASK` (2 to 4,194,304, built-in 256 for `1` or unset: 
 masked unit diagonal table a unit takes for its size alone at eight threads or more),
 `LOSAT_X_BPQBLOCK` (1 or
 more, built-in 50,000: query letters per block; a value that is not a positive number is the
-built-in value).
+built-in value; a block also ends before a batch whose lookup-table words would take it past the
+most of a block, NCBI's largest table or for the standard table at least 2^22 words, so a block of
+`-word_size 4` holds one batch or a few).
 
 `LOSAT_X_SEEDBUCKET` was in the block of the round 3-4 set and was left out when the set became
 the default: it numbered the lookup hits of one chunk scan in a 32-bit counter, exact only up to

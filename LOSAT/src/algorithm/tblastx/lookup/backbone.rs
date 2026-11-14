@@ -33,6 +33,9 @@ pub(crate) use x_lut_direct::XAaSpares;
 // EXPERIMENT (LOSAT_X_BPLK16): the table of a blastp block, `u16` hits or `Int4` hits
 // (x_lut_direct.rs); no NCBI counterpart for the re-export itself.
 pub(crate) use x_lut_direct::XBpLookup;
+// BLASTP's table of 4-letter words (`-word_size 4`, item SC8b of line NP) from the joint builder
+// (x_lut_direct.rs); no NCBI counterpart for the re-export itself.
+pub(crate) use x_lut_direct::x_bp_build_wide_lookup;
 // The comparison of two tables (x_lut_direct.rs), for blastp's unit tests with `parallel`
 // threads (blast_engine/x_lookup_ahead.rs).
 #[cfg(all(

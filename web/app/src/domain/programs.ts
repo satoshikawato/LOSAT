@@ -431,7 +431,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           },
         ],
       },
-      // LOSAT's BLASTP reads word sizes 2, 3 and 5 to 7 (7, which NCBI's select lacks, through "Other").
+      // LOSAT's BLASTP reads word sizes 2 to 7 (4 and 7, which NCBI's select lacks, through "Other").
       { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize, cullingLimit] },
       {
         title: 'Scoring Parameters',

@@ -1428,6 +1428,12 @@ fn reap_contained(redone: &mut Vec<Redone>) {
     });
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039 (quoted in the
+// module): `-use_sw_tback` (`eSmithWatermanTbck`) redoes each match with
+// `Blast_RedoOneMatchSmithWaterman` in the place of `Blast_RedoOneMatch` (series PR, item
+// PS11c-3: RPS-BLAST's redo).
+pub(crate) mod smith_waterman;
+
 #[cfg(test)]
 mod tests {
     use super::*;

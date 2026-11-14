@@ -75,6 +75,10 @@ FASTA files:
 - `q3b_long.faa` (rows `db.ps.q3b.long.*` and `db.oldfsc.blastp.split.6`): one protein of 21,000 random letters (a fixed
   pseudo-random generator) with `LOSAT/tests/fasta/psiblast/tk.faa` planted at 500, 9,800, 14,000 and 20,500 (cut at the
   end), a query that NCBI splits into chunks of 10,000 that overlap by 100.
+- The database `x2g_c0054` (rows `db.x2g.*`, line RG item X2g-1) is the subject
+  `LOSAT/tests/fasta/outfmt0/x2g_c0054_s.faa` (70 random letters, case c0054 of the line's survey; its query is
+  `x2g_c0054_q.fna` there): with `-ungapped -window_size 0` and a low `-threshold`, the search reports one-hit
+  ungapped HSPs of length 0.
 
 Databases (all `-blastdb_version 4`, no `-parse_seqids`; only `.pin .psq .phr` are kept, the `.pjs` file
 makeblastdb also writes was deleted). Run from `LOSAT/`:
@@ -96,6 +100,8 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "proteins planted in bxchunk_q.fna" -blastdb_version 4
     makeblastdb -in tests/db_search/q3b_chains.faa -dbtype prot -out tests/db_search/q3b_chains \
         -title "subjects whose HSPs with tests/fasta/psiblast/tk.faa form linked sets" -blastdb_version 4
+    makeblastdb -in tests/fasta/outfmt0/x2g_c0054_s.faa -dbtype prot -out tests/db_search/x2g_c0054 \
+        -title "x2g c0054 subject" -blastdb_version 4
 
 `wm_s60k` (rows `db.wm.*`, line NP M2: `-window_masker_db`) is the subject `s60k.fa` of
 `LOSAT/tests/blastn_regression_fixtures.py`, with only `.nin .nsq .nhr` kept:

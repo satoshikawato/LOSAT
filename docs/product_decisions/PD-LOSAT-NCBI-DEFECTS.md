@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.21
+- Version: 1.23
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -38,7 +38,9 @@
   1.20 2026-11-14 (the explicit rejections of `-outfmt 18`, rule 3, line RG items T2 and T2c);
   1.21 2026-11-14 (TBLASTX's one-hit HSPs of length 0 or less ported, rule 4, and the explicit
   rejection of their merge across subject chunks with a sum of lengths of 0, rule 3, line RG item
-  X2b)
+  X2b);
+  1.23 2026-11-14 (BLASTX's ungapped one-hit HSPs of negative length ported, rule 4, line RG item
+  X2g-1)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -643,6 +645,17 @@ would port:
   order) and deletes them in its re-evaluation (a
   length of 0 or less scores 0, below every cutoff), so they are never reported. The X2 build
   refused these searches; LOSAT now gives NCBI's output (the rule-3 merge case above aside).
+- BLASTX `-ungapped -window_size 0` with a low `-threshold` (version 1.23, 2026-11-14, line RG item
+  X2g-1): the same HSPs of the one-hit word finder. NCBI links them with the others in the first
+  `BLAST_LinkHsps` and reaps them by their E-values; `Blast_HSPListReevaluateUngapped` does not
+  rescore them (the subject is a protein) and deletes those of negative length in `Blast_HSPTest`
+  (`blast_hits.c:993-1000,2719`: the alignment length is below `min_hit_length`, which is 0), so
+  they are never reported. `Blast_HSPListSubjectBestHit` (`-subject_besthit`) sees them too
+  (`blast_hits.c:2569`). LOSAT panicked on these searches and now gives NCBI's output. No merge
+  divides by a sum of lengths of 0 here: NCBI never splits the query of an ungapped search
+  (`split_query_cxx.cpp:60-61`), and LOSAT refuses subjects that NCBI would search in chunks. Those
+  of length 0 are kept and reported, in forms of NCBI's formatters that LOSAT does not reproduce yet
+  (it refuses such a search; README, "What LOSAT refuses").
 - `-evalue` with a signed infinity or NaN (`+inf`, `-nan`, `+nan(1)`, `1e999`): NCBI's
   `CArg_Double` reads them with `strtod` and its option check (`<= 0`) lets them pass;
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT

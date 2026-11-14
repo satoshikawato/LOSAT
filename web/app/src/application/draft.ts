@@ -24,9 +24,9 @@ import {
   type FastaParserKind,
   type InputRole,
   type ProgramId,
+  type RegistryFile,
   type SequenceKind,
 } from 'losat/domain';
-import type { RegistryFile } from 'losat/domain';
 import type { EngineGateway, InputCheck, ProgramDescription, StartInfo } from 'losat/ports';
 import {
   accessionLines,
@@ -1304,8 +1304,8 @@ export class SearchDraft {
 
   /** The registry file of the argv's `-conffile`: the chosen file's bytes under the argv's name; undefined without either. */
   private async registryFile(program: ProgramId, start: StartInfo): Promise<RegistryFile | undefined> {
-    const file = start.conffile === null ? undefined : this.state.get().conffiles[program];
-    return file === undefined || start.conffile === null ? undefined : { name: start.conffile, bytes: new Uint8Array(await file.arrayBuffer()) };
+    const file = this.state.get().conffiles[program];
+    return start.conffile === null || file === undefined ? undefined : { name: start.conffile, bytes: new Uint8Array(await file.arrayBuffer()) };
   }
 
   /**

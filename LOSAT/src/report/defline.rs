@@ -248,10 +248,13 @@ pub fn generate_defline(
 pub struct BioseqFacts {
     /// `m_ThirdParty`: a `tpg`, `tpe` or `tpd` id (the prefix `TPA: `).
     pub third_party: bool,
-    /// `m_IsNC`, `m_IsNM` or `m_IsNR`: an accession of a RefSeq chromosome, mRNA or ncRNA,
-    /// whose empty title NCBI makes from the source and features (a protein's is then not
-    /// `unnamed protein product`).
-    pub refseq_source_title: bool,
+    /// `m_IsNC` or `m_IsNR`: an accession of a RefSeq chromosome or ncRNA, whose empty title
+    /// NCBI makes with `x_SetTitleFromNC` or `x_SetTitleFromNR` and then from the source (a
+    /// protein's is then not `unnamed protein product`; `source_title`).
+    pub refseq_chromosome_or_ncrna: bool,
+    /// `m_IsNM`: an accession of a RefSeq mRNA (`NM_`, `XM_`), whose empty title NCBI makes with
+    /// `x_SetTitleFromNM` and then from the source, unless `local_annots_only` (`source_title`).
+    pub refseq_mrna: bool,
     /// `m_IsPDB`, `m_PDBChainID` and `m_PDBChain`: whether a `pdb` id was seen and its chain.
     pub pdb: Option<(Vec<u8>, i32)>,
     /// `m_IsPatent`, `m_PatentSequence`, `m_PatentCountry` and `m_PatentNumber`.
@@ -869,18 +872,22 @@ fn title_before_decoding_of(
 // The Bioseq of a database sequence has no features, no MolInfo (so `x_IsComplete()` holds:
 // no `, partial`), no genome (no organelle), no CDS (so no source feature for `synthetic
 // construct` and the like) and no orgname (not cross-kingdom); of `x_SetTitleFromBioSrc`'s
-// parts only the organism remains. A RefSeq chromosome, mRNA or ncRNA record skips
-// `x_SetTitleFromProtein` for `x_SetTitleFromNC`, `x_SetTitleFromNM` or `x_SetTitleFromNR`,
-// which make nothing without a name, and then gets `x_SetTitleFromBioSrc` (create_defline.cpp:
-// 4033-4036); with a name, those functions are not ported: the callers refuse such a record
-// (`db_subject::ParsedSubject::with_source`).
+// parts only the organism remains. A RefSeq chromosome or ncRNA record, and an mRNA record
+// without `m_LocalAnnotsOnly`, skips `x_SetTitleFromProtein` for `x_SetTitleFromNC`,
+// `x_SetTitleFromNR` or `x_SetTitleFromNM`, which make nothing of a database Bioseq
+// (`x_SetTitleFromNC` returns at its MolInfo test, :1606-1607; `x_SetTitleFromNM` needs one gene
+// and one CDS feature, :1741; `x_SetTitleFromNR` sets its title in its gene feature loop only,
+// :1766-1768), and then gets `x_SetTitleFromBioSrc` (create_defline.cpp:4033-4036): the name,
+// also of a protein (probe of line RG T5, `T/t5/rs`: `ref|NC_000001.1|` and `ref|NM_000001.1|`
+// proteins `Homo sapiens`, blastdbcmd `-long_seqids` of the `NM_` one `[Homo sapiens]`).
 /// The title that `GenerateDefline` makes of the source of a Bioseq without a title (`ids`):
 /// a protein's is `unnamed protein product` (none with `local_annots_only`) and ` [<taxname>]`
-/// where the source names the organism, a nucleotide's (and a RefSeq chromosome's, mRNA's or
-/// ncRNA's) the name without white space at its ends.
+/// where the source names the organism, a nucleotide's (and a RefSeq chromosome's or ncRNA's,
+/// and an mRNA's but with `local_annots_only`) the name without white space at its ends.
 fn source_title(protein: bool, ids: &BioseqFacts) -> Vec<u8> {
     let taxname = ids.taxname.as_deref().unwrap_or_default();
-    if protein && !ids.refseq_source_title {
+    let refseq = ids.refseq_chromosome_or_ncrna || (ids.refseq_mrna && !ids.local_annots_only);
+    if protein && !refseq {
         let mut title = if ids.local_annots_only {
             Vec::new()
         } else {
@@ -2276,12 +2283,19 @@ mod tests {
             b"unnamed protein product [ x ]"
         );
         let mut refseq = named(b" x ");
-        refseq.refseq_source_title = true;
+        refseq.refseq_chromosome_or_ncrna = true;
         assert_eq!(source_title(true, &refseq), b"x");
+        refseq.local_annots_only = true;
+        assert_eq!(source_title(true, &refseq), b"x");
+        let mut mrna = named(b" x ");
+        mrna.refseq_mrna = true;
+        assert_eq!(source_title(true, &mrna), b"x");
+        mrna.local_annots_only = true;
+        assert_eq!(source_title(true, &mrna), b" [ x ]");
         assert!(source_title(
             true,
             &BioseqFacts {
-                refseq_source_title: true,
+                refseq_mrna: true,
                 ..Default::default()
             }
         )

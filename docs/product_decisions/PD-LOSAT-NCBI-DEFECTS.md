@@ -542,10 +542,8 @@ would port:
 - A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
   each time it reads the definition line.
 - Titles NCBI takes from the tax ids, where a report shows them (outfmt 0, a printed tabular id
-  that replaces `lcl|Subject_N`): an empty title of a RefSeq chromosome, mRNA or ncRNA sequence
-  made from the taxonomy database's name of the tax id (`x_SetTitleFromNC`, `x_SetTitleFromNM`,
-  `x_SetTitleFromNR`; of any other sequence LOSAT makes it as NCBI does since line RG item T5),
-  and a title whose end `x_AdjustProteinTitleSuffix` rewrites.
+  that replaces `lcl|Subject_N`): a title whose end `x_AdjustProteinTitleSuffix` rewrites (an
+  empty title LOSAT makes from the tax id's name as NCBI does since line RG item T5).
 
 ## Ported (rule 4)
 

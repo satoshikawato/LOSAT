@@ -447,31 +447,14 @@ impl ParsedSubject {
     // whose volume puts the target's taxids first) names the organism only where the taxonomy
     // database gives a name for the taxid; else NCBI writes the title of a Bioseq without one
     // (review 1 of line DBID N1b L1, `blastdb-ids-20261021/R/titlesrc/review1/r2.tsv`).
-    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:4012-4018
-    // ```c++
-    //             // several record types have specific methods
-    //             if (m_IsNC) {
-    //                 x_SetTitleFromNC ();
-    //             } else if (m_IsNM  &&  !m_LocalAnnotsOnly) {
-    //                 x_SetTitleFromNM (bsh);
-    //             } else if (m_IsNR) {
-    //                 x_SetTitleFromNR (bsh);
-    // ```
-    // A RefSeq chromosome, mRNA or ncRNA record whose source has a name gets the title of these
-    // functions, which LOSAT does not port (`report::defline::source_title`).
+    // A RefSeq chromosome, mRNA or ncRNA record gets its title from the source too: NCBI's own
+    // functions for them make nothing of a database Bioseq (`report::defline::source_title`).
     /// The subject with the name of its Bioseq's first source (`names` of the taxids its volume
     /// looks up, `volume_taxids`, asked only where `title_from_taxonomy`), from which its generated
     /// title is made (`source`, `bioseq_title`).
     pub fn with_source(mut self, names: impl FnOnce(&[i32]) -> SourceTaxname) -> Self {
         if self.title_from_taxonomy() {
-            self.source = match names(&self.volume_taxids()) {
-                SourceTaxname::Named(_) if self.bioseq_facts().refseq_source_title => {
-                    SourceTaxname::Refused(
-                        "an empty title that NCBI BLAST+ makes from the source of a RefSeq chromosome, mRNA or ncRNA record (x_SetTitleFromNC, x_SetTitleFromNM, x_SetTitleFromNR) whose taxid the taxonomy database names",
-                    )
-                }
-                source => source,
-            };
+            self.source = names(&self.volume_taxids());
         }
         self
     }
@@ -1670,24 +1653,46 @@ fn check_pairwise_record(
 // 3+6  XM_      refseq_mrna_predicted
 // 3+9  XM_      refseq_mrna_predicted
 // ```
-/// Whether `CSeq_id::IdentifyAccession` gives `accession` a RefSeq chromosome, mRNA or ncRNA
-/// type (`BioseqFacts::refseq_source_title`).
-fn refseq_source_accession(accession: &[u8]) -> bool {
+/// The RefSeq kind that `CSeq_id::IdentifyAccession` gives `accession` where `x_SetFlags` tests
+/// it: a chromosome or ncRNA (`BioseqFacts::refseq_chromosome_or_ncrna`) or an mRNA
+/// (`BioseqFacts::refseq_mrna`).
+fn refseq_accession_kind(accession: &[u8]) -> Option<RefseqKind> {
     if accession.len() < 3 || accession[2] != b'_' {
-        return false;
+        return None;
     }
     let digits = &accession[3..];
     if !digits.iter().all(u8::is_ascii_digit) {
-        return false;
+        return None;
     }
     let prefix = [
         accession[0].to_ascii_uppercase(),
         accession[1].to_ascii_uppercase(),
     ];
     match &prefix {
-        b"AC" | b"NC" | b"NR" => digits.len() == 6,
-        b"NM" | b"XM" => digits.len() == 6 || digits.len() == 9,
-        _ => false,
+        b"AC" | b"NC" | b"NR" if digits.len() == 6 => Some(RefseqKind::ChromosomeOrNcrna),
+        b"NM" | b"XM" if digits.len() == 6 || digits.len() == 9 => Some(RefseqKind::Mrna),
+        _ => None,
+    }
+}
+
+/// A RefSeq kind whose empty title `GenerateDefline` makes with its own function
+/// (`refseq_accession_kind`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RefseqKind {
+    /// `m_IsNC` or `m_IsNR`.
+    ChromosomeOrNcrna,
+    /// `m_IsNM`.
+    Mrna,
+}
+
+impl BioseqFacts {
+    /// Sets the flag of the RefSeq kind of `accession` (`refseq_accession_kind`), if any.
+    fn add_refseq_accession(&mut self, accession: Option<&[u8]>) {
+        match accession.and_then(refseq_accession_kind) {
+            Some(RefseqKind::ChromosomeOrNcrna) => self.refseq_chromosome_or_ncrna = true,
+            Some(RefseqKind::Mrna) => self.refseq_mrna = true,
+            None => {}
+        }
     }
 }
 
@@ -1698,19 +1703,13 @@ pub(crate) fn bioseq_facts(ids: &[ParsedSeqId]) -> BioseqFacts {
         match id {
             ParsedSeqId::Tpg(text) | ParsedSeqId::Tpe(text) | ParsedSeqId::Tpd(text) => {
                 flags.third_party = true;
-                flags.refseq_source_title |= text
-                    .accession
-                    .as_deref()
-                    .is_some_and(refseq_source_accession);
+                flags.add_refseq_accession(text.accession.as_deref());
             }
             ParsedSeqId::Other(text)
             | ParsedSeqId::Genbank(text)
             | ParsedSeqId::Embl(text)
             | ParsedSeqId::Ddbj(text) => {
-                flags.refseq_source_title |= text
-                    .accession
-                    .as_deref()
-                    .is_some_and(refseq_source_accession);
+                flags.add_refseq_accession(text.accession.as_deref());
             }
             ParsedSeqId::Pdb(pdb) => {
                 let (chain_id, chain) = flags.pdb.get_or_insert_with(|| (Vec::new(), 0));
@@ -2611,9 +2610,19 @@ mod tests {
         .unwrap()
         .with_source(|_| panic!("no source to name"));
         assert_eq!(none.source(), &SourceTaxname::Unnamed);
-        // A named RefSeq chromosome is refused; an unnamed one keeps its empty title.
+        // A named RefSeq chromosome gets the name (`x_SetTitleFromNC` makes nothing of a database
+        // Bioseq), a protein's not upper-cased and not `unnamed protein product`; an unnamed one
+        // keeps its empty title.
         let refseq = subject("ref|NC_000001", Some(9606), named());
-        assert!(matches!(refseq.source(), SourceTaxname::Refused(_)));
+        assert!(matches!(refseq.source(), SourceTaxname::Named(_)));
+        assert_eq!(
+            text(&refseq.bioseq_title(false, false).unwrap().text),
+            "Uncultured bacterium"
+        );
+        assert_eq!(
+            text(&refseq.bioseq_title(true, false).unwrap().text),
+            "uncultured bacterium"
+        );
         let refseq = subject("ref|NC_000001", Some(9606), SourceTaxname::Unnamed);
         assert_eq!(refseq.source(), &SourceTaxname::Unnamed);
     }
@@ -2724,22 +2733,23 @@ mod tests {
 
     #[test]
     fn refseq_accessions_whose_empty_titles_come_from_the_source() {
-        for (accession, from_source) in [
-            ("NC_000001", true),
-            ("AC_000001", true),
-            ("NM_000001", true),
-            ("NM_000000001", true),
-            ("XM_000000001", true),
-            ("NR_000001", true),
-            ("NR_000000001", false),
-            ("NC_0000001", false),
-            ("NP_000001", false),
-            ("WP_000000001", false),
-            ("XR_000001", false),
+        use RefseqKind::{ChromosomeOrNcrna, Mrna};
+        for (accession, kind) in [
+            ("NC_000001", Some(ChromosomeOrNcrna)),
+            ("AC_000001", Some(ChromosomeOrNcrna)),
+            ("NM_000001", Some(Mrna)),
+            ("NM_000000001", Some(Mrna)),
+            ("XM_000000001", Some(Mrna)),
+            ("NR_000001", Some(ChromosomeOrNcrna)),
+            ("NR_000000001", None),
+            ("NC_0000001", None),
+            ("NP_000001", None),
+            ("WP_000000001", None),
+            ("XR_000001", None),
         ] {
             assert_eq!(
-                refseq_source_accession(accession.as_bytes()),
-                from_source,
+                refseq_accession_kind(accession.as_bytes()),
+                kind,
                 "{accession}"
             );
         }

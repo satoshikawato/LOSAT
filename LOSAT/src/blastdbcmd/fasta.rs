@@ -802,8 +802,7 @@ fn adjust_protein_title_suffix(title: &mut Vec<u8>, taxname: &[u8]) {
 /// the Bioseq's title descriptor `title` (`report::defline::generate_bioseq_defline`, with
 /// the suffix adjustment of a protein with a source, and an empty title made from the name of
 /// the source). `Err`: the Bioseqs whose title NCBI makes from parts LOSAT does not model (a
-/// named RefSeq chromosome, mRNA or ncRNA without a title; a source without a name and a title
-/// ending in ` []`).
+/// source without a name and a title ending in ` []`).
 fn generated_title(source: &Source, set: &DeflineSet, title: &[u8]) -> Result<Vec<u8>, Stop> {
     let ids = &set.deflines[0].ids;
     let mut bioseq_facts = crate::report::db_subject::bioseq_facts(ids);
@@ -823,15 +822,6 @@ fn generated_title(source: &Source, set: &DeflineSet, title: &[u8]) -> Result<Ve
             let taxname = crate::report::defline::SourceTaxname::of_names(names.as_ref())
                 .name()
                 .unwrap_or_default();
-            if taxname.is_some() && bioseq_facts.refseq_source_title {
-                return Err(Stop::Refused(format!(
-                    "-long_seqids of a RefSeq chromosome, mRNA or ncRNA sequence without a title \
-                     whose taxid the taxonomy database names (NCBI makes its title with \
-                     x_SetTitleFromNC, x_SetTitleFromNM or x_SetTitleFromNR) is not supported by \
-                     LOSAT's {}",
-                    super::PROGRAM
-                )));
-            }
             bioseq_facts.taxname = taxname;
         } else {
             match names {

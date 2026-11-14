@@ -59,8 +59,8 @@
   (`unnamed protein product [Homo sapiens]`, `Homo sapiens`, the first letter of a nucleotide's
   name upper-cased, a TPA or MAG prefix dropped in the heading) in outfmt 0, 18 and the tabular
   subject ids, in databases with and without parsed Seq-ids, which lines DBID H3 and N1b L1
-  refused, and kept refused such a title of a RefSeq chromosome, mRNA or ncRNA sequence and one
-  whose tax id's lookup reads past the end of `taxdb.btd` (NCBI crashes))
+  refused (also of a RefSeq chromosome, mRNA or ncRNA sequence, whose own NCBI functions make
+  nothing of a database Bioseq), and kept refused one whose tax id's lookup reads past the end of `taxdb.btd` (NCBI crashes))
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -802,7 +802,6 @@ a result that LOSAT does not reproduce.
 | An outfmt 0 description id of 65 bytes or more | 0 | Pads the line without end, from 65 bytes with a title of 3 bytes or more, from 67 with any title | 3 |
 | A protein title of punctuation that `x_CleanAndCompress` reads past | 0; tabular formats for an `lcl|Subject_N` id | Crashes | 3 |
 | A protein with a tax id and a title ending in `]`, where a definition line has no title (0) or the id is `lcl|Subject_N` (tabular formats) | 0, tabular formats | With `taxdb.bti` on the search path `x_AdjustProteinTitleSuffix` rewrites the title from the tax ids; without it NCBI keeps the title | 2 |
-| An empty title of a RefSeq chromosome, mRNA or ncRNA sequence (an `NC_`, `AC_`, `NM_`, `XM_` or `NR_` accession) with a tax id that the taxonomy database names. Of any other sequence LOSAT makes such a title from the name as NCBI does (line RG item T5; line DBID N1b L1 refused it) | 0, 18; tabular formats where the title's first word replaces a printed `lcl|Subject_N` id | Makes the title with `x_SetTitleFromNC`, `x_SetTitleFromNM` or `x_SetTitleFromNR`, which LOSAT does not port; for a tax id the database does not name, the empty title of a sequence without one, as LOSAT writes it | 2 |
 | A title in no encoding that NCBI recognises, for an `lcl|Subject_N` id | tabular formats | Not compared | |
 
 A tabular field list reads the sequence that NCBI's formatters find by the Seq-align id only with

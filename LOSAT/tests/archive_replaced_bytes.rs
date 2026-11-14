@@ -174,7 +174,9 @@ fn run_once(binary: &Path, case: &Case, dir: &Path, one: Option<fs::File>) -> St
     let mut command = Command::new(binary);
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
-        if text.starts_with("LOSAT_")
+        // The worker log stays: a build with the `blastx-worker-probe` feature (the gate's) panics
+        // without it.
+        if (text.starts_with("LOSAT_") && text != "LOSAT_BLASTX_WORKER_LOG")
             || text.starts_with("NCBI")
             || text.starts_with("BLAST")
             || matches!(

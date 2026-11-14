@@ -77,12 +77,14 @@ fn an_empty_pipe_is_no_query_and_no_warning() {
     assert!(output.stderr.is_empty());
 }
 
-// The formats that read the query file once before the search (outfmt 5, 11, 13 to 16) refuse
-// standard input as they refuse any other query that cannot be read twice.
+// The formats that read the query file once before the search (outfmt 5, 13 to 16) refuse
+// standard input as they refuse any other query that cannot be read twice. The BLAST archive
+// (outfmt 11) reads it once, as NCBI does, and writes NCBI's bytes (the title of a piped query
+// with a byte NCBI's stream replaces too: tests/export_search_strategy.rs).
 #[test]
 fn formats_that_read_the_query_twice_refuse_standard_input() {
-    for format in ["5", "11"] {
-        let output = run_with_stdin(
+    let run = |format: &str| {
+        run_with_stdin(
             &[
                 "blastx",
                 "-subject",
@@ -91,12 +93,21 @@ fn formats_that_read_the_query_twice_refuse_standard_input() {
                 format,
             ],
             b">q\nACGT\n",
-        );
-        assert_eq!(output.status.code(), Some(1));
-        assert!(output.stdout.is_empty());
-        assert!(String::from_utf8_lossy(&output.stderr)
-            .contains("unsupported BLASTX query input for -outfmt"));
-    }
+        )
+    };
+    let output = run("5");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("unsupported BLASTX query input for -outfmt"));
+    let output = run("11");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.starts_with(b"Blast4-archive ::= {"));
+    assert!(output.stderr.is_empty());
 }
 
 #[test]

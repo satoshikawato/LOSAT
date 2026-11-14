@@ -43,8 +43,12 @@ use crate::stats::tables::KarlinParams;
 
 /// The recorded options of a BLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
-/// always sets it (`S/DESIGN_OF8.md` 2.2).
+/// always sets it (`S/DESIGN_OF8.md` 2.2). RPSTBLASTN, whose search is BLASTX's, gives its own
+/// (`BlastxArgs::request_inputs`), made from these and its arguments.
 pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
+    if let Some(inputs) = &args.request_inputs {
+        return OptionInputs::clone(inputs);
+    }
     let mut inputs = OptionInputs::new(Program::Blastx, &args.task);
     inputs.dbsize = args.dbsize;
     inputs.searchsp = args.searchsp;
@@ -78,19 +82,7 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.ungapped = args.ungapped;
     inputs.soft_masking = Some(args.soft_masking);
     // An archive is written only for a `-seg` that `resolve` read.
-    inputs.seg = args.seg_spec().ok().map(|seg| match seg {
-        crate::blastinput::value_parsers::SegSpec::No => Filter::No,
-        crate::blastinput::value_parsers::SegSpec::Yes => Filter::Yes,
-        crate::blastinput::value_parsers::SegSpec::WindowLocutHicut {
-            window,
-            locut,
-            hicut,
-        } => Filter::Seg {
-            window,
-            locut,
-            hicut,
-        },
-    });
+    inputs.seg = args.seg_spec().ok().map(Filter::from);
     inputs.culling_limit = args.culling_limit;
     inputs.subject_besthit = args.subject_besthit;
     inputs.max_intron_length = args.max_intron_length;
@@ -116,7 +108,13 @@ pub(crate) fn handle_for(
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
     let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
-    ArchiveHandle::for_program(&option_inputs(args), database, "BLASTX", options).map(Some)
+    ArchiveHandle::for_program(
+        &option_inputs(args),
+        database,
+        args.program().upper,
+        options,
+    )
+    .map(Some)
 }
 
 /// The refusal of a title that the archive cannot write as NCBI does
@@ -148,14 +146,14 @@ pub(crate) fn query_is_regular(file: &std::fs::File) -> bool {
 }
 
 /// The refusal of a query for which `query_is_regular` is false, with the archive (`archive`)
-/// or the search strategy.
-pub(crate) fn refuse_irregular_query(archive: bool) -> Result<()> {
+/// or the search strategy; `label` names the program (BLASTX, RPSTBLASTN).
+pub(crate) fn refuse_irregular_query(archive: bool, label: &str) -> Result<()> {
     let option = if archive {
         "-outfmt 11"
     } else {
         "-export_search_strategy"
     };
-    anyhow::bail!("unsupported BLASTX query input for {option}: use a regular file")
+    anyhow::bail!("unsupported {label} query input for {option}: use a regular file")
 }
 
 /// Reads the query file once before the search, batch by batch as the search reads it
@@ -600,8 +598,12 @@ pub(crate) fn batch_searched_space(batches: &[BatchResults]) -> Option<i64> {
 /// The requests of a run's batches (`RunRequests`): nucleotide queries, protein subjects (the
 /// `-subject` records `subjects`, `None` for `-db`), and the lower-case runs of each query in both
 /// frames of a translated query (the reader keeps them only with `-lcase_masking`,
-/// `FastaRecord::archive_lowercase_runs`).
-pub(crate) fn requests(subjects: Option<&[FastaRecord]>) -> RunRequests<'_, FastaRecord> {
+/// `FastaRecord::archive_lowercase_runs`); `label` names the program (BLASTX, RPSTBLASTN) in a
+/// refusal.
+pub(crate) fn requests<'a>(
+    subjects: Option<&'a [FastaRecord]>,
+    label: &'static str,
+) -> RunRequests<'a, FastaRecord> {
     RunRequests::new(
         RequestPolicy {
             query_protein: false,
@@ -609,7 +611,7 @@ pub(crate) fn requests(subjects: Option<&[FastaRecord]>) -> RunRequests<'_, Fast
             lcase: Some(LcaseFrames::PlusAndMinus),
         },
         subjects,
-        "BLASTX",
+        label,
     )
 }
 

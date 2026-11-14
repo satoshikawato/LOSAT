@@ -6833,6 +6833,14 @@ Scheduling (each value computed by one thread with the original function; order 
   where every stripe walks all source cells: x0.68 at 4). Measured (workstation node 1, against dev, 800 cDNAs x 8
   yeast proteins at 32 threads): the cap with serial builds x1.28 (2026-10-26, a probe), with this build x0.985
   (2026-10-27, 7 rounds in swapped order).
+  The compressed lookup table (`-word_size` 6 and 7, and any table its bucket fill declines; line NP SC9b (2),
+  2026-11-14) is built the same way, in ceil(threads / K) parts with K the compressed table's (`LOSAT_X_BXCLUTCAP`),
+  by the parallel flat builder (`tblastx/lookup/x_clut_par.rs` `x_try_build_flat_in_parts`, the one-latch passes;
+  the same table slot for slot, `blastx_tables_built_in_parts_are_the_one_part_tables`). Its build was 131 of 138
+  thread-seconds of 800 cDNAs x scer_pep at word size 6 and 8 threads. Workstation node 1 against dev 51f974c26:
+  word size 6 at 8 / 16 / 32 threads x0.41 / x0.29 / x0.21 of the time with 78 / 82 / 74 % of the memory, word
+  size 7 x0.36 / x0.25 / x0.18, BLOSUM45 word size 6 at 8 threads x0.34. Word 5's bucket fill (pooled `u16`
+  vectors) stays on the unit's thread: built in parts it took x0.61 of the time but +62 % of the maximum RSS.
 - `LOSAT_X_BXCTXONCE=1` (BLASTX, speed and memory; in the strict set from the pull request that added it: on unless
   `=0` or `LOSAT_X_DEFAULT=0`; acts where the `LOSAT_X_BXDIAG` fused loop runs): the fused loop's context table of a
   query batch (`XContextTable`, the binary search's index at every query offset) is made once per lookup table and

@@ -1333,19 +1333,16 @@ mod tests {
         );
         // The options require each other: a parser error, the CLI's message.
         assert!(validate(&[&dc[..], &["-template_type", "coding"]].concat()).is_err());
-        // validate reports TBLASTX's checks of its options alone, as the run does.
+        // validate reports TBLASTX's checks of its options alone, as the run does; the one-hit
+        // word finder (`-window_size 0`) runs as the CLI runs it (line RG, X2).
         let tblastx = ["tblastx", "-query", "q", "-subject", "s"];
         assert!(validate(&tblastx).is_ok());
-        for (extra, start) in [
-            (["-evalue", "0"], "BLAST query/options error: expect value"),
-            (
-                ["-window_size", "0"],
-                "-window_size 0 (the one-hit word finder)",
-            ),
-        ] {
-            let error = validate(&[&tblastx[..], &extra[..]].concat()).unwrap_err();
-            assert!(error.starts_with(start), "{error}");
-        }
+        assert!(validate(&[&tblastx[..], &["-window_size", "0"]].concat()).is_ok());
+        let error = validate(&[&tblastx[..], &["-evalue", "0"]].concat()).unwrap_err();
+        assert!(
+            error.starts_with("BLAST query/options error: expect value"),
+            "{error}"
+        );
         // validate reports BLASTX's checks of each search's options, as the run does (NCBI's
         // errors and LOSAT's refusals); the tabular search that -num_alignments 0 rejects alone
         // is tolerated, as `run` tolerates it.

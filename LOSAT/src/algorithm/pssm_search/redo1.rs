@@ -43,7 +43,7 @@ use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::common::GapEditOp;
 use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
 use crate::core::composition_adjustment::compo_scale::{
-    pssm_composition_based_stats, PosMatrixInfo,
+    pssm_composition_based_stats, PosMatrixInfo, RedoInstance, XDropRedo,
 };
 use crate::core::composition_adjustment::redo_alignment::{
     build_query_word_hashes, test_near_identical, BlastCompoAlignment, BlastCompoSequenceData,
@@ -585,6 +585,22 @@ impl RedoMatch<'_> {
         subject: &[u8],
     ) -> Option<(BlastpHspList, i32, f64)> {
         let alignments = self.redo_one_match(run, hsps, subject);
+        self.finish::<XDropRedo>(run, oid, hsps, subject, alignments)
+    }
+
+    /// The steps of a redo after its window's alignments `alignments` (the list's head first):
+    /// `s_HSPListFromDistinctAlignments`, `s_HitlistReapContained`, `s_HitlistEvaluateAndPurge`,
+    /// and for a list whose best e-value passes `-evalue`, `s_HSPListNormalizeScores` and
+    /// `s_ComputeNumIdentities` (quoted at `redo_match`), for the redo `C` (`RedoInstance`: the
+    /// X-drop redo's and the Smith-Waterman redo's instances, each with one caller).
+    pub(super) fn finish<C: RedoInstance>(
+        &self,
+        run: &RedoRun<'_>,
+        oid: u32,
+        hsps: &[BlastpPreliminaryHsp],
+        subject: &[u8],
+        alignments: Vec<Align>,
+    ) -> Option<(BlastpHspList, i32, f64)> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:321-354
         // ```c
         //     for (align = *alignments;  NULL != align;  align = align->next) {
@@ -604,7 +620,7 @@ impl RedoMatch<'_> {
             .collect();
         redone.sort_by(|a, b| score_compare(&a.align, &b.align));
         if redone.len() > 1 {
-            reap_contained(&mut redone);
+            reap_contained::<C>(&mut redone);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:410-446
         // ```c
@@ -633,7 +649,7 @@ impl RedoMatch<'_> {
         let query_length = self.query_length;
         let subject_length = subject.len() as i32;
         let best_evalue = match &self.link {
-            Some(link) => link_redone(&mut redone, link, run, subject_length)?,
+            Some(link) => link_redone::<C>(&mut redone, link, run, subject_length)?,
             None => {
                 let mut best_evalue = i32::MAX as f64;
                 for hsp in &mut redone {
@@ -833,7 +849,7 @@ impl RedoMatch<'_> {
                 );
             }
             if hsp_index == 0 || (subject_maybe_biased && near_identical != old_near_identical) {
-                subject_data = self.subject_range(
+                subject_data = self.subject_range::<XDropRedo>(
                     run,
                     subject,
                     &incoming[0],
@@ -875,7 +891,7 @@ impl RedoMatch<'_> {
                         adjust_search_failed = true;
                     } else {
                         matrix_adjust_rule = EMatrixAdjustRule::CompoScaleOldMatrix;
-                        pssm_composition_based_stats(
+                        pssm_composition_based_stats::<XDropRedo>(
                             &mut run.matrix.rows,
                             self.info,
                             &subject_composition.prob,
@@ -940,7 +956,7 @@ impl RedoMatch<'_> {
     /// /** Default instructions and mask residue for SEG filtering */
     /// #define BLASTP_MASK_INSTRUCTIONS "S 10 1.8 2.1"
     /// ```
-    fn subject_range(
+    fn subject_range<C: RedoInstance>(
         &self,
         run: &RedoRun<'_>,
         subject: &[u8],
@@ -1057,7 +1073,7 @@ impl RedoMatch<'_> {
 ///             hsp_list->best_evalue = hsp_list->hsp_array[index]->evalue;
 ///     }
 /// ```
-fn link_redone(
+fn link_redone<C: RedoInstance>(
     redone: &mut Vec<Redone>,
     link: &RedoLink,
     run: &RedoRun<'_>,
@@ -1391,7 +1407,7 @@ fn score_compare(a: &Align, b: &Align) -> std::cmp::Ordering {
 ///                 }
 /// ```
 /// Every HSP of a PSSM search has the query frame and subject frame 0.
-fn reap_contained(redone: &mut Vec<Redone>) {
+fn reap_contained<C: RedoInstance>(redone: &mut Vec<Redone>) {
     let mut keep = vec![true; redone.len()];
     for iread in 1..redone.len() {
         let hsp1 = &redone[iread].align;
@@ -1488,7 +1504,7 @@ mod tests {
                 num: 1,
             },
         ];
-        reap_contained(&mut redone);
+        reap_contained::<XDropRedo>(&mut redone);
         assert_eq!(
             redone.iter().map(|r| r.align.score).collect::<Vec<_>>(),
             vec![100, 80]

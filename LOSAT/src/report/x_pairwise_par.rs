@@ -512,11 +512,15 @@ fn write_serial<S: QuerySections, W: Write>(
                 //             const CBioseq_Handle& subj_handle =
                 //                 m_Scope.GetBioseqHandle((*alnIter)->GetSeq_id(1));
                 // ```
-                // The merge loads every aligned subject before the section's first byte.
-                for &s_idx in group.aligned(sections.num_alignments()) {
-                    read(s_idx, &mut *writer)?;
+                // The merge loads every aligned subject before the section's first byte; without
+                // one (`-num_alignments 0`) there is no section (`DisplaySeqalign` returns at once).
+                let aligned = group.aligned(sections.num_alignments());
+                if !aligned.is_empty() {
+                    for &s_idx in aligned {
+                        read(s_idx, &mut *writer)?;
+                    }
+                    sections.alignments(writer, q_idx, group)?;
                 }
-                sections.alignments(writer, q_idx, group)?;
             } else {
                 for &s_idx in group.aligned(sections.num_alignments()) {
                     read(s_idx, &mut *writer)?;

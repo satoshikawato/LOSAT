@@ -12720,8 +12720,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                 let hit_len_array = &mut subject_scratch.hit_len_array;
                 let diag_hash = &mut subject_scratch.diag_hash;
                 // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the two retrieves of the
-                // diagonal hash in the scans called below (`pair_extend::extend_offset_pairs` for a
-                // two-stage table, `na_scan::scan_na_lookup` for the other tables) skip the walk of
+                // diagonal hash in the scans called below (`two_stage_scan::scan_two_stage_lookup`,
+                // through `pair_extend::extend_offset_pairs`, for a two-stage table,
+                // `na_scan::scan_na_lookup` for the other tables) skip the walk of
                 // a bucket whose cells all lie below the level bound, unless diagnostics print what
                 // they read.
                 let x_lv_ref = diag_hash.x_lv_on()

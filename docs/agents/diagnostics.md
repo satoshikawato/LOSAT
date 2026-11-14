@@ -4165,8 +4165,9 @@ Scheduling (each value computed by one thread with the original function; order 
   cDNAs: max RSS 2 MiB above dev at the run's last 1-3 % while the live data was 12 MiB below it, read with the mmap
   threshold pinned in a diagnostic run, s27 w21). The table's form is chosen once per table (`Csr::x_packed`):
   `Csr::run` and `Ring` are the code of a head of one element per cell, used by every discontiguous table and by a
-  contiguous one with the switch off, and the contiguous scans (`scan_strip_csr`, the reference scan
-  `scan_two_stage_lookup`) are generic over `x_dc_csr::XHead`, so each form's scan is compiled on its own (the
+  contiguous one with the switch off, and the contiguous scans (`scan_strip_csr`, generic over
+  `x_dc_csr::XHead`, and the reference scan's `x_scan_csr!` in `scan_two_stage_lookup`, a macro expanded once per
+  head form) compile each form's scan on its own (the
   dc-megablast and `=0` scans have dev's instructions). The packed ring (`XRingPacked`) drops a word of an empty cell
   (its run is empty, so the emit would read nothing) and prefetches the rank's two offsets; the one-word answers of
   the lookup (`for_each_hit`, `count_hits`, `contains_hit`) read either form (`Csr::x_run_any`). The build counts each

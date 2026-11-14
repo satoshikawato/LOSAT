@@ -14,8 +14,13 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684 (the loop of
 //! `BlastNaWordFinder`, :1597-1695, with the word lengths of a megablast table, :1625-1637), where
 //! `scansub` is the megablast scanner that `s_MBChooseScanSubject`
-//! (c++/src/algo/blast/core/blast_nascan.c:2602-2680) picks and `extend` is `s_BlastNaExtend`
-//! (:1052-1174) or the variant `BlastChooseNaExtend` (:1791-1834) picks
+//! (c++/src/algo/blast/core/blast_nascan.c:2602-2680) picks and `extend` is the variant
+//! `BlastChooseNaExtend` (c++/src/algo/blast/core/na_ungapped.c:1791-1836) picks:
+//! `s_BlastNaExtendDirect` for a discontiguous table or one whose width is the word size
+//! (:1798-1799), else `s_BlastNaExtendAligned` or `s_BlastNaExtend` (:1052-1174). For the small-query table the
+//! scanner is `s_SmallNaChooseScanSubject`'s (blast_nascan.c:1298) and the extension the one
+//! `BlastChooseNaExtend` picks at na_ungapped.c:1806-1818 (`s_BlastSmallNaExtendAlignedOneByte` or
+//! `s_BlastSmallNaExtend`); its word lengths are at na_ungapped.c:1617-1624
 //! ```c
 //!     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
 //!
@@ -212,11 +217,15 @@ pub(super) struct TwoStageScanState<'s> {
 ///       }
 /// ```
 /// `#[inline(always)]`: the branch of `collect_prelim_hits_for_chunk` that this was stays in that
-/// closure's code. As a function of its own, its dc-megablast scan loop (LOSAT_X_BNDCONE=0, the
-/// discontiguous scan inlined here) took another register allocation and block layout: one more
-/// instruction and five executed instructions of loop-alignment padding per subject byte (+0.84 %
-/// for a 3,000-letter query, callgrind, n1). `on_word` and the other callbacks stay functions of
-/// their own, as they were.
+/// closure's code (one copy in each instance of `search_query_batch`). Out of line, its
+/// dc-megablast scan loop (LOSAT_X_BNDCONE=0, then inlined in this fn) took another register
+/// allocation and block layout: one more instruction and five executed instructions of
+/// loop-alignment padding per subject byte (+0.84 % for a 3,000-letter query, callgrind, n1).
+/// `on_word` and the other callbacks stay functions of their own, as they were. Their closures no
+/// longer sit in the generic over `UNGAPPED`, so they, and the generic scans called with them, have
+/// one instance for both instances of `search_query_batch` and run out of line: the discontiguous
+/// scan's loop (13.46 M -> 13.39 M instructions for that query) and the LOSAT_X_DCCSR ring's scan
+/// (26.67 M -> 27.04 M for a 600 kb x 300 kb pair).
 #[inline(always)]
 pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoStageScanState<'_>) {
     let &TwoStageScanInputs {

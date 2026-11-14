@@ -138,6 +138,10 @@ impl DomAlign {
 /// with `++hf`, `--hf` (and `- COORDSBASE` of an `Hsp_hit-from` of `-2147483648`), which LOSAT
 /// computes as their values (PD-LOSAT-NCBI-DEFECTS exception 11). An archive's starts are `int`s
 /// (converted from `TSeqPos`), so they stay narrow, and so does every start of a real document.
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:1121
+// ```c++
+// 	std::vector<SeqPos_t> m_vecSStarts;
+// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SubjectStarts {
     Narrow(Vec<i32>),

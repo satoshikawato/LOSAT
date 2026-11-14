@@ -1438,7 +1438,9 @@ fn write_pairwise(
         program: "tblastn".into(),
         protein_matrix: scoring.matrix,
         line_length: formatting.line_length(),
-        sort: formatting.report_sort(),
+        // `-sorthits` for every view, `-sorthsps` for outfmt 0 only (NCBI's warning for the others,
+        // `PairwiseView::report_sort`).
+        sort: view.report_sort(formatting.report_sort()),
         view,
         ..PairwiseConfig::default()
     };

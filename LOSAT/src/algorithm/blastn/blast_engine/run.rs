@@ -7081,7 +7081,9 @@ fn post_process_hits_and_write(
                 program: "blastn".to_string(),
                 show_frame: false,
                 line_length: report.formatting.line_length(),
-                sort: report.formatting.report_sort(),
+                // `-sorthits` for every view, `-sorthsps` for outfmt 0 only (NCBI's warning for the
+                // others, `PairwiseView::report_sort`).
+                sort: view.report_sort(report.formatting.report_sort()),
                 view,
                 ..PairwiseConfig::default()
             };
@@ -7091,7 +7093,7 @@ fn post_process_hits_and_write(
                     queries: report.queries,
                     query_placements: &report.ranges.queries.placements,
                     subjects: report.subjects,
-                    subject_placements: &report.ranges.subjects.placements,
+                    subject_placements: report.ranges.subjects.placements,
                     parsed: report.database_parsed,
                     listed_ordinals: report
                         .database_ordinals

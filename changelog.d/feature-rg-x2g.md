@@ -1,6 +1,12 @@
 - `blastx -ungapped -window_size 0` with a low `-threshold` no longer crashes (a panic) where NCBI's
   one-hit word finder finds ungapped alignments of negative length, and gives NCBI BLAST+ 2.17.0's
   output there, with `-subject` and `-db`: such alignments take part in the linking of the others and
-  are then deleted, as in NCBI BLAST+. Where an alignment of length 0 is among the hits that the
-  reports show, which NCBI BLAST+ reports in forms of its own for each format, LOSAT stops with an
-  error for now.
+  are then deleted, as in NCBI BLAST+.
+- The alignments of length 0 that such searches report are written as NCBI BLAST+ writes them, in
+  every format that `blastx` supports: tabular rows of empty ranges with `-db`, NCBI's exception
+  (exit status 255) after the rows before it where NCBI's formatters stop (outfmt 0, `qcovs`, the
+  tabular rows with `-subject`), the cut document and the error message of BLAST XML, XML2 and JSON,
+  and the Seq-aligns of outfmt 8, 9, 11 and 12. LOSAT no longer crashes when such an alignment
+  touches a lower-case or SEG mask. With `-subject`, an alignment of length 0 at the subject's first
+  letter is refused (an error, exit status 1), where NCBI BLAST+'s output depends on its memory
+  limit.

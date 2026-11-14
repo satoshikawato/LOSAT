@@ -75,10 +75,14 @@ FASTA files:
 - `q3b_long.faa` (rows `db.ps.q3b.long.*` and `db.oldfsc.blastp.split.6`): one protein of 21,000 random letters (a fixed
   pseudo-random generator) with `LOSAT/tests/fasta/psiblast/tk.faa` planted at 500, 9,800, 14,000 and 20,500 (cut at the
   end), a query that NCBI splits into chunks of 10,000 that overlap by 100.
-- The database `x2g_c0054` (rows `db.x2g.*`, line RG item X2g-1) is the subject
+- The database `x2g_c0054` (rows `db.x2g.*`, line RG item X2g) is the subject
   `LOSAT/tests/fasta/outfmt0/x2g_c0054_s.faa` (70 random letters, case c0054 of the line's survey; its query is
   `x2g_c0054_q.fna` there): with `-ungapped -window_size 0` and a low `-threshold`, the search reports one-hit
-  ungapped HSPs of length 0.
+  ungapped HSPs of length 0. `x2g_f0616`, `x2g_f3147` and `x2g_f1144` are the subjects `x2g_f0616_s.faa`,
+  `x2g_f3147_s.faa` and `x2g_f1144_s.faa` there (cases of the line's format survey: an HSP of length 0 in frame
+  -2, in frame +1 at query offset 0, at subject offset 0), `x2g_ms` the two subjects `x2g_ms.faa` (with the two
+  queries `x2g_mq.fna`, the second's HSP of length 0) and `x2g_rk` the two subjects `x2g_rk.faa` (the one
+  ranked second holds the HSP of length 0 of `x2g_f0616_q.fna`).
 
 - `x2f_c0384_q.fna` / `x2f_c0384_s.faa`, `x2f_c0326_q.fna` / `x2f_c0326_s.faa`: two random pairs of the line RG
   X2f survey (cases c0384 and c0326), rows `db.x2f.*`: with `-window_size 0` and a low `-threshold`, BLASTX's
@@ -117,6 +121,9 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "a filler of 4,075 letters, then x2f_s1" -blastdb_version 4
     makeblastdb -in tests/fasta/outfmt0/x2g_c0054_s.faa -dbtype prot -out tests/db_search/x2g_c0054 \
         -title "x2g c0054 subject" -blastdb_version 4
+    for n in f0616:x2g_f0616_s.faa f3147:x2g_f3147_s.faa f1144:x2g_f1144_s.faa ms:x2g_ms.faa rk:x2g_rk.faa; do
+        makeblastdb -in tests/fasta/outfmt0/${n#*:} -dbtype prot -out tests/db_search/x2g_${n%%:*} \
+            -title "x2g ${n%%:*} subjects" -blastdb_version 4; done
 
 `wm_s60k` (rows `db.wm.*`, line NP M2: `-window_masker_db`) is the subject `s60k.fa` of
 `LOSAT/tests/blastn_regression_fixtures.py`, with only `.nin .nsq .nhr` kept:
@@ -955,7 +962,8 @@ of a row is one argument, so a cell with spaces is a list of names). `multidb/` 
   `ENSTTEST0001.1`, a copy of record 1's sequence (taxid 9606). `n4a` / `n4b`: version 4 without `-parse_seqids`; `nnp`:
   the records of `nb` as version 5 without `-parse_seqids`.
 - `d1/g` and `d2/g`: the records of `na` and `nb` under one base name in two directories. `et`: the records of `na` with an
-  empty title. `al.nal`: an alias file (`TITLE multidb alias of na`, `DBLIST na`). `sl.txt`: a seqid list of the first
+  empty title. `al.nal`: an alias file (`TITLE multidb alias of na`, `DBLIST na`). `mix_u.nal` (line DBID mixdb, written by hand): an
+  alias file of `na nnp` whose `FIRST_OID 9`, `LAST_OID 17` keep the sequences of `nnp` (without the accession table) alone. `sl.txt`: a seqid list of the first
   accession of `na`, `nb`, `pa` and `pb`.
 
 The ncbi rows search `taxfilter/q.fna` (BLASTN, BLASTX, TBLASTX) or `taxfilter/q.faa` (BLASTP, TBLASTN, PSIBLAST) and cover:
@@ -1320,7 +1328,7 @@ query's warning where `GetNumSeqs` is 0 (B, C, D); BLASTN and TBLASTX divide B's
 workstation's probes p4c_dp, p4c_dn).
 
 Rows `db.ak.*.ord.*` (D1a-2): the order of a search database's errors, NCBI's (probes p4c_e*, p4c_f2): the list, the alias
-files' counts, the formatter's reopening of each name, then the headers and the accession tables. `o_mix` and `o_mixs` are
+files' counts, the formatter's reopening of each name, then the headers (before line DBID mixdb also the accession tables). `o_mix` and `o_mixs` are
 `multidb/na` (with the accession table) and `multidb/nnp` (without) under `NSEQ abc` / `STATS_NSEQ abc`, with `-seqidlist`
 (the list's `DB contains no accession info.` first) and `-taxids` (the alias file's error); `o_np` is `nnp` alone, `o_v4`
 the version 4 `multidb/n4a` (`Taxonomy filtering is not supported in v4 BLAST dbs` first); `o_dh` and `o_dhs` are over

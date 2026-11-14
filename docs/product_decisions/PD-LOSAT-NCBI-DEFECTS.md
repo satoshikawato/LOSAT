@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.25
+- Version: 1.26
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -47,8 +47,12 @@
   1.24 2026-11-14 (the rule-2 rejection of a query's id widened to the display id and to generated
   ids, line RG item T3a; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07,
   within the class the maintainer accepted with 1.10 on 2026-11-02);
-  1.25 2026-11-15 (BLASTX's ungapped one-hit HSPs of negative length ported, rule 4, line RG item
-  X2g-1)
+  1.25 2026-11-14 (a version 5 database list that mixes databases with and without accession
+  tables is searched; the rejection of 1.9 keeps only a run whose reports look a parsed Seq-id up
+  in a file without the table, rule 3, line DBID item mixdb, Owner-delegated);
+  1.26 2026-11-15 (BLASTX's ungapped one-hit HSPs of negative length and of length 0 ported, rule 4,
+  line RG item X2g, with the refusal of decision X2g-4 of that line: Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -463,15 +467,22 @@ asks the maintainer to accept it, as the PRs of versions 1.5 and 1.13 did.
 - A version 5 database list (several names in `-db`, or the `DBLIST` of an alias file) that
   mixes databases with and without the accession table (`acc2oid`) of `makeblastdb
   -parse_seqids`: NCBI searches it, and before it writes a batch's reports (every format but
-  the archive) its BlastDb data loader looks each hit's Seq-id up in every LMDB file of the
-  list (`BlastFormatter_PreFetchSequenceData`, `CSeqDBLMDBSet::AccessionToOids`); a hit with
-  a parsed Seq-id then stops the run with `BLAST Database error: DB contains no accession
-  info.` (exit 2), after the outfmt 0 header and the earlier batches. Without such a hit, and
-  for outfmt 11, NCBI runs to the end; a taxid list stops it up front. LOSAT refuses the list
-  before the search (`the databases mix version 5 files with the accession table of
-  makeblastdb -parse_seqids ... and without it`; version 1.9, line DI-8 `DECISIONS.md` 31,
-  probe DI-8f F42, P14, H09, H15-H19): whether NCBI fails depends on the hits, and
-  reproducing that would need the lookup before every batch's reports in every program.
+  the Seq-annots and the archive) its BlastDb data loader looks each hit's Seq-id up in every
+  LMDB file of the list (`BlastFormatter_PreFetchSequenceData`,
+  `CSeqDBLMDBSet::AccessionToOids`); a hit whose Seq-id it looks up as a string (an accession, a
+  name, a giim; not a gi, not `gnl|BL_ORD_ID|n`) then stops the run with `BLAST Database error:
+  DB contains no accession info.` (exit 2), after the outfmt 0 header and the earlier batches. Where `PRE_FETCH_SEQS_LIMIT` turns the prefetch off, the reports write
+  `Unknown` for such a hit, and then the outfmt 0 alignments stop with that error, the tabular
+  formats crash (`CCoreException`, exit 255) and the JSON and XML2 documents end with its trace.
+  Without such a hit (a `gnl|BL_ORD_ID|n` of a database without parsed Seq-ids, or of one made
+  with `-input_type blastdb`, needs no accession table), and for the Seq-annots and the archive,
+  NCBI runs to the end (the Seq-annots too stop where `PRE_FETCH_SEQS_LIMIT=2147483647` prefetches
+  for them); `-seqidlist` and `-negative_seqidlist` of accessions stop it up front with the same
+  error. LOSAT searches such a list as NCBI does (line DBID item mixdb, probe of 4,080 runs:
+  6 programs, 20 formats, the prefetch on and off, 17 lists and alias files) and refuses a run
+  whose reports or prefetch look a parsed Seq-id up in a file without the table (`... whose
+  lookup in the database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0 stops)`).
+  Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31).
 
 - A negative seqid list that excludes a sequence (every id of its `.nos`/`.pos` record
   listed) of a volume that the database does not hold, while the database holds other
@@ -705,17 +716,32 @@ would port:
   order) and deletes them in its re-evaluation (a
   length of 0 or less scores 0, below every cutoff), so they are never reported. The X2 build
   refused these searches; LOSAT now gives NCBI's output (the rule-3 merge case above aside).
-- BLASTX `-ungapped -window_size 0` with a low `-threshold` (version 1.25, 2026-11-15, line RG item
-  X2g-1): the same HSPs of the one-hit word finder. NCBI links them with the others in the first
+- BLASTX `-ungapped -window_size 0` with a low `-threshold` (version 1.26, 2026-11-15, line RG item
+  X2g): the same HSPs of the one-hit word finder. NCBI links them with the others in the first
   `BLAST_LinkHsps` and reaps them by their E-values; `Blast_HSPListReevaluateUngapped` does not
   rescore them (the subject is a protein) and deletes those of negative length in `Blast_HSPTest`
   (`blast_hits.c:993-1000,2719`: the alignment length is below `min_hit_length`, which is 0), so
   they are never reported. `Blast_HSPListSubjectBestHit` (`-subject_besthit`) sees them too
   (`blast_hits.c:2569`). LOSAT panicked on these searches and now gives NCBI's output. No merge
   divides by a sum of lengths of 0 here: NCBI never splits the query of an ungapped search
-  (`split_query_cxx.cpp:60-61`), and LOSAT refuses subjects that NCBI would search in chunks. Those
-  of length 0 are kept and reported, in forms of NCBI's formatters that LOSAT does not reproduce yet
-  (it refuses such a search; README, "What LOSAT refuses").
+  (`split_query_cxx.cpp:60-61`), and LOSAT refuses subjects that NCBI would search in chunks.
+  Those of length 0 are kept and reported; their Std-seg rows end one before they start
+  (`x_UngappedHSPToStdSeg`). LOSAT now writes them as NCBI's formatters do. With `-db` the
+  Seq-aligns stay as made: tabular rows of empty ranges (a subject whose only HSP it is shows the
+  query's Seq-align id and fields at 0: `x_SetQueryCovSeqalign` throws on the empty row and
+  `SetFields` leaves before its alignment block), Seq-aligns whose empty rows end at `TSeqPos`
+  4294967295, `CSeq_align::GetSeqRange`'s `Row is empty` (`Seq_align.cpp:227`, exit status 255)
+  where `qcovs` and outfmt 0's description table read the rows, and a block without rows past
+  that table. With `-subject` NCBI's Seq-loc mapper rewrites the query row to one nucleotide with
+  a fuzz (`seq_align_mapper_base.cpp:1535-1557`): `CreateDensegFromStdseg`'s exception
+  (`Seq_align.cpp:801`) where the tabular rows, outfmt 0's alignments and the XML make a Dense-seg
+  of it, that nucleotide in `qcovs`. BLAST XML, XML2 and JSON catch the exception (exit status 0,
+  the message on stderr, the query's report cut or left out), outfmt 13 and 14 do not (an empty
+  side file, exit status 255). LOSAT refuses one cell (decision X2g-4): with `-subject`, such an
+  HSP at the first letter of the searched range, which the mapper cuts into two alignments
+  without scores. NCBI's output there is partly not defined (on the 4 GiB limit of the line's
+  probes `BLAST ran out of memory`, exit status 4, for a segment of about 2^32 letters), and the
+  rest comes from `CAlnVec` over alignments that the mapper makes by accident.
 - `-evalue` with a signed infinity or NaN (`+inf`, `-nan`, `+nan(1)`, `1e999`): NCBI's
   `CArg_Double` reads them with `strtod` and its option check (`<= 0`) lets them pass;
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT

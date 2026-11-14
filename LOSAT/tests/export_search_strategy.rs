@@ -352,22 +352,59 @@ fn blastp_query_blocks_do_not_change_the_strategy_file() {
             .find(|case| case.name == name)
             .unwrap_or_else(|| panic!("row {name}"));
         for block in ["1", "0"] {
-            let reach = reach_support::Reach::new("strategy_bp_xml");
             check(
                 xml,
-                &[("LOSAT_X_BPQBLOCK", block), reach.var()],
+                &[("LOSAT_X_BPQBLOCK", block)],
                 "1",
                 &format!("xmlqblock{block}"),
             );
-            if block == "1" && name.ends_with(".f16") {
-                let sides = reach.sides("LOSAT_X_BPQBLOCK");
-                assert!(
-                    sides.0,
-                    "{name}: LOSAT_X_BPQBLOCK did not take the block search: {sides:?}"
-                );
-            }
         }
     }
+    // A run that fails writes no reach file (`xreach::write_report` follows a run that ends): the
+    // same XML2 search with the matrix name NCBI's XML spells shows that these inputs take the
+    // block search, whose plan is made before any format (`x_query_block_plan`).
+    let held = cases
+        .iter()
+        .find(|case| case.name == "blastp.sub.xmlmatrix.batches.f16")
+        .expect("row blastp.sub.xmlmatrix.batches.f16");
+    let known = Case {
+        name: format!("{}.known", held.name),
+        program: held.program.clone(),
+        env: held.env.clone(),
+        args: held
+            .args
+            .iter()
+            .map(|arg| match arg.as_str() {
+                "blosum62" => "BLOSUM62".to_string(),
+                _ => arg.clone(),
+            })
+            .collect(),
+        check: held.check.clone(),
+        rc: 0,
+        pre: None,
+        expect: String::new(),
+    };
+    let dir = run_dir(&known, "xmlknown");
+    let reach = reach_support::Reach::new("strategy_bp_xml");
+    let output = run(
+        &known,
+        &dir.join("s.ss"),
+        &[("LOSAT_X_BPQBLOCK", "1"), reach.var()],
+        "1",
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sides = reach.sides("LOSAT_X_BPQBLOCK");
+    assert!(
+        sides.0,
+        "{}: LOSAT_X_BPQBLOCK did not take the block search: {sides:?}",
+        known.name
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// The default-on switches that the strategy's paths cross, at their `0` side (the paths they

@@ -7834,6 +7834,27 @@ fn x_prelim_block_plan(
     (blocks.len() > 1).then_some(blocks)
 }
 
+// No NCBI counterpart: the input records of a block of whole batches; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): the input records of `block`, whole batches of `query_batches`
+/// (`x_prelim_block_plan`; the batches' searched queries follow each other, none empty): from the
+/// input start of the batch whose searched queries start the block to the input end of the batch
+/// whose searched queries end it.
+fn x_block_input(
+    query_batches: &[seq_range::RangedBatch],
+    block: &std::ops::Range<usize>,
+) -> std::ops::Range<usize> {
+    let first =
+        &query_batches[query_batches.partition_point(|batch| batch.searched.start < block.start)];
+    let last =
+        &query_batches[query_batches.partition_point(|batch| batch.searched.end < block.end)];
+    assert!(
+        first.searched.start == block.start && last.searched.end == block.end,
+        "a block is whole batches of the call"
+    );
+    first.input.start..last.input.end
+}
+
 // EXPERIMENT (LOSAT_X_BPQBLOCK): whether the search of all queries passes the checks that refuse
 // it before any row is written and that a block search would make only in the block that holds
 // the cause, after the rows of the blocks before:
@@ -9782,11 +9803,13 @@ fn x_lookup_after_prelim(
 /// query.
 enum PrelimOnly<'a> {
     Chunk(&'a mut Vec<Option<BlastpHitList>>),
-    /// The block's lists; the call's subjects, encoded once for all blocks, and the block's query
-    /// frames (the call's, SEG made once).
+    /// The block's lists, and what the call of all queries made once for all its blocks: its
+    /// subjects, encoded, with `-lcase_masking` their scan ranges (`x_soft_subject`), and the
+    /// block's query frames (SEG made once).
     Block {
         lists: &'a mut Vec<Option<BlastpHitList<XPrelimHsp>>>,
         subjects: &'a [EncodedProtein],
+        soft_subjects: Option<&'a [Vec<(i32, i32)>]>,
         frames: &'a [Vec<QueryFrame>],
     },
 }
@@ -9878,11 +9901,15 @@ fn run_call(
     // A query chunk's search (`PrelimOnly::Chunk`).
     let query_chunk = prelim.as_ref().is_some_and(PrelimOnly::is_chunk);
     // EXPERIMENT (LOSAT_X_BPQBLOCK): a block of the preliminary stage of the search of all queries
-    // (`PrelimOnly::Block`): the call's subjects and the block's query frames, from that call.
+    // (`PrelimOnly::Block`): the call's subjects, their scan ranges and the block's query frames,
+    // from that call.
     let x_block_inputs = match &prelim {
         Some(PrelimOnly::Block {
-            subjects, frames, ..
-        }) => Some((*subjects, *frames)),
+            subjects,
+            soft_subjects,
+            frames,
+            ..
+        }) => Some((*subjects, *frames, *soft_subjects)),
         _ => None,
     };
     let timing_enabled = blastp_timing_env_enabled();
@@ -9995,7 +10022,7 @@ fn run_call(
     let query_frames: &[Vec<QueryFrame>] = match (x_block_inputs, x_prebuilt.as_mut()) {
         // EXPERIMENT (LOSAT_X_BPQBLOCK): a block of the preliminary stage takes its frames from the
         // search of all queries (its records, encoded with the same parameters).
-        (Some((_, frames)), _) => frames,
+        (Some((_, frames, _)), _) => frames,
         (None, Some(prebuilt)) => {
             x_owned_frames = prebuilt.take_query_frames();
             &x_owned_frames
@@ -10027,7 +10054,7 @@ fn run_call(
     // stage runs in blocks (`PrelimOnly::Block`); the same values.
     let x_owned_subjects: Vec<EncodedProtein>;
     let subjects: &[EncodedProtein] = if let Some(encoded) = x_block_inputs
-        .map(|(subjects, _)| subjects)
+        .map(|(subjects, _, _)| subjects)
         .or_else(|| super::x_query_blocks::x_block_subjects(blastp_parallel_pool, subject_records))
     {
         encoded
@@ -10223,13 +10250,25 @@ fn run_call(
     // starts now, on the pool, beside this block's search (`blast_engine/x_lookup_ahead.rs`).
     x_ahead.lookup_ready(&lookup);
     let context_lookup_bounds = blastp_context_lookup_bounds(&contexts);
-    let concatenated_query = build_blastp_concatenated_query(&contexts);
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): with the preliminary stage in blocks (`x_blocks`) this call
+    // scans no subject (each block's call makes its own query and table), so it makes neither
+    // the concatenated query nor the context table (both empty).
+    let x_scans = x_blocks.is_none();
+    let concatenated_query = if x_scans {
+        build_blastp_concatenated_query(&contexts)
+    } else {
+        Vec::new()
+    };
     // The context of every query offset, for the candidates of the fused seed loop (the binary
     // search gives the same index).
     // No NCBI counterpart: a table of BSearchContextInfo's results; it does not change any value
     // NCBI computes.
     let x_context_table = {
-        let frame_bases: Vec<i32> = contexts.iter().map(|ctx| ctx.frame_base).collect();
+        let frame_bases: Vec<i32> = if x_scans {
+            contexts.iter().map(|ctx| ctx.frame_base).collect()
+        } else {
+            Vec::new()
+        };
         super::x_seed_fused::XContextTable::new(&frame_bases, concatenated_query.len())
     };
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-180
@@ -10793,9 +10832,18 @@ fn run_call(
     let total_query_span = query_length + 1;
     // `-lcase_masking`: the scan ranges of each subject of a FASTA set (`-db` subjects have no
     // case; `database` masks are other options). Empty for a subject without lower case.
-    let x_soft_subjects = args
-        .lcase_masking
-        .then(|| x_soft_subject::x_subject_scan_ranges(subject_records));
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): made once by the search of all queries for its blocks of the
+    // preliminary stage, which take them (`PrelimOnly::Block`).
+    let x_owned_soft_subjects: Option<Vec<Vec<(i32, i32)>>>;
+    let x_soft_subjects: Option<&[Vec<(i32, i32)>]> = match x_block_inputs {
+        Some((_, _, soft_subjects)) => soft_subjects,
+        None => {
+            x_owned_soft_subjects = args
+                .lcase_masking
+                .then(|| x_soft_subject::x_subject_scan_ranges(subject_records));
+            x_owned_soft_subjects.as_deref()
+        }
+    };
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1498
     // ```c
@@ -10877,7 +10925,6 @@ fn run_call(
         let scan_ungapped_start = blastp_timing_start(timing_enabled);
         // `-lcase_masking`: this subject's scan ranges, when it has lower-case letters.
         let x_soft = x_soft_subjects
-            .as_deref()
             .and_then(|all| all.get(s_idx))
             .filter(|ranges| !ranges.is_empty());
         // The subject scan and the two-hit test in one loop (a search with a window).
@@ -12232,16 +12279,7 @@ fn run_call(
         // it is this call's error, made with this call's batches and reports
         // (`preliminary_search_error`), as where one table finds it.
         for block in blocks {
-            // A block is whole batches of the call (`x_query_blocks`): its input records are theirs.
-            let first = query_batches
-                .iter()
-                .find(|batch| batch.searched.start == block.start)
-                .expect("a block starts at a batch of the call");
-            let last = query_batches
-                .iter()
-                .find(|batch| batch.searched.end == block.end)
-                .expect("a block ends at a batch of the call");
-            let input = first.input.start..last.input.end;
+            let input = x_block_input(&query_batches, block);
             let block_input = ranges.query_input.slice(input.clone());
             let mut block_lists = Vec::new();
             let searched = run_resolved_in_pool(
@@ -12255,6 +12293,7 @@ fn run_call(
                 Some(PrelimOnly::Block {
                     lists: &mut block_lists,
                     subjects,
+                    soft_subjects: x_soft_subjects,
                     frames: &query_frames[block.clone()],
                 }),
                 &BlastpRanges {

@@ -7,8 +7,8 @@
 //! NCBI's blastp and blastn have no `-sum_stats`, and the other linking searches take other forms:
 //! TBLASTX links ungapped HSPs of translated sequences (`algorithm::tblastx::sum_stats_linking`, its
 //! own kernels for its `UngappedHit`), and the gapped BLASTX and TBLASTN searches use the
-//! uneven-gap linking (`s_BlastUnevenGapLinkHSPs`). The parameters of the ungapped searches'
-//! linking (`CalculateLinkHSPCutoffs`) are `EvenGapLinkParams::ungapped`'s, which TBLASTX reads too.
+//! uneven-gap linking (`s_BlastUnevenGapLinkHSPs`). The cutoffs of the ungapped searches' linking
+//! (`CalculateLinkHSPCutoffs`) are `calculate_link_hsp_cutoffs`'s, which TBLASTX calls too.
 //!
 //! The port is literal, with NCBI's shortcuts (`use_current_max`, `path_changed`, the `changed`
 //! flags, `next_larger`): they decide which of equal sums a chain takes, so the result depends on
@@ -64,7 +64,7 @@ pub(crate) const BLAST_GAP_DECAY_RATE: f64 = 0.5;
 
 /// The linking parameters (`BlastLinkHSPParameters`) of a protein search with sum statistics and
 /// even-gap linking: a gapped one (`preliminary`, `traceback`; psiblast) or an ungapped one
-/// (`ungapped`; BLASTX, and TBLASTX's cutoffs), and whether the query is translated.
+/// (`ungapped`; BLASTX), and whether the query is translated.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:609-617
 /// ```c
@@ -106,7 +106,8 @@ pub(crate) struct EvenGapLinkParams {
     pub(crate) cutoff_big_gap: i32,
     /// `kTranslatedQuery` (`Blast_QueryIsTranslated`): the HSPs of the three frames of a strand
     /// (contexts `3k..3k+3`) form one query frame of the linking (`strand_factor` 3), sorted by
-    /// `s_RevCompareHSPsTbx`, `s_RevCompareHSPsTransl` and `s_FwdCompareHSPsTransl`.
+    /// `s_RevCompareHSPsTbx` and at the end by `s_FwdCompareHSPsTransl` (`even_gap_link_hsps`
+    /// says why NCBI's `s_RevCompareHSPsTransl` before it changes nothing).
     pub(crate) query_translated: bool,
 }
 
@@ -369,7 +370,7 @@ const LARGE: usize = 1;
 //    struct LinkHSPStruct* prev;         /**< Previous HSP in a set, if any */
 //    struct LinkHSPStruct* next;         /**< Next HSP in a set, if any */
 // ```
-/// `LinkHSPStruct`; the links are slots of `LinkState::nodes` (slot 0 is `hp_start`, the HSP of
+/// `LinkHSPStruct`; the links are slots of `even_gap_link_hsps`'s `nodes` (slot 0 is `hp_start`, the HSP of
 /// sorted position `i` is slot `i + 1`). `num` is NCBI's `Int2`: a set of more than 32,767 HSPs
 /// wraps on the store `H->hsp_link.num[index] = H_hsp_num+1` (an `Int4` converted to `Int2`,
 /// deterministic, so kept as NCBI's; the sums are `i64`, Owner 2026-10-10, as their `Int4`
@@ -395,7 +396,7 @@ struct Node {
     next: Link,
 }
 
-/// A slot of `LinkState::nodes` or none (NCBI's `LinkHSPStruct*` or `NULL`), in 4 bytes: a list
+/// A slot of `even_gap_link_hsps`'s `nodes` or none (NCBI's `LinkHSPStruct*` or `NULL`), in 4 bytes: a list
 /// holds far fewer than `u32::MAX` HSPs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Link(u32);
@@ -404,6 +405,7 @@ impl Link {
     const NONE: Link = Link(u32::MAX);
 
     fn some(slot: usize) -> Link {
+        debug_assert!(slot < u32::MAX as usize);
         Link(slot as u32)
     }
 
@@ -568,7 +570,7 @@ pub(crate) fn link_in_place<T>(
 ) {
     let hsps: Vec<LinkHsp> = items.iter().map(hsp).collect();
     let mut slots: Vec<Option<T>> = std::mem::take(items).into_iter().map(Some).collect();
-    items.reserve(slots.len());
+    items.reserve_exact(slots.len());
     even_gap_link_hsps(&hsps, &contexts, subject_length, params, &mut |linked| {
         let mut item = slots[linked.index]
             .take()
@@ -767,10 +769,11 @@ pub(crate) fn even_gap_link_hsps(
     //             s_FwdCompareHSPs);
     //    }
     // ```
-    // The two sorts compare the same fields (the query frame, `query.offset`, `subject.offset`), the
-    // first in decreasing and the second in increasing order. As stable sorts, the first keeps HSPs
-    // with equal fields in the slots' order and the second keeps that order among them, so the
-    // second alone, on the slots' order, gives the same list.
+    // The two sorts compare the same fields (the query frame, `query.offset`, `subject.offset`; the
+    // offsets in the other direction), so a pair is equal under one exactly when it is equal under
+    // the other. As stable sorts, the first keeps HSPs with equal fields in the slots' order and the
+    // second keeps that order among them, so the second alone, on the slots' order, gives the same
+    // list.
     let mut array: Vec<usize> = (1..=total_number_of_hsps).collect();
     array.sort_by(|&a, &b| fwd_compare(&sorted[a - 1], &sorted[b - 1]));
 
@@ -811,6 +814,7 @@ pub(crate) fn even_gap_link_hsps(
     // ```
     // The list NCBI builds visits, in the array's order, each HSP that is not inside a chain,
     // and after a chain's head the rest of its chain.
+    let mut emitted = 0usize;
     for &slot in &array {
         let head = &nodes[slot];
         if head.linked_set && !head.start_of_chain {
@@ -823,6 +827,7 @@ pub(crate) fn even_gap_link_hsps(
                 evalue: head.evalue,
                 num: 1,
             });
+            emitted += 1;
             continue;
         }
         let num_links = i32::from(head.num[method]);
@@ -833,9 +838,14 @@ pub(crate) fn even_gap_link_hsps(
                 evalue: nodes[h].evalue,
                 num: num_links,
             });
+            emitted += 1;
             current = nodes[h].link[method].get();
         }
     }
+    debug_assert_eq!(
+        emitted, total_number_of_hsps,
+        "the linking lists every HSP once"
+    );
 }
 
 /// The values of `s_BlastEvenGapLinkHSPs` that every query frame reads.

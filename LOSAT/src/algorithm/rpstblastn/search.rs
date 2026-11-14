@@ -88,13 +88,12 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         let Some(database) = database else {
             bail!("a search without -db is not supported by LOSAT's {PROGRAM}");
         };
-        // A total length of 0 (an alias file's `LENGTH 0`): NCBI's RPS search has no loop over
-        // subjects (blast_engine.c:1384-1393) and opens each volume alone; refused as rpsblast
-        // refuses it (`blastp::blast_engine::rps_hooks::check_alias_keys`) until item D1a-4.
-        if database.x_seqdb().statistics().per_subject() {
-            bail!(
-                "an alias file's LENGTH 0 over an RPS-BLAST database; this database is not supported by LOSAT's {PROGRAM}"
-            );
+        // A total length of 0 or of 2^63 or more: refused as rpsblast refuses it
+        // (`blastp::blast_engine::rps_hooks::check_alias_keys`) until item D1a-4.
+        if let Some(reason) = crate::algorithm::rps_search::volumes::untraced_total_length(
+            &database.x_seqdb().statistics(),
+        ) {
+            return Err(crate::algorithm::common::database::refusal(reason, PROGRAM));
         }
         // LOSAT's refusals of the volumes' files come before the first byte, as rpsblast's do;
         // NCBI's own errors of the files stay where NCBI's search of a batch raises them

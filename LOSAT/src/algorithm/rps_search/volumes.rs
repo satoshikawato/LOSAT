@@ -18,7 +18,20 @@ pub(crate) enum RpsVolumeError {
     /// each query of the batch ("Unknown error code -1").
     NoMatrix,
 }
-use crate::seqdb::{SeqDb, Volume};
+use crate::seqdb::{DbStatistics, SeqDb, Volume};
+
+/// LOSAT's refusal of a profile database whose total length (`BlastSeqSrcGetTotLen`, NCBI's `Int8`)
+/// is 0 or negative: an alias file's `LENGTH 0`, a list whose scan keeps no sequence, or a `LENGTH`
+/// of 2^63 or more. NCBI's RPS search has no loop over subjects (blast_engine.c:1384-1393) and
+/// opens each volume alone, whose statistics then read the volume's own length and count (probe of
+/// D1a-3 fix 6: a footer's "Effective search space used" and the next request's
+/// `EffectiveSearchSpace` differ from a plain reading of the negative total); LOSAT has not traced
+/// these totals (item D1a-4). One owner for `rpsblast` and `rpstblastn`.
+pub(crate) fn untraced_total_length(statistics: &DbStatistics) -> Option<&'static str> {
+    (statistics.engine_db_length <= 0).then_some(
+        "an alias file's LENGTH of 0 or of 2^63 or more (a total length of 0 or less as NCBI's Int8) over an RPS-BLAST database",
+    )
+}
 
 /// The volumes of a profile database in the order of their search.
 pub(crate) struct RpsVolumeSet<'a> {
@@ -122,8 +135,9 @@ pub(crate) fn search_sets(
     let mut sets = Vec::new();
     if volumes.order.len() > 1 && searchsp.unwrap_or(0) == 0 && dbsize.unwrap_or(0) == 0 {
         // `check_alias_keys` refuses `STATS_TOTLEN`, so the length is `GetTotalLength`, the `Uint8`
-        // that `SetDbLength(Int8)` takes as NCBI's `Int8` (negative for an alias `LENGTH` of 2^63
-        // or more): `DbStatistics::engine_db_length`.
+        // that `SetDbLength(Int8)` takes as NCBI's `Int8`: `DbStatistics::engine_db_length`
+        // (positive here: `untraced_total_length` refuses 0 and the negative totals of an alias
+        // `LENGTH` of 2^63 or more).
         sets.push(Param {
             name: "DbLength",
             value: ParamValue::BigInteger(db.statistics().engine_db_length),
@@ -602,4 +616,34 @@ fn merge_align_set(final_list: &mut BlastpHitList, mut input: BlastpHitList) {
     }
     final_list.hsplist_count = final_list.hsplist_array.len();
     final_list.hsplist_array.shrink_to_fit();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::untraced_total_length;
+    use crate::seqdb::DbStatistics;
+
+    fn with_total(engine_db_length: i64) -> DbStatistics {
+        DbStatistics {
+            setup_total: engine_db_length,
+            setup_count: 3,
+            gumbel_db_length: engine_db_length,
+            engine_db_length,
+            request_count: 3,
+            min_length: 10,
+            average: 100,
+        }
+    }
+
+    /// The RPS search refuses a total length of 0 (an alias `LENGTH 0`) and the negative totals of
+    /// an alias `LENGTH` of 2^63 or more (`Int8` of `GetTotalLength`), and searches a positive one.
+    #[test]
+    fn an_rps_search_refuses_totals_of_zero_or_less() {
+        assert!(untraced_total_length(&with_total(0)).is_some());
+        assert!(untraced_total_length(&with_total(i64::MIN)).is_some());
+        assert!(untraced_total_length(&with_total(i64::MIN + 1)).is_some());
+        assert!(untraced_total_length(&with_total(-1)).is_some());
+        assert!(untraced_total_length(&with_total(1)).is_none());
+        assert!(untraced_total_length(&with_total(i64::MAX)).is_none());
+    }
 }

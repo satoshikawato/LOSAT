@@ -348,15 +348,13 @@ pub(super) fn check_alias_keys(database: &database::BlastpDatabase, program: &st
             program,
         ));
     }
-    // A total length of 0 (an alias file's `LENGTH 0`), which a database search of the other
-    // programs reads as NCBI's statistics of each subject (`DbStatistics::per_subject`): NCBI's RPS
-    // search has no loop over subjects (blast_engine.c:1384-1393) and opens each volume alone; kept
-    // refused with the other alias keys until item D1a-4 traces it.
-    if database.statistics().per_subject() {
-        return Err(crate::algorithm::common::database::refusal(
-            "an alias file's LENGTH 0 over an RPS-BLAST database",
-            program,
-        ));
+    // A total length of 0 (which a database search of the other programs reads as NCBI's
+    // statistics of each subject, `DbStatistics::per_subject`) or of 2^63 or more: kept refused
+    // with the other alias keys until item D1a-4 traces them.
+    if let Some(reason) =
+        crate::algorithm::rps_search::volumes::untraced_total_length(&database.statistics())
+    {
+        return Err(crate::algorithm::common::database::refusal(reason, program));
     }
     Ok(())
 }

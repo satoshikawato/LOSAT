@@ -98,16 +98,18 @@ struct BucketHead {
 
 /// The buckets of a volume (`lookup->bucket_array`, `rows / RPS_BUCKET_SIZE + 1` of them), kept
 /// by a worker for its run (series PR, item PS12s, D4): a bucket is a list of fixed-size blocks
-/// from the run's pool (`RpsBlockPool`, M2), its hits in the order of the scan; the hits are read bucket by bucket, each in the order of
-/// the scan (`next_block`), as NCBI reads its buckets, and each bucket's blocks but its current one go
-/// back to the pool of free blocks as soon as they are read.
+/// from the run's pool (`RpsBlockPool`, M2), its hits in the order of the scan; the hits are read
+/// bucket by bucket, each in the order of the scan (`next_block`), as NCBI reads its buckets, and
+/// each bucket's blocks but its current one go back to the pool of free blocks as soon as they
+/// are read.
 ///
 /// A hit takes 4 bytes (M1 of PS12s), where NCBI's `BlastOffsetPair` takes 8: the concatenated
 /// position inside its bucket (`BUCKET_BITS` bits; the bucket gives the rest) and the low
 /// `SEGMENT_SHIFT` bits of the query offset, whose high bits (its segment) the block holds once.
 /// A segment holds 2^21 query offsets; when the scan reaches the next one, every bucket's current
 /// block that holds hits is closed (`start_segment`), so a block's hits are in one segment and
-/// every offset reads back whole, whatever the length of the query.
+/// every offset reads back whole, whatever the length of the query. A scan that crosses k segment
+/// boundaries therefore holds at most min(hits, k x buckets) partly filled blocks (4 KB each).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:197-208
 /// ```c
@@ -608,9 +610,10 @@ mod tests {
     }
 
     // D4 and M1 of PS12s: the blocks of a bucket hold its hits in the order of the scan, and
-    // `next_block` reads them bucket by bucket, as one `Vec` of NCBI's pairs per bucket holds and reads
-    // them; a drained bucket's closed blocks go back to the pool, which keeps its blocks from scan
-    // to scan and volume to volume (fewer or more buckets): what the largest scan's buckets held.
+    // `next_block` reads them bucket by bucket, as one `Vec` of NCBI's pairs per bucket holds and
+    // reads them; a drained bucket's closed blocks go back to the pool, which keeps its blocks
+    // from scan to scan and volume to volume (fewer or more buckets): what the largest scan's
+    // buckets held.
     // Query offsets cross segments of 2^21 (also inside a bucket's block) and read back whole.
     #[test]
     fn blocks_read_the_hits_in_the_order_of_vectors_per_bucket() {

@@ -864,7 +864,11 @@ impl RpsVolumeResults {
         let mut searched = searched.into_iter();
         let mut batches = Vec::with_capacity(spans.len());
         for &count in spans {
-            let first_refusal = refused.by_ref().take(count).flatten().next();
+            // The batch's refusals are all consumed: the next batch never reads them.
+            let first_refusal = refused
+                .by_ref()
+                .take(count)
+                .fold(None, |first, refusal| first.or(refusal));
             let results: Vec<Option<Result<RpsTraced>>> = searched.by_ref().take(count).collect();
             let batch = match first_refusal.or_else(|| late.take()) {
                 Some(refusal) => Err(refusal),
@@ -882,7 +886,9 @@ impl RpsVolumeResults {
         batches
     }
 
-    /// The results of the run's queries as one batch (`batches`): rpsblast's.
+    /// The results of the run's queries as one batch (`batches`), for the tests of the order of
+    /// the errors.
+    #[cfg(test)]
     pub(crate) fn all(self) -> Result<Vec<RpsTraced>> {
         let count = self.refused.len();
         self.batches(&[count])

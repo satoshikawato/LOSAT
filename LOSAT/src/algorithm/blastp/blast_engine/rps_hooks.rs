@@ -591,16 +591,22 @@ pub(super) fn rps_search(
                 "-sum_stats true (NCBI BLAST+ 2.17.0's rpsblast links HSPs with the profiles' contexts as query indexes and reads past its arrays: its output depends on memory contents or it crashes) is not supported by LOSAT's RPSBLAST"
             );
         }
-        // The run's queries as one batch: the first refusal of their cutoffs, else the first
-        // error of their searches in query order (`RpsVolumeResults::batches`).
-        let traced = engine
+        // The run's query batches (`run.batches`) in NCBI's order: each batch's first refusal of
+        // its cutoffs, else its first search error in query order, and the first failing batch
+        // in batch order ends the run (`RpsVolumeResults::batches`).
+        let spans: Vec<usize> = run.batches.iter().map(|batch| batch.len()).collect();
+        let mut traced = Vec::new();
+        for batch in engine
             .search_volume(
                 &files,
                 &Consensus::new(&setup, volume, &files),
                 pool,
                 &workers,
             )?
-            .all()?;
+            .batches(&spans)
+        {
+            traced.extend(batch?);
+        }
         // The volume's mappings and per-volume data go before the next volume is opened (and
         // before its lists are merged): at most one volume's pages are resident.
         drop(engine);

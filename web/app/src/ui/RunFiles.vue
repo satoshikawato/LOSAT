@@ -22,8 +22,7 @@ const decoder = new TextDecoder();
   <div class="run-files" data-testid="run-files">
     <section v-for="(file, index) in files" :key="`${run.snapshot.runId}:${index}`" class="run-file" :data-testid="`run-file-${index}`">
       <p class="run-file-name">
-        <span class="option-name">-logfile</span> <span data-testid="run-file-name">{{ file.name }}</span>
-        <span class="muted small">{{ formatBytes(file.bytes.length) }}</span>
+        <span class="option-name">-logfile</span> <span data-testid="run-file-name">{{ file.name }}</span><span class="muted small">, {{ formatBytes(file.bytes.length) }}</span>
       </p>
       <pre v-if="file.bytes.length > 0" v-scroll-focus="file.name" class="output" data-testid="run-file-text">{{ decoder.decode(file.bytes) }}</pre>
       <p v-else class="muted" data-testid="run-file-empty">The file is empty.</p>

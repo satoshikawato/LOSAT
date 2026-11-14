@@ -559,11 +559,10 @@ fn database_without_headers(dir: &Path, name: &str, dbtype: &str, sequences: &[S
 /// does not search their batch, reads no definition line for it and writes its archive), then two
 /// records that hit the database, the first with a hyphen (the reader's warning, read with its
 /// batch); `BATCH_SIZE` 60 (180) makes a batch of the first two and one of each record after. A
-/// title that the archive cannot write in the batch that fails, or in the batch after it, is never
-/// written: the run's bytes are those of the run without that title, also where the run holds its
-/// output for the later title (`archive::ArchiveHold`: the first batch's archive comes before the
-/// warning in a stream that both go to). One in the first batch is written, with its `Bad char`
-/// reports. The command line (`-num_threads` 1 and 4, apart and merged) and the library API
+/// title with a byte that the archive replaces, in the batch that fails or in the batch after it,
+/// is never written: the run's bytes are those of the run without that title (no `#` and no `Bad
+/// char` post; the first batch's archive comes before the warning in a stream that both go to).
+/// One in the first batch is written, with its `Bad char` reports. The command line (`-num_threads` 1 and 4, apart and merged) and the library API
 /// (`examples/library_command_line`, whose formats and diagnostics are separate streams of the
 /// caller).
 #[test]

@@ -1378,9 +1378,6 @@ fn search(
     } else {
         0
     };
-    if let Some(database) = database {
-        database.check_accession_tables()?;
-    }
     app::check_search_environment("TBLASTN", database.is_none())?;
     let subjects = subject_records;
     // The search reads the residues of the subject records in place (NCBI's subjects stay in the

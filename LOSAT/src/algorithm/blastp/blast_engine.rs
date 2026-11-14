@@ -6343,8 +6343,14 @@ struct BlastpRanges<'a> {
     query_input: &'a seq_range::QueryInput,
     subject_placements: &'a seq_range::Placements,
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the input position of the first query of a block (0 for a
-    // search of every query), added to `query_input`'s positions where a query is named.
+    // search of every query), added to `query_input`'s positions where a query is named; and
+    // psiblast's rounds of one query (`psi_round::run_queries`): its input position.
     x_ordinal_base: usize,
+    /// The index among the run's searched queries of the call's first query: where the search
+    /// strategy's requests of the call's batches start (`CallRequests`). It is the input position
+    /// of `x_ordinal_base` unless `-query_loc` skips records before the call's queries (a range
+    /// that starts past the end of its record: psiblast's rounds of a query after such a record).
+    searched_base: usize,
     /// A query chunk's search (`search_split_query_batches`): the effective search space of each
     /// context of the chunk's whole batch, which NCBI sets as the chunk's options
     /// (`SplitQuery_SetEffectiveSearchSpace`); `None` for every other search.
@@ -6863,9 +6869,6 @@ fn search(
             seq_range::QueryInput::whole(query_records),
         ),
     };
-    if let Some(database) = database {
-        database.check_accession_tables()?;
-    }
     check_blastp_environment(args.app, database.is_none())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
     // ```c++
@@ -6973,6 +6976,7 @@ fn search(
             &plan,
             query_records,
             &searched_queries,
+            &query_input,
             batches,
             subjects,
             subject_source,
@@ -7037,6 +7041,7 @@ fn search(
             query_input: &done_input,
             subject_placements: &subjects.placements,
             x_ordinal_base: 0,
+            searched_base: 0,
             split_search_spaces: None,
         };
         let stopped = std::sync::Mutex::new(stopped);
@@ -7463,6 +7468,7 @@ fn search(
                                 query_input: &block_input,
                                 subject_placements: &subjects.placements,
                                 x_ordinal_base: block.start,
+                                searched_base: block.start,
                                 split_search_spaces: None,
                             },
                             &BlastpReports {
@@ -7569,11 +7575,11 @@ fn search(
             //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
             //                 results = lcl_blast.Run();
             // ```
-            // A header file that NCBI cannot read fails the search of the batch whose
-            // hit lists reach it first (`database::HeaderReadError`), after the outfmt 0
-            // prolog, the reports of the batches before (without the epilog) and the
-            // reader's messages of that batch. LOSAT searches all batches together, so
-            // the batches before are searched again and reported alone.
+            // A header file that NCBI cannot read (or rpsblast's profile sequences, read by a
+            // batch's traceback) fails the batch whose hit lists reach it first
+            // (`database::HeaderReadError`), after the outfmt 0 prolog, the reports of the
+            // batches before (without the epilog) and that batch's reader messages. LOSAT
+            // searches all batches together: the batches before are searched again alone.
             let failure = match result {
                 Err(error) if error.is::<database::HeaderReadError>() => error
                     .downcast::<database::HeaderReadError>()
@@ -8607,10 +8613,11 @@ fn write_reports_without_queries(
 /// <text>`, exit status 3. LOSAT searches all batches together, so the failure is the first
 /// searched batch's: the call's first batch, or, when that batch holds invalid queries only,
 /// which NCBI does not search (local_blast.cpp:177-180), a later one, after the reports of the
-/// batches before it (`unsearched_batches_then_engine_error`). `chunk` is a split query's chunk
-/// (its batch is searched), or an error that NCBI raises in the call's first batch whatever its
-/// queries' validity (`rps_hooks::RpsEngineError`'s flag). `database_name` is empty for a
-/// subject set.
+/// batches before it (`unsearched_batches_then_engine_error`). `first_batch` is an error of the
+/// call's first batch whatever its queries' validity: a split query's chunk (its batch is
+/// searched; its call has no search strategy requests, `search_split_query_batches` writes them),
+/// or RPS-BLAST's files, which NCBI sets up before it checks the batch's queries
+/// (`rps_hooks::RpsEngineError`). `database_name` is empty for a subject set.
 #[allow(clippy::too_many_arguments)]
 fn preliminary_search_error(
     args: &ResolvedBlastpArgs,
@@ -8623,11 +8630,11 @@ fn preliminary_search_error(
     reports: &BlastpReports<'_>,
     query_batches: &[seq_range::RangedBatch],
     query_batch_skipped: &[bool],
-    chunk: bool,
+    first_batch: bool,
     database_name: &str,
     text: &str,
 ) -> anyhow::Error {
-    if !(chunk || query_batch_skipped.first() == Some(&false)) {
+    if !(first_batch || query_batch_skipped.first() == Some(&false)) {
         return unsearched_batches_then_engine_error(
             args,
             query_records,
@@ -8644,15 +8651,13 @@ fn preliminary_search_error(
         );
     }
     let written = (|| -> Result<()> {
-        // The failed batch's search strategy request (a chunk's is that of its query's batch,
-        // `search_split_query_batches`): the call's first, whose search fails; its titles are
-        // refused before the prolog.
+        // The failed batch's search strategy request: the call's first, whose search fails; its
+        // titles are refused before the prolog.
         if let (Some(call), Some(batch)) = (
             reports.call_requests,
             query_batches
                 .iter()
-                .find(|batch| !batch.searched.is_empty())
-                .filter(|_| !chunk),
+                .find(|batch| !batch.searched.is_empty()),
         ) {
             call.end_at(batch.searched.end)?;
         }
@@ -8778,7 +8783,7 @@ impl<'a> CallRequests<'a> {
             ),
             records: query_records,
             placements: &ranges.query_input.placements,
-            base: ranges.x_ordinal_base,
+            base: ranges.searched_base,
             searched: std::sync::Mutex::new(vec![None; spans.len()]),
             spans,
             through: std::sync::Mutex::new(None),
@@ -8964,6 +8969,7 @@ fn unsearched_batches_then_engine_error(
         query_input: &prefix_input,
         subject_placements: ranges.subject_placements,
         x_ordinal_base: ranges.x_ordinal_base,
+        searched_base: ranges.searched_base,
         split_search_spaces: None,
     };
     // The first searched batch's search strategy request follows those of the batches before
@@ -9293,6 +9299,7 @@ fn search_split_query_batches(
                     query_input: &part_input,
                     subject_placements: &seq_range::Placements::default(),
                     x_ordinal_base: 0,
+                    searched_base: 0,
                     split_search_spaces: Some(&batch_search_spaces),
                 },
                 // A chunk's search ends after its preliminary stage, before any report.
@@ -12283,8 +12290,8 @@ fn run_call(
         )
         .map_err(|error| {
             match (database, error.downcast::<rps_hooks::RpsEngineError>()) {
-                // NCBI's errors of the RPS files come from the first batch's search, after the
-                // outfmt 0 prolog.
+                // NCBI's errors of the RPS files come from the first batch's set-up, after the
+                // outfmt 0 prolog, whatever its queries' validity.
                 (Some(database), Ok(engine_error)) => preliminary_search_error(
                     &args,
                     query_records,
@@ -12296,7 +12303,7 @@ fn run_call(
                     reports,
                     &query_batches,
                     &query_batch_skipped,
-                    engine_error.1,
+                    true,
                     database.name(),
                     &engine_error.0,
                 ),

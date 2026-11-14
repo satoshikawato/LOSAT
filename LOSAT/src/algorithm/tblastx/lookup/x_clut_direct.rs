@@ -2121,6 +2121,16 @@ impl XSink for XBucketChunks {
         self.next_entry[b] = at + 1;
         self.total += 1;
     }
+
+    // The trait's loop, inlined into `XWords`' neighbour lists: with the bucket fill's several
+    // instances (word sizes, offset types, runs) the compiler kept it a call per list, 1.3 % more
+    // instructions of BLASTX word size 5 at 1 thread than dev's one instance (line NP, SC9e).
+    #[inline(always)]
+    fn many(&mut self, partial: u32, last: &[u32]) {
+        for &letter in last {
+            self.one(partial + letter);
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (see

@@ -146,8 +146,8 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
 /// `delim=`), add an output of their own, the third value returned (docs/web/abi_v2.md §7). The
 /// rule reads the words, not the fields they make, so that the application reads it from the argv
 /// alike: `6 std` adds an output with the bytes of outfmt 6. 0 with words adds none (the CLI writes
-/// outfmt 0); BLASTP's 1 to 4 add one without the words. The output of outfmt 13 and 14 is a ZIP archive of the master file and the side
-/// files (`search`). The arguments come back with
+/// outfmt 0); BLASTP's 1 to 4 add one without the words. The output of outfmt 13 and 14 is a
+/// ZIP archive of the master file and the side files (`search`). The arguments come back with
 /// `-outfmt` at the CLI's default, `0`: the engine is given the formats of each search
 /// (`ReportOutputs`), and the checks of the arguments alone (`check_options`) read the formats
 /// as they do without `-outfmt`, but for an `-outfmt` whose custom delimiter the CLI rejects

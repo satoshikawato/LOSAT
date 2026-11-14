@@ -1359,6 +1359,17 @@ survey's probes (`T/t3/scripts/gen.py`, a seeded generator, and three hand-made 
 - `deflineonly.fa` (a record without letters) and `allx_q3.fa` (an all-X query, then a query): runs that stop
   at their first query batch, which write outfmt 0's prolog (`db.of1.bp.defl.*`, `db.of1.bp.emptydb.*`, the
   empty database `tests/seqdb/db/empty`).
+- `lo24.fa`, `lp17.fa`, `lp20.fa`, `lp58.fa` (review 2 of T3a, `T/t3/review2_t3a/in2/`, `in3/`), each searched
+  against itself with `-parse_deflines` and a `-query_loc` and `-subject_loc` that keep one copy as the query:
+  the HSP of the longest segment follows a subject insertion, so the subject row that keeps its other segments
+  ends with that insertion, after the alignment's last column, where NCBI writes its `\` and `|` onto the
+  strings' terminators (`db.of1.bp.lo24.f1`, `lp17.f2`, `lp58.f2`; `lp20.ll20.f1` with `-line_length 20`).
+- `qid` (the database of `qid.fa`) and `qid_q1.fa`, `qid_q2.fa` (review 2 of T3a, D2): database sequences with the
+  ids that queries read without `-parse_deflines` get, `lcl|Query_1` (the letters of `qid_q1.fa`'s query) and
+  `lcl|query_2` (those of `qa`), and `other1`. NCBI's scope finds a query of the batch for such a sequence and
+  shows the query in its place (and aborts on its merge with `-seg yes`): `db.of1.bp.qid*.reject`; with
+  `BATCH_SIZE=1` the second query is in the next batch and NCBI shows the database sequence
+  (`db.of1.bp.qid2.e1.b1.f2`).
 
 The databases (version 4; `.pjs` deleted). Run from `LOSAT/`:
 
@@ -1366,4 +1377,6 @@ The databases (version 4; `.pjs` deleted). Run from `LOSAT/`:
         -title "subjects of the query-anchored rows" -blastdb_version 4
     makeblastdb -in tests/db_search/of1/sp_ids.fa -dbtype prot -out tests/db_search/of1/sp_ids \
         -title "subjects of the query-anchored rows with Seq-ids" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/qid.fa -dbtype prot -out tests/db_search/of1/qid \
+        -title "a database sequence under the id of a query" -parse_seqids -blastdb_version 4
     rm tests/db_search/of1/*.pjs

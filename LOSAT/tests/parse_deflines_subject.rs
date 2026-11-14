@@ -83,6 +83,30 @@ fn run_with(
     extra: &[&str],
 ) -> (i32, Vec<u8>, String) {
     let dir = temp_dir(tag);
+    run_in(
+        &dir,
+        program,
+        query_letters,
+        subject_letters,
+        queries,
+        subjects,
+        outfmt,
+        extra,
+    )
+}
+
+/// `run_with` in the directory `dir` (the same files for every call).
+#[allow(clippy::too_many_arguments)]
+fn run_in(
+    dir: &std::path::Path,
+    program: &str,
+    query_letters: &str,
+    subject_letters: &str,
+    queries: &[&str],
+    subjects: &[&str],
+    outfmt: &str,
+    extra: &[&str],
+) -> (i32, Vec<u8>, String) {
     let write = |name: &str, deflines: &[&str], letters: &str| {
         let path = dir.join(format!("{program}.{name}"));
         let text: String = deflines
@@ -189,19 +213,22 @@ fn a_query_and_a_subject_with_one_id_are_refused() {
 // ```
 // BLASTP's query-anchored formats 1 to 4 read the queries as outfmt 0 does: the refusal of a query
 // with a subject's id comes with the query's batch, after the prolog that NCBI's application writes
-// before its first batch, the same bytes as outfmt 0's (line RG T3a review D3).
+// before its first batch, the same bytes as outfmt 0's (line RG T3a review D3). The reference bytes
+// are LOSAT's own outfmt 0 run, which is LOSAT's refusal too, not bytes of NCBI's.
 #[test]
 fn blastp_formats_1_to_4_refuse_a_query_with_a_subject_s_id_after_outfmt_0_s_prolog() {
     // One directory: the prolog names the subject file.
+    let dir = temp_dir("anchored");
     let refuse = |outfmt: &str| {
-        run(
-            "anchored",
+        run_in(
+            &dir,
             "blastp",
             PROTEIN,
             PROTEIN,
             &["same1 a"],
             &["same1 b"],
             outfmt,
+            &[],
         )
     };
     let (status, prolog, stderr) = refuse("0");
@@ -729,6 +756,59 @@ fn blastx_reads_its_query_before_the_search_as_the_search_does() {
             stderr.contains("a query title with a character outside the US-ASCII range")
                 && stderr.contains("not supported by LOSAT"),
             "gi|abc BATCH_SIZE=1 n{threads}: {stderr}"
+        );
+    }
+}
+
+// BLASTP's query-anchored formats refuse the section that NCBI BLAST+ aborts on (selfseg3, the
+// rejection row `db.of1.bp.selfseg3.reject`) in the search that reports the query, before its
+// first byte (line RG T3a review 2 D3): a run of many queries takes the block search, which refuses
+// in the query's block, after the reports of the blocks before (NCBI's own bytes before its abort
+// depend on its buffers, so no prefix is NCBI's); the search of all queries refuses before any byte.
+// `BATCH_SIZE=1` and `LOSAT_X_BPQBLOCK=1` make each query a block of its own.
+#[test]
+fn blastp_query_anchored_abort_is_refused_in_the_block_that_reports_it() {
+    let of1 = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/of1");
+    let dir = temp_dir("anchored-blocks");
+    let query = dir.join("q.fa");
+    let mut queries = std::fs::read(of1.join("qa.fa")).unwrap();
+    queries.extend(std::fs::read(of1.join("selfseg3.fa")).unwrap());
+    std::fs::write(&query, queries).unwrap();
+    let run = |blocks: &str, threads: &str| {
+        let output = losat()
+            .arg("blastp")
+            .arg("-query")
+            .arg(&query)
+            .arg("-subject")
+            .arg(of1.join("selfseg3.fa"))
+            .args(["-parse_deflines", "-seg", "yes", "-outfmt", "1"])
+            .args(["-num_threads", threads])
+            .env("BATCH_SIZE", "1")
+            .env("LOSAT_X_BPQBLOCK", blocks)
+            .output()
+            .unwrap();
+        (
+            output.status.code().unwrap_or(-1),
+            String::from_utf8(output.stdout).unwrap(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+    let refusal =
+        "the record lcl|selfseg3 is both a query and a subject under -parse_deflines and \
+                   NCBI BLAST+ aborts on its query-anchored alignments";
+    for threads in ["1", "4"] {
+        let (status, stdout, stderr) = run("0", threads);
+        assert_eq!(status, 1, "n{threads}: {stderr}");
+        assert!(stdout.is_empty(), "n{threads}: {stdout}");
+        assert!(stderr.contains(refusal), "n{threads}: {stderr}");
+        let (status, stdout, stderr) = run("1", threads);
+        assert_eq!(status, 1, "blocks n{threads}: {stderr}");
+        assert!(stderr.contains(refusal), "blocks n{threads}: {stderr}");
+        assert!(
+            stdout.starts_with("BLASTP 2.17.0+\n")
+                && stdout.contains("\nQuery= qa query protein alpha\n")
+                && !stdout.contains("Query= selfseg3"),
+            "blocks n{threads}: {stdout}"
         );
     }
 }

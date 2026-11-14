@@ -9,6 +9,7 @@ use super::*;
 
 /// The probes' sequences by name.
 const SEQUENCES: &[(&str, &str)] = &[
+    ("lo24", "VTRFLYYCEKKMNGFEIRVKYGHMHQGNGLKECFRWKFAVIKMWHSHTTWDMGSSSSGGGGGSSGSGGSGSSSGGSSSGGGSSGGSSSGSGGGGSTRYLCYCTAKINDGFTHRSKITHMHQGNGLKGCFLWKFASIKMWHAHTTPEMGSSGGSGGSGGGGSGGGSGSGSGGGSGGSGGSSSGGGGVTRFLYYCEKKMPGFEIRVKYKHMHQGNGKKECFIWKFRVQAVIKMWHSHTTWDMGSGGSGGGGSGSSSGGGGGGGGGSGGGSGSSSGGGGGGGGVTRFLYYCPKKMNGFEIMQKYGGMEQGNMLERECFRWKFAVEKMWHSHTTSELGSMECGFKMMNQFPYRLWGGKC"),
     ("q100", "MFPCDVENWCTHCDQQDIDVQCWEIWCWWPCICVFLQFVEWLVGEWWHNEVDWCYHSVQMRWRNLIGIDWLTSMRLYDETQGMFSQCDVWMMNYSWRDDK"),
     ("qa", "DIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIGCFQSTQNPYFMYNYNTHSSFMSETRIRTNKHYWSRYHAPMHQQFTKVNNGAEPGRQEEIRFTHGTYKKRDCALNERMFCFKCESRLSLVWD"),
     ("qc", "QHNLNCLVAWTKLGGGPGYKIEPAAWKHLCKKQTCGWCNNQKLKPWYPNGLSTTRPWGRQ"),
@@ -884,6 +885,45 @@ self1  1    QFAYPPMKGTSASGFWSEAFTFGM--EGIWIRCKMAMGTM--NYPPMLGNYV  48
 self1  192                                          PWNYPPMLGNYV  203
 self1  155   FAYKPMKSTSADGFWTEAFKFGM--HGIWGRCKLAMGSM              191
 self1  79   QFAYPPMKGTSASGFWSEAFTFGMGGEGIWIRCKMAMGTM--NYPPMLGNYV  128
+
+"#
+    );
+}
+
+/// lo24's HSPs in the order of the Seq-align set (`-outfmt "6 ... btop"` of the same search).
+const LO24: &[(u32, u32, u32, &str)] = &[
+    (0, 1, 186, "12NP8GK7LK4RI3-R-V-Q14"),
+    (0, 1, 281, "8EP8RMVQ3HG1HE3GM1-EKR9IE8WSDEML2"),
+    (0, 2, 96, "2FY1YC2ETKA1MI1-D2ETIH1VS1YIGT9EG2RL4VS5SA3WPDE1"),
+];
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3050, 3060 and 3089 (quoted at
+// `column`). lo24 of review 2 of line RG T3a (`T/t3/review2_t3a/`: `-query in2/lo24.fa -subject
+// in2/lo24.fa -parse_deflines -query_loc 1-54 -subject_loc 55-355 -outfmt 1`, row `db.of1.bp.lo24.f1`):
+// the longest segment (q14-52, 39 columns) is the third HSP's, after its insertion of D, so the
+// subject row that keeps that HSP's other segments (q2-13, then the insertion) ends with the insertion,
+// which the merge puts after the alignment's last column. On the section's only line NCBI writes its
+// `\` and `|` onto the strings' terminator: two lines of spaces, and the `D` past them, at that column.
+#[test]
+fn an_insertion_after_the_last_column_writes_no_mark() {
+    let got = self_section("lo24", LO24, 1);
+    assert_eq!(
+        got,
+        r#"
+lo24  1    VTRFLYYCEKKMNGFEIRVKYGHMHQGNGLKECFRWKFAVIKMWHSHTTWDMGS  54
+lo24  96    ..Y.C..TA.I.-----------------------------------------  107
+                                                                 
+                                                                 
+                                                                 D
+lo24  109               ..TH.S.IT.........G..L....S.....A...PE.    147
+lo24  186  ............P........K.......K....I.................    240
+                                                 \               
+                                                 |               
+                                               RVQ
+lo24  281  ........P........MQ...G.E...M.R.........E........SEL..  335
+                                         \                       
+                                         |                       
+                                         E
 
 "#
     );

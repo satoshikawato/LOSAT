@@ -377,11 +377,12 @@ pub(crate) fn write_section<W: Write + ?Sized>(
 
 /// Whether NCBI BLAST+ aborts on the section of `hsps` (`aln_mix::MixError::NcbiAborts`): its
 /// merge leaves out the rows of the query's own Bioseq while segments hold them. A program asks
-/// it before any format is written and refuses the run there
-/// (`pairwise::blastp_section_aborts`): NCBI's output before the abort is what its stream had
-/// flushed, which depends on its buffer (to a file or a pipe, the version line and the two
-/// `NcbiEndl` of `PrintProlog`, blast_format.cpp:387-395, plus each full buffer; more on a
-/// terminal), so LOSAT writes none of it. Only a section with the query's own Bioseq can get
+/// it before any format of the search's call is written and refuses the run there
+/// (`pairwise::blastp_section_aborts`; in a block search, after the reports of the blocks
+/// before): NCBI's output before the abort is what its stream had flushed, which depends on its
+/// buffer (to a file or a pipe, the version line and the two `NcbiEndl` of `PrintProlog`,
+/// blast_format.cpp:387-395, plus each full buffer; more on a terminal), so no prefix of it is
+/// NCBI's and LOSAT writes none of the call's. Only a section with the query's own Bioseq can get
 /// there (an ordinary subject's row takes its first match, `x_SecondRowFits`), so the others are
 /// not merged here.
 pub(crate) fn ncbi_aborts(hsps: &Hsps) -> io::Result<bool> {
@@ -973,7 +974,9 @@ fn display_inserts(
     }
     let mut line = vec![b' '; actual_line_len];
     for insert in &insert_list {
-        *column(&mut line, insert.aln_start - aln_start + 1)? = b'\\';
+        if let Some(byte) = column(&mut line, insert.aln_start - aln_start + 1)? {
+            *byte = b'\\';
+        }
     }
     let mut inserts = Vec::new();
     do_fills(
@@ -998,13 +1001,37 @@ fn display_inserts(
     Ok(())
 }
 
-/// The byte of `line` at `index`: NCBI writes the marks of an insertion inside the line (an
-/// insertion comes before a query column of the line).
-fn column(line: &mut [u8], index: i64) -> io::Result<&mut u8> {
-    usize::try_from(index)
-        .ok()
-        .and_then(|index| line.get_mut(index))
-        .ok_or_else(|| internal("an insertion outside its line"))
+/// The byte of `line` at `index` where NCBI writes the mark of an insertion (`\` or `|`); `None`
+/// at `index == line.len()`, where NCBI's write changes no byte of the line.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3089 (`x_FillInserts`)
+/// ```c++
+///         line[from - aln_start + 1] = '\\';
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3050 and 3060
+/// (`x_DoFills`, both branches)
+/// ```c++
+///                 bar[curInsertAlnStart-aln_start+1] = '|';
+/// ```
+/// Both strings hold `aln_range.GetLength()` bytes, and `x_GetInserts` takes an insertion whose
+/// alignment start is below the line's end, so the index is at most the length. It is the length
+/// for an insertion after the last column of the alignment's last line: a row that ends with an
+/// insertion, which the merge puts after the alignment's last column (the split row of the query's
+/// own Bioseq, `aln_mix::Mix::place`, whose HSP's longest segment follows a subject insertion).
+/// NCBI then writes `\` and `|` onto the strings' terminator (`operator[]` at `size()`): no byte
+/// of the line changes, the lines print their spaces, and `s_AdjustInsert` puts the letters past
+/// the line, right-aligned at that column. That visible result (no mark) is deterministic in NCBI
+/// BLAST+ 2.17.0 (review 2 of line RG T3a: rows `db.of1.bp.lo24.f1`, `lp17.f2`, `lp58.f2`, and
+/// `lp20.ll20`, where `-line_length 20` puts the insertion on no line) and LOSAT reproduces it
+/// (PD-LOSAT-NCBI-DEFECTS rule 2). An index past the length, which `x_GetInserts` cannot give, is
+/// LOSAT's internal error.
+fn column(line: &mut [u8], index: i64) -> io::Result<Option<&mut u8>> {
+    let len = line.len();
+    match usize::try_from(index) {
+        Ok(index) if index == len => Ok(None),
+        Ok(index) if index < len => Ok(Some(&mut line[index])),
+        _ => Err(internal("an insertion outside its line")),
+    }
 }
 
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3031-3073
@@ -1074,7 +1101,9 @@ fn do_fills(
         let mut prvs_insert_aln_end = 0i64;
         for insert in insert_list {
             let cur_insert_aln_start = insert.aln_start;
-            *column(&mut bar, cur_insert_aln_start - aln_start + 1)? = b'|';
+            if let Some(byte) = column(&mut bar, cur_insert_aln_start - aln_start + 1)? {
+                *byte = b'|';
+            }
             if is_first_insert || cur_insert_aln_start - prvs_insert_aln_end >= 1 {
                 new_insert.clear();
                 let seq_end = insert.seq_start + insert.insert_len - 1;

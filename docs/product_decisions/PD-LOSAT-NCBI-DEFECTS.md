@@ -603,10 +603,13 @@ asks the maintainer to accept it, as the PRs of versions 1.5 and 1.13 did.
   `FillUnalignedRegions` indexes its vectors with their row index of -1 (`alnsegments.cpp:286-338`):
   NCBI writes before the vectors' buffers and aborts (`double free or corruption (out)`, exit 134;
   review probes `selfseg3`, a record whose SEG mask splits its self diagonal, and `self2`). LOSAT
-  runs the same merge and refuses (exit 1) where it reaches that row, before the report's first
-  byte: NCBI's output before the abort is what its stream had flushed, which depends on its
-  buffer (to a file or a pipe, the version line of the prolog). The other sections of such a
-  record are NCBI's (fixture rows `db.of1.bp.self1.*`).
+  runs the same merge and refuses (exit 1) where it reaches that row, before the first byte of
+  the reports of the search that holds the query: the report's first byte, or in the block
+  search of many queries the first byte of the query's block, after the reports of the blocks
+  before (as outfmt 0's refusal of such a record's masks). NCBI's output before the abort is what
+  its stream had flushed, which depends on its buffer (to a file or a pipe, the version line of
+  the prolog), so no prefix of it is NCBI's. The other sections of such a record are NCBI's
+  (fixture rows `db.of1.bp.self1.*`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

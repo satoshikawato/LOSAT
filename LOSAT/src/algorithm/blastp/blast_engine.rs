@@ -5324,7 +5324,10 @@ pub fn run(
         }
     };
     let out_file = open_out_file(&args)?;
-    let pairwise = format == Some(crate::blastinput::app::ReportFormat::Pairwise);
+    // Outfmt 0 to 4 (`blastp_pairwise_view_of`; psiblast and rpsblast refuse 1 to 4 before their
+    // search): the stream of NCBI's `CBlastFormat`.
+    let pairwise =
+        format.is_some_and(|format| blastp_pairwise_view_of(args.app, format as i32).is_some());
     // The organism report's `-out` file is written as NCBI's buffer writes it.
     let tax_report = format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
     // LOSAT's reports read the format number and the custom fields that NCBI keeps; blastp's
@@ -5404,9 +5407,9 @@ pub fn run(
     //         exit_code = BLAST_OUTPUT_ERROR;                                     \
     //     }                                                                       \
     // ```
-    // The outfmt 0 formatter's stream throws when a write fails, as the organism report's
-    // where NCBI's buffer writes it (`cli::NcbiReportBuffer`); for outfmt 6/7 NCBI aborts and LOSAT reports
-    // the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
+    // The stream of the outfmt 0 to 4 formatter throws when a write fails, as the organism
+    // report's where NCBI's buffer writes it (`cli::NcbiReportBuffer`); for outfmt 6/7 NCBI aborts
+    // and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
     if stream.failed && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
@@ -7769,21 +7772,11 @@ fn x_query_block_plan(
         .iter()
         .map(|format| kind_of(format.outfmt))
         .collect::<Option<Vec<_>>>()?;
-    // Outfmt 1 to 4 refuse a query whose own record is a subject and whose section NCBI BLAST+
-    // aborts on before any format is written (`pairwise::blastp_section_aborts`), which only the
-    // query's hits tell: a block search would have written the blocks before. A run that can
-    // have one (`-parse_deflines` with a query record that is also a subject,
-    // `BelievedIds::shared`) takes the search of all queries.
-    if args.parse_deflines
-        && outputs.formats.iter().any(|format| {
-            blastp_query_anchored_view(args.app, format.outfmt).is_ok_and(|view| view.is_some())
-        })
-        && queries
-            .iter()
-            .any(|record| record.believed().is_some_and(|ids| ids.shared.is_some()))
-    {
-        return None;
-    }
+    // Outfmt 1 to 4 refuse a section that NCBI BLAST+ aborts on, and a database sequence that NCBI
+    // shows as a query, in the call that reports the query, before any byte of it (`run_call`, as
+    // outfmt 0 refuses the masks of a shared record, `believed::refuse_shared_masks`): in a block
+    // search, after the bytes of the blocks before (NCBI's own bytes before its abort depend on
+    // its buffers, so no prefix is NCBI's); the blocks are taken as for outfmt 0.
     let tabular = kinds.contains(&XBlockReport::Tabular);
     match subject_source {
         BlastpSubjectSource::Fasta(subjects) => {
@@ -14208,7 +14201,11 @@ fn run_call(
         .and_then(crate::api::local_blast::FormatOutput::report_format);
     let places_reads =
         first_report.is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
-    let pairwise_first = first_report == Some(crate::blastinput::app::ReportFormat::Pairwise);
+    // Outfmt 0 to 4 (`blastp_pairwise_view_of`): NCBI's `PrintOneResultSet` sorts the hits by
+    // `-sorthits` and writes the description lines before the alignments in all five
+    // (blast_format.cpp:1523-1541), so they read the subjects in one order.
+    let pairwise_first = first_report
+        .is_some_and(|format| blastp_pairwise_view_of(args.app, format as i32).is_some());
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
         if prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
@@ -14388,9 +14385,12 @@ fn run_call(
     }
     // Outfmt 1 to 4 of a `-subject` search: a query whose own record is one of the subjects
     // (`-parse_deflines`) and whose query-anchored section NCBI BLAST+ aborts on is refused
-    // before any format is written (`pairwise::blastp_section_aborts`; line RG T3a,
-    // PD-LOSAT-NCBI-DEFECTS rule 3). The formats 1 to 4 merge one section (their views differ in
-    // the letters they show).
+    // before any format of the call is written (`pairwise::blastp_section_aborts`; line RG T3a,
+    // PD-LOSAT-NCBI-DEFECTS rule 3): in a block search (`x_query_block_plan`), the call of the
+    // query's block, after the bytes of the blocks before, as outfmt 0's refusal of the masks of
+    // such a record above (NCBI's own bytes before its abort depend on its buffers, so no prefix
+    // is NCBI's). The formats 1 to 4 merge one section (their views differ in the letters they
+    // show).
     let anchored_view = format_plans.iter().find_map(|outfmt| match outfmt {
         BlastpReport::Pairwise(view)
             if *view != crate::report::pairwise::PairwiseView::Pairwise =>
@@ -14425,6 +14425,41 @@ fn run_call(
                 return Err(anchored::aborted_section(record, args.app.name()));
             }
         }
+    }
+    // Outfmt 1 to 4 of a database search whose queries are read without `-parse_deflines`: a
+    // reported database sequence whose Seq-align id is the generated id (`lcl|Query_N`) of a query
+    // of the batch that reports it is that query's own Bioseq for NCBI's scope, which shows the
+    // query's title and letters in its place and can abort on its merge (review 2 of line RG
+    // T3a, D2): refused here, with the abort above (`ListedTitles::refuse_generated_query_ids`).
+    // Under `-parse_deflines` every query has a believed id (generated for a record without one)
+    // and the refusal of a reported sequence with a query's id is the scopes' of the batches,
+    // for every format (`ListedTitles::refuse_ids_of_queries` above). A `-subject` search cannot
+    // meet it: without `-parse_deflines` the subjects are `lcl|Subject_N`, and with it a subject
+    // with a query's id is the reader's refusal (`id_scope`) unless it is the query's own record
+    // (the abort above). NCBI's display of such a sequence in outfmt 0, 6 and 7 (the query's
+    // title and letters) is line RG item X7's, the owner of this behaviour for every format.
+    if let (Some(_), false, Some(titles)) =
+        (anchored_view, args.parse_deflines, listed_titles.as_ref())
+    {
+        let scopes: Vec<(usize, crate::blastinput::query_batch::QueryScope)> = query_batches
+            .iter()
+            .map(|batch| {
+                (
+                    batch.searched.end,
+                    crate::blastinput::query_batch::QueryScope::of_generated_ids(
+                        ranges.input_records[batch.input.clone()]
+                            .iter()
+                            .map(|record| record.local_id.as_str()),
+                    ),
+                )
+            })
+            .collect();
+        let none = crate::blastinput::query_batch::QueryScope::default();
+        titles.refuse_generated_query_ids(&hit_lists, |query| {
+            scopes
+                .get(scopes.partition_point(|&(end, _)| end <= query))
+                .map_or(&none, |(_, scope)| scope)
+        })?;
     }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block

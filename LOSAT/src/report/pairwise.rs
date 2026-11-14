@@ -2697,10 +2697,11 @@ fn blastp_section_hsps(
 /// BLASTP `-subject` search (`query_anchored::ncbi_aborts`), `rows` the rows of its hits in the
 /// final order: the section of the report (`BlastpSections::alignments`), whose group is sorted
 /// by `sort` (`PairwiseView::report_sort`) and whose aligned subjects are the first
-/// `num_alignments`. Asked before any format is written, for a query whose own record is one of
-/// the subjects (`is_query`, `-parse_deflines`), so that the refusal comes before the report's
-/// first byte, as the other refusals of such a record (`believed::refuse_shared_masks`). Only a
-/// `-subject` search has such a subject, whose hits `joins` never shows in another subject's.
+/// `num_alignments`. Asked before any format of the search's call is written, for a query whose
+/// own record is one of the subjects (`is_query`, `-parse_deflines`), so that the refusal comes
+/// before the first byte of the call's reports (in a block search, of the query's block), as the
+/// other refusals of such a record (`believed::refuse_shared_masks`). Only a `-subject` search has
+/// such a subject, whose hits `joins` never shows in another subject's.
 pub(crate) fn blastp_section_aborts(
     view: PairwiseView,
     sort: super::hit_sort::ReportSort,

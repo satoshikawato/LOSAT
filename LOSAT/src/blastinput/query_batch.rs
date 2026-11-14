@@ -242,6 +242,24 @@ impl QueryScope {
         }
     }
 
+    /// The scope of query records read without `-parse_deflines`, by their generated local ids
+    /// `local_ids` (`Query_N`, without `lcl|`; `believed::generated_ids`): the keys that `add_ids_of`
+    /// keeps of such an id (`scope_keys`: a local string id in any case, as NCBI's scope finds
+    /// one).
+    pub(crate) fn of_generated_ids<'r>(local_ids: impl IntoIterator<Item = &'r str>) -> Self {
+        let mut scope = Self::default();
+        let mut keys = Vec::new();
+        for id in local_ids
+            .into_iter()
+            .flat_map(crate::blastinput::fasta_reader::believed::generated_ids)
+        {
+            keys.clear();
+            crate::seqid::defline_set::scope_keys(&id, &mut keys);
+            scope.keys.extend(keys.iter().copied());
+        }
+        scope
+    }
+
     /// Whether a query of the scope has an id with one of the keys `keys`.
     pub(crate) fn has_key(&self, keys: &[u64]) -> bool {
         keys.iter().any(|key| self.keys.contains(key))

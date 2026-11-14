@@ -1156,6 +1156,51 @@ impl ListedTitles<'_> {
         Ok(())
     }
 
+    /// Outfmt 1 to 4 of queries read without `-parse_deflines` (line RG T3a, review 2 D2): LOSAT's
+    /// refusal of a subject with parsed Seq-ids of the final hit lists `hit_lists` whose Seq-align
+    /// id is the generated id (`lcl|Query_N`) of a query of the batch that reports it, as NCBI's
+    /// scope finds an id (`scope_of`: that batch's scope, by query, `QueryScope::of_generated_ids`;
+    /// the keys of `refuse_id_of_a_query`). NCBI's formatter adds the batch's queries to its scope
+    /// before their reports and empties it after them (`query_batch::QueryScopeSpan::Batch`; no
+    /// outfmt 5 here) and finds such a subject there: its reports show the query's title and
+    /// letters in the subject's place, and the query-anchored merge of the query's own Bioseq can
+    /// abort (`double free or corruption`, as `pairwise::blastp_section_aborts`). A weak match
+    /// (`QueryScopeKeys::weak`, of text Seq-ids) never meets a local id.
+    pub(super) fn refuse_generated_query_ids<'s>(
+        &self,
+        hit_lists: &[Option<BlastpHitList>],
+        scope_of: impl Fn(usize) -> &'s crate::blastinput::query_batch::QueryScope,
+    ) -> Result<()> {
+        if self.parsed.is_empty() {
+            return Ok(());
+        }
+        for (query, hit_list) in hit_lists.iter().enumerate() {
+            let Some(hit_list) = hit_list else {
+                continue;
+            };
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            for hsp_list in &hit_list.hsplist_array[..count] {
+                let rank = hsp_list.oid as usize;
+                let Some(subject) = &self.parsed[rank] else {
+                    continue;
+                };
+                if scope_of(query).has_key(&subject.query_scope_keys().own) {
+                    return Err(shared::parsed_refusal(
+                        self.listed.ordinals[rank],
+                        &format!(
+                            "has the Seq-id {}, the id of a query read without -parse_deflines \
+                             in the query batch that reports it: NCBI BLAST+ shows that query in \
+                             its place in the query-anchored formats (outfmt 1 to 4)",
+                            String::from_utf8_lossy(&subject.alignment_fasta())
+                        ),
+                        self.program,
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// The stored title of the subject of rank `rank` (empty for a subject in no final hit
     /// list).
     fn title(&self, rank: usize) -> &[u8] {

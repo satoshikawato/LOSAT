@@ -4103,8 +4103,14 @@ Scheduling (each value computed by one thread with the original function; order 
     (`Cut::run_cold`), so that the loads of the inputs `seed_of_pair` reads stay out of the loop as in the strips' scan
     (a closure called from both loops stayed a call per pair, and a room test before each pair kept those loads in
     the loop: about 30 and 17 instructions more per seed, dc-megablast of 31,168 cDNAs x 3 Mb at 4 threads, `perf`);
-  - a piece is an arena of 16,384 / 64 + P blocks of 64 seeds with their positions (20 bytes each; P partitions),
-    each partition's seeds a chain of blocks in scan order; the arenas are a pool of 3 T + 2 (T threads), the last two
+  - a piece is an arena of 16,384 / 64 + P blocks of 64 seeds with their positions (20 bytes each; P partitions,
+    rounded up to a multiple of 4), each partition's seeds a chain of blocks in scan order: its first block (block p),
+    then runs of 4 blocks (a page of seeds) taken in order from the front of the arena, and once those are given out
+    single free blocks of other partitions' runs; so a piece touches the pages of its seeds from the front, a slot
+    keeps those of its largest piece, and a partition's seeds after its first block lie in pages of seeds of its own,
+    which the hardware prefetches of the fold do not leave (equal lanes, one per partition, touched a page of every
+    lane a partition had a seed in, whatever its seeds: megablast Sakai x MG1655 `-db` at 16 threads, peak 1.3 MiB
+    over the strips'); the arenas are a pool of 3 T + 2 (T threads), the last two
     for the strip the slowest partition is in alone, and a piece takes the slot of a piece every partition has folded
     before a slot no piece has used (as the strips take a new buffer only when none can be given back). The pool's
     seeds and positions are two buffers kept in the subject scratch, each slot a region of them, each allocated once
@@ -4112,9 +4118,15 @@ Scheduling (each value computed by one thread with the original function; order 
     initialized: glibc maps them, their free leaves the threshold as it is, and only the pages of the blocks pieces
     wrote are resident (an arena allocated by itself, 266-328 KiB, was mapped and its free raised the threshold to its
     size, so that later blocks of up to that size came from the heap's arenas and stayed resident: blastn of the
-    cDNAs x 3 Mb at 16 threads, peak 1.13-1.15 of the strips'). So the stage holds at most
-    (3 T + 2) x (16,384 + 64 P) x 20 bytes whatever the subject, the query or the density of the seeds: 17 MB at 16
-    threads, 79 MB at 64;
+    cDNAs x 3 Mb at 16 threads, peak 1.13-1.15 of the strips'; the regions of the seeds begin on a page). So the stage
+    holds at most (3 T + 2) x (16,384 + 64 P) x 20 bytes whatever the subject, the query or the density of the seeds:
+    17 MB at 16 threads, 79 MB at 64;
+  - the folds read a piece's slot and arena without a lock: the producer writes the piece's slot in a ring (the strips
+    within reach of the slowest partition x the pool's slots) before the strip's count, and the arena is written only
+    by the participant that took the slot and read once the piece is counted, until every partition has folded it (a
+    lock of the strip's list of slots and of the slot, taken by every partition for every piece, wrote lines the
+    others read: blastn-short of 30,000 short queries x 3 Mb at 16 threads, the participants' loads served from another
+    core's cache x4 those of the strips stage);
   - a participant makes one piece per turn and parks the rest of its strip (any participant goes on with it), so
     no helper holds a strip half-scanned; a partition folds the pieces of a strip in order, then the next strip, and
     the positions count on across a strip's pieces, so the keys, the hits' order and the appended cells' numbers are

@@ -41,10 +41,11 @@
 //! enough for `PIECE_SEEDS` seeds (the switch's number) whatever partitions they go to; each
 //! partition's seeds of the piece are a chain of blocks in scan order: its first block, then runs
 //! of a page of seeds taken in order from the front of the arena (`Links`), so that a piece
-//! touches the pages of its seeds and a partition's seeds lie in whole pages. The arenas are a
-//! pool of `PIECES_PER_THREAD * threads + RESERVED` slots, allocated at their size once and kept in the
-//! subject scratch, so a stage holds at most that many pieces whatever the subject, the query or
-//! the density of the seeds (and arenas only for as many pieces as it had at once: a piece takes
+//! touches the pages of its seeds and a partition's seeds after its first block lie in pages of
+//! seeds of its own. The arenas are a pool of `PIECES_PER_THREAD * threads + RESERVED` slots,
+//! allocated at their size once and kept in the subject scratch, so a stage holds at most that
+//! many pieces whatever the subject, the query or the density of the seeds (and arenas only for
+//! as many pieces as it had at once: a piece takes
 //! the slot of one every partition has folded before a slot no piece has used, `Sched::take`, as
 //! the strips stage takes a new buffer only when it has none to give back); the strip the
 //! slowest partition is in (the lowest strip a partition has not folded all of) alone may take
@@ -121,8 +122,9 @@ struct Span {
 }
 
 /// The blocks of a run of a partition's blocks after its first: a page of seeds (4 KiB), so that a
-/// partition's seeds lie in pages of its own, which the hardware prefetches of a fold's reads do
-/// not leave.
+/// partition's seeds after its first block lie in pages of seeds of its own, which the hardware
+/// prefetches of a fold's reads do not leave (their positions, 4 bytes each, share a page with
+/// those of three other runs).
 const RUN: usize = {
     let run = PAGE / (BLOCK * size_of::<Seed>());
     assert!(run >= 1);
@@ -133,10 +135,12 @@ const RUN: usize = {
 /// seeds (`used` of them taken), each partition's blocks linked in its order (`next`, its first
 /// and last block in `chains`). Partition p's first block is block p of the arena; its later
 /// blocks come in runs of `RUN` blocks (a page of seeds), each the next run of the blocks after
-/// the first ones (`front`), and `spans` holds each partition's run. So a piece touches the
-/// first blocks of its partitions and the pages of its seeds from the front of the arena, a slot
-/// keeps the pages of its largest piece, and a partition's seeds lie in its first block and in
-/// whole pages of its own. (Blocks taken in the order of the pushes, the partitions' blocks
+/// the first ones (`front`), and `spans` holds each partition's run; once the runs are given out,
+/// a partition takes the last free block of another partition's run (`take_tail`: a piece of
+/// many seeds over many partitions, near the arena's end). So a piece touches the first blocks of
+/// its partitions and the pages of its seeds from the front of the arena, a slot keeps the pages
+/// of its largest piece, and a partition's seeds lie in its first block and in pages of seeds of
+/// its own. (Blocks taken in the order of the pushes, the partitions' blocks
 /// interleaved, made the fold read each partition's seeds in blocks scattered over the arena:
 /// the hardware prefetches of the neighbouring blocks of other partitions and the pages of the
 /// scattered blocks took the fold +6 % cycles at the same instructions, L2 misses +22 %;
@@ -270,24 +274,41 @@ impl Links {
     }
 
     /// `take` once partition p's run is used up: the next run of the arena becomes p's, and p
-    /// takes its first block.
+    /// takes its first block; once the runs are given out, `take_tail`.
     #[cold]
     #[inline(never)]
     fn take_run(&mut self, p: usize) -> u16 {
         let first = self.front;
-        // (a piece takes at most `piece_seeds` seeds, `Cut`, a partition's last block is the only
-        // one not full and its last run the only one not used up, so the arena's runs hold them,
-        // `Arena::blocks`)
-        assert!(
-            usize::from(first) + RUN <= self.next.len(),
-            "LOSAT_X_SEEDPIECE: a full arena"
-        );
+        if usize::from(first) + RUN > self.next.len() {
+            return self.take_tail(p);
+        }
         self.front += RUN as u16;
         self.spans[p] = Span {
             next: first + 1,
             end: first + RUN as u16,
         };
         first
+    }
+
+    /// `take` once the arena's runs are given out: the last free block of another partition's run
+    /// (an unused first block included), which p takes alone.
+    #[cold]
+    #[inline(never)]
+    fn take_tail(&mut self, p: usize) -> u16 {
+        // (a piece takes at most `piece_seeds` seeds, `Cut`, and a partition's last block is the
+        // only one not full, so the arena's first blocks and runs hold them, `Arena::blocks`)
+        let q = self
+            .spans
+            .iter()
+            .position(|span| span.next < span.end)
+            .expect("LOSAT_X_SEEDPIECE: a full arena");
+        self.spans[q].end -= 1;
+        let b = self.spans[q].end;
+        self.spans[p] = Span {
+            next: b + 1,
+            end: b + 1,
+        };
+        b
     }
 
     /// (tests) whether a stage used the slot.
@@ -337,8 +358,8 @@ impl Store {
         len: usize,
     ) -> impl Iterator<Item = (&mut [MaybeUninit<Seed>], &mut [MaybeUninit<u32>])> {
         let need = slots * len;
-        // (a page more, so that the regions can begin on a page: glibc's mapped blocks begin
-        // after a header, and a run of a partition's seeds is a page, `RUN`)
+        // (a page more, so that the seeds' regions can begin on a page: glibc's mapped blocks
+        // begin after a header, and a run of a partition's seeds is a page, `RUN`)
         let (seeds_n, pos_n) = (
             need + PAGE / size_of::<Seed>(),
             need + PAGE / size_of::<u32>(),
@@ -384,13 +405,12 @@ pub(super) struct Arena<'s> {
 
 impl Arena<'_> {
     /// The blocks of an arena for `parts` partitions: their first blocks (`parts`, up to a whole
-    /// run) and the runs of `piece_seeds` seeds in any cut, since a partition's last block is the
-    /// only one not full and its last run the only one not used up (those after the first
-    /// blocks: fewer than `piece_seeds.div_ceil(BLOCK)` blocks, plus fewer than `RUN` per
-    /// partition). A whole number of runs, so that every slot's region begins on a run.
+    /// run) and runs of `piece_seeds.div_ceil(BLOCK)` blocks, which hold `piece_seeds` seeds in
+    /// any cut, since a partition's last block is the only one not full and every free block can
+    /// be taken (`Links::take_tail`). A whole number of runs, so that every slot's seeds begin on
+    /// a run.
     fn blocks(parts: usize, piece_seeds: usize) -> usize {
-        parts.next_multiple_of(RUN)
-            + (piece_seeds.div_ceil(BLOCK) + (RUN - 1) * parts).next_multiple_of(RUN)
+        parts.next_multiple_of(RUN) + piece_seeds.div_ceil(BLOCK).next_multiple_of(RUN)
     }
 
     /// Empty, for `parts` partitions and pieces of `piece_seeds` seeds (its region of the
@@ -544,8 +564,8 @@ struct StripState {
 }
 
 /// No NCBI counterpart (scheduling only): the slot in the pool of each piece a partition may still
-/// fold, which the participants read without a lock: piece k of strip i at `(i % strips) *
-/// pieces + k % pieces`, for `strips` the strips handed out past the slowest partition's (`ahead`)
+/// fold, which the participants read without a lock: piece k of strip i at `(i % strips) * row
+/// + k % pieces`, for `strips` the strips handed out past the slowest partition's (`ahead`)
 /// and `pieces` the slots of the pool. Piece k's entry is written by the piece's producer before
 /// the strip's count says it is there (`Release`) and read after the count is read (`Acquire`),
 /// and it is not written again while a partition has piece k to fold or its slot is to go back:
@@ -562,21 +582,26 @@ struct PieceSlots {
     slots: Vec<AtomicU32>,
     strips: usize,
     pieces: usize,
+    /// the entries from one strip's row to the next: its pieces and a cache line, so that no two
+    /// rows share a line (a producer writes its strip's row while other strips' folds read theirs)
+    row: usize,
 }
 
 impl PieceSlots {
     fn new(strips: usize, pieces: usize) -> Self {
         let (strips, pieces) = (strips.max(1), pieces.max(1));
+        let row = pieces.next_multiple_of(16) + 16;
         PieceSlots {
-            slots: (0..strips * pieces).map(|_| AtomicU32::new(0)).collect(),
+            slots: (0..strips * row).map(|_| AtomicU32::new(0)).collect(),
             strips,
             pieces,
+            row,
         }
     }
 
     #[inline(always)]
     fn at(&self, strip: usize, k: u32) -> &AtomicU32 {
-        &self.slots[(strip % self.strips) * self.pieces + k as usize % self.pieces]
+        &self.slots[(strip % self.strips) * self.row + k as usize % self.pieces]
     }
 }
 
@@ -752,7 +777,7 @@ where
             .map(|lane| lane.0.load(Ordering::Acquire))
             .min()
             .unwrap_or(pack(n, 0));
-        // (a load first, as in `seed_stage_home`; lock order: the schedule, then a strip's pieces)
+        // (a load first, as in `seed_stage_home`)
         if freed.load(Ordering::Relaxed) < min_next {
             let mut s = lock(&sched);
             let f = freed.load(Ordering::Relaxed);
@@ -1175,7 +1200,8 @@ mod tests {
     /// partition (the pushes of `PieceSink::push`: a block when the partition's last one is full),
     /// up to `piece_seeds` seeds: partition p's first block is block p, its later ones whole runs
     /// of `RUN` blocks that begin on a run, and the runs taken are the first ones after the first
-    /// blocks (a piece touches the front of its arena).
+    /// blocks (a piece touches the front of its arena); once the runs are given out, single blocks
+    /// of other partitions' runs.
     #[test]
     fn take_gives_each_block_once_in_runs_from_the_front() {
         let mut rng = 0x9e37_79b9_7f4a_7c15u64;
@@ -1185,27 +1211,31 @@ mod tests {
             rng ^= rng << 17;
             (rng % n as u64) as usize
         };
+        let mut tails = 0;
         for parts in [1usize, 2, 3, 5, 16, 64, 128] {
             for piece_seeds in [1usize, 2, 63, 64, 65, 300, 4000, 4096, 16_384] {
                 let blocks = Arena::blocks(parts, piece_seeds);
                 assert_eq!(blocks % RUN, 0, "{parts} {piece_seeds}");
                 let front = parts.next_multiple_of(RUN);
-                for cut in 0..5 {
+                for cut in 0..6 {
                     let mut links = Links::default();
                     links.reset(parts, blocks);
                     let mut fill = vec![BLOCK; parts];
                     let mut taken = vec![false; blocks];
                     let mut mine: Vec<Vec<u16>> = vec![Vec::new(); parts];
                     for k in 0..piece_seeds {
-                        // all to one partition, round robin, uniform, mostly one, or each
-                        // partition's seeds one block and one more seed (the most runs)
+                        // all to one partition, round robin, uniform, mostly one, each
+                        // partition's seeds one block and one more seed, or that and then a
+                        // run and one more seed in turn (the most blocks: every run begun)
                         let p = match cut {
                             0 => 0,
                             1 => k % parts,
                             2 => next(parts),
                             3 if next(4) == 0 => next(parts),
                             3 => parts - 1,
-                            _ => (k / (BLOCK + 1)) % parts,
+                            4 => (k / (BLOCK + 1)) % parts,
+                            _ if k < (BLOCK + 1) * parts => k / (BLOCK + 1),
+                            _ => ((k - (BLOCK + 1) * parts) / (BLOCK * RUN)) % parts,
                         };
                         if fill[p] == BLOCK {
                             let b = links.take(p);
@@ -1227,6 +1257,11 @@ mod tests {
                         usize::from(links.used),
                         taken.iter().filter(|&&t| t).count()
                     );
+                    // (blocks of other runs only once the runs are given out)
+                    if usize::from(links.front) == blocks {
+                        tails += 1;
+                        continue;
+                    }
                     let mut runs = 0;
                     for (p, bs) in mine.iter().enumerate() {
                         if let Some(&first) = bs.first() {
@@ -1259,5 +1294,7 @@ mod tests {
                 }
             }
         }
+        // (the cuts reach the arena's end)
+        assert!(tails > 0);
     }
 }

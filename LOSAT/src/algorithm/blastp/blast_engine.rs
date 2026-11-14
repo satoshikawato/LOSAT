@@ -18311,6 +18311,50 @@ mod tests {
         ));
     }
 
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): the preliminary stage in blocks is planned for blastp's search
+    // of all queries only: the blocks of whole batches of `x_batch_blocks` (here more than one block
+    // of the built-in 50,000 letters of `x_bp_qblock`; the variable is not set in tests), each
+    // ending at a batch end, on one thread and on three; none for one block, for psiblast or with
+    // `-sum_stats`; and a call of the preliminary stage only never plans
+    // (`BlastpReports::prelim_only`), so a block is not split again on its own batches' words.
+    #[test]
+    fn x_prelim_block_plan_is_the_search_of_all_queries_of_blastp() {
+        let records = x_block_test_records(&[3000; 30]);
+        let input = seq_range::QueryInput::whole(&records);
+        let few = seq_range::QueryInput::whole(&records[..10]);
+        let resolved = make_blastp_args().resolve().expect("resolved blastp args");
+        let mut psi = make_blastp_args();
+        psi.app = BlastpApp::Psiblast;
+        let psi = psi.resolve().expect("resolved psiblast args");
+        let mut sum_stats = resolved.clone();
+        sum_stats.sum_stats = true;
+        let batches = input.batches(10000);
+        for threads in [1, 3] {
+            crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                let blocks =
+                    x_prelim_block_plan(&resolved, &records, &input, 10000, pool).expect("blocks");
+                assert!(blocks.len() > 1, "{blocks:?}");
+                assert_eq!(blocks.first().map(|block| block.start), Some(0));
+                assert_eq!(blocks.last().map(|block| block.end), Some(records.len()));
+                for (block, next) in blocks.iter().zip(&blocks[1..]) {
+                    assert_eq!(block.end, next.start);
+                }
+                for block in &blocks {
+                    assert!(batches.iter().any(|batch| batch.searched.end == block.end));
+                }
+                assert!(x_prelim_block_plan(&psi, &records, &input, 10000, pool).is_none());
+                assert!(x_prelim_block_plan(&sum_stats, &records, &input, 10000, pool).is_none());
+                assert!(
+                    x_prelim_block_plan(&resolved, &records[..10], &few, 10000, pool).is_none()
+                );
+                Ok(())
+            })
+            .expect("pool");
+        }
+        assert!(!BlastpReports::prelim_only(true).x_plan_blocks);
+        assert!(!BlastpReports::prelim_only(false).x_plan_blocks);
+    }
+
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the contexts of the search of all queries whose preliminary
     // stage runs in blocks (`x_blocks_contexts`, no table) are those of each table's builder, every
     // field and the Karlin blocks bit for bit: exact blastp's words of 2, 3 (BLOSUM62, BLOSUM45,

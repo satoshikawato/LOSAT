@@ -2531,9 +2531,10 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     //                  options->word_size != 7) {
     // ```
     // The compressed lookup table runs at each of its word sizes, 5 to 7
-    // (`validate_protein_options` has refused the others); of the lookup table's sizes, LOSAT's
-    // BLASTP implements 2 (blastp-short, item SC3) and 3.
-    if !matches!(args.word_size, 2 | 3)
+    // (`validate_protein_options` has refused the others), and so does the lookup table at 2
+    // (blastp-short, item SC3), 3 and 4 (item SC8b); this refuses no word size that the options
+    // handler lets through.
+    if !matches!(args.word_size, 2..=4)
         && args.lookup_table_type != BlastpLookupTableType::CompressedAaLookupTable
         && args.psi_search.is_none()
     {
@@ -9021,17 +9022,29 @@ fn x_bp_runtime_lookup(built: XBpLookup) -> BlastpRuntimeLookup {
 //     lookup->threshold = (Int4)opt->threshold;
 // ```
 /// The lookup table of exact blastp (`AaLookupTable`) and the query contexts of `query_frames`, as
-/// the lookup region of `run_resolved_in_pool` builds them, of the search's word size (3, or 2:
-/// blastp-short and `-word_size 2`, item SC3). The threshold takes the x86-64
+/// the lookup region of `run_resolved_in_pool` builds them, of the search's word size (3, 2:
+/// blastp-short and `-word_size 2`, item SC3, or 4, item SC8b). The threshold takes the x86-64
 /// conversion: `INT_MIN` for a threshold beyond `Int4` (every word). The table is filled in place,
-/// without the reference builder's chains (lookup/x_lut_direct.rs). The build of the next block's table ahead of that block
+/// without the reference builder's chains (lookup/x_lut_direct.rs); a table of 4-letter words by
+/// the joint builder on `pool`'s threads (`x_bp_build_wide_lookup`). The build of the next block's table ahead of that block
 /// (LOSAT_X_BPLKPAHEAD, `x_lookup_ahead.rs`, `blastp_aa_lookup_ahead`) takes the same threshold and
 /// query frames and gives the same table; the Karlin parameters it is passed are not used.
 fn blastp_aa_lookup(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
     x_chunk: bool,
+    pool: &crate::utils::threading::SearchPool<'_>,
 ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
+    // `-word_size 4` (item SC8b): the joint builder of 32-bit indices on the pool's threads.
+    if let Some((lookup, contexts)) = crate::algorithm::tblastx::lookup::x_bp_build_wide_lookup(
+        query_frames,
+        crate::core::blast_util::ncbi_int4_from_double(args.threshold),
+        args.scoring.matrix,
+        args.word_size,
+        pool,
+    ) {
+        return (BlastpRuntimeLookup::Aa(lookup), contexts);
+    }
     // EXPERIMENT (LOSAT_X_BPLK16): the table of 16-bit hits where the switch is on.
     if x_bplk16() {
         let (built, contexts) = x_bp_build_ncbi_lookup_as(
@@ -9082,6 +9095,11 @@ fn blastp_aa_lookup_ahead(
     query_frames: &[Vec<QueryFrame>],
     spares: &crate::algorithm::tblastx::lookup::XAaSpares,
 ) -> Option<(BlastpRuntimeLookup, Vec<QueryContext>)> {
+    // `-word_size 4` (item SC8b): no table ahead; the block builds its own on the pool's threads
+    // (`blastp_aa_lookup`).
+    if !crate::algorithm::tblastx::lookup::x_pair_lut::x_direct_covers(args.word_size) {
+        return None;
+    }
     // EXPERIMENT (LOSAT_X_BPLK16): the table of 16-bit hits where the switch is on (a block of the
     // block loop is never a query chunk).
     if x_bplk16() {
@@ -9123,13 +9141,18 @@ fn blastp_aa_lookup_ahead(
 // ```
 /// EXPERIMENT (LOSAT_X_BPLKREUSE): `blastp_aa_lookup`'s table and contexts (the same arguments),
 /// built on the vectors of the block before that `spare` keeps
-/// (`XAaSpares::x_build_on_block_spare`).
+/// (`XAaSpares::x_build_on_block_spare`); a table of 4-letter words (item SC8b) is
+/// `blastp_aa_lookup`'s, on `pool`'s threads.
 fn blastp_aa_lookup_on_block_spare(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
     spare: &crate::algorithm::tblastx::lookup::XAaSpares,
     x_chunk: bool,
+    pool: &crate::utils::threading::SearchPool<'_>,
 ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
+    if !crate::algorithm::tblastx::lookup::x_pair_lut::x_direct_covers(args.word_size) {
+        return blastp_aa_lookup(args, query_frames, x_chunk, pool);
+    }
     // EXPERIMENT (LOSAT_X_BPLK16): the table of 16-bit hits where the switch is on.
     if x_bplk16() {
         let threshold = crate::core::blast_util::ncbi_int4_from_double(args.threshold);
@@ -9351,6 +9374,14 @@ fn blastp_matrix_compressed_lookup(
     Ok((lookup, contexts))
 }
 
+// No NCBI counterpart: memory only (which vectors a later build may take).
+/// Whether a later block's build may take the vectors of exact blastp's `table`: those of the
+/// direct builders' word sizes (2 and 3); the joint builder of a table of 4-letter words (item
+/// SC8b, `blastp_aa_lookup`) takes none, so those are freed with the table.
+fn x_bp_aa_vectors_reused(table: &crate::algorithm::tblastx::lookup::BlastAaLookupTable) -> bool {
+    crate::algorithm::tblastx::lookup::x_pair_lut::x_direct_covers(table.word_length as usize)
+}
+
 // No NCBI counterpart: memory only; it changes no value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPLKDROP): a strict-set switch, on unless it is `0`. The search's lookup
 /// table after its preliminary stage, which nothing reads any more: kept (`Some`) only where the
@@ -9375,6 +9406,7 @@ fn x_lookup_after_prelim(
             BlastpRuntimeLookup::CompressedFlat(_) => {
                 super::x_query_blocks::x_bp_lookup_spare(pool).is_some()
             }
+            BlastpRuntimeLookup::Aa(table) if !x_bp_aa_vectors_reused(table) => false,
             BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {
                 super::x_query_blocks::x_bp_aa_spares(pool).is_some()
                     || super::x_query_blocks::x_bp_aa_block_spare(pool).is_some()
@@ -9726,8 +9758,14 @@ fn run_call(
                     &query_frames,
                     spare,
                     chunk_prelim.is_some(),
+                    blastp_parallel_pool,
                 ),
-                None => blastp_aa_lookup(&args, &query_frames, chunk_prelim.is_some()),
+                None => blastp_aa_lookup(
+                    &args,
+                    &query_frames,
+                    chunk_prelim.is_some(),
+                    blastp_parallel_pool,
+                ),
             },
         },
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
@@ -15259,7 +15297,7 @@ fn run_call(
                 spare.give(table);
             }
         }
-        Some(BlastpRuntimeLookup::Aa(table)) => {
+        Some(BlastpRuntimeLookup::Aa(table)) if x_bp_aa_vectors_reused(&table) => {
             if let Some(spares) = super::x_query_blocks::x_bp_aa_spares(blastp_parallel_pool)
                 .or_else(|| super::x_query_blocks::x_bp_aa_block_spare(blastp_parallel_pool))
             {
@@ -15275,7 +15313,7 @@ fn run_call(
                 spares.give16(table);
             }
         }
-        Some(BlastpRuntimeLookup::Compressed(_)) | None => {}
+        Some(BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Compressed(_)) | None => {}
     }
 
     if let Some(timing) = timing.as_ref() {
@@ -16392,18 +16430,22 @@ mod tests {
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_options.c:1163-1169
-    // (above): word size 4 keeps the lookup table, of which LOSAT's BLASTP implements word sizes 2
-    // and 3.
+    // (above): word size 4 keeps the lookup table, which LOSAT's BLASTP builds with the joint
+    // builder (item SC8b).
     #[test]
-    fn test_validate_requested_blastp_support_rejects_lookup_table_word_size_four() {
-        let mut args = make_blastp_args();
-        args.word_size = Some(4);
-        let resolved = args.resolve().expect("resolved blastp args");
-        let err = validate_requested_blastp_support(&resolved).expect_err("unsupported word size");
-        assert_eq!(
-            err.to_string(),
-            "-word_size 4 (the lookup table) is not supported by LOSAT's BLASTP"
-        );
+    fn test_validate_requested_blastp_support_accepts_lookup_table_word_size_four() {
+        for task in ["blastp", "blastp-fast", "blastp-short"] {
+            let mut args = make_blastp_args();
+            args.task = task.into();
+            args.word_size = Some(4);
+            let resolved = args.resolve().expect("resolved blastp args");
+            assert_eq!(
+                resolved.lookup_table_type,
+                BlastpLookupTableType::AaLookupTable
+            );
+            validate_requested_blastp_support(&resolved)
+                .unwrap_or_else(|err| panic!("{task} -word_size 4: {err}"));
+        }
     }
 
     // NCBI reference: c++/src/algo/blast/core/blast_options.c:1163-1169 (above): word size 2 keeps

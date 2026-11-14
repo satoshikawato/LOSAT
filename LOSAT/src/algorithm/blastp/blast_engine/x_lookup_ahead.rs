@@ -1733,7 +1733,7 @@ mod tests {
     ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
         match args.lookup_table_type {
             BlastpLookupTableType::AaLookupTable => {
-                super::super::blastp_aa_lookup(args, frames, false)
+                super::super::blastp_aa_lookup(args, frames, false, pool)
             }
             BlastpLookupTableType::CompressedAaLookupTable => {
                 let lengths: Vec<usize> = records.iter().map(|record| record.seq().len()).collect();

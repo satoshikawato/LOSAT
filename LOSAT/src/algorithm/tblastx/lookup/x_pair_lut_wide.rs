@@ -844,9 +844,24 @@ impl XPairLutQuery {
     /// compacted (BLASTX's scans index the whole backbone), built in tasks for `parts` threads of
     /// the pool the build runs on.
     pub(crate) fn x_build_full_wide(&self, parts: usize) -> BlastAaLookupTable {
+        self.x_build_full_wide_with(XWideOn::Here(parts))
+    }
+
+    /// BLASTP's lookup table of 4-letter words (`-word_size 4`, item SC8b of line NP): the table
+    /// [`Self::x_build_full_wide`] builds, in tasks on `pool`'s threads.
+    pub(crate) fn x_build_full_wide_on(
+        &self,
+        pool: &crate::utils::threading::SearchPool<'_>,
+    ) -> BlastAaLookupTable {
+        self.x_build_full_wide_with(XWideOn::Pool(pool))
+    }
+
+    // No NCBI counterpart (scheduling only): the one table of the query's locations, its tasks on
+    // `on`.
+    /// The body of [`Self::x_build_full_wide`] and [`Self::x_build_full_wide_on`].
+    fn x_build_full_wide_with(&self, on: XWideOn<'_, '_>) -> BlastAaLookupTable {
         let tables = [self.prepared.lookup_locations.clone()];
-        let mut built =
-            self.x_build_tables_wide_with(&tables, XWideOn::Here(parts), false, None, false);
+        let mut built = self.x_build_tables_wide_with(&tables, on, false, None, false);
         debug_assert!(built.len() == 1 && built[0].rank.is_empty());
         built.pop().expect("one table").table
     }

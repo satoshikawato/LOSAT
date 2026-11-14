@@ -887,7 +887,8 @@ Rows `db.sl.*`: `-seqidlist` and `-negative_seqidlist` with `-db`, five programs
   `sl_tfn.txt` (four local ids across tfn's two volumes), `sl_prot.txt` and `sl_nucl.txt` (every Seq-id form of
   `ids/prot_v5` and `ids/nucl_v5`: tpg, RefSeq and Swiss-Prot without versions, a pdb chain, local ids, a general id as
   `db:tag`, a versionless accession of an OID of several definition lines, a gi that NCBI drops), `sl_gi.txt` (gi ids only:
-  NCBI's `Empty seqid list` warning and no restriction on a version 5 database, no OID on a version 4 one),
+  NCBI's `Empty seqid list` warning on a version 5 database, then no restriction on one volume that the alias files leave
+  whole, no OID on two or more volumes or inside an alias range: rows `db.gisl.*`; no OID on a version 4 one),
   `sl_comment.txt` (no id: no list), `sl_none.txt` (ids no database has: NCBI searches an empty database, LOSAT refuses),
   `sl_empty.txt` (0 bytes: NCBI's `Failed to map seqidlist file ` error);
 - binary lists in the format of `blastdb_aliastool -seqid_file_out` (NUL, file size, count, title, date, database length
@@ -908,6 +909,16 @@ NCBI 2.17.0) has no accession table: a seqid list on it is NCBI's `BLAST Databas
 
 A list file that is not on the search path (NCBI: `Error: NCBI C++ Exception: ... To be memory mapped the file must
 exist: ''`, exit 255, with the path of NCBI's build tree) is checked by `src/cli_v2_tests.rs`, not by a row.
+
+Rows `db.gisl.*` (line DBID, item gisl): `-seqidlist seqidlist/sl_gi.txt` on version 5 databases of one and of two
+volumes, and on the alias files of `aliaskeys/` over one volume. NCBI's `x_ApplyUserGiList` clears every OID of the list
+that lost every id, and the search finds an empty database (each query's `Filtering resulted in an empty database.`), unless
+its OID bit set is the special all-set one, which a copy of one volume's special set makes: the clearing writes into a
+stale array, and the whole database is searched. So `taxfilter/tfp`, `aliaskeys/p_r123` (the range of the whole volume),
+`p_twice`, `p_dupvol`, `p_cover` and `p_coverr` (`p_r123` and `p_range` in both orders: the range that covers the other
+is kept) are searched whole; `taxfilter/tfn` (two volumes), the two databases `taxfilter/tfp ids/prot_v5`, `aliaskeys/p_range`,
+`p_union`, `p_halves` (`p_lo` and `p_hi`, ranges 1-11 and 12-23 whose union is the volume) and `n_vol1` are searched
+empty. The negative list on `taxfilter/tfn` excludes nothing.
 
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
@@ -1299,7 +1310,8 @@ in an empty database.` and a search that goes on, `p_nseq4g`: NCBI's `int` of 42
 `FIRST_OID` / `LAST_OID` ranges (`p_range`, `p_nest` and `p_rin`: nested ranges ANDed, `p_union`: two alias files over one
 volume ORed, `p_twice`: an alias file and the volume itself, `p_dupvol`: one volume twice in a `DBLIST`, `p_first0`, `p_last2`,
 `p_empty`, `p_beyond`, `p_r312` and `p_r312s` with `-taxids` and `-negative_taxids`, `p_range` with `-seqidlist`, `n_range`,
-`n_mv`: the global OIDs 9-13 of the two volumes, `n_vol1`: the second volume alone). The ncbi rows were frozen with NCBI
+`n_mv`: the global OIDs 9-13 of the two volumes, `n_vol1`: the second volume alone; `p_lo`, `p_hi`, `p_halves`, `p_cover`
+and `p_coverr` for the rows `db.gisl.*`). The ncbi rows were frozen with NCBI
 BLAST+ 2.17.0 on the workstation (`env_blast`; two rows checked against the release build on the developer machine, the same
 bytes); the `db.ak.bp.err.*` rows (NCBI's `CStringException` texts, exit 255, which carry the path of NCBI's build tree:
 `p_bad_nseq`, `p_bad_first`, `p_bad_min`, `p_bad_stlen`, `p_bad_two` without and with `-taxids`) with the release build on the

@@ -2399,10 +2399,6 @@ pub(super) fn range_mask(
     if !has_ranges(root) {
         return None;
     }
-    /// NCBI's `size_t` of an `int` bound.
-    fn bound(value: i32) -> u64 {
-        i64::from(value) as u64
-    }
     fn mark(
         node: &AliasNode,
         lo: u64,
@@ -2430,6 +2426,11 @@ pub(super) fn range_mask(
     Some(words)
 }
 
+/// NCBI's `size_t` of an `int` bound of an OID range (`CSeqDB_BitSet(mask.GetBegin(), ...)`).
+fn bound(value: i32) -> u64 {
+    i64::from(value) as u64
+}
+
 /// Sets the bits `[from, to)` of `words` (nothing when `to <= from`).
 fn set_bits(words: &mut [u64], from: u64, to: u64) {
     if to <= from {
@@ -2448,6 +2449,356 @@ fn set_bits(words: &mut [u64], from: u64, to: u64) {
         words[word] |= ones;
         at += span;
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:142-177
+// ```c++
+// void CSeqDB_BitSet::UnionWith(CSeqDB_BitSet & other, bool consume)
+// {
+//     if (other.m_Special == eAllClear) {
+//         // Nothing to do.
+//         return;
+//     }
+//
+//     if (m_Special == eAllClear) {
+//         // Result is just 'other'.
+//         x_Copy(other, consume);
+//         return;
+//     }
+//
+//     // Our all-1s mask covers the other.
+//
+//     if (other.m_Start >= m_Start &&
+//         other.m_End   <= m_End   &&
+//         m_Special     == eAllSet) {
+//
+//         return;
+//     }
+//
+//     // The other all-1s mask covers ours.
+//
+//     if (other.m_Start   <= m_Start &&
+//         other.m_End     >= m_End   &&
+//         other.m_Special == eAllSet) {
+//
+//         // Copy is probably better than swap here.
+//         x_Copy(other, consume);
+//         return;
+//     }
+//
+//     // Adjust the range if needed; convert special cases to eNone.
+//
+//     x_Normalize(other.m_Start, other.m_End);
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:309-319
+// ```c++
+// void CSeqDB_BitSet::x_Normalize(size_t start, size_t end)
+// {
+//     ...
+//     if (m_Start > start || m_End < end || m_Special != eNone) {
+//         CSeqDB_BitSet dup(std::min(m_Start, start),
+//                           std::max(m_End,   end));
+//
+//         Swap(dup);
+// ```
+/// The shape of an NCBI `CSeqDB_BitSet` that its operations decide by: the OIDs
+/// `[start, end)` and whether it is a special set (all of them set, `eAllSet`, or none,
+/// `eAllClear`) or a bit array (`eNone`), whose bits do not matter here
+/// ([`all_bits_special_set`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BitSetShape {
+    start: u64,
+    end: u64,
+    special: Special,
+}
+
+/// `CSeqDB_BitSet::ESpecialCase`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Special {
+    /// `eNone`: a bit array.
+    None,
+    /// `eAllSet`.
+    AllSet,
+    /// `eAllClear`.
+    AllClear,
+}
+
+impl BitSetShape {
+    fn new(start: u64, end: u64, special: Special) -> Self {
+        Self {
+            start,
+            end,
+            special,
+        }
+    }
+
+    /// `UnionWith`: `x_Normalize` widens the range to both and makes a bit array.
+    fn union_with(self, other: Self) -> Self {
+        if other.special == Special::AllClear {
+            return self;
+        }
+        if self.special == Special::AllClear {
+            return other;
+        }
+        if other.start >= self.start && other.end <= self.end && self.special == Special::AllSet {
+            return self;
+        }
+        if other.start <= self.start && other.end >= self.end && other.special == Special::AllSet
+        {
+            return other;
+        }
+        Self::new(
+            self.start.min(other.start),
+            self.end.max(other.end),
+            Special::None,
+        )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:193-243
+    // ```c++
+    // void CSeqDB_BitSet::IntersectWith(CSeqDB_BitSet & other, bool consume)
+    // {
+    //     // All clear cases
+    //
+    //     if (m_Special == eAllClear) {
+    //         return;
+    //     }
+    //
+    //     if (other.m_Special == eAllClear) {
+    //         x_Copy(other, consume);
+    //         return;
+    //     }
+    //
+    //     // All set cases.
+    //
+    //     if (m_Special == eAllSet && other.m_Special == eAllSet) {
+    //         size_t start = std::max(m_Start, other.m_Start);
+    //         size_t end   = std::min(m_End,   other.m_End);
+    //
+    //         if (start >= end) {
+    //             // The intersected ranges don't overlap.
+    //             m_Special = eAllClear;
+    //         } else {
+    //             m_Start = start;
+    //             m_End = end;
+    //         }
+    //         return;
+    //     }
+    //
+    //     if (other.m_Special == eAllSet || m_Special == eAllSet) {
+    //         CSeqDB_BitSet result;
+    //         CSeqDB_BitSet range;
+    //
+    //         if (m_Special == eAllSet) {
+    //             result.x_Copy(other, consume);
+    //             range.x_Copy(*this, true);
+    //         } else {
+    //             Swap(result);
+    //             range.x_Copy(other, consume);
+    //         }
+    //
+    //         if (result.m_Start < range.m_Start)
+    //             result.AssignBitRange(result.m_Start, range.m_Start, false);
+    //
+    //         if (result.m_End > range.m_End)
+    //             result.AssignBitRange(range.m_End, result.m_End, false);
+    //
+    //         Swap(result);
+    //
+    //         return;
+    //     }
+    // ```
+    /// `IntersectWith`: of a special all-set and a bit array, the bit array (its range).
+    fn intersect_with(self, other: Self) -> Self {
+        if self.special == Special::AllClear {
+            return self;
+        }
+        if other.special == Special::AllClear {
+            return other;
+        }
+        match (self.special, other.special) {
+            (Special::AllSet, Special::AllSet) => {
+                let start = self.start.max(other.start);
+                let end = self.end.min(other.end);
+                if start >= end {
+                    Self {
+                        special: Special::AllClear,
+                        ..self
+                    }
+                } else {
+                    Self::new(start, end, Special::AllSet)
+                }
+            }
+            (Special::AllSet, _) => other,
+            _ => self,
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfilter.cpp:57-78
+// ```c++
+//     ITERATE(vector<CSeqDB_BasePath>, iter, m_Volumes) {
+//         if (iter->GetBasePathS() == volname) {
+//             clone->AddVolume(*iter);
+//         }
+//     }
+//
+//     // If this node is an placeholder with a single child node,
+//     // replace this node with the child node.
+//
+//     while(clone->m_Filters.empty() &&
+//           clone->m_Volumes.empty() &&
+//           clone->m_SubNodes.size() == 1) {
+//
+//         CRef<CSeqDB_FilterTree> sub = clone->m_SubNodes[0];
+//         clone = sub;
+//     }
+//
+//     if (clone->m_SubNodes.empty() && clone->m_Volumes.empty()) {
+//         clone.Reset();
+//     }
+//
+//     return clone;
+// ```
+// (The first half of `Specialize` is quoted at `range_mask`.) The filters of a node are its
+// OID range, the only alias filter LOSAT reads (`UNSUPPORTED_KEYS`).
+/// A node of NCBI's filter tree specialised to one volume (`CSeqDB_FilterTree::Specialize`):
+/// its OID range, its sub-nodes, and how many times it names the volume.
+struct VolumeNode {
+    range: Option<OidRange>,
+    nodes: Vec<VolumeNode>,
+    volumes: usize,
+}
+
+/// `Specialize(volume)` of the tree under `node`; `None` when no branch reaches the volume.
+fn specialize(node: &AliasNode, volume: &str) -> Option<VolumeNode> {
+    let mut clone = VolumeNode {
+        range: node.range,
+        nodes: Vec::new(),
+        volumes: 0,
+    };
+    for sub in node.subnodes.iter().filter_map(|sub| specialize(sub, volume)) {
+        if sub.range.is_some() {
+            clone.nodes.push(sub);
+        } else {
+            clone.nodes.extend(sub.nodes);
+            clone.volumes += sub.volumes;
+        }
+    }
+    clone.volumes += node.vol_names.iter().filter(|name| *name == volume).count();
+    while clone.range.is_none() && clone.volumes == 0 && clone.nodes.len() == 1 {
+        clone = clone.nodes.pop().expect("one sub-node");
+    }
+    (!clone.nodes.is_empty() || clone.volumes > 0).then_some(clone)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:145-177
+// ```c++
+//     if (vols > 0) {
+//         ...
+//         volume_map.Reset(new CSeqDB_BitSet(vol_start,
+//                                      vol_end,
+//                                      CSeqDB_BitSet::eAllSet));
+//     } else {
+//         // Since this node did not have a volume, we OR together all
+//         // of its subnodes.
+//
+//         volume_map.Reset(new CSeqDB_BitSet(vol_start,
+//                                      vol_end,
+//                                      CSeqDB_BitSet::eAllClear));
+//
+//         ITERATE(vector< CRef< CSeqDB_FilterTree > >, sub, ft->GetNodes()) {
+//             CRef<CSeqDB_BitSet> sub_bits =
+//                 x_ComputeFilters(**sub, vol, gis, locked, isBlastDBv5);
+//
+//             volume_map->UnionWith(*sub_bits, true);
+//         }
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:191-207
+// ```c++
+//     CRef<CSeqDB_BitSet> filter(new CSeqDB_BitSet(vol_start,
+//                                                  vol_end,
+//                                                  CSeqDB_BitSet::eAllSet));
+//     ...
+//         if (mask.GetType() == CSeqDB_AliasMask::eOidRange) {
+//             CSeqDB_BitSet r2(mask.GetBegin(),
+//                                 mask.GetEnd(),
+//                                 CSeqDB_BitSet::eAllSet);
+//             filter->IntersectWith(r2, true);
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:290-291
+// ```c++
+//     volume_map->IntersectWith(*filter, true);
+//     return volume_map;
+// ```
+/// The shape of the OIDs `[start, end)` of one volume that the specialised tree `node` keeps
+/// (`CSeqDBOIDList::x_ComputeFilters`).
+fn volume_bits(node: &VolumeNode, start: u64, end: u64) -> BitSetShape {
+    let map = if node.volumes > 0 {
+        BitSetShape::new(start, end, Special::AllSet)
+    } else {
+        node.nodes.iter().fold(
+            BitSetShape::new(start, end, Special::AllClear),
+            |map, sub| map.union_with(volume_bits(sub, start, end)),
+        )
+    };
+    let mut filter = BitSetShape::new(start, end, Special::AllSet);
+    if let Some(range) = node.range {
+        let (begin, end) = range.bounds();
+        filter = filter.intersect_with(BitSetShape::new(bound(begin), bound(end), Special::AllSet));
+    }
+    map.intersect_with(filter)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:80-99
+// ```c++
+//     m_NumOIDs = volset.GetNumOIDs();
+//
+//     m_AllBits.Reset(new CSeqDB_BitSet(0, m_NumOIDs));
+//     ...
+//     for(int i = 0; i < volset.GetNumVols(); i++) {
+//         const CSeqDBVolEntry * v1 = volset.GetVolEntry(i);
+//
+//         CRef<CSeqDB_BitSet> vol_bits =
+//             x_ComputeFilters(filters, *v1, gi_list_set, locked, lmdb_set.IsBlastDBVersion5());
+//
+//         m_AllBits->UnionWith(*vol_bits, true);
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:338-348
+// ```c++
+// void CSeqDB_BitSet::x_Copy(CSeqDB_BitSet & other, bool consume)
+// {
+//     if (consume && other.m_Special == eNone) {
+//         Swap(other);
+//     } else {
+//         m_Start   = other.m_Start;
+//         m_End     = other.m_End;
+//         m_Special = other.m_Special;
+//         m_Bits    = other.m_Bits;
+//     }
+// }
+// ```
+// `m_AllBits` starts as a bit array of every OID. It becomes the special all-set only by the
+// copy of a volume's special all-set that covers every OID: one volume whose filters keep all
+// of it as a special set (no OID range inside it, no two range nodes ORed). Its `m_Bits`
+// then takes the empty vector of the copy, and keeps the array of the volume set as its
+// capacity (`vector::operator=` reuses the storage).
+/// Whether NCBI's OID bit set of the volume set (`CSeqDBOIDList::m_AllBits`) is the special
+/// all-set one after the OID ranges of the alias tree `root` (`x_Setup`), the volumes `names`
+/// (in NCBI's order) holding the global OIDs `starts[i]..starts[i + 1]`.
+pub(super) fn all_bits_special_set(root: &AliasNode, names: &[String], starts: &[u32]) -> bool {
+    let mut all = BitSetShape::new(0, u64::from(starts[names.len()]), Special::None);
+    for (at, name) in names.iter().enumerate() {
+        let node = specialize(root, name).expect("the alias tree reaches every volume");
+        all = all.union_with(volume_bits(
+            &node,
+            u64::from(starts[at]),
+            u64::from(starts[at + 1]),
+        ));
+    }
+    all.special == Special::AllSet
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:247-258

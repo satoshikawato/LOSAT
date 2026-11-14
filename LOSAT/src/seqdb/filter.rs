@@ -2643,13 +2643,59 @@ impl SeqDb {
     // 	    m_AllBits->ClearBit(excluded_oids[i]);
     // 	}
     // ```
-    // A text list that lost every id (all `gi|N`): NCBI warns `Empty seqid list` and searches
-    // the whole database, positive or negative (probe S17, S18, R08, R09 of
-    // dropin-survey-20261029/DI8: 500 hits of 514 sequences, the statistics of the whole
-    // database; a positive list with no id would clear every OID by the code above, which
-    // the run does not show). LOSAT does what the run shows: the warnings, every OID kept,
-    // and, as NCBI's `CSeqDBImpl` still scans the totals for a list (`x_ScanTotals`,
-    // approximate nucleotide lengths, the shortest length), the scanned totals.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:376-381
+    // ```c++
+    // void CSeqDB_BitSet::AssignBitRange(size_t start, size_t end, bool value)
+    // {
+    //     _ASSERT(start >= m_Start && end <= m_End);
+    //
+    //     if ((start + eWordBits*3) > end) {
+    //         for(size_t i = start; i < end; i++) {
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:75-88
+    // ```c++
+    // void CSeqDB_BitSet::ClearBit(size_t index)
+    // {
+    //     _ASSERT(m_Special == eNone);
+    //     _ASSERT(index >= m_Start);
+    //     _ASSERT(index < m_End);
+    //
+    //     index -= m_Start;
+    //
+    //     size_t vx = index >> eWordShift;
+    //     int wx = index & eWordMask;
+    //
+    //     _ASSERT(m_Bits.size() > vx);
+    //     m_Bits[vx] &= ~(TByte(0x80 >> wx));
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:90-100
+    // ```c++
+    // bool CSeqDB_BitSet::CheckOrFindBit(size_t & index) const
+    // {
+    //     if (index < m_Start)
+    //         index = m_Start;
+    //
+    //     if (index >= m_End)
+    //         return false;
+    //
+    //     if (m_Special == eAllSet) {
+    //         return true;
+    //     }
+    // ```
+    // A text list that lost every id (all `gi|N`): NCBI warns `Empty seqid list`. A negative
+    // one excludes nothing. A positive one is empty (`gis.Empty()`), and `x_ApplyUserGiList`
+    // clears every OID of `m_AllBits` (the code above): no OID is searched and each query
+    // gets `Filtering resulted in an empty database.` (a database of two or more volumes, or
+    // one volume inside an OID range of the alias files). When `m_AllBits` is the special
+    // all-set (one volume that the alias files keep whole, `alias::all_bits_special_set`),
+    // `ClearBit` writes into the array its copy left behind (a debug build's `_ASSERT(m_Special
+    // == eNone)` is off) and the set still answers every OID: NCBI searches the whole database
+    // (probe S17, S18, R08, R09 of dropin-survey-20261029/DI8: 500 hits of 514 sequences, the
+    // statistics of the whole database; line DBID gisl: 1, 2, 3 volumes and 14 alias shapes, 6
+    // programs). LOSAT does what the runs show: the warnings, every OID kept or none, and, as
+    // NCBI's `CSeqDBImpl` still scans the totals for a list (`x_ScanTotals`, approximate
+    // nucleotide lengths, the shortest length), the scanned totals.
     // The ids of a binary list are used as written (the alias tool wrote them as the
     // processing writes them). The lists the volumes keep for the filtered header read are
     // the processed ids.
@@ -2680,7 +2726,12 @@ impl SeqDb {
             if ids.is_empty() {
                 warnings.push(ListWarning::Posted(EMPTY_LIST_WARNING.to_string()));
                 let num_oids = self.volume_starts[self.volumes.len()];
-                let words = vec![u64::MAX; (num_oids as usize).div_ceil(64)];
+                let kept = if list.negative || self.all_bits_special_set {
+                    u64::MAX
+                } else {
+                    0
+                };
+                let words = vec![kept; (num_oids as usize).div_ceil(64)];
                 return self.apply_filter(words, num_oids, None);
             }
             ids
@@ -3710,7 +3761,7 @@ mod tests {
     }
 
     #[test]
-    fn a_list_that_loses_every_id_leaves_a_version_5_database_whole() {
+    fn a_list_that_loses_every_id_leaves_a_version_5_database_of_one_volume_whole() {
         let whole = ids_db("prot_v5", SeqType::Protein).num_seqs();
         for negative in [false, true] {
             let mut db = ids_db("prot_v5", SeqType::Protein);
@@ -3731,6 +3782,52 @@ mod tests {
             assert_eq!(db.num_seqs(), whole);
             assert_eq!(kept_ids(&db).len(), whole as usize);
             assert!(db.min_length() > 0);
+        }
+    }
+
+    // Line DBID gisl: `x_ApplyUserGiList` clears every OID of a positive list that lost every id,
+    // except where NCBI's OID bit set is the special all-set (one volume that the alias files
+    // keep whole); a negative one excludes nothing.
+    #[test]
+    fn a_positive_list_that_loses_every_id_keeps_no_oid_unless_one_volume_is_kept_whole() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search");
+        for (name, seqtype, whole) in [
+            ("taxfilter/tfp", SeqType::Protein, true),
+            // `FIRST_OID 1`, `LAST_OID 23`: the whole volume.
+            ("aliaskeys/p_r123", SeqType::Protein, true),
+            // A range and the volume itself; the same volume twice.
+            ("aliaskeys/p_twice", SeqType::Protein, true),
+            ("aliaskeys/p_dupvol", SeqType::Protein, true),
+            // The whole volume and a range inside it, in both orders.
+            ("aliaskeys/p_cover", SeqType::Protein, true),
+            ("aliaskeys/p_coverr", SeqType::Protein, true),
+            // A range inside the volume; two ranges ORed, and two whose union is the volume.
+            ("aliaskeys/p_range", SeqType::Protein, false),
+            ("aliaskeys/p_union", SeqType::Protein, false),
+            ("aliaskeys/p_halves", SeqType::Protein, false),
+            // Two volumes; one of them inside a range.
+            ("taxfilter/tfn", SeqType::Nucleotide, false),
+            ("aliaskeys/n_vol1", SeqType::Nucleotide, false),
+        ] {
+            let path = root.join(name);
+            let path = path.to_str().unwrap();
+            let unrestricted = SeqDb::open(path, seqtype).unwrap().num_seqs();
+            for negative in [false, true] {
+                let mut db = SeqDb::open(path, seqtype).unwrap();
+                let mut warnings = Vec::new();
+                db.restrict(
+                    &DbList::Seqids(list_of(b"gi|1414\n", negative)),
+                    &mut warnings,
+                )
+                .unwrap();
+                assert_eq!(
+                    warnings.last(),
+                    Some(&ListWarning::Posted(EMPTY_LIST_WARNING.to_string())),
+                    "{name}"
+                );
+                let kept = if negative || whole { unrestricted } else { 0 };
+                assert_eq!(db.num_seqs(), kept, "{name}, negative {negative}");
+            }
         }
     }
 

@@ -683,7 +683,7 @@ impl SeqDb {
     /// it from one that holds only the ordinal ids.
     ///
     /// Column files (the mask data of `makeblastdb -mask_data`, user columns) are not read
-    /// when the database is opened: [`SeqDb::mask_algorithms`] and [`SeqDb::mask_ranges`]
+    /// when the database is opened: [`SeqDb::mask_algorithms`] and [`SeqDb::mask_ranges_at`]
     /// (`losat blastdbcmd`) open them on first use, as NCBI does, and LOSAT's searches never
     /// ask for them (`Volume::open_as`).
     pub fn open_in(name: &str, seqtype: SeqType, path: &SearchPath) -> Result<Self, SeqDbError> {

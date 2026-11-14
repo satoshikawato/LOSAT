@@ -672,8 +672,8 @@ pub enum DatabaseHeading<'a> {
 }
 
 impl<'a> DatabaseHeading<'a> {
-    /// The Seq-id text that outfmt 0 writes in place of the subject's alignments ("Sequence with
-    /// id <id> no longer exists in database...alignment skipped", showalign.cpp:1976-1981, quoted
+    /// The Seq-id text that outfmt 0 writes in place of the subject's alignments (`Sequence with
+    /// id <id> no longer exists in database...alignment skipped`, showalign.cpp:1976-1981, quoted
     /// at `ParsedSubject::heading_skipped_id`) where the heading's generated title throws: an empty
     /// stored title made from a name that NCBI cannot decode (`SourceTaxname::undecodable_id`), or
     /// the generated title of a sequence with parsed Seq-ids (`heading_skipped_id`).

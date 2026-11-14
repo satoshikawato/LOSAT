@@ -271,7 +271,7 @@ fn start(
     words: &[&str],
     run_files: &RunFiles,
     diagnostics: &mut dyn std::io::Write,
-) -> Result<CallerStart, (String, Option<CallerStart>)> {
+) -> Result<CallerStart, (String, Option<Box<CallerStart>>)> {
     let (name, arguments) = words.split_first().unwrap_or((&"", &[]));
     if let Err(error) = Program::parse(name) {
         return Err((parse(words).err().unwrap_or(error), None));
@@ -287,7 +287,7 @@ fn start(
     )
     .map_err(|message| (message, None))?;
     match start.ended() {
-        Some(message) => Err((message.to_string(), Some(start))),
+        Some(message) => Err((message.to_string(), Some(Box::new(start)))),
         None => Ok(start),
     }
 }
@@ -1202,7 +1202,7 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
             run_started(words, query, subject, &mut started, &mut diagnostics),
             Some(started),
         ),
-        Err((message, started)) => (Err(message), started),
+        Err((message, started)) => (Err(message), started.map(|started| *started)),
     };
     // The run's files (the file of `-logfile`), after the run, whether it failed or not.
     let handed = started.map_or(Ok(()), CallerStart::finish);
@@ -1300,11 +1300,15 @@ fn run_started(
     Ok(())
 }
 
+/// The HSP records of the tabular search (`emit_hit_records`): its hits, the recorder of their
+/// ranges and the hits' ordinals.
+type HitRecords = (Arc<Vec<PairwiseHit>>, RangeRecorder, Option<Vec<usize>>);
+
 /// What the searches of a run wrote (`search_all`): the streams of the formats, and the HSP
 /// records of the tabular search.
 struct Done {
     writers: Vec<StreamWriter>,
-    records: Option<(Arc<Vec<PairwiseHit>>, RangeRecorder, Option<Vec<usize>>)>,
+    records: Option<HitRecords>,
 }
 
 /// The searches of a run of the parsed argv `parsed` (`run`): the messages that the command line

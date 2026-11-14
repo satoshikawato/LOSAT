@@ -121,11 +121,10 @@ fn batch_sizes(
             }
             None => QueryBatchSizes::new(args, inputs.subject)?,
         }),
-        Commands::Blastp(_) => BatchSizes::Fixed(query_batch_size("BLASTP", 10000)?),
-        Commands::Tblastn(_) => BatchSizes::Fixed(query_batch_size("TBLASTN", 20000)?),
-        Commands::Tblastx(_) => BatchSizes::Fixed(query_batch_size("TBLASTX", 10002)?),
+        Commands::Blastp(_) => BatchSizes::Fixed(query_batch_size(10000)?),
+        Commands::Tblastn(_) => BatchSizes::Fixed(query_batch_size(20000)?),
+        Commands::Tblastx(_) => BatchSizes::Fixed(query_batch_size(10002)?),
         Commands::Blastx(_) => BatchSizes::Fixed(query_batch_size(
-            "BLASTX",
             crate::algorithm::blastx::QUERY_BATCH_SIZE as u32,
         )?),
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:468-468

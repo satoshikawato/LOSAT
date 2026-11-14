@@ -605,6 +605,11 @@ pub struct BlastpArgs {
     /// (`strategy::StrategyExport::for_run`).
     #[arg(skip)]
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
+    /// The recorded options of the search strategy's requests of an application whose search is
+    /// BLASTP's (psiblast, rpsblast: `archive::option_inputs`), made by its command line from its
+    /// own arguments as given, with `-export_search_strategy`; `None` for BLASTP's.
+    #[arg(skip)]
+    pub request_inputs: Option<Box<crate::report::archive::options::OptionInputs>>,
     /// The application whose search this is: psiblast's command line sets it
     /// (`algorithm/psiblast`).
     #[arg(skip)]
@@ -993,7 +998,7 @@ impl ResolvedBlastpArgs {
     /// reads no variable (a batch of one query, and of the queries without letters before it).
     pub fn query_batch_size(&self) -> Result<u32> {
         match self.app {
-            BlastpApp::Blastp => crate::blastinput::app::query_batch_size("BLASTP", 10000),
+            BlastpApp::Blastp => crate::blastinput::app::query_batch_size(10000),
             BlastpApp::Psiblast => Ok(1),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:141-144
             // ```c++
@@ -1003,7 +1008,7 @@ impl ResolvedBlastpArgs {
             //     return blast::GetQueryBatchSize(eRPSBlast, m_IsUngapped, is_remote);
             // ```
             // (`eRPSBlast` takes the default of `GetQueryBatchSize`, 10000, or `BATCH_SIZE`.)
-            BlastpApp::Rpsblast => crate::blastinput::app::query_batch_size("RPSBLAST", 10000),
+            BlastpApp::Rpsblast => crate::blastinput::app::query_batch_size(10000),
         }
     }
 }
@@ -1199,7 +1204,6 @@ impl BlastpArgs {
         let query_range = crate::blastinput::seq_range::parse_optional_range(
             self.query_loc.as_deref(),
             crate::blastinput::seq_range::RangeRole::Query,
-            self.app.name(),
         )?;
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886 and
         // 2960-2977 (the formatting handler: other programs' formats, the hit list size

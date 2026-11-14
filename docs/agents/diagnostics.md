@@ -4134,8 +4134,8 @@ Scheduling (each value computed by one thread with the original function; order 
   its arena, once to count and once to place (so the build holds one chunk's words, the fill's arena, not the whole
   query's), each thread owns a contiguous run of cell blocks, and the whole build is one `rayon::broadcast` whose
   threads pass a spin barrier between the reading and the owners' work of each chunk. The scans read a word's run
-  instead of walking its chain: the strip scan of PAIRPAR (`scan_strip_csr`) and the reference scan of
-  `search_query_batch` put the words with hits (after the presence test) through the FIFO of `LOSAT_X_DCCSR`; the
+  instead of walking its chain: the strip scan of PAIRPAR (`scan_strip_csr`) and the reference scan of a
+  two-stage table (`two_stage_scan.rs` `scan_two_stage_lookup`) put the words with hits (after the presence test) through the FIFO of `LOSAT_X_DCCSR`; the
   words, pairs and their order are the chain walk's. `for_each_hit`, `count_hits` and the masked-word test of
   `s_TypeOfWord` (`contains_hit`) read the run where the table has no chains. The `[TIMING] x_mb_lookup_build`
   interval includes the CSR builds (in `loop` or `pool_fill`), and `[TIMING] x_bn_csr: builds= parallel= words=`
@@ -4165,8 +4165,9 @@ Scheduling (each value computed by one thread with the original function; order 
   cDNAs: max RSS 2 MiB above dev at the run's last 1-3 % while the live data was 12 MiB below it, read with the mmap
   threshold pinned in a diagnostic run, s27 w21). The table's form is chosen once per table (`Csr::x_packed`):
   `Csr::run` and `Ring` are the code of a head of one element per cell, used by every discontiguous table and by a
-  contiguous one with the switch off, and the contiguous scans (`scan_strip_csr`, the reference scan of
-  `search_query_batch`) are generic over `x_dc_csr::XHead`, so each form's scan is compiled on its own (the
+  contiguous one with the switch off, and the contiguous scans (`scan_strip_csr`, generic over
+  `x_dc_csr::XHead`, and the reference scan's `x_scan_csr!` in `scan_two_stage_lookup`, a macro expanded once per
+  head form) compile each form's scan on its own (the
   dc-megablast and `=0` scans have dev's instructions). The packed ring (`XRingPacked`) drops a word of an empty cell
   (its run is empty, so the emit would read nothing) and prefetches the rank's two offsets; the one-word answers of
   the lookup (`for_each_hit`, `count_hits`, `contains_hit`) read either form (`Csr::x_run_any`). The build counts each

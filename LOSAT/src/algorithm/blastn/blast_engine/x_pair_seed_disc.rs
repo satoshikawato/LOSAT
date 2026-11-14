@@ -225,7 +225,8 @@ fn in_scope_array(x: &Inputs<'_>) -> bool {
 /// ```
 /// Phase 1 for one strip: the discontiguous scan kernel `scan_subject_disc_words_with_ranges`
 /// picks (`choose_disc_scan_subject`), from `job.start` to `job.end` (stride 1); every word's
-/// first-template chain, then its second-template chain, as `on_word` walks them; every pair
+/// first-template chain, then its second-template chain, as `on_word` of
+/// `two_stage_scan::scan_two_stage_lookup` walks them; every pair
 /// through `seed_of_pair`, into `out` (a list, or with LOSAT_X_DCSEEDLEAN the strip's
 /// partitions' lists).
 fn scan_strip_disc<O: SeedOut>(x: &Inputs<'_>, disc: &DiscTemplates, job: &StripJob, out: &mut O) {

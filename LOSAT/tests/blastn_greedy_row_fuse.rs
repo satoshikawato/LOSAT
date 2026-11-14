@@ -22,6 +22,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 const OFF: (&str, &str) = ("LOSAT_X_GREEDYROWFUSE", "0");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const LINE: &str = "[X_STATS] GREEDYROWFUSE ";
@@ -42,7 +45,7 @@ fn megablast(
     outfmt: &str,
     threads: u32,
     variables: &[(&str, &str)],
-) -> (Vec<u8>, String) {
+) -> (Vec<u8>, String, Option<TempFile>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -52,12 +55,7 @@ fn megablast(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-greedyrowfuse-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastn_greedy_row_fuse_worker");
     let output = command
         .arg("blastn")
         .args(["-task", "megablast"])
@@ -75,7 +73,7 @@ fn megablast(
         output.status.success(),
         "{query} x {subject} {variables:?} threads {threads}: {stderr}"
     );
-    (output.stdout, stderr)
+    (output.stdout, stderr, log)
 }
 
 /// `kernel=` and `fused_rows=` of the one `[X_STATS] GREEDYROWFUSE` line; `None` without it.
@@ -142,7 +140,7 @@ fn check_line(stderr: &str, off: bool, what: &str) {
 #[test]
 fn megablast_with_fused_rows_gives_the_ncbi_report() {
     let ncbi: &[u8] = include_bytes!("fixtures/megablast_automatic_xdrop.outfmt6");
-    let (report, stderr) = megablast("NZ_CP006932.fasta", "NZ_CP006932.fasta", "6", 1, &[]);
+    let (report, stderr, _log) = megablast("NZ_CP006932.fasta", "NZ_CP006932.fasta", "6", 1, &[]);
     assert!(
         report == ncbi,
         "NZ_CP006932: the report differs from NCBI's"
@@ -153,7 +151,7 @@ fn megablast_with_fused_rows_gives_the_ncbi_report() {
         if off {
             variables.push(OFF);
         }
-        let (report, stderr) =
+        let (report, stderr, _log) =
             megablast("NZ_CP006932.fasta", "NZ_CP006932.fasta", "6", 1, &variables);
         let what = format!("NZ_CP006932 off={off}");
         assert!(report == ncbi, "{what}: the report differs from NCBI's");
@@ -171,16 +169,16 @@ fn megablast_with_fused_rows_gives_the_ncbi_report() {
 #[test]
 fn megablast_with_fused_rows_gives_the_report_without_them() {
     const OUTFMT: &str = "0";
-    let (reference, stderr) = megablast("Sakai.fna", "MG1655.fna", OUTFMT, 1, &[OFF]);
+    let (reference, stderr, _log) = megablast("Sakai.fna", "MG1655.fna", OUTFMT, 1, &[OFF]);
     assert!(!reference.is_empty(), "no hits");
     assert_eq!(stderr, "");
-    let (report, stderr) = megablast("Sakai.fna", "MG1655.fna", OUTFMT, 1, &[]);
+    let (report, stderr, _log) = megablast("Sakai.fna", "MG1655.fna", OUTFMT, 1, &[]);
     assert!(
         report == reference,
         "Sakai x MG1655: the report differs from =0's"
     );
     assert_eq!(stderr, "", "Sakai x MG1655");
-    let (report, stderr) = megablast("Sakai.fna", "MG1655.fna", OUTFMT, 4, &[STATS]);
+    let (report, stderr, _log) = megablast("Sakai.fna", "MG1655.fna", OUTFMT, 4, &[STATS]);
     assert!(
         report == reference,
         "Sakai x MG1655 threads 4: the report differs from =0's"

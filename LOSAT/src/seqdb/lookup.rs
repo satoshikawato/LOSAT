@@ -623,6 +623,35 @@ pub struct SeqidLookup<'a> {
     volumes: IdLookup<'a>,
     /// Each LMDB file of the database with its environment (version 5), in the database's order.
     envs: Vec<(&'a LmdbEntry, Env<'a, DbFile>)>,
+    /// What the lookups keep of each LMDB file of `envs` (`LmdbKept`).
+    kept: std::cell::RefCell<Vec<LmdbKept>>,
+}
+
+/// What a `SeqidLookup` keeps of one LMDB file between its lookups.
+#[derive(Default)]
+struct LmdbKept {
+    /// The `acc2oid` database once opened (`LmdbEntry::acc2oid_in`).
+    acc2oid: Option<super::lmdb_read::Db>,
+    /// Whether a key starts with each prefix that `case_folded_oids` asked about (the reported
+    /// sequences' names share their first letters).
+    prefixes: rustc_hash::FxHashMap<Vec<u8>, bool>,
+}
+
+impl LmdbKept {
+    /// The `acc2oid` database of `entry`'s file opened as `env`, opened at the first lookup (an
+    /// error is not kept: each lookup fails as NCBI's).
+    fn acc2oid(
+        &mut self,
+        entry: &LmdbEntry,
+        env: &Env<'_, DbFile>,
+    ) -> Result<super::lmdb_read::Db, SeqDbError> {
+        if let Some(db) = self.acc2oid {
+            return Ok(db);
+        }
+        let db = entry.acc2oid_in(env)?;
+        self.acc2oid = Some(db);
+        Ok(db)
+    }
 }
 
 impl SeqDb {
@@ -657,6 +686,7 @@ impl SeqDb {
                 entries: Vec::new(),
                 isams: Isams::Shared(isams),
             },
+            kept: std::cell::RefCell::new(envs.iter().map(|_| LmdbKept::default()).collect()),
             envs,
         })
     }
@@ -740,13 +770,9 @@ impl SeqidLookup<'_> {
     /// The OIDs of a version 5 database under the upper-case key of `seqid` (for a `pdb` id its
     /// molecule in upper case), the search's list's OIDs only: every sequence that holds an id
     /// that differs from `seqid` in case alone. Empty for version 4, whose string ISAM keys are in
-    /// lower case, and for the other ids.
+    /// lower case, and for the other ids (a text, `pir` or `prf` id: `case_variant_oids`).
     pub fn case_folded_oids(&self, seqid: &ParsedSeqId) -> Result<Vec<u32>, SeqDbError> {
-        let db = self.volumes.db;
-        let bl_ord_id = matches!(seqid, ParsedSeqId::General(tag) if tag.db == b"BL_ORD_ID");
-        if !db.is_version5()
-            || bl_ord_id
-            || !is_string_id(seqid)
+        if !self.keys_in_lmdb(seqid)
             || seqid.textseq().is_some()
             || matches!(seqid, ParsedSeqId::Pir(_) | ParsedSeqId::Prf(_))
         {
@@ -761,9 +787,80 @@ impl SeqidLookup<'_> {
                 key
             }
         };
+        self.lmdb_oids(&key)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:128-131
+    // ```c++
+    //     if(seqid->IsPir() || seqid->IsPrf()) {
+    //     	SKeyValuePair kv_pir;
+    //     	kv_pir.id = seqid->AsFastaString();
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:160-176
+    // ```c++
+    //     if(seqid->GetTextseq_Id() != NULL) {
+    //     	SKeyValuePair kv;
+    //     	kv.id = seqid->GetSeqIdString(false);
+    //     	kv.oid = oid;
+    //     	string id_v = seqid->GetSeqIdString(true);
+    //     	if( kv.id != id_v) {
+    //     		m_list.push_back(kv);
+    //     		SKeyValuePair kv_v;
+    //     		kv_v.id = id_v;
+    // ```
+    // A text Seq-id's key has no upper-case copy: an accession's is in upper case
+    // (`GetSeqIdString`, `seqid::label::content`), so the lookup finds every holder of it, but a
+    // name alone and a `pir` or `prf` id's FASTA text (also its accession) are as written, and
+    // NCBI's handles take `pir||pirname` and `pir||PIRNAME`, `gb||locusy` and `gb||LOCUSY` for one
+    // (`CSeq_id_Textseq_Tree::x_FindStrInfo` and `x_Equals`, seq_id_tree.cpp:1064-1112;
+    // `seqid::mask_handle::mask_handle_key`): LOSAT looks up every other key that differs in the
+    // case of those letters (`tax_files::acc_case_variant_oids`; probe of line DBID pircase,
+    // `blastdb-ids-20261021/R/pircase`). The key of a name alone is the same in every alternative
+    // (`gb||locusy`, `emb||LOCUSY`, `sp||LOCUSY`), which the handles keep apart: the caller keeps
+    // the sequences that hold an id of the same handle.
+    /// The OIDs of a version 5 database under the other keys that differ from the key of `seqid`
+    /// only in the case of its letters, the search's list's OIDs only, for a text id of a name
+    /// alone and a `pir` or `prf` id (not the `pir|` or `prf|` before its FASTA text): the
+    /// sequences that can hold an id that differs from `seqid` in case alone. Empty for version 4,
+    /// whose string ISAM keys are in lower case, for a text id with an accession, whose key is in
+    /// upper case, and for the other ids (`case_folded_oids`).
+    pub fn case_variant_oids(&self, seqid: &ParsedSeqId) -> Result<Vec<u32>, SeqDbError> {
+        if !self.keys_in_lmdb(seqid) {
+            return Ok(Vec::new());
+        }
+        let mut key = Vec::new();
+        let from = if matches!(seqid, ParsedSeqId::Pir(_) | ParsedSeqId::Prf(_)) {
+            label::fasta(seqid, &mut key);
+            b"pir|".len()
+        } else if seqid.textseq().is_some_and(|text| text.accession.is_none()) {
+            label::content(seqid, true, &mut key);
+            0
+        } else {
+            return Ok(Vec::new());
+        };
         let mut oids = Vec::new();
-        for (entry, env) in &self.envs {
-            let found = entry.oids_in(env, &key)?;
+        let mut kept = self.kept.borrow_mut();
+        for ((entry, env), kept) in self.envs.iter().zip(kept.iter_mut()) {
+            let db = kept.acc2oid(entry, env)?;
+            let found = entry.case_variant_oids_in(env, &db, &key, from, &mut kept.prefixes)?;
+            oids.extend(
+                found
+                    .into_iter()
+                    .filter_map(|oid| entry.database_oid(oid))
+                    .filter(|&oid| self.volumes.visible(oid)),
+            );
+        }
+        Ok(oids)
+    }
+
+    /// The OIDs of the key `key` in every LMDB file (`LmdbEntry::oids_of`), in the files' order,
+    /// the search's list's OIDs only.
+    fn lmdb_oids(&self, key: &[u8]) -> Result<Vec<u32>, SeqDbError> {
+        let mut oids = Vec::new();
+        let mut kept = self.kept.borrow_mut();
+        for ((entry, env), kept) in self.envs.iter().zip(kept.iter_mut()) {
+            let db = kept.acc2oid(entry, env)?;
+            let found = entry.oids_of(env, &db, key)?;
             oids.extend(
                 found
                     .into_iter()
@@ -862,17 +959,7 @@ impl SeqidLookup<'_> {
             } else {
                 label::content(seqid, true, &mut key);
             }
-            let mut oids = Vec::new();
-            for (entry, env) in &self.envs {
-                let found = entry.oids_in(env, &key)?;
-                oids.extend(
-                    found
-                        .into_iter()
-                        .filter_map(|oid| entry.database_oid(oid))
-                        .filter(|&oid| self.volumes.visible(oid)),
-                );
-            }
-            return Ok(oids);
+            return self.lmdb_oids(&key);
         }
         let simplified =
             seqdb_simplify_seqid(seqid).map_err(|error| SeqDbError::NotFound(error.to_string()))?;

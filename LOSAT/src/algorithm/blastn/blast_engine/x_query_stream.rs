@@ -1276,12 +1276,8 @@ mod tests {
             "2-3",
             "1000-2000",
         ] {
-            let range = crate::blastinput::seq_range::parse_sequence_range(
-                text,
-                RangeRole::Query,
-                "BLASTN",
-            )
-            .unwrap();
+            let range =
+                crate::blastinput::seq_range::parse_sequence_range(text, RangeRole::Query).unwrap();
             let cut = cut_queries(&records, &range);
             let (input, searched) = query_input_of(lengths.to_vec(), Some(&range));
             same_query_input(&input, &cut.input).unwrap_or_else(|error| panic!("{text}: {error}"));
@@ -1536,12 +1532,8 @@ mod tests {
     /// first, in batches of every size, with and without `-query_loc`.
     #[test]
     fn the_second_reading_reads_the_records_of_the_first() {
-        let range = crate::blastinput::seq_range::parse_sequence_range(
-            "50-1200",
-            RangeRole::Query,
-            "BLASTN",
-        )
-        .unwrap();
+        let range = crate::blastinput::seq_range::parse_sequence_range("50-1200", RangeRole::Query)
+            .unwrap();
         let (mut warned, mut failed, mut long) = (0, 0, 0);
         for seed in 1..=40u64 {
             let file = TempFile::new("records", &text(seed));
@@ -1567,12 +1559,8 @@ mod tests {
     #[cfg(all(unix, feature = "parallel"))]
     #[test]
     fn the_second_reading_in_parts_reads_the_records_of_the_first() {
-        let range = crate::blastinput::seq_range::parse_sequence_range(
-            "50-1200",
-            RangeRole::Query,
-            "BLASTN",
-        )
-        .unwrap();
+        let range = crate::blastinput::seq_range::parse_sequence_range("50-1200", RangeRole::Query)
+            .unwrap();
         let (mut in_parts, mut warned) = (0, 0);
         for seed in 1..=60u64 {
             let text = text(seed);

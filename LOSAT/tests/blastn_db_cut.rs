@@ -24,6 +24,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 mod reach_support;
 
 fn fixture(name: &str) -> PathBuf {
@@ -47,6 +50,8 @@ fn genome(name: &str) -> Vec<u8> {
 
 /// What one run printed: the report and standard error.
 struct Run {
+    /// The run\'s worker log, when the test made one: kept until the caller drops the run.
+    _log: Option<TempFile>,
     code: Option<i32>,
     stdout: Vec<u8>,
     stderr: String,
@@ -160,12 +165,7 @@ fn blastn_any_exit(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bndbcut-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastn_db_cut_worker");
     let output = command
         .arg("blastn")
         .args(["-task", task])
@@ -179,6 +179,7 @@ fn blastn_any_exit(
         .output()
         .expect("run LOSAT");
     Run {
+        _log: log,
         code: output.status.code(),
         stdout: output.stdout,
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),

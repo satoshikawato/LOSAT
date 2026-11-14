@@ -131,7 +131,7 @@ impl TblastnArgs {
             // ```
             // A PSSM search's request is the PSSM one (program `blastp`, service `psi`, the
             // whole `PssmWithParameters`; with `-subject` NCBI stops with that error after
-            // the prolog): item F1b of line RG, with psiblast's.
+            // the prolog): item F1b-2 of line RG, with psiblast's.
             if args.in_pssm.is_some() {
                 anyhow::bail!(
                         "-export_search_strategy with -in_pssm is not supported by LOSAT's TBLASTN yet (NCBI writes a PSI-BLAST request with -db and stops with \"Remote PSI-BL2SEQ is not supported\" with -subject)"
@@ -258,7 +258,6 @@ impl TblastnArgs {
             let subject_range = seq_range::parse_optional_range(
                 args.subject_loc.as_deref(),
                 seq_range::RangeRole::Subject,
-                "TBLASTN",
             )?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:230-246
             // ```c++
@@ -976,7 +975,7 @@ fn before_prolog(
     x_subject_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
     diagnostics: &mut dyn Write,
 ) -> Result<u32> {
-    let batch_size = crate::blastinput::app::query_batch_size("TBLASTN", 20000)?;
+    let batch_size = crate::blastinput::app::query_batch_size(20000)?;
     // EXPERIMENT (LOSAT_X_TBNSTORE): a packed subject's length is its store's.
     crate::blastinput::input_files::write_empty_subject_warnings_by_length(
         subjects,
@@ -1170,7 +1169,6 @@ fn run_local_formats(
     let subject_range = seq_range::parse_optional_range(
         args.subject_loc.as_deref(),
         seq_range::RangeRole::Subject,
-        "TBLASTN",
     )?;
     for record in
         &subject_records[..seq_range::subjects_read(subject_records, subject_range.as_ref())]
@@ -1347,8 +1345,7 @@ fn search(
     } else {
         0
     };
-    app::check_search_environment("TBLASTN", database.is_none(), outputs.only_archive())?;
-    app::check_query_split_environment("TBLASTN", false, true)??;
+    app::check_search_environment("TBLASTN", database.is_none())?;
     let subjects = subject_records;
     // The search reads the residues of the subject records in place (NCBI's subjects stay in the
     // reader's records, `CBlastQueryVector`); they are not copied for it. EXPERIMENT
@@ -1467,6 +1464,7 @@ fn search(
         &query_input,
         reading,
         batch_size,
+        true,
         crate::blastinput::query_batch::QueryScopes::of_search(
             believed_queries,
             database.is_none(),
@@ -1891,21 +1889,40 @@ fn search(
                         Err(error) => return Err(error),
                     }
                 }
-                if let Some(scopes) = batches.query_scopes.as_ref() {
-                    crate::algorithm::common::database::refuse_reported_ids_of_queries(
-                        &titles,
-                        batch_results
-                            .iter()
-                            .enumerate()
-                            .flat_map(|(index, hitlist)| {
-                                hitlist.lists().iter().filter_map(move |list| {
-                                    Some((range.start + index, u32::try_from(list.oid).ok()?))
-                                })
-                            }),
-                        scopes,
-                        "TBLASTN",
-                    )?;
-                }
+            }
+            // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:294-299
+            // ```c++
+            //                 if (fmt_args->ArchiveFormatRequested(args)) {
+            //                     formatter.WriteArchive(*query_factory, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+            //                     m_Bah.ResetMessages();
+            //                 } else {
+            //                     BlastFormatter_PreFetchSequenceData(*results, scope,
+            //                     		                            fmt_args->GetFormattedOutputChoice());
+            // ```
+            // The prefetch before the batch's reports reads `PRE_FETCH_SEQS_LIMIT`, after the
+            // batch's search and the read of its titles: a value that NCBI cannot convert fails
+            // the first batch here, before its reports (`app::check_prefetch_environment`).
+            if let Err(error) = app::check_prefetch_environment(outputs.only_archive()) {
+                failed = Some((range, error));
+                break;
+            }
+            // LOSAT's refusal of a reported sequence with the id of a query of its scope, after
+            // NCBI's own errors of the batch: the reports would show it (the prefetch's error
+            // above comes first).
+            if let (Some(_), Some(scopes)) = (database, batches.query_scopes.as_ref()) {
+                crate::algorithm::common::database::refuse_reported_ids_of_queries(
+                    &titles,
+                    batch_results
+                        .iter()
+                        .enumerate()
+                        .flat_map(|(index, hitlist)| {
+                            hitlist.lists().iter().filter_map(move |list| {
+                                Some((range.start + index, u32::try_from(list.oid).ok()?))
+                            })
+                        }),
+                    scopes,
+                    "TBLASTN",
+                )?;
             }
             results.append(&mut batch_results);
             if let Some(all_lengths) = &mut lengths {

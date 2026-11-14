@@ -301,10 +301,11 @@ impl ReportFormat {
 
     /// Whether the report's writer, as the first format, writes the texts of the subjects that a
     /// query's report reads one by one (where the batch's prefetch is off) where it reads each
-    /// (`QueryWarnings::subject_read`): outfmt 0 (description lines and alignment headings), 5
-    /// (`Hit`s), the tabular rows (6, 7, 10 and 20) and the organism report (18, at each
-    /// Seq-align it does not skip, `report::tax_report`); the others write them before the
-    /// query's report.
+    /// (`QueryWarnings::subject_read`): outfmt 0 (description lines and alignment headings), 1 to 4
+    /// (description lines, and the subjects with alignments before the section, which NCBI's
+    /// merge loads first, showalign.cpp:2003), 5 (`Hit`s), the tabular rows (6, 7, 10 and 20) and
+    /// the organism report (18, at each Seq-align it does not skip, `report::tax_report`); the
+    /// others write them before the query's report.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
     /// ```c++
@@ -320,6 +321,10 @@ impl ReportFormat {
         matches!(
             self,
             Pairwise
+                | QueryAnchoredIdentities
+                | QueryAnchoredNoIdentities
+                | FlatQueryAnchoredIdentities
+                | FlatQueryAnchoredNoIdentities
                 | Xml
                 | Tabular
                 | TabularWithComments
@@ -399,11 +404,13 @@ impl Program {
             Pairwise => true,
             Tabular => true,
             TabularWithComments => true,
-            // Line OF track T (text formats): none yet.
-            QueryAnchoredIdentities => false,
-            QueryAnchoredNoIdentities => false,
-            FlatQueryAnchoredIdentities => false,
-            FlatQueryAnchoredNoIdentities => false,
+            // Line RG T3 (the query-anchored formats 1 to 4, `report::query_anchored`): BLASTP
+            // (T3a); BLASTN, TBLASTN (T3b), BLASTX and TBLASTX (T3c) refuse them until their parts
+            // land.
+            QueryAnchoredIdentities
+            | QueryAnchoredNoIdentities
+            | FlatQueryAnchoredIdentities
+            | FlatQueryAnchoredNoIdentities => matches!(self, Program::Blastp),
             // 10 and 20 with the shared tabular writer (line CLI C2).
             CommaSeparatedValues => self.shared_tabular(),
             // Line RG T2: the organism report, which reads the hit lists as the shared tabular
@@ -1309,9 +1316,13 @@ mod tests {
             // 11 (the BLAST archive): every program (OF8a parts 1 and 2: BLASTN, BLASTP; OF8b
             // parts 1 to 3: BLASTX, TBLASTN, TBLASTX).
             // 10 and 20 with the shared tabular writer (line CLI C2: every program); 18, the
-            // organism report (line RG T2: every program).
+            // organism report (line RG T2: every program); 1 to 4, the query-anchored views (line RG
+            // T3a: BLASTP).
             let expected: &[i32] = match program {
                 Program::Blastn => &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20],
+                Program::Blastp => &[
+                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20,
+                ],
                 _ => &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20],
             };
             assert_eq!(written, expected, "{program:?}");

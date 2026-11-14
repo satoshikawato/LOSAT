@@ -318,6 +318,7 @@ async function toAlignments(id: HspId): Promise<void> {
       <!-- A failed run keeps the file of its -logfile (TBLASTX's holds NCBI's error; line RG E1w-3b). -->
       <RunFiles
         v-if="state.phase === 'unavailable' && selected?.status === 'failed' && (selected.record.runFiles?.length ?? 0) > 0"
+        :key="selected.snapshot.runId"
         :coordinator="coordinator"
         :run="selected"
       />

@@ -11,7 +11,7 @@ import { OUTPUT_FORMATS, type OutputFormat } from '../../domain/output-format.js
 import type { ResolvedDefault } from '../../domain/parameters.js';
 import type { ProgramId } from '../../domain/programs.js';
 import type { EngineGateway, ParameterDescription, ProgramDescription, StartResult, ValidationResult } from '../../ports/engine.js';
-import { FILE_REGISTRY, type ReactorAbi } from './abi.js';
+import { FILE_REGISTRY, loadFile, type FileInfo, type ReactorAbi } from './abi.js';
 
 export type EngineControl = Pick<EngineGateway, 'describe' | 'start' | 'validate'>;
 
@@ -104,7 +104,17 @@ export function reactorControl(reactor: () => Promise<ReactorAbi>): EngineContro
     },
     async validate(argv, registry): Promise<ValidationResult> {
       const abi = await reactor();
-      const file = registry === undefined ? undefined : abi.registerFile(FILE_REGISTRY, registry.name, registry.bytes);
+      // The file's bytes are in memory: its load, the validation and the release take no task between
+      // them, so no other call of this instance (a scan, a check, another validation) meets the file.
+      // The engine holds the file during the validation only; the memory that it took is used again
+      // by the next file, so a large file grows the instance once, to the largest file chosen. A file
+      // that the engine cannot hold is refused with its message (`not enough memory for the registry
+      // file ...`).
+      let file: FileInfo | undefined;
+      if (registry !== undefined) {
+        const { name, bytes } = registry;
+        file = await loadFile(abi, FILE_REGISTRY, name, bytes.length, (start, end) => bytes.subarray(start, end));
+      }
       let message: string | undefined;
       try {
         message = abi.validate(argv);

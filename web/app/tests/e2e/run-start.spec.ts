@@ -9,6 +9,7 @@
 // in the engine build (LOSAT_WEB_REACTORS). With LOSAT_WEB_SCREENS=<directory>, the states are saved
 // as PNGs.
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Download, type Locator, type Page } from '@playwright/test';
@@ -110,7 +111,7 @@ test('the file of -logfile is a file of the run: shown after the formats and sav
     else await expect(file.getByTestId('run-file-text')).toHaveText(text);
     if (id === 'tblastx') await shoot(page.getByTestId('results-outputs'), '03-outputs-logfile', browserName);
     const saved = await downloaded(page, () => page.getByTestId('run-file-download-0').click());
-    expect(saved.name).toMatch(new RegExp(`^losat-run${run}-${id}-.*\\.run\\.log$`));
+    expect(saved.name).toMatch(new RegExp(`^losat-run${run}-${id}-.*Z\\.logfile\\.run\\.log$`));
     expect(saved.bytes.toString('utf8')).toBe(text);
     // "Download All" lists it after the outputs, and saves the same bytes under the same name.
     await page.getByTestId('results-download-all').click();
@@ -147,7 +148,7 @@ test('a failed TBLASTX run keeps the file of its -logfile, with NCBI\'s error, u
   await shoot(page.getByTestId('results-panel'), '04-failed-tblastx-logfile', browserName);
   const shown = (await file.getByTestId('run-file-text').textContent()) ?? '';
   const saved = await downloaded(page, () => file.getByTestId('run-file-download-0').click());
-  expect(saved.name).toMatch(/^losat-run1-tblastx-.*\.run\.log$/);
+  expect(saved.name).toMatch(/^losat-run1-tblastx-.*Z\.logfile\.run\.log$/);
   expect(saved.bytes.toString('utf8')).toBe(shown);
   const native = nativeLogFile(['tblastx'], QUERY, EMPTY_SUBJECT);
   if (native !== undefined) expect(saved.bytes.equals(native), 'tblastx -logfile run.log, failed').toBe(true);
@@ -194,6 +195,7 @@ test('the file that -conffile names is chosen in the form and read under that na
   await chooseRun(page, 1);
   await page.getByTestId('results-view-details').click();
   await expect(page.getByTestId('run-conffile')).toHaveText('settings.ini: my settings.ini, 8 bytes');
+  await expect(page.getByTestId('run-conffile-sha256')).toHaveText(`SHA-256 ${createHash('sha256').update(settings).digest('hex')}`);
   if (NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `The bytes of the outputs: ${NO_NATIVE_REASON}` });
   else {
     const { outputs } = await storedOutputs(page, 1);
@@ -213,6 +215,16 @@ test('the file that -conffile names is chosen in the form and read under that na
   await page.getByTestId('param-extra').fill('');
   await expect(row).toHaveCount(0);
   await expect(validation).toHaveAttribute('data-state', 'ok');
+  // "Restore default search parameters" lets the chosen file go with Additional options.
+  await page.getByTestId('param-extra').fill('-conffile settings.ini');
+  await page.getByTestId('param-conffile-file').setInputFiles({ name: 'my settings.ini', mimeType: 'text/plain', buffer: Buffer.from(settings) });
+  await expect(validation).toHaveAttribute('data-state', 'ok');
+  await page.getByTestId('restore-defaults').click();
+  await expect(page.getByTestId('param-extra')).toHaveValue('');
+  await expect(row).toHaveCount(0);
+  await page.getByTestId('param-extra').fill('-conffile settings.ini');
+  await expect(page.getByTestId('param-conffile-missing')).toBeVisible();
+  await expect(validation).toHaveText(missing);
 });
 
 // -dryrun: the run reads the arguments and the settings and searches nothing (NCBI BLAST+ 2.17.0); the

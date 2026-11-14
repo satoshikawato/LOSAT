@@ -67,6 +67,7 @@ function setup(
     downloader: { save: () => undefined },
     now: () => 0,
     newRunId: () => `run-${++id}`,
+    digest: sha256Hex,
   });
   const requests: SearchRequest[][] = [];
   const draft = new SearchDraft({
@@ -1333,15 +1334,24 @@ describe('SearchDraft submit', () => {
     expect(draft.state.get().start?.conffile).toBe('settings.ini');
     expect(draft.state.get().validation).toEqual({ state: 'invalid', message: missing });
     expect(registries.at(-1)).toBeUndefined();
-    // A file of any name is read as the argv's.
+    // A file of any name is read as the argv's, once: every validation and run takes the bytes read when it was chosen.
     const chosen = file('my.ini', '[BLAST]\n');
+    let reads = 0;
+    const read = chosen.arrayBuffer.bind(chosen);
+    chosen.arrayBuffer = () => (reads++, read());
     draft.setConffile(chosen);
     await draft.idle();
     expect(draft.state.get().conffiles.blastn).toBe(chosen);
     expect(draft.state.get().validation).toEqual({ state: 'ok' });
-    expect(registries.at(-1)).toEqual({ name: 'settings.ini', bytes: new TextEncoder().encode('[BLAST]\n') });
+    const bytes = new TextEncoder().encode('[BLAST]\n');
+    expect(registries.at(-1)).toEqual({ name: 'settings.ini', bytes });
+    draft.setField('-word_size', '16');
+    await draft.idle();
+    expect(registries.at(-1)!.bytes).toBe(registries.at(-2)!.bytes);
     expect((await draft.submit()).ok).toBe(true);
-    expect(requests.at(-1)![0]!.conffile).toBe(chosen);
+    expect(requests.at(-1)![0]!.conffile).toEqual({ name: 'my.ini', bytes });
+    expect(requests.at(-1)![0]!.conffile!.bytes).toBe(registries.at(-1)!.bytes);
+    expect(reads).toBe(1);
     // Another program has its own Additional options and file.
     draft.setProgram('blastp');
     await draft.idle();
@@ -1362,6 +1372,38 @@ describe('SearchDraft submit', () => {
     await draft.idle();
     expect(draft.state.get().conffiles.blastn).toBeUndefined();
     expect(draft.state.get().validation).toEqual({ state: 'invalid', message: missing });
+  });
+
+  // The row of -conffile follows the argv: it goes when the argv cannot be made or the program changes
+  // (until the engine's start of the new argv), and `-conffile=` names no file that the engine can hold.
+  it("forgets the engine's start of an argv that is gone, and gives no file for an empty -conffile name", async () => {
+    const { draft, registries } = setup({
+      start: (argv) => {
+        const at = argv.findIndex((word) => word === '-conffile' || word.startsWith('-conffile='));
+        const name = at < 0 ? null : argv[at] === '-conffile' ? argv[at + 1]! : argv[at]!.slice('-conffile='.length);
+        return { ok: true, start: { conffile: name, logFile: null, dryRun: false } };
+      },
+    });
+    draft.setConffile(file('my.ini', '[BLAST]\n'));
+    draft.setExtra('-conffile settings.ini');
+    await draft.idle();
+    expect(draft.state.get().start?.conffile).toBe('settings.ini');
+    draft.setExtra("-conffile settings.ini -evalue '1");
+    await draft.idle();
+    expect(draft.state.get().validation.state).toBe('invalid');
+    expect(draft.state.get().start).toBeUndefined();
+    draft.setExtra('-conffile settings.ini');
+    await draft.idle();
+    expect(draft.state.get().start?.conffile).toBe('settings.ini');
+    draft.setProgram('blastp');
+    expect(draft.state.get().start).toBeUndefined();
+    await draft.idle();
+    expect(draft.state.get().start?.conffile).toBeNull();
+    draft.setProgram('blastn');
+    draft.setExtra('-conffile=');
+    await draft.idle();
+    expect(draft.state.get().start?.conffile).toBe('');
+    expect(registries.at(-1)).toBeUndefined();
   });
 
   it('shows the message of an argv that the engine cannot start, and validates nothing of it', async () => {

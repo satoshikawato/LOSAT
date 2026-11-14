@@ -25,7 +25,7 @@ export const ROLE_SUBJECT = 1;
 export const FILE_WINDOW_MASKER_COUNTS = 1;
 /** The kind of a named input file (`file_begin`, ABI v2 §4): a registry file of NCBI's application start, the file of `-conffile`. */
 export const FILE_REGISTRY = 2;
-/** Bytes of a file held in memory given to the engine at a time, through one buffer of engine memory (`registerFile`). */
+/** Bytes of a named input file given to the engine at a time, through one buffer of engine memory (`loadFile`). */
 export const FILE_CHUNK_BYTES = 8 * 1024 * 1024;
 
 type Export = (...args: number[]) => number;
@@ -287,35 +287,6 @@ export class ReactorAbi {
   }
 
   /**
-   * Registers a named input file whose bytes are in memory (a registry file, kind 2): begins it, gives
-   * its bytes in chunks of at most `FILE_CHUNK_BYTES` through one buffer, ends it, and returns its
-   * *file* JSON. A file that the engine refuses is released (unless the instance stopped), so that the
-   * name is free again.
-   */
-  registerFile(kind: number, name: string, bytes: Uint8Array): FileInfo {
-    const handle = this.fileBegin(kind, name, bytes.length);
-    let buffer: ChunkBuffer | undefined;
-    try {
-      buffer = this.chunkBuffer(Math.max(1, Math.min(FILE_CHUNK_BYTES, bytes.length)));
-      for (let offset = 0; offset < bytes.length; offset += FILE_CHUNK_BYTES) {
-        this.fileChunk(handle, bytes.subarray(offset, offset + FILE_CHUNK_BYTES), buffer);
-      }
-      return this.fileEnd(handle);
-    } catch (error) {
-      if (this.stopped === undefined) {
-        try {
-          this.fileRelease(handle);
-        } catch {
-          // Already dropped by the engine.
-        }
-      }
-      throw error;
-    } finally {
-      if (buffer !== undefined) this.freeChunkBuffer(buffer);
-    }
-  }
-
-  /**
    * Starts the inflation of a file named `name` (ABI v2 §4): the engine's name rule gives the
    * compression and the plain name; undefined when the name is plain.
    */
@@ -437,6 +408,60 @@ export class ReactorAbi {
       }
       this.stopped = new EngineStoppedError(stopMessage(error, this.output()), { cause: error });
       throw this.stopped;
+    }
+  }
+}
+
+/** The calls of `loadFile` into an instance. */
+export type FileLoader = Pick<ReactorAbi, 'stoppedBy' | 'fileBegin' | 'chunkBuffer' | 'fileChunk' | 'fileEnd' | 'fileRelease' | 'freeChunkBuffer'>;
+
+/**
+ * Gives the engine a named input file of `size` bytes (ABI v2 §4: a WindowMasker counts file, kind 1,
+ * or a registry file, kind 2) and returns its *file* JSON: `file_begin`, the bytes from `read(start,
+ * end)` in chunks of at most `FILE_CHUNK_BYTES` through one buffer of engine memory taken once,
+ * `file_end`. A file that the engine refuses (a chunk or its end) is released, unless the instance
+ * stopped, so that its name is free again; the buffer is given back in every case. `call` wraps each
+ * call into the instance (the Engine worker counts them as uses of the threaded instance). Bytes that
+ * `read` returns as they are (a file in memory) give no task between the calls: no other call of the
+ * instance runs during the load.
+ */
+export async function loadFile(
+  abi: FileLoader,
+  kind: number,
+  name: string,
+  size: number,
+  read: (start: number, end: number) => Uint8Array | Promise<Uint8Array>,
+  call: <T>(body: () => T) => T = (body) => body(),
+): Promise<FileInfo> {
+  const handle = call(() => abi.fileBegin(kind, name, size));
+  let buffer: ChunkBuffer | undefined;
+  try {
+    buffer = call(() => abi.chunkBuffer(Math.max(1, Math.min(FILE_CHUNK_BYTES, size))));
+    for (let offset = 0; offset < size; offset += FILE_CHUNK_BYTES) {
+      const next = read(offset, Math.min(size, offset + FILE_CHUNK_BYTES));
+      const bytes = next instanceof Uint8Array ? next : await next;
+      call(() => abi.fileChunk(handle, bytes, buffer!));
+    }
+    return call(() => abi.fileEnd(handle));
+  } catch (error) {
+    // The engine drops a file whose chunk or end it refused; one that it still holds (the file could
+    // not be read) is released. Not after a stop, nor when the caller's instance is ending.
+    if (abi.stoppedBy === undefined) {
+      try {
+        call(() => abi.fileRelease(handle));
+      } catch {
+        // Already dropped by the engine, or the instance is ending.
+      }
+    }
+    throw error;
+  } finally {
+    if (buffer !== undefined) {
+      const taken = buffer;
+      try {
+        call(() => abi.freeChunkBuffer(taken));
+      } catch {
+        // The instance is ending: its memory goes with it.
+      }
     }
   }
 }

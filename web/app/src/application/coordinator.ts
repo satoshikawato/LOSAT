@@ -58,11 +58,17 @@ export interface SearchRequest {
   /** Where the counts of a taxonomy ID came from; the run records it. */
   readonly windowMaskerOrigin?: CountsOrigin;
   /**
-   * The file chosen for the argv's `-conffile` (Additional options; line RG E1w-3b): the run reads
-   * its bytes under the name that the engine's start reads of the argv. Not used by an argv without
-   * `-conffile`.
+   * The file chosen for the argv's `-conffile` (Additional options; line RG E1w-3b), read when it was
+   * chosen: the run reads its bytes under the name that the engine's start reads of the argv. Not
+   * used by an argv without `-conffile`. The requests of a group share it, and their snapshots its bytes.
    */
-  readonly conffile?: File;
+  readonly conffile?: ChosenFile;
+}
+
+/** A file that the user chose, read once: its name and its bytes. */
+export interface ChosenFile {
+  readonly name: string;
+  readonly bytes: Uint8Array;
 }
 
 export interface RunView {
@@ -84,6 +90,8 @@ export interface CoordinatorDeps {
   readonly downloader: Downloader;
   readonly now: () => number;
   readonly newRunId: () => string;
+  /** The lower-case hex SHA-256 of bytes (the package's `sha256Hex`), for the registry file of a snapshot. */
+  readonly digest: (bytes: Uint8Array) => Promise<string>;
 }
 
 export type EnqueueResult = ValidationResult & { readonly runId?: string };
@@ -128,6 +136,8 @@ export class Coordinator {
   async enqueueAll(requests: readonly SearchRequest[]): Promise<EnqueueAllResult> {
     if (requests.length === 0) return { ok: false, message: 'There is nothing to search.' };
     const prepared: Prepared[] = [];
+    // The SHA-256 of each registry file, once for the requests of a group that share it.
+    const digests = new Map<Uint8Array, Promise<string>>();
     for (const request of requests) {
       const queryName = inputName(request.query, PASTED_NAMES.query);
       const subjectName = inputName(request.subject, PASTED_NAMES.subject);
@@ -148,11 +158,15 @@ export class Coordinator {
       if (!start.ok) return start;
       let conffile: ConffileSnapshot | undefined;
       const { conffile: conffileName, dryRun } = start.start;
-      if (conffileName !== null && request.conffile !== undefined) {
+      // An empty name (`-conffile=`) names no file that the engine can hold: its message stands.
+      if (conffileName !== null && conffileName !== '' && request.conffile !== undefined) {
+        const { name: fileName, bytes } = request.conffile;
+        let digest = digests.get(bytes);
+        if (digest === undefined) digests.set(bytes, (digest = this.deps.digest(bytes)));
         try {
-          conffile = Object.freeze({ name: conffileName, fileName: request.conffile.name, bytes: new Uint8Array(await request.conffile.arrayBuffer()) });
+          conffile = Object.freeze({ name: conffileName, fileName, bytes, sha256: await digest });
         } catch (error) {
-          return { ok: false, message: `The file of -conffile ${conffileName} (${request.conffile.name}) could not be read: ${errorMessage(error)}` };
+          return { ok: false, message: `The file of -conffile ${conffileName} (${fileName}) could not be read: ${errorMessage(error)}` };
         }
       }
       let validation: ValidationResult;

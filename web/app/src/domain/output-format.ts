@@ -171,9 +171,10 @@ function exportPrefix(run: ExportedRun): string {
 
 /**
  * The file name of a file that a run made besides its outputs (the file of `-logfile NAME`; line RG
- * E1w-3b): the run's start of the names of its outputs, then the file's own name
- * (`losat-run3-tblastx-20261104T111530Z.run.log`), so that the files of two runs get other names.
+ * E1w-3b): the run's start of the names of its outputs, `logfile`, then the file's own name
+ * (`losat-run3-tblastx-20261104T111530Z.logfile.run.log`), so that the files of two runs get other
+ * names, and no file of a run gets the name of one of its outputs (`-logfile outfmt6.txt`).
  */
 export function runFileName(run: ExportedRun, name: string): string {
-  return `${exportPrefix(run)}.${name}`;
+  return `${exportPrefix(run)}.logfile.${name}`;
 }

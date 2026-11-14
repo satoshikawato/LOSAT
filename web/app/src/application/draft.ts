@@ -53,7 +53,7 @@ import { fastaParser, programById, PROGRAMS, sequenceKind } from '../domain/prog
 import { regionProblem, regionValue, type RegionText } from '../domain/region';
 import type { DataGateway } from '../ports/data';
 import type { AccessionFetcher, FetchResult } from '../ports/fetch';
-import type { EnqueueAllResult, SearchRequest } from './coordinator';
+import type { ChosenFile, EnqueueAllResult, SearchRequest } from './coordinator';
 import { SourceRace, type RaceStanding } from './source-race';
 import { SourceRefs } from './source-refs';
 import { Store } from './store';
@@ -251,6 +251,11 @@ export class SearchDraft {
   /** The running fetch of each role's accessions. */
   private readonly fetches = new Map<InputRole, AbortController>();
   private readonly race: SourceRace;
+  /**
+   * The bytes of each file chosen for `-conffile`, read once when it was chosen: every validation and
+   * every run of a group gives the engine these bytes, and a file that is let go takes them with it.
+   */
+  private readonly conffileBytes = new WeakMap<File, Promise<Uint8Array>>();
   /** The argv of the latest validation that the engine accepted (the prepare hint's argv). */
   private validArgv: readonly string[] | undefined;
   private nextKey = 1;
@@ -302,7 +307,8 @@ export class SearchDraft {
       if (sequenceKind(previous, role) !== sequenceKind(next, role)) this.cancelFetch(role);
     }
     const description = this.described.get(program);
-    this.set({ program, description, descriptionError: undefined, message: undefined });
+    // The engine's start of the other program's argv is not this program's (its -conffile row goes until the validation).
+    this.set({ program, description, descriptionError: undefined, message: undefined, start: undefined });
     this.loadDescription(program);
     for (const role of ROLES) {
       const parser = fastaParser(next, role);
@@ -413,7 +419,10 @@ export class SearchDraft {
     const { program, conffiles } = this.state.get();
     const next = { ...conffiles };
     if (file === undefined) delete next[program];
-    else next[program] = file;
+    else {
+      next[program] = file;
+      void this.bytesOf(file);
+    }
     this.set({ conffiles: Object.freeze(next), message: undefined });
     this.scheduleValidation();
   }
@@ -935,9 +944,18 @@ export class SearchDraft {
     } catch (error) {
       return { ok: false, message: messageOf(error) };
     }
-    // The file of the argv's -conffile, which the engine's start named at the validation (idle).
+    // The file of the argv's -conffile, which the engine's start named at the validation (idle): one
+    // read of it for every run of the group.
     const { start, conffiles } = this.state.get();
-    const conffile = start === undefined || start.conffile === null ? undefined : conffiles[program];
+    const file = start?.conffile ? conffiles[program] : undefined;
+    let conffile: ChosenFile | undefined;
+    if (file !== undefined) {
+      try {
+        conffile = { name: file.name, bytes: await this.bytesOf(file) };
+      } catch (error) {
+        return { ok: false, message: `The file of -conffile (${file.name}) could not be read: ${messageOf(error)}` };
+      }
+    }
     const resolved = {
       query: await Promise.all(groups.query.map((group) => this.resolveGroup(group))),
       subject: await Promise.all(groups.subject.map((group) => this.resolveGroup(group))),
@@ -1275,7 +1293,8 @@ export class SearchDraft {
         extra: this.extraWords(),
       });
     } catch (error) {
-      this.set({ validation: { state: 'invalid', message: messageOf(error) } });
+      // No argv, so no start of one: the -conffile row goes with the words that named the file.
+      this.set({ validation: { state: 'invalid', message: messageOf(error) }, start: undefined });
       return;
     }
     this.set({ validation: { state: 'checking' } });
@@ -1302,10 +1321,26 @@ export class SearchDraft {
     this.prepareEngine();
   }
 
-  /** The registry file of the argv's `-conffile`: the chosen file's bytes under the argv's name; undefined without either. */
+  /**
+   * The registry file of the argv's `-conffile`: the chosen file's bytes under the argv's name;
+   * undefined without either. An empty name (`-conffile=`) names no file that the engine can hold, and
+   * gets the engine's message.
+   */
   private async registryFile(program: ProgramId, start: StartInfo): Promise<RegistryFile | undefined> {
     const file = this.state.get().conffiles[program];
-    return start.conffile === null || file === undefined ? undefined : { name: start.conffile, bytes: new Uint8Array(await file.arrayBuffer()) };
+    return !start.conffile || file === undefined ? undefined : { name: start.conffile, bytes: await this.bytesOf(file) };
+  }
+
+  /** The bytes of a file chosen for `-conffile`, read at its first use (`conffileBytes`). */
+  private bytesOf(file: File): Promise<Uint8Array> {
+    let bytes = this.conffileBytes.get(file);
+    if (bytes === undefined) {
+      bytes = file.arrayBuffer().then((buffer) => new Uint8Array(buffer));
+      // A file that cannot be read is told by the validation and the run that need it.
+      bytes.catch(() => undefined);
+      this.conffileBytes.set(file, bytes);
+    }
+    return bytes;
   }
 
   /**

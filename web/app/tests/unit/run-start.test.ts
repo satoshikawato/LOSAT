@@ -13,19 +13,22 @@ import { instantiateSerial, reactorControl, WasmEngine } from 'losat';
 import { readStoredZip, type RunFile } from 'losat/domain';
 import { runFilesOf, withRunFiles, type EngineRunRequest } from 'losat/ports';
 import { findReactors } from '../../build/reactors';
-import { runFileName } from '../../src/domain/output-format';
+import { outputFileName, runFileName } from '../../src/domain/output-format';
 import { EngineRuntime } from '../../../packages/losat/src/infra/engine-worker/runtime';
 import type { EngineCommand, EngineEvent, WorkerRun } from '../../../packages/losat/src/infra/engine-worker/protocol';
 import { ABI_EXPORTS, inspectReactor } from '../../../packages/losat/src/infra/reactor/artifact';
 import {
   EngineCallError,
   EngineStoppedError,
+  FILE_CHUNK_BYTES,
   FILE_REGISTRY,
+  loadFile,
   ReactorAbi,
   ROLE_QUERY,
   ROLE_SUBJECT,
   RUN_FILES_STREAM,
   type AbiExports,
+  type FileLoader,
 } from '../../../packages/losat/src/infra/reactor/abi';
 
 const encode = (text: string) => new TextEncoder().encode(text);
@@ -123,7 +126,7 @@ describe("the reader of the engine's archive of a run's files", () => {
 // --- the ABI binding -------------------------------------------------------------------------------
 
 /** Exports of a fake engine for `start`, `validate` and the file calls, which log what they are given. */
-function fakeExports(options: { start?: string | 'fail'; validate?: string; failEnd?: boolean } = {}) {
+function fakeExports(options: { start?: string | 'fail'; validate?: string; trapValidate?: boolean; failEnd?: boolean } = {}) {
   const memory = new WebAssembly.Memory({ initial: 4 });
   const log: string[] = [];
   let next = 4096;
@@ -160,6 +163,7 @@ function fakeExports(options: { start?: string | 'fail'; validate?: string; fail
     },
     losat_web2_validate: (ptr: number, len: number) => {
       log.push(`validate ${text(ptr, len).split('\0').join(' ')}`);
+      if (options.trapValidate) throw new WebAssembly.RuntimeError('unreachable');
       if (options.validate === undefined) return 0;
       error = options.validate;
       return -1;
@@ -200,13 +204,47 @@ describe('the ABI binding of the start and of a registry file', () => {
     expect(fakeExports({ start: 'fail' }).abi.start(['blastn', '-version'])).toEqual({ ok: false, message: "error: unexpected argument '-version' found" });
   });
 
-  it('registers a file held in memory as kind 2: begin with its size, its bytes, end; a file that the engine refuses is released', () => {
+  it('loads a file held in memory as kind 2: begin with its size, its bytes, end; a file that the engine refuses is released', async () => {
+    const bytes = encode('[BLAST]\n');
     const { abi, log } = fakeExports();
-    expect(abi.registerFile(FILE_REGISTRY, 'c.ini', encode('[BLAST]\n'))).toEqual({ handle: 9, name: 'c.ini', kind: 'registry', size: 8, sha256: 'ab' });
+    expect(await loadFile(abi, FILE_REGISTRY, 'c.ini', bytes.length, (start, end) => bytes.subarray(start, end))).toEqual({
+      handle: 9,
+      name: 'c.ini',
+      kind: 'registry',
+      size: 8,
+      sha256: 'ab',
+    });
     expect(log).toEqual(['begin 2 c.ini 8', 'chunk 9 [BLAST]\n', 'end 9']);
     const failing = fakeExports({ failEnd: true });
-    expect(() => failing.abi.registerFile(FILE_REGISTRY, 'c.ini', encode('[x\n'))).toThrow(EngineCallError);
+    await expect(loadFile(failing.abi, FILE_REGISTRY, 'c.ini', 3, () => encode('[x\n'))).rejects.toThrow(EngineCallError);
     expect(failing.log).toEqual(['begin 2 c.ini 3', 'chunk 9 [x\n', 'end 9', 'release 9']);
+  });
+
+  // One loader for both kinds of file (the WindowMasker counts file's runtime cases are window-masker.test.ts's).
+  it('gives a file larger than one chunk in chunks of FILE_CHUNK_BYTES through one buffer, each call through `call`', async () => {
+    const calls: string[] = [];
+    const loader = {
+      stoppedBy: undefined,
+      fileBegin: (kind: number, name: string, size: number) => (calls.push(`begin ${kind} ${name} ${size}`), 7),
+      chunkBuffer: (capacity: number) => (calls.push(`buffer ${capacity}`), { ptr: 1, capacity }),
+      fileChunk: (file: number, bytes: Uint8Array) => void calls.push(`chunk ${file} ${bytes.length} ${bytes[0]}`),
+      fileEnd: (file: number) => (calls.push(`end ${file}`), { handle: file, name: 'c.ini', kind: 'registry' as const, size: 0, sha256: '' }),
+      fileRelease: (file: number) => void calls.push(`release ${file}`),
+      freeChunkBuffer: () => void calls.push('free buffer'),
+    } as unknown as FileLoader;
+    const bytes = new Uint8Array(FILE_CHUNK_BYTES + 3).fill(1);
+    bytes[FILE_CHUNK_BYTES] = 2;
+    let wrapped = 0;
+    await loadFile(loader, FILE_REGISTRY, 'c.ini', bytes.length, (start, end) => bytes.subarray(start, end), (body) => (wrapped++, body()));
+    expect(calls).toEqual([
+      `begin 2 c.ini ${FILE_CHUNK_BYTES + 3}`,
+      `buffer ${FILE_CHUNK_BYTES}`,
+      `chunk 7 ${FILE_CHUNK_BYTES} 1`,
+      'chunk 7 3 2',
+      'end 7',
+      'free buffer',
+    ]);
+    expect(wrapped).toBe(6);
   });
 
   it('requires losat_web2_start of an engine module', () => {
@@ -258,6 +296,20 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
     expect(log).toEqual(['validate blastp']);
     expect(await control.start(['blastp', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true } });
   });
+
+  it('does not validate with a file that the engine refuses, and calls an instance that stopped no more', async () => {
+    const refused = fakeExports({ failEnd: true });
+    await expect(reactorControl(async () => refused.abi).validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', bytes: encode('[x\n') })).rejects.toThrow(
+      'the input file ended after 1 of its 3 bytes',
+    );
+    expect(refused.log).toEqual(['begin 2 c.ini 3', 'chunk 9 [x\n', 'end 9', 'release 9']);
+    // A trap in the validation: the stopped instance's file is not released (ABI v2 §4, "After a trap").
+    const trapped = fakeExports({ trapValidate: true });
+    await expect(reactorControl(async () => trapped.abi).validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', bytes: encode('[BLAST]\n') })).rejects.toThrow(
+      EngineStoppedError,
+    );
+    expect(trapped.log).toEqual(['begin 2 c.ini 8', 'chunk 9 [BLAST]\n', 'end 9', 'validate blastp -conffile c.ini']);
+  });
 });
 
 // --- the Engine worker's runtime -------------------------------------------------------------------
@@ -265,8 +317,10 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
 /**
  * A binding with no engine behind it that records the calls of a search; its run sends outfmt 6 and
  * the archive of `runFiles` on stream 8 (in two chunks), and then fails with `fail`, or stops.
+ * `heldName` is the name of a file that the instance holds (a WindowMasker counts file): `file_begin`
+ * refuses it, as the adapter does.
  */
-function fakeAbi(options: { runFiles?: Uint8Array; fail?: string; stop?: boolean } = {}) {
+function fakeAbi(options: { runFiles?: Uint8Array; fail?: string; stop?: boolean; heldName?: string } = {}) {
   const calls: string[] = [];
   let handle = 100;
   let stopped: EngineStoppedError | undefined;
@@ -274,10 +328,15 @@ function fakeAbi(options: { runFiles?: Uint8Array; fail?: string; stop?: boolean
     get stoppedBy() {
       return stopped;
     },
-    registerFile: (kind: number, name: string, bytes: Uint8Array) => {
-      calls.push(`register file ${kind} ${name} ${new TextDecoder().decode(bytes)}`);
-      return { handle: ++handle, name, kind: 'registry', size: bytes.length, sha256: '0' };
+    fileBegin: (kind: number, name: string, size: number) => {
+      calls.push(`begin ${kind} ${name} ${size}`);
+      if (name === options.heldName) throw new EngineCallError(`a file named ${name} is registered: release it before registering another`);
+      return ++handle;
     },
+    chunkBuffer: (capacity: number) => (calls.push(`buffer ${capacity}`), { ptr: 1, capacity }),
+    fileChunk: (file: number, bytes: Uint8Array) => void calls.push(`chunk ${file} ${new TextDecoder().decode(bytes)}`),
+    fileEnd: (file: number) => (calls.push(`end ${file}`), { handle: file, name: 'c.ini', kind: 'registry', size: 8, sha256: '0' }),
+    freeChunkBuffer: () => void calls.push('free buffer'),
     validate: (argv: readonly string[]) => {
       calls.push(`validate ${argv.join(' ')}`);
       return undefined;
@@ -335,8 +394,8 @@ function runtimeWith(abi: ReactorAbi) {
 /** A run of `words` after the inputs, whose output port records what the Engine worker sent. */
 function workerRun(words: readonly string[], conffile?: { name: string; bytes: Uint8Array }) {
   const channel = new MessageChannel();
-  const received: unknown[] = [];
-  channel.port2.onmessage = (event) => received.push(event.data);
+  const received: Array<{ readonly type: string }> = [];
+  channel.port2.onmessage = (event: MessageEvent<{ type: string }>) => received.push(event.data);
   const input = (role: string) => ({ bytes: new Uint8Array([62, 10, 65]), records: [{ id: role, length: 3 }], key: `k-${role}` });
   const run: WorkerRun = {
     type: 'run',
@@ -350,25 +409,38 @@ function workerRun(words: readonly string[], conffile?: { name: string; bytes: U
     ...(conffile === undefined ? {} : { conffile }),
     output: channel.port1,
   };
+  /**
+   * What the run sent on its port, all of it: a port delivers in order, so once a mark posted after
+   * the run has arrived, every message that the run posted has.
+   */
+  const delivered = async () => {
+    channel.port1.postMessage({ type: 'mark' });
+    await expect.poll(() => received.some((message) => message.type === 'mark')).toBe(true);
+    return received.filter((message) => message.type !== 'mark');
+  };
   const close = () => {
     channel.port1.close();
     channel.port2.close();
   };
-  return { run, received, close };
+  return { run, delivered, close };
 }
 
-const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 const LOG: RunFile = { name: 'run.log', bytes: encode('BLAST engine error: The average subject length is too short\n') };
+const CONFFILE = { name: 'c.ini', bytes: encode('[BLAST]\n') };
 
 describe("the Engine worker's runtime and the files of a run", () => {
   it('registers the file of -conffile before validate, keeps stream 8 apart from the outputs, and releases the file before the end', async () => {
     const { abi, calls } = fakeAbi({ runFiles: storedZip([[LOG.name, LOG.bytes]]) });
     const runtime = runtimeWith(abi);
-    const { run, received, close } = workerRun(['-conffile', 'c.ini', '-logfile', 'run.log'], { name: 'c.ini', bytes: encode('[BLAST]\n') });
+    const { run, delivered, close } = workerRun(['-conffile', 'c.ini', '-logfile', 'run.log'], CONFFILE);
     const result = await runtime.run(run, () => undefined);
     expect(result.runFiles).toEqual([LOG]);
     expect(calls).toEqual([
-      'register file 2 c.ini [BLAST]\n',
+      'begin 2 c.ini 8',
+      'buffer 8',
+      'chunk 101 [BLAST]\n',
+      'end 101',
+      'free buffer',
       'validate tblastx -query q.fa -subject s.fa -conffile c.ini -logfile run.log -num_threads 1',
       'register query',
       'register subject',
@@ -376,21 +448,20 @@ describe("the Engine worker's runtime and the files of a run", () => {
       'release 102',
       'file release 101',
     ]);
-    await settle();
     // The Data worker gets the outputs only: one chunk of outfmt 6 and the end.
-    expect(received).toEqual([{ type: 'chunk', stream: 6, bytes: encode('q\ts\n') }, { type: 'end', chunks: 1, bytes: 4 }]);
+    expect(await delivered()).toEqual([{ type: 'chunk', stream: 6, bytes: encode('q\ts\n') }, { type: 'end', chunks: 1, bytes: 4 }]);
     close();
     // A search without the option registers nothing, and one without files gives none.
     const plain = fakeAbi();
     const next = workerRun([]);
     expect('runFiles' in (await runtimeWith(plain.abi).run(next.run, () => undefined))).toBe(false);
-    expect(plain.calls.some((call) => call.startsWith('register file') || call.startsWith('file release'))).toBe(false);
+    expect(plain.calls.some((call) => call.startsWith('begin') || call.startsWith('file release'))).toBe(false);
     next.close();
   });
 
   it("gives a failed run's files with its error, releases what it registered, and sends no end", async () => {
     const { abi, calls } = fakeAbi({ runFiles: storedZip([[LOG.name, LOG.bytes]]), fail: 'BLAST engine error: The average subject length is too short' });
-    const { run, received, close } = workerRun(['-logfile', 'run.log'], { name: 'c.ini', bytes: encode('[BLAST]\n') });
+    const { run, delivered, close } = workerRun(['-logfile', 'run.log'], CONFFILE);
     const error = await runtimeWith(abi)
       .run(run, () => undefined)
       .catch((e: unknown) => e);
@@ -398,14 +469,24 @@ describe("the Engine worker's runtime and the files of a run", () => {
     expect((error as Error).message).toBe('BLAST engine error: The average subject length is too short');
     expect(runFilesOf(error)).toEqual([LOG]);
     expect(calls.slice(-2)).toEqual(['release 102', 'file release 101']);
-    await settle();
-    expect(received.some((message) => (message as { type: string }).type === 'end')).toBe(false);
+    // The chunk written before the failure, and no end.
+    expect(await delivered()).toEqual([{ type: 'chunk', stream: 6, bytes: encode('q\ts\n') }]);
+    close();
+  });
+
+  it('fails a run whose file of -conffile the engine refuses, with nothing registered and nothing searched', async () => {
+    // `-window_masker_db x -conffile x` on an instance that holds the counts file x: the adapter refuses the name.
+    const { abi, calls } = fakeAbi({ heldName: 'c.ini' });
+    const { run, delivered, close } = workerRun(['-conffile', 'c.ini'], CONFFILE);
+    await expect(runtimeWith(abi).run(run, () => undefined)).rejects.toThrow('a file named c.ini is registered: release it before registering another');
+    expect(calls).toEqual(['begin 2 c.ini 8']);
+    expect(await delivered()).toEqual([]);
     close();
   });
 
   it('gives no files of a run that stopped, and calls the stopped instance no more', async () => {
     const { abi, calls } = fakeAbi({ runFiles: storedZip([[LOG.name, LOG.bytes]]), stop: true });
-    const { run, close } = workerRun(['-logfile', 'run.log'], { name: 'c.ini', bytes: encode('[BLAST]\n') });
+    const { run, close } = workerRun(['-logfile', 'run.log'], CONFFILE);
     const error = await runtimeWith(abi)
       .run(run, () => undefined)
       .catch((e: unknown) => e);
@@ -421,8 +502,7 @@ describe("the Engine worker's runtime and the files of a run", () => {
     const completed = fakeAbi({ runFiles: broken });
     const first = workerRun(['-logfile', 'run.log']);
     await expect(runtimeWith(completed.abi).run(first.run, () => undefined)).rejects.toThrow('entry 1 is not stored (method 8)');
-    await settle();
-    expect(first.received.some((message) => (message as { type: string }).type === 'end')).toBe(false);
+    expect(await first.delivered()).toEqual([{ type: 'chunk', stream: 6, bytes: encode('q\ts\n') }]);
     first.close();
     const failed = fakeAbi({ runFiles: broken, fail: 'BLAST engine error: x' });
     const second = workerRun(['-logfile', 'run.log']);
@@ -512,8 +592,11 @@ describe('the gateway and the files of a run', () => {
 describe('the name of a downloaded file of a run', () => {
   it("starts as the names of the run's outputs do and ends with the file's own name", () => {
     const run = { number: 3, program: 'tblastx', queuedAt: Date.UTC(2026, 10, 4, 11, 15, 30), argv: ['tblastx'] };
-    expect(runFileName(run, 'run.log')).toBe('losat-run3-tblastx-20261104T111530Z.run.log');
-    expect(runFileName({ ...run, program: 'blastn', task: 'megablast' }, 'log')).toBe('losat-run3-blastn-megablast-20261104T111530Z.log');
+    expect(runFileName(run, 'run.log')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.run.log');
+    expect(runFileName({ ...run, program: 'blastn', task: 'megablast' }, 'log')).toBe('losat-run3-blastn-megablast-20261104T111530Z.logfile.log');
+    // A file named as an output's file (-logfile outfmt6.txt) is not saved under that output's name.
+    expect(runFileName(run, 'outfmt6.txt')).not.toBe(outputFileName(run, 6));
+    expect(runFileName(run, 'outfmt6.txt')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.outfmt6.txt');
   });
 });
 

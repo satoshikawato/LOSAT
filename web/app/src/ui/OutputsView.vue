@@ -5,15 +5,14 @@
 // (outfmt 9, and the ZIP archive of the files of 13 and 14) is exported, not shown. An output that cannot be read, or an export that is not
 // saved, says why (application/outputs.ts). After the formats, the files that the run made besides
 // its outputs (the file of -logfile; line RG E1w-3b) are a tab of their own (RunFiles).
-import { computed, onMounted, onUnmounted, ref, useId, watch } from 'vue';
+import { computed, ref, useId, watch } from 'vue';
 import { CUSTOM_OUTPUT, type RunOutput } from 'losat/domain';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputReader } from '../application/outputs';
 import { toShellCommand } from '../domain/argv';
-import { outputChunks } from '../domain/output-chunks';
 import { isBinaryOutput, outfmtOf, runOutputs } from '../domain/output-format';
+import OutputText from './OutputText.vue';
 import RunFiles from './RunFiles.vue';
-import { vScrollFocus } from './scroll-focus';
 import TabList from './TabList.vue';
 import { useStore } from './useStore';
 
@@ -63,41 +62,8 @@ const tabs = computed(() => [
 ]);
 const reader = new OutputReader(props.coordinator);
 const output = useStore(reader.state);
-const chunks = computed(() => outputChunks(output.value.text));
-/** A new output has new blocks: a block remembers the height it was last laid out with. */
-const generation = ref(0);
-const view = ref<HTMLElement>();
-let marked = false;
-
-/**
- * The blocks that a selection over more than one text spans are laid out while it lasts: a browser
- * may leave text that it did not lay out out of the selection (Firefox 151: 1 % of the output on
- * select all). A selection inside one text needs none: its block is laid out already.
- */
-function onSelectionChange(): void {
-  const selection = document.getSelection();
-  const ranges: Range[] = [];
-  for (let i = 0; i < (selection?.rangeCount ?? 0); i++) {
-    const range = selection!.getRangeAt(i);
-    const oneText = range.startContainer === range.endContainer && range.startContainer.nodeType === Node.TEXT_NODE;
-    if (!range.collapsed && !oneText) ranges.push(range);
-  }
-  if (ranges.length === 0 && !marked) return;
-  marked = false;
-  for (const block of view.value?.children ?? []) {
-    const selected = ranges.some((range) => range.intersectsNode(block));
-    block.classList.toggle('output-chunk-selected', selected);
-    marked ||= selected;
-  }
-}
-onMounted(() => document.addEventListener('selectionchange', onSelectionChange));
-// The blocks of a new output may come inside a selection, which then does not change.
-watch(generation, onSelectionChange, { flush: 'post' });
-onUnmounted(() => document.removeEventListener('selectionchange', onSelectionChange));
-
 // The reader keeps the latest choice: a later one may be read first.
 watch([() => props.run, format], ([run, fmt]) => void reader.show(run, fmt, !isBinaryOutput(run.snapshot.argv, fmt)), { immediate: true });
-watch(() => output.value.text, () => generation.value++);
 </script>
 
 <template>
@@ -105,14 +71,19 @@ watch(() => output.value.text, () => generation.value++);
     <!-- Chosen by Enter or Space: each output shown is read from storage, the largest first (WA2-AX-12). -->
     <TabList v-model="shown" label="Output format" :tabs="tabs" manual />
     <div v-if="filesShown" :id="`${ids}-panel`" role="tabpanel" :aria-labelledby="`${ids}-tab-${FILES}`" class="outputs-panel">
-      <RunFiles :coordinator="coordinator" :run="run" />
+      <RunFiles :key="run.snapshot.runId" :coordinator="coordinator" :run="run" />
     </div>
     <div v-else :id="`${ids}-panel`" role="tabpanel" :aria-labelledby="`${ids}-tab-${format}`" class="outputs-panel">
       <p class="command">
         Command: <code data-testid="result-command">{{ toShellCommand(run.snapshot.argv, format) }}</code>
       </p>
-      <!-- A Tab stop that the arrow keys scroll, also in WebKit (WA2-AX-08). -->
-      <pre v-if="!output.failed && !binary" ref="view" v-scroll-focus="`outfmt ${outfmtOf(run.snapshot.argv, format)} output`" class="output" data-testid="result-output" :data-shown="output.shown"><span v-for="(chunk, index) in chunks" :key="`${generation}:${index}`" class="output-chunk" :style="{ '--output-chunk-lines': chunk.lines }">{{ chunk.text }}</span></pre>
+      <OutputText
+        v-if="!output.failed && !binary"
+        :text="output.text"
+        :label="`outfmt ${outfmtOf(run.snapshot.argv, format)} output`"
+        data-testid="result-output"
+        :data-shown="output.shown"
+      />
       <!-- Next to Export, whose failure it also tells; where the text would be when the text could not be read. -->
       <p v-if="output.problem" class="results-message error" role="alert" data-testid="outputs-problem" :data-failed="output.failed">{{ output.problem }}</p>
       <button data-testid="export-output" @click="reader.export(run, format)">

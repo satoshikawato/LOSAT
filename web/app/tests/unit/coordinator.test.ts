@@ -54,6 +54,7 @@ function setup(engine: EngineGateway = new FakeEngine(), wrap: (data: DataServic
     downloader,
     now: () => 1000,
     newRunId: () => `run-${++id}`,
+    digest: sha256Hex,
   });
   return { coordinator, data, store, saved };
 }
@@ -327,17 +328,19 @@ describe('Coordinator', () => {
 
   // NCBI's application start (line RG E1w-3b): the engine's start of the argv names the registry
   // file of -conffile and tells a dry run; enqueue validates with the chosen file under the argv's
-  // name, and the snapshot freezes its bytes.
+  // name, and the snapshot freezes its bytes and their SHA-256 (once for a group, which shares them).
   it("reads the engine's start at enqueue: the -conffile file under the argv's name, frozen with its bytes, and the dry run", async () => {
     const engine = new ManualEngine();
     engine.startResult = startOf({ conffile: 'settings.ini', dryRun: true });
     const { coordinator } = setup(engine);
-    const chosen = new File(['[BLAST]\n'], 'my settings.ini');
-    const runId = (await coordinator.enqueue({ ...request, extra: ['-conffile', 'settings.ini', '-dryrun'], conffile: chosen })).runId!;
     const bytes = new TextEncoder().encode('[BLAST]\n');
+    const chosen = { name: 'my settings.ini', bytes };
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const runId = (await coordinator.enqueue({ ...request, extra: ['-conffile', 'settings.ini', '-dryrun'], conffile: chosen })).runId!;
     expect(engine.registries).toEqual([{ name: 'settings.ini', bytes }]);
     const snapshot = viewOf(coordinator, runId)!.snapshot;
-    expect(snapshot.conffile).toEqual({ name: 'settings.ini', fileName: 'my settings.ini', bytes });
+    expect(snapshot.conffile).toEqual({ name: 'settings.ini', fileName: 'my settings.ini', bytes, sha256 });
+    expect(snapshot.conffile!.bytes).toBe(bytes);
     expect(Object.isFrozen(snapshot.conffile)).toBe(true);
     expect(snapshot.dryRun).toBe(true);
     await waitFor(coordinator, runId, 'running');
@@ -355,6 +358,37 @@ describe('Coordinator', () => {
     expect('conffile' in engine.requests[1]!).toBe(false);
     engine.finish(plain);
     await waitFor(coordinator, plain, 'completed');
+
+    // `-conffile=` names no file that the engine can hold: the engine's message stands, without the file.
+    engine.startResult = startOf({ conffile: '' });
+    const empty = (await coordinator.enqueue({ ...request, extra: ['-conffile='], conffile: chosen })).runId!;
+    expect(engine.registries.at(-1)).toBeUndefined();
+    expect('conffile' in viewOf(coordinator, empty)!.snapshot).toBe(false);
+    await waitFor(coordinator, empty, 'running');
+    engine.finish(empty);
+    await waitFor(coordinator, empty, 'completed');
+
+    // A group shares the file's bytes, and its SHA-256 is counted once.
+    engine.startResult = startOf({ conffile: 'settings.ini' });
+    let digests = 0;
+    (coordinator as unknown as { deps: { digest: (bytes: Uint8Array) => Promise<string> } }).deps.digest = async (b) => {
+      digests++;
+      return sha256Hex(b);
+    };
+    const group = await coordinator.enqueueAll([
+      { ...request, extra: ['-conffile', 'settings.ini'], conffile: chosen },
+      { ...request, extra: ['-conffile', 'settings.ini'], conffile: chosen },
+    ]);
+    const snapshots = group.runIds!.map((id) => viewOf(coordinator, id)!.snapshot);
+    expect(snapshots.map((s) => s.conffile?.bytes)).toEqual([bytes, bytes]);
+    expect(snapshots[0]!.conffile!.bytes).toBe(snapshots[1]!.conffile!.bytes);
+    expect(snapshots.map((s) => s.conffile?.sha256)).toEqual([sha256, sha256]);
+    expect(digests).toBe(1);
+    for (const id of group.runIds!) {
+      await waitFor(coordinator, id, 'running');
+      engine.finish(id);
+      await waitFor(coordinator, id, 'completed');
+    }
   });
 
   it('does not queue a request whose argv the engine cannot start, with its message', async () => {
@@ -403,8 +437,8 @@ describe('Coordinator', () => {
     await coordinator.exportRunFile(completed, 0);
     await coordinator.exportRunFile(failed, 0);
     expect(saved).toEqual([
-      { fileName: 'losat-run1-blastn-19700101T000001Z.run.log', text: 'Warning: [tblastx] Examining 5 or more matches is recommended\n', type: 'text/plain' },
-      { fileName: 'losat-run2-blastn-19700101T000001Z.run.log', text: 'BLAST engine error: The average subject length is too short\n', type: 'text/plain' },
+      { fileName: 'losat-run1-blastn-19700101T000001Z.logfile.run.log', text: 'Warning: [tblastx] Examining 5 or more matches is recommended\n', type: 'text/plain' },
+      { fileName: 'losat-run2-blastn-19700101T000001Z.logfile.run.log', text: 'BLAST engine error: The average subject length is too short\n', type: 'text/plain' },
     ]);
     await expect(coordinator.exportRunFile(plain, 0)).rejects.toThrow('the run has no such file');
   });

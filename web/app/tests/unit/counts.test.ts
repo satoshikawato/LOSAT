@@ -111,6 +111,7 @@ function draftSetup() {
     downloader: { save: () => undefined },
     now: () => 0,
     newRunId: () => `run-${++id}`,
+    digest: sha256Hex,
   });
   const requests: SearchRequest[] = [];
   const draft = new SearchDraft({

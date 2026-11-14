@@ -58,6 +58,8 @@ export interface ConffileSnapshot {
   /** The name of the file that the user chose. */
   readonly fileName: string;
   readonly bytes: Uint8Array;
+  /** Lower-case hex SHA-256 of `bytes`. */
+  readonly sha256: string;
 }
 
 export interface RunSnapshot {

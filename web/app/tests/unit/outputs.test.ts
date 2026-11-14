@@ -41,8 +41,11 @@ class Outputs implements OutputPort {
     return new Promise((resolve, reject) => this.exports.push({ runId, format, resolve, reject }));
   }
 
-  exportRunFile(): Promise<void> {
-    return Promise.reject(new Error('unused'));
+  /** The saves of a run's files (RunRecord.runFiles), by run and index. */
+  readonly fileExports: Array<{ readonly runId: string; readonly index: number; resolve(): void; reject(error: unknown): void }> = [];
+
+  exportRunFile(runId: string, index: number): Promise<void> {
+    return new Promise((resolve, reject) => this.fileExports.push({ runId, index, resolve, reject }));
   }
 }
 
@@ -231,6 +234,23 @@ describe('OutputReader', () => {
 });
 
 describe('OutputSaver', () => {
+  // The file of a run's -logfile (line RG E1w-3b) is saved as an output is, and says why it is not.
+  it("saves a run's file, says why one is not saved, and the latest save wins", async () => {
+    const outputs = new Outputs();
+    const saver = new OutputSaver(outputs);
+    void saver.saveRunFile(run(1), 0);
+    expect(outputs.fileExports[0]).toMatchObject({ runId: 'r1', index: 0 });
+    outputs.fileExports[0]!.reject(new Error('the run has no such file'));
+    await settle();
+    expect(saver.problem.get()).toBe('Not saved: the run has no such file');
+    void saver.saveRunFile(run(1), 0);
+    void saver.save(run(1), 6);
+    outputs.exports[0]!.resolve();
+    outputs.fileExports[1]!.reject(removed());
+    await settle();
+    expect(saver.problem.get()).toBe('');
+  });
+
   it('a save that ends after a reset says nothing: another run or format was chosen', async () => {
     const outputs = new Outputs();
     const saver = new OutputSaver(outputs);

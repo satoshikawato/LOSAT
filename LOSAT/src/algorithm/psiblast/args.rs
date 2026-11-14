@@ -804,6 +804,7 @@ mod tests {
             Some(2),
             "the rounds of a range run"
         );
+        assert!(ranged.query_range.is_some(), "the range reaches the rounds");
         let error = parse(&["-num_iterations", "3", "-seg", "yes"])
             .unwrap()
             .into_blastp_args()

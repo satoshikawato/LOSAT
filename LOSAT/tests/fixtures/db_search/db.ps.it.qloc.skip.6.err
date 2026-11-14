@@ -1,0 +1,1 @@
+Warning: [psiblast] Query_2 YP_009220601.1 TK.. : Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics 

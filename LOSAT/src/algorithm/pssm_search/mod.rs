@@ -393,8 +393,11 @@ impl PsiSearch {
     /// round 1's alignment, as the record's letters 39-210 at 4.494 % identities; series Q, Q4a).
     /// No row past the range is read: the kernels, the lookup table of the query's offsets and
     /// the position-based composition-based statistics index the PSSM by the query's offset in
-    /// its range (`pssm_search::rows`), and the Karlin values are the PSSM's own. Without
-    /// `-query_loc` the query is the record and every row is read.
+    /// its range (`pssm_search::rows`), and the Karlin values are the PSSM's own (NCBI's debug
+    /// build asserts that the PSSM has the query's length in the redo, blast_kappa.c:3066; the
+    /// release build, the reference, does not). Without `-query_loc` the query is the record and
+    /// every row is read. `PsiBlastSetupScoreBlock`'s warnings look at every row
+    /// (`setup_messages`, made by the caller from the engine's PSSM).
     ///
     /// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:303-310
     /// ```c++

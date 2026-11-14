@@ -270,6 +270,8 @@ psiblast.db.three.it1	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db t
 psiblast.db.three.it2	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.db.three.it0	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.sub.three.it2	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.qloc.it2	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -query_loc 20-300 -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.qloc.skip.it2	psiblast	-	-query tests/fasta/psiblast/q4a_skip.faa -db tests/db_search/paja -query_loc 20-300 -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.db.two.it2.cbs3	psiblast	-	-query tests/fasta/psiblast/two.faa -db tests/db_search/paja -num_iterations 2 -comp_based_stats 3 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.db.three.it2.ssp	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -searchsp 1000000 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.db.three.ssp0	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -searchsp 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-

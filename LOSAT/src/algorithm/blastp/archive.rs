@@ -89,7 +89,7 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
     inputs.seg = args
         .seg
         .as_deref()
-        .and_then(|value| crate::blastinput::app::parse_seg_option(value, "BLASTP").ok())
+        .and_then(|value| crate::blastinput::app::parse_seg_option(value).ok())
         .map(|spec| match spec {
             SegSpec::No => Filter::No,
             SegSpec::Yes => Filter::Yes,

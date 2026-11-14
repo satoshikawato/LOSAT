@@ -373,7 +373,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
     let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
     let queries = queries(&Inputs::path(&inputs.query));
     let subjects = subjects(&Inputs::path(&inputs.subject));
-    let cases: [(&str, fn(&mut BlastxArgs)); 10] = [
+    let cases: [(&str, fn(&mut BlastxArgs)); 9] = [
         ("Word-size must be greater than zero", |a| {
             a.word_size = Some(0)
         }),
@@ -395,10 +395,6 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
         (
             "an -evalue that is not finite (inf) is not supported by LOSAT's BLASTX",
             |a| a.evalue = f64::INFINITY,
-        ),
-        (
-            "the SEG locut or hicut \"+nan\" (not a finite decimal number) is not supported by LOSAT's BLASTX",
-            |a| a.seg = "12 +nan 2.5".into(),
         ),
         ("Invalid number of arguments to filtering option", |a| {
             a.seg = "12 2.2".into()

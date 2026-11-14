@@ -648,9 +648,11 @@ pub fn xinclude_check_for(choice: &FormatChoice, out: Option<&Path>) -> anyhow::
     }
 }
 
-/// A `-seg` value as NCBI's filtering handler reads it, with NCBI's errors. A locut or
-/// hicut that `NStr::StringToDouble` reads but that is not a finite number (an infinity or
-/// NaN) is rejected with LOSAT's message, after NCBI's errors of both values.
+/// A `-seg` value as NCBI's filtering handler reads it, with NCBI's errors. Every locut and
+/// hicut that `NStr::StringToDouble` reads is taken, an infinity or NaN too: the query filter
+/// keeps the default for one that is not above 0 (NaN included, `SegSpec::params`), SEG
+/// compares an infinite one as NCBI does (`+inf` masks every window), and the filter string of
+/// the reports prints it as glibc does (`report::blast_xml::filter`).
 ///
 /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:396-406
 /// ```c
@@ -690,24 +692,13 @@ pub fn xinclude_check_for(choice: &FormatChoice, out: Option<&Path>) -> anyhow::
 ///         }
 ///     }
 /// ```
-pub fn parse_seg_option(value: &str, program: &str) -> anyhow::Result<SegSpec> {
-    read_seg_option(value, program).map_err(|error| match error {
-        SegOptionError::Ncbi(message) => options_error(message),
-        SegOptionError::Losat(error) => error,
-    })
+pub fn parse_seg_option(value: &str) -> anyhow::Result<SegSpec> {
+    read_seg_option(value).map_err(options_error)
 }
 
-/// Why `read_seg_option` refuses a `-seg` value: NCBI's error of the filtering handler (its
-/// message, a `CInputException`), or LOSAT's refusal of a value that NCBI accepts.
-#[derive(Debug)]
-pub enum SegOptionError {
-    Ncbi(&'static str),
-    Losat(anyhow::Error),
-}
-
-/// `parse_seg_option` with NCBI's error and LOSAT's refusal apart, for a program that reports
-/// them at different times (BLASTX: `algorithm::blastx::args`).
-pub fn read_seg_option(value: &str, program: &str) -> Result<SegSpec, SegOptionError> {
+/// `parse_seg_option` with NCBI's error as its message (a `CInputException`), for a program that
+/// reports it with its other deferred errors (BLASTX: `algorithm::blastx::args`).
+pub fn read_seg_option(value: &str) -> Result<SegSpec, &'static str> {
     match value {
         "no" => return Ok(SegSpec::No),
         "yes" => return Ok(SegSpec::Yes),
@@ -715,28 +706,17 @@ pub fn read_seg_option(value: &str, program: &str) -> Result<SegSpec, SegOptionE
     }
     let tokens: Vec<&str> = value.split(' ').collect();
     if tokens.len() != 3 {
-        return Err(SegOptionError::Ncbi(
-            "Invalid number of arguments to filtering option",
-        ));
+        return Err("Invalid number of arguments to filtering option");
     }
-    let invalid = || SegOptionError::Ncbi("Invalid input for filtering parameters");
+    let invalid = || "Invalid input for filtering parameters";
     // `NStr::StringToInt(tokens[0])`, flags 0.
     let window = crate::ncbi_str::string_to_int(tokens[0].as_bytes(), 0).map_err(|_| invalid())?;
     // NCBI reads the values with `NStr::StringToDouble(token)` (default flags,
     // `ncbi_str::string_to_double`: glibc's `strtod`, decimal or hexadecimal, which must end at
-    // the end of the token); an error of either is NCBI's. LOSAT reads the finite ones.
+    // the end of the token).
     let mut cuts = [0.0; 2];
     for (cut, token) in cuts.iter_mut().zip(&tokens[1..]) {
         *cut = crate::ncbi_str::string_to_double(token.as_bytes()).map_err(|_| invalid())?;
-    }
-    if let Some((_, token)) = cuts
-        .iter()
-        .zip(&tokens[1..])
-        .find(|(cut, _)| !cut.is_finite())
-    {
-        return Err(SegOptionError::Losat(anyhow::anyhow!(
-            "the SEG locut or hicut {token:?} (not a finite number) is not supported by LOSAT's {program}"
-        )));
     }
     Ok(SegSpec::WindowLocutHicut {
         window,
@@ -1109,41 +1089,56 @@ mod tests {
             "12 . 2.5",
             "12 nan(1) 2.5",
         ] {
-            let error = format!("{:#}", parse_seg_option(value, "TBLASTX").unwrap_err());
+            let error = format!("{:#}", parse_seg_option(value).unwrap_err());
             assert!(
                 error.contains("Invalid input for filtering parameters"),
                 "{value}: {error}"
             );
         }
-        for value in [
-            "12 +inf 2.5",
-            "12 1e400 2.5",
-            "12 2.2 -nan",
-            "12 +nan(1) 2.5",
+        // NCBI 2.17.0 searches with an infinite or NaN locut or hicut (sw8/nfix/probe/seg2), as
+        // LOSAT does: the values as read (the filter string prints them), defaults for those not
+        // above 0 in the query filter (`SegSpec::params`).
+        for (value, locut, hicut) in [
+            ("12 +inf 2.5", f64::INFINITY, 2.5),
+            ("12 1e400 2.5", f64::INFINITY, 2.5),
+            ("12 2.2 -nan", 2.2, -f64::NAN),
+            ("12 +nan(1) 2.5", f64::from_bits(0x7ff8_0000_0000_0001), 2.5),
+            ("12 -inf -inf", f64::NEG_INFINITY, f64::NEG_INFINITY),
         ] {
-            let error = format!("{:#}", parse_seg_option(value, "TBLASTX").unwrap_err());
-            assert!(
-                error.contains("not supported by LOSAT's TBLASTX"),
-                "{value}: {error}"
-            );
+            match parse_seg_option(value).unwrap() {
+                SegSpec::WindowLocutHicut {
+                    window: 12,
+                    locut: read_locut,
+                    hicut: read_hicut,
+                } => assert_eq!(
+                    (read_locut.to_bits(), read_hicut.to_bits()),
+                    (locut.to_bits(), hicut.to_bits()),
+                    "{value}"
+                ),
+                other => panic!("{value}: {other:?}"),
+            }
         }
-        // NCBI's error of the hicut comes before LOSAT's refusal of the locut.
-        let error = format!(
-            "{:#}",
-            parse_seg_option("12 +inf 2.5x", "TBLASTX").unwrap_err()
+        let params = |value: &str| parse_seg_option(value).unwrap().params().unwrap();
+        let (inf_low, nan_high) = (params("12 +inf 2.5"), params("12 2.2 -nan"));
+        assert_eq!(
+            (inf_low.locut, inf_low.hicut),
+            (f64::INFINITY, f64::INFINITY)
         );
+        assert_eq!((nan_high.locut, nan_high.hicut), (2.2, 2.5));
+        // NCBI's error of the hicut, with an infinite locut.
+        let error = format!("{:#}", parse_seg_option("12 +inf 2.5x").unwrap_err());
         assert!(
             error.contains("Invalid input for filtering parameters"),
             "{error}"
         );
-        assert!(parse_seg_option("12 2.2 2.5", "TBLASTX").is_ok());
+        assert!(parse_seg_option("12 2.2 2.5").is_ok());
         // `strtod` reads hexadecimal numbers: NCBI 2.17.0's `blastp -seg "12 0x1.2p1 0x1.4p1"`
         // searches as `-seg "12 2.25 2.5"`, `-seg "12 0x10 2.5"` with the locut 16.
         for (value, locut, hicut) in [
             ("12 0x1.2p1 0x1.4p1", 2.25, 2.5),
             ("12 0x10 2.5", 16.0, 2.5),
         ] {
-            match parse_seg_option(value, "TBLASTX").unwrap() {
+            match parse_seg_option(value).unwrap() {
                 SegSpec::WindowLocutHicut {
                     window: 12,
                     locut: read_locut,
@@ -1403,26 +1398,17 @@ mod tests {
 
     #[test]
     fn seg_values_follow_ncbis_filtering_handler() {
-        assert_eq!(parse_seg_option("no", "BLASTP").unwrap(), SegSpec::No);
-        assert!(message(parse_seg_option("12 2.2", "BLASTP").unwrap_err())
+        assert_eq!(parse_seg_option("no").unwrap(), SegSpec::No);
+        assert!(message(parse_seg_option("12 2.2").unwrap_err())
             .contains("Invalid number of arguments to filtering option"));
-        assert!(
-            message(parse_seg_option("12  2.2 2.5", "BLASTP").unwrap_err())
-                .contains("Invalid number of arguments to filtering option")
-        );
-        assert!(
-            message(parse_seg_option("x 2.2 2.5", "BLASTP").unwrap_err())
-                .contains("Invalid input for filtering parameters")
-        );
-        assert!(
-            message(parse_seg_option("12 inf 2.5", "BLASTP").unwrap_err())
-                .contains("Invalid input for filtering parameters")
-        );
-        assert!(
-            message(parse_seg_option("12 +inf 2.5", "BLASTP").unwrap_err()).starts_with("losat ")
-        );
+        assert!(message(parse_seg_option("12  2.2 2.5").unwrap_err())
+            .contains("Invalid number of arguments to filtering option"));
+        assert!(message(parse_seg_option("x 2.2 2.5").unwrap_err())
+            .contains("Invalid input for filtering parameters"));
+        assert!(message(parse_seg_option("12 inf 2.5").unwrap_err())
+            .contains("Invalid input for filtering parameters"));
         assert_eq!(
-            parse_seg_option("+12 2.2 .5", "BLASTP").unwrap(),
+            parse_seg_option("+12 2.2 .5").unwrap(),
             SegSpec::WindowLocutHicut {
                 window: 12,
                 locut: 2.2,

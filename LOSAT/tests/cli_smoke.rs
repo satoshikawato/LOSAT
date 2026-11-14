@@ -1534,3 +1534,70 @@ fn real_arguments_and_pssm_spaces_read_as_ncbis() {
     );
     fs::remove_dir_all(&dir).unwrap();
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1147-1154
+// ```c
+//         sparamsp = SegParametersNewAa();
+//         sparamsp->overlaps = TRUE;
+//         if (seg_options->window > 0)
+//             sparamsp->window = seg_options->window;
+//         if (seg_options->locut > 0.0)
+//             sparamsp->locut = seg_options->locut;
+//         if (seg_options->hicut > 0.0)
+//             sparamsp->hicut = seg_options->hicut;
+// ```
+// NCBI BLAST+ 2.17.0 (swebok-improve-20261105/sw8/nfix/probe/seg2): a `-seg` locut or hicut
+// that is NaN keeps SEG's default (`-nan > 0.0` is false), an infinite locut makes every window
+// low in complexity (no hit), and the filter string prints the values as glibc's `%1.1f`.
+#[test]
+fn seg_cuts_that_are_not_finite_search_as_ncbis() {
+    let dir = temp_path("seg_not_finite", "dir");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("pq.faa"),
+        ">p1 test protein\nMKVLAAGIVALLLAAQQQQQQQQQQQQQQQQPPPPPPPPGSGSGSGSGSGSAEDKLMNVWYRTSHCFIPKLEDGHKLMNRSTVWY\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("ps.faa"),
+        ">s1 subject protein\nMKVLAAGIVALLLAAQQQQQQQQQAQQQQQPPPPPPPPGSGSGSGSGAGSAEDKLMNVWYRTSHCFIPKLEDGHKLMNRSTVWYAAAA\n",
+    )
+    .unwrap();
+    let blastp = |seg: &str, outfmt: &str| {
+        clean_losat_command()
+            .current_dir(&dir)
+            .args(["blastp", "-query", "pq.faa", "-subject", "ps.faa"])
+            .args(["-seg", seg, "-outfmt", outfmt])
+            .output()
+            .expect("run LOSAT")
+    };
+    let default_rows = "p1\ts1\t100.000\t33\t0\t0\t53\t85\t52\t84\t1.70e-25\t77.0\n";
+    for (seg, rows) in [
+        ("12 2.2 2.5", default_rows),
+        ("12 2.2 -nan", default_rows),
+        ("12 +nan(1) 2.5", default_rows),
+        ("12 -inf 2.5", default_rows),
+        ("12 2.2 +inf", default_rows),
+        ("12 +inf 2.5", ""),
+        ("12 1e400 2.5", ""),
+    ] {
+        let output = blastp(seg, "6");
+        assert_eq!(output.status.code(), Some(0), "{seg}: {output:?}");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), rows, "{seg}");
+    }
+    for (seg, filter) in [
+        ("12 +inf 2.5", "S 12 inf 2.5;"),
+        ("12 2.2 -nan", "S 12 2.2 -nan;"),
+        ("12 +nan(1) 2.5", "S 12 nan 2.5;"),
+        ("12 -inf 2.5", "S 12 -inf 2.5;"),
+    ] {
+        let output = blastp(seg, "5");
+        assert_eq!(output.status.code(), Some(0), "{seg}: {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .contains(&format!("<Parameters_filter>{filter}</Parameters_filter>")),
+            "{seg}"
+        );
+    }
+    fs::remove_dir_all(&dir).unwrap();
+}

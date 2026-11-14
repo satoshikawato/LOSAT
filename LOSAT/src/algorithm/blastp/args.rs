@@ -1092,7 +1092,7 @@ impl BlastpArgs {
         //             const string& seg_opts = args[kArgSegFiltering].AsString();
         // ```
         if let Some(seg) = &self.seg {
-            options.seg = crate::blastinput::app::parse_seg_option(seg, self.app.name())?;
+            options.seg = crate::blastinput::app::parse_seg_option(seg)?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
         // ```c++

@@ -999,16 +999,10 @@ impl BlastxArgs {
         //         }
         // ```
         // The filtering handler (`CFilteringArgs`, before the composition handler,
-        // blastx_args.cpp:44-82): NCBI's error of `-seg` here, LOSAT's refusal of a value that
-        // NCBI reads (a locut or hicut that is not finite) after NCBI's checks.
-        let (seg, seg_refusal) = match self.seg_spec() {
-            Ok(seg) => (seg, None),
-            Err(crate::blastinput::app::SegOptionError::Ncbi(message)) => {
-                return Err(SemanticOptionsError::from(message).into())
-            }
-            Err(crate::blastinput::app::SegOptionError::Losat(refusal)) => {
-                (SegSpec::No, Some(refusal))
-            }
+        // blastx_args.cpp:44-82): NCBI's error of `-seg` here.
+        let seg = match self.seg_spec() {
+            Ok(seg) => seg,
+            Err(message) => return Err(SemanticOptionsError::from(message).into()),
         };
         let composition = composition_mode(&self.comp_based_stats);
         if self.ungapped && composition != 0 {
@@ -1189,9 +1183,6 @@ impl BlastxArgs {
                 "expect value or cutoff score must be greater than zero",
             )
             .into());
-        }
-        if let Some(refusal) = seg_refusal {
-            return Err(refusal);
         }
         // LOSAT's limit, for values that NCBI's checks above accept: an e-value that is not
         // finite (`+inf`, `1e999`, `-nan`; NCBI's argument reads `inf` and `nan` without a sign as
@@ -1535,10 +1526,8 @@ impl BlastxArgs {
     }
 
     /// `-seg` as NCBI's filtering handler reads it (`app::read_seg_option`).
-    pub(crate) fn seg_spec(
-        &self,
-    ) -> std::result::Result<SegSpec, crate::blastinput::app::SegOptionError> {
-        crate::blastinput::app::read_seg_option(&self.seg, self.program().upper)
+    pub(crate) fn seg_spec(&self) -> std::result::Result<SegSpec, &'static str> {
+        crate::blastinput::app::read_seg_option(&self.seg)
     }
 
     /// The `-db` value as NCBI keeps it (`seqdb::db_argument_name`), when given.

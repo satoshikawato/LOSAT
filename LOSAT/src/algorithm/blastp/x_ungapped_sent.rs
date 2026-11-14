@@ -34,8 +34,10 @@
 //! * blastp's query block is kept as `u16` codes shifted by 5 (`q << 5`, [`XQueryCode`]), so that a
 //!   step's index into the keys is one OR with the subject's code; BLASTX's buffers stay bytes.
 //! * No score wraps (a wrapped score could step over a sentinel without stopping): a block on the
-//!   path has at most `i32::MAX / 16` letters, the word and the two walks of one extension read
-//!   distinct query positions at +11 a step at most, so a score stays below `11 * (len + 3)`, and
+//!   path has at most `i32::MAX / 16` letters, the word (`W` letters, at most 4) and the two walks
+//!   of one extension read distinct query positions at +11 a step at most (the walks' positions
+//!   are distinct, the word's score only decides where they start), so a score stays below
+//!   `11 * (len + 4)`, and
 //!   a score is never below `best - 255` (a step costs at most 128 and the walk stops once
 //!   `best - score` reaches `dropoff <= 127`).
 //!
@@ -46,7 +48,7 @@
 //! byte table (`x_ungapped_fast::matrix_table`). The argument holds with the matrix's largest score
 //! `M` for 11 and the table's -128 for the sentinel: the path takes a matrix whose table gives the
 //! sentinel -128 against every code and whose `M` is at most 31, and a block of at most
-//! `i32::MAX / 32` letters, so a score stays below `31 * (len + 3)`.
+//! `i32::MAX / 32` letters, so a score stays below `31 * (len + 4)`.
 //!
 //! In a replay of the closure on 4.3 million captured candidates of an OrthoFinder job (line F,
 //! `v4-F/results/s1/p2`, arm V6) every result equalled the reference's, at 204.7 instead of 264.7
@@ -135,18 +137,19 @@ fn padded_rows(query: &[u8]) -> Vec<u16> {
 
 /// Codes below this index the table (`q << 5 | s`).
 const CODES: u8 = 32;
-/// The only word size this path takes.
+/// The only word size blastp's path takes ([`XSentQuery::new`]); BLASTX's takes 2 to 4, as the
+/// instance `W` of [`two_hit_in`] (`blastx/x_ungap_sent.rs`).
 const WORD_SIZE: usize = 3;
 /// Largest X-drop the sentinel stop is exact for (see the module comment).
 const MAX_DROPOFF: i32 = 127;
 /// Longest query block on the path: no score of a walk wraps (see the module comment).
 const MAX_BLOCK_LEN: usize = (i32::MAX / 16) as usize;
-const _: () = assert!(11 * (MAX_BLOCK_LEN as i64 + 3) < i32::MAX as i64);
+const _: () = assert!(11 * (MAX_BLOCK_LEN as i64 + 4) < i32::MAX as i64);
 /// Longest query block on the path for a matrix other than BLOSUM62, whose largest score is at
 /// most 31 (`MatrixTable::sent_table`): no score of a walk wraps. BLASTX's query batches of
 /// another matrix take the same bound (`blastx/x_ungap_sent.rs`, item SC6b).
 pub(crate) const MAX_BLOCK_LEN_OF: usize = (i32::MAX / 32) as usize;
-const _: () = assert!(31 * (MAX_BLOCK_LEN_OF as i64 + 3) < i32::MAX as i64);
+const _: () = assert!(31 * (MAX_BLOCK_LEN_OF as i64 + 4) < i32::MAX as i64);
 
 struct State {
     /// `LOSAT_X_BPUNGAPSENT`.
@@ -367,7 +370,7 @@ pub(crate) unsafe fn two_hit(
     q_right_off: usize,
     dropoff: i32,
 ) -> Option<BlastpTwoHitUngappedResult> {
-    two_hit_in::<2, u16>(
+    two_hit_in::<2, u16, WORD_SIZE>(
         query.keys,
         &query.padded,
         subject.aa_seq,
@@ -381,16 +384,20 @@ pub(crate) unsafe fn two_hit(
 /// [`two_hit`] on two buffers that start with a sentinel and end with one: the reference's
 /// sequences are `query[1..query.len() - TAIL + 1]` and the same of `subject` (`TAIL` 2: blastp's
 /// query block and `subject_raw`, without the last sentinel; 1: BLASTX's six-frame query and
-/// subject, which keep it). A const per caller keeps each caller's instance its own.
+/// subject, which keep it), for the word size `W` (the reference's `word_size` argument: blastp 3,
+/// BLASTX 2 to 4). A const per caller keeps each caller's instance its own, and a const `W` makes
+/// the word loop's length the instance's, chosen once per subject by the caller (never per
+/// candidate); nothing else in the function reads `W` (the module comment of
+/// `blastx/x_ungap_sent.rs` gives the argument for `W` other than 3).
 ///
 /// SAFETY: `1 <= dropoff <= 127`; both buffers have a sentinel (code 0) at index 0 and at their
 /// last index; `table` scores the sentinel -128 against every code, both ways, and with its
-/// largest score `M`, `M * (len + 3) < i32::MAX` for the `len` letters of `query` (BLOSUM62's 11
+/// largest score `M`, `M * (len + 4) < i32::MAX` for the `len` letters of `query` (BLOSUM62's 11
 /// and at most `i32::MAX / 16` letters, or `M <= 31` and at most `i32::MAX / 32`: module
-/// comment); fewer than `i32::MAX` bytes in `subject`; and `TAIL` is 1 or 2.
+/// comment); fewer than `i32::MAX` bytes in `subject`; `TAIL` is 1 or 2; and `W` is 1 to 4.
 // NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
 #[inline(always)]
-pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode>(
+pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode, const W: usize>(
     keys: &KeyTable,
     query: &[Q],
     subject: &[u8],
@@ -401,10 +408,11 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode>(
 ) -> Option<BlastpTwoHitUngappedResult> {
     debug_assert!((1..=MAX_DROPOFF).contains(&dropoff));
     debug_assert!(TAIL == 1 || TAIL == 2);
+    debug_assert!((1..=4).contains(&W));
     let qlen = query.len() - TAIL;
     let slen = subject.len() - TAIL;
     // The early return of the reference wrapper (a word that does not fit).
-    if q_right_off + WORD_SIZE > qlen || s_right_off + WORD_SIZE > slen {
+    if q_right_off + W > qlen || s_right_off + W > slen {
         return None;
     }
     let tab = keys.as_ptr();
@@ -415,13 +423,13 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode>(
     let s_left_off = s_left_off as i32;
     let mut s_right_off = s_right_off as i32;
 
-    // the word loop of three letters (inside both sequences: checked above), on keys from 0: its
+    // the word loop of `W` letters (inside both sequences: checked above), on keys from 0: its
     // best is `left_score` and the best's length `right_d` (module comment)
     let mut key = 0i64;
     let mut best = 0i64;
     let qw = qb.add(q_right_off as usize);
     let sw = sb.add(s_right_off as usize);
-    for i in 0..WORD_SIZE {
+    for i in 0..W {
         key += *tab.add((*qw.add(i)).row() | *sw.add(i) as usize);
         if key > best {
             best = key;
@@ -455,9 +463,11 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode>(
         // SAFETY: with TAIL 2, q_right_off <= qlen and s_right_off <= slen, and both have a
         // sentinel at offset qlen / slen. With TAIL 1 the last sentinel is at offset qlen - 1 /
         // slen - 1, and the walk starts at or before it: the word ends at that offset at most, and
-        // a word whose last letter is a sentinel has right_d < 3 (that letter scores -128, the
-        // other two 11 each at most: BLASTX, the one caller with TAIL 1, scores with BLOSUM62),
-        // so the start is past it only when it is not in the word.
+        // a word whose last letter is a sentinel has right_d < W (that letter's step scores -128,
+        // so its key is below the key before it, which is at most the best: a sentinel step is
+        // never the best, whatever `W` and the other letters' scores, and the table gives the
+        // sentinel -128 against every code), so the start is past it only when it is not in the
+        // word.
         let (best, len, end) = walk::<true, Q>(
             tab,
             qb.add(q_right_off as usize),

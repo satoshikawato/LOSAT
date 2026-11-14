@@ -141,11 +141,11 @@ fn losat(program: &str, dir: &Path, threads: &str) -> Command {
             command.env_remove(variable);
         }
     }
-    // The probe of an `--all-features` binary goes to a file of the case: `prlimit --fsize`
-    // limits every file the run writes, and the caller's log may already be past the room.
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_some() {
-        command.env("LOSAT_BLASTX_WORKER_LOG", dir.join("worker.log"));
-    }
+    // The probe of an `--all-features` binary goes to a file of the case (set whether or not the
+    // caller's environment names one: the probe needs a name at 2 threads and more):
+    // `prlimit --fsize` limits every file the run writes, and the caller's log may already be
+    // past the room.
+    command.env("LOSAT_BLASTX_WORKER_LOG", dir.join("worker.log"));
     command.env("HOME", dir).env("USERPROFILE", dir);
     command
 }

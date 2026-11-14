@@ -15,7 +15,11 @@ run:
   write: then LOSAT stops there).
 - `SEQ_ID_PREFER_ACCESSION_OVER_GI`, `SEQ_ID_AVOID_GI` and a `[BLAST] BLASTDB` value that LOSAT
   cannot read: where the `-db` database opens, which in every search program is before an empty
-  query file ends the run.
+  query file ends the run. A `[BLAST] BLASTDB` value that LOSAT cannot read also stops a
+  `-subject` search whose report looks `taxdb.bti` up (a tabular report with `sscinames`,
+  `scomnames`, `sblastnames` or `sskingdoms`, or the organism report, outfmt 18), at the same
+  point; the singular names (`ssciname`, ...) look nothing up for `-subject` records, which have no
+  taxid, so they do not read it, as in NCBI BLAST+.
 - The other variables of a search: after the options and the input files, before the search. An
   empty query file ends the run first, as in NCBI BLAST+ (`Query is Empty!`, exit status 0).
 - The query splitting variables in blastx (at every query batch) and tblastx, and the splitting
@@ -73,7 +77,7 @@ file with any other entry stops the run, and so does an `NCBI_CONFIG__<SECTION>_
 for another entry. LOSAT reads the files as NCBI BLAST+ 2.17.0 does: comments, sections, entries
 before the first section (left out), a value continued on the next line after a backslash, quotes
 at the ends of a value, and backslash escapes. A value that is not UTF-8 stops a run that opens a
-database for `BLASTDB`, `-window_masker_taxid` for `WINDOW_MASKER_PATH`, and
+database or looks `taxdb.bti` up for `BLASTDB`, `-window_masker_taxid` for `WINDOW_MASKER_PATH`, and
 `makeblastdb -parse_seqids` for `MAX_SEQID_LENGTH`.
 
 A file that NCBI BLAST+ reports as malformed gets NCBI BLAST+'s messages, where NCBI BLAST+ writes
@@ -97,8 +101,9 @@ then stops after its options.
 rpsbproc writes its messages to the `-logfile` file as NCBI's rpsbproc does, and its program information,
 progress and dry run line to the standard error stream; its `-dryrun` runs its own dry run (its start, then
 the line of its status). rpsbproc reads `.ncbirc` once, when its configuration is loaded (it has no usage
-report), and LOSAT refuses a `.ncbirc` with a syntax error there: NCBI's rpsbproc reports it with the name
-of a source file of its own build. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
+report): a `.ncbirc` with a syntax error is reported there as NCBI's rpsbproc reports it, naming a source file
+of that rpsbproc's own build (the Linux x64 binary of NCBI's package of 2025-05-13), and the run goes on.
+LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
 UTF-16, or a malformed line that is not UTF-8. LOSAT's library runs the same start in a call whose
 arguments have `-logfile`, `-conffile` or `-dryrun`, and in a call that reads NCBI's settings (a
 database search, blastn's `-window_masker_taxid`, the organism report of outfmt 18, the file of a
@@ -110,15 +115,23 @@ call's error.
 
 These change the output as they change NCBI BLAST+'s output. They are not needed for normal use.
 
+NCBI BLAST+ reads `BATCH_SIZE`, `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE` and `PRE_FETCH_SEQS_LIMIT` as
+whole numbers: an optional `+` or `-` and digits, within the range of a 32-bit integer, without
+spaces. Where it reads a value that is not such a number (`abc`, `1.5`, ` 5`, `5 `,
+`2147483648`), the program stops as NCBI BLAST+ stops: exit status 255 and NCBI's message
+`Error: NCBI C++ Exception:` with a `T0` line that names NCBI's source file `ncbistr.cpp` in the
+build of the official Linux x64 release and `Cannot convert string '...' to Int8` (or `to int,
+overflow`), and with `-outfmt 11` NCBI's error archive. The table says where each one stops.
+
 | Variable | Effect |
 | :--- | :--- |
-| `BATCH_SIZE` | The number of query letters searched together (NCBI's query batch). A value that is not an integer stops the run. `psiblast` searches one query at a time and does not read it, as in NCBI BLAST+. |
-| `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE` | The length of the pieces a long query is split into, and their overlap. An empty value counts as unset; a value that is not an integer stops the run. `rpsblast` never splits a query and, as NCBI BLAST+ does, does not read `OVERLAP_CHUNK_SIZE` (a non-integer value is ignored there; `CHUNK_SIZE` is still read). With a translated query (`blastx`, `tblastx`) a chunk size that is not a multiple of 3 is NCBI's error `Split query chunk size must be divisible by 3` (exit status 3). Splitting values that NCBI BLAST+ does not search correctly are refused: a negative chunk size above a negative overlap, an overlap so close to the chunk size that NCBI splits a chunk again, and in blastx an overlap that is not a multiple of 3. |
+| `BATCH_SIZE` | The number of query letters searched together (NCBI's query batch). A value that is not a number (an empty one too) stops the run before anything is written; `blastn` stops after the start of the `-outfmt 0` report. `psiblast` searches one query at a time and does not read it, as in NCBI BLAST+. |
+| `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE` | The length of the pieces a long query is split into, and their overlap. An empty value counts as unset; a value that is not a number stops the run at the first query batch, after the start of the `-outfmt 0` report and the warnings about the batch's query records (`blastn` reads `CHUNK_SIZE` before it reads the first batch). `rpsblast` and `rpstblastn` never split a query and, as NCBI BLAST+ does, do not read `OVERLAP_CHUNK_SIZE` (a non-integer value is ignored there; `CHUNK_SIZE` is still read); neither does `blastx` with several queries in a batch. With a translated query (`blastx`, `tblastx`; not `rpstblastn`) a chunk size that is not a multiple of 3 is NCBI's error `Split query chunk size must be divisible by 3` (exit status 3). Splitting values that NCBI BLAST+ does not search correctly are refused: a negative chunk size above a negative overlap, an overlap so close to the chunk size that NCBI splits a chunk again, and in blastx an overlap that is not a multiple of 3. |
 | `ARCHIVE_FORMAT` | The encoding of `-outfmt 11`: unset or empty for text ASN.1, a value starting with `bin` (any case) for binary ASN.1, `xml` (any case) for XML; any other value writes no archive, as in NCBI BLAST+. |
 | `ADAPTIVE_CBS` | Any value, an empty one too, with composition-based statistics: `blastp`, `psiblast`, `rpsblast`, `blastx` and `tblastn` keep a larger preliminary hit list (1,500 subjects, or twice the hit list size and 50 more from a hit list size of 1,000), and with a hit list size (`-max_target_seqs`) below 1,000 all of them but `psiblast` cut that list by E-value before the final alignments, as NCBI BLAST+ does. The reported hits can grow or shrink. |
 | `CTOOLKIT_COMPATIBLE` | Any value: `-outfmt 0` writes `(bits)` in place of `(Bits)` above the hit list. |
 | `OLD_FSC` | Any value, an empty one too: `blastp`, `blastx`, `tblastn`, `psiblast` (every round) and `rpsblast` compute E-values and cutoffs without the finite-size correction, as NCBI BLAST+ does for any `-searchsp`. It changes nothing in `blastn`, `tblastx` or an ungapped `blastx` search. |
-| `PRE_FETCH_SEQS_LIMIT` | With `-db`, an integer is the largest number of alignments of a query batch for which NCBI BLAST+ reads the report's sequences from the database before the report (0: never); LOSAT applies the same rule. A value that is not an integer stops the run (NCBI BLAST+ stops before its report), except when every format is `-outfmt 11`, which `psiblast` and `rpsblast` do not write. |
+| `PRE_FETCH_SEQS_LIMIT` | With `-db`, an integer is the largest number of alignments of a query batch for which NCBI BLAST+ reads the report's sequences from the database before the report (0: never); LOSAT applies the same rule. A value that is not a number (an empty one too) stops the run after the search of the first query batch, before its report (after the start of the `-outfmt 0` report), except when every format is `-outfmt 11`, which every program but `psiblast` writes without reading the variable. |
 
 ## makeblastdb
 

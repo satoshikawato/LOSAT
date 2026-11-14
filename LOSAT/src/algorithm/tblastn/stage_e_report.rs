@@ -196,6 +196,10 @@ pub(super) fn render(
     formatting: crate::blastinput::report_counts::FormattingArgs,
     genetic_code: u8,
     seg: Option<&SegParams>,
+    // The `-seg` options as NCBI's filter string prints them (`SegSpec::filter_options`), not the
+    // SEG parameters `seg` (a value not above 0 or NaN there is SEG's default, a hicut below the
+    // locut the locut): BLAST XML's `Parameters_filter`.
+    seg_filter: Option<(i32, f64, f64)>,
     mask_lowercase: bool,
     query_warning_lines: &[Vec<u8>],
     // The texts of the subjects that each query's report reads one by one (its batch's prefetch
@@ -283,7 +287,7 @@ pub(super) fn render(
             query_batch_skipped,
             scoring,
             matrix_name,
-            seg,
+            seg_filter,
             ranges,
             xml_is_xml2,
             xml_only_xml2,
@@ -1723,6 +1727,7 @@ mod tests {
                 Default::default(),
                 1,
                 Some(&seg),
+                Some((12, 2.2, 2.5)),
                 false,
                 &[],
                 &[],

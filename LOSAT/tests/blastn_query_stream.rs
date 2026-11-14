@@ -34,6 +34,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), and this
 /// file's own on 2026-10-18 (perf/bn-memory-rules), each `0`, the default before, unless the
 /// search sets it: every search here runs as it was written, with the switches off that it does
@@ -158,11 +161,19 @@ fn queries(dir: &TempDir, name: &str, tail: &[u8]) -> PathBuf {
 }
 
 /// One run's exit status, report (standard output, or the `-out` file) and standard error.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 struct Run {
+    /// The run\'s worker log, when the test made one: kept until the caller drops the run.
+    _log: Option<TempFile>,
     status: Option<i32>,
     report: Vec<u8>,
     stderr: Vec<u8>,
+}
+
+impl PartialEq for Run {
+    fn eq(&self, other: &Run) -> bool {
+        self.status == other.status && self.report == other.report && self.stderr == other.stderr
+    }
 }
 
 /// One search with `args`, the given variables as its only `LOSAT_*` variables and `BATCH_SIZE`
@@ -189,12 +200,7 @@ fn blastn_with_input(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join(format!("losat_qstream_{}_worker.log", std::process::id())),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastn_query_stream_worker");
     command
         .arg("blastn")
         .args(args)
@@ -231,6 +237,7 @@ fn blastn_with_input(
         None => output.stdout,
     };
     Run {
+        _log: log,
         status: output.status.code(),
         report,
         stderr: output.stderr,

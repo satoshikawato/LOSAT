@@ -2458,29 +2458,6 @@ fn has_usage_report(program: &str) -> bool {
     !matches!(program, "rpsbproc" | "dustmasker" | "segmasker")
 }
 
-/// Whether NCBI's `program` is built apart from BLAST+ 2.17.0 (rpsbproc), so that the posts of
-/// its system-wide file name its own toolkit build (`rpsbproc_registry_refusal`).
-fn has_own_build(program: &str) -> bool {
-    program == "rpsbproc"
-}
-
-/// LOSAT's refusal of a system-wide file (`.ncbirc`) whose syntax error NCBI's rpsbproc reports
-/// when it loads its configuration (`application_start`): the post quotes the exception's
-/// `what()`, whose place is a source file of the toolkit build of that rpsbproc (`T0 "/opt/conda/conda-bld/
-/// rpsbproc_<n>/work/ncbi_cxx/c++/src/corelib/ncbireg.cpp", line 722` in bioconda's 0.5.1, the
-/// package of 2025-05-13 another), which LOSAT does not write. The reports of its `rpsbproc.ini`
-/// and of the file of `-conffile` name no place (`NcbiException::report_default_ex`), nor does
-/// the post of a `.ncbirc` whose stream fails (`ncbi_registry::error_reading_post`): they are
-/// NCBI's bytes, as in the BLAST programs (NCBI rpsbproc 0.5.1, both builds, line RG
-/// `E/SURVEY_E1c.md`: probes `c_ini_bad`, `c_conf_bad`, `c_conf_bad_log`, `c_conf_unread_dot`,
-/// and of its review 1, `r_ncbirc_bom1`; line RG DECISIONS E1c-3).
-fn rpsbproc_registry_refusal(path: &Path) -> String {
-    format!(
-        "the registry file {} has an error that NCBI's rpsbproc reports when it starts; this is not supported by LOSAT's rpsbproc",
-        path.display()
-    )
-}
-
 /// `BLAST_USAGE_REPORT` as `NStr::StringToBool` reads it (`usage_report_reads_ncbirc`): `None`
 /// when it is not set, `Some(None)` for a value that is not a Boolean (NCBI aborts).
 fn usage_report_variable(env: &dyn Fn(&str) -> Option<OsString>) -> Option<Option<bool>> {
@@ -2495,15 +2472,15 @@ fn ncbirc_turned_off(env: &dyn Fn(&str) -> Option<OsString>) -> bool {
     env("NCBI_DONT_USE_NCBIRC").is_some() || env("NCBI_CONFIG__NCBI__DONT_USE_NCBIRC").is_some()
 }
 
-/// The messages of one read of the system-wide file (`ncbi_registry::syntax_error_notice`,
+/// The messages of `program`'s read of the system-wide file (`ncbi_registry::syntax_error_notice`,
 /// `ncbi_registry::error_reading_post`).
-fn system_wide_posts(read: &RegistryRead) -> String {
+fn system_wide_posts(read: &RegistryRead, program: &str) -> String {
     let mut posts = String::new();
     if read.stream_failed {
         posts.push_str(error_reading_post());
     }
     if let Some(error) = &read.error {
-        posts.push_str(&syntax_error_notice(error));
+        posts.push_str(&syntax_error_notice(error, program));
     }
     posts
 }
@@ -2705,7 +2682,7 @@ fn application_start(
         }
     }
     if let Some((read, _)) = usage_read {
-        start.usage_report = unless_refused(system_wide_posts(read));
+        start.usage_report = unless_refused(system_wide_posts(read, program));
         if start.usage_report.is_err() {
             return ended(start);
         }
@@ -2770,11 +2747,7 @@ fn application_start(
             Some((Ok(Some(read)), path)) => {
                 let kept = usage_report_reads && read.error.is_none() && ini.is_none();
                 if !kept {
-                    posts.push_str(&system_wide_posts(read));
-                }
-                if has_own_build(program) && read.error.is_some() {
-                    start.config = Err(rpsbproc_registry_refusal(path));
-                    return ended(start);
+                    posts.push_str(&system_wide_posts(read, program));
                 }
                 ncbirc_entries = Some((path.as_path(), read.entries.as_slice()));
             }
@@ -4174,9 +4147,11 @@ mod tests {
 
     // NCBI's rpsbproc 0.5.1 (the 2025-05-13 package and bioconda's, env parity probe of
     // 2026-11-12 on ws; quoted at `has_usage_report`): no usage report, so neither its read of
-    // `.ncbirc` nor its `BLAST_USAGE_REPORT`; a `.ncbirc` that rpsbproc reports is LOSAT's
-    // refusal (`rpsbproc_registry_refusal`), a malformed `rpsbproc.ini` or `-conffile` file is
-    // NCBI's report, exit status 2 (line RG probes `c_ini_bad`, `c_conf_bad`).
+    // `.ncbirc` nor its `BLAST_USAGE_REPORT`; a `.ncbirc` that rpsbproc reports is posted once, at
+    // the configuration load, naming the 2025-05-13 package's build tree, and the entries before
+    // the bad line are kept (env parity probe I of 2026-11-14, `i_probe/`); a malformed
+    // `rpsbproc.ini` or `-conffile` file is NCBI's report, exit status 2 (line RG probes
+    // `c_ini_bad`, `c_conf_bad`).
     #[test]
     fn rpsbproc_starts_without_the_usage_report() {
         let dir = std::env::temp_dir().join(format!(
@@ -4211,8 +4186,12 @@ mod tests {
         std::fs::write(&ncbirc, "[BLAST]\nBLASTDB=/db\ngarbage\n").unwrap();
         let malformed = start(&[]);
         assert_eq!(malformed.usage_report, Ok(String::new()));
-        assert!(malformed.config.unwrap_err().contains("LOSAT's rpsbproc"));
-        assert!(malformed.settings.unwrap_err().contains("LOSAT's rpsbproc"));
+        let post = "Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:\n    T0 \"/export/home/tomcat/TeamCity/Agent2/work/b895474bf74772ad/struct_tree/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'garbage' (m_Pos = 3)\n\n";
+        assert_eq!(malformed.config, Ok(ConfigLoad::Loaded(post.to_string())));
+        assert_eq!(
+            malformed.settings.unwrap().blastdb,
+            Ok(Some("/db".to_string()))
+        );
         std::fs::remove_file(&ncbirc).unwrap();
         std::fs::write(dir.join("rpsbproc.ini"), "garbage\n").unwrap();
         let report = "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n";

@@ -1003,15 +1003,17 @@ fn run_inner(
     // of the reports, as rpsblast refuses them (`args::RpsTblastnSearch::for_database`, once per
     // run).
     if let Some(search) = options.rpstblastn.clone() {
-        options.rpstblastn = Some(search.for_database(&options, database.as_ref())?);
+        let search = search.for_database(&options, database.as_ref())?;
         // What each batch's RPS set-up writes into the options handle, which the search strategy's
-        // later requests hold (`OptionsHandle::pass`).
+        // later requests hold (`OptionsHandle::pass`): the search for the database knows its
+        // volumes' costs.
         if let Some(strategy) = &strategy {
             strategy.options().set_search_sets(
                 Vec::new(),
                 search.handle_sets(database.as_ref(), args.searchsp, args.dbsize),
             )?;
         }
+        options.rpstblastn = Some(search);
     }
     // LOSAT_X_DBIDXREAD acts on a database's index files only; the new side is marked where a
     // volume is opened (`seqdb::Volume::open`).

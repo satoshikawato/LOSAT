@@ -448,8 +448,9 @@ of exception 9 (PS16a) did.
 
 - `-outfmt 18`, the organism report (version 1.18, 2026-11-14, line RG item T2c; all five
   programs): a query batch that NCBI does not search (no query of it has a valid context, "Could
-  not calculate ungapped Karlin-Altschul parameters"): NCBI's `x_PrintTaxReport` reads the null
-  Seq-align-set of the batch (`blast_format.cpp:893`, `:898-899`) and stops with a null pointer
+  not calculate ungapped Karlin-Altschul parameters"): NCBI leaves the Seq-align-set of each of its
+  queries null (`local_blast.cpp:204-205`), and `x_PrintTaxReport` reads the query's one
+  (`blast_format.cpp:893`, `:898-899`) and stops with a null pointer
   exception and a stack trace of its build, exit status 255; LOSAT writes NCBI's bytes up to the
   query's `Length=` line and then the error. Also (line RG item T2, 2026-11-13): a taxonomy name
   with `<@bl_taxid@>` (NCBI prints the uninitialised `STaxInfo::blNameTaxid`, `taxFormat.hpp:142`)

@@ -1692,9 +1692,12 @@ impl NcbiBuffer {
                 // `count`: the bytes of the insertion copied into the buffer, up to its last
                 // newline where a line-buffered stream's insertion fits (`must_flush`).
                 let room = if self.allocated { block - self.held } else { 0 };
-                let (count, must_flush) = match insertion.iter().rposition(|&byte| byte == b'\n') {
-                    Some(at) if lines && n <= room => (at + 1, true),
-                    _ => (n.min(room), false),
+                // glibc looks for the newline only in its line-buffered branch, when the
+                // insertion fits; a fully buffered stream never scans the bytes.
+                let last_newline = || insertion.iter().rposition(|&byte| byte == b'\n');
+                let (count, must_flush) = match (lines && n <= room).then(last_newline).flatten() {
+                    Some(at) => (at + 1, true),
+                    None => (n.min(room), false),
                 };
                 let to_do = n - count;
                 if to_do == 0 && !must_flush {
@@ -1709,9 +1712,12 @@ impl NcbiBuffer {
                         to_do
                     };
                     let kept = &insertion[n - (to_do - do_write)..];
-                    match kept.iter().rposition(|&byte| byte == b'\n') {
-                        Some(at) if lines => kept.len() - at - 1,
-                        _ => kept.len(),
+                    match lines
+                        .then(|| kept.iter().rposition(|&byte| byte == b'\n'))
+                        .flatten()
+                    {
+                        Some(at) => kept.len() - at - 1,
+                        None => kept.len(),
                     }
                 }
             }

@@ -193,9 +193,10 @@ fn a_query_and_a_subject_with_one_id_are_refused() {
 // before its first batch, the same bytes as outfmt 0's (line RG T3a review D3).
 #[test]
 fn blastp_formats_1_to_4_refuse_a_query_with_a_subject_s_id_after_outfmt_0_s_prolog() {
+    // One directory: the prolog names the subject file.
     let refuse = |outfmt: &str| {
         run(
-            &format!("anchored{outfmt}"),
+            "anchored",
             "blastp",
             PROTEIN,
             PROTEIN,

@@ -51,8 +51,8 @@
   tables is searched; the rejection of 1.9 keeps only a run whose reports look a parsed Seq-id up
   in a file without the table, rule 3, line DBID item mixdb, Owner-delegated);
   1.26 2026-11-15 (the rule-2 item of a seqid list of gi ids only narrowed to what NCBI's runs
-  show: a positive list keeps every sequence only on one volume that the alias files leave
-  whole, and none elsewhere, line DBID item gisl, Owner-delegated)
+  show: a positive list keeps every sequence only where NCBI's OID bit set is its special
+  all-set one, and none elsewhere, line DBID item gisl, Owner-delegated)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -409,11 +409,12 @@ asks the maintainer to accept it, as the PRs of versions 1.5 and 1.13 did.
 - A text seqid list whose ids all go in NCBI's rewriting for a version 5 database (gi ids
   only): NCBI prints `Empty seqid list`. A negative list excludes nothing. A positive list
   clears every OID (`x_ApplyUserGiList`): no sequence is searched, and each query gets
-  `Filtering resulted in an empty database.` (two or more volumes, or one volume inside an
-  alias file's `FIRST_OID`-`LAST_OID` range), except where NCBI's OID bit set is its special
-  all-set one (one volume that the alias files leave whole): the clearing writes into a stale
-  array, and the whole database is searched (line DI-8 `DECISIONS.md` 18; line DBID item gisl,
-  2026-11-15).
+  `Filtering resulted in an empty database.`, except where NCBI's OID bit set is its special
+  all-set one: the clearing writes into a stale array, and the whole database is searched.
+  That is the case when the `-db` names reach one volume and at least one path of alias files
+  to it crosses no `FIRST_OID`-`LAST_OID` range that cuts the volume (two ranges whose union is
+  the volume do not count; two or more volumes never do) (line DI-8 `DECISIONS.md` 18; line
+  DBID item gisl, 2026-11-15).
 
 - `CHUNK_SIZE=1000` without `BATCH_SIZE`: the batch size becomes 0, NCBI prints the
   outfmt 0 prolog and then `BLAST engine error: Empty CBlastQueryVector`, exit 3.

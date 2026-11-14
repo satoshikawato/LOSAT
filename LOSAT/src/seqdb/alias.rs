@@ -2291,7 +2291,7 @@ pub(super) fn has_ranges(node: &AliasNode) -> bool {
 //         m_AllBits->UnionWith(*vol_bits, true);
 //     }
 // ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:131-177
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:130-177
 // ```c++
 //     const string & vn = vol.Vol()->GetVolName();
 //     CRef<CSeqDB_FilterTree> ft = filters.Specialize(vn);
@@ -2314,7 +2314,7 @@ pub(super) fn has_ranges(node: &AliasNode) -> bool {
 //         }
 //     }
 // ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:193-206
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:191-207
 // ```c++
 //     CRef<CSeqDB_BitSet> filter(new CSeqDB_BitSet(vol_start,
 //                                                  vol_end,
@@ -2370,20 +2370,23 @@ pub(super) fn has_ranges(node: &AliasNode) -> bool {
 //           m_End    (end),
 //           m_Special(sp)
 // ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:208-221
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:208-220
 // ```c++
-// void CSeqDB_BitSet::IntersectWith(const CSeqDB_BitSet & other, bool consume)
-// {
-//     if (m_Special == eAllClear || other.m_Special == eAllSet) {
-//         return;
-//     }
-//     ...
 //     if (m_Special == eAllSet && other.m_Special == eAllSet) {
-//         m_Start = max(m_Start, other.m_Start);
-//         m_End = min(m_End, other.m_End);
+//         size_t start = std::max(m_Start, other.m_Start);
+//         size_t end   = std::min(m_End,   other.m_End);
+//
+//         if (start >= end) {
+//             // The intersected ranges don't overlap.
+//             m_Special = eAllClear;
+//         } else {
+//             m_Start = start;
+//             m_End = end;
+//         }
 //         return;
 //     }
 // ```
+// (The whole of `IntersectWith` is quoted at `BitSetShape::intersect_with`.)
 // The `int` bounds of a range become `size_t`: a negative one is sign-extended past every OID
 // (line RG D1a-2, survey A M2), so a negative `FIRST_OID` keeps no OID and a negative
 // `LAST_OID` is no upper bound, as `bound` reads them.
@@ -2543,8 +2546,7 @@ impl BitSetShape {
         if other.start >= self.start && other.end <= self.end && self.special == Special::AllSet {
             return self;
         }
-        if other.start <= self.start && other.end >= self.end && other.special == Special::AllSet
-        {
+        if other.start <= self.start && other.end >= self.end && other.special == Special::AllSet {
             return other;
         }
         Self::new(
@@ -2677,7 +2679,11 @@ fn specialize(node: &AliasNode, volume: &str) -> Option<VolumeNode> {
         nodes: Vec::new(),
         volumes: 0,
     };
-    for sub in node.subnodes.iter().filter_map(|sub| specialize(sub, volume)) {
+    for sub in node
+        .subnodes
+        .iter()
+        .filter_map(|sub| specialize(sub, volume))
+    {
         if sub.range.is_some() {
             clone.nodes.push(sub);
         } else {
@@ -2745,8 +2751,9 @@ fn volume_bits(node: &VolumeNode, start: u64, end: u64) -> BitSetShape {
     };
     let mut filter = BitSetShape::new(start, end, Special::AllSet);
     if let Some(range) = node.range {
-        let (begin, end) = range.bounds();
-        filter = filter.intersect_with(BitSetShape::new(bound(begin), bound(end), Special::AllSet));
+        let (first, last) = range.bounds();
+        filter =
+            filter.intersect_with(BitSetShape::new(bound(first), bound(last), Special::AllSet));
     }
     map.intersect_with(filter)
 }
@@ -2780,11 +2787,13 @@ fn volume_bits(node: &VolumeNode, start: u64, end: u64) -> BitSetShape {
 //     }
 // }
 // ```
-// `m_AllBits` starts as a bit array of every OID. It becomes the special all-set only by the
-// copy of a volume's special all-set that covers every OID: one volume whose filters keep all
-// of it as a special set (no OID range inside it, no two range nodes ORed). Its `m_Bits`
-// then takes the empty vector of the copy, and keeps the array of the volume set as its
-// capacity (`vector::operator=` reuses the storage).
+// `m_AllBits` starts as a bit array over every OID, all clear. It becomes the special all-set
+// only by the copy of a volume's special all-set that covers every OID: the `-db` names reach
+// one volume (that holds OIDs), and at least one path of the alias tree to it crosses no
+// `FIRST_OID`-`LAST_OID` range that cuts the volume (a union of special sets stays special only
+// when one covers the others; two ranges whose union is the volume make a bit array). Its
+// `m_Bits` then takes the empty vector of the copy, and keeps the array of the volume set as
+// its capacity (`vector::operator=` reuses the storage).
 /// Whether NCBI's OID bit set of the volume set (`CSeqDBOIDList::m_AllBits`) is the special
 /// all-set one after the OID ranges of the alias tree `root` (`x_Setup`), the volumes `names`
 /// (in NCBI's order) holding the global OIDs `starts[i]..starts[i + 1]`.

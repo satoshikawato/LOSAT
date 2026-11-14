@@ -20,6 +20,7 @@ use super::isam;
 use super::lmdb_read::{Db, Env};
 use super::seqidlist::{self, SeqidListFile};
 use super::{tax_files, SeqDb, SeqDbError, SeqType};
+use crate::seqid::accguide::SeqIdWarning;
 use crate::seqid::model::ObjectId;
 use crate::seqid::{label, BlastDefline, DeflineSet, ParsedSeqId};
 
@@ -64,6 +65,9 @@ pub enum ListWarning {
     /// `ERR_POST(text)` at the default severity (an error that is reported before NCBI
     /// throws): with the diagnostic prefix of the program.
     Error(String),
+    /// `ERR_POST_X(subcode, Warning << message)` of NCBI's Seq-id code: with its error code
+    /// before the diagnostic prefix of the program.
+    SeqId(SeqIdWarning),
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:206-226
@@ -2599,7 +2603,7 @@ impl SeqDb {
     //     				user_list->SetSiTranslation(i, oids[i]);
     //     			}
     // ```
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:294-302
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:294-303
     // ```c++
     // void CSeqDBOIDList::x_ApplyUserGiList(CSeqDBGiList   & gis)
     //
@@ -2686,11 +2690,12 @@ impl SeqDb {
     // A text list that lost every id (all `gi|N`): NCBI warns `Empty seqid list`. A negative
     // one excludes nothing. A positive one is empty (`gis.Empty()`), and `x_ApplyUserGiList`
     // clears every OID of `m_AllBits` (the code above): no OID is searched and each query
-    // gets `Filtering resulted in an empty database.` (a database of two or more volumes, or
-    // one volume inside an OID range of the alias files). When `m_AllBits` is the special
-    // all-set (one volume that the alias files keep whole, `alias::all_bits_special_set`),
-    // `ClearBit` writes into the array its copy left behind (a debug build's `_ASSERT(m_Special
-    // == eNone)` is off) and the set still answers every OID: NCBI searches the whole database
+    // gets `Filtering resulted in an empty database.` (two or more volumes, or one volume
+    // whose every path in the alias files crosses an OID range that cuts it). When `m_AllBits`
+    // is the special all-set (`alias::all_bits_special_set`), the clearing (`ClearBit` below
+    // 24 OIDs, a `memset` from 24; a release build compiles `_ASSERT(m_Special == eNone)`
+    // out) writes into the array its copy left behind, and the set still answers every OID:
+    // NCBI searches the whole database
     // (probe S17, S18, R08, R09 of dropin-survey-20261029/DI8: 500 hits of 514 sequences, the
     // statistics of the whole database; line DBID gisl: 1, 2, 3 volumes and 14 alias shapes, 6
     // programs). LOSAT does what the runs show: the warnings, every OID kept or none, and, as
@@ -2719,7 +2724,12 @@ impl SeqDb {
         }
         let ids: Vec<Vec<u8>> = if list.file.info.is_v4 {
             warnings.push(ListWarning::Posted(TEXT_LIST_WARNING.to_string()));
-            let ids = seqidlist::process_for_v5(&list.file.ids).map_err(|invalid| {
+            let mut posted = Vec::new();
+            let processed = seqidlist::process_for_v5(&list.file.ids, &mut |warning| {
+                posted.push(ListWarning::SeqId(warning));
+            });
+            warnings.append(&mut posted);
+            let ids = processed.map_err(|invalid| {
                 warnings.push(ListWarning::Error(invalid.error.message.clone()));
                 SeqDbError::NotFound(invalid.message())
             })?;
@@ -3801,10 +3811,19 @@ mod tests {
             // The whole volume and a range inside it, in both orders.
             ("aliaskeys/p_cover", SeqType::Protein, true),
             ("aliaskeys/p_coverr", SeqType::Protein, true),
+            // An alias of an alias; the whole range above it.
+            ("aliaskeys/p_chain", SeqType::Protein, true),
+            ("aliaskeys/p_above", SeqType::Protein, true),
+            // Two ranges ORed (a bit array), then the whole range.
+            ("aliaskeys/p_arrcov", SeqType::Protein, true),
+            // One volume of a nucleotide database.
+            ("taxfilter/tfn.00", SeqType::Nucleotide, true),
             // A range inside the volume; two ranges ORed, and two whose union is the volume.
             ("aliaskeys/p_range", SeqType::Protein, false),
             ("aliaskeys/p_union", SeqType::Protein, false),
             ("aliaskeys/p_halves", SeqType::Protein, false),
+            // A range that cuts the volume above an alias without one.
+            ("aliaskeys/p_abovecut", SeqType::Protein, false),
             // Two volumes; one of them inside a range.
             ("taxfilter/tfn", SeqType::Nucleotide, false),
             ("aliaskeys/n_vol1", SeqType::Nucleotide, false),

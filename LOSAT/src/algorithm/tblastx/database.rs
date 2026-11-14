@@ -674,11 +674,17 @@ pub(crate) fn reported_subjects(
 }
 
 impl ReportedSubjects {
-    /// The subject ids of the tabular reports, by rank: the first word of the stored title, or
-    /// the id of a sequence with parsed Seq-ids (`common::database::tabular_subject_ids`; an id
-    /// LOSAT cannot write is empty where no tabular report `reads` the subject).
-    pub(crate) fn tabular_subject_ids(&self, reads: bool) -> Result<Vec<Arc<[u8]>>> {
+    /// The subject ids of the tabular reports of `database`, by rank: the first word of the
+    /// stored title, or the id of a sequence with parsed Seq-ids
+    /// (`common::database::tabular_subject_ids`; an id LOSAT cannot write is empty where no
+    /// tabular report `reads` the subject).
+    pub(crate) fn tabular_subject_ids(
+        &self,
+        database: &TblastxDatabase,
+        reads: bool,
+    ) -> Result<shared::ReportedTabularIds> {
         shared::tabular_subject_ids(
+            &database.db,
             &self.records,
             &self.ordinals,
             &self.parsed,

@@ -2350,6 +2350,7 @@ fn search(
                         .as_ref()
                         .expect("a database search has its Database: lines"),
                     reported,
+                    database,
                 },
             ),
             _ => (

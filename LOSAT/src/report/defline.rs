@@ -672,16 +672,72 @@ macro_rules! punctuation_title {
 }
 pub(crate) use punctuation_title;
 
-/// The subject ID of the tabular formats (`sseqid`, `sacc`, `saccver`) of a database
+/// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of a database sequence
+/// without parsed Seq-ids (`database_subject_id`): the Seq-id that `GetSeqIdList` gives its
+/// `gnl|BL_ORD_ID|n`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DatabaseSubjectId {
+    /// The first word of the generated title, a local id: the three fields alike.
+    Word(Vec<u8>),
+    /// The general id itself, kept where the generated title has no first word: `sseqid`
+    /// writes it as `gnl|BL_ORD_ID|n`, `sacc` and `saccver` as `BL_ORD_ID:n`
+    /// (`ordinal_subject_ids`).
+    Ordinal,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:165-186
+// ```c++
+// static string
+// s_GetSeqIdListString(const list<CRef<CSeq_id> >& id,
+//                      CBlastTabularInfo::ESeqIdType id_type)
+// {
+//     string id_str = NcbiEmptyString;
+//
+//     switch (id_type) {
+//     case CBlastTabularInfo::eFullId:
+//         id_str = CShowBlastDefline::GetSeqIdListString(id, true);
+//         break;
+//     case CBlastTabularInfo::eAccession:
+//     {
+//         CConstRef<CSeq_id> accid = FindBestChoice(id, CSeq_id::Score);
+//         accid->GetLabel(&id_str, CSeq_id::eContent, 0);
+//         break;
+//     }
+//     case CBlastTabularInfo::eAccVersion:
+//     {
+//         CConstRef<CSeq_id> accid = FindBestChoice(id, CSeq_id::Score);
+//         accid->GetLabel(&id_str, CSeq_id::eContent, CSeq_id::fLabel_Version);
+//         break;
+//     }
+// ```
+/// `sseqid` (the FASTA form `gnl|BL_ORD_ID|n`) and `sacc` and `saccver` (the label
+/// `BL_ORD_ID:n`) of the general id that NCBI keeps for the database sequence whose OID is `oid`
+/// (`DatabaseSubjectId::Ordinal`; the `sall*` fields of a sequence without parsed Seq-ids are its
+/// own: `sallseqid` and `sallacc` the same).
+pub fn ordinal_subject_ids(oid: u32) -> [Vec<u8>; 2] {
+    let id = crate::seqid::ParsedSeqId::General(crate::seqid::model::Dbtag {
+        db: b"BL_ORD_ID".to_vec(),
+        // An OID is an `int` in NCBI (`seqdb::OrdinalDefline::bl_ord_id` fits).
+        tag: crate::seqid::model::ObjectId::Id(oid as i32),
+    });
+    let (mut fasta, mut label) = (Vec::new(), Vec::new());
+    crate::seqid::label::fasta(&id, &mut fasta);
+    crate::seqid::label::content(&id, false, &mut label);
+    [fasta, label]
+}
+
+/// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of a database
 /// sequence without parsed Seq-ids (its only id is `gnl|BL_ORD_ID|n`) with the stored
 /// title `title`: the first word of the title that `GenerateDefline` makes of it
-/// (flags 0), which `GetSeqIdList` puts in the place of the id.
+/// (flags 0), which `GetSeqIdList` puts in the place of the id, or where that word is empty
+/// the id itself (`DatabaseSubjectId::Ordinal`: NCBI writes `gnl|BL_ORD_ID|n` for `sseqid` and
+/// `BL_ORD_ID:n` for `sacc` and `saccver`; a title of spaces, `MAG:` alone, an empty title of a
+/// nucleotide whose source has no name, `MAG: (plastid) [ ]` of a protein with a source;
+/// showdefline.cpp:218-242 below, `next_seqid->Assign(**itr)` of an empty `id_token`).
 ///
 /// `Err` names what LOSAT does not write as NCBI: a title whose encoding NCBI cannot
-/// guess (`GenerateDefline` throws), a title of punctuation that NCBI's
-/// `x_CleanAndCompress` reads past the end of (NCBI crashes), and a title whose generated
-/// first word is empty (NCBI keeps the general id and writes it in two forms,
-/// `gnl|BL_ORD_ID|n` for `sseqid` and `BL_ORD_ID:n` for `sacc` and `saccver`).
+/// guess (`GenerateDefline` throws) and a title of punctuation that NCBI's
+/// `x_CleanAndCompress` reads past the end of (NCBI crashes).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:218-242
 /// ```c++
@@ -728,12 +784,15 @@ pub(crate) use punctuation_title;
 /// The Bioseq of a database sequence carries its stored title as its title descriptor
 /// (seqdbvol.cpp:1445-1463) and the source of its taxid (`ids`, `BioseqFacts::of_source`), so
 /// `GenerateDefline` reads the title as it reads the one of a FASTA record, and makes an empty
-/// one from the source's name (`Homo` of `Homo sapiens`; `unnamed` of a protein).
+/// one from the source's name (`Homo` of `Homo sapiens`; `unnamed` of a protein). The
+/// empty word comes after the title's prefix goes (create_defline.cpp:4050-4062, `MAG: (plastid)
+/// [ ]` adjusted to `MAG:`, then emptied: probe of the review of line RG item T5c,
+/// `remaining-gaps-20261112/T/t5c/review/out/ncbi/sall.*`) or of a title that stays empty.
 pub fn database_subject_id(
     title: &[u8],
     ids: &BioseqFacts,
     protein: bool,
-) -> Result<Vec<u8>, &'static str> {
+) -> Result<DatabaseSubjectId, &'static str> {
     let defline = generate_bioseq_defline(title, protein, false, ids)
         .map_err(|UnknownEncoding| "in no encoding that NCBI BLAST+ recognises")?;
     if defline.reads_past_end {
@@ -741,11 +800,9 @@ pub fn database_subject_id(
     }
     let token = first_word(&defline.text);
     if token.is_empty() {
-        return Err(
-            "from which NCBI BLAST+ makes no subject id (it writes gnl|BL_ORD_ID|n and BL_ORD_ID:n)",
-        );
+        return Ok(DatabaseSubjectId::Ordinal);
     }
-    Ok(token.to_vec())
+    Ok(DatabaseSubjectId::Word(token.to_vec()))
 }
 
 /// `NStr::Split(text, " ", tokens)[0]`: the bytes before the first space.
@@ -886,7 +943,8 @@ fn title_before_decoding_of(
 // The reverse search gives the last place at or before `slen - plen` where the pattern matches
 // without case (ASCII: the C locale): an empty pattern has no first letter, so `find_last_of`
 // finds nothing (an empty name never matches), and a stop at 0 without a match is never
-// `idx + 2` (at least 2). The last match is the same place.
+// `idx + 2` (at least 2). So the place is `idx + 2` (`slen - plen - 1`) exactly where the name
+// is there and not at `slen - plen`: only those two places are compared.
 /// `s_TitleEndsInOrganism`: the position of `[` where `title` ends in ` [<taxname>]` (the name in
 /// any ASCII case).
 fn title_ends_in_organism(title: &[u8], taxname: &[u8]) -> Option<usize> {
@@ -898,10 +956,8 @@ fn title_ends_in_organism(title: &[u8], taxname: &[u8]) -> Option<usize> {
     if title[idx] != b' ' || title[idx + 1] != b'[' || title[len1 - 1] != b']' {
         return None;
     }
-    let pos = (0..=len1 - len2)
-        .rev()
-        .find(|&at| title[at..at + len2].eq_ignore_ascii_case(taxname));
-    (pos == Some(idx + 2)).then_some(idx + 1)
+    let found_at = |at: usize| title[at..at + len2].eq_ignore_ascii_case(taxname);
+    (!found_at(len1 - len2) && found_at(idx + 2)).then_some(idx + 1)
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2123-2147
@@ -1143,19 +1199,6 @@ pub fn protein_title_suffix_adjustable(title: &[u8]) -> bool {
         .iter()
         .rposition(|byte| !b".,;~ ".contains(byte))
         .is_some_and(|end| title[end] == b']')
-}
-
-/// Whether `adjust_protein_title_suffix` can take the ` [ ]` branch for `title` (the binomial
-/// `" "`): the one way the source of a database sequence can make a title that NCBI cannot write
-/// out of one that it can (a name appended that is not in the title, or no bracket left: a title
-/// of punctuation, an empty first word). Where the title ends in ` [taxname]`, the name that
-/// comes back has the title's bytes but for their ASCII case and keeps its brackets.
-pub fn protein_title_suffix_may_drop_brackets(title: &[u8]) -> bool {
-    let end = title
-        .iter()
-        .rposition(|byte| !b".,;~ ".contains(byte))
-        .map_or(0, |end| end + 1);
-    title[..end].ends_with(b" [ ]")
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1545-1550
@@ -2100,8 +2143,8 @@ mod tests {
             (",;,x y", ",;,x"),
         ] {
             assert_eq!(
-                database_subject_id(title.as_bytes(), &BioseqFacts::default(), true).as_deref(),
-                Ok(id.as_bytes()),
+                database_subject_id(title.as_bytes(), &BioseqFacts::default(), true),
+                Ok(DatabaseSubjectId::Word(id.as_bytes().to_vec())),
                 "{title:?}"
             );
         }
@@ -2110,11 +2153,40 @@ mod tests {
     // The same oracle: a title of one space keeps the general id (NCBI writes
     // `gnl|BL_ORD_ID|0` for sseqid and `BL_ORD_ID:0` for sacc and saccver), and NCBI
     // dies of SIGSEGV on the titles `, ,` and `; ;` (exit status 139): LOSAT names them.
+    // A prefix alone (`MAG:`), and `MAG: (plastid) [ ]` of a protein with a source without a
+    // name (adjusted to `MAG:`), keep it too (probe of the review of line RG item T5c,
+    // `remaining-gaps-20261112/T/t5c/review/out/ncbi/sall.blastp.f6.*`: `gnl|BL_ORD_ID|7` and
+    // `BL_ORD_ID:7`); without a source that title gives `(plastid)`.
     #[test]
     fn database_subject_id_names_the_titles_that_it_does_not_write() {
-        assert!(database_subject_id(b" ", &BioseqFacts::default(), true)
-            .unwrap_err()
-            .contains("makes no subject id"));
+        let nameless = BioseqFacts {
+            has_source: true,
+            ..BioseqFacts::default()
+        };
+        for (title, facts) in [
+            (&b" "[..], &BioseqFacts::default()),
+            (b"MAG:", &BioseqFacts::default()),
+            (b"MAG: (plastid) [ ]", &nameless),
+        ] {
+            assert_eq!(
+                database_subject_id(title, facts, true),
+                Ok(DatabaseSubjectId::Ordinal),
+                "{title:?}"
+            );
+        }
+        assert_eq!(
+            database_subject_id(b"MAG: (plastid) [ ]", &BioseqFacts::default(), true),
+            Ok(DatabaseSubjectId::Word(b"(plastid)".to_vec()))
+        );
+        // A nucleotide's empty title without a name of its source.
+        assert_eq!(
+            database_subject_id(b"", &nameless, false),
+            Ok(DatabaseSubjectId::Ordinal)
+        );
+        assert_eq!(
+            ordinal_subject_ids(7),
+            [b"gnl|BL_ORD_ID|7".to_vec(), b"BL_ORD_ID:7".to_vec()]
+        );
         for title in [", ,", "; ;"] {
             assert!(
                 database_subject_id(title.as_bytes(), &BioseqFacts::default(), true)
@@ -2791,13 +2863,6 @@ mod tests {
         assert!(!protein_title_suffix_adjustable(b"alpha protein"));
         assert!(!protein_title_suffix_adjustable(b""));
         assert!(protein_title_suffix_adjustable(b"a] .~"));
-        assert!(protein_title_suffix_may_drop_brackets(
-            b"zeta, partial [ ]."
-        ));
-        assert!(!protein_title_suffix_may_drop_brackets(
-            b"alpha, partial [Bacillus sp.]"
-        ));
-        assert!(!protein_title_suffix_may_drop_brackets(b"..."));
         // In `GenerateDefline`: a protein heading with a source only, before the prefixes go and
         // the title is decoded; never a title made from the source.
         let source = |taxname: Option<&[u8]>| BioseqFacts {
@@ -2847,5 +2912,46 @@ mod tests {
                 .reads_past_end
         );
         assert_eq!(made(b", [ ]", true, false, &source(None)), " [ ]");
+    }
+
+    // `title_ends_in_organism` compares the name at two places only; `NStr::Find`'s reverse
+    // search (the last match at or before `len1 - len2`, ASCII case folded) gives the same answer
+    // for every title and name of a small alphabet (each title of up to 8 bytes).
+    #[test]
+    fn the_organism_end_compares_two_places_as_the_reverse_search_answers() {
+        let reverse_search = |title: &[u8], taxname: &[u8]| -> Option<usize> {
+            let (len1, len2) = (title.len(), taxname.len());
+            if len2 == 0 || len1 <= len2 + 4 {
+                return None;
+            }
+            let idx = len1 - len2 - 3;
+            if title[idx] != b' ' || title[idx + 1] != b'[' || title[len1 - 1] != b']' {
+                return None;
+            }
+            let pos = (0..=len1 - len2)
+                .rev()
+                .find(|&at| title[at..at + len2].eq_ignore_ascii_case(taxname));
+            (pos == Some(idx + 2)).then_some(idx + 1)
+        };
+        let alphabet = [b'a', b'A', b' ', b'[', b']'];
+        let names: [&[u8]; 6] = [b"a", b"A", b"a]", b"[a", b" ", b"aA"];
+        let mut title = Vec::new();
+        for len in 0..=8u32 {
+            for code in 0..alphabet.len().pow(len) {
+                title.clear();
+                let mut rest = code;
+                for _ in 0..len {
+                    title.push(alphabet[rest % alphabet.len()]);
+                    rest /= alphabet.len();
+                }
+                for name in names {
+                    assert_eq!(
+                        title_ends_in_organism(&title, name),
+                        reverse_search(&title, name),
+                        "{title:?} {name:?}"
+                    );
+                }
+            }
+        }
     }
 }

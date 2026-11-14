@@ -121,6 +121,8 @@ pub(super) struct TblastnTabular<'a> {
     /// The default report's tabular subject ids (`sseqid`, `sacc`, `saccver`), by subject index
     /// or rank (`stage_e_report::tabular_subject_ids`, `ReportedSubjects::tabular_subject_ids`).
     pub subject_ids: &'a [Arc<[u8]>],
+    /// `sseqid` where it is not `subject_ids` (`common::database::ReportedTabularIds::seq_ids`).
+    pub subject_seq_ids: &'a [Option<Arc<[u8]>>],
     /// The records of a subject set (`-subject`; the organism report shows their local ids and
     /// titles).
     pub subject_records: &'a [FastaRecord],
@@ -241,6 +243,7 @@ pub(super) fn write_tblastn_tabular(
         },
         ShownSubjects::Database { reported, .. } => TabularSubjects::Database {
             ids: tab.subject_ids,
+            seq_ids: tab.subject_seq_ids,
             ordinals: &reported.ordinals,
             records: &reported.records,
             parsed: &reported.parsed,

@@ -34,6 +34,15 @@ shows the generated title, and `lcl|Subject_9nn` records, whose tabular ids are 
 the version 4 databases `psfs_<taxid>` without `-parse_seqids` (`-taxid`, `psfs_none` without one)
 with the alias `psfs` over them (the tabular ids are the first word of the generated title).
 
+With `--word-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --word-only`, fix 1 of line RG
+item T5c) it writes only the version 4 protein databases `pword_<taxid>` without `-parse_seqids`
+(WORD_STORED; `pword_none` without `-taxid`) and the alias `pword` over them: titles whose generated
+title has no first word, so that NCBI keeps the sequence's own `gnl|BL_ORD_ID|n` in the tabular ids
+(`BL_ORD_ID:n` for `sacc` and `saccver`): a title of one space, a prefix alone (`TPA:`), and
+`MAG: (plastid) [ ]`, which `x_AdjustProteinTitleSuffix` cuts to `MAG:` where the Bioseq has a
+source (taxid 77777, which no taxonomy database here names); `  MAG:  ` and `chi, partial [ ]` give a
+word.
+
 Python 3 standard library only; makeblastdb is NCBI's (the comparison oracle builds the inputs).
 """
 import os
@@ -156,6 +165,43 @@ SUFFIX_STORED = {
     77777: ["a, [ ]", "phi, partial [Bacillus sp.]", "psi protein, partial []", "chi, partial [ ]"],
     None: ["alpha, partial [Bacillus sp.]", "chi, partial [ ]"],
 }
+
+# The titles of `pword_<taxid>` (version 4, without -parse_seqids; None: no -taxid).
+WORD_STORED = {
+    77777: ["MAG: (plastid) [ ]", " ", "TPA:", "chi, partial [ ]", "  MAG:  "],
+    None: ["MAG: (plastid) [ ]", " ", "chi, partial [ ]"],
+}
+
+
+def stored_main(ncbi_bin, prefix, stored):
+    """The version 4 protein databases `<prefix>_<taxid>` of the titles `stored` (the letters of
+    `pdup.faa`, `-taxid <taxid>`, none for `None`) and the alias `<prefix>` over them."""
+    here = os.path.join("tests", "db_search", "t5")
+    seq = letters(os.path.join("tests", "db_search", "ids", "pdup.faa"))
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(work), "BLAST_USAGE_REPORT": "false"}
+    names = []
+    for taxid, titles in stored.items():
+        name = f"{prefix}_{taxid if taxid is not None else 'none'}"
+        names.append(name)
+        fasta = os.path.join(work, name + ".fa")
+        with open(fasta, "w") as f:
+            for title in titles:
+                f.write(">" + title + "\n" + seq + "\n")
+        cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot",
+               "-blastdb_version", "4", "-title", name, "-out", os.path.join(here, name)]
+        if taxid is not None:
+            cmd += ["-taxid", str(taxid)]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+        # makeblastdb's version 4 JSON metadata file is not read by a search.
+        if os.path.exists(os.path.join(here, name + ".pjs")):
+            os.remove(os.path.join(here, name + ".pjs"))
+    with open(os.path.join(here, f"{prefix}.pal"), "w") as f:
+        f.write(f"TITLE {prefix}\nDBLIST {' '.join(names)} \n")
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
 
 
 def suffix_main(ncbi_bin):
@@ -312,5 +358,7 @@ if __name__ == "__main__":
         mix_main(sys.argv[1])
     elif "--suffix-only" in sys.argv[2:]:
         suffix_main(sys.argv[1])
+    elif "--word-only" in sys.argv[2:]:
+        stored_main(sys.argv[1], "pword", WORD_STORED)
     else:
         main()

@@ -536,6 +536,15 @@ loses it, then an organelle in parentheses of NCBI's list (`(mitochondrion)`, no
 `.nt.` show the rest unchanged); ` []` stays. The description (`fLeavePrefixSuffix`), outfmt 5, 13 to 16, `stitle`
 and the stored headings show the title as stored.
 
+Titles without a first word (fix 1 of line RG item T5c; rows `db.t5.word.*`): `t5/make_t5.py NCBI_BIN --word-only`
+writes `t5/pword_77777` and `t5/pword_none` (version 4 without `-parse_seqids`, `-taxid 77777` and none; the alias
+`t5/pword`) of the titles ` ` (one space), `TPA:`, `MAG: (plastid) [ ]`, `chi, partial [ ]` and `  MAG:  `. Where the
+title that `GenerateDefline` makes has no first word (a title of spaces, a prefix alone, `MAG: (plastid) [ ]` cut to
+`MAG:` by `x_AdjustProteinTitleSuffix` with the source of taxid 77777), NCBI keeps the sequence's `gnl|BL_ORD_ID|n` in
+`sseqid` and `sallseqid` and writes `BL_ORD_ID:n` in `sacc`, `saccver` and `sallacc`; the nucleotide rows search
+`t5/nclean` and `t5/nall`, whose empty titles of a taxid that the taxonomy database does not name (or without one)
+give no word either.
+
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title
 `, ,` NCBI's `x_CleanAndCompress` reads past the end of where it makes the tabular id of a protein; the query

@@ -14233,6 +14233,7 @@ fn run_call(
                 }
                 (Some(titles), _) => {
                     let (ids, accessions) = titles.tabular_subject_ids(
+                        database.expect("listed titles come from a database"),
                         &hit_lists,
                         format_plans
                             .iter()

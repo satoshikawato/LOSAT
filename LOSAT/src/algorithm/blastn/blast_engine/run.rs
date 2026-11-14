@@ -5794,7 +5794,7 @@ struct BlastnReportInputs<'a> {
     database: Option<&'a PairwiseDatabase>,
     /// The tabular subject ids of a database search's reported sequences, by rank
     /// (`database::ReportedSubjects::tabular_subject_ids`); `None` for a subject set.
-    database_subject_ids: Option<&'a [Arc<[u8]>]>,
+    database_subject_ids: Option<&'a crate::algorithm::common::database::ReportedTabularIds>,
     /// The ordinal ID of each reported sequence of a database search, by rank
     /// (`database::ReportedSubjects::ordinals`); `None` for a subject set.
     database_ordinals: Option<&'a [u32]>,
@@ -6611,7 +6611,9 @@ fn post_process_hits_and_write(
     let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> =
         if output_formats.iter().any(|format| format.is_tabular()) {
             match (
-                report.database_subject_ids,
+                report
+                    .database_subject_ids
+                    .map(|ids| ids.accessions.as_slice()),
                 report.subject_cache.and_then(|cache| cache.ids.as_deref()),
             ) {
                 (Some(ids), _) => std::borrow::Cow::Borrowed(ids),
@@ -7286,6 +7288,9 @@ fn write_custom_tabular(
     let subjects = match report.database_ordinals {
         Some(ordinals) if report.database_reader.is_some() => TabularSubjects::Database {
             ids: subject_ids,
+            seq_ids: report
+                .database_subject_ids
+                .map_or(&[][..], |ids| ids.seq_ids.as_slice()),
             ordinals,
             records: report.subjects.records(),
             parsed: report.database_parsed,
@@ -11207,14 +11212,19 @@ fn write_reports_untimed(
     ) {
         observer.database_subjects(reported.library_subjects(database)?);
     }
-    let database_subject_ids = match &reported {
-        Some(reported) if output_formats.iter().any(|format| format.is_tabular()) => Some(
-            reported.tabular_subject_ids(
-                output_formats
-                    .iter()
-                    .any(|format| format.tabular_reads_subject()),
-            )?,
-        ),
+    let database_subject_ids = match (&reported, subjects.source) {
+        (Some(reported), SubjectSource::Database(database))
+            if output_formats.iter().any(|format| format.is_tabular()) =>
+        {
+            Some(
+                reported.tabular_subject_ids(
+                    database,
+                    output_formats
+                        .iter()
+                        .any(|format| format.tabular_reads_subject()),
+                )?,
+            )
+        }
         _ => None,
     };
     let subject_letters = match (&reported, subjects.source) {
@@ -11306,7 +11316,7 @@ fn write_reports_untimed(
         db_num_seqs: subjects.shown.num_seqs,
         db_len_total: subjects.shown.total_letters,
         database: subjects.shown.database.as_ref(),
-        database_subject_ids: database_subject_ids.as_deref(),
+        database_subject_ids: database_subject_ids.as_ref(),
         database_ordinals: reported
             .as_ref()
             .map(|reported| reported.ordinals.as_slice()),

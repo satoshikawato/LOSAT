@@ -1641,21 +1641,23 @@ impl ListedTitles<'_> {
     }
 
     /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of every
-    /// listed subject, by rank (`report::defline::database_subject_id`); a subject
+    /// listed subject of `database`, by rank (`report::defline::database_subject_id`); a subject
     /// without rows gets an empty id. A subject with rows whose id LOSAT cannot write as
     /// NCBI is an error before any format is written where a tabular report `reads` the
     /// subject (`report::tabular::reads_subject`), else its ids are empty: a table of fields
     /// that read nothing of the subject prints none of them.
     pub(super) fn tabular_subject_ids(
         &self,
+        database: &BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
         reads: bool,
     ) -> Result<(Vec<Arc<[u8]>>, Vec<Option<[Arc<[u8]>; 2]>>)> {
         let reported = Self::reported(hit_lists);
         let ranks = self.listed.ordinals.len();
         let mut ids: Vec<Arc<[u8]>> = Vec::with_capacity(ranks);
-        // `sacc` and `saccver` of the subjects with parsed Seq-ids, by rank (empty without
-        // them; the others' are their `sseqid`).
+        // `sacc` and `saccver` of the subjects with parsed Seq-ids, and of those without whose
+        // id is their kept `gnl|BL_ORD_ID|n` (`BL_ORD_ID:n`), by rank (empty without them; the
+        // others' are their `sseqid`).
         let mut accessions: Vec<Option<[Arc<[u8]>; 2]>> = Vec::new();
         // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): one empty id for every subject without rows.
         let empty: Arc<[u8]> = Arc::from(&b""[..]);
@@ -1694,10 +1696,22 @@ impl ListedTitles<'_> {
                 true,
                 self.program,
             ) {
-                Err(_) if !reads => Vec::new(),
+                Err(_) if !reads => crate::report::defline::DatabaseSubjectId::Word(Vec::new()),
                 id => id?,
             };
-            ids.push(Arc::from(id));
+            match id {
+                crate::report::defline::DatabaseSubjectId::Word(word) => ids.push(Arc::from(word)),
+                crate::report::defline::DatabaseSubjectId::Ordinal => {
+                    let [id, accession] =
+                        crate::report::defline::ordinal_subject_ids(database.db.oid(ordinal));
+                    ids.push(Arc::from(id));
+                    if accessions.is_empty() {
+                        accessions = vec![None; ranks];
+                    }
+                    let accession: Arc<[u8]> = Arc::from(accession);
+                    accessions[rank] = Some([Arc::clone(&accession), accession]);
+                }
+            }
         }
         Ok((ids, accessions))
     }
@@ -1973,11 +1987,14 @@ fn x_all_header_ranges(
 /// title that the outfmt 0 report writes as NCBI, and with `taxids` (the batches' prefetch reads
 /// the taxonomy database) a taxid that decodes, where no lookup of the taxonomy database can be
 /// refused. Read in `pool` over the ordinal ids; a reader error is `false` (the search of all
-/// queries then reports it where NCBI does).
+/// queries then reports it where NCBI does). The tabular id is the reports' own question
+/// (`shared::tabular_subject_id` of the title and the record's source,
+/// `shared::HeaderReader::stored_source` of the taxid read with it, as `shared::read_header`
+/// gives them to `ListedTitles::tabular_subject_ids`), so a title is refused here exactly where
+/// the search of all queries refuses it.
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): the definition lines are read in ranges of
 /// `HEADER_RANGE_SEQS` sequences (`SeqDb::visit_deflines`, the same results as
-/// `SeqDb::deflines`; with `taxids`, `SeqDb::visit_deflines_taxids`, the titles and the taxids in
-/// one pass) instead of one sequence at a time.
+/// `SeqDb::deflines`, the titles and the taxids in one pass) instead of one sequence at a time.
 pub(super) fn x_titles_allow_blocks(
     database: &BlastpDatabase,
     pairwise: bool,
@@ -1985,7 +2002,8 @@ pub(super) fn x_titles_allow_blocks(
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> bool {
     let db = &database.db;
-    let allowed_deflines = |ordinal: u32,
+    let allowed_deflines = |headers: &shared::HeaderReader<'_>,
+                            ordinal: u32,
                             deflines: std::result::Result<
         Vec<crate::seqdb::OrdinalDefline>,
         crate::seqdb::SeqDbError,
@@ -2010,38 +2028,32 @@ pub(super) fn x_titles_allow_blocks(
                         )
                         .is_ok()
                     } else {
-                        // A protein's word is `unnamed`, with or without the name of its source.
-                        // The end of a title ending in `]` that the source rewrites
-                        // (`report::defline::adjust_protein_title_suffix`) refuses nothing that
-                        // the title without it does not, but for a ` [ ]` end, which can leave
-                        // a title of punctuation or take a name that does not decode: such a
-                        // title goes to the search of all queries.
-                        crate::report::defline::database_subject_id(
-                            &deflines[0].title,
-                            &Default::default(),
+                        // The tabular id of the title with its source (an empty title made from
+                        // it, the end of a title ending in `]` rewritten from it). A lookup that
+                        // LOSAT refuses is ruled out with `taxids` too.
+                        let defline = &deflines[0];
+                        shared::tabular_subject_id(
+                            &defline.title,
+                            &headers.stored_source(&defline.title, defline.taxid, ordinal),
+                            ordinal,
                             true,
+                            database.program,
                         )
                         .is_ok()
-                            && !crate::report::defline::protein_title_suffix_may_drop_brackets(
-                                &deflines[0].title,
-                            )
                     }
             }
             Err(_) => false,
         }
     };
     if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
-        // A record whose taxid does not decode is an `Err` (`visit_deflines_taxids`).
+        // A record whose taxid does not decode is an `Err` (`visit_deflines`). Each range has its
+        // reader of the sources' names (`HeaderReader`, which opens the taxonomy database at its
+        // first lookup).
         let allowed_range = |range: &BlockRange| -> bool {
-            if taxids {
-                db.visit_deflines_taxids(*range, |ordinal, deflines| {
-                    allowed_deflines(ordinal, deflines)
-                })
-            } else {
-                db.visit_deflines(*range, |ordinal, deflines| {
-                    allowed_deflines(ordinal, deflines)
-                })
-            }
+            let headers = shared::HeaderReader::new(db);
+            db.visit_deflines(*range, |ordinal, deflines| {
+                allowed_deflines(&headers, ordinal, deflines)
+            })
         };
         if crate::seqdb::x_bp_db_keep() {
             return x_all_header_ranges(db, pool, allowed_range)
@@ -2067,7 +2079,9 @@ pub(super) fn x_titles_allow_blocks(
         };
         return titles && !(taxids && shared::taxdb_may_refuse(db, false));
     }
-    let allowed = |ordinal: u32| -> bool { allowed_deflines(ordinal, db.deflines(ordinal)) };
+    let allowed = |headers: &mut shared::HeaderReader<'_>, ordinal: u32| -> bool {
+        allowed_deflines(headers, ordinal, db.deflines(ordinal))
+    };
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -2077,16 +2091,21 @@ pub(super) fn x_titles_allow_blocks(
             (0..db.num_seqs())
                 .into_par_iter()
                 .with_min_len(4096)
-                .all(allowed)
+                .map_init(|| shared::HeaderReader::new(db), allowed)
+                .all(|allowed| allowed)
         })
     } else {
-        (0..db.num_seqs()).all(allowed)
+        let mut headers = shared::HeaderReader::new(db);
+        (0..db.num_seqs()).all(|ordinal| allowed(&mut headers, ordinal))
     };
     #[cfg(not(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     )))]
-    let titles = (0..db.num_seqs()).all(allowed);
+    let titles = {
+        let mut headers = shared::HeaderReader::new(db);
+        (0..db.num_seqs()).all(|ordinal| allowed(&mut headers, ordinal))
+    };
     // One sequence at a time (`LOSAT_X_DBIDXREAD=0`): the taxids after the titles.
     titles && (!taxids || x_taxids_allow_blocks(database, false, pool))
 }
@@ -2169,7 +2188,7 @@ pub(super) fn x_titles_read_allow_blocks(
 // database's taxids), else the database's taxids, sorted and deduplicated, looked up. It has its
 // own taxonomy handle, so the run's open messages stay for the report. This is conservative,
 // since the report reads the taxids of the subjects with hits only.
-// The titles and the taxid decodes are read in one pass over the headers (`SeqDb::visit_deflines_taxids`,
+// The titles and the taxid decodes are read in one pass over the headers (`SeqDb::visit_deflines`,
 // one read per `HEADER_RANGE_SEQS` sequences, as `x_titles_read_allow_blocks` reads them); no set of
 // taxids is built here.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
@@ -2192,7 +2211,7 @@ pub(super) fn x_titles_taxids_allow_blocks(
             && x_taxids_allow_blocks(database, names, pool);
     }
     let readable_range = |range: &BlockRange| -> bool {
-        db.visit_deflines_taxids(*range, |_ordinal, deflines| match deflines {
+        db.visit_deflines(*range, |_ordinal, deflines| match deflines {
             // The taxid `read_reported_taxonomy` takes of a sequence: its first definition
             // line's.
             Ok(deflines) => deflines.len() == 1 && deflines[0].replaced_title_bytes == 0,
@@ -3620,7 +3639,9 @@ mod tests {
         );
         assert_eq!(listed.encoded[3].aa_len, 300);
         // The tabular ids of the subjects with rows, the stored titles for `stitle`.
-        let (ids, accessions) = titles.tabular_subject_ids(&hit_lists, true).unwrap();
+        let (ids, accessions) = titles
+            .tabular_subject_ids(&database, &hit_lists, true)
+            .unwrap();
         assert!(accessions.is_empty());
         assert_eq!(
             ids.iter().map(|id| id.as_ref()).collect::<Vec<_>>(),
@@ -3683,8 +3704,11 @@ mod tests {
         assert!(lean.title(2).is_empty() && lean.title(3).is_empty());
         assert!(Arc::ptr_eq(&lean_titles[2], &lean_titles[3]));
         assert_eq!(
-            lean.tabular_subject_ids(&hit_lists, true).unwrap(),
-            records.tabular_subject_ids(&hit_lists, true).unwrap()
+            lean.tabular_subject_ids(&database, &hit_lists, true)
+                .unwrap(),
+            records
+                .tabular_subject_ids(&database, &hit_lists, true)
+                .unwrap()
         );
         lean.check_shown_titles(&database, &[0usize, 1].into_iter().collect())
             .unwrap();
@@ -3924,7 +3948,7 @@ mod tests {
         assert_eq!(renamed, [(0, 0), (2, 2)]);
     }
 
-    // EXPERIMENT (LOSAT_X_BPQBLOCK): the one pass over the headers (`SeqDb::visit_deflines_taxids`)
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): the one pass over the headers (`SeqDb::visit_deflines`)
     // gives the answer of the two checks it replaces (`x_titles_read_allow_blocks`, then
     // `x_taxids_allow_blocks` one sequence at a time), for a database whose headers read, one with
     // taxids, an alias of volumes, and one whose header file is missing, at one thread and in a pool.

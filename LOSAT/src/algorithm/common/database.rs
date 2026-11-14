@@ -631,6 +631,9 @@ pub(crate) struct StoredTitle {
     /// The name of the organism of the source of the sequence's Bioseq, from which NCBI makes an
     /// empty title (`HeaderReader::stored_source`; `report::defline::BioseqFacts::of_source`).
     pub(crate) source: crate::report::defline::SourceTaxname,
+    /// The `taxid` of the definition line (0 for none), read with the title: the Bioseq's source
+    /// where it is positive (`HeaderReader::stored_source`).
+    pub(crate) taxid: i32,
 }
 
 impl StoredTitle {
@@ -698,6 +701,7 @@ pub(crate) fn stored_title(
         title: defline.title,
         replaced_bytes: defline.replaced_title_bytes > 0,
         source: Default::default(),
+        taxid: defline.taxid,
     })
 }
 
@@ -710,7 +714,7 @@ pub(crate) fn keep_source(
     ranks: usize,
     source: crate::report::defline::SourceTaxname,
 ) {
-    if source == crate::report::defline::SourceTaxname::Unnamed {
+    if matches!(source, crate::report::defline::SourceTaxname::Unnamed) {
         return;
     }
     if sources.is_empty() {
@@ -767,9 +771,10 @@ pub(crate) struct HeaderReader<'a> {
     /// The taxonomy database of the search path where `taxdb.bti` is found and it opens, opened
     /// at the first record whose title NCBI can make from its taxids (`source_taxname`).
     taxdb: std::cell::OnceCell<Option<crate::seqdb::taxdb::TaxDb>>,
-    /// `source_taxname` of the first sources' taxids of the titles made from a source, by taxid.
+    /// `source_taxname` of the first sources' taxids of the titles made from a source, by taxid
+    /// (asked for every reported protein title ending in `]` that has a taxid: a cheap hash).
     source_names:
-        std::cell::RefCell<std::collections::HashMap<i32, crate::report::defline::SourceTaxname>>,
+        std::cell::RefCell<rustc_hash::FxHashMap<i32, crate::report::defline::SourceTaxname>>,
     /// `LookupTexts::of`, asked at the first record found with other taxids or in another
     /// volume (`copy_of`).
     lookup_texts: std::cell::OnceCell<LookupTexts>,
@@ -1225,38 +1230,39 @@ impl<'a> HeaderReader<'a> {
     // (`alpha` of `alpha, partial [Bacillus sp.]` with taxid 100002; `chi` of `chi, partial [ ]`
     // also without a name: probe of line RG T5c, `T/t5c/out/ncbi/psall.blastp.f6.*`). The other
     // reports show the stored title, or the description's without the adjustment.
-    /// The source of the sequence `ordinal` without parsed Seq-ids, whose stored title is `title`,
-    /// where a title that NCBI makes depends on it: the name from which it makes an empty title
-    /// (`report::defline::bioseq_title_from_source`, where a taxonomy database opens), and for a
-    /// protein title whose end it can rewrite (`report::defline::protein_title_suffix_adjustable`)
-    /// whether there is a source (`SourceTaxname::Nameless` without a name) and its name:
-    /// `source_taxname` of its first source's taxid, `DeflineSet::first_source_taxid` of its
-    /// definition lines, which NCBI reads by its ordinal id (no target). The definition lines are
-    /// read only for those titles; ones that do not read are LOSAT's refusal. Other titles ask
-    /// nothing (`Unnamed`).
-    fn stored_source(&self, title: &[u8], ordinal: u32) -> crate::report::defline::SourceTaxname {
+    /// The source of the sequence `ordinal` without parsed Seq-ids, whose stored title is `title`
+    /// and whose definition line's taxid is `taxid` (`StoredTitle::taxid`, read with the title;
+    /// one definition line, so its positive taxid is the first source's,
+    /// `DeflineSet::first_source_taxid` without a target: NCBI reads the sequence by its ordinal
+    /// id), where a title that NCBI makes depends on it: the name from which it makes an empty
+    /// title (`report::defline::bioseq_title_from_source`, where a taxonomy database opens), and
+    /// for a protein title whose end it can rewrite
+    /// (`report::defline::protein_title_suffix_adjustable`) whether there is a source
+    /// (`SourceTaxname::Nameless` without a name) and its name (`source_taxname`). Other titles
+    /// ask nothing (`Unnamed`).
+    pub(crate) fn stored_source(
+        &self,
+        title: &[u8],
+        taxid: i32,
+        ordinal: u32,
+    ) -> crate::report::defline::SourceTaxname {
         use crate::report::defline::SourceTaxname;
-        let suffix = self.db.seqtype() == SeqType::Protein
-            && crate::report::defline::protein_title_suffix_adjustable(title);
-        if !suffix
-            && (!crate::report::defline::bioseq_title_from_source(title, &Default::default())
-                || self.taxdb().is_none())
+        let taxid = (taxid > 0).then_some(taxid);
+        if self.db.seqtype() == SeqType::Protein
+            && crate::report::defline::protein_title_suffix_adjustable(title)
         {
-            return SourceTaxname::Unnamed;
-        }
-        let Ok(set) = self.db.defline_set(ordinal) else {
-            return SourceTaxname::Refused(
-                "a title that NCBI BLAST+ makes from its taxid (an empty one with the taxonomy database, or the end of a protein title ending in ']'), and a definition line whose taxid does not read",
-            );
-        };
-        if suffix {
-            return match set.first_source_taxid(None) {
+            return match taxid {
                 None => SourceTaxname::Unnamed,
                 Some(taxid) => match self.source_taxname(Some(taxid)) {
                     SourceTaxname::Unnamed => SourceTaxname::Nameless,
                     source => source,
                 },
             };
+        }
+        if !crate::report::defline::bioseq_title_from_source(title, &Default::default())
+            || self.taxdb().is_none()
+        {
+            return SourceTaxname::Unnamed;
         }
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1976-1981
         // ```c++
@@ -1269,16 +1275,15 @@ impl<'a> HeaderReader<'a> {
         // ```
         // `CSeq_id::GetSeqIdString()` (Seq_id.cpp:2145-2154, `seqid::label::content`) of the
         // Seq-align's `gnl|BL_ORD_ID|n`, the OID (with a taxid list, of the ordinal id).
-        self.source_taxname(set.first_source_taxid(None))
-            .of_stored(|| {
-                let id = crate::seqid::ParsedSeqId::General(crate::seqid::model::Dbtag {
-                    db: b"BL_ORD_ID".to_vec(),
-                    tag: crate::seqid::model::ObjectId::Id(self.db.oid(ordinal) as i32),
-                });
-                let mut text = Vec::new();
-                crate::seqid::label::content(&id, false, &mut text);
-                text
-            })
+        self.source_taxname(taxid).of_stored(|| {
+            let id = crate::seqid::ParsedSeqId::General(crate::seqid::model::Dbtag {
+                db: b"BL_ORD_ID".to_vec(),
+                tag: crate::seqid::model::ObjectId::Id(self.db.oid(ordinal) as i32),
+            });
+            let mut text = Vec::new();
+            crate::seqid::label::content(&id, false, &mut text);
+            text
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:213-221
@@ -1727,7 +1732,7 @@ fn reported_header(
         }
         Ok(crate::seqdb::SequenceHeader::Ordinal(deflines)) => {
             let mut stored = stored_title(Ok(deflines), ordinal, query, program)?;
-            stored.source = headers.stored_source(&stored.title, ordinal);
+            stored.source = headers.stored_source(&stored.title, stored.taxid, ordinal);
             Ok(ReportedHeader::Stored(stored))
         }
         Err(error) => Err(header_read_error(error, query, program)),
@@ -2138,16 +2143,33 @@ pub(crate) fn check_reported_parsed(
 //     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
 //     "evalue bitscore";
 // ```
+/// The tabular subject ids of the reported sequences of a database, by rank
+/// (`tabular_subject_ids`).
+#[derive(Debug, Default)]
+pub(crate) struct ReportedTabularIds {
+    /// `saccver` (also `sacc`, and the id that the default fields print), by rank.
+    pub(crate) accessions: Vec<std::sync::Arc<[u8]>>,
+    /// `sseqid` (also `sallseqid`) where it is not the `saccver` of a sequence without parsed
+    /// Seq-ids: the `gnl|BL_ORD_ID|n` that NCBI keeps where the generated title has no first
+    /// word (`report::defline::DatabaseSubjectId::Ordinal`), by rank; empty when no sequence has
+    /// one. The ids of a sequence with parsed Seq-ids come from it
+    /// (`ParsedSubject::tabular_ids`).
+    pub(crate) seq_ids: Vec<Option<std::sync::Arc<[u8]>>>,
+}
+
 /// The subject id of the default tabular fields (`saccver`) of each reported database sequence by
-/// rank, for the programs that write no custom fields (BLASTN, TBLASTN, TBLASTX): the first word
-/// of the stored title (`tabular_subject_id`, the same for `sseqid`, `sacc` and `saccver`; an
-/// empty one made from the name of its source, `sources[rank]`), or for a sequence with parsed
-/// Seq-ids (`parsed[rank]`) its `saccver` (`ParsedSubject::tabular_ids`).
-/// `records[rank]` holds the stored title, `ordinals[rank]` the ordinal id; `protein` for a
-/// protein database. An id that LOSAT cannot write as NCBI is its refusal where a tabular report
-/// `reads` the subject (`report::tabular::reads_subject`), else empty: a table of fields that
-/// read nothing of the subject prints none of its ids.
+/// rank, for the nucleotide databases of BLASTN, TBLASTN and TBLASTX: the first word of the stored
+/// title (`tabular_subject_id`, the same for `sseqid`, `sacc` and `saccver`; an empty one made
+/// from the name of its source, `sources[rank]`; without a word the sequence's own id of the OID
+/// that `db` gives its ordinal id, `report::defline::ordinal_subject_ids`, whose `sseqid` goes to
+/// `seq_ids`), or for a sequence with parsed Seq-ids (`parsed[rank]`) its `saccver`
+/// (`ParsedSubject::tabular_ids`). `records[rank]` holds the stored title, `ordinals[rank]` the
+/// ordinal id; `protein` for a protein database. An id that LOSAT cannot write as NCBI is its
+/// refusal where a tabular report `reads` the subject (`report::tabular::reads_subject`), else
+/// empty: a table of fields that read nothing of the subject prints none of its ids.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn tabular_subject_ids(
+    db: &SeqDb,
     records: &[crate::blastinput::fasta_reader::FastaRecord],
     ordinals: &[u32],
     parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
@@ -2155,33 +2177,41 @@ pub(crate) fn tabular_subject_ids(
     protein: bool,
     reads: bool,
     program: &str,
-) -> Result<Vec<std::sync::Arc<[u8]>>> {
-    records
-        .iter()
-        .zip(ordinals)
-        .enumerate()
-        .map(|(rank, (record, &ordinal))| {
-            let id = match parsed.get(rank).and_then(Option::as_deref) {
-                Some(subject) => subject
-                    .tabular_saccver(protein)
-                    .map_err(|problem| parsed_refusal(ordinal, &format!("has {problem}"), program)),
-                None => tabular_subject_id(
-                    &record.title,
-                    sources
-                        .get(rank)
-                        .unwrap_or(&crate::report::defline::UNNAMED_SOURCE),
-                    ordinal,
-                    protein,
-                    program,
-                )
-                .map(std::sync::Arc::from),
-            };
-            match id {
-                Err(_) if !reads => Ok(std::sync::Arc::from(&b""[..])),
-                id => id,
-            }
-        })
-        .collect()
+) -> Result<ReportedTabularIds> {
+    let mut ids = ReportedTabularIds::default();
+    for (rank, (record, &ordinal)) in records.iter().zip(ordinals).enumerate() {
+        let id = match parsed.get(rank).and_then(Option::as_deref) {
+            Some(subject) => subject
+                .tabular_saccver(protein)
+                .map_err(|problem| parsed_refusal(ordinal, &format!("has {problem}"), program)),
+            None => tabular_subject_id(
+                &record.title,
+                sources
+                    .get(rank)
+                    .unwrap_or(&crate::report::defline::UNNAMED_SOURCE),
+                ordinal,
+                protein,
+                program,
+            )
+            .map(|id| match id {
+                crate::report::defline::DatabaseSubjectId::Word(word) => std::sync::Arc::from(word),
+                crate::report::defline::DatabaseSubjectId::Ordinal => {
+                    let [seq_id, accession] =
+                        crate::report::defline::ordinal_subject_ids(db.oid(ordinal));
+                    if ids.seq_ids.is_empty() {
+                        ids.seq_ids = vec![None; records.len()];
+                    }
+                    ids.seq_ids[rank] = Some(std::sync::Arc::from(seq_id));
+                    std::sync::Arc::from(accession)
+                }
+            }),
+        };
+        ids.accessions.push(match id {
+            Err(_) if !reads => std::sync::Arc::from(&b""[..]),
+            id => id?,
+        });
+    }
+    Ok(ids)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
@@ -2217,7 +2247,14 @@ pub(crate) fn library_subject(
 ) -> crate::api::local_blast::ReportedSubject {
     let id = match parsed {
         Some(subject) => subject.tabular_saccver(protein).ok().map(|id| id.to_vec()),
-        None => tabular_subject_id(title, source, ordinal, protein, program).ok(),
+        None => match tabular_subject_id(title, source, ordinal, protein, program) {
+            Ok(crate::report::defline::DatabaseSubjectId::Word(word)) => Some(word),
+            Ok(crate::report::defline::DatabaseSubjectId::Ordinal) => {
+                let [_, accession] = crate::report::defline::ordinal_subject_ids(db.oid(ordinal));
+                Some(accession)
+            }
+            Err(_) => None,
+        },
     }
     .unwrap_or_else(|| {
         title
@@ -2545,15 +2582,17 @@ pub(crate) fn check_reported_title(
 /// sequence `ordinal` with the stored title `title` and the source `source` of its Bioseq, from
 /// which NCBI makes an empty title and rewrites the end of a protein title ending in `]`
 /// (`report::defline::database_subject_id`; `protein` for a protein database;
-/// `HeaderReader::stored_source`). A title whose id LOSAT cannot write as NCBI, and a source that
-/// it refuses (`SourceTaxname::Refused`), are LOSAT's refusals (`program` names the program).
+/// `HeaderReader::stored_source`): the first word of the generated title, or the sequence's own
+/// `gnl|BL_ORD_ID|n` (`report::defline::ordinal_subject_ids` of its OID). A title whose id LOSAT
+/// cannot write as NCBI, and a source that it refuses (`SourceTaxname::Refused`), are LOSAT's
+/// refusals (`program` names the program).
 pub(crate) fn tabular_subject_id(
     title: &[u8],
     source: &crate::report::defline::SourceTaxname,
     ordinal: u32,
     protein: bool,
     program: &str,
-) -> Result<Vec<u8>> {
+) -> Result<crate::report::defline::DatabaseSubjectId> {
     let mut facts =
         crate::report::defline::BioseqFacts::of_source(source_name(source, ordinal, program)?);
     facts.has_source = source.has_source();

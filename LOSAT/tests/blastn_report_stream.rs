@@ -705,8 +705,9 @@ fn a_database_search_refused_in_a_later_batch_writes_the_batches_before() {
         sequences[at..at + 4].copy_from_slice(&(count + 1).to_be_bytes());
         std::fs::write(&path, sequences).unwrap();
     });
-    // A title of spaces only: NCBI makes no tabular subject id of it, which LOSAT refuses where a
-    // tabular report shows the sequence; outfmt 0 and 17 show it (and stream, with the off bytes).
+    // A title of spaces only: NCBI makes no first word of it and keeps the sequence's own id
+    // (`report::defline::DatabaseSubjectId::Ordinal`: `BL_ORD_ID:1` in the default tabular
+    // fields); every format shows it and streams, with the off bytes.
     let blank = database(&dir, "blank", |db| {
         let path = format!("{db}.nhr");
         let mut header = std::fs::read(&path).unwrap();
@@ -718,17 +719,20 @@ fn a_database_search_refused_in_a_later_batch_writes_the_batches_before() {
         header[at..at + title.len()].fill(b' ');
         std::fs::write(&path, header).unwrap();
     });
-    for (outfmt, threads) in [("0", 4), ("17", 1)] {
+    for (outfmt, threads) in [("0", 4), ("17", 1), ("6", 1), ("6", 4)] {
         let (off, (batches, reason)) = run(&query, &blank, outfmt, threads);
         assert_eq!(off.status, Some(0), "blank title, outfmt {outfmt}: {off:?}");
         assert!(
             batches >= 8 && reason == "none",
             "blank title, outfmt {outfmt}"
         );
+        if outfmt == "6" {
+            let rows = String::from_utf8_lossy(&off.report).into_owned();
+            assert!(rows.contains("\tBL_ORD_ID:1\t"), "{rows}");
+        }
     }
     for (db, refusal) in [
         (&title, "has a stored title with a byte outside"),
-        (&blank, "makes no subject id"),
         (
             &ambiguity,
             "the ambiguity data are shorter than their count",
@@ -751,17 +755,15 @@ fn a_database_search_refused_in_a_later_batch_writes_the_batches_before() {
             assert_eq!(off.status, Some(0), "{what}, early queries: {off:?}");
             assert!(batches >= 2 && reason == "none", "{what}, early queries");
             // Outfmt 17 writes its document only at the end: a refused run writes none, with the
-            // switch too (the blank title is not refused there).
-            if db != &blank {
-                let sam = args(&query, db, "17");
-                let sam: Vec<&str> = sam.iter().map(String::as_str).collect();
-                let what = format!("{what} outfmt 17");
-                let (off, on, _) = refused_late(&what, &sam, threads, &[]);
-                assert!(
-                    off.report.is_empty() && on.report.is_empty(),
-                    "{what}: {on:?}"
-                );
-            }
+            // switch too.
+            let sam = args(&query, db, "17");
+            let sam: Vec<&str> = sam.iter().map(String::as_str).collect();
+            let what = format!("{what} outfmt 17");
+            let (off, on, _) = refused_late(&what, &sam, threads, &[]);
+            assert!(
+                off.report.is_empty() && on.report.is_empty(),
+                "{what}: {on:?}"
+            );
         }
     }
 }

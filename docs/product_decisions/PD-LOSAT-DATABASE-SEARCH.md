@@ -64,7 +64,11 @@
   line RG item T5c wrote the end of a protein title ending in `]` that NCBI rewrites from the first
   tax id (`x_AdjustProteinTitleSuffix`, with or without a taxonomy database) in the outfmt 0 heading,
   outfmt 18 and the tabular subject ids, which version 1.3 refused in databases with parsed Seq-ids
-  and LOSAT wrote unchanged in the tabular ids of a database without them)
+  and LOSAT wrote unchanged in the tabular ids of a database without them, and its fix 1 wrote the
+  sequence's own `gnl|BL_ORD_ID|n` (`BL_ORD_ID:n` in `sacc`, `saccver` and `sallacc`) that NCBI keeps
+  in the tabular ids where the generated title has no first word (a title of spaces, a TPA or MAG
+  prefix alone, `MAG: (plastid) [ ]` cut to `MAG:` from the tax id, a nucleotide's empty title whose
+  tax id the taxonomy database does not name), in every program, which version 1.0 refused)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -547,8 +551,9 @@ search code with a different subject source.
 - Residues: a stored `O` is read as `X` for the search and as `O` for the composition-based
   redo (NCBI compares the stored bytes there); `U`, `B`, `Z`, `J`, `*` as stored.
 - Reports: the `Database:` lines of outfmt 0 (title, counts, `Posted date`), `>` and the
-  stored title, subject ids made from the title as NCBI makes them (`gnl|BL_ORD_ID|n` is
-  never shown), `# Database:` of outfmt 7 with the `-db` value as given.
+  stored title, subject ids made from the title as NCBI makes them (`gnl|BL_ORD_ID|n`, and
+  `BL_ORD_ID:n` in the accession fields, only where the title made has no first word),
+  `# Database:` of outfmt 7 with the `-db` value as given.
 - Errors: NCBI's texts and exit statuses for a database that is not found or cannot be
   read, at the point where NCBI reports them (a header file is first read when the reports
   of a query batch are made).
@@ -562,7 +567,7 @@ Rejected explicitly (NCBI runs these, or crashes, or LOSAT cannot reproduce what
 | `-searchsp` | NCBI then uses a different statistics path (`OLD_FSC`, no Gumbel block); a stage of its own |
 | A database sequence with a gap residue (`-`, stored by makeblastdb), a byte above the protein alphabet, or a sequence not between two NUL bytes | NCBI's `-db` never aligns a stored gap and its formatter counts it as a gap; not reproduced |
 | A database sequence without parsed Seq-ids with more or fewer than one definition line | makeblastdb without `-parse_seqids` writes one; a sequence with parsed Seq-ids may have several (version 1.3) |
-| A reported subject whose title gives no subject id (a title of spaces: NCBI shows `gnl|BL_ORD_ID|n`), or whose title NCBI's cleaner reads past (titles like `, ,`: NCBI crashes) | tabular formats, and outfmt 0 for the second |
+| A reported subject whose title NCBI's cleaner reads past (titles like `, ,`: NCBI crashes) | tabular formats and outfmt 0 |
 | A shown subject with an empty title and a tax id (makeblastdb `-taxid`) whose lookup in the taxonomy database reads past the mapped end of `taxdb.btd` (line RG item T5; outfmt 0, 18 and the tabular subject ids, all six programs) | NCBI reads unmapped memory and crashes. A title made from a name the taxonomy database gives is written as NCBI makes it (line RG item T5; line DBID H3 refused it in outfmt 0) |
 | A reported title with a raw byte outside ' '..'~' in the header file | NCBI prints `#` and a warning a number of times that depends on the format and the field |
 | `-dbsize` whose effective search space overflows NCBI's `Int8` | NCBI's arithmetic overflows |
@@ -621,7 +626,6 @@ Rejected explicitly, besides what BLASTP `-db` and the reader reject (the same r
 | Rejected | Why |
 | --- | --- |
 | `-searchsp`, `-db_soft_mask`, `-db_hard_mask` | a stage of its own; masks are not read (P4) |
-| A reported subject whose title gives no subject id: a title of spaces, or an empty title of a sequence whose tax id the taxonomy database does not name (NCBI writes `gnl|BL_ORD_ID|n` and `BL_ORD_ID:n`; for a protein an empty title gives `unnamed`, which BLASTP writes; a name gives its first word, line RG item T5) | as BLASTP: ids of the general form are not written |
 | `-dbsize` whose effective search space overflows NCBI's `Int8` | NCBI's arithmetic overflows |
 | A database of more letters than the target's `usize` (32-bit targets) | |
 

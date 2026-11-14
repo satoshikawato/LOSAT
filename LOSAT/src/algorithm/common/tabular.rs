@@ -87,6 +87,8 @@ pub(crate) enum TabularSubjects<'a> {
     /// none has one), lengths, and taxonomy (empty when no field shows it).
     Database {
         ids: &'a [Arc<[u8]>],
+        /// `sseqid` where it is not `ids` (`common::database::ReportedTabularIds::seq_ids`).
+        seq_ids: &'a [Option<Arc<[u8]>>],
         ordinals: &'a [u32],
         records: &'a [FastaRecord],
         parsed: &'a [Option<Arc<ParsedSubject>>],
@@ -247,6 +249,7 @@ impl<'a> TabularSubjects<'a> {
             }
             TabularSubjects::Database {
                 ids,
+                seq_ids,
                 ordinals,
                 records,
                 parsed,
@@ -296,16 +299,22 @@ impl<'a> TabularSubjects<'a> {
                     }
                     // A sequence without parsed Seq-ids: the first word of its stored title
                     // (`gnl|BL_ORD_ID|n` replaced, `CShowBlastDefline::GetSeqIdList`) for every
-                    // id, and its one definition line's title.
+                    // id, or without one the general id kept (`seq_ids`), and its one definition
+                    // line's title.
                     None => {
-                        let id: &[u8] = ids.get(s_idx).map_or(&b"unknown"[..], |id| id.as_ref());
+                        let accession: &[u8] =
+                            ids.get(s_idx).map_or(&b"unknown"[..], |id| id.as_ref());
+                        let id = seq_ids
+                            .get(s_idx)
+                            .and_then(Option::as_deref)
+                            .unwrap_or(accession);
                         let title = records
                             .get(s_idx)
                             .map_or(&[][..], |record| record.title.as_slice());
                         Ok(SubjectValues {
                             id: Cow::Borrowed(id),
-                            accession: Cow::Borrowed(id),
-                            accession_version: Cow::Borrowed(id),
+                            accession: Cow::Borrowed(accession),
+                            accession_version: Cow::Borrowed(accession),
                             gi: 0,
                             all_ids: Vec::new(),
                             titles: Some(vec![title]),

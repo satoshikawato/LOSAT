@@ -50,6 +50,8 @@ pub(super) enum ShownSubjects<'a> {
         name: &'a str,
         pairwise: &'a PairwiseDatabase,
         reported: &'a super::database::ReportedSubjects,
+        /// The searched database (the OIDs of the reported sequences' ids).
+        database: &'a super::database::TblastnDatabase,
     },
 }
 
@@ -311,21 +313,30 @@ pub(super) fn render(
                 super::tabular::tabular_spec(format.outfmt).as_ref(),
             )
     };
-    let subject_ids = if outputs.formats.iter().any(shows_ids) {
+    let crate::algorithm::common::database::ReportedTabularIds {
+        accessions: subject_ids,
+        seq_ids: subject_seq_ids,
+    } = if outputs.formats.iter().any(shows_ids) {
         match shown {
-            ShownSubjects::Fasta { .. } => tabular_subject_ids(hitlists, subject_records)?,
-            ShownSubjects::Database { reported, .. } => {
-                reported.tabular_subject_ids(outputs.formats.iter().any(|format| {
+            ShownSubjects::Fasta { .. } => crate::algorithm::common::database::ReportedTabularIds {
+                accessions: tabular_subject_ids(hitlists, subject_records)?,
+                seq_ids: Vec::new(),
+            },
+            ShownSubjects::Database {
+                reported, database, ..
+            } => reported.tabular_subject_ids(
+                database,
+                outputs.formats.iter().any(|format| {
                     shows_ids(format)
                         && crate::report::tabular::reads_subject(
                             super::tabular::tabular_spec(format.outfmt).as_ref(),
                             crate::blastinput::app::Program::Tblastn,
                         )
-                }))?
-            }
+                }),
+            )?,
         }
     } else {
-        Vec::new()
+        Default::default()
     };
     // NCBI c++/src/algo/blast/format/blast_format.cpp:1411:
     // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
@@ -446,6 +457,7 @@ pub(super) fn render(
                         queries: query_records,
                         letters: subject_letters,
                         subject_ids: &subject_ids,
+                        subject_seq_ids: &subject_seq_ids,
                         subject_records,
                         shown,
                         query_batch_skipped,

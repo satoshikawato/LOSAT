@@ -2086,6 +2086,8 @@ pub(crate) struct ReportDatabase<'a> {
     pub pairwise: &'a crate::report::pairwise::PairwiseDatabase,
     /// The reported sequences by rank (their tabular ids).
     pub reported: &'a super::super::database::ReportedSubjects,
+    /// The searched database (the OIDs of the reported sequences' ids).
+    pub searched: &'a super::super::database::TblastxDatabase,
 }
 
 /// The `Database:` text of the reports of a local `-subject` search.
@@ -2326,17 +2328,24 @@ fn write_tblastx_outputs(
     }
     // Built before any format is written, so that a report that cannot be made fails the
     // run without output (`tabular_subject_ids`).
-    let subject_ids = if output_formats.iter().any(|format| format.is_tabular()) {
+    let crate::algorithm::common::database::ReportedTabularIds {
+        accessions: subject_ids,
+        seq_ids: subject_seq_ids,
+    } = if output_formats.iter().any(|format| format.is_tabular()) {
         match &run.database {
             Some(database) => database.reported.tabular_subject_ids(
+                database.searched,
                 output_formats
                     .iter()
                     .any(|format| format.tabular_reads_subject()),
             )?,
-            None => tabular_subject_ids(&hits, run.subjects)?,
+            None => crate::algorithm::common::database::ReportedTabularIds {
+                accessions: tabular_subject_ids(&hits, run.subjects)?,
+                seq_ids: Vec::new(),
+            },
         }
     } else {
-        Vec::new()
+        Default::default()
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
     // ```c++
@@ -2705,6 +2714,7 @@ fn write_tblastx_outputs(
                         query_titles: &query_titles,
                         database: &database,
                         subject_ids: &subject_ids,
+                        subject_seq_ids: &subject_seq_ids,
                         unsearched: &unsearched,
                     },
                     &mut writer,
@@ -4223,6 +4233,7 @@ impl BatchReports<'_> {
                         name: database.name(),
                         pairwise,
                         reported: &reported_subjects,
+                        searched: database,
                     }),
                 )
             }

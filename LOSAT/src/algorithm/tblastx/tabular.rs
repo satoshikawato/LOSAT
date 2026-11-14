@@ -147,6 +147,8 @@ pub(super) struct TblastxTabular<'a, 'r> {
     /// The default report's tabular subject ids (`sseqid`, `sacc`, `saccver`), by subject index
     /// or rank (`tabular_subject_ids`, `ReportedSubjects::tabular_subject_ids`).
     pub subject_ids: &'a [Arc<[u8]>],
+    /// `sseqid` where it is not `subject_ids` (`common::database::ReportedTabularIds::seq_ids`).
+    pub subject_seq_ids: &'a [Option<Arc<[u8]>>],
     /// By query: whether NCBI did not search its batch (outfmt 7's lines without a count).
     pub unsearched: &'a [bool],
 }
@@ -211,6 +213,7 @@ pub(super) fn write_tblastx_tabular(
         },
         Some(database) => TabularSubjects::Database {
             ids: tab.subject_ids,
+            seq_ids: tab.subject_seq_ids,
             ordinals: &database.reported.ordinals,
             records: &database.reported.records,
             parsed: &database.reported.parsed,

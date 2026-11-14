@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.18
+- Version: 1.19
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -31,7 +31,10 @@
   1.17 2026-11-13 (the explicit rejections of `losat rpsbproc` in the XML input, rule 3, line PS
   item PS16d);
   1.18 2026-11-14 (the explicit rejections of TBLASTN's one-hit gapped start past NCBI's buffers
-  and of the endless split it can cause, rule 3, line RG item X2)
+  and of the endless split it can cause, rule 3, line RG item X2);
+  1.19 2026-11-14 (the end of a database protein's title that `x_AdjustProteinTitleSuffix`
+  rewrites from the tax ids, which version 1.10 listed among the explicit rejections of
+  deterministic results of rule 2, moved to the results ported under rule 4, line RG item T5c)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:

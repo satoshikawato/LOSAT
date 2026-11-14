@@ -309,8 +309,10 @@ pub(crate) struct ReportedSubjects {
     /// The sources from which NCBI makes the empty stored titles of the others, by rank
     /// (`shared::StoredTitle::source`; empty when none has one).
     sources: Vec<crate::report::defline::SourceTaxname>,
-    /// `sacc` and `saccver` of the sequences with parsed Seq-ids by rank, with `tabular`
-    /// (empty without them; the others' are their `sseqid`).
+    /// `sacc` and `saccver` of the sequences with parsed Seq-ids by rank, with `tabular`, and of
+    /// those without whose id is their kept `gnl|BL_ORD_ID|n` (`BL_ORD_ID:n`,
+    /// `report::defline::DatabaseSubjectId::Ordinal`; empty without them; the others' are their
+    /// `sseqid`).
     tabular_accessions: Vec<Option<[String; 2]>>,
     /// What a custom tabular field list reads beyond the default report's ids
     /// (`read_tabular`; empty and `None` otherwise).
@@ -521,12 +523,27 @@ impl ReportedSubjects {
                 let id = if shown && tabular_reads {
                     shared::tabular_subject_id(&title, &source, ordinal, true, database.program)?
                 } else {
-                    Vec::new()
+                    crate::report::defline::DatabaseSubjectId::Word(Vec::new())
                 };
                 // A stored title is a VisibleString (checked above), so its id is ASCII.
-                reported
-                    .tabular_ids
-                    .push(String::from_utf8_lossy(&id).into_owned());
+                let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
+                match id {
+                    crate::report::defline::DatabaseSubjectId::Word(word) => {
+                        reported.tabular_ids.push(text(word))
+                    }
+                    // The general id kept: `sacc` and `saccver` are its label.
+                    crate::report::defline::DatabaseSubjectId::Ordinal => {
+                        let [id, accession] =
+                            crate::report::defline::ordinal_subject_ids(database.db.oid(ordinal));
+                        reported.tabular_ids.push(text(id));
+                        if reported.tabular_accessions.is_empty() {
+                            reported.tabular_accessions = vec![None; listed.len()];
+                        }
+                        let accession = text(accession);
+                        reported.tabular_accessions[reported.ordinals.len()] =
+                            Some([accession.clone(), accession]);
+                    }
+                }
             }
             let encoded = subjects.read_encoded(oid)?;
             reported.records.push(FastaRecord {

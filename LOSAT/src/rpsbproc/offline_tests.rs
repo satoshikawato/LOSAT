@@ -18,7 +18,6 @@ fn hsp(from: i32, to: i32, frame: i32, qseq: &[u8], hseq: &[u8]) -> Hsp {
         align_len: Some(qseq.len() as i32),
         qseq: qseq.to_vec(),
         hseq: hseq.to_vec(),
-        midline_len: None,
     }
 }
 
@@ -309,32 +308,35 @@ fn domain_positions_that_overflow_int() {
     );
 }
 
-// The strings of an `Hsp` that NCBI holds at once (offl_cd_align_proc.cpp:198, quoted at
-// `hsp_strings`): `Hsp_qseq`, `Hsp_hseq`, `Hsp_midline` when the document has it, and the copy of
-// `Hsp_hseq` of an HSP that passes the E-value cutoff, each with its terminating 0. From 1 GiB
-// they are refused under the memory rule (DECISIONS 40; PS16-Q1 review S3-2), which replaces the
-// refusal of an `Hsp_qseq` of 2^31 letters.
+// The `int` positions of an alignment string (offl_cd_align_proc.cpp:51-122, 190-228, quoted at
+// `parse_hsp` and `parse_align_strings`): `++alnResIdx` and `++start` pass `INT_MAX` in an
+// `Hsp_qseq` of 2^31 letters or more and are computed as their values (PD-LOSAT-NCBI-DEFECTS
+// exception 11, line PS `DECISIONS.md` 59; checked end to end on ws, PS16-Q1 oracle `q31`, an
+// `Hsp_qseq` of 2^31 + 8 letters against NCBI's output for 2^31 - 128). A string read at an `int`
+// index: the index as a `size_t` (a negative one is past any length), the terminating 0 at the
+// length. "See if NA"'s `t0 = t1 + 1` converts a `size_t` to `int`: from 2^31 a negative `t0`,
+// whose read NCBI makes far past the string (refused).
 #[test]
-fn hsp_strings_from_1_gib_are_refused() {
-    let half = 1usize << 29;
-    assert_eq!(hsp_strings(3, 3, None, false), 8);
-    assert_eq!(hsp_strings(3, 3, Some(3), true), 16);
-    // The document's two strings: 2^29 + 1 and 2^29 - 2 bytes (just below), then 2^29 - 1.
+fn string_reads_at_int_positions() {
+    let text = b"AB-";
+    assert_eq!(string_at(text, 0), Some(b'A'));
+    assert_eq!(string_at(text, 3), Some(0));
+    assert_eq!(string_at(text, 4), None);
+    assert_eq!(string_at(text, -1), None);
+    assert_eq!(string_at(text, i64::from(i32::MAX) + 1), None);
+    let Err(ProcessError::Unsupported(message)) = qseq_at(text, -2_147_483_648) else {
+        panic!("refused");
+    };
     assert_eq!(
-        hsp_memory_refusal(hsp_strings(half, half - 3, None, false)),
-        None
+        message,
+        "an Hsp_qseq that NCBI's \"see if NA\" loop reads past its end in the XML input is not supported by LOSAT's rpsbproc"
     );
-    let at = hsp_strings(half, half - 2, None, false);
-    assert_eq!(at, 1 << 30);
+    // `(t1 + 1)` as the `int` `t0`: 2^31 - 1 + 1 is `INT_MIN`, 2^32 is 0.
     assert_eq!(
-        hsp_memory_refusal(at).unwrap(),
-        "an Hsp whose strings NCBI's rpsbproc holds at once (Hsp_qseq, Hsp_hseq, Hsp_midline and the copy of Hsp_hseq that ParseBlastOutput makes, with their terminating 0) come to 1073741824 bytes (1 GiB or more; NCBI's result depends on the host's memory) in the XML input is not supported by LOSAT's rpsbproc"
+        i64::from(((1u64 << 31) - 1 + 1) as u32 as i32),
+        -2_147_483_648
     );
-    // With `Hsp_midline` and the copy of `Hsp_hseq`: four strings of 2^28 - 1 letters reach it.
-    let quarter = (1usize << 28) - 1;
-    assert_eq!(hsp_strings(quarter, quarter, Some(quarter), true), 1 << 30);
-    assert!(hsp_memory_refusal(hsp_strings(quarter, quarter, Some(quarter - 1), true)).is_none());
-    assert!(hsp_memory_refusal(hsp_strings(quarter, quarter, Some(quarter), true)).is_some());
+    assert_eq!(i64::from((u64::from(u32::MAX) + 1) as u32 as i32), 0);
 }
 
 // `m_dimTranslated[rfidx][qf] = '\0'` at the string's length is the defined write of the

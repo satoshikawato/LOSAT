@@ -56,43 +56,6 @@ pub(crate) struct Hsp {
     pub(crate) align_len: Option<i32>,
     pub(crate) qseq: Vec<u8>,
     pub(crate) hseq: Vec<u8>,
-    /// The length of `Hsp_midline` when the document has it (read, not kept).
-    pub(crate) midline_len: Option<usize>,
-}
-
-/// The bytes of an `Hsp`'s strings that NCBI's rpsbproc holds at once: `Hsp_qseq`, `Hsp_hseq` and
-/// `Hsp_midline` (when the document has it) in its `CBlastOutput`, which holds the whole document
-/// while `ParseBlastOutput` reads it, and, with `hseq_copy`, the copy of `Hsp_hseq` that
-/// `ParseBlastOutput` makes for an HSP that passes the E-value cutoff; each with its terminating 0.
-// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:198
-// ```c++
-// 					const string &qseq = (*iterHsp)->GetQseq(), hseq = (*iterHsp)->GetHseq();
-// ```
-// (`hseq` is a `const string`, not a reference: a copy. `ParseAlignStrings` takes both by
-// reference and makes no copy of them. The document's other members are a few numbers.)
-pub(crate) fn hsp_strings(
-    qseq: usize,
-    hseq: usize,
-    midline: Option<usize>,
-    hseq_copy: bool,
-) -> u64 {
-    let string = |len: usize| len as u64 + 1;
-    string(qseq)
-        + string(hseq)
-        + midline.map_or(0, string)
-        + if hseq_copy { string(hseq) } else { 0 }
-}
-
-/// The refusal of an `Hsp` whose strings NCBI holds at once come to `total` bytes, 1 GiB or more
-/// (`hsp_strings`): NCBI's allocations then succeed or throw `std::bad_alloc` by the host's memory
-/// (DECISIONS 40; PS16-Q1 review S3-2). Below 1 GiB the positions of `Hsp_qseq` stay within
-/// NCBI's `int`.
-pub(crate) fn hsp_memory_refusal(total: u64) -> Option<String> {
-    (total >= MEMORY_LIMIT).then(|| {
-        format!(
-            "an Hsp whose strings NCBI's rpsbproc holds at once (Hsp_qseq, Hsp_hseq, Hsp_midline and the copy of Hsp_hseq that ParseBlastOutput makes, with their terminating 0) come to {total} bytes (1 GiB or more; NCBI's result depends on the host's memory) in the XML input is not supported by LOSAT's rpsbproc"
-        )
-    })
 }
 
 fn unsupported(what: &str) -> ProcessError {
@@ -452,15 +415,13 @@ impl OfflineQuery {
             self.pr_commit()?;
         }
         let (qseq, hseq) = (&hsp.qseq[..], &hsp.hseq[..]);
-        // The copy of `hseq` (quoted at `hsp_strings`); the document's strings alone were checked
-        // when the HSP was read (`blastxml::read_hsp`).
-        let held = hsp_strings(qseq.len(), hseq.len(), hsp.midline_len, true);
-        if let Some(refusal) = hsp_memory_refusal(held) {
-            return Err(ProcessError::Unsupported(refusal));
-        }
-        // `SeqLen_t alnLen = qseq.size()`: below 1 GiB.
+        // `SeqLen_t alnLen = qseq.size()`: the length modulo 2^32 (`size_t` to `unsigned int`).
         let aln_len = qseq.len() as u32;
-        let mut aln_res_idx: i32 = 0;
+        // `++alnResIdx` passes `INT_MAX` when the first 2^31 columns or more of an `Hsp_qseq` of
+        // 2^31 letters or more are gaps (undefined): computed as its value, compared with `alnLen`
+        // as an `unsigned int` (PD-LOSAT-NCBI-DEFECTS exception 11, line PS `DECISIONS.md` 59). It
+        // stops at `alnLen`, so it reads `qseq` within its length.
+        let mut aln_res_idx: i64 = 0;
         while (aln_res_idx as u32) < aln_len
             && (qseq[aln_res_idx as usize] == b'-' || hseq_at(hseq, aln_res_idx)? == b'-')
         {
@@ -470,7 +431,7 @@ impl OfflineQuery {
             let mut aa_res: u32 = 0;
             let mut t0 = aln_res_idx;
             while (t0 as u32) < aln_len {
-                if qseq[t0 as usize] == b'-' {
+                if qseq_at(qseq, t0)? == b'-' {
                     t0 += 1;
                 } else {
                     let start = t0 as usize;
@@ -479,7 +440,17 @@ impl OfflineQuery {
                         .position(|&c| c == b'-')
                         .map_or(aln_len as usize, |gap| start + gap);
                     aa_res = aa_res.wrapping_add((t1 - start) as u32);
-                    t0 = (t1 + 1) as i32;
+                    // `t0 = t1 + 1` stores a `size_t` in the `int` (modulo 2^32, C++20): from 2^31
+                    // on a negative `t0`, whose `qseq[t0]` NCBI reads far past the string
+                    // (`qseq_at` refuses it), and at 2^32 a `t0` of 0, from which NCBI's loop
+                    // starts over and never ends (refused).
+                    let next = i64::from((t1 as u64 + 1) as u32 as i32);
+                    if (0..=t0).contains(&next) {
+                        return Err(unsupported(
+                            "an Hsp_qseq of 2^32 - 1 letters or more over which NCBI's \"see if NA\" loop starts over and never ends",
+                        ));
+                    }
+                    t0 = next;
                 }
             }
             let span = (to - from + 1) as u32;
@@ -627,7 +598,10 @@ impl OfflineQuery {
     // ```
     // (`qf - qofs`, `qf += segLen`, `hf += segLen` and `start - segLen` are `unsigned int`
     // arithmetic (of `qf`'s and `hf`'s values modulo 2^32), stored in an `int` or passed as a
-    // `size_t`; `++qf`, `--qf`, `++hf` and `--hf` are `int`, undefined past its limits: computed
+    // `size_t`; `++start` of an `Hsp_qseq` of 2^31 letters or more passes `INT_MAX` (undefined):
+    // computed as its value, compared with `n` as an `unsigned int` and used as the `size_t` index
+    // and the `unsigned int` `start - segLen` (line PS `DECISIONS.md` 59; it stops at `n`, within
+    // the string); `++qf`, `--qf`, `++hf` and `--hf` are `int`, undefined past its limits: computed
     // as their values, which `qf`, `hf` and `m_vecSStarts` keep (`domains::SubjectStarts`;
     // PD-LOSAT-NCBI-DEFECTS exception 11; PS16-Q1 oracles `xhfmax`, `xhfmin` and their nearby
     // inputs). `hf` starts from `Hsp_hit-from` and passes them with a hit near `INT_MAX` or
@@ -642,7 +616,7 @@ impl OfflineQuery {
         hseq: &[u8],
         mut qf: i64,
         mut hf: i64,
-        mut start: i32,
+        mut start: i64,
         n: u32,
         qofs: u32,
         dst: &mut DomAlign,
@@ -797,14 +771,27 @@ impl OfflineQuery {
 
 /// `hseq[i]` of a `const std::string` at an index of `qseq`: its terminating 0 at its length,
 /// past it undefined (refused).
-fn hseq_at(hseq: &[u8], i: i32) -> Result<u8, ProcessError> {
-    let i = i as usize;
-    match i.cmp(&hseq.len()) {
-        std::cmp::Ordering::Less => Ok(hseq[i]),
-        std::cmp::Ordering::Equal => Ok(0),
-        std::cmp::Ordering::Greater => Err(unsupported(
-            "an Hsp whose Hsp_hseq is shorter than its Hsp_qseq (NCBI reads past it)",
-        )),
+fn hseq_at(hseq: &[u8], i: i64) -> Result<u8, ProcessError> {
+    string_at(hseq, i).ok_or_else(|| {
+        unsupported("an Hsp whose Hsp_hseq is shorter than its Hsp_qseq (NCBI reads past it)")
+    })
+}
+
+/// `qseq[t0]` of "see if NA" (quoted at `OfflineQuery::parse_hsp`): a `t0` that NCBI's `size_t`
+/// to `int` conversion made negative reads far past the string (undefined, refused).
+fn qseq_at(qseq: &[u8], i: i64) -> Result<u8, ProcessError> {
+    string_at(qseq, i)
+        .ok_or_else(|| unsupported("an Hsp_qseq that NCBI's \"see if NA\" loop reads past its end"))
+}
+
+/// `s[i]` of a `const std::string` (`i` an `int`, converted to `size_t`: a negative one is past any
+/// length): the byte, its terminating 0 at its length, `None` past it (undefined).
+fn string_at(s: &[u8], i: i64) -> Option<u8> {
+    let i = usize::try_from(i).ok()?;
+    match i.cmp(&s.len()) {
+        std::cmp::Ordering::Less => Some(s[i]),
+        std::cmp::Ordering::Equal => Some(0),
+        std::cmp::Ordering::Greater => None,
     }
 }
 

@@ -97,7 +97,7 @@
 use std::io::Read;
 
 use super::data::CddData;
-use super::offline::{self, Hsp, OfflineQuery};
+use super::offline::{Hsp, OfflineQuery};
 use super::query::{DomQuery, ProcessError};
 use crate::ncbi_str::c_atoi;
 use crate::report::serial::asn_text_reader::{AsnSource, StreamSource};
@@ -400,7 +400,6 @@ fn read_hsp<S: AsnSource>(
     hsp.query_frame = None;
     hsp.identity = None;
     hsp.align_len = None;
-    hsp.midline_len = None;
     reader.class("Hsp", &HSP, |reader, index| {
         match index {
             1 => hsp.bit_score = reader.real()?,
@@ -416,24 +415,13 @@ fn read_hsp<S: AsnSource>(
             15 => hsp.align_len = Some(reader.int4()?),
             17 => reader.string(&mut hsp.qseq)?,
             18 => reader.string(&mut hsp.hseq)?,
-            19 => {
-                reader.string(scratch)?;
-                hsp.midline_len = Some(scratch.len());
-            }
+            19 => reader.string(scratch)?,
             _ => {
                 reader.int4()?;
             }
         }
         Ok(())
-    })?;
-    // NCBI's `CBlastOutput` holds the strings of every HSP of the document while it is read and
-    // processed: an HSP whose strings come to 1 GiB or more is refused here, before the document's
-    // session is printed (as NCBI's read of it may fail, ending its loop, or succeed).
-    let held = offline::hsp_strings(hsp.qseq.len(), hsp.hseq.len(), hsp.midline_len, false);
-    match offline::hsp_memory_refusal(held) {
-        Some(refusal) => Err(XmlError::Unsupported(refusal)),
-        None => Ok(()),
-    }
+    })
 }
 
 #[cfg(test)]

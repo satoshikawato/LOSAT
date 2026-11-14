@@ -269,14 +269,14 @@ db.sc8a.ws6_mt1.6	blastp	ncbi	tests/db_search/paja	tests/fasta/SicyWSV.faa	-word
 db.sc8a.ws7_qloc.6	blastp	ncbi	tests/db_search/paja	tests/fasta/SicyWSV.faa	-word_size 7 -query_loc 50-400	6	0	bf9fea795741d2a5f35466bdd3bf55a5d480ab0a90445fdeb608fcc8a3caf74c	5263		SC8a: -word_size 7 with -query_loc
 db.sc8a.ws6_soft.6	blastp	ncbi	tests/db_search/paja	tests/fasta/SicyWSV.faa	-word_size 6 -seg yes -soft_masking true	6	0	2d951a18cda2ab04669e4d0655197bc02cda0edf0f18eec0a1903657831cfa70	5640		SC8a: -word_size 6 with SEG and -soft_masking true
 db.sc8a.ws7_split.6	blastp	ncbi	tests/seqdb/db/prot_v4	tests/db_search/split_q.faa	-word_size 7	6	0	af6763778eb818d48c28ef99ea3b33348f046f37d69a1dbe3e7bddcfea8eaeed	317		SC8a: -word_size 7 with a query cut into chunks
-db.sc8b.w4.6	blastp	ncbi	tests/db_search/paja	tests/fasta/SicyWSV.faa	-word_size 4	6					SC8b: -word_size 4 with -db, 89 queries
-db.sc8b.w4.0	blastp	ncbi	tests/db_search/paja	tests/fasta/outfmt0/sc4a_q.faa	-word_size 4 -max_target_seqs 5	0					SC8b: -word_size 4 with -db, pairwise (footer and database lines)
-db.sc8b.w4.fast.6	blastp	ncbi	tests/db_search/paja	tests/fasta/SicyWSV.faa	-task blastp-fast -word_size 4	6					SC8b: blastp-fast -word_size 4 with -db
-db.sc8b.w4.short.6	blastp	ncbi	tests/db_search/paja	tests/fasta/outfmt0/sc3_short_q.faa	-task blastp-short -word_size 4	6					SC8b: blastp-short -word_size 4 with -db
-db.sc8b.w4.BLOSUM45.6	blastp	ncbi	tests/db_search/paja	tests/fasta/SicyWSV.faa	-word_size 4 -matrix BLOSUM45	6					SC8b: -word_size 4 with BLOSUM45 and -db
-db.sc8b.w4.cbs0.6	blastp	ncbi	tests/db_search/paja	tests/fasta/SicyWSV.faa	-word_size 4 -comp_based_stats 0	6					SC8b: -word_size 4 in composition mode 0 with -db
-db.sc8b.w4.ws0.6	blastp	ncbi	tests/db_search/paja	tests/fasta/SicyWSV.faa	-word_size 4 -window_size 0	6					SC8b: -word_size 4, the one-hit search, with -db
-db.sc8b.w4.split.6	blastp	ncbi	tests/seqdb/db/prot_v4	tests/db_search/split_q.faa	-word_size 4	6					SC8b: -word_size 4 with a query split into chunks
+db.sc8b.w4.6	blastp	ncbi	tests/db_search/paja	tests/fasta/SicyWSV.faa	-word_size 4	6	0	3c0770b264b12013547310f6a5ff53fabb0b40c0f8768972937c2dc47dd32925	45122		SC8b: -word_size 4 with -db, 89 queries
+db.sc8b.w4.0	blastp	ncbi	tests/db_search/paja	tests/fasta/outfmt0/sc4a_q.faa	-word_size 4 -max_target_seqs 5	0	0	49b045b3368115789cacaa67a14a146ee045b721d62e891297a8c1e857f86f6c	16648		SC8b: -word_size 4 with -db, pairwise (footer and database lines)
+db.sc8b.w4.fast.6	blastp	ncbi	tests/db_search/paja	tests/fasta/SicyWSV.faa	-task blastp-fast -word_size 4	6	0	30037131ce5f3f1ef55d174d5fe156cdccd0fb1924dc151095ae9d8921c96761	4963		SC8b: blastp-fast -word_size 4 with -db
+db.sc8b.w4.short.6	blastp	ncbi	tests/db_search/paja	tests/fasta/outfmt0/sc3_short_q.faa	-task blastp-short -word_size 4	6	0	cba11245d7aa51ddd7483b7c1e9b313a05e17c5df573e4015284cda7f8692e35	2601	6dbeba0e3567393756be719052bd222cabc07410d0d175898f0c914bd63f372f	SC8b: blastp-short -word_size 4 with -db
+db.sc8b.w4.BLOSUM45.6	blastp	ncbi	tests/db_search/paja	tests/fasta/SicyWSV.faa	-word_size 4 -matrix BLOSUM45	6	0	730a8c00c2e911e1639949bf31b93706b6b4cb6de9d82e5087bd0dfb40b2b3c7	40908		SC8b: -word_size 4 with BLOSUM45 and -db
+db.sc8b.w4.cbs0.6	blastp	ncbi	tests/db_search/paja	tests/fasta/SicyWSV.faa	-word_size 4 -comp_based_stats 0	6	0	3b1b721793fbcd4864fa3f5b84c6e5a6a0fcfd685b1fa2219ec064d1ae0e2a09	99164		SC8b: -word_size 4 in composition mode 0 with -db
+db.sc8b.w4.ws0.6	blastp	ncbi	tests/db_search/paja	tests/fasta/SicyWSV.faa	-word_size 4 -window_size 0	6	0	72b8bca5e4f7c06adfe7349138bd6b256de080731716ecb520293437a427d710	52343		SC8b: -word_size 4, the one-hit search, with -db
+db.sc8b.w4.split.6	blastp	ncbi	tests/seqdb/db/prot_v4	tests/db_search/split_q.faa	-word_size 4	6	0	d8d028cd25e40ca5c81f74dcdef61de7b041a2efb236d143207a3fb3249b25e7	986		SC8b: -word_size 4 with a query split into chunks
 db.sc2b.BLOSUM45.6	blastp	ncbi	tests/db_search/paja	tests/fasta/SicyWSV.faa	-matrix BLOSUM45	6	0	18137b9967c4dfa90f7d8858b11efcbb66fa32a7abfc1e2cb4f89765afe45c44	30144		SC2b: BLOSUM45 with -db, 89 queries
 db.sc2b.PAM30.6	blastp	ncbi	tests/db_search/paja	tests/fasta/SicyWSV.faa	-matrix PAM30	6	0	941de533dc3d70032e3dba965dbbfcb7dc5e235559ece61f25e8ccec64ea4094	12760		SC2b: PAM30 with -db, 89 queries
 db.sc2b.PAM250.0	blastp	ncbi	tests/db_search/paja	tests/fasta/outfmt0/sc4a_q.faa	-matrix PAM250 -max_target_seqs 5	0	0	2d2a740f45e683ddf42bf1fad10ac1bb63e534661a64eb78a4d64fdb80a70e27	18568		SC2b: PAM250 with -db, pairwise (the footer), 5 subjects per query

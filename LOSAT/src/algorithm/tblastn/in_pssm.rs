@@ -154,12 +154,16 @@ pub(super) fn check_limits(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:191-196 (the
     // chunks of a split query are set up without the PSSM)
     // A PSSM query that NCBI splits is searched with the matrix in its preliminary stage, as
-    // psiblast's (`algorithm::psiblast::in_pssm::check_in_pssm_options`).
+    // psiblast's (`algorithm::psiblast::in_pssm::check_in_pssm_options`). Sizes that NCBI cannot
+    // convert split nothing: they stop the search's query splitter, before any split
+    // (`query_batch::read_query_batches`).
     if !searched {
         return Ok(());
     }
-    let sizes =
-        crate::algorithm::blastp::protein_query_split::protein_query_split_sizes("TBLASTN", 10000)?;
+    let Ok(sizes) = crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(10000)
+    else {
+        return Ok(());
+    };
     let length = psi.query.seq().len();
     if crate::algorithm::blastp::protein_query_split::split_protein_batch(&[length], sizes)
         .is_some()

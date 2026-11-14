@@ -69,6 +69,10 @@ fn reals_are_read_with_ncbis_arithmetic() {
         ("{ 765945647632464, 10, -15 }", 0x3fe8_82a0_7263_0a05),
         // glibc's pow(10, 23) is the double above 10^23's nearest.
         ("{ 3, 10, 23 }", 0x44cf_c384_2bd1_f072),
+        // More than 18 digits, which `StringToDoublePosix` adds up in x87 extended precision
+        // (`third`; NCBI's corelib, swebok-improve-20261105/sw8/nfix/probe/x87).
+        ("{ 1234567890123456789, 10, 0 }", 0x43b1_2210_f47d_e981),
+        ("{ 12345678901234567890123, 10, 0 }", 0x4484_ea15_b273_b38a),
     ] {
         assert_eq!(real_of(text).to_bits(), bits, "{text}");
     }
@@ -84,7 +88,7 @@ fn reals_are_read_with_ncbis_arithmetic() {
     assert_eq!(real_of("{ +7, 10, 1 }"), 70.0);
     assert_eq!(real_of("PLUS-INFINITY"), f64::INFINITY);
     assert_eq!(real_of("minus-infinity"), f64::NEG_INFINITY);
-    // `HUGE_VAL/HUGE_VAL` of NCBI's x86-64 builds: the sign bit set (`asn_text_reader::NCBI_NAN`;
+    // `HUGE_VAL/HUGE_VAL` of NCBI's x86-64 builds: the sign bit set (`ncbi_str::NCBI_NAN`;
     // PS16d review oracle O2 `a_nan` prints `-nan`), also for the word form `nan`.
     assert!(real_of("NOT-A-NUMBER").is_nan() && real_of("NOT-A-NUMBER").is_sign_negative());
     assert!(real_of("nan").is_nan() && real_of("nan").is_sign_negative());
@@ -95,15 +99,13 @@ fn reals_are_read_with_ncbis_arithmetic() {
     // (`fDecimalPosixFinite`).
     assert_eq!(real_of("0.005e2147483647"), f64::MAX);
     assert_eq!(real_of("-0.005e2147483647"), -f64::MAX);
-    // -3 - 2147483647 is not (NCBI's `int` overflows): the reader's error, no panic.
-    for bad in [
-        "{ 1, 3, 0 }",
-        "{ -, 10, 0 }",
-        "{ 1, 10 }",
-        "{ 1234567890123456789, 10, 0 }",
-        "0.005e-2147483647",
-        "-0.005e-2147483647",
-    ] {
+    // -3 - 2147483647 is not: NCBI's `int` overflows (undefined behaviour; NCBI's corelib wraps
+    // it to 2147483647 and gives DBL_MAX). LOSAT's widened exponent, -2147483650, is below -614:
+    // 0, which the word form makes DBL_MIN (the Owner's rule of 2026-10-10 for NCBI's signed
+    // overflows; line SW, SW8).
+    assert_eq!(real_of("0.005e-2147483647"), f64::MIN_POSITIVE);
+    assert_eq!(real_of("-0.005e-2147483647"), -f64::MIN_POSITIVE);
+    for bad in ["{ 1, 3, 0 }", "{ -, 10, 0 }", "{ 1, 10 }"] {
         let document = format!(
             "PssmWithParameters ::= {{ pssm {{ numRows 1, numColumns 1, finalData {{ scores {{ 1 }}, lambda {bad}, kappa {{ 0, 10, 0 }}, h {{ 0, 10, 0 }} }} }} }}"
         );

@@ -736,7 +736,9 @@ mod tests {
             starts.push(volume_start);
             volume_start += volume.num_oids();
         }
-        let oids: Vec<u32> = (0..db.num_seqs()).map(|ordinal| db.oid(ordinal)).collect();
+        let oids: Vec<u32> = (0..db.num_seqs())
+            .map(|ordinal| db.oid(ordinal).get())
+            .collect();
         let want: Vec<u32> = (0..db.num_seqs())
             .filter(|&ordinal| {
                 let oid = oids[ordinal as usize];

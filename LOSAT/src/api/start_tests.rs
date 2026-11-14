@@ -480,10 +480,20 @@ fn a_dry_run_parses_with_the_kind_of_its_subject() {
         ),
         Err(refused.clone())
     );
+    // `run_to_file`'s file is the parser's `-out`: its usage line names it, as the command line's
+    // does when `-out` is given.
     let out = dir.join("out.txt");
+    let Error::Argv(message) = &refused else {
+        unreachable!()
+    };
+    let refused_out = Error::Argv(message.replace(
+        "Usage: losat blastp -query <PATH> -db <NAME>\n",
+        "Usage: losat blastp -query <PATH> -db <NAME> -out <PATH>\n",
+    ));
+    assert_ne!(refused_out, refused);
     assert_eq!(
         run_to_file(&search, database, "6", &out, &mut diagnostics),
-        Err(refused.clone())
+        Err(refused_out)
     );
     assert_eq!(run_batches(&search, database).err(), Some(refused.clone()));
     assert!(diagnostics.is_empty() && !out.exists());

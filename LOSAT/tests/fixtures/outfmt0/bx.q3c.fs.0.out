@@ -1,0 +1,90 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/q3c_p300.faa).
+           1 sequences; 300 total letters
+
+
+
+Query= fs_plus frame shift
+
+Length=962
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value   N
+
+p300 q3c linking subject                                              279     4e-157  2
+
+
+> p300 q3c linking subject
+Length=300
+
+ Score = 279 bits (604),  Expect(2) = 4e-157
+ Identities = 113/150 (75%), Positives = 116/150 (77%), Gaps = 0/150 (0%)
+ Frame = +2
+
+Query  482  QHNLRCLVAWTKLGGGTCYKIEPFAWKHLCKKYTCKWSNIWKLFPWYPNGLSQTNPWGMA  661
+            QHNL CLVAWTKLGGG  YKIEP AWKHLCKK TC W N  KL PWYPNGLS T PWG  
+Sbjct  151  QHNLNCLVAWTKLGGGPGYKIEPAAWKHLCKKQTCGWCNNQKLKPWYPNGLSTTRPWGRQ  210
+
+Query  662  YEGTWGRKADCWQRIRDDMINAKESEHVLEKKKGPDESREAFKMPRNQLYSVKFGKKIMD  841
+             EG WGR A CW RIRD M NA ESEHVLEKKKGPDESREA KM RN LYSV+FGK I D
+Sbjct  211  QEGHWGRPAYCWDRIRDYMHNAIESEHVLEKKKGPDESREAQKMDRNPLYSVRFGKAIED  270
+
+Query  842  DTDTNFIHQLDVYVTRPMECILDRFRENDR  931
+            D DT F HQ+DVY T P+ECILDR RE DR
+Sbjct  271  DKDTPFDHQMDVYQTTPLECILDREREPDR  300
+
+
+ Score = 279 bits (603),  Expect(2) = 4e-157
+ Identities = 114/149 (77%), Positives = 117/149 (79%), Gaps = 0/149 (0%)
+ Frame = +1
+
+Query  34   IEWSTMGARIQDAQYEELKIIRLLFHNIPSHEGWKGRWFQMIGENTGMFRLTFPLFYGCF  213
+            I WST  ARIQ AQY   KIIR  +HN PS EGW GR F  IGENTGMFRL FP F GCF
+Sbjct  2    IVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIGCF  61
+
+Query  214  QSTQYPYFKYNFNTHSSFMSATWIRTNKHMWSCYHCPMHQQFTKVNNGAEPKVQEEIRFT  393
+            QSTQ PYF YN+NTHSSFMS T IRTNKH WS YH PMHQQFTKVNNGAEP  QEEIRFT
+Sbjct  62   QSTQNPYFMYNYNTHSSFMSETRIRTNKHYWSRYHAPMHQQFTKVNNGAEPGRQEEIRFT  121
+
+Query  394  HGTYPERDCALNERMACFKCELNLSLRWD  480
+            HGTY +RDCALNERM CFKCE  LSL WD
+Sbjct  122  HGTYKKRDCALNERMFCFKCESRLSLVWD  150
+
+
+ Score = 14.8 bits (26),  Expect = 5.8
+ Identities = 3/5 (60%), Positives = 5/5 (100%), Gaps = 0/5 (0%)
+ Frame = -2
+
+Query  58   LRPWW  44
+            L+PW+
+Sbjct  193  LKPWY  197
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 84000
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/q3c_p300.faa).
+    Posted date:  Unknown
+  Number of letters in database: 300
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 12
+Window for multiple hits: 40

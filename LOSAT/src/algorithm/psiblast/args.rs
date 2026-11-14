@@ -592,7 +592,7 @@ impl PsiblastArgs {
             strategy: None,
             request_inputs,
             app: BlastpApp::Psiblast,
-            subject_taxdb: None,
+            taxdb_setting: None,
             inclusion_ethresh: Some(self.inclusion_ethresh),
             first_query_ordinal: self.first_query_ordinal,
             psiblast_pssm: Some(crate::algorithm::psiblast::pssm::PsiblastPssmOptions {
@@ -643,10 +643,7 @@ impl PsiblastArgs {
             .map(crate::core::blast_util::ncbi_int4_from_double);
         inputs.window_size = self.window_size;
         inputs.soft_masking = self.soft_masking;
-        inputs.seg = self
-            .seg
-            .as_deref()
-            .and_then(|value| seg_filter(value, "PSIBLAST"));
+        inputs.seg = self.seg.as_deref().and_then(seg_filter);
         if let Ok((mode, unified_p)) =
             crate::blastinput::app::parse_comp_based_stats(&self.comp_based_stats, true, false)
         {

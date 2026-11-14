@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/taxfilter/tfu_p</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Homo sapiens] &gt;P69906.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan paniscus] &gt;P69907.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan troglodytes]</query-title>
+              <query-len>142</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|3</id>
+                      <accession>3</accession>
+                      <title>human hemoglobin theta-1</title>
+                      <taxid>9606</taxid>
+                    </HitDescr>
+                  </description>
+                  <len>142</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>182.185</bit-score>
+                      <score>461</score>
+                      <evalue>9.45132e-65</evalue>
+                      <identity>88</identity>
+                      <positive>110</positive>
+                      <query-from>1</query-from>
+                      <query-to>142</query-to>
+                      <hit-from>1</hit-from>
+                      <hit-to>142</hit-to>
+                      <align-len>142</align-len>
+                      <gaps>0</gaps>
+                      <qseq>MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR</qseq>
+                      <hseq>MALSAEDRALVRALWKKLGSNVGVYTTEALERTFLAFPATKTYFSHLDLSPGSSQVRAHGQKVADALSLAVERLDDLPHALSALSHLHACQLRVDPASFQLLGHCLLVTLARHYPGDFSPALQASLDKFLSHVISALVSEYR</hseq>
+                      <midline>M LS  D+  V+A W K+G++ G Y  EALER FL+FP TKTYF H DLS GS+QV+ HG+KVADAL+ AV  +DD+P+ALSALS LHA +LRVDP +F+LL HCLLVTLA H P +F+PA+ ASLDKFL+ V + L S+YR</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|1</id>
+                      <accession>1</accession>
+                      <title>human hemoglobin zeta</title>
+                      <taxid>9606</taxid>
+                    </HitDescr>
+                  </description>
+                  <len>142</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>176.407</bit-score>
+                      <score>446</score>
+                      <evalue>1.77279e-62</evalue>
+                      <identity>85</identity>
+                      <positive>104</positive>
+                      <query-from>1</query-from>
+                      <query-to>142</query-to>
+                      <hit-from>1</hit-from>
+                      <hit-to>142</hit-to>
+                      <align-len>142</align-len>
+                      <gaps>0</gaps>
+                      <qseq>MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR</qseq>
+                      <hseq>MSLTKTERTIIVSMWAKISTQADTIGTETLERLFLSHPQTKTYFPHFDLHPGSAQLRAHGSKVVAAVGDAVKSIDDIGGALSKLSELHAYILRVDPVNFKLLSHCLLVTLAARFPADFTAEAHAAWDKFLSVVSSVLTEKYR</hseq>
+                      <midline>M L+  ++T + + W K+   A   G E LER+FLS P TKTYFPHFDL  GSAQ++ HG KV  A+ +AV  +DD+  ALS LS+LHA+ LRVDPVNFKLLSHCLLVTLAA  PA+FT   HA+ DKFL+ VS+VLT KYR</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>4</db-num>
+                  <db-len>570</db-len>
+                  <hsp-len>20</hsp-len>
+                  <eff-space>29768</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

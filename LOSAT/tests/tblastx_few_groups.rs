@@ -15,6 +15,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod temp_support;
+use temp_support::TempPath;
+
 const SWITCH: &str = "LOSAT_X_TBXFEWGROUPS";
 const OFF: (&str, &str) = ("LOSAT_X_TBXFEWGROUPS", "0");
 
@@ -89,17 +92,18 @@ fn reached(dir: &Path) -> (bool, bool) {
     (new, reference)
 }
 
-/// `tblastx` of the inputs at `threads` with `env`: the report and the sides of `SWITCH` recorded.
-/// `LOSAT_BLASTX_WORKER_LOG` names a file of its own: a binary built with the
-/// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
-/// soon as a search has more than one thread, and it selects nothing.
+/// `tblastx` of the inputs at `threads` with `env`: the report, the sides of `SWITCH` recorded and
+/// the worker log, which goes with the result: the caller drops it after its assertions, and it is
+/// kept when the test panics. `LOSAT_BLASTX_WORKER_LOG` names a file of its own: a binary built
+/// with the `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file
+/// name as soon as a search has more than one thread, and it selects nothing.
 fn tblastx(
     inputs: &Inputs,
     threads: u32,
     env: &[(&str, &str)],
     args: &[&str],
-) -> (Vec<u8>, (bool, bool)) {
-    let dir = temp_path("reach");
+) -> (Vec<u8>, (bool, bool), TempPath) {
+    let dir = TempPath::keep_on_failure(temp_path("reach"));
     std::fs::create_dir_all(&dir).unwrap();
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
@@ -113,8 +117,9 @@ fn tblastx(
             command.env_remove(name);
         }
     }
+    let log = TempPath::keep_on_failure(temp_path("worker.log"));
     let output = command
-        .env("LOSAT_BLASTX_WORKER_LOG", temp_path("worker.log"))
+        .env("LOSAT_BLASTX_WORKER_LOG", &log)
         .env("LOSAT_X_PAIRPARGATE", "0")
         .env("LOSAT_X_REACH", &dir)
         .envs(env.iter().copied())
@@ -134,8 +139,7 @@ fn tblastx(
         "{env:?} threads {threads}: {stderr}"
     );
     let sides = reached(&dir);
-    let _ = std::fs::remove_dir_all(&dir);
-    (output.stdout, sides)
+    (output.stdout, sides, log)
 }
 
 /// A batch of 12 kb takes fewer groups at one and four threads, with the report of `=0`; with
@@ -144,17 +148,17 @@ fn tblastx(
 fn one_group_gives_the_report_of_the_six() {
     let inputs = Inputs::new(12_000, 12_000);
     for args in [&[][..], &["-matrix", "BLOSUM45"][..]] {
-        let (expected, sides) = tblastx(&inputs, 1, &[OFF], args);
+        let (expected, sides, _log) = tblastx(&inputs, 1, &[OFF], args);
         assert!(!expected.is_empty(), "no hits");
         assert_eq!(sides, (false, false), "=0 records nothing");
-        let (report, sides) = tblastx(&inputs, 1, &[], args);
+        let (report, sides, _log) = tblastx(&inputs, 1, &[], args);
         assert_eq!(report, expected, "{args:?}: one group");
         assert_eq!(
             sides,
             (true, false),
             "{args:?}: the side that one thread took"
         );
-        let (report, sides) = tblastx(&inputs, 4, &[], args);
+        let (report, sides, _log) = tblastx(&inputs, 4, &[], args);
         assert_eq!(report, expected, "{args:?}: four threads");
         assert_eq!(
             sides,
@@ -168,9 +172,9 @@ fn one_group_gives_the_report_of_the_six() {
 #[test]
 fn a_longer_batch_keeps_its_groups() {
     let inputs = Inputs::new(70_000, 6_000);
-    let (expected, _) = tblastx(&inputs, 1, &[OFF], &[]);
+    let (expected, _, _log) = tblastx(&inputs, 1, &[OFF], &[]);
     assert!(!expected.is_empty(), "no hits");
-    let (report, sides) = tblastx(&inputs, 1, &[], &[]);
+    let (report, sides, _log) = tblastx(&inputs, 1, &[], &[]);
     assert_eq!(report, expected);
     assert_eq!(sides, (false, true), "the side that a long batch took");
 }
@@ -195,18 +199,18 @@ fn queries_against_subjects_give_the_same_report_with_the_gate() {
     std::fs::write(&inputs.query, pieces_of("AP027131.fasta", 12_000, 4)).unwrap();
     std::fs::write(&inputs.subject, pieces_of("AP027133.fasta", 12_000, 8)).unwrap();
     let gate = ("LOSAT_X_PAIRPARGATE", "1");
-    let (expected, sides) = tblastx(&inputs, 4, &[gate, OFF], &[]);
+    let (expected, sides, _log) = tblastx(&inputs, 4, &[gate, OFF], &[]);
     assert!(!expected.is_empty(), "no hits");
     assert_eq!(sides, (false, false), "=0 records nothing");
-    let (report, sides) = tblastx(&inputs, 4, &[gate], &[]);
+    let (report, sides, _log) = tblastx(&inputs, 4, &[gate], &[]);
     assert_eq!(report, expected, "four threads");
     assert_eq!(sides, (true, false), "one group for the subjects");
-    let (report, _) = tblastx(&inputs, 1, &[gate], &[]);
+    let (report, _, _log) = tblastx(&inputs, 1, &[gate], &[]);
     assert_eq!(report, expected, "one thread");
     let mut mixed = bases("AP027133.fasta", 12_000);
     mixed.push_str(">short\nACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n");
     std::fs::write(&inputs.subject, &mixed).unwrap();
-    let (expected, _) = tblastx(&inputs, 4, &[gate, OFF], &[]);
-    let (report, _) = tblastx(&inputs, 4, &[gate], &[]);
+    let (expected, _, _log) = tblastx(&inputs, 4, &[gate, OFF], &[]);
+    let (report, _, _log) = tblastx(&inputs, 4, &[gate], &[]);
     assert_eq!(report, expected, "one long subject");
 }

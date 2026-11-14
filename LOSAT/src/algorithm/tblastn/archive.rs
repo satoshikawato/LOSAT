@@ -33,7 +33,7 @@ use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::masks::{Frame, MaskEntry};
-use crate::report::archive::options::{Filter, OptionInputs, RequestKind};
+use crate::report::archive::options::{OptionInputs, RequestKind};
 use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
@@ -89,8 +89,7 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     inputs.seg = args
         .seg
         .as_deref()
-        .and_then(|value| crate::blastinput::app::parse_seg_option(value, "TBLASTN").ok())
-        .map(Filter::from);
+        .and_then(crate::report::archive::options::seg_filter);
     inputs.max_intron_length = args.max_intron_length.unwrap_or(0);
     inputs.db_gencode = i32::from(args.db_gencode);
     inputs.hitlist_size = args

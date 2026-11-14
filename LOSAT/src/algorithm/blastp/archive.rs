@@ -28,7 +28,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::masks::{Frame, MaskEntry};
-use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::options::OptionInputs;
 use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
@@ -88,8 +88,7 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
     inputs.seg = args
         .seg
         .as_deref()
-        .and_then(|value| crate::blastinput::app::parse_seg_option(value, "BLASTP").ok())
-        .map(Filter::from);
+        .and_then(crate::report::archive::options::seg_filter);
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)

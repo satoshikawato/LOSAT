@@ -107,8 +107,8 @@ impl PsiRoundPlan {
 
 /// The key of a subject in the inclusion sets and the rows of the PSSM's multiple alignment
 /// (`CSeq_id_Handle` of its Seq-align id, DESIGN_ps5 §2): the index of a `-subject` record
-/// (`lcl|Subject_N`), the ordinal id of a database sequence without parsed Seq-ids
-/// (`gnl|BL_ORD_ID|oid`), or a parsed Seq-align id (copies of one record share it). Two parsed ids
+/// (`lcl|Subject_N`), the OID of a database sequence without parsed Seq-ids
+/// (`gnl|BL_ORD_ID|oid`, `seqdb::Oid`; not its rank in a restricted search), or a parsed Seq-align id (copies of one record share it). Two parsed ids
 /// are one key where they are equal; others that NCBI's handles can take for one are refused
 /// (`check_handles`), so the keys are the handles of the runs LOSAT accepts.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -118,7 +118,7 @@ pub(crate) enum SetKey {
 }
 
 impl SetKey {
-    /// The Seq-align id of an ordinal key (`gnl|BL_ORD_ID|oid`, as NCBI names a database sequence
+    /// The Seq-align id of an index key (`gnl|BL_ORD_ID|oid`, as NCBI names a database sequence
     /// without parsed Seq-ids; a `-subject` record's key is never compared with a parsed id: the
     /// keys of `-subject` records are their indices, with `-parse_deflines` too, whose reader
     /// refuses the ids that NCBI's handles would take for one; RG DECISIONS 27).

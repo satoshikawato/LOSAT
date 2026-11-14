@@ -130,7 +130,13 @@ fn guess_format(bytes: &[u8]) -> PssmFileFormat {
     let printing = buffer
         .iter()
         .all(|&c| c.is_ascii_graphic() || matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'));
-    let trimmed = buffer.trim_ascii_start();
+    // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1285-1286
+    // ```c++
+    //     string input( m_pTestBuffer, (size_t)m_iTestDataSize );
+    //     NStr::TruncateSpacesInPlace( input, NStr::eTrunc_Begin );
+    // ```
+    // `eTrunc_Begin` drops C's `isspace` bytes, the vertical tab included.
+    let trimmed = crate::ncbi_str::truncate_spaces_begin(buffer);
     let xml = [b"<?xml".as_slice(), b"<!doctype"].iter().any(|prefix| {
         trimmed.len() >= prefix.len() && trimmed[..prefix.len()].eq_ignore_ascii_case(prefix)
     }) || trimmed.starts_with(b"<Blast4-request>");
@@ -141,8 +147,9 @@ fn guess_format(bytes: &[u8]) -> PssmFileFormat {
     }
 }
 
-/// `TestFormatTextAsn`: at least 80 % of the test buffer letters, digits, white space or braces
-/// (counted line by line, each non-empty line with one line end, as `EnsureStats` counts), and
+/// `TestFormatTextAsn`: at least 80 % of the test buffer letters, digits, white space (C's
+/// `isspace`, the vertical tab included) or braces (counted line by line, each non-empty line
+/// with one line end, as `EnsureStats` counts), and
 /// the first line that is not blank or a comment of the form `Name ::= ...` with a letter first.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1679-1726
@@ -174,6 +181,17 @@ fn guess_format(bytes: &[u8]) -> PssmFileFormat {
 ///     }
 ///     return false;
 /// ```
+/// NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:276-283
+/// ```c++
+///         for ( int c = 1; c < 256; ++c ) {
+///             if ( isalpha((unsigned char)c) )
+///                 symbol_type_table[c] |= fAlpha;
+///             if ( isdigit((unsigned char)c) )
+///                 symbol_type_table[c] |= fDigit;
+///             if ( isspace((unsigned char)c) )
+///                 symbol_type_table[c] |= fSpace;
+///         }
+/// ```
 /// NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:714-733
 /// ```c++
 ///     while ( ! TestBuffer.fail() ) {
@@ -204,7 +222,7 @@ fn text_asn(buffer: &[u8]) -> bool {
         counted += line
             .iter()
             .filter(|&&c| {
-                c.is_ascii_alphanumeric() || c.is_ascii_whitespace() || c == b'{' || c == b'}'
+                c.is_ascii_alphanumeric() || crate::ncbi_str::is_space(c) || c == b'{' || c == b'}'
             })
             .count()
             + 1;
@@ -326,9 +344,8 @@ pub(crate) fn read_in_pssm(path: &Path, reader: PssmReader<'_>) -> Result<(PsiSe
     let (pssm, skipped) =
         match crate::blastinput::pssm_text::read_pssm_with_parameters_and_skips(&bytes) {
             Ok(read) => read,
-            // The reader's own limits (a query Seq-entry set, Seq-ids and Seq-data it does not type,
-            // REAL numbers NCBI computes with undefined behaviour or in `long double`): LOSAT's
-            // refusal, where NCBI reads the file.
+            // The reader's own limits (a query Seq-entry set, Seq-ids and Seq-data it does not type):
+            // LOSAT's refusal, where NCBI reads the file.
             Err(error) if error.message.contains("is not supported by LOSAT") => {
                 return Err(reader.refuse(format!(
                     "a PSSM that LOSAT's reader does not read ({}, line {}: {})",
@@ -1390,6 +1407,23 @@ mod tests {
         assert_eq!(guess_format(b"\x30\x80\xa0\x80"), PssmFileFormat::NotText);
         assert_eq!(
             guess_format(b"<?xml version=\"1.0\"?>\n"),
+            PssmFileFormat::NotText
+        );
+        // A vertical tab is C's white space (`isspace`): NCBI 2.17.0's psiblast searches a PSSM
+        // with a comment of vertical tabs (its counts give 93 % instead of 56 %) and reads a
+        // file that starts with vertical tabs and form feeds before `<?xml` or `<!DOCTYPE` as
+        // XML ("Unrecognized format for PSSM ... (must be PssmWithParameters)" for one that is
+        // not a PSSM), as without them (swebok-improve-20261105/sw8/nfix/probe/b25).
+        // 37 of 42 bytes counted (7 without the vertical tabs).
+        assert!(text_asn(
+            &[&b"X ::= {\n-- "[..], &[0x0b; 30], b"\n"].concat()
+        ));
+        assert_eq!(
+            guess_format(b"\x0b<?xml version=\"1.0\"?>\n"),
+            PssmFileFormat::NotText
+        );
+        assert_eq!(
+            guess_format(b"\x0b\x0c <!DOCTYPE PssmWithParameters>\n"),
             PssmFileFormat::NotText
         );
     }

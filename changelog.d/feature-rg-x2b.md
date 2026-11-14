@@ -6,7 +6,8 @@
   alignment that meets another in the overlap of two of its parts where their lengths add up to 0
   (the same alignment of length 0 found in both parts, or one of length -1 or -2 that starts or
   ends inside one of length 1 or 2; NCBI BLAST+'s result is undefined there).
-- `tblastx` on a subject of 15,000,000 letters or more (a frame of more than 5,000,000 letters,
-  searched in overlapping parts) now orders the alignments of the overlapping parts as NCBI BLAST+
-  2.17.0 does, so alignments with the same score and coordinates in different query frames can
-  no longer come out in another order or join another chain than NCBI BLAST+'s.
+- `tblastx` on a subject frame of more than 5,000,000 letters (a subject of more than 15,000,002
+  letters; it is searched in overlapping parts) now merges the alignment lists of the parts in
+  NCBI BLAST+ 2.17.0's order, so alignments anywhere on that frame with the same score and
+  coordinates in different query frames can no longer come out in another order or join another
+  chain than NCBI BLAST+'s.

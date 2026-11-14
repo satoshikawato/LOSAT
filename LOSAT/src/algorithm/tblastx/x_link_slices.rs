@@ -521,7 +521,7 @@ where
 // for the literal port). The statements of the reference's group step in their order, with the
 // cut replaced by the slices and the assembly by nothing.
 /// `link_groups` with `use_legacy` and `fast_shadow` given.
-pub(super) fn link_groups_as(
+fn link_groups_as(
     mut hits: Vec<UngappedHit>,
     call: &Call<'_>,
     lap: &mut LinkLap,

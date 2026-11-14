@@ -655,6 +655,9 @@ fn contained_in_hsp(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32) -> bool {
 struct ChunkMergeUndefined;
 
 /// Why the chunk merge of a list of the two-hit word finder never returns `ChunkMergeUndefined`.
+/// A merge never shortens an HSP: the merged HSP takes the minimum start and the maximum end, so its
+/// length is at least the longer input's. A two-hit HSP merged again in a third chunk therefore
+/// still has a positive length, and the lengths of two HSPs of any chunk add up to at least 2.
 const TWO_HIT_CHUNK_MERGE_IS_DEFINED: &str = concat!(
     "the two-hit word finder saves HSPs of positive length only (`convert_init_hsps_unsorted` ",
     "asserts a positive span), so the lengths of two of them add up to at least 2 in a chunk merge"
@@ -7880,7 +7883,14 @@ mod tests {
             let frame = |next: &mut dyn FnMut(u64) -> u64| if next(4) == 0 { -1 } else { 1 };
             let mut first: Vec<usize> = Vec::new();
             for _ in 0..1 + next(6) {
-                let s_offset = 170 + next(130) as i32;
+                // A quarter of the groups start at subject offset 0 or 1, so that their subject
+                // ends (offset + length, length -2 and up) can be below 0: an `Int4` end and a
+                // `u32` end tell apart in the strip test and in the final sort.
+                let s_offset = if next(4) == 0 {
+                    next(2) as i32
+                } else {
+                    170 + next(130) as i32
+                };
                 let q_offset = (s_offset - 170 + next(4) as i32).max(0);
                 let (len, s_frame) = (length(&mut next), frame(&mut next));
                 first.extend(push_group(

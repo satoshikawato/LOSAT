@@ -76,6 +76,10 @@ pub(crate) fn good_visible_char(c: u8) -> bool {
     (b' '..=b'~').contains(&c)
 }
 
+/// The error code and subcode of NCBI's post of a replaced byte: `ERR_POST_X(7, message)` of
+/// `Serial_IStream` (include/serial/error_codes.hpp:47; `ReplaceVisibleChar` is in objistr.cpp).
+pub(crate) const ERR_CODE: (u32, u32) = (803, 7);
+
 /// `m_NonPrintSubst`, the byte stored for a bad one (objistr.cpp:463).
 pub(crate) const SUBST: u8 = b'#';
 
@@ -83,7 +87,7 @@ pub(crate) const SUBST: u8 = b'#';
 /// (`CObjectIStreamAsn::Location`, objistrasn.cpp:111-115) or the bytes a binary stream has read
 /// (`CObjectIStream::Location`, objistr.cpp:815-819).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Position {
+pub enum Position {
     Line(usize),
     Byte(usize),
 }
@@ -97,6 +101,8 @@ pub(crate) enum Shown {
     /// A binary reader's string as it is being fixed in place (objistrasnb.cpp:703-749): the bad
     /// bytes before this one already [`SUBST`].
     BeingFixed,
+    /// Nothing: the XML stream passes `kEmptyStr` (`x_VerifyChar`, objostrxml.cpp:548-554).
+    Nothing,
 }
 
 /// The bytes of one string (a text chunk, a binary string, a string written) that NCBI's stream
@@ -136,12 +142,13 @@ impl BadChars {
     }
 
     /// A string written by a stream whose trace is `trace`, before its bad bytes are noted
-    /// (`note`), each at the position the writer is at.
-    pub(crate) fn written(trace: String, original: &[u8]) -> Self {
+    /// (`note`), each at the position the writer is at; the messages show the string as given
+    /// (`shown`: the ASN.1 text and binary streams) or not (the XML stream).
+    pub(crate) fn written(trace: String, original: &[u8], shown: bool) -> Self {
         BadChars {
             trace,
             bytes: original.to_vec(),
-            shown: Shown::AsIs,
+            shown: if shown { Shown::AsIs } else { Shown::Nothing },
             bad: Vec::new(),
             after: Vec::new(),
         }
@@ -176,9 +183,10 @@ impl BadChars {
         &self.trace
     }
 
-    /// The string as the message of the `k`-th bad byte shows it.
+    /// The string as the message of the `k`-th bad byte shows it (empty: none).
     pub(crate) fn shown(&self, k: usize) -> Vec<u8> {
         match self.shown {
+            Shown::Nothing => Vec::new(),
             Shown::AsIs => self.bytes.clone(),
             Shown::BeingFixed => {
                 let index = self.bad[k].0;
@@ -207,9 +215,10 @@ impl BadChars {
             self.trace
         )
         .into_bytes();
-        if !self.bytes.is_empty() {
+        let shown = self.shown(k);
+        if !shown.is_empty() {
             message.push(b'\n');
-            message.extend_from_slice(&self.shown(k));
+            message.extend_from_slice(&shown);
         }
         message
     }
@@ -226,7 +235,8 @@ impl BadChars {
 
     /// The post of the `k`-th bad byte (`post`).
     fn post_one(&self, k: usize, program: Option<&str>, out: &mut Vec<u8>) {
-        out.extend_from_slice(b"Error: (803.7) ");
+        let (code, subcode) = ERR_CODE;
+        out.extend_from_slice(format!("Error: ({code}.{subcode}) ").as_bytes());
         if let Some(program) = program {
             out.extend_from_slice(format!("[{program}] ").as_bytes());
         }
@@ -254,6 +264,22 @@ pub(crate) fn posts_after(bad: &[BadChars], program: Option<&str>) -> Vec<(usize
         }
     }
     posts
+}
+
+/// Each message of `bad` (`BadChars::message`, without the post's prefix) with the bytes of its
+/// document that NCBI's buffer had handed out before it (`BadChars::note_after`; 0 where the
+/// writer has no model), in order.
+pub(crate) fn messages_after(bad: &[BadChars]) -> Vec<(usize, Vec<u8>)> {
+    let mut messages = Vec::new();
+    for bad_chars in bad {
+        for k in 0..bad_chars.len() {
+            messages.push((
+                bad_chars.after.get(k).copied().unwrap_or(0),
+                bad_chars.message(k),
+            ));
+        }
+    }
+    messages
 }
 
 /// Each post of `BadChars::post_all` on its own (one message of NCBI's diagnostic handler each).
@@ -337,7 +363,7 @@ mod tests {
     /// A string written: each byte at its own position, the original string shown.
     #[test]
     fn a_written_string_shows_the_original() {
-        let mut bad = BadChars::written("T.E.title".to_string(), b"t\xe9t\x01e");
+        let mut bad = BadChars::written("T.E.title".to_string(), b"t\xe9t\x01e", true);
         bad.note(1, Position::Byte(21));
         bad.note(3, Position::Byte(23));
         assert_eq!(bad.len(), 2);

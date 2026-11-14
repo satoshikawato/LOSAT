@@ -464,6 +464,18 @@ pub struct BlastxArgs {
     /// BLASTX's search of the query batches; `None` in every BLASTX run.
     #[arg(skip)]
     pub(crate) rpstblastn: Option<std::sync::Arc<dyn RpsTblastnSearch>>,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), which a
+    /// library call (`api::run`) reads from the application settings, as the command line
+    /// does (`common::database::SubjectTaxdb`); `None` elsewhere. Not a public option.
+    #[arg(skip)]
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
+    /// The settings by which a search of the library looks up the file of an unknown matrix
+    /// (`ResolvedOptions::find_matrix_file`), from its application start: set by `api::run` for an
+    /// ungapped search whose `-matrix` NCBI's tables do not have (`unknown_matrix_name`) and by
+    /// `run_local_database`; `None` for the command line, which looks it up with its own
+    /// settings (`native::run`), and LOSAT Web, which has no file system. Not a public option.
+    #[arg(skip)]
+    pub matrix_search: Option<crate::blastinput::ncbi_environment::MatrixSearch>,
 }
 
 /// The search of RPSTBLASTN's query batches (`rps_search::translated`, series PR item PS12a,
@@ -719,8 +731,9 @@ pub struct ResolvedOptions {
     /// first query batch fails with "Unknown error code -1" (`query_setup.rs`).
     pub unknown_matrix: bool,
     /// The file that NCBI BLAST+ reads for `unknown_matrix`'s name
-    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found by the command line after
-    /// the options are resolved; `None` elsewhere. The first query batch is refused then
+    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found by the command line and the
+    /// library API after the options are resolved (`find_matrix_file`); `None` in LOSAT Web. The
+    /// first query batch is refused then
     /// (`query_setup::matrix_error_message`).
     pub matrix_file: Option<std::path::PathBuf>,
     pub gap_open: i32,
@@ -830,6 +843,9 @@ pub struct ResolvedOptions {
     /// `native::run` (`-db`: the database's search path, `-subject`: NCBI's). False otherwise,
     /// as Web reads it (DECISIONS 7 of line CLI C2).
     pub taxdb_found: bool,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), set with
+    /// `taxdb_found` (`common::database::SubjectTaxdb`); `None` otherwise.
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
     /// A list kept no sequence of the database (`SeqDb::filtered_empty`): the queries of the
     /// searched batches have `EMPTY_DATABASE_MESSAGE`.
     pub filtered_empty: bool,
@@ -859,6 +875,21 @@ pub(crate) const AA_LOOKUP_TABLE: i32 = 3;
 pub(crate) const COMPRESSED_AA_LOOKUP_TABLE: i32 = 4;
 
 impl ResolvedOptions {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1301-1306 (quoted at
+    // `ncbi_environment::ApplicationSettings::matrix_file`: `BlastFindMatrixPath`)
+    /// Looks up the file that NCBI reads for `unknown_matrix`'s name with `search`
+    /// (`MatrixSearch::file`) into `matrix_file`, after the options are resolved: the command
+    /// line's run (`native::run`) and the library's searches (`local::read_format_options`).
+    pub(crate) fn find_matrix_file(
+        &mut self,
+        search: &crate::blastinput::ncbi_environment::MatrixSearch,
+    ) -> Result<()> {
+        if self.unknown_matrix {
+            self.matrix_file = search.file(&self.matrix).map_err(anyhow::Error::msg)?;
+        }
+        Ok(())
+    }
+
     /// Whether the search's lookup table is the compressed one (`-word_size` 5 to 7, blastx-fast).
     pub(crate) fn compressed_lookup(&self) -> bool {
         self.lookup_type == COMPRESSED_AA_LOOKUP_TABLE
@@ -908,6 +939,13 @@ impl ResolvedOptions {
 //
 // ```
 impl BlastxArgs {
+    /// Whether the search is ungapped with a `-matrix` that NCBI's tables do not have: the name
+    /// that NCBI looks for as a file (`ResolvedOptions::unknown_matrix`, which the resolution
+    /// sets for such a search; a gapped one refuses the name first).
+    pub(crate) fn unknown_matrix_name(&self) -> bool {
+        self.ungapped && blastx_matrix(self.matrix.as_deref().unwrap_or("BLOSUM62")).is_none()
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3642
     // ```c++
     //     CRef<CBlastOptionsHandle> retval(x_CreateOptionsHandle(locality, args));
@@ -1468,7 +1506,8 @@ impl BlastxArgs {
             outfmt,
             fields,
             tabular,
-            taxdb_found: false,
+            taxdb_found: self.subject_taxdb.is_some(),
+            subject_taxdb: self.subject_taxdb.clone(),
             filtered_empty: false,
             num_threads: self.num_threads,
             query_range: None,

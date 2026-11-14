@@ -284,7 +284,7 @@ fn a_title_in_a_batch_that_ncbi_writes_is_written_with_its_messages() {
 }
 
 /// The library API (`examples/library_command_line`, the command line's arguments through
-/// `LOSAT::api::run`; a failure ends with status 1) reads the whole query before it searches, so
+/// `losat::api::run`; a failure ends with status 1) reads the whole query before it searches, so
 /// its batches meet no reader error; they stop where the command line's do otherwise, and its
 /// refusal looks at the same records. (Its `-subject` entries lost their own checks of every
 /// record.)

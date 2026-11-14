@@ -1174,7 +1174,7 @@ impl ShownSubjects<'_> {
 /// a document that holds each report back never writes the last query's
 /// (`blast_xml::written_queries`).
 pub(crate) fn render_queries(
-    writer: &mut impl Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     stderr: &mut dyn Write,
     options: &ResolvedOptions,
     queries: &[FastaRecord],
@@ -1233,7 +1233,7 @@ pub(super) fn reported_hsps(batches: &[BatchResults], gapped: bool) -> usize {
 /// `render_queries`, with what `run_local` adds (`local`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_queries_with(
-    writer: &mut impl Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     stderr: &mut dyn Write,
     options: &ResolvedOptions,
     queries: &[FastaRecord],

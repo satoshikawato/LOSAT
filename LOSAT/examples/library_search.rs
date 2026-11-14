@@ -12,7 +12,7 @@
 
 use std::io::Write as _;
 
-use LOSAT::api::{read_fasta, run_collect, validate, Error, Inputs, Program, Role};
+use losat::api::{read_fasta, run_collect, validate, Error, Inputs, Program, Role};
 
 fn main() {
     if let Err(error) = search() {

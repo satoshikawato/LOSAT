@@ -659,11 +659,22 @@ pub fn asn_text(value: &PssmWithParameters) -> PssmText {
 /// (the object is not copied).
 pub fn asn_text_with_karlin(value: &PssmWithParameters, karlin: Option<FinalKarlin>) -> PssmText {
     let mut out = Vec::new();
-    let mut enc = super::asn_text::AsnTextEncoder::new(&mut out);
-    write_document(&mut enc, value, karlin);
-    let bad_chars = enc.take_bad_chars();
+    // The ASN.1 text stream raises no error.
+    let (_, bad_chars) = super::encoder::write_asn_text(&PssmDocument { value, karlin }, &mut out);
     PssmText {
         bytes: out,
         bad_chars,
+    }
+}
+
+/// A PSSM's document (`write_document`) for any encoder.
+struct PssmDocument<'a> {
+    value: &'a PssmWithParameters,
+    karlin: Option<FinalKarlin>,
+}
+
+impl super::encoder::SerialDocument for PssmDocument<'_> {
+    fn write<E: Encoder>(&self, enc: &mut E) {
+        write_document(enc, self.value, self.karlin);
     }
 }

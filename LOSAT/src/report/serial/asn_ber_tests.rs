@@ -4,7 +4,7 @@
 //! do not hold (an integer of three or four bytes, a string of 128 bytes or more).
 
 use super::asn_ber::AsnBinaryEncoder;
-use super::encoder::{Encoder, SerialError};
+use super::encoder::{Encoder, SerialError, Traced};
 
 /// The bytes that `write` makes the encoder append.
 fn bytes(write: impl FnOnce(&mut AsnBinaryEncoder<'_>)) -> Vec<u8> {
@@ -104,15 +104,20 @@ fn visible_strings_have_short_and_long_lengths() {
     );
 }
 
-/// A byte outside 0x20..0x7E is written as `#` and noted at the bytes the document has written
-/// before it (`GetStreamPos`; NCBI 2.17.0, `ARCHIVE_FORMAT=bin blastn -outfmt 11` with the title
+/// A byte outside 0x20..0x7E: the plain encoder writes `#` and reports the error; NCBI's form
+/// through `Traced` writes `#` and notes it at the bytes the document has written before it
+/// (`GetStreamPos`; NCBI 2.17.0, `ARCHIVE_FORMAT=bin blastn -outfmt 11` with the title
 /// `q1 first query café`: `Bad char [0xC3] in string at byte 213`, then `[0xA9] ... at byte 214`,
-/// probe `bn11bin` of M4a-1b part 5), with the stream's trace and the string as given, and no
-/// error.
+/// probe `bn11bin` of M4a-1b part 5), with the stream's trace and the string as given.
 #[test]
 fn a_non_visible_byte_is_written_as_a_hash_and_noted() {
     let mut buf = b"before".to_vec();
     let mut enc = AsnBinaryEncoder::new(&mut buf);
+    enc.visible_str(b"a\tb");
+    assert_eq!(enc.error(), Some(SerialError::NonVisibleChar(b'\t')));
+    assert_eq!(buf, b"before\x1a\x03a#b");
+    let mut buf = b"before".to_vec();
+    let mut enc = Traced::new(AsnBinaryEncoder::ncbi(&mut buf));
     enc.begin_document("T");
     enc.begin_sequence("T");
     enc.member("title", 0);
@@ -133,6 +138,68 @@ fn a_non_visible_byte_is_written_as_a_hash_and_noted() {
             .to_vec()
     );
     assert_eq!(&buf[6..], b"\x30\x80\xa0\x80\x1a\x04a##b\x00\x00\x00\x00");
+}
+
+/// Through `Traced`, NCBI's stack trace: members and variants by name, `.E` for a container
+/// element, nothing for named types and classes (`GetStackTraceASN`; NCBI 2.17.0
+/// convert2blastmask, probe RG K/k4/probe case c_bin_e: `Bad char [0xC3] in string at byte 20`
+/// for the string's first byte at offset 20); positions count from the document's start, and a
+/// flush hands out only what NCBI's buffer has handed out.
+#[test]
+fn with_frames_a_non_visible_byte_is_replaced_at_its_offset() {
+    let mut sink = Vec::new();
+    let mut buf = Vec::new();
+    buf.extend_from_slice(b"before");
+    let mut enc = Traced::new(AsnBinaryEncoder::ncbi(&mut buf));
+    enc.begin_document("Seq-loc");
+    enc.variant("Seq-loc", "packed-int", 5);
+    enc.begin_named("Packed-seqint");
+    enc.begin_list(false);
+    for title in [&b"a"[..], b"b\tc"] {
+        enc.element();
+        enc.begin_sequence("Seq-interval");
+        enc.member("from", 0);
+        enc.int(0);
+        enc.end_member();
+        enc.flush_to(&mut sink, false).unwrap();
+        enc.member("id", 3);
+        enc.variant("Seq-id", "local", 0);
+        enc.variant("Object-id", "str", 1);
+        enc.visible_str(title);
+        enc.end_variant();
+        enc.end_variant();
+        enc.end_member();
+        enc.end_sequence();
+    }
+    enc.end_list();
+    enc.end_named();
+    enc.end_variant();
+    enc.member("x", 0);
+    enc.visible_str(b"\xff");
+    enc.end_member();
+    enc.end_document();
+    assert_eq!(enc.error(), None);
+    assert!(sink.is_empty());
+    let bad = enc.take_bad_chars();
+    enc.flush_to(&mut sink, true).unwrap();
+    let first = sink.iter().position(|&byte| byte == b'#').unwrap();
+    let last = sink.iter().rposition(|&byte| byte == b'#').unwrap();
+    assert_eq!(bad.len(), 2);
+    assert_eq!(
+        bad[0].message(0),
+        format!(
+            "Seq-loc.packed-int.E.id.local.str\nBad char [0x9] in string at byte {first}\nb\tc"
+        )
+        .into_bytes()
+    );
+    assert_eq!(
+        bad[1].message(0),
+        [
+            format!("Seq-loc.x\nBad char [0xFF] in string at byte {last}\n").as_bytes(),
+            b"\xff"
+        ]
+        .concat()
+    );
 }
 
 /// `WriteDouble2(data, DBL_DIG)`: `09`, the length (digits + 1), the decimal form byte 0 and

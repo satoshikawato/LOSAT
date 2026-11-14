@@ -234,7 +234,7 @@ Service Worker：release を固定した資産キャッシュだけ
 web/
   AGENTS.md                  # web/ 以下の規約
   adapter/                   # S05 で新設。Rust cdylib。ABI v2。wasm32-wasip1 と wasm32-wasip1-threads の reactor
-    Cargo.toml               # LOSAT = { path = "../../LOSAT", default-features = false }、features は parallel / wasm-threads を明示
+    Cargo.toml               # losat = { path = "../../LOSAT", default-features = false }、features は parallel / wasm-threads を明示
   app/                       # Vite + Vue 3 + TypeScript（S01 で新設）
     public/_headers          # 応答ヘッダーの唯一の定義（COOP / COEP / CORP / CSP）
     build/headers.ts         # _headers を読み、Vite と試験に渡す

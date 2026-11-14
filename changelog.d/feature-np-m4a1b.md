@@ -30,3 +30,9 @@
   `maskinfo_asn1_bin` (`Error: (803.7) Blast-db-mask-info.algo-options`). These were refused before. blastx with `-outfmt 11`
   or `-export_search_strategy` now also reads a query that is not a regular file (a pipe, `-query -`). Still refused: a control
   character in the XML archive (`ARCHIVE_FORMAT=xml`) of a `-db` name or `-window_masker_db` path.
+- NCBI's errors for the bytes written as `#` come where NCBI writes them among the bytes of the document when the standard
+  output and the standard error go to one file (`2>&1`): in the ASN.1 binary documents (`-outfmt 9`, `ARCHIVE_FORMAT=bin`) and
+  in dustmasker's, segmasker's and convert2blastmask's `seqloc_*` and `maskinfo_*` outputs as already in the ASN.1 text ones
+  (a long document hands its first bytes out before a later error). Documents without such a byte are written as before, at
+  the same cost. Still refused: a convert2blastmask `-masking_options` control character after the first 4096 bytes of a
+  `maskinfo_xml` document.

@@ -459,6 +459,18 @@ pub fn tabular_subject_id(
     Ok(replaced.to_vec())
 }
 
+/// The words of LOSAT's refusal of a protein title of punctuation that NCBI BLAST+'s
+/// `x_CleanAndCompress` reads past the end of (NCBI BLAST+ 2.17.0 crashes; approved exception 2
+/// of PD-LOSAT-NCBI-DEFECTS has a nucleotide title stop at the end of the string), after
+/// "a title ": one text for the tabular ids (`database_subject_id`,
+/// `ParsedSubject::generated_title_word`) and the organism report (`tax_report::generated_title`).
+macro_rules! punctuation_title {
+    () => {
+        "of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes)"
+    };
+}
+pub(crate) use punctuation_title;
+
 /// The subject ID of the tabular formats (`sseqid`, `sacc`, `saccver`) of a database
 /// sequence without parsed Seq-ids (its only id is `gnl|BL_ORD_ID|n`) with the stored
 /// title `title`: the first word of the title that `GenerateDefline` makes of it
@@ -519,9 +531,7 @@ pub fn database_subject_id(title: &[u8], protein: bool) -> Result<Vec<u8>, &'sta
     let defline = generate_defline(title, protein, false)
         .map_err(|UnknownEncoding| "in no encoding that NCBI BLAST+ recognises")?;
     if defline.reads_past_end {
-        return Err(
-            "of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes)",
-        );
+        return Err(punctuation_title!());
     }
     let token = first_word(&defline.text);
     if token.is_empty() {

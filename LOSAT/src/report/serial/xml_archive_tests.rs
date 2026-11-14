@@ -6,7 +6,7 @@
 //! archives (`<Blast4-ka-block_gapped value="false"/>`, `<Dense-seg_starts_E>`,
 //! `<Na-strand value="plus"/>`).
 
-use super::encoder::{Encoder, SerialError};
+use super::encoder::{Encoder, SerialError, Traced};
 use super::xml::XmlEncoder;
 
 const HEADER: &str = "<?xml version=\"1.0\"?>\n<!DOCTYPE Blast4-archive PUBLIC \"-//NCBI//NCBI Blast4/EN\" \"NCBI_Blast4.dtd\">";
@@ -307,11 +307,33 @@ fn a_string_byte_from_0x7f_up_is_written_as_it_is_and_a_control_byte_is_an_error
         buf,
         b"\n<T>\n  <T_m>caf\xc3\xa9 \x7f \xff &lt;&amp;&gt; a&#x9;b</T_m>\n</T>".to_vec()
     );
-    // 0x01-0x1F other than TAB, LF and CR: NCBI writes `#` and a diagnostic, LOSAT refuses.
+    // 0x01-0x1F other than TAB, LF and CR: NCBI writes `#` and a diagnostic, an error of the
+    // encoder by itself.
     let mut buf = Vec::new();
     let mut enc = XmlEncoder::archive(&mut buf);
     enc.visible_str(b"a\x01b");
-    assert_eq!(enc.error(), Some(SerialError::XmlControlChar(1)));
+    assert_eq!(enc.error(), Some(SerialError::NonVisibleChar(1)));
+    // Through `Traced`: `#` and a note at the stream's line, without the string (NCBI 2.17.0
+    // convert2blastmask, probe RG K/k4/probe case c_xml_tab: `Bad char [0x1] in string at line 8`
+    // for `-masking_options` on line 8 of a `maskinfo_xml` document).
+    let mut buf = Vec::new();
+    let mut enc = Traced::new(XmlEncoder::ncbi_object(&mut buf, "NCBI-T"));
+    enc.begin_document("T");
+    enc.begin_sequence("T");
+    enc.member("m", 0);
+    enc.visible_str(b"a\tb\x01c\x7f");
+    enc.end_member();
+    enc.end_sequence();
+    enc.end_document();
+    assert_eq!(enc.error(), None);
+    let bad = enc.take_bad_chars();
+    assert_eq!(bad.len(), 1);
+    assert_eq!(bad[0].len(), 1);
+    assert_eq!(
+        bad[0].message(0),
+        b"T.m\nBad char [0x1] in string at line 4".to_vec()
+    );
+    assert!(buf.ends_with(b"<T_m>a&#x9;b#c\x7f</T_m>\n</T>\n"));
     // The US-ASCII stream of outfmt 5 still refuses a byte >= 0x80.
     let mut buf = Vec::new();
     let mut enc = XmlEncoder::object(&mut buf);

@@ -299,7 +299,7 @@ pub(crate) fn run_pair(
                             let mut results =
                                 searched.next().expect("one search per queued batch")?;
                             report::render_queries(
-                                &mut output,
+                                &mut crate::cli::NcbiOstream::new(Box::new(&mut output)),
                                 &mut *diagnostics.borrow_mut(),
                                 &options,
                                 queries,
@@ -385,7 +385,7 @@ pub(crate) fn run_pair(
                 //                	    formatter.PrintOneResultSet(**result, query_batch);
                 // ```
                 report::render_queries(
-                    &mut output,
+                    &mut crate::cli::NcbiOstream::new(Box::new(&mut output)),
                     &mut *diagnostics.borrow_mut(),
                     &options,
                     queries,

@@ -648,9 +648,8 @@ pub(crate) fn psi_search_and_object(
         )));
     }
     let title: &[u8] = titles.first().map_or(&[], |title| title.as_slice());
-    if title.first().is_some_and(u8::is_ascii_whitespace)
-        || title.last().is_some_and(u8::is_ascii_whitespace)
-    {
+    // `NStr::TruncateSpaces` (`eTrunc_Both`) of the `Query=` line would cut the title's ends.
+    if crate::ncbi_str::truncate_spaces(title).len() != title.len() {
         return Err(reader.refuse(
             "a PSSM query whose title starts or ends with white space (NCBI's Query= line, tabular query id and warnings each read such a title their own way)",
         ));

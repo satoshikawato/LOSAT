@@ -26,7 +26,8 @@ use super::{ArchiveEncoding, ArchiveHandle};
 use crate::report::diag_log::Message;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
-use crate::report::serial::encoder::Encoder;
+use crate::report::serial::encoder::{Encoder, SerialError, Traced};
+use crate::report::serial::visible::BadChars;
 use crate::report::serial::xml::XmlEncoder;
 
 /// The bytes that an encoder holds before its buffer is handed to the sink.
@@ -86,51 +87,169 @@ pub struct BatchArchive<'a> {
 }
 
 /// The encoder, the sink and the first I/O error: the documents are written by calls that
-/// do not return one. With `posts`, the messages of the bytes the document writes as `#` go to the
-/// run's diagnostics among the document's bytes, where NCBI's stream posts them (`flush`).
+/// do not return one. A document is written with a plain encoder first (`ArchiveOut::plain`), which
+/// hands to the sink only the bytes older than NCBI's buffer can hold (`HOLD`); when the encoder
+/// reports a byte that NCBI writes as `#` (`SerialError::NonVisibleChar`), it hands out nothing
+/// more and `finish` asks for the document again (`Finish::Again`), which is then written through
+/// `Traced` and NCBI's form of the encoder (`ArchiveOut::traced`, `write_asn`), from the byte where
+/// the first writing stopped handing out. With `posts`, the messages of the bytes the document
+/// writes as `#` go to the run's diagnostics among the document's bytes, where NCBI's buffer had
+/// handed them out (`flush`).
 pub struct ArchiveOut<'s, E: Encoder> {
     pub enc: E,
     sink: &'s mut dyn Write,
     io_error: Option<std::io::Error>,
     posts: Option<PostOut<'s>>,
+    /// The bytes that a flush keeps (`HOLD` in the plain writing, 0 through `Traced`).
+    keep: usize,
+    /// The plain writing: the bytes handed to the sink.
+    handed: usize,
+    /// Through `Traced` without `posts`: the strings with replaced bytes, for the caller.
+    bad_chars: Vec<BadChars>,
+    /// Through `Traced`: the bytes of the document still to drop instead of handing them out
+    /// (those that the first writing handed out).
+    skip: usize,
+}
+
+/// The bytes that the plain writing of a document keeps from the sink: NCBI's buffer never holds
+/// more (`stream_buffer::INITIAL_SIZE`: none of the archive's reservations needs a larger buffer,
+/// and `Write` fills it without growing it), so the message of a byte found later falls after
+/// every byte handed out (NCBI has handed out at least the document's bytes but its buffer's).
+const HOLD: usize = crate::report::serial::stream_buffer::INITIAL_SIZE;
+
+/// How the writing of a document ended (`ArchiveOut::finish`).
+pub(super) enum Finish {
+    /// The document is written, with the strings that the encoder wrote with bytes replaced by
+    /// `#` and has not posted (`ArchiveOut::traced` without `posts`).
+    Done(Vec<BadChars>),
+    /// The plain encoder reported a byte that NCBI writes as `#`: write the document again
+    /// through `Traced`, from the byte (the bytes handed out).
+    Again(usize),
 }
 
 /// Where an archive's messages go (`ArchiveHandle::write_unsaved_text`).
-struct PostOut<'s> {
-    diagnostics: &'s mut dyn Write,
-    handle: &'s ArchiveHandle,
+pub(super) struct PostOut<'s> {
+    pub(super) diagnostics: &'s mut dyn Write,
+    pub(super) handle: &'s ArchiveHandle,
 }
 
 /// Hands the encoder's final bytes to `sink` (`all`: every byte), with the messages of the bytes
-/// written as `#` so far, each after the document's bytes that NCBI's stream has handed to its
+/// written as `#` so far, each after the document's bytes that NCBI's buffer has handed to its
 /// output when it posts it (`visible::posts_after`: on a stream that both go to, NCBI's message
-/// falls there).
+/// falls there). A plain encoder that reported such a byte hands nothing more out: its bytes are
+/// dropped (the document is written again, `Finish::Again`).
+#[allow(clippy::too_many_arguments)]
 fn flush<E: Encoder>(
     enc: &mut E,
     sink: &mut dyn Write,
     posts: &mut Option<PostOut<'_>>,
+    bad_chars: &mut Vec<BadChars>,
+    keep: usize,
+    handed: &mut usize,
+    skip: &mut usize,
     all: bool,
 ) -> std::io::Result<()> {
-    if let Some(out) = posts {
-        let program = Some(out.handle.request().program);
-        for (after, text) in
-            crate::report::serial::visible::posts_after(&enc.take_bad_chars(), program)
-        {
-            enc.flush_through(sink, after)?;
-            sink.flush()?;
-            out.handle
-                .write_unsaved_text(&mut *out.diagnostics, &text)?;
+    if *skip > 0 {
+        let mut skipping = SkipFirst {
+            inner: sink,
+            left: *skip,
+        };
+        let flushed = flush(
+            enc,
+            &mut skipping,
+            posts,
+            bad_chars,
+            keep,
+            handed,
+            &mut 0,
+            all,
+        );
+        *skip = skipping.left;
+        return flushed;
+    }
+    if keep > 0 {
+        if let Some(SerialError::NonVisibleChar(_)) = enc.error() {
+            return enc.flush_keeping(&mut std::io::sink(), keep);
         }
+        let before = enc.buffered();
+        if all {
+            enc.flush_to(sink, true)?;
+        } else {
+            enc.flush_keeping(sink, keep)?;
+        }
+        *handed += before - enc.buffered();
+        return Ok(());
+    }
+    match posts {
+        Some(out) => {
+            let program = Some(out.handle.request().program);
+            for (after, text) in
+                crate::report::serial::visible::posts_after(&enc.take_bad_chars(), program)
+            {
+                enc.flush_through(sink, after)?;
+                sink.flush()?;
+                out.handle
+                    .write_unsaved_text(&mut *out.diagnostics, &text)?;
+            }
+        }
+        None => bad_chars.extend(enc.take_bad_chars()),
     }
     enc.flush_to(sink, all)
 }
 
-impl<E: Encoder> ArchiveOut<'_, E> {
+impl<'s, E: Encoder> ArchiveOut<'s, E> {
+    /// The first writing of a document, with a plain encoder.
+    pub(super) fn plain(enc: E, sink: &'s mut dyn Write) -> Self {
+        Self::new(enc, sink, None, HOLD)
+    }
+
+    /// A document written once, whose encoder writes no `#` (the XML archive, the error archive
+    /// of sanitized messages).
+    pub(super) fn once(enc: E, sink: &'s mut dyn Write) -> Self {
+        Self::new(enc, sink, None, 0)
+    }
+
+    /// The second writing of a document, through `Traced` and NCBI's form of an encoder; the
+    /// messages go to `posts` among the bytes, or to the caller (`Finish::Done`).
+    /// (`skip`: the bytes of the document that the first writing handed out.)
+    pub(super) fn traced(
+        enc: E,
+        sink: &'s mut dyn Write,
+        posts: Option<PostOut<'s>>,
+        skip: usize,
+    ) -> Self {
+        let mut out = Self::new(enc, sink, posts, 0);
+        out.skip = skip;
+        out
+    }
+
+    fn new(enc: E, sink: &'s mut dyn Write, posts: Option<PostOut<'s>>, keep: usize) -> Self {
+        ArchiveOut {
+            enc,
+            sink,
+            io_error: None,
+            posts,
+            keep,
+            handed: 0,
+            bad_chars: Vec::new(),
+            skip: 0,
+        }
+    }
+
     /// Hands the encoder's final bytes to the sink once enough have gathered. Call it after
     /// each element of a long list.
     pub fn flush_if_large(&mut self) {
-        if self.io_error.is_none() && self.enc.buffered() >= FLUSH_BYTES {
-            if let Err(error) = flush(&mut self.enc, self.sink, &mut self.posts, false) {
+        if self.io_error.is_none() && self.enc.buffered() >= FLUSH_BYTES + self.keep {
+            if let Err(error) = flush(
+                &mut self.enc,
+                self.sink,
+                &mut self.posts,
+                &mut self.bad_chars,
+                self.keep,
+                &mut self.handed,
+                &mut self.skip,
+                false,
+            ) {
                 self.io_error = Some(error);
             }
         }
@@ -145,10 +264,24 @@ impl<E: Encoder> ArchiveOut<'_, E> {
             sink,
             io_error,
             posts,
+            keep,
+            handed,
+            bad_chars,
+            skip,
         } = self;
+        let keep = *keep;
         let mut flush_large = |enc: &mut E| {
-            if io_error.is_none() && enc.buffered() >= FLUSH_BYTES {
-                if let Err(error) = flush(enc, &mut **sink, posts, false) {
+            if io_error.is_none() && enc.buffered() >= FLUSH_BYTES + keep {
+                if let Err(error) = flush(
+                    enc,
+                    &mut **sink,
+                    posts,
+                    bad_chars,
+                    keep,
+                    handed,
+                    skip,
+                    false,
+                ) {
                     *io_error = Some(error);
                 }
             }
@@ -156,9 +289,28 @@ impl<E: Encoder> ArchiveOut<'_, E> {
         write(enc, &mut flush_large)
     }
 
-    pub(super) fn finish(mut self) -> Result<()> {
+    /// Hands the rest of the document to the sink, or asks for it again (`Finish::Again`) when
+    /// the plain encoder reported a byte that NCBI writes as `#`.
+    pub(super) fn finish(mut self) -> Result<Finish> {
+        if self.keep > 0 {
+            if let Some(SerialError::NonVisibleChar(_)) = self.enc.error() {
+                if let Some(error) = self.io_error {
+                    return Err(error.into());
+                }
+                return Ok(Finish::Again(self.handed));
+            }
+        }
         if self.io_error.is_none() {
-            if let Err(error) = flush(&mut self.enc, self.sink, &mut self.posts, true) {
+            if let Err(error) = flush(
+                &mut self.enc,
+                self.sink,
+                &mut self.posts,
+                &mut self.bad_chars,
+                self.keep,
+                &mut self.handed,
+                &mut self.skip,
+                true,
+            ) {
                 self.io_error = Some(error);
             }
         }
@@ -167,8 +319,87 @@ impl<E: Encoder> ArchiveOut<'_, E> {
         }
         match self.io_error {
             Some(error) => Err(error.into()),
-            None => Ok(()),
+            None => Ok(Finish::Done(self.bad_chars)),
         }
+    }
+}
+
+/// A document of the archive's writer, written with any encoder (`write_asn`).
+pub(super) trait ArchiveDocument {
+    fn write<E: Encoder>(&mut self, out: &mut ArchiveOut<'_, E>) -> Result<()>;
+}
+
+/// Writes `document` to `sink` in ASN.1 text or binary (`binary`): once with the plain encoder,
+/// and when it reported a byte that NCBI writes as `#`, again through `Traced` (`write_again`).
+/// The strings with replaced bytes whose messages did not go to `posts`.
+pub(super) fn write_asn<'s, D: ArchiveDocument>(
+    binary: bool,
+    document: &mut D,
+    sink: &'s mut dyn Write,
+    posts: Option<PostOut<'s>>,
+) -> Result<Vec<BadChars>> {
+    let mut buf = Vec::new();
+    let finish = if binary {
+        let mut out = ArchiveOut::plain(AsnBinaryEncoder::new(&mut buf), &mut *sink);
+        document.write(&mut out)?;
+        out.finish()?
+    } else {
+        let mut out = ArchiveOut::plain(AsnTextEncoder::new(&mut buf), &mut *sink);
+        document.write(&mut out)?;
+        out.finish()?
+    };
+    match finish {
+        Finish::Done(bad_chars) => Ok(bad_chars),
+        Finish::Again(handed) => write_again(binary, document, sink, posts, handed),
+    }
+}
+
+/// `document` written again through `Traced` of NCBI's form of the encoder, its first `handed`
+/// bytes (which the first writing handed out) not handed out again.
+#[cold]
+#[inline(never)]
+fn write_again<'s, D: ArchiveDocument>(
+    binary: bool,
+    document: &mut D,
+    sink: &'s mut dyn Write,
+    posts: Option<PostOut<'s>>,
+    handed: usize,
+) -> Result<Vec<BadChars>> {
+    let mut buf = Vec::new();
+    let finish = if binary {
+        let enc = Traced::new(AsnBinaryEncoder::ncbi(&mut buf));
+        let mut out = ArchiveOut::traced(enc, sink, posts, handed);
+        document.write(&mut out)?;
+        out.finish()?
+    } else {
+        let enc = Traced::new(AsnTextEncoder::ncbi(&mut buf));
+        let mut out = ArchiveOut::traced(enc, sink, posts, handed);
+        document.write(&mut out)?;
+        out.finish()?
+    };
+    match finish {
+        Finish::Done(bad_chars) => Ok(bad_chars),
+        Finish::Again(_) => unreachable!("only the plain writing asks for the document again"),
+    }
+}
+
+/// A sink that drops the first `left` bytes written to it (the bytes of a document written again
+/// that the first writing handed out).
+struct SkipFirst<'w> {
+    inner: &'w mut dyn Write,
+    left: usize,
+}
+
+impl Write for SkipFirst<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let skipped = self.left.min(buf.len());
+        self.left -= skipped;
+        self.inner.write_all(&buf[skipped..])?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
     }
 }
 
@@ -548,16 +779,24 @@ pub(super) fn write_strategy_document<E: Encoder>(
     out.enc.end_document();
 }
 
-/// The text encoder over `sink` (the strategy file is always ASN.1 text).
-pub(super) fn text_out<'s, 'b>(
-    buf: &'b mut Vec<u8>,
-    sink: &'s mut dyn Write,
-) -> ArchiveOut<'s, AsnTextEncoder<'b>> {
-    ArchiveOut {
-        enc: AsnTextEncoder::new(buf),
-        sink,
-        io_error: None,
-        posts: None,
+/// The `Blast4-request` of one query batch (`write_strategy_document`) as an `ArchiveDocument`.
+pub(super) struct StrategyDocument<'h> {
+    pub(super) request: &'h super::ArchiveRequest,
+    pub(super) batch: &'h RequestInputs<'h>,
+    pub(super) search_space_option: Option<i64>,
+    pub(super) database_list: Option<&'h Param>,
+}
+
+impl ArchiveDocument for StrategyDocument<'_> {
+    fn write<E: Encoder>(&mut self, out: &mut ArchiveOut<'_, E>) -> Result<()> {
+        write_strategy_document(
+            out,
+            self.request,
+            self.batch,
+            self.search_space_option,
+            self.database_list,
+        );
+        Ok(())
     }
 }
 
@@ -610,54 +849,59 @@ pub fn write_archive<A: AlignSource>(
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     let messages = handle.take_messages_through(batch.request.queries.len());
-    let space = handle.search_space_option(batch.searched_space);
-    let list = handle.options().database_list();
-    let request = handle.request();
-    let bad_chars = match handle.encoding() {
+    let mut document = SearchArchive {
+        request: handle.request(),
+        batch,
+        search_space_option: handle.search_space_option(batch.searched_space),
+        database_list: handle.options().database_list(),
+        messages: &messages,
+        aligns,
+    };
+    let binary = match handle.encoding() {
         ArchiveEncoding::Nothing => return Ok(()),
         ArchiveEncoding::Xml => {
             let mut buf = Vec::new();
-            let mut out = ArchiveOut {
-                enc: XmlEncoder::archive(&mut buf),
-                sink,
-                io_error: None,
-                posts: None,
-            };
-            write_search_archive(&mut out, request, batch, space, list, &messages, aligns)?;
-            return out.finish();
-        }
-        ArchiveEncoding::Text => {
-            // The messages go among the document's bytes, where NCBI's buffer has handed them to
-            // its stream (`flush`).
-            let mut buf = Vec::new();
-            let mut out = ArchiveOut {
-                enc: AsnTextEncoder::new(&mut buf),
-                sink,
-                io_error: None,
-                posts: Some(PostOut {
-                    diagnostics,
-                    handle,
-                }),
-            };
-            write_search_archive(&mut out, request, batch, space, list, &messages, aligns)?;
-            return out.finish();
-        }
-        ArchiveEncoding::Binary => {
-            let mut buf = Vec::new();
-            let mut out = ArchiveOut {
-                enc: AsnBinaryEncoder::new(&mut buf),
-                sink,
-                io_error: None,
-                posts: None,
-            };
-            write_search_archive(&mut out, request, batch, space, list, &messages, aligns)?;
-            let bad_chars = out.enc.take_bad_chars();
+            let mut out = ArchiveOut::once(XmlEncoder::archive(&mut buf), sink);
+            document.write(&mut out)?;
             out.finish()?;
-            bad_chars
+            return Ok(());
         }
+        ArchiveEncoding::Text => false,
+        ArchiveEncoding::Binary => true,
     };
-    handle.write_unsaved_posts(diagnostics, &bad_chars)?;
+    // The messages go among the document's bytes, where NCBI's buffer has handed them to its
+    // output (`flush`).
+    let posts = PostOut {
+        diagnostics,
+        handle,
+    };
+    let unposted = write_asn(binary, &mut document, sink, Some(posts))?;
+    debug_assert!(unposted.is_empty());
     Ok(())
+}
+
+/// The archive of one query batch (`write_search_archive`) as an `ArchiveDocument`.
+struct SearchArchive<'h, 'b, A> {
+    request: &'h super::ArchiveRequest,
+    batch: &'h BatchArchive<'b>,
+    search_space_option: Option<i64>,
+    database_list: Option<&'h Param>,
+    messages: &'h [Message],
+    aligns: &'h mut A,
+}
+
+impl<A: AlignSource> ArchiveDocument for SearchArchive<'_, '_, A> {
+    fn write<E: Encoder>(&mut self, out: &mut ArchiveOut<'_, E>) -> Result<()> {
+        write_search_archive(
+            out,
+            self.request,
+            self.batch,
+            self.search_space_option,
+            self.database_list,
+            self.messages,
+            &mut *self.aligns,
+        )
+    }
 }
 
 /// Writes the error archive (`PrintErrorArchive`): the messages saved since the last
@@ -673,46 +917,27 @@ pub fn write_error_archive(
     }
     let mut messages = handle.take_messages();
     messages.extend(error_lines.iter().cloned());
-    match handle.encoding() {
-        ArchiveEncoding::Nothing => Ok(()),
+    // The messages are sanitized (`diag_log::sanitize`: 0x20..0x7E only), so no stream writes
+    // `#` here: one writing.
+    let mut buf = Vec::new();
+    let finish = match handle.encoding() {
+        ArchiveEncoding::Nothing => return Ok(()),
         ArchiveEncoding::Xml => {
-            let mut buf = Vec::new();
-            let mut out = ArchiveOut {
-                enc: XmlEncoder::archive(&mut buf),
-                sink,
-                io_error: None,
-                posts: None,
-            };
+            let mut out = ArchiveOut::once(XmlEncoder::archive(&mut buf), sink);
             write_error_document(&mut out, &messages);
-            out.finish()
+            out.finish()?
         }
         ArchiveEncoding::Text => {
-            let mut buf = Vec::new();
-            let mut out = ArchiveOut {
-                enc: AsnTextEncoder::new(&mut buf),
-                sink,
-                io_error: None,
-                posts: None,
-            };
+            let mut out = ArchiveOut::once(AsnTextEncoder::new(&mut buf), sink);
             write_error_document(&mut out, &messages);
-            // The messages are sanitized (`diag_log::sanitize`: 0x20..0x7E only), so the stream
-            // writes no `#` here.
-            debug_assert!(out.enc.take_bad_chars().is_empty());
-            out.finish()
+            out.finish()?
         }
         ArchiveEncoding::Binary => {
-            let mut buf = Vec::new();
-            let mut out = ArchiveOut {
-                enc: AsnBinaryEncoder::new(&mut buf),
-                sink,
-                io_error: None,
-                posts: None,
-            };
+            let mut out = ArchiveOut::once(AsnBinaryEncoder::new(&mut buf), sink);
             write_error_document(&mut out, &messages);
-            // The messages are sanitized (`diag_log::sanitize`: 0x20..0x7E only), so the stream
-            // writes no `#` here.
-            debug_assert!(out.enc.take_bad_chars().is_empty());
-            out.finish()
+            out.finish()?
         }
-    }
+    };
+    debug_assert!(matches!(finish, Finish::Done(ref bad) if bad.is_empty()));
+    Ok(())
 }

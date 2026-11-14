@@ -1,0 +1,1512 @@
+Blast-db-mask-info ::= {
+  algo-id 0,
+  algo-program dust,
+  algo-options "o",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 100,
+          to 163,
+          id local str "a#b"
+        },
+        {
+          from 264,
+          to 327,
+          id local str "a#b"
+        },
+        {
+          from 428,
+          to 491,
+          id local str "a#b"
+        },
+        {
+          from 592,
+          to 655,
+          id local str "a#b"
+        },
+        {
+          from 756,
+          to 819,
+          id local str "a#b"
+        },
+        {
+          from 920,
+          to 983,
+          id local str "a#b"
+        },
+        {
+          from 1084,
+          to 1147,
+          id local str "a#b"
+        },
+        {
+          from 1248,
+          to 1311,
+          id local str "a#b"
+        },
+        {
+          from 1412,
+          to 1475,
+          id local str "a#b"
+        },
+        {
+          from 1576,
+          to 1639,
+          id local str "a#b"
+        },
+        {
+          from 1740,
+          to 1803,
+          id local str "a#b"
+        },
+        {
+          from 1904,
+          to 1967,
+          id local str "a#b"
+        },
+        {
+          from 2068,
+          to 2131,
+          id local str "a#b"
+        },
+        {
+          from 2232,
+          to 2295,
+          id local str "a#b"
+        },
+        {
+          from 2396,
+          to 2459,
+          id local str "a#b"
+        },
+        {
+          from 2560,
+          to 2623,
+          id local str "a#b"
+        },
+        {
+          from 2724,
+          to 2787,
+          id local str "a#b"
+        },
+        {
+          from 2888,
+          to 2951,
+          id local str "a#b"
+        },
+        {
+          from 3052,
+          to 3115,
+          id local str "a#b"
+        },
+        {
+          from 3216,
+          to 3279,
+          id local str "a#b"
+        },
+        {
+          from 3380,
+          to 3443,
+          id local str "a#b"
+        },
+        {
+          from 3544,
+          to 3607,
+          id local str "a#b"
+        },
+        {
+          from 3708,
+          to 3771,
+          id local str "a#b"
+        },
+        {
+          from 3872,
+          to 3935,
+          id local str "a#b"
+        },
+        {
+          from 4036,
+          to 4099,
+          id local str "a#b"
+        },
+        {
+          from 4200,
+          to 4263,
+          id local str "a#b"
+        },
+        {
+          from 4364,
+          to 4427,
+          id local str "a#b"
+        },
+        {
+          from 4528,
+          to 4591,
+          id local str "a#b"
+        },
+        {
+          from 4692,
+          to 4755,
+          id local str "a#b"
+        },
+        {
+          from 4856,
+          to 4919,
+          id local str "a#b"
+        },
+        {
+          from 5020,
+          to 5083,
+          id local str "a#b"
+        },
+        {
+          from 5184,
+          to 5247,
+          id local str "a#b"
+        },
+        {
+          from 5348,
+          to 5411,
+          id local str "a#b"
+        },
+        {
+          from 5512,
+          to 5575,
+          id local str "a#b"
+        },
+        {
+          from 5676,
+          to 5739,
+          id local str "a#b"
+        },
+        {
+          from 5840,
+          to 5903,
+          id local str "a#b"
+        },
+        {
+          from 6004,
+          to 6067,
+          id local str "a#b"
+        },
+        {
+          from 6168,
+          to 6231,
+          id local str "a#b"
+        },
+        {
+          from 6332,
+          to 6395,
+          id local str "a#b"
+        },
+        {
+          from 6496,
+          to 6559,
+          id local str "a#b"
+        },
+        {
+          from 6660,
+          to 6723,
+          id local str "a#b"
+        },
+        {
+          from 6824,
+          to 6887,
+          id local str "a#b"
+        },
+        {
+          from 6988,
+          to 7051,
+          id local str "a#b"
+        },
+        {
+          from 7152,
+          to 7215,
+          id local str "a#b"
+        },
+        {
+          from 7316,
+          to 7379,
+          id local str "a#b"
+        },
+        {
+          from 7480,
+          to 7543,
+          id local str "a#b"
+        },
+        {
+          from 7644,
+          to 7707,
+          id local str "a#b"
+        },
+        {
+          from 7808,
+          to 7871,
+          id local str "a#b"
+        },
+        {
+          from 7972,
+          to 8035,
+          id local str "a#b"
+        },
+        {
+          from 8136,
+          to 8199,
+          id local str "a#b"
+        },
+        {
+          from 8300,
+          to 8363,
+          id local str "a#b"
+        },
+        {
+          from 8464,
+          to 8527,
+          id local str "a#b"
+        },
+        {
+          from 8628,
+          to 8691,
+          id local str "a#b"
+        },
+        {
+          from 8792,
+          to 8855,
+          id local str "a#b"
+        },
+        {
+          from 8956,
+          to 9019,
+          id local str "a#b"
+        },
+        {
+          from 9120,
+          to 9183,
+          id local str "a#b"
+        },
+        {
+          from 9284,
+          to 9347,
+          id local str "a#b"
+        },
+        {
+          from 9448,
+          to 9511,
+          id local str "a#b"
+        },
+        {
+          from 9612,
+          to 9675,
+          id local str "a#b"
+        },
+        {
+          from 9776,
+          to 9839,
+          id local str "a#b"
+        },
+        {
+          from 9940,
+          to 10003,
+          id local str "a#b"
+        },
+        {
+          from 10104,
+          to 10167,
+          id local str "a#b"
+        },
+        {
+          from 10268,
+          to 10331,
+          id local str "a#b"
+        },
+        {
+          from 10432,
+          to 10495,
+          id local str "a#b"
+        },
+        {
+          from 10596,
+          to 10659,
+          id local str "a#b"
+        },
+        {
+          from 10760,
+          to 10823,
+          id local str "a#b"
+        },
+        {
+          from 10924,
+          to 10987,
+          id local str "a#b"
+        },
+        {
+          from 11088,
+          to 11151,
+          id local str "a#b"
+        },
+        {
+          from 11252,
+          to 11315,
+          id local str "a#b"
+        },
+        {
+          from 11416,
+          to 11479,
+          id local str "a#b"
+        },
+        {
+          from 11580,
+          to 11643,
+          id local str "a#b"
+        },
+        {
+          from 11744,
+          to 11807,
+          id local str "a#b"
+        },
+        {
+          from 11908,
+          to 11971,
+          id local str "a#b"
+        },
+        {
+          from 12072,
+          to 12135,
+          id local str "a#b"
+        },
+        {
+          from 12236,
+          to 12299,
+          id local str "a#b"
+        },
+        {
+          from 12400,
+          to 12463,
+          id local str "a#b"
+        },
+        {
+          from 12564,
+          to 12627,
+          id local str "a#b"
+        },
+        {
+          from 12728,
+          to 12791,
+          id local str "a#b"
+        },
+        {
+          from 12892,
+          to 12955,
+          id local str "a#b"
+        },
+        {
+          from 13056,
+          to 13119,
+          id local str "a#b"
+        },
+        {
+          from 13220,
+          to 13283,
+          id local str "a#b"
+        },
+        {
+          from 13384,
+          to 13447,
+          id local str "a#b"
+        },
+        {
+          from 13548,
+          to 13611,
+          id local str "a#b"
+        },
+        {
+          from 13712,
+          to 13775,
+          id local str "a#b"
+        },
+        {
+          from 13876,
+          to 13939,
+          id local str "a#b"
+        },
+        {
+          from 14040,
+          to 14103,
+          id local str "a#b"
+        },
+        {
+          from 14204,
+          to 14267,
+          id local str "a#b"
+        },
+        {
+          from 14368,
+          to 14431,
+          id local str "a#b"
+        },
+        {
+          from 14532,
+          to 14595,
+          id local str "a#b"
+        },
+        {
+          from 14696,
+          to 14759,
+          id local str "a#b"
+        },
+        {
+          from 14860,
+          to 14923,
+          id local str "a#b"
+        },
+        {
+          from 15024,
+          to 15087,
+          id local str "a#b"
+        },
+        {
+          from 15188,
+          to 15251,
+          id local str "a#b"
+        },
+        {
+          from 15352,
+          to 15415,
+          id local str "a#b"
+        },
+        {
+          from 15516,
+          to 15579,
+          id local str "a#b"
+        },
+        {
+          from 15680,
+          to 15743,
+          id local str "a#b"
+        },
+        {
+          from 15844,
+          to 15907,
+          id local str "a#b"
+        },
+        {
+          from 16008,
+          to 16071,
+          id local str "a#b"
+        },
+        {
+          from 16172,
+          to 16235,
+          id local str "a#b"
+        },
+        {
+          from 16336,
+          to 16399,
+          id local str "a#b"
+        },
+        {
+          from 16500,
+          to 16563,
+          id local str "a#b"
+        },
+        {
+          from 16664,
+          to 16727,
+          id local str "a#b"
+        },
+        {
+          from 16828,
+          to 16891,
+          id local str "a#b"
+        },
+        {
+          from 16992,
+          to 17055,
+          id local str "a#b"
+        },
+        {
+          from 17156,
+          to 17219,
+          id local str "a#b"
+        },
+        {
+          from 17320,
+          to 17383,
+          id local str "a#b"
+        },
+        {
+          from 17484,
+          to 17547,
+          id local str "a#b"
+        },
+        {
+          from 17648,
+          to 17711,
+          id local str "a#b"
+        },
+        {
+          from 17812,
+          to 17875,
+          id local str "a#b"
+        },
+        {
+          from 17976,
+          to 18039,
+          id local str "a#b"
+        },
+        {
+          from 18140,
+          to 18203,
+          id local str "a#b"
+        },
+        {
+          from 18304,
+          to 18367,
+          id local str "a#b"
+        },
+        {
+          from 18468,
+          to 18531,
+          id local str "a#b"
+        },
+        {
+          from 18632,
+          to 18695,
+          id local str "a#b"
+        },
+        {
+          from 18796,
+          to 18859,
+          id local str "a#b"
+        },
+        {
+          from 18960,
+          to 19023,
+          id local str "a#b"
+        },
+        {
+          from 19124,
+          to 19187,
+          id local str "a#b"
+        },
+        {
+          from 19288,
+          to 19351,
+          id local str "a#b"
+        },
+        {
+          from 19452,
+          to 19515,
+          id local str "a#b"
+        },
+        {
+          from 19616,
+          to 19679,
+          id local str "a#b"
+        },
+        {
+          from 19780,
+          to 19843,
+          id local str "a#b"
+        },
+        {
+          from 19944,
+          to 20007,
+          id local str "a#b"
+        },
+        {
+          from 20108,
+          to 20171,
+          id local str "a#b"
+        },
+        {
+          from 20272,
+          to 20335,
+          id local str "a#b"
+        },
+        {
+          from 20436,
+          to 20499,
+          id local str "a#b"
+        },
+        {
+          from 20600,
+          to 20663,
+          id local str "a#b"
+        },
+        {
+          from 20764,
+          to 20827,
+          id local str "a#b"
+        },
+        {
+          from 20928,
+          to 20991,
+          id local str "a#b"
+        },
+        {
+          from 21092,
+          to 21155,
+          id local str "a#b"
+        },
+        {
+          from 21256,
+          to 21319,
+          id local str "a#b"
+        },
+        {
+          from 21420,
+          to 21483,
+          id local str "a#b"
+        },
+        {
+          from 21584,
+          to 21647,
+          id local str "a#b"
+        },
+        {
+          from 21748,
+          to 21811,
+          id local str "a#b"
+        },
+        {
+          from 21912,
+          to 21975,
+          id local str "a#b"
+        },
+        {
+          from 22076,
+          to 22139,
+          id local str "a#b"
+        },
+        {
+          from 22240,
+          to 22303,
+          id local str "a#b"
+        },
+        {
+          from 22404,
+          to 22467,
+          id local str "a#b"
+        },
+        {
+          from 22568,
+          to 22631,
+          id local str "a#b"
+        },
+        {
+          from 22732,
+          to 22795,
+          id local str "a#b"
+        },
+        {
+          from 22896,
+          to 22959,
+          id local str "a#b"
+        },
+        {
+          from 23060,
+          to 23123,
+          id local str "a#b"
+        },
+        {
+          from 23224,
+          to 23287,
+          id local str "a#b"
+        },
+        {
+          from 23388,
+          to 23451,
+          id local str "a#b"
+        },
+        {
+          from 23552,
+          to 23615,
+          id local str "a#b"
+        },
+        {
+          from 23716,
+          to 23779,
+          id local str "a#b"
+        },
+        {
+          from 23880,
+          to 23943,
+          id local str "a#b"
+        },
+        {
+          from 24044,
+          to 24107,
+          id local str "a#b"
+        },
+        {
+          from 24208,
+          to 24271,
+          id local str "a#b"
+        },
+        {
+          from 24372,
+          to 24435,
+          id local str "a#b"
+        },
+        {
+          from 24536,
+          to 24599,
+          id local str "a#b"
+        },
+        {
+          from 24700,
+          to 24763,
+          id local str "a#b"
+        },
+        {
+          from 24864,
+          to 24927,
+          id local str "a#b"
+        },
+        {
+          from 25028,
+          to 25091,
+          id local str "a#b"
+        },
+        {
+          from 25192,
+          to 25255,
+          id local str "a#b"
+        },
+        {
+          from 25356,
+          to 25419,
+          id local str "a#b"
+        },
+        {
+          from 25520,
+          to 25583,
+          id local str "a#b"
+        },
+        {
+          from 25684,
+          to 25747,
+          id local str "a#b"
+        },
+        {
+          from 25848,
+          to 25911,
+          id local str "a#b"
+        },
+        {
+          from 26012,
+          to 26075,
+          id local str "a#b"
+        },
+        {
+          from 26176,
+          to 26239,
+          id local str "a#b"
+        },
+        {
+          from 26340,
+          to 26403,
+          id local str "a#b"
+        },
+        {
+          from 26504,
+          to 26567,
+          id local str "a#b"
+        },
+        {
+          from 26668,
+          to 26731,
+          id local str "a#b"
+        },
+        {
+          from 26832,
+          to 26895,
+          id local str "a#b"
+        },
+        {
+          from 26996,
+          to 27059,
+          id local str "a#b"
+        },
+        {
+          from 27160,
+          to 27223,
+          id local str "a#b"
+        },
+        {
+          from 27324,
+          to 27387,
+          id local str "a#b"
+        },
+        {
+          from 27488,
+          to 27551,
+          id local str "a#b"
+        },
+        {
+          from 27652,
+          to 27715,
+          id local str "a#b"
+        },
+        {
+          from 27816,
+          to 27879,
+          id local str "a#b"
+        },
+        {
+          from 27980,
+          to 28043,
+          id local str "a#b"
+        },
+        {
+          from 28144,
+          to 28207,
+          id local str "a#b"
+        },
+        {
+          from 28308,
+          to 28371,
+          id local str "a#b"
+        },
+        {
+          from 28472,
+          to 28535,
+          id local str "a#b"
+        },
+        {
+          from 28636,
+          to 28699,
+          id local str "a#b"
+        },
+        {
+          from 28800,
+          to 28863,
+          id local str "a#b"
+        },
+        {
+          from 28964,
+          to 29027,
+          id local str "a#b"
+        },
+        {
+          from 29128,
+          to 29191,
+          id local str "a#b"
+        },
+        {
+          from 29292,
+          to 29355,
+          id local str "a#b"
+        },
+        {
+          from 29456,
+          to 29519,
+          id local str "a#b"
+        },
+        {
+          from 29620,
+          to 29683,
+          id local str "a#b"
+        },
+        {
+          from 29784,
+          to 29847,
+          id local str "a#b"
+        },
+        {
+          from 29948,
+          to 30011,
+          id local str "a#b"
+        },
+        {
+          from 30112,
+          to 30175,
+          id local str "a#b"
+        },
+        {
+          from 30276,
+          to 30339,
+          id local str "a#b"
+        },
+        {
+          from 30440,
+          to 30503,
+          id local str "a#b"
+        },
+        {
+          from 30604,
+          to 30667,
+          id local str "a#b"
+        },
+        {
+          from 30768,
+          to 30831,
+          id local str "a#b"
+        },
+        {
+          from 30932,
+          to 30995,
+          id local str "a#b"
+        },
+        {
+          from 31096,
+          to 31159,
+          id local str "a#b"
+        },
+        {
+          from 31260,
+          to 31323,
+          id local str "a#b"
+        },
+        {
+          from 31424,
+          to 31487,
+          id local str "a#b"
+        },
+        {
+          from 31588,
+          to 31651,
+          id local str "a#b"
+        },
+        {
+          from 31752,
+          to 31815,
+          id local str "a#b"
+        },
+        {
+          from 31916,
+          to 31979,
+          id local str "a#b"
+        },
+        {
+          from 32080,
+          to 32143,
+          id local str "a#b"
+        },
+        {
+          from 32244,
+          to 32307,
+          id local str "a#b"
+        },
+        {
+          from 32408,
+          to 32471,
+          id local str "a#b"
+        },
+        {
+          from 32572,
+          to 32635,
+          id local str "a#b"
+        },
+        {
+          from 32736,
+          to 32799,
+          id local str "a#b"
+        },
+        {
+          from 32900,
+          to 32963,
+          id local str "a#b"
+        },
+        {
+          from 33064,
+          to 33127,
+          id local str "a#b"
+        },
+        {
+          from 33228,
+          to 33291,
+          id local str "a#b"
+        },
+        {
+          from 33392,
+          to 33455,
+          id local str "a#b"
+        },
+        {
+          from 33556,
+          to 33619,
+          id local str "a#b"
+        },
+        {
+          from 33720,
+          to 33783,
+          id local str "a#b"
+        },
+        {
+          from 33884,
+          to 33947,
+          id local str "a#b"
+        },
+        {
+          from 34048,
+          to 34111,
+          id local str "a#b"
+        },
+        {
+          from 34212,
+          to 34275,
+          id local str "a#b"
+        },
+        {
+          from 34376,
+          to 34439,
+          id local str "a#b"
+        },
+        {
+          from 34540,
+          to 34603,
+          id local str "a#b"
+        },
+        {
+          from 34704,
+          to 34767,
+          id local str "a#b"
+        },
+        {
+          from 34868,
+          to 34931,
+          id local str "a#b"
+        },
+        {
+          from 35032,
+          to 35095,
+          id local str "a#b"
+        },
+        {
+          from 35196,
+          to 35259,
+          id local str "a#b"
+        },
+        {
+          from 35360,
+          to 35423,
+          id local str "a#b"
+        },
+        {
+          from 35524,
+          to 35587,
+          id local str "a#b"
+        },
+        {
+          from 35688,
+          to 35751,
+          id local str "a#b"
+        },
+        {
+          from 35852,
+          to 35915,
+          id local str "a#b"
+        },
+        {
+          from 36016,
+          to 36079,
+          id local str "a#b"
+        },
+        {
+          from 36180,
+          to 36243,
+          id local str "a#b"
+        },
+        {
+          from 36344,
+          to 36407,
+          id local str "a#b"
+        },
+        {
+          from 36508,
+          to 36571,
+          id local str "a#b"
+        },
+        {
+          from 36672,
+          to 36735,
+          id local str "a#b"
+        },
+        {
+          from 36836,
+          to 36899,
+          id local str "a#b"
+        },
+        {
+          from 37000,
+          to 37063,
+          id local str "a#b"
+        },
+        {
+          from 37164,
+          to 37227,
+          id local str "a#b"
+        },
+        {
+          from 37328,
+          to 37391,
+          id local str "a#b"
+        },
+        {
+          from 37492,
+          to 37555,
+          id local str "a#b"
+        },
+        {
+          from 37656,
+          to 37719,
+          id local str "a#b"
+        },
+        {
+          from 37820,
+          to 37883,
+          id local str "a#b"
+        },
+        {
+          from 37984,
+          to 38047,
+          id local str "a#b"
+        },
+        {
+          from 38148,
+          to 38211,
+          id local str "a#b"
+        },
+        {
+          from 38312,
+          to 38375,
+          id local str "a#b"
+        },
+        {
+          from 38476,
+          to 38539,
+          id local str "a#b"
+        },
+        {
+          from 38640,
+          to 38703,
+          id local str "a#b"
+        },
+        {
+          from 38804,
+          to 38867,
+          id local str "a#b"
+        },
+        {
+          from 38968,
+          to 39031,
+          id local str "a#b"
+        },
+        {
+          from 39132,
+          to 39195,
+          id local str "a#b"
+        },
+        {
+          from 39296,
+          to 39359,
+          id local str "a#b"
+        },
+        {
+          from 39460,
+          to 39523,
+          id local str "a#b"
+        },
+        {
+          from 39624,
+          to 39687,
+          id local str "a#b"
+        },
+        {
+          from 39788,
+          to 39851,
+          id local str "a#b"
+        },
+        {
+          from 39952,
+          to 40015,
+          id local str "a#b"
+        },
+        {
+          from 40116,
+          to 40179,
+          id local str "a#b"
+        },
+        {
+          from 40280,
+          to 40343,
+          id local str "a#b"
+        },
+        {
+          from 40444,
+          to 40507,
+          id local str "a#b"
+        },
+        {
+          from 40608,
+          to 40671,
+          id local str "a#b"
+        },
+        {
+          from 40772,
+          to 40835,
+          id local str "a#b"
+        },
+        {
+          from 40936,
+          to 40999,
+          id local str "a#b"
+        },
+        {
+          from 41100,
+          to 41163,
+          id local str "a#b"
+        },
+        {
+          from 41264,
+          to 41327,
+          id local str "a#b"
+        },
+        {
+          from 41428,
+          to 41491,
+          id local str "a#b"
+        },
+        {
+          from 41592,
+          to 41655,
+          id local str "a#b"
+        },
+        {
+          from 41756,
+          to 41819,
+          id local str "a#b"
+        },
+        {
+          from 41920,
+          to 41983,
+          id local str "a#b"
+        },
+        {
+          from 42084,
+          to 42147,
+          id local str "a#b"
+        },
+        {
+          from 42248,
+          to 42311,
+          id local str "a#b"
+        },
+        {
+          from 42412,
+          to 42475,
+          id local str "a#b"
+        },
+        {
+          from 42576,
+          to 42639,
+          id local str "a#b"
+        },
+        {
+          from 42740,
+          to 42803,
+          id local str "a#b"
+        },
+        {
+          from 42904,
+          to 42967,
+          id local str "a#b"
+        },
+        {
+          from 43068,
+          to 43131,
+          id local str "a#b"
+        },
+        {
+          from 43232,
+          to 43295,
+          id local str "a#b"
+        },
+        {
+          from 43396,
+          to 43459,
+          id local str "a#b"
+        },
+        {
+          from 43560,
+          to 43623,
+          id local str "a#b"
+        },
+        {
+          from 43724,
+          to 43787,
+          id local str "a#b"
+        },
+        {
+          from 43888,
+          to 43951,
+          id local str "a#b"
+        },
+        {
+          from 44052,
+          to 44115,
+          id local str "a#b"
+        },
+        {
+          from 44216,
+          to 44279,
+          id local str "a#b"
+        },
+        {
+          from 44380,
+          to 44443,
+          id local str "a#b"
+        },
+        {
+          from 44544,
+          to 44607,
+          id local str "a#b"
+        },
+        {
+          from 44708,
+          to 44771,
+          id local str "a#b"
+        },
+        {
+          from 44872,
+          to 44935,
+          id local str "a#b"
+        },
+        {
+          from 45036,
+          to 45099,
+          id local str "a#b"
+        },
+        {
+          from 45200,
+          to 45263,
+          id local str "a#b"
+        },
+        {
+          from 45364,
+          to 45427,
+          id local str "a#b"
+        },
+        {
+          from 45528,
+          to 45591,
+          id local str "a#b"
+        },
+        {
+          from 45692,
+          to 45755,
+          id local str "a#b"
+        },
+        {
+          from 45856,
+          to 45919,
+          id local str "a#b"
+        },
+        {
+          from 46020,
+          to 46083,
+          id local str "a#b"
+        },
+        {
+          from 46184,
+          to 46247,
+          id local str "a#b"
+        },
+        {
+          from 46348,
+          to 46411,
+          id local str "a#b"
+        },
+        {
+          from 46512,
+          to 46575,
+          id local str "a#b"
+        },
+        {
+          from 46676,
+          to 46739,
+          id local str "a#b"
+        },
+        {
+          from 46840,
+          to 46903,
+          id local str "a#b"
+        },
+        {
+          from 47004,
+          to 47067,
+          id local str "a#b"
+        },
+        {
+          from 47168,
+          to 47231,
+          id local str "a#b"
+        },
+        {
+          from 47332,
+          to 47395,
+          id local str "a#b"
+        },
+        {
+          from 47496,
+          to 47559,
+          id local str "a#b"
+        },
+        {
+          from 47660,
+          to 47723,
+          id local str "a#b"
+        },
+        {
+          from 47824,
+          to 47887,
+          id local str "a#b"
+        },
+        {
+          from 47988,
+          to 48051,
+          id local str "a#b"
+        },
+        {
+          from 48152,
+          to 48215,
+          id local str "a#b"
+        },
+        {
+          from 48316,
+          to 48379,
+          id local str "a#b"
+        },
+        {
+          from 48480,
+          to 48543,
+          id local str "a#b"
+        },
+        {
+          from 48644,
+          to 48707,
+          id local str "a#b"
+        },
+        {
+          from 48808,
+          to 48871,
+          id local str "a#b"
+        },
+        {
+          from 48972,
+          to 49035,
+          id local str "a#b"
+        },
+        {
+          from 49136,
+          to 49199,
+          id local str "a#b"
+        }
+      }
+    },
+    more FALSE
+  }
+}

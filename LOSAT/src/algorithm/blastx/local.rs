@@ -403,7 +403,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         .collect();
     let writers = formats
         .iter_mut()
-        .map(|format| format.sink.open())
+        .map(|format| format.sink.ostream())
         .collect::<io::Result<Vec<_>>>()?;
     // A run in which a `-subject` title (refused with its first hit) or the message of a query
     // (refused where NCBI does not search its batch) could still be refused by those documents
@@ -424,12 +424,14 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                 None => super::blast_xml::subjects_may_be_refused(subjects),
             });
     let hold = xml_may_refuse.then(archive::ArchiveHold::new);
-    let mut writers: Vec<Box<dyn Write + '_>> = match &hold {
+    // The hold comes between a format's stream and the caller's writer, which has no stream of
+    // NCBI's (`cli::NcbiOstream`): it keeps the bytes in order.
+    let mut writers: Vec<crate::cli::NcbiOstream<'_>> = match &hold {
         Some(hold) => {
             hold.hold();
             writers
                 .into_iter()
-                .map(|writer| Box::new(hold.writer(writer)) as Box<dyn Write + '_>)
+                .map(|writer| crate::cli::NcbiOstream::new(Box::new(hold.writer(writer))))
                 .collect()
         }
         None => writers,
@@ -488,7 +490,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
 /// (`wants_hits`) and the database sequences it names.
 fn write_run(
     run: &RunReports<'_>,
-    writers: &mut [Box<dyn Write + '_>],
+    writers: &mut [crate::cli::NcbiOstream<'_>],
     documents: &mut [Option<super::blast_xml::RunXml2>],
     wants_hits: bool,
     diagnostics: &mut &mut (dyn Write + Send),
@@ -555,7 +557,7 @@ fn write_run(
         report::write_prolog(writer, warnings, options, subjects, &shown).map_err(report_error)?;
         if let Some(document) = &mut documents[index] {
             let mut start = Vec::new();
-            document.start(&mut start);
+            document.document_mut().start(&mut start);
             writer.write_all(&start).map_err(output_error)?;
         }
         writer.flush().map_err(output_error)?;
@@ -845,6 +847,7 @@ pub fn run_local_database(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::BLASTX_TASK.check(&mut args.task)?;
+    args.matrix_search = Some(settings.matrix_search.clone());
     let requested = requested_formats(&args, outputs);
     let (choices, resolutions) = read_format_options(&args, &requested)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
@@ -923,7 +926,10 @@ fn search_database(
     for options in &mut resolved {
         options.query_range = query_range;
         options.filtered_empty = database.filtered_empty();
-        if options.tabular.is_some_and(|spec| spec.checks_taxdb()) {
+        if options
+            .tabular
+            .is_some_and(|spec| spec.looks_up_every_taxid())
+        {
             options.taxdb_found = database.taxdb_found();
         }
     }
@@ -1150,6 +1156,14 @@ fn read_format_options(
         match args.resolve_with_format(choice) {
             Err(error) if error.downcast_ref::<SemanticOptionsError>().is_none() => {
                 return Err(error)
+            }
+            // The file of an unknown matrix, looked up where the command line looks it up
+            // (`native::run`), with the settings of the library's start.
+            Ok(mut options) => {
+                if let Some(search) = &args.matrix_search {
+                    options.find_matrix_file(search)?;
+                }
+                resolutions.push(Ok(options));
             }
             resolution => resolutions.push(resolution),
         }

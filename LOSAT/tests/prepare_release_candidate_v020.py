@@ -648,7 +648,7 @@ def prepare_source(args: argparse.Namespace) -> None:
     source_crate = args.crate.resolve()
     if source_crate.name != spec["filename"] or not source_crate.is_file():
         raise ReleaseFailure("source crate filename or path differs from RC contract")
-    expected_root = f"LOSAT-{contract['package_version']}"
+    expected_root = spec["filename"].removesuffix(".crate")
     members = crate_members(source_crate, expected_root)
     with tempfile.TemporaryDirectory(prefix="losat-rc-source-") as temp_dir:
         temp_root = Path(temp_dir)

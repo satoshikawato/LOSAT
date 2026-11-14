@@ -271,10 +271,9 @@ pub struct TblastxArgs {
     #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = tblastx_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
     pub xdrop_ungap: Option<f64>,
 
-    /// Two-hit window size for triggering ungapped extension (default: 40, or the matrix's
-    /// suggestion; `window`). Smaller values are more strict, larger values are more sensitive.
-    /// 0 (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX.
-    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    // The window of the two-hit word finder (`window`); 0 takes the one-hit word finder. The help is
+    // NCBI's, as tblastn's.
+    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
     pub window_size: Option<i32>,
 
     /// Output format: 0 (pairwise), 6 or 7 (tabular), without custom fields.
@@ -342,6 +341,11 @@ pub struct TblastxArgs {
     /// give no search path: not found, DECISIONS 7 of line CLI C2). Not a public option.
     #[arg(skip)]
     pub tabular_taxdb: Option<bool>,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made by the
+    /// command line with `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere.
+    /// Not a public option.
+    #[arg(skip)]
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
     // ```c++
     //     int GetLocalIdCounterInitValue() const { return m_LocalIdCounter; }
@@ -354,8 +358,9 @@ pub struct TblastxArgs {
     #[arg(skip)]
     pub first_query_ordinal: usize,
     /// The file that NCBI BLAST+ reads for a `-matrix` that its tables do not have
-    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found by the command line before
-    /// the search; `None` elsewhere. Not a public option.
+    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found before the search by the
+    /// command line and the library API (`find_matrix_file`); `None` in LOSAT Web. Not a public
+    /// option.
     #[arg(skip)]
     pub matrix_file: Option<std::path::PathBuf>,
 }
@@ -418,6 +423,23 @@ impl TblastxArgs {
         } else {
             TblastxMatrix::Unknown
         }
+    }
+
+    /// Looks up the file that NCBI reads for an `Unknown` matrix (`scoring_matrix`) with `search`
+    /// (`MatrixSearch::file`) into `matrix_file`: the first step of the command line's run
+    /// (`run`) and of the library's searches (`run_local_database`, `api::run`'s search of
+    /// records), before the options and the outputs, as NCBI's score block, which looks for it
+    /// when it sets up a batch, refuses the run there (`run_in_pool`).
+    pub(crate) fn find_matrix_file(
+        &mut self,
+        search: &crate::blastinput::ncbi_environment::MatrixSearch,
+    ) -> anyhow::Result<()> {
+        if self.scoring_matrix() == TblastxMatrix::Unknown {
+            self.matrix_file = search
+                .file(self.matrix_name())
+                .map_err(anyhow::Error::msg)?;
+        }
+        Ok(())
     }
 
     /// The word threshold: `-threshold`, or the matrix's suggestion for a translated subject.

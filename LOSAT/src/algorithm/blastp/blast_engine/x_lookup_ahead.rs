@@ -1674,6 +1674,7 @@ mod tests {
             export_search_strategy: None,
             strategy: None,
             app: BlastpApp::Blastp,
+            subject_taxdb: None,
             inclusion_ethresh: None,
             gap_trigger: None,
             sum_stats: false,

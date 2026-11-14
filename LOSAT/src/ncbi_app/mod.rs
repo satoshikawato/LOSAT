@@ -14,8 +14,7 @@ use std::ffi::OsString;
 use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::{
-    diag_target, library_application_settings, log_file, preparse, ApplicationSettings,
-    ApplicationStart, DiagTarget, Preparsed,
+    diag_target, log_file, preparse, ApplicationSettings, ApplicationStart, DiagTarget, Preparsed,
 };
 
 use args::{ArgException, Args, ArgsError, Dep, Desc};
@@ -23,8 +22,7 @@ use args::{ArgException, Args, ArgsError, Dep, Desc};
 /// A program run by NCBI's application and argument reader.
 pub(crate) struct Tool {
     /// The program's name (`GetProgramBasename`): the start of its `-version` line, its usage,
-    /// its `<program>.ini` and its settings (`ApplicationStart::settings` on the command line,
-    /// `library_application_settings` in the library API).
+    /// its `<program>.ini` and its settings (`ApplicationStart::settings`).
     pub(crate) program: &'static str,
     /// The program's name in LOSAT's refusals (`BLASTDBCMD`).
     pub(crate) refusal_name: &'static str,
@@ -129,7 +127,22 @@ impl Diag<'_> {
 
     /// `err_post` of a message that is not UTF-8.
     pub(crate) fn err_post_bytes(&mut self, message: &[u8]) {
+        self.err_post_code_bytes(None, message);
+    }
+
+    /// The post of a byte that NCBI's object stream replaced while it wrote an object
+    /// (`visible::BadChars::message`: `ERR_POST_X(7, message)` of error code 803, as
+    /// `Error: (803.7) <prefix> <message>`).
+    pub(crate) fn post_replaced(&mut self, message: &[u8]) {
+        self.err_post_code_bytes(Some(crate::report::serial::visible::ERR_CODE), message);
+    }
+
+    /// `err_post_bytes` with the error code and subcode of `ERR_POST_X` after the severity.
+    fn err_post_code_bytes(&mut self, code: Option<(u32, u32)>, message: &[u8]) {
         let mut line = b"Error: ".to_vec();
+        if let Some((code, subcode)) = code {
+            line.extend_from_slice(format!("({code}.{subcode}) ").as_bytes());
+        }
         if let Some(prefix) = self.tool.post_prefix {
             line.extend_from_slice(format!("[{prefix}] ").as_bytes());
         }
@@ -267,10 +280,7 @@ pub(crate) fn run(
         words,
         (&mut std::io::stdin(), &mut out, &mut err),
         body,
-        Some(CommandLine {
-            start,
-            xml_help: ncbi_xml,
-        }),
+        (start, Some(ncbi_xml)),
     );
     let _ = out.flush();
     let _ = err.flush();
@@ -299,19 +309,20 @@ pub(crate) type Body = fn(
 //         LoadConfig(*m_Config, &x_conf);
 // ```
 /// The run of `tool` with `words`, its standard input `input`, its output on `out` and its
-/// errors on `err`; the exit status. The library API's run: no application start.
+/// errors on `err`; the exit status. The library API's run, which runs NCBI's application start
+/// of this process as the command line's entry does (`ApplicationStart::of_process`): the usage
+/// report's messages go to `err` at once.
 ///
 /// The order is NCBI's: the diagnostic file of `-logfile` is opened first (append; stderr when
 /// it cannot be opened), then `-version` and the full versions are read (the first one is
 /// printed, in the library API too, whatever the bytes of the other words, `ncbi_version::print`;
-/// a word that is not UTF-8 is refused after them), then the configuration is loaded (its
-/// messages go where the diagnostics go; a `<program>.ini` that NCBI reports as malformed ends
-/// the run with exit status 2: g_reg probes `o2`, `inibad_null`), then the arguments; an
-/// argument error prints the usage and a line of `=` on stderr and NCBI's report of the
-/// exception as diagnostics. LOSAT's refusals come where NCBI would start the work they stand
-/// for, before anything is written: `-conffile` without the command line's application start
-/// (which loads its file), `-xmlhelp` where the reader takes it without that start, and `-dryrun` without it; with it, `-dryrun`
-/// ends the run with exit status 0 after the arguments and the settings. Then `body` runs.
+/// a word that is not UTF-8 is refused after them), then the configuration is loaded (the file of
+/// `-conffile` in place of `<program>.ini`; its messages go where the diagnostics go; a
+/// `<program>.ini` that NCBI reports as malformed ends the run with exit status 2: g_reg probes
+/// `o2`, `inibad_null`), then the arguments; an argument error prints the usage and a line of `=`
+/// on stderr and NCBI's report of the exception as diagnostics. `-xmlhelp`, whose XML only the
+/// command line writes, is refused where the reader takes it, and `-dryrun` ends the run with exit
+/// status 0 after the arguments and the settings. Then `body` runs.
 pub(crate) fn run_with(
     tool: &'static Tool,
     words: &[OsString],
@@ -320,15 +331,17 @@ pub(crate) fn run_with(
     err: &mut dyn Write,
     body: Body,
 ) -> i32 {
-    run_app(tool, words, (input, out, err), body, None)
-}
-
-/// What the command line's run of a tool has and the library API's has not (`run_app`).
-struct CommandLine<'a> {
-    /// The command line's application start of the tool.
-    start: &'a ApplicationStart,
-    /// The writer of NCBI's XML of `-xmlhelp` (`ncbi_xml`).
-    xml_help: fn(&str) -> Option<String>,
+    let start = ApplicationStart::of_process(tool.program, words);
+    match start.usage_report() {
+        Ok(text) => {
+            let _ = err.write_all(text.as_bytes());
+        }
+        Err(reason) => {
+            let _ = writeln!(err, "Error: {reason}");
+            return 1;
+        }
+    }
+    run_app(tool, words, (input, out, err), body, (&start, None))
 }
 
 /// NCBI's XML of `program`'s arguments, whole: the readers of `ncbi_app` refuse no argument of
@@ -337,26 +350,22 @@ fn ncbi_xml(program: &str) -> Option<String> {
     crate::ncbi_xmlhelp::print(program, |_| false)
 }
 
-/// `run_with`, with the application start and the XML of `-xmlhelp` that the command line's `run`
-/// has (`command_line`); the library API's run has neither and refuses the words that they
-/// stand for (`cli::toolkit_file_word_refusal`; `cli::xml_help_refusal`, line RG DECISIONS
-/// E2x-1), so the library does not carry the XML.
+/// The run of `run` and `run_with` after the application start `start` (whose usage report's
+/// messages the caller has written), with the writer of NCBI's XML of `-xmlhelp` that the command
+/// line's `run` has (`xml_help`); the library API's run has none and refuses `-xmlhelp`
+/// (`cli::xml_help_refusal`, line RG DECISIONS E2x-1), so the library does not carry the XML.
 fn run_app(
     tool: &'static Tool,
     words: &[OsString],
     (input, out, err): (&mut dyn Read, &mut dyn Write, &mut dyn Write),
     body: Body,
-    command_line: Option<CommandLine<'_>>,
+    (start, xml_help): (&ApplicationStart, Option<fn(&str) -> Option<String>>),
 ) -> i32 {
-    let start = command_line.as_ref().map(|line| line.start);
-    // NCBI's application start (`ncbi_environment::ApplicationStart`), which the command line's
-    // entry has made: the file of `-logfile` gets the usage report's messages when NCBI opens it,
-    // before `-version`.
+    // NCBI's application start (`ncbi_environment::ApplicationStart`): the file of `-logfile`
+    // gets the usage report's messages when NCBI opens it, before `-version`.
     let mut target = diag_target(log_file(words));
-    if let Some(start) = start {
-        start.write_log_setup(&mut target);
-    }
-    let (words, conffile, dryrun) = match preparse(words) {
+    start.write_log_setup(&mut target);
+    let (words, dryrun) = match preparse(words) {
         // `-version` and the full versions (`ncbi_version::print`, line RG item E3), before the
         // arguments are read, whatever their bytes.
         Preparsed::Version(request) => {
@@ -365,11 +374,7 @@ fn run_app(
             );
             return 0;
         }
-        Preparsed::Words {
-            words,
-            conffile,
-            dryrun,
-        } => (words, conffile, dryrun),
+        Preparsed::Words { words, dryrun, .. } => (words, dryrun),
     };
     let Some(words) = words
         .iter()
@@ -389,28 +394,12 @@ fn run_app(
         stderr: err,
         tool,
     };
-    // The file of `-conffile` is the configuration of the command line's application start
-    // (`ApplicationStart::of_process`); the library API runs none
-    // (`cli::toolkit_file_word_refusal`).
-    if conffile.is_some() && start.is_none() {
-        return diag.refuse(&crate::cli::toolkit_file_word_refusal(
-            tool.program,
-            "-conffile",
-        ));
-    }
-    // So is `-dryrun`, which the command line's entry ends after the arguments.
-    if dryrun && start.is_none() {
-        return diag.refuse(&crate::cli::toolkit_file_word_refusal(
-            tool.program,
-            "-dryrun",
-        ));
-    }
-    if let Some(start) = start {
-        match start.write_config_load(&mut diag.target, diag.stderr) {
-            Ok(None) => {}
-            Ok(Some(status)) => return status,
-            Err(reason) => return diag.refuse(&reason),
-        }
+    // The configuration (the file of `-conffile` in place of `<program>.ini`,
+    // `ApplicationStart::of_process`).
+    match start.write_config_load(&mut diag.target, diag.stderr) {
+        Ok(None) => {}
+        Ok(Some(status)) => return status,
+        Err(reason) => return diag.refuse(&reason),
     }
     let args = match args::parse(tool, &words) {
         Ok(args) => args,
@@ -424,10 +413,7 @@ fn run_app(
         }
         // NCBI's XML, which the command line's run writes (`ncbi_xml`); the library API writes
         // none (`cli::xml_help_refusal`, line RG DECISIONS E2x-1).
-        Err(ArgsError::XmlHelp) => match command_line
-            .as_ref()
-            .and_then(|line| (line.xml_help)(tool.program))
-        {
+        Err(ArgsError::XmlHelp) => match xml_help.and_then(|xml| xml(tool.program)) {
             Some(xml) => {
                 let _ = out.write_all(xml.as_bytes());
                 return 0;
@@ -438,10 +424,7 @@ fn run_app(
         Err(ArgsError::Invalid(error)) => return diag.report_arg_exception(&error, None),
         Err(ArgsError::Refused(reason)) => return diag.refuse(&reason),
     };
-    let settings = match start.map_or_else(
-        || library_application_settings(tool.program),
-        ApplicationStart::settings,
-    ) {
+    let settings = match start.settings() {
         Ok(settings) => settings,
         Err(reason) => return diag.refuse(&reason),
     };

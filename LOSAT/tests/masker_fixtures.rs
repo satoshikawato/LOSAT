@@ -5,7 +5,7 @@
 //! in `tests/<program>/ncbi/<name>.{out,err,rc}` (probes of line RG, items K1, K2 and K3,
 //! 2026-11-12 and 11-13, on ws and the local official release). A name the table repeats is
 //! compared on its last row, whose output the probe kept. NCBI is not run here. Every row runs
-//! through the library API too (`LOSAT::api::run_dustmasker`, `run_segmasker`,
+//! through the library API too (`losat::api::run_dustmasker`, `run_segmasker`,
 //! `run_convert2blastmask`, by `examples/library_command_line`), with the same bytes.
 
 use std::fs;
@@ -229,11 +229,16 @@ fn runs_here(case: &Case) -> bool {
         .position(|word| word == "-out")
         .and_then(|at| case.words.get(at + 1))
         .map(String::as_str);
-    match out {
-        Some("/dev/full") => cfg!(target_os = "linux"),
-        Some("/dev/null") => cfg!(unix),
-        _ => true,
-    }
+    // A table, not a `match` or an `if` chain: the `cfg!` are constants, which clippy would read
+    // as `matches!` (Windows) or as an `if` that is always true (Unix).
+    let devices = [
+        ("/dev/full", cfg!(target_os = "linux")),
+        ("/dev/null", cfg!(unix)),
+    ];
+    devices
+        .iter()
+        .find(|(device, _)| out == Some(*device))
+        .is_none_or(|&(_, here)| here)
 }
 
 /// The rows of `program` that run here (`runs_here`).
@@ -264,12 +269,54 @@ fn describe(rows: &[(String, Streams, Streams)]) -> String {
     text
 }
 
-/// The rows of `program`'s table whose run differs from NCBI's.
+/// `run` with the standard output and the standard error in one file (`2>&1`): the stream that
+/// holds NCBI's messages among the bytes of a document, where its buffer handed them out.
+fn run_combined(program: &str, case: &Case) -> Vec<u8> {
+    let dir = fixtures(program);
+    let path = std::env::temp_dir().join(format!(
+        "losat-masker-{program}-{}-{}.all",
+        case.name,
+        std::process::id()
+    ));
+    let file = fs::File::create(&path).unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+    for (name, _) in std::env::vars_os() {
+        let text = name.to_string_lossy();
+        if text.starts_with("LOSAT_") || text.starts_with("NCBI_") || text.starts_with("BLAST") {
+            command.env_remove(&name);
+        }
+    }
+    let stdin = match &case.stdin {
+        Some(file) => Stdio::from(fs::File::open(dir.join(file)).unwrap()),
+        None => Stdio::null(),
+    };
+    command
+        .env("NCBI_CONFIG_PATH", &dir)
+        .current_dir(&dir)
+        .arg(program)
+        .args(&case.words)
+        .stdin(stdin)
+        .stdout(Stdio::from(file.try_clone().unwrap()))
+        .stderr(Stdio::from(file))
+        .status()
+        .unwrap();
+    let all = fs::read(&path).unwrap();
+    fs::remove_file(&path).unwrap();
+    all
+}
+
+/// The rows of `program`'s table whose run differs from NCBI's: stdout, stderr and status, and
+/// for a row with NCBI's combined stream (`ncbi/<row>.all`, frozen with `2>&1`) that stream.
 fn rows_that_differ(program: &str) -> Vec<String> {
     let mut differ = Vec::new();
     for case in cases_here(program) {
         let (got, want) = (run(program, &case), expected(program, &case));
-        if got != want {
+        let all = fixtures(program)
+            .join("ncbi")
+            .join(format!("{}.all", case.name));
+        let combined_differs =
+            all.is_file() && run_combined(program, &case) != fs::read(&all).unwrap();
+        if got != want || combined_differs {
             differ.push((case.name.clone(), got, want));
         }
     }
@@ -297,57 +344,47 @@ fn convert2blastmask_gives_ncbis_bytes() {
     assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
 }
 
-// `run_dustmasker` and `run_segmasker` are the command line's run without its application start,
-// which reads the file of `-conffile` and ends `-dryrun` (`ncbi_app::run_with`): the library
-// refuses those two words, as `run_blastdbcmd` does, and `-xmlhelp`, whose XML only the command
-// line writes (line RG DECISIONS E2x-1). The example ends every failure with exit status 1. The
-// rows of `program`'s table whose run through the library differs.
+// `run_dustmasker`, `run_segmasker` and `run_convert2blastmask` run NCBI's application start as
+// the command line does (`ncbi_app::run_with`, line RG item E1w-2): the rows of `-logfile`,
+// `-conffile` and `-dryrun` give the command line's bytes through the library too. `-xmlhelp`,
+// whose XML only the command line writes, is refused (line RG DECISIONS E2x-1). The example ends
+// every failure with exit status 1. The rows of `program`'s table whose run through the library
+// differs.
 fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Vec<String> {
     let example = example_binary("library_command_line");
     let mut differ = Vec::new();
-    let mut refused = 0;
+    let (mut refused, mut started) = (0, 0);
     for case in cases_here(program) {
         let (out, err, status) = run_binary(&example, program, &case);
-        let word = ["-conffile", "-dryrun"].into_iter().find(|word| {
-            case.words
-                .iter()
-                .any(|given| given == word || given.starts_with(&format!("{word}=")))
-        });
-        let expected = match word {
-            None if case
-                .words
-                .iter()
-                .find(|given| matches!(given.as_str(), "-h" | "-help" | "-help-full" | "-xmlhelp"))
-                .is_some_and(|given| given == "-xmlhelp") =>
-            {
-                refused += 1;
-                let text = format!(
-                    "Error: the NCBI C++ Toolkit option -xmlhelp runs on the command line of \
-                     LOSAT's {refusal_name} only: the library API and the Web engine do not write \
-                     NCBI's XML description of the arguments\n"
-                );
-                (Vec::new(), text.into_bytes(), 1)
+        let help = case
+            .words
+            .iter()
+            .find(|given| matches!(given.as_str(), "-h" | "-help" | "-help-full" | "-xmlhelp"));
+        let expected = if help.is_some_and(|given| given == "-xmlhelp") {
+            refused += 1;
+            let text = format!(
+                "Error: the NCBI C++ Toolkit option -xmlhelp runs on the command line of \
+                 LOSAT's {refusal_name} only: the library API and the Web engine do not write \
+                 NCBI's XML description of the arguments\n"
+            );
+            (Vec::new(), text.into_bytes(), 1)
+        } else {
+            if ["-conffile", "-dryrun"].into_iter().any(|word| {
+                case.words
+                    .iter()
+                    .any(|given| given == word || given.starts_with(&format!("{word}=")))
+            }) {
+                started += 1;
             }
-            Some(word) => {
-                refused += 1;
-                let text = format!(
-                    "Error: the NCBI C++ Toolkit option {word} runs on the command line of \
-                     LOSAT's {refusal_name} only: the library API and the Web engine run no NCBI \
-                     application start, which reads it\n"
-                );
-                (Vec::new(), text.into_bytes(), 1)
-            }
-            None => {
-                let (out, err, status) = expected(program, &case);
-                (out, err, i32::from(status != 0))
-            }
+            let (out, err, status) = expected(program, &case);
+            (out, err, i32::from(status != 0))
         };
         let got = (out, err, status);
         if got != expected {
             differ.push((case.name.clone(), got, expected));
         }
     }
-    assert!(refused > 0);
+    assert!(refused > 0 && started > 0, "{program}: {refused} {started}");
     if !differ.is_empty() {
         eprintln!("{}", describe(&differ));
     }

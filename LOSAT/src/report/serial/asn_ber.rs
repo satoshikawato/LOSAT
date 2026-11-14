@@ -32,10 +32,10 @@
 //! }
 //! ```
 
-use super::encoder::{Encoder, SerialError};
-use super::object_stack::ObjectStack;
+use super::encoder::{Encoder, Replaced, SerialError};
 use super::real::double_to_string_posix;
-use super::visible::{good_visible_char, BadChars, Position, SUBST};
+use super::stream_buffer::{StreamBuffer, ASN_BINARY_BACK_LIMIT};
+use super::visible::{good_visible_char, Position};
 
 /// `DBL_DIG`: the precision of `WriteDouble` (`WriteDouble2(data, DBL_DIG)`).
 const DBL_DIG: u32 = 15;
@@ -61,38 +61,160 @@ const INDEFINITE_LENGTH: u8 = 0x80;
 const REAL_DECIMAL: u8 = 0x00;
 
 /// The ASN.1 binary encoder, appending one document to `out`.
-pub struct AsnBinaryEncoder<'b> {
+pub struct AsnBinaryEncoder<'b, const MODEL: bool = false> {
     out: &'b mut Vec<u8>,
     /// Where the document starts in `out`.
     start: usize,
-    /// The bytes of the document handed to a sink (`flush_to`).
-    flushed: usize,
     error: Option<SerialError>,
-    /// The stream's object stack (`GetStackTraceASN`), from the calls of `Encoder`, as the text
-    /// encoder's (`asn_text::AsnTextEncoder`, where NCBI's frames are quoted).
-    stack: ObjectStack,
-    /// The strings written with bytes replaced by `#` (`take_bad_chars`).
-    bad_chars: Vec<BadChars>,
+    /// NCBI's form: the bytes written as `#` (`replace`).
+    replaced: Vec<Replaced>,
+    /// NCBI's form: NCBI's output buffer (back limit 0), and the bytes of the document handed to
+    /// a sink (`flush_to`, `flush_through`).
+    ncbi: StreamBuffer,
+    drained: usize,
 }
 
-impl<'b> AsnBinaryEncoder<'b> {
-    /// An encoder that appends a document to `out`.
+impl<'b> AsnBinaryEncoder<'b, false> {
+    /// The plain encoder, appending a document to `out`.
     pub fn new(out: &'b mut Vec<u8>) -> Self {
+        Self::with_out(out)
+    }
+}
+
+impl<'b> AsnBinaryEncoder<'b, true> {
+    /// NCBI's form of the encoder, appending a document to `out` (`encoder::Traced`): it writes
+    /// `#` for a VisibleString byte outside 0x20..0x7E and records it at NCBI's stream position,
+    /// with the bytes that NCBI's buffer has handed out then.
+    pub fn ncbi(out: &'b mut Vec<u8>) -> Self {
+        Self::with_out(out)
+    }
+}
+
+impl<'b, const MODEL: bool> AsnBinaryEncoder<'b, MODEL> {
+    fn with_out(out: &'b mut Vec<u8>) -> Self {
         let start = out.len();
         Self {
             out,
             start,
-            flushed: 0,
             error: None,
-            stack: ObjectStack::default(),
-            bad_chars: Vec::new(),
+            replaced: Vec::new(),
+            ncbi: StreamBuffer::new(ASN_BINARY_BACK_LIMIT),
+            drained: 0,
         }
     }
 
-    /// `GetStreamPos()`: the bytes of the document written so far (NCBI's stream starts at 0
-    /// for each document).
+    /// `WriteByte` (`m_Output.PutChar`, objostrasnb.cpp:161-225): one byte, one reservation in
+    /// NCBI's form.
+    #[inline(always)]
+    fn byte(&mut self, byte: u8) {
+        if MODEL {
+            self.ncbi.skip(1);
+        }
+        self.out.push(byte);
+    }
+
+    /// Bytes that NCBI writes one `WriteByte` each (`WriteBytesOf`, a tag and its length).
+    #[inline(always)]
+    fn bytes_of(&mut self, bytes: &[u8]) {
+        if MODEL {
+            for _ in bytes {
+                self.ncbi.skip(1);
+            }
+        }
+        self.out.extend_from_slice(bytes);
+    }
+
+    /// `WriteBytes(bytes, size)` (`m_Output.PutString`, objostrasnb.cpp:230-247).
+    #[inline(always)]
+    fn put_bytes(&mut self, bytes: &[u8]) {
+        if MODEL {
+            self.ncbi.put_string(bytes.len());
+        }
+        self.out.extend_from_slice(bytes);
+    }
+
+    /// `GetStreamPos()`: the bytes of the document written so far.
     fn stream_pos(&self) -> usize {
-        self.flushed + self.out.len() - self.start
+        self.drained + (self.out.len() - self.start)
+    }
+
+    /// `ReplaceVisibleChar` of the byte `byte`, at its offset in the buffer (`Replaced`;
+    /// `encoder::Traced` makes it the offset in the document); `write_string` then writes `#`.
+    #[cold]
+    #[inline(never)]
+    fn replace(&mut self, index: usize) {
+        self.replaced.push(Replaced {
+            index,
+            position: Position::Byte(self.stream_pos()),
+            after: self.ncbi.flushed(),
+            with_string: true,
+        });
+    }
+
+    /// The bytes of `WriteString` of a VisibleString: a byte outside 0x20..0x7E is written as
+    /// `#`, the error `NonVisibleChar` without `REPLACE`, recorded at its offset with it
+    /// (`replace`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:841-865
+    /// ```c++
+    ///     WriteLength(length - fixed);
+    ///     if ( type == eStringTypeVisible && x_FixCharsMethod() != eFNP_Allow ) {
+    ///         size_t done = 0;
+    ///         for ( size_t i = 0; i < length; ++i ) {
+    ///             char c = str[i];
+    ///             if ( !GoodVisibleChar(c) ) {
+    ///                 ...
+    ///                 if ( i > done ) {
+    ///                     WriteBytes(str.data() + done, i - done);
+    ///                 }
+    ///                 c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, str, x_FixCharsSubst());
+    ///                 if (c != 0) {
+    ///                     WriteByte(c);
+    ///                 }
+    ///                 done = i + 1;
+    ///             }
+    ///         }
+    /// ```
+    #[inline(always)]
+    fn write_string<const REPLACE: bool>(&mut self, value: &[u8]) {
+        self.byte(TAG_VISIBLE_STRING);
+        self.length(value.len());
+        if MODEL {
+            // NCBI's calls: `WriteBytes` of the good bytes before each bad one, the message, then
+            // `WriteByte` of `#`; `WriteBytes` of the rest.
+            let mut done = 0;
+            for (index, &byte) in value.iter().enumerate() {
+                if !good_visible_char(byte) {
+                    if index > done {
+                        self.put_bytes(&value[done..index]);
+                    }
+                    if REPLACE {
+                        self.replace(index);
+                    } else if self.error.is_none() {
+                        self.error = Some(SerialError::NonVisibleChar(byte));
+                    }
+                    self.byte(b'#');
+                    done = index + 1;
+                }
+            }
+            if done < value.len() {
+                self.put_bytes(&value[done..]);
+            }
+            return;
+        }
+        // The plain form (`REPLACE` is NCBI's form's only): each byte, `#` for a bad one, which is
+        // the error `NonVisibleChar`.
+        debug_assert!(!REPLACE);
+        for &byte in value {
+            if good_visible_char(byte) {
+                self.out.push(byte);
+            } else {
+                if self.error.is_none() {
+                    self.error = Some(SerialError::NonVisibleChar(byte));
+                }
+                self.out.push(b'#');
+            }
+        }
     }
 
     /// `WriteLength`: one byte up to 127, else `0x80 + count` and the `count` bytes of the
@@ -120,7 +242,7 @@ impl<'b> AsnBinaryEncoder<'b> {
     /// ```
     fn length(&mut self, length: usize) {
         if length <= 127 {
-            self.out.push(length as u8);
+            self.byte(length as u8);
             return;
         }
         let bytes = (length as u64).to_be_bytes();
@@ -134,8 +256,8 @@ impl<'b> AsnBinaryEncoder<'b> {
             // `sizeof(length)`: eight bytes on x86-64 Linux, not the shortest four.
             8
         };
-        self.out.push(0x80 + count as u8);
-        self.out.extend_from_slice(&bytes[8 - count..]);
+        self.byte(0x80 + count as u8);
+        self.bytes_of(&bytes[8 - count..]);
     }
 
     /// `WriteNumberValue(Int4)`: the length (1 to 4) and the two's-complement bytes, the
@@ -176,9 +298,8 @@ impl<'b> AsnBinaryEncoder<'b> {
         } else {
             4
         };
-        self.out.push(length as u8);
-        self.out
-            .extend_from_slice(&value.to_be_bytes()[4 - length..]);
+        self.byte(length as u8);
+        self.bytes_of(&value.to_be_bytes()[4 - length..]);
     }
 
     /// `BeginClassMember` / `BeginChoiceVariant`: the explicit context tag `[tag]` with an
@@ -196,36 +317,27 @@ impl<'b> AsnBinaryEncoder<'b> {
     /// (the tags of Seq-annot's modules are below 31, so the identifier is one byte.)
     fn context_open(&mut self, tag: u8) {
         debug_assert!(tag < 31, "a one-byte context tag");
-        self.out.push(TAG_CONTEXT | tag);
-        self.out.push(INDEFINITE_LENGTH);
+        self.byte(TAG_CONTEXT | tag);
+        self.byte(INDEFINITE_LENGTH);
     }
 
     /// `WriteEndOfContent`: the two zero bytes that close an indefinite-length value.
     fn end_of_content(&mut self) {
-        self.out.extend_from_slice(&[0, 0]);
+        self.bytes_of(&[0, 0]);
     }
 }
 
-impl Encoder for AsnBinaryEncoder<'_> {
+impl<const MODEL: bool> Encoder for AsnBinaryEncoder<'_, MODEL> {
     /// `WriteFileHeader` writes nothing in the binary stream (the type name `Seq-annot ::=`
     /// belongs to the text stream).
-    fn begin_document(&mut self, type_name: &'static str) {
-        self.stack.set_root(type_name);
-    }
+    fn begin_document(&mut self, _type_name: &'static str) {}
 
     /// No separator follows a binary document (`SetAutoSeparator` is not set).
-    fn end_document(&mut self) {
-        debug_assert!(
-            self.stack.depth() <= 1,
-            "every frame of the document is closed: {}",
-            self.stack.trace()
-        );
-    }
+    fn end_document(&mut self) {}
 
     /// `BeginClass`: `30 80`.
     fn begin_sequence(&mut self, _type_name: &str) {
-        self.out
-            .extend_from_slice(&[TAG_SEQUENCE, INDEFINITE_LENGTH]);
+        self.bytes_of(&[TAG_SEQUENCE, INDEFINITE_LENGTH]);
     }
 
     /// `EndClass`: `00 00`.
@@ -233,47 +345,38 @@ impl Encoder for AsnBinaryEncoder<'_> {
         self.end_of_content();
     }
 
-    fn member(&mut self, name: &'static str, tag: u8) {
-        self.stack.push(name);
+    fn member(&mut self, _name: &'static str, tag: u8) {
         self.context_open(tag);
     }
 
     fn end_member(&mut self) {
-        self.stack.pop();
         self.end_of_content();
     }
 
     /// `BeginContainer`: `30 80` for a SEQUENCE OF, `31 80` for a SET OF
     /// (`MakeContainerTagByte`).
     fn begin_list(&mut self, set: bool) {
-        self.stack.push("");
-        self.out
-            .extend_from_slice(&[if set { TAG_SET } else { TAG_SEQUENCE }, INDEFINITE_LENGTH]);
+        self.bytes_of(&[if set { TAG_SET } else { TAG_SEQUENCE }, INDEFINITE_LENGTH]);
     }
 
     /// `BeginContainerElement` writes nothing: the element writes its own tag.
-    fn element(&mut self) {
-        self.stack.set_top("E");
-    }
+    fn element(&mut self) {}
 
     fn end_list(&mut self) {
-        self.stack.pop();
         self.end_of_content();
     }
 
-    fn variant(&mut self, _type_name: &'static str, name: &'static str, tag: u8) {
-        self.stack.push(name);
+    fn variant(&mut self, _type_name: &'static str, _name: &'static str, tag: u8) {
         self.context_open(tag);
     }
 
     fn end_variant(&mut self) {
-        self.stack.pop();
         self.end_of_content();
     }
 
     /// `WriteInt4`: INTEGER.
     fn int(&mut self, value: i32) {
-        self.out.push(TAG_INTEGER);
+        self.byte(TAG_INTEGER);
         self.number(value);
     }
 
@@ -287,14 +390,14 @@ impl Encoder for AsnBinaryEncoder<'_> {
         {
             start += 1;
         }
-        self.out.push(TAG_INTEGER);
-        self.out.push((8 - start) as u8);
-        self.out.extend_from_slice(&bytes[start..]);
+        self.byte(TAG_INTEGER);
+        self.byte((8 - start) as u8);
+        self.bytes_of(&bytes[start..]);
     }
 
     /// `WriteEnum`: ENUMERATED with the number of the value.
     fn enumerated(&mut self, _name: &str, value: i32) {
-        self.out.push(TAG_ENUMERATED);
+        self.byte(TAG_ENUMERATED);
         self.number(value);
     }
 
@@ -311,69 +414,29 @@ impl Encoder for AsnBinaryEncoder<'_> {
     /// }
     /// ```
     fn named_int(&mut self, _name: &str, value: i32) {
-        self.out.push(TAG_INTEGER);
+        self.byte(TAG_INTEGER);
         self.number(value);
     }
 
     /// `WriteBool`: `01 01 01` or `01 01 00`.
     fn boolean(&mut self, value: bool) {
-        self.out
-            .extend_from_slice(&[TAG_BOOLEAN, 1, u8::from(value)]);
+        self.bytes_of(&[TAG_BOOLEAN, 1, u8::from(value)]);
     }
 
     /// `WriteString` of a VisibleString: the tag, the length and the bytes. A byte outside
-    /// 0x20..0x7E (`GoodVisibleChar`) is written as `#` and noted at the stream's position, the
-    /// bytes written before it (`WriteBytes` of the good bytes before `ReplaceVisibleChar`),
-    /// with the whole string (`take_bad_chars`, as in the text stream).
-    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:831-871
-    /// ```c++
-    /// void CObjectOStreamAsnBinary::WriteString(const string& str, EStringType type)
-    /// {
-    ///     size_t length = str.size(), fixed = 0;
-    ///     WriteStringTag(type);
-    ///     ...
-    ///     WriteLength(length - fixed);
-    ///     if ( type == eStringTypeVisible && x_FixCharsMethod() != eFNP_Allow ) {
-    ///         size_t done = 0;
-    ///         for ( size_t i = 0; i < length; ++i ) {
-    ///             char c = str[i];
-    ///             if ( !GoodVisibleChar(c) ) {
-    ///                 ...
-    ///                 if ( i > done ) {
-    ///                     WriteBytes(str.data() + done, i - done);
-    ///                 }
-    ///                 c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, str, x_FixCharsSubst());
-    ///                 if (c != 0) {
-    ///                     WriteByte(c);
-    ///                 }
-    ///                 done = i + 1;
-    ///             }
-    ///         }
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:510-513
-    /// ```c++
-    /// string CObjectOStream::GetPosition(void) const
-    /// {
-    ///     return "byte "+NStr::Int8ToString(NcbiStreamposToInt8(GetStreamPos()));
-    /// }
-    /// ```
+    /// 0x20..0x7E is replaced by NCBI (`eFNP_ReplaceAndWarn`, as in the text stream): here an
+    /// error (`write_string`).
     fn visible_str(&mut self, value: &[u8]) {
-        self.out.push(TAG_VISIBLE_STRING);
-        self.length(value.len());
-        let mut bad: Option<BadChars> = None;
-        for (index, &byte) in value.iter().enumerate() {
-            if good_visible_char(byte) {
-                self.out.push(byte);
-            } else {
-                let at = Position::Byte(self.stream_pos());
-                let stack = &self.stack;
-                bad.get_or_insert_with(|| BadChars::written(stack.trace(), value))
-                    .note(index, at);
-                self.out.push(SUBST);
-            }
-        }
-        if let Some(bad) = bad {
-            self.bad_chars.push(bad);
+        self.write_string::<false>(value);
+    }
+
+    /// `visible_str` that records each replaced byte (`replace`) instead of the error.
+    fn visible_str_replacing(&mut self, value: &[u8]) {
+        // Only NCBI's form replaces (`encoder::Traced` writes through it).
+        if MODEL {
+            self.write_string::<true>(value);
+        } else {
+            self.write_string::<false>(value);
         }
     }
 
@@ -400,9 +463,9 @@ impl Encoder for AsnBinaryEncoder<'_> {
     /// }
     /// ```
     fn octets(&mut self, value: &[u8]) {
-        self.out.push(TAG_OCTET_STRING);
+        self.byte(TAG_OCTET_STRING);
         self.length(value.len());
-        self.out.extend_from_slice(value);
+        self.put_bytes(value);
     }
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:874-879
@@ -416,19 +479,46 @@ impl Encoder for AsnBinaryEncoder<'_> {
     /// }
     /// ```
     fn string_store(&mut self, value: &[u8]) {
-        self.out.push(TAG_STRING_STORE);
+        self.byte(TAG_STRING_STORE);
         self.length(value.len());
-        self.out.extend_from_slice(value);
+        self.put_bytes(value);
     }
 
     fn buffered(&self) -> usize {
-        self.out.len()
+        self.out.len() - self.start
     }
 
-    fn flush_to(&mut self, sink: &mut dyn std::io::Write, _all: bool) -> std::io::Result<()> {
-        sink.write_all(&self.out[self.start..])?;
-        self.flushed += self.out.len() - self.start;
-        self.out.truncate(self.start);
+    /// The plain form hands out every byte (the binary stream looks back at nothing); NCBI's form
+    /// what NCBI's buffer has handed out.
+    fn flush_to(&mut self, sink: &mut dyn std::io::Write, all: bool) -> std::io::Result<()> {
+        let through = if MODEL && !all {
+            self.ncbi.flushed()
+        } else {
+            self.stream_pos()
+        };
+        self.flush_through(sink, through)
+    }
+
+    fn flush_keeping(&mut self, sink: &mut dyn std::io::Write, keep: usize) -> std::io::Result<()> {
+        if MODEL {
+            return self.flush_to(sink, false);
+        }
+        let through = self.stream_pos().saturating_sub(keep);
+        self.flush_through(sink, through)
+    }
+
+    fn flush_through(
+        &mut self,
+        sink: &mut dyn std::io::Write,
+        through: usize,
+    ) -> std::io::Result<()> {
+        if through <= self.drained {
+            return Ok(());
+        }
+        let end = self.start + (through - self.drained);
+        sink.write_all(&self.out[self.start..end])?;
+        self.out.drain(self.start..end);
+        self.drained = through;
         Ok(())
     }
 
@@ -441,17 +531,17 @@ impl Encoder for AsnBinaryEncoder<'_> {
         }
         let mut digits = Vec::with_capacity(24);
         double_to_string_posix(value, DBL_DIG, &mut digits);
-        self.out.push(TAG_REAL);
+        self.byte(TAG_REAL);
         self.length(digits.len() + 1);
-        self.out.push(REAL_DECIMAL);
-        self.out.extend_from_slice(&digits);
+        self.byte(REAL_DECIMAL);
+        self.put_bytes(&digits);
     }
 
     fn error(&self) -> Option<SerialError> {
         self.error
     }
 
-    fn take_bad_chars(&mut self) -> Vec<BadChars> {
-        std::mem::take(&mut self.bad_chars)
+    fn take_replaced(&mut self) -> Vec<Replaced> {
+        std::mem::take(&mut self.replaced)
     }
 }

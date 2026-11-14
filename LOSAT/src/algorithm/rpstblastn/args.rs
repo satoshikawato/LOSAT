@@ -325,6 +325,8 @@ impl RpstblastnArgs {
             // search with composition-based statistics is BLASTX's (`resolve`).
             comp_based_stats: requested_cbs.to_string(),
             rpstblastn: Some(Arc::new(search)),
+            subject_taxdb: None,
+            matrix_search: None,
         })
     }
 }

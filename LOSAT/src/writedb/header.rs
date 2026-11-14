@@ -196,7 +196,7 @@ fn write_visible_string(
             out.push(byte);
         } else {
             noted
-                .get_or_insert_with(|| BadChars::written(stack.trace(), text))
+                .get_or_insert_with(|| BadChars::written(stack.trace(), text, true))
                 .note(index, Position::Byte(out.len()));
             out.push(SUBST);
         }

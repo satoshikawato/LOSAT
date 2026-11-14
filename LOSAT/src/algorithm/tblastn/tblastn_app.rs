@@ -181,7 +181,7 @@ impl TblastnArgs {
         crate::utils::threading::validate_threads(args.num_threads)?;
         // The diagnostics stream: with the archive it also saves what it writes as the
         // messages of the next archive.
-        let mut stderr = std::io::stderr();
+        let mut stderr = crate::cli::CliStderr::process();
         let mut archive_tee;
         let diagnostics: &mut (dyn Write + Send) = match &archive {
             Some(handle) => {
@@ -414,7 +414,9 @@ impl TblastnArgs {
             }
             RunIo::Memory { query, .. } => Input::Bytes(query),
         };
-        let mut stream = report_stream(&args, &io)?;
+        // The organism report's `-out` file is written as NCBI's buffer writes it.
+        let tax_report = format == Some(app::ReportFormat::TaxFormat);
+        let mut stream = report_stream(&args, &io, tax_report)?;
         let pairwise = format == Some(app::ReportFormat::Pairwise);
         // The format as the reports read it: the number and the custom fields, or the value as
         // given when it has a delimiter, which `normalized` drops and the custom tabular report
@@ -467,7 +469,7 @@ impl TblastnArgs {
         // ```
         // The outfmt 0 formatter's stream throws when a write fails; for outfmt 6/7 NCBI
         // aborts and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
-        if stream.failed && pairwise {
+        if stream.failed && (pairwise || tax_report) {
             return Err(crate::cli::NativeError {
                 exit: 6,
                 message: "BLAST failed to write output\n".to_string(),
@@ -578,7 +580,7 @@ fn write_run_error_archive(
     let Some(lines) = super::archive::error_lines(error, true) else {
         return;
     };
-    if let Ok(mut report) = report_stream(args, io) {
+    if let Ok(mut report) = report_stream(args, io, false) {
         let _ = write_error_archive(io, handle, error, &lines, &mut report);
         let _ = std::io::Write::flush(&mut report);
     }
@@ -604,9 +606,13 @@ fn write_error_archive(
 
 /// The report stream of a run: the `-out` file (created) or standard output, or the report
 /// in memory (`RunIo::Memory`).
-fn report_stream(args: &TblastnArgs, io: &RunIo<'_>) -> Result<crate::cli::ReportStream> {
+fn report_stream(
+    args: &TblastnArgs,
+    io: &RunIo<'_>,
+    tax_report: bool,
+) -> Result<crate::cli::ReportStream> {
     Ok(match io {
-        RunIo::Files => cli_report_stream(open_out_file(args)?),
+        RunIo::Files => crate::cli::ReportStream::of_cli(open_out_file(args)?, tax_report),
         RunIo::Memory { report, .. } => crate::cli::ReportStream {
             inner: Box::new(MemoryReport(report.clone())),
             failed: false,
@@ -627,19 +633,6 @@ fn open_out_file(args: &TblastnArgs) -> Result<Option<std::io::BufWriter<std::fs
             None => None,
         },
     )
-}
-
-/// The report stream of the command line: the `-out` file, or standard output.
-fn cli_report_stream(
-    out_file: Option<std::io::BufWriter<std::fs::File>>,
-) -> crate::cli::ReportStream {
-    crate::cli::ReportStream {
-        inner: match out_file {
-            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
-            None => crate::cli::report_standard_output(),
-        },
-        failed: false,
-    }
 }
 
 /// What `search_cli` and `run_local_database` do after the options are processed and before the
@@ -703,6 +696,16 @@ fn open_search_database(
     {
         args.tabular_taxdb = Some(match database.as_ref() {
             Some(database) => database.taxdb_found(),
+            // The organism report's lookups open the run's own database.
+            None if outputs.formats.iter().any(|format| {
+                super::tabular::tabular_spec(format.outfmt)
+                    .is_some_and(|spec| spec.kind == crate::report::tabular::TabularKind::TaxReport)
+            }) =>
+            {
+                args.subject_taxdb =
+                    crate::algorithm::common::database::SubjectTaxdb::of(settings, "TBLASTN")?;
+                args.subject_taxdb.is_some()
+            }
             None => crate::algorithm::common::database::subject_taxdb_found(settings, "TBLASTN")?,
         });
     }
@@ -862,9 +865,7 @@ fn search_cli(
         Input::Bytes(bytes) => {
             let mut source = FastaInputSource::from_bytes(bytes, config);
             source.set_id_scope(args.id_scope.clone());
-            let empty = bytes
-                .iter()
-                .all(|&byte| crate::blastinput::fasta_reader::stream::input_space(byte));
+            let empty = crate::ncbi_str::is_blank(bytes);
             (QuerySource::Bytes(source), empty)
         }
     };
@@ -2009,12 +2010,11 @@ fn search(
         // ```
         // A structured format (outfmt 8, 12) writes none of a query's own warnings
         // (`ReportFormat::writes_query_warnings`); the warnings go with the first format.
-        let result_warnings = outputs.formats.first().is_none_or(|format| {
-            crate::blastinput::app::ReportFormat::from_number(super::stage_e_report::format_number(
-                format.outfmt,
-            ))
-            .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings)
-        });
+        let result_warnings = outputs
+            .formats
+            .first()
+            .and_then(crate::api::local_blast::FormatOutput::report_format)
+            .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings);
         let filtered_empty = database.is_some_and(|database| database.filtered_empty());
         // The texts of the subjects that the reports of the queries whose batch's prefetch is
         // off read one by one, by query, where the first format places them (`places_reads`).
@@ -2138,7 +2138,7 @@ fn search(
             if outputs.formats.first().is_some_and(|format| {
                 crate::algorithm::common::database::prefetches_subjects(Some(
                     match super::stage_e_report::format_number(format.outfmt) {
-                        10 | 20 => 6,
+                        10 | 18 | 20 => 6,
                         number => number,
                     },
                 ))
@@ -2152,29 +2152,23 @@ fn search(
                     .formats
                     .first()
                     .and_then(|format| super::tabular::tabular_spec(format.outfmt));
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
-                // ```c++
-                //        		const CBioseq_Handle& subject_bh =
-                //                 scope.GetBioseqHandle(align.GetSeq_id(1));
-                // ```
                 // Whether the first format's writer writes the texts of the subjects that a
                 // query's report reads one by one where it reads each
-                // (`QueryWarnings::subject_read`): outfmt 0 (description lines and alignment
-                // headings), 5 (`Hit`s) and the tabular rows.
-                let places_reads = outputs.formats.first().is_some_and(|format| {
-                    matches!(
-                        super::stage_e_report::format_number(format.outfmt),
-                        0 | 5 | 6 | 7 | 10 | 20
-                    )
-                });
-                // The pairwise report reads its subjects in the order of its `-sorthits`.
-                let pairwise = outputs
+                // (`ReportFormat::places_subject_reads`).
+                let first_report = outputs
                     .formats
                     .first()
-                    .is_some_and(|format| super::stage_e_report::format_number(format.outfmt) == 0)
-                    .then(|| resolved.formatting.report_sort());
-                let plural_names =
-                    taxdb_found && first_spec.as_ref().is_some_and(|spec| spec.checks_taxdb());
+                    .and_then(crate::api::local_blast::FormatOutput::report_format);
+                let places_reads = first_report
+                    .is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
+                // The pairwise report reads its subjects in the order of its `-sorthits`.
+                let pairwise = (first_report
+                    == Some(crate::blastinput::app::ReportFormat::Pairwise))
+                .then(|| resolved.formatting.report_sort());
+                let plural_names = taxdb_found
+                    && first_spec
+                        .as_ref()
+                        .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid);
                 let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList]| {
                     if plural_names
                         && hitlists
@@ -2290,8 +2284,14 @@ fn search(
             }
             _ => Vec::new(),
         };
+        // A `-subject` search's organism report (outfmt 18) looks names up in the run's
+        // database.
         let names = match (tabular_specs.first(), database) {
             (Some(spec), Some(database)) => database.tabular_names(spec, &taxonomy)?,
+            (Some(_), None) => args
+                .subject_taxdb
+                .as_ref()
+                .map(|taxdb| taxdb.report_names("TBLASTN")),
             _ => None,
         };
         let tabular_inputs = super::tabular::TabularInputs {
@@ -2456,7 +2456,9 @@ fn parsed_shown(
         tabular: formats.iter().any(|format| {
             matches!(
                 super::stage_e_report::format_number(format.outfmt),
-                6 | 7 | 10 | 20
+                6 | 7 | 10 | 18 | 20
+            ) && crate::report::tabular::writes_rows(
+                super::tabular::tabular_spec(format.outfmt).as_ref(),
             ) && crate::report::tabular::reads_subject(
                 super::tabular::tabular_spec(format.outfmt).as_ref(),
                 crate::blastinput::app::Program::Tblastn,
@@ -2497,7 +2499,7 @@ fn parsed_shown(
         // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (quoted in `run`).
         prefetched: crate::algorithm::common::database::prefetches_subjects(numbers.first().map(
             |&number| match number {
-                10 | 20 => 6,
+                10 | 18 | 20 => 6,
                 number => number,
             },
         )) && !crate::algorithm::common::database::prefetch_always_off(),

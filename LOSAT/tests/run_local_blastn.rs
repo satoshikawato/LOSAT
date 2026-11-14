@@ -1,4 +1,4 @@
-//! The BLASTN search of `LOSAT::api` (which calls the shared entry `run_local`) writes several
+//! The BLASTN search of `losat::api` (which calls the shared entry `run_local`) writes several
 //! output formats from one search. Every format must be byte-identical to the CLI run that
 //! requests only that format, and the warnings must equal that run's standard error. (Identity of
 //! outfmt 0 with NCBI is checked by docs/evidence/losat_web_e2a/check_losat.py over the frozen
@@ -10,8 +10,8 @@ mod run_local_support;
 
 use std::process::Command;
 
+use losat::api::{Outcome, Program};
 use run_local_support::{cli_out_path, fixture_sequence, Files, TempFasta, Written};
-use LOSAT::api::{Outcome, Program};
 
 const FORMATS: [&str; 12] = [
     "0", "6", "7", "8", "9", "12", "5", "15", "16", "11", "17", "17 SQ SR",

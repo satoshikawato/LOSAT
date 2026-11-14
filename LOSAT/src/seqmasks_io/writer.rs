@@ -8,13 +8,14 @@
 
 use std::io::{self, Write};
 
+use crate::ncbi_app::Diag;
 use crate::report::archive::masks::write_ranges_seq_loc;
 use crate::report::db_subject::bioseq_ids;
 use crate::report::defline::generate_bioseq_defline;
 use crate::report::seqid::SeqId;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
-use crate::report::serial::encoder::{Encoder, SerialError};
+use crate::report::serial::encoder::{Encoder, SerialError, Traced};
 use crate::report::serial::visible::BadChars;
 use crate::report::serial::xml::XmlEncoder;
 use crate::seqdb::mask::FilterProgram;
@@ -121,16 +122,15 @@ impl MaskWriter {
         MaskWriter::MaskInfo(MaskInfoWriter::new(serial, algo_id, program, options))
     }
 
-    /// `Print(bsh, mask, parsed_id)` of the writer.
-    /// `posts` gets NCBI's messages of the bytes that a serial document writes as `#`
-    /// (`write_document`).
+    /// `Print(bsh, mask, parsed_id)` of the writer; `diag` takes the posts of the serial
+    /// stream (`write_document`).
     pub(crate) fn print(
         &mut self,
         seq: &MaskedBioseq<'_>,
         mask: &[(u32, u32)],
         parsed_id: bool,
         out: &mut dyn Write,
-        posts: &mut Vec<u8>,
+        diag: &mut Diag,
     ) -> Result<(), WriteError> {
         match self {
             MaskWriter::Interval => {
@@ -189,12 +189,8 @@ impl MaskWriter {
                     return Ok(());
                 }
                 let mut bytes = Vec::new();
-                write_document(
-                    *serial,
-                    &Document::SeqLoc(first_id(seq), mask),
-                    &mut bytes,
-                    posts,
-                )?;
+                let document = Document::SeqLoc(first_id(seq), mask);
+                write_document(*serial, &document, &mut bytes, out, diag)?;
                 out.write_all(&bytes)?;
             }
             MaskWriter::MaskInfo(writer) => {
@@ -242,8 +238,7 @@ impl MaskWriter {
     /// (`x_ConsolidateListOfMasks`, :108-136, moves the Seq-loc of each list into one list and
     /// sets its `more` to false.)
     /// (`m_OutputFormat` `eSerial_None`, the format `interval`, writes nothing either.)
-    /// `posts` as `print`'s.
-    pub(crate) fn finish(self, out: &mut dyn Write, posts: &mut Vec<u8>) -> Result<(), WriteError> {
+    pub(crate) fn finish(self, out: &mut dyn Write, diag: &mut Diag) -> Result<(), WriteError> {
         let MaskWriter::MaskInfo(writer) = self else {
             return Ok(());
         };
@@ -251,7 +246,7 @@ impl MaskWriter {
             return Ok(());
         };
         let mut bytes = Vec::new();
-        write_document(serial, &Document::MaskInfo(&writer), &mut bytes, posts)?;
+        write_document(serial, &Document::MaskInfo(&writer), &mut bytes, out, diag)?;
         out.write_all(&bytes)?;
         Ok(())
     }
@@ -346,28 +341,29 @@ enum Document<'a> {
     MaskInfo(&'a MaskInfoWriter),
 }
 
-/// `os << MSerial_<format> << object`: one document in `serial`. The ASN.1 text and binary
-/// streams write `#` for a byte of a VisibleString outside 0x20..0x7E (`-masking_options` of
-/// convert2blastmask) and post a message for it, which is appended to `posts` (the masking
-/// programs post without their name: `Error: (803.7) Blast-db-mask-info.algo-options` / `Bad
-/// char [0xC3] in string at line 4` / the string, convert2blastmask 2.17.0).
+/// `os << MSerial_<format> << object`: one document in `serial` appended to `out`, which the
+/// caller then writes to `stream`. A byte that NCBI's stream writes as `#` with an error message
+/// makes the plain encoder report `NonVisibleChar`; such a document is written again through
+/// `Traced` and its messages are posted (`rewrite_and_post`).
 fn write_document(
     serial: Serial,
     document: &Document<'_>,
     out: &mut Vec<u8>,
-    posts: &mut Vec<u8>,
+    stream: &mut dyn Write,
+    diag: &mut Diag,
 ) -> Result<(), WriteError> {
-    let error = match serial {
-        Serial::AsnText => encode(&mut AsnTextEncoder::new(out), document, posts),
-        Serial::AsnBinary => encode(&mut AsnBinaryEncoder::new(out), document, posts),
-        Serial::Xml => {
-            let module = match document {
-                Document::SeqLoc(..) => "NCBI-Seqloc",
-                Document::MaskInfo(_) => "NCBI-BlastDL",
-            };
-            encode(&mut XmlEncoder::ncbi_object(out, module), document, posts)
-        }
+    let start = out.len();
+    let mut error = match serial {
+        Serial::AsnText => encode(&mut AsnTextEncoder::new(out), document),
+        Serial::AsnBinary => encode(&mut AsnBinaryEncoder::new(out), document),
+        Serial::Xml => encode(
+            &mut XmlEncoder::ncbi_object(out, module(document)),
+            document,
+        ),
     };
+    if let Some(SerialError::NonVisibleChar(_)) = error {
+        error = rewrite_and_post(serial, document, out, start, stream, diag)?;
+    }
     match error {
         None => Ok(()),
         Some(error) => Err(WriteError::Refused(format!(
@@ -376,13 +372,64 @@ fn write_document(
     }
 }
 
-/// Writes `document` through `enc`, appends the messages of its bad bytes to `posts` and returns
-/// the encoder's error.
-fn encode<E: Encoder>(
-    enc: &mut E,
+/// The DTD module of the XML form of `document`.
+fn module(document: &Document<'_>) -> &'static str {
+    match document {
+        Document::SeqLoc(..) => "NCBI-Seqloc",
+        Document::MaskInfo(_) => "NCBI-BlastDL",
+    }
+}
+
+/// `document` written again from `start` of `out` through `Traced` (NCBI's form of the ASN.1
+/// text and binary encoders, the XML object stream), with NCBI's posts of the bytes that its
+/// stream replaced (`Diag::post_replaced`) among the document's bytes, where NCBI's buffer had
+/// handed them to `stream` (`Replaced::after`; NCBI's `cerr` is tied to `cout`, so a post first
+/// writes what `cout` holds): the document's bytes before each post go to `stream` here, the rest
+/// stay in `out` for the caller. (The XML stream's buffer is not modelled: its posts come before
+/// the document, as NCBI's while the document's first 4096 bytes hold the byte, and the XML
+/// encoder refuses a control character past them.) The error of the second writing, if any.
+#[cold]
+#[inline(never)]
+fn rewrite_and_post(
+    serial: Serial,
     document: &Document<'_>,
-    posts: &mut Vec<u8>,
-) -> Option<SerialError> {
+    out: &mut Vec<u8>,
+    start: usize,
+    stream: &mut dyn Write,
+    diag: &mut Diag,
+) -> Result<Option<SerialError>, WriteError> {
+    out.truncate(start);
+    let (error, bad_chars) = match serial {
+        Serial::AsnText => encode_traced(AsnTextEncoder::ncbi(out), document),
+        Serial::AsnBinary => encode_traced(AsnBinaryEncoder::ncbi(out), document),
+        Serial::Xml => encode_traced(XmlEncoder::ncbi_object(out, module(document)), document),
+    };
+    if error.is_some() {
+        return Ok(error);
+    }
+    let mut done = 0;
+    for (after, message) in crate::report::serial::visible::messages_after(&bad_chars) {
+        stream.write_all(&out[start + done..start + after])?;
+        stream.flush()?;
+        diag.post_replaced(&message);
+        done = after;
+    }
+    out.drain(start..start + done);
+    Ok(None)
+}
+
+/// `encode` through `Traced` of `enc`, and the strings with replaced bytes.
+fn encode_traced<E: Encoder>(
+    enc: E,
+    document: &Document<'_>,
+) -> (Option<SerialError>, Vec<BadChars>) {
+    let mut enc = Traced::new(enc);
+    let error = encode(&mut enc, document);
+    (error, enc.take_bad_chars())
+}
+
+/// Writes `document` through `enc` and returns the encoder's error.
+fn encode<E: Encoder>(enc: &mut E, document: &Document<'_>) -> Option<SerialError> {
     match document {
         Document::SeqLoc(id, mask) => {
             enc.begin_document("Seq-loc");
@@ -421,7 +468,6 @@ fn encode<E: Encoder>(
         }
     }
     enc.end_document();
-    BadChars::post_all(&enc.take_bad_chars(), None, posts);
     enc.error()
 }
 

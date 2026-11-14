@@ -65,9 +65,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 
 use super::options::OptionInputs;
-use super::writer::{text_out, write_strategy_document, RequestInputs};
+use super::writer::{write_asn, RequestInputs, StrategyDocument};
 use super::{ArchiveEncoding, ArchiveRequest, OptionsHandle, SearchSpaceCarry};
-use crate::report::serial::encoder::Encoder;
 
 struct State {
     sink: Box<dyn Write + Send>,
@@ -350,28 +349,28 @@ impl StrategyExport {
             );
             let shared = &self.0;
             make(&mut |request| {
-                let mut buf = Vec::new();
-                let mut out = text_out(&mut buf, &mut *state.sink);
-                write_strategy_document(
-                    &mut out,
-                    &shared.request,
-                    request,
-                    state.carry.option(),
-                    shared.options.database_list(),
-                );
                 // NCBI posts the messages of the bytes it writes as `#` as its stream writes the
                 // request (`SaveSearchStrategy`, before the batch's search): its handler saves them
                 // for the batch's archive.
-                let bad_chars = out.enc.take_bad_chars();
-                let written = out.finish();
+                let mut document = StrategyDocument {
+                    request: &shared.request,
+                    batch: request,
+                    search_space_option: state.carry.option(),
+                    database_list: shared.options.database_list(),
+                };
+                let written = write_asn(false, &mut document, &mut *state.sink, None);
+                let bad_chars = match &written {
+                    Ok(bad_chars) => bad_chars.as_slice(),
+                    Err(_) => &[],
+                };
                 let posted = match &shared.archive {
                     Some(archive) => archive.write_saved_posts(
                         &mut *state.diagnostics,
-                        &bad_chars,
+                        bad_chars,
                         queries.start,
                     ),
                     None => crate::report::serial::visible::write_posts(
-                        &bad_chars,
+                        bad_chars,
                         Some(shared.request.program),
                         &mut *state.diagnostics,
                     ),

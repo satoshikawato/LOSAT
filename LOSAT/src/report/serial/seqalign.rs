@@ -60,9 +60,7 @@ use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryNames, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::seqid::SeqId;
 
-use super::asn_ber::AsnBinaryEncoder;
-use super::asn_text::AsnTextEncoder;
-use super::encoder::{Encoder, SerialError};
+use super::encoder::{write_asn_binary, write_asn_text, Encoder, SerialDocument, SerialError};
 use super::json::JsonEncoder;
 use super::visible::BadChars;
 
@@ -1861,6 +1859,20 @@ pub(crate) fn write_seq_aligns<E: Encoder>(
 ///         retval->SetData().SetAlign().push_back(*itr);
 ///     }
 /// ```
+/// One query's Seq-annot (`write_seq_annot`) as a document of any encoder.
+struct SeqAnnot<'r, 'a> {
+    run: &'r RunRecord<'a>,
+    query: &'r QueryRecord<'a>,
+    subjects: &'r [SubjectRecord<'a>],
+    hsps: &'r [HspRecord<'a>],
+}
+
+impl SerialDocument for SeqAnnot<'_, '_> {
+    fn write<E: Encoder>(&self, enc: &mut E) {
+        write_seq_annot(enc, self.run, self.query, self.subjects, self.hsps);
+    }
+}
+
 fn write_seq_annot<E: Encoder>(
     enc: &mut E,
     run: &RunRecord<'_>,
@@ -1930,23 +1942,26 @@ pub fn write_query(
         return Ok(false);
     }
     let start = buf.len();
+    let document = SeqAnnot {
+        run,
+        query,
+        subjects,
+        hsps,
+    };
     let error = match format {
         SerialFormat::AsnText => {
-            let mut enc = AsnTextEncoder::new(buf);
-            write_seq_annot(&mut enc, run, query, subjects, hsps);
-            bad_chars.extend(enc.take_bad_chars());
-            enc.error()
+            let (error, bad) = write_asn_text(&document, buf);
+            bad_chars.extend(bad);
+            error
         }
         SerialFormat::AsnBinary => {
-            let mut enc = AsnBinaryEncoder::new(buf);
-            write_seq_annot(&mut enc, run, query, subjects, hsps);
-            bad_chars.extend(enc.take_bad_chars());
-            enc.error()
+            let (error, bad) = write_asn_binary(&document, buf);
+            bad_chars.extend(bad);
+            error
         }
         SerialFormat::Json => {
             let mut enc = JsonEncoder::new(buf);
-            write_seq_annot(&mut enc, run, query, subjects, hsps);
-            bad_chars.extend(enc.take_bad_chars());
+            document.write(&mut enc);
             enc.error()
         }
     };
@@ -1979,8 +1994,8 @@ pub(crate) fn write_query_to(
     if !write_query(format, run, query, subjects, hsps, buf, &mut bad_chars)? {
         return Ok(());
     }
-    // Each message after the document's bytes that NCBI's stream has handed to its output then
-    // (`visible::posts_after`; the binary stream's are taken as before every byte).
+    // Each message after the document's bytes that NCBI's buffer has handed to its output then
+    // (`visible::posts_after`, `encoder::Replaced::after`).
     let mut done = 0;
     for (after, text) in super::visible::posts_after(&bad_chars, Some(app)) {
         writer.write_all(&buf[done..after])?;

@@ -896,6 +896,17 @@ def extra_rows() -> list[Row]:
         fmts=(11,))
     add("arch_titlelong_first", "blastn", "megablast", "@/batchlong_title_first.nuc.fa", "@/batchlong.s.nuc.fa",
         fmts=(11,))
+    # NCBI's messages of a binary document fall where its output buffer (4096 bytes, back limit 0) has
+    # handed the document's bytes out (M4a-1b part 6; the text archive's back limit is 80): the
+    # combined stream holds them among the bytes.
+    for env in ("", "ARCHIVE_FORMAT=bin"):
+        suffix = ".bin" if env else ""
+        add(f"order_title_s{suffix}", "blastn", "megablast", "@/order_big.q.nuc.fa", "@/order_title.s.nuc.fa",
+            env=env, fmts=(11,))
+        add(f"order_delid_s{suffix}", "blastn", "megablast", "@/order_unit.q.nuc.fa", "@/order_delid.s.nuc.fa",
+            env=env, args="-parse_deflines", fmts=(11,))
+    add("order_delid_s", "blastn", "megablast", "@/order_unit.q.nuc.fa", "@/order_delid.s.nuc.fa",
+        args="-parse_deflines", fmts=(8, 9))
     # a subject cannot be in a later batch, but its errors and warnings come before the query's
     for program, task in ALL_PROGRAMS:
         q, s = base_pair(program)
@@ -1049,6 +1060,27 @@ def batchlong_files() -> dict[str, bytes]:
     return out
 
 
+def serial_order_files() -> dict[str, bytes]:
+    """The order of NCBI's 803.7 messages among a binary document's bytes (M4a-1b part 6): a
+    query of 20,000 nucleotides whose archive's first 4 KB go out before the `-subject` title's
+    `café`; a 200-nucleotide unit and a subject of 60 copies of it under a `-parse_deflines` local
+    id with a DEL byte, whose 60 Seq-aligns each write the id (one message each)."""
+    rng = random.Random(20261114)
+    big = "".join(rng.choice("ACGT") for _ in range(20000)).encode()
+    unit = "".join(rng.choice("ACGT") for _ in range(200)).encode()
+    subject = b"".join(unit + "".join(rng.choice("ACGT") for _ in range(80)).encode() for _ in range(60))
+
+    def render(title, seq):
+        return b">" + title + b"\n" + b"\n".join(wrap_lines(seq, 60)) + b"\n"
+
+    return {
+        "order_big.q.nuc.fa": render(b"q1 big query", big),
+        "order_title.s.nuc.fa": render("s1 café subject".encode(), big[5000:7000]),
+        "order_unit.q.nuc.fa": render(b"q1 unit", unit),
+        "order_delid.s.nuc.fa": render(b"lcl|s\x7f1 subject", subject),
+    }
+
+
 def seqid_files() -> dict[str, bytes]:
     out = {}
     for i, line in enumerate(SEQID_LINES):
@@ -1071,6 +1103,7 @@ def command_generate(args) -> int:
                 files[f"{name}.{role}.{kind}.{EXT[kind]}"] = v["fn"](Ctx(kind, role))
     files.update(batch_files())
     files.update(batchlong_files())
+    files.update(serial_order_files())
     files.update(seqid_files())
     for existing in FIXTURES.iterdir():
         if existing.is_file() and existing.name not in files:

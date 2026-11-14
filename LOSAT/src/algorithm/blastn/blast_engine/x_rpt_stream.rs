@@ -101,11 +101,8 @@
 //!   query lengths that a later batch could meet keep the reports after the loop: scoring options
 //!   without Karlin-Altschul values or large greedy gap costs (`search_query_batch`, in
 //!   `context_statistics`), a negative
-//!   `CHUNK_SIZE` (`search_query_chunks`), a search space that could overflow (`SearchSpace`), an
-//!   ungapped cutoff of a query too long (`UngappedCutoff`), and the BLAST archive's (outfmt 11)
-//!   refusal of a query title that it cannot write (`ArchiveTitle`: the title of a query that the
-//!   reading read, refused by the loop in its batch when NCBI completes the batch; the subjects'
-//!   titles are refused in the first batch). With one batch (the first batch takes
+//!   `CHUNK_SIZE` (`search_query_chunks`), a search space that could overflow (`SearchSpace`) and
+//!   an ungapped cutoff of a query too long (`UngappedCutoff`). With one batch (the first batch takes
 //!   every query record) nothing can come after it, so none of these checks is made and no
 //!   subject value is made ahead (the one call makes them as without the switch). LOSAT's
 //!   internal invariant errors and panics are not argued; a write error of the output stops the
@@ -206,10 +203,6 @@ pub(super) enum Off {
     UngappedCutoff,
     /// A database length times a query length that could overflow NCBI's 64-bit search space.
     SearchSpace,
-    /// The BLAST archive (outfmt 11) with a query title that it cannot write (`check_titles`),
-    /// which LOSAT refuses in the batch that holds the query when NCBI completes that batch
-    /// (`run_in_pool`): a later batch's refusal would come after the first batch's archive.
-    ArchiveTitle,
 }
 
 impl Off {
@@ -223,7 +216,6 @@ impl Off {
             Off::ChunkSize => "chunk_size",
             Off::UngappedCutoff => "ungapped_cutoff",
             Off::SearchSpace => "search_space",
-            Off::ArchiveTitle => "archive_title",
         }
     }
 }
@@ -273,9 +265,7 @@ pub(super) struct Stream {
 
 impl Stream {
     /// The streaming of a search with these outputs and subjects, `query_input` and `lengths` its
-    /// query input and the searched queries' lengths, `batching` with the first batch's size,
-    /// `archive_title` whether the archive refuses the title of a query read
-    /// (`Queries::archive_title`; `run_in_pool`).
+    /// query input and the searched queries' lengths, `batching` with the first batch's size.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn start(
         args: &BlastnArgs,
@@ -286,7 +276,6 @@ impl Stream {
         query_input: &QueryInput,
         lengths: &[usize],
         batching: QueryBatching,
-        archive_title: bool,
     ) -> Self {
         let started = std::time::Instant::now();
         let checked = check(
@@ -299,7 +288,6 @@ impl Stream {
             query_input,
             lengths,
             batching,
-            archive_title,
         );
         let check_seconds = started.elapsed().as_secs_f64();
         let (off, cache, one_batch) = match checked {
@@ -477,7 +465,6 @@ fn check(
     query_input: &QueryInput,
     lengths: &[usize],
     batching: QueryBatching,
-    archive_title: bool,
 ) -> std::result::Result<Ready, Off> {
     if let Some(off) = refused_before_reading(on, args, outputs, output_formats) {
         return Err(off);
@@ -551,9 +538,6 @@ fn check(
     let factor = 2 * lengths.iter().copied().max().unwrap_or(0) as i128 + 1;
     if (db_length.abs() + metadata.db_num_seqs as i128 * factor) * factor > i128::from(i64::MAX) {
         return Err(Off::SearchSpace);
-    }
-    if archive_title {
-        return Err(Off::ArchiveTitle);
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:310-312
     // ```c++
@@ -683,7 +667,6 @@ mod tests {
     ) -> std::result::Result<Ready, Off> {
         checked_as(
             &[BlastnOutputFormat::Tabular],
-            false,
             on,
             extra,
             subjects,
@@ -694,11 +677,10 @@ mod tests {
         )
     }
 
-    /// `checked` for the output formats `formats`, `archive_title` as `Stream::start`'s.
+    /// `checked` for the output formats `formats`.
     #[allow(clippy::too_many_arguments)]
     fn checked_as(
         formats: &[BlastnOutputFormat],
-        archive_title: bool,
         on: bool,
         extra: &[&str],
         subjects: &[crate::blastinput::fasta_reader::FastaRecord],
@@ -739,7 +721,6 @@ mod tests {
             &query_input,
             &lengths,
             batching,
-            archive_title,
         )
     }
 
@@ -877,64 +858,21 @@ mod tests {
                 )],
             ] {
                 assert_eq!(
-                    checked_as(
-                        &xml,
-                        false,
-                        true,
-                        &[],
-                        &good,
-                        10,
-                        batch_size,
-                        plain,
-                        &mut outputs
-                    )
-                    .err(),
+                    checked_as(&xml, true, &[], &good, 10, batch_size, plain, &mut outputs).err(),
                     Some(Off::Xml)
                 );
             }
         }
-        // The BLAST archive (outfmt 11) is streamed unless a query has a title that it cannot
-        // write: with several batches (4,000 letters) a later batch's refusal would follow the
-        // first batch's archive; one batch (20,000 letters) needs no check.
+        // The BLAST archive (outfmt 11) is streamed, with several batches (4,000 letters) or one
+        // (20,000 letters).
         let archive = [BlastnOutputFormat::Archive];
-        assert!(checked_as(
-            &archive,
-            false,
-            true,
-            &[],
-            &good,
-            10,
-            4000,
-            plain,
-            &mut outputs
-        )
-        .is_ok());
-        assert_eq!(
-            checked_as(
-                &archive,
-                true,
-                true,
-                &[],
-                &good,
-                10,
-                4000,
-                plain,
-                &mut outputs
-            )
-            .err(),
-            Some(Off::ArchiveTitle)
+        assert!(
+            checked_as(&archive, true, &[], &good, 10, 4000, plain, &mut outputs)
+                .is_ok_and(|ready| !ready.one_batch)
         );
-        assert!(checked_as(
-            &archive,
-            true,
-            true,
-            &[],
-            &good,
-            10,
-            20_000,
-            plain,
-            &mut outputs
-        )
-        .is_ok_and(|ready| ready.one_batch));
+        assert!(
+            checked_as(&archive, true, &[], &good, 10, 20_000, plain, &mut outputs)
+                .is_ok_and(|ready| ready.one_batch)
+        );
     }
 }

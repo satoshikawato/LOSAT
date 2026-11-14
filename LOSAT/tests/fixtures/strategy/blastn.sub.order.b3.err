@@ -1,0 +1,14 @@
+Error: (803.7) [blastn] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 21
+q1 oneé
+Error: (803.7) [blastn] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 21
+q1 oneé
+FASTA-Reader: Ignoring invalid residues at position(s): On line 4: 31
+FASTA-Reader: Ignoring invalid residues at position(s): On line 6: 31
+Error: (803.7) [blastn] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 21
+q3 thrée
+Error: (803.7) [blastn] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 21
+q3 thrée

@@ -60,6 +60,14 @@
   its OID, which version 1.0 refused, and refused it where the taxonomy database names the tax id
   of a nucleotide's empty title, from which NCBI makes the id, as line DBID H3 refused outfmt 0,
   only for a table that prints a subject id, which version 1.0 refused for every table; the same
+  day line RG item T5 made an empty title of a sequence whose tax id the taxonomy database names
+  as NCBI makes it from the source of its Bioseq (`unnamed protein product [Homo sapiens]`,
+  `Homo sapiens`, the first letter of a nucleotide's name upper-cased, a TPA or MAG prefix dropped
+  in the heading) in outfmt 0, 18 and the tabular subject ids (`Homo` for a nucleotide's), in
+  databases with and without parsed Seq-ids, which lines DBID H3, N1b L1 and ordname refused
+  (also of a RefSeq chromosome, mRNA or ncRNA sequence, whose own NCBI functions make nothing of
+  a database Bioseq), and kept refused one whose tax id's lookup reads past the end of
+  `taxdb.btd` (NCBI crashes); the same
   day line RG item T3a refused in BLASTP's outfmt 1 to 4 a reported sequence whose Seq-align id is
   the id `lcl|Query_N` of a query of its batch read without `-parse_deflines`, and also its
   display id in outfmt 1 to 4 (outfmt 0 stays line RG item X7's), and in outfmt 0 to 4 of
@@ -569,7 +577,7 @@ Rejected explicitly (NCBI runs these, or crashes, or LOSAT cannot reproduce what
 | A database sequence with a gap residue (`-`, stored by makeblastdb), a byte above the protein alphabet, or a sequence not between two NUL bytes | NCBI's `-db` never aligns a stored gap and its formatter counts it as a gap; not reproduced |
 | A database sequence without parsed Seq-ids with more or fewer than one definition line | makeblastdb without `-parse_seqids` writes one; a sequence with parsed Seq-ids may have several (version 1.3) |
 | A reported subject whose title NCBI's cleaner reads past (titles like `, ,`: NCBI crashes) | tabular formats and outfmt 0 |
-| In outfmt 0, a shown subject with an empty title and a tax id (makeblastdb `-taxid`) that the taxonomy database names (line DBID H3; all six programs) | NCBI makes the title from the tax id and the taxonomy database, as for a sequence with parsed Seq-ids: `unnamed protein product [Homo sapiens]`, for a nucleotide `Homo sapiens`. For a tax id that it does not name (not in it, no `taxdb.btd`, a database that does not open) NCBI writes the stored title, as LOSAT does; the other formats show the stored title or its first word, but a nucleotide's tabular subject id is the first word of the title made from the tax id (BLASTN's row below) |
+| A shown subject with an empty title and a tax id (makeblastdb `-taxid`) whose lookup in the taxonomy database reads past the mapped end of `taxdb.btd` (line RG item T5; outfmt 0, 18 and the tabular subject ids, all six programs) | NCBI reads unmapped memory and crashes. A title made from a name the taxonomy database gives is written as NCBI makes it (line RG item T5; line DBID H3 refused it in outfmt 0, line DBID ordname in a nucleotide's tabular subject id) |
 | A reported title with a raw byte outside ' '..'~' in the header file | NCBI prints `#` and a warning a number of times that depends on the format and the field |
 | `-dbsize` whose effective search space overflows NCBI's `Int8` | NCBI's arithmetic overflows |
 | A database of more letters than the target's `usize` (32-bit targets) | |
@@ -629,7 +637,6 @@ Rejected explicitly, besides what BLASTP `-db` and the reader reject (the same r
 | Rejected | Why |
 | --- | --- |
 | `-searchsp`, `-db_soft_mask`, `-db_hard_mask` | a stage of its own; masks are not read (P4). Since 2026-11-14 `-db_soft_mask` is searched and `-db_hard_mask` is refused where it would mask the search (line NP, M4a-2a; section "BLASTN database masks") |
-| In the tabular formats that print a subject id (the default fields, `sseqid`, `sacc`, `saccver`, `sallseqid`, `sallacc`), a reported subject with an empty title and a tax id that the taxonomy database names (line DBID ordname) | NCBI makes the title from the tax id, as in outfmt 0 (line DBID H3, the row of BLASTP), and prints its first word, the organism's (`Homo` for 9606), in the place of the id; the other fields show the stored title (`N/A`) and the taxonomy as LOSAT does. A title of spaces, and an empty title without such a tax id, give no word: NCBI prints the general id, `gnl|BL_ORD_ID|n` for `sseqid` and `BL_ORD_ID:n` for `sacc` and `saccver` with n the sequence's OID, as LOSAT does (for a protein an empty title gives `unnamed`) |
 | `-dbsize` whose effective search space overflows NCBI's `Int8` | NCBI's arithmetic overflows |
 | A database of more letters than the target's `usize` (32-bit targets) | |
 
@@ -843,7 +850,6 @@ a result that LOSAT does not reproduce.
 | An outfmt 0 description id of 65 bytes or more | 0 | Pads the line without end, from 65 bytes with a title of 3 bytes or more, from 67 with any title | 3 |
 | A protein title of punctuation that `x_CleanAndCompress` reads past | 0; tabular formats for an `lcl|Subject_N` id | Crashes | 3 |
 | A protein with a tax id and a title ending in `]`, where a definition line has no title (0) or the id is `lcl|Subject_N` (tabular formats) | 0, tabular formats | With `taxdb.bti` on the search path `x_AdjustProteinTitleSuffix` rewrites the title from the tax ids; without it NCBI keeps the title | 2 |
-| An empty title of a sequence with a tax id that the taxonomy database names (not a `pdb` id with a chain or a patent) | 0; tabular formats that print a nucleotide `lcl|Subject_N` id | Makes the title from the tax ids and the taxonomy database (the tabular id is its first word, the organism's; for a protein `unnamed`, as LOSAT writes it); for a tax id the database does not name, the title of a sequence without one | 2 |
 | A title in no encoding that NCBI recognises, for an `lcl|Subject_N` id | tabular formats | Not compared | |
 
 A tabular field list reads the sequence that NCBI's formatters find by the Seq-align id only with

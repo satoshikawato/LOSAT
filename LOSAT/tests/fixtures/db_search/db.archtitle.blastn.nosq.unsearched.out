@@ -1,0 +1,162 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">u1 unsearched query caf\303\251"
+                  }
+                }
+              },
+              title "u1 unsearched query caf##"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 90,
+              seq-data ncbi4na 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">u2 unsearched query"
+                  }
+                }
+              },
+              title "u2 unsearched query"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 90,
+              seq-data ncbi4na 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/arch_tbn_snucl_nonsq",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        }
+      },
+      program-options {
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 41,
+                  to 48,
+                  id local str "Query_1"
+                },
+                {
+                  from 41,
+                  to 48,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame plus1
+          }
+        },
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 41,
+                  to 48,
+                  id local str "Query_2"
+                },
+                {
+                  from 41,
+                  to 48,
+                  id local str "Query_2"
+                }
+              }
+            },
+            frame plus1
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { -1, 10, 0 },
+        k { -1, 10, 0 },
+        h { -1, 10, 0 },
+        gapped FALSE
+      },
+      {
+        lambda { -1, 10, 0 },
+        k { -1, 10, 0 },
+        h { -1, 10, 0 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 0",
+      "Effective search space used: 0",
+      "Length adjustment: 0"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "BLAST engine error: Database memory map file error"
+    }
+  }
+}

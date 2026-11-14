@@ -1709,7 +1709,9 @@ fn search(
         // NCBI fails when it formats a batch in BLAST XML with a matrix name its XML data does not
         // know (`stage_e_report::xml_matrix_failure`, the decision of `stage_e_report::render`):
         // the batch of the run's first searched query, or of its second where the report is held
-        // (`-subject`, `-in_pssm`); the search strategy's file holds the requests up to that
+        // (`-subject`, `-in_pssm`; `XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of
+        // another Seq-id, the second as LOSAT refuses two queries of one id before any output);
+        // the search strategy's file holds the requests up to that
         // batch's, whatever the number of batches after it (probe 7 of RG-F1, probe K4f of line
         // RG). A held report that fails at the run's end, or a run that stops before, writes every
         // request it makes.

@@ -185,9 +185,11 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     } else if error.downcast_ref::<NativeError>().is_some_and(|e| {
         (e.exit == 1 && e.message.starts_with("Command line argument error"))
             || (e.exit == 6 && e.message == "BLAST failed to write output\n")
+            || (e.exit == 3 && e.message.starts_with("BLAST engine error: "))
     }) {
         // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1), or a
-        // write to one that fails (`framing::side_file_write_error`).
+        // write to one that fails (`framing::side_file_write_error`), or NCBI's engine error made
+        // already (`blast_xml::matrix::unsupported_score_matrix`).
         error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
@@ -802,13 +804,17 @@ fn run_inner(
     let mut read_ahead_scopes = None;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (quoted at
     // `blast_xml::write_blastx_xml`)
-    // A matrix name that NCBI's BLAST XML report data does not know fails the report data before
-    // any report is written (`blast_xml::xml_matrix_failure`): NCBI writes no title, so nothing is
-    // checked or held.
-    if let (Some(held), None) = (
-        &held,
-        super::blast_xml::xml_matrix_failure(&options, database.is_none()),
-    ) {
+    // Where the run's XML format fails for a matrix name that NCBI's BLAST XML report data does not
+    // know (`blast_xml::xml_matrix_failure`, decided once for the run): before any report is
+    // written, so NCBI writes no title. Such a run reads the queries before the search only for
+    // their scopes (`-parse_deflines`, whose refusal of two queries of one id comes before any
+    // byte), checks no title and holds nothing.
+    let xml_matrix =
+        super::blast_xml::xml_matrix_failure(std::slice::from_ref(&options), database.is_none());
+    let reads_ahead = held
+        .as_ref()
+        .filter(|_| xml_matrix.is_none() || query_scopes_of().is_some());
+    if let Some(held) = reads_ahead {
         // A query that is not a regular file (a pipe, `<(...)`, `/dev/stdin` from a pipe, a
         // FIFO) or `-query -` cannot be read a second time: the read before the search would
         // take every byte (DECISIONS 22). Refused before the search.
@@ -830,9 +836,9 @@ fn run_inner(
         // A `BATCH_SIZE` that the run refuses (below, before any query is read) leaves no title
         // to check, as a batch size of 0 does.
         // A `-subject` XML2 or JSON document holds each report back until the next query's
-        // arrives (`Xml2Target::holds_back`).
-        let holds_back =
-            super::blast_xml::xml2_kind(options.outfmt).is_some() && database.is_none();
+        // arrives (`blast_xml2::reports_held`).
+        let holds_back = super::blast_xml::xml2_kind(options.outfmt).is_some()
+            && crate::report::blast_xml2::reports_held(database.is_none(), false);
         let scan = super::blast_xml::prescan_queries(
             query_file
                 .try_clone()
@@ -843,6 +849,7 @@ fn run_inner(
             *batch_size.as_ref().unwrap_or(&0),
             query_range.as_ref(),
             holds_back,
+            xml_matrix.is_none(),
             query_scopes_of(),
         )?;
         stops_after = scan.stops_after;
@@ -858,9 +865,10 @@ fn run_inner(
         let database_may_refuse = database
             .as_ref()
             .is_some_and(|database| database.later_batch_may_refuse(!prefetch));
-        if scan.messages_may_be_refused
-            || database_may_refuse
-            || super::blast_xml::subjects_may_be_refused(&subjects)
+        if xml_matrix.is_none()
+            && (scan.messages_may_be_refused
+                || database_may_refuse
+                || super::blast_xml::subjects_may_be_refused(&subjects))
         {
             held.hold();
         }
@@ -1224,6 +1232,7 @@ fn run_inner(
                     queries_before,
                     stops,
                     xml2.borrow_mut().as_mut(),
+                    xml_matrix,
                 )
                 .map_err(refused)
             }
@@ -1238,6 +1247,7 @@ fn run_inner(
                 queries_before,
                 stops,
                 xml2.borrow_mut().as_mut(),
+                xml_matrix,
             )
             .map_err(refused),
         }
@@ -1340,6 +1350,7 @@ fn run_inner(
         &shown_run,
         processed,
         xml2.borrow_mut().as_mut(),
+        xml_matrix,
     )
     .map_err(report_error)?;
     writer.flush().map_err(output_error)?;

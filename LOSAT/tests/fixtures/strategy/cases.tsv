@@ -193,6 +193,8 @@ tblastn.sub.short.x1	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/allx_tbn.f
 tblastx.sub.short.q	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/strategy/short.fna -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
 tblastx.sub.short.q.f0	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/strategy/short.fna -export_search_strategy {ss}	ncbi	3	-	-
 tblastx.sub.short.x1	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/allx_tbx.fna -subject tests/fasta/strategy/short.fna -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.short.q.xmlmatrix	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/strategy/short.fna -matrix blosum62 -outfmt 5 -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.short.xmlmatrix.b3.f16	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xm3.fna -subject tests/fasta/strategy/short.fna -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	3	-	-
 blastn.db.nohr.nh1	blastn	-	-query tests/fasta/strategy/nh1_blastn.fna -db tests/db_search/nnophr -task blastn -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.db.nohr.nh	blastn	-	-query tests/fasta/strategy/nh_blastn.fna -db tests/db_search/nnophr -task blastn -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
 blastn.db.nohr.nh.batches	blastn	BATCH_SIZE=1	-query tests/fasta/strategy/nh_blastn.fna -db tests/db_search/nnophr -task blastn -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
@@ -311,6 +313,10 @@ tblastx.sub.order.xmlmatrix.b3.f16	tblastx	BATCH_SIZE=1	-query tests/fasta/strat
 tblastx.sub.order.xmlmatrix.b1.f15	tblastx	-	-query tests/fasta/strategy/order_xm3.fna -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 15 -export_search_strategy {ss}	ncbi	3	-	-
 tblastx.sub.order.xmlmatrix.q1.f16	tblastx	-	-query tests/fasta/strategy/order_xm1.fna -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	3	-	-
 tblastx.sub.order.xmlmatrix.s1.f15	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xms.fna -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 15 -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.order.xmlmatrix.prefetch	tblastx	PRE_FETCH_SEQS_LIMIT=abc	-query tests/fasta/strategy/order_xm1.fna -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 5 -export_search_strategy {ss}	ncbi	255	-	-
+tblastx.sub.order.xmlmatrix.prefetch.b3.f16	tblastx	BATCH_SIZE=1,PRE_FETCH_SEQS_LIMIT=abc	-query tests/fasta/strategy/order_xm3.fna -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	255	-	-
+blastx.sub.order.xmlmatrix.dupid.b3.f16	blastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xmdup.fna -parse_deflines -subject tests/fasta/strategy/order_s.faa -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	refuse	1	-	two query records have the Seq-id lcl|dup
+tblastx.sub.order.xmlmatrix.dupid.b3.f16	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xmdup.fna -parse_deflines -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	refuse	1	-	two query records have the Seq-id lcl|dup
 psiblast.db.itdef	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.db.it2	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.db.it0	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -num_iterations 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-

@@ -179,26 +179,13 @@ pub(super) fn reads_subject_letters<'a>(
     })
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121, :196
-// ```c++
-//     m_IsBl2Seq = (m_DbName == kEmptyStr ? true : false);
-//     ...
-//     m_IsIterative = options.IsIterativeSearch();
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:862-866
-// ```c++
-// CBlastOptions::IsIterativeSearch() const{
-//     switch ( GetProgram()) {
-//     	case ePSIBlast :
-//     	case ePSITblastn :
-//     	case eDeltaBlast :
-//     		return true;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121, :196 (quoted at
+// `blast_xml2::reports_held`)
 /// Where TBLASTN's run of the formats `formats` stops for a matrix name `matrix_name` that NCBI's
-/// BLAST XML report data does not know (`blast_xml::matrix::xml_formatting_failure`): the XML2 and
-/// JSON documents hold each query's report back for a search without a database (`-subject`,
-/// `m_IsBl2Seq`) and for `-in_pssm` (PSI-TBLASTN, `m_IsIterative`). The one decision behind the
-/// search strategy's last request (`tblastn_app::search`) and the error of `render`.
+/// BLAST XML report data does not know (`blast_xml::matrix::xml_formatting_failure`), with the
+/// facts of the search: no database (`-subject`, `m_IsBl2Seq`) and `-in_pssm` (PSI-TBLASTN,
+/// `m_IsIterative`). The one decision behind the search strategy's last request
+/// (`tblastn_app::search`) and the error of `render`.
 pub(super) fn xml_matrix_failure(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
     matrix_name: &str,
@@ -208,7 +195,8 @@ pub(super) fn xml_matrix_failure(
     crate::report::blast_xml::matrix::xml_formatting_failure(
         formats.iter().map(|format| format.outfmt),
         matrix_name,
-        !database || pssm,
+        !database,
+        pssm,
     )
 }
 
@@ -287,7 +275,9 @@ pub(super) fn render(
     // NCBI writes the XML2 and JSON documents' start before the search (`PrintProlog`) and
     // fails for a matrix of its formatting table's that it does not know when it makes a report's
     // data (`xml_matrix_failure`): that of the run's first query, or of its second where the
-    // report is held, in the batch of that query, or for a run of one query whose report is held
+    // report is held (`XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id,
+    // the second as LOSAT refuses two queries of one id before any output), in the batch of that
+    // query, or for a run of one query whose report is held
     // in `PrintEpilog` (blast_format.cpp:2204-2212, quoted at
     // `blast_xml::matrix::XmlMatrixFailure`) unless the run stops before (`ranges.epilog`; the
     // caller writes that stop). The start alone is written then (probe `tblastn_sub_lcmatrix`),

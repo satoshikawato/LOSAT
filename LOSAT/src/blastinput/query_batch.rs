@@ -496,7 +496,8 @@ impl QueryBatches {
     /// Where the searched queries end of the batch whose formatting NCBI fails for a matrix name
     /// its BLAST XML report data does not know (`blast_xml::matrix::XmlMatrixFailure`): the
     /// search strategy's last request (`StrategyExport::stop_after`). The batch of the run's first
-    /// searched query (as `first_request_end`), or of its second when the report is held; `None`
+    /// searched query (as `first_request_end`), or of its second when the report is held
+    /// (`XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id); `None`
     /// when a held report fails at the run's end or the run stops before: every request that
     /// the run makes is written (probe K/k4f: `-subject` 13-16 with one query and an empty second
     /// batch wrote both requests and stopped with that batch's error).

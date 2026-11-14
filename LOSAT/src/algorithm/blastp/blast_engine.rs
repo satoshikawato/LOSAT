@@ -6742,26 +6742,13 @@ fn psiblast_stop_at_pssm_query(
     batches
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121, :196
-// ```c++
-//     m_IsBl2Seq = (m_DbName == kEmptyStr ? true : false);
-//     ...
-//     m_IsIterative = options.IsIterativeSearch();
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:862-866
-// ```c++
-// CBlastOptions::IsIterativeSearch() const{
-//     switch ( GetProgram()) {
-//     	case ePSIBlast :
-//     	case ePSITblastn :
-//     	case eDeltaBlast :
-//     		return true;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121, :196 (quoted at
+// `blast_xml2::reports_held`)
 /// Where blastp's (and psiblast's) run of the formats of `outputs` stops for a matrix name that
-/// NCBI's BLAST XML report data does not know (`blast_xml::matrix::xml_formatting_failure`): the
-/// XML2 and JSON documents hold each query's report back for a search without a database
-/// (`-subject`, `m_IsBl2Seq`) and for psiblast (`m_IsIterative`). The one decision behind the
-/// search strategy's last request (`search`) and the formats' error (`run_call`).
+/// NCBI's BLAST XML report data does not know (`blast_xml::matrix::xml_formatting_failure`), with
+/// the facts of the search: no database (`-subject`, `m_IsBl2Seq`) and psiblast (`m_IsIterative`).
+/// The one decision behind the search strategy's last request (`search`) and the formats' error
+/// (`run_call`).
 fn blastp_xml_matrix_failure(
     args: &ResolvedBlastpArgs,
     outputs: &ReportOutputs<'_>,
@@ -6770,7 +6757,8 @@ fn blastp_xml_matrix_failure(
     crate::report::blast_xml::matrix::xml_formatting_failure(
         outputs.formats.iter().map(|format| format.outfmt),
         &args.matrix_name,
-        !database || args.app == BlastpApp::Psiblast,
+        !database,
+        args.app == BlastpApp::Psiblast,
     )
 }
 
@@ -7206,7 +7194,9 @@ fn search(
     // NCBI fails when it formats a batch's results in BLAST XML with a matrix name that its XML
     // data does not know ("unsupported score matrix", `run_resolved_in_pool`'s format loop): the
     // batch of the run's first searched query, or of its second where the report is held
-    // (`blastp_xml_matrix_failure`); the search strategy's file then holds the requests up to that
+    // (`blastp_xml_matrix_failure`; `XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of
+    // another Seq-id, the second as LOSAT refuses two queries of one id before any output); the
+    // search strategy's file then holds the requests up to that
     // batch's (probe 7 of RG-F1, probe K4f of line RG), whichever call writes them. A held report
     // that fails at the run's end, or a run that stops before, writes every request it makes.
     if let Some(strategy) = args.strategy.as_ref() {

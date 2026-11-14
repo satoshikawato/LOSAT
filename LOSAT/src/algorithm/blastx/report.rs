@@ -1172,7 +1172,8 @@ impl ShownSubjects<'_> {
 /// The reports of one query batch, the `queries_before` queries of the batches before it written
 /// already. `stops`: the run stops after this batch (a later batch fails before its search), so
 /// a document that holds each report back never writes the last query's
-/// (`blast_xml::written_queries`).
+/// (`blast_xml::written_queries`). `xml_matrix`: where the run's XML formats fail for a matrix
+/// name NCBI's XML does not know (`blast_xml::xml_matrix_failure`, decided once for the run).
 pub(crate) fn render_queries(
     writer: &mut crate::cli::NcbiOstream<'_>,
     stderr: &mut dyn Write,
@@ -1184,6 +1185,7 @@ pub(crate) fn render_queries(
     queries_before: usize,
     stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
+    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
 ) -> Result<()> {
     render_queries_with(
         writer,
@@ -1196,6 +1198,7 @@ pub(crate) fn render_queries(
         queries_before,
         stops,
         xml2,
+        xml_matrix,
         None,
     )
 }
@@ -1243,6 +1246,7 @@ pub(super) fn render_queries_with(
     queries_before: usize,
     stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
+    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
     local: Option<LocalReport<'_, '_>>,
 ) -> Result<()> {
     sort_lists(batches);
@@ -1282,6 +1286,7 @@ pub(super) fn render_queries_with(
             batches,
             queries_before,
             stops,
+            xml_matrix,
         );
     }
     if let Some(xml2) = xml2 {
@@ -1296,6 +1301,7 @@ pub(super) fn render_queries_with(
             batches,
             queries_before,
             stops,
+            xml_matrix,
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
@@ -2035,16 +2041,17 @@ pub(crate) fn write_epilog(
     shown: &ShownSubjects<'_>,
     queries: usize,
     xml2: Option<&mut super::blast_xml::RunXml2>,
+    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2204-2212 (quoted at
     // `blast_xml::matrix::XmlMatrixFailure`)
     // A run of one query whose XML2 or JSON report is held makes its report data in
     // `PrintEpilog`: a matrix name that NCBI's XML does not know fails there, before the epilog
-    // (`blast_xml::xml_matrix_failure`).
-    if super::blast_xml::xml_matrix_failure(options, matches!(shown, ShownSubjects::Fasta { .. }))
-        .is_some_and(|failure| failure.fails_at_end(queries))
+    // (`xml_matrix`, the run's `blast_xml::xml_matrix_failure`; the XML formats of the run).
+    if matches!(options.outfmt, 5 | 13..=16)
+        && xml_matrix.is_some_and(|failure| failure.fails_at_end(queries))
     {
-        return Err(super::blast_xml::xml_matrix_error());
+        return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
     }
     if options.outfmt == 0 {
         crate::report::pairwise::write_blastx_epilog(

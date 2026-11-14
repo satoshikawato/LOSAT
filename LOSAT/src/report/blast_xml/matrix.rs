@@ -136,11 +136,16 @@ pub enum XmlMatrixFailure {
     /// run's first searched query fails.
     FirstQuery,
     /// The XML2 and JSON documents of a `-subject` search (`m_IsBl2Seq`) or of an iterative
-    /// program (`m_IsIterative`: psiblast, tblastn `-in_pssm`): a query's report is held until a
-    /// result of the next query arrives, so the batch of the run's second searched query fails,
-    /// after its reader messages and search strategy request and before anything of its reports;
-    /// a run of one searched query fails at its end (`PrintEpilog`) instead of writing the
-    /// epilog, unless another error ends it first.
+    /// program (`m_IsIterative`: psiblast, tblastn `-in_pssm`; `blast_xml2::reports_held`): a
+    /// query's report is held until a result arrives whose query Seq-id does not match the held
+    /// one (blast_format.cpp:2377), and is made then. LOSAT refuses two queries of one Seq-id in a
+    /// `-subject` search before any output (`-parse_deflines`, `query_batch::QueryScopes`: one
+    /// scope for the run; without the option every query has its own local id), so that result is
+    /// the run's second searched query's: its batch fails, after its reader messages and search
+    /// strategy request and before anything of its reports. A run of one searched query fails at
+    /// its end (`PrintEpilog`) instead of writing the epilog, unless another error ends it first.
+    /// (psiblast's and tblastn `-in_pssm`'s XML formats are not written yet, line PS items PS15
+    /// and PS15b: there a later query of the same Seq-id would be accumulated with the first.)
     SecondQueryOrEnd,
 }
 
@@ -169,19 +174,22 @@ impl XmlMatrixFailure {
 /// Whether and where a protein program's run of the formats `outfmts` with the score matrix
 /// `matrix_name` (as typed) stops in its formats: a BLAST XML family format
 /// (`is_structured_xml`) makes report data, whose matrix is found by `strcmp` of the name
-/// (`packed_matrix`). `holds_back` is NCBI's `m_IsBl2Seq || m_IsIterative`: a `-subject`
-/// search, psiblast, tblastn `-in_pssm`. With several formats (the library), the first to fail
-/// stops the run. The one decision behind the error (`unsupported_score_matrix`) and the search
-/// strategy's last request (`StrategyExport::stop_after`) of BLASTP (psiblast too), TBLASTN,
-/// TBLASTX and BLASTX.
+/// (`packed_matrix`). The programs give their facts: a search of subject records
+/// (`subject_search`: `-subject`) and an iterative program (`iterative`: psiblast, tblastn
+/// `-in_pssm`), whose XML2 and JSON reports are held (`blast_xml2::reports_held`). With several
+/// formats (the library), the first to fail stops the run. The one decision behind the error
+/// (`unsupported_score_matrix`) and the search strategy's last request
+/// (`StrategyExport::stop_after`) of BLASTP (psiblast too), TBLASTN, TBLASTX and BLASTX.
 pub fn xml_formatting_failure<'a>(
     outfmts: impl IntoIterator<Item = &'a str>,
     matrix_name: &str,
-    holds_back: bool,
+    subject_search: bool,
+    iterative: bool,
 ) -> Option<XmlMatrixFailure> {
     if packed_matrix(matrix_name).is_some() {
         return None;
     }
+    let holds_back = crate::report::blast_xml2::reports_held(subject_search, iterative);
     outfmts
         .into_iter()
         .filter(|outfmt| is_structured_xml(outfmt))
@@ -258,11 +266,14 @@ mod tests {
     /// formats.
     #[test]
     fn the_xml_formats_fail_for_a_name_ncbi_does_not_spell() {
+        // The facts of the search: a search of subject records, an iterative program.
+        let searches = [(false, false), (true, false), (false, true), (true, true)];
         for outfmt in ["5", "13", "14", "15", "16", " 5"] {
             assert!(is_structured_xml(outfmt), "{outfmt}");
-            for holds_back in [false, true] {
-                let failure = xml_formatting_failure([outfmt], "blosum62", holds_back);
-                let held = holds_back && outfmt.trim() != "5";
+            for (subject_search, iterative) in searches {
+                let failure =
+                    xml_formatting_failure([outfmt], "blosum62", subject_search, iterative);
+                let held = (subject_search || iterative) && outfmt.trim() != "5";
                 assert_eq!(
                     failure,
                     Some(if held {
@@ -270,10 +281,10 @@ mod tests {
                     } else {
                         XmlMatrixFailure::FirstQuery
                     }),
-                    "{outfmt} {holds_back}"
+                    "{outfmt} {subject_search} {iterative}"
                 );
                 assert_eq!(
-                    xml_formatting_failure([outfmt], "BLOSUM62", holds_back),
+                    xml_formatting_failure([outfmt], "BLOSUM62", subject_search, iterative),
                     None,
                     "{outfmt}"
                 );
@@ -282,22 +293,22 @@ mod tests {
         for outfmt in ["0", "6", "7 qseqid", "8", "11", "12", "17", "abc"] {
             assert!(!is_structured_xml(outfmt), "{outfmt}");
             assert_eq!(
-                xml_formatting_failure([outfmt], "blosum62", true),
+                xml_formatting_failure([outfmt], "blosum62", true, true),
                 None,
                 "{outfmt}"
             );
         }
         assert_eq!(
-            xml_formatting_failure(["6", "16"], "blosum62", false),
+            xml_formatting_failure(["6", "16"], "blosum62", false, false),
             Some(XmlMatrixFailure::FirstQuery)
         );
         // Several formats: the first to fail stops the run.
         assert_eq!(
-            xml_formatting_failure(["16", "15"], "blosum62", true),
+            xml_formatting_failure(["16", "15"], "blosum62", true, false),
             Some(XmlMatrixFailure::SecondQueryOrEnd)
         );
         assert_eq!(
-            xml_formatting_failure(["16", "5"], "blosum62", true),
+            xml_formatting_failure(["16", "5"], "blosum62", true, false),
             Some(XmlMatrixFailure::FirstQuery)
         );
         let error = unsupported_score_matrix();

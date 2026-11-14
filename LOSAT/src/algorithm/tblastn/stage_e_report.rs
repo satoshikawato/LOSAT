@@ -217,6 +217,11 @@ pub(super) fn render(
     // `-in_pssm` (PSI-TBLASTN): the query's PSSM, whose reports (outfmt 0, 6, 7 and 10) name the
     // program PSITBLASTN, show no query masks and print the PSSM's gapped Karlin-Altschul values.
     pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
+    // `-show_gis`: the labels of the query-anchored sections (outfmt 1 to 4).
+    show_gis: bool,
+    // The first searched query of each query batch (NCBI's scope of the batch's queries, which
+    // the query-anchored formats' refusals read); empty: one batch.
+    batch_starts: &[usize],
 ) -> Result<()> {
     ensure!(
         query_records.len() == hitlists.len(),
@@ -333,7 +338,7 @@ pub(super) fn render(
         || outputs
             .formats
             .iter()
-            .any(|format| format_number(format.outfmt) == 0)
+            .any(|format| (0..=4).contains(&format_number(format.outfmt)))
     {
         Some(std::sync::Arc::new(pairwise_hits(
             query_records,
@@ -354,6 +359,134 @@ pub(super) fn render(
     {
         hits_sink(std::sync::Arc::clone(pairwise_hits));
     }
+    // The query-anchored formats (outfmt 1 to 4, line RG T3b), before any format of the call is
+    // written: a reported database sequence that NCBI's scope finds as a query of its batch, by
+    // its Seq-align id (a generated `lcl|Query_N`) or, in a description line, by its display id
+    // (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's): NCBI shows the
+    // query in its place (with the protein query's letters translated as nucleotides).
+    let anchored_view = outputs.formats.iter().find_map(|format| {
+        crate::blastinput::app::ReportFormat::from_number(format_number(format.outfmt))
+            .and_then(crate::report::pairwise::PairwiseView::of)
+            .filter(|view| *view != crate::report::pairwise::PairwiseView::Pairwise)
+    });
+    if let (Some(view), Some(rows)) = (anchored_view, pairwise_hits.as_deref()) {
+        if matches!(shown, ShownSubjects::Database { .. }) {
+            let generated = query_records
+                .first()
+                .is_none_or(|query| query.believed().is_none());
+            let mut starts: Vec<usize> = batch_starts.to_vec();
+            if starts.first() != Some(&0) {
+                starts.insert(0, 0);
+            }
+            let spans: Vec<std::ops::Range<usize>> = starts
+                .iter()
+                .enumerate()
+                .map(|(index, &start)| {
+                    start
+                        ..starts
+                            .get(index + 1)
+                            .copied()
+                            .unwrap_or(query_records.len())
+                })
+                .collect();
+            let scopes: Vec<crate::blastinput::query_batch::QueryScope> = spans
+                .iter()
+                .map(|span| {
+                    let records = &query_records
+                        [span.start.min(query_records.len())..span.end.min(query_records.len())];
+                    if generated {
+                        crate::blastinput::query_batch::QueryScope::of_generated_ids(
+                            records.iter().map(|record| record.local_id.as_str()),
+                        )
+                    } else {
+                        let mut scope = crate::blastinput::query_batch::QueryScope::default();
+                        scope.add_ids_of(records.iter().filter_map(FastaRecord::believed));
+                        scope
+                    }
+                })
+                .collect();
+            let none = crate::blastinput::query_batch::QueryScope::default();
+            let parsed = shown.parsed_subjects();
+            crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
+                query_records.len(),
+                |q_idx| {
+                    hitlists[q_idx]
+                        .lists()
+                        .iter()
+                        .filter(|list| !list.hsps.hsps.is_empty())
+                        .filter_map(|list| u32::try_from(list.oid).ok())
+                        .collect()
+                },
+                |q_idx| {
+                    Ok(crate::report::pairwise::blastp_described_subjects(
+                        view.report_sort(formatting.report_sort()),
+                        false,
+                        report_counts.num_descriptions,
+                        q_idx,
+                        rows,
+                        |previous, s_idx| {
+                            crate::report::db_subject::rank_joins_as_copy(
+                                parsed,
+                                previous as usize,
+                                s_idx as usize,
+                            )
+                        },
+                    ))
+                },
+                parsed,
+                |rank| {
+                    shown
+                        .oid(rank as usize)
+                        .expect("a database search names its sequences by OID")
+                },
+                |q_idx| {
+                    spans
+                        .iter()
+                        .position(|span| span.contains(&q_idx))
+                        .map_or(&none, |batch| &scopes[batch])
+                },
+                generated,
+                program,
+            )?;
+        }
+    }
+    // The sequences of the query-anchored sections of outfmt 1 to 4 (line RG T3b), made once.
+    let anchored = if outputs
+        .formats
+        .iter()
+        .any(|format| (1..=4).contains(&format_number(format.outfmt)))
+    {
+        let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
+        Some(super::anchored::AnchoredSequences {
+            queries: query_records,
+            query_placements: ranges.queries,
+            subject_records,
+            subject_letters,
+            subject_placements: ranges.subjects,
+            shown,
+            show_gis,
+            // The masks of outfmt 0's rows (`pairwise_hits`), half-open in the searched letters.
+            query_masks: query_records
+                .iter()
+                .enumerate()
+                .map(|(q_idx, query)| {
+                    if pssm.is_some() {
+                        return Vec::new();
+                    }
+                    let offset = ranges.queries.offset(q_idx) as u32;
+                    encode_tblastn_lookup_query(query.seq(), seg, mask_lowercase)
+                        .seg_masks
+                        .into_iter()
+                        .filter(|&(left, right)| left < right)
+                        .map(|(left, right)| (left as u32 + offset, right as u32 - 1 + offset))
+                        .collect()
+                })
+                .collect(),
+            code: crate::algorithm::tblastx::report::DisplayCode::new(&code),
+        })
+    } else {
+        None
+    };
     // The warnings of each query are written before its report, once, with the first
     // format (`QueryWarnings`); the taxonomy database's messages of XML2 and JSON go to the
     // diagnostics at every format.
@@ -473,11 +606,11 @@ pub(super) fn render(
                 probe.as_mut(),
                 warnings.as_mut(),
             )?,
-            0 => write_pairwise(
+            number @ 0..=4 => write_pairwise(
                 &mut writer,
                 pairwise_hits
                     .as_deref()
-                    .expect("pairwise hits prepared for TBLASTN outfmt 0"),
+                    .expect("pairwise hits prepared for TBLASTN outfmt 0 to 4"),
                 query_records,
                 subject_records,
                 subject_letters,
@@ -495,6 +628,12 @@ pub(super) fn render(
                 probe.as_mut(),
                 warnings.as_mut(),
                 pssm,
+                crate::report::pairwise::PairwiseView::of(
+                    crate::blastinput::app::ReportFormat::from_number(number)
+                        .expect("a format number 0 to 4"),
+                )
+                .expect("a pairwise view of formats 0 to 4"),
+                anchored.as_ref(),
             )?,
             // BLAST XML: one document per run, a header before the first query and a
             // trailer after the last (`blast_xml`).
@@ -1189,6 +1328,10 @@ fn write_pairwise(
     probe: Option<&mut FormatProbe<'_>>,
     warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
     pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
+    // The alignment section: outfmt 0's, or a query-anchored section (outfmt 1 to 4) of the
+    // sequences `anchored`.
+    view: crate::report::pairwise::PairwiseView,
+    anchored: Option<&super::anchored::AnchoredSequences<'_>>,
 ) -> Result<()> {
     ensure!(
         ungapped_karlin.len() == query_records.len() && query_validity.len() == query_records.len(),
@@ -1296,6 +1439,7 @@ fn write_pairwise(
         protein_matrix: scoring.matrix,
         line_length: formatting.line_length(),
         sort: formatting.report_sort(),
+        view,
         ..PairwiseConfig::default()
     };
     write_tblastn_pairwise_report(
@@ -1318,6 +1462,7 @@ fn write_pairwise(
         probe,
         warnings,
         ranges.epilog,
+        anchored.map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
     )?;
     Ok(())
 }
@@ -1753,6 +1898,8 @@ mod tests {
                 None,
                 &Default::default(),
                 None,
+                false,
+                &[],
             )
             .unwrap();
             drop(outputs);

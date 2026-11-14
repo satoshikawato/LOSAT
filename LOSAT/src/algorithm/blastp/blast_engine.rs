@@ -14645,13 +14645,16 @@ fn run_call(
                 &rows,
                 &subject_titles,
                 |s_idx| {
-                    subject_records
-                        .get(s_idx as usize)
-                        .is_some_and(|subject| anchored::subject_is_query_record(record, subject))
+                    subject_records.get(s_idx as usize).is_some_and(|subject| {
+                        crate::report::query_anchored::subject_is_query_record(record, subject)
+                    })
                 },
             )?;
             if aborts {
-                return Err(anchored::aborted_section(record, args.app.name()));
+                return Err(crate::report::query_anchored::aborted_section(
+                    record,
+                    args.app.name(),
+                ));
             }
         }
     }

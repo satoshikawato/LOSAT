@@ -390,7 +390,10 @@ impl TblastnArgs {
         // The organism report's `-out` file is written as NCBI's buffer writes it.
         let tax_report = format == Some(app::ReportFormat::TaxFormat);
         let mut stream = report_stream(&args, &io, tax_report)?;
-        let pairwise = format == Some(app::ReportFormat::Pairwise);
+        // Outfmt 0 to 4: the pairwise report (`report::pairwise::PairwiseView`).
+        let pairwise = format
+            .and_then(crate::report::pairwise::PairwiseView::of)
+            .is_some();
         // The format as the reports read it: the number and the custom fields, or the value as
         // given when it has a delimiter, which `normalized` drops and the custom tabular report
         // reads (`tabular::tabular_spec`, which parses it again as NCBI does).
@@ -1262,7 +1265,8 @@ fn write_first_batch_prologs(
         None => subject_letters.lengths().sum(),
     };
     for format in outputs.formats.iter_mut() {
-        if crate::blastinput::app::parse_formatting_string(format.outfmt)?.number == 0 {
+        if (0..=4).contains(&crate::blastinput::app::parse_formatting_string(format.outfmt)?.number)
+        {
             let mut writer = format.sink.open()?;
             crate::report::pairwise::write_tblastn_pairwise_prolog(
                 &mut writer,
@@ -2305,10 +2309,11 @@ fn search(
                     .and_then(crate::api::local_blast::FormatOutput::report_format);
                 let places_reads = first_report
                     .is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
-                // The pairwise report reads its subjects in the order of its `-sorthits`.
-                let pairwise = (first_report
-                    == Some(crate::blastinput::app::ReportFormat::Pairwise))
-                .then(|| resolved.formatting.report_sort());
+                // The pairwise report (outfmt 0 to 4) reads its subjects in the order of its
+                // `-sorthits`.
+                let pairwise = first_report
+                    .and_then(crate::report::pairwise::PairwiseView::of)
+                    .map(|view| view.report_sort(resolved.formatting.report_sort()));
                 let plural_names = taxdb_found
                     && first_spec
                         .as_ref()
@@ -2455,7 +2460,9 @@ fn search(
                     .map(|record| (record.believed(), record.title.as_slice())),
                 args.show_gis,
                 false,
-                crate::blastinput::app::parse_formatting_string(&args.outfmt)?.number == 0,
+                (0..=4).contains(
+                    &crate::blastinput::app::parse_formatting_string(&args.outfmt)?.number,
+                ),
                 "TBLASTN",
             )?
         } else {
@@ -2550,6 +2557,12 @@ fn search(
             archive_render.as_ref(),
             &tabular_inputs,
             pssm.as_deref(),
+            args.show_gis,
+            &batches
+                .starts
+                .iter()
+                .map(|&(_, searched)| searched)
+                .collect::<Vec<_>>(),
         )?;
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);
         // The failed batch's reading messages (its search strategy request was written before its
@@ -2597,7 +2610,7 @@ fn parsed_shown(
         .iter()
         .map(|format| super::stage_e_report::format_number(format.outfmt))
         .collect();
-    let pairwise = numbers.contains(&0);
+    let pairwise = numbers.iter().any(|number| (0..=4).contains(number));
     crate::algorithm::common::database::ParsedShown {
         tabular: formats.iter().any(|format| {
             matches!(

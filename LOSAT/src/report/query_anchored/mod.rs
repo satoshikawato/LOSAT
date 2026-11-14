@@ -29,11 +29,14 @@
 //!     }
 //! ```
 //!
-//! Line RG T3a writes what BLASTP's Seq-aligns reach: Dense-segs of two rows of width 1 without
-//! strands, all in NCBI's first frame group. The frame groups of a translated query
-//! (`For reading frame ...`, `s_GetStdsegMasterFrame`), the minus strands, the rows of width 3,
-//! Dense-diags and `fForceTranslation` (TBLASTX) are not written here (line RG T3b and T3c): the
-//! input (`Segment`) has no strand and no width.
+//! What BLASTP's, BLASTN's and TBLASTN's Seq-aligns reach (lines RG T3a and T3b), all in NCBI's
+//! first frame group: Dense-segs of two rows (BLASTN's minus-strand HSPs with the query on the
+//! minus strand; the Dense-diag of an ungapped BLASTN HSP, `CreateDensegFromDendiag`, is the
+//! Dense-seg of its one segment), and TBLASTN's Std-segs as `CreateDensegFromStdseg` makes them
+//! (a protein query row of width 1, a nucleotide subject row of width 3 in its frame). The frame
+//! groups of a translated query (`For reading frame ...`, `s_GetStdsegMasterFrame`),
+//! `fNegativeStrand` and `fForceTranslation` (BLASTX, TBLASTX: line RG T3c) are not written here:
+//! the input (`Hsps`) has no query strand and no query width.
 
 mod aln_mix;
 mod aln_vec;
@@ -61,19 +64,41 @@ pub(crate) struct Segment {
     pub(crate) len: u32,
 }
 
+/// One HSP of a section (`Hsps::iter`): its subject's key, its Dense-seg's segments, and whether
+/// its rows are on different strands (`m_StrandsDiffer`: a minus-strand BLASTN HSP, whose query
+/// row is on the minus strand, or a TBLASTN HSP in a minus frame).
+#[derive(Clone, Copy)]
+pub(crate) struct Hsp<'a> {
+    pub(crate) subject: u32,
+    pub(crate) segments: &'a [Segment],
+    pub(crate) strands_differ: bool,
+}
+
 /// The HSPs of one query's section in the order of its Seq-align set after the sort and the
 /// prune of the report (`PruneSeqalign`): each with its subject's key and its segments.
 #[derive(Default)]
 pub(crate) struct Hsps {
     segments: Vec<Segment>,
-    /// Each HSP's subject and the end of its segments in `segments`.
-    hsps: Vec<(u32, usize)>,
+    /// Each HSP's subject, the end of its segments in `segments` and `Hsp::strands_differ`.
+    hsps: Vec<(u32, usize, bool)>,
     /// The subject that is the query's own Bioseq (one record read as the query and as a subject
     /// with `-parse_deflines`), which `CAlnMix::Add` keeps on its own row (`fPreserveRows`).
     query_bioseq: Option<u32>,
+    /// The query is a protein and the subjects are nucleotides (TBLASTN): the subjects' rows have
+    /// a width of 3, their starts are nucleotides and the segments' lengths residues.
+    translated_subjects: bool,
 }
 
 impl Hsps {
+    /// The HSPs of a section whose subjects are nucleotides translated against a protein query
+    /// (`translated_subjects`).
+    pub(crate) fn of_translated_subjects() -> Self {
+        Self {
+            translated_subjects: true,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.hsps.is_empty()
     }
@@ -81,7 +106,8 @@ impl Hsps {
     /// Adds an HSP of subject `subject`, its Dense-seg's `starts` (two per segment, the query's
     /// then the subject's, `-1` for a gap, `report::serial::seqalign::Segments::starts`) and
     /// `lens`, each start moved by `query_offset` and `subject_offset` (the remaps of the
-    /// ranges, `RemapToQueryLoc` and `s_RemapToSubjectLoc`).
+    /// ranges, `RemapToQueryLoc` and `s_RemapToSubjectLoc`), and `strands_differ`
+    /// (`Hsp::strands_differ`).
     pub(crate) fn push_dense_seg(
         &mut self,
         subject: u32,
@@ -89,6 +115,7 @@ impl Hsps {
         lens: &[i32],
         query_offset: u32,
         subject_offset: u32,
+        strands_differ: bool,
     ) {
         let position = |start: i32, offset: u32| (start >= 0).then(|| start as u32 + offset);
         self.segments.extend(
@@ -101,7 +128,8 @@ impl Hsps {
                     len: len as u32,
                 }),
         );
-        self.hsps.push((subject, self.segments.len()));
+        self.hsps
+            .push((subject, self.segments.len(), strands_differ));
     }
 
     /// Marks subject `subject` as the query's own Bioseq (`query_bioseq`).
@@ -109,31 +137,49 @@ impl Hsps {
         self.query_bioseq = Some(subject);
     }
 
-    /// Each HSP's subject and segments, in order.
-    fn iter(&self) -> impl Iterator<Item = (u32, &[Segment])> {
+    /// The HSPs, in order.
+    fn iter(&self) -> impl Iterator<Item = Hsp<'_>> {
         let mut start = 0;
-        self.hsps.iter().map(move |&(subject, end)| {
-            let segments = &self.segments[start..end];
-            start = end;
-            (subject, segments)
-        })
+        self.hsps
+            .iter()
+            .map(move |&(subject, end, strands_differ)| {
+                let segments = &self.segments[start..end];
+                start = end;
+                Hsp {
+                    subject,
+                    segments,
+                    strands_differ,
+                }
+            })
     }
 }
 
 /// The merged Dense-seg of a section (`x_CreateDenseg`): the sequence of each row (the query
 /// first), each segment's length and each segment's starts (`starts[segment * rows + row]`, `-1`
-/// where the row has no letters).
+/// where the row has no letters), each row's strand (`plus`) and, in a section of translated
+/// subjects, each row's width (`widths`, empty otherwise: 1).
 pub(crate) struct Denseg {
     ids: Vec<SeqKey>,
     lens: Vec<u32>,
     starts: Vec<i32>,
+    plus: Vec<bool>,
+    widths: Vec<u32>,
 }
 
 /// What a program gives the section about its sequences.
 pub(crate) trait Sequences {
-    /// Appends the letters `from..=to` (0-based) of `seq` as the report shows them
-    /// (`CAlnVec::GetSeqString`: the Bioseq's IUPAC letters, upper case).
+    /// Appends the letters `from..=to` (0-based, in the records) of `seq`'s plus strand as the
+    /// report reads them (the IUPAC letters of the Bioseq's sequence vector, upper case,
+    /// `CAlnVec::x_GetSeqVector`): residues of a protein, nucleotides of a nucleotide sequence,
+    /// which `aln_vec::AlnMap::seq_string` reverse-complements or translates for a row.
     fn letters(&self, seq: SeqKey, from: u32, to: u32, out: &mut Vec<u8>);
+
+    /// The genetic code of `seq`'s translated rows (`CAlnVec::SetGenCode`: the query's
+    /// `m_MasterGeneticCode` for row 0, the database's `m_SlaveGeneticCode` for the others,
+    /// showalign.cpp:2100-2101); `None` for a sequence that is not translated.
+    fn genetic_code(&self, _seq: SeqKey) -> Option<crate::algorithm::tblastx::report::DisplayCode> {
+        None
+    }
 
     /// Appends the label of `seq`'s rows (`x_FillSeqid` without `eShowBlastStyleId`).
     fn label(&self, seq: SeqKey, out: &mut Vec<u8>);
@@ -155,6 +201,11 @@ pub(crate) trait ReportSequences: Sync {
     fn subject_label(&self, s_idx: u32, out: &mut Vec<u8>);
     fn query_masks(&self, q_idx: usize, out: &mut Vec<(u32, u32)>);
     fn subject_masks(&self, q_idx: usize, s_idx: u32, out: &mut Vec<(u32, u32)>);
+
+    /// The genetic code of the subjects' translated rows (`Sequences::genetic_code`).
+    fn subject_genetic_code(&self) -> Option<crate::algorithm::tblastx::report::DisplayCode> {
+        None
+    }
 }
 
 /// The [`Sequences`] of query `q_idx`'s section, a subject's key being its index.
@@ -182,6 +233,13 @@ impl Sequences for OfQuery<'_> {
         match seq {
             SeqKey::Query => self.sequences.query_masks(self.q_idx, out),
             SeqKey::Subject(s_idx) => self.sequences.subject_masks(self.q_idx, s_idx, out),
+        }
+    }
+
+    fn genetic_code(&self, seq: SeqKey) -> Option<crate::algorithm::tblastx::report::DisplayCode> {
+        match seq {
+            SeqKey::Query => None,
+            SeqKey::Subject(_) => self.sequences.subject_genetic_code(),
         }
     }
 }
@@ -249,6 +307,78 @@ pub(crate) fn fill_seqid(ids: &[crate::seqid::ParsedSeqId], show_gis: bool, out:
     if let Some(best) = crate::seqid::rank::find_best(ids, crate::seqid::rank::text_score) {
         crate::seqid::label::format_label(best, true, out);
     }
+}
+
+/// The label of the rows of a FASTA record read as a query or a `-subject` subject: its Seq-ids
+/// with `-parse_deflines` (`fill_seqid`), else its local id (`Query_N`, `Subject_N`).
+pub(crate) fn record_label(
+    record: &crate::blastinput::fasta_reader::FastaRecord,
+    show_gis: bool,
+    out: &mut Vec<u8>,
+) {
+    match record.believed() {
+        Some(ids) => fill_seqid(&ids.ids, show_gis, out),
+        None => record.seq_id().sam_name(out),
+    }
+}
+
+/// The label of the rows of a database sequence: its parsed Seq-ids
+/// (`ParsedSubject::anchored_label`), else `gnl|BL_ORD_ID|<oid>`, whose label is the tag
+/// (`GetLabel` of a `general` id, `fill_seqid`): its OID in the opened database, not its ordinal id
+/// where a list or an alias range leaves sequences out (`seqdb::Oid`, as
+/// `report::record::SubjectNames::Database`; review 3 of line RG T3a, D2).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2231-2236
+/// ```c++
+///                 if (seqid.Which() == CSeq_id::e_General) {
+///                     CDbtag & dbt = seqid.SetGeneral();
+///
+///                     if (dbt.GetDb() == "BL_ORD_ID") {
+///                         int vol_oid = dbt.GetTag().GetId();
+///                         dbt.SetTag().SetId(m_VolStart + vol_oid);
+/// ```
+pub(crate) fn database_label(
+    parsed: Option<&crate::report::db_subject::ParsedSubject>,
+    oid: crate::seqdb::Oid,
+    out: &mut Vec<u8>,
+) {
+    match parsed {
+        Some(parsed) => parsed.anchored_label(out),
+        None => out.extend_from_slice(oid.get().to_string().as_bytes()),
+    }
+}
+
+/// Whether the `-subject` record `subject` is query `query`'s own record: the query is one record
+/// with a subject (the same definition line and letters, `BelievedIds::shared`), and the subject
+/// has its id (any other subject with the query's id is refused before the reports).
+pub(crate) fn subject_is_query_record(
+    query: &crate::blastinput::fasta_reader::FastaRecord,
+    subject: &crate::blastinput::fasta_reader::FastaRecord,
+) -> bool {
+    match (query.believed(), subject.believed()) {
+        (Some(query), Some(subject)) => query.shared.is_some() && subject.best == query.best,
+        _ => false,
+    }
+}
+
+/// The refusal of a run whose query `record` (one record as a query and as a subject under
+/// `-parse_deflines`) has a query-anchored section that NCBI BLAST+ aborts on (`ncbi_aborts`,
+/// asked by `pairwise::section_aborts`), named as the refusal of its masks in outfmt 0 names it
+/// (`believed::refuse_shared_masks`).
+pub(crate) fn aborted_section(
+    record: &crate::blastinput::fasta_reader::FastaRecord,
+    program: &str,
+) -> anyhow::Error {
+    let mut fasta = Vec::new();
+    if let Some(ids) = record.believed() {
+        crate::seqid::label::fasta(&ids.best, &mut fasta);
+    }
+    anyhow::anyhow!(
+        "the record {} is both a query and a subject under -parse_deflines and NCBI BLAST+ aborts \
+         on its query-anchored alignments (outfmt 1 to 4), whose merge leaves out the subject's \
+         rows; this is not supported by LOSAT's {program}",
+        String::from_utf8_lossy(&fasta)
+    )
 }
 
 /// Formats 1 to 4: `eShowIdentity` (`.` for a letter equal to the query's: 1 and 3) and
@@ -371,7 +501,7 @@ pub(crate) fn write_section<W: Write + ?Sized>(
     if view.anchored {
         map.set_anchor(0).map_err(internal)?;
     }
-    let rows = prepare_rows(&map, line_length, hsps.query_bioseq, sequences);
+    let rows = prepare_rows(&map, line_length, hsps.query_bioseq, sequences)?;
     display_rows(writer, &map, view, line_length, rows, sequences)
 }
 
@@ -402,8 +532,9 @@ struct RowData {
     strings: Vec<aln_vec::RowString>,
     labels: Vec<Vec<u8>>,
     row_rng: Vec<(i64, i64)>,
-    /// `masked_regions`: each row's masks as alignment ranges, by the row's sequence (`masks`).
-    masked: Vec<usize>,
+    /// `masked_regions`: each row's masks as alignment ranges, by the row's sequence (`masks`);
+    /// `None` for a row of width 3, whose frame no mask has (`frame[row]`, `x_OutputSeq`).
+    masked: Vec<Option<usize>>,
     masks: Vec<Vec<(i64, i64)>>,
     max_id_len: usize,
     max_start_len: usize,
@@ -433,6 +564,24 @@ struct RowData {
 ///                                    &insertStart[row], &insertLength[row],
 ///                                    (int)m_LineLen, &seqStarts[row], &seqStops[row]);
 /// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:411-422 (`s_GetFrame`)
+/// ```c++
+///     int frame = 0;
+///     if (strand == eNa_strand_plus) {
+///         frame = (start % 3) + 1;
+///     } else if (strand == eNa_strand_minus) {
+///         frame = -(((int)sp.GetBioseqHandle(id).GetBioseqLength() - start - 1)
+///                   % 3 + 1);
+///
+///     }
+///     return frame;
+/// ```
+/// A row of width 3 has a frame of 1 to 3 or -1 to -3, every other row 0. The masks of the query
+/// and of the subjects have none (`CSeqLocInfo::eFrameNotSet`, 0: blast_aux.cpp:892 for BLASTN's,
+/// the context's frame 0 of a protein query, seqinfosrc_seqvec.cpp:142 and seqinfosrc_seqdb.cpp:
+/// 118 for the subjects'), so `x_OutputSeq` (`locFrame == frame`) shows none on a row of width 3
+/// (a TBLASTN subject's).
+///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1366-1370
 /// ```c++
 ///         //make id
@@ -448,11 +597,8 @@ fn prepare_rows(
     line_length: usize,
     query_bioseq: Option<u32>,
     sequences: &dyn Sequences,
-) -> RowData {
+) -> io::Result<RowData> {
     let num_rows = map.num_rows();
-    let mut letters = |seq: SeqKey, from: u32, to: u32, out: &mut Vec<u8>| {
-        sequences.letters(seq, from, to, out);
-    };
     let mut data = RowData {
         sequence: Vec::with_capacity(num_rows),
         strings: Vec::with_capacity(num_rows),
@@ -469,7 +615,7 @@ fn prepare_rows(
     for row in 0..num_rows {
         let key = map.seq_key(row);
         data.row_rng.push(map.seq_aln_range(row));
-        let mut string = map.whole_aln_seq_string(row, line_length as u32, &mut letters);
+        let mut string = map.whole_aln_seq_string(row, line_length as u32, sequences)?;
         data.sequence.push(std::mem::take(&mut string.buffer));
         data.strings.push(string);
         let mut label = Vec::new();
@@ -478,7 +624,8 @@ fn prepare_rows(
         data.labels.push(label);
         let max_cood = map.seq_start(row).max(map.seq_stop(row));
         data.max_start_len = data.max_start_len.max(max_cood.to_string().len());
-        // The rows of one sequence have one list (`x_FillLocList` of its masks).
+        // The rows of one sequence have one list (`x_FillLocList` of its masks), which only its
+        // rows of frame 0 show.
         let index = *lists.entry(key).or_insert_with(|| {
             intervals.clear();
             sequences.masks(key, &mut intervals);
@@ -486,9 +633,9 @@ fn prepare_rows(
                 .push(fill_loc_list(map, key, query_bioseq, &intervals));
             data.masks.len() - 1
         });
-        data.masked.push(index);
+        data.masked.push((map.width(row) == 1).then_some(index));
     }
-    data
+    Ok(data)
 }
 
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4291-4338
@@ -520,7 +667,14 @@ fn prepare_rows(
 ///                                                   interval.GetTo(),
 ///                                                   CAlnMap::eBackwards, true);
 ///                 } else {
-///                     ...
+///                     actualAlnStart =
+///                         m_AV->GetAlnPosFromSeqPos(i,
+///                                                   interval.GetTo(),
+///                                                   CAlnMap::eBackwards, true);
+///                     actualAlnStop =
+///                         m_AV->GetAlnPosFromSeqPos(i,
+///                                                   interval.GetFrom(),
+///                                                   CAlnMap::eBackwards, true);
 ///                 }
 ///                 alnloc->aln_range.Set(actualAlnStart, actualAlnStop);
 ///                 has_valid_loc = true;
@@ -534,9 +688,10 @@ fn prepare_rows(
 ///     }
 /// }
 /// ```
-/// A mask goes to the columns of the first row of its sequence whose letters it meets, and
-/// `x_OutputSeq` puts those columns in lower case in every row of that sequence: a subject's mask
-/// spreads to the same columns of its other HSPs' rows (PD-LOSAT-NCBI-DEFECTS rule 2, DECISIONS
+/// A mask goes to the columns of the first row of its sequence whose letters it meets (on a
+/// minus-strand row its end is the first column), and `x_OutputSeq` puts those columns in lower
+/// case in every row of that sequence of frame 0: a subject's mask spreads to the same columns of
+/// its other HSPs' rows, also of the other strand (PD-LOSAT-NCBI-DEFECTS rule 2, DECISIONS
 /// T3-6). The rows of a subject that is the query's own Bioseq (`query_bioseq`) have the query's
 /// id, so the query's row, the first, takes its masks.
 fn fill_loc_list(
@@ -556,9 +711,14 @@ fn fill_loc_list(
     for &(from, to) in masks {
         for row in 0..map.num_rows() {
             if own(map.seq_key(row)) && map.seq_start(row) <= to && from <= map.seq_stop(row) {
+                let (first, last) = if map.is_positive_strand(row) {
+                    (from, to)
+                } else {
+                    (to, from)
+                };
                 list.push((
-                    i64::from(map.aln_pos_from_seq_pos(row, from)),
-                    i64::from(map.aln_pos_from_seq_pos(row, to)),
+                    i64::from(map.aln_pos_from_seq_pos(row, first)),
+                    i64::from(map.aln_pos_from_seq_pos(row, last)),
                 ));
                 break;
             }
@@ -822,7 +982,7 @@ fn display_sequence_line(
         &rows.sequence[row],
         j as usize,
         actual_line_len,
-        &rows.masks[rows.masked[row]],
+        rows.masked[row].map_or(&[][..], |index| &rows.masks[index]),
     );
     add_space(out, 2);
     if !empty {
@@ -859,7 +1019,8 @@ fn display_sequence_line(
 ///                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
 ///                     }
 /// ```
-/// (The row's masks are those of its own sequence, all of frame 0, as is the row.)
+/// (The row's masks are those of its own sequence, all of frame 0: none on a row of width 3,
+/// `prepare_rows`.)
 fn output_seq(out: &mut Vec<u8>, sequence: &[u8], start: usize, len: usize, masks: &[(i64, i64)]) {
     let end = (start + len).min(sequence.len());
     let first = out.len();
@@ -980,7 +1141,8 @@ fn display_inserts(
     }
     let mut inserts = Vec::new();
     do_fills(
-        map.seq_key(row),
+        map,
+        row,
         actual_line_len,
         aln_start,
         insert_list,
@@ -1083,9 +1245,12 @@ fn column(line: &mut [u8], index: i64) -> io::Result<Option<&mut u8>> {
 ///
 /// }
 /// ```
-/// (The recursion as a loop.) The letters of an insertion are not masked.
+/// (The recursion as a loop.) The letters of an insertion are not masked; they are the row's
+/// (`GetSeqString`: reverse-complemented on a minus-strand row, translated on a row of width 3,
+/// whose insertion's length is in nucleotides).
 fn do_fills(
-    key: SeqKey,
+    map: &AlnMap<'_>,
+    row: usize,
     aln_range_len: usize,
     aln_start: i64,
     mut insert_list: Vec<Insert>,
@@ -1107,7 +1272,7 @@ fn do_fills(
             if is_first_insert || cur_insert_aln_start - prvs_insert_aln_end >= 1 {
                 new_insert.clear();
                 let seq_end = insert.seq_start + insert.insert_len - 1;
-                sequences.letters(key, insert.seq_start, seq_end, &mut new_insert);
+                map.seq_string(row, insert.seq_start, seq_end, sequences, &mut new_insert)?;
                 prvs_insert_aln_end =
                     adjust_insert(&mut seq, &new_insert, cur_insert_aln_start, aln_start);
                 is_first_insert = false;
@@ -1203,3 +1368,5 @@ fn adjust_insert(
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_t3b;

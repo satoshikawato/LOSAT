@@ -574,7 +574,7 @@ fn check(
                 .iter()
                 .map(|subject| subject.subject_tabular_id(false).ok().map(Arc::from))
                 .collect();
-            let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
+            let pairwise = output_formats.iter().any(|format| format.is_pairwise());
             let titles = pairwise.then(|| prepared.records.iter().map(record_title).collect());
             // The records as read with `-subject_loc` (never packed), else the searched ones.
             let masks = (pairwise && args.lcase_masking).then(|| {

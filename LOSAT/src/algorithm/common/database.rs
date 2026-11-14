@@ -1986,6 +1986,86 @@ pub(crate) fn refuse_display_id_of_a_query(
     ))
 }
 
+/// Outfmt 1 to 4 of queries read without `-parse_deflines` (line RG T3a, review 2 D2): LOSAT's
+/// refusal of a reported database sequence `subject` whose Seq-align id is the generated id
+/// (`lcl|Query_N`) of a query of the batch that reports it (`scope`, `QueryScope::of_generated_ids`,
+/// as NCBI's scope finds an id: the keys of `refuse_id_of_a_query`). NCBI's formatter adds the
+/// batch's queries to its scope before their reports and empties it after them and finds such a
+/// subject there: its reports show the query's title and letters in the subject's place, and the
+/// query-anchored merge of the query's own Bioseq can abort (`double free or corruption`). NCBI's
+/// display of such a sequence in outfmt 0, 6 and 7 is line RG item X7's.
+pub(crate) fn refuse_generated_query_id(
+    subject: &crate::report::db_subject::ParsedSubject,
+    oid: crate::seqdb::Oid,
+    scope: &crate::blastinput::query_batch::QueryScope,
+    program: &str,
+) -> Result<()> {
+    if !scope.has_key(&subject.query_scope_keys().own) {
+        return Ok(());
+    }
+    Err(parsed_refusal(
+        oid,
+        &format!(
+            "has the Seq-id {}, the id of a query read without -parse_deflines in the query batch \
+             that reports it: NCBI BLAST+ shows that query in its place in the query-anchored \
+             formats (outfmt 1 to 4)",
+            String::from_utf8_lossy(&subject.alignment_fasta())
+        ),
+        program,
+    ))
+}
+
+/// The query-anchored formats (outfmt 1 to 4) of a program whose reports name a database's
+/// sequences by rank (BLASTN, TBLASTN: line RG T3b; BLASTP's `ListedTitles` asks the same
+/// refusals): for each query `0..num_queries`, the sequences of its final hit list (`reported`,
+/// by rank) with parsed Seq-ids (`parsed`, by rank; `oid_of` a rank's OID), with the scope of the
+/// query's batch (`scope_of`): queries read without `-parse_deflines` (`generated`, their
+/// `lcl|Query_N`): `refuse_generated_query_id` of each; then, for a query that reports a sequence
+/// whose display id its scope has (`QueryScopeKeys::display`), `refuse_display_id_of_a_query` of
+/// each sequence whose description line its report shows (`described`, by rank: the description
+/// line looks the title up again by that id and NCBI shows the query's title there). A query read
+/// with `-parse_deflines` whose id a reported sequence has as its Seq-align id is refused in every
+/// format by `refuse_reported_ids_of_queries` (line RG X7).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn refuse_query_ids_of_anchored_reports<'s>(
+    num_queries: usize,
+    mut reported: impl FnMut(usize) -> Vec<u32>,
+    mut described: impl FnMut(usize) -> Result<Vec<u32>>,
+    parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
+    oid_of: impl Fn(u32) -> crate::seqdb::Oid,
+    scope_of: impl Fn(usize) -> &'s crate::blastinput::query_batch::QueryScope,
+    generated: bool,
+    program: &str,
+) -> Result<()> {
+    if parsed.is_empty() {
+        return Ok(());
+    }
+    let parsed_of = |rank: u32| parsed.get(rank as usize).and_then(Option::as_deref);
+    for query in 0..num_queries {
+        let scope = scope_of(query);
+        let ranks = reported(query);
+        if generated {
+            for &rank in &ranks {
+                if let Some(subject) = parsed_of(rank) {
+                    refuse_generated_query_id(subject, oid_of(rank), scope, program)?;
+                }
+            }
+        }
+        if !ranks.iter().any(|&rank| {
+            parsed_of(rank)
+                .is_some_and(|subject| scope.has_key(&subject.query_scope_keys().display))
+        }) {
+            continue;
+        }
+        for rank in described(query)? {
+            if let Some(subject) = parsed_of(rank) {
+                refuse_display_id_of_a_query(subject, oid_of(rank), scope, generated, program)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// `refuse_id_of_a_query` of each reported sequence of `reported` (a searched query, by its index
 /// in `scopes`, and a sequence that its report names, by ordinal id; `oids` the database's OIDs)
 /// whose header `titles` holds with parsed Seq-ids, with the scope of that query. A program calls it for each query batch

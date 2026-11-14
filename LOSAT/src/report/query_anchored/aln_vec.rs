@@ -5,10 +5,12 @@
 //! `GetAlnPosFromSeqPos` with `eBackwards` and `try_reverse_dir` (the masks, `x_FillLocList`)
 //! and `GetWholeAlnSeqString` with its insertions and per-line coordinates.
 //!
-//! Every row is a plus-strand row of width 1 (`aln_mix` module doc): the minus-strand halves of
-//! these functions (`plus ? ... : ...`, `last - cur`) and `TranslateNAToAA` are not ported.
+//! A row is on the plus or the minus strand and has a width of 1, or of 3 (a TBLASTN subject's
+//! nucleotides, translated: `GetSeqString`, `TranslateNAToAA`); `aln_mix` module doc.
 
-use super::{Denseg, SeqKey};
+use std::io;
+
+use super::{internal, Denseg, SeqKey, Sequences};
 
 /// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnmap.hpp:220-233
 /// ```c++
@@ -174,6 +176,53 @@ impl<'d> AlnMap<'d> {
         self.ds.ids[row]
     }
 
+    // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnmap.hpp:559-581,599-603
+    // ```c++
+    // inline
+    // int CAlnMap::GetWidth(TNumrow row) const
+    // {
+    //     if ( !m_Widths.empty() ) {
+    //         _ASSERT(m_Widths.size() == (size_t) m_NumRows);
+    //         return m_Widths[row];
+    //     } else {
+    //         return 1;
+    //     }
+    // }
+    //
+    // inline
+    // TSeqPos CAlnMap::x_GetLen(TNumrow row, TNumseg seg) const
+    // {
+    //     /// Optimization for return m_Lens[seg] * GetWidth(row);
+    //     if (GetWidth(row) != 1) {
+    //         _ASSERT(GetWidth(row) == 3);
+    //         TSeqPos len = m_Lens[seg];
+    //         return len + len + len;
+    //     } else {
+    //         return m_Lens[seg];
+    //     }
+    // }
+    // ...
+    // inline
+    // bool CAlnMap::IsPositiveStrand(TNumrow row) const
+    // {
+    //     return (m_Strands.empty()  ||  m_Strands[row] != eNa_strand_minus);
+    // }
+    // ```
+    /// `GetWidth`.
+    pub(crate) fn width(&self, row: usize) -> u32 {
+        self.ds.widths.get(row).copied().unwrap_or(1)
+    }
+
+    /// `IsPositiveStrand`.
+    pub(crate) fn is_positive_strand(&self, row: usize) -> bool {
+        self.ds.plus[row]
+    }
+
+    /// `x_GetLen`: segment `seg`'s length in the row's letters.
+    fn x_get_len(&self, row: usize, seg: usize) -> u32 {
+        self.ds.lens[seg].wrapping_mul(self.width(row))
+    }
+
     /// `GetNumSegs`.
     fn aln_num_segs(&self) -> usize {
         if self.anchor.is_some() {
@@ -261,16 +310,25 @@ impl<'d> AlnMap<'d> {
     //     return m_Starts[seg * m_NumRows + row] + x_GetLen(row, seg) - 1;
     // }
     // ```
-    /// `GetSeqStart` (the row's first position).
+    /// `GetSeqStart` (the row's lowest position).
     pub(crate) fn seq_start(&self, row: usize) -> u32 {
-        self.raw_start(row, self.left_segs[row]) as u32
+        let seg = if self.is_positive_strand(row) {
+            self.left_segs[row]
+        } else {
+            self.right_segs[row]
+        };
+        self.raw_start(row, seg) as u32
     }
 
-    /// `GetSeqStop` (the row's last position).
+    /// `GetSeqStop` (the row's highest position).
     pub(crate) fn seq_stop(&self, row: usize) -> u32 {
-        let seg = self.right_segs[row];
+        let seg = if self.is_positive_strand(row) {
+            self.right_segs[row]
+        } else {
+            self.left_segs[row]
+        };
         (self.raw_start(row, seg) as u32)
-            .wrapping_add(self.ds.lens[seg])
+            .wrapping_add(self.x_get_len(row, seg))
             .wrapping_sub(1)
     }
 
@@ -328,10 +386,14 @@ impl<'d> AlnMap<'d> {
         }
     }
 
-    /// `GetRawSeg(row, seq_pos, eBackwards, true)` of a plus-strand row.
+    /// `GetRawSeg(row, seq_pos, eBackwards, true)`: on a minus-strand row the segments are searched
+    /// from the last (`last - cur`), whose positions are the lowest.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:400-524
     /// ```c++
+    /// CAlnMap::GetRawSeg(TNumrow row, TSeqPos seq_pos,
+    ///                    ESearchDirection dir, bool try_reverse_dir) const
+    /// {
     ///     TSignedSeqPos start = -1, sseq_pos = seq_pos;
     ///     TNumseg       btm, top, mid, cur, last, cur_top, cur_btm;
     ///     btm = cur_btm = 0; cur = top = last = cur_top = m_NumSegs - 1;
@@ -354,7 +416,12 @@ impl<'d> AlnMap<'d> {
     ///                     }
     ///                 }
     ///             } else {
-    ///                 ...
+    ///                 seg = m_NumSegs;
+    ///                 while (seg--) {
+    ///                     if (m_Starts[seg * m_NumRows + row] >= 0) {
+    ///                         return seg;
+    ///                     }
+    ///                 }
     ///             }
     ///         }
     ///     } else if (sseq_pos > (TSignedSeqPos)GetSeqStop(row)) {
@@ -372,7 +439,12 @@ impl<'d> AlnMap<'d> {
     ///                     }
     ///                 }
     ///             } else {
-    ///                 ...
+    ///                 seg = -1;
+    ///                 while (++seg < m_NumSegs) {
+    ///                     if (m_Starts[seg * m_NumRows + row] >= 0) {
+    ///                         return seg;
+    ///                     }
+    ///                 }
     ///             }
     ///         }
     ///     }
@@ -443,36 +515,49 @@ impl<'d> AlnMap<'d> {
     ///     }
     ///
     ///     return -1;
+    /// }
     /// ```
     fn raw_seg_backwards(&self, row: usize, seq_pos: u32) -> usize {
         let sseq_pos = seq_pos as i32;
+        let plus = self.is_positive_strand(row);
         let present = |seg: i64| self.raw_start(row, seg as usize) >= 0;
         let num_segs = self.num_segs as i64;
+        let last = num_segs - 1;
+        let index = |cur: i64| if plus { cur } else { last - cur };
         if sseq_pos < self.seq_start(row) as i32 {
-            if let Some(seg) = (0..num_segs).find(|&seg| present(seg)) {
+            let found = if plus {
+                (0..num_segs).find(|&seg| present(seg))
+            } else {
+                (0..num_segs).rev().find(|&seg| present(seg))
+            };
+            if let Some(seg) = found {
                 return seg as usize;
             }
         } else if sseq_pos > self.seq_stop(row) as i32 {
-            if let Some(seg) = (0..num_segs).rev().find(|&seg| present(seg)) {
+            let found = if plus {
+                (0..num_segs).rev().find(|&seg| present(seg))
+            } else {
+                (0..num_segs).find(|&seg| present(seg))
+            };
+            if let Some(seg) = found {
                 return seg as usize;
             }
         }
-        let (mut btm, mut top, mut cur_btm) = (0i64, num_segs - 1, 0i64);
+        let (mut btm, mut top, mut cur_btm) = (0i64, last, 0i64);
         while btm <= top {
             let mid = (top + btm) / 2;
             let mut cur = mid;
             let mut start = -1;
             while cur <= top && {
-                start = self.raw_start(row, cur as usize);
+                start = self.raw_start(row, index(cur) as usize);
                 start < 0
             } {
                 cur += 1;
             }
             if cur <= top && start >= 0 {
-                if sseq_pos >= start
-                    && i64::from(seq_pos) < i64::from(start) + i64::from(self.ds.lens[cur as usize])
-                {
-                    return cur as usize;
+                let len = self.x_get_len(row, index(cur) as usize);
+                if sseq_pos >= start && i64::from(seq_pos) < i64::from(start) + i64::from(len) {
+                    return index(cur) as usize;
                 }
                 if sseq_pos > start {
                     btm = cur + 1;
@@ -484,16 +569,15 @@ impl<'d> AlnMap<'d> {
             }
             cur = mid - 1;
             while cur >= btm && {
-                start = self.raw_start(row, cur as usize);
+                start = self.raw_start(row, index(cur) as usize);
                 start < 0
             } {
                 cur -= 1;
             }
             if cur >= btm && start >= 0 {
-                if sseq_pos >= start
-                    && i64::from(seq_pos) < i64::from(start) + i64::from(self.ds.lens[cur as usize])
-                {
-                    return cur as usize;
+                let len = self.x_get_len(row, index(cur) as usize);
+                if sseq_pos >= start && i64::from(seq_pos) < i64::from(start) + i64::from(len) {
+                    return index(cur) as usize;
                 }
                 if sseq_pos > start {
                     btm = mid + 1;
@@ -503,15 +587,21 @@ impl<'d> AlnMap<'d> {
                 }
                 continue;
             }
-            return cur_btm as usize;
+            return index(cur_btm) as usize;
         }
-        cur_btm as usize
+        index(cur_btm) as usize
     }
 
-    /// `GetAlnPosFromSeqPos(row, seq_pos, eBackwards, true)` of a plus-strand row.
+    /// `GetAlnPosFromSeqPos(row, seq_pos, eBackwards, true)`. Within an insertion a plus-strand
+    /// row takes the column on its left, a minus-strand row (`eBackwards` is its `eForward`) the
+    /// column on its right.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:527-594
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:527-596
     /// ```c++
+    /// TSignedSeqPos CAlnMap::GetAlnPosFromSeqPos(TNumrow row, TSeqPos seq_pos,
+    ///                                            ESearchDirection dir,
+    ///                                            bool try_reverse_dir) const
+    /// {
     ///     TNumseg raw_seg = GetRawSeg(row, seq_pos, dir, try_reverse_dir);
     ///     if (raw_seg < 0) { // out of seq range
     ///         return -1;
@@ -525,7 +615,10 @@ impl<'d> AlnMap<'d> {
     ///     CNumSegWithOffset seg = x_GetSegFromRawSeg(raw_seg);
     ///
     ///     if (dir == eNone) {
-    ///         ...
+    ///         if (seg.GetOffset()) {
+    ///             // seq_pos is within an insert
+    ///             return -1;
+    ///         }
     ///     } else {
     ///         // check if within unaligned region
     ///         // if seq_pos outside the segment returned by GetRawSeg
@@ -542,7 +635,16 @@ impl<'d> AlnMap<'d> {
     ///         if (seg.GetOffset()  &&
     ///             (dir == eRight  ||
     ///              dir == (plus ? eForward : eBackwards))) {
-    ///             ...
+    ///
+    ///             // seek the nearest alnpos on the right
+    ///             if (seg.GetAlnSeg() < GetNumSegs() - 1) {
+    ///                 return GetAlnStart(seg.GetAlnSeg() + 1);
+    ///             } else if (try_reverse_dir) {
+    ///                 return GetAlnStop(seg.GetAlnSeg());
+    ///             } else {
+    ///                 return -1;
+    ///             }
+    ///
     ///         }
     ///         if (seg.GetOffset()  &&
     ///             (dir == eLeft  ||
@@ -565,11 +667,15 @@ impl<'d> AlnMap<'d> {
     ///     TSeqPos delta = (seq_pos - start) / GetWidth(row);
     ///     return m_AlnStarts[seg.GetAlnSeg()]
     ///         + (plus ? delta : m_Lens[raw_seg] - 1 - delta);
+    /// }
     /// ```
     pub(crate) fn aln_pos_from_seq_pos(&self, row: usize, seq_pos: u32) -> i32 {
         let raw_seg = self.raw_seg_backwards(row, seq_pos);
         let start = self.raw_start(row, raw_seg) as u32;
-        let stop = start.wrapping_add(self.ds.lens[raw_seg]).wrapping_sub(1);
+        let stop = start
+            .wrapping_add(self.x_get_len(row, raw_seg))
+            .wrapping_sub(1);
+        let plus = self.is_positive_strand(row);
         let seg = self.seg_from_raw_seg(raw_seg);
         let edge = |aln_seg: i32, stop: bool| -> i32 {
             let aln_seg = aln_seg as usize;
@@ -579,25 +685,46 @@ impl<'d> AlnMap<'d> {
                 self.aln_start(aln_seg)
             }) as i32
         };
-        if seq_pos < start {
+        if if plus {
+            seq_pos < start
+        } else {
+            seq_pos > stop
+        } {
             return edge(seg.aln_seg, false);
         }
-        if seq_pos > stop {
+        if if plus {
+            seq_pos > stop
+        } else {
+            seq_pos < start
+        } {
             return edge(seg.aln_seg, true);
         }
-        if seg.offset != 0 {
+        if seg.offset != 0 && !plus {
+            return if (seg.aln_seg as i64) < self.aln_num_segs() as i64 - 1 {
+                edge(seg.aln_seg + 1, false)
+            } else {
+                edge(seg.aln_seg, true)
+            };
+        }
+        if seg.offset != 0 && plus {
             return if seg.aln_seg >= 0 {
                 edge(seg.aln_seg, true)
             } else {
                 edge(seg.aln_seg + 1, false)
             };
         }
-        self.aln_starts[seg.aln_seg as usize].wrapping_add(seq_pos - start) as i32
+        let delta = (seq_pos - start) / self.width(row);
+        let delta = if plus {
+            delta
+        } else {
+            self.ds.lens[raw_seg] - 1 - delta
+        };
+        self.aln_starts[seg.aln_seg as usize].wrapping_add(delta) as i32
     }
 
     /// `GetWholeAlnSeqString(row, buffer, &insert_aln_starts, &insert_starts, &insert_lens,
-    /// scrn_width, &scrn_lefts, &scrn_rights)` of a plus-strand row of width 1, the letters read
-    /// by `letters` (`GetSeqString`). The gap character is `-` and the end character a space
+    /// scrn_width, &scrn_lefts, &scrn_rights)`, the letters read by `seq_string`
+    /// (`GetSeqString`). The gap character is `-` and the end character a space
     /// (`x_PrepareRowData`, showalign.cpp:1209-1215).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:199-405
@@ -796,13 +923,14 @@ impl<'d> AlnMap<'d> {
     ///     return buffer;
     /// ```
     /// (The arithmetic is that of NCBI's types: `TSeqPos` (`u32`) wraps, `TSignedSeqPos` and
-    /// `int` are `i32`, and a quotient stored in an `int` is cut to 32 bits.)
+    /// `int` are `i32`, and a quotient stored in an `int` is cut to 32 bits.) A row of width 3 counts
+    /// its alignment positions and screens in its nucleotides (`scrn_width *= width`).
     pub(crate) fn whole_aln_seq_string(
         &self,
         row: usize,
         scrn_width: u32,
-        letters: &mut dyn FnMut(SeqKey, u32, u32, &mut Vec<u8>),
-    ) -> RowString {
+        sequences: &dyn Sequences,
+    ) -> io::Result<RowString> {
         let mut out = RowString {
             buffer: Vec::new(),
             inserts: std::collections::VecDeque::new(),
@@ -812,12 +940,12 @@ impl<'d> AlnMap<'d> {
         let (mut aln_pos, mut scrn_pos, mut prev_len, mut ttl_len) = (0u32, 0u32, 0u32, 0u32);
         let (mut scrn_lft_seq_pos, mut scrn_rgt_seq_pos) = (-1i32, -1i32);
         let (mut prev_aln_pos, mut prev_start) = (-1i32, -1i32);
-        let width = 1u32;
+        let plus = self.is_positive_strand(row);
+        let width = self.width(row);
         let scrn_width = scrn_width.wrapping_mul(width);
         let record_coords = scrn_width != 0;
         out.buffer.reserve(self.aln_stop().wrapping_add(1) as usize);
         let (left_seg, right_seg) = (self.left_segs[row], self.right_segs[row]);
-        let key = self.ds.ids[row];
         let mut buff = Vec::new();
         for seg in 0..self.num_segs {
             let seg_len = self.ds.lens[seg];
@@ -828,11 +956,18 @@ impl<'d> AlnMap<'d> {
                 .is_some_and(|anchor| self.raw_start(anchor, seg) < 0)
             {
                 if start >= 0 {
-                    if prev_aln_pos == (aln_pos / width) as i32
-                        && start == prev_start.wrapping_add(prev_len as i32)
-                    {
+                    let adjacent = if plus {
+                        prev_start.wrapping_add(prev_len as i32)
+                    } else {
+                        prev_start.wrapping_sub(len as i32)
+                    };
+                    if prev_aln_pos == (aln_pos / width) as i32 && start == adjacent {
                         ttl_len = ttl_len.wrapping_add(len);
-                        out.inserts.back_mut().expect("the insert before").2 = ttl_len;
+                        let last = out.inserts.back_mut().expect("the insert before");
+                        last.2 = ttl_len;
+                        if !plus {
+                            last.1 = start as u32;
+                        }
                     } else {
                         prev_aln_pos = (aln_pos / width) as i32;
                         ttl_len = len;
@@ -847,7 +982,7 @@ impl<'d> AlnMap<'d> {
             if start >= 0 {
                 let stop = start.wrapping_add(len as i32).wrapping_sub(1);
                 buff.clear();
-                letters(key, start as u32, stop as u32, &mut buff);
+                self.seq_string(row, start as u32, stop as u32, sequences, &mut buff)?;
                 let buf_len = (buff.len() as u32).min(seg_len);
                 out.buffer.extend_from_slice(&buff);
                 if buf_len < seg_len {
@@ -860,8 +995,9 @@ impl<'d> AlnMap<'d> {
                         .extend(std::iter::repeat_n(fill_ch, (seg_len - buf_len) as usize));
                 }
                 if record_coords {
+                    let near = if plus { start } else { stop };
                     if scrn_lft_seq_pos < 0 {
-                        scrn_lft_seq_pos = start;
+                        scrn_lft_seq_pos = near;
                         if scrn_rgt_seq_pos < 0 {
                             scrn_rgt_seq_pos = scrn_lft_seq_pos;
                         }
@@ -871,28 +1007,38 @@ impl<'d> AlnMap<'d> {
                         out.lefts.push_back(scrn_lft_seq_pos as u32);
                         out.rights.push_back(scrn_rgt_seq_pos as u32);
                         if i == 0 {
-                            scrn_lft_seq_pos = start;
+                            scrn_lft_seq_pos = near;
                         }
                         scrn_pos = scrn_pos.wrapping_add(scrn_width);
                     }
                     if nscrns > 0 {
-                        scrn_lft_seq_pos = start;
+                        scrn_lft_seq_pos = near;
                     }
                     let nscrns =
                         (aln_pos.wrapping_add(len).wrapping_sub(scrn_pos) / scrn_width) as i32;
+                    let step = if plus { -1 } else { 1 };
                     let mut curr_pos = aln_pos;
                     for _ in 0..nscrns {
-                        let delta = scrn_width.wrapping_sub(curr_pos.wrapping_sub(scrn_pos)) as i32;
-                        out.lefts.push_back(scrn_lft_seq_pos as u32);
-                        if scrn_lft_seq_pos < start {
-                            scrn_lft_seq_pos = start.wrapping_add(delta);
-                            scrn_rgt_seq_pos = scrn_lft_seq_pos.wrapping_sub(1);
+                        let delta = if plus {
+                            scrn_width.wrapping_sub(curr_pos.wrapping_sub(scrn_pos))
                         } else {
-                            scrn_rgt_seq_pos = scrn_lft_seq_pos.wrapping_sub(1).wrapping_add(delta);
+                            curr_pos.wrapping_sub(scrn_pos).wrapping_sub(scrn_width)
+                        } as i32;
+                        out.lefts.push_back(scrn_lft_seq_pos as u32);
+                        if if plus {
+                            scrn_lft_seq_pos < start
+                        } else {
+                            scrn_lft_seq_pos > stop
+                        } {
+                            scrn_lft_seq_pos = near.wrapping_add(delta);
+                            scrn_rgt_seq_pos = scrn_lft_seq_pos.wrapping_add(step);
+                        } else {
+                            scrn_rgt_seq_pos =
+                                scrn_lft_seq_pos.wrapping_add(step).wrapping_add(delta);
                             scrn_lft_seq_pos = scrn_lft_seq_pos.wrapping_add(delta);
                         }
                         if seg == left_seg && scrn_lft_seq_pos == scrn_rgt_seq_pos {
-                            scrn_rgt_seq_pos = scrn_rgt_seq_pos.wrapping_sub(1);
+                            scrn_rgt_seq_pos = scrn_rgt_seq_pos.wrapping_add(step);
                         }
                         out.rights.push_back(scrn_rgt_seq_pos as u32);
                         scrn_pos = scrn_pos.wrapping_add(scrn_width);
@@ -901,7 +1047,7 @@ impl<'d> AlnMap<'d> {
                     if aln_pos.wrapping_add(len) <= scrn_pos {
                         scrn_lft_seq_pos = -1;
                     }
-                    scrn_rgt_seq_pos = stop;
+                    scrn_rgt_seq_pos = if plus { stop } else { start };
                 }
             } else {
                 let fill_ch = if seg < left_seg || seg > right_seg {
@@ -931,6 +1077,86 @@ impl<'d> AlnMap<'d> {
                 }
             }
         }
-        out
+        Ok(out)
+    }
+
+    /// `GetSeqString(buffer, row, seq_from, seq_to)`: the letters `seq_from..=seq_to` of the row's
+    /// sequence (`Sequences::letters`, its plus strand), reverse-complemented on a minus-strand row
+    /// (the `eStrand_Minus` sequence vector, `x_GetSeqVector`), translated on a row of width 3
+    /// with the row's genetic code (`Sequences::genetic_code`; `SetGenCode`, showalign.cpp:
+    /// 2100-2101).
+    ///
+    /// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:287-313
+    /// ```c++
+    /// inline
+    /// string& CAlnVec::GetSeqString(string& buffer,
+    ///                               TNumrow row,
+    ///                               TSeqPos seq_from, TSeqPos seq_to) const
+    /// {
+    ///     if (GetWidth(row) == 3) {
+    ///         string buff;
+    ///         buffer.erase();
+    ///         if (IsPositiveStrand(row)) {
+    ///             x_GetSeqVector(row).GetSeqData(seq_from, seq_to + 1, buff);
+    ///         } else {
+    ///             CSeqVector& seq_vec = x_GetSeqVector(row);
+    ///             TSeqPos size = seq_vec.size();
+    ///             seq_vec.GetSeqData(size - seq_to - 1, size - seq_from, buff);
+    ///         }
+    ///         TranslateNAToAA(buff, buffer, GetGenCode(row));
+    ///     } else {
+    ///         if (IsPositiveStrand(row)) {
+    ///             x_GetSeqVector(row).GetSeqData(seq_from, seq_to + 1, buffer);
+    ///         } else {
+    ///             CSeqVector& seq_vec = x_GetSeqVector(row);
+    ///             TSeqPos size = seq_vec.size();
+    ///             seq_vec.GetSeqData(size - seq_to - 1, size - seq_from, buffer);
+    ///         }
+    ///     }
+    ///     return buffer;
+    /// }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:893-904
+    /// ```c++
+    /// void CAlnVec::TranslateNAToAA(const string& na,
+    ///                               string& aa,
+    ///                               int gencode)
+    /// {
+    ///     if (na.size() % 3) {
+    ///         NCBI_THROW(CAlnException, eTranslateFailure,
+    ///                    "CAlnVec::TranslateNAToAA(): "
+    ///                    "NA size expected to be divisible by 3");
+    ///     }
+    /// ```
+    /// (A row's positions lie in its sequence and a row of width 3 has whole codons: the throw is
+    /// an internal error here.)
+    pub(crate) fn seq_string(
+        &self,
+        row: usize,
+        seq_from: u32,
+        seq_to: u32,
+        sequences: &dyn Sequences,
+        out: &mut Vec<u8>,
+    ) -> io::Result<()> {
+        let key = self.ds.ids[row];
+        let plus = self.is_positive_strand(row);
+        if self.width(row) == 3 {
+            let mut nucleotides = Vec::new();
+            sequences.letters(key, seq_from, seq_to, &mut nucleotides);
+            if nucleotides.len() % 3 != 0 {
+                return Err(internal("a translated row's letters are not whole codons"));
+            }
+            let code = sequences
+                .genetic_code(key)
+                .ok_or_else(|| internal("a translated row without a genetic code"))?;
+            code.translate(&nucleotides, !plus, out);
+        } else if plus {
+            sequences.letters(key, seq_from, seq_to, out);
+        } else {
+            let first = out.len();
+            sequences.letters(key, seq_from, seq_to, out);
+            crate::algorithm::blastn::lookup::reverse_complement_in_place(&mut out[first..]);
+        }
+        Ok(())
     }
 }

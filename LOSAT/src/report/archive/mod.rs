@@ -529,25 +529,19 @@ impl ArchiveHandle {
 // 		...
 // 			m_messages.push_back(d);
 // ```
-/// Posts error 803.7 of each byte that NCBI's stream replaced in a document of the run of
+/// Posts error 803.7 of each byte that NCBI's stream replaced in an archive of the run of
 /// `program` (`encoder::ReplacedChar`, with the application's prefix: `SetDiagPostPrefix(
-/// "blastn")`) on `diagnostics`. With the run's archive `archive`, a post of the search strategy
-/// (`saved`) is a message of the batch's archive, as every post while NCBI's handler saves them;
-/// the posts of an archive are not (`ArchiveHandle::write_unsaved`).
+/// "blastn")`) on `diagnostics`, without saving them as messages of the run's archive `archive`:
+/// NCBI's `ResetMessages` after the archive drops them (`ArchiveHandle::write_unsaved`). The
+/// search strategy's posts are saved (`strategy::StrategyExport::take_posts`).
 pub(crate) fn post_replaced(
     diagnostics: &mut dyn Write,
-    archive: Option<&ArchiveHandle>,
-    saved: bool,
+    archive: &ArchiveHandle,
     program: &str,
     replaced: &[crate::report::serial::encoder::ReplacedChar],
 ) -> std::io::Result<()> {
     for byte in replaced {
-        let text = byte.post(Some(program));
-        match archive {
-            Some(handle) if saved => handle.write_post(diagnostics, ERROR, &text)?,
-            Some(handle) => handle.write_unsaved(diagnostics, &text)?,
-            None => diagnostics.write_all(&text)?,
-        }
+        archive.write_unsaved(diagnostics, &byte.post(Some(program)))?;
     }
     Ok(())
 }

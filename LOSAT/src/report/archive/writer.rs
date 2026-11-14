@@ -637,8 +637,7 @@ pub fn write_archive<A: AlignSource>(
     let post = |replaced: &ReplacedChar| {
         super::post_replaced(
             diagnostics,
-            Some(handle),
-            false,
+            handle,
             request.program,
             std::slice::from_ref(replaced),
         )?;

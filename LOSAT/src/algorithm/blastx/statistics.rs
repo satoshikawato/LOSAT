@@ -1,11 +1,12 @@
 //! BLASTX HSP statistics; protein-subject lengths remain in amino acids.
 use super::{
     args::ResolvedOptions,
-    linking::{link_parameters, link_uneven, LinkedHsp, LinkedHspList},
+    linking::{link_even, link_parameters, link_uneven, LinkedHsp, LinkedHspList},
     parameters::ContextParameters,
     preliminary::PreliminaryHsp,
     query_setup::PreparedQueryBatch,
 };
+use crate::core::link_hsps::{EvenGapLinkParams, LinkCutoffs};
 use crate::{
     config::{ProteinScoringSpec, ScoringMatrix},
     stats::{lookup_protein_params, spouge::blast_spouge_stoe},
@@ -55,7 +56,7 @@ pub fn evaluate_gapped(
 ) -> Result<LinkedHspList> {
     ensure!(
         options.gapped,
-        "BLASTX even-gap ungapped linking is not implemented"
+        "BLASTX's gapped statistics called for an ungapped search"
     );
     // Speed (graduated 2026-10-27; the switch was `LOSAT_X_BXEVALEMPTY`): a subject without HSPs
     // gets at once the list that both ways below give for no input (`link_uneven`'s first lines,
@@ -488,16 +489,16 @@ pub(crate) fn evaluate_ungapped(
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject_length: i32,
-    prepared: Option<([i32; 2], f64)>,
+    prepared: Option<LinkCutoffs>,
 ) -> Result<LinkedHspList> {
     if let Some(link) = link_parameters(options) {
         if link.longest_intron <= 0 {
-            return Ok(super::even_gap::link_even(
+            return Ok(link_even(
                 input,
                 batch,
                 parameters,
                 subject_length,
-                prepared.expect("per-subject even-gap cutoffs"),
+                &EvenGapLinkParams::ungapped(prepared.expect("per-subject even-gap cutoffs"), true),
             ));
         }
         let lengths: Vec<_> = batch.contexts.iter().map(|c| c.length as i32).collect();

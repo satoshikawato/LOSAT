@@ -1436,3 +1436,229 @@ fn blastx_seg_error_comes_from_the_filtering_handler() {
     }
     fs::remove_dir_all(&dir).unwrap();
 }
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:460-469
+// ```c++
+// inline CArg_Double::CArg_Double(const string& name, const string& value)
+//     : CArg_String(name, value)
+// {
+//     try {
+//         m_Double = NStr::StringToDouble(value, NStr::fDecimalPosixOrLocal);
+// ```
+// NCBI BLAST+ 2.17.0 (swebok-improve-20261105/sw8/nfix/probe/cli): a real argument takes
+// glibc's hexadecimal numbers and NCBI's mantissa with a final `e` (`blastn -evalue`, BLAST XML's
+// `Parameters_expect`); `-threshold`'s constraint reads its value without the final `e` (an
+// error), `-seg` takes hexadecimal cuts, and a PSSM with vertical tabs in a comment is text
+// ASN.1 (psiblast searches it as without them: the frozen `ps.subj.inpssm.tk.6`).
+#[test]
+fn real_arguments_and_pssm_spaces_read_as_ncbis() {
+    let dir = temp_path("ncbi_reals", "dir");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("q.fa"),
+        ">q1\nACGTACGTTAGCTAGCTAGGATCGATCGATGCTAGCTAGCTAGCATCGATCGATCGTAGCTAGCTAGCTAGC\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("s.fa"),
+        ">s1\nTTTTACGTACGTTAGCTAGCTAGGATCGATCGATGCTAGCTAGCTAGCATCGATCGATCGTAGCTAGCTAGCTAGCAAAA\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("pq.faa"),
+        ">p1 test protein\nMKVLAAGIVALLLAAQQQQQQQQQQQQQQQQPPPPPPPPGSGSGSGSGSGSAEDKLMNVWYRTSHCFIPKLEDGHKLMNRSTVWY\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("ps.faa"),
+        ">s1 subject protein\nMKVLAAGIVALLLAAQQQQQQQQQAQQQQQPPPPPPPPGSGSGSGSGAGSAEDKLMNVWYRTSHCFIPKLEDGHKLMNRSTVWYAAAA\n",
+    )
+    .unwrap();
+    let run = |args: &[&str]| {
+        clean_losat_command()
+            .current_dir(&dir)
+            .args(args)
+            .output()
+            .expect("run LOSAT")
+    };
+    let blastn = [
+        "blastn", "-query", "q.fa", "-subject", "s.fa", "-outfmt", "5",
+    ];
+    for (value, expect) in [
+        ("0x10", "16"),
+        ("0x1p-3", "0.125"),
+        ("1e", "1"),
+        ("12345678901234567890e", "1.23456789012346e+19"),
+        ("0.0000000000000001e", "1e-16"),
+        ("-nan(1)", "NaN"),
+    ] {
+        let output = run(&[&blastn[..], &["-evalue", value]].concat());
+        assert_eq!(output.status.code(), Some(0), "{value}: {output:?}");
+        let xml = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            xml.contains(&format!("<Parameters_expect>{expect}</Parameters_expect>")),
+            "{value}: {xml}"
+        );
+    }
+    for value in ["1x", "1e+", "2,5", "inf", "nan(5)"] {
+        let output = run(&[&blastn[..], &["-evalue", value]].concat());
+        assert_eq!(output.status.code(), Some(2), "{value}: {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("expected a number"),
+            "{value}: {output:?}"
+        );
+    }
+    let blastp = [
+        "blastp", "-query", "pq.faa", "-subject", "ps.faa", "-outfmt", "6",
+    ];
+    let threshold_16 = run(&[&blastp[..], &["-threshold", "16"]].concat());
+    assert_eq!(threshold_16.status.code(), Some(0), "{threshold_16:?}");
+    let threshold_hex = run(&[&blastp[..], &["-threshold", "0x10"]].concat());
+    assert_eq!(threshold_hex.stdout, threshold_16.stdout);
+    for value in ["1e", "12345678901234567890e"] {
+        let output = run(&[&blastp[..], &["-threshold", value]].concat());
+        assert_eq!(output.status.code(), Some(2), "{value}: {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Illegal value"),
+            "{value}: {output:?}"
+        );
+    }
+    let seg_decimal = run(&[&blastp[..], &["-seg", "12 2.25 2.5"]].concat());
+    let seg_hex = run(&[&blastp[..], &["-seg", "12 0x1.2p1 0x1.4p1"]].concat());
+    assert_eq!(seg_decimal.status.code(), Some(0), "{seg_decimal:?}");
+    assert_eq!(seg_hex.status.code(), Some(0), "{seg_hex:?}");
+    assert!(!seg_hex.stdout.is_empty());
+    assert_eq!(seg_hex.stdout, seg_decimal.stdout);
+    // A comment line of 3,000 vertical tabs after the first line.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut pssm = Vec::new();
+    std::io::Read::read_to_end(
+        &mut flate2::read::GzDecoder::new(
+            fs::read(root.join("tests/fixtures/pssm/ps4_tk_paja.asn.gz"))
+                .unwrap()
+                .as_slice(),
+        ),
+        &mut pssm,
+    )
+    .unwrap();
+    let first_line = pssm.iter().position(|&byte| byte == b'\n').unwrap() + 1;
+    let mut with_tabs = pssm[..first_line].to_vec();
+    with_tabs.extend_from_slice(b"-- ");
+    with_tabs.extend(std::iter::repeat_n(0x0b, 3000));
+    with_tabs.push(b'\n');
+    with_tabs.extend_from_slice(&pssm[first_line..]);
+    fs::write(dir.join("vt.asn"), with_tabs).unwrap();
+    let subject = root.join("tests/fasta/PajaWSV.faa");
+    let output = run(&[
+        "psiblast",
+        "-in_pssm",
+        "vt.asn",
+        "-subject",
+        subject.to_str().unwrap(),
+        "-comp_based_stats",
+        "0",
+        "-outfmt",
+        "6",
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(
+        output.stdout,
+        fs::read(root.join("tests/fixtures/outfmt0/ps.subj.inpssm.tk.6.out")).unwrap()
+    );
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1147-1154
+// ```c
+//         sparamsp = SegParametersNewAa();
+//         sparamsp->overlaps = TRUE;
+//         if (seg_options->window > 0)
+//             sparamsp->window = seg_options->window;
+//         if (seg_options->locut > 0.0)
+//             sparamsp->locut = seg_options->locut;
+//         if (seg_options->hicut > 0.0)
+//             sparamsp->hicut = seg_options->hicut;
+// ```
+// NCBI BLAST+ 2.17.0 (swebok-improve-20261105/sw8/nfix/probe/seg2): a `-seg` locut or hicut
+// that is NaN keeps SEG's default (`-nan > 0.0` is false), an infinite locut makes every window
+// low in complexity (no hit), and the filter string prints the values as glibc's `%1.1f`.
+#[test]
+fn seg_cuts_that_are_not_finite_search_as_ncbis() {
+    let dir = temp_path("seg_not_finite", "dir");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("pq.faa"),
+        ">p1 test protein\nMKVLAAGIVALLLAAQQQQQQQQQQQQQQQQPPPPPPPPGSGSGSGSGSGSAEDKLMNVWYRTSHCFIPKLEDGHKLMNRSTVWY\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("ps.faa"),
+        ">s1 subject protein\nMKVLAAGIVALLLAAQQQQQQQQQAQQQQQPPPPPPPPGSGSGSGSGAGSAEDKLMNVWYRTSHCFIPKLEDGHKLMNRSTVWYAAAA\n",
+    )
+    .unwrap();
+    let blastp = |seg: &str, outfmt: &str| {
+        clean_losat_command()
+            .current_dir(&dir)
+            .args(["blastp", "-query", "pq.faa", "-subject", "ps.faa"])
+            .args(["-seg", seg, "-outfmt", outfmt])
+            .output()
+            .expect("run LOSAT")
+    };
+    let default_rows = "p1\ts1\t100.000\t33\t0\t0\t53\t85\t52\t84\t1.70e-25\t77.0\n";
+    for (seg, rows) in [
+        ("12 2.2 2.5", default_rows),
+        ("12 2.2 -nan", default_rows),
+        ("12 +nan(1) 2.5", default_rows),
+        ("12 -inf 2.5", default_rows),
+        ("12 2.2 +inf", default_rows),
+        ("12 +inf 2.5", ""),
+        ("12 1e400 2.5", ""),
+    ] {
+        let output = blastp(seg, "6");
+        assert_eq!(output.status.code(), Some(0), "{seg}: {output:?}");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), rows, "{seg}");
+    }
+    for (seg, filter) in [
+        ("12 +inf 2.5", "S 12 inf 2.5;"),
+        ("12 2.2 -nan", "S 12 2.2 -nan;"),
+        ("12 +nan(1) 2.5", "S 12 nan 2.5;"),
+        ("12 -inf 2.5", "S 12 -inf 2.5;"),
+    ] {
+        let output = blastp(seg, "5");
+        assert_eq!(output.status.code(), Some(0), "{seg}: {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .contains(&format!("<Parameters_filter>{filter}</Parameters_filter>")),
+            "{seg}"
+        );
+    }
+    // TBLASTN prints the options too, not the SEG parameters made of them (it printed
+    // `S 12 inf inf;`, `S 12 3.0 3.0;` and `L;` for the others): NCBI BLAST+ 2.17.0 `tblastn
+    // -outfmt 5`, also in the `filter` of outfmt 14 and 16.
+    fs::write(
+        dir.join("ns.fna"),
+        ">ns1 back-translated subject\nATGAAAGTGCTGGCTGCTGGCATTGTGGCTCTGCTGCTGGCTGCTCAGCAGCAGCAGCAGCAGCAGCAGCAG\n",
+    )
+    .unwrap();
+    for (seg, filter) in [
+        ("12 +inf 2.5", "S 12 inf 2.5;"),
+        ("12 -nan -nan", "S 12 -nan -nan;"),
+        ("12 -inf 2.5", "S 12 -inf 2.5;"),
+        ("12 3 2.5", "S 12 3.0 2.5;"),
+        ("12 0 2.5", "S 12 0.0 2.5;"),
+    ] {
+        let output = clean_losat_command()
+            .current_dir(&dir)
+            .args(["tblastn", "-query", "pq.faa", "-subject", "ns.fna"])
+            .args(["-seg", seg, "-outfmt", "5"])
+            .output()
+            .expect("run LOSAT");
+        assert_eq!(output.status.code(), Some(0), "{seg}: {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .contains(&format!("<Parameters_filter>{filter}</Parameters_filter>")),
+            "tblastn {seg}"
+        );
+    }
+    fs::remove_dir_all(&dir).unwrap();
+}

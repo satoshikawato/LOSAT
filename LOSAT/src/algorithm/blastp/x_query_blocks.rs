@@ -680,6 +680,7 @@ impl<'a> XBlockSink<'a> {
             OutputSink::Writer(writer) | OutputSink::Files(writer, _) => {
                 Self::Writer(&mut **writer)
             }
+            OutputSink::Out(out) => Self::Writer(&mut **out),
         }
     }
 

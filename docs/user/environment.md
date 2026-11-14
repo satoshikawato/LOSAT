@@ -15,7 +15,11 @@ run:
   write: then LOSAT stops there).
 - `SEQ_ID_PREFER_ACCESSION_OVER_GI`, `SEQ_ID_AVOID_GI` and a `[BLAST] BLASTDB` value that LOSAT
   cannot read: where the `-db` database opens, which in every search program is before an empty
-  query file ends the run.
+  query file ends the run. A `[BLAST] BLASTDB` value that LOSAT cannot read also stops a
+  `-subject` search whose report looks `taxdb.bti` up (a tabular report with `sscinames`,
+  `scomnames`, `sblastnames` or `sskingdoms`, or the organism report, outfmt 18), at the same
+  point; the singular names (`ssciname`, ...) look nothing up for `-subject` records, which have no
+  taxid, so they do not read it, as in NCBI BLAST+.
 - The other variables of a search: after the options and the input files, before the search. An
   empty query file ends the run first, as in NCBI BLAST+ (`Query is Empty!`, exit status 0).
 - The query splitting variables in blastx (at every query batch) and tblastx, and the splitting
@@ -73,7 +77,7 @@ file with any other entry stops the run, and so does an `NCBI_CONFIG__<SECTION>_
 for another entry. LOSAT reads the files as NCBI BLAST+ 2.17.0 does: comments, sections, entries
 before the first section (left out), a value continued on the next line after a backslash, quotes
 at the ends of a value, and backslash escapes. A value that is not UTF-8 stops a run that opens a
-database for `BLASTDB`, `-window_masker_taxid` for `WINDOW_MASKER_PATH`, and
+database or looks `taxdb.bti` up for `BLASTDB`, `-window_masker_taxid` for `WINDOW_MASKER_PATH`, and
 `makeblastdb -parse_seqids` for `MAX_SEQID_LENGTH`.
 
 A file that NCBI BLAST+ reports as malformed gets NCBI BLAST+'s messages, where NCBI BLAST+ writes
@@ -97,8 +101,9 @@ then stops after its options.
 rpsbproc writes its messages to the `-logfile` file as NCBI's rpsbproc does, and its program information,
 progress and dry run line to the standard error stream; its `-dryrun` runs its own dry run (its start, then
 the line of its status). rpsbproc reads `.ncbirc` once, when its configuration is loaded (it has no usage
-report), and LOSAT refuses a `.ncbirc` with a syntax error there: NCBI's rpsbproc reports it with the name
-of a source file of its own build. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
+report): a `.ncbirc` with a syntax error is reported there as NCBI's rpsbproc reports it, naming a source file
+of that rpsbproc's own build (the Linux x64 binary of NCBI's package of 2025-05-13), and the run goes on.
+LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
 UTF-16, or a malformed line that is not UTF-8. LOSAT's library runs the same start in a call whose
 arguments have `-logfile`, `-conffile` or `-dryrun`, and in a call that reads NCBI's settings (a
 database search, blastn's `-window_masker_taxid`, the organism report of outfmt 18, the file of a

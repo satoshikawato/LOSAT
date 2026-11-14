@@ -36,7 +36,6 @@ use crate::report::blast_xml2::{FsSideFiles, NoSideFiles, RunSideFiles, Xml2Kind
 use anyhow::{bail, Result};
 use std::{
     fmt,
-    fs::File,
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
     // ```c++
     // bool CStreamLineReader::AtEOF(void) const
@@ -568,15 +567,14 @@ fn run_inner(
         // (`cli::report_destination`).
         path if tax_report => crate::cli::report_destination(
             path.map(|path| {
-                File::create(path)
+                crate::cli::create_out_file(path, None)
                     .map(|file| Box::new(file) as Box<dyn Write + Send>)
-                    .map_err(|_| inaccessible("out", path))
             })
             .transpose()?,
             true,
         ),
         None => Box::new(io::stdout().lock()),
-        Some(path) => Box::new(File::create(path).map_err(|_| inaccessible("out", path))?),
+        Some(path) => Box::new(crate::cli::create_out_file(path, None)?),
     };
     // BLAST XML (outfmt 5) and the XML2 and JSON documents (outfmt 13 to 16): the output can
     // hold the whole document in memory (`blast_xml::HeldOutput`), decided below before the
@@ -725,24 +723,26 @@ fn run_inner(
     options.filtered_empty = database
         .as_ref()
         .is_some_and(|database| database.filtered_empty());
-    // A custom tabular field list that shows a plural name of the taxonomy database asks
-    // whether `taxdb.bti` is on the search path: its formatters warn without it. A `-db` search
-    // asks its database; a `-subject` search the search path of NCBI's databases (the
-    // environment and the registry), as BLASTP's and BLASTN's.
-    if options
-        .tabular
-        .is_some_and(|spec| spec.looks_up_every_taxid())
-    {
-        options.taxdb_found = match &database {
-            Some(database) => database.taxdb_found(),
-            // The organism report's lookups open the run's own database.
-            None if options.outfmt == 18 => {
-                options.subject_taxdb =
-                    crate::algorithm::common::database::SubjectTaxdb::of(&settings, "BLASTX")?;
-                options.subject_taxdb.is_some()
+    // A custom tabular field list that looks every taxid up (the plural names of the taxonomy
+    // database, the organism report) asks whether `taxdb.bti` is on the search path: the plural
+    // names' formatters warn without it. A `-db` search asks its database; a `-subject` search
+    // the search path of NCBI's databases (the environment and the registry), as BLASTP's and
+    // BLASTN's (`local::subject_taxonomy`).
+    match &database {
+        Some(database) => {
+            if options
+                .tabular
+                .is_some_and(|spec| spec.looks_up_every_taxid())
+            {
+                options.taxdb_found = database.taxdb_found();
             }
-            None => crate::algorithm::common::database::subject_taxdb_found(&settings, "BLASTX")?,
-        };
+        }
+        None => super::local::subject_taxonomy(
+            std::slice::from_mut(&mut options),
+            Some(&crate::algorithm::common::database::TaxdbSetting::of(
+                &settings,
+            )),
+        )?,
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -2290,7 +2290,7 @@ fn write_run_error_archive(
     };
     let destination: Option<Box<dyn Write>> =
         match args.out.as_deref().filter(|p| *p != Path::new("-")) {
-            Some(path) => File::create(path)
+            Some(path) => crate::cli::create_out_file(path, None)
                 .ok()
                 .map(|file| Box::new(file) as Box<dyn Write>),
             None => Some(Box::new(io::stdout().lock())),

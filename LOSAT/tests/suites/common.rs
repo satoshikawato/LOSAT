@@ -40,6 +40,8 @@ mod export_search_strategy;
 mod library_api;
 #[path = "../library_examples.rs"]
 mod library_examples;
+#[path = "../library_out_taxdb.rs"]
+mod library_out_taxdb;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]
 mod makeblastdb_ncbi_exceptions;
 #[path = "../makeblastdb_output_streams.rs"]

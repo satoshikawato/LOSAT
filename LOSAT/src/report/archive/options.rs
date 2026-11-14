@@ -81,10 +81,10 @@ impl From<crate::blastinput::value_parsers::SegSpec> for Filter {
     }
 }
 
-/// The filter of a `-seg` value as given (`app::parse_seg_option`; `label` names the program in
-/// its error), `None` for a value the program refuses (no request is written then).
-pub fn seg_filter(value: &str, label: &str) -> Option<Filter> {
-    crate::blastinput::app::parse_seg_option(value, label)
+/// The filter of a `-seg` value as given (`app::parse_seg_option`), `None` for a value that NCBI's
+/// filtering handler refuses (no request is written then).
+pub fn seg_filter(value: &str) -> Option<Filter> {
+    crate::blastinput::app::parse_seg_option(value)
         .ok()
         .map(Filter::from)
 }

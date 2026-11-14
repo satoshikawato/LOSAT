@@ -190,12 +190,26 @@ fn numbers() {
         let value = real(text).unwrap().unwrap();
         assert!(value.is_nan() && value.is_sign_negative(), "{text}");
     }
-    // More than 18 significant digits: LOSAT's port of `StringToDoublePosix` refuses them (as
-    // the ASN.1 text readers do; h1 oracle `p_expect`).
-    assert!(!refused(real("0.0100000000000000002")));
-    assert!(refused(real("1.000000000000000001")));
-    assert!(refused(real("1.50000000000000000001e-2")));
+    // More than 18 significant digits: NCBI's `StringToDoublePosix` adds the digits after the
+    // 18th in `long double` (line SW, SW8 B28; NCBI's corelib with `fDecimalPosixFinite`,
+    // swebok-improve-20261105/sw8/nfix/probe/x87 `s2dp`: 0x3f847ae147ae147b, 0x3ff0000000000000,
+    // 0x3f8eb851eb851eb8).
+    for (text, bits) in [
+        ("0.0100000000000000002", 0x3f84_7ae1_47ae_147b_u64),
+        ("1.000000000000000001", 0x3ff0_0000_0000_0000),
+        ("1.50000000000000000001e-2", 0x3f8e_b851_eb85_1eb8),
+    ] {
+        assert_eq!(
+            real(text).map(|r| r.map(f64::to_bits)),
+            Ok(Some(bits)),
+            "{text}"
+        );
+    }
     assert_eq!(real("1e999"), Ok(Some(f64::MAX)));
+    // An exponent that overflows NCBI's `int` (undefined behaviour; NCBI's wrapped exponent gives
+    // DBL_MAX) in LOSAT's widened arithmetic: DBL_MIN with `fDecimalPosixFinite`
+    // (PD-LOSAT-NCBI-DEFECTS exception 11).
+    assert_eq!(real("1.55e-2147483647"), Ok(Some(f64::MIN_POSITIVE)));
     assert!(fails(real("1e5x")));
     assert!(fails(real("1 2")));
     let big = |text: &str| {

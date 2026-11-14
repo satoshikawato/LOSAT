@@ -144,6 +144,9 @@ pub enum OutputSink<'a> {
     /// A writer provided by the caller. It is not buffered here, so that every byte a
     /// formatter has written reaches it before each `FormatObserver` call.
     Writer(&'a mut (dyn Write + Send)),
+    /// The `-out` file of the library's `run_to_file`, made where the command line makes its
+    /// `-out` (`ReportOutputs::open_out`); otherwise as `Writer`.
+    Out(&'a mut OutFile),
     /// A writer provided by the caller, as `Writer`, and the caller's receiver of the side files
     /// of outfmt 13 and 14 (a caller without files: LOSAT Web). The writer gets the master file,
     /// the receiver each side file, named as next to the receiver's `-out`
@@ -171,6 +174,7 @@ impl OutputSink<'_> {
             OutputSink::Stdout => Box::new(BufWriter::new(io::stdout())),
             OutputSink::File(path) => Box::new(BufWriter::new(File::create(path)?)),
             OutputSink::Writer(writer) | OutputSink::Files(writer, _) => Box::new(&mut **writer),
+            OutputSink::Out(out) => Box::new(&mut **out),
         })
     }
 
@@ -188,9 +192,93 @@ impl OutputSink<'_> {
         }
     }
 
-    /// Whether the output is a writer of the caller (`Writer` or `Files`).
+    /// Whether the output is a writer of the caller (`Writer` or `Files`), or the `-out` file of
+    /// `run_to_file`, which is written as one (`Out`).
     pub(crate) fn is_writer(&self) -> bool {
-        matches!(self, OutputSink::Writer(_) | OutputSink::Files(..))
+        matches!(
+            self,
+            OutputSink::Writer(_) | OutputSink::Files(..) | OutputSink::Out(_)
+        )
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
+// ```c
+// else {
+//     m_OutputStream = &args[kArgOutput].AsOutputFile();
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:913-916 (quoted at
+// `ReportOutputs::finish_archive`): `PrintErrorArchive` opens `-out` for the error archive of an
+// error that came before the argument handling opened it.
+/// The `-out` file of the library's `run_to_file` (`OutputSink::Out`). It is made where the
+/// command line makes `-out`: each program's entry calls `ReportOutputs::open_out` after it has
+/// read the subjects (or the taxid or seqid list of `-db`) and before it processes the options,
+/// so an error after that point leaves the file empty and an error before it leaves no file, as on
+/// the command line. The first write makes it too: the error archive of an earlier error (outfmt
+/// 11, `ReportOutputs::finish_archive`), as NCBI's `PrintErrorArchive` opens `-out`. A making that
+/// failed is not tried again.
+pub struct OutFile {
+    path: std::path::PathBuf,
+    /// The program whose file names must be UTF-8 (`cli::create_out_file`).
+    program: Option<&'static str>,
+    state: OutState,
+}
+
+/// Whether `OutFile` has been made.
+enum OutState {
+    Unmade,
+    Made { file: BufWriter<File> },
+    Failed,
+}
+
+impl OutFile {
+    /// The file `path` of a search of `program` (`cli::create_out_file`), not made yet.
+    pub(crate) fn new(path: &Path, program: Option<&'static str>) -> Self {
+        OutFile {
+            path: path.to_path_buf(),
+            program,
+            state: OutState::Unmade,
+        }
+    }
+
+    /// Makes the file as the command line makes `-out` (`cli::create_out_file`), once.
+    fn make(&mut self) -> anyhow::Result<()> {
+        match self.state {
+            OutState::Unmade => match crate::cli::create_out_file(&self.path, self.program) {
+                Ok(file) => {
+                    self.state = OutState::Made {
+                        file: BufWriter::new(file),
+                    };
+                    Ok(())
+                }
+                Err(error) => {
+                    self.state = OutState::Failed;
+                    Err(error)
+                }
+            },
+            OutState::Made { .. } => Ok(()),
+            OutState::Failed => Err(anyhow::anyhow!("the -out file could not be made")),
+        }
+    }
+}
+
+impl Write for OutFile {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if matches!(self.state, OutState::Unmade) {
+            self.make().map_err(io::Error::other)?;
+        }
+        match &mut self.state {
+            OutState::Made { file, .. } => file.write(buf),
+            _ => Err(io::Error::other("the -out file could not be made")),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match &mut self.state {
+            OutState::Made { file, .. } => file.flush(),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -230,6 +318,17 @@ impl FormatOutput<'_> {
     fn is_archive(&self) -> bool {
         self.report_format() == Some(crate::blastinput::app::ReportFormat::ArchiveFormat)
     }
+}
+
+/// `ReportOutputs::open_out` of the outputs `formats` (for a caller that holds the diagnostics
+/// stream of the same outputs).
+pub(crate) fn open_out(formats: &mut [FormatOutput<'_>]) -> anyhow::Result<()> {
+    for format in formats {
+        if let OutputSink::Out(out) = &mut format.sink {
+            out.make()?;
+        }
+    }
+    Ok(())
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
@@ -494,6 +593,13 @@ pub struct ReportOutputs<'a> {
 }
 
 impl ReportOutputs<'_> {
+    /// Makes the `-out` file of `run_to_file` (`OutputSink::Out`) where the command line opens its
+    /// `-out`: each program's entry calls it after reading the subjects (or the taxid or seqid list
+    /// of `-db`) and before processing the options. The other sinks are not opened here.
+    pub(crate) fn open_out(&mut self) -> anyhow::Result<()> {
+        open_out(&mut self.formats)
+    }
+
     /// Whether every requested format is the BLAST archive (outfmt 11), which NCBI's apps but
     /// psiblast write without fetching the report's sequences ahead
     /// (`blastinput::app::check_search_environment`); a call without formats (hit records
@@ -551,6 +657,13 @@ impl ReportOutputs<'_> {
             lines,
             self.formats.iter_mut().find(|format| format.is_archive()),
         ) {
+            // `PrintErrorArchive` opens `-out` before the archive's encoding is read
+            // (`ARCHIVE_FORMAT`, which can write nothing), and ignores a file it cannot open: the
+            // file of `run_to_file` is made here when the search ended before making it.
+            if let (OutputSink::Out(out), true) = (&mut format.sink, handle.error_archive_enabled())
+            {
+                let _ = out.make();
+            }
             let mut writer = format.sink.open()?;
             let written = crate::report::archive::write_error_archive(handle, &lines, &mut writer)
                 .and_then(|()| writer.flush().map_err(anyhow::Error::from));
@@ -584,6 +697,7 @@ impl ReportOutputs<'_> {
                         OutputSink::Stdout => OutputSink::Stdout,
                         OutputSink::File(path) => OutputSink::File(path),
                         OutputSink::Writer(writer) => OutputSink::Writer(&mut **writer),
+                        OutputSink::Out(out) => OutputSink::Out(out),
                         OutputSink::Files(writer, sink) => {
                             OutputSink::Files(&mut **writer, sink.clone())
                         }

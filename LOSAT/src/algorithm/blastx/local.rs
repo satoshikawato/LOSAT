@@ -151,12 +151,16 @@ fn search_records(
     if subjects.is_empty() {
         return Err(engine("Empty CBlastQueryVector"));
     }
+    // `-out` (`run_to_file`) is made where the command line opens it (`native::run`).
+    crate::api::local_blast::open_out(&mut outputs.formats)?;
     check_filtering(args)?;
     let query_range = parse_query_range(args)?;
     let mut resolved = check_resolutions(args, &choices, resolutions, &mut **diagnostics)?;
     for options in &mut resolved {
         options.query_range = query_range;
     }
+    // The taxonomy database of the reports, where the command line asks (`native::run`).
+    subject_taxonomy(&mut resolved, args.taxdb_setting.as_ref())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:213-217
     // ```c++
     //         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
@@ -227,6 +231,26 @@ fn search_records(
         },
         outputs,
     )
+}
+
+/// What the reports `resolved` of a `-subject` search ask of the taxonomy database, through
+/// `setting` (`common::database::subject_taxonomy`): asked by the command line (`native::run`)
+/// and by a search of records (`search_records`) at the same point, after the options are
+/// resolved. The reports share the organism report's database, as the other programs' formats.
+pub(super) fn subject_taxonomy(
+    resolved: &mut [ResolvedOptions],
+    setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
+) -> Result<()> {
+    let taxonomy = crate::algorithm::common::database::subject_taxonomy(
+        setting,
+        "BLASTX",
+        resolved.iter().filter_map(|options| options.tabular),
+    )?;
+    for options in resolved {
+        options.taxdb_found = taxonomy.found.unwrap_or(false);
+        options.subject_taxdb = taxonomy.taxdb.clone();
+    }
+    Ok(())
 }
 
 /// A `-db` search's part of `report_batches`.
@@ -925,6 +949,8 @@ fn search_database(
     let list = args
         .db_filter
         .resolve(&settings, &mut *outputs.diagnostics)?;
+    // `-out` (`run_to_file`) is made where the command line opens it (`native::run`).
+    outputs.open_out()?;
     check_filtering(args)?;
     let query_range = parse_query_range(args)?;
     let mut resolved = check_resolutions(args, &choices, resolutions, &mut *outputs.diagnostics)?;
@@ -1096,14 +1122,11 @@ fn parse_subject_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
 // ```
 /// The filtering handler (`CFilteringArgs`), which comes after the subjects are read and before
 /// the query options and formatting handlers: NCBI's error of `-seg` (`BlastxArgs::seg_spec`;
-/// `resolve_with_format` keeps it with the other deferred errors, LOSAT's refusal of a value that
-/// NCBI reads comes from `resolve_with_format`).
+/// `resolve_with_format` keeps it with the other deferred errors).
 pub(super) fn check_filtering(args: &BlastxArgs) -> Result<()> {
     match args.seg_spec() {
-        Err(app::SegOptionError::Ncbi(message)) => {
-            Err(options_error(SemanticOptionsError::from(message).into()))
-        }
-        Ok(_) | Err(app::SegOptionError::Losat(_)) => Ok(()),
+        Err(message) => Err(options_error(SemanticOptionsError::from(message).into())),
+        Ok(_) => Ok(()),
     }
 }
 

@@ -1931,7 +1931,7 @@ fn ncbi_compressed_lookup_tables(
     if query_chunk {
         return Ok(vec![0..locations.len()]);
     }
-    let sizes = protein_query_split_sizes("BLASTP", 10000)?;
+    let sizes = protein_query_split_sizes(10000)?;
     // The first lookup segment of query `q_idx` or of a query after it.
     let first_segment = |q_idx: usize| {
         let context = contexts.partition_point(|context| (context.q_idx as usize) < q_idx);
@@ -5461,7 +5461,6 @@ fn read_cli_subjects(
     let subject_range = seq_range::parse_optional_range(
         args.subject_loc.as_deref(),
         seq_range::RangeRole::Subject,
-        args.app.name(),
     )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
     // ```c++
@@ -5989,7 +5988,6 @@ fn run_local_formats(
     let subject_range = seq_range::parse_optional_range(
         args.subject_loc.as_deref(),
         seq_range::RangeRole::Subject,
-        "BLASTP",
     )?;
     for record in
         &subject_records[..seq_range::subjects_read(subject_records, subject_range.as_ref())]
@@ -6457,7 +6455,7 @@ fn psiblast_stop_at_invalid_query(
     let (input_start, searched_start) = batches.starts[batch];
     let span = batches.searched_span(searched_start);
     let query_length = searched_queries[searched_start].seq().len();
-    let error = match protein_query_split_sizes(args.app.name(), 10000) {
+    let error = match protein_query_split_sizes(10000) {
         _ if empty_database => crate::cli::NativeError {
             exit: 2,
             message: "BLAST Database error: OID not found\n".to_string(),
@@ -6725,7 +6723,7 @@ fn search(
             seq_range::QueryInput::whole(query_records),
         ),
     };
-    check_blastp_environment(args.app, database.is_none(), outputs.only_archive())?;
+    check_blastp_environment(args.app, database.is_none())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
     // ```c++
     //         formatter.PrintProlog();
@@ -6761,6 +6759,8 @@ fn search(
         //         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
         //         CBlastInput input(&fasta, m_CmdLineArgs->GetQueryBatchSize());
         // ```
+        // NCBI never splits an RPS-BLAST query, so it does not read OVERLAP_CHUNK_SIZE for it
+        // (`SplitQuery_ShouldSplit`, split_query_aux_priv.cpp:73-97).
         BlastpApp::Blastp | BlastpApp::Rpsblast => {
             crate::blastinput::query_batch::read_query_batches(
                 query_records,
@@ -6768,6 +6768,7 @@ fn search(
                 &query_input,
                 reading,
                 batch_size,
+                args.app != BlastpApp::Rpsblast,
                 query_scopes,
             )
         }
@@ -7722,7 +7723,7 @@ fn x_block_search_refuses_nothing(
     if crate::blastinput::app::check_diag_table_window(query_length, window, "BLASTP").is_err() {
         return false;
     }
-    let Ok(sizes) = protein_query_split_sizes("BLASTP", 10000) else {
+    let Ok(sizes) = protein_query_split_sizes(10000) else {
         return false;
     };
     let searched_batches = || {
@@ -8405,6 +8406,12 @@ impl<'a> CallRequests<'a> {
         Ok(())
     }
 
+    /// The end of the call's first batch, where an NCBI error of that batch's reports ends the
+    /// call (`end_at`).
+    fn first_batch_end(&self) -> usize {
+        self.spans.first().map_or(0, |span| span.end)
+    }
+
     /// The titles of the batch that follows the call (`NextRequest`), refused before the call's
     /// reports when its request is to be written.
     fn check_next(&self) -> Result<()> {
@@ -8648,27 +8655,15 @@ struct BlastpReports<'a> {
 }
 
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
-/// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`), a
-/// `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert unless every requested format is the
-/// archive (`archive`) and query split values that NCBI cannot convert (not
-/// `OVERLAP_CHUNK_SIZE` in RPSBLAST, whose queries it never splits). Other
-/// batch sizes change a blastp report only through the query batches
-/// (`read_query_batches`; the redo of a query reads the heaps of its batch,
-/// `kappa_query_batches`) and the query split (`search_split_query_batches`).
-fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool, archive: bool) -> Result<()> {
-    use crate::blastinput::app;
-    let app_name = app.name();
-    // psiblast's iterations fetch the report's sequences ahead before they choose the
-    // archive (`app::check_search_environment`).
-    app::check_search_environment(
-        app_name,
-        fasta_subjects,
-        archive && app == BlastpApp::Blastp,
-    )?;
-    // NCBI never splits an RPS-BLAST query, so it does not read OVERLAP_CHUNK_SIZE for it
-    // (`SplitQuery_ShouldSplit`, split_query_aux_priv.cpp:73-97).
-    app::check_query_split_environment(app_name, false, app != BlastpApp::Rpsblast)??;
-    Ok(())
+/// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`). The values that NCBI
+/// converts in each query batch stop its first batch: `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` in its
+/// query splitter (`read_query_batches`; not `OVERLAP_CHUNK_SIZE` in RPSBLAST, whose queries it
+/// never splits) and `PRE_FETCH_SEQS_LIMIT` in its prefetch (`run_resolved_in_pool`). Other batch
+/// sizes change a blastp report only through the query batches (`read_query_batches`; the redo of
+/// a query reads the heaps of its batch, `kappa_query_batches`) and the query split
+/// (`search_split_query_batches`).
+fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool) -> Result<()> {
+    crate::blastinput::app::check_search_environment(app.name(), fasta_subjects)
 }
 
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -8774,7 +8769,7 @@ fn search_split_query_batches(
     if args.rps_search.is_some() {
         return Ok(());
     }
-    let sizes = protein_query_split_sizes(args.app.name(), 10000)?;
+    let sizes = protein_query_split_sizes(10000)?;
     let batch_size = args.query_batch_size()?;
     // The batches count whole records (`seq_range::QueryInput::batches`); a batch is
     // split by the lengths of its searched queries (their intervals with `-query_loc`).
@@ -13406,6 +13401,35 @@ fn run_call(
         }),
         _ => None,
     };
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:280-285
+    // ```c++
+    //             if (fmt_args->ArchiveFormatRequested(args)) {
+    //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results,  0, m_Bah.GetMessages());
+    //                 m_Bah.ResetMessages();
+    //             } else {
+    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+    //                 		                            fmt_args->GetFormattedOutputChoice());
+    // ```
+    // The prefetch before a batch's reports reads `PRE_FETCH_SEQS_LIMIT`, after the batch's search
+    // and the read of its definition lines (above): a value that NCBI cannot convert stops the
+    // first batch here, after the outfmt 0 prolog and the messages of its records, before any of
+    // its reports (`app::check_prefetch_environment`; the first call of a run that writes reports
+    // meets it: not a chunk's search, which returned above). psiblast's iterations fetch ahead
+    // before they choose the archive, rpsblast's and blastp's write the archive without it.
+    let archive_alone = outputs.only_archive() && args.app != BlastpApp::Psiblast;
+    if let Err(error) = crate::blastinput::app::check_prefetch_environment(archive_alone) {
+        // NCBI wrote the first batch's search strategy request before its search (`CallRequests`).
+        if let Some(call) = reports.call_requests {
+            call.end_at(call.first_batch_end())?;
+        }
+        if reports.x_prolog {
+            write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
+        }
+        if let Some(first_batch_messages) = reports.reader_warnings.first() {
+            outputs.diagnostics.write_all(first_batch_messages)?;
+        }
+        return Err(error);
+    }
     if let (Some(titles), Some(scopes)) = (listed_titles.as_ref(), reports.query_scopes) {
         titles.refuse_ids_of_queries(&hit_lists, scopes)?;
     }

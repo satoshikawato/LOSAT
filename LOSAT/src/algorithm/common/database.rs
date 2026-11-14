@@ -287,11 +287,7 @@ pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error 
     //     }                                                                       \
     // ```
     if let Some(exception) = error.ncbi_exception() {
-        return NativeError {
-            exit: 255,
-            message: format!("Error: {}\n", exception.what()),
-        }
-        .into();
+        return NativeError::exception(exception).into();
     }
     match error.ncbi_message() {
         Some(text) => NativeError {
@@ -1081,11 +1077,12 @@ impl BatchReads {
     }
 }
 
-/// `PRE_FETCH_SEQS_LIMIT` as `NStr::StringToInt` reads it; `None` when it is not set or is no
-/// integer.
+/// The limit of `PRE_FETCH_SEQS_LIMIT` (`app::prefetch_seqs_limit`); `None` when it is not set. A
+/// value that NCBI cannot convert stops the first batch before its prefetch
+/// (`app::check_prefetch_environment`), so no batch's prefetch is decided by it: the plans made
+/// before the search count it as unset.
 fn prefetch_seqs_limit() -> Option<i32> {
-    std::env::var_os("PRE_FETCH_SEQS_LIMIT")
-        .and_then(|value| crate::blastinput::query_batch::ncbi_string_to_int(&value))
+    crate::blastinput::app::prefetch_seqs_limit().ok().flatten()
 }
 
 impl<'a> HeaderReader<'a> {

@@ -103,13 +103,11 @@ fn refusal(message: impl Into<String>) -> anyhow::Error {
 /// `CHUNK_SIZE` always, `OVERLAP_CHUNK_SIZE` only when the batch has one query
 /// (`SplitQuery_ShouldSplit`), also for an ungapped search, which is not split. The `int`
 /// becomes NCBI's 64-bit `size_t`, so -1 passes the check of 3 and -2 does not. A chunk size
-/// not divisible by 3 is NCBI's engine error; a value NCBI cannot convert is LOSAT's refusal
-/// (NCBI stops with a `CStringException` that names its build's source files).
+/// not divisible by 3 is NCBI's engine error; a value NCBI cannot convert is its
+/// `CStringException`, which ends the program (`app::read_query_split_variable`; the search's
+/// error frames pass it on as it is, `native::database_search_error`).
 pub fn split_sizes(query_count: usize) -> Result<SplitSizes> {
-    let read = |variable: &str| {
-        crate::blastinput::app::read_query_split_variable("BLASTX", variable)
-            .map_err(|error| refusal(error.to_string()))
-    };
+    let read = crate::blastinput::app::read_query_split_variable;
     let chunk_size = read("CHUNK_SIZE")?.map_or(CHUNK_SIZE as u64, |value| i64::from(value) as u64);
     validate_chunk_size(chunk_size)?;
     let overlap = match query_count > 1 {

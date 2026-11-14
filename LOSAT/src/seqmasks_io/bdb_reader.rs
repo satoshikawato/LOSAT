@@ -236,8 +236,8 @@ impl MaskBdbReader {
         let names = self
             .taxdb
             .lookup(&self.db, taxid, &mut Vec::new())
-            .map_err(|error| lookup_refusal(oid, error))?
-            .into_names();
+            .and_then(crate::seqdb::taxdb::TaxLookup::into_names)
+            .map_err(|error| lookup_refusal(oid, error))?;
         Ok(
             crate::report::defline::SourceTaxname::of_names(names.as_ref())
                 .name()
@@ -246,9 +246,10 @@ impl MaskBdbReader {
     }
 }
 
-/// LOSAT's refusal of the sequence `oid` whose taxonomy lookup failed with `error`: a record
-/// that reaches past the mapped end of `taxdb.btd` (NCBI reads unmapped memory and crashes,
-/// PD-LOSAT-NCBI-DEFECTS rule 3), or a taxonomy database that does not open or read.
+/// LOSAT's refusal of the sequence `oid` whose taxonomy lookup failed with `error`: a record of an
+/// empty `taxdb.btd` (NCBI maps it as a null pointer and faults, PD-LOSAT-NCBI-DEFECTS rule 3), a
+/// title made from names that NCBI reads past its mapping of `taxdb.btd` (its bytes, or whether
+/// NCBI faults, depend on its memory map), or a taxonomy database that does not open or read.
 fn lookup_refusal(oid: u32, error: SeqDbError) -> BdbError {
     BdbError::Unsupported(format!(
         "sequence {oid} of the database, whose taxid's lookup in the taxonomy database fails \

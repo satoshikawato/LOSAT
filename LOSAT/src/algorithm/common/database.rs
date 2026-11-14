@@ -1180,8 +1180,10 @@ impl<'a> HeaderReader<'a> {
     // `CDeflineGenerator::x_SetFlags` takes the first (create_defline.cpp:1004-1011). An empty
     // scientific name is no name (`m_Taxname` empty). Without `taxdb.bti` on the search path
     // `GetTaxNames` finds nothing; a database that does not open names nothing either (its
-    // texts are `LookupTexts`'). A lookup that reads past the mapped end of `taxdb.btd` (`Err`)
-    // crashes NCBI.
+    // texts are `LookupTexts`'). A lookup whose scientific name NCBI reads past its mapping of
+    // `taxdb.btd` (`Err`: an empty `taxdb.btd`, where NCBI faults, or a record without its third
+    // tab inside the mapping, where NCBI's result depends on its memory map) is refused where the
+    // title is shown.
     /// The name that the taxonomy database gives the taxid `taxid` of a Bioseq's first source
     /// (`DeflineSet::first_source_taxid`: of a stored title its definition line's, of a sequence
     /// with parsed Seq-ids `ParsedSubject::first_source_taxid`; none: `Unnamed`), its titles made
@@ -1199,10 +1201,15 @@ impl<'a> HeaderReader<'a> {
             .entry(taxid)
             .or_insert_with(|| {
                 let mut messages = Vec::new();
-                match taxdb.names(taxid, &mut messages) {
-                    Ok(names) => SourceTaxname::of_names(names.as_ref()),
+                match taxdb.lookup(taxid, &mut messages) {
+                    Ok(crate::seqdb::taxdb::TaxLookup::PastMapping(_)) => SourceTaxname::Refused(
+                        "an empty title that NCBI BLAST+ makes from its taxid with the taxonomy database, whose lookup of that taxid reads the record past NCBI BLAST+'s mapping of taxdb.btd (NCBI BLAST+ 2.17.0 reads memory past its mapping there: its bytes, or whether it faults, depend on its memory map)",
+                    ),
+                    Ok(lookup) => {
+                        SourceTaxname::of_names(lookup.into_names().ok().flatten().as_ref())
+                    }
                     Err(_) => SourceTaxname::Refused(
-                        "an empty title that NCBI BLAST+ makes from its taxid with the taxonomy database, whose lookup of that taxid reads past the mapped end of taxdb.btd (NCBI BLAST+ 2.17.0 reads unmapped memory)",
+                        "an empty title that NCBI BLAST+ makes from its taxid with the taxonomy database, whose lookup of that taxid reads a record of an empty taxdb.btd (NCBI BLAST+ 2.17.0 maps the file as a null pointer and reads unmapped memory)",
                     ),
                 }
             })
@@ -2452,9 +2459,10 @@ pub(crate) fn reports_may_refuse(
 }
 
 /// Whether the lookup of one of `taxids` in the taxonomy database on the search path of `db`
-/// could be refused, as the batches' prefetch looks them up (`prefetch_messages`); `false`
-/// without `taxdb.bti` there. One pass over the index usually finds that no lookup of any taxid
-/// can fail (`TaxDb::any_lookup_may_fail`); else each one is looked up once. Both use a taxonomy
+/// could be refused, as the batches' prefetch looks them up (`prefetch_messages`; its names reach
+/// no output, so only a fault is refused: a record of an empty `taxdb.btd`, `TaxDb::lookup`);
+/// `false` without `taxdb.bti` there. One pass over the index usually finds that no lookup of any
+/// taxid can fault (`TaxDb::any_lookup_faults`); else each one is looked up once. Both use a taxonomy
 /// handle of their own (as `taxdb_may_refuse`'s database side does), so the run's handle and
 /// messages are as they would be without this call. The prefetch's refusal of NCBI's cache
 /// (`TaxdbRun::cache_collision`) comes at the run's first prefetch, before any report.
@@ -2466,13 +2474,13 @@ fn taxids_may_refuse(db: &SeqDb, taxids: &[i32]) -> bool {
         return false;
     };
     let taxdb = crate::seqdb::taxdb::LazyTaxDb::new(search_path.clone());
-    if matches!(taxdb.any_lookup_may_fail(), Ok(false)) {
+    if matches!(taxdb.any_lookup_faults(), Ok(false)) {
         return false;
     }
     let mut messages = Vec::new();
     taxids
         .iter()
-        .any(|&taxid| taxdb.names(taxid, &mut messages).is_err())
+        .any(|&taxid| taxdb.lookup(taxid, &mut messages).is_err())
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1865-1886
@@ -2980,10 +2988,10 @@ mod tests {
 /// and the taxid then takes the slot. Of the texts a lookup can write, those of opening come once per
 /// process and only the offset error of the last entry (`TaxDb::offset_error_taxid`, `L`) comes
 /// again at each lookup that misses, so the record keeps what decides the bytes
-/// ([`VolumeLookups`]): each (volume, taxid) looked up (the taxonomy database is asked at the
-/// first), and per volume what `L`'s slot holds, which only the lookups of `L` and of another
-/// positive taxid of its slot change. A run whose volumes hold no such other taxid looks `L` up
-/// once per volume, in any order.
+/// ([`VolumeLookups`]): per volume what `L`'s slot holds, which only the lookups of `L` and of
+/// another positive taxid of its slot change; the taxonomy database is asked where `L` misses, and
+/// at every other lookup only where a lookup can fault ([`TaxdbRun::volume_load`]). A run whose
+/// volumes hold no such other taxid looks `L` up once per volume, in any order.
 ///
 /// Where the order of the fetches is not known, a run with a volume that holds `L` and another
 /// taxid of its slot is refused where NCBI first fetches a subject: a prefetch
@@ -3010,7 +3018,7 @@ pub(crate) struct TaxdbRun {
     collision: std::sync::OnceLock<Option<(std::path::PathBuf, String)>>,
     /// The texts of opening the database when the rows of a tabular report opened it, kept for
     /// those rows ([`TaxdbRun::open_for_rows`], [`tabular_names`]).
-    rows_open: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    rows_open: std::sync::OnceLock<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
 }
 
 /// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_texts`]).
@@ -3018,6 +3026,9 @@ pub(crate) struct TaxdbRun {
 struct PrefetchTexts {
     /// The positive taxid whose lookup writes the offset error (`TaxDb::offset_error_taxid`).
     offset_error_taxid: Option<i32>,
+    /// Whether a lookup can fault: NCBI maps an empty `taxdb.btd` as a null pointer
+    /// (`TaxDb::maps_null`).
+    maps_null: bool,
 }
 
 /// `CSeqDBVol::m_TaxCache(256)`: the slots of a volume's taxonomy cache.
@@ -3030,17 +3041,16 @@ fn tax_cache_slot(taxid: i32) -> i32 {
 }
 
 /// The volume lookups of a run ([`TaxdbRun`]), in the order in which LOSAT records them
-/// ([`TaxdbRun::load`]).
+/// ([`TaxdbRun::load`]): only what decides the texts of the offset error, which only a taxonomy
+/// database with that error records. Nothing grows with the taxids looked up.
 #[derive(Default)]
 struct VolumeLookups {
-    /// Each (volume, taxid) looked up: NCBI asks the taxonomy database at the first.
-    asked: rustc_hash::FxHashSet<(usize, i32)>,
     /// By volume, what the slot of the offset error's taxid holds ([`OffsetSlot`]); only where
     /// the taxonomy database has that error.
-    offset_slots: std::collections::HashMap<usize, OffsetSlot>,
+    offset_slots: rustc_hash::FxHashMap<usize, OffsetSlot>,
     /// The sequences, by ordinal id, whose loads looked up a taxid of that slot: a later read of
     /// one may find it in NCBI's scope and load nothing, or load it again.
-    slot_loads: std::collections::HashSet<u32>,
+    slot_loads: rustc_hash::FxHashSet<u32>,
     /// A run of a program without NCBI's object manager ([`TaxdbRun::sequential`]): every read
     /// of a sequence is a load (`CSeqDB::GetBioseq`), a read again too.
     sequential: bool,
@@ -3267,29 +3277,28 @@ impl TaxdbRun {
     /// [`PrefetchTexts`] of the run, read once.
     fn prefetch_texts(&self, db: &SeqDb) -> PrefetchTexts {
         *self.texts.get_or_init(|| {
-            let refused = PrefetchTexts {
+            let none = PrefetchTexts {
                 offset_error_taxid: None,
+                maps_null: false,
             };
             if !self.found(db) {
-                return PrefetchTexts {
-                    offset_error_taxid: None,
-                };
+                return none;
             }
             let Some(search_path) = db.search_path() else {
-                return PrefetchTexts {
-                    offset_error_taxid: None,
-                };
+                return none;
             };
+            // A database that does not open fails at the run's first lookup, through its handle.
             let Ok(taxdb) = crate::seqdb::taxdb::TaxDb::open(search_path) else {
-                return refused;
+                return none;
             };
             let Ok(taxid) = taxdb.offset_error_taxid() else {
-                return refused;
+                return none;
             };
             // `x_GetTaxonomy` looks a positive taxid up only.
             let taxid = taxid.filter(|&taxid| taxid > 0);
             PrefetchTexts {
                 offset_error_taxid: taxid,
+                maps_null: taxdb.maps_null(),
             }
         })
     }
@@ -3379,11 +3388,16 @@ impl TaxdbRun {
             .taxdb(search_path)
             .open()
             .map_err(|error| taxdb_error(error, program))?;
-        self.rows_open
+        self.rows_open()
             .lock()
             .expect("the texts of opening")
             .extend(texts);
         Ok(())
+    }
+
+    /// The texts of opening kept for the rows ([`TaxdbRun::open_for_rows`]), made at the first use.
+    fn rows_open(&self) -> &std::sync::Arc<std::sync::Mutex<Vec<String>>> {
+        self.rows_open.get_or_init(Default::default)
     }
 
     /// The run's taxonomy database, a handle that opens it at its first name asked for.
@@ -3406,11 +3420,11 @@ impl TaxdbRun {
 
     /// NCBI's lookups of the volume's taxonomy cache where it loads the sequence `ordinal` of `db`:
     /// the positive taxids `lookups` in the order of `CSeqDBVol::x_GetTaxonomy`, a taxid of several
-    /// definition lines once for each ([`blob_taxids`]). The taxonomy database is asked at the
-    /// volume's first lookup of a taxid in the run (the texts of opening come with the run's first,
-    /// `LazyTaxDb::names`) and again where a lookup of the offset error's taxid misses its slot of
-    /// the cache ([`VolumeLookups::offset_slot`]). Returns what each of those asks wrote, by taxid,
-    /// in the order of the lookups. A load whose texts NCBI's scope decides (a read again of a
+    /// definition lines once for each ([`blob_taxids`]). The texts of opening come with the run's
+    /// first lookup; the taxonomy database is asked where a lookup of the offset error's taxid
+    /// misses its slot of the cache ([`VolumeLookups::offset_slot`]) and, where `taxdb.btd` is mapped
+    /// as a null pointer, at every lookup of another taxid ([`TaxdbRun::volume_load`]). Returns what
+    /// each lookup that wrote a text wrote, by taxid, in the order of the lookups. A load whose texts NCBI's scope decides (a read again of a
     /// sequence loaded before, where its scope keeping it and loading it again write other texts,
     /// or a load after such a read) is LOSAT's refusal ([`TaxonomyRefusal`]), naming `program`.
     fn load(
@@ -3427,54 +3441,80 @@ impl TaxdbRun {
         let volume = db
             .volume_index(ordinal)
             .map_err(|error| database_error(error, program))?;
-        let last = self.prefetch_texts(db).offset_error_taxid;
+        let texts = self.prefetch_texts(db);
+        let misses = match texts.offset_error_taxid {
+            Some(last) => Some(self.slot_misses(volume, ordinal, lookups, last).map_err(
+                |cause| taxdb_error(slot_uncertain_error(db, volume, last, cause), program),
+            )?),
+            None => None,
+        };
+        let open = taxdb.open().map_err(|error| taxdb_error(error, program))?;
         let mut answers = Vec::new();
         self.volume_load(
             taxdb,
-            volume,
-            ordinal,
-            last,
+            texts,
+            misses.as_deref(),
             lookups.iter().copied(),
+            open,
             &mut |taxid, messages| answers.push((taxid, messages)),
         )
-        .map_err(|error| match error {
-            LoadError::Slot { last, cause } => {
-                taxdb_error(slot_uncertain_error(db, volume, last, cause), program)
-            }
-            LoadError::Taxdb(error) => taxdb_error(error, program),
-        })?;
+        .map_err(|error| taxdb_error(error, program))?;
         Ok(answers)
     }
 
-    /// [`TaxdbRun::load`] of the sequence `ordinal` in the volume `volume`, the lookups `lookups`
-    /// (a list of the taxids only where the slot of the offset error's taxid `last` is followed:
-    /// no allocation per load otherwise), each ask of the taxonomy database `taxdb` given to
-    /// `answer` with its texts.
+    /// Which of the lookups `lookups` of a load of the sequence `ordinal` in the volume `volume`
+    /// ask the taxonomy database again for the offset error's taxid `last`
+    /// ([`VolumeLookups::offset_slot`]).
+    fn slot_misses(
+        &self,
+        volume: usize,
+        ordinal: u32,
+        lookups: &[i32],
+        last: i32,
+    ) -> std::result::Result<Vec<bool>, SlotUncertain> {
+        self.volume_lookups
+            .lock()
+            .expect("the volume lookups")
+            .offset_slot(volume, ordinal, lookups, last)
+    }
+
+    // NCBI asks `GetTaxNames` where the volume's 256-slot cache misses (quoted at
+    // `SlotHolds::walk`). Of what such an ask does, only three things reach the output of a load,
+    // whose names nothing writes (`GetBioseq`'s sources; a title made from one asks the names
+    // itself): the texts of opening the database at the process's first ask, the offset error at
+    // each ask of its taxid `L`, and a fault where `taxdb.btd` is mapped as a null pointer. A
+    // record read past a mapping that is not null is not a fault for certain and writes nothing
+    // (`TaxDb::lookup`). So the taxonomy database is asked where `L` misses its slot
+    // (`VolumeLookups::offset_slot`) and, with a null mapping, at every lookup of another taxid (the
+    // first one that reads a record is NCBI's fault); the cache's other slots decide nothing.
+    /// The asks of a load ([`TaxdbRun::load`]) whose lookups are `lookups`, by what the run's
+    /// taxonomy database `taxdb` can write (`texts`) and which lookups of the offset error's taxid
+    /// miss its slot (`misses`, [`TaxdbRun::slot_misses`]; `None` without that error): each ask
+    /// given to `answer` with its texts, `open` (the texts of opening the database, where the
+    /// load opened it) with the first lookup. Nothing is recorded per taxid, and a load of a run
+    /// whose taxonomy database writes no offset error and maps a `taxdb.btd` that is not empty
+    /// asks nothing.
+    #[inline]
     fn volume_load(
         &self,
         taxdb: &crate::seqdb::taxdb::LazyTaxDb,
-        volume: usize,
-        ordinal: u32,
-        last: Option<i32>,
-        lookups: impl Iterator<Item = i32> + Clone,
-        answer: &mut dyn FnMut(i32, Vec<String>),
-    ) -> std::result::Result<(), LoadError> {
-        let mut record = self.volume_lookups.lock().expect("the volume lookups");
-        let misses = match last {
-            Some(last) => Some(
-                record
-                    .offset_slot(volume, ordinal, &lookups.clone().collect::<Vec<_>>(), last)
-                    .map_err(|cause| LoadError::Slot { last, cause })?,
-            ),
-            None => None,
-        };
+        texts: PrefetchTexts,
+        misses: Option<&[bool]>,
+        lookups: impl Iterator<Item = i32>,
+        mut open: Vec<String>,
+        answer: &mut impl FnMut(i32, Vec<String>),
+    ) -> std::result::Result<(), SeqDbError> {
         for (index, taxid) in lookups.enumerate() {
-            let miss = misses.as_ref().is_some_and(|misses| misses[index]);
-            if record.asked.insert((volume, taxid)) || miss {
-                let mut messages = Vec::new();
-                taxdb
-                    .names(taxid, &mut messages)
-                    .map_err(LoadError::Taxdb)?;
+            let ask = if Some(taxid) == texts.offset_error_taxid {
+                misses.is_some_and(|misses| misses[index])
+            } else {
+                texts.maps_null
+            };
+            if ask || !open.is_empty() {
+                let mut messages = std::mem::take(&mut open);
+                if ask {
+                    taxdb.lookup(taxid, &mut messages)?;
+                }
                 answer(taxid, messages);
             }
         }
@@ -3509,14 +3549,18 @@ impl TaxdbRun {
     /// lookups of its positive taxids in the order of `x_GetTaxonomy`
     /// (`DeflineSet::taxonomy_order`, the target's line first) write the texts of opening the
     /// taxonomy database at the run's first lookup, and the offset error where a lookup of its
-    /// taxid misses the volume's cache ([`VolumeLookups::offset_slot`]). Err: a lookup that reads
-    /// past the mapped end of `taxdb.btd` (NCBI crashes) or a taxonomy database that does not
-    /// open or read: LOSAT's refusal. One path for every load, the search's
-    /// ([`TaxdbRun::volume_load`]): the taxonomy database is asked for a (volume, taxid) not
-    /// looked up before and where the slot of the offset error's taxid misses; a load without a
-    /// new (volume, taxid) and without that error allocates nothing. Inlined up to its first
-    /// test: a sequence without a positive taxid, or a run without `taxdb.bti` on the search
-    /// path once a load found none, asks nothing (the readers ask it of every sequence).
+    /// taxid misses the volume's cache ([`VolumeLookups::offset_slot`]). Err: a lookup that reads a
+    /// record of an empty `taxdb.btd` (NCBI maps it as a null pointer and faults) or a taxonomy
+    /// database that does not open or read: LOSAT's refusal. A record read past NCBI's mapping of
+    /// a `taxdb.btd` that is not empty is not refused here: nothing of its names is written (NCBI
+    /// reads memory past its mapping there; whether it faults depends on its memory map). One path
+    /// for every load, the search's ([`TaxdbRun::volume_load`]): the taxonomy database is asked
+    /// only where a lookup can write a text or fault; a load of a run without the offset error
+    /// asks nothing and allocates nothing. Inlined up to its first test: a sequence without a
+    /// positive taxid, or a run without `taxdb.bti` on the search path once a load found none,
+    /// asks nothing (the readers ask it of every sequence). After the run's first load, a load of
+    /// a run whose taxonomy database has no offset error makes its asks here, in the reader's
+    /// code: there is no slot to follow.
     #[inline]
     pub(crate) fn bioseq_texts(
         &self,
@@ -3529,14 +3573,26 @@ impl TaxdbRun {
             return Ok(Vec::new());
         }
         let taxids = set.taxonomy_order(target);
-        if taxids.clone().next().is_none() {
-            return Ok(Vec::new());
+        if let (Some(taxdb), Some(&prefetch)) = (self.lazy.get(), self.texts.get()) {
+            if prefetch.offset_error_taxid.is_none() {
+                let mut texts = Vec::new();
+                self.volume_load(
+                    taxdb,
+                    prefetch,
+                    None,
+                    taxids,
+                    Vec::new(),
+                    &mut |_, messages| texts.extend(messages),
+                )?;
+                return Ok(texts);
+            }
         }
         self.bioseq_loads(db, oid, taxids)
     }
 
-    /// [`TaxdbRun::bioseq_texts`] of a sequence with the positive taxids `taxids` (out of line:
-    /// the readers' own code holds the tests before it).
+    /// [`TaxdbRun::bioseq_texts`] of the run's first load of a sequence with a positive taxid
+    /// (it resolves `taxdb.bti` and opens the database) and of each load where the slot of the
+    /// offset error's taxid is followed (out of line: the readers' own code holds the rest).
     #[inline(never)]
     fn bioseq_loads(
         &self,
@@ -3544,37 +3600,56 @@ impl TaxdbRun {
         oid: u32,
         taxids: crate::seqid::defline_set::TaxonomyOrder<'_>,
     ) -> std::result::Result<Vec<String>, SeqDbError> {
-        let mut texts = Vec::new();
-        let (taxdb, last) = match (self.lazy.get(), self.texts.get()) {
-            (Some(taxdb), Some(prefetch)) => (taxdb, prefetch.offset_error_taxid),
+        // NCBI's first lookup opens the database: at the first sequence with a positive taxid.
+        if taxids.clone().next().is_none() {
+            return Ok(Vec::new());
+        }
+        let mut open = Vec::new();
+        let (taxdb, prefetch) = match (self.lazy.get(), self.texts.get()) {
+            (Some(taxdb), Some(prefetch)) => (taxdb, *prefetch),
             _ => {
                 let Some(search_path) = db.search_path().filter(|_| self.found(db)) else {
                     return Ok(Vec::new());
                 };
                 // The run's first lookup opens the database (its texts of opening come first);
-                // the offset error's taxid is the same database's (no second open, as the
-                // search's prefetch makes before its first lookup).
+                // the offset error's taxid and the null mapping are the same database's (no
+                // second open, as the search's prefetch makes before its first lookup).
                 let taxdb = self.lazy_taxdb(search_path);
-                texts = taxdb.open()?;
-                let last = taxdb
-                    .offset_error_taxid()
-                    .ok()
-                    .flatten()
-                    .filter(|&taxid| taxid > 0);
-                let _ = self.texts.set(PrefetchTexts {
-                    offset_error_taxid: last,
-                });
-                (taxdb, last)
+                open = taxdb.open()?;
+                let prefetch = PrefetchTexts {
+                    offset_error_taxid: taxdb
+                        .offset_error_taxid()
+                        .ok()
+                        .flatten()
+                        .filter(|&taxid| taxid > 0),
+                    maps_null: taxdb.maps_null()?,
+                };
+                let _ = self.texts.set(prefetch);
+                (taxdb, prefetch)
             }
         };
-        let volume = db.oid_volume(oid)?;
-        self.volume_load(taxdb, volume, oid, last, taxids, &mut |_, messages| {
-            texts.extend(messages)
-        })
-        .map_err(|error| match error {
-            LoadError::Slot { last, cause } => slot_uncertain_error(db, volume, last, cause),
-            LoadError::Taxdb(error) => error,
-        })?;
+        // Only the slot of the offset error's taxid is followed: its volume, where the run's
+        // taxonomy database has that error.
+        let misses = match prefetch.offset_error_taxid {
+            Some(last) => {
+                let volume = db.oid_volume(oid)?;
+                let lookups: Vec<i32> = taxids.clone().collect();
+                Some(
+                    self.slot_misses(volume, oid, &lookups, last)
+                        .map_err(|cause| slot_uncertain_error(db, volume, last, cause))?,
+                )
+            }
+            None => None,
+        };
+        let mut texts = Vec::new();
+        self.volume_load(
+            taxdb,
+            prefetch,
+            misses.as_deref(),
+            taxids,
+            open,
+            &mut |_, messages| texts.extend(messages),
+        )?;
         Ok(texts)
     }
 
@@ -3686,17 +3761,8 @@ fn slot_uncertain_error(db: &SeqDb, volume: usize, last: i32, cause: SlotUncerta
     }
 }
 
-/// Why a volume's load ([`TaxdbRun::volume_load`]) gave no texts.
-enum LoadError {
-    /// A load whose texts of the offset error of taxid `last` NCBI's scope decides.
-    Slot { last: i32, cause: SlotUncertain },
-    /// A lookup that failed (it reads past the mapped end of `taxdb.btd`, a read error) or a
-    /// taxonomy database that does not open.
-    Taxdb(SeqDbError),
-}
-
 /// LOSAT's refusal of a taxonomy database name or record (`read_reported_taxonomy`): a scientific
-/// name NCBI's XML stream cannot write, or a record NCBI reads from unmapped memory. A run that
+/// name NCBI's XML stream cannot write, or a name NCBI reads past its mapping of `taxdb.btd`. A run that
 /// holds its XML2 or JSON document drops it on this error and no other (BLASTX,
 /// `XmlRefusal::of_taxonomy`); the other errors of the lookups (a read error of a file) are not
 /// refusals, and the held document is written as NCBI writes what it has.
@@ -3990,7 +4056,7 @@ pub(crate) fn tabular_names<'t>(
         return Ok(Some(crate::report::tabular::TabularNames::for_report(
             crate::report::tax_report::TaxNamesDb::new(
                 run.taxdb(search_path),
-                Some(std::sync::Arc::clone(&run.rows_open)),
+                Some(std::sync::Arc::clone(run.rows_open())),
                 taxdb_error,
             ),
             program,
@@ -4010,7 +4076,7 @@ pub(crate) fn tabular_names<'t>(
     if !names.looks_up() {
         return Ok(Some(names));
     }
-    let opened = std::mem::take(&mut *run.rows_open.lock().expect("the texts of opening"));
+    let opened = std::mem::take(&mut *run.rows_open().lock().expect("the texts of opening"));
     Ok(Some(names.opened_before(opened)))
 }
 
@@ -4903,22 +4969,25 @@ pub(crate) fn taxdb_may_refuse(db: &SeqDb, names: bool) -> bool {
 }
 
 /// The taxonomy side of [`taxdb_may_refuse`]: `Some(false)` when no lookup of any taxid can be
-/// refused or, with `names`, give a scientific name that `names::check_text` refuses
-/// ([`crate::seqdb::taxdb::TaxDb::any_lookup_may_refuse`]); `Some(true)` when one can; `None` when
+/// refused: without `names` (the prefetch's lookups, whose names reach no output) none faults
+/// ([`crate::seqdb::taxdb::TaxDb::any_lookup_faults`]); with `names` none is refused and none gives
+/// a scientific name that `names::check_text` refuses
+/// ([`crate::seqdb::taxdb::TaxDb::any_lookup_may_refuse`]). `Some(true)` when one can; `None` when
 /// the taxonomy database cannot be opened or read, which only the lookups of the database's taxids
 /// can answer.
 fn taxdb_side(taxdb: &crate::seqdb::taxdb::LazyTaxDb, names: bool) -> Option<bool> {
+    if !names {
+        return taxdb.any_lookup_faults().ok();
+    }
     taxdb
-        .any_lookup_may_refuse(&|name| {
-            names && crate::report::blast_xml::names::check_text(name).is_err()
-        })
+        .any_lookup_may_refuse(&|name| crate::report::blast_xml::names::check_text(name).is_err())
         .ok()
 }
 
 /// The database side of [`taxdb_may_refuse`]: whether the lookup of the first definition line's
 /// taxid of some sequence would be refused, looking each distinct non-zero taxid up with the
-/// `names` + `names::check_text` code `read_reported_taxonomy` uses (`names::check_text` only
-/// with `names`). The headers are read in
+/// `names` + `names::check_text` code `read_reported_taxonomy` uses with `names`, and as the
+/// prefetch does without (`lookup`: a fault only). The headers are read in
 /// ranges of [`crate::seqdb::HEADER_RANGE_SEQS`] sequences, one read per MiB
 /// ([`SeqDb::visit_defline_taxids`]). A header that cannot be read answers `true`. Memory: the
 /// distinct taxids, nothing per sequence.
@@ -4937,14 +5006,16 @@ fn database_side(db: &SeqDb, taxdb: &crate::seqdb::taxdb::LazyTaxDb, names: bool
                 return true;
             }
             let mut messages = Vec::new();
-            refused = match taxdb.names(taxid, &mut messages) {
-                Err(_) => true,
-                Ok(Some(found)) => {
-                    names
-                        && crate::report::blast_xml::names::check_text(&found.scientific_name)
-                            .is_err()
+            refused = if names {
+                match taxdb.names(taxid, &mut messages) {
+                    Err(_) => true,
+                    Ok(Some(found)) => {
+                        crate::report::blast_xml::names::check_text(&found.scientific_name).is_err()
+                    }
+                    Ok(None) => false,
                 }
-                Ok(None) => false,
+            } else {
+                taxdb.lookup(taxid, &mut messages).is_err()
             };
             !refused
         });
@@ -5888,23 +5959,31 @@ mod taxdb_prepass_tests {
     }
 
     #[test]
-    fn a_record_past_the_last_page_holds() {
+    fn a_record_past_the_last_page_holds_where_a_written_name_comes_from_past_it() {
         // The record of 10090 (entry 3) ends at the offset of entry 4: 5000 bytes, past the
-        // 4096-byte page that ends the mapping of the small `taxdb.btd`.
+        // 4096-byte page that ends NCBI's mapping of the small `taxdb.btd`. From 105 its three
+        // tabs are inside the mapping (its scientific name too): nothing holds. From 4096 the
+        // record lies wholly past the mapping: the names (XML2 and JSON) hold, the prefetch,
+        // which writes none of them, does not.
         let dir = std::env::temp_dir().join(format!("losat_prepass_btd_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::copy(variant("good").join("taxdb.btd"), dir.join("taxdb.btd")).unwrap();
         let mut index = std::fs::read(variant("good").join("taxdb.bti")).unwrap();
-        let at = 24 + 8 * 4 + 4;
-        index[at..at + 4].copy_from_slice(&5000u32.to_be_bytes());
-        std::fs::write(dir.join("taxdb.bti"), &index).unwrap();
-        for names in [true, false] {
-            assert!(taxdb_may_refuse(
-                &database("sprot_mixtax", Some(&dir)),
-                names
-            ));
-            // 9606 (entry 2) is fine: the database with that taxid alone does not hold.
-            assert!(!taxdb_may_refuse(&database("sprot_tax", Some(&dir)), names));
+        let next = 24 + 8 * 4 + 4;
+        index[next..next + 4].copy_from_slice(&5000u32.to_be_bytes());
+        for (own, holds) in [(105u32, false), (4096, true)] {
+            let at = 24 + 8 * 3 + 4;
+            index[at..at + 4].copy_from_slice(&own.to_be_bytes());
+            std::fs::write(dir.join("taxdb.bti"), &index).unwrap();
+            for names in [true, false] {
+                assert_eq!(
+                    taxdb_may_refuse(&database("sprot_mixtax", Some(&dir)), names),
+                    holds && names,
+                    "{own} {names}"
+                );
+                // 9606 (entry 2) is fine: the database with that taxid alone does not hold.
+                assert!(!taxdb_may_refuse(&database("sprot_tax", Some(&dir)), names));
+            }
         }
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -5929,6 +6008,7 @@ mod taxdb_prepass_tests {
             ("high_bytes_utf8", Some(true)),
             ("offset_next_past_end", Some(true)),
             ("bad_magic", Some(false)),
+            ("btd_empty", Some(true)),
             // Not checked: whatever the pass says, the answer is the database side's.
             ("unsorted_adjacent", None),
         ] {
@@ -5947,10 +6027,12 @@ mod taxdb_prepass_tests {
                             assert!(!taxdb_may_refuse(&db, names), "{taxonomy} {name}");
                         }
                     }
-                    // Without the names only the record past the end refuses.
+                    // Without the names (the prefetch's lookups) only a lookup that faults
+                    // refuses: an empty taxdb.btd. With them the pass also leaves an index whose
+                    // offsets decrease (offset_next_past_end) to the database side.
                     if name == "sprot_mixtax" && expected.is_some() {
-                        let expected = expected
-                            .map(|refused| refused && (names || taxonomy != "high_bytes_utf8"));
+                        let expected =
+                            expected.map(|refused| refused && (names || taxonomy == "btd_empty"));
                         assert_eq!(side, expected, "{taxonomy} {names}");
                     }
                     // The database side alone and the dispatch give one answer.
@@ -6046,14 +6128,16 @@ mod taxdb_prepass_tests {
             (Vec::new(), Some(None))
         );
         assert_eq!(reads(None, 2).unwrap(), (Vec::new(), None));
-        // An empty taxdb.btd: the first lookup, of 9606 (OID 2), reads past its mapped end.
+        // An empty taxdb.btd (NCBI maps it as a null pointer): the first lookup that reads a
+        // record, of 9606 (OID 2), faults.
         assert!(matches!(
             reads(Some(&variant("btd_empty")), 1),
             Err(SeqDbError::Unsupported { .. })
         ));
         // A database without the offset error whose record of 99990 (OIDs 4, 6, 7, 9) reaches
-        // past the mapped end of taxdb.btd (to the next entry's offset, 5000): the first load
-        // (9606) opens it without the offset error, and the first lookup of 99990 fails.
+        // past NCBI's mapping of taxdb.btd (to the next entry's offset, 5000): NCBI reads memory
+        // past the mapping, and its loads write nothing of it, so they go on as NCBI's where it
+        // completes; the names of 99990 have no defined result (no tab inside the mapping).
         let built = cwd.join("taxdb_99990_past_page");
         std::fs::create_dir_all(&built).unwrap();
         let mut index = Vec::new();
@@ -6079,10 +6163,20 @@ mod taxdb_prepass_tests {
             run.texts.get().map(|texts| texts.offset_error_taxid),
             Some(None)
         );
-        let set = db.defline_set(4).unwrap();
+        for oid in 4..db.num_seqs() {
+            let set = db.defline_set(oid).unwrap();
+            assert_eq!(
+                run.bioseq_texts(&db, oid, &set, None).unwrap(),
+                Vec::<String>::new()
+            );
+        }
         assert!(matches!(
-            run.bioseq_texts(&db, 4, &set, None),
-            Err(SeqDbError::Unsupported { .. })
+            run.lookup(&db, 99990, &mut Vec::new()),
+            Ok(crate::seqdb::taxdb::TaxLookup::PastMapping(_))
+        ));
+        assert!(matches!(
+            run.lookup(&db, 9606, &mut Vec::new()),
+            Ok(crate::seqdb::taxdb::TaxLookup::Named(_))
         ));
         std::fs::remove_dir_all(&cwd).unwrap();
     }

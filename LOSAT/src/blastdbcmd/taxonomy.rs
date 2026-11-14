@@ -353,7 +353,10 @@ impl TaxFields {
                 Field::TaxId => out.extend_from_slice(taxid.to_string().as_bytes()),
                 Field::SciName => out.extend_from_slice(name(|n| &n.scientific_name)),
                 Field::CommonName => out.extend_from_slice(name(|n| &n.common_name)),
-                Field::SuperKingdom => out.extend_from_slice(name(|n| &n.super_kingdom)),
+                // `tax_info` refuses a kingdom past NCBI's mapping of taxdb.btd.
+                Field::SuperKingdom => {
+                    out.extend_from_slice(name(|n| n.super_kingdom.as_deref().unwrap_or_default()))
+                }
                 Field::BlastName => out.extend_from_slice(name(|n| &n.blast_name)),
                 Field::NumSeqs => out.extend_from_slice(num_seqs.to_string().as_bytes()),
             }
@@ -443,6 +446,7 @@ pub(super) fn tax_info(db: &SeqDb, args: &Args, diag: &mut Diag, out: &mut Ostre
         Err(error) => return database_error(diag, error),
     };
     let taxdb = TaxdbRun::sequential();
+    let need_kingdom = fields.fields.contains(&Field::SuperKingdom);
     let mut sink = BufWriter::new(out);
     let _ = writeln!(sink, "# of Tax IDs in Database: {}", tax_ids.len());
     let mut line = Vec::new();
@@ -456,11 +460,21 @@ pub(super) fn tax_info(db: &SeqDb, args: &Args, diag: &mut Diag, out: &mut Ostre
                 }
                 diag.err_post(message);
             }
+            // A lookup whose result NCBI reads past its mapping of taxdb.btd is refused where
+            // the line writes it: names of no defined result, a kingdom past the mapping.
+            let lookup = lookup.and_then(|lookup| match lookup {
+                TaxLookup::PastMapping(past) if taxid != 0 => Err(past.error("names")),
+                TaxLookup::Named(names) if need_kingdom => match &names.super_kingdom {
+                    Err(past) => Err(past.error("super kingdom")),
+                    Ok(_) => Ok(TaxLookup::Named(names)),
+                },
+                lookup => Ok(lookup),
+            });
             match lookup {
                 Ok(_) if taxid == 0 => LineNames::NotAvailable,
                 Ok(TaxLookup::Named(names)) => LineNames::Named(names),
                 Ok(TaxLookup::Unnamed) => LineNames::Empty,
-                Ok(TaxLookup::NotInIndex) => LineNames::NotAvailable,
+                Ok(TaxLookup::NotInIndex | TaxLookup::PastMapping(_)) => LineNames::NotAvailable,
                 Err(error) => {
                     if flush_before_diagnostic(&mut sink) {
                         return 0;
@@ -508,7 +522,7 @@ mod tests {
             scientific_name: b"Homo sapiens".to_vec(),
             common_name: b"human".to_vec(),
             blast_name: b"primates".to_vec(),
-            super_kingdom: b"Eukaryota".to_vec(),
+            super_kingdom: Ok(b"Eukaryota".to_vec()),
         };
         let mut out = Vec::new();
         fields.line(9606, &LineNames::Named(names), 3, &mut out);

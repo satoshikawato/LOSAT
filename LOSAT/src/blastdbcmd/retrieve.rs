@@ -242,11 +242,16 @@ impl<'a> Source<'a> {
     /// `CSeqDB::GetTaxInfo(taxid)`: the names of the taxonomy database on the search path,
     /// `None` where NCBI's lookup throws (no database, no such taxid), and the `ERR_POST` texts
     /// of the lookup (of opening the database, when it is the run's first lookup, and the offset
-    /// error), which NCBI writes where it looks the taxid up. Err: a lookup that reads past the
-    /// mapped end of `taxdb.btd` (NCBI crashes), LOSAT's refusal.
+    /// error), which NCBI writes where it looks the taxid up. Err: LOSAT's refusal of a lookup
+    /// that reads a record of an empty `taxdb.btd` (NCBI faults) or whose names NCBI reads past
+    /// its mapping of `taxdb.btd` without a defined result (`TaxLookup::into_names`); a super
+    /// kingdom past the mapping is refused where the format writes it (`format::DeflineFields`).
     pub fn tax_info(&self, taxid: i32) -> Result<(Option<TaxNames>, Vec<String>), Stop> {
         let mut texts = Vec::new();
-        let names = self.taxdb.lookup(self.db, taxid, &mut texts)?.into_names();
+        let names = self
+            .taxdb
+            .lookup(self.db, taxid, &mut texts)?
+            .into_names()?;
         Ok((names, texts))
     }
 
@@ -256,13 +261,16 @@ impl<'a> Source<'a> {
         Ok(self
             .taxdb
             .lookup(self.db, taxid, &mut Vec::new())?
-            .into_names())
+            .into_names()?)
     }
 
     /// The lookups of `CSeqDB::GetBioseq` of the OID `oid`, whose definition lines are `set`, for
     /// the target id `target` (`DeflineSet::taxonomy_lookups`), for a Bioseq that NCBI makes (one
     /// with definition lines and letters): their texts posted to `out` before any byte of the
-    /// sequence ([`TaxdbRun::bioseq_texts`]). Err: LOSAT's refusal of a lookup NCBI crashes on.
+    /// sequence ([`TaxdbRun::bioseq_texts`]). Err: LOSAT's refusal of a lookup that NCBI faults on
+    /// for certain (a record of an empty `taxdb.btd`). Inlined into the formatter, which calls it
+    /// for every sequence.
+    #[inline]
     pub fn post_bioseq_texts(
         &self,
         oid: u32,

@@ -9,9 +9,12 @@
 //! on `tests/db_search/t5b` (make_t5b.py there) with `BLASTDB` naming
 //! `tests/seqdb/taxdb/<variant>`.
 //!
-//! Where a lookup reads a record past the mapped end of `taxdb.btd` (the empty `taxdb.btd` of
-//! `btd_empty`), NCBI crashes (SIGSEGV, every format; PD-LOSAT-NCBI-DEFECTS rule 3): LOSAT refuses
-//! the run there, with one line that names its program and exit status 1.
+//! Where a lookup reads a record of an empty `taxdb.btd` (`btd_empty`, which NCBI maps as a null
+//! pointer), NCBI crashes (SIGSEGV, every format that looks a taxid up; PD-LOSAT-NCBI-DEFECTS rule
+//! 3): LOSAT refuses the run there, with one line that names its program and exit status 1. Where a
+//! record of another `taxdb.btd` reaches past NCBI's mapping of the file
+//! (`tests/db_search/t5b/taxdb/<variant>`, make_t5b.py --taxdb), NCBI reads memory past its mapping
+//! and LOSAT refuses only a written name that comes from there (the same line and status).
 
 use std::process::{Command, Stdio};
 
@@ -287,42 +290,116 @@ fn the_texts_of_a_damaged_taxonomy_database_come_where_ncbi_reads_the_taxids() {
     }
 }
 
+/// The runs that write a name NCBI reads past its mapping of `taxdb.btd` (line RG item T5b fix 2;
+/// NCBI 2.17.0 completes them, with bytes that depend on its memory map): taxonomy database under
+/// `tests/db_search/t5b/taxdb`, program and words.
+const PAST_MAPPING: &[(&str, &str, &[&str])] = &[
+    (
+        "kingdom_past_page",
+        "blastdbcmd",
+        &["-db", "nmv", "-entry", "all", "-outfmt", "%a %K"],
+    ),
+    (
+        "kingdom_past_page",
+        "blastdbcmd",
+        &["-db", "nmv", "-tax_info", "-outfmt", "%T|%K"],
+    ),
+    (
+        "kingdom_past_page",
+        "blastdbcmd",
+        &["-db", "nmv", "-tax_info"],
+    ),
+    (
+        "names_past_page",
+        "blastdbcmd",
+        &["-db", "nmv", "-entry", "all", "-outfmt", "%a %T %S"],
+    ),
+    (
+        "names_past_page",
+        "blastdbcmd",
+        &["-db", "nmv", "-entry", "all", "-outfmt", "%a %C %N"],
+    ),
+    (
+        "names_past_page",
+        "blastdbcmd",
+        &["-db", "pmv", "-entry", "all", "-long_seqids"],
+    ),
+    (
+        "names_past_page",
+        "blastdbcmd",
+        &["-db", "nmv", "-tax_info", "-outfmt", "%T|%S"],
+    ),
+    (
+        "names_past_page",
+        "dustmasker",
+        &["-in", "nmv", "-infmt", "blastdb", "-outfmt", "fasta"],
+    ),
+    (
+        "names_past_page",
+        "segmasker",
+        &["-in", "pmv", "-infmt", "blastdb", "-outfmt", "fasta"],
+    ),
+];
+
+/// One run of `losat program words...` in `tests/db_search/t5b` with `BLASTDB=blastdb`: one line of
+/// standard error that names LOSAT's program and holds `reason`, exit status 1.
+fn assert_refused(program: &str, words: &[&str], blastdb: &str, reason: &str) {
+    let dir = RunDir::new(&format!("refused-{program}"));
+    let mut command = Command::new(BIN);
+    for (name, _) in std::env::vars_os() {
+        let text = name.to_string_lossy();
+        if text.starts_with("LOSAT_") || text.starts_with("NCBI") || text.starts_with("BLAST") {
+            command.env_remove(&name);
+        }
+    }
+    let output = command
+        .current_dir(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join("db_search")
+                .join("t5b"),
+        )
+        .arg(program)
+        .args(words)
+        .stdin(Stdio::null())
+        .env("BLASTDB", blastdb)
+        .env("NCBI_CONFIG_PATH", &dir.0)
+        .env("HOME", &dir.0)
+        .env("USERPROFILE", &dir.0)
+        .output()
+        .expect("run LOSAT CLI");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(stderr.lines().count(), 1, "{program} {words:?}: {stderr}");
+    assert!(
+        stderr.contains(&format!(
+            "is not supported by LOSAT's {}",
+            program.to_uppercase()
+        )) && stderr.contains(reason),
+        "{program} {words:?}: {stderr}"
+    );
+    assert_eq!(output.status.code(), Some(1), "{program} {words:?}");
+}
+
+#[test]
+fn a_name_read_past_ncbi_s_mapping_is_refused_where_it_is_written() {
+    for &(variant, program, words) in PAST_MAPPING {
+        assert_refused(
+            program,
+            words,
+            &format!("taxdb/{variant}"),
+            "NCBI BLAST+'s mapping",
+        );
+    }
+}
+
 #[test]
 fn a_lookup_ncbi_crashes_on_is_refused() {
     for &(program, words) in REFUSED {
-        let dir = RunDir::new(&format!("refused-{program}"));
-        let mut command = Command::new(BIN);
-        for (name, _) in std::env::vars_os() {
-            let text = name.to_string_lossy();
-            if text.starts_with("LOSAT_") || text.starts_with("NCBI") || text.starts_with("BLAST") {
-                command.env_remove(&name);
-            }
-        }
-        let output = command
-            .current_dir(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests")
-                    .join("db_search")
-                    .join("t5b"),
-            )
-            .arg(program)
-            .args(words)
-            .stdin(Stdio::null())
-            .env("BLASTDB", "../../seqdb/taxdb/btd_empty")
-            .env("NCBI_CONFIG_PATH", &dir.0)
-            .env("HOME", &dir.0)
-            .env("USERPROFILE", &dir.0)
-            .output()
-            .expect("run LOSAT CLI");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(stderr.lines().count(), 1, "{program} {words:?}: {stderr}");
-        assert!(
-            stderr.contains(&format!(
-                "is not supported by LOSAT's {}",
-                program.to_uppercase()
-            )) && stderr.contains("reaches past the mapped end"),
-            "{program} {words:?}: {stderr}"
+        assert_refused(
+            program,
+            words,
+            "../../seqdb/taxdb/btd_empty",
+            "reaches past the mapped end",
         );
-        assert_eq!(output.status.code(), Some(1), "{program} {words:?}");
     }
 }

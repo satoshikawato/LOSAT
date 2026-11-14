@@ -532,7 +532,14 @@ Volume 1: two titled sequences without a taxid, titled and untitled 9606, untitl
 volume 2: untitled 99990, titled 9606. With `../seqdb/taxdb/<variant>` on the search path they serve the rows
 `db_t5b_*` of `../dustmasker` and `../segmasker` (`-conffile conf/t5b_<variant>.ini`), the blastdbcmd cases
 `T5B101`-`T5B504` (`../blastdbcmd_discovery.rs`) and `../taxdb_tool_texts.rs` (the merged streams, `-logfile`, and
-the runs on `btd_empty` where NCBI crashes, which LOSAT refuses).
+the runs on `btd_empty` where NCBI crashes, which LOSAT refuses). `make_t5b.py --taxdb` (no NCBI program) writes the
+taxonomy databases of fix 2, `t5b/taxdb/kingdom_past_page` and `t5b/taxdb/names_past_page`: the `taxdb.btd` of
+`../seqdb/taxdb/good` (266 bytes) with an index whose record of 9606 reaches past NCBI's mapping of the file (the end
+of its 4,096-byte page), after its third tab (68..5,000: its names inside the mapping, its kingdom not) or wholly
+(4,096..5,000). NCBI reads memory past its mapping there; with them on the search path the databases serve the rows
+`db_t5b_*_past_page_*` of the maskers, the blastdbcmd cases `T5B601`-`T5B608`, the rows `db.t5b.*` of
+`../db_search_manifest/blastp.tsv` and `blastn.tsv`, and the refusals of `../taxdb_tool_texts.rs` (a name written from
+past the mapping).
 
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title

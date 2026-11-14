@@ -193,7 +193,8 @@ const CASES: &[Case] = &[
     ("T511", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/pmix", "-entry", "AB312001.1", "-target_only", "-long_seqids"], 0),
     ("T512", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/psuffix", "-entry", "AB362001.1", "-target_only", "-long_seqids"], 0),
     ("T513", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/nmix", "-entry", "AB301002.1", "-target_only", "-long_seqids"], 0),
-    ("T514", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/pmix", "-entry", "AB302002.1", "-target_only", "-long_seqids"], 0),    // Line RG item T5b: a damaged taxonomy database (`../seqdb/taxdb/<variant>`) on the search path
+    ("T514", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/pmix", "-entry", "AB302002.1", "-target_only", "-long_seqids"], 0),
+    // Line RG item T5b: a damaged taxonomy database (`../seqdb/taxdb/<variant>`) on the search path
     // of `../db_search/t5b` (make_t5b.py there): NCBI posts the texts of opening it once, at the
     // first lookup, and the offset error of its last entry at each lookup that asks for taxid
     // 99990 (the FASTA formatter's two `GetBioseq` calls follow the volume's 256-slot cache;
@@ -237,6 +238,21 @@ const CASES: &[Case] = &[
     ("T5B502", Some("../seqdb/taxdb/tabs1"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%T|%S|%L|%K|%B"], 0),
     ("T5B503", Some("../seqdb/taxdb/offset_last_at_end"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%T|%S|%L|%K|%B"], 0),
     ("T5B504", Some("../seqdb/taxdb/empty_fields"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%T|%S|%L|%K|%B"], 0),
+    // Line RG item T5b fix 2: a record of `taxdb.btd` that reaches past NCBI's mapping of the file
+    // (`../db_search/t5b/taxdb/<variant>`, make_t5b.py --taxdb). `kingdom_past_page`: 9606's
+    // record runs past the mapping after its third tab, so its names are NCBI's and only its
+    // super kingdom comes from memory past the mapping (`%K`, refused in taxdb_tool_texts.rs);
+    // `names_past_page`: 9606's record lies wholly past it, so only the runs that write none of
+    // its names go on (the loads of titled sequences, `%a %T`). NCBI BLAST+ 2.17.0 (local oracle),
+    // 2026-11-15, the T5b fix 2 subagent of ad-RG-T5-5.
+    ("T5B601", Some("../db_search/t5b/taxdb/kingdom_past_page"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all"], 0),
+    ("T5B602", Some("../db_search/t5b/taxdb/kingdom_past_page"), false, &["-db", "../db_search/t5b/pmv", "-entry", "all", "-long_seqids"], 0),
+    ("T5B603", Some("../db_search/t5b/taxdb/kingdom_past_page"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all", "-outfmt", "%a %T %S %L %B"], 0),
+    ("T5B604", Some("../db_search/t5b/taxdb/kingdom_past_page"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all", "-outfmt", "%a %C %N"], 0),
+    ("T5B605", Some("../db_search/t5b/taxdb/kingdom_past_page"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%T|%S|%L|%B"], 0),
+    ("T5B606", Some("../db_search/t5b/taxdb/names_past_page"), false, &["-db", "../db_search/t5b/nmv", "-entry", "AB410002.1,AB410011.1"], 0),
+    ("T5B607", Some("../db_search/t5b/taxdb/names_past_page"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all", "-outfmt", "%a %T"], 0),
+    ("T5B608", Some("../db_search/t5b/taxdb/names_past_page"), false, &["-db", "../db_search/t5b/nmv", "-entry_batch", "../db_search/t5b/batch.txt"], 0),
 ];
 
 /// The probe's cases that LOSAT refuses (one line naming LOSAT's BLASTDBCMD, exit status 1,

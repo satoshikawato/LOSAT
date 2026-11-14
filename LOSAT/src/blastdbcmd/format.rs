@@ -752,10 +752,18 @@ impl DeflineFields {
                 texts.extend(lookup_texts);
                 match names {
                     Some(names) => {
+                        // A kingdom that NCBI reads past its mapping of taxdb.btd: refused
+                        // where `%K` writes it.
+                        fields.super_kingdom = match &names.super_kingdom {
+                            Ok(kingdom) => check_name(kingdom),
+                            Err(past) if wants(b"K") => {
+                                return Err(past.error("super kingdom").into())
+                            }
+                            Err(_) => Vec::new(),
+                        };
                         fields.scientific_name = names.scientific_name;
                         fields.common_name = names.common_name;
                         fields.blast_name = check_name(&names.blast_name);
-                        fields.super_kingdom = check_name(&names.super_kingdom);
                     }
                     None => {
                         for field in [

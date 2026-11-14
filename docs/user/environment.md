@@ -43,9 +43,10 @@ run:
 | `WINDOW_MASKER_PATH` | The directory, after the variable above. |
 | `[WINDOW_MASKER] WINDOW_MASKER_PATH` in `.ncbirc` | The directory, after both variables: the first `.ncbirc` on the search path, also when `<program>.ini` sets `[NCBI] DONT_USE_NCBIRC`; `NCBI_DONT_USE_NCBIRC` and `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC` skip it. `<program>.ini`'s entry is not read. |
 
-A taxid without that file, or with a file that NCBI BLAST+ cannot read, stops the search with NCBI's error at the first query batch the file cannot mask (exit status 3). NCBI BLAST+ reads `.ncbirc` again for the directory each time it masks a query batch, and each chunk of a batch that it splits; a malformed `.ncbirc` gives its message each time, with `[blastn]` after the error code, and the directory comes from the entries above the line it reports; LOSAT does the same. LOSAT refuses, before any output:
+The file may be in any of the four counts formats of `windowmasker` (optimized binary, binary, optimized ascii, ascii), as in NCBI BLAST+. A taxid without that file, or with a file that NCBI BLAST+ cannot read, stops the search with NCBI's error at the first query batch the file cannot mask (exit status 3). NCBI BLAST+ reads `.ncbirc` again for the directory each time it masks a query batch, and each chunk of a batch that it splits; a malformed `.ncbirc` gives its message each time, with `[blastn]` after the error code, and the directory comes from the entries above the line it reports; LOSAT does the same. LOSAT refuses, before any output:
 
-- a counts file in the ascii or optimized ascii format there (NCBI BLAST+ reads them);
+- an ascii counts file whose unit size is 17 to 251 (NCBI BLAST+ masks with units that do not fit its 32-bit units, an undefined result);
+- an optimized ascii counts file whose hash parameters line (its third) leaves unread a value that NCBI BLAST+ then checks (the line ends, or a word before it is not a number: NCBI checks it uninitialized, an undefined result);
 - a `.ncbirc` that sets `[NCBI] .Inherits`;
 - a directory or path that is not UTF-8, and a current directory it cannot read.
 
@@ -85,11 +86,25 @@ messages, before the options are read: its report, then every message so far aga
 go to the standard error stream, and with `-logfile` as in NCBI BLAST+: those of the start to the
 standard error stream and into the file, the others into the file (`-logfile /dev/null` and
 `-logfile ""` discard them), except that blastn, blastp, blastx, tblastn and psiblast write the
-messages again to the standard error stream. (The search programs then refuse `-logfile` as they
-read their options.) `-conffile`, which would load another file in place of `<program>.ini`, is
-refused before the configuration is loaded. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
-UTF-16, or a malformed line that is not UTF-8. LOSAT's library runs no program start and refuses
-a file that NCBI BLAST+ reports.
+messages again to the standard error stream. The messages of the run go into the file in
+tblastx, rpsblast and rpstblastn, and to the standard error stream in the other search programs,
+as in NCBI BLAST+. `-conffile FILE` loads FILE in place of `<program>.ini` (a name without a directory is
+looked for where `<program>.ini` is looked for, a name with one is that file); a FILE that is not
+a file ends the program with NCBI BLAST+'s message and exit status 255, before `-h`. With
+`-dryrun` the configuration is loaded and the settings that LOSAT refuses are refused as without
+it (some of them, such as `DIAG_POST_LEVEL`, would make NCBI BLAST+ write a message); the program
+then stops after its options.
+rpsbproc writes its messages to the `-logfile` file as NCBI's rpsbproc does, and its program information,
+progress and dry run line to the standard error stream; its `-dryrun` runs its own dry run (its start, then
+the line of its status). rpsbproc reads `.ncbirc` once, when its configuration is loaded (it has no usage
+report), and LOSAT refuses a `.ncbirc` with a syntax error there: NCBI's rpsbproc reports it with the name
+of a source file of its own build. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
+UTF-16, or a malformed line that is not UTF-8. LOSAT's library runs the same start in a call whose
+arguments have `-logfile`, `-conffile` or `-dryrun`, and in a call that reads NCBI's settings (a
+database search, blastn's `-window_masker_taxid`, the organism report of outfmt 18, the file of a
+`-matrix` that NCBI's tables do not have in tblastx and ungapped blastx): its messages
+go where the command line writes them, and a start that stops the command line's program is the
+call's error.
 
 ## Variables that change a search or a report
 
@@ -106,7 +121,7 @@ overflow`), and with `-outfmt 11` NCBI's error archive. The table says where eac
 | Variable | Effect |
 | :--- | :--- |
 | `BATCH_SIZE` | The number of query letters searched together (NCBI's query batch). A value that is not a number (an empty one too) stops the run before anything is written; `blastn` stops after the start of the `-outfmt 0` report. `psiblast` searches one query at a time and does not read it, as in NCBI BLAST+. |
-| `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE` | The length of the pieces a long query is split into, and their overlap. An empty value counts as unset; a value that is not a number stops the run at the first query batch, after the start of the `-outfmt 0` report and the warnings about the batch's query records (`blastn` reads `CHUNK_SIZE` before it reads the first batch). `rpsblast` never splits a query and, as NCBI BLAST+ does, does not read `OVERLAP_CHUNK_SIZE` (a non-integer value is ignored there; `CHUNK_SIZE` is still read); neither does `blastx` with several queries in a batch. With a translated query (`blastx`, `tblastx`) a chunk size that is not a multiple of 3 is NCBI's error `Split query chunk size must be divisible by 3` (exit status 3). Splitting values that NCBI BLAST+ does not search correctly are refused: a negative chunk size above a negative overlap, an overlap so close to the chunk size that NCBI splits a chunk again, and in blastx an overlap that is not a multiple of 3. |
+| `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE` | The length of the pieces a long query is split into, and their overlap. An empty value counts as unset; a value that is not a number stops the run at the first query batch, after the start of the `-outfmt 0` report and the warnings about the batch's query records (`blastn` reads `CHUNK_SIZE` before it reads the first batch). `rpsblast` and `rpstblastn` never split a query and, as NCBI BLAST+ does, do not read `OVERLAP_CHUNK_SIZE` (a non-integer value is ignored there; `CHUNK_SIZE` is still read); neither does `blastx` with several queries in a batch. With a translated query (`blastx`, `tblastx`; not `rpstblastn`) a chunk size that is not a multiple of 3 is NCBI's error `Split query chunk size must be divisible by 3` (exit status 3). Splitting values that NCBI BLAST+ does not search correctly are refused: a negative chunk size above a negative overlap, an overlap so close to the chunk size that NCBI splits a chunk again, and in blastx an overlap that is not a multiple of 3. |
 | `ARCHIVE_FORMAT` | The encoding of `-outfmt 11`: unset or empty for text ASN.1, a value starting with `bin` (any case) for binary ASN.1, `xml` (any case) for XML; any other value writes no archive, as in NCBI BLAST+. |
 | `ADAPTIVE_CBS` | Any value, an empty one too, with composition-based statistics: `blastp`, `psiblast`, `rpsblast`, `blastx` and `tblastn` keep a larger preliminary hit list (1,500 subjects, or twice the hit list size and 50 more from a hit list size of 1,000), and with a hit list size (`-max_target_seqs`) below 1,000 all of them but `psiblast` cut that list by E-value before the final alignments, as NCBI BLAST+ does. The reported hits can grow or shrink. |
 | `CTOOLKIT_COMPATIBLE` | Any value: `-outfmt 0` writes `(bits)` in place of `(Bits)` above the hit list. |

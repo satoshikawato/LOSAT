@@ -1,4 +1,4 @@
-//! The shared BLASTX entry `run_local` (which `LOSAT::api` calls) writes outfmt 0, 6 and 7 from
+//! The shared BLASTX entry `run_local` (which `losat::api` calls) writes outfmt 0, 6 and 7 from
 //! one search. Every format must be byte-identical to the CLI run that requests only that format
 //! and to the frozen NCBI BLAST+ 2.17.0 bytes (`outfmt0_manifest.tsv`), the warnings must be
 //! written once, as the CLI writes them to standard error, and the api's ranges must be those of
@@ -12,10 +12,10 @@ mod run_local_support;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use losat::api::{Error, Outcome, Program};
 use run_local_support::{
     assert_observer_ranges, cli_out_path, fixture_sequence, temp_path, Files, TempFasta, Written,
 };
-use LOSAT::api::{Error, Outcome, Program};
 
 const FORMATS: [&str; 3] = ["0", "6", "7"];
 

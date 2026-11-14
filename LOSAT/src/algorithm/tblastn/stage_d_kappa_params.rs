@@ -183,6 +183,7 @@ pub(super) fn local_kappa_redo_params(
         } else {
             1
         },
+        do_link_hsps: do_sum_stats,
     })
 }
 

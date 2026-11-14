@@ -4,12 +4,14 @@
 // rank), never by a row number of a table, and a detail that arrives after the selection
 // moved on is dropped. Values shown come from the stored outputs and the HSP records
 // (docs/web/results_columns.md); the domain functions group, sort and filter them.
-import { recordName, type RecordKey } from '../domain/dataset';
+import type { ProgramId, RecordKey, SequenceKind } from 'losat/domain';
+import type { ProgramDescription } from 'losat/ports';
+import { recordName } from '../domain/dataset';
 import { optionValue } from '../domain/argv';
 import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan, type HspTable } from '../domain/hsp-table';
 import { shownScores, splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
 import { customOutfmt } from '../domain/output-format';
-import { programById, residueUnit, type ProgramId, type SequenceKind } from '../domain/programs';
+import { programById, residueUnit } from '../domain/programs';
 import {
   buildResultIndex,
   filterQuery,
@@ -29,7 +31,6 @@ import {
 } from '../domain/result-index';
 import { verificationBadge, type Badge, type OptionGrammar, type VerificationTable } from '../domain/verification';
 import type { RunStore } from '../ports/data';
-import type { ProgramDescription } from '../ports/engine';
 import type { AppState, RunView } from './coordinator';
 import { Store } from './store';
 

@@ -1,5 +1,7 @@
 use std::io::{self, Write};
 
+use crate::ncbi_str::truncate_spaces;
+
 // =============================================================================
 // NCBI Output Format Types
 // =============================================================================
@@ -266,6 +268,30 @@ pub fn format_bitscore_ncbi(bit_score: f64) -> String {
     }
 }
 
+/// The total bit score of a description table row (`total_bit_string`), which `GetScoreString`
+/// formats as the bit score but with `%2.1lf` below 99.9.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:994-1003
+/// ```c++
+///     if (total_bit_score > 99999){
+///         snprintf(total_bit_score_buf, sizeof(total_bit_score_buf), "%5.3le",
+///             total_bit_score);
+///     } else if (total_bit_score > 99.9){
+///         snprintf(total_bit_score_buf, sizeof(total_bit_score_buf), "%3.0ld",
+///             (long)total_bit_score);
+///     } else {
+///         snprintf(total_bit_score_buf, sizeof(total_bit_score_buf), "%2.1lf",
+///             total_bit_score);
+///     }
+/// ```
+pub fn format_total_bitscore_ncbi(total_bit_score: f64) -> String {
+    if total_bit_score > 99.9 {
+        format_bitscore_ncbi(total_bit_score)
+    } else {
+        format!("{:2.1}", total_bit_score)
+    }
+}
+
 /// Format percent identity exactly as NCBI tabular output does.
 ///
 /// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/objtools/align_format/tabular.hpp:437-441
@@ -467,53 +493,6 @@ pub fn write_hit_fields_bytes<W: Write>(
         )?;
     }
     writeln!(writer)
-}
-
-/// `NStr::TruncateSpaces(text)` (`eTrunc_Both`): `text` without the white space at its
-/// ends (`isspace` of an `unsigned char` in the C locale: 0x09-0x0D and the space).
-///
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:3145-3175
-/// ```c
-/// template <class TStr>
-/// TStr s_TruncateSpaces(const TStr& str, NStr::ETrunc where,
-///                       const TStr& empty_str)
-/// {
-///     SIZE_TYPE length = str.length();
-///     if (length == 0) {
-///         return empty_str;
-///     }
-///     SIZE_TYPE beg = 0;
-///     if (where == NStr::eTrunc_Begin  ||  where == NStr::eTrunc_Both) {
-///         _ASSERT(beg < length);
-///         while ( isspace((unsigned char) str[beg]) ) {
-///             if (++beg == length) {
-///                 return empty_str;
-///             }
-///         }
-///     }
-///     SIZE_TYPE end = length;
-///     if ( where == NStr::eTrunc_End  ||  where == NStr::eTrunc_Both ) {
-///         _ASSERT(beg < end);
-///         while (isspace((unsigned char) str[--end])) {
-///             if (beg == end) {
-///                 return empty_str;
-///             }
-///         }
-///         _ASSERT(beg <= end  &&  !isspace((unsigned char) str[end]));
-///         ++end;
-///     }
-/// ```
-pub fn truncate_spaces(text: &[u8]) -> &[u8] {
-    let is_space = |byte: &u8| matches!(byte, 0x09..=0x0D | b' ');
-    let begin = text
-        .iter()
-        .position(|byte| !is_space(byte))
-        .unwrap_or(text.len());
-    let end = text
-        .iter()
-        .rposition(|byte| !is_space(byte))
-        .map_or(begin, |last| last + 1);
-    &text[begin..end]
 }
 
 /// The `# Query: ` line of the outfmt 7 header of a query with the title `query_title`
@@ -796,9 +775,5 @@ mod tests {
             write_outfmt7_query_line(&mut out, &title).unwrap();
             assert_eq!(out, line, "{defline:?}");
         }
-        // `NStr::TruncateSpaces`: 0x09-0x0D and the space at both ends.
-        assert_eq!(truncate_spaces(b" \x0b\x0cid x\t\r "), b"id x");
-        assert_eq!(truncate_spaces(b" \n "), b"");
-        assert_eq!(truncate_spaces(b"\xa0id\xa0"), b"\xa0id\xa0");
     }
 }

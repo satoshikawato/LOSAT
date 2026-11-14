@@ -5,13 +5,12 @@
 //!
 //! The LMDB files are written by the port of NCBI's LMDB in [`super::mdb`].
 
-use std::fs::File;
-use std::io::{BufWriter, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use super::mdb::{
     Dbi, Env, LmdbError, MDB_APPENDDUP, MDB_CREATE, MDB_DUPFIXED, MDB_DUPSORT, MDB_INTEGERKEY,
 };
+use super::ofstream::OfStream;
 use super::platform::LmdbPlatform;
 use super::WriteDbError;
 use crate::ncbi_str::{string_to_int, string_to_uint, string_to_uint8};
@@ -1016,23 +1015,27 @@ impl WriteDbLmdb {
     // 		offset += offsets[i];
     // 		os.write((char *) &offset, 8);
     // 	}
+    //
+    // 	os.flush();
+    // 	os.close();
+    // }
     // ```
+    // The stream is not tested (`super::ofstream`): a `.pos` that cannot be opened or written
+    // leaves the build going on. The exception of a gap in the OIDs leaves the stream to its
+    // destructor, which writes what it holds.
     fn create_oid_to_seqids_lookup_file(&mut self) -> Result<(), WriteDbError> {
         if self.list.is_empty() {
             return Ok(());
         }
         let total_num_oids = self.list.last().unwrap().oid() as u64 + 1;
         let filename = lmdb_file_name(&self.db, "os");
-        let io = |source| WriteDbError::Io {
-            path: filename.clone(),
-            source,
-        };
-        let mut os = BufWriter::new(File::create(&filename).map_err(io)?);
+        let mut os = OfStream::create(&filename);
         let mut offsets: Vec<u32> = vec![0; total_num_oids as usize];
-        os.write_all(&total_num_oids.to_le_bytes()).map_err(io)?;
+        os.write(&total_num_oids.to_le_bytes());
         for _ in 0..total_num_oids {
-            os.write_all(&0u64.to_le_bytes()).map_err(io)?;
+            os.write(&0u64.to_le_bytes());
         }
+        os.flush();
         let mut count = 0usize;
         let mut tmp_ids: Vec<KeyValuePair> = Vec::new();
         let mut id = Vec::new();
@@ -1045,12 +1048,11 @@ impl WriteDbLmdb {
             };
             if i > 0 && kv.oid() != prev_oid {
                 if kv.oid().wrapping_sub(prev_oid) != 1 {
-                    os.flush().map_err(io)?;
                     return Err(WriteDbError::Other(
                         "Input id list not in ascending oid order".to_string(),
                     ));
                 }
-                offsets[count] = self.write_ids(&mut os, &mut tmp_ids, &mut id).map_err(io)?;
+                offsets[count] = self.write_ids(&mut os, &mut tmp_ids, &mut id);
                 count += 1;
                 tmp_ids.clear();
             }
@@ -1060,23 +1062,21 @@ impl WriteDbLmdb {
             }
             tmp_ids.push(kv);
         }
-        offsets[count] = self.write_ids(&mut os, &mut tmp_ids, &mut id).map_err(io)?;
-        os.seek(SeekFrom::Start(8)).map_err(io)?;
+        offsets[count] = self.write_ids(&mut os, &mut tmp_ids, &mut id);
+        os.flush();
+        os.seekp(8);
         let mut offset: u64 = 0;
         for o in &offsets {
             offset += *o as u64;
-            os.write_all(&offset.to_le_bytes()).map_err(io)?;
+            os.write(&offset.to_le_bytes());
         }
-        os.flush().map_err(io)
+        os.flush();
+        os.close();
+        Ok(())
     }
 
     /// `s_WirteIds`: the ids of one OID, sorted, each after its length; `id` is scratch.
-    fn write_ids(
-        &self,
-        os: &mut impl Write,
-        ids: &mut [KeyValuePair],
-        id: &mut Vec<u8>,
-    ) -> std::io::Result<u32> {
+    fn write_ids(&self, os: &mut OfStream, ids: &mut [KeyValuePair], id: &mut Vec<u8>) -> u32 {
         ids.sort_unstable_by(|a, b| id_cmp(&self.ids, *a, *b));
         let mut diff: u32 = 0;
         for e in ids.iter() {
@@ -1084,17 +1084,17 @@ impl WriteDbLmdb {
             let id = &id[..];
             let id_len = id.len() as u32;
             if id_len >= 0xFF {
-                os.write_all(&[0xFF])?;
-                os.write_all(&id_len.to_le_bytes())?;
+                os.write(&[0xFF]);
+                os.write(&id_len.to_le_bytes());
                 diff += 5;
             } else {
-                os.write_all(&[id_len as u8])?;
+                os.write(&[id_len as u8]);
                 diff += 1;
             }
-            os.write_all(id)?;
+            os.write(id);
             diff += id_len;
         }
-        Ok(diff)
+        diff
     }
 
     /// `~CWriteDB_LMDB`: the `.pos` file, the `acc2oid` transactions, the environment closed
@@ -1236,36 +1236,37 @@ impl WriteDbTaxId {
     // 		offset += offsets[i];
     // 		os.write((char *) &offset, 8);
     // 	}
+    //
+    // 	os.flush();
+    // 	os.close();
+    // }
     // ```
+    // The stream is not tested (`super::ofstream`), as for the `.pos` file.
     fn create_oid_to_taxids_lookup_file(&mut self) -> Result<(), WriteDbError> {
         if self.taxid2oid.is_empty() {
             return Err(WriteDbError::Other("No tax info for any oid".to_string()));
         }
         let total_num_oids = self.taxid2oid.last().unwrap().1 as u64 + 1;
         let filename = lmdb_file_name(&self.db, "ot");
-        let io = |source| WriteDbError::Io {
-            path: filename.clone(),
-            source,
-        };
-        let mut os = BufWriter::new(File::create(&filename).map_err(io)?);
+        let mut os = OfStream::create(&filename);
         let mut offsets: Vec<u32> = vec![0; total_num_oids as usize];
-        os.write_all(&total_num_oids.to_le_bytes()).map_err(io)?;
+        os.write(&total_num_oids.to_le_bytes());
         for _ in 0..total_num_oids {
-            os.write_all(&0u64.to_le_bytes()).map_err(io)?;
+            os.write(&0u64.to_le_bytes());
         }
+        os.flush();
         let mut count = 0usize;
         let mut start = 0usize;
         for i in 0..self.taxid2oid.len() {
             let (_, oid) = self.taxid2oid[i];
             if i > 0 && oid != self.taxid2oid[i - 1].1 {
                 if oid.wrapping_sub(self.taxid2oid[i - 1].1) != 1 {
-                    os.flush().map_err(io)?;
                     return Err(WriteDbError::Other(
                         "Input id list not in ascending oid order".to_string(),
                     ));
                 }
                 for &(t, _) in &self.taxid2oid[start..i] {
-                    os.write_all(&t.to_le_bytes()).map_err(io)?;
+                    os.write(&t.to_le_bytes());
                 }
                 offsets[count] = (i - start) as u32;
                 count += 1;
@@ -1273,16 +1274,19 @@ impl WriteDbTaxId {
             }
         }
         for &(t, _) in &self.taxid2oid[start..] {
-            os.write_all(&t.to_le_bytes()).map_err(io)?;
+            os.write(&t.to_le_bytes());
         }
         offsets[count] = (self.taxid2oid.len() - start) as u32;
-        os.seek(SeekFrom::Start(8)).map_err(io)?;
+        os.flush();
+        os.seekp(8);
         let mut offset: u64 = 0;
         for o in &offsets {
             offset += *o as u64;
-            os.write_all(&offset.to_le_bytes()).map_err(io)?;
+            os.write(&offset.to_le_bytes());
         }
-        os.flush().map_err(io)
+        os.flush();
+        os.close();
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:578-613
@@ -1316,40 +1320,43 @@ impl WriteDbTaxId {
     //    	SKeyValuePair<Uint8> kv(m_TaxId2OidList.back().tax_id, offset);
     //    	s_WirteOids(os, tmp_oids);
     // 	m_TaxId2OffsetsList.push_back(kv);
+    //
+    // 	os.flush();
+    // 	os.close();
+    // }
     // ```
+    // The stream is not tested (`super::ofstream`), as for the `.pos` file.
     // `cmp_key` orders by tax id (signed), then by OID; the pairs that tie are equal.
     fn create_taxid_to_oids_lookup_file(&mut self) -> Result<(), WriteDbError> {
         self.taxid2oid.sort_unstable();
         let filename = lmdb_file_name(&self.db, "to");
-        let io = |source| WriteDbError::Io {
-            path: filename.clone(),
-            source,
-        };
-        let mut os = BufWriter::new(File::create(&filename).map_err(io)?);
+        let mut os = OfStream::create(&filename);
         let mut offset: u64 = 0;
         let mut tmp_oids: Vec<u32> = Vec::new();
-        let write_oids = |os: &mut BufWriter<File>, oids: &mut Vec<u32>| -> std::io::Result<u64> {
+        let write_oids = |os: &mut OfStream, oids: &mut Vec<u32>| -> u64 {
             oids.sort_unstable();
             oids.dedup();
-            os.write_all(&(oids.len() as u32).to_le_bytes())?;
+            os.write(&(oids.len() as u32).to_le_bytes());
             for o in oids.iter() {
-                os.write_all(&o.to_le_bytes())?;
+                os.write(&o.to_le_bytes());
             }
-            Ok((oids.len() as u64 + 1) * 4)
+            (oids.len() as u64 + 1) * 4
         };
         for i in 0..self.taxid2oid.len() {
             if i > 0 && self.taxid2oid[i].0 != self.taxid2oid[i - 1].0 {
                 let p = (self.taxid2oid[i - 1].0, offset);
-                offset += write_oids(&mut os, &mut tmp_oids).map_err(io)?;
+                offset += write_oids(&mut os, &mut tmp_oids);
                 self.taxid2offsets.push(p);
                 tmp_oids.clear();
             }
             tmp_oids.push(self.taxid2oid[i].1);
         }
         let kv = (self.taxid2oid.last().unwrap().0, offset);
-        write_oids(&mut os, &mut tmp_oids).map_err(io)?;
+        write_oids(&mut os, &mut tmp_oids);
         self.taxid2offsets.push(kv);
-        os.flush().map_err(io)
+        os.flush();
+        os.close();
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:466-521

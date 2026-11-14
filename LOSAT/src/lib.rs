@@ -102,15 +102,32 @@ pub(crate) mod seqdb;
 // NCBI objects/seqloc (CSeq_id), objects/blastdb (CBlast_def_line_set) and the id helpers
 // of objtools/align_format: the Seq-ids of database sequences.
 pub(crate) mod seqid;
+
+/// The mask readers and writers of NCBI's masking tools (`dustmasker`, `segmasker`,
+/// `convert2blastmask`).
+pub(crate) mod seqmasks_io;
 // NCBI objtools/blast/seqdb_writer (CWriteDB) and app/blastdb/makeblastdb.cpp:
 // writer of BLAST database volumes.
 pub(crate) mod writedb;
 // NCBI app/blastdb/blastdbcmd.cpp: the BLAST database client (its -info).
 pub(crate) mod blastdbcmd;
+// NCBI app/dustmasker/dust_mask_app.cpp: the masker of low-complexity nucleotide regions.
+pub(crate) mod dustmasker;
+// NCBI app/segmasker/segmasker.cpp: the masker of low-complexity protein regions.
+pub(crate) mod segmasker;
+// NCBI app/blastdb/convert2blastmask.cpp: the masking information of lower case FASTA input.
+pub(crate) mod convert2blastmask;
+// NCBI corelib/ncbiapp.cpp and corelib/ncbiargs.cpp: the application and argument reader of
+// blastdbcmd, dustmasker, segmasker and convert2blastmask.
+pub(crate) mod ncbi_app;
 // NCBI corelib/ncbiexpt.cpp: the reports of NCBI's exceptions (`CException::what()`).
 pub(crate) mod ncbi_exception;
 // NCBI corelib/ncbistr.cpp: the number conversions of `NStr`.
 pub(crate) mod ncbi_str;
+// NCBI corelib/version.cpp: what `-version` and the full versions print (`CVersionAPI`).
+pub(crate) mod ncbi_version;
+// NCBI corelib/ncbiargs.cpp: what `-xmlhelp` prints (`CArgDescriptions::PrintUsageXml`).
+pub(crate) mod ncbi_xmlhelp;
 // NCBI's rpsbproc 0.5.1 (RpsbProc/src/rpsbproc_main.cpp of the 2025-05-13 package): the CDD
 // domain annotation of rpsblast's archives.
 pub(crate) mod rpsbproc;

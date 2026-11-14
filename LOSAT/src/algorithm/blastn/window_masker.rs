@@ -68,12 +68,27 @@ pub struct WindowMasker {
     /// archive's `WindowMaskerTaxId`), or `None` for `-window_masker_db`.
     pub taxid: Option<i32>,
     masker: Result<SeqMasker, WinMaskError>,
-    /// What NCBI writes each time it loads the registry of `-window_masker_taxid` to find the
-    /// file (`ncbi_environment::WindowMaskerRegistry`; `load_posts`); empty for
-    /// `-window_masker_db`, which loads no registry.
-    registry_posts: Posts,
-    /// Whether only the run's first load writes `registry_posts`.
-    registry_posts_once: bool,
+    /// What NCBI writes at the run's first load of the masker and at each later one
+    /// (`load_posts`): the posts of the registry of `-window_masker_taxid`, which it loads to
+    /// find the file (`ncbi_environment::WindowMaskerRegistry`; none for `-window_masker_db`,
+    /// which loads no registry), then the warnings of the counts reader
+    /// (`UnitCounts::warnings`, at every load).
+    first_load: Posts,
+    later_loads: Posts,
+}
+
+/// The posts of a load of the masker: those of the registry (`registry`), then the counts
+/// reader's warnings when the masker was made (NCBI 2.17.0, line NP M3d: an ascii file's
+/// second, higher `>t_low` writes its warning at each load, after the post of a malformed
+/// `.ncbirc`).
+fn load_posts(registry: &Posts, masker: &Result<SeqMasker, WinMaskError>) -> Posts {
+    let mut posts = registry.clone();
+    if let Ok(masker) = masker {
+        for warning in masker.warnings() {
+            posts.lines(format!("Warning: [blastn] {warning}\n").as_bytes());
+        }
+    }
+    posts
 }
 
 impl fmt::Debug for WindowMasker {
@@ -129,12 +144,14 @@ pub(crate) fn open(name: &str, source: &dyn CountsSource) -> Result<WindowMasker
             });
         }
     }
+    let masker = build(name, source);
+    let posts = load_posts(&Posts::new(), &masker);
     Ok(WindowMasker {
         name: name.to_string(),
         taxid: None,
-        masker: build(name, source),
-        registry_posts: Posts::new(),
-        registry_posts_once: false,
+        masker,
+        first_load: posts.clone(),
+        later_loads: posts,
     })
 }
 
@@ -159,11 +176,12 @@ fn build(name: &str, source: &dyn CountsSource) -> Result<SeqMasker, WinMaskErro
 /// The masker of `-window_masker_taxid <taxid>` (not 0) with the counts file
 /// `<directory>/<taxid>/wmasker.obinary` (`registry`: the directory of the registry entry
 /// `[WINDOW_MASKER] WINDOW_MASKER_PATH`, `None` or empty for the current directory, and what
-/// each load of the registry writes, `load_posts`), which NCBI looks for when it makes the masks
-/// of each query batch and chunk: a path that is no file is the empty name, whose error
+/// each load of the registry writes, `load_posts`; LOSAT Web's registry of its registered files),
+/// which NCBI looks for when it makes the masks of each query batch and chunk (in `source`): a
+/// path that is no file is the empty name, whose error
 /// (`could not open `) each batch reports (`batch_error`). NCBI checks no format of the
-/// file (unlike `-window_masker_db`'s, `open`) and reads the ascii counts too, which LOSAT does not
-/// read: it refuses them before the search.
+/// file (unlike `-window_masker_db`'s, `open`): the ascii and optimized ascii counts are read
+/// too.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:418-422
 /// ```c++
@@ -180,7 +198,7 @@ pub(crate) fn open_taxid(
     source: &dyn CountsSource,
 ) -> anyhow::Result<WindowMasker> {
     let directory = registry.path.as_deref();
-    let file = crate::utils::winmask::taxid_stat_file(directory, taxid).map_err(|error| {
+    let file = crate::utils::winmask::taxid_stat_file(directory, taxid, source).map_err(|error| {
         anyhow::anyhow!(
             "-window_masker_taxid {taxid}: the current directory, where NCBI BLAST+ looks for the counts file, cannot be read ({error}); this is not supported by LOSAT's BLASTN"
         )
@@ -195,24 +213,25 @@ pub(crate) fn open_taxid(
         None => String::new(),
     };
     let masker = build(&name, source);
-    if let Err(WinMaskError::UnsupportedFormat(format)) = &masker {
-        let format = match format {
-            StatType::Ascii => "ascii",
-            StatType::OAscii => "optimized ascii",
-            StatType::Binary => "binary",
-            StatType::OBinary => "optimized binary",
-            StatType::Unknown => "unknown",
-        };
-        anyhow::bail!(
-            "-window_masker_taxid {taxid}: the windowmasker unit counts {name} are in the {format} format, which NCBI BLAST+ reads and LOSAT's BLASTN does not; this is not supported by LOSAT's BLASTN"
-        );
+    // The counts that only LOSAT refuses (NCBI's result is undefined there) are refused when
+    // the options are read, before any output.
+    if let Err(error @ (WinMaskError::UnitSize { .. } | WinMaskError::UnsetHashParameter { .. })) =
+        &masker
+    {
+        return Err(rejection(&name, error));
     }
+    let first_load = load_posts(&registry.load_posts, &masker);
+    let later_loads = if registry.posts_once {
+        load_posts(&Posts::new(), &masker)
+    } else {
+        first_load.clone()
+    };
     Ok(WindowMasker {
         name,
         taxid: Some(taxid),
         masker,
-        registry_posts: registry.load_posts.clone(),
-        registry_posts_once: registry.posts_once,
+        first_load,
+        later_loads,
     })
 }
 
@@ -233,7 +252,8 @@ impl WindowMasker {
     /// What NCBI writes when it makes the masks of a query factory (`x_CalculateMasks`, once
     /// for a query batch and then once for each chunk of a split batch): with
     /// `-window_masker_taxid` it loads the registry that names the file's directory then
-    /// (`s_FindPathToWM`), which may post about `.ncbirc` (`WindowMaskerRegistry::load_posts`).
+    /// (`s_FindPathToWM`), which may post about `.ncbirc` (`WindowMaskerRegistry::load_posts`),
+    /// and then reads the counts file, whose reader may post warnings (`s_BuildSeqMasker`).
     /// `first`: the run's first load (the set-up of its first query batch).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:216-224
@@ -258,11 +278,10 @@ impl WindowMasker {
     ///     string db = WindowMaskerTaxidToDb(taxid);
     /// ```
     pub(crate) fn load_posts(&self, first: bool) -> &Posts {
-        static NONE: Posts = Posts::new();
-        if self.registry_posts_once && !first {
-            &NONE
+        if first {
+            &self.first_load
         } else {
-            &self.registry_posts
+            &self.later_loads
         }
     }
 
@@ -419,12 +438,12 @@ pub(crate) fn batch_error(
     Some((warnings, NativeError { exit: 3, message }))
 }
 
-/// LOSAT's rejection of the errors that NCBI does not report as `batch_error` does: a
-/// format LOSAT does not read (a counts source that names one after the check), the masker's
-/// window check (not reached with blastn's settings), a cache bit array of 0 words that NCBI
-/// reads past (`WinMaskError::EmptyCacheBitArray`), a query of 2^32 letters or more, and an
-/// error of the masks of a chunk of a split batch whose whole queries were masked (NCBI masks
-/// each chunk when it searches it, after the batch's set-up).
+/// LOSAT's rejection of the errors that NCBI does not report as `batch_error` does: an ascii
+/// file's unit size above 16 and an optimized ascii file's unset hash parameter (both where
+/// NCBI's result is undefined; `open_taxid` refuses them before any output), a cache bit array of 0 words that NCBI reads past (`WinMaskError::EmptyCacheBitArray`), a
+/// query of 2^32 letters or more, an error of a counts source of LOSAT Web, and an error of the
+/// masks of a chunk of a split batch whose whole queries were masked (NCBI masks each chunk
+/// when it searches it, after the batch's set-up).
 pub(crate) fn rejection(name: &str, error: &WinMaskError) -> anyhow::Error {
     anyhow::anyhow!(
         "the windowmasker unit counts {name} give an error that LOSAT's BLASTN does not report as NCBI BLAST+ does ({error}); this is not supported by LOSAT's BLASTN"
@@ -520,7 +539,8 @@ mod tests {
     // NCBI BLAST+ 2.17.0 blastn `-window_masker_taxid` (line NP M/STATE.md, "NCBI 2.17.0 の実機"):
     // the file under the directory is used whatever its format is called; a path that is no file
     // is the empty name, which fails each batch with `could not open ` and the factory's error;
-    // LOSAT refuses the ascii counts that NCBI reads, before the search.
+    // ascii counts are read (line NP M3d), their errors are NCBI's and their warnings come after
+    // the registry's posts at each load.
     #[test]
     fn the_file_of_a_taxid_is_the_masker_or_the_empty_name() {
         let dir = std::env::temp_dir().join(format!(
@@ -579,9 +599,34 @@ mod tests {
         let one = format!("Warning: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open \n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n ");
         assert_eq!(error.exit, 3);
         assert_eq!(error.message, format!("BLAST engine error: {one}{one}\n"));
-        let ascii = open_taxid(10, root, &FileCounts).unwrap_err().to_string();
-        assert!(ascii.contains("ascii format"), "{ascii}");
-        assert!(ascii.contains("not supported by LOSAT"), "{ascii}");
+        // "AAAAAAAAA" is a unit beyond `Uint4` (base 16).
+        let ascii = open_taxid(10, root, &FileCounts).unwrap();
+        let report = ascii.build_error().unwrap().create_report().unwrap();
+        assert!(
+            report.contains("Cannot convert string 'AAAAAAAAA' to unsigned int, overflow"),
+            "{report}"
+        );
+        // A second, higher t_low: its warning at every load, after the registry's posts.
+        std::fs::create_dir_all(dir.join("15")).unwrap();
+        std::fs::write(
+            dir.join("15/wmasker.obinary"),
+            b"9\n2 76\n>t_low 74\n>t_extend 147\n>t_threshold 173\n>t_high 210\n>t_low 80\n",
+        )
+        .unwrap();
+        let warning = Posts::of_lines(b"Warning: [blastn] Requested value of t_low (74) is less than the one stored with the N-mer counts (80).The value 80 will be used.\n".to_vec());
+        let mut both = Posts::of_lines(b"posted\n".to_vec());
+        both.append(&warning);
+        for (once, later) in [(false, &both), (true, &warning)] {
+            let registry = WindowMaskerRegistry {
+                load_posts: Posts::of_lines(b"posted\n".to_vec()),
+                posts_once: once,
+                ..root.clone()
+            };
+            let masker = open_taxid(15, &registry, &FileCounts).unwrap();
+            assert!(masker.build_error().is_none());
+            assert_eq!(masker.load_posts(true), &both);
+            assert_eq!(masker.load_posts(false), later);
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

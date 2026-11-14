@@ -9,6 +9,7 @@ use clap::Args;
 use super::build_db::BuildDatabase;
 use super::data_size::uint8_to_string_data_size;
 use super::format_guess::appears_fasta;
+use super::mask_data::process::{process_mask_data, MaskDataOptions};
 use super::metadata::{db_files_metadata, last_updated, write_metadata_file, DbMetadata};
 use super::platform::Platform;
 use super::taxid_set::{TaxIdMapError, TaxIdSet};
@@ -17,7 +18,7 @@ use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::blastinput::compressed::{compression_of_name, Compression};
 use crate::blastinput::ncbi_environment::{
-    check_ncbi_application_settings, diag_target, DiagStream, DiagTarget,
+    diag_target, ApplicationSettings, DiagStream, DiagTarget,
 };
 use crate::ncbi_str::string_to_uint8_data_size;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
@@ -94,7 +95,31 @@ use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 //              CArgDescriptions::eInputFile);
 //     arg_desc->SetDependency("taxid_map", CArgDescriptions::eRequires, "parse_seqids");
 // ```
-// LOSAT's parser checks the range of `-taxid`, the exclusion and the requirement; its errors
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:257-277
+// ```c++
+//     arg_desc->SetCurrentGroup("Sequence masking options");
+//     arg_desc->AddOptionalKey("mask_data", "mask_data_files",
+//                              "Comma-separated list of input files containing "
+//                              "masking data as produced by NCBI masking "
+//                              "applications (e.g. dustmasker, segmasker, "
+//                              "windowmasker)",
+//                              CArgDescriptions::eString);
+//
+//     arg_desc->AddOptionalKey("mask_id", "mask_algo_ids",
+//                              "Comma-separated list of strings to uniquely "
+//                              "identify the masking algorithm",
+//                              CArgDescriptions::eString);
+//
+//     arg_desc->AddOptionalKey("mask_desc", "mask_algo_descriptions",
+//                              "Comma-separated list of free form strings to "
+//                              "describe the masking algorithm details",
+//                              CArgDescriptions::eString);
+//
+//     arg_desc->SetDependency("mask_id", CArgDescriptions::eRequires, "mask_data");
+//     arg_desc->SetDependency("mask_desc", CArgDescriptions::eRequires, "mask_id");
+// ```
+// LOSAT's parser checks the range of `-taxid`, the exclusion and the requirements (`-taxid_map`
+// needs `-parse_seqids`, `-mask_id` needs `-mask_data`, `-mask_desc` needs `-mask_id`); its errors
 // are the parser's (exit status 2, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES) where NCBI's argument
 // reader prints its usage (exit status 1). `check_arguments` repeats the two dependencies for
 // the library. The options of makeblastdb that LOSAT does not support are not registered;
@@ -133,13 +158,26 @@ pub struct MakedbArgs {
     #[arg(long)]
     pub hash_index: bool,
     /// Taxonomy ID to assign to all sequences
-    #[arg(long, value_name = "TaxID", value_parser = clap::value_parser!(i32).range(0..),
+    // NCBI's integer and its constraint (`nonnegative_ncbi_integer`): `0x10` is 16 (NCBI BLAST+
+    // 2.17.0, line RG item E1b probe `makeblastdb.k.taxid.12`: rc 0 with `-dryrun`).
+    #[arg(long, value_name = "TaxID",
+          value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_integer,
           conflicts_with = "taxid_map")]
     pub taxid: Option<i32>,
     /// Text file mapping sequence IDs to taxonomy IDs. Format:<SequenceId> <TaxonomyId><newline>
     #[allow(rustdoc::invalid_html_tags, reason = "NCBI's help, printed by clap")]
     #[arg(long, value_name = "TaxIDMapFile", requires = "parse_seqids")]
     pub taxid_map: Option<String>,
+    /// Comma-separated list of input files containing masking data as produced by NCBI masking
+    /// applications (e.g. dustmasker, segmasker, windowmasker)
+    #[arg(long, value_name = "mask_data_files")]
+    pub mask_data: Option<String>,
+    /// Comma-separated list of strings to uniquely identify the masking algorithm
+    #[arg(long, value_name = "mask_algo_ids", requires = "mask_data")]
+    pub mask_id: Option<String>,
+    /// Comma-separated list of free form strings to describe the masking algorithm details
+    #[arg(long, value_name = "mask_algo_descriptions", requires = "mask_id")]
+    pub mask_desc: Option<String>,
     /// Option to parse seqid for FASTA input if set, for all other input types seqids are
     /// parsed automatically
     #[arg(long)]
@@ -148,12 +186,11 @@ pub struct MakedbArgs {
 
 /// The options of makeblastdb 2.17.0 that `losat makeblastdb` refuses
 /// (makeblastdb.cpp:246-333). `-h` and `-version` are served (`crate::cli`);
-/// `-logfile`, `-parse_seqids`, `-hash_index`, `-taxid` and `-taxid_map` are read.
-pub const UNSUPPORTED_OPTIONS: [&str; 8] = [
+/// `-logfile`, `-parse_seqids`, `-hash_index`, `-taxid`, `-taxid_map`, `-mask_data`, `-mask_id`
+/// and `-mask_desc` are read. `-gi_mask` and `-gi_mask_name` write GI-indexed mask files
+/// (item M4c), which LOSAT does not write yet.
+pub const UNSUPPORTED_OPTIONS: [&str; 5] = [
     "randomize",
-    "mask_data",
-    "mask_id",
-    "mask_desc",
     "gi_mask",
     "gi_mask_name",
     "metadata_output_prefix",
@@ -172,6 +209,9 @@ pub enum MakedbError {
     Database(SeqDbError),
     /// A request makeblastdb serves and LOSAT does not.
     Unsupported(String),
+    /// NCBI's `CIOException::eFlush` of the metadata file's stream: the text makeblastdb
+    /// prints after "BLAST failed to write output: ", exit status 6.
+    Output(&'static str),
     /// NCBI's `CArgException` raised after the arguments were parsed: the text
     /// makeblastdb prints after "Command line argument error: ".
     Argument(String),
@@ -240,22 +280,34 @@ impl MakedbError {
     //         exit_code = BLAST_OUT_OF_MEMORY;                                    \
     //     }                                                                       \
     // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
+    // ```c++
+    //     catch (const CIOException& e) {                                         \
+    //         if (e.GetErrCode() == CIOException::eFlush) {                       \
+    //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
+    //             exit_code = BLAST_OUTPUT_ERROR;                                 \
+    //         }                                                                   \
+    //     }                                                                       \
+    // ```
     /// The exit code: 1 (`BLAST_INPUT_ERROR`) for an error of the options or
     /// of the database creation, 2 (`BLAST_DATABASE_ERROR`) when the new
     /// database cannot be opened, 4 (`BLAST_OUT_OF_MEMORY`) for a failed
-    /// allocation, and 255 (`BLAST_UNKNOWN_ERROR`) otherwise, which includes
-    /// the failures of the file system that LOSAT reports itself.
+    /// allocation, 6 (`BLAST_OUTPUT_ERROR`) when the metadata file's stream cannot be
+    /// flushed, and 255 (`BLAST_UNKNOWN_ERROR`) otherwise, which includes LOSAT's own
+    /// refusals and an input file that cannot be read.
     pub fn exit_code(&self) -> i32 {
         match self {
             MakedbError::Build(
                 WriteDbError::Exception(_) | WriteDbError::Other(_) | WriteDbError::Io { .. },
             ) => 255,
             MakedbError::Build(WriteDbError::OutOfMemory) => 4,
+            MakedbError::Output(_) => 6,
             MakedbError::Database(_) | MakedbError::Build(WriteDbError::Database(_)) => 2,
             MakedbError::Build(
                 WriteDbError::Creation(_)
                 | WriteDbError::CreationBytes(_)
-                | WriteDbError::Options(_),
+                | WriteDbError::Options(_)
+                | WriteDbError::Unsupported(_),
             )
             | MakedbError::Unsupported(_)
             | MakedbError::Argument(_) => 1,
@@ -269,6 +321,7 @@ impl std::fmt::Display for MakedbError {
             MakedbError::Build(error) => error.fmt(f),
             MakedbError::Database(error) => write!(f, "BLAST Database error: {error}"),
             MakedbError::Unsupported(message) => write!(f, "losat makeblastdb: {message}"),
+            MakedbError::Output(message) => write!(f, "BLAST failed to write output: {message}"),
             MakedbError::Argument(message) => write!(f, "Command line argument error: {message}"),
         }
     }
@@ -478,8 +531,9 @@ pub fn check_environment(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Re
 // the reader's "not set"; the static `s_Max*` copies are read nowhere). A value it cannot
 // convert is ignored (`catch`), as is an empty one. LOSAT's FASTA reader keeps NCBI's default
 // limits (makedb-v5 DECISIONS 12), so it refuses the entry with `-parse_seqids` exactly when
-// makeblastdb would use it. `[BLAST] LONG_SEQID` is refused for every program by
-// `check_ncbi_application_settings` (it is not one of the entries that change nothing).
+// makeblastdb would use it. `[BLAST] LONG_SEQID` is refused for every program by the
+// application settings (`ApplicationStart::settings`; it is not one of the entries that change
+// nothing).
 /// Refuses `[BLAST] MAX_SEQID_LENGTH` (`max_seqid_length`, from
 /// `ApplicationSettings::max_seqid_length`: the value of the first layer that has the entry,
 /// `Err` for a file value LOSAT cannot read) for a build with `-parse_seqids` when makeblastdb
@@ -496,17 +550,17 @@ pub fn check_registry_settings(
             "{reason} ([BLAST] MAX_SEQID_LENGTH changes the Seq-ids NCBI makeblastdb parses \
              with -parse_seqids)"
         )),
-        Ok(Some(value)) if string_to_uint(value).is_some_and(|limit| limit != 0) => Err(format!(
-            "the registry entry [BLAST] MAX_SEQID_LENGTH ({value}), which changes the Seq-ids \
-             NCBI makeblastdb parses with -parse_seqids, is not supported by LOSAT's makeblastdb"
-        )),
+        // `NStr::StringToUInt(value)` with no flags: no limit where it throws.
+        Ok(Some(value))
+            if crate::ncbi_str::string_to_uint(value.as_bytes()).is_ok_and(|limit| limit != 0) =>
+        {
+            Err(format!(
+                "the registry entry [BLAST] MAX_SEQID_LENGTH ({value}), which changes the Seq-ids \
+                 NCBI makeblastdb parses with -parse_seqids, is not supported by LOSAT's makeblastdb"
+            ))
+        }
         Ok(_) => Ok(()),
     }
-}
-
-/// `NStr::StringToUInt(value)` with no flags: `None` where it throws.
-fn string_to_uint(value: &str) -> Option<u32> {
-    crate::ncbi_str::string_to_uint(value.as_bytes()).ok()
 }
 
 /// The checks of the arguments that LOSAT makes first: what LOSAT does not
@@ -543,6 +597,29 @@ fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
     // ```
     // The parser checks these on the command line (`-taxid` has its range there); a caller of
     // the library that sets the fields is checked here with the parser's sentences.
+    // The same for the masking options: `-mask_id` requires `-mask_data`, `-mask_desc` requires
+    // `-mask_id` (makeblastdb.cpp:276-277, quoted at `MakedbArgs`).
+    for (name, given, needed, needed_given) in [
+        (
+            "mask_id",
+            args.mask_id.is_some(),
+            "mask_data",
+            args.mask_data.is_some(),
+        ),
+        (
+            "mask_desc",
+            args.mask_desc.is_some(),
+            "mask_id",
+            args.mask_id.is_some(),
+        ),
+    ] {
+        if given && !needed_given {
+            return Err(MakedbError::Argument(format!(
+                "Argument \"{needed}\". Must be specified, as it is required by argument:  \
+                 `{name}'"
+            )));
+        }
+    }
     if args.taxid_map.is_some() {
         if !args.parse_seqids {
             return Err(MakedbError::Argument(
@@ -915,19 +992,20 @@ fn verify_input_files(names: &[&str], err: &mut dyn Write) -> Result<(), MakedbE
 /// platform whose makeblastdb the files follow ([`Platform::host`] for a build).
 ///
 /// `logfile_error` is the error of a `-logfile` that could not be opened, raised where
-/// makeblastdb opens the file. `end_message` gets the message of `~CBuildDatabase`
-/// (`-taxid_map` matched no sequence), which makeblastdb posts after everything else,
-/// the error of the build included.
+/// makeblastdb opens the file. `end_messages` gets the messages of `~CBuildDatabase` (no
+/// sequence matched a mask, `-taxid_map` matched no sequence), which makeblastdb posts after
+/// everything else, the error of the build included.
 #[allow(clippy::too_many_arguments)]
 fn build_database_with_log(
     args: &MakedbArgs,
+    registry_blastdb: Option<&str>,
     now: Option<&LocalTime>,
     platform: Platform,
     stdin: &mut dyn Read,
     out: &mut dyn Write,
     err: &mut dyn Write,
     logfile_error: Option<MakedbError>,
-    end_message: &mut Option<&'static str>,
+    end_messages: &mut Vec<String>,
 ) -> Result<(), MakedbError> {
     let version = check_arguments(args)?;
     let is_protein = args.dbtype == "prot";
@@ -1047,6 +1125,28 @@ fn build_database_with_log(
     if let Some(taxids) = taxids {
         db.set_taxids(taxids);
     }
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1288-1294
+    // ```c++
+    //     x_ProcessMaskData();
+    //     x_ProcessInputData(args[kInput].AsString(), is_protein);
+    // ```
+    // The mask files are read before the input is looked at. A failure ends the run at once
+    // (`CATCH_ALL`), and the destructor's messages follow it (`end_messages`).
+    let mask_options = MaskDataOptions {
+        mask_data: args.mask_data.as_deref(),
+        mask_id: args.mask_id.as_deref(),
+        mask_desc: args.mask_desc.as_deref(),
+        root: None,
+    };
+    let masked = {
+        let mut warn = warn_to(err);
+        process_mask_data(&mut db, &mask_options, &mut warn)
+    };
+    if let Err(error) = masked {
+        let error = error.into_makedb_error();
+        *end_messages = destructor_messages(&db, error.as_ref());
+        return error.map_or(Ok(()), Err);
+    }
     if names.is_empty() {
         return Err(unsupported(
             "-in names no input file; losat makeblastdb reads FASTA files or the standard input",
@@ -1059,12 +1159,32 @@ fn build_database_with_log(
         from_stdin.then_some(stdin_map),
         title,
         is_protein,
+        registry_blastdb,
         now,
         stdin,
         err,
     );
-    *end_message = db.taxid_message();
+    *end_messages = destructor_messages(&db, result.as_ref().err());
     result
+}
+
+/// What `~CBuildDatabase` posts (build_db.cpp:1204-1213), in its order: the message about the
+/// masks, then the one about the taxids. Each entry is one message, without its final newline.
+/// Nothing after a refusal of LOSAT (`error`): those messages are NCBI's words about the state
+/// of NCBI's run, which LOSAT did not follow (the refusal of `-in ""` posts none either).
+fn destructor_messages(db: &BuildDatabase<'_>, error: Option<&MakedbError>) -> Vec<String> {
+    if matches!(
+        error,
+        Some(MakedbError::Unsupported(_) | MakedbError::Build(WriteDbError::Unsupported(_)))
+    ) {
+        return Vec::new();
+    }
+    let mut messages = Vec::new();
+    db.post_destruction_diagnostics(&mut |line: &[u8]| {
+        messages.push(String::from_utf8_lossy(line).into_owned());
+    });
+    messages.extend(db.taxid_message().map(str::to_string));
+    messages
 }
 
 /// The rest of `x_BuildDatabase`: the input files, `EndBuild` and the metadata file.
@@ -1077,6 +1197,7 @@ fn add_input_and_close(
     from_stdin: Option<Option<bool>>,
     title: &str,
     is_protein: bool,
+    registry_blastdb: Option<&str>,
     now: &LocalTime,
     stdin: &mut dyn Read,
     err: &mut dyn Write,
@@ -1159,50 +1280,42 @@ fn add_input_and_close(
         // again), its own "Adding sequences" line, and "No sequences added" for a
         // file without a sequence.
         for &name in names {
-            match std::fs::File::open(name) {
-                // A compressed name is inflated while it is read (`CompressedInput`); a fault of
-                // its data is reported by name, after the build removed its files as for any
-                // failed input.
-                Ok(mut file) => match compression_of_name(std::path::Path::new(name)) {
-                    Some(compression) => {
-                        let mut input = CompressedInput::new(file, compression);
-                        let result = add_fasta(db, &mut input, err);
-                        if let Some(fault) = input.fault() {
-                            return Err(compressed_fault_error(name, compression, fault));
-                        }
-                        result?
+            // A file that exists and cannot be opened (`x_VerifyInputFilesType` has warned that
+            // it does "NOT appear to be FASTA"). makeblastdb does not test the stream it
+            // opened: `AddFasta` skips a stream that is not good and adds nothing from it, not
+            // even its "Adding sequences" line; a build of such files alone ends with "No
+            // volumes were created." and exit status 0 (makeblastdb 2.17.0, a compressed name
+            // too). A deterministic NCBI result, reproduced.
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1398-1408
+            // ```c++
+            // bool CBuildDatabase::AddFasta(CNcbiIstream & fasta_file)
+            // {
+            //     // Add any fasta sequences as well.
+            //     bool success = true;
+            //
+            //     if (fasta_file) {
+            //         CFastaBioseqSource fbs(fasta_file,
+            //                                m_IsProtein,
+            //                                m_ParseIDs,
+            //                                m_LongIDs);
+            //
+            // ```
+            let Ok(mut file) = std::fs::File::open(name) else {
+                continue;
+            };
+            // A compressed name is inflated while it is read (`CompressedInput`); a fault of
+            // its data is reported by name, after the build removed its files as for any
+            // failed input.
+            match compression_of_name(std::path::Path::new(name)) {
+                Some(compression) => {
+                    let mut input = CompressedInput::new(file, compression);
+                    let result = add_fasta(db, &mut input, err);
+                    if let Some(fault) = input.fault() {
+                        return Err(compressed_fault_error(name, compression, fault));
                     }
-                    None => add_fasta(db, &mut file, err)?,
-                },
-                // A file that exists and cannot be opened. makeblastdb does
-                // not test the stream it opened: `AddFasta` skips a stream
-                // that is not good and adds nothing from it (a build of that
-                // file alone ends with "No volumes were created." and exit
-                // status 0). LOSAT does not reproduce that: it reports the
-                // file, with the exit status of its file-system errors, and
-                // removes what earlier files added.
-                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1398-1408
-                // ```c++
-                // bool CBuildDatabase::AddFasta(CNcbiIstream & fasta_file)
-                // {
-                //     // Add any fasta sequences as well.
-                //     bool success = true;
-                //
-                //     if (fasta_file) {
-                //         CFastaBioseqSource fbs(fasta_file,
-                //                                m_IsProtein,
-                //                                m_ParseIDs,
-                //                                m_LongIDs);
-                //
-                // ```
-                Err(source) => {
-                    let mut warn = warn_to(err);
-                    let _ = db.end_build(true, &mut warn);
-                    return Err(MakedbError::Build(WriteDbError::Io {
-                        path: name.into(),
-                        source,
-                    }));
+                    result?
                 }
+                None => add_fasta(db, &mut file, err)?,
             }
         }
     }
@@ -1212,7 +1325,7 @@ fn add_input_and_close(
         db.end_build(false, &mut warn)
     };
     if closed? {
-        open_new_database(db, title, is_protein, now)?;
+        open_new_database(db, title, is_protein, registry_blastdb, now, err)?;
     }
     Ok(())
 }
@@ -1238,9 +1351,13 @@ fn add_input_and_close(
 //     }
 // ```
 // `CSeqDB sdb(new_db, t)` throws a `CSeqDBException` when the reader cannot
-// open what was written; the usual cause is an alias file of an earlier
+// open what was written; the usual causes are an alias file of an earlier
 // database of the same name that `DeleteBlastDb` could not resolve and
-// therefore left in place, which now hides the new single volume. LOSAT
+// therefore left in place, which now hides the new single volume, and an
+// index file or alias file that is not a file (one that could not be created
+// or renamed, a link to a device: `CFile::Exists` asks for a regular file).
+// The other files of a volume are not opened then: one that is missing is
+// left out of the metadata (`db_files_metadata`). LOSAT
 // resolves the database here for that outcome and for the values of the
 // metadata, and it only resolves: the alias files are read and every volume is
 // located, but no volume is opened. The volumes were written a moment ago, and
@@ -1248,8 +1365,8 @@ fn add_input_and_close(
 // sequence). So the error `CSeqDB` gives for more volumes than the process may
 // hold open files ("Too many open files, please raise the open file limit",
 // exit status 2 after a complete build) is not reproduced. The totals of the
-// metadata are those of the volumes written (what the reader would read from
-// their index files), and their date is the build's.
+// metadata are those of the volumes written that the database resolves to (what
+// the reader would read from their index files), and their date is the build's.
 //
 // The path is one database name (`SeqDb::locate_one_name_metadata`), which
 // departs from NCBI on purpose: `CSeqDB` splits the name at spaces and double
@@ -1264,7 +1381,9 @@ fn open_new_database(
     db: &BuildDatabase<'_>,
     title: &str,
     is_protein: bool,
+    registry_blastdb: Option<&str>,
     now: &LocalTime,
+    err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
     let new_db = db.output_dbname();
     let seqtype = if is_protein {
@@ -1273,21 +1392,61 @@ fn open_new_database(
         SeqType::Nucleotide
     };
     // `CSeqDB` names its search path in the message of a database that is not there: the
-    // current directory, `BLASTDB` and the registry entry `[BLAST] BLASTDB`. The registry was
-    // read, and its unreadable values refused, before the build (`check_ncbi_application_settings`
-    // in the callers of `run_with`).
-    let registry = check_ncbi_application_settings("makeblastdb")
-        .ok()
-        .and_then(|settings| settings.blastdb.ok().flatten());
-    let search =
-        SearchPath::from_environment(registry.as_deref()).map_err(MakedbError::Database)?;
+    // current directory, `BLASTDB` and the registry entry `[BLAST] BLASTDB` (`registry_blastdb`,
+    // of the application settings that the callers of `run_with` read before the build; a value
+    // that LOSAT does not read is left out).
+    let search = SearchPath::from_environment(registry_blastdb).map_err(MakedbError::Database)?;
     let located = SeqDb::locate_one_name_metadata(new_db, seqtype, &search, &|_| {
         Some(title.as_bytes().to_vec())
     })
     .map_err(MakedbError::Database)?;
     let output_db = db.output_db();
     let version = output_db.version();
-    let totals = output_db.volume_totals();
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1649-1656
+    // ```c++
+    //     case CSeqDB::eFilteredAll:
+    //         if (oid_count) {
+    //             *oid_count = GetNumSeqs();
+    //         }
+    //         if (total_length) {
+    //             *total_length = GetTotalLength();
+    //         }
+    //         break;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1638-1644,1662-1668
+    // ```c++
+    // Int8 CSeqDBAliasNode::GetNumSeqs(const CSeqDBVolSet & vols) const
+    // {
+    //     CSeqDB_NSeqsWalker walk;
+    //     WalkNodes(& walk, vols);
+    //
+    //     return walk.GetNum();
+    // }
+    // ...
+    // Uint8 CSeqDBAliasNode::GetTotalLength(const CSeqDBVolSet & volset) const
+    // {
+    //     CSeqDB_TotalLengthWalker walk;
+    //     WalkNodes(& walk, volset);
+    //
+    //     return walk.GetLength();
+    // }
+    // ```
+    // The totals are those of the volumes `CSeqDB` opened: the ones the alias file names (a
+    // cut alias file names fewer than the writer made), or the one volume. Each volume's
+    // count and length are the ones its index file holds in its header, which are the writer's
+    // (`volume_totals`); no volume is opened. A volume the resolution finds that the writer did
+    // not make (one of the same name in the current directory, found first) adds nothing. The
+    // names are compared as paths (by their components: the separators of Windows).
+    let written: std::collections::HashMap<std::path::PathBuf, (u32, u64)> = output_db
+        .volume_totals()
+        .into_iter()
+        .map(|(name, oids, letters)| (std::path::PathBuf::from(name), (oids, letters)))
+        .collect();
+    let totals: Vec<(u32, u64)> = located
+        .volumes
+        .iter()
+        .filter_map(|path| written.get(std::path::Path::new(path)).copied())
+        .collect();
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1705-1747
     // ```c++
     // 	GetTotals(CSeqDB::eFilteredAll, &num_seqs, &total_length, true);
@@ -1347,7 +1506,7 @@ fn open_new_database(
         dbtype: if is_protein { "Protein" } else { "Nucleotide" },
         db_version: version.number(),
         description: located.title,
-        number_of_letters: totals.iter().map(|(_, _, letters)| letters).sum(),
+        number_of_letters: totals.iter().map(|(_, letters)| letters).sum(),
         // NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.def:11-12
         // ```
         // number-of-letters._type = Uint8
@@ -1355,7 +1514,7 @@ fn open_new_database(
         // ```
         // NCBI's `GetDBMetaData` counts in an `int num_seqs` (seqdb.cpp:1707), which a
         // database of more than 2^31 - 1 sequences would overflow; LOSAT sums in `Int8`.
-        number_of_sequences: totals.iter().map(|(_, oids, _)| i64::from(*oids)).sum(),
+        number_of_sequences: totals.iter().map(|(oids, _)| i64::from(*oids)).sum(),
         last_updated: last_updated(now),
         number_of_volumes: located.volumes.len() as i32,
         number_of_taxids: (version == DbVersion::V5)
@@ -1368,7 +1527,10 @@ fn open_new_database(
         bytes_to_cache,
         files,
     };
-    write_metadata_file(new_db, is_protein, &metadata).map_err(MakedbError::Build)
+    match write_metadata_file(new_db, is_protein, &metadata, err) {
+        Some(message) => Err(MakedbError::Output(message)),
+        None => Ok(()),
+    }
 }
 
 fn add_fasta(
@@ -1395,8 +1557,8 @@ fn add_fasta(
 // destination (`2>&1`) in the order of the events. The standard output of
 // the Rust library is line buffered whatever it is connected to; the log
 // goes to it without another buffer.
-/// Runs `losat makeblastdb` and returns the exit code.
-pub fn run(args: &MakedbArgs) -> i32 {
+/// Runs `losat makeblastdb` with the settings of its application start and returns the exit code.
+pub fn run(args: &MakedbArgs, settings: &ApplicationSettings) -> i32 {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let stderr = std::io::stderr();
@@ -1405,6 +1567,7 @@ pub fn run(args: &MakedbArgs) -> i32 {
     let now = LocalTime::now();
     let status = run_with(
         args,
+        registry_blastdb(settings),
         now.as_ref(),
         Platform::host(),
         &mut stdin.lock(),
@@ -1413,6 +1576,12 @@ pub fn run(args: &MakedbArgs) -> i32 {
     );
     let _ = out.flush();
     status
+}
+
+/// The registry entry `[BLAST] BLASTDB` of `settings` that `run_with` takes: `None` when the
+/// registry has no such entry or LOSAT does not read its value (`ApplicationSettings::blastdb`).
+pub(crate) fn registry_blastdb(settings: &ApplicationSettings) -> Option<&str> {
+    settings.blastdb.as_ref().ok().and_then(Option::as_deref)
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:843-871
@@ -1498,31 +1667,34 @@ pub fn run(args: &MakedbArgs) -> i32 {
 // nothing, exit status 1). LOSAT reads `-logfile` as an option of makeblastdb
 // only, not anywhere in the command line as NCBI's application does (for example
 // as the value of `-title`).
-/// One run with the given time, platform and streams: the build, then the error
+/// One run with the registry entry `[BLAST] BLASTDB` of the application settings
+/// (`registry_blastdb`) and the given time, platform and streams: the build, then the error
 /// message and the exit code of a failed build. With `-logfile` the log and the
 /// messages go where makeblastdb sends them instead of `out` and `err`.
 pub(crate) fn run_with(
     args: &MakedbArgs,
+    registry_blastdb: Option<&str>,
     now: Option<&LocalTime>,
     platform: Platform,
     stdin: &mut dyn Read,
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
-    let mut end_message = None;
+    let mut end_messages = Vec::new();
     let name = match args.logfile.as_deref() {
         None | Some("-") => {
             let result = build_database_with_log(
                 args,
+                registry_blastdb,
                 now,
                 platform,
                 stdin,
                 out,
                 err,
                 None,
-                &mut end_message,
+                &mut end_messages,
             );
-            return finish(result, end_message, err);
+            return finish(result, &end_messages, err);
         }
         Some(name) => name,
     };
@@ -1549,15 +1721,16 @@ pub(crate) fn run_with(
             let mut log = &file;
             let result = build_database_with_log(
                 args,
+                registry_blastdb,
                 now,
                 platform,
                 stdin,
                 &mut log,
                 &mut diag,
                 None,
-                &mut end_message,
+                &mut end_messages,
             );
-            finish(result, end_message, &mut diag)
+            finish(result, &end_messages, &mut diag)
         }
         None => {
             let error = MakedbError::Argument(format!(
@@ -1565,22 +1738,23 @@ pub(crate) fn run_with(
             ));
             let result = build_database_with_log(
                 args,
+                registry_blastdb,
                 now,
                 platform,
                 stdin,
                 out,
                 &mut diag,
                 Some(error),
-                &mut end_message,
+                &mut end_messages,
             );
-            finish(result, end_message, &mut diag)
+            finish(result, &end_messages, &mut diag)
         }
     }
 }
 
-/// The error message and the exit code of a build, then the message of
-/// `~CBuildDatabase` (`end_message`).
-fn finish(result: Result<(), MakedbError>, end_message: Option<&str>, err: &mut dyn Write) -> i32 {
+/// The error message and the exit code of a build, then the messages of
+/// `~CBuildDatabase` (`end_messages`).
+fn finish(result: Result<(), MakedbError>, end_messages: &[String], err: &mut dyn Write) -> i32 {
     let status = match result {
         Ok(()) => 0,
         Err(MakedbError::Build(WriteDbError::CreationBytes(message))) => {
@@ -1594,7 +1768,7 @@ fn finish(result: Result<(), MakedbError>, end_message: Option<&str>, err: &mut 
             error.exit_code()
         }
     };
-    if let Some(message) = end_message {
+    for message in end_messages {
         let _ = writeln!(err, "{message}");
     }
     status

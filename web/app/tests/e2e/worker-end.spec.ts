@@ -1,5 +1,5 @@
 // A worker that the page ends while its thread waits on a shared memory gives that memory
-// back. WebKit (Playwright's 2311) never ended such a worker when the wait had no timeout: it
+// back. WebKit (build 2311 of Playwright 1.61.1) never ended such a worker when the wait had no timeout: it
 // kept the worker's instance and its shared memory until the page closed, and a page can reserve
 // a memory of 4 GiB about 15 times, so each cancel of a threaded search whose threads were
 // waiting left one, until no threaded search could start. The shared-memory guard records each

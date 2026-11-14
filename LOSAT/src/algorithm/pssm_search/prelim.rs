@@ -52,13 +52,16 @@ use super::ungapped::{pssm_extend_one_hit, pssm_extend_two_hit};
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use crate::algorithm::blastp::extension::BlastpUngappedData;
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
-use crate::algorithm::blastp::hsp::{reap_hsplist_by_evalue, update_best_evalue, BlastpHspList};
+use crate::algorithm::blastp::hsp::{
+    link_hsp_list, reap_hsplist_by_evalue, update_best_evalue, BlastpHspList,
+};
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::tblastx::blast_aascan::{
     s_blast_aa_scan_subject_one_range, BlastOffsetPair as OffsetPair,
 };
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
+use crate::core::link_hsps::{EvenGapLinkParams, LinkContext};
 use crate::stats::KarlinParams;
 
 /// NCBI's `BlastInitHSP` with its `BlastUngappedData`.
@@ -77,7 +80,8 @@ pub(crate) struct PssmPrelim<'a, R: PssmRows> {
     pub(crate) word_size: i32,
     /// `-window_size`; 0 for the one-hit search.
     pub(crate) window: i32,
-    /// `cutoffs->x_dropoff` of the context (`ceil(7 ln 2 / kbp_psi->Lambda)`).
+    /// `cutoffs->x_dropoff` of the context (`ceil(x_dropoff ln 2 / kbp_psi->Lambda)` of the
+    /// search's `-xdrop_ungap`, 7 bits by default).
     pub(crate) x_dropoff: i32,
     /// `word_params->cutoffs[0].cutoff_score`.
     pub(crate) word_cutoff: i32,
@@ -93,6 +97,10 @@ pub(crate) struct PssmPrelim<'a, R: PssmRows> {
     pub(crate) stats: EvalueStats<'a>,
     /// `hit_params->prelim_evalue`.
     pub(crate) prelim_evalue: f64,
+    /// psiblast's `-sum_stats true`: the preliminary linking parameters (`hit_params->
+    /// link_hsp_params`) and the query's context as the linking reads it; `None` without sum
+    /// statistics.
+    pub(crate) link: Option<(EvenGapLinkParams, LinkContext)>,
 }
 
 /// The memory of one subject's preliminary search, kept from subject to subject as NCBI keeps
@@ -389,6 +397,15 @@ impl<R: PssmRows> PssmPrelim<'_, R> {
         //            for PHI or RPS with old FSC, since calculating the E values
         //            requires precomputation that has not been done yet */
         // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873
+        // ```c
+        //     if (hit_params->link_hsp_params) {
+        //         status = BLAST_LinkHsps(program_number, hsp_list_out, query_info,
+        //                   subject->length, gap_align->sbp, hit_params->link_hsp_params,
+        //                   score_options->gapped_calculation);
+        // ```
+        // With psiblast's `-sum_stats true` the HSPs take the e-values of their linked sets
+        // (`kbp_gap_psi`), in the list the linking sorts by score.
         let query_length = self.rows.len() as i32;
         let mut list = BlastpHspList {
             oid: s_idx,
@@ -397,17 +414,23 @@ impl<R: PssmRows> PssmPrelim<'_, R> {
                 .iter()
                 .map(|hsp| XPrelimHsp {
                     hsp: *hsp,
-                    e_value: self.stats.e_value(
-                        hsp.raw_score,
-                        self.karlin,
-                        query_length,
-                        aa_len as i32,
-                    ),
+                    e_value: match self.link {
+                        Some(_) => f64::MAX,
+                        None => self.stats.e_value(
+                            hsp.raw_score,
+                            self.karlin,
+                            query_length,
+                            aa_len as i32,
+                        ),
+                    },
                 })
                 .collect(),
             best_evalue: f64::MAX,
         };
-        update_best_evalue(&mut list);
+        match &self.link {
+            Some((params, context)) => link_hsp_list(&mut list, *context, aa_len as i32, params),
+            None => update_best_evalue(&mut list),
+        }
         reap_hsplist_by_evalue(&mut list, self.prelim_evalue);
         (!list.hsps.is_empty()).then_some(list)
     }

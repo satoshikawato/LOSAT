@@ -2,9 +2,8 @@
 // The page's CSP (script-src 'self') refuses an inline script tag, so axe's source runs through
 // the driver's evaluate, which is not a page script.
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { createRequire } from 'node:module';
 import type { Page } from '@playwright/test';
-import { REPOSITORY } from './harness-server';
 
 let source: string | undefined;
 
@@ -17,7 +16,8 @@ export interface AxeViolation {
 
 /** The violations of axe's rules (its default set) in the elements that `selectors` select, without those that `exclude` selects. */
 export async function axeViolations(page: Page, selectors: readonly string[], exclude: readonly string[] = []): Promise<AxeViolation[]> {
-  source ??= readFileSync(join(REPOSITORY, 'web/app/node_modules/axe-core/axe.min.js'), 'utf8');
+  // Where npm installed it (the workspace's node_modules, web/package.json).
+  source ??= readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
   if (!(await page.evaluate(() => 'axe' in window))) await page.evaluate(`${source}\n;void 0`);
   return page.evaluate(async ([include, left]) => {
     type Result = { violations: { id: string; impact?: string | null; nodes: { target: unknown[] }[] }[] };

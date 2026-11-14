@@ -56,7 +56,8 @@ const BLOSUM62_11_1: KarlinBlk = KarlinBlk {
 };
 
 fn blosum62() -> PsiScoreBlk {
-    crate::algorithm::psiblast::pssm::score_block(ScoringMatrix::Blosum62, BLOSUM62_11_1).unwrap()
+    crate::algorithm::pssm_search::in_pssm::score_block(ScoringMatrix::Blosum62, BLOSUM62_11_1)
+        .unwrap()
 }
 
 /// psiblast's request without `-out_ascii_pssm` (`PSIDiagnosticsRequestNewEx(FALSE)`).

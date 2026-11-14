@@ -10,10 +10,13 @@
 //!
 //! - `two_hit` - Two-hit extension algorithm (NCBI style)
 
+// The one-hit extension (`-window_size 0`).
+mod one_hit;
 mod two_hit;
 // The table walks of the two-hit extension.
 mod x_two_hit_fast;
 
+pub(crate) use one_hit::extend_hit_one_hit;
 pub(crate) use two_hit::extend_hit_two_hit_fitting;
 pub(crate) use two_hit::extend_hit_two_hit_with;
 // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the walks the sentinels stop, and the checks that choose them.

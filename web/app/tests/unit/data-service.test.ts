@@ -1,15 +1,12 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import type { IndexedRecord } from '../../src/domain/dataset';
-import { sha256Hex } from '../../src/infra/browser/platform';
+import { RunOutputWriter, sha256Hex } from 'losat';
+import { CUSTOM_OUTPUT, type IndexedRecord } from 'losat/domain';
+import type { Compression, FileInflater, RecordScanner } from 'losat/ports';
 import { MEMORY_FULL_MESSAGE, RESULTS_REMOVED_MESSAGE, StorageRemovedError } from '../../src/infra/data/block-store';
-import { CUSTOM_OUTPUT } from '../../src/domain/output-format';
 import { DataService, STORED_CHECK_READS, type DataServiceDeps } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
-import { RunOutputWriter } from '../../src/infra/run-output/writer';
-import type { Compression, FileInflater } from '../../src/ports/inflate';
-import type { RecordScanner } from '../../src/ports/scan';
 import { NodeInflater } from './support/node-inflater';
 
 const encoder = new TextEncoder();

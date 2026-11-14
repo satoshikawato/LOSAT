@@ -4,9 +4,8 @@
 //! the size limit, and closing renames a single volume or writes the alias
 //! file of several.
 
-use std::path::PathBuf;
-
 use std::collections::BTreeSet;
+use std::path::Path;
 
 use super::bioseq::Bioseq;
 use super::convert::{seq_data_to_binary, sequence_hash, BinarySequence};
@@ -16,6 +15,8 @@ use super::header::{defline_set, encode_defline_set, BadChar, BadTitleChar};
 use super::lmdb::{
     lmdb_file_name, lmdb_map_size_from_env, LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
 };
+use super::mask_data::{MaskWriter, MaskedRanges};
+use super::ofstream::OfStream;
 use super::platform::Platform;
 pub use super::volume::Indices;
 use super::volume::{IndexScratch, Volume};
@@ -74,6 +75,9 @@ pub struct WriteDb {
     /// The first sequence of GIs only between two sequences with keys: makeblastdb 2.17.0
     /// aborts on it when it writes the `.pos` file (`WriteDb::close`).
     gi_only_between_keys: Option<(u32, Vec<u8>)>,
+    /// The mask data: the registered algorithms, the mask column and the blobs of the
+    /// sequence being written. Empty for a database without mask data.
+    mask: MaskWriter,
 }
 
 impl std::fmt::Debug for WriteDb {
@@ -137,8 +141,8 @@ fn post_bad_title_chars(diagnostics: &mut Vec<u8>, title: &[u8], bad: &[BadTitle
 }
 
 /// `post_bad_title_chars` for the strings of definition lines with parsed Seq-ids:
-/// "Error: (803.7) [makeblastdb] Blast-def-line-set.E.seqid.E.local.str", "Bad char
-/// [0xE9] in string at byte 38" and the string (makeblastdb 2.17.0, survey B fixture
+/// `Error: (803.7) [makeblastdb] Blast-def-line-set.E.seqid.E.local.str`, `Bad char
+/// [0xE9] in string at byte 38` and the string (makeblastdb 2.17.0, survey B fixture
 /// p23_nonascii; the member paths of the other alternatives from the S3a probes).
 fn post_bad_chars(diagnostics: &mut Vec<u8>, bad: &[BadChar]) {
     for bad_char in bad {
@@ -198,6 +202,7 @@ impl WriteDb {
             lmdb_had_keys: false,
             gi_only_after_keys: None,
             gi_only_between_keys: None,
+            mask: MaskWriter::default(),
         }
     }
 
@@ -316,6 +321,8 @@ impl WriteDb {
         self.pending_hash = 0;
         self.ids.clear();
         self.tax_ids.clear();
+        // `x_ResetSequenceData`: the mask blobs of the previous sequence go.
+        self.mask.reset_sequence();
         if bioseq.is_aa != self.protein {
             let name = |protein: bool| if protein { "protein" } else { "nucleotide" };
             return Err(WriteDbError::Creation(format!(
@@ -554,7 +561,14 @@ impl WriteDb {
 
         let mut done = false;
         if let Some(volume) = self.volumes.last_mut() {
-            done = volume.write_sequence(&binary.seq, &binary.ambig, &binhdr, &self.ids, hash)?;
+            done = volume.write_sequence(
+                &binary.seq,
+                &binary.ambig,
+                &binhdr,
+                &self.ids,
+                hash,
+                self.mask.blobs(),
+            )?;
             if done {
                 self.insert_lmdb_entries()?;
             }
@@ -570,6 +584,12 @@ impl WriteDb {
                 arrays = volume.take_offset_arrays();
                 scratch = volume.take_index_scratch();
             }
+            // The date of the column is read before the volume's files are created, so
+            // that a clock that cannot be read leaves none.
+            let column_date = match self.mask.column_meta() {
+                Some(_) => Some(self.mask.column_date(index as usize)?),
+                None => None,
+            };
             self.volumes.push(Volume::create(
                 &self.dbname,
                 self.protein,
@@ -583,11 +603,23 @@ impl WriteDb {
                 self.indices,
                 scratch,
             )?);
+            if let (Some(meta), Some(date)) = (self.mask.column_meta(), &column_date) {
+                if let Some(volume) = self.volumes.last_mut() {
+                    volume.create_mask_column(meta, date, self.max_file_size)?;
+                }
+            }
             if !self.indices.full {
                 binhdr = self.cook_header(&bioseq.title);
             }
             let volume = self.volumes.last_mut().expect("a volume was pushed");
-            done = volume.write_sequence(&binary.seq, &binary.ambig, &binhdr, &self.ids, hash)?;
+            done = volume.write_sequence(
+                &binary.seq,
+                &binary.ambig,
+                &binhdr,
+                &self.ids,
+                hash,
+                self.mask.blobs(),
+            )?;
             if done {
                 self.insert_lmdb_entries()?;
             }
@@ -810,7 +842,13 @@ impl WriteDb {
     // The volume names are the final ones (after `RenameSingle` or
     // `RenameFileIndex`). `Reset` runs the destructors of the two LMDB
     // writers, which write their lookup files and their LMDB transactions
-    // (`WriteDbLmdb::close`, `WriteDbTaxId::close`).
+    // (`WriteDbLmdb::close`, `WriteDbTaxId::close`). An exception that leaves `Close` before
+    // them (the duplicate id of the last sequence, found when `x_Publish` writes it) leaves
+    // the last volume open and both writers alive: their destructors run when the writer is
+    // destroyed, after `x_EndBuild` has removed the files of the build
+    // (`destroy_after_failed_close`). An exception that leaves one of these destructors ends
+    // makeblastdb (`std::terminate`): LOSAT ends with an error there, and no destructor runs
+    // after it (`lmdb` and `taxdb` are dropped without their work).
     /// `Close`: publishes the last sequence, closes the last volume, gives
     /// the files their final names, and writes the LMDB files of version 5.
     pub fn close(&mut self) -> Result<(), WriteDbError> {
@@ -835,10 +873,10 @@ impl WriteDb {
             }
         }
         if count > 1 {
-            self.make_alias()?;
+            self.make_alias();
         }
         if self.version == DbVersion::V5 {
-            if let Some(mut lmdb) = self.lmdb.take() {
+            if let Some(lmdb) = self.lmdb.as_mut() {
                 let vol_names: Vec<String> = self
                     .volumes
                     .iter()
@@ -846,16 +884,156 @@ impl WriteDb {
                     .collect();
                 let vol_num_oids: Vec<u32> = self.volumes.iter().map(Volume::oid).collect();
                 lmdb.insert_volumes_info(&vol_names, &vol_num_oids)?;
+                // `m_Lmdbdb.Reset()`: makeblastdb aborts in this destructor (the `.pos` file).
                 if let Some((oid, name)) = self.gi_only_between_keys.take() {
+                    self.lmdb = None;
+                    self.taxdb = None;
                     return Err(gi_only_between_keys_error(oid, &name));
                 }
-                lmdb.close()?;
+                if let Some(lmdb) = self.lmdb.take() {
+                    if let Err(error) = lmdb.close() {
+                        self.taxdb = None;
+                        return Err(error);
+                    }
+                }
                 if let Some(taxdb) = self.taxdb.take() {
                     taxdb.close()?;
                 }
             }
         }
         Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:100-108
+    // ```c++
+    // CWriteDB_Impl::~CWriteDB_Impl()
+    // {
+    //     try {
+    //     	Close();
+    //     } catch (const CWriteDBException& e) {
+    //         ERR_POST(Error << "BLAST Database creation error: " << e.GetMsg());
+    //     }
+    //
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.hpp:629-648
+    // ```c++
+    //     CRef<CWriteDB_Volume> m_Volume;
+    //
+    //     /// List of all volumes so far, up to and including m_Volume.
+    //     vector< CRef<CWriteDB_Volume> > m_VolumeList;
+    //     ...
+    //     ///Write lmdb handle
+    //     CRef <CWriteDB_LMDB>    m_Lmdbdb;
+    //
+    //     ///Write tax info handle
+    //     CRef <CWriteDB_TaxID>    m_Taxdb;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:146-151
+    // ```c++
+    // CWriteDB_Volume::~CWriteDB_Volume()
+    // {
+    //     if (m_Open) {
+    //         Close();
+    //     }
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:65-72,437-444
+    // ```c++
+    // CWriteDB_LMDB::~CWriteDB_LMDB()
+    // {
+    // 	x_CreateOidToSeqidsLookupFile();
+    // 	x_CommitTransaction();
+    //     CBlastLMDBManager::GetInstance().CloseEnv(m_Db);
+    //     CFile(m_Db+"-lock").Remove();
+    // ...
+    // CWriteDB_TaxID::~CWriteDB_TaxID()
+    // {
+    // 	x_CreateOidToTaxIdsLookupFile();
+    // 	x_CreateTaxIdToOidsLookupFile();
+    // 	x_CommitTransaction();
+    //     CBlastLMDBManager::GetInstance().CloseEnv(m_Db);
+    //     CFile(m_Db+"-lock").Remove();
+    // }
+    // ```
+    // After a `Close` that threw, the destructor's `Close` returns at once (`m_Closed`), and the
+    // members are destroyed in the reverse order of their declaration: `m_Taxdb` (the `.pot`
+    // and `.pto` files, the commit into `.ptf`), `m_Lmdbdb` (the `.pos` file, the commit into the
+    // `.pdb` file, which `x_EndBuild` removed: it goes to the removed file), then
+    // `m_VolumeList` and `m_Volume`, whose last volume closes: its index file is written to the
+    // removed one, and the files it makes at the close (the ISAM files, the OID to GI file) are
+    // made under the volume's numbered name, since no rename ran. makeblastdb destroys the
+    // writer when it ends, after its message; the files are those of these steps either way.
+    // A destructor that throws ends makeblastdb (`std::terminate`): the steps after it do not
+    // run (the tax id writer of a database whose first sequence failed: "No tax info for any
+    // oid"). An error of the last volume's close is LOSAT's 4 GiB stop, after the build's error.
+    /// The destructors of the writer's members after a `close` that failed (`x_EndBuild` has
+    /// removed the files of the build).
+    pub fn destroy_after_failed_close(&mut self) {
+        if let Some(taxdb) = self.taxdb.take() {
+            if taxdb.close().is_err() {
+                self.lmdb = None;
+                return;
+            }
+        }
+        if let Some(lmdb) = self.lmdb.take() {
+            if lmdb.close().is_err() {
+                return;
+            }
+        }
+        if let Some(volume) = self.volumes.last_mut() {
+            let _ = volume.close();
+        }
+    }
+
+    /// `RegisterMaskAlgorithm(program, options, name)`: registers a masking algorithm of the
+    /// filtering program `program` (a `Blast-filter-program` number) and returns its id.
+    /// `name` is the name of the mask file for makeblastdb. The first registration creates
+    /// the mask column.
+    pub fn register_mask_algorithm(
+        &mut self,
+        program: i32,
+        options: &[u8],
+        name: &[u8],
+    ) -> Result<i32, WriteDbError> {
+        self.mask
+            .register_program(program, options, name, !self.volumes.is_empty())
+    }
+
+    /// `RegisterMaskAlgorithm(id, description, options)`: the form of `makeblastdb -mask_id`.
+    pub fn register_mask_algorithm_id(
+        &mut self,
+        id: &[u8],
+        description: &[u8],
+        options: &[u8],
+    ) -> Result<i32, WriteDbError> {
+        self.mask
+            .register_id(id, description, options, !self.volumes.is_empty())
+    }
+
+    /// `SetMaskData`: the masked ranges of the sequence added last (its mask blobs are
+    /// written with it when it is published). The ranges are those
+    /// `MaskedRangeSet::get_ranges` gives.
+    pub fn set_mask_data(&mut self, ranges: &[MaskedRanges]) -> Result<(), WriteDbError> {
+        // `x_ComputeSeqLength` of a sequence from a `CBioseq` is the length of its Seq-inst.
+        let seq_length = self
+            .pending
+            .as_ref()
+            .and_then(|bioseq| u32::try_from(bioseq.length).ok());
+        self.mask
+            .set_mask_data(ranges, seq_length, !self.volumes.is_empty())
+    }
+
+    /// Test hook: the date that the mask column of volume `index` stores instead of the
+    /// time of its creation.
+    #[cfg(test)]
+    pub fn set_column_date(&mut self, index: usize, date: &[u8]) {
+        self.mask.set_column_date(index, date);
+    }
+
+    /// The date for a mask column when the clock cannot be read (the time of the build).
+    pub fn set_column_date_fallback(&mut self, date: &[u8]) {
+        self.mask.set_date_fallback(date);
     }
 
     /// The volumes written: the path of each without extension, its number
@@ -905,26 +1083,28 @@ impl WriteDb {
     //           << "TITLE "        << m_Title << "\n"
     //           << "DBLIST "       << dblist  << "\n";
     // ```
+    // The `ofstream` is not tested (`super::ofstream`): an alias file that cannot be opened or
+    // written leaves the build going on, and the new database cannot be opened afterwards. The
+    // stream writes the file when it is destroyed. makeblastdb sets no GI mask.
     /// `x_MakeAlias`: the alias file of a database of several volumes.
-    fn make_alias(&self) -> Result<(), WriteDbError> {
-        let mut text = Vec::new();
-        text.extend_from_slice(b"#\n# Alias file created: ");
-        text.extend_from_slice(&self.date);
-        text.extend_from_slice(b"\n#\nTITLE ");
-        text.extend_from_slice(&self.title);
-        text.extend_from_slice(b"\nDBLIST ");
+    fn make_alias(&self) {
+        let mut dblist = Vec::new();
         for (i, volume) in self.volumes.iter().enumerate() {
             if i > 0 {
-                text.push(b' ');
+                dblist.push(b' ');
             }
-            text.extend_from_slice(file_name(volume.volume_name()).as_bytes());
+            dblist.extend_from_slice(file_name(volume.volume_name()).as_bytes());
         }
-        text.push(b'\n');
-        let name = self.alias_name();
-        std::fs::write(&name, text).map_err(|source| WriteDbError::Io {
-            path: PathBuf::from(name),
-            source,
-        })
+        let mut alias = OfStream::create(Path::new(&self.alias_name()));
+        alias.insert(b"#\n# Alias file created: ");
+        alias.insert(&self.date);
+        alias.insert(b"\n#\n");
+        alias.insert(b"TITLE ");
+        alias.insert(&self.title);
+        alias.insert(b"\n");
+        alias.insert(b"DBLIST ");
+        alias.insert(&dblist);
+        alias.insert(b"\n");
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1655-1674
@@ -976,18 +1156,6 @@ impl WriteDb {
             files.push(build_lmdb_file_name(&self.dbname, self.protein));
         }
         files
-    }
-
-    /// Drops every open file without flushing (before a failed build removes
-    /// its files).
-    pub fn abandon(&mut self) {
-        self.closed = true;
-        self.pending = None;
-        for volume in &mut self.volumes {
-            volume.abandon();
-        }
-        self.lmdb = None;
-        self.taxdb = None;
     }
 }
 

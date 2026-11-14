@@ -1,4 +1,4 @@
-//! The library API (`LOSAT::api`, docs/losat_library_surface_plan.md §6): a search of records in
+//! The library API (`losat::api`, docs/losat_library_surface_plan.md §6): a search of records in
 //! memory writes the bytes of the command line, one report per `-outfmt`, with the command line's
 //! warnings; the typed values are the columns of `-outfmt 6` and the `Statistics` of outfmt 5; two
 //! searches at once give the reports of each alone; the example writes nothing to standard error;
@@ -11,10 +11,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use LOSAT::api::{
+use crate::library_examples::example_binary;
+
+use losat::api::{
     describe, read_fasta, read_inputs, run, run_batches, run_blastdbcmd, run_collect,
-    run_makeblastdb, run_to_file, validate, Error, FastaRecord, HspRecord, Inputs, Outcome,
-    Program, Role, Strand, ValueKind, API_OWNED,
+    run_dustmasker, run_makeblastdb, run_to_file, validate, Error, FastaRecord, HspRecord, Inputs,
+    Outcome, Program, Role, Strand, ValueKind, API_OWNED,
 };
 
 /// One search: a program, two fixtures of `tests/fasta`, options and the formats to compare.
@@ -1332,32 +1334,9 @@ fn two_searches_at_once_give_the_reports_of_each_alone() {
     }
 }
 
-/// The example binary, built by `cargo test` (every target) or here by `cargo build` when a
-/// single test target was asked for.
-fn example_binary() -> PathBuf {
-    let bin_dir = Path::new(env!("CARGO_BIN_EXE_losat"))
-        .parent()
-        .unwrap()
-        .to_path_buf();
-    let example = bin_dir
-        .join("examples")
-        .join(format!("library_search{}", std::env::consts::EXE_SUFFIX));
-    if !example.exists() {
-        let status = Command::new(env!("CARGO"))
-            .args(["build", "--example", "library_search", "--profile", "test"])
-            .arg("--target-dir")
-            .arg(bin_dir.parent().unwrap())
-            .current_dir(env!("CARGO_MANIFEST_DIR"))
-            .status()
-            .expect("build the example");
-        assert!(status.success(), "cargo build --example library_search");
-    }
-    example
-}
-
 #[test]
 fn the_example_prints_the_command_lines_report_and_writes_only_its_warnings_to_stderr() {
-    let example = example_binary();
+    let example = example_binary("library_search");
     for (case, warnings) in [(&CASES[0], false), (&CASES[WARNINGS_CASE], true)] {
         let (query, subject) = (fixture(case.query), fixture(case.subject));
         let (bytes, stderr) = cli(case, &query, &subject, "6");
@@ -1460,7 +1439,7 @@ fn engine_tests(name: &str) -> String {
 
 impl DatabaseCase {
     /// The query file's records and the search, as `-db` runs them.
-    fn read(&self) -> (Vec<u8>, Vec<FastaRecord>, LOSAT::api::Search) {
+    fn read(&self) -> (Vec<u8>, Vec<FastaRecord>, losat::api::Search) {
         let bytes = std::fs::read(engine_tests(self.query)).unwrap();
         let search = validate(self.program, self.options).unwrap();
         let (records, none) = read_inputs(&search, &bytes, b"").unwrap();
@@ -1633,6 +1612,88 @@ fn a_database_fails_as_on_the_command_line() {
     assert!(outcome.reports[0].bytes.is_empty());
 }
 
+/// `run_makeblastdb` takes the masking options of the command line (`-mask_data`, `-mask_id`,
+/// `-mask_desc`): the database it writes has the mask column of the command line's, read back
+/// by `blastdbcmd` through the library and through the binary alike.
+#[test]
+fn a_masked_database_made_through_the_library_equals_the_command_lines() {
+    let seqdb = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb");
+    let fasta = seqdb.join("mask_nucl.fna");
+    let masks = seqdb.join("mask_writer/dust.asnt");
+    let (fasta, masks) = (fasta.to_str().unwrap(), masks.to_str().unwrap());
+    let directory = temp_path("masked");
+    std::fs::create_dir_all(&directory).unwrap();
+    let library = directory.join("library");
+    let binary = directory.join("binary");
+    let words = |name: &Path| -> Vec<String> {
+        [
+            "-in",
+            fasta,
+            "-dbtype",
+            "nucl",
+            "-title",
+            "masked",
+            "-out",
+            name.to_str().unwrap(),
+            "-mask_data",
+            masks,
+            "-mask_id",
+            "dust1",
+            "-mask_desc",
+            "the masks of dustmasker",
+        ]
+        .map(str::to_string)
+        .to_vec()
+    };
+    let argv = words(&library);
+    let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
+    let (mut log, mut warnings) = (Vec::new(), Vec::new());
+    run_makeblastdb(&argv, &mut std::io::empty(), &mut log, &mut warnings).unwrap();
+    assert!(
+        String::from_utf8_lossy(&log).contains(&format!("Mask file: {masks}\n")),
+        "{}",
+        String::from_utf8_lossy(&log)
+    );
+    assert!(warnings.is_empty());
+    let cli = command(env!("CARGO_BIN_EXE_losat"))
+        .arg("makeblastdb")
+        .args(words(&binary))
+        .output()
+        .unwrap();
+    assert!(
+        cli.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cli.stderr)
+    );
+    assert!(cli.stderr.is_empty());
+    // The algorithm of `-mask_id` is the first free id from 100 on.
+    for name in [&library, &binary] {
+        let name = name.to_str().unwrap();
+        let words = ["-db", name, "-entry", "all", "-outfmt", "%o %m100"];
+        let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
+        run_blastdbcmd(&words, &mut std::io::empty(), &mut output, &mut diagnostics).unwrap();
+        let text = String::from_utf8_lossy(&output).into_owned();
+        assert!(text.starts_with("0 199-281;\n"), "{text}");
+        assert!(diagnostics.is_empty());
+        let cli = command(env!("CARGO_BIN_EXE_losat"))
+            .arg("blastdbcmd")
+            .args(words)
+            .output()
+            .unwrap();
+        assert_eq!(output, cli.stdout);
+    }
+    // The dependencies of the options are the parser's.
+    let error = run_makeblastdb(
+        &["-dbtype", "nucl", "-mask_id", "x"],
+        &mut std::io::empty(),
+        &mut std::io::sink(),
+        &mut std::io::sink(),
+    )
+    .unwrap_err();
+    assert!(matches!(error, Error::Argv(_)), "{error}");
+    assert!(error.message().contains("mask_data"), "{error}");
+}
+
 #[test]
 fn a_database_made_through_the_library_is_read_and_searched_through_it() {
     let directory = temp_path("made");
@@ -1655,19 +1716,32 @@ fn a_database_made_through_the_library_is_read_and_searched_through_it() {
         String::from_utf8_lossy(&log)
     );
     assert!(warnings.is_empty());
-    // The command line reads what the library wrote, and the two read it alike.
-    for words in [
-        vec!["-db", name, "-info"],
-        vec!["-db", name, "-entry", "all", "-outfmt", "%o %l %t"],
+    // The command line reads what the library wrote, and the two read it alike; a batch file
+    // `-` is the caller's reader, the command line's standard input (of a database with
+    // accessions: an ordinal id names no sequence of a version 5 database, as in NCBI).
+    let accessions = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/blastdbcmd/db/p5");
+    let accessions = accessions.to_str().unwrap();
+    for (words, input) in [
+        (vec!["-db", name, "-info"], ""),
+        (
+            vec!["-db", name, "-entry", "all", "-outfmt", "%o %l %t"],
+            "",
+        ),
+        (
+            vec!["-db", accessions, "-entry_batch", "-", "-outfmt", "%o %a"],
+            "P99999.2\n",
+        ),
     ] {
         let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
-        run_blastdbcmd(&words, &mut output, &mut diagnostics).unwrap();
-        let cli = command(env!("CARGO_BIN_EXE_losat"))
-            .arg("blastdbcmd")
-            .args(&words)
-            .output()
-            .unwrap();
+        run_blastdbcmd(&words, &mut input.as_bytes(), &mut output, &mut diagnostics).unwrap();
+        let cli = run_with_stdin(
+            command(env!("CARGO_BIN_EXE_losat"))
+                .arg("blastdbcmd")
+                .args(&words),
+            input,
+        );
         assert!(cli.status.success(), "{words:?}");
+        assert!(!output.is_empty(), "{words:?}");
         assert_eq!(output, cli.stdout, "{words:?}");
         assert_eq!(diagnostics, cli.stderr, "{words:?}");
     }
@@ -1696,7 +1770,13 @@ fn a_database_made_through_the_library_is_read_and_searched_through_it() {
     let missing = missing.to_str().unwrap();
     let words = ["-db", missing, "-info"];
     let mut diagnostics = Vec::new();
-    let error = run_blastdbcmd(&words, &mut std::io::sink(), &mut diagnostics).unwrap_err();
+    let error = run_blastdbcmd(
+        &words,
+        &mut std::io::empty(),
+        &mut std::io::sink(),
+        &mut diagnostics,
+    )
+    .unwrap_err();
     let cli = command(env!("CARGO_BIN_EXE_losat"))
         .arg("blastdbcmd")
         .args(words)
@@ -1745,6 +1825,73 @@ fn the_api_owns_the_inputs_and_the_outputs() {
     assert!(matches!(error, Error::Argv(_)), "{error}");
     let error = Program::parse("makeblastdb").unwrap_err();
     assert!(error.message().contains("run_makeblastdb"), "{error}");
+    let error = Program::parse("dustmasker").unwrap_err();
+    assert!(error.message().contains("run_dustmasker"), "{error}");
+}
+
+/// The output of `command` run with `input` as its standard input.
+fn run_with_stdin(command: &mut Command, input: &str) -> std::process::Output {
+    use std::io::Write as _;
+    let mut child = command
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+// `tests/masker_fixtures.rs` runs every row of the NCBI fixture through the library too
+// (`examples/library_command_line`); this is the API's own contract: the caller's reader is the
+// standard input, and a failure's message is what the command line writes to standard error.
+#[test]
+fn dustmasker_masks_sequences_in_memory_as_the_command_line_does() {
+    let fasta =
+        ">one low complexity\nACGTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTACGTAGCTAGCATCGACT\n";
+    for words in [vec![], vec!["-in", "-", "-outfmt", "fasta"]] {
+        let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
+        run_dustmasker(&words, &mut fasta.as_bytes(), &mut output, &mut diagnostics).unwrap();
+        let cli = run_with_stdin(
+            command(env!("CARGO_BIN_EXE_losat"))
+                .arg("dustmasker")
+                .args(&words),
+            fasta,
+        );
+        assert!(cli.status.success(), "{words:?}");
+        assert!(!output.is_empty(), "{words:?}");
+        assert_eq!(output, cli.stdout, "{words:?}");
+        assert_eq!(diagnostics, cli.stderr, "{words:?}");
+    }
+    // A failure (an `-in` that does not open: NCBI's argument report, exit status 1 there).
+    let words = ["-in", "no/such/file.fa"];
+    let mut diagnostics = Vec::new();
+    let error = run_dustmasker(
+        &words,
+        &mut std::io::empty(),
+        &mut std::io::sink(),
+        &mut diagnostics,
+    )
+    .unwrap_err();
+    let cli = run_with_stdin(
+        command(env!("CARGO_BIN_EXE_losat"))
+            .arg("dustmasker")
+            .args(words),
+        "",
+    );
+    assert!(!cli.status.success());
+    assert_eq!(diagnostics, cli.stderr);
+    assert!(matches!(error, Error::Search(_)), "{error}");
+    assert_eq!(
+        error.message().as_bytes(),
+        cli.stderr.trim_ascii_end(),
+        "{error}"
+    );
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:209-214 (the subjects'

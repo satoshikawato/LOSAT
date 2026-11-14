@@ -152,6 +152,17 @@ with the definition lines `gb|AAA00001.1|` taxid 99990, `gb|CCC00001.1|` 150 and
 and `prd_ax` (A `gb|AAA00001.1|` 99990 and X `gb|XXX00001.1|` 150, a random sequence that no PSSM reads).
 `--pssmread-only` builds only these.
 
+Where the reports read their subjects one by one (line DBID taxrow, review 3 H2 of pssmread), version 5:
+`txr_p` (protein, `txr_p.faa`) and `txr_n` (nucleotide, `txr_n.fna`, the proteins' back-translations), each a decoy
+`gb|DDD00001.1|` taxid 9606 without hits, A `gb|AAA00001.1|` taxid 9606 (the best hit of `txr_q.faa` / `txr_q.fna`;
+`txr_q2.*` add a query without hits; `txr_q3.faa` is `txr_q.faa`'s query twice) and B `gb|BBB00001.1|` taxid 99990,
+whose lookup writes the offset error of `tests/seqdb/taxdb/offset_last_past_end` (`txr.map`), for
+`tests/taxonomy_read_order.rs`; `txr_s` (protein,
+`txr_s.faa`) and `txr_sn` (nucleotide, `txr_s.fna`) for its `-sorthits` cases (line DBID taxrow2): the decoy, A and F
+`gb|FFF00001.1|` taxid 99990 (`txr_s.map`), the first 45 letters of `txr_q.faa` (135 of `txr_q.fna`), whose identities
+put it before A with `-sorthits 3` only.
+`--taxrow-only` builds only these.
+
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
 `pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
 through `pjoin_abc.pal` and `njoin_abc.nal`; `pjoin_bt.*` and `njoin_bt.*` from `pjoin_b.faa` and `njoin_b.fna` with
@@ -341,6 +352,17 @@ def build_pssmread(args: argparse.Namespace) -> None:
             f"DBLIST {names}\n")
 
 
+def build_taxrow(args: argparse.Namespace) -> None:
+    for name, fasta, taxid_map in (("txr_p", "txr_p.faa", "txr.map"), ("txr_n", "txr_n.fna", "txr.map"),
+                                   ("txr_s", "txr_s.faa", "txr_s.map"), ("txr_sn", "txr_s.fna", "txr_s.map")):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta),
+             "-dbtype", "nucl" if fasta.endswith(".fna") else "prot", "-parse_seqids",
+             "-blastdb_version", "5", "-title", f"{name} (parsed Seq-ids)", "-out", str(args.out / name),
+             "-taxid_map", str(HERE / taxid_map)],
+            check=True, stdout=subprocess.DEVNULL)
+
+
 def build_join(args: argparse.Namespace) -> None:
     for name, fasta, dbtype, taxid in (("pjoin_a", "pjoin_a.faa", "prot", None), ("pjoin_b", "pjoin_b.faa", "prot", None),
                                        ("pjoin_c", "pjoin_c.faa", "prot", None), ("pjoin_bt", "pjoin_b.faa", "prot", "9606"),
@@ -380,6 +402,7 @@ def main() -> int:
     ap.add_argument("--weakbatch-only", action="store_true", help="build only the databases of line DBID weakbatch")
     ap.add_argument("--pssmrows-only", action="store_true", help="build only the databases of line DBID pssmrows")
     ap.add_argument("--pssmread-only", action="store_true", help="build only the databases of line DBID pssmread")
+    ap.add_argument("--taxrow-only", action="store_true", help="build only the databases of line DBID taxrow")
     args = ap.parse_args()
     if args.weak_only:
         build_weak(args)
@@ -413,6 +436,9 @@ def main() -> int:
         return 0
     if args.pssmread_only:
         build_pssmread(args)
+        return 0
+    if args.taxrow_only:
+        build_taxrow(args)
         return 0
     variants = [r for r in records(SEQID / "variants.fa") if r[1:].split()[0] not in DROPPED_VARIANTS]
     all_records = (records(SEQID / "prot_ids.fa") + records(SEQID / "prot_extra.fa") + variants

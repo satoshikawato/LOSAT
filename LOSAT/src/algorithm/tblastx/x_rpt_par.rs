@@ -128,15 +128,39 @@ pub(crate) fn write_tabular<W: Write>(
                 (!unsearched[q_idx]).then_some(query_hits.len()),
             )?;
         }
+        // A subject's first row loads it where the query's batch did not prefetch it
+        // (`QueryWarnings::subject_read`, as `report::write_tabular`).
+        let marks = warnings
+            .as_deref()
+            .is_some_and(|warnings| warnings.reads_with_texts(q_idx));
+        let mut previous: Option<u32> = None;
         if query_hits.len() <= CHUNK {
             for hsp in query_hits {
+                if marks && previous != Some(hsp.hit.s_idx) {
+                    previous = Some(hsp.hit.s_idx);
+                    if let Some(warnings) = warnings.as_deref_mut() {
+                        warnings.subject_read(q_idx, hsp.hit.s_idx, &mut *writer)?;
+                    }
+                }
                 report::write_tabular_row(writer, hsp, query_ids, subject_ids, &config)?;
             }
             continue;
         }
         for window in query_hits.chunks(CHUNK * WINDOW_CHUNKS * pool.threads()) {
-            for buffer in format_rows(pool, window, query_ids, subject_ids, &config)? {
-                writer.write_all(&buffer)?;
+            let buffers = format_rows(pool, window, query_ids, subject_ids, &config)?;
+            for (rows, buffer) in window.chunks(CHUNK).zip(buffers) {
+                let reads = if marks {
+                    first_rows(rows, &buffer, &mut previous)
+                } else {
+                    Vec::new()
+                };
+                crate::report::query_warnings::write_marked(
+                    &buffer,
+                    &reads,
+                    q_idx,
+                    &mut *writer,
+                    warnings.as_deref_mut(),
+                )?;
             }
         }
     }
@@ -249,7 +273,8 @@ pub(crate) fn engine_counts<S: TbxScore>(
     report::engine_counts(hits, queries, subjects, query_code, db_code, sc)
 }
 
-/// The outfmt 0 rows of `hits` (`report::pairwise_hits`) as an indexed map on `pool` (item 2).
+/// The outfmt 0 rows of `hits` (`report::pairwise_hits`, the Seq-aligns' identities
+/// `seqalign_identities` by HSP) as an indexed map on `pool` (item 2).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -257,12 +282,21 @@ pub(crate) fn engine_counts<S: TbxScore>(
 pub(crate) fn pairwise_hits(
     pool: &SearchPool<'_>,
     hits: &[TblastxHsp],
+    seqalign_identities: Option<&[u32]>,
     rows: &PairwiseRows<'_>,
 ) -> Vec<PairwiseHit> {
+    debug_assert!(seqalign_identities.is_none_or(|identities| identities.len() == hits.len()));
     pool.install(|| {
         hits.par_iter()
+            .enumerate()
             .with_min_len(CHUNK / 4)
-            .map_init(Vec::new, |window, hsp| rows.hit(hsp, window))
+            .map_init(Vec::new, |window, (index, hsp)| {
+                rows.hit(
+                    hsp,
+                    seqalign_identities.map(|identities| identities[index]),
+                    window,
+                )
+            })
             .collect()
     })
 }
@@ -274,10 +308,43 @@ pub(crate) fn pairwise_hits(
 pub(crate) fn pairwise_hits(
     _pool: &SearchPool<'_>,
     hits: &[TblastxHsp],
+    seqalign_identities: Option<&[u32]>,
     rows: &PairwiseRows<'_>,
 ) -> Vec<PairwiseHit> {
     let mut window = Vec::new();
-    hits.iter().map(|hsp| rows.hit(hsp, &mut window)).collect()
+    hits.iter()
+        .enumerate()
+        .map(|(index, hsp)| {
+            rows.hit(
+                hsp,
+                seqalign_identities.map(|identities| identities[index]),
+                &mut window,
+            )
+        })
+        .collect()
+}
+
+/// Where the subjects of `rows` (formatted into `buffer`, one line each) have their first row,
+/// after the row of subject `previous` (updated): the buffer's length at each, and the subject
+/// (`report::query_warnings::write_marked`).
+fn first_rows(
+    rows: &[&TblastxHsp],
+    buffer: &[u8],
+    previous: &mut Option<u32>,
+) -> Vec<(usize, u32)> {
+    let mut reads = Vec::new();
+    let mut at = 0;
+    for hsp in rows {
+        if *previous != Some(hsp.hit.s_idx) {
+            *previous = Some(hsp.hit.s_idx);
+            reads.push((at, hsp.hit.s_idx));
+        }
+        at += buffer[at..]
+            .iter()
+            .position(|&byte| byte == b'\n')
+            .map_or(buffer.len() - at, |end| end + 1);
+    }
+    reads
 }
 
 /// The rows of `window`, one buffer per chunk of `CHUNK` rows, in order.

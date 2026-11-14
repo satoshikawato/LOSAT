@@ -222,8 +222,9 @@ fn x_tbn_ungap(matrix: ScoringMatrix) -> (bool, Option<&'static x_ungapped_fast:
 }
 
 /// The byte-table walks of the two-hit loop (`XTwoHit::pairs_on`): BLOSUM62's (`XBlosum62Walks`)
-/// or another matrix's (`&MatrixTable`).
-trait XUngapWalks: Copy {
+/// or another matrix's (`&MatrixTable`), or the extension of a PSSM query's rows
+/// (`score::XPssmWalks`, tblastn `-in_pssm`).
+pub(super) trait XUngapWalks: Copy {
     /// `x_ungapped_fast::two_hit` with this table.
     #[allow(clippy::too_many_arguments)]
     fn two_hit(
@@ -727,6 +728,59 @@ impl<'a> XTwoHit<'a> {
         self.diagonals.entries = entries;
     }
 
+    /// `x_pairs_bf_of` with the walks `walks` of a PSSM query (`score::XPssmWalks`, whose
+    /// extension is the PSSM's in every case: the finder is made with `x_with_walks`). Its own
+    /// text, as `x_pairs_bf_of`'s, so that the matrices' keep their code.
+    #[inline(never)]
+    pub(super) fn x_pairs_bf_walks<W: XUngapWalks>(
+        &mut self,
+        walks: W,
+        frame: i8,
+        chunk_offset: u32,
+        subject_sequence: &[u8],
+        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+        hits: &mut Vec<InitHsp>,
+    ) {
+        debug_assert!(self.x_ungap_fast && self.x_ungap_matrix.is_none());
+        if !super::x_tbn_hitbf::fits(self.window, self.word_size) {
+            self.pairs_with(walks, frame, chunk_offset, subject_sequence, pairs, hits);
+            return;
+        }
+        let mut entries =
+            std::mem::replace(&mut self.diagonals.entries, XDiagCells::Pair(Vec::new()));
+        match &mut entries {
+            XDiagCells::Packed(cells) => self.x_pairs_bf_on(
+                walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+            XDiagCells::Pair(cells) => self.x_pairs_bf_on(
+                walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+        }
+        self.diagonals.entries = entries;
+    }
+
+    /// The finder whose extensions are always its walks' (`pairs_on` takes the walks when
+    /// `x_ungap_fast`): a PSSM query's (`x_pairs_bf_walks`), whatever `LOSAT_X_TBNUNGAP` and the
+    /// matrix say. No NCBI counterpart: the PSSM's extension is NCBI's `use_pssm` branch, the
+    /// reference of that query (`pssm_search::ungapped::pssm_extend_two_hit`).
+    pub(super) fn x_with_walks(mut self) -> Self {
+        self.x_ungap_fast = true;
+        self.x_ungap_matrix = None;
+        self
+    }
+
     /// Another matrix's table of the byte-table walks (`x_tbn_ungap`): the caller of the word
     /// finder takes `x_pairs_bf_of` with it; `None` for BLOSUM62's walks and the reference.
     pub(super) fn x_ungap_matrix(&self) -> Option<&'static x_ungapped_fast::MatrixTable> {
@@ -788,6 +842,146 @@ impl<'a> XTwoHit<'a> {
     // ```
     // Same order as Blast_InitHitListSortByScore: score descending, then s_start, length
     // descending, q_start. The sort is stable, as glibc's qsort is under the pinned NCBI build.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:773-803
+    // ```c
+    //             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+    //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+    //             diag_coord = (subject_offset - query_offset) & diag_mask;
+    //             diff = subject_offset -
+    //                 (diag_array[diag_coord].last_hit - diag_offset);
+    //
+    //             /* do an extension, but only if we have not already extended this
+    //                far */
+    //             if (diff >= 0) {
+    //                 Int4 curr_context = BSearchContextInfo(query_offset,
+    //                                                        query_info);
+    //                 BlastUngappedCutoffs *cutoffs = word_params->cutoffs +
+    //                                                         curr_context;
+    //                 score = s_BlastAaExtendOneHit(matrix, subject, query,
+    //                                               subject_offset, query_offset,
+    //                                               cutoffs->x_dropoff,
+    //                                               &hsp_q, &hsp_s, &hsp_len,
+    //                                               wordsize, use_pssm, &s_last_off);
+    //
+    //                 /* if the hsp meets the score threshold, report it */
+    //                 if (score >= cutoffs->cutoff_score) {
+    //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+    //                                      query_offset, subject_offset, hsp_len,
+    //                                      score);
+    //                 }
+    //                 diag_array[diag_coord].last_hit =
+    //                     s_last_off - (wordsize - 1) + diag_offset;
+    //                 ++hits_extended;
+    //             }
+    // ```
+    // The per-hit loop of `s_BlastAaWordFinder_OneHit` (`-window_size 0`; `BlastAaWordFinder`
+    // takes it when the table has no `multiple_hits`, aa_ungapped.c:214-224) on one filled offset
+    // array: the diagonal is `s - q` (the two-hit loop's is `q - s`), no flag is read or set, and
+    // `last_hit` is set after every extension, also one below the cutoff. The table of a window of
+    // 0 is never packed (`x_packs`: `x_tbn_hitbf::fits` needs a window above the word size), and
+    // the unit ends with the same `exit` (`offset += subject_length + 0`). The extension is the
+    // score source's (`TbnScore::one_hit`: the matrix's, BLASTP's `extend_one_hit_for`, or the
+    // PSSM's `pssm_extend_one_hit`).
+    /// The loop body of the one-hit word finder for one filled offset array.
+    pub(super) fn x_pairs_one_hit<S: super::score::TbnScore>(
+        &mut self,
+        score: S,
+        frame: i8,
+        chunk_offset: u32,
+        subject_sequence: &[u8],
+        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+        hits: &mut Vec<InitHsp>,
+    ) -> anyhow::Result<()> {
+        debug_assert_eq!(self.window, 0);
+        // The cells are taken out for the loop over them and put back (a move of the vector).
+        let mut entries =
+            std::mem::replace(&mut self.diagonals.entries, XDiagCells::Pair(Vec::new()));
+        let done = match &mut entries {
+            XDiagCells::Packed(cells) => self.one_hit_on(
+                score,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+            XDiagCells::Pair(cells) => self.one_hit_on(
+                score,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+        };
+        self.diagonals.entries = entries;
+        done
+    }
+
+    /// `x_pairs_one_hit` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`).
+    #[allow(clippy::too_many_arguments)]
+    fn one_hit_on<S: super::score::TbnScore, C: super::x_tbn_hitbf::XDiagCell>(
+        &self,
+        score: S,
+        cells: &mut [C],
+        frame: i8,
+        chunk_offset: u32,
+        subject_sequence: &[u8],
+        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+        hits: &mut Vec<InitHsp>,
+    ) -> anyhow::Result<()> {
+        let word_size = self.word_size;
+        let word_size_i32 = word_size as i32;
+        let diagonals = &self.diagonals;
+        for pair in pairs {
+            // Uint4 offsets: the differences wrap as NCBI's unsigned arithmetic does, and the
+            // Int4 `diff` is their bits.
+            let q = pair.q_off as i32;
+            let s = pair.s_off as i32;
+            let index = (s.wrapping_sub(q) & diagonals.mask) as usize;
+            let cell = &mut cells[index];
+            let (last_hit, _) = cell.get();
+            let diff = s.wrapping_sub(last_hit.wrapping_sub(diagonals.offset));
+            if diff < 0 {
+                continue;
+            }
+            let context = self.context_offsets.partition_point(|&offset| offset <= q) - 1;
+            // The scanner gives words inside the unit, so the extension always runs (`None` is
+            // a word past the slices, which NCBI's scan does not give).
+            let Some(result) = score.one_hit(
+                self.query_sequence,
+                subject_sequence,
+                q as usize,
+                s as usize,
+                self.x_dropoffs[context],
+                word_size,
+                self.matrix,
+            ) else {
+                anyhow::bail!(
+                    "TBLASTN -window_size 0: the word at query offset {} and subject offset {} is past the letters (internal error)",
+                    pair.q_off,
+                    pair.s_off
+                );
+            };
+            if result.ungapped_data.score >= self.cutoff_scores[context] {
+                hits.push(InitHsp {
+                    frame,
+                    chunk_offset,
+                    q_seed: pair.q_off,
+                    s_seed: pair.s_off,
+                    q_start: result.ungapped_data.q_start,
+                    s_start: result.ungapped_data.s_start,
+                    length: result.ungapped_data.length,
+                    score: result.ungapped_data.score,
+                });
+            }
+            cell.set_last_hit(result.s_last_off - (word_size_i32 - 1) + diagonals.offset);
+        }
+        Ok(())
+    }
+
     /// NCBI c++/src/algo/blast/core/blast_extend.c:273-313 (stable, as glibc's
     /// qsort under the pinned NCBI BLAST+).
     pub(super) fn sort(hits: &mut [InitHsp]) {

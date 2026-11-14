@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<!DOCTYPE Seq-loc PUBLIC "-//NCBI//NCBI Seqloc/EN" "NCBI_Seqloc.dtd">
+<Seq-loc>
+  <Seq-loc_int>
+    <Seq-interval>
+      <Seq-interval_from>0</Seq-interval_from>
+      <Seq-interval_to>12</Seq-interval_to>
+      <Seq-interval_id>
+        <Seq-id>
+          <Seq-id_local>
+            <Object-id>
+              <Object-id_id>6</Object-id_id>
+            </Object-id>
+          </Seq-id_local>
+        </Seq-id>
+      </Seq-interval_id>
+    </Seq-interval>
+  </Seq-loc_int>
+</Seq-loc>
+<?xml version="1.0"?>
+<!DOCTYPE Seq-loc PUBLIC "-//NCBI//NCBI Seqloc/EN" "NCBI_Seqloc.dtd">
+<Seq-loc>
+  <Seq-loc_int>
+    <Seq-interval>
+      <Seq-interval_from>0</Seq-interval_from>
+      <Seq-interval_to>24</Seq-interval_to>
+      <Seq-interval_id>
+        <Seq-id>
+          <Seq-id_local>
+            <Object-id>
+              <Object-id_id>8</Object-id_id>
+            </Object-id>
+          </Seq-id_local>
+        </Seq-id>
+      </Seq-interval_id>
+    </Seq-interval>
+  </Seq-loc_int>
+</Seq-loc>

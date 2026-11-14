@@ -27,8 +27,9 @@
 //!
 //! Why the result is the same. Pass 3 is the pass 3 of `x_greedy_row_impl` statement by
 //! statement: the same cells written with the same values in increasing `k`, the same
-//! `x_greedy_cell_slow` calls in the same order, the same updates of `diag_lower`,
-//! `curr_extent` and the cell that set it, and the same state left at the end. It differs only in
+//! `x_greedy_cell_slow` calls and the same `x_past_seq1_end` diagonals in the same order, the
+//! same updates of `diag_lower`, `curr_extent` and the cell that set it, and the same state left
+//! at the end. It differs only in
 //! where the slide length of a surviving diagonal comes from, and that length is the same value:
 //!
 //! - Pass 2 of `x_greedy_row_impl` gives -1 ("`x_greedy_cell_slow`") when `unfit < 0`, i.e. when
@@ -60,7 +61,8 @@
 #![allow(clippy::too_many_arguments)]
 
 use super::{
-    x_greedy_cell_slow, XGreedyRowCold, XGreedyRowState, FENCE_SENTRY, X_GREEDY_BLOCK, X_NO_CELL,
+    x_greedy_cell_slow, x_past_seq1_end, XGreedyRowCold, XGreedyRowState, FENCE_SENTRY,
+    X_GREEDY_BLOCK, X_NO_CELL,
 };
 use crate::algorithm::blastn::constants::INVALID_OFFSET;
 
@@ -212,6 +214,21 @@ unsafe fn x_greedy_row_fused<const REVERSE: bool>(
                 -1
             };
             if index < 0 {
+                // A diagonal past the end of `seq1` (`x_past_seq1_end`), unless the fence was
+                // already hit on entry (C returns at the first kept diagonal then).
+                // NCBI reference (598d8ae6): greedy_align.c:565-600
+                let seq1_index = seq2_index + block_first + i as i32;
+                if !cold.fence_hit
+                    && x_past_seq1_end::<REVERSE>(seq2, len1, len2, seq1_index, seq2_index)
+                {
+                    *current.add(cell) = seq2_index;
+                    let extent = seq1_index + seq2_index;
+                    if extent > curr_extent {
+                        curr_extent = extent;
+                        best_cell = cell;
+                    }
+                    continue;
+                }
                 cold.diag_lower = diag_lower;
                 cold.curr_extent = curr_extent;
                 cold.best_cell = best_cell;
@@ -823,5 +840,125 @@ mod tests {
         eprintln!("x_greedy_row_fused_matches_three_passes_on_alignments: {summary}");
         assert!(converged * 3 > calls && long * 3 > calls, "{summary}");
         assert!(stopped * 40 > calls && fences * 40 > calls, "{summary}");
+    }
+
+    /// No NCBI counterpart: the row kernels handle a kept diagonal past the end of `seq1`
+    /// (`x_past_seq1_end`) in place, and this test is the independent check of that branch. On
+    /// random lengths, bases, directions and offsets (`seq1_index` in `len1 + 1..=len1 + 5`,
+    /// `seq2_index` inside `seq2`), with and without the fence sentry at the byte that
+    /// `x_past_seq1_end` reads: it is true exactly when the sentry is absent, and then the
+    /// inline update (the cell is `seq2_index`, `curr_extent` and `best_cell` change only when
+    /// `seq1_index + seq2_index` is larger, nothing else) equals what `x_greedy_cell_slow` leaves
+    /// from the same inputs; with the sentry `x_greedy_cell_slow` stops at the fence.
+    #[test]
+    fn past_seq1_end_branch_equals_x_greedy_cell_slow() {
+        let mut rng = Rng(0x005E_ED0F_E1D5_u64);
+        let (mut inline, mut fenced) = (0usize, 0usize);
+        for _ in 0..4000 {
+            let len1 = rng.range(8, 48);
+            let len2 = rng.range(8, 48);
+            let seq1: Vec<u8> = (0..len1).map(|_| rng.below(4) as u8).collect();
+            let mut seq2: Vec<u8> = (0..len2).map(|_| rng.below(4) as u8).collect();
+            let reverse = rng.below(2) == 0;
+            let seq2_index = rng.range(0, len2 - 1);
+            let seq1_index = rng.range(len1 + 1, len1 + 5);
+            let sentry = rng.below(2) == 0;
+            let at = if reverse {
+                len2 - 1 - seq2_index
+            } else {
+                seq2_index
+            } as usize;
+            if sentry {
+                seq2[at] = FENCE_SENTRY;
+            }
+            let curr_extent = rng.range(-5, len1 + len2 + 10);
+            let longest_match_run = rng.range(0, 5);
+            let cell = rng.range(0, 7) as usize;
+            let k = rng.range(-20, 20);
+            let (seed_q, seed_s) = (rng.range(-1, len1), rng.range(-1, len2));
+            let (diag_lower, best_cell, end1_cell) = (rng.range(-9, 9), rng.below(8) as usize, 3);
+            let (end1, end2) = (rng.below(2) == 0, rng.below(2) == 0);
+            let make = || XGreedyRowCold {
+                diag_lower,
+                end1_reached: end1,
+                end2_reached: end2,
+                curr_extent,
+                best_cell,
+                end1_cell,
+                longest_match_run,
+                seed_start_q: seed_q,
+                seed_start_s: seed_s,
+                fence_hit: false,
+                stopped: false,
+            };
+            let snapshot = |c: &XGreedyRowCold| {
+                (
+                    c.diag_lower,
+                    c.end1_reached,
+                    c.end2_reached,
+                    c.curr_extent,
+                    c.best_cell,
+                    c.end1_cell,
+                    c.longest_match_run,
+                    c.seed_start_q,
+                    c.seed_start_s,
+                    c.fence_hit,
+                    c.stopped,
+                )
+            };
+            let before = [-9i32; 8];
+            let past = unsafe {
+                if reverse {
+                    x_past_seq1_end::<true>(seq2.as_ptr(), len1, len2, seq1_index, seq2_index)
+                } else {
+                    x_past_seq1_end::<false>(seq2.as_ptr(), len1, len2, seq1_index, seq2_index)
+                }
+            };
+            assert_eq!(past, !sentry, "len1 {len1} len2 {len2} reverse {reverse}");
+
+            let mut cold = make();
+            let mut current = before;
+            unsafe {
+                let (s1, s2) = (seq1.as_ptr(), seq2.as_ptr());
+                let cur = current.as_mut_ptr();
+                if reverse {
+                    x_greedy_cell_slow::<true>(
+                        s1, s2, len1, len2, seq1_index, seq2_index, cell, k, cur, &mut cold,
+                    );
+                } else {
+                    x_greedy_cell_slow::<false>(
+                        s1, s2, len1, len2, seq1_index, seq2_index, cell, k, cur, &mut cold,
+                    );
+                }
+            }
+            if !past {
+                fenced += 1;
+                assert!(
+                    cold.fence_hit && cold.stopped,
+                    "the sentry stops the distance"
+                );
+                continue;
+            }
+            inline += 1;
+            // what the inline branch does
+            let mut expected = make();
+            let mut expected_current = before;
+            expected_current[cell] = seq2_index;
+            if seq1_index + seq2_index > expected.curr_extent {
+                expected.curr_extent = seq1_index + seq2_index;
+                expected.best_cell = cell;
+            }
+            assert_eq!(
+                snapshot(&cold),
+                snapshot(&expected),
+                "len1 {len1} len2 {len2} reverse {reverse} seq1_index {seq1_index} \
+                 seq2_index {seq2_index}"
+            );
+            assert_eq!(current, expected_current);
+        }
+        assert!(
+            inline > 500 && fenced > 500,
+            "inline {inline}, fenced {fenced}"
+        );
     }
 }

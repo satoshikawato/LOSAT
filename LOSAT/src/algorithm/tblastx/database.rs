@@ -67,15 +67,6 @@ impl TblastxDatabase {
         self
     }
 
-    /// The ids of the queries of the search (`SeqDb::id_scope`).
-    pub(super) fn in_id_scope(
-        mut self,
-        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
-    ) -> Self {
-        self.db.set_id_scope(id_scope);
-        self
-    }
-
     /// Opens the nucleotide database `name` as NCBI's `CSearchDatabase` opens it
     /// (`common::database::open_database`). A total length that LOSAT cannot hold as an index
     /// (above `usize`) or as NCBI's `Int8` is LOSAT's refusal.
@@ -93,10 +84,9 @@ impl TblastxDatabase {
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
-        // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
-        // NCBI's choice of its Seq-ids.
-        let parsed = shared::check_seqids(&db, settings, PROGRAM)?;
-        shared::restrict_database(&mut db, name, list, diagnostics, PROGRAM)?;
+        // A database with parsed Seq-ids is read (line DBID, ID2b).
+        let parsed =
+            shared::restrict_database(&mut db, name, list, diagnostics, settings, PROGRAM)?;
         // TBLASTX has no Gumbel block: NCBI's average subject length divides by the statistics'
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;
@@ -172,6 +162,7 @@ impl TblastxDatabase {
         &self,
         shown: ParsedShown,
         prefetch: bool,
+        queries: Option<&crate::blastinput::query_batch::QueryScope>,
         pool: &crate::utils::threading::SearchPool<'_>,
     ) -> Option<shared::ReportRefusal> {
         shared::reports_may_refuse(
@@ -180,6 +171,7 @@ impl TblastxDatabase {
             false,
             self.taxdb_found(),
             prefetch,
+            queries,
             pool,
             PROGRAM,
         )
@@ -228,8 +220,14 @@ impl TblastxDatabase {
         self.db.list_taxids()
     }
 
-    /// The OIDs of the volumes (`SeqDb::num_oids`): none is the database whose first query
-    /// batch fails, also with a list or an alias file's range or `NSEQ`.
+    /// Whether the first query batch with a valid context fails with NCBI's `Database memory map
+    /// file error` (`SeqDb::first_oid_read_fails`: no OID, and statistics that read OID 0).
+    pub(crate) fn first_oid_read_fails(&self) -> bool {
+        self.db.first_oid_read_fails()
+    }
+
+    /// The OIDs of the volumes (`SeqDb::num_oids`).
+    #[cfg(test)]
     pub(crate) fn num_oids(&self) -> u32 {
         self.db.num_oids()
     }
@@ -431,6 +429,47 @@ pub(crate) fn prefetch_messages<'h>(
         (ordinal, parsed)
     });
     shared::prefetch_messages(&database.db, &database.taxdb, subjects, PROGRAM)
+}
+
+/// [`prefetch_messages`] by subject (`shared::subject_read_texts`): the text of the first read
+/// of each subject that writes one, with its ordinal id, where a query's report reads its
+/// subjects one by one: in report order, or, for the pairwise report (`pairwise`, its
+/// `-sorthits` and `-sorthsps`), in the order of its sorted groups (`QueryGroup::read_order` of
+/// the rows' hits, `report::PairwiseRows::hit`: the HSP's hit, whose `num_ident` is the engine's
+/// that the rows' Seq-align identities copy, `report::seqalign_identities`; the rows' shift to
+/// the records of a ranged query moves every HSP of the query alike, which no sort reads, and
+/// the rows name the subjects by rank, in the order of the ordinal ids).
+pub(crate) fn subject_read_texts<'h>(
+    database: &TblastxDatabase,
+    ordered: impl IntoIterator<Item = &'h TblastxHsp>,
+    titles: &DatabaseTitles,
+    rows_open: bool,
+    pairwise: Option<crate::report::hit_sort::ReportSort>,
+) -> Result<crate::report::query_warnings::QueryReads> {
+    let parsed = |ordinal: u32| match titles.get(&ordinal) {
+        Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+        _ => None,
+    };
+    let ordered = ordered.into_iter();
+    let ordinals: Vec<u32> = match pairwise {
+        Some(sort) => crate::report::x_pairwise_par::QueryGroup::read_order(
+            ordered.map(|hsp| (hsp.hit.s_idx, hsp)),
+            |hsp| crate::report::hit_sort::HspScores::of_hit(&hsp.hit, hsp.hit.num_ident),
+            |previous, ordinal| match (parsed(previous), parsed(ordinal)) {
+                (Some(earlier), Some(later)) => {
+                    crate::report::db_subject::joins_as_copy(earlier, later)
+                }
+                _ => false,
+            },
+            sort,
+            true,
+        ),
+        None => ordered.map(|hsp| hsp.hit.s_idx).collect(),
+    };
+    let subjects = ordinals
+        .into_iter()
+        .map(|ordinal| (ordinal, ordinal, parsed(ordinal)));
+    shared::subject_read_texts(&database.db, &database.taxdb, subjects, rows_open, PROGRAM)
 }
 
 /// NCBI's prefetch of the query batch whose reported hits are `ordered` (in report order, by
@@ -810,8 +849,8 @@ mod tests {
             ["nucl_v5", "nucl_v4", "nrefuse_v5", "njoined"].map(|name| {
                 let database = open(name);
                 (
-                    database.reports_may_refuse(tabular, false, pool),
-                    database.reports_may_refuse(pairwise, false, pool),
+                    database.reports_may_refuse(tabular, false, None, pool),
+                    database.reports_may_refuse(pairwise, false, None, pool),
                 )
             })
         };

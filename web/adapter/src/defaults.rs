@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use clap::CommandFactory;
-use LOSAT::web_adapter::{Cli, Commands};
+use losat::web_adapter::{Cli, Commands};
 
 use crate::json;
 use crate::run::Program;
@@ -44,7 +44,7 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
     let bool_text = |value: bool| value.to_string();
     match command {
         Commands::Blastn(mut args) => {
-            use LOSAT::web_adapter::{
+            use losat::web_adapter::{
                 configure_task, determine_effective_word_size, determine_evalue,
                 determine_scoring_params, determine_window_size,
             };
@@ -72,6 +72,7 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             put("-xdrop_gap", task.x_drop_gapped.to_string());
             put("-xdrop_gap_final", task.x_drop_final.to_string());
             put("-culling_limit", args.culling_limit_value().to_string());
+            put("-line_length", args.formatting.line_length().to_string());
             hit_list(
                 &mut put,
                 args.max_target_seqs,
@@ -94,6 +95,7 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             put("-seg", resolved.seg.to_ncbi_cli_string());
             put("-soft_masking", bool_text(resolved.soft_masking));
             put("-culling_limit", resolved.culling_limit.to_string());
+            put("-line_length", resolved.line_length.to_string());
             put("-max_target_seqs", resolved.max_target_seqs.to_string());
             put("-num_descriptions", resolved.num_descriptions.to_string());
             put("-num_alignments", resolved.num_alignments.to_string());
@@ -114,6 +116,10 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             put("-seg", resolved.seg.to_ncbi_cli_string());
             put("-soft_masking", bool_text(resolved.soft_masking));
             put("-culling_limit", resolved.culling_limit.to_string());
+            put(
+                "-line_length",
+                resolved.formatting.line_length().to_string(),
+            );
             put("-max_target_seqs", resolved.hitlist_size.to_string());
             put("-num_descriptions", resolved.num_descriptions.to_string());
             put("-num_alignments", resolved.num_alignments.to_string());
@@ -133,6 +139,7 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             );
             put("-soft_masking", bool_text(args.soft_masking()));
             put("-culling_limit", args.culling_limit().to_string());
+            put("-line_length", args.formatting.line_length().to_string());
             hit_list(
                 &mut put,
                 args.max_target_seqs,
@@ -155,6 +162,10 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             put("-sum_stats", bool_text(resolved.sum_stats));
             put("-soft_masking", bool_text(resolved.soft_masking));
             put("-culling_limit", resolved.culling_limit.to_string());
+            put(
+                "-line_length",
+                resolved.formatting.line_length().to_string(),
+            );
             put("-max_target_seqs", resolved.hitlist_size.to_string());
             put("-num_descriptions", resolved.num_descriptions.to_string());
             put("-num_alignments", resolved.num_alignments.to_string());
@@ -174,7 +185,7 @@ fn hit_list(
     num_alignments: Option<usize>,
 ) {
     let counts =
-        LOSAT::web_adapter::report_counts(0, max_target_seqs, num_descriptions, num_alignments);
+        losat::web_adapter::report_counts(0, max_target_seqs, num_descriptions, num_alignments);
     put("-max_target_seqs", counts.hitlist_size.to_string());
     put("-num_descriptions", counts.num_descriptions.to_string());
     put("-num_alignments", counts.num_alignments.to_string());
@@ -271,7 +282,7 @@ pub fn defaults(program: Program) -> Result<Defaults, String> {
                     .any(|arg| arg.get_long() == flag.strip_prefix('-'))
             })
     };
-    let matrices: Vec<String> = LOSAT::web_adapter::ScoringMatrix::ALL
+    let matrices: Vec<String> = losat::web_adapter::ScoringMatrix::ALL
         .iter()
         .map(|matrix| matrix.ncbi_name().to_string())
         .collect();

@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!DOCTYPE Blast-db-mask-info PUBLIC "-//NCBI//NCBI BlastDL/EN" "NCBI_BlastDL.dtd">
+<Blast-db-mask-info>
+  <Blast-db-mask-info_algo-id>0</Blast-db-mask-info_algo-id>
+  <Blast-db-mask-info_algo-program>
+    <Blast-filter-program value="dust">10</Blast-filter-program>
+  </Blast-db-mask-info_algo-program>
+  <Blast-db-mask-info_algo-options>o</Blast-db-mask-info_algo-options>
+  <Blast-db-mask-info_masks>
+    <Blast-mask-list>
+      <Blast-mask-list_masks></Blast-mask-list_masks>
+      <Blast-mask-list_more value="false"/>
+    </Blast-mask-list>
+  </Blast-db-mask-info_masks>
+</Blast-db-mask-info>

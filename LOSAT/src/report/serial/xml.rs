@@ -64,7 +64,7 @@
 //! own line only when the last thing written was a closing tag (`m_EndTag`): a primitive
 //! member is one line, `<T_m>value</T_m>`.
 
-use super::encoder::{Encoder, SerialError};
+use super::encoder::{Encoder, Replaced, SerialError, StreamPosition};
 use super::real::write_xml_double;
 
 /// What the stream writes at the start and end of a document.
@@ -134,6 +134,11 @@ pub struct XmlEncoder<'b, const OBJECT: bool = false> {
     names: Vec<u8>,
     marks: Vec<usize>,
     error: Option<SerialError>,
+    /// The control characters that `visible_str_replacing` replaced (`replace`).
+    replaced: Vec<Replaced>,
+    /// `replace`'s count of the ends of line: those before `lines_to` in `out`.
+    lines_to: usize,
+    lines: u64,
 }
 
 impl<'b> XmlEncoder<'b, false> {
@@ -169,13 +174,25 @@ impl<'b> XmlEncoder<'b, false> {
     pub fn raw(&mut self, bytes: &[u8]) {
         self.out.extend_from_slice(bytes);
     }
+
+    /// The length of the output written so far, where the next `raw` bytes start.
+    pub fn written(&self) -> usize {
+        self.out.len()
+    }
 }
 
 impl<'b> XmlEncoder<'b, true> {
     /// One `Blast4-archive` document of outfmt 11 with `ARCHIVE_FORMAT=xml`, in NCBI's object
     /// mode; `Encoder::flush_to` hands its bytes to a sink element by element.
     pub fn archive(out: &'b mut Vec<u8>) -> Self {
-        Self::new(out, Piece::NcbiObject, "NCBI-Blast4")
+        Self::ncbi_object(out, "NCBI-Blast4")
+    }
+
+    /// One document of a root type of the ASN.1 module `module` written as the archive is
+    /// (`os << MSerial_Xml << object`): dustmasker's `Seq-loc` (`NCBI-Seqloc`) and
+    /// `Blast-db-mask-info` (`NCBI-BlastDL`).
+    pub fn ncbi_object(out: &'b mut Vec<u8>, module: &'static str) -> Self {
+        Self::new(out, Piece::NcbiObject, module)
     }
 }
 
@@ -200,6 +217,78 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
             names: Vec::new(),
             marks: Vec::new(),
             error: None,
+            replaced: Vec::new(),
+            lines_to: start,
+            lines: 0,
+        }
+    }
+
+    /// `x_VerifyChar` of the control character `byte`: `ReplaceVisibleChar` without the
+    /// string, reported at the line (`Replaced`, `encoder::Traced`); `write_string` then writes
+    /// `#`. The line is 1 + the ends of line of the document that the encoder holds (all of it
+    /// through `Traced`), counted on from the last call: the XML stream only appends (the `>`
+    /// that `value_attribute` takes back is no end of line).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:548-554
+    /// ```c++
+    /// inline bool BAD_CHAR(char x) {
+    ///     return (x < 0x20 && x > 0x0 && x != 0x9 && x != 0xA && x != 0xD);
+    /// }
+    /// inline char CObjectOStreamXml::x_VerifyChar(char x) {
+    ///     return BAD_CHAR(x) ?
+    ///         ReplaceVisibleChar(x, x_FixCharsMethod(), this, kEmptyStr, x_FixCharsSubst()) : x;
+    /// }
+    /// ```
+    #[cold]
+    #[inline(never)]
+    fn replace(&mut self, byte: u8) {
+        if self.lines_to < self.start {
+            self.lines_to = self.start;
+            self.lines = 0;
+        }
+        self.lines_to = self.lines_to.min(self.out.len());
+        self.lines += self.out[self.lines_to..]
+            .iter()
+            .filter(|&&byte| byte == b'\n')
+            .count() as u64;
+        self.lines_to = self.out.len();
+        self.replaced.push(Replaced {
+            byte,
+            position: StreamPosition::Line(1 + self.lines),
+            with_string: false,
+        });
+    }
+
+    /// The loop of `WriteString` (quoted at `visible_str`): without `REPLACE` a control
+    /// character is the error `NonVisibleChar`, with it the character is recorded (`replace`)
+    /// and `#` written in its place.
+    #[inline(always)]
+    fn write_string<const REPLACE: bool>(&mut self, value: &[u8]) {
+        if OBJECT && self.pending_elem {
+            self.open_element();
+        }
+        for &byte in value {
+            match byte {
+                b'&' => self.out.extend_from_slice(b"&amp;"),
+                b'<' => self.out.extend_from_slice(b"&lt;"),
+                b'>' => self.out.extend_from_slice(b"&gt;"),
+                b'\'' => self.out.extend_from_slice(b"&apos;"),
+                b'"' => self.out.extend_from_slice(b"&quot;"),
+                0 => {}
+                0x09 | 0x0a | 0x0d => {
+                    self.out.extend_from_slice(b"&#x");
+                    self.out.push(b"0123456789abcdef"[usize::from(byte & 0xf)]);
+                    self.out.push(b';');
+                }
+                0x01..=0x1f if REPLACE => {
+                    self.replace(byte);
+                    self.out.push(b'#');
+                }
+                0x01..=0x1f => self.fail(SerialError::NonVisibleChar(byte)),
+                0x80..=0xff if OBJECT => self.out.push(byte),
+                0x80..=0xff => self.fail(SerialError::NonAsciiChar(byte)),
+                _ => self.out.push(byte),
+            }
         }
     }
 
@@ -589,6 +678,44 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
         }
     }
 
+    /// `WriteEnum` of an INTEGER with named values in the object mode: ` value="name">`, the
+    /// number, and the closing tag that `end_named` writes.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:442-456
+    /// ```c++
+    ///     if ( !m_SkipNextTag && !values.GetName().empty() ) {
+    ///         OpenTagStart();
+    ///         m_Output.PutString(values.GetName());
+    ///         if ( !skipname ) {
+    ///             m_Output.PutString(" value=\"");
+    ///             m_Output.PutString(valueName);
+    ///             m_Output.PutChar('\"');
+    ///         }
+    ///         if ( values.IsInteger() ) {
+    ///             OpenTagEnd();
+    ///             m_Output.PutInt4(value);
+    ///             CloseTagStart();
+    ///             m_Output.PutString(values.GetName());
+    ///             CloseTagEnd();
+    ///         }
+    /// ```
+    fn named_int(&mut self, name: &str, value: i32) {
+        if OBJECT {
+            if self.pending_elem {
+                self.open_element();
+            }
+            debug_assert_eq!(self.out.last(), Some(&b'>'));
+            self.out.pop();
+            self.out.extend_from_slice(b" value=\"");
+            self.out.extend_from_slice(name.as_bytes());
+            self.out.extend_from_slice(b"\">");
+            let mut buffer = itoa_i64(i64::from(value));
+            self.out.extend_from_slice(buffer.text());
+        } else {
+            self.fail(SerialError::XmlUnsupported("INTEGER with named values"));
+        }
+    }
+
     /// `WriteBool` of the object mode: ` value="true"/>` or ` value="false"/>`.
     fn boolean(&mut self, value: bool) {
         if OBJECT {
@@ -616,35 +743,22 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     ///             ... hi (if not 0) and lo in lower-case hex ... ';'
     /// ```
     /// A byte of 0x01-0x1F other than TAB, LF and CR is replaced by `#` with an error
-    /// message (`x_VerifyChar`, `BAD_CHAR`), which LOSAT does not write: an error here (the
-    /// callers refuse such strings first). A byte >= 0x80 makes the US-ASCII stream of outfmt 5
+    /// message (`x_VerifyChar`, `BAD_CHAR`; `replace`): an error here, `#` and a record in
+    /// `visible_str_replacing`. A byte >= 0x80 makes the US-ASCII stream of outfmt 5
     /// throw (`CUtf8::SymbolToChar`, corelib/ncbistr.cpp:6900-6903), an error here too; the
     /// archive's stream has no encoding, so `WriteEncodedChar` takes its first branch
     /// (objostrxml.cpp:559-565) and the byte passes `x_VerifyChar` and is written as it is (the
-    /// object mode). A NUL byte is dropped (`if (s != '\0')`).
+    /// object mode). A NUL byte ends NCBI's string (`WriteString`: `for ( const char* src =
+    /// str.c_str(); *src; ++src )`, objostrxml.cpp:927-935); LOSAT drops it and writes the rest
+    /// (whether a string that reaches this writer can hold one is still to be checked).
     fn visible_str(&mut self, value: &[u8]) {
-        if OBJECT && self.pending_elem {
-            self.open_element();
-        }
-        for &byte in value {
-            match byte {
-                b'&' => self.out.extend_from_slice(b"&amp;"),
-                b'<' => self.out.extend_from_slice(b"&lt;"),
-                b'>' => self.out.extend_from_slice(b"&gt;"),
-                b'\'' => self.out.extend_from_slice(b"&apos;"),
-                b'"' => self.out.extend_from_slice(b"&quot;"),
-                0 => {}
-                0x09 | 0x0a | 0x0d => {
-                    self.out.extend_from_slice(b"&#x");
-                    self.out.push(b"0123456789abcdef"[usize::from(byte & 0xf)]);
-                    self.out.push(b';');
-                }
-                0x01..=0x1f => self.fail(SerialError::NonVisibleChar(byte)),
-                0x80..=0xff if OBJECT => self.out.push(byte),
-                0x80..=0xff => self.fail(SerialError::NonAsciiChar(byte)),
-                _ => self.out.push(byte),
-            }
-        }
+        self.write_string::<false>(value);
+    }
+
+    /// `visible_str` that writes NCBI's `#` for a control character and records it
+    /// (`replace`).
+    fn visible_str_replacing(&mut self, value: &[u8]) {
+        self.write_string::<true>(value);
     }
 
     /// `WriteBytes` of the object mode: the bytes as upper-case hex digits, unwrapped
@@ -701,6 +815,10 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
 
     fn error(&self) -> Option<SerialError> {
         self.error
+    }
+
+    fn take_replaced(&mut self) -> Vec<Replaced> {
+        std::mem::take(&mut self.replaced)
     }
 }
 

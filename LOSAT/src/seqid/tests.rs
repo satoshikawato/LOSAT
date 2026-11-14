@@ -6,21 +6,23 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use super::ber::decode_full_set;
-use super::defline_set::{
-    alignment_line_id, compare, description_id, match_keys, seq_id_list, tabular_id, Sic, TabularId,
-};
+use super::defline_set::{alignment_line_id, compare, description_id, match_keys, Sic};
 use super::label::{bare, content, fasta, first_gi, format_label};
 use super::model::{
     Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId, PdbSeqId, TextseqId,
 };
 use super::rank::{best_rank_score, find_best, text_score};
 use super::{BlastDefline, DeflineSet};
-use crate::report::defline::generate_defline;
+use crate::blastinput::app::{FormatChoice, ReportFormat};
+use crate::report::db_subject::ParsedSubject;
 use crate::report::seqid::SeqId;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::encoder::Encoder;
 use crate::report::serial::json::JsonEncoder;
+use crate::report::tabular::{
+    TabularHsp, TabularQuery, TabularSpec, TabularSubject, TabularTaxonomy, TabularWriter,
+};
 use crate::seqdb::{SeqDb, SeqType};
 
 fn fixture_dir() -> PathBuf {
@@ -245,48 +247,73 @@ fn every_seq_id_encodes_as_makeblastdb_stored_it() {
     assert!(ids > 150, "{ids}");
 }
 
-/// The first word of the subject Bioseq's generated title (`GenerateDefline` of its title;
-/// no fixture record with a `lcl|Subject_` id has a Seq-id that changes the title).
-fn title_word(bioseq: &BlastDefline, protein: bool) -> Vec<u8> {
-    let title = bioseq.title.as_deref().unwrap_or(b"");
-    let defline = generate_defline(title, protein, false).expect("a known encoding");
-    defline.text.split(|&c| c == b' ').next().unwrap().to_vec()
-}
-
-/// The ids and titles that `tabular_id` and the joins give for one sequence, in the column
-/// order `sseqid sallseqid sacc saccver sallacc sgi sallgi stitle salltitles staxid staxids`.
-fn tabular_row(set: &DeflineSet, protein: bool) -> Vec<String> {
-    let aln = set.alignment_id().expect("an id");
-    let bioseq = &set.deflines[set.bioseq_defline(aln).expect("a target")];
-    let word = title_word(bioseq, protein);
-    let target = seq_id_list(&bioseq.ids, &word);
-    let staxid = set.first_taxid();
-    let staxids = set.tax_ids();
-    vec![
-        with(|out| tabular_id(&target, TabularId::Full, out)),
-        with(|out| set.tabular_all(TabularId::Full, &word, out)),
-        with(|out| tabular_id(&target, TabularId::Accession, out)),
-        with(|out| tabular_id(&target, TabularId::AccessionVersion, out)),
-        with(|out| set.tabular_all(TabularId::Accession, &word, out)),
-        with(|out| tabular_id(&target, TabularId::Gi, out)),
-        with(|out| set.tabular_all(TabularId::Gi, &word, out)),
-        with(|out| set.first_title(out)),
-        with(|out| set.all_titles(out)),
-        if staxid == 0 {
-            "N/A".to_string()
-        } else {
-            staxid.to_string()
+/// The columns `sseqid sallseqid sacc saccver sallacc sgi sallgi stitle salltitles staxid staxids`
+/// of one database sequence as the reports make them: the ids and titles of
+/// `report::db_subject::ParsedSubject` (`tabular_ids`, `tabular_gi`, `all_tabular_ids`, the titles
+/// of its definition lines), its `TabularTaxonomy::of_deflines`, written by the tabular writer
+/// (`TabularWriter::row`). `None` for a sequence that LOSAT refuses to show (`ParsedSubject::new`,
+/// `tabular_ids`, `all_tabular_ids`); `match_rows` still fails when no sequence gives an NCBI row.
+fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
+    let subject = ParsedSubject::new(set.clone()).ok()?;
+    let [id, accession, accession_version] = subject.tabular_ids(protein).ok()?;
+    let all_ids = subject.all_tabular_ids(protein).ok()?;
+    let titles: Vec<&[u8]> = subject
+        .deflines()
+        .iter()
+        .map(|defline| defline.title.as_deref().unwrap_or_default())
+        .collect();
+    let taxonomy = TabularTaxonomy::of_deflines(subject.deflines());
+    let spec = TabularSpec::of(
+        ReportFormat::Tabular,
+        &FormatChoice {
+            number: 6,
+            spec:
+                "sseqid sallseqid sacc saccver sallacc sgi sallgi stitle salltitles staxid staxids"
+                    .to_string(),
+            delimiter: String::new(),
         },
-        if staxids.is_empty() {
-            "N/A".to_string()
-        } else {
-            staxids
-                .iter()
-                .map(i32::to_string)
-                .collect::<Vec<_>>()
-                .join(";")
-        },
-    ]
+    )
+    .expect("the fields");
+    let shown = TabularSubject {
+        id: &id,
+        accession: &accession,
+        accession_version: &accession_version,
+        gi: subject.tabular_gi(),
+        all_ids: &all_ids,
+        length: 0,
+        titles: Some(&titles),
+        taxonomy: &taxonomy,
+        names: None,
+        nucleotide: !protein,
+        qcovs: -1,
+        qcovus: -1,
+    };
+    let hsp = TabularHsp {
+        q_start: 1,
+        q_end: 1,
+        s_start: 1,
+        s_end: 1,
+        evalue: 0.0,
+        bit_score: 0.0,
+        score: 0,
+        length: 1,
+        gap_opens: 0,
+        gaps: 0,
+        num_ident: 1,
+        q_frame: 0,
+        s_frame: 0,
+        rows: None,
+        qcovhsp: 100,
+    };
+    let mut out = Vec::new();
+    TabularWriter {
+        spec: &spec,
+        program_version: "BLASTP 2.17.0+",
+        matrix: None,
+    }
+    .row(&mut out, &TabularQuery::local(b"q", 1), &shown, &hsp);
+    let row = text(out.strip_suffix(b"\n").expect("one row"));
+    Some(row.split('\t').map(str::to_string).collect())
 }
 
 const CASES: [(&str, &str, SeqType); 4] = [
@@ -344,7 +371,7 @@ fn tabular_id_and_title_fields_are_ncbis() {
         match_rows(
             case,
             expected,
-            |oid| Some(tabular_row(&sets[oid], protein)),
+            |oid| tabular_row(&sets[oid], protein),
             sets.len(),
         );
     }

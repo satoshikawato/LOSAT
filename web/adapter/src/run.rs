@@ -4,8 +4,8 @@ use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use LOSAT::api::FastaRecord;
-use LOSAT::web_adapter::{
+use losat::api::FastaRecord;
+use losat::web_adapter::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
     Cli, Commands, CountsSource, FormatObserver, FormatOutput, HspIndex, OutputSink, PairwiseHit,
     ReportOutputs,
@@ -34,6 +34,7 @@ impl Program {
             "blastx" => Ok(Self::Blastx),
             "psiblast" => Err("psiblast is not available in the browser (ABI v2)".into()),
             "rpsblast" => Err("rpsblast is not available in the browser (ABI v2)".into()),
+            "rpstblastn" => Err("rpstblastn is not available in the browser (ABI v2)".into()),
             other => Err(format!("unknown program '{other}'")),
         }
     }
@@ -90,7 +91,7 @@ pub fn outputs(program: Program, custom: Option<&str>) -> Vec<Output> {
     let mut outputs = Vec::new();
     if let Some(outfmt) = custom {
         let choice =
-            LOSAT::web_adapter::parse_formatting_string(outfmt).expect("parse_run read the value");
+            losat::web_adapter::parse_formatting_string(outfmt).expect("parse_run read the value");
         outputs.push(Output {
             stream: STREAM_CUSTOM,
             number: choice.number as u32,
@@ -111,6 +112,7 @@ fn outfmt_of(command: &mut Commands) -> &mut String {
         Commands::Blastx(a) => &mut a.outfmt,
         Commands::Psiblast(_)
         | Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => {
             unreachable!("rejected by Program::parse")
@@ -119,8 +121,8 @@ fn outfmt_of(command: &mut Commands) -> &mut String {
 }
 
 /// The engine's name of the program, for its reading of `-outfmt`.
-fn engine_program(program: Program) -> LOSAT::web_adapter::EngineProgram {
-    use LOSAT::web_adapter::EngineProgram as Engine;
+fn engine_program(program: Program) -> losat::web_adapter::EngineProgram {
+    use losat::web_adapter::EngineProgram as Engine;
     match program {
         Program::Blastp => Engine::Blastp,
         Program::Tblastn => Engine::Tblastn,
@@ -140,7 +142,7 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
 /// the CLI does (`parse_formatting_string`, `report_format`, with the CLI's messages; the
 /// formatting handler's check of a custom delimiter comes later, `custom_handler_check`). A run
 /// writes the program's formats 0, 6 and 7 whatever the value; every other format that the CLI
-/// writes (5, 8 to 16, 20, BLASTN's 17), and 6 and 7 with words after the number (fields,
+/// writes (5, 8 to 16, 18, 20, BLASTN's 17), and 6 and 7 with words after the number (fields,
 /// `delim=`), add an output of their own, the third value returned (docs/web/abi_v2.md §7). The
 /// rule reads the words, not the fields they make, so that the application reads it from the argv
 /// alike: `6 std` adds an output with the bytes of outfmt 6. 0 with words adds none (the CLI writes
@@ -169,17 +171,17 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
     // default `-outfmt 0`, so the host's words are parsed exactly as on the command line,
     // with the CLI's binary name: an error (an unknown program too) is the CLI's message.
     let argv = std::iter::once("losat").chain(words.iter().copied());
-    let cli: Cli = LOSAT::web_adapter::try_parse_cli(argv)
-        .map_err(|error| LOSAT::web_adapter::render_message(&error))?;
+    let cli: Cli = losat::web_adapter::try_parse_cli(argv)
+        .map_err(|error| losat::web_adapter::render_message(&error))?;
     let program = Program::parse(words.first().copied().unwrap_or(""))?;
     let mut command = cli.command;
     let outfmt = std::mem::replace(outfmt_of(&mut command), "0".to_string());
-    let choice = LOSAT::web_adapter::parse_formatting_string(&outfmt)
+    let choice = losat::web_adapter::parse_formatting_string(&outfmt)
         .map_err(|error| format!("{error:#}"))?;
     // The `@PG` line of SAM (outfmt 17) shows the command line, which `main` gives BLASTN: the
     // run's, `losat` and its argv, each word followed by one space (`cli::command_line_bytes`). Only
     // a run that writes SAM holds it.
-    if let (Commands::Blastn(args), LOSAT::web_adapter::SAM_FORMAT) = (&mut command, choice.number)
+    if let (Commands::Blastn(args), losat::web_adapter::SAM_FORMAT) = (&mut command, choice.number)
     {
         let mut line = b"losat ".to_vec();
         for word in words {
@@ -197,10 +199,10 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
     // check of a custom delimiter comes with the program's checks of the options (`validate`) and
     // in the engine's `run_local`.
     let engine = engine_program(program);
-    LOSAT::web_adapter::report_format(&choice, engine, Some(std::path::Path::new("out")))
+    losat::web_adapter::report_format(&choice, engine, Some(std::path::Path::new("out")))
         .and_then(|format| match format {
             Some(_) => Ok(()),
-            None => LOSAT::web_adapter::formatting_handler_check(&choice, engine),
+            None => losat::web_adapter::formatting_handler_check(&choice, engine),
         })
         .map_err(|error| format!("{error:#}"))?;
     // NCBI's white space around the value (`NStr::TruncateSpaces`), as `parse_formatting_string`
@@ -221,8 +223,8 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
 pub fn writes_archive(words: &[&str]) -> bool {
     parse_run(words).is_ok_and(|(_, _, custom)| {
         custom.is_some_and(|outfmt| {
-            LOSAT::web_adapter::parse_formatting_string(&outfmt)
-                .is_ok_and(|choice| choice.number == LOSAT::web_adapter::ARCHIVE_FORMAT)
+            losat::web_adapter::parse_formatting_string(&outfmt)
+                .is_ok_and(|choice| choice.number == losat::web_adapter::ARCHIVE_FORMAT)
         })
     })
 }
@@ -237,7 +239,7 @@ pub fn writes_archive(words: &[&str]) -> bool {
 /// fail, see there), and the error is that of the first search, the tabular formats'.
 /// `run` leaves them to the engine, which reports them as the CLI does.
 pub fn validate(words: &[&str]) -> Result<(), String> {
-    use LOSAT::web_adapter::{parse_optional_range, RangeRole};
+    use losat::web_adapter::{parse_optional_range, RangeRole};
     // The ranges' syntax, in NCBI's order: the subject range where the subjects are read
     // (before the other option handlers), the query range with the query options (the
     // engine's option checks read it). Whether a range fits the records is checked by
@@ -260,15 +262,15 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
     // The CLI checks the thread count before the options (`validate_threads`), the checks of the
     // options alone last; with the argv's `-outfmt` they stop at its delimiter first.
     if custom_rejected {
-        LOSAT::web_adapter::validate_threads(num_threads(&command))
+        losat::web_adapter::validate_threads(num_threads(&command))
             .map_err(|error| format!("{error:#}"))?;
     }
     match command {
         Commands::Blastn(mut args) => subject_range(args.subject_loc.as_deref())
             .and_then(|()| args.resolve_dust())
             .and_then(|()| {
-                if names_registered_counts(&args) {
-                    args.window_masker_counts = Some(crate::files::source());
+                if validates_window_masker(&args) {
+                    give_blastn_counts(&mut args, &crate::files::source());
                     args.resolve_window_masker()
                 } else {
                     Ok(())
@@ -298,21 +300,21 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
         Commands::Tblastx(mut args) => subject_range(args.subject_loc.as_deref())
             .and_then(|()| {
                 with_custom(&mut args.outfmt);
-                LOSAT::web_adapter::check_tblastx_options(&args)
+                losat::web_adapter::check_tblastx_options(&args)
             })
             .map_err(|error| format!("{error:#}"))
             .and_then(|()| custom_check())?,
         Commands::Blastp(mut args) => subject_range(args.subject_loc.as_deref())
             .and_then(|()| {
                 with_custom(&mut args.outfmt);
-                LOSAT::web_adapter::check_blastp_options(&args)
+                losat::web_adapter::check_blastp_options(&args)
             })
             .map_err(|error| format!("{error:#}"))
             .and_then(|()| custom_check())?,
         Commands::Tblastn(mut args) => subject_range(args.subject_loc.as_deref())
             .and_then(|()| {
                 with_custom(&mut args.outfmt);
-                LOSAT::web_adapter::check_tblastn_options(&args)
+                losat::web_adapter::check_tblastn_options(&args)
             })
             .map_err(|error| format!("{error:#}"))
             .and_then(|()| custom_check())?,
@@ -351,9 +353,9 @@ fn custom_handler_check(program: Program, custom: Option<&str>) -> Result<(), St
     let Some(outfmt) = custom else {
         return Ok(());
     };
-    LOSAT::web_adapter::parse_formatting_string(outfmt)
+    losat::web_adapter::parse_formatting_string(outfmt)
         .and_then(|choice| {
-            LOSAT::web_adapter::formatting_handler_check(&choice, engine_program(program))
+            losat::web_adapter::formatting_handler_check(&choice, engine_program(program))
         })
         .map_err(|error| format!("{error:#}"))
 }
@@ -372,17 +374,17 @@ fn custom_handler_check(program: Program, custom: Option<&str>) -> Result<(), St
 /// so `run` makes these checks and stops with the CLI's message and exit code.
 /// Making them for a query of any letters would reject what the CLI accepts (WA-FM-01).
 fn blastn_group_check(
-    args: &mut LOSAT::web_adapter::BlastnArgs,
+    args: &mut losat::web_adapter::BlastnArgs,
     group: &[Output],
 ) -> Result<(), String> {
-    use LOSAT::web_adapter::{check_losat_limits, check_scoring_options};
+    use losat::web_adapter::{check_losat_limits, check_scoring_options};
     // The host has no database files.
     if args.db.is_some() {
         return Err("-db (a database search) is not supported in the browser yet".to_string());
     }
     let outfmts: Vec<i32> = group.iter().map(|output| output.number as i32).collect();
     // `process_options` sets the counts that the checks read.
-    let (counts, _) = LOSAT::web_adapter::run_report_counts(
+    let (counts, _) = losat::web_adapter::run_report_counts(
         "blastn",
         &outfmts,
         args.max_target_seqs,
@@ -400,11 +402,11 @@ fn blastn_group_check(
 /// `run_local` makes them before it searches. `validate` runs it for each search of a run, and
 /// `run` asks it which search is rejected (`group_rejected`).
 fn blastx_group_check(
-    args: &LOSAT::web_adapter::BlastxArgs,
+    args: &losat::web_adapter::BlastxArgs,
     group: &[Output],
 ) -> Result<(), String> {
     let outfmts: Vec<&str> = group.iter().map(|output| output.outfmt.as_str()).collect();
-    LOSAT::web_adapter::check_blastx_options(args, &outfmts).map_err(|error| format!("{error:#}"))
+    losat::web_adapter::check_blastx_options(args, &outfmts).map_err(|error| format!("{error:#}"))
 }
 
 /// Whether the options' checks reject the search of the output formats `group`, as the CLI
@@ -539,7 +541,7 @@ impl FormatObserver for RangeRecorder {
 ///         }
 /// ```
 fn searched_queries(query_loc: Option<&str>, records: &[FastaRecord]) -> Option<Vec<usize>> {
-    use LOSAT::web_adapter::{parse_optional_range, record_interval, RangeRole, RecordInterval};
+    use losat::web_adapter::{parse_optional_range, record_interval, RangeRole, RecordInterval};
     let range = parse_optional_range(query_loc, RangeRole::Query).ok()??;
     Some(
         records
@@ -570,6 +572,7 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
         // Rejected by `Program::parse`.
         Commands::Psiblast(_)
         | Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => [None; 3],
     }
@@ -587,6 +590,7 @@ fn num_threads(command: &Commands) -> usize {
         // Rejected by `Program::parse`.
         Commands::Psiblast(_)
         | Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => 1,
     }
@@ -596,7 +600,7 @@ fn num_threads(command: &Commands) -> usize {
 /// of `command` (`report_counts`, NCBI `blast_args.cpp:2894-2973`).
 pub fn hit_list_size(command: &Commands, format: u32) -> usize {
     let [max_target_seqs, descriptions, alignments] = count_options(command);
-    LOSAT::web_adapter::report_counts(format as i32, max_target_seqs, descriptions, alignments)
+    losat::web_adapter::report_counts(format as i32, max_target_seqs, descriptions, alignments)
         .hitlist_size
 }
 
@@ -605,18 +609,20 @@ pub fn hit_list_size(command: &Commands, format: u32) -> usize {
 /// that search, as the CLI writes it alone: the CLI's search depends on the hit list size,
 /// which `-num_descriptions` and `-num_alignments` (without `-max_target_seqs`) can make
 /// differ between the pairwise format 0 and the tabular formats. Without those options the
-/// sizes are equal and the group is the program's formats in their order (the one search of
-/// before). The tabular group goes first because the formatting handler's warnings belong to
-/// the first format, and the CLI writes the tabular formats' (`ReportCounts::warnings`). The
+/// sizes are equal and the group is the program's formats with the tabular ones first (the one
+/// search of before). The tabular formats go first because the formatting handler's warnings
+/// belong to the first format, and the CLI writes the tabular formats' (`ReportCounts::warnings`;
+/// `-line_length`, `-sorthits` and `-sorthsps` warn for formats above 4 or other than 0 only,
+/// blast_args.cpp:2947-2989). The
 /// output of the argv's `-outfmt` (a format above 4) has the hit list size of the tabular
 /// formats, so it joins the tabular group, first (`outputs`): it adds no search.
 pub fn search_groups(formats: &[Output], command: &Commands) -> Vec<Vec<Output>> {
     let [_, descriptions, alignments] = count_options(command);
-    if descriptions.is_none() && alignments.is_none() {
-        return vec![formats.to_vec()];
-    }
     let mut ordered: Vec<Output> = formats.to_vec();
     ordered.sort_by_key(|format| format.number <= 4);
+    if descriptions.is_none() && alignments.is_none() {
+        return vec![ordered];
+    }
     let mut groups: Vec<(usize, Vec<Output>)> = Vec::new();
     for format in ordered {
         let size = hit_list_size(command, format.number);
@@ -649,7 +655,7 @@ impl Failed {
             + std::fmt::Display
             + std::fmt::Debug,
     {
-        let cli_stderr = match error.downcast_ref::<LOSAT::web_adapter::NativeError>() {
+        let cli_stderr = match error.downcast_ref::<losat::web_adapter::NativeError>() {
             Some(native) => native.message.clone().into_bytes(),
             None => format!("Error: {error:?}\n").into_bytes(),
         };
@@ -687,7 +693,7 @@ impl ArchivedFiles {
     }
 }
 
-impl LOSAT::web_adapter::SideFileReceiver for ArchivedFiles {
+impl losat::web_adapter::SideFileReceiver for ArchivedFiles {
     fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
         match self
             .0
@@ -763,7 +769,7 @@ fn search(
                     sink: match archive {
                         Some((master, files)) => OutputSink::Files(
                             master,
-                            LOSAT::web_adapter::SideFileSink::new(SIDE_FILE_BASE, files.clone()),
+                            losat::web_adapter::SideFileSink::new(SIDE_FILE_BASE, files.clone()),
                         ),
                         None => OutputSink::Writer(writer),
                     },
@@ -796,6 +802,7 @@ fn search(
             }
             Commands::Psiblast(_)
             | Commands::Rpsblast(_)
+            | Commands::Rpstblastn(_)
             | Commands::Makedb(_)
             | Commands::Rpsbproc(_) => {
                 unreachable!("rejected by Program::parse")
@@ -953,24 +960,34 @@ fn link_format0(
     }
 }
 
-/// Whether `validate` checks the file of `-window_masker_db`, where the command line checks it:
-/// after `-dust`, before the query range and the other options (`resolve_window_masker`, with the
-/// CLI's message for a format other than the two binary ones). Only for a name that is registered:
-/// a host that validates an argv without its files (the application's control reactor) leaves the
-/// file to `run`, where a name that is not registered is the CLI's file that cannot be opened.
-fn names_registered_counts(args: &LOSAT::web_adapter::BlastnArgs) -> bool {
-    args.window_masker_db
-        .as_deref()
-        .is_some_and(crate::files::registered)
+/// Whether `validate` reads the WindowMasker options where the command line reads them: after
+/// `-dust`, before the query range and the other options (`resolve_window_masker`: the check of
+/// the file of `-window_masker_db`, with the CLI's message for a format other than the two binary
+/// ones, then "at most one of" the options, then the file of `-window_masker_taxid`). Not when
+/// `-window_masker_db` names a file that is not registered: a host that validates an argv without
+/// its files (the application's control reactor) leaves the file to `run`, where a name that is
+/// not registered is the CLI's file that cannot be opened. A taxid whose file is not registered
+/// is the CLI's taxid without a file, whose error comes with the search (`batch_error`). An argv
+/// without the options is validated as before named input files.
+fn validates_window_masker(args: &losat::web_adapter::BlastnArgs) -> bool {
+    match args.window_masker_db.as_deref() {
+        Some(name) => crate::files::registered(name),
+        None => args.window_masker_taxid.is_some(),
+    }
 }
 
-/// The counts source of BLASTN's `-window_masker_db`: the named input files registered when the
-/// run starts (`files::source`), which the engine opens by the option's value as the command line
-/// opens the file of that name. `None` without the option, so a run without it gives the engine
-/// what it gave before named input files.
+/// The counts source of BLASTN's `-window_masker_db` and `-window_masker_taxid`: the named input
+/// files registered when the run starts (`files::source`), which the engine opens by the option's
+/// value, or by the taxid's name in `files::WINDOW_MASKER_PATH`, as the command line opens the
+/// file of that name. `None` without the options, so a run without them gives the engine what it
+/// gave before named input files.
 fn window_masker_counts(command: &Commands) -> Option<Arc<dyn CountsSource>> {
     match command {
-        Commands::Blastn(args) if args.window_masker_db.is_some() => Some(crate::files::source()),
+        Commands::Blastn(args)
+            if args.window_masker_db.is_some() || args.window_masker_taxid.is_some() =>
+        {
+            Some(crate::files::source())
+        }
         _ => None,
     }
 }
@@ -978,7 +995,20 @@ fn window_masker_counts(command: &Commands) -> Option<Arc<dyn CountsSource>> {
 /// Gives a search's command the run's counts source (`window_masker_counts`).
 fn give_counts(command: &mut Commands, counts: Option<&Arc<dyn CountsSource>>) {
     if let (Commands::Blastn(args), Some(counts)) = (command, counts) {
-        args.window_masker_counts = Some(counts.clone());
+        give_blastn_counts(args, counts);
+    }
+}
+
+/// Gives BLASTN's arguments the counts source, and with `-window_masker_taxid` LOSAT Web's
+/// registry of counts files, where the command line gives NCBI's registry: the directory
+/// `files::WINDOW_MASKER_PATH`, and no posts of a `.ncbirc` (LOSAT Web reads none).
+fn give_blastn_counts(args: &mut losat::web_adapter::BlastnArgs, counts: &Arc<dyn CountsSource>) {
+    args.window_masker_counts = Some(counts.clone());
+    if args.window_masker_taxid.is_some() {
+        args.window_masker_registry = Some(Ok(Default::default()));
+        if let Some(Ok(registry)) = &mut args.window_masker_registry {
+            registry.path = Some(crate::files::WINDOW_MASKER_PATH.to_string());
+        }
     }
 }
 
@@ -1023,7 +1053,7 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
     // The searches of the run share one thread pool (`with_run_pool`): a browser holds a thread
     // worker for every thread that may start, and the threads of a pool may not have returned when
     // the next pool starts, so each pool of its own needed thread workers of its own.
-    LOSAT::web_adapter::with_run_pool(threads, program.name(), || -> Result<(), String> {
+    losat::web_adapter::with_run_pool(threads, program.name(), || -> Result<(), String> {
         for group in &groups {
             let mut command = match command.take() {
                 Some(command) => command,
@@ -1197,13 +1227,13 @@ mod tests {
             assert!(parse(&words).is_ok(), "{program}");
             for option in ["-num_descriptions", "-num_alignments"] {
                 let both = [&words[..], &[option, "3"]].concat();
-                let cli = LOSAT::web_adapter::try_parse_cli(
+                let cli = losat::web_adapter::try_parse_cli(
                     std::iter::once("losat").chain(both.iter().copied()),
                 )
                 .unwrap_err();
                 assert_eq!(
                     parse(&both).unwrap_err(),
-                    LOSAT::web_adapter::render_message(&cli),
+                    losat::web_adapter::render_message(&cli),
                     "{program} {option}"
                 );
                 assert!(parse(&both).unwrap_err().contains("cannot be used with"));
@@ -1216,11 +1246,11 @@ mod tests {
         assert!(parse(&["psiblast", "-query", "q", "-subject", "s"]).is_err());
         // An unknown program and a parser error are the CLI's messages.
         for words in [&["nosuch"][..], &["tblastx", "-query", "q"][..]] {
-            let cli = LOSAT::web_adapter::try_parse_cli(
+            let cli = losat::web_adapter::try_parse_cli(
                 std::iter::once("losat").chain(words.iter().copied()),
             )
             .map(|_| ())
-            .map_err(|error| LOSAT::web_adapter::render_message(&error));
+            .map_err(|error| losat::web_adapter::render_message(&error));
             assert_eq!(parse(words).map(|_| ()), cli, "{words:?}");
         }
         assert_eq!(Program::Tblastx.formats(), &[0, 6, 7]);
@@ -1298,19 +1328,16 @@ mod tests {
         );
         // The options require each other: a parser error, the CLI's message.
         assert!(validate(&[&dc[..], &["-template_type", "coding"]].concat()).is_err());
-        // validate reports TBLASTX's checks of its options alone, as the run does.
+        // validate reports TBLASTX's checks of its options alone, as the run does; the one-hit
+        // word finder (`-window_size 0`) runs as the CLI runs it (line RG, X2).
         let tblastx = ["tblastx", "-query", "q", "-subject", "s"];
         assert!(validate(&tblastx).is_ok());
-        for (extra, start) in [
-            (["-evalue", "0"], "BLAST query/options error: expect value"),
-            (
-                ["-window_size", "0"],
-                "-window_size 0 (the one-hit word finder)",
-            ),
-        ] {
-            let error = validate(&[&tblastx[..], &extra[..]].concat()).unwrap_err();
-            assert!(error.starts_with(start), "{error}");
-        }
+        assert!(validate(&[&tblastx[..], &["-window_size", "0"]].concat()).is_ok());
+        let error = validate(&[&tblastx[..], &["-evalue", "0"]].concat()).unwrap_err();
+        assert!(
+            error.starts_with("BLAST query/options error: expect value"),
+            "{error}"
+        );
         // validate reports BLASTX's checks of each search's options, as the run does (NCBI's
         // errors and LOSAT's refusals); the tabular search that -num_alignments 0 rejects alone
         // is tolerated, as `run` tolerates it.
@@ -1356,13 +1383,13 @@ mod tests {
                 "7",
             ][..],
         ] {
-            let cli = LOSAT::web_adapter::try_parse_cli(
+            let cli = losat::web_adapter::try_parse_cli(
                 ["losat"].into_iter().chain(words.iter().copied()),
             )
             .unwrap_err();
             assert_eq!(
                 parse(words).unwrap_err(),
-                LOSAT::web_adapter::render_message(&cli),
+                losat::web_adapter::render_message(&cli),
                 "{words:?}"
             );
         }
@@ -1628,7 +1655,7 @@ mod tests {
 
     // The searches of a run: one per distinct hit list size of the formats 0, 6 and 7 (NCBI
     // `blast_args.cpp:2894-2973`), the tabular formats first; without -num_descriptions and
-    // -num_alignments the one search of the program's formats in their order.
+    // -num_alignments the one search of the program's formats, the tabular ones first.
     #[test]
     fn a_run_searches_once_for_each_hit_list_size() {
         let groups = |program: &str, options: &[&str]| {
@@ -1639,7 +1666,7 @@ mod tests {
                 .map(|group| group.iter().map(|output| output.stream).collect())
                 .collect::<Vec<Vec<u32>>>()
         };
-        let one = vec![vec![0, 6, 7]];
+        let one = vec![vec![6, 7, 0]];
         let one_tabular_first = vec![vec![6, 7, 0]];
         let two = vec![vec![6, 7], vec![0]];
         for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
@@ -1669,7 +1696,7 @@ mod tests {
             // The output of the argv's -outfmt (stream 4) has the hit list size of 6 and 7: it
             // joins the tabular search, first, and adds none.
             for (options, expected) in [
-                (&["-outfmt", "6 qseqid"][..], vec![vec![4, 0, 6, 7]]),
+                (&["-outfmt", "6 qseqid"][..], vec![vec![4, 6, 7, 0]]),
                 (
                     &["-outfmt", "7 std qcovs", "-num_alignments", "3"],
                     vec![vec![4, 6, 7], vec![0]],
@@ -1678,7 +1705,7 @@ mod tests {
                     &["-outfmt=6 sseqid", "-num_descriptions", "500"],
                     vec![vec![4, 6, 7, 0]],
                 ),
-                (&["-outfmt", "7"], vec![vec![0, 6, 7]]),
+                (&["-outfmt", "7"], vec![vec![6, 7, 0]]),
             ] {
                 assert_eq!(groups(program, options), expected, "{program} {options:?}");
             }
@@ -1748,10 +1775,10 @@ mod tests {
             // What the CLI rejects, with its message.
             let engine = engine_program(Program::parse(program).unwrap());
             for outfmt in ["abc", "99", "1", "6\tqseqid"] {
-                let cli = LOSAT::web_adapter::parse_formatting_string(outfmt)
+                let cli = losat::web_adapter::parse_formatting_string(outfmt)
                     .and_then(|choice| {
-                        LOSAT::web_adapter::report_format(&choice, engine, None)?;
-                        LOSAT::web_adapter::formatting_handler_check(&choice, engine)
+                        losat::web_adapter::report_format(&choice, engine, None)?;
+                        losat::web_adapter::formatting_handler_check(&choice, engine)
                     })
                     .unwrap_err();
                 assert_eq!(
@@ -1765,8 +1792,8 @@ mod tests {
             let conflict = "6 delim=; qseqid staxids";
             assert_eq!(custom(program, conflict), Ok(Some(conflict.to_string())));
             let words = [program, "-query", "q", "-subject", "s", "-outfmt", conflict];
-            let handler = LOSAT::web_adapter::parse_formatting_string(conflict)
-                .and_then(|choice| LOSAT::web_adapter::formatting_handler_check(&choice, engine))
+            let handler = losat::web_adapter::parse_formatting_string(conflict)
+                .and_then(|choice| losat::web_adapter::formatting_handler_check(&choice, engine))
                 .unwrap_err();
             assert_eq!(validate(&words), Err(format!("{handler:#}")), "{program}");
             assert!(validate(&words)

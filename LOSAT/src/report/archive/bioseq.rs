@@ -1,11 +1,14 @@
 //! The Bioseq of a query or subject record in a BLAST archive.
 //!
-//! NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:597-601
+//! NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:597-603
 //! ```c++
-//!     // (CFastaReader::ParseDefLine ... the raw defline is kept in a user object)
-//!     CRef<CUser_object> uo(new CUser_object);
-//!     uo->SetType().SetStr("CFastaReader");
-//!     uo->AddField("DefLine", NStr::PrintableString(defline));
+//!     if ( !TestFlag(fNoUserObjs) ) {
+//!         // store the raw defline in a User-object for reference
+//!         CRef<CSeqdesc> desc(new CSeqdesc);
+//!         desc->SetUser().SetType().SetStr("CFastaReader");
+//!         desc->SetUser().AddField("DefLine", NStr::PrintableString(s));
+//!         m_CurrentSeq->SetDescr().Set().push_back(desc);
+//!     }
 //! ```
 //! A record is `id { local str "Query_N" }` (`Subject_N` for `-subject`), `descr` with the
 //! `CFastaReader` user object (the raw defline line) and the `title` (absent when it is
@@ -17,7 +20,7 @@ use crate::report::seqid::SeqId;
 use crate::report::serial::encoder::Encoder;
 
 /// A record to write as a Bioseq.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct BioseqInput<'a> {
     /// `Query_N` or `Subject_N`.
     pub id: &'a str,
@@ -25,8 +28,9 @@ pub struct BioseqInput<'a> {
     pub ids: Option<&'a [crate::seqid::ParsedSeqId]>,
     /// With `-parse_deflines` and an id that is not local: the query as a Seq-loc.
     pub seq_loc: Option<QuerySeqLoc<'a>>,
-    /// The defline line as read, with its `>` and without the line end.
-    pub defline: &'a [u8],
+    /// The defline line as read, with its `>` and without the line end (`>` and the title for a
+    /// record that kept none).
+    pub defline: std::borrow::Cow<'a, [u8]>,
     /// The title (the defline after the `>` up to the first control byte, trimmed).
     pub title: &'a [u8],
     /// The letters as the reader keeps them (lower case where the lower-case mask covers
@@ -63,56 +67,6 @@ pub struct QuerySeqLoc<'a> {
     pub to: i32,
     pub strand: SeqLocStrand,
     pub id: &'a crate::seqid::ParsedSeqId,
-}
-
-/// `NStr::PrintableString(s, 0)`: a byte outside 0x20..0x7e, a backslash or a quote is
-/// written as an escape.
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3732-3845
-/// (`\t \r \n \a \b \f \v` as letters, `\\` `\'` `\"` backslashed, a `?` next to a `?` as
-/// `\?`, other bytes as reduced octal: `\303\251`, `\1`).
-pub fn printable_string(text: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(text.len() + 8);
-    for (index, &byte) in text.iter().enumerate() {
-        let escape = match byte {
-            7 => Some(b'a'),
-            8 => Some(b'b'),
-            12 => Some(b'f'),
-            13 => Some(b'r'),
-            9 => Some(b't'),
-            11 => Some(b'v'),
-            10 => {
-                out.extend_from_slice(b"\\n\\\n");
-                continue;
-            }
-            b'\\' | b'\'' | b'"' => Some(byte),
-            b'?' if (index > 0 && text[index - 1] == b'?')
-                || (index + 1 < text.len() && text[index + 1] == b'?') =>
-            {
-                Some(b'?')
-            }
-            _ => None,
-        };
-        if let Some(escape) = escape {
-            out.push(b'\\');
-            out.push(escape);
-        } else if !(0x20..0x7f).contains(&byte) {
-            let mut reduce = index + 1 == text.len() || !(b'0'..=b'7').contains(&text[index + 1]);
-            out.push(b'\\');
-            let (v1, v2, v3) = (byte >> 6, (byte >> 3) & 7, byte & 7);
-            if v1 != 0 || !reduce {
-                out.push(b'0' + v1);
-                reduce = false;
-            }
-            if v2 != 0 || !reduce {
-                out.push(b'0' + v2);
-            }
-            out.push(b'0' + v3);
-        } else {
-            out.push(byte);
-        }
-    }
-    out
 }
 
 /// `NCBI4na` code of an upper-case nucleotide letter (`-ACMGRSVTWYHKDBN`); a letter outside
@@ -239,7 +193,12 @@ pub fn write_bioseq<E: Encoder>(enc: &mut E, bioseq: &BioseqInput<'_>) {
     enc.end_member();
     enc.member("data", 2);
     enc.variant("User-field_data", "str", 0);
-    enc.visible_str(&printable_string(bioseq.defline));
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:601
+    // ```c++
+    //         desc->SetUser().AddField("DefLine", NStr::PrintableString(s));
+    // ```
+    // The default mode `fNewLine_Quote` writes a line feed as `\n` (ncbistr.hpp:2730).
+    enc.visible_str(&crate::ncbi_str::printable_string(&bioseq.defline));
     enc.end_variant();
     enc.end_member();
     enc.end_sequence();
@@ -313,16 +272,26 @@ pub fn write_bioseq<E: Encoder>(enc: &mut E, bioseq: &BioseqInput<'_>) {
 mod tests {
     use super::*;
 
+    /// The `DefLine` field is `NStr::PrintableString(s)` of the raw line (fasta.cpp:601) in the
+    /// default `fNewLine_Quote` mode: a line feed, which only a record the library builds can
+    /// hold, is written as `\n`.
     #[test]
-    fn printable_string_follows_ncbi() {
-        assert_eq!(printable_string(b">plain text"), b">plain text");
-        assert_eq!(printable_string(b"a\tb\\c'd\"e"), b"a\\tb\\\\c\\'d\\\"e");
-        assert_eq!(printable_string(b"what??"), b"what\\?\\?");
-        assert_eq!(printable_string(b"one?two"), b"one?two");
-        assert_eq!(printable_string(b"caf\xc3\xa9"), b"caf\\303\\251");
-        assert_eq!(printable_string(b"\x01x"), b"\\1x");
-        assert_eq!(printable_string(b"\x011"), b"\\0011");
-        assert_eq!(printable_string(b"\x07\x08\x0c\r\x0b"), b"\\a\\b\\f\\r\\v");
+    fn the_defline_field_quotes_a_line_feed() {
+        let mut buf = Vec::new();
+        let mut enc = crate::report::serial::asn_text::AsnTextEncoder::new(&mut buf);
+        let bioseq = BioseqInput {
+            id: "Query_1",
+            ids: None,
+            seq_loc: None,
+            defline: std::borrow::Cow::Borrowed(b">a\nb"),
+            title: b"a",
+            letters: b"MKV",
+            protein: true,
+        };
+        write_bioseq(&mut enc, &bioseq);
+        assert_eq!(enc.error(), None);
+        let text = String::from_utf8(buf).unwrap();
+        assert!(text.contains(r#"str ">a\nb""#), "{text}");
     }
 
     #[test]

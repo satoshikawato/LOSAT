@@ -1,19 +1,20 @@
 //! A search from Python: the inputs are read and the search runs with the GIL released.
 //!
-//! Python cannot stop a thread inside its process, so a search stops where `LOSAT::api` lets a
+//! Python cannot stop a thread inside its process, so a search stops where `losat::api` lets a
 //! caller stop: between two of NCBI's query batches. `Batches` returns to Python after each
 //! batch, and `run` without reports looks for a signal between them (Ctrl-C).
 
 use std::borrow::Cow;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 use arrow_array::RecordBatch;
+use losat::api::{self, FastaRecord, HspRecord, Inputs, Program, Role, Search};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedBytes;
 use pyo3::types::{PyBytes, PyList, PySlice, PyTuple};
 use self_cell::self_cell;
-use LOSAT::api::{self, FastaRecord, HspRecord, Inputs, Program, Role, Search};
 
 use crate::exception;
 use crate::table::{of_records, HspTable};
@@ -65,8 +66,19 @@ impl Loaded {
         (subject, subject_name): NamedSubject,
     ) -> Result<Self, api::Error> {
         let search = checked(program, argv)?;
-        let query_bytes = query.bytes(Role::Query)?;
         let database = subject.is_none();
+        // A dry run reads no record, as the command line's does not (`Search::dry_run`).
+        if search.dry_run() {
+            return Ok(Self {
+                search,
+                query: Vec::new(),
+                subject: Vec::new(),
+                query_name,
+                subject_name,
+                database,
+            });
+        }
+        let query_bytes = query.bytes(Role::Query)?;
         let subject_bytes = match &subject {
             Some(subject) => subject.bytes(Role::Subject)?,
             None => Cow::Borrowed(&[][..]),
@@ -205,6 +217,28 @@ pub fn run_to_file(
     .map_err(exception)
 }
 
+/// A tool of the library API (`api::run_makeblastdb` and the others).
+type Tool = fn(&[&str], &mut dyn Read, &mut dyn Write, &mut dyn Write) -> Result<(), api::Error>;
+
+/// `tool` with the command line's words and `input` as its standard input, without the GIL:
+/// what it writes to standard output and to standard error.
+fn run_tool<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+    tool: Tool,
+) -> PyResult<(Bound<'py, PyBytes>, String)> {
+    let (output, diagnostics) = py
+        .detach(|| {
+            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
+            let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
+            tool(&words, &mut &*input, &mut output, &mut diagnostics)?;
+            Ok((output, diagnostics))
+        })
+        .map_err(exception)?;
+    Ok((PyBytes::new(py, &output), diagnostics_text(&diagnostics)))
+}
+
 /// `makeblastdb` with the command line's words: `input` is its standard input. Returns what it
 /// writes to standard output and to standard error.
 #[pyfunction]
@@ -213,33 +247,51 @@ pub fn makeblastdb<'py>(
     argv: Vec<String>,
     input: PyBackedBytes,
 ) -> PyResult<(Bound<'py, PyBytes>, String)> {
-    let (output, diagnostics) = py
-        .detach(|| {
-            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
-            let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
-            api::run_makeblastdb(&words, &mut &*input, &mut output, &mut diagnostics)?;
-            Ok((output, diagnostics))
-        })
-        .map_err(exception)?;
-    Ok((PyBytes::new(py, &output), diagnostics_text(&diagnostics)))
+    run_tool(py, argv, input, api::run_makeblastdb)
 }
 
-/// `blastdbcmd` with the command line's words. Returns what it writes to standard output and to
-/// standard error.
+/// `blastdbcmd` with the command line's words: `input` is its standard input (a batch file `-`).
+/// Returns what it writes to standard output and to standard error.
 #[pyfunction]
 pub fn blastdbcmd<'py>(
     py: Python<'py>,
     argv: Vec<String>,
+    input: PyBackedBytes,
 ) -> PyResult<(Bound<'py, PyBytes>, String)> {
-    let (output, diagnostics) = py
-        .detach(|| {
-            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
-            let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
-            api::run_blastdbcmd(&words, &mut output, &mut diagnostics)?;
-            Ok((output, diagnostics))
-        })
-        .map_err(exception)?;
-    Ok((PyBytes::new(py, &output), diagnostics_text(&diagnostics)))
+    run_tool(py, argv, input, api::run_blastdbcmd)
+}
+
+/// `dustmasker` with the command line's words: `input` is its standard input (`-in -`, and
+/// without `-in`). Returns what it writes to standard output and to standard error.
+#[pyfunction]
+pub fn dustmasker<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+) -> PyResult<(Bound<'py, PyBytes>, String)> {
+    run_tool(py, argv, input, api::run_dustmasker)
+}
+
+/// `segmasker` with the command line's words: `input` is its standard input (`-in -`, and
+/// without `-in`). Returns what it writes to standard output and to standard error.
+#[pyfunction]
+pub fn segmasker<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+) -> PyResult<(Bound<'py, PyBytes>, String)> {
+    run_tool(py, argv, input, api::run_segmasker)
+}
+
+/// `convert2blastmask` with the command line's words: `input` is its standard input (`-in -`,
+/// and without `-in`). Returns what it writes to standard output and to standard error.
+#[pyfunction]
+pub fn convert2blastmask<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+) -> PyResult<(Bound<'py, PyBytes>, String)> {
+    run_tool(py, argv, input, api::run_convert2blastmask)
 }
 
 /// `run` without reports.

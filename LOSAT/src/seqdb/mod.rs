@@ -69,6 +69,7 @@ mod tests;
 mod x_dbidxread_tests;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::OnceLock;
 
 use crate::seqid::model::ObjectId;
@@ -436,39 +437,16 @@ impl SeqDbError {
 //         m_SearchDb.Reset(new CSearchDatabase( local_dblist,
 //                                              mol_type));
 // ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3153-3172
-// ```c++
-//     SIZE_TYPE beg = 0;
-//     if (where == NStr::eTrunc_Begin  ||  where == NStr::eTrunc_Both) {
-//         _ASSERT(beg < length);
-//         while ( isspace((unsigned char) str[beg]) ) {
-//             if (++beg == length) {
-//                 return empty_str;
-//             }
-//         }
-//     }
-//     SIZE_TYPE end = length;
-//     if ( where == NStr::eTrunc_End  ||  where == NStr::eTrunc_Both ) {
-//         _ASSERT(beg < end);
-//         while (isspace((unsigned char) str[--end])) {
-//             if (beg == end) {
-//                 return empty_str;
-//             }
-//         }
-//         _ASSERT(beg <= end  &&  !isspace((unsigned char) str[end]));
-//         ++end;
-//     }
-// ```
-// `isspace` in the "C" locale: space, tab, line feed, vertical tab, form feed
-// and carriage return. The reader itself (`CSeqDB`, `SeqDb::open_in`) takes
-// the name as it is given: a name of spaces alone is "No database names were
-// passed to CSeqDB::CSeqDB()." there, while the programs, which trim first,
-// report "Database name is required.".
+// `NStr::TruncateSpaces` (`eTrunc_Both`) is `ncbi_str::truncate_spaces_str`: the `isspace` of
+// the "C" locale (space, tab, line feed, vertical tab, form feed and carriage return). The
+// reader itself (`CSeqDB`, `SeqDb::open_in`) takes the name as it is given: a name of spaces
+// alone is "No database names were passed to CSeqDB::CSeqDB()." there, while the programs,
+// which trim first, report "Database name is required.".
 /// The database name that a BLAST program hands to the reader for the value
 /// of its `-db` argument: the value without the white space at its ends.
 /// A search program passes the result to [`SeqDb::open_in`].
 pub fn db_argument_name(value: &str) -> &str {
-    value.trim_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r'])
+    crate::ncbi_str::truncate_spaces_str(value)
 }
 
 /// A contiguous range of sequences inside one volume, as planned by
@@ -500,6 +478,20 @@ impl BlockRange {
     pub fn end_ordinal(&self) -> u32 {
         self.first_ordinal + self.len()
     }
+}
+
+/// Where the reads of one sequence find it (NCBI's `CSeqDBVolSet::FindVol`): its volume, its
+/// OID in the volume, and the id that the readers' messages and blocks name (the ordinal id or
+/// the OID that the caller asked for). [`SeqDb::locate_oid`] finds it by NCBI's OID, as every
+/// read of NCBI's `CSeqDB` does; `SeqDb::find_volume` by ordinal id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SeqLocation {
+    /// Index of the volume in the database.
+    volume: usize,
+    /// The sequence's OID in the volume.
+    vol_oid: u32,
+    /// The id the caller gave (an ordinal id or an OID), for messages.
+    id: u32,
 }
 
 /// A database resolved without opening its volumes
@@ -588,31 +580,33 @@ pub struct SeqDb {
     printed_total_length: u64,
     /// The sum of the volumes' lengths (`CSeqDBVolSet::GetVolumeSetLength`).
     volume_set_length: u64,
+    /// `SeqDb::included_length` of a `filter`, made at its first use (none before). Only the
+    /// schedules of the parallel searches read it (`SeqDb::set_included_length`).
+    #[cfg(any(test, feature = "parallel"))]
+    included_length: OnceLock<u64>,
     /// The length of OID 0 of the volumes, which the statistics read when their total length
     /// is not positive (`statistics_numbers`); `None` when it is.
     first_oid_length: Option<u64>,
     /// The walks of the alias tree, with the exception of each one whose value does not
     /// convert (`check_alias_values`).
     alias_totals: alias::AliasTotals,
-    /// Why LOSAT refuses the alias files' values (not supported yet), checked after NCBI's
-    /// errors (`check_alias_values`).
-    alias_refusal: Option<(PathBuf, String)>,
-    /// The OIDs the alias files' ranges include (`alias::range_mask`): `None` without a range.
-    alias_mask: Option<Vec<u64>>,
+    /// Whether the alias files give an OID range (`alias::range_mask`).
+    alias_ranges: bool,
+    /// NCBI's `m_OidListSetup`: whether its OID list was built, which a database opened
+    /// without a list does at its first use (`SeqDb::check_or_find_oid`).
+    oid_list_set_up: AtomicBool,
     /// Whether a list was applied (`SeqDb::restrict`): NCBI's `CSeqDB` then scans the totals.
     list_applied: bool,
     /// The name the database was opened with (`-db`), for LOSAT's refusals.
     name: String,
-    /// The included OIDs when not every OID is (the alias files' ranges, a list): ordinal id
-    /// `i` is the `i`-th of them.
+    /// NCBI's OID list (the alias files' ranges, a list) and its iteration range, when there
+    /// is one: ordinal id `i` is the `i`-th OID of the list inside the range.
     filter: Option<Box<filter::OidFilter>>,
     /// The search path the database was found on (`open_in`), for files NCBI looks for
     /// beside it (`taxdb.bti`).
     search_path: Option<SearchPath>,
     /// `-show_gis` of the search that reads the headers for its reports.
     reports_show_gis: bool,
-    /// The ids of the queries of the search under `-parse_deflines`.
-    id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
     /// Whether the database was opened with a positive list (`SeqDb::restrict`).
     positive_list: bool,
     /// `SeqDb::list_taxids`.
@@ -637,6 +631,16 @@ struct Counts {
     min_length: i32,
 }
 
+/// The walks of the alias files' counts that NCBI's `CSeqDB` constructor makes without a list,
+/// in its order (seqdbimpl.cpp:117-139, quoted at [`SeqDb::open_every_oid_in`]).
+const UNLISTED_WALK_KEYS: &[alias::WalkKey] = &[
+    alias::WalkKey::Nseq,
+    alias::WalkKey::Length,
+    alias::WalkKey::MinSeqLength,
+    alias::WalkKey::StatsNseq,
+    alias::WalkKey::StatsTotlen,
+];
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1093-1102
 // ```c++
 // string CSeqDBImpl::x_FixString(const string & s) const
@@ -650,72 +654,6 @@ struct Counts {
 //     return s;
 // }
 // ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:269-296
-// ```c++
-// bool CSeqDBImpl::x_CheckOrFindOID(int & next_oid, CSeqDBLockHold & locked)
-// {
-//     CHECK_MARKER();
-//     bool success = true;
-//
-//     if (next_oid < m_RestrictBegin) {
-//         next_oid = m_RestrictBegin;
-//     }
-//
-//     if (next_oid >= m_RestrictEnd) {
-//         success = false;
-//     }
-//
-//     if (! m_OidListSetup) {
-//         x_GetOidList(locked);
-//     }
-//
-//     if (success && m_OIDList.NotEmpty()) {
-//         success = m_OIDList->CheckOrFindOID(next_oid);
-//
-//         if (next_oid > m_RestrictEnd) {
-//             success = false;
-//         }
-//     }
-//
-//     return success;
-// }
-// ```
-// `x_GetOidList` sets the iteration range of a top node with a single alias file that has a
-// range (`alias::top_iteration_range`) after the first OID was checked against the old range,
-// and a list's constructor resets the range after its scan of the totals (seqdbimpl.cpp:151):
-// when the OID list holds OIDs outside that range (the range's alias file and another name in
-// one `-db`), NCBI's search, its totals and blastdbcmd's first OID disagree on the OIDs.
-/// LOSAT's refusals of the OID ranges of the alias tree `root` (line RG, item D1a-2): a
-/// `FIRST_OID` or `LAST_OID` that NCBI's `int` reads as negative, and an OID list (`mask`)
-/// with OIDs outside the iteration range that NCBI sets for it.
-fn alias_range_refusal(
-    root: &alias::AliasNode,
-    mask: Option<&[u64]>,
-    num_oids: u32,
-) -> Option<(PathBuf, String)> {
-    if let Some(name) = alias::range_beyond_int(root) {
-        return Some((
-            PathBuf::from(name),
-            "FIRST_OID or LAST_OID is 2^31 or more, a negative int to NCBI; LOSAT does not read \
-             such alias files yet"
-                .to_string(),
-        ));
-    }
-    let (mask, (begin, end)) = (mask?, alias::top_iteration_range(root, num_oids)?);
-    let outside = (0..num_oids)
-        .filter(|&oid| oid < begin || oid >= end)
-        .any(|oid| mask[(oid / 64) as usize] >> (oid % 64) & 1 == 1);
-    outside.then(|| {
-        (
-            PathBuf::from(root.subnodes[0].this_name.as_deref().unwrap_or("-")),
-            "the OID range of the alias file with another database of the same -db, whose \
-             OIDs outside the range NCBI's search and blastdbcmd read differently; LOSAT does \
-             not read such alias files yet"
-                .to_string(),
-        )
-    })
-}
-
 fn fix_string(s: &[u8]) -> &[u8] {
     match s.iter().position(|&byte| byte == 0) {
         Some(at) => &s[..at],
@@ -846,19 +784,6 @@ impl SeqDb {
         self.reports_show_gis = show_gis;
     }
 
-    /// The ids of the queries of the search that reads the headers, under `-parse_deflines`.
-    pub fn id_scope(&self) -> Option<&crate::seqid::id_scope::IdScope> {
-        self.id_scope.as_deref()
-    }
-
-    /// Sets `id_scope`.
-    pub fn set_id_scope(
-        &mut self,
-        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
-    ) {
-        self.id_scope = id_scope;
-    }
-
     /// Whether the database was opened with a positive list (`CSeqDB::GetGiList` is set), whatever
     /// the list then selects: a list of GIs alone also searches the whole database of version 5.
     ///
@@ -972,7 +897,7 @@ impl SeqDb {
 
     /// The number of the volume that holds `ordinal` (`CSeqDBVolSet::FindVol`).
     pub fn volume_index(&self, ordinal: u32) -> Result<usize, SeqDbError> {
-        self.find_volume(ordinal).map(|(volume, _)| volume)
+        self.find_volume(ordinal).map(|at| at.volume)
     }
 
     /// Opens the one database at the path `name` (without extension), taken
@@ -1223,16 +1148,17 @@ impl SeqDb {
             printed_num_seqs: counts.num_seqs,
             printed_total_length: total_length,
             volume_set_length: total_length,
+            #[cfg(any(test, feature = "parallel"))]
+            included_length: OnceLock::new(),
             first_oid_length: None,
             alias_totals: alias::AliasTotals::default(),
-            alias_refusal: None,
-            alias_mask: None,
+            alias_ranges: false,
+            oid_list_set_up: AtomicBool::new(false),
             list_applied: false,
             name: name.to_string(),
             filter: None,
             search_path: None,
             reports_show_gis: false,
-            id_scope: None,
             positive_list: false,
             list_taxids: Vec::new(),
             name_records: Vec::new(),
@@ -1281,7 +1207,8 @@ impl SeqDb {
     // where NCBI's constructor reaches them, which depends on the list (`check_alias_values`).
     // `x_GetNumSeqs` and `x_GetNumSeqsStats` are the `int` of the walks' `Int8`
     // (seqdbimpl.cpp:948-949); the ranges make the OID list (`alias::range_mask`), which a
-    // list later intersects (`restrict`).
+    // list later intersects (`restrict`), and the iteration range that its first build sets
+    // (`alias::top_iteration_range`), inside which a search reads the list's OIDs.
     /// Reads the counts, the OID ranges and their errors from the alias tree `root` of the
     /// volumes `names` (the volume paths in the order of `self.volumes`).
     fn read_alias_tree(
@@ -1327,13 +1254,14 @@ impl SeqDb {
         self.stats_total_length = totals.stats_totlen.as_ref().map_or(0, |&value| value);
         self.printed_num_seqs = nseq;
         self.printed_total_length = length;
-        self.alias_refusal = alias_range_refusal(root, mask.as_deref(), num_oids);
-        if let Some(words) = &mask {
-            let filter = filter::OidFilter::new(words.clone(), num_oids);
+        self.alias_ranges = mask.is_some();
+        if let Some(words) = mask {
+            let range = alias::top_iteration_range(root, num_oids).unwrap_or((0, num_oids));
+            let filter = filter::OidFilter::new(words, num_oids).with_range(range);
             self.num_seqs = filter.count();
             self.filter = Some(Box::new(filter));
+            self.set_included_length(None);
         }
-        self.alias_mask = mask;
         self.alias_totals = totals;
         self.update_first_oid_length()?;
         Ok(())
@@ -1393,14 +1321,13 @@ impl SeqDb {
         Ok(parsed)
     }
 
-    /// `deflines` of the first sequence of volume `at` (non-empty), whether a taxid list
-    /// includes it or not.
+    /// `deflines` of the first sequence of volume `at` (non-empty), whether a list includes it
+    /// or not, and with every definition line: the check reads the header as stored, before a
+    /// taxid list's `DeflineRule` (`Volume::stored_deflines`), which would refuse a first sequence
+    /// that the list leaves out. Its messages name the sequence's OID.
     fn first_deflines(&self, at: usize) -> Result<Vec<OrdinalDefline>, SeqDbError> {
-        let ordinal = match &self.filter {
-            Some(filter) => filter.rank(self.volume_starts[at]),
-            None => self.volume_starts[at],
-        };
-        self.ordinal_deflines(at, ordinal, self.volumes[at].deflines(0))
+        let oid = self.volume_starts[at];
+        self.ordinal_deflines(at, oid, self.volumes[at].stored_deflines(0))
     }
 
     /// Whether the database is of format version 5 (its volumes' index files name an LMDB
@@ -1420,11 +1347,12 @@ impl SeqDb {
         self.seqtype
     }
 
-    /// The number of included OIDs: ordinal ids run from 0 to this number minus one. They are
-    /// the OIDs of the volumes that the alias files' ranges (`FIRST_OID`, `LAST_OID`) and a list
-    /// ([`SeqDb::restrict`]) include; iterations and schedules count them. NCBI's
-    /// `GetNumSeqs` is another number, which the statistics ([`SeqDb::statistics_numbers`]) and
-    /// the warning of [`SeqDb::filtered_empty`] read.
+    /// The number of included OIDs, the sequences a search reads: ordinal ids run from 0 to
+    /// this number minus one. They are the OIDs of the volumes that the alias files' ranges
+    /// (`FIRST_OID`, `LAST_OID`) and a list ([`SeqDb::restrict`]) include, inside the iteration
+    /// range NCBI sets for the only alias file of a `-db` (without a list); iterations and
+    /// schedules count them. NCBI's `GetNumSeqs` is another number, which the statistics
+    /// ([`SeqDb::statistics_numbers`]) and the warning of [`SeqDb::filtered_empty`] read.
     pub fn num_seqs(&self) -> u32 {
         self.num_seqs
     }
@@ -1433,6 +1361,65 @@ impl SeqDb {
     /// no sequence when it is 0.
     pub fn num_oids(&self) -> u32 {
         self.volume_starts[self.volumes.len()]
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_bdb_reader.cpp:44-49
+    // ```c++
+    // CRef< CSeq_entry > CMaskBDBReader::GetNextSequence()
+    // {
+    //     CRef< CSeq_entry > entry( null );
+    //     if( oid_ < seqdb_->GetNumOIDs() ) {
+    //         CRef< CBioseq > seq = seqdb_->GetBioseq( oid_++ );
+    // ```
+    /// Every OID of the volumes as an ordinal id ([`SeqDb::num_oids`] of them): the alias
+    /// files' OID ranges (`FIRST_OID`, `LAST_OID`) no longer leave any out. For a reader that
+    /// loops `GetNumOIDs` and reads each OID with `GetBioseq(oid)`, which reads an OID outside
+    /// the ranges too (dustmasker's `CMaskBDBReader`). Only before a list
+    /// ([`SeqDb::restrict`]): the alias keys of lists are refused when the database opens.
+    fn include_every_oid(&mut self) {
+        debug_assert!(!self.list_applied, "include_every_oid after a list");
+        self.filter = None;
+        self.set_included_length(None);
+        self.num_seqs = self.num_oids();
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:117-139
+    // ```c++
+    //         if (m_NeedTotalsScan) {
+    //             CSeqDBLockHold locked(m_Atlas);
+    //
+    //             // This is a whole-database scan; it's always done in
+    //             // approximate length mode.
+    //             x_ScanTotals(true, & m_NumSeqs, & m_TotalLength,
+    //                                & m_MaxLength, & m_MinLength, locked);
+    //
+    //         } else {
+    //             m_NumSeqs     = x_GetNumSeqs();
+    //             m_TotalLength = x_GetTotalLength();
+    //             m_MaxLength   = x_GetMaxLength();
+    //             m_MinLength   = x_GetMinLength();
+    //             ...
+    //         }
+    //         m_NumSeqsStats     = x_GetNumSeqsStats();
+    //         m_TotalLengthStats = x_GetTotalLengthStats();
+    // ```
+    /// Opens the database `name` for a reader that loops `GetNumOIDs` and reads each OID with
+    /// `GetBioseq(oid)` (dustmasker's `CMaskBDBReader`, which makes `CSeqDB(name, type)`):
+    /// [`SeqDb::open_search_in`], the errors of the walks of the alias files' counts that NCBI's
+    /// constructor makes (those of [`SeqDb::check_alias_values`] without a list), and
+    /// `include_every_oid`. LOSAT's refusals of the values that only a search reads
+    /// differently are not made, as such a reader reads none of them: a negative `NSEQ`, a
+    /// `LENGTH` of 0 or of 2^63 or more (NCBI 2.17.0 dustmasker reads them as it reads the
+    /// database without the alias file: review 2 of line RG item K1, F5).
+    pub fn open_every_oid_in(
+        name: &str,
+        seqtype: SeqType,
+        path: &SearchPath,
+    ) -> Result<Self, SeqDbError> {
+        let mut db = Self::open_search_in(name, seqtype, path)?;
+        db.walk_errors(UNLISTED_WALK_KEYS)?;
+        db.include_every_oid();
+        Ok(db)
     }
 
     /// `CSeqDB::GetNumSeqs` of the search: the walk of `NSEQ` (the volumes' OIDs below the
@@ -1504,12 +1491,12 @@ impl SeqDb {
     // ```
     /// Whether NCBI warns that the database is empty (`GetNumSeqs` of the search is 0:
     /// `report::query_warnings::EMPTY_DATABASE_MESSAGE` for each query): a list that kept no
-    /// sequence of a database that has some, or an alias file's `NSEQ 0`. The search goes on
-    /// over the included OIDs, which a list that kept none leaves without any. A database
-    /// without any sequence, with or without a list, is not this: its first query batch fails
-    /// ([`SeqDb::num_oids`]).
+    /// sequence of a database that has some, an alias file's `NSEQ 0`, or its `LENGTH` or
+    /// `STATS_TOTLEN` over volumes without sequences. The search goes on over the included OIDs,
+    /// which may be none. Where the first query batch fails instead
+    /// ([`SeqDb::first_oid_read_fails`]), NCBI writes no warning.
     pub fn filtered_empty(&self) -> bool {
-        self.counts.num_seqs == 0 && self.num_oids() > 0
+        self.counts.num_seqs == 0 && !self.first_oid_read_fails()
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:905-938
@@ -1579,7 +1566,7 @@ impl SeqDb {
     /// `MIN_SEQ_LENGTH`): RPS-BLAST, which searches the volumes' profiles by OID, refuses them
     /// (`rps_hooks::check_alias_keys`).
     pub fn alias_ranges_or_statistics(&self) -> bool {
-        self.alias_mask.is_some()
+        self.alias_ranges
             || self.stats_num_seqs != 0
             || self.stats_total_length != 0
             || !matches!(self.alias_totals.min_seq_length, Ok(0))
@@ -1599,6 +1586,25 @@ impl SeqDb {
         self.statistics_total_length() <= 0
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:932-936 (at
+    // `statistics_numbers`)
+    // ```c
+    //           Int4 oid = 0;  /* Get length of first sequence. */
+    //           if ( (total_length = BlastSeqSrcGetSeqLen(seq_src, (void*) &oid)) < 0) {
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:240-251 (at
+    // `common::database::PreliminaryReadError`): the `CSeqDBException` of that read is
+    // `BLAST engine error: Database memory map file error` (exit status 3; psiblast's
+    // `BLAST Database error: OID not found`, exit status 2).
+    /// Whether the setup of the first query batch with a valid context fails: the statistics'
+    /// total is not positive ([`SeqDb::statistics_length_is_empty`]), so NCBI reads the length of
+    /// OID 0 (`GetSeqLength(0)`, which asks the volumes, not the list), and the volumes have no
+    /// OID. An alias file's `LENGTH` or `STATS_TOTLEN` over such volumes makes the total positive:
+    /// NCBI then reads no sequence and reports no hit (probes p4c_dp, p4c_dn of line RG D1a-2).
+    pub fn first_oid_read_fails(&self) -> bool {
+        self.statistics_length_is_empty() && self.num_oids() == 0
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-975
     // ```c
     //    if (sbp->gbp) {
@@ -1608,8 +1614,9 @@ impl SeqDb {
     //    }
     // ```
     /// Whether the statistics read 0 sequences of a positive total length
-    /// ([`SeqDb::statistics_numbers`]: an alias file's `NSEQ 0` without `STATS_NSEQ`, or a list
-    /// that kept no sequence under a `STATS_TOTLEN`). The programs without the Gumbel block
+    /// ([`SeqDb::statistics_numbers`]: an alias file's `NSEQ 0` without `STATS_NSEQ`, its `LENGTH`
+    /// or `STATS_TOTLEN` over volumes without sequences, or a list that kept no sequence under a
+    /// `STATS_TOTLEN`). The programs without the Gumbel block
     /// (BLASTN, TBLASTX, and the protein programs with `-ungapped`, `-searchsp` or `OLD_FSC`)
     /// divide the total by it, and NCBI BLAST+ 2.17.0 crashes (SIGFPE).
     pub fn statistics_count_is_zero(&self) -> bool {
@@ -1648,21 +1655,9 @@ impl SeqDb {
         let keys: &[WalkKey] = if self.list_applied {
             &[WalkKey::StatsNseq, WalkKey::StatsTotlen]
         } else {
-            &[
-                WalkKey::Nseq,
-                WalkKey::Length,
-                WalkKey::MinSeqLength,
-                WalkKey::StatsNseq,
-                WalkKey::StatsTotlen,
-            ]
+            UNLISTED_WALK_KEYS
         };
         self.walk_errors(keys)?;
-        if let Some((path, message)) = &self.alias_refusal {
-            return Err(SeqDbError::Unsupported {
-                path: path.clone(),
-                message: message.clone(),
-            });
-        }
         // Values NCBI reads in ways LOSAT does not reproduce yet (line RG, item D1a-2).
         let refuse = |message: &str| {
             Err(SeqDbError::Unsupported {
@@ -1676,7 +1671,11 @@ impl SeqDb {
                 self.counts.num_seqs
             ));
         }
-        if self.counts.total_length as i64 <= 0 && self.num_seqs > 0 {
+        // A total of 2^63 or more is negative as NCBI's Int8: NCBI's search reads that negative
+        // `db_length` the usual way (blast_setup.c:925-935, the cutoffs of blast_engine.c:1454),
+        // not per subject; LOSAT's statistics take no negative total (line RG D1a-3).
+        let negative_total = (self.counts.total_length as i64) < 0 && self.num_seqs > 0;
+        if !self.list_applied && (self.statistics_per_subject() || negative_total) {
             return refuse(&format!(
                 "the total length of the alias files (LENGTH) is {} as NCBI's Int8 while the \
                  database includes sequences",
@@ -1687,6 +1686,34 @@ impl SeqDb {
             self.check_printed_counts()?;
         }
         Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443
+    // ```c
+    //        if (db_length == 0) {
+    //            /* This is not a database search, hence need to recalculate and save
+    //             the effective search spaces and length adjustments for all
+    //             queries based on the length of the current single subject
+    //             sequence. */
+    //            if ((status = BLAST_OneSubjectUpdateParameters(program_number,
+    //                           seq_arg.seq->length, score_options, query_info,
+    //                           sbp, hit_params, word_params,
+    //                           eff_len_options)) != 0)
+    // ```
+    // `db_length` is `BlastSeqSrcGetTotLen`, NCBI's `GetTotalLength` (`counts`): an alias file's
+    // `LENGTH 0`, or a list whose scan of the totals visits no sequence (the walk of
+    // `OidFilter::walk` stops before the listed OIDs that the search reads: line RG D1a-2,
+    // survey A, the iteration range of the only alias file of a `-db`).
+    /// Whether NCBI's search computes the statistics of each subject on its own: `GetTotalLength`
+    /// is 0 while the search reads sequences. LOSAT's database searches do not (an alias file's
+    /// `LENGTH 0` is refused by [`SeqDb::check_alias_values`], a list's scan by the search's
+    /// opener). Every included sequence counts as read here, while NCBI's TBLASTN and TBLASTX
+    /// skip the subjects shorter than `min_subj_seq_length` before this check
+    /// (blast_engine.c:1429): a database whose searched subjects are all that short is refused
+    /// though NCBI searches it the usual way, until the statistics of each subject are ported
+    /// (line RG D1a-3, which removes this refusal).
+    pub fn statistics_per_subject(&self) -> bool {
+        self.counts.total_length == 0 && self.num_seqs > 0
     }
 
     /// The first exception of the walks of `keys`, in that order.
@@ -1750,31 +1777,62 @@ impl SeqDb {
         &self.volumes
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvolset.hpp:210-226
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvolset.hpp:245-275
     // ```c++
-    //     CSeqDBVol * FindVol(int oid, int & vol_oid) const
+    //     const CSeqDBVol * FindVol(int oid, int & vol_oid, int & vol_idx) const
     //     {
     //         ...
-    //         int vol_idx(0);
-    //         return const_cast<CSeqDBVol*>(FindVol(oid, vol_oid, vol_idx));
+    //         for(int index = 0; index < (int) m_VolList.size(); index++) {
+    //             if ((m_VolList[index].OIDStart() <= oid) &&
+    //                 (m_VolList[index].OIDEnd()   >  oid)) {
+    //                 ...
+    //                 vol_oid = oid - m_VolList[index].OIDStart();
+    //                 vol_idx = index;
+    //
+    //                 return m_VolList[index].Vol();
+    //             }
+    //         }
+    //
+    //         return NULL;
     //     }
     // ```
-    /// The volume that holds `ordinal` and the sequence's number in it.
-    fn find_volume(&self, ordinal: u32) -> Result<(usize, u32), SeqDbError> {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:416-425
+    // ```c++
+    //         if (const CSeqDBVol * vol = m_VolSet.FindVol(oid, vol_oid)) {
+    //             return vol->GetSeqLengthExact(vol_oid);
+    //         }
+    //     }
+    //
+    //     NCBI_THROW(CSeqDBException, eArgErr, CSeqDB::kOidNotFound);
+    // ```
+    /// The place of NCBI's OID `oid` (`FindVol`), whether the alias files' ranges and a list
+    /// include it or not: NCBI's reads by OID do not ask them. `OID not found` (`kOidNotFound`,
+    /// seqdb.cpp:53) for an OID past the volumes.
+    pub fn locate_oid(&self, oid: u32) -> Result<SeqLocation, SeqDbError> {
+        if oid >= self.num_oids() {
+            return Err(SeqDbError::Range("OID not found".to_string()));
+        }
+        // The last volume whose first OID is not above `oid`; empty volumes share their
+        // start with the next volume.
+        let volume = self.volume_starts[..self.volumes.len()].partition_point(|&s| s <= oid) - 1;
+        Ok(SeqLocation {
+            volume,
+            vol_oid: oid - self.volume_starts[volume],
+            id: oid,
+        })
+    }
+
+    /// The place of the ordinal id `ordinal`: the place of its OID ([`SeqDb::locate_oid`]),
+    /// named by `ordinal`.
+    fn find_volume(&self, ordinal: u32) -> Result<SeqLocation, SeqDbError> {
         if ordinal >= self.num_seqs {
             return Err(SeqDbError::Range(format!(
                 "ordinal id {ordinal} is outside the database ({} sequences)",
                 self.num_seqs
             )));
         }
-        let oid = match &self.filter {
-            Some(filter) => filter.select(ordinal),
-            None => ordinal,
-        };
-        // The last volume whose first OID is not above `oid`; empty volumes share their
-        // start with the next volume.
-        let volume = self.volume_starts[..self.volumes.len()].partition_point(|&s| s <= oid) - 1;
-        Ok((volume, oid - self.volume_starts[volume]))
+        let at = self.locate_oid(self.oid(ordinal))?;
+        Ok(SeqLocation { id: ordinal, ..at })
     }
 
     /// `end` cut at the first OID of `volume` from `first` on that a taxid list excludes:
@@ -1823,7 +1881,11 @@ impl SeqDb {
     /// ([`SeqDb::read_block`]) reads the same index entries and returns the
     /// error where a block's read errors are reported.
     pub fn next_block(&self, first_ordinal: u32, max_bytes: u64) -> Option<BlockRange> {
-        let (volume, first) = self.find_volume(first_ordinal).ok()?;
+        let SeqLocation {
+            volume,
+            vol_oid: first,
+            ..
+        } = self.find_volume(first_ordinal).ok()?;
         let end = self.volumes[volume]
             .block_end(first, max_bytes)
             .unwrap_or(first + 1);
@@ -1875,7 +1937,12 @@ impl SeqDb {
         let mut window_volume = usize::MAX;
         let mut next_ordinal = first_ordinal;
         while blocks.len() < max {
-            let Ok((volume, first)) = self.find_volume(next_ordinal) else {
+            let Ok(SeqLocation {
+                volume,
+                vol_oid: first,
+                ..
+            }) = self.find_volume(next_ordinal)
+            else {
                 break;
             };
             if volume != window_volume {
@@ -1906,7 +1973,11 @@ impl SeqDb {
         if first_ordinal >= end_ordinal {
             return None;
         }
-        let (volume, first) = self.find_volume(first_ordinal).ok()?;
+        let SeqLocation {
+            volume,
+            vol_oid: first,
+            ..
+        } = self.find_volume(first_ordinal).ok()?;
         let end = self.volumes[volume]
             .num_oids()
             .min(first.saturating_add(end_ordinal - first_ordinal));
@@ -1967,15 +2038,24 @@ impl SeqDb {
 
     /// Reads the one sequence `ordinal` (for traceback and reports).
     pub fn read_sequence(&self, ordinal: u32) -> Result<SequenceBlock, SeqDbError> {
-        let (volume, first) = self.find_volume(ordinal)?;
-        self.volumes[volume].read_block(first, first + 1, ordinal)
+        self.read_sequence_at(self.find_volume(ordinal)?)
+    }
+
+    /// Reads the one sequence at `at` (a block of one sequence whose first ordinal id is the id
+    /// `at` was found by).
+    pub fn read_sequence_at(&self, at: SeqLocation) -> Result<SequenceBlock, SeqDbError> {
+        self.volumes[at.volume].read_block(at.vol_oid, at.vol_oid + 1, at.id)
     }
 
     /// The number of residues of protein `ordinal`, read from the index
     /// alone (`read_sequence(ordinal)`'s `protein(0).len()`).
     pub fn protein_length(&self, ordinal: u32) -> Result<u32, SeqDbError> {
-        let (volume, oid) = self.find_volume(ordinal)?;
-        self.volumes[volume].protein_length(oid)
+        self.protein_length_at(self.find_volume(ordinal)?)
+    }
+
+    /// [`SeqDb::protein_length`] of the protein at `at`.
+    pub fn protein_length_at(&self, at: SeqLocation) -> Result<u32, SeqDbError> {
+        self.volumes[at.volume].protein_length(at.vol_oid)
     }
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_block` with the bytes in a buffer that glibc maps
@@ -2018,15 +2098,19 @@ impl SeqDb {
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_sequence` with the bytes in a buffer that glibc maps
     /// from 1 MiB on.
     pub fn x_read_sequence_mapped(&self, ordinal: u32) -> Result<SequenceBlock, SeqDbError> {
-        let (volume, first) = self.find_volume(ordinal)?;
-        self.volumes[volume].x_read_block_mapped(first, first + 1, ordinal)
+        let at = self.find_volume(ordinal)?;
+        self.volumes[at.volume].x_read_block_mapped(at.vol_oid, at.vol_oid + 1, ordinal)
     }
 
     /// The length in bases of nucleotide `ordinal`, read from the index and the last byte of
     /// its packed bases (no letters).
     pub fn nucleotide_length(&self, ordinal: u32) -> Result<usize, SeqDbError> {
-        let (volume, oid) = self.find_volume(ordinal)?;
-        self.volumes[volume].nucleotide_length(oid, ordinal)
+        self.nucleotide_length_at(self.find_volume(ordinal)?)
+    }
+
+    /// [`SeqDb::nucleotide_length`] of the nucleotide at `at`.
+    pub fn nucleotide_length_at(&self, at: SeqLocation) -> Result<usize, SeqDbError> {
+        self.volumes[at.volume].nucleotide_length(at.vol_oid, at.id)
     }
 
     /// The IUPAC letters `[from, to)` of nucleotide `ordinal`: the bases of the range and the
@@ -2037,15 +2121,24 @@ impl SeqDb {
         from: usize,
         to: usize,
     ) -> Result<Vec<u8>, SeqDbError> {
-        let (volume, oid) = self.find_volume(ordinal)?;
-        self.volumes[volume].nucleotide_iupac_range(oid, ordinal, from, to)
+        self.nucleotide_iupac_range_at(self.find_volume(ordinal)?, from, to)
+    }
+
+    /// [`SeqDb::nucleotide_iupac_range`] of the nucleotide at `at`.
+    pub fn nucleotide_iupac_range_at(
+        &self,
+        at: SeqLocation,
+        from: usize,
+        to: usize,
+    ) -> Result<Vec<u8>, SeqDbError> {
+        self.volumes[at.volume].nucleotide_iupac_range(at.vol_oid, at.id, from, to)
     }
 
     /// The length and the ambiguity runs of nucleotide `ordinal`, read once for any number of
     /// [`SeqDb::nucleotide_iupac_range_with`] calls on it.
     pub fn nucleotide_ambiguity(&self, ordinal: u32) -> Result<NucleotideAmbiguity, SeqDbError> {
-        let (volume, oid) = self.find_volume(ordinal)?;
-        self.volumes[volume].nucleotide_ambiguity(oid, ordinal)
+        let at = self.find_volume(ordinal)?;
+        self.volumes[at.volume].nucleotide_ambiguity(at.vol_oid, ordinal)
     }
 
     /// [`SeqDb::nucleotide_iupac_range`] with the length and the runs of
@@ -2057,8 +2150,9 @@ impl SeqDb {
         to: usize,
         ambiguity: &NucleotideAmbiguity,
     ) -> Result<Vec<u8>, SeqDbError> {
-        let (volume, oid) = self.find_volume(ordinal)?;
-        self.volumes[volume].nucleotide_iupac_range_with(oid, ordinal, from, to, ambiguity)
+        let at = self.find_volume(ordinal)?;
+        self.volumes[at.volume]
+            .nucleotide_iupac_range_with(at.vol_oid, ordinal, from, to, ambiguity)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2222-2241
@@ -2088,8 +2182,12 @@ impl SeqDb {
     /// `gnl|BL_ORD_ID|n`, where `n` is the stored number plus the first
     /// ordinal id of the volume, as NCBI reports it.
     pub fn deflines(&self, ordinal: u32) -> Result<Vec<OrdinalDefline>, SeqDbError> {
-        let (volume, oid) = self.find_volume(ordinal)?;
-        self.ordinal_deflines(volume, ordinal, self.volumes[volume].deflines(oid))
+        let at = self.find_volume(ordinal)?;
+        self.ordinal_deflines(
+            at.volume,
+            ordinal,
+            self.volumes[at.volume].deflines(at.vol_oid),
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2221-2240
@@ -2118,8 +2216,12 @@ impl SeqDb {
     /// (`deflines`), or every member and Seq-id (`defline_set`) of a record with parsed
     /// Seq-ids. A record without parsed Seq-ids is read as before, with the same errors.
     pub fn read_header(&self, ordinal: u32) -> Result<SequenceHeader, SeqDbError> {
-        let (volume, oid) = self.find_volume(ordinal)?;
-        self.sequence_header(volume, ordinal, self.volumes[volume].header(oid))
+        let at = self.find_volume(ordinal)?;
+        self.sequence_header(
+            at.volume,
+            ordinal,
+            self.volumes[at.volume].header(at.vol_oid),
+        )
     }
 
     /// The `SequenceHeader` of the header `header` of the sequence `ordinal` in `volume`.
@@ -2141,16 +2243,21 @@ impl SeqDb {
 
     /// The definition lines of `ordinal` with every member and every Seq-id
     /// (`seqid::ber::decode_full_set`), as NCBI's `GetHdr` gives them: the
-    /// tag of a `general` id `BL_ORD_ID` is its database ordinal id (the
-    /// stored number plus the first ordinal id of the volume).
+    /// tag of a `general` id `BL_ORD_ID` is its OID in the database (the
+    /// stored number plus the first OID of the volume).
     pub fn defline_set(&self, ordinal: u32) -> Result<DeflineSet, SeqDbError> {
-        let (volume, oid) = self.find_volume(ordinal)?;
-        let set = self.volumes[volume].defline_set(oid)?;
-        self.ordinal_set(volume, ordinal, set)
+        self.defline_set_at(self.find_volume(ordinal)?)
     }
 
-    /// `set`, the definition lines of the sequence `ordinal` in `volume`, with the tag of a
-    /// `general` id `BL_ORD_ID` made its database ordinal id (`defline_set`).
+    /// [`SeqDb::defline_set`] of the sequence at `at`.
+    pub fn defline_set_at(&self, at: SeqLocation) -> Result<DeflineSet, SeqDbError> {
+        let set = self.volumes[at.volume].defline_set(at.vol_oid)?;
+        self.ordinal_set(at.volume, at.id, set)
+    }
+
+    /// `set`, the definition lines of the sequence `ordinal` (the id its messages name) in
+    /// `volume`, with the tag of a `general` id `BL_ORD_ID` made its OID in the database
+    /// (`defline_set`).
     fn ordinal_set(
         &self,
         volume: usize,
@@ -2196,8 +2303,8 @@ impl SeqDb {
     /// apart from `deflines`, for the XML2 and JSON formats, the prefetch's taxonomy lookups and
     /// an empty stored title (`HeaderReader::stored_taxonomy_title`).
     pub fn defline_taxids(&self, ordinal: u32) -> Result<Vec<i32>, SeqDbError> {
-        let (volume, oid) = self.find_volume(ordinal)?;
-        self.volumes[volume].defline_taxids(oid)
+        let at = self.find_volume(ordinal)?;
+        self.volumes[at.volume].defline_taxids(at.vol_oid)
     }
 
     /// The definition lines of a volume's sequence as `deflines` gives them for `ordinal`.

@@ -57,7 +57,7 @@
 // that 0 means a free cell), in WAIT_TABLE (one of WAIT_SLOTS cells, chosen from the address) and
 // clears it when the wait returns.
 // When the host ends the memory's workers (the memory keeper, ThreadHost.terminate: endWaits in
-// web/app/src/infra/reactor/shared-memory.ts) it sets WAITS_ENDING and notifies every recorded address,
+// web/packages/losat/src/infra/reactor/shared-memory.ts) it sets WAITS_ENDING and notifies every recorded address,
 // again each millisecond, until the table is empty (or nothing changed in it and no notify woke a
 // thread for a second: a cell that stays set without a waiter, after an overflow of the main thread's
 // stack into these cells). From then on, and while the table is full, the helper waits in slices of

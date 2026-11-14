@@ -107,6 +107,7 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 | DW-51 | 2026-11-05 | Web は CLI が書く output format を全部作る（DW-47 の「outfmt 5・10 などは範囲の外」を置き換える） | Owner の答え（W10 の最後の報告の質問「outfmt 5 と 10 も Web で作るか」に、chat「outfmt 5（XML）や 10（CSV）なども Web で作ります」「すべてのoutput formatに対応すべき」）。Additional options の `-outfmt` が 0・6・7 以外の、その program の CLI が書く形式（5、8〜12、15、16、20、BLASTN の 17。語があっても無くても）なら、run はその出力を DW-47 と同じ stream 4 に足す（`docs/web/abi_v2.md` §5・§7。CLI の同じ argv と同じバイト。SAM の `@PG` の CL は run の command、archive の Bioseq は全長と読んだままの defline。検索は増えない）。Outputs のタブは `outfmt <値>`、Export の名前は形式の拡張子（`.xml`、`.asn`、`.asnb`、`.csv`、`.json`、`.sam`。語があれば `outfmt10-custom.csv`）と media type、Download All の名前は BLAST+ の `-outfmt` help の名前（`BLAST XML (outfmt 5)` など）。binary の outfmt 9 は Outputs に本文を出さず Export で保存する。Run details の印は記録が 0・6・7 だけなので「Not yet supported」（DW-47 と同じ）。13・14（`-out` の横の side file）と BLASTX の 11 は engine の変更が要るので次の段（線 WA の W11b）で、それまで「-outfmt N is not supported in the browser yet」（Owner-delegated 2026-11-05、記録は `web-audit-20261104/w11/DECISIONS.md`） |
 | DW-52 | 2026-11-06 | outfmt 13・14 と BLASTX の 11 も Web で作る（DW-51 の残り） | DW-51 の「すべて」の残り（線 WA の段 W11b）。engine の `run_local` は side file を caller の受け手に渡せる（`OutputSink::Files`：master は writer、各 side file は `SideFileSink` の受け手に、`-out` を受け手の名前として NCBI の規則で名づける。CLI の `-out` の道は変えない）。adapter は 13・14 の stream 4 を ZIP にする（store、CRC-32、日時 1980-01-01 固定、side file を書けた順に足し、最後に master。名前は CLI の `-out results` の file：`results_1.json`…と master `results.json`／`results.xml`。拡張子の無い base なので 13 でも master が並べる名前と side file の名前が同じ）。Outputs は本文を出さず Export（`…outfmt13.zip`、`application/zip`）、Download All は BLAST+ の名前（「Multiple-file BLAST JSON (outfmt 13)」）、Run details と Outputs のコマンドは `-out results` を足す（CLI が file に書く形式なので、その command で ZIP の中と同じ file ができる）。BLASTX の 11 は engine がもう書く（library API の線）ので、adapter の拒否を外す。比べた案：ABI に file 名つきの chunk を足す（ABI の版が変わり、host と worker も変わる）、master を `results`（拡張子なし、CLI の `-out results` と同じ名前）にする（開く program が決まらない）。Owner-delegated（常設指示 2026-09-29、2026-10-07 再確認）、記録は `web-audit-20261104/w11/DECISIONS.md` |
 | DW-53 | 2026-11-12 | Web の `-window_masker_db`（線 NP WW1） | 線 NP の DECISIONS 20・23（Owner 2026-10-24「Web で WindowMasker を出す」）。ABI v2 に名前付きの入力ファイルの export を 4 つ足す（`file_begin` / `file_chunk` / `file_end` / `file_release`、版は 2 のまま、`docs/web/abi_v2.md` §4）。counts は argv の値の名前で登録し、adapter が SHA-256 を数え、1 回だけ読む。run は CLI と同じ所・同じ文で counts の誤りを返す。app は instance ごとに counts を多くて 1 つ持つ（§4.6 R1）。画面は BLASTN の「Filters and Masking」の行「Filter」に印とファイルの欄（`docs/web/ncbi_ui_mapping.md`）。判断は線 NP の `WW/DESIGN_ww1.md` §9（Owner-delegated） |
+| DW-54 | 2026-11-12 | Web の `-window_masker_taxid`（線 NP WW2） | 線 NP の `WW/DESIGN_ww2.md`（Owner-delegated、常設指示 2026-09-29 / 2026-10-07）。「Species-specific repeats filter for:」の横に select「Taxonomy ID」/「Counts file」。Taxonomy ID の counts は利用者が「Download」を押したときだけ ftp.ncbi.nlm.nih.gov から取り（Range で再開）、このブラウザ（OPFS `windowmasker/<taxid>/`）に残し、検索は ABI v2 の名前 `windowmasker/<taxid>/wmasker.obinary` で WW1 の道に渡す。`docs/web/fetch_design.md` §12、`docs/web/ncbi_ui_mapping.md` §4 |
 
 ### 0.5 この計画で下した技術判断
 
@@ -233,7 +234,7 @@ Service Worker：release を固定した資産キャッシュだけ
 web/
   AGENTS.md                  # web/ 以下の規約
   adapter/                   # S05 で新設。Rust cdylib。ABI v2。wasm32-wasip1 と wasm32-wasip1-threads の reactor
-    Cargo.toml               # LOSAT = { path = "../../LOSAT", default-features = false }、features は parallel / wasm-threads を明示
+    Cargo.toml               # losat = { path = "../../LOSAT", default-features = false }、features は parallel / wasm-threads を明示
   app/                       # Vite + Vue 3 + TypeScript（S01 で新設）
     public/_headers          # 応答ヘッダーの唯一の定義（COOP / COEP / CORP / CSP）
     build/headers.ts         # _headers を読み、Vite と試験に渡す
@@ -351,7 +352,7 @@ formatter は、HSP の行（outfmt 6/7）や節（outfmt 0 のスコアの行�
 
 ### 4.8 ABI v2
 
-契約は [`docs/web/abi_v2.md`](web/abi_v2.md) にある（S01 で下書き、S05 で確定）。`describe` は program ごとに対応する出力形式を返し、`run` はその形式だけを出す。アプリ側から見た型は `web/app/src/ports/engine.ts` で、HSP レコードの項目を変えるときは同じコミットで両方を変える。成果物は `losat-web-serial.wasm` と `losat-web-threads.wasm` の 2 つで、ビルドの条件は TD-6、共有メモリの最大値は TD-7 のとおりにする。
+契約は [`docs/web/abi_v2.md`](web/abi_v2.md) にある（S01 で下書き、S05 で確定）。`describe` は program ごとに対応する出力形式を返し、`run` はその形式だけを出す。アプリ側から見た型は `web/packages/losat/src/ports/engine.ts` で、HSP レコードの項目を変えるときは同じコミットで両方を変える。成果物は `losat-web-serial.wasm` と `losat-web-threads.wasm` の 2 つで、ビルドの条件は TD-6、共有メモリの最大値は TD-7 のとおりにする。
 
 ### 4.9 NCBI 側の拠り所（固定 commit `598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4`、`/mnt/c/Users/genom/GitHub/ncbi-blast/`）
 
@@ -415,7 +416,7 @@ Combined は、複数ファイルのレコードをつないだ 1 回の実行�
 - 状態は `Queued → Preparing → Running → Finalizing → Completed | Cancelled | Failed`。実行は常に 1 つで、待ち行列は FIFO（S01 で実装）。
 - 取消と確定の順序：実行は `Finalizing` に入るまで取消せる。`Finalizing` の後の取消は受け付けず、その実行は完了する（S01 で実装）。
 - 段階のイベントは、実行中で取消されていない実行のものだけを受け付ける。S09 で Worker を作り直すようになったら、イベントに `runtimeGeneration` を付け、古い世代のものを捨てる。
-- Auto のスレッド数（S09 で決めた。上限は 2026-10-18 に変えた）：入力（query と subject の FASTA）が 20,000 バイト未満なら serial、それ以上なら論理プロセッサの半分（1 MB 未満は最大 8、1 MB 以上は最大 32）。手動の指定はそのまま使う（`src/infra/engine-worker/policy.ts`）。結果の印は、V-BR がその program をその数のスレッドで走らせた時だけ Supported になるので、V-BR は program ごとに 1 から 32 の全部の数を走らせる（WA-RS-03、2026-11-04）。
+- Auto のスレッド数（S09 で決めた。上限は 2026-10-18 に変えた）：入力（query と subject の FASTA）が 20,000 バイト未満なら serial、それ以上なら論理プロセッサの半分（1 MB 未満は最大 8、1 MB 以上は最大 32）。手動の指定はそのまま使う（`web/packages/losat/src/infra/engine-worker/policy.ts`）。結果の印は、V-BR がその program をその数のスレッドで走らせた時だけ Supported になるので、V-BR は program ごとに 1 から 32 の全部の数を走らせる（WA-RS-03、2026-11-04）。
 - instance の作り直し（S09 で決めた）：検索の後の linear memory が 512 MiB 以上なら作り直す（S09 の時点の threaded の最大値 1 GiB の半分。最大値を上げた後も 512 MiB のままにする：linear memory は縮まないので、大きな検索の後のメモリをブラウザに返すための値である）。実行回数では作り直さない（G12 の対策。linear memory は最初の 1〜3 回の検索で水準に達し、増え続けなかった）。
 - 設計書 §9.4 の Wake Lock の選択、終了前の注意、スリープやバックグラウンドからの復帰時の状態確認（S12、`REQ-22`）：Wake Lock は利用者が選び、Run が実行中か待っている間、ページが見えている間だけ持つ。Run が実行中か待っている間は離れる前に注意する。2026-11-04（WA-IN-06、`ncbi_ui_mapping.md` §4）からは、結果のある Run（Completed）がある間と、検索フォームに入力（貼った文か source）がある間も注意する：次の訪問で戻さず（REQ-20）server にも無いので、再読み込みで消えると戻せない。Run を消す操作が無いので、最初の Run が完了した後は tab の間ずっと注意する。Run があるまま 1 秒以上隠れたページが戻ると、隠れていた時間、Run ごとの前と今の状態、Data worker の応答を示す。タブを閉じても検索が続くとは言わない。
 

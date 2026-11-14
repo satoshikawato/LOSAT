@@ -1,14 +1,14 @@
 //! The Python binding of LOSAT's library API: `pylosat._pylosat`, which `pylosat/_api.py` wraps.
 //!
-//! This crate hands `LOSAT::api` its inputs and hands Python what comes back. It computes no
+//! This crate hands `losat::api` its inputs and hands Python what comes back. It computes no
 //! BLAST-defined value and writes no report (`PD-LOSAT-PYTHON-BINDING-BOUNDARY`); what NCBI does
 //! not have, Arrow and pickle, stays here and out of `LOSAT/`.
 
 mod search;
 mod table;
 
+use losat::api::{self, Program, ValueKind};
 use pyo3::prelude::*;
-use LOSAT::api::{self, Program, ValueKind};
 
 pyo3::create_exception!(
     pylosat,
@@ -100,6 +100,14 @@ fn validate(program: &str, argv: Vec<String>) -> PyResult<()> {
     Ok(())
 }
 
+/// Whether a checked argv has `-dryrun` (`api::Search::dry_run`).
+#[pyfunction]
+fn dry_run(program: &str, argv: Vec<String>) -> PyResult<bool> {
+    Ok(search::checked(program, &argv)
+        .map_err(exception)?
+        .dry_run())
+}
+
 #[pymodule]
 fn _pylosat(module: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = module.py();
@@ -113,9 +121,13 @@ fn _pylosat(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<search::Batches>()?;
     module.add_function(wrap_pyfunction!(describe, module)?)?;
     module.add_function(wrap_pyfunction!(validate, module)?)?;
+    module.add_function(wrap_pyfunction!(dry_run, module)?)?;
     module.add_function(wrap_pyfunction!(search::run, module)?)?;
     module.add_function(wrap_pyfunction!(search::run_to_file, module)?)?;
     module.add_function(wrap_pyfunction!(search::makeblastdb, module)?)?;
     module.add_function(wrap_pyfunction!(search::blastdbcmd, module)?)?;
+    module.add_function(wrap_pyfunction!(search::dustmasker, module)?)?;
+    module.add_function(wrap_pyfunction!(search::segmasker, module)?)?;
+    module.add_function(wrap_pyfunction!(search::convert2blastmask, module)?)?;
     Ok(())
 }

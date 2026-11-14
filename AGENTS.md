@@ -72,9 +72,11 @@ authoritative, current guidance for agent behavior in LOSAT.
      (NCBI: SIGPIPE) with exit 4 and no message (exception 9). Errors raised after argument parsing, the outfmt 0 write
      failure ("BLAST failed to write output", exit 6), all other warnings, and
      every search result must still match NCBI. Non-UTF-8
-     file names, `.ncbirc` keys that change output, and NCBI C++ Toolkit
-     words (`-version`, `-dryrun`, `-logfile`, ...; also in an option's value)
-     are explicit rejections, not exceptions.
+     file names and `.ncbirc` keys that change output are explicit rejections, not
+     exceptions. `-version` and `-version-full*` (NCBI's forms, LOSAT's package),
+     `-help-full` (the text of `-help`), and on the command line `-xmlhelp` (NCBI's XML
+     without the options LOSAT refuses by name), `-logfile`, `-conffile` and `-dryrun`,
+     run as in NCBI (README, NCBI C++ Toolkit options).
    - Approved exceptions for NCBI defects (`PD-LOSAT-NCBI-DEFECTS`): where
      NCBI BLAST+ fails (a crash, a debug-only assumption, a read past a buffer)
      and LOSAT's result was shown to equal NCBI's output for a nearby input
@@ -407,7 +409,7 @@ cd LOSAT && cargo fmt
   state (`set_var`, `remove_var`, `set_current_dir`, `set_hook`, `take_hook`, rayon's
   `build_global`, the global allocator `#[global_allocator]`) gets its own `[[test]]` in `LOSAT/Cargo.toml` instead, since the tests of a suite
   share one process; `tests/suite_layout.rs` checks both. An integration test reaches the engine
-  through `LOSAT::api` and the `losat` binary only (every other module is `pub(crate)`); a test of
+  through `losat::api` and the `losat` binary only (every other module is `pub(crate)`); a test of
   an engine item that `api` does not expose lives in the crate, as above.
 - Integration tests must compare output with NCBI BLAST+ and verify hit counts,
   bit scores, E-values, and coordinates, on real short and long sequences.
@@ -476,7 +478,7 @@ web/                       # LOSAT Web (browser application)
 ├── adapter/               # Rust crate: Wasm ABI v2 over the LOSAT library (added in session S05)
 └── app/                   # Vite + Vue 3 + TypeScript application
 
-python/                    # pylosat: the Python binding of LOSAT::api (PyO3, its own Cargo root)
+python/                    # pylosat: the Python binding of losat::api (PyO3, its own Cargo root)
 ├── AGENTS.md              # Rules for code under python/
 ├── src/                   # Rust crate: the extension module
 ├── pylosat/               # Python package

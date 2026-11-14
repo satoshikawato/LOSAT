@@ -1,5 +1,5 @@
 //! The search programs (blastn, blastp, blastx, psiblast, pssm_search, rps_search, rpsblast,
-//! tblastn, tblastx) and
+//! rpstblastn, tblastn, tblastx) and
 //! `common`, the code they share.
 //!
 //! The programs are layered, bottom to top:
@@ -45,6 +45,11 @@ pub mod rps_search;
 //     static const string kProgram("rpsblast");
 // ```
 pub mod rpsblast;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:48-50
+// ```c++
+//     static const string kProgram("rpstblastn");
+// ```
+pub mod rpstblastn;
 // NCBI reference: c++/src/algo/blast/blastinput/tblastn_args.cpp:45-62
 // static const string kProgram("tblastn");
 // static const char kDefaultTask[] = "tblastn";

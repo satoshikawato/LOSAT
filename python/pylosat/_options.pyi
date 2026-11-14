@@ -57,6 +57,16 @@ class BlastnOptions(TypedDict, total=False):
     > 4 [default: 500]"""
     num_alignments: int
     """Number of database sequences to show alignments for [default: 250]"""
+    line_length: int
+    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
+    Not applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
+    for outfmt != 0"""
     max_hsps: int
     """Maximum number of HSPs per subject (unlimited when omitted) Reference:
     ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270"""
@@ -159,6 +169,16 @@ class BlastpOptions(TypedDict, total=False):
     > 4 [default: 500]"""
     num_alignments: int
     """Number of database sequences to show alignments for [default: 250]"""
+    line_length: int
+    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
+    Not applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
+    for outfmt != 0"""
     max_hsps: int
     qcov_hsp_perc: float
     """Percent query coverage per hsp"""
@@ -271,6 +291,16 @@ class BlastxOptions(TypedDict, total=False):
     > 4 [default: 500]"""
     num_alignments: int
     """Number of database sequences to show alignments for [default: 250]"""
+    line_length: int
+    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
+    Not applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
+    for outfmt != 0"""
     num_threads: int
     """Number of threads (CPUs); serial WASI accepts only 1"""
     mt_mode: int
@@ -358,6 +388,16 @@ class TblastnOptions(TypedDict, total=False):
     > 4 [default: 500]"""
     num_alignments: int
     """Number of database sequences to show alignments for [default: 250]"""
+    line_length: int
+    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
+    Not applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
+    for outfmt != 0"""
     max_hsps: int
     """Set maximum number of HSPs per subject sequence to save for each query"""
     qcov_hsp_perc: float
@@ -416,6 +456,16 @@ class TblastxOptions(TypedDict, total=False):
     > 4 [default: 500]"""
     num_alignments: int
     """Number of database sequences to show alignments for [default: 250]"""
+    line_length: int
+    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
+    Not applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
+    for outfmt != 0"""
     max_hsps: int
     """Set maximum number of HSPs per subject sequence to save for each query"""
     qcov_hsp_perc: float
@@ -428,9 +478,8 @@ class TblastxOptions(TypedDict, total=False):
     xdrop_ungap: float
     """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
     window_size: int
-    """Two-hit window size for triggering ungapped extension (default: 40, or the matrix's
-    suggestion; `window`). Smaller values are more strict, larger values are more sensitive. 0
-    (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX"""
+    """Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's
+    suggestion]"""
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
@@ -440,10 +489,34 @@ class TblastxOptions(TypedDict, total=False):
     """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
 
 class PsiblastOptions(TypedDict, total=False):
+    seqidlist: str
+    """Restrict search of database to list of SeqIDs"""
+    negative_seqidlist: str
+    """Restrict search of database to everything except the specified SeqIDs"""
+    taxids: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants (multiple IDs delimited by ',')"""
+    taxidlist: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants"""
+    negative_taxids: str
+    """Restrict search of database to everything except the specified taxonomy IDs and their
+    descendants (multiple IDs delimited by ',')"""
+    negative_taxidlist: str
+    """Restrict search of database to everything except the specified taxonomy IDs and their
+    descendants"""
+    no_taxid_expansion: Literal['true', 'false']
+    """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
     dbsize: int
     """Effective length of the database"""
+    show_gis: Literal['true', 'false']
+    """Show NCBI GIs in deflines?"""
+    parse_deflines: Literal['true', 'false']
+    """Should the query and subject defline(s) be parsed?"""
     searchsp: int
     """Effective length of the search space"""
+    sum_stats: bool
+    """Use sum statistics"""
     evalue: float
     """Expectation value (E) threshold for saving hits [default: 10]"""
     threshold: float
@@ -459,9 +532,30 @@ class PsiblastOptions(TypedDict, total=False):
     > 4 [default: 500]"""
     num_alignments: int
     """Number of database sequences to show alignments for [default: 250]"""
+    line_length: int
+    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
+    Not applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
+    for outfmt != 0"""
     max_hsps: int
     qcov_hsp_perc: float
     """Percent query coverage per hsp"""
+    culling_limit: int
+    """If the query range of a hit is enveloped by that of at least this many higher-scoring
+    hits, delete the hit"""
+    xdrop_ungap: float
+    """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
+    xdrop_gap: float
+    """X-dropoff value (in bits) for preliminary gapped extensions [default: 15]"""
+    xdrop_gap_final: float
+    """X-dropoff value (in bits) for final gapped alignment [default: 25]"""
+    gap_trigger: float
+    """Number of bits to trigger gapping"""
     window_size: int
     """Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's
     suggestion]"""
@@ -479,6 +573,7 @@ class PsiblastOptions(TypedDict, total=False):
     """SEG: no, yes, or 'WINDOW LOCUT HICUT' [default: no]"""
     soft_masking: bool
     """Apply filtering locations as soft masks [default: false]"""
+    lcase_masking: Literal['true', 'false']
     use_sw_tback: Literal['true', 'false']
     query_loc: str
     """Location on the query sequence in 1-based offsets (Format: start-stop)"""

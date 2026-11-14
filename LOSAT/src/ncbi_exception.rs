@@ -166,6 +166,12 @@ impl NcbiException {
         self.site
     }
 
+    /// Whether LOSAT knows the place of every throw of the chain, which `what()` names (a
+    /// [`ThrowSite::generated`] names none).
+    pub fn places_known(&self) -> bool {
+        self.chain().iter().all(|e| !e.site.file.is_empty())
+    }
+
     /// `GetMsg()`: the message, without the place or the extra text.
     pub fn get_msg(&self) -> &str {
         &self.message
@@ -229,8 +235,9 @@ impl NcbiException {
     //     return text;
     // }
     // ```
-    /// `s_GetExceptionText`: the message and the extra text of the class.
-    fn text(&self) -> String {
+    /// `s_GetExceptionText`: the message and the extra text of the class (the text of each
+    /// exception of a chain that NCBI's diagnostics post, `ncbi_app::args`).
+    pub(crate) fn text(&self) -> String {
         match &self.extra {
             Some(extra) => format!("{} ({extra})", self.message),
             None => self.message.clone(),

@@ -104,6 +104,12 @@ impl FormatSpec {
         })
     }
 
+    /// Whether a specifier reads the definition lines (`m_GetDefline`: `Write` reads them with
+    /// `GetHdr`).
+    pub fn reads_deflines(&self) -> bool {
+        self.get_defline
+    }
+
     /// Whether a specifier writes the letters of the sequence (`%s`).
     pub fn writes_letters(&self) -> bool {
         self.need_seq
@@ -186,7 +192,9 @@ impl FormatSpec {
         let mut print = |defline: Option<&BlastDefline>, line: &mut Vec<u8>| -> Result<(), Stop> {
             line.clear();
             let printed = self.x_print(source, oid, length, defline, &seq, &hash, &masks, line);
-            out.write_all(line).map_err(Stop::io)?;
+            // `out` writes to an `ncbi_app::files::Ostream` (`retrieve::process`): a failed write
+            // does nothing, as in NCBI's `ostream`; a closed pipe ends the retrieval.
+            out.write_all(line).map_err(Stop::write)?;
             printed
         };
         if !self.get_defline {
@@ -237,7 +245,7 @@ impl FormatSpec {
             match kind {
                 b'o' => line.extend_from_slice(b"-1"),
                 b'l' => {
-                    out.write_all(&line).map_err(Stop::io)?;
+                    out.write_all(&line).map_err(Stop::write)?;
                     return Err(missing());
                 }
                 b'd' => {
@@ -247,7 +255,7 @@ impl FormatSpec {
                     )));
                 }
                 other => {
-                    out.write_all(&line).map_err(Stop::io)?;
+                    out.write_all(&line).map_err(Stop::write)?;
                     let mut message = b"Unrecognized format specification: '%".to_vec();
                     message.push(other);
                     message.push(b'\'');
@@ -257,7 +265,7 @@ impl FormatSpec {
         }
         line.extend_from_slice(&self.separators[self.types.len()]);
         line.push(b'\n');
-        out.write_all(&line).map_err(Stop::io)
+        out.write_all(&line).map_err(Stop::write)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:165-262
@@ -309,7 +317,7 @@ impl FormatSpec {
                 b'a' => line.extend_from_slice(&fields.accession),
                 b'i' => line.extend_from_slice(&fields.seq_id),
                 b'g' => line.extend_from_slice(fields.gi.as_bytes()),
-                b'o' => line.extend_from_slice(source.db.oid(oid).to_string().as_bytes()),
+                b'o' => line.extend_from_slice(oid.to_string().as_bytes()),
                 b't' => line.extend_from_slice(&fields.title),
                 b'h' => line.extend_from_slice(hash.as_bytes()),
                 b'l' => line.extend_from_slice(length.to_string().as_bytes()),
@@ -467,9 +475,8 @@ fn x_get_seq(source: &Source, oid: u32, config: &Config) -> Result<Vec<u8>, Stop
                     |&(first, second): &(u32, u32)| first > second || second as usize > seq.len();
                 if masks.iter().any(outside) {
                     return Err(Stop::refused(format!(
-                        "-outfmt %s with a stored mask outside the sequence at OID {} \
-                         (NCBI writes past the letters)",
-                        source.db.oid(oid)
+                        "-outfmt %s with a stored mask outside the sequence at OID {oid} \
+                         (NCBI writes past the letters)"
                     )));
                 }
                 &masks[..]

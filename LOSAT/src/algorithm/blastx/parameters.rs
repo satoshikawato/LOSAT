@@ -320,14 +320,16 @@ pub fn gumbel_block(options: &ResolvedOptions, db_length: i64) -> Option<BlastGu
 pub struct SearchSpaceOverflow {
     pub db_length: i64,
     pub query_length: usize,
+    /// The program of the refusal (`args::ProgramName::upper`).
+    pub program: &'static str,
 }
 
 impl std::fmt::Display for SearchSpaceOverflow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "a database length of {} letters with a query of {} letters overflows NCBI BLAST+'s 64-bit effective search space, which is not supported by LOSAT's BLASTX",
-            self.db_length, self.query_length
+            "a database length of {} letters with a query of {} letters overflows NCBI BLAST+'s 64-bit effective search space, which is not supported by LOSAT's {}",
+            self.db_length, self.query_length, self.program
         )
     }
 }
@@ -389,9 +391,10 @@ pub fn effective_lengths(
             None => (db_length - db_count * adj)
                 .max(1)
                 .checked_mul(c.length as i64 - adj)
-                .ok_or(SearchSpaceOverflow {
+                .ok_or_else(|| SearchSpaceOverflow {
                     db_length,
                     query_length: c.length,
+                    program: options.program().upper,
                 })?,
         };
     }
@@ -633,7 +636,7 @@ pub fn subject_parameters(
     let gumbel_block_used = options.has_gumbel_block();
     if !gumbel_block_used && db_count == 0 && db_length > 0 {
         return Err(crate::algorithm::common::database::refusal(
-            "the statistics count 0 sequences of the database (an alias file's NSEQ 0), by which NCBI BLAST+ divides its length",
+            crate::algorithm::common::database::STATISTICS_COUNT_ZERO,
             "BLASTX",
         ));
     }

@@ -359,6 +359,10 @@ pub struct BlastnArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
+    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
+    /// `blastinput::report_counts::FormattingArgs`).
+    #[command(flatten)]
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     /// The hit list size (NCBI BLAST hitlist_size) and the numbers of descriptions and
     /// alignments of the pairwise report, which `process_options` sets from
     /// `-max_target_seqs`, `-num_descriptions`, `-num_alignments` and the output format
@@ -394,6 +398,17 @@ pub struct BlastnArgs {
     pub min_diag_separation: usize,
     #[arg(long, value_name = "PATH", value_parser = blastn_output_path())]
     pub out: Option<PathBuf>,
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
+    /// ```c++
+    ///     arg_desc.AddOptionalKey(kArgOutputSearchStrategy,
+    ///                             "filename",
+    ///                             "File name to record the search strategy used",
+    ///                             CArgDescriptions::eOutputFile);
+    /// ```
+    /// The search strategy file (`report::archive::strategy`), created by `run` before the other
+    /// options are read.
+    #[arg(long, value_name = "filename", value_parser = blastn_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:648-660,674-679
     // ```c
     //     arg_desc.AddOptionalKey(kArgMismatch, "penalty",
@@ -478,12 +493,20 @@ pub struct BlastnArgs {
     //                 "Enable WindowMasker filtering using a Taxonomic ID",
     //                 CArgDescriptions::eInteger);
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2285
+    // ```c++
+    // 	arg_desc.SetDependency(kArgNoTaxIdExpansion,CArgDescriptions::eExcludes, kArgWindowMaskerTaxId);
+    // ```
     // Read by the filtering handler after `-dust` (`resolve_window_masker`); 0 is no
-    // WindowMasker, but it is one of the filtering databases given.
+    // WindowMasker, but it is one of the filtering databases given. The database arguments
+    // exclude it with `-no_taxid_expansion` (`DbFilterArgs`, shared with programs that have no
+    // `-window_masker_taxid`): an argument error, also with `-dryrun` (NCBI BLAST+ 2.17.0, line RG
+    // item E1b probe `blastn.x.no_taxid_expansion.window_masker_taxid`: USAGE, rc 1).
     #[arg(
         long = "window_masker_taxid",
         value_name = "window_masker_taxid",
         value_parser = ncbi_integer,
+        conflicts_with = "no_taxid_expansion",
         help = "Enable WindowMasker filtering using a Taxonomic ID"
     )]
     pub window_masker_taxid: Option<i32>,
@@ -507,14 +530,15 @@ pub struct BlastnArgs {
     /// `None` without them (or with the taxid 0).
     #[arg(skip)]
     pub window_masker: Option<std::sync::Arc<super::window_masker::WindowMasker>>,
-    /// Where `-window_masker_db` is read from: the file system when `None`; LOSAT Web's adapter
-    /// gives the counts files it holds under their names.
+    /// Where `-window_masker_db` and the file of `-window_masker_taxid` are read from: the file
+    /// system when `None`; LOSAT Web's adapter gives the counts files it holds under their names.
     #[arg(skip)]
     pub window_masker_counts: Option<std::sync::Arc<dyn crate::utils::winmask::CountsSource>>,
     /// The registry of `-window_masker_taxid` as the caller read it (the directory of its files
-    /// and what each load writes, `ncbi_environment::ApplicationSettings::window_masker_registry`);
-    /// `None` when the caller has no such registry (LOSAT Web), which `-window_masker_taxid`
-    /// other than 0 then refuses.
+    /// and what each load writes, `ncbi_environment::ApplicationSettings::window_masker_registry`),
+    /// or LOSAT Web's registry of the counts files it holds (`window_masker_counts`: its directory,
+    /// no posts); `None` when the caller gives neither, which `-window_masker_taxid` other than 0
+    /// then refuses (`run_local_formats`).
     #[arg(skip)]
     pub window_masker_registry:
         Option<Result<crate::blastinput::ncbi_environment::WindowMaskerRegistry, String>>,
@@ -524,6 +548,11 @@ pub struct BlastnArgs {
     /// give no search path: not found). Not a public option.
     #[arg(skip)]
     pub tabular_taxdb: Option<bool>,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made by the
+    /// command line with `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere.
+    /// Not a public option.
+    #[arg(skip)]
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
     // ```c++
     //         arg_desc.AddDefaultKey(kArgStrand, "strand",
@@ -744,6 +773,10 @@ pub struct BlastnArgs {
     /// reads the arguments (`archive::handle_for`).
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// The run's search strategy export (`-export_search_strategy`), made by `run`
+    /// (`strategy::StrategyExport::for_run`).
+    #[arg(skip)]
+    pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
 
     /// The command line of the run as the SAM `@PG` line shows it: every argument followed by
     /// one space, raw bytes (`GetCmdlineArgs`); `None` where there is no command line (the
@@ -1008,8 +1041,9 @@ impl BlastnArgs {
         }
         let masker = match self.window_masker_taxid.filter(|&taxid| taxid != 0) {
             Some(taxid) => {
-                // The command line and the library give the registry; LOSAT Web has none and
-                // refuses the option before (`run_local_formats`).
+                // The command line and the library give the registry, LOSAT Web the registry of
+                // its counts files; a caller that gives none is refused before
+                // (`run_local_formats`).
                 let registry = self
                     .window_masker_registry
                     .as_ref()

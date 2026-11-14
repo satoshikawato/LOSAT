@@ -32,7 +32,7 @@
 //! }
 //! ```
 
-use super::encoder::{Encoder, SerialError};
+use super::encoder::{Encoder, Replaced, SerialError, StreamPosition};
 use super::real::double_to_string_posix;
 
 /// `DBL_DIG`: the precision of `WriteDouble` (`WriteDouble2(data, DBL_DIG)`).
@@ -62,12 +62,72 @@ const REAL_DECIMAL: u8 = 0x00;
 pub struct AsnBinaryEncoder<'b> {
     out: &'b mut Vec<u8>,
     error: Option<SerialError>,
+    /// The bytes that `visible_str_replacing` replaced (`replace`).
+    replaced: Vec<Replaced>,
 }
 
 impl<'b> AsnBinaryEncoder<'b> {
     /// An encoder that appends a document to `out`.
     pub fn new(out: &'b mut Vec<u8>) -> Self {
-        Self { out, error: None }
+        Self {
+            out,
+            error: None,
+            replaced: Vec::new(),
+        }
+    }
+
+    /// `ReplaceVisibleChar` of the byte `byte`, at its offset in the buffer (`Replaced`;
+    /// `encoder::Traced` makes it the offset in the document); `write_string` then writes `#`.
+    #[cold]
+    #[inline(never)]
+    fn replace(&mut self, byte: u8) {
+        self.replaced.push(Replaced {
+            byte,
+            position: StreamPosition::Byte(self.out.len() as u64),
+            with_string: true,
+        });
+    }
+
+    /// The bytes of `WriteString` of a VisibleString: a byte outside 0x20..0x7E is written as
+    /// `#`, the error `NonVisibleChar` without `REPLACE`, recorded at its offset with it
+    /// (`replace`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:841-865
+    /// ```c++
+    ///     WriteLength(length - fixed);
+    ///     if ( type == eStringTypeVisible && x_FixCharsMethod() != eFNP_Allow ) {
+    ///         size_t done = 0;
+    ///         for ( size_t i = 0; i < length; ++i ) {
+    ///             char c = str[i];
+    ///             if ( !GoodVisibleChar(c) ) {
+    ///                 ...
+    ///                 if ( i > done ) {
+    ///                     WriteBytes(str.data() + done, i - done);
+    ///                 }
+    ///                 c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, str, x_FixCharsSubst());
+    ///                 if (c != 0) {
+    ///                     WriteByte(c);
+    ///                 }
+    ///                 done = i + 1;
+    ///             }
+    ///         }
+    /// ```
+    #[inline(always)]
+    fn write_string<const REPLACE: bool>(&mut self, value: &[u8]) {
+        self.out.push(TAG_VISIBLE_STRING);
+        self.length(value.len());
+        for &byte in value {
+            if (0x20..=0x7e).contains(&byte) {
+                self.out.push(byte);
+            } else {
+                if REPLACE {
+                    self.replace(byte);
+                } else if self.error.is_none() {
+                    self.error = Some(SerialError::NonVisibleChar(byte));
+                }
+                self.out.push(b'#');
+            }
+        }
     }
 
     /// `WriteLength`: one byte up to 127, else `0x80 + count` and the `count` bytes of the
@@ -257,6 +317,23 @@ impl Encoder for AsnBinaryEncoder<'_> {
         self.number(value);
     }
 
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1006-1017
+    /// ```c++
+    /// void CObjectOStreamAsnBinary::WriteEnum(const CEnumeratedTypeValues& values,
+    ///                                         TEnumValueType value)
+    /// {
+    ///     if ( values.IsInteger() ) {
+    ///         WriteSysTag(eInteger);
+    ///     }
+    ///     ...
+    ///     WriteNumberValue(value);
+    /// }
+    /// ```
+    fn named_int(&mut self, _name: &str, value: i32) {
+        self.out.push(TAG_INTEGER);
+        self.number(value);
+    }
+
     /// `WriteBool`: `01 01 01` or `01 01 00`.
     fn boolean(&mut self, value: bool) {
         self.out
@@ -264,21 +341,15 @@ impl Encoder for AsnBinaryEncoder<'_> {
     }
 
     /// `WriteString` of a VisibleString: the tag, the length and the bytes. A byte outside
-    /// 0x20..0x7E is replaced by NCBI (`eFNP_ReplaceAndWarn`, as in the text stream); LOSAT
-    /// refuses it (`NonVisibleChar`).
+    /// 0x20..0x7E is replaced by NCBI (`eFNP_ReplaceAndWarn`, as in the text stream): here an
+    /// error (`write_string`).
     fn visible_str(&mut self, value: &[u8]) {
-        self.out.push(TAG_VISIBLE_STRING);
-        self.length(value.len());
-        for &byte in value {
-            if (0x20..=0x7e).contains(&byte) {
-                self.out.push(byte);
-            } else {
-                if self.error.is_none() {
-                    self.error = Some(SerialError::NonVisibleChar(byte));
-                }
-                self.out.push(b'#');
-            }
-        }
+        self.write_string::<false>(value);
+    }
+
+    /// `visible_str` that records each replaced byte (`replace`) instead of the error.
+    fn visible_str_replacing(&mut self, value: &[u8]) {
+        self.write_string::<true>(value);
     }
 
     /// `WriteDouble2(data, DBL_DIG)`: `09`, the length, the decimal form byte 0 and the
@@ -352,5 +423,9 @@ impl Encoder for AsnBinaryEncoder<'_> {
 
     fn error(&self) -> Option<SerialError> {
         self.error
+    }
+
+    fn take_replaced(&mut self) -> Vec<Replaced> {
+        std::mem::take(&mut self.replaced)
     }
 }

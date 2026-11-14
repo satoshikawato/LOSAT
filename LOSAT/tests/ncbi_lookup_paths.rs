@@ -12,6 +12,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use crate::library_examples::example_binary;
+
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 const INPUTS: &str = "tests/fasta/outfmt11";
 
@@ -125,6 +127,29 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
         }
     };
     let data_path = format!("{}{dp}", if cfg!(windows) { ";;" } else { "::" });
+    // The subjects as databases too, for the library's database searches (`run_local_database`).
+    for (fasta, dbtype, name) in [
+        ("arch_tbx_s.fna", "nucl", "TBLASTX"),
+        ("arch_bx_s.faa", "prot", "BLASTX"),
+    ] {
+        let out = dir.join("db").join(name).display().to_string();
+        let made = run_in(
+            Path::new(BIN),
+            &[
+                "makeblastdb",
+                "-in",
+                &input(fasta),
+                "-dbtype",
+                dbtype,
+                "-out",
+                &out,
+            ],
+            &dir,
+            &[],
+            b"",
+        );
+        assert_eq!(made.status.code(), Some(0), "{made:?}");
+    }
     for (program, words) in matrix_runs() {
         let mut args: Vec<&str> = words.iter().map(String::as_str).collect();
         let query = input(if program == "TBLASTX" {
@@ -135,6 +160,11 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
         args.extend(["-matrix", "mymat", "-num_threads", "1"]);
         let mut with_query = args.clone();
         with_query.extend(["-query", &query]);
+        // The same search of the database of the subject.
+        let db = dir.join("db").join(program).display().to_string();
+        let mut with_db = with_query.clone();
+        with_db[1] = "-db";
+        with_db[2] = &db;
         for (at, envs) in [
             ("bm/MYMAT", vec![("BLASTMAT", bm.as_str())]),
             ("bm/nt/MYMAT", vec![("BLASTMAT", bm.as_str())]),
@@ -164,6 +194,14 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
                     && stderr.contains(&format!("not supported by LOSAT's {program}")),
                 "{program} {at}: {stderr}"
             );
+            check_library(&with_query, &dir, &envs, &output, program);
+            let output = run_in(Path::new(BIN), &with_db, &dir, &envs, b"");
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("-matrix mymat is not a matrix of NCBI BLAST+'s tables"),
+                "{program} {at} -db: {output:?}"
+            );
+            check_library(&with_db, &dir, &envs, &output, program);
             // No query, no batch: NCBI reads no matrix (an empty pipe: the report without
             // queries).
             let mut empty = args.clone();
@@ -187,9 +225,46 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
                 stderr.starts_with("BLAST engine error: Error: Unknown error code -1"),
                 "{program} {envs:?}: {stderr}"
             );
+            check_library(&with_query, &at, &envs, &output, program);
+            let output = run_in(Path::new(BIN), &with_db, &at, &envs, b"");
+            check_library(&with_db, &at, &envs, &output, program);
         }
     }
     let _ = fs::remove_dir_all(&dir);
+}
+
+/// The library API's search of the same words (`examples/library_command_line`, line RG item
+/// E1w-2): a search of records with a `-matrix` that NCBI's tables do not have runs the
+/// application start and looks the file up with its settings, as the command line does
+/// (`TblastxArgs::find_matrix_file`, `ResolvedOptions::find_matrix_file`). Its error is the
+/// command line's text (the example writes a failure's message, status 1; TBLASTX's refusal
+/// without the command line's `Error: `), and BLASTX's prolog is the same.
+fn check_library(args: &[&str], dir: &Path, envs: &[(&str, &str)], cli: &Output, program: &str) {
+    let library = run_in(
+        &example_binary("library_command_line"),
+        args,
+        dir,
+        envs,
+        b"",
+    );
+    let stderr = String::from_utf8_lossy(&library.stderr).into_owned();
+    let stderr = match program {
+        "TBLASTX" if cli.status.code() == Some(1) => format!("Error: {stderr}"),
+        _ => stderr,
+    };
+    assert_eq!(
+        (
+            library.status.code(),
+            stderr,
+            String::from_utf8_lossy(&library.stdout)
+        ),
+        (
+            Some(1),
+            String::from_utf8_lossy(&cli.stderr).into_owned(),
+            String::from_utf8_lossy(&cli.stdout)
+        ),
+        "{program} {args:?} {envs:?}: the library"
+    );
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1650-1652 (a file found that
@@ -636,12 +711,12 @@ fn a_malformed_ini_with_a_logfile_is_replayed_where_ncbi_replays_it() {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1022 (quoted at
-// `ncbi_environment::preparse` and `cli::ncbi_toolkit_word_error`) and
+// `ncbi_environment::preparse` and `ncbi_environment::conf_file_path`) and
 // c++/src/algo/blast/api/blast_usage_report.cpp:195-206 (quoted at
 // `ncbi_environment::usage_report_reads_ncbirc`). NCBI BLAST+ 2.17.0 (env parity review G, F2-F4):
-// `-conffile other.ini` loads that file in place of a malformed `blastn.ini` (LOSAT refuses it
-// before the configuration load); `BLAST_USAGE_REPORT=abc` aborts before `-version` (LOSAT
-// refuses there); `-logfile -version` logs to the file `-version` and prints no version.
+// `-conffile other.ini` loads that file in place of a malformed `blastn.ini`, which is not read
+// (line RG item E1); `BLAST_USAGE_REPORT=abc` aborts before `-version` (LOSAT refuses there);
+// `-logfile -version` logs to the file `-version` and prints no version.
 #[cfg(unix)]
 #[test]
 fn the_words_before_the_arguments_are_read_as_ncbi_reads_them() {
@@ -653,15 +728,17 @@ fn the_words_before_the_arguments_are_read_as_ncbi_reads_them() {
     for conffile in [&["-conffile", "other.ini"][..], &["-conffile=other.ini"]] {
         let mut args = vec!["blastn"];
         args.extend_from_slice(conffile);
-        args.extend(["-query", "q.fa"]);
-        let refused = run_in(losat, &args, &dir, &[], b"");
-        let stderr = text(&refused.stderr);
-        assert_ne!(refused.status.code(), Some(0));
+        args.extend(["-version"]);
+        let loaded = run_in(losat, &args, &dir, &[], b"");
+        assert_eq!(loaded.status.code(), Some(0), "{loaded:?}");
+        let mut args = vec!["blastn"];
+        args.extend_from_slice(conffile);
+        args.extend(["-h"]);
+        let loaded = run_in(losat, &args, &dir, &[], b"");
+        assert_eq!(loaded.status.code(), Some(0), "{loaded:?}");
         assert!(
-            stderr.contains(
-                "the NCBI C++ Toolkit option -conffile is not supported by LOSAT's BLASTN"
-            ) && !stderr.contains("Application's initialization failed"),
-            "{stderr}"
+            !text(&loaded.stderr).contains("Application's initialization failed"),
+            "{loaded:?}"
         );
     }
     fs::remove_file(dir.join("blastn.ini")).unwrap();

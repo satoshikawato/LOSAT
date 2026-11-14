@@ -58,11 +58,11 @@ use std::io::Write as _;
 
 use anyhow::Result;
 
-use super::in_pssm_files::{InPssmFile, InPssmRounds};
+use super::in_pssm_files::InPssmRounds;
 use super::pssm::{
     is_regular_file, OutputFileReset, PsiblastPssmOptions, PssmFileCheck, PssmRequest,
 };
-use crate::report::serial::pssm::ObjectId;
+use crate::algorithm::pssm_search::in_pssm::InPssmFile;
 
 /// The rounds of a psiblast run of FASTA queries or of a PSSM query: `-num_iterations` (0: until
 /// convergence), the PSSM engine's options and files (`-pseudocount`, `-out_pssm`,
@@ -392,7 +392,7 @@ pub(crate) struct PsiRoundIo {
     pub(crate) request: PssmRequest,
     /// The Seq-id of the next PSSM's query: the PSSM query's of `-in_pssm`, `None` for a FASTA
     /// query (`Query_<n>`).
-    pub(crate) query_id: Option<ObjectId>,
+    pub(crate) query_id: Option<crate::seqid::ParsedSeqId>,
     pub(crate) outcome: std::sync::Mutex<Option<RoundOutcome>>,
 }
 

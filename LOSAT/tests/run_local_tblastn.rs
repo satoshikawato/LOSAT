@@ -1,4 +1,4 @@
-//! The TBLASTN search of `LOSAT::api` (which calls the shared entry `run_local`) writes several
+//! The TBLASTN search of `losat::api` (which calls the shared entry `run_local`) writes several
 //! output formats from one search. Every format must be byte-identical to the CLI run that
 //! requests only that format, and the warnings must equal that run's standard error. A subject or
 //! a query without residues is kept, with NCBI's warnings, by the CLI. (The saved NCBI BLAST+
@@ -12,8 +12,8 @@ mod run_local_support;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use losat::api::{read_fasta, FastaRecord, Outcome, Program, Role};
 use run_local_support::{cli_out_path, temp_path, Files, TempFasta};
-use LOSAT::api::{read_fasta, FastaRecord, Outcome, Program, Role};
 
 /// The last three are the custom tabular reports of the shared writer (line CLI C2, PR 2).
 const FORMATS: [&str; 13] = [
@@ -130,7 +130,7 @@ fn cli(inputs: &Inputs, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
 //    hitlist_size = args[kArgMaxTargetSequences].AsInteger();
 // }
 // ```
-// This half compares `LOSAT::api`'s search with the CLI run of every format (reports and warnings);
+// This half compares `losat::api`'s search with the CLI run of every format (reports and warnings);
 // the half about the entry itself (the hit records and the observer change nothing) is the test of
 // the same name in `LOSAT/src/api/local_blast_tests/tblastn.rs`.
 #[test]
@@ -373,7 +373,7 @@ fn queries_without_residues_are_kept_and_a_batch_of_them_stops() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 and
-// c++/src/algo/blast/core/blast_message.c:215-217 (quoted at `stage_d_pipeline::SubjectLengthInvalid`).
+// c++/src/algo/blast/core/blast_message.c:215-217 (quoted at `stage_d_pipeline::SetupEngineError`).
 // Without the Gumbel block (`-searchsp` or `OLD_FSC`) a set of subjects whose average is below one letter
 // fails the setup of a batch with NCBI's engine error (exit 3) after the start of the outfmt 0
 // report, and after the report of a first batch that NCBI does not search (`BATCH_SIZE=1`, an
@@ -436,6 +436,32 @@ fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error
                 ),
                 _ => assert!(stdout.is_empty(), "{args:?} {env:?}: {stdout}"),
             }
+        }
+        // The XML2 and JSON documents: their start alone (`PrintProlog`, before the search), once;
+        // a `-subject` run holds the first batch's report back, and the run never writes it
+        // (review 1 of line DBID json, H1). NCBI 2.17.0 with these inputs.
+        for (outfmt, start) in [
+            ("15", "{\n\"BlastOutput2\": [\n".to_string()),
+            (
+                "16",
+                "<?xml version=\"1.0\" encoding=\"US-ASCII\"?>\n<BlastXML2\n    \
+                 xmlns=\"http://www.ncbi.nlm.nih.gov\"\n    \
+                 xmlns:xs=\"http://www.w3.org/2001/XMLSchema-instance\"\n    \
+                 xs:schemaLocation=\"http://www.ncbi.nlm.nih.gov \
+                 http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd\"\n>"
+                    .to_string(),
+            ),
+        ] {
+            let args: Vec<&str> = args.iter().copied().chain(["-outfmt", outfmt]).collect();
+            let (code, stdout, stderr) =
+                run_local_support::subject_cli("tblastn", &query, &subject.0, &args, env);
+            assert_eq!(code, Some(3), "{args:?} {env:?}: {stderr}");
+            assert_eq!(
+                stderr,
+                format!("{subjects_warning}{error}"),
+                "{args:?} {env:?}"
+            );
+            assert_eq!(stdout, start, "{args:?} {env:?}");
         }
     }
     // The boundary: an average of exactly one letter (tblastn `-subject` of "ACG", ``, ``)

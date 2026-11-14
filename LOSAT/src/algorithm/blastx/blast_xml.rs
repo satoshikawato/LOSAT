@@ -345,6 +345,34 @@ struct HeldState {
     held: Vec<u8>,
     discarded: bool,
     side: Option<HeldSideFiles>,
+    /// The run's standard error (`HeldOutput::stderr`), and what the run writes there while the
+    /// output is held: each text with the length of the held output before it.
+    stderr: Option<(Box<dyn Write>, Vec<(usize, Vec<u8>)>)>,
+}
+
+impl HeldState {
+    /// Writes the held output with the texts written to standard error while it was held, each
+    /// after the output before it (NCBI's `cerr` flushes `cout` first), and empties both.
+    fn write_held(&mut self) -> std::io::Result<()> {
+        let held = std::mem::take(&mut self.held);
+        let texts = self
+            .stderr
+            .as_mut()
+            .map(|(_, texts)| std::mem::take(texts))
+            .unwrap_or_default();
+        let mut written = 0;
+        for (at, text) in texts {
+            self.inner.write_all(&held[written..at])?;
+            self.inner.flush()?;
+            written = at;
+            if let Some((stderr, _)) = self.stderr.as_mut() {
+                stderr.write_all(&text)?;
+                stderr.flush()?;
+            }
+        }
+        self.inner.write_all(&held[written..])?;
+        self.inner.flush()
+    }
 }
 
 impl HeldOutput {
@@ -355,7 +383,27 @@ impl HeldOutput {
             held: Vec::new(),
             discarded: false,
             side,
+            stderr: None,
         })))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:493-500
+    // ```c++
+    //         if (new_hit) {
+    //             new_hit->SetNum(index);
+    //             ++index;
+    //             if( !incremental_output ) hits.push_back(new_hit);
+    // 	    else
+    // 	    {
+    // 		CNcbiOstrstream  one_hit_os;
+    // ```
+    /// The run's standard error `inner` through this output (`HeldStderr`): while the output is
+    /// held, what the run writes there is kept with the place in the output where NCBI, which
+    /// writes its document as it goes, writes it (the taxonomy texts of a `Hit`'s read between
+    /// the `Hit`s), and written there at `release`; at `discard` the texts alone.
+    pub(super) fn stderr(&self, inner: Box<dyn Write>) -> HeldStderr {
+        self.0.borrow_mut().stderr = Some((inner, Vec::new()));
+        HeldStderr(Rc::clone(&self.0))
     }
 
     /// Keeps everything written from now on in memory.
@@ -375,6 +423,13 @@ impl HeldOutput {
         if let Some(side) = &state.side {
             side.discard();
         }
+        // What the run wrote to standard error in the meantime stays (before the refusal).
+        if let Some((stderr, texts)) = state.stderr.as_mut() {
+            for (_, text) in std::mem::take(texts) {
+                let _ = stderr.write_all(&text);
+            }
+            let _ = stderr.flush();
+        }
     }
 
     /// Writes what is held and passes the bytes on again: the side files first (in order), then
@@ -388,13 +443,47 @@ impl HeldOutput {
             if let Err(error) = side.release() {
                 state.discarded = true;
                 state.held.clear();
+                // What the run wrote to standard error in the meantime stays.
+                if let Some((stderr, texts)) = state.stderr.as_mut() {
+                    for (_, text) in std::mem::take(texts) {
+                        let _ = stderr.write_all(&text);
+                    }
+                    let _ = stderr.flush();
+                }
                 return Err(error);
             }
         }
-        let held = std::mem::take(&mut state.held);
-        state.inner.write_all(&held)?;
-        state.inner.flush()?;
+        state.write_held()?;
         Ok(())
+    }
+}
+
+/// The run's standard error while its output may be held (`HeldOutput::stderr`).
+pub(super) struct HeldStderr(Rc<RefCell<HeldState>>);
+
+impl Write for HeldStderr {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let mut state = self.0.borrow_mut();
+        let at = state.held.len();
+        let holding = state.holding && !state.discarded;
+        let Some((stderr, texts)) = state.stderr.as_mut() else {
+            return Ok(bytes.len());
+        };
+        if holding {
+            texts.push((at, bytes.to_vec()));
+            Ok(bytes.len())
+        } else {
+            stderr.write(bytes)
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let mut state = self.0.borrow_mut();
+        let holding = state.holding && !state.discarded;
+        match state.stderr.as_mut() {
+            Some((stderr, _)) if !holding => stderr.flush(),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -423,9 +512,12 @@ impl Write for HeldOutput {
 
 impl Drop for HeldState {
     fn drop(&mut self) {
-        if !self.discarded && !self.held.is_empty() {
-            let _ = self.inner.write_all(&self.held);
-            let _ = self.inner.flush();
+        let texts = self
+            .stderr
+            .as_ref()
+            .is_some_and(|(_, texts)| !texts.is_empty());
+        if !self.discarded && (!self.held.is_empty() || texts) {
+            let _ = self.write_held();
         }
     }
 }
@@ -617,6 +709,9 @@ pub(super) struct QueryScan {
     /// written where the document holds it back (`written_queries`). `None` when the run reads
     /// to the end of the file, or stops at its first batch.
     pub stops_after: Option<usize>,
+    /// Under `-parse_deflines`, the scopes of the queries read, in the search's batches
+    /// (`prescan_queries`; `QueryScopes::read_ahead`).
+    pub query_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
 }
 
 /// Reads the query file once before the search (`scan_queries`), with the search's reader
@@ -626,7 +721,10 @@ pub(super) struct QueryScan {
 /// line that is not a defline; the run reads the file again and fails there as it always did,
 /// after the reports of the batches before it), and so does a record it refuses for every format
 /// (a title that is not UTF-8). A batch size of 0 reads no query (NCBI's first batch is empty and
-/// the search stops at it): nothing is checked.
+/// the search stops at it): nothing is checked. Under `-parse_deflines` (`query_scopes`, without a
+/// batch yet) the read adds each batch to the scopes of the queries (`QueryScopes::add_batch_ids`),
+/// so that LOSAT's refusal of two queries of one scope with one id comes before the first byte; the
+/// search then reads them from `QueryScan::query_scopes`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prescan_queries(
     file: std::fs::File,
@@ -636,12 +734,15 @@ pub(super) fn prescan_queries(
     batch_size: usize,
     range: Option<&crate::blastinput::seq_range::SequenceRange>,
     holds_back: bool,
+    mut query_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
 ) -> Result<QueryScan> {
     if batch_size == 0 {
         return Ok(QueryScan::default());
     }
     let mut stream = settings.stream_before_search(file);
-    scan_queries(options, holds_back, &mut |deliver| {
+    let mut delivered = 0usize;
+    let mut refusal = None;
+    let mut scan = scan_queries(options, holds_back, &mut |deliver| {
         super::input::read_fasta_stream_batches(
             &mut stream,
             false,
@@ -649,10 +750,30 @@ pub(super) fn prescan_queries(
             batch_size,
             false,
             range,
-            deliver,
+            &mut |batch| {
+                // A batch that NCBI fails (`deliver`'s error) reports nothing of its scope.
+                deliver(batch)?;
+                if let Some(scopes) = query_scopes.as_mut() {
+                    let added = scopes.add_batch_ids(
+                        batch.iter().filter_map(|record| record.believed()),
+                        delivered,
+                    );
+                    if let Err(error) = added {
+                        refusal = Some(error);
+                        anyhow::bail!("LOSAT refuses this batch");
+                    }
+                }
+                delivered += batch.len();
+                Ok(())
+            },
             &mut |_| Ok(()),
         )
-    })
+    })?;
+    if let Some(refusal) = refusal {
+        return Err(refusal);
+    }
+    scan.query_scopes = query_scopes.map(crate::blastinput::query_batch::QueryScopes::read_ahead);
+    Ok(scan)
 }
 
 /// Refuses the first query the writer would refuse (a title with a byte NCBI's XML stream cannot
@@ -924,6 +1045,14 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 searched: !batch.search_skipped,
                 masks: &masks,
             };
+            // The texts of the subjects that the query's report reads one by one, written where
+            // NCBI loads the subject of each `Hit` (`HitSink::position`, `ReadCursor`).
+            let mut reads = crate::report::query_warnings::ReadCursor::new(std::slice::from_ref(
+                shown.query_reads(batch.query_ordinal + qidx),
+            ));
+            // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): those texts
+            // and the taxonomy database's messages.
+            let mut posts = crate::report::query_warnings::HitPosts::new(reads.is_some());
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
                 // A copy of one record of the database that follows another is shown in its
                 // `Hit`.
@@ -954,7 +1083,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     // NCBI's messages about the taxonomy database: opening and the volume's
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time.
-                    taxdb_printer.at_names(first, names, &mut *diagnostics)?;
+                    posts.hit(sink.position(), first as u32, |texts| {
+                        taxdb_printer.at_names(first, names, texts)
+                    })?;
                     sink.hit(&hit, |hsps| {
                         for list in lists[range]
                             .iter()
@@ -1009,7 +1140,19 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             });
             // A failed query leaves its partial bytes in `buf`, which the error return drops.
             written?;
-            writer.write_all(&buf)?;
+            posts.write(
+                &buf,
+                &mut *writer,
+                &mut *diagnostics,
+                |subject, writer, sink| match reads.as_mut() {
+                    Some(reads) => reads.subject_read(0, subject, writer, sink),
+                    None => Ok(()),
+                },
+            )?;
+            // A text whose read no `Hit` placed comes after the query's report.
+            if let Some(reads) = reads.as_mut() {
+                reads.before_query(1, &mut *writer, &mut *diagnostics)?;
+            }
             buf.clear();
         }
     }
@@ -1201,6 +1344,57 @@ mod held_side_files_tests {
             .collect();
         names.sort();
         names
+    }
+
+    /// One log of the output (`o:`) and of standard error (`e:`) in the order written.
+    #[derive(Clone, Default)]
+    struct Log(Rc<RefCell<Vec<String>>>, &'static str);
+
+    impl Write for Log {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if !bytes.is_empty() {
+                self.0
+                    .borrow_mut()
+                    .push(format!("{}{}", self.1, String::from_utf8_lossy(bytes)));
+            }
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_held_output_writes_the_standard_error_texts_where_they_came() {
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let held = HeldOutput::new(Box::new(Log(Rc::clone(&log), "o:")), None);
+        let mut stderr = held.stderr(Box::new(Log(Rc::clone(&log), "e:")));
+        let mut output = held.clone();
+        // Not held: each goes at once.
+        output.write_all(b"head").unwrap();
+        stderr.write_all(b"w1").unwrap();
+        held.hold();
+        output.write_all(b"hit1").unwrap();
+        stderr.write_all(b"t2").unwrap();
+        output.write_all(b"hit2").unwrap();
+        assert_eq!(*log.borrow(), ["o:head", "e:w1"]);
+        held.release().unwrap();
+        assert_eq!(
+            *log.borrow(),
+            ["o:head", "e:w1", "o:hit1", "e:t2", "o:hit2"]
+        );
+        // A discarded output keeps its standard error texts and drops the output.
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let held = HeldOutput::new(Box::new(Log(Rc::clone(&log), "o:")), None);
+        let mut stderr = held.stderr(Box::new(Log(Rc::clone(&log), "e:")));
+        let mut output = held.clone();
+        held.hold();
+        output.write_all(b"hit1").unwrap();
+        stderr.write_all(b"t1").unwrap();
+        held.discard();
+        stderr.write_all(b"refusal").unwrap();
+        assert_eq!(*log.borrow(), ["e:t1", "e:refusal"]);
     }
 
     #[test]

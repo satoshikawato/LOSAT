@@ -26,7 +26,8 @@ another form leaves the file whole, so it differs from the frozen sha256. No byt
 `freeze --ncbi-bin DIR [--only PREFIX]` runs NCBI, writes the frozen files and rewrites the rc, hash and size columns.
 `check --losat BIN [--only PREFIX] [--out TSV]` prints one line per row (`same`, or `differs` with the first
 difference), writes the same lines to --out and exits 0 only when every row is `same`. Both run in the environment of
-db_search_fixtures.clean_env.
+db_search_fixtures.clean_env; NCBI's runs (`freeze`) also get BLAST_USAGE_REPORT=false (db_search_fixtures.ncbi_env:
+NCBI BLAST+ then sends no usage report with the run's parameters to NCBI).
 """
 from __future__ import annotations
 
@@ -44,7 +45,7 @@ from pathlib import Path
 
 TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS))
-from db_search_fixtures import clean_env  # noqa: E402
+from db_search_fixtures import clean_env, ncbi_env  # noqa: E402
 
 MANIFEST = TESTS / "dropin_corpus_manifest.tsv"
 INPUTS = TESTS / "dropin_corpus"
@@ -227,7 +228,7 @@ def freeze(args) -> int:
     FROZEN.mkdir(parents=True, exist_ok=True)
     ncbi_bin = args.ncbi_bin.resolve()
     home = tempfile.TemporaryDirectory(prefix="dropin_corpus_home_")
-    env = clean_env(dict(os.environ), home.name)
+    env = ncbi_env(clean_env(dict(os.environ), home.name))
     failed = 0
     for row in rows:
         if not row["row_id"].startswith(args.only):

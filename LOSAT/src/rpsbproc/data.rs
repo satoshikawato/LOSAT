@@ -136,7 +136,7 @@ pub(crate) struct CddData {
 /// Why the data does not load.
 #[derive(Debug)]
 pub(crate) enum DataError {
-    /// `CSimpleException` "Data file <path> does not exist" (rpsbproc: "Annotation data loading
+    /// `CSimpleException` "Data file `<path>` does not exist" (rpsbproc: "Annotation data loading
     /// unsuccessful: ...", exit 2).
     Missing(String),
     /// A number that NCBI's conversion refuses (rpsbproc: two `Error:` lines, exit 2).
@@ -238,7 +238,7 @@ impl<'a> Line<'a> {
         DataError::Unsupported(format!(
             "a line of {} where NCBI's loader makes {what} is not supported by LOSAT's rpsbproc: '{}'",
             self.file,
-            printable_string(self.bytes)
+            String::from_utf8_lossy(&printable_string(self.bytes))
         ))
     }
 }

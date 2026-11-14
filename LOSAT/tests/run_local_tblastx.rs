@@ -1,4 +1,4 @@
-//! The TBLASTX search of `LOSAT::api` (which calls the shared entry `run_local`) writes several
+//! The TBLASTX search of `losat::api` (which calls the shared entry `run_local`) writes several
 //! output formats from one search. Every format must be byte-identical to the CLI run that
 //! requests only that format, the warnings must equal that run's standard error, and the hit
 //! records must be the final HSP list. With `-num_threads 2` the native search reduces its
@@ -12,8 +12,8 @@ mod run_local_support;
 
 use std::process::Command;
 
+use losat::api::{Outcome, Program};
 use run_local_support::{cli_out_path, fixture_sequence, Files, TempFasta};
-use LOSAT::api::{Outcome, Program};
 
 /// The last three are the custom tabular reports of the shared writer (line CLI C2, PR 2).
 const FORMATS: [&str; 13] = [

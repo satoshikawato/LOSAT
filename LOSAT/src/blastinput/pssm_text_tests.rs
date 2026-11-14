@@ -84,7 +84,10 @@ fn reals_are_read_with_ncbis_arithmetic() {
     assert_eq!(real_of("{ +7, 10, 1 }"), 70.0);
     assert_eq!(real_of("PLUS-INFINITY"), f64::INFINITY);
     assert_eq!(real_of("minus-infinity"), f64::NEG_INFINITY);
-    assert!(real_of("NOT-A-NUMBER").is_nan());
+    // `HUGE_VAL/HUGE_VAL` of NCBI's x86-64 builds: the sign bit set (`asn_text_reader::NCBI_NAN`;
+    // PS16d review oracle O2 `a_nan` prints `-nan`), also for the word form `nan`.
+    assert!(real_of("NOT-A-NUMBER").is_nan() && real_of("NOT-A-NUMBER").is_sign_negative());
+    assert!(real_of("nan").is_nan() && real_of("nan").is_sign_negative());
     assert_eq!(real_of("0.5"), 0.5);
     assert_eq!(real_of("-2.5e3"), -2500.0);
     assert_eq!(real_of("00.25"), 0.25);
@@ -138,7 +141,9 @@ fn small_pssm(title: &[u8]) -> PssmWithParameters {
             row_labels: None,
             by_row: Some(false),
             query: Some(PssmQuery {
-                ids: vec![PssmSeqId::Local(ObjectId::Str(b"Query_7".to_vec()))],
+                ids: vec![crate::seqid::ParsedSeqId::Local(ObjectId::Str(
+                    b"Query_7".to_vec(),
+                ))],
                 titles: Some(vec![title.to_vec()]),
                 inst: SeqInst {
                     repr: ("raw", 2),
@@ -357,7 +362,8 @@ fn skipped_members_are_named_and_an_empty_descr_is_an_error() {
 // title, frequency ratios of 26 rows, the parameters without gap costs.
 #[test]
 fn ncbis_pssm_with_frequency_ratios_is_read() {
-    use crate::report::serial::pssm::{PssmSeqId, SeqData, TextseqId};
+    use crate::report::serial::pssm::SeqData;
+    use crate::seqid::model::{ParsedSeqId, TextseqId};
     let value = read_pssm_with_parameters(&gunzip("pssm/pssm_freq_ratios.asn.gz")).unwrap();
     let pssm = &value.pssm;
     assert_eq!((pssm.num_rows, pssm.num_columns), (26, 232));
@@ -366,17 +372,13 @@ fn ncbis_pssm_with_frequency_ratios_is_read() {
     assert_eq!(
         query.ids,
         vec![
-            PssmSeqId::Gi(129295),
-            PssmSeqId::Textseq {
-                variant: "swissprot",
-                tag: 7,
-                id: TextseqId {
-                    name: Some(b"OVALX_CHICK".to_vec()),
-                    accession: Some(b"P01013".to_vec()),
-                    release: None,
-                    version: None,
-                },
-            },
+            ParsedSeqId::Gi(129295),
+            ParsedSeqId::Swissprot(TextseqId {
+                name: Some(b"OVALX_CHICK".to_vec()),
+                accession: Some(b"P01013".to_vec()),
+                release: None,
+                version: None,
+            }),
         ]
     );
     assert_eq!(

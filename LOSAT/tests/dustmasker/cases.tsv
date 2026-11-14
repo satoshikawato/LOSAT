@@ -1,0 +1,299 @@
+# name<TAB>arguments (shell words, run in this directory; "< file" = stdin). NCBI BLAST+ 2.17.0 dustmasker 1.0.0 on ws (env_blast), 2026-11-12, ad-RG-K-1.
+basic_int	-in in/basic.fa
+nruns_int	-in in/nruns.fa
+ambig_int	-in in/ambig.fa
+short_int	-in in/short.fa
+deflines_int	-in in/deflines.fa
+protein_int	-in in/protein.fa
+protfirst_int	-in in/protfirst.fa
+empty_int	-in in/empty.fa
+noheader_int	-in in/noheader.fa
+gaps_int	-in in/gaps.fa
+badchar_int	-in in/badchar.fa
+crlf_int	-in in/crlf.fa
+dup_int	-in in/dup.fa
+long_int	-in in/long.fa
+width80_int	-in in/width80.fa
+basic_int_ps	-in in/basic.fa -parse_seqids
+deflines_int_ps	-in in/deflines.fa -parse_seqids
+short_int_ps	-in in/short.fa -parse_seqids
+dup_int_ps	-in in/dup.fa -parse_seqids
+nruns_int_ps	-in in/nruns.fa -parse_seqids
+basic_interval	-in in/basic.fa -outfmt interval
+basic_interval_ps	-in in/basic.fa -outfmt interval -parse_seqids
+deflines_interval	-in in/deflines.fa -outfmt interval
+deflines_interval_ps	-in in/deflines.fa -outfmt interval -parse_seqids
+short_interval	-in in/short.fa -outfmt interval
+short_interval_ps	-in in/short.fa -outfmt interval -parse_seqids
+basic_fasta	-in in/basic.fa -outfmt fasta
+basic_fasta_ps	-in in/basic.fa -outfmt fasta -parse_seqids
+deflines_fasta	-in in/deflines.fa -outfmt fasta
+deflines_fasta_ps	-in in/deflines.fa -outfmt fasta -parse_seqids
+short_fasta	-in in/short.fa -outfmt fasta
+short_fasta_ps	-in in/short.fa -outfmt fasta -parse_seqids
+basic_acclist	-in in/basic.fa -outfmt acclist
+basic_acclist_ps	-in in/basic.fa -outfmt acclist -parse_seqids
+deflines_acclist	-in in/deflines.fa -outfmt acclist
+deflines_acclist_ps	-in in/deflines.fa -outfmt acclist -parse_seqids
+short_acclist	-in in/short.fa -outfmt acclist
+short_acclist_ps	-in in/short.fa -outfmt acclist -parse_seqids
+basic_maskinfo_asn1_text	-in in/basic.fa -outfmt maskinfo_asn1_text
+basic_maskinfo_asn1_text_ps	-in in/basic.fa -outfmt maskinfo_asn1_text -parse_seqids
+deflines_maskinfo_asn1_text	-in in/deflines.fa -outfmt maskinfo_asn1_text
+deflines_maskinfo_asn1_text_ps	-in in/deflines.fa -outfmt maskinfo_asn1_text -parse_seqids
+short_maskinfo_asn1_text	-in in/short.fa -outfmt maskinfo_asn1_text
+short_maskinfo_asn1_text_ps	-in in/short.fa -outfmt maskinfo_asn1_text -parse_seqids
+basic_maskinfo_asn1_bin	-in in/basic.fa -outfmt maskinfo_asn1_bin
+basic_maskinfo_asn1_bin_ps	-in in/basic.fa -outfmt maskinfo_asn1_bin -parse_seqids
+deflines_maskinfo_asn1_bin	-in in/deflines.fa -outfmt maskinfo_asn1_bin
+deflines_maskinfo_asn1_bin_ps	-in in/deflines.fa -outfmt maskinfo_asn1_bin -parse_seqids
+short_maskinfo_asn1_bin	-in in/short.fa -outfmt maskinfo_asn1_bin
+short_maskinfo_asn1_bin_ps	-in in/short.fa -outfmt maskinfo_asn1_bin -parse_seqids
+basic_maskinfo_xml	-in in/basic.fa -outfmt maskinfo_xml
+basic_maskinfo_xml_ps	-in in/basic.fa -outfmt maskinfo_xml -parse_seqids
+deflines_maskinfo_xml	-in in/deflines.fa -outfmt maskinfo_xml
+deflines_maskinfo_xml_ps	-in in/deflines.fa -outfmt maskinfo_xml -parse_seqids
+short_maskinfo_xml	-in in/short.fa -outfmt maskinfo_xml
+short_maskinfo_xml_ps	-in in/short.fa -outfmt maskinfo_xml -parse_seqids
+basic_seqloc_asn1_text	-in in/basic.fa -outfmt seqloc_asn1_text
+basic_seqloc_asn1_text_ps	-in in/basic.fa -outfmt seqloc_asn1_text -parse_seqids
+deflines_seqloc_asn1_text	-in in/deflines.fa -outfmt seqloc_asn1_text
+deflines_seqloc_asn1_text_ps	-in in/deflines.fa -outfmt seqloc_asn1_text -parse_seqids
+short_seqloc_asn1_text	-in in/short.fa -outfmt seqloc_asn1_text
+short_seqloc_asn1_text_ps	-in in/short.fa -outfmt seqloc_asn1_text -parse_seqids
+basic_seqloc_asn1_bin	-in in/basic.fa -outfmt seqloc_asn1_bin
+basic_seqloc_asn1_bin_ps	-in in/basic.fa -outfmt seqloc_asn1_bin -parse_seqids
+deflines_seqloc_asn1_bin	-in in/deflines.fa -outfmt seqloc_asn1_bin
+deflines_seqloc_asn1_bin_ps	-in in/deflines.fa -outfmt seqloc_asn1_bin -parse_seqids
+short_seqloc_asn1_bin	-in in/short.fa -outfmt seqloc_asn1_bin
+short_seqloc_asn1_bin_ps	-in in/short.fa -outfmt seqloc_asn1_bin -parse_seqids
+basic_seqloc_xml	-in in/basic.fa -outfmt seqloc_xml
+basic_seqloc_xml_ps	-in in/basic.fa -outfmt seqloc_xml -parse_seqids
+deflines_seqloc_xml	-in in/deflines.fa -outfmt seqloc_xml
+deflines_seqloc_xml_ps	-in in/deflines.fa -outfmt seqloc_xml -parse_seqids
+short_seqloc_xml	-in in/short.fa -outfmt seqloc_xml
+short_seqloc_xml_ps	-in in/short.fa -outfmt seqloc_xml -parse_seqids
+basic_fasta_hard	-in in/basic.fa -outfmt fasta -hard_masking
+basic_int_hard	-in in/basic.fa -hard_masking
+basic_mask_hard	-in in/basic.fa -outfmt maskinfo_asn1_text -hard_masking
+ambig_fasta	-in in/ambig.fa -outfmt fasta
+nruns_fasta	-in in/nruns.fa -outfmt fasta
+nruns_fasta_hard	-in in/nruns.fa -outfmt fasta -hard_masking
+gaps_fasta	-in in/gaps.fa -outfmt fasta
+width80_fasta	-in in/width80.fa -outfmt fasta
+empty_mask_text	-in in/empty.fa -outfmt maskinfo_asn1_text
+empty_mask_bin	-in in/empty.fa -outfmt maskinfo_asn1_bin
+empty_mask_xml	-in in/empty.fa -outfmt maskinfo_xml
+empty_seqloc_text	-in in/empty.fa -outfmt seqloc_asn1_text
+nomask_mask_text	-in in/short.fa -outfmt maskinfo_asn1_text -level 64
+win_0	-in in/basic.fa -window "0"
+win_1	-in in/basic.fa -window "1"
+win_2	-in in/basic.fa -window "2"
+win_3	-in in/basic.fa -window "3"
+win_4	-in in/basic.fa -window "4"
+win_7	-in in/basic.fa -window "7"
+win_8	-in in/basic.fa -window "8"
+win_9	-in in/basic.fa -window "9"
+win_32	-in in/basic.fa -window "32"
+win_63	-in in/basic.fa -window "63"
+win_64	-in in/basic.fa -window "64"
+win_65	-in in/basic.fa -window "65"
+win_100	-in in/basic.fa -window "100"
+win_1000	-in in/basic.fa -window "1000"
+win_-1	-in in/basic.fa -window "-1"
+win_x	-in in/basic.fa -window "x"
+win_2.5	-in in/basic.fa -window "2.5"
+win_empty	-in in/basic.fa -window ""
+lev_0	-in in/basic.fa -level 0
+lev_1	-in in/basic.fa -level 1
+lev_2	-in in/basic.fa -level 2
+lev_4	-in in/basic.fa -level 4
+lev_5	-in in/basic.fa -level 5
+lev_10	-in in/basic.fa -level 10
+lev_19	-in in/basic.fa -level 19
+lev_21	-in in/basic.fa -level 21
+lev_64	-in in/basic.fa -level 64
+lev_65	-in in/basic.fa -level 65
+lev_100	-in in/basic.fa -level 100
+lev_1000	-in in/basic.fa -level 1000
+lev_-1	-in in/basic.fa -level -1
+lev_x	-in in/basic.fa -level x
+lnk_0	-in in/basic.fa -linker 0
+lnk_1	-in in/basic.fa -linker 1
+lnk_2	-in in/basic.fa -linker 2
+lnk_10	-in in/basic.fa -linker 10
+lnk_32	-in in/basic.fa -linker 32
+lnk_33	-in in/basic.fa -linker 33
+lnk_100	-in in/basic.fa -linker 100
+lnk_-1	-in in/basic.fa -linker -1
+lnk_x	-in in/basic.fa -linker x
+win100_long	-in in/long.fa -window 100
+win200_long	-in in/long.fa -window 200 -level 10
+lev10_long	-in in/long.fa -level 10
+lnk5_long	-in in/long.fa -linker 5
+lnk5_nruns	-in in/nruns.fa -linker 5
+win20_nruns	-in in/nruns.fa -window 20
+stdin_int	< in/basic.fa
+stdin_dash	-in - < in/basic.fa
+noin_file	-in in/does_not_exist.fa
+out_bad	-in in/basic.fa -out /nonexistent_dir/x.out
+fmt_bad	-in in/basic.fa -outfmt xyz
+infmt_bad	-in in/basic.fa -infmt xyz
+fmt_upper	-in in/basic.fa -outfmt FASTA
+fmt_seqloc_asn1_binary	-in in/basic.fa -outfmt seqloc_asn1_binary
+unknown_opt	-in in/basic.fa -foo
+help_h	-h
+help_help	-help
+# help_xml (-xmlhelp, line RG item E2x): env_blast on ws, 2026-11-13 (ad-RG-E-5, line RG item E2 probe).
+help_xml	-xmlhelp
+help_noargs_extra	extra_positional
+ps_flag_value	-in in/basic.fa -parse_seqids true
+dup_opt	-in in/basic.fa -window 10 -window 20
+nr_win_0	-in in/nruns.fa -window 0
+nr_win_1	-in in/nruns.fa -window 1
+nr_win_7	-in in/nruns.fa -window 7
+nr_win_8	-in in/nruns.fa -window 8
+nr_win_20	-in in/nruns.fa -window 20
+nr_win_63	-in in/nruns.fa -window 63
+nr_win_64	-in in/nruns.fa -window 64
+nr_win_65	-in in/nruns.fa -window 65
+nr_win_100	-in in/nruns.fa -window 100
+nr_win_1000	-in in/nruns.fa -window 1000
+nr_win_-1	-in in/nruns.fa -window -1
+nr_win_-64	-in in/nruns.fa -window -64
+nr_win_2147483647	-in in/nruns.fa -window 2147483647
+nr_lnk_0	-in in/nruns.fa -linker 0
+nr_lnk_1	-in in/nruns.fa -linker 1
+nr_lnk_2	-in in/nruns.fa -linker 2
+nr_lnk_5	-in in/nruns.fa -linker 5
+nr_lnk_32	-in in/nruns.fa -linker 32
+nr_lnk_33	-in in/nruns.fa -linker 33
+nr_lnk_100	-in in/nruns.fa -linker 100
+nr_lnk_-1	-in in/nruns.fa -linker -1
+nr_lnk_-2	-in in/nruns.fa -linker -2
+nr_lnk_2147483647	-in in/nruns.fa -linker 2147483647
+nr_win0_lnk0	-in in/nruns.fa -window 0 -linker 0
+nr_win10_lnk3	-in in/nruns.fa -window 10 -linker 3
+big_win_2147483648	-in in/basic.fa -window "2147483648"
+big_win_4294967296	-in in/basic.fa -window "4294967296"
+big_win_99999999999	-in in/basic.fa -window "99999999999"
+big_win_-2147483648	-in in/basic.fa -window "-2147483648"
+big_win_-2147483649	-in in/basic.fa -window "-2147483649"
+big_win_+5	-in in/basic.fa -window "+5"
+big_win_0x10	-in in/basic.fa -window "0x10"
+big_win_010	-in in/basic.fa -window "010"
+big_win_5_sp	-in in/basic.fa -window " 5"
+big_win_5_sp	-in in/basic.fa -window "5 "
+opts_raw_text	-in in/basic.fa -outfmt maskinfo_asn1_text -window -1 -level 0 -linker 100
+opts_raw_xml	-in in/basic.fa -outfmt maskinfo_xml -window 1000 -level 70 -linker -5
+protein_fasta	-in in/protein.fa -outfmt fasta
+badchar_fasta	-in in/badchar.fa -outfmt fasta
+ambig_int	-in in/ambig.fa
+lower_fasta_hard	-in in/ambig.fa -outfmt fasta -hard_masking
+nruns_maskinfo_text	-in in/nruns.fa -outfmt maskinfo_asn1_text
+protein_seqloc_text_ps	-in in/protein.fa -outfmt seqloc_asn1_text -parse_seqids
+deflines_seqloc_xml_ps2	-in in/deflines.fa -outfmt seqloc_xml -parse_seqids
+in_dir	-in in
+out_dash	-in in/basic.fa -out -
+in_twice	-in in/basic.fa -in in/ambig.fa
+outfmt_empty	-in in/basic.fa -outfmt ""
+infmt_upper	-in in/basic.fa -infmt FASTA
+infmt_empty	-in in/basic.fa -infmt ""
+mdefl_interval	-in in/more_defl.fa -outfmt interval
+mdefl_interval_ps	-in in/more_defl.fa -outfmt interval -parse_seqids
+mdefl_acclist	-in in/more_defl.fa -outfmt acclist
+mdefl_acclist_ps	-in in/more_defl.fa -outfmt acclist -parse_seqids
+mdefl_maskinfo_asn1_text	-in in/more_defl.fa -outfmt maskinfo_asn1_text
+mdefl_maskinfo_asn1_text_ps	-in in/more_defl.fa -outfmt maskinfo_asn1_text -parse_seqids
+mdefl_seqloc_xml	-in in/more_defl.fa -outfmt seqloc_xml
+mdefl_seqloc_xml_ps	-in in/more_defl.fa -outfmt seqloc_xml -parse_seqids
+mdefl_maskinfo_asn1_bin	-in in/more_defl.fa -outfmt maskinfo_asn1_bin
+mdefl_maskinfo_asn1_bin_ps	-in in/more_defl.fa -outfmt maskinfo_asn1_bin -parse_seqids
+# -infmt blastdb: the databases in db/ were made by NCBI makeblastdb 2.17.0 from in/ (basic, deflines -> defl, nruns, ambig, short, protfirst -> prot, more_defl -parse_seqids -> mdefl_ps); @CWD@ in the expected text is this directory.
+db_basic_interval	-infmt blastdb -in db/basic -outfmt interval
+db_basic_fasta	-infmt blastdb -in db/basic -outfmt fasta
+db_basic_acclist	-infmt blastdb -in db/basic -outfmt acclist
+db_basic_maskinfo_asn1_text	-infmt blastdb -in db/basic -outfmt maskinfo_asn1_text
+db_basic_maskinfo_asn1_bin	-infmt blastdb -in db/basic -outfmt maskinfo_asn1_bin
+db_basic_maskinfo_xml	-infmt blastdb -in db/basic -outfmt maskinfo_xml
+db_basic_seqloc_asn1_text	-infmt blastdb -in db/basic -outfmt seqloc_asn1_text
+db_basic_seqloc_asn1_bin	-infmt blastdb -in db/basic -outfmt seqloc_asn1_bin
+db_basic_seqloc_xml	-infmt blastdb -in db/basic -outfmt seqloc_xml
+db_basic_int_ps	-infmt blastdb -in db/basic -parse_seqids
+db_defl_interval	-infmt blastdb -in db/defl -outfmt interval
+db_defl_fasta	-infmt blastdb -in db/defl -outfmt fasta
+db_defl_acclist	-infmt blastdb -in db/defl -outfmt acclist
+db_defl_maskinfo_asn1_text	-infmt blastdb -in db/defl -outfmt maskinfo_asn1_text
+db_defl_maskinfo_asn1_bin	-infmt blastdb -in db/defl -outfmt maskinfo_asn1_bin
+db_defl_maskinfo_xml	-infmt blastdb -in db/defl -outfmt maskinfo_xml
+db_defl_seqloc_asn1_text	-infmt blastdb -in db/defl -outfmt seqloc_asn1_text
+db_defl_seqloc_asn1_bin	-infmt blastdb -in db/defl -outfmt seqloc_asn1_bin
+db_defl_seqloc_xml	-infmt blastdb -in db/defl -outfmt seqloc_xml
+db_defl_int_ps	-infmt blastdb -in db/defl -parse_seqids
+db_nruns_interval	-infmt blastdb -in db/nruns -outfmt interval
+db_nruns_fasta	-infmt blastdb -in db/nruns -outfmt fasta
+db_nruns_acclist	-infmt blastdb -in db/nruns -outfmt acclist
+db_nruns_maskinfo_asn1_text	-infmt blastdb -in db/nruns -outfmt maskinfo_asn1_text
+db_nruns_maskinfo_asn1_bin	-infmt blastdb -in db/nruns -outfmt maskinfo_asn1_bin
+db_nruns_maskinfo_xml	-infmt blastdb -in db/nruns -outfmt maskinfo_xml
+db_nruns_seqloc_asn1_text	-infmt blastdb -in db/nruns -outfmt seqloc_asn1_text
+db_nruns_seqloc_asn1_bin	-infmt blastdb -in db/nruns -outfmt seqloc_asn1_bin
+db_nruns_seqloc_xml	-infmt blastdb -in db/nruns -outfmt seqloc_xml
+db_nruns_int_ps	-infmt blastdb -in db/nruns -parse_seqids
+db_ambig_interval	-infmt blastdb -in db/ambig -outfmt interval
+db_ambig_fasta	-infmt blastdb -in db/ambig -outfmt fasta
+db_ambig_acclist	-infmt blastdb -in db/ambig -outfmt acclist
+db_ambig_maskinfo_asn1_text	-infmt blastdb -in db/ambig -outfmt maskinfo_asn1_text
+db_ambig_maskinfo_asn1_bin	-infmt blastdb -in db/ambig -outfmt maskinfo_asn1_bin
+db_ambig_maskinfo_xml	-infmt blastdb -in db/ambig -outfmt maskinfo_xml
+db_ambig_seqloc_asn1_text	-infmt blastdb -in db/ambig -outfmt seqloc_asn1_text
+db_ambig_seqloc_asn1_bin	-infmt blastdb -in db/ambig -outfmt seqloc_asn1_bin
+db_ambig_seqloc_xml	-infmt blastdb -in db/ambig -outfmt seqloc_xml
+db_ambig_int_ps	-infmt blastdb -in db/ambig -parse_seqids
+db_short_interval	-infmt blastdb -in db/short -outfmt interval
+db_short_fasta	-infmt blastdb -in db/short -outfmt fasta
+db_short_acclist	-infmt blastdb -in db/short -outfmt acclist
+db_short_maskinfo_asn1_text	-infmt blastdb -in db/short -outfmt maskinfo_asn1_text
+db_short_maskinfo_asn1_bin	-infmt blastdb -in db/short -outfmt maskinfo_asn1_bin
+db_short_maskinfo_xml	-infmt blastdb -in db/short -outfmt maskinfo_xml
+db_short_seqloc_asn1_text	-infmt blastdb -in db/short -outfmt seqloc_asn1_text
+db_short_seqloc_asn1_bin	-infmt blastdb -in db/short -outfmt seqloc_asn1_bin
+db_short_seqloc_xml	-infmt blastdb -in db/short -outfmt seqloc_xml
+db_short_int_ps	-infmt blastdb -in db/short -parse_seqids
+db_prot	-infmt blastdb -in db/prot
+db_missing	-infmt blastdb -in db/missing
+db_basic_fasta_hard	-infmt blastdb -in db/basic -outfmt fasta -hard_masking
+db_stdin	-infmt blastdb < in/basic.fa
+db_mdefl_ps_interval	-infmt blastdb -in db/mdefl_ps -outfmt interval
+db_mdefl_ps_interval_ps	-infmt blastdb -in db/mdefl_ps -outfmt interval -parse_seqids
+db_mdefl_ps_maskinfo_asn1_text	-infmt blastdb -in db/mdefl_ps -outfmt maskinfo_asn1_text
+db_mdefl_ps_maskinfo_asn1_text_ps	-infmt blastdb -in db/mdefl_ps -outfmt maskinfo_asn1_text -parse_seqids
+db_mdefl_ps_seqloc_asn1_text	-infmt blastdb -in db/mdefl_ps -outfmt seqloc_asn1_text
+db_mdefl_ps_seqloc_asn1_text_ps	-infmt blastdb -in db/mdefl_ps -outfmt seqloc_asn1_text -parse_seqids
+# OID ranges of an alias file (db/oidr.nal: DBLIST basic, FIRST_OID 2, LAST_OID 3): NCBI's CMaskBDBReader reads every OID of the volumes (GetNumOIDs), the range leaves none out. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-13, ad-RG-K-2.
+db_oidr_interval	-infmt blastdb -in db/oidr -outfmt interval
+db_oidr_fasta	-infmt blastdb -in db/oidr -outfmt fasta
+db_oidr_maskinfo_asn1_text	-infmt blastdb -in db/oidr -outfmt maskinfo_asn1_text
+db_oidr_seqloc_asn1_text	-infmt blastdb -in db/oidr -outfmt seqloc_asn1_text
+# -conffile (line RG item E1 on dev: the command line's application start loads it in place of dustmasker.ini): conf/blastdb.ini sets [BLAST] BLASTDB=db, conf/malformed.ini has a line without '='. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-13, ad-RG-K-2.
+conf_blastdb	-infmt blastdb -in basic -conffile conf/blastdb.ini
+conf_blastdb_eq	-infmt blastdb -in basic -outfmt maskinfo_asn1_text -conffile=conf/blastdb.ini
+conf_malformed	-in in/basic.fa -conffile conf/malformed.ini
+conf_missing	-in in/basic.fa -conffile conf/missing.ini
+# An alias value that NCBI cannot convert (db/lenbad.nal: DBLIST basic, LENGTH abc): NCBI reports the CStringException, exit status 3. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-13, ad-RG-K-2 (review 2 F6).
+db_lenbad	-infmt blastdb -in db/lenbad -outfmt acclist
+# -dryrun (line RG item E1b on dev): the arguments are read, nothing runs. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-13, ad-RG-K-2.
+dryrun_basic	-in in/basic.fa -dryrun
+dryrun_missing_input	-in in/nonexist.fa -dryrun
+dryrun_bad_window	-dryrun -window abc
+# Alias values that only a search reads differently (review 2 of K1, F5): db/len0.nal (DBLIST basic, LENGTH 0), db/nseqneg.nal (NSEQ -5), db/firstbig.nal (FIRST_OID 3000000000), and the ranged db/oidr with another name (db/short). NCBI's CMaskBDBReader reads every OID with GetBioseq, as without the alias file. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-13, ad-RG-K-3.
+# id_del_* (a DEL byte in a -parse_seqids id: # and error 803.7 in the serial formats, as it is in interval; RG DECISIONS K4-1) frozen 2026-11-14 by ad-RG-K-10 with the local official NCBI BLAST+ 2.17.0 release; in/id_del.fa is the review's du_lcl.fa (remaining-gaps-20261112/K/k4/review/probe/in).
+db_len0_acclist	-infmt blastdb -in db/len0 -outfmt acclist
+db_nseqneg_interval	-infmt blastdb -in db/nseqneg -outfmt interval
+db_firstbig_fasta	-infmt blastdb -in db/firstbig -outfmt fasta
+db_oidr_short_acclist	-infmt blastdb -in "db/oidr db/short" -outfmt acclist
+id_del_seqloc_txt	-in in/id_del.fa -outfmt seqloc_asn1_text -parse_seqids
+id_del_seqloc_bin	-in in/id_del.fa -outfmt seqloc_asn1_bin -parse_seqids
+id_del_maskinfo_txt	-in in/id_del.fa -outfmt maskinfo_asn1_text -parse_seqids
+id_del_maskinfo_bin	-in in/id_del.fa -outfmt maskinfo_asn1_bin -parse_seqids
+id_del_int_ps	-in in/id_del.fa -parse_seqids

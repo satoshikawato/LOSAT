@@ -2,8 +2,8 @@
 //! NCBI's `Blast_TracebackFromHSPList` on each preliminary HSP list with `gap_align->positionBased`,
 //! a PSSM copy of BLASTP's ordinary traceback (`blastp/blast_engine/traceback.rs`), whose kernels
 //! read the 28×28 matrix. The starts and the alignments read the PSSM rows (`gapalign.rs`); the
-//! identities and positives read BLOSUM62 (`sbp->matrix`, blast_hits.c:770-772); the e-values and
-//! bit scores read `kbp_gap_psi` (`sbp->kbp_gap`, `Blast_QueryIsPssm`).
+//! identities and positives read the search's matrix (`sbp->matrix`, blast_hits.c:770-772); the
+//! e-values and bit scores read `kbp_gap_psi` (`sbp->kbp_gap`, `Blast_QueryIsPssm`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1500
 //! ```c
@@ -30,14 +30,16 @@ use super::rows::PssmRows;
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use crate::algorithm::blastp::gapalign::{adjust_subject_range, BlastpPreliminaryHsp};
 use crate::algorithm::blastp::hsp::{
-    reap_hsplist_by_evalue, BlastpHitList, BlastpHsp, BlastpHspList,
+    link_hsp_list, reap_hsplist_by_evalue, BlastpHitList, BlastpHsp, BlastpHspList,
 };
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::blastp::x_redo_subjects::XRedoSubjects;
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::common::GapEditOp;
+use crate::config::ScoringMatrix;
+use crate::core::link_hsps::{EvenGapLinkParams, LinkContext};
 use crate::stats::KarlinParams;
-use crate::utils::matrix::blosum62_score_ncbistdaa_direct;
+use crate::utils::matrix::standard_score;
 
 /// What the traceback of every list reads: the PSSM, the query's one context, the subjects, the
 /// scoring and the hit-saving options.
@@ -50,6 +52,8 @@ pub(crate) struct PssmTraceback0<'a, R: PssmRows> {
     pub(crate) subjects: XRedoSubjects<'a>,
     pub(crate) gap_open: i32,
     pub(crate) gap_extend: i32,
+    /// The matrix of the search (`sbp->matrix`), whose positive scores are the positives.
+    pub(crate) matrix: ScoringMatrix,
     /// `ext_params->gap_x_dropoff_final` (`kbp_gap_psi`'s Lambda).
     pub(crate) x_drop_final: i32,
     /// `kbp_gap_psi[0]`.
@@ -58,6 +62,10 @@ pub(crate) struct PssmTraceback0<'a, R: PssmRows> {
     pub(crate) stats: EvalueStats<'a>,
     pub(crate) expect_value: f64,
     pub(crate) hitlist_size: usize,
+    /// psiblast's `-sum_stats true`: the traceback's linking parameters
+    /// (`EvenGapLinkParams::traceback`) and the query's context as the linking reads it
+    /// (`kbp_gap_psi`); `None` without sum statistics.
+    pub(crate) link: Option<(EvenGapLinkParams, LinkContext)>,
 }
 
 /// A preliminary list of the query and one subject, full or compact.
@@ -208,26 +216,37 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
                     query_nomask,
                     query_length: ctx.aa_len,
                     tree_query_bound: self.total_query_span,
-                    subject,
+                    subject: TraceSubject::One(subject),
                     gap_open: self.gap_open,
                     gap_extend: self.gap_extend,
                     x_drop_final: self.x_drop_final,
                     contained_before: true,
+                    matrix: self.matrix,
                 },
                 hsps,
                 scratch,
-            ),
+            )
+            .0,
             best_evalue: f64::MAX,
         };
         self.post_traceback_update(&mut hsp_list, subject.len());
         Ok((!hsp_list.hsps.is_empty()).then_some(hsp_list))
     }
 
-    /// `s_HSPListPostTracebackUpdate` (no linking, no RPS, a scale factor of 1): the e-values from
+    /// `s_HSPListPostTracebackUpdate` (no RPS, a scale factor of 1): the e-values from
     /// `kbp_gap_psi` (Spouge's finite-size correction with the query's and the subject's
     /// lengths, or without the Gumbel block the context's search space, `EvalueStats::e_value`),
-    /// the e-value reap, the bit scores.
+    /// or with psiblast's `-sum_stats true` the linked sets' e-values (large gaps only), the
+    /// e-value reap, the bit scores.
     ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:213-216
+    /// ```c
+    ///    /* Relink and rereap the HSP list, if needed. */
+    ///    if (hit_params->link_hsp_params) {
+    ///       BLAST_LinkHsps(program_number, hsp_list, query_info, subject_length,
+    ///                      sbp, hit_params->link_hsp_params, kGapped);
+    ///    } else {
+    /// ```
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:229-250
     /// ```c
     ///       Blast_HSPListGetEvalues(program_number, query_info, subject_length,
@@ -242,14 +261,21 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
     ///    Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
     /// ```
     fn post_traceback_update(&self, hsp_list: &mut BlastpHspList, subject_length: usize) {
-        let query_length = self.context.aa_len as i32;
-        for hsp in &mut hsp_list.hsps {
-            hsp.e_value = self.stats.e_value(
-                hsp.raw_score,
-                self.karlin,
-                query_length,
-                subject_length as i32,
-            );
+        match &self.link {
+            Some((params, context)) => {
+                link_hsp_list(hsp_list, *context, subject_length as i32, params);
+            }
+            None => {
+                let query_length = self.context.aa_len as i32;
+                for hsp in &mut hsp_list.hsps {
+                    hsp.e_value = self.stats.e_value(
+                        hsp.raw_score,
+                        self.karlin,
+                        query_length,
+                        subject_length as i32,
+                    );
+                }
+            }
         }
         reap_hsplist_by_evalue(hsp_list, self.expect_value);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1926-1928
@@ -278,17 +304,59 @@ pub(crate) struct TraceHsps<'a, R: PssmRows> {
     pub(crate) query_length: usize,
     /// `query_blk->length + 1`, the query bound of NCBI's containment tree.
     pub(crate) tree_query_bound: i32,
-    /// The subject's letters.
-    pub(crate) subject: &'a [u8],
+    /// The subject's letters, or a translated subject's frames.
+    pub(crate) subject: TraceSubject<'a>,
     pub(crate) gap_open: i32,
     pub(crate) gap_extend: i32,
     pub(crate) x_drop_final: i32,
     pub(crate) contained_before: bool,
+    /// The matrix of the search (`sbp->matrix`), for the positives.
+    pub(crate) matrix: ScoringMatrix,
+}
+
+/// The subject of a list's traceback: its letters, or the frames of a translated subject
+/// (rpstblastn's query: NCBI's `kTranslateSubject`), each HSP aligned on its frame's letters
+/// (`subject.frame`), without `AdjustSubjectRange`, inside a containment tree whose subject bound
+/// is `tree_bound`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:416-421
+/// ```c
+///             if (program_number == eBlastTypeRpsTblastn) {
+///                  const Int4 context = BLAST_FrameToContext(hsp->subject.frame, program_number);
+///                  subject = translation_buffer + frame_offsets[context] + 1;
+///                  subject_length = frame_offsets[context+1] - frame_offsets[context] - 1;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:461-468
+/// ```c
+///          if (!kTranslateSubject && !kSmithWaterman) {
+///              AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
+///                                 query_length, &start_shift);
+/// ```
+#[derive(Clone, Copy)]
+pub(crate) enum TraceSubject<'a> {
+    One(&'a [u8]),
+    Frames {
+        /// The frames' letters in the context order (`BLAST_FrameToContext`).
+        frames: &'a [&'a [u8]],
+        tree_bound: i32,
+    },
+}
+
+impl<'a> TraceSubject<'a> {
+    /// The letters an HSP of the subject's frame `frame` aligns on.
+    fn of(self, frame: i32) -> &'a [u8] {
+        match self {
+            Self::One(letters) => letters,
+            Self::Frames { frames, .. } => frames[crate::core::blast_util::frame_to_context(frame)],
+        }
+    }
 }
 
 /// The loop of `Blast_TracebackFromHSPList` over one list's HSPs with a PSSM, then the purge of
 /// common endpoints, the sort by score and the containment pass: the traced HSPs with their
-/// counts, before `s_HSPListPostTracebackUpdate`.
+/// counts, before `s_HSPListPostTracebackUpdate`, and the length of the subject (frame) of the
+/// last HSP aligned past the containment test (`stat_length`, blast_traceback.c:433; 0 when
+/// none was).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:367-373
 /// ```c
@@ -300,11 +368,15 @@ pub(crate) fn trace_hsps<R: PssmRows>(
     inputs: &TraceHsps<'_, R>,
     hsps: impl Iterator<Item = BlastpPreliminaryHsp>,
     scratch: &mut PssmGapScratch,
-) -> Vec<BlastpHsp> {
+) -> (Vec<BlastpHsp>, usize) {
     let query_nomask = inputs.query_nomask;
-    let subject = inputs.subject;
-    let mut tree = BlastIntervalTree::new(0, inputs.tree_query_bound, 0, subject.len() as i32 + 1);
+    let (tree_subject_bound, translated) = match inputs.subject {
+        TraceSubject::One(letters) => (letters.len() as i32 + 1, false),
+        TraceSubject::Frames { tree_bound, .. } => (tree_bound, true),
+    };
+    let mut tree = BlastIntervalTree::new(0, inputs.tree_query_bound, 0, tree_subject_bound);
     let mut traced: Vec<Traced> = Vec::new();
+    let mut stat_length = 0usize;
     for mut hsp in hsps {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:402-405
         // ```c
@@ -314,6 +386,10 @@ pub(crate) fn trace_hsps<R: PssmRows>(
         // ```
         if inputs.contained_before && tree.contains_hsp(&tree_hsp(&hsp), 0, 0) {
             continue;
+        }
+        let subject = inputs.subject.of(hsp.subject_frame);
+        if !subject.is_empty() {
+            stat_length = subject.len();
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-447
         // ```c
@@ -355,12 +431,16 @@ pub(crate) fn trace_hsps<R: PssmRows>(
         //              hsp->subject.gapped_start = s_start;
         //          }
         // ```
-        let (s_start, s_length, shift) = adjust_subject_range(
-            hsp.gapped_subject_start as usize,
-            subject.len(),
-            hsp.gapped_query_start as usize,
-            inputs.query_length,
-        );
+        let (s_start, s_length, shift) = if translated {
+            (hsp.gapped_subject_start as usize, subject.len(), 0)
+        } else {
+            adjust_subject_range(
+                hsp.gapped_subject_start as usize,
+                subject.len(),
+                hsp.gapped_query_start as usize,
+                inputs.query_length,
+            )
+        };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-512
         // ```c
         //            BLAST_GappedAlignmentWithTraceback(program_number, query,
@@ -444,9 +524,16 @@ pub(crate) fn trace_hsps<R: PssmRows>(
             continue;
         }
         tree.add_hsp(node, 0, IndexMethod::QueryAndSubject);
-        final_hsps.push(final_hsp(&hsp, edit_script, query_nomask, subject));
+        let subject = inputs.subject.of(hsp.subject_frame);
+        final_hsps.push(final_hsp(
+            &hsp,
+            edit_script,
+            query_nomask,
+            subject,
+            inputs.matrix,
+        ));
     }
-    final_hsps
+    (final_hsps, stat_length)
 }
 
 /// The interval-tree node of an HSP of the context at offset 0.
@@ -484,8 +571,8 @@ pub(super) fn preliminary_hsp(local: &BlastpHsp) -> BlastpPreliminaryHsp {
 }
 
 /// The final HSP of a traced one: 1-based starts, no composition adjustment, and the counts of
-/// `Blast_HSPGetNumIdentitiesAndPositives` on the unmasked query with BLOSUM62 (`sbp->matrix`),
-/// with the gaps and mismatches that the reports read.
+/// `Blast_HSPGetNumIdentitiesAndPositives` on the unmasked query with the search's matrix
+/// (`sbp->matrix`; rpsblast's is BLOSUM62), with the gaps and mismatches that the reports read.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:806-833
 /// ```c
@@ -517,6 +604,7 @@ pub(super) fn final_hsp(
     edit_script: Vec<GapEditOp>,
     query_nomask: &[u8],
     subject: &[u8],
+    matrix: ScoringMatrix,
 ) -> BlastpHsp {
     let (mut q, mut s) = (hsp.query_start as usize, hsp.subject_start as usize);
     let (mut length, mut num_ident, mut num_positives, mut gap_opens, mut gap_letters) =
@@ -531,7 +619,7 @@ pub(super) fn final_hsp(
                     if ql == sl {
                         num_ident += 1;
                         num_positives += 1;
-                    } else if blosum62_score_ncbistdaa_direct(ql, sl) > 0 {
+                    } else if standard_score(matrix, ql, sl) > 0 {
                         num_positives += 1;
                     }
                 }
@@ -554,6 +642,7 @@ pub(super) fn final_hsp(
         }
     }
     BlastpHsp {
+        num: 1,
         identity: if length > 0 {
             (num_ident as f64 * 100.0) / (length as f64)
         } else {
@@ -581,5 +670,60 @@ pub(super) fn final_hsp(
         gap_info: Some(edit_script),
         num_positives,
         comp_adjustment_method: 0,
+    }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use super::*;
+
+    fn hsp(frame: i32, query: (i32, i32), subject: (i32, i32), score: i32) -> BlastpPreliminaryHsp {
+        BlastpPreliminaryHsp {
+            query_start: query.0,
+            query_end: query.1,
+            subject_start: subject.0,
+            subject_end: subject.1,
+            gapped_query_start: query.0,
+            gapped_subject_start: subject.0,
+            raw_score: score,
+            query_context: 0,
+            query_frame: 0,
+            subject_frame: frame,
+            query_length: 100,
+            q_idx: 0,
+            s_idx: 0,
+        }
+    }
+
+    // blast_traceback.c:402-405 (quoted at `trace_hsps`): before each alignment of a translated
+    // subject, an HSP inside one traced before is dropped when their subject frames have the
+    // same sign (`BlastIntervalTreeContainsHSP` compares the signs only, blast_itree.c), so a
+    // frame +2 HSP inside a frame +1 one is contained and a frame -1 one is not.
+    #[test]
+    fn containment_reads_the_sign_of_the_subject_frame_only() {
+        let mut tree = BlastIntervalTree::new(0, 101, 0, 101);
+        tree.add_hsp(
+            tree_hsp(&hsp(1, (10, 60), (10, 60), 500)),
+            0,
+            IndexMethod::QueryAndSubject,
+        );
+        assert!(tree.contains_hsp(&tree_hsp(&hsp(2, (20, 40), (20, 40), 100)), 0, 0));
+        assert!(!tree.contains_hsp(&tree_hsp(&hsp(-1, (20, 40), (20, 40), 100)), 0, 0));
+        assert!(!tree.contains_hsp(&tree_hsp(&hsp(1, (5, 40), (20, 40), 100)), 0, 0));
+    }
+
+    // blast_traceback.c:416-421 (quoted at `TraceSubject`): each HSP aligns on its own frame.
+    #[test]
+    fn a_translated_subject_gives_each_hsp_its_frames_letters() {
+        let frames: [&[u8]; 6] = [b"a", b"b", b"c", b"d", b"e", b"f"];
+        let subject = TraceSubject::Frames {
+            frames: &frames,
+            tree_bound: 3,
+        };
+        let letters: Vec<&[u8]> = [1, 2, 3, -1, -2, -3]
+            .map(|frame| subject.of(frame))
+            .to_vec();
+        assert_eq!(letters, frames.to_vec());
+        assert_eq!(TraceSubject::One(b"xyz").of(0), b"xyz");
     }
 }

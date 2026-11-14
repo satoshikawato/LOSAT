@@ -147,11 +147,7 @@ pub(super) struct PreparedXml {
 /// (the matrix table is made from the name as typed, as BLASTP's.)
 pub(super) fn unsupported_matrix(matrix_name: &str, has_queries: bool) -> Result<()> {
     if FormattingMatrix::new(matrix_name).is_none() && has_queries {
-        return Err(crate::cli::NativeError {
-            exit: 3,
-            message: "BLAST engine error: unsupported score matrix\n".to_string(),
-        }
-        .into());
+        return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
     }
     Ok(())
 }
@@ -415,13 +411,19 @@ impl PreparedXml {
         ranges: &ReportRanges<'_>,
         mut warnings: Option<&mut QueryWarnings<'_>>,
     ) -> Result<()> {
+        // The document's start (`StructuredXml::start`), before the first query's warnings, also
+        // for a run that stops before its first report (its first batch fails) and for a run
+        // without a query.
+        let mut buf: Vec<u8> = Vec::new();
+        document.start(&mut buf);
+        writer.write_all(&buf)?;
+        buf.clear();
         let Some(positives) = &self.positives else {
             // A run without a query (with one, `prepare` refuses) and a matrix the formatting
             // table does not know (`-matrix blosum62`: TBLASTN runs it, the table does not):
             // NCBI never builds the table and writes the epilog alone (for outfmt 5 its end of
             // line).
             if ranges.epilog {
-                let mut buf = Vec::new();
                 document.finish(&mut buf)?;
                 writer.write_all(&buf)?;
             }
@@ -445,7 +447,6 @@ impl PreparedXml {
         };
         let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
         let mut taxdb_printer = self.taxa_notes.printer();
-        let mut buf: Vec<u8> = Vec::new();
         let mut masks: Vec<QueryMask> = Vec::new();
         let mut x_window: Vec<u8> = Vec::new();
         let mut qrow = String::new();
@@ -495,6 +496,15 @@ impl PreparedXml {
                 searched: self.searched[q_idx],
                 masks: &masks,
             };
+            // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): the texts of
+            // the subjects that the query's report reads one by one
+            // (`QueryWarnings::subject_read`) and the taxonomy database's messages.
+            let mut posts = crate::report::query_warnings::HitPosts::new(
+                warnings
+                    .as_deref()
+                    .is_some_and(|warnings| warnings.reads_with_texts(q_idx)),
+            );
+            let posting = warnings.is_some();
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
                 let lists = hitlist.lists();
                 ensure!(
@@ -521,9 +531,13 @@ impl PreparedXml {
                     // NCBI's messages about the taxonomy database: opening and the volume's
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time (nothing for the other formats).
-                    if let Some(warnings) = warnings.as_deref_mut() {
-                        taxdb_printer.at_names(first, names, &mut *warnings.sink)?;
-                    }
+                    posts.hit(sink.position(), first as u32, |texts| {
+                        if posting {
+                            taxdb_printer.at_names(first, names, texts)
+                        } else {
+                            Ok(())
+                        }
+                    })?;
                     sink.hit(&hit, |hsps| {
                         for list in &lists[range] {
                             if list.hsps.hsps.is_empty() {
@@ -545,14 +559,8 @@ impl PreparedXml {
                                 // translated coordinates use three nucleotide letters per
                                 // residue and reverse strand endpoints run in descending order.
                                 let subject_len = i32::try_from(subject_seq.len())?;
-                                let (s_start, s_end) = if frame > 0 {
-                                    (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
-                                } else {
-                                    (
-                                        subject_len - 3 * hsp.s_start + frame + 1,
-                                        subject_len - 3 * hsp.s_end + frame + 2,
-                                    )
-                                };
+                                let (s_start, s_end) =
+                                    super::stage_e_report::subject_endpoints(hsp, subject_len);
                                 // The rows, without the lower case of the masks.
                                 aligned_sequences_into(
                                     query_letters,
@@ -609,7 +617,13 @@ impl PreparedXml {
             });
             // A failed query leaves its partial bytes in `buf`, which the error return drops.
             written?;
-            writer.write_all(&buf)?;
+            crate::report::query_warnings::write_hit_posts(
+                &buf,
+                &posts,
+                q_idx,
+                writer,
+                warnings.as_deref_mut(),
+            )?;
             buf.clear();
         }
         if ranges.epilog {

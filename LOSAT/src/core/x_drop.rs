@@ -4,7 +4,9 @@
 //! (`BlastExtensionParametersNew`) and the X-drop of the composition-based redo
 //! (`s_GappingParamsNew`), and the X-drops that NCBI's gapped kernels can size
 //! (`kernel_x_drop_fits`). BLASTP, BLASTX, TBLASTN and TBLASTX convert their X-drops here, once
-//! per search or query batch, never in an extension loop.
+//! per search or query batch, never in an extension loop. The gap trigger in bits, the other cutoff
+//! of the extensions that a search gives in bits, converts here for every program
+//! (`gap_trigger_raw_score`).
 //!
 //! NCBI converts each double to `Int4` once. A value past `Int4` is converted as the x86-64 build
 //! of NCBI BLAST+ 2.17.0 (the oracle) converts it, to `INT_MIN`
@@ -45,6 +47,27 @@ use crate::core::blast_util::ncbi_int4_from_double;
 
 /// NCBI's `NCBIMATH_LN2` (`0.69314718055994530941723212145818`, the same double).
 const NCBIMATH_LN2: f64 = std::f64::consts::LN_2;
+
+/// A context's gap trigger (the raw score of an ungapped alignment that starts a gapped extension)
+/// from the gap trigger in bits and the context's ungapped block `kbp_std` (`lambda`, `k`): one
+/// conversion of the double for every program (psiblast's `-gap_trigger`, the defaults of 22 bits
+/// for proteins and 27 for blastn), `INT_MIN` past `Int4` as the X-drops (psiblast's
+/// `-gap_trigger 1e300`, `-1e300` or `-inf`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:338-345
+/// ```c
+///       if (sbp->kbp_std) {     /* this may not be set for gapped blastn */
+///          kbp = sbp->kbp_std[context];
+///          if (s_BlastKarlinBlkIsValid(kbp)) {
+///             gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 +
+///                                      kbp->logK) / kbp->Lambda);
+///          }
+///       }
+/// ```
+#[inline]
+pub(crate) fn gap_trigger_raw_score(bits: f64, lambda: f64, k: f64) -> i32 {
+    ncbi_int4_from_double((bits * NCBIMATH_LN2 + k.ln()) / lambda)
+}
 
 /// A context's ungapped X-drop (`x_dropoff_init`) from the X-drop in bits, the context's ungapped
 /// Lambda (`sbp->kbp[context]`) and the score block's scale factor: one conversion of the double

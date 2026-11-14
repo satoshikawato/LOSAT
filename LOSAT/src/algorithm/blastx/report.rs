@@ -413,12 +413,7 @@ pub(crate) fn alignment(
     // of the rows (a stored gap character of the subject is one).
     let mut gaps = 0;
     let mut subject_stored_gaps = Vec::new();
-    let script = if hsp.edit_script.is_empty() {
-        vec![GapEditOp::Sub(u32::try_from(raw.q_end - raw.q_start)?)]
-    } else {
-        hsp.edit_script.clone()
-    };
-    for op in script {
+    for op in display_script(hsp)? {
         let (count, consume_q, consume_s) = match op {
             GapEditOp::Sub(n) => (n, true, true),
             GapEditOp::Ins(n) => (n, true, false),
@@ -705,6 +700,48 @@ pub(crate) fn alignment(
         subject_stored_gaps,
     })
 }
+
+/// The operations of the display alignment of `hsp` (`alignment`, a column for each letter of an
+/// operation): its edit script, or one substitution of its query span without one.
+fn display_script(hsp: &Hsp) -> Result<Vec<GapEditOp>> {
+    let raw = &hsp.hsp;
+    Ok(if hsp.edit_script.is_empty() {
+        vec![GapEditOp::Sub(u32::try_from(raw.q_end - raw.q_start)?)]
+    } else {
+        hsp.edit_script.clone()
+    })
+}
+
+/// The values of the outfmt 0 row of `hsp`, of a query of `query_length` letters
+/// (`pairwise_hits`), that the report's sorts read (`HspScores::of`), without making the row, for
+/// the model of the reads (`ReportedSubjects::fetch_by_query`): the row's columns (those of
+/// `display_script`, `alignment`'s rows), `alignment`'s coordinates (`query_endpoints` and the
+/// subject's), the engine's identities (the row's `seqalign_num_ident`). The records' offsets of
+/// a ranged query move every HSP of the query alike (a database subject has none), which no sort
+/// reads, and are left out.
+pub(crate) fn hsp_scores(
+    hsp: &Hsp,
+    query_length: usize,
+) -> Result<crate::report::hit_sort::HspScores> {
+    let raw = &hsp.hsp;
+    let length = display_script(hsp)?
+        .iter()
+        .map(|op| op.num() as usize)
+        .sum();
+    let (qstart, qend) = query_endpoints(query_length, raw.frame, raw.q_start, raw.q_end);
+    Ok(crate::report::hit_sort::HspScores::of_values(
+        hsp.bit_score,
+        hsp.evalue,
+        hsp.identity,
+        length,
+        (usize::try_from(qstart)?, usize::try_from(qend)?),
+        (
+            usize::try_from(raw.s_start + 1)?,
+            usize::try_from(raw.s_end)?,
+        ),
+    ))
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
 // ```c++
 // CRef<CSeq_id> s_ReplaceLocalId(const CBioseq_Handle& bh, CConstRef<CSeq_id> sid_in, bool parse_local)
@@ -1021,6 +1058,16 @@ impl ShownSubjects<'_> {
             ShownSubjects::Fasta { .. } => &[],
         }
     }
+
+    /// The texts of the subjects that the query `ordinal`'s report reads one by one, which its
+    /// writer places where it reads each (`ReportedSubjects::query_reads`); empty otherwise.
+    pub(crate) fn query_reads(&self, ordinal: usize) -> &crate::report::query_warnings::QueryReads {
+        static NONE: crate::report::query_warnings::QueryReads = Vec::new();
+        match self {
+            ShownSubjects::Database { reported, .. } => reported.query_reads(ordinal),
+            ShownSubjects::Fasta { .. } => &NONE,
+        }
+    }
 }
 
 /// The records of a subject set whose ids `-parse_deflines` read, by subject index: as subjects
@@ -1127,7 +1174,7 @@ impl ShownSubjects<'_> {
 /// a document that holds each report back never writes the last query's
 /// (`blast_xml::written_queries`).
 pub(crate) fn render_queries(
-    writer: &mut impl Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     stderr: &mut dyn Write,
     options: &ResolvedOptions,
     queries: &[FastaRecord],
@@ -1186,7 +1233,7 @@ pub(super) fn reported_hsps(batches: &[BatchResults], gapped: bool) -> usize {
 /// `render_queries`, with what `run_local` adds (`local`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_queries_with(
-    writer: &mut impl Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     stderr: &mut dyn Write,
     options: &ResolvedOptions,
     queries: &[FastaRecord],
@@ -1306,12 +1353,13 @@ pub(super) fn render_queries_with(
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            stderr.write_all(&query_warning(
-                query,
-                batch.search_skipped,
-                options.filtered_empty,
-            ))?;
+            stderr.write_all(&query_warning(options, query, batch.search_skipped))?;
             stderr.write_all(shown.query_fetches(batch.query_ordinal + qidx))?;
+            // The texts of the subjects that the query's rows read one by one, written where they
+            // read each (`ReadCursor`, the query's only).
+            let mut reads = crate::report::query_warnings::ReadCursor::new(std::slice::from_ref(
+                shown.query_reads(batch.query_ordinal + qidx),
+            ));
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:779-783
             // ```c++
             //               m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader)
@@ -1380,7 +1428,12 @@ pub(super) fn render_queries_with(
                     })
                     .sum();
                 if comments {
-                    writeln!(writer, "# BLASTX {}", crate::NCBI_BLAST_VERSION)?;
+                    writeln!(
+                        writer,
+                        "# {} {}",
+                        options.program().upper,
+                        crate::NCBI_BLAST_VERSION
+                    )?;
                     writeln!(
                         writer,
                         "# Query: {}",
@@ -1430,18 +1483,33 @@ pub(super) fn render_queries_with(
                                 .join(", ")
                         )?;
                     }
-                    if !batch.search_skipped {
+                    // A merged result has an alignment set (`ResolvedOptions::merged_volumes`).
+                    if !batch.search_skipped || options.merged_volumes() {
                         writeln!(writer, "# {count} hits found")?;
                     }
                 }
-                for list in lists {
+                // Several volumes: the merged lists cut once per query (`ResolvedOptions::shown_lists`).
+                let listed = &lists[..lists.len().min(options.shown_lists())];
+                for list in listed {
                     let subject = &subjects[list.oid];
                     let shown_subject = ShownSubject {
                         ids: shown.subject_ids(subject, list.oid),
                     };
+                    let mut read = false;
                     for hsp in &list.hsps {
                         if !has_seqalign(hsp, options.gapped) {
                             continue;
+                        }
+                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+                        // ```c++
+                        //        		const CBioseq_Handle& subject_bh =
+                        //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+                        // ```
+                        // The subject's first row loads it where the query's batch did not
+                        // prefetch it: the texts of its taxonomy lookups follow the rows before it.
+                        if let (Some(reads), false) = (reads.as_mut(), read) {
+                            read = true;
+                            reads.subject_read(0, list.oid as u32, &mut *writer, &mut *stderr)?;
                         }
                         let a = alignment(batch, hsp, subject, query, &code, options.scoring)?;
                         let values: Vec<_> = options
@@ -1460,6 +1528,10 @@ pub(super) fn render_queries_with(
                         }
                         next_hsp += 1;
                     }
+                }
+                // A text whose read the rows did not place comes after them.
+                if let Some(reads) = reads.as_mut() {
+                    reads.before_query(1, &mut *writer, &mut *stderr)?;
                 }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
                 // ```c++
@@ -1522,6 +1594,9 @@ fn write_pairwise(
     let mut valid = Vec::new();
     let mut skipped = Vec::new();
     let mut warnings = Vec::new();
+    // The texts of the subjects that each query's report reads one by one, which the writer
+    // places where it reads each (`ShownSubjects::query_reads`).
+    let mut reads = Vec::new();
     for batch in batches {
         for qidx in 0..batch.queries.len() {
             let absolute = batch.query_ordinal + qidx;
@@ -1568,10 +1643,10 @@ fn write_pairwise(
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            let mut query_warnings =
-                query_warning(query, batch.search_skipped, options.filtered_empty);
+            let mut query_warnings = query_warning(options, query, batch.search_skipped);
             query_warnings.extend_from_slice(shown.query_fetches(batch.query_ordinal + qidx));
             warnings.push(query_warnings);
+            reads.push(shown.query_reads(batch.query_ordinal + qidx).clone());
             valid.push(first.is_some());
             skipped.push(batch.search_skipped);
         }
@@ -1613,9 +1688,17 @@ fn write_pairwise(
         ShownSubjects::Fasta { parsed, .. } => parsed.subjects.as_slice(),
         ShownSubjects::Database { .. } => &[],
     };
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:247-249
+    // ```c++
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+    // ```
     let config = PairwiseConfig {
         program: "blastx".into(),
         protein_matrix: options.scoring,
+        line_length: options.formatting.line_length(),
+        sort: options.report_sort(),
         ..PairwiseConfig::default()
     };
     write_blastx_pairwise_report(
@@ -1623,6 +1706,7 @@ fn write_pairwise(
         writer,
         stderr,
         &warnings,
+        &reads,
         &config,
         &qinfo,
         &valid,
@@ -1729,7 +1813,27 @@ pub(super) fn pairwise_hits(
                         comp_adjust_method: Some(u8::try_from(hsp.composition_method)?),
                         sum_n: Some(hsp.num),
                         subject_stored_gaps: a.subject_stored_gaps,
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:530-531
+                        // ```c
+                        //         else
+                        //             status = Blast_HSPGetNumIdentitiesAndPositives(query_nomask, subject, hsp, scoring_options, 0, sbp);
+                        // ```
+                        // The Seq-align's `num_ident` (`seqalign::query_records`): the engine's
+                        // identities on the unmasked query frame (`statistics::identity_and_positive`),
+                        // not those of the rows (`a.identity`), which the display's translation
+                        // and the subject's stored gap characters make.
+                        seqalign_num_ident: hsp.identity,
                     });
+                    // The model of the reads sorts by `hsp_scores` of the batch's query length
+                    // without the rows (`ReportedSubjects::fetch_by_query`): the row's values
+                    // where the records' offsets move nothing.
+                    debug_assert!(
+                        query.placement().offset != 0
+                            || subject.placement().offset != 0
+                            || hsp_scores(hsp, batch.prepared.original_lengths[qidx]).ok()
+                                == hits.last().map(crate::report::hit_sort::HspScores::of),
+                        "BLASTX hsp_scores differs from its row"
+                    );
                 }
             }
         }
@@ -1835,6 +1939,7 @@ pub(crate) fn write_prolog(
     if options.outfmt == 0 {
         crate::report::pairwise::write_blastx_prolog(
             writer,
+            options.program().upper,
             &pairwise_metadata(options, subjects, shown),
             shown.pairwise_database(),
         )?;
@@ -1842,7 +1947,13 @@ pub(crate) fn write_prolog(
     // Outfmt 20's line of the field names, after its formatter's warning
     // (`tabular::write_prolog`).
     if let Some(spec) = options.tabular {
-        super::tabular::write_prolog(spec, options.taxdb_found, &mut *writer, diagnostics)?;
+        super::tabular::write_prolog(
+            options.program(),
+            spec,
+            options.taxdb_found,
+            &mut *writer,
+            diagnostics,
+        )?;
     }
     Ok(())
 }
@@ -1939,6 +2050,7 @@ pub(crate) fn write_epilog(
         // the taxonomy database without `taxdb.bti` (`tabular::write_epilog_warning`).
         if let Some(spec) = options.tabular {
             super::tabular::write_epilog_warning(
+                options.program(),
                 spec,
                 options.taxdb_found,
                 &mut *writer,
@@ -2059,11 +2171,20 @@ pub(crate) fn write_epilog(
 // ```
 // Global errorId0 "Could..." precedes per-query "Sequence..." after Combine.
 pub(super) fn query_warning(
+    options: &ResolvedOptions,
     query: &FastaRecord,
     search_skipped: bool,
-    filtered_empty: bool,
 ) -> Vec<u8> {
-    let empty_database = filtered_empty && !search_skipped;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:173
+    // ```c++
+    // 			aggregate_messages.Combine(thread_results[d]->GetErrors());
+    // ```
+    // RPSTBLASTN's results of a database of several volumes are merged, which keeps the
+    // messages of error severity only (`ResolvedOptions::merged_volumes`).
+    if options.merged_volumes() {
+        return Vec::new();
+    }
+    let empty_database = options.filtered_empty && !search_skipped;
     if !query.sequence.is_empty() && !search_skipped && !empty_database {
         return Vec::new();
     }
@@ -2076,7 +2197,7 @@ pub(super) fn query_warning(
         id.truncate(25);
         id.extend_from_slice(b".. ");
     }
-    let mut bytes = b"Warning: [blastx] ".to_vec();
+    let mut bytes = format!("Warning: [{}] ", options.program().lower).into_bytes();
     bytes.extend_from_slice(&id);
     bytes.extend_from_slice(b": ");
     if search_skipped {

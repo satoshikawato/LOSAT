@@ -1,0 +1,10 @@
+Blast-db-mask-info ::= {
+  algo-id 0,
+  algo-program dust,
+  algo-options "o",
+  masks {
+    masks {
+    },
+    more FALSE
+  }
+}

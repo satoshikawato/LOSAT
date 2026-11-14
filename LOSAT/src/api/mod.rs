@@ -7,9 +7,9 @@
 //! # Use
 //!
 //! ```no_run
-//! use LOSAT::api::{read_fasta, run_collect, validate, Inputs, Program, Role};
+//! use losat::api::{read_fasta, run_collect, validate, Inputs, Program, Role};
 //!
-//! # fn main() -> Result<(), LOSAT::api::Error> {
+//! # fn main() -> Result<(), losat::api::Error> {
 //! let query = read_fasta(Program::Blastp, Role::Query, b">q\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n")?;
 //! let subject = read_fasta(Program::Blastp, Role::Subject, b">s\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n")?;
 //! let search = validate(Program::Blastp, &["-evalue", "1e-5", "-num_threads", "2"])?;
@@ -28,7 +28,7 @@
 //! `BLASTDB` search path):
 //!
 //! ```no_run
-//! # use LOSAT::api::{read_inputs, run_collect, validate, Error, Inputs, Program};
+//! # use losat::api::{read_inputs, run_collect, validate, Error, Inputs, Program};
 //! # fn use_it(fasta: &[u8]) -> Result<(), Error> {
 //! let search = validate(Program::Blastn, &["-taxids", "9606", "-evalue", "1e-5"])?;
 //! let (query, _) = read_inputs(&search, fasta, b"")?;
@@ -39,7 +39,7 @@
 //! Many queries, one of NCBI's query batches in memory at a time:
 //!
 //! ```no_run
-//! # use LOSAT::api::{run_batches, Error, Inputs, Search};
+//! # use losat::api::{run_batches, Error, Inputs, Search};
 //! # fn use_it(search: &Search, inputs: Inputs<'_>) -> Result<(), Error> {
 //! let batches = run_batches(search, inputs)?;
 //! let total = batches.query_count();
@@ -79,7 +79,30 @@
 //!   which change no output; the diagnostic variables of `docs/agents/diagnostics.md`) are read
 //!   here too. A database search reads what the command line reads to find a database (`BLASTDB`,
 //!   `.ncbirc`) and the query batch and archive settings (`BATCH_SIZE`, `ARCHIVE_FORMAT`, ...);
-//!   a search of records reads no NCBI setting.
+//!   a search of records reads no NCBI setting, unless its argv has one of the NCBI C++ Toolkit's
+//!   words below, but where NCBI's library looks one up itself: blastn's `-window_masker_taxid`,
+//!   the organism report of outfmt 18 and the file of a `-matrix` that NCBI's tables do not have
+//!   (tblastx, blastx `-ungapped`).
+//! - `-logfile`, `-conffile` and `-dryrun` work as on the command line: a call whose argv has one
+//!   runs NCBI's application start first (as does a call that reads NCBI's settings, when it
+//!   first reads them). The start's messages about the registry files go where the command line
+//!   writes them (the call's diagnostics stand for its standard error), the `-logfile` file gets
+//!   what the command line writes there (with tblastx, the messages and the errors of its run
+//!   too), and a start that ends the command line's program is an [`Error::Search`] with its
+//!   text. The registry and environment settings that the command line refuses after its start
+//!   are the call's [`Error::Search`] then, with the command line's text after `Error: `. With
+//!   `-dryrun` ([`Search::dry_run`]) a call ends after the start, the settings and the parse of
+//!   the argv with the call's kind of subject (`-subject_loc` with a database fails as without
+//!   `-dryrun`): no record or `-outfmt` value is read, no report is written. The versions and
+//!   `-xmlhelp`, whose texts only the command line writes, are refused ([`validate`]); the tools
+//!   print the versions. [`validate`] parses the argv without the start, which runs with each
+//!   search: an argv that the parser refuses makes no `-logfile` file (the command line's start
+//!   has made it before its parser's error), and one whose start ends the command line's program
+//!   before its arguments are read (a missing `-conffile` file) and that the parser refuses too
+//!   (two `-conffile`) gets the parser's error there. As any error of [`run_collect`] and
+//!   [`run_batches`], one of the start carries its message alone: the start's messages before it
+//!   (a usage report's) were in the call's diagnostics, which an error does not return; [`run`]
+//!   has written them to its writer.
 //! - [`run_batches`] searches one of NCBI's query batches at a time: the host reports progress
 //!   between batches and stops the search by not asking for the next one. Inside a batch only
 //!   the host can stop it, by ending the thread or the process.
@@ -91,8 +114,12 @@
 //! - [`Program::Psiblast`] is the search of LOSAT's `psiblast`: its first round, and the formats
 //!   it writes. The API writes no PSSM file, so it refuses `-out_pssm`, `-out_ascii_pssm`,
 //!   `-save_pssm_after_last_round` and `-save_each_pssm` ([`validate`]).
-//! - [`run_makeblastdb`] and [`run_blastdbcmd`] are the two database programs: the command line's
-//!   words, with the caller's writers for its standard streams.
+//! - The API writes no search strategy file either: every program refuses
+//!   `-export_search_strategy` ([`validate`]); the command line writes it.
+//! - [`run_makeblastdb`] and [`run_blastdbcmd`] are the two database programs, and
+//!   [`run_dustmasker`] and [`run_segmasker`] the maskers of low-complexity regions (nucleotide,
+//!   protein) and [`run_convert2blastmask`] the converter of lower case masks: the command
+//!   line's words, with the caller's reader and writers for its standard streams.
 //!
 //! # Items
 //!
@@ -104,7 +131,8 @@
 //! - The search: [`run_collect`], [`run`](run()), [`run_to_file`], [`run_batches`]
 //! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`QueryStats`],
 //!   [`Strand`], [`QueryHits`], [`SubjectHits`]
-//! - The database programs: [`run_makeblastdb`], [`run_blastdbcmd`]
+//! - The tools: [`run_makeblastdb`], [`run_blastdbcmd`], [`run_dustmasker`], [`run_segmasker`],
+//!   [`run_convert2blastmask`]
 //! - The failures: [`Error`]
 //! - The engine's version: [`VERSION`]
 
@@ -118,6 +146,7 @@ pub(crate) mod local_blast;
 mod program;
 mod run;
 mod search;
+mod start;
 mod tools;
 mod view;
 
@@ -128,8 +157,11 @@ pub use error::Error;
 pub use input::{read_fasta, read_input_file, read_inputs, Inputs, Role};
 pub use program::Program;
 pub use run::{run, run_collect, run_to_file, HspRecord, Outcome, QueryStats, Report, Strand};
+pub(crate) use search::file_options;
 pub use search::{validate, Search, API_OWNED};
-pub use tools::{run_blastdbcmd, run_makeblastdb};
+pub use tools::{
+    run_blastdbcmd, run_convert2blastmask, run_dustmasker, run_makeblastdb, run_segmasker,
+};
 pub use view::{QueryHits, SubjectHits};
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/version.hpp:49-57

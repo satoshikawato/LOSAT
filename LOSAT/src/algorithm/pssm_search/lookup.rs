@@ -76,6 +76,19 @@ pub(crate) fn build_pssm_lookup<R: PssmRows>(
     word_length: usize,
     threshold: i32,
 ) -> BlastAaLookupTable<BackboneCell> {
+    build_pssm_lookup_in(rows, word_length, threshold, &[(0, rows.len() as i64 - 1)])
+}
+
+/// `build_pssm_lookup` over the lookup segments `locations` (NCBI's `lookup_segments`, inclusive
+/// `[left, right]` ranges of query offsets; one with `left > right` adds no word): the
+/// complement of the query's filtering locations (tblastn `-in_pssm`, whose SEG masks keep words
+/// out of the table, `algorithm::tblastn::in_pssm`).
+pub(crate) fn build_pssm_lookup_in<R: PssmRows>(
+    rows: &R,
+    word_length: usize,
+    threshold: i32,
+    locations: &[(i64, i64)],
+) -> BlastAaLookupTable<BackboneCell> {
     // ilog2(28) + 1
     let charsize = 5usize;
     let mut backbone_size = 0usize;
@@ -90,11 +103,11 @@ pub(crate) fn build_pssm_lookup<R: PssmRows>(
         // §4.3: no generic helper shared with the default path).
         chains: (0..backbone_size).map(|_| Vec::new()).collect(),
     };
-    add_pssm_neighboring_words(&mut thin, rows, word_length, charsize, threshold);
+    add_pssm_neighboring_words(&mut thin, rows, word_length, charsize, threshold, locations);
     finalize(thin, rows.len(), word_length, charsize, mask, threshold)
 }
 
-/// `s_AddPSSMNeighboringWords` for the one location `[0, len - 1]`.
+/// `s_AddPSSMNeighboringWords` over the lookup segments `locations`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:623-658
 /// ```c
@@ -140,11 +153,8 @@ fn add_pssm_neighboring_words<R: PssmRows>(
     wordsize: usize,
     charsize: usize,
     threshold: i32,
+    locations: &[(i64, i64)],
 ) {
-    let len = rows.len();
-    if len < wordsize {
-        return;
-    }
     let row_max_of = |pos: usize| -> i32 {
         let row = rows.row(pos);
         let mut max = row[0];
@@ -154,14 +164,21 @@ fn add_pssm_neighboring_words<R: PssmRows>(
         max
     };
     let mut row_max = vec![0i32; wordsize];
-    for (i, slot) in row_max.iter_mut().enumerate().take(wordsize - 1) {
-        *slot = row_max_of(i);
-    }
-    for offset in 0..=len - wordsize {
-        row_max[wordsize - 1] = row_max_of(offset + wordsize - 1);
-        add_pssm_word_hits(thin, rows, offset, wordsize, charsize, threshold, &row_max);
-        for i in 0..wordsize - 1 {
-            row_max[i] = row_max[i + 1];
+    for &(from, right) in locations {
+        let to = right - wordsize as i64 + 1;
+        if to < from {
+            continue;
+        }
+        let (from, to) = (from as usize, to as usize);
+        for (i, slot) in row_max.iter_mut().enumerate().take(wordsize - 1) {
+            *slot = row_max_of(from + i);
+        }
+        for offset in from..=to {
+            row_max[wordsize - 1] = row_max_of(offset + wordsize - 1);
+            add_pssm_word_hits(thin, rows, offset, wordsize, charsize, threshold, &row_max);
+            for i in 0..wordsize - 1 {
+                row_max[i] = row_max[i + 1];
+            }
         }
     }
 }
@@ -426,6 +443,31 @@ mod tests {
         // Threshold 16: no word reaches it (the best is 15), not even the query's own.
         let table = build_pssm_lookup(&rows, 3, 16);
         assert!(table.backbone.iter().all(|cell| cell.num_used == 0));
+    }
+
+    // NCBI blast_aalookup.c:623-658: the words of each lookup segment, none across a masked
+    // position; a segment shorter than a word and an inverted one add nothing.
+    #[test]
+    fn words_come_from_the_lookup_segments_only() {
+        let mut rows = vec![[-4i32; BLASTAA_SIZE]; 6];
+        for (pos, letter) in [1usize, 3, 4, 1, 3, 4].into_iter().enumerate() {
+            rows[pos][letter] = 5;
+        }
+        let rows = pssm(rows);
+        // Position 3 masked: the segments [0, 2] and [4, 5]; only the word at 0 fits.
+        let table = build_pssm_lookup_in(&rows, 3, 11, &[(0, 2), (4, 5)]);
+        assert_eq!(hits(&table, &[1, 3, 4]), vec![0]);
+        assert!(hits(&table, &[3, 4, 1]).is_empty());
+        assert!(hits(&table, &[4, 1, 3]).is_empty());
+        // The whole query as one segment is `build_pssm_lookup`'s table.
+        let whole = build_pssm_lookup_in(&rows, 3, 11, &[(0, 5)]);
+        let all = build_pssm_lookup(&rows, 3, 11);
+        assert_eq!(whole.pv, all.pv);
+        for word in [[1, 3, 4], [3, 4, 1], [4, 1, 3]] {
+            assert_eq!(hits(&whole, &word), hits(&all, &word));
+        }
+        let none = build_pssm_lookup_in(&rows, 3, 11, &[(6, 5)]);
+        assert!(none.backbone.iter().all(|cell| cell.num_used == 0));
     }
 
     // Chains of more than three offsets go to the overflow array in index order, with the cell's

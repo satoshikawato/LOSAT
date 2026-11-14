@@ -15,8 +15,8 @@
 
 pub(crate) mod defline_ids;
 mod line_reader;
-mod pack;
-mod reader;
+pub(crate) mod pack;
+pub(crate) mod reader;
 #[cfg(test)]
 mod tests;
 mod title;
@@ -26,18 +26,27 @@ pub(crate) use title::fasta_reader_fasta;
 
 use std::io::Read;
 
-use super::bioseq::{Bioseq, ParsedIds, SeqData};
-use reader::{DeltaSeq, FastaReader, ReadError, SeqInst};
+use super::bioseq::{Bioseq, ParsedIds, PastSeqPos, SeqData};
+use reader::{
+    DeltaSeq, FastaReader, PastSeqPosForm, ReadError, ReaderFlags, ReaderWarning, SeqInst,
+};
 
-/// An error that ends the reading: the message makeblastdb prints after
-/// "BLAST Database creation error: ".
+/// An error that ends the reading: its message and how makeblastdb reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceError {
     pub message: String,
-    /// The error is a failed allocation for a length that the input states
-    /// (`std::bad_alloc` in NCBI): makeblastdb then prints `message` alone, "BLAST ran
-    /// out of memory", and exits with its status for that.
-    pub out_of_memory: bool,
+    pub kind: SourceErrorKind,
+}
+
+/// How makeblastdb reports a `SourceError`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceErrorKind {
+    /// NCBI's error: the message after "BLAST Database creation error: ".
+    Creation,
+    /// A failed allocation for a length that the input states (`std::bad_alloc` in NCBI):
+    /// makeblastdb prints the message alone, "BLAST ran out of memory", and exits with its
+    /// status for that.
+    OutOfMemory,
 }
 
 impl SourceError {
@@ -54,7 +63,7 @@ impl SourceError {
     fn out_of_memory() -> Self {
         Self {
             message: "BLAST ran out of memory".to_string(),
-            out_of_memory: true,
+            kind: SourceErrorKind::OutOfMemory,
         }
     }
 }
@@ -83,38 +92,14 @@ impl<R: Read> FastaBioseqSource<R> {
     ///     : m_FastaReader(NULL)
     /// {
     ///     m_LineReader.Reset(new CBufferedLineReader(fasta_file));
-    ///     typedef CFastaReader::EFlags TFlags;
-    ///
-    ///     int iflags = CFastaReader::fForceType;
-    ///
-    ///     if (is_protein) {
-    ///         iflags |= CFastaReader::fAssumeProt;
-    ///     } else {
-    ///         iflags |= CFastaReader::fAssumeNuc;
-    ///         iflags |=  CFastaReader::fParseGaps;
-    ///     }
-    ///
-    ///     if (parse_ids) {
-    ///         iflags |= CFastaReader::fRequireID;
-    ///         // parse bare accessions
-    ///         if (!long_ids) {
-    ///             iflags |= CFastaReader::fParseRawID;
-    ///         }
-    ///     } else {
-    ///         iflags |= CFastaReader::fNoParseID;
-    ///     }
-    ///
-    ///     iflags |= CFastaReader::fQuickIDCheck;
-    ///     iflags |= CFastaReader::fDisableNoResidues;
-    ///
-    ///     TFlags flags = (TFlags) iflags;
-    ///
-    ///     m_FastaReader = new CFastaReader(*m_LineReader, flags);
     /// ```
-    /// The flags are those of `reader`.
+    /// The flags are quoted at `reader::ReaderFlags::fasta_bioseq_source`.
     pub fn with_parse_ids(input: R, is_protein: bool, parse_ids: bool) -> Self {
         Self {
-            reader: Some(FastaReader::new(input, is_protein, parse_ids)),
+            reader: Some(FastaReader::new(
+                input,
+                ReaderFlags::fasta_bioseq_source(is_protein, parse_ids),
+            )),
         }
     }
 
@@ -188,8 +173,9 @@ impl<R: Read> FastaBioseqSource<R> {
     /// `s_FixBioseqDeltas` can make a sequence longer (a gap of unknown length becomes one
     /// `N`) but not empty or the reverse, so `Bioseq::length` is the length after it. A
     /// record above 2,147,483,647 residues is returned with its length and no sequence
-    /// data: NCBI stops at that length, before `x_EditAndAddBioseq`. (NCBI counts in 32
-    /// bits and a record of 4,294,967,296 residues or more wraps there; LOSAT counts on.)
+    /// data: NCBI stops at that length, before `x_EditAndAddBioseq`. NCBI counts in 32
+    /// bits: a record of 4,294,967,296 residues or more (gaps included) has the length of
+    /// its count modulo 2^32 (`reader::SeqInst::PastSeqPos`, `Bioseq::past_seq_pos`).
     ///
     /// A failed read of the input ends the reading with "Read error" and the system's
     /// message (LOSAT's text: NCBI's line reader throws a `CIOException` "Read error").
@@ -198,16 +184,21 @@ impl<R: Read> FastaBioseqSource<R> {
         let Some(reader) = &mut self.reader else {
             return Ok(None);
         };
-        if reader.lines.at_eof() {
-            let read_error = reader.lines.take_read_error();
+        if reader.at_eof() {
+            let read_error = reader.take_read_error();
             self.reader = None;
             return match read_error {
                 Some(error) => Err(read_error_message(&error)),
                 None => Ok(None),
             };
         }
-        let record = reader.read_one_seq(warn);
-        if let Some(error) = reader.lines.take_read_error() {
+        // makeblastdb writes a warning of the reader as its line, and a warning of the
+        // Seq-id parser with its prefix.
+        let record = reader.read_one_seq(&mut |warning| match warning {
+            ReaderWarning::Line(line) => warn(line),
+            ReaderWarning::SeqId(warning) => post_seq_id_warning(warning, &mut *warn),
+        });
+        if let Some(error) = reader.take_read_error() {
             self.reader = None;
             return Err(read_error_message(&error));
         }
@@ -216,6 +207,14 @@ impl<R: Read> FastaBioseqSource<R> {
             Err(ReadError::OutOfMemory) => {
                 self.reader = None;
                 return Err(SourceError::out_of_memory());
+            }
+            Err(ReadError::Ncbi(exception)) => {
+                // Only convert2blastmask's reader throws other exceptions.
+                self.reader = None;
+                return Err(SourceError {
+                    message: exception.get_msg().to_string(),
+                    kind: SourceErrorKind::Creation,
+                });
             }
             Err(ReadError::Parse(error)) => {
                 self.reader = None;
@@ -226,11 +225,11 @@ impl<R: Read> FastaBioseqSource<R> {
                     .unwrap_or(message);
                 return Err(SourceError {
                     message,
-                    out_of_memory: false,
+                    kind: SourceErrorKind::Creation,
                 });
             }
         };
-        let is_aa = reader.is_protein();
+        let is_aa = record.is_aa;
         // With `-parse_seqids` the definition lines depend on the ids that
         // `AddSequences` edits first: the writer builds them (`writedb::deflines`).
         let (title, parsed) = if reader.parses_ids() {
@@ -248,14 +247,40 @@ impl<R: Read> FastaBioseqSource<R> {
                     self.reader = None;
                     return Err(SourceError {
                         message: message.to_string(),
-                        out_of_memory: false,
+                        kind: SourceErrorKind::Creation,
                     });
                 }
             }
         };
-        let Ok((length, seq_data)) = fix_bioseq_deltas(record.inst) else {
-            self.reader = None;
-            return Err(SourceError::out_of_memory());
+        // A record past NCBI's 32-bit length comes with NCBI's (wrapped) length and no data:
+        // `AddSequences` skips it or stops at its length first, as any record
+        // (`CBuildDatabase::add_sequences`), and `s_FixBioseqDeltas` then throws for a protein
+        // delta, returns a delta that starts with `Seq-loc null` unchanged (no data), or
+        // builds the data, which LOSAT refuses (`PastSeqPos::Refused`).
+        let (length, seq_data, past_seq_pos) = match record.inst {
+            SeqInst::PastSeqPos {
+                length,
+                seq_pos_length,
+                form,
+            } => {
+                let past = match form {
+                    PastSeqPosForm::Delta | PastSeqPosForm::DeltaFromNull if is_aa => {
+                        Some(PastSeqPos::ProteinDelta)
+                    }
+                    PastSeqPosForm::DeltaFromNull => None,
+                    PastSeqPosForm::Delta | PastSeqPosForm::Residues => {
+                        Some(PastSeqPos::Refused { length })
+                    }
+                };
+                (seq_pos_length, None, past)
+            }
+            inst => {
+                let Ok((length, seq_data)) = fix_bioseq_deltas(inst) else {
+                    self.reader = None;
+                    return Err(SourceError::out_of_memory());
+                };
+                (length, seq_data, None)
+            }
         };
         Ok(Some(Bioseq {
             local_id: record.local_id.to_string(),
@@ -264,6 +289,7 @@ impl<R: Read> FastaBioseqSource<R> {
             length,
             seq_data,
             parsed,
+            past_seq_pos,
         }))
     }
 }
@@ -271,7 +297,7 @@ impl<R: Read> FastaBioseqSource<R> {
 fn read_error_message(error: &std::io::Error) -> SourceError {
     SourceError {
         message: format!("Read error: {error}"),
-        out_of_memory: false,
+        kind: SourceErrorKind::Creation,
     }
 }
 
@@ -453,6 +479,8 @@ fn fix_bioseq_deltas(
     Ok(match inst {
         SeqInst::Virtual => (0, None),
         SeqInst::TooLong { length } => (length, None),
+        // `next_bioseq` hands a record past NCBI's `TSeqPos` over without calling this.
+        SeqInst::PastSeqPos { seq_pos_length, .. } => (seq_pos_length, None),
         SeqInst::Raw { length, seq_data } => (length, Some(seq_data)),
         SeqInst::Delta {
             length,

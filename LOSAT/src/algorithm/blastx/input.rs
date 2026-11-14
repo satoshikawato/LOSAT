@@ -16,6 +16,7 @@ use crate::blastinput::fasta_reader::RecordSource;
 use crate::blastinput::seq_range::{
     record_interval, RecordInterval, RecordPlacement, SequenceRange,
 };
+use crate::ncbi_str::{is_space, truncate_spaces, truncate_spaces_begin, truncate_spaces_end};
 
 #[derive(Debug, Clone)]
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:619-631
@@ -612,7 +613,8 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         let line = if is_header {
             header
         } else {
-            trim_input_space(line)
+            // `NStr::TruncateSpaces_Unsafe(*++GetLineReader())` (`eTrunc_Both`, fasta.cpp:376).
+            truncate_spaces(line)
         };
         // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:399-408
         // ```c++
@@ -812,7 +814,8 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                     &mut records,
                     pending_title_warning.take(),
                     protein,
-                    parse_deflines.and_then(|read| read.id_scope),
+                    parse_deflines
+                        .and_then(|read| read.id_scope.map(|scope| (scope, read.program.upper))),
                     warn,
                 )?;
                 emit_fasta_batch(&mut records, batch_size, &mut batch, deliver)?;
@@ -840,16 +843,18 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 )?),
                 None => None,
             };
+            // The `isspace` skip before the title (`eTrunc_Begin`), then
+            // `NStr::TruncateSpacesInPlace(processed_title)` at its end (fasta.cpp:2038).
             let title_bytes = match &believed {
-                Some(defline) => trim_input_start(&line[defline.title_search..]),
-                None => trim_input_start(&line[1..]),
+                Some(defline) => truncate_spaces_begin(&line[defline.title_search..]),
+                None => truncate_spaces_begin(&line[1..]),
             };
             let end = title_bytes
                 .iter()
                 .skip(1)
                 .position(|&b| b < b' ')
                 .map_or(title_bytes.len(), |i| i + 1);
-            let title = String::from_utf8(trim_input_end(&title_bytes[..end]).to_vec())
+            let title = String::from_utf8(truncate_spaces_end(&title_bytes[..end]).to_vec())
                 .context("invalid UTF-8 FASTA title")?;
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1623-1677
             // ```c++
@@ -977,7 +982,12 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             if c == b';' {
                 break;
             }
-            if input_space(c) {
+            // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:930-931
+            // ```c++
+            //         case '\t': case '\n': case '\v': case '\f': case '\r': case ' ':
+            //             continue;
+            // ```
+            if is_space(c) {
                 continue;
             }
             if c == b'-' {
@@ -1045,7 +1055,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             &mut records,
             pending_title_warning.take(),
             protein,
-            parse_deflines.and_then(|read| read.id_scope),
+            parse_deflines.and_then(|read| read.id_scope.map(|scope| (scope, read.program.upper))),
             warn,
         )?;
         emit_fasta_batch(&mut records, batch_size, &mut batch, deliver)?;
@@ -1071,6 +1081,8 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
 struct BelievedRead<'a> {
     strand: crate::report::archive::bioseq::SeqLocStrand,
     id_scope: Option<&'a crate::seqid::id_scope::IdScope>,
+    /// The program of the reader's messages (`FastaStream::program`).
+    program: super::args::ProgramName,
 }
 
 /// A defline under `-parse_deflines` (`fasta_reader::believed`).
@@ -1093,24 +1105,30 @@ fn read_believed_defline(
 ) -> Result<BelievedLine> {
     use crate::blastinput::fasta_reader::believed::{
         duplicate_id, generated_ids, named_molecule, parse_believed_defline,
-        refuse_range_in_archive, BelievedIds,
+        refuse_range_in_archive, refused_id, BelievedIds,
     };
     let mut written = Ok(());
-    let parsed = parse_believed_defline(line, protein, "blastx", line_number, &mut |message| {
-        if written.is_ok() {
-            written = warn(&InputWarning {
-                line: line_number as usize,
-                kind: "defline_id",
-                positions: Vec::new(),
-                text: message.to_vec(),
-            });
-        }
-    });
+    let parsed = parse_believed_defline(
+        line,
+        protein,
+        read.program.lower,
+        line_number,
+        &mut |message| {
+            if written.is_ok() {
+                written = warn(&InputWarning {
+                    line: line_number as usize,
+                    kind: "defline_id",
+                    positions: Vec::new(),
+                    text: message.to_vec(),
+                });
+            }
+        },
+    );
     written?;
     let parsed = parsed.map_err(FastaParseError)?;
     let role = if protein { "subject" } else { "query" };
     if parsed.range && keep_defline {
-        return Err(refuse_range_in_archive(role, "BLASTX"));
+        return Err(refuse_range_in_archive(role, read.program.upper));
     }
     let molecule = named_molecule(&parsed.ids);
     let ids = if parsed.ids.is_empty() || parsed.range {
@@ -1122,7 +1140,15 @@ fn read_believed_defline(
     } else {
         parsed.ids
     };
-    if let Some(refusal) = duplicate_id(&ids, keys, role, "BLASTX") {
+    // Two queries with one id are the scopes' of the query batches (`QueryScopes`, which the
+    // search adds as the reader delivers the batches): NCBI's formatter empties the scope after
+    // each batch against a database.
+    let refusal = refused_id(&ids, role, "-parse_deflines", read.program.upper).or_else(|| {
+        protein
+            .then(|| duplicate_id(&ids, keys, role, read.program.upper))
+            .flatten()
+    });
+    if let Some(refusal) = refusal {
         return Err(refusal);
     }
     Ok(BelievedLine {
@@ -1186,7 +1212,7 @@ fn finish_record(
     records: &mut Vec<FastaRecord>,
     title_warning: Option<InputWarning>,
     protein: bool,
-    id_scope: Option<&crate::seqid::id_scope::IdScope>,
+    id_scope: Option<(&crate::seqid::id_scope::IdScope, &str)>,
     warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
 ) -> Result<()> {
     if let Some(warning) = title_warning {
@@ -1194,9 +1220,9 @@ fn finish_record(
         record.warnings.push(warning);
     }
     // A nucleotide query and a protein subject are never one record (`RecordMark`).
-    if let (Some(scope), Some(believed)) = (id_scope, record.believed()) {
+    if let (Some((scope, program)), Some(believed)) = (id_scope, record.believed()) {
         let role = if protein { "subject" } else { "query" };
-        scope.add_record(&believed.ids, None, role, "BLASTX")?;
+        scope.add_record(&believed.ids, None, role, program)?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:334-340
     // ```c++
@@ -1264,7 +1290,7 @@ fn check_data_line(line: &[u8], number: usize) -> Result<()> {
             good += 1;
         } else if c == b';' {
             break;
-        } else if c != b'-' && !input_space(c) && !c.is_ascii_digit() {
+        } else if c != b'-' && !is_space(c) && !c.is_ascii_digit() {
             bad += 1;
         }
     }
@@ -1724,7 +1750,7 @@ pub(crate) fn stream_is_empty<R: Read + Seek>(stream: &mut FastaStream<R>) -> bo
     loop {
         match input.read(&mut byte) {
             Ok(0) | Err(_) => return true,
-            Ok(_) if input_space(byte[0]) => {}
+            Ok(_) if is_space(byte[0]) => {}
             Ok(_) => {
                 // IsIStreamEmpty restores position only after successful extraction.
                 // NCBI unconditionally clears seekg failure and restores orig_state.
@@ -1831,6 +1857,9 @@ pub(crate) struct FastaStream<R: Read> {
     /// Seq-id (`fasta_reader::seq_id::reject_seq_id_line`); `None` reads every first line as
     /// FASTA, as NCBI does with the data loaders off.
     pub(crate) seq_id_role: Option<&'static str>,
+    /// The program of the reader's messages (`args::ProgramName`; BLASTX unless the run is
+    /// RPSTBLASTN's, `QueryStreamSettings::program`).
+    pub(crate) program: super::args::ProgramName,
     /// `CStreamLineReader::UngetLine`: the line that the next read gives again (the Seq-id step
     /// of `read_fasta_stream` read it and handed it back).
     unget_line: Option<Vec<u8>>,
@@ -1903,6 +1932,7 @@ impl<R: Read> FastaStream<R> {
             id_scope: None,
             strand: crate::report::archive::bioseq::SeqLocStrand::Both,
             seq_id_role: None,
+            program: super::args::ProgramName::BLASTX,
             unget_line: None,
         }
     }
@@ -2442,6 +2472,8 @@ pub(crate) struct QueryStreamSettings {
     pub(crate) strand: crate::report::archive::bioseq::SeqLocStrand,
     /// NCBI's data loaders (`FastaStream::seq_id_role`).
     pub(crate) data_loaders: bool,
+    /// The program of the reader's messages (`FastaStream::program`).
+    pub(crate) program: super::args::ProgramName,
 }
 
 impl QueryStreamSettings {
@@ -2452,6 +2484,7 @@ impl QueryStreamSettings {
         stream.id_scope = self.id_scope.clone();
         stream.strand = self.strand;
         stream.seq_id_role = self.data_loaders.then_some("query");
+        stream.program = self.program;
         stream
     }
 
@@ -2680,6 +2713,7 @@ fn read_fasta_stream<R: Read>(
     let parse_deflines = stream.parse_deflines.then_some(BelievedRead {
         strand: stream.strand,
         id_scope: id_scope.as_deref(),
+        program: stream.program,
     });
     // A file without records gives one empty batch; one whose records a range skipped gave it
     // already.
@@ -2708,9 +2742,11 @@ fn read_fasta_stream<R: Read>(
     // (`UngetLine`).
     if let Some(role) = stream.seq_id_role {
         if let Some(line) = stream.next() {
-            if let Some(refusal) =
-                crate::blastinput::fasta_reader::seq_id::reject_seq_id_line(&line, "BLASTX", role)
-            {
+            if let Some(refusal) = crate::blastinput::fasta_reader::seq_id::reject_seq_id_line(
+                &line,
+                stream.program.upper,
+                role,
+            ) {
                 return Err(refusal);
             }
             stream.unget_line = Some(line);
@@ -2735,65 +2771,6 @@ fn read_fasta_stream<R: Read>(
         deliver(&[])?;
     }
     Ok(records)
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:930-931
-// ```c++
-//         case '\t': case '\n': case '\v': case '\f': case '\r': case ' ':
-//             continue;
-// ```
-fn input_space(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
-}
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3153-3161
-// ```c++
-//     SIZE_TYPE beg = 0;
-//     if (where == NStr::eTrunc_Begin  ||  where == NStr::eTrunc_Both) {
-//         _ASSERT(beg < length);
-//         while ( isspace((unsigned char) str[beg]) ) {
-//             if (++beg == length) {
-//                 return empty_str;
-//             }
-//         }
-//     }
-// ```
-fn trim_input_start(bytes: &[u8]) -> &[u8] {
-    let start = bytes
-        .iter()
-        .position(|&byte| !input_space(byte))
-        .unwrap_or(bytes.len());
-    &bytes[start..]
-}
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3162-3172
-// ```c++
-//     SIZE_TYPE end = length;
-//     if ( where == NStr::eTrunc_End  ||  where == NStr::eTrunc_Both ) {
-//         _ASSERT(beg < end);
-//         while (isspace((unsigned char) str[--end])) {
-//             if (beg == end) {
-//                 return empty_str;
-//             }
-//         }
-//         _ASSERT(beg <= end  &&  !isspace((unsigned char) str[end]));
-//         ++end;
-//     }
-// ```
-fn trim_input_end(bytes: &[u8]) -> &[u8] {
-    let end = bytes
-        .iter()
-        .rposition(|&byte| !input_space(byte))
-        .map_or(0, |p| p + 1);
-    &bytes[..end]
-}
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3187-3190
-// ```c++
-// CTempString NStr::TruncateSpaces_Unsafe(const CTempString str, ETrunc where)
-// {
-//     return s_TruncateSpaces(str, where, CTempString());
-// }
-// ```
-fn trim_input_space(bytes: &[u8]) -> &[u8] {
-    trim_input_end(trim_input_start(bytes))
 }
 
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
@@ -3805,6 +3782,7 @@ mod query_settings_tests {
     #[test]
     fn a_read_before_the_search_reads_as_the_search_and_keeps_the_search_ids() {
         let settings = QueryStreamSettings {
+            program: crate::algorithm::blastx::args::ProgramName::BLASTX,
             parse_deflines: true,
             id_scope: Some(Default::default()),
             strand: crate::report::archive::bioseq::SeqLocStrand::Both,

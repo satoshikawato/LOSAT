@@ -1,24 +1,23 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { RunOutputWriter, sha256Hex } from 'losat';
+import { CUSTOM_OUTPUT } from 'losat/domain';
+import {
+  DIAGNOSTICS_STREAM,
+  type EngineGateway,
+  type EnginePhase,
+  type EngineRunRequest,
+  type RuntimeInfo,
+  type ValidationResult,
+} from 'losat/ports';
 import { Coordinator, type SearchRequest } from '../../src/application/coordinator';
-import { CUSTOM_OUTPUT } from '../../src/domain/output-format';
 import type { RunStatus } from '../../src/domain/run';
-import { sha256Hex } from '../../src/infra/browser/platform';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine, FAKE_MARKER } from '../../src/infra/fake/fake-engine';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
-import { RunOutputWriter } from '../../src/infra/run-output/writer';
 import type { DataGateway } from '../../src/ports/data';
 import type { Downloader } from '../../src/ports/download';
-import type {
-  EngineGateway,
-  EnginePhase,
-  EngineRunRequest,
-  RuntimeInfo,
-  ValidationResult,
-} from '../../src/ports/engine';
-import { DIAGNOSTICS_STREAM } from '../../src/ports/run-output';
 import { NodeInflater } from './support/node-inflater';
 
 const request: SearchRequest = {

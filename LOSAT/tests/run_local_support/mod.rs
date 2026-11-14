@@ -1,5 +1,5 @@
 //! The harness shared by the `run_local` tests of every program that compare a search with the
-//! `losat` binary: the temporary FASTA files, and a search of files through `LOSAT::api` (the
+//! `losat` binary: the temporary FASTA files, and a search of files through `losat::api` (the
 //! library's entry, which calls the same `run_local_*` functions as the command line), with the
 //! reports, the warnings and the error that the command line gives. The tests of the entry's own
 //! contract (its sinks, its observer, its refusals of hand-set arguments) are in the crate
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use LOSAT::api::{
+use losat::api::{
     read_fasta, read_input_file, read_inputs, run, run_collect, run_to_file, validate, Error,
     FastaRecord, Inputs, Outcome, Program, Role,
 };
@@ -162,7 +162,7 @@ impl<'a> Files<'a> {
     fn with_records<T>(
         &self,
         options: &[&str],
-        with: impl FnOnce(&LOSAT::api::Search, Inputs<'_>) -> Result<T, Error>,
+        with: impl FnOnce(&losat::api::Search, Inputs<'_>) -> Result<T, Error>,
     ) -> Result<T, Error> {
         let search = validate(self.program, options)?;
         let (query, subject) = read_inputs(

@@ -8,11 +8,13 @@
 // page goes to its results (`submitted`), as NCBI's BLAST button does. Explanatory copy follows
 // stop-describing-ui (Owner, 2026-11-02): NCBI's sentences stay, LOSAT's explanations go.
 import { computed, onUnmounted, ref, watch } from 'vue';
+import type { InputRole } from 'losat/domain';
 import type { Attention, AttentionState } from '../application/attention';
 import type { SearchDraft } from '../application/draft';
+import type { CountsLoader } from '../application/counts';
 import type { ExampleLoader } from '../application/examples';
 import { changedFields, effectiveValue, placementFlags, sectionsAt } from '../domain/parameters';
-import { PROGRAMS, programById, searchSummaryParts, type InputRole } from '../domain/programs';
+import { programById, PROGRAMS, searchSummaryParts } from '../domain/programs';
 import { announce } from './announcer';
 import { REFUSAL_ID } from './refusal';
 import { useStore } from './useStore';
@@ -26,6 +28,7 @@ import ParameterForm from './ParameterForm.vue';
 const props = defineProps<{
   draft: SearchDraft;
   examples: ExampleLoader;
+  counts: CountsLoader;
   attention: Attention;
   attentionState: AttentionState;
 }>();
@@ -249,7 +252,7 @@ function onThreads(event: Event): void {
           </p>
           <button type="button" data-testid="restore-defaults" @click="restoreDefaults">Restore default search parameters</button>
         </div>
-        <ParameterForm :draft="draft" :state="state" />
+        <ParameterForm :draft="draft" :state="state" :counts="counts" />
         <div class="blast-row">
           <button
             class="primary-action"

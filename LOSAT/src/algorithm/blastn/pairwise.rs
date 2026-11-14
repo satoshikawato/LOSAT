@@ -240,6 +240,10 @@ impl Rows<'_> {
                 comp_adjust_method: None,
                 sum_n: None,
                 subject_stored_gaps: Vec::new(),
+                // The Seq-align's `num_ident` (`seqalign::query_records` writes the same
+                // `hsp.num_ident`), which `into_hit` copies to `hit.num_ident` as well: BLASTN's
+                // rows are not counted again.
+                seqalign_num_ident: hsp.num_ident,
             });
         }
         Ok(())

@@ -164,6 +164,17 @@ pub struct BlastxArgs {
     // ```
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
+    /// ```c++
+    ///     arg_desc.AddOptionalKey(kArgOutputSearchStrategy,
+    ///                             "filename",
+    ///                             "File name to record the search strategy used",
+    ///                             CArgDescriptions::eOutputFile);
+    /// ```
+    /// The search strategy file (`report::archive::strategy`), created by `run` before the other
+    /// options are read.
+    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:99-100
     // ```c++
     //         arg_desc.AddDefaultKey(kTask, "task_name", "Task to execute",
@@ -397,6 +408,10 @@ pub struct BlastxArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
+    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
+    /// `blastinput::report_counts::FormattingArgs`).
+    #[command(flatten)]
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3158-3161
     // ```c++
     //     arg_desc.AddDefaultKey(kArgNumThreads, "int_value",
@@ -445,6 +460,129 @@ pub struct BlastxArgs {
         help = "Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d, T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score matrix adjustment"
     )]
     pub comp_based_stats: String,
+    /// The RPS search of an RPSTBLASTN run (`algorithm::rpstblastn`), which takes the place of
+    /// BLASTX's search of the query batches; `None` in every BLASTX run.
+    #[arg(skip)]
+    pub(crate) rpstblastn: Option<std::sync::Arc<dyn RpsTblastnSearch>>,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), which a
+    /// library call (`api::run`) reads from the application settings, as the command line
+    /// does (`common::database::SubjectTaxdb`); `None` elsewhere. Not a public option.
+    #[arg(skip)]
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
+    /// The settings by which a search of the library looks up the file of an unknown matrix
+    /// (`ResolvedOptions::find_matrix_file`), from its application start: set by `api::run` for an
+    /// ungapped search whose `-matrix` NCBI's tables do not have (`unknown_matrix_name`) and by
+    /// `run_local_database`; `None` for the command line, which looks it up with its own
+    /// settings (`native::run`), and LOSAT Web, which has no file system. Not a public option.
+    #[arg(skip)]
+    pub matrix_search: Option<crate::blastinput::ncbi_environment::MatrixSearch>,
+}
+
+/// The search of RPSTBLASTN's query batches (`rps_search::translated`, series PR item PS12a,
+/// DECISIONS 38 D1): the user's nucleotide queries, in BLASTX's query batches with BLASTX's frames,
+/// masks and statistics, against a profile database, whose results BLASTX's reports write. A run
+/// that has one (`ResolvedOptions::rpstblastn`) is RPSTBLASTN's: the command line's loop of the
+/// query batches (`native::run_query_batches`) is this search's, once per run; nothing of BLASTX's
+/// own search runs. It is a trait of BLASTX's so that BLASTX does not depend on the RPS engine.
+pub(crate) trait RpsTblastnSearch: std::fmt::Debug + Send + Sync {
+    /// The run's search over `database`, once per run before the first byte of the reports
+    /// (`native::run_inner`): LOSAT's refusals of the database's files and of the options come
+    /// there, NCBI's own errors of the files where NCBI's search of a batch raises them.
+    fn for_database(
+        &self,
+        options: &ResolvedOptions,
+        database: Option<&super::database::BlastxDatabase>,
+    ) -> Result<std::sync::Arc<dyn RpsTblastnSearch>>;
+    /// `native::run_query_batches` of RPSTBLASTN: the query batches of `read`, searched against
+    /// the profile volumes of `database`, each handed to `render` in the reader's order. Returns
+    /// the number of queries reported.
+    #[allow(clippy::too_many_arguments)]
+    fn run_query_batches(
+        &self,
+        options: &ResolvedOptions,
+        database: Option<&super::database::BlastxDatabase>,
+        read: &mut super::native::QueryBatchReader<'_>,
+        diagnostics: &mut dyn std::io::Write,
+        search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
+        render: &mut super::native::BatchRender<'_>,
+    ) -> Result<usize>;
+    /// Whether the batches' results are merged over a database of several volumes, as NCBI's
+    /// `CLocalRPSBlast` merges them: the merge keeps only NCBI's messages of error severity (no
+    /// query warning, `report::query_warning`) and gives a batch that was not searched an empty
+    /// alignment set (outfmt 7's `# 0 hits found`), while its statistics stay those of a batch
+    /// that was not searched.
+    fn merges_volumes(&self) -> bool;
+}
+
+/// The program of a run of BLASTX's driver as NCBI's and LOSAT's texts name it: BLASTX, or
+/// RPSTBLASTN for an RPSTBLASTN run (`BlastxArgs::rpstblastn`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ProgramName {
+    /// `BLASTX`: LOSAT's refusals ("not supported by LOSAT's BLASTX") and the reports' program
+    /// lines.
+    pub(crate) upper: &'static str,
+    /// `blastx`: NCBI's messages (`Warning: [blastx] ...`) and its settings.
+    pub(crate) lower: &'static str,
+}
+
+impl ProgramName {
+    pub(crate) const BLASTX: Self = Self {
+        upper: "BLASTX",
+        lower: "blastx",
+    };
+    pub(crate) const RPSTBLASTN: Self = Self {
+        upper: "RPSTBLASTN",
+        lower: "rpstblastn",
+    };
+
+    fn of(rpstblastn: &Option<std::sync::Arc<dyn RpsTblastnSearch>>) -> Self {
+        match rpstblastn {
+            Some(_) => Self::RPSTBLASTN,
+            None => Self::BLASTX,
+        }
+    }
+}
+
+impl ResolvedOptions {
+    /// The program of the run's texts (`ProgramName`).
+    pub(crate) fn program(&self) -> ProgramName {
+        ProgramName::of(&self.rpstblastn)
+    }
+
+    /// Whether the run's results are merged over several volumes (`RpsTblastnSearch::merges_volumes`).
+    pub(crate) fn merged_volumes(&self) -> bool {
+        self.rpstblastn
+            .as_ref()
+            .is_some_and(|search| search.merges_volumes())
+    }
+
+    /// The number of a query's lists the tabular reports write: the merge of several volumes
+    /// keeps each volume's lists (`s_MergeAlignSet`), which NCBI's formatter cuts to the hit
+    /// list size after counting their hits (as rpsblast's `psiblast_hits_found`); all of them
+    /// otherwise.
+    pub(crate) fn shown_lists(&self) -> usize {
+        if self.merged_volumes() {
+            usize::try_from(self.hitlist_size).unwrap_or(0)
+        } else {
+            usize::MAX
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:184 (blastx_app.cpp:247-249
+    // hands the sorts over too, quoted at `formatting`)
+    // ```c++
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    // ```
+    /// The sorts of the pairwise report (`-sorthits`, `-sorthsps`): BLASTX's; none for an
+    /// RPSTBLASTN run, whose application hands its formatter the line length only, as rpsblast's
+    /// and psiblast's (`blastp::args`, `hit_sort::ReportSort`): its sorts are read with NCBI's
+    /// warnings (`native::warnings_of`) and sort nothing.
+    pub(crate) fn report_sort(&self) -> crate::report::hit_sort::ReportSort {
+        match self.rpstblastn {
+            Some(_) => Default::default(),
+            None => self.formatting.report_sort(),
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:838-871
@@ -593,8 +731,9 @@ pub struct ResolvedOptions {
     /// first query batch fails with "Unknown error code -1" (`query_setup.rs`).
     pub unknown_matrix: bool,
     /// The file that NCBI BLAST+ reads for `unknown_matrix`'s name
-    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found by the command line after
-    /// the options are resolved; `None` elsewhere. The first query batch is refused then
+    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found by the command line and the
+    /// library API after the options are resolved (`find_matrix_file`); `None` in LOSAT Web. The
+    /// first query batch is refused then
     /// (`query_setup::matrix_error_message`).
     pub matrix_file: Option<std::path::PathBuf>,
     pub gap_open: i32,
@@ -683,6 +822,14 @@ pub struct ResolvedOptions {
     pub hitlist_size: i32,
     pub num_descriptions: i32,
     pub num_alignments: i32,
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:247-249
+    // ```c++
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+    // ```
+    /// `-line_length`, `-sorthits` and `-sorthsps` of the pairwise report.
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     pub outfmt: u8,
     /// The fields of the default tabular report (outfmt 6 and 7 without `tabular`: the `std`
     /// fields), by name; empty for outfmt 0.
@@ -696,6 +843,9 @@ pub struct ResolvedOptions {
     /// `native::run` (`-db`: the database's search path, `-subject`: NCBI's). False otherwise,
     /// as Web reads it (DECISIONS 7 of line CLI C2).
     pub taxdb_found: bool,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), set with
+    /// `taxdb_found` (`common::database::SubjectTaxdb`); `None` otherwise.
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
     /// A list kept no sequence of the database (`SeqDb::filtered_empty`): the queries of the
     /// searched batches have `EMPTY_DATABASE_MESSAGE`.
     pub filtered_empty: bool,
@@ -704,6 +854,9 @@ pub struct ResolvedOptions {
     /// `qcovs` by; read by `native::run` where NCBI's query options handler reads it (after the
     /// subjects), `None` otherwise.
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
+    /// RPSTBLASTN's search (`BlastxArgs::rpstblastn`): the run is RPSTBLASTN's, whose reports name
+    /// it; `None` in every BLASTX run.
+    pub(crate) rpstblastn: Option<std::sync::Arc<dyn RpsTblastnSearch>>,
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:185-191
@@ -722,6 +875,21 @@ pub(crate) const AA_LOOKUP_TABLE: i32 = 3;
 pub(crate) const COMPRESSED_AA_LOOKUP_TABLE: i32 = 4;
 
 impl ResolvedOptions {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1301-1306 (quoted at
+    // `ncbi_environment::ApplicationSettings::matrix_file`: `BlastFindMatrixPath`)
+    /// Looks up the file that NCBI reads for `unknown_matrix`'s name with `search`
+    /// (`MatrixSearch::file`) into `matrix_file`, after the options are resolved: the command
+    /// line's run (`native::run`) and the library's searches (`local::read_format_options`).
+    pub(crate) fn find_matrix_file(
+        &mut self,
+        search: &crate::blastinput::ncbi_environment::MatrixSearch,
+    ) -> Result<()> {
+        if self.unknown_matrix {
+            self.matrix_file = search.file(&self.matrix).map_err(anyhow::Error::msg)?;
+        }
+        Ok(())
+    }
+
     /// Whether the search's lookup table is the compressed one (`-word_size` 5 to 7, blastx-fast).
     pub(crate) fn compressed_lookup(&self) -> bool {
         self.lookup_type == COMPRESSED_AA_LOOKUP_TABLE
@@ -771,6 +939,13 @@ impl ResolvedOptions {
 //
 // ```
 impl BlastxArgs {
+    /// Whether the search is ungapped with a `-matrix` that NCBI's tables do not have: the name
+    /// that NCBI looks for as a file (`ResolvedOptions::unknown_matrix`, which the resolution
+    /// sets for such a search; a gapped one refuses the name first).
+    pub(crate) fn unknown_matrix_name(&self) -> bool {
+        self.ungapped && blastx_matrix(self.matrix.as_deref().unwrap_or("BLOSUM62")).is_none()
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3642
     // ```c++
     //     CRef<CBlastOptionsHandle> retval(x_CreateOptionsHandle(locality, args));
@@ -1061,8 +1236,9 @@ impl BlastxArgs {
         // no number). Every word size of NCBI's, 2 to 7, runs (item SC9 of line NP).
         if !self.evalue.is_finite() {
             bail!(
-                "an -evalue that is not finite ({}) is not supported by LOSAT's BLASTX",
-                self.evalue
+                "an -evalue that is not finite ({}) is not supported by LOSAT's {}",
+                self.evalue,
+                self.program().upper
             );
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:429-433
@@ -1144,8 +1320,8 @@ impl BlastxArgs {
             &matrix_name,
             word_size > 4,
             word_size,
-            "blastx",
-            "BLASTX",
+            self.program().lower,
+            self.program().upper,
         )?;
         // The counts are at most `i32::MAX` (the options are `Int4`).
         let hitlist_size = counts.hitlist_size as i32;
@@ -1178,6 +1354,22 @@ impl BlastxArgs {
         } else {
             Vec::new()
         };
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:250
+        // ```c++
+        //         formatter.SetCustomDelimiter(fmt_args->GetCustomDelimiter());
+        // ```
+        // rpstblastn_app.cpp does not set it (as rpsblast's and psiblast's apps): its tabular
+        // formats keep their own delimiter, the tab or the comma (`delim=` is still checked).
+        let without_delimiter;
+        let choice = if self.rpstblastn.is_some() && !choice.delimiter.is_empty() {
+            without_delimiter = crate::blastinput::app::FormatChoice {
+                delimiter: String::new(),
+                ..choice.clone()
+            };
+            &without_delimiter
+        } else {
+            choice
+        };
         let tabular = crate::blastinput::app::ReportFormat::from_number(choice.number)
             .and_then(|format| crate::report::tabular::TabularSpec::of(format, choice))
             .map(crate::report::tabular::TabularSpec::intern);
@@ -1190,11 +1382,26 @@ impl BlastxArgs {
             self.max_target_seqs.is_some(),
             composition > 0,
             !self.ungapped,
-            "BLASTX",
+            self.program().upper,
         )?;
         let options = ResolvedOptions {
             word_size,
-            threshold,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:60-67
+            // ```c++
+            // CBlastRPSOptionsHandle::SetLookupTableDefaults()
+            // {
+            //     m_Opts->SetLookupTableType(eRPSLookupTable);
+            //     // N.B.: the word threshold is not set because for RPS-BLAST it CANNOT be
+            //     // done, i.e.: the RPS-BLAST databases already have this value encoded in
+            //     // them and therefore this value cannot be changed on an RPS-BLAST run
+            // }
+            // ```
+            // RPSTBLASTN's threshold is 0: its reports print none.
+            threshold: if self.rpstblastn.is_some() {
+                0.0
+            } else {
+                threshold
+            },
             lookup_type: if word_size > 4 {
                 COMPRESSED_AA_LOOKUP_TABLE
             } else {
@@ -1295,13 +1502,16 @@ impl BlastxArgs {
             hitlist_size,
             num_descriptions: counts.num_descriptions as i32,
             num_alignments: counts.num_alignments as i32,
+            formatting: self.formatting,
             outfmt,
             fields,
             tabular,
-            taxdb_found: false,
+            taxdb_found: self.subject_taxdb.is_some(),
+            subject_taxdb: self.subject_taxdb.clone(),
             filtered_empty: false,
             num_threads: self.num_threads,
             query_range: None,
+            rpstblastn: self.rpstblastn.clone(),
         };
         // The gapped X-drops that NCBI's kernels cannot size are refused before the search.
         super::parameters::check_gapped_x_drops(&options)?;
@@ -1354,15 +1564,25 @@ impl BlastxArgs {
     //             	ITERATE(CSearchResultSet, result, *results) {
     //                	    formatter.PrintOneResultSet(**result, query_batch);
     // ```
-    pub fn run(self) -> Result<()> {
-        super::native::run(&self)
+    /// Runs the search with the settings of the program's application start
+    /// (`ApplicationStart::settings`).
+    pub(crate) fn run(
+        self,
+        settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    ) -> Result<()> {
+        super::native::run(&self, settings)
+    }
+
+    /// The program of the run's texts (`ProgramName`).
+    pub(crate) fn program(&self) -> ProgramName {
+        ProgramName::of(&self.rpstblastn)
     }
 
     /// `-seg` as NCBI's filtering handler reads it (`app::read_seg_option`).
     pub(crate) fn seg_spec(
         &self,
     ) -> std::result::Result<SegSpec, crate::blastinput::app::SegOptionError> {
-        crate::blastinput::app::read_seg_option(&self.seg, "BLASTX")
+        crate::blastinput::app::read_seg_option(&self.seg, self.program().upper)
     }
 
     /// The `-db` value as NCBI keeps it (`seqdb::db_argument_name`), when given.

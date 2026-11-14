@@ -11,6 +11,7 @@ FASTA record of `manifest.tsv` with the counts file and the flags of its row and
 | --- | --- | --- |
 | `counts/mg1655_u9.obinary` | `LOSAT/tests/fasta/MG1655.fna` | `windowmasker -mk_counts -in MG1655.fna -unit 9 -sformat obinary -out mg1655_u9.obinary` |
 | `counts/dm2L_u9.binary` | *D. melanogaster* BDGP6.54 2L:1-3,000,000 (Ensembl `dna.toplevel`) | `windowmasker -mk_counts -in dm2L_3M.fa -unit 9 -sformat binary -out dm2L_u9.binary` |
+| `counts/mg1655_u9.ascii`, `counts/mg1655_u9.oascii` | `LOSAT/tests/fasta/MG1655.fna` | the same as `mg1655_u9.obinary` with `-sformat ascii` and `-sformat oascii` (2026-11-12, line NP M3d) |
 
 `counts/dm_u2.obinary` (`-mk_counts -in dm2L_60k.fa -unit 2`) has a cache bit array of 0 words;
 NCBI keeps it in use, and the boost would read past it (its thresholds of 500 keep the boost
@@ -20,6 +21,17 @@ Units of 9 letters keep the files small: the default for these inputs is 10, who
 binary file holds a hash table of 2 MiB. Units of 7 and 8 give thresholds stuck at the count
 limit of 500. Both files have thresholds (t_low, t_extend, t_threshold, t_high) of
 `[74, 147, 173, 210]` and `[43, 106, 136, 184]`.
+
+The two text files hold the optimized binary file's counts: the optimized ascii one is its tables
+written as text, the ascii one lists the units of its hash table (the same 13,368 units and counts).
+The manifest's rows of `mg1655_u9.obinary` are repeated with them, and NCBI's application gives
+the same intervals except for `-set_t_low 200`, where the optimized binary file's cache bit array
+skips windows that the text formats, which have none, score
+(`expected/mg1655_u9_text.dmp_setlow200.interval`, the same for both).
+
+`text_counts.tsv` lists the ascii and optimized ascii counts files of the blastn
+`-window_masker_taxid` fixtures (`tests/fixtures/winmask_blastn/`): these two files and their
+edits, written at run time by `make_blastn_error_fixtures.py` and `tests/blastn_window_masker.rs`.
 
 ## FASTA
 

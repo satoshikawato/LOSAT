@@ -67,7 +67,8 @@
 //!   taxonomy database; the refusal of NCBI's taxonomy cache, which the batches ask for where
 //!   NCBI fetches a subject, so possibly in a later batch, `Off::TaxonomyCache`; a database with parsed Seq-ids of more than
 //!   `common::database::PARSED_CHECK_SEQUENCES_MAX` sequences is not read and keeps its reports
-//!   after the loop, `Off::LargeParsed`; blastn's reads nothing before the search since
+//!   after the loop, `Off::LargeParsed`; a query title that the search strategy's requests cannot
+//!   write, `Off::StrategyTitles`; blastn's reads nothing before the search since
 //!   2026-11-03 and refuses in the batch that reports the sequence). The refusals that depend on the
 //!   arguments only (the matrix, the `-seg` value) come in the first batch, where nothing of the
 //!   stream is written yet. With one batch (the first batch takes every query record) nothing can
@@ -142,6 +143,12 @@ pub(super) enum Off {
     TaxonomyCache,
     /// A database sequence whose report could be refused (`ReportRefusal`).
     Database(crate::algorithm::common::database::ReportRefusal),
+    /// Under `-parse_deflines`, two query records of the run with one id, which a batch could
+    /// refuse (`query_batch::QueryScopes`).
+    QueryIds,
+    /// `-export_search_strategy`: a query title that ASN.1 text cannot write, which the request of
+    /// a later batch would refuse (`RunRequests::write`, before the batch's search).
+    StrategyTitles,
 }
 
 impl Off {
@@ -163,6 +170,8 @@ impl Off {
             Off::Database(ReportRefusal::Headers) => "database_headers",
             Off::Database(ReportRefusal::Joined) => "database_joined",
             Off::Database(ReportRefusal::Taxonomy) => "database_taxonomy",
+            Off::QueryIds => "query_ids",
+            Off::StrategyTitles => "strategy_titles",
         }
     }
 }
@@ -240,6 +249,32 @@ pub(super) fn check(
     {
         return Err(Off::SearchSpace);
     }
+    // The search strategy's request of each batch refuses a query title that ASN.1 text cannot
+    // write where it is written, before the batch's search (`run_batch_loop`): a later batch's
+    // would follow the reports of the batches before (a subject's comes with the first batch).
+    if args.strategy.is_some()
+        && query_runs
+            .records
+            .iter()
+            .any(|record| !crate::report::archive::ArchiveEncoding::Text.writes_text(&record.title))
+    {
+        return Err(Off::StrategyTitles);
+    }
+    // Under `-parse_deflines`, two queries of the run with one id, which a batch's scope could
+    // hold (`QueryScopes`), and with `-db` the scope of every query for the database's sequences
+    // (`TblastxDatabase::reports_may_refuse`).
+    let queries = if args.parse_deflines {
+        Some(
+            crate::blastinput::query_batch::QueryScopes::of_records(
+                crate::blastinput::query_batch::QueryScopeSpan::Run,
+                "TBLASTX",
+                query_runs.input_records,
+            )
+            .map_err(|_| Off::QueryIds)?,
+        )
+    } else {
+        None
+    };
     match &subjects.shown {
         ShownSubjects::Fasta { records, .. } => {
             if format.is_tabular()
@@ -255,6 +290,7 @@ pub(super) fn check(
             database,
             format,
             crate::algorithm::common::database::PARSED_CHECK_SEQUENCES_MAX,
+            queries.as_ref().map(|scopes| scopes.of_query(0)),
             pool,
         ),
     }
@@ -264,11 +300,13 @@ pub(super) fn check(
 /// of more than `max_parsed` sequences in its volumes is not read (`Off::LargeParsed`, NCBI's
 /// `nt` and `core_nt` with `common::database::PARSED_CHECK_SEQUENCES_MAX`: the reports after the
 /// loop, as blastn's), a run whose prefetch NCBI's taxonomy cache refuses is not streamed
-/// (`Off::TaxonomyCache`), else every header is read in `pool` (`TblastxDatabase::reports_may_refuse`).
+/// (`Off::TaxonomyCache`), else every header is read in `pool` (`TblastxDatabase::reports_may_refuse`,
+/// with `queries`: under `-parse_deflines` the scope of every query of the run).
 fn database_check(
     database: &crate::algorithm::tblastx::database::TblastxDatabase,
     format: report::TblastxOutputFormat,
     max_parsed: u32,
+    queries: Option<&crate::blastinput::query_batch::QueryScope>,
     pool: &SearchPool<'_>,
 ) -> Result<(), Off> {
     if database.parsed_beyond(max_parsed) {
@@ -292,7 +330,7 @@ fn database_check(
     if prefetch && database.prefetch_refused() {
         return Err(Off::TaxonomyCache);
     }
-    match database.reports_may_refuse(shown, prefetch, pool) {
+    match database.reports_may_refuse(shown, prefetch, queries, pool) {
         Some(refusal) => Err(Off::Database(refusal)),
         None => Ok(()),
     }
@@ -344,7 +382,7 @@ mod tests {
                 let database = open(name);
                 let count = database.num_oids();
                 formats.map(|format| {
-                    [count, count - 1].map(|max| database_check(&database, format, max, pool))
+                    [count, count - 1].map(|max| database_check(&database, format, max, None, pool))
                 })
             })
         };

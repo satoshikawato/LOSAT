@@ -32,14 +32,34 @@ mod db_taxid_root;
 mod default_bundle;
 #[path = "../entry_names.rs"]
 mod entry_names;
+#[path = "../export_search_strategy.rs"]
+mod export_search_strategy;
 #[path = "../library_api.rs"]
 mod library_api;
+#[path = "../library_examples.rs"]
+mod library_examples;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]
 mod makeblastdb_ncbi_exceptions;
+#[path = "../makeblastdb_output_streams.rs"]
+mod makeblastdb_output_streams;
+#[path = "../makeblastdb_past_32_bits.rs"]
+mod makeblastdb_past_32_bits;
 #[path = "../makeblastdb_rename_lock.rs"]
 mod makeblastdb_rename_lock;
+#[path = "../masker_fixtures.rs"]
+mod masker_fixtures;
 #[path = "../ncbi_lookup_paths.rs"]
 mod ncbi_lookup_paths;
+#[path = "../ncbi_toolkit_dryrun.rs"]
+mod ncbi_toolkit_dryrun;
+#[path = "../ncbi_toolkit_file_options.rs"]
+mod ncbi_toolkit_file_options;
+#[path = "../ncbi_toolkit_help.rs"]
+mod ncbi_toolkit_help;
+#[path = "../ncbi_toolkit_version.rs"]
+mod ncbi_toolkit_version;
+#[path = "../ncbi_windows_paths.rs"]
+mod ncbi_windows_paths;
 #[path = "../newton_lanes8_default.rs"]
 mod newton_lanes8_default;
 #[path = "../outfmt11_blastn.rs"]
@@ -98,6 +118,10 @@ mod seq_id_first_line;
 mod seqalign_samples;
 #[path = "../suite_layout.rs"]
 mod suite_layout;
+#[path = "../tax_report_streams.rs"]
+mod tax_report_streams;
+#[path = "../taxonomy_read_order.rs"]
+mod taxonomy_read_order;
 #[path = "../web_v1_search_space.rs"]
 mod web_v1_search_space;
 #[path = "../x_reach_directory.rs"]

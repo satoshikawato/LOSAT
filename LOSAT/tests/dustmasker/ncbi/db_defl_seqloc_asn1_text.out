@@ -1,0 +1,338 @@
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 1
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id general {
+      db "BL_ORD_ID",
+      tag id 1
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id general {
+      db "BL_ORD_ID",
+      tag id 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 2
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id general {
+      db "BL_ORD_ID",
+      tag id 2
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id general {
+      db "BL_ORD_ID",
+      tag id 2
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 3
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id general {
+      db "BL_ORD_ID",
+      tag id 3
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id general {
+      db "BL_ORD_ID",
+      tag id 3
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 4
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id general {
+      db "BL_ORD_ID",
+      tag id 4
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id general {
+      db "BL_ORD_ID",
+      tag id 4
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 5
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id general {
+      db "BL_ORD_ID",
+      tag id 5
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id general {
+      db "BL_ORD_ID",
+      tag id 5
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 6
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id general {
+      db "BL_ORD_ID",
+      tag id 6
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id general {
+      db "BL_ORD_ID",
+      tag id 6
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 7
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id general {
+      db "BL_ORD_ID",
+      tag id 7
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id general {
+      db "BL_ORD_ID",
+      tag id 7
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 8
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id general {
+      db "BL_ORD_ID",
+      tag id 8
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id general {
+      db "BL_ORD_ID",
+      tag id 8
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 9
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id general {
+      db "BL_ORD_ID",
+      tag id 9
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id general {
+      db "BL_ORD_ID",
+      tag id 9
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 10
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id general {
+      db "BL_ORD_ID",
+      tag id 10
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id general {
+      db "BL_ORD_ID",
+      tag id 10
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 11
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id general {
+      db "BL_ORD_ID",
+      tag id 11
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id general {
+      db "BL_ORD_ID",
+      tag id 11
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 12
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id general {
+      db "BL_ORD_ID",
+      tag id 12
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id general {
+      db "BL_ORD_ID",
+      tag id 12
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 13
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id general {
+      db "BL_ORD_ID",
+      tag id 13
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id general {
+      db "BL_ORD_ID",
+      tag id 13
+    }
+  }
+}

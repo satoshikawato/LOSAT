@@ -39,6 +39,8 @@ use crate::report::tabular::SubjectFetch;
 use crate::seqdb::{SeqDb, SeqType};
 
 /// The program that LOSAT's refusals name.
+/// The program of the texts of BLASTX's database when the run names none: the database's own
+/// whole check from the stream (`x_db_stream`) and the tests.
 const PROGRAM: &str = "BLASTX";
 
 /// The longest subject BLASTX searches in one piece (NCBI's `MAX_DBSEQ_LEN`).
@@ -69,6 +71,9 @@ pub(crate) struct BlastxDatabase {
     taxdb: shared::TaxdbRun,
     /// Whether the database has parsed Seq-ids (`shared::check_seqids`).
     parsed_seqids: bool,
+    /// The program of the run (`args::ProgramName::upper`: BLASTX, or RPSTBLASTN), which the
+    /// database's messages name.
+    program: &'static str,
 }
 
 impl BlastxDatabase {
@@ -78,20 +83,11 @@ impl BlastxDatabase {
         self
     }
 
-    /// The ids of the queries of the search (`SeqDb::id_scope`).
-    pub(super) fn in_id_scope(
-        mut self,
-        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
-    ) -> Self {
-        self.db.set_id_scope(id_scope);
-        self
-    }
-
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
     #[cfg(test)]
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name, settings, None, &mut std::io::sink())
+        Self::open_restricted(name, settings, None, &mut std::io::sink(), PROGRAM)
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
@@ -101,17 +97,18 @@ impl BlastxDatabase {
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
         diagnostics: &mut dyn std::io::Write,
+        program: &'static str,
     ) -> Result<Self> {
-        let mut db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
-        // A database with parsed Seq-ids is read (line DBID, ID2a), unless a variable changes
-        // NCBI's choice of its Seq-ids.
-        let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
-        shared::restrict_database(&mut db, name, list, diagnostics, PROGRAM)?;
+        let mut db = shared::open_database(name, SeqType::Protein, settings, program)?;
+        // A database with parsed Seq-ids is read (line DBID, ID2a).
+        let parsed_seqids =
+            shared::restrict_database(&mut db, name, list, diagnostics, settings, program)?;
         Ok(Self {
             db,
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),
             parsed_seqids,
+            program,
         })
     }
 
@@ -206,7 +203,7 @@ impl BlastxDatabase {
     /// query batch with a valid context, which the caller fails with it. The search checks each
     /// sequence where it first reads it (`XStreamDb::x_check`).
     pub(crate) fn x_open_stream(&self) -> Result<usize> {
-        if self.db.num_oids() == 0 {
+        if self.db.first_oid_read_fails() {
             return Err(PreliminaryReadError("Database memory map file error").into());
         }
         let count = self.db.num_seqs();
@@ -229,7 +226,7 @@ impl BlastxDatabase {
 
     /// The whole check of the database (`x_check_whole`).
     pub(crate) fn x_check_stores(&self) -> Result<usize> {
-        x_check_whole(&self.db)
+        x_check_whole_named(&self.db, self.program)
     }
 
     /// The opened database.
@@ -246,12 +243,17 @@ impl BlastxDatabase {
 /// that fails during the search (`native::search_error`), whichever sequence the search's
 /// threads read first.
 pub(super) fn x_check_whole(db: &SeqDb) -> Result<usize> {
-    if db.num_oids() == 0 {
+    x_check_whole_named(db, PROGRAM)
+}
+
+/// `x_check_whole` of a run of the program `program` (`BlastxDatabase::program`).
+fn x_check_whole_named(db: &SeqDb, program: &str) -> Result<usize> {
+    if db.first_oid_read_fails() {
         return Err(PreliminaryReadError("Database memory map file error").into());
     }
     let mut longest = 0;
     let mut first_too_long = None;
-    shared::x_check_protein_stores(db, PROGRAM, |ordinal, length| {
+    shared::x_check_protein_stores(db, program, |ordinal, length| {
         longest = longest.max(length);
         if length > MAX_DBSEQ_LEN && first_too_long.is_none() {
             first_too_long = Some((ordinal, length));
@@ -314,6 +316,10 @@ pub(crate) struct ReportedSubjects {
     /// `PRE_FETCH_SEQS_LIMIT` turned the batch's prefetch off (`fetch_by_query`): the writers
     /// write them after the query's warnings (`ShownSubjects::query_fetches`).
     query_fetches: std::collections::BTreeMap<usize, Vec<u8>>,
+    /// The texts of the subjects that each query's report reads one by one (`fetch_by_query`),
+    /// by query ordinal, where the format's writer places them at the reads
+    /// (`report::query_warnings::ReadCursor`; `ShownSubjects::query_reads`).
+    query_reads: std::collections::BTreeMap<usize, crate::report::query_warnings::QueryReads>,
 }
 
 /// The values of a custom tabular report's fields that read more of the reported sequences than
@@ -388,15 +394,19 @@ impl ReportedSubjects {
                         &headers,
                         ordinal,
                         batch.query_ordinal + qidx,
-                        PROGRAM,
+                        database.program,
                     )? {
                         shared::ReportedHeader::Stored(stored) => {
-                            shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                            shared::check_reported_title(
+                                stored.replaced_bytes,
+                                ordinal,
+                                database.program,
+                            )?;
                             if pairwise {
                                 shared::check_shown_stored_title(
                                     stored.taxonomy_title,
                                     ordinal,
-                                    PROGRAM,
+                                    database.program,
                                 )?;
                             }
                             listed.insert(list.oid, Some(Arc::from(stored.title)));
@@ -470,7 +480,7 @@ impl ReportedSubjects {
                                 let ordinal = u32::try_from(list.oid).ok()?;
                                 Some((ordinal, parsed.get(&list.oid)?.as_ref()))
                             }),
-                        PROGRAM,
+                        database.program,
                     )?;
                 }
             }
@@ -482,17 +492,22 @@ impl ReportedSubjects {
             let shown = title.is_some();
             let title = title.clone().unwrap_or_else(|| Arc::from(&b""[..]));
             if pairwise && shown && !parsed.contains_key(&oid) {
-                shared::check_shown_protein_title(&title, ordinal, PROGRAM)?;
+                shared::check_shown_protein_title(&title, ordinal, database.program)?;
             }
             if let Some(subject) = parsed.get(&oid) {
                 // The formats that read the subject's Bioseq; the Seq-annots and the archive
                 // write its Seq-align id alone.
                 if tabular_reads || pairwise || structured || taxids || taxonomy {
-                    subject
-                        .fetched(taxonomy, one_by_one)
-                        .map_err(|reason| shared::parsed_refusal(ordinal, &reason, PROGRAM))?;
+                    subject.fetched(taxonomy, one_by_one).map_err(|reason| {
+                        shared::parsed_refusal(ordinal, &reason, database.program)
+                    })?;
                 } else if prefetched {
-                    shared::check_prefetched_parsed(&database.db, subject, ordinal, PROGRAM)?;
+                    shared::check_prefetched_parsed(
+                        &database.db,
+                        subject,
+                        ordinal,
+                        database.program,
+                    )?;
                 }
                 if pairwise {
                     shared::check_shown_parsed_subject(
@@ -500,7 +515,7 @@ impl ReportedSubjects {
                         true,
                         taxdb_found,
                         ordinal,
-                        PROGRAM,
+                        database.program,
                     )?;
                 }
                 if tabular {
@@ -515,7 +530,7 @@ impl ReportedSubjects {
                             return Err(shared::parsed_refusal(
                                 ordinal,
                                 &format!("has {problem}"),
-                                PROGRAM,
+                                database.program,
                             ))
                         }
                     };
@@ -536,7 +551,7 @@ impl ReportedSubjects {
                 // An unreported subject's id is never written, nor an id of a table of fields
                 // that read nothing of the subject.
                 let id = if shown && tabular_reads {
-                    shared::tabular_subject_id(&title, ordinal, true, PROGRAM)?
+                    shared::tabular_subject_id(&title, ordinal, true, database.program)?
                 } else {
                     Vec::new()
                 };
@@ -601,7 +616,7 @@ impl ReportedSubjects {
                 &reported.ordinals,
                 &shown,
                 &reported.parsed,
-                PROGRAM,
+                database.program,
             )
             .map_err(super::blast_xml::XmlRefusal::of_taxonomy)?;
         }
@@ -633,7 +648,7 @@ impl ReportedSubjects {
                     self.parsed_subject(list.oid),
                 )
             });
-        shared::batch_prefetch(&database.db, &database.taxdb, subjects, PROGRAM)
+        shared::batch_prefetch(&database.db, &database.taxdb, subjects, database.program)
     }
 
     /// NCBI's messages about the taxonomy database where `PRE_FETCH_SEQS_LIMIT` turns the
@@ -647,12 +662,23 @@ impl ReportedSubjects {
     /// subject only for its identities ask in every batch: BLASTX writes each batch's reports
     /// before the next is searched, so a run whose later rows may look a tax id up refuses at
     /// its first batch, before any byte (also where none of them does, as before).
+    /// `places`: the format's writer writes each query's texts where it reads each subject
+    /// (`query_reads`; outfmt 0, 5 and the tabular rows); `rows_open`: the rows look the plural
+    /// names up (`shared::subject_read_texts`). The subjects are read in the order of the hit
+    /// lists, or, for the pairwise report (`pairwise`, its `-sorthits` and `-sorthsps`), in the
+    /// order of its sorted groups (`QueryGroup::read_order` of the rows' hits: each list's HSPs
+    /// that the reports show in the reports' order, `HspList::evalue_order`, with the values of
+    /// their rows, `report::hsp_scores`).
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn fetch_by_query(
         &mut self,
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
         rows: SubjectFetch,
+        places: bool,
+        rows_open: bool,
+        pairwise: Option<crate::report::hit_sort::ReportSort>,
     ) -> Result<()> {
         if rows == SubjectFetch::Never && crate::algorithm::common::database::prefetch_always_off()
         {
@@ -660,19 +686,67 @@ impl ReportedSubjects {
         }
         for batch in batches {
             for (index, lists) in batch.queries.iter().enumerate() {
-                let subjects = lists
-                    .iter()
-                    .filter(|list| {
-                        list.hsps.iter().any(|hsp| {
-                            super::report::has_seqalign(hsp, gapped) && rows.reads(hsp.identity)
+                let ranks: Vec<u32> = match pairwise {
+                    Some(sort) => {
+                        let query_length = batch.prepared.original_lengths[index];
+                        let mut hits = Vec::new();
+                        for list in lists {
+                            for hsp in list.evalue_order() {
+                                if super::report::has_seqalign(hsp, gapped) {
+                                    hits.push((
+                                        list.oid as u32,
+                                        super::report::hsp_scores(hsp, query_length)?,
+                                    ));
+                                }
+                            }
+                        }
+                        crate::report::x_pairwise_par::QueryGroup::read_order(
+                            hits,
+                            |scores| *scores,
+                            |previous, rank| {
+                                crate::report::db_subject::rank_joins_as_copy(
+                                    &self.parsed,
+                                    previous as usize,
+                                    rank as usize,
+                                )
+                            },
+                            sort,
+                            false,
+                        )
+                    }
+                    None => lists
+                        .iter()
+                        .filter(|list| {
+                            list.hsps.iter().any(|hsp| {
+                                super::report::has_seqalign(hsp, gapped) && rows.reads(hsp.identity)
+                            })
                         })
-                    })
-                    .map(|list| (self.ordinals[list.oid], self.parsed_subject(list.oid)));
-                let messages =
-                    shared::prefetch_messages(&database.db, &database.taxdb, subjects, PROGRAM)?;
-                if !messages.is_empty() {
-                    self.query_fetches
-                        .insert(batch.query_ordinal + index, messages);
+                        .map(|list| list.oid as u32)
+                        .collect(),
+                };
+                let subjects = ranks.into_iter().map(|rank| {
+                    (
+                        rank,
+                        self.ordinals[rank as usize],
+                        self.parsed_subject(rank as usize),
+                    )
+                });
+                let reads = shared::subject_read_texts(
+                    &database.db,
+                    &database.taxdb,
+                    subjects,
+                    rows_open,
+                    database.program,
+                )?;
+                if reads.is_empty() {
+                    continue;
+                }
+                let ordinal = batch.query_ordinal + index;
+                if places {
+                    self.query_reads.insert(ordinal, reads);
+                } else {
+                    let messages = reads.into_iter().flat_map(|(_, text)| text).collect();
+                    self.query_fetches.insert(ordinal, messages);
                 }
             }
         }
@@ -683,6 +757,13 @@ impl ReportedSubjects {
     /// batch prefetched).
     pub(crate) fn query_fetches(&self, ordinal: usize) -> &[u8] {
         self.query_fetches.get(&ordinal).map_or(&[], Vec::as_slice)
+    }
+
+    /// The texts of the subjects that the query `ordinal`'s report reads one by one, where its
+    /// writer places them (`fetch_by_query` with `places`); empty otherwise.
+    pub(crate) fn query_reads(&self, ordinal: usize) -> &crate::report::query_warnings::QueryReads {
+        static NONE: crate::report::query_warnings::QueryReads = Vec::new();
+        self.query_reads.get(&ordinal).unwrap_or(&NONE)
     }
 
     /// The messages of every query's own fetches, in query order, for a format that writes no
@@ -746,7 +827,7 @@ impl ReportedSubjects {
             let parsed = self.parsed.get(rank).and_then(Option::as_deref);
             if let (true, Some(subject)) = (needs.all_deflines, parsed) {
                 self.tabular.all_ids[rank] = subject.all_tabular_ids(true).map_err(|problem| {
-                    shared::parsed_refusal(ordinal, &format!("has {problem}"), PROGRAM)
+                    shared::parsed_refusal(ordinal, &format!("has {problem}"), database.program)
                 })?;
             }
             if needs.taxonomy {
@@ -756,7 +837,7 @@ impl ReportedSubjects {
                         let set = database
                             .db
                             .defline_set(ordinal)
-                            .map_err(|error| shared::database_error(error, PROGRAM))?;
+                            .map_err(|error| shared::database_error(error, database.program))?;
                         TabularTaxonomy::of_deflines(&set.deflines)
                     }
                 };
@@ -767,7 +848,7 @@ impl ReportedSubjects {
             &database.taxdb,
             spec,
             &self.tabular.taxonomy,
-            PROGRAM,
+            database.program,
         )?;
         Ok(())
     }
@@ -838,6 +919,40 @@ impl ReportedSubjects {
             Some([accession, version]) => [id, accession, version],
             None => [id, id, id],
         }
+    }
+
+    /// With `-parse_deflines`, `common::database::refuse_id_of_a_query` of each reported sequence
+    /// with parsed Seq-ids of the batches `batches` of one reader batch (their hit lists named by
+    /// their ranks, `for_batch`), with the scope that `scopes` (numbered from the reader batch's
+    /// first query) gives the query of its report (`BatchResults::query_ordinal`, which counts
+    /// from the reader batch, and the query's index).
+    pub(crate) fn refuse_ids_of_queries(
+        &self,
+        batches: &[BatchResults],
+        gapped: bool,
+        scopes: crate::blastinput::query_batch::QueryScopesFrom<'_>,
+    ) -> Result<()> {
+        if self.parsed.is_empty() {
+            return Ok(());
+        }
+        for batch in batches {
+            for (qidx, lists) in batch.queries.iter().enumerate() {
+                for list in lists {
+                    if !super::report::reported(list, gapped) {
+                        continue;
+                    }
+                    if let Some(subject) = self.parsed_subject(list.oid) {
+                        shared::refuse_id_of_a_query(
+                            subject,
+                            self.ordinals[list.oid],
+                            scopes.of_query(batch.query_ordinal + qidx),
+                            PROGRAM,
+                        )?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The sequences with parsed Seq-ids by rank (empty when the batch reports none).
@@ -951,6 +1066,7 @@ mod tests {
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),
             parsed_seqids: false,
+            program: PROGRAM,
         }
     }
 
@@ -1122,7 +1238,7 @@ mod tests {
                 hsp.identity = identities;
             }
             reported
-                .fetch_by_query(&database, &batches, true, rows)
+                .fetch_by_query(&database, &batches, true, rows, false, false, None)
                 .unwrap();
             [
                 reported.query_fetches(0).to_vec(),

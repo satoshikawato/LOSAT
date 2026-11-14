@@ -9,7 +9,7 @@ use crate::common::Hit;
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::adjust_scores::AdjustedProteinMatrix;
 use crate::utils::matrix::{
-    blosum62_ncbistdaa_score_row, blosum62_score_ncbistdaa_direct, protein_score,
+    blosum62_ncbistdaa_score_row, blosum62_score_ncbistdaa_direct, protein_score, standard_score,
 };
 
 #[cfg(test)]
@@ -105,19 +105,6 @@ enum BlastpScoreMatrix<'a> {
 }
 
 #[inline(always)]
-fn blastp_standard_score(matrix: ScoringMatrix, query_residue: u8, subject_residue: u8) -> i32 {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:737-957
-    // ```c
-    // next_score = score_array[b_index].best + matrix_row[*b_ptr];
-    // ```
-    if matrix == ScoringMatrix::Blosum62 {
-        blosum62_score_ncbistdaa_direct(query_residue, subject_residue)
-    } else {
-        protein_score(matrix, query_residue, subject_residue)
-    }
-}
-
-#[inline(always)]
 fn blastp_standard_score_impl<const BLOSUM62: bool>(
     matrix: ScoringMatrix,
     query_residue: u8,
@@ -176,7 +163,7 @@ impl BlastpScoreMatrix<'_> {
         // ```
         match self {
             Self::Blosum62 => blosum62_score_ncbistdaa_direct(query_residue, subject_residue),
-            Self::Standard(matrix) => blastp_standard_score(matrix, query_residue, subject_residue),
+            Self::Standard(matrix) => standard_score(matrix, query_residue, subject_residue),
             Self::Adjusted(matrix) => matrix.score(query_residue, subject_residue),
         }
     }
@@ -1173,7 +1160,7 @@ fn align_ex_protein_score_only(
     // recurrence of Blast_SemiGappedAlign
     // (same max/gap updates, same X-drop test, same best-cell choice) in vector lanes and returns
     // (a_offset, b_offset, score).
-    // If the problem does not fit the 8/16-bit lanes (or the target has no vector kernel) it
+    // If the problem does not fit the 8/16/32-bit lanes (or the target has no vector kernel) it
     // returns None and the scalar port below runs.
     if crate::utils::xdrop_simd::KERNEL_COMPILED {
         use crate::utils::xdrop_simd::{xdrop_align, ColSeq, RowSeq};
@@ -1269,7 +1256,7 @@ fn x_blosum62_tables() -> &'static crate::utils::xdrop_simd::StaticTables {
 //             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
 // ```
 // The tables hold the scores that matrix[A[a]][B[b]] reads for a matrix other than BLOSUM62
-// (`blastp_standard_score`, built as `x_blosum62_tables` is); they only change how the row is
+// (`standard_score`, built as `x_blosum62_tables` is); they only change how the row is
 // looked up, and give the kernel the matrix's largest score (its 8-bit lanes need it).
 /// The lookup tables of the SIMD kernel for `matrix`, built at the first call for the matrix;
 /// `None` if a score is outside the 16-bit tables (the kernel then builds each row as before).
@@ -1281,7 +1268,7 @@ fn x_standard_tables(
         ScoringMatrix::ALL.len()] = [const { OnceLock::new() }; ScoringMatrix::ALL.len()];
     T[matrix as usize]
         .get_or_init(|| {
-            let f = move |q: u8, s: u8| blastp_standard_score(matrix, q, s);
+            let f = move |q: u8, s: u8| standard_score(matrix, q, s);
             crate::utils::xdrop_simd::build_tables(&f, 28)
         })
         .as_deref()
@@ -1311,7 +1298,7 @@ fn with_x_scores<R>(
         }),
         BlastpScoreMatrix::Adjusted(m) => run(&Scores::Rows28(&m.scores)),
         BlastpScoreMatrix::Standard(matrix) => {
-            let f = move |q: u8, s: u8| blastp_standard_score(matrix, q, s);
+            let f = move |q: u8, s: u8| standard_score(matrix, q, s);
             run(&match x_standard_tables(matrix) {
                 Some(t) => Scores::Tables { t, n: 28 },
                 None => Scores::Func { f: &f, n: 28 },
@@ -4611,7 +4598,7 @@ mod tests {
         for matrix in ScoringMatrix::ALL {
             assert!(x_standard_tables(matrix).is_some(), "{matrix:?}");
             let top = (1..28u8)
-                .flat_map(|q| (1..28u8).map(move |s| blastp_standard_score(matrix, q, s)))
+                .flat_map(|q| (1..28u8).map(move |s| standard_score(matrix, q, s)))
                 .max()
                 .unwrap();
             let score_matrix = BlastpScoreMatrix::Standard(matrix);
@@ -4937,11 +4924,74 @@ mod tests {
                 scratch.dp_mem_alloc,
             )
         };
-        let (bounded, bounded_cells, _) = run_traceback(100_000);
+        // the comparison side: an X-drop the 16-bit lanes hold as it is (no clamp) and that the
+        // extension never reaches (it drops at most about 900 here), so a clamp to a wrong `R`
+        // on the huge side would show
+        let (bounded, bounded_cells, _) = run_traceback(20_000);
         let (unbounded, cells, alloc) = run_traceback(huge);
         assert_eq!(unbounded, bounded);
         // `GapAlignScratch::new` holds NCBI's first 1000 cells, more than `N + 1`.
         assert_eq!(bounded_cells, 1000);
+        assert_eq!(cells, 1000);
+        // No NCBI counterpart: the vector kernels run a huge X-drop as the clamp's `R`
+        // (`xdrop_simd::x_drop_for_lanes`, `LOSAT_X_DP32`) and do not touch `dp_mem_alloc`; the
+        // scalar port, which answers without them (other targets, `LOSAT_X_DP32=0`) and for the
+        // calls they decline, keeps NCBI's count (below).
+        let vector =
+            crate::utils::xdrop_simd::x_kernels_run() && crate::utils::xdrop_simd::x_dp32();
+        if vector {
+            assert_eq!(alloc, 1000);
+        } else {
+            assert!(alloc >= huge as usize + 3, "{alloc}");
+        }
+        // The scalar ports themselves with the huge X-drop (the left extensions of the traceback
+        // and of the score-only alignment): NCBI's count, only the cells up to `N`, and the
+        // results of the X-drop the extension never reaches.
+        let scalar_traceback = |x_drop: i32| {
+            let mut scratch = GapAlignScratch::new();
+            let mut fence_hit = false;
+            let result = align_ex_protein_scalar(
+                &query,
+                &subject,
+                21,
+                21,
+                BlastpScoreMatrix::Standard(ScoringMatrix::Blosum62),
+                11,
+                1,
+                x_drop,
+                true,
+                &mut scratch,
+                &mut fence_hit,
+                false,
+            );
+            (result, scratch.dp_mem.len(), scratch.dp_mem_alloc)
+        };
+        let (bounded, _, _) = scalar_traceback(100_000);
+        let (unbounded, cells, alloc) = scalar_traceback(huge);
+        assert_eq!(unbounded, bounded);
+        assert_eq!(cells, 1000);
+        assert!(alloc >= huge as usize + 3, "{alloc}");
+        let scalar_score_only = |x_drop: i32| {
+            let mut scratch = GapAlignScratch::new();
+            let result = align_ex_protein_score_only_scalar(
+                &query,
+                0,
+                &subject,
+                0,
+                21,
+                21,
+                BlastpScoreMatrix::Standard(ScoringMatrix::Blosum62),
+                11,
+                1,
+                x_drop,
+                true,
+                &mut scratch,
+            );
+            (result, scratch.dp_mem.len(), scratch.dp_mem_alloc)
+        };
+        let (bounded, _, _) = scalar_score_only(100_000);
+        let (unbounded, cells, alloc) = scalar_score_only(huge);
+        assert_eq!(unbounded, bounded);
         assert_eq!(cells, 1000);
         assert!(alloc >= huge as usize + 3, "{alloc}");
         for mode in [
@@ -4962,7 +5012,13 @@ mod tests {
                 &mut scratch,
             );
             assert_eq!(scratch.dp_mem.len(), 1000);
-            assert!(scratch.dp_mem_alloc >= huge as usize + 3);
+            // the vector kernels (the exact mode's dispatch, `xdrop_align`) leave the count as
+            // it was, as above
+            if vector && matches!(mode, BlastpGappedAlignmentMode::Exact) {
+                assert_eq!(scratch.dp_mem_alloc, 1000);
+            } else {
+                assert!(scratch.dp_mem_alloc >= huge as usize + 3);
+            }
             let bounded = blastp_score_only_gapped_alignment(
                 &query,
                 &subject,
@@ -4971,10 +5027,127 @@ mod tests {
                 ScoringMatrix::Blosum62,
                 11,
                 1,
-                100_000,
+                20_000,
                 mode,
             );
             assert_eq!(unbounded, bounded);
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:736-741,766-770
+    // ```c
+    // Blast_SemiGappedAlign(const Uint1* A, const Uint1* B, Int4 M, Int4 N,
+    //    Int4* a_offset, Int4* b_offset, Boolean score_only,
+    // ...
+    //     if (!score_only) {
+    //         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
+    // ```
+    // Both sides of `LOSAT_X_DP32` in one process: with X-drops past the 16-bit lanes (50,000, 1e6
+    // and 2^31 - 300) on a composition-adjusted matrix (BLOSUM62 x 150, the scale of the redo's
+    // matrices), the dispatched traceback and score-only extensions (`align_ex_protein`,
+    // `align_ex_protein_score_only`: the 32-bit lanes) give what the scalar ports give
+    // (`align_ex_protein_scalar`, `align_ex_protein_score_only_scalar`: what `LOSAT_X_DP32=0`
+    // runs), left and right of the seed as the extension wrappers call them: offsets, score, edit
+    // script and fence flag.
+    #[test]
+    fn wide_lanes_give_the_scalar_ports_results() {
+        let mut scores = [[0i32; 28]; 28];
+        for (q, row) in scores.iter_mut().enumerate() {
+            for (s, v) in row.iter_mut().enumerate() {
+                let b = blosum62_score_ncbistdaa_direct(q as u8, s as u8);
+                // the gap letter keeps BLAST_SCORE_MIN, as the adjusted matrices do
+                *v = if b > -100 { 150 * b } else { b };
+            }
+        }
+        let adjusted = AdjustedProteinMatrix { scores };
+        let matrix = BlastpScoreMatrix::Adjusted(&adjusted);
+        let (gap_open, gap_extend) = (11 * 150, 150);
+        let mut state = 0x2545_F491u32;
+        let mut next = move |n: u32| {
+            state = state.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            (state >> 8) % n
+        };
+        let runs = crate::utils::xdrop_simd::X32_RUNS.with(|n| n.get());
+        for case in 0..10 {
+            let len = 60 + next(240) as usize;
+            // letters 1..=24 (no gap letter, whose -32768 entries the 32-bit lanes decline)
+            let query: Vec<u8> = (0..len).map(|_| 1 + next(24) as u8).collect();
+            let mut subject = Vec::with_capacity(len + 8);
+            for (i, &c) in query.iter().enumerate() {
+                match next(40) {
+                    0 => subject.extend([c, 1 + next(24) as u8]),
+                    1 if i > 0 => {}
+                    2..=6 => subject.push(1 + next(24) as u8),
+                    _ => subject.push(c),
+                }
+            }
+            let (q_start, s_start) = (len / 2, (len / 2).min(subject.len() - 2));
+            for x_drop in [50_000, 1_000_000, i32::MAX - 300] {
+                for reverse in [true, false] {
+                    let (q, s, len1, len2) = if reverse {
+                        (&query[..], &subject[..], q_start + 1, s_start + 1)
+                    } else {
+                        (
+                            &query[q_start..],
+                            &subject[s_start..],
+                            query.len() - q_start - 1,
+                            subject.len() - s_start - 1,
+                        )
+                    };
+                    let (mut a, mut b) = (GapAlignScratch::new(), GapAlignScratch::new());
+                    let (mut fence_a, mut fence_b) = (false, false);
+                    let got = align_ex_protein(
+                        q,
+                        s,
+                        len1,
+                        len2,
+                        matrix,
+                        gap_open,
+                        gap_extend,
+                        x_drop,
+                        reverse,
+                        &mut a,
+                        &mut fence_a,
+                        false,
+                    );
+                    let want = align_ex_protein_scalar(
+                        q,
+                        s,
+                        len1,
+                        len2,
+                        matrix,
+                        gap_open,
+                        gap_extend,
+                        x_drop,
+                        reverse,
+                        &mut b,
+                        &mut fence_b,
+                        false,
+                    );
+                    assert_eq!(
+                        (got, fence_a),
+                        (want, fence_b),
+                        "case {case} x {x_drop} reverse {reverse}: traceback"
+                    );
+                    let (q_base, s_base) = if reverse { (0, 0) } else { (q_start, s_start) };
+                    let got = align_ex_protein_score_only(
+                        &query, q_base, &subject, s_base, len1, len2, matrix, gap_open, gap_extend,
+                        x_drop, reverse, &mut a,
+                    );
+                    let want = align_ex_protein_score_only_scalar(
+                        &query, q_base, &subject, s_base, len1, len2, matrix, gap_open, gap_extend,
+                        x_drop, reverse, &mut b,
+                    );
+                    assert_eq!(
+                        got, want,
+                        "case {case} x {x_drop} reverse {reverse}: score only"
+                    );
+                }
+            }
+        }
+        if crate::utils::xdrop_simd::x_kernels_run() && crate::utils::xdrop_simd::x_dp32() {
+            let runs = crate::utils::xdrop_simd::X32_RUNS.with(|n| n.get()) - runs;
+            assert!(runs > 100, "the 32-bit lanes ran {runs} times");
         }
     }
 }

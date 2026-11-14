@@ -1,0 +1,249 @@
+177058	CHL00136	rpl31	ribosomal protein L31; V	68
+177082	CHL00180	rbcR	LysR transcriptional reg	305
+439844	COG0074	SucD	Succinyl-CoA synthetase,	288
+439891	COG0121	YafJ	Predicted glutamine amid	248
+440024	COG0254	RpmE	Ribosomal protein L31 [T	72
+440027	COG0257	RpmJ	Ribosomal protein L36 [T	38
+440048	COG0279	GmhA	Phosphoheptose isomerase	189
+512403	COG0388	Nit1	Nitrilase/amidase YafV/N	252
+440326	COG0560	SerB	Phosphoserine phosphatas	221
+440327	COG0561	Cof	Hydroxymethylpyrimidine 	192
+440347	COG0582	FimB	Integrase/recombinase, i	391
+440348	COG0583	LysR	DNA-binding transcriptio	256
+440430	COG0666	ANKYR	Ankyrin repeat [Signal t	289
+440557	COG0794	GutQ	D-arabinose 5-phosphate 	317
+440903	COG1292	BetT	Choline-glycine betaine 	512
+440932	COG1321	MntR	Mn-dependent transcripti	135
+441131	COG1522	Lrp	DNA-binding transcriptio	138
+441138	COG1529	CoxL	Aldehyde, CO or xanthine	741
+441268	COG1662	InsB	Transposase and inactiva	193
+441343	COG1737	RpiR	DNA-binding transcriptio	286
+441451	COG1846	MarR	DNA-binding transcriptio	142
+441502	COG1898	RfbC	dTDP-4-dehydrorhamnose 3	177
+441563	COG1960	CaiA	Acyl-CoA dehydrogenase r	381
+441578	COG1975	XdhC	Molybdoenzyme maturation	303
+441799	COG2197	CitB	DNA-binding response reg	131
+441802	COG2200	EAL	EAL domain, c-di-GMP-spe	576
+442052	COG2771	CsgD	DNA-binding transcriptio	188
+442153	COG2909	MalT	ATP-, maltotriose- and D	184
+442241	COG3004	NhaA	Na+/H+ antiporter NhaA [	387
+442612	COG3385	InsG	IS4 transposase InsG [Mo	385
+442660	COG3434	YuxH	c-di-GMP phosphodiestera	407
+442983	COG3769	YedP	Mannosyl-3-phosphoglycer	268
+443623	COG4566	FixJ	DNA-binding response reg	196
+512688	COG4742	ArnR	Transcriptional regulato	255
+443849	COG4821	COG4821	Uncharacterized conserve	250
+443970	COG4943	YjcC	Redox-sensing c-di-GMP p	528
+443998	COG4973	XerC	Site-specific recombinas	287
+512728	COG4974	XerD	Site-specific tyrosine r	279
+444025	COG5001	COG5001	Cyclic di-GMP metabolism	678
+444607	COG5905	GerE	Spore transcriptional re	76
+502586	NF000612	PRK00019	50S ribosomal protein L3	72
+502977	NF001628	PRK00414	D-sedoheptulose 7-phosph	192
+503034	NF001809	PRK00528	50S ribosomal protein L3	71
+503166	NF002021	PRK00831	type B 50S ribosomal pro	41
+503450	NF002462	PRK01678	type B 50S ribosomal pro	79
+503714	NF002805	PRK02947	sugar isomerase domain-c	246
+503764	NF002887	PRK03356	L-carnitine/gamma-butyro	497
+505031	NF004760	PRK06091	acyl-CoA synthetase FdrA	555
+506875	NF007000	PRK09463	acyl-CoA dehydrogenase. 	726
+506978	NF007111	PRK09560	Na(+)/H(+) antiporter Nh	389
+506979	NF007112	PRK09561	sodium/proton antiporter	388
+507113	NF007279	PRK09738	type I toxin-antitoxin s	52
+507226	NF007399	PRK09928	choline BCCT transporter	675
+507269	NF007443	PRK09993	Ivy family C-type lysozy	148
+507552	NF007757	PRK10438	amidohydrolase. 	256
+507600	NF007806	PRK10513	sugar-phosphatase. 	270
+507614	NF007821	PRK10530	pyridoxal phosphatase. 	272
+507996	NF008213	PRK10976	sugar/pyridoxal phosphat	266
+508064	NF008284	PRK11062	transcriptional activato	296
+508122	NF008352	PRK11139	transcriptional regulato	297
+508224	NF008467	PRK11359	oxygen-sensing cyclic-di	799
+508291	NF008548	PRK11475	DNA-binding transcriptio	175
+509139	NF009586	PRK13026	acyl-CoA dehydrogenase. 	747
+509886	NF010546	PRK13936	phosphoheptose isomerase	197
+510151	NF010883	PRK14290	chaperone protein DnaJ. 	365
+510757	NF011705	PRK15126	HMP-PP phosphatase. Cata	269
+468085	NF033558	transpos_IS1	IS1 family transposase. 	199
+468100	NF033591	transpos_IS4_2	IS4 family transposase. 	340
+468101	NF033592	transpos_IS4_1	IS4 family transposase. 	332
+439499	NF038187	FadE_coli	acyl-CoA dehydrogenase F	816
+468673	NF040709	benzoate_BenM	benzoate utilization tra	299
+468737	NF040786	LysR_Sec_metab	selenium metabolism-asso	298
+468908	NF040978	Ve_IatC_Nterm	inverse autotransporter 	1065
+511111	NF040981	Ve_YrIlm_NTERM	YrIlm family inverse aut	477
+469362	NF041474	membrane_YkgR	small membrane protein Y	33
+469553	NF041671	peri_hyde_PaoC	aldehyde oxidoreductase 	735
+511468	NF042960	AcphenoCarb_ApcA	acetophenone carboxylase	658
+511507	NF043006	CyhCrbnylCoADH	cyclohexane-1-carbonyl-C	380
+512042	NF045966	YcsE_rel_Pase	YcsE-related riboflavin 	265
+165205	PHA02874	PHA02874	ankyrin repeat protein; 	434
+165206	PHA02875	PHA02875	ankyrin repeat protein; 	413
+165207	PHA02876	PHA02876	ankyrin repeat protein; 	682
+222939	PHA02878	PHA02878	ankyrin repeat protein; 	477
+165231	PHA02917	PHA02917	ankyrin-like protein; Pr	661
+222980	PHA03095	PHA03095	ankyrin-like protein; Pr	471
+222984	PHA03100	PHA03100	ankyrin repeat protein; 	422
+215066	PLN00125	PLN00125	Succinyl-CoA ligase [GDP	300
+215096	PLN00192	PLN00192	aldehyde oxidase	1344
+178008	PLN02382	PLN02382	probable sucrose-phospha	413
+215284	PLN02519	PLN02519	isovaleryl-CoA dehydroge	404
+178141	PLN02526	PLN02526	acyl-coenzyme A oxidase	412
+215479	PLN02887	PLN02887	hydrolase family protein	580
+215491	PLN02906	PLN02906	xanthine dehydrogenase	1319
+215625	PLN03192	PLN03192	Voltage-dependent potass	823
+240305	PTZ00174	PTZ00174	phosphomannomutase; Prov	247
+240307	PTZ00187	PTZ00187	succinyl-CoA synthetase 	317
+140343	PTZ00322	PTZ00322	6-phosphofructo-2-kinase	664
+185635	PTZ00456	PTZ00456	acyl-CoA dehydrogenase; 	622
+272905	TIGR00099	Cof-subfamily	Cof subfamily of IIB sub	256
+272907	TIGR00105	L31	ribosomal protein L31. T	68
+129533	TIGR00441	gmhA	phosphoheptose isomerase	154
+273264	TIGR00773	NhaA	Na+/H+ antiporter NhaA. 	373
+213565	TIGR00842	bcct	choline/carnitine/betain	452
+273311	TIGR00870	trp	transient-receptor-poten	743
+273510	TIGR01221	rmlC	dTDP-4-dehydrorhamnose 3	176
+273651	TIGR01484	HAD-SF-IIB	HAD-superfamily hydrolas	207
+132014	TIGR02969	mam_aldehyde_ox	aldehyde oxidase. Member	1330
+238042	cd00090	HTH_ARSR	Arsenical Resistance Ope	78
+238212	cd00352	Gn_AT_II	Glutamine amidotransfera	220
+271175	cd00397	DNA_BRE_C	DNA breaking-rejoining e	167
+380337	cd00438	cupin_RmlC	RmlC carbohydrate epimer	168
+173838	cd00567	ACAD	Acyl-CoA dehydrogenase. 	327
+271177	cd00796	INT_Rci_Hp1_C	Shufflon-specific DNA re	162
+271179	cd00798	INT_XerDC_C	XerD and XerC integrases	172
+271181	cd00800	INT_Lambda_C	C-terminal catalytic dom	161
+271182	cd00801	INT_P4_C	Bacteriophage P4 integra	180
+173840	cd01151	GCD	Glutaryl-CoA dehydrogena	386
+173841	cd01152	ACAD_fadE6_17_26	Putative acyl-CoA dehydr	380
+173842	cd01153	ACAD_fadE5	Putative acyl-CoA dehydr	407
+173843	cd01154	AidB	Proteins involved in DNA	418
+173845	cd01156	IVD	Isovaleryl-CoA dehydroge	376
+173846	cd01157	MCAD	Medium chain acyl-CoA de	378
+173847	cd01158	SCAD_SBCAD	Short chain acyl-CoA deh	373
+173849	cd01160	LCAD	Long chain acyl-CoA dehy	372
+173850	cd01161	VLCAD	Very long chain acyl-CoA	409
+173851	cd01162	IBD	Isobutyryl-CoA dehydroge	375
+271183	cd01182	INT_RitC_C_like	C-terminal catalytic dom	186
+271184	cd01184	INT_C_like_1	Uncharacterized site-spe	180
+271185	cd01185	INTN1_C_like	Integrase IntN1 of Bacte	161
+271188	cd01188	INT_RitA_C_like	C-terminal catalytic dom	179
+271189	cd01189	INT_ICEBs1_C_like	C-terminal catalytic dom	147
+271192	cd01192	INT_C_like_3	Uncharacterized site-spe	178
+319763	cd01427	HAD_like	Haloacid dehalogenase-li	106
+238888	cd01907	GlxB	Glutamine amidotransfera	249
+238889	cd01908	YafJ	Glutamine amidotransfera	257
+238923	cd01948	EAL	EAL domain. This domain 	240
+380338	cd02208	cupin_RmlC-like	RmlC-like cupin superfam	73
+319792	cd02605	HAD_SPP	sucrose-phosphatase, sim	245
+240112	cd04795	SIS	SIS domain. SIS (Sugar I	87
+240138	cd05005	SIS_PHI	Hexulose-6-phosphate iso	179
+240139	cd05006	SIS_GmhA	Phosphoheptose isomerase	177
+240140	cd05007	SIS_Etherase	N-acetylmuramic acid 6-p	257
+240141	cd05008	SIS_GlmS_GlmD_1	SIS (Sugar ISomerase) do	126
+240144	cd05013	SIS_RpiR	RpiR-like protein. RpiR 	139
+240145	cd05014	SIS_Kpsf	KpsF-like protein. KpsF 	128
+176102	cd05466	PBP2_LTTR_substrate	The substrate binding do	197
+99777	cd06170	LuxR_C_like	C-terminal DNA-binding d	57
+143587	cd07197	nitrilase	Nitrilase superfamily, i	253
+349983	cd07346	ABC_6TM_exporters	Six-transmembrane helica	292
+319810	cd07507	HAD_Pase	haloacid dehalogenase-li	255
+319816	cd07514	HAD_Pase	phosphatase, similar to 	139
+319818	cd07516	HAD_Pase	phosphatase, similar to 	253
+319819	cd07517	HAD_HPP	phosphatase, similar to 	213
+319820	cd07518	HAD_YbiV-Like	Escherichia coli YbiV su	184
+143599	cd07575	Xc-1258_like	Xanthomonas campestris X	252
+143600	cd07576	R-amidase_like	Pseudomonas sp. MCI3434 	254
+143607	cd07583	nitrilase_5	Uncharacterized subgroup	253
+176106	cd08414	PBP2_LTTR_aromatics_like	The C-terminal substrate	197
+176107	cd08415	PBP2_LysR_opines_like	The C-terminal substrate	196
+176112	cd08420	PBP2_CysL_like	C-terminal substrate bin	201
+176114	cd08422	PBP2_CrgA_like	The C-terminal substrate	197
+176120	cd08429	PBP2_NhaR	The C-terminal substrate	204
+176122	cd08431	PBP2_HupR	The C-terminal substrate	195
+176159	cd08470	PBP2_CrgA_like_1	The C-terminal substrate	197
+176160	cd08471	PBP2_CrgA_like_2	The C-terminal substrate	201
+176161	cd08472	PBP2_CrgA_like_3	The C-terminal substrate	202
+176162	cd08473	PBP2_CrgA_like_4	The C-terminal substrate	202
+176163	cd08474	PBP2_CrgA_like_5	The C-terminal substrate	202
+176164	cd08475	PBP2_CrgA_like_6	The C-terminal substrate	199
+176165	cd08476	PBP2_CrgA_like_7	The C-terminal substrate	197
+176166	cd08477	PBP2_CrgA_like_8	The C-terminal substrate	197
+176168	cd08479	PBP2_CrgA_like_9	The C-terminal substrate	198
+176169	cd08480	PBP2_CrgA_like_10	The C-terminal substrate	198
+199909	cd10747	DnaJ_C	C-terminal substrate bin	158
+349989	cd18545	ABC_6TM_YknV_like	Six-transmembrane helica	293
+350009	cd18565	ABC_6TM_exporter_like	Six-transmembrane helica	313
+513171	pfam00126	HTH_1	Bacterial regulatory hel	60
+513237	pfam00196	GerE	Bacterial regulatory pro	57
+513454	pfam00441	Acyl-CoA_dh_1	Acyl-CoA dehydrogenase, 	150
+513456	pfam00444	Ribosomal_L36	Ribosomal protein L36. 	38
+513542	pfam00549	Ligase_CoA	CoA-ligase. This family 	128
+513554	pfam00563	EAL	EAL domain. This domain 	236
+513580	pfam00589	Phage_integrase	Phage integrase family. 	167
+513678	pfam00702	Hydrolase	haloacid dehalogenase-li	190
+513844	pfam00908	dTDP_sugar_isom	dTDP-4-dehydrorhamnose 3	165
+514079	pfam01197	Ribosomal_L31	Ribosomal protein L31. 	65
+514218	pfam01380	SIS	SIS domain. SIS (Sugar I	131
+514348	pfam01556	DnaJ_C	DnaJ C terminal domain. 	213
+514383	pfam01609	DDE_Tnp_1	Transposase DDE domain. 	196
+485358	pfam01848	HOK_GEF	Hok/gef family. 	41
+514667	pfam02028	BCCT	BCCT, betaine/carnitine/	485
+515065	pfam02625	XdhC_CoxI	XdhC and CoxI family. Th	68
+515068	pfam02629	CoA_binding	CoA binding domain. This	97
+515144	pfam02738	MoCoBD_1	Molybdopterin cofactor-b	242
+515167	pfam02770	Acyl-CoA_dh_M	Acyl-CoA dehydrogenase, 	97
+515168	pfam02771	Acyl-CoA_dh_N	Acyl-CoA dehydrogenase, 	112
+281403	pfam03400	DDE_Tnp_IS1	IS1 transposase. Transpo	131
+515602	pfam03466	LysR_substrate	LysR substrate binding d	205
+516633	pfam05116	S6PP	Sucrose-6F-phosphate pho	246
+516697	pfam05204	Hom_end	Homing endonuclease. Hom	110
+517306	pfam06496	DUF1097	Protein of unknown funct	140
+517326	pfam06545	AllG	Oxamate carbamoyltransfe	215
+517494	pfam06965	Na_H_antiport_1	Na+/H+ antiporter 1. Thi	377
+518158	pfam08282	Hydrolase_3	haloacid dehalogenase-li	255
+489909	pfam08816	Ivy	Inhibitor of vertebrate 	117
+518824	pfam09317	ACDH_C	Acyl-CoA dehydrogenase, 	284
+491845	pfam11392	AllH	Oxamate carbamoyltransfe	109
+492229	pfam11924	IAT_beta	Inverse autotransporter,	279
+492909	pfam12796	Ank_2	Ankyrin repeats (3 copie	91
+493211	pfam13230	GATase_4	Glutamine amidotransfera	271
+520685	pfam13356	Arm-DNA-bind_3	Arm DNA-binding domain. 	78
+520712	pfam13404	HTH_AsnC-type	AsnC-type helix-turn-hel	41
+520754	pfam13478	XdhC_C	XdhC Rossmann domain. Th	143
+520810	pfam13580	SIS_2	SIS domain. SIS (Sugar I	137
+520835	pfam13637	Ank_4	Ankyrin repeats (many co	50
+493753	pfam13857	Ank_5	Ankyrin repeats (many co	56
+522332	pfam16449	MatB	Fimbrillin MatB. This is	166
+523667	pfam19425	Csd3_N2	Csd3 second domain. This	122
+523884	pfam20256	MoCoBD_2	Molybdopterin cofactor-b	282
+500391	pfam22083	I-HmuI_NUMOD-like	DNA endonuclease I-HmuI-	46
+293786	sd00045	ANK	ankyrin repeats. Ankyrin	98
+214491	smart00052	EAL	Putative diguanylate pho	242
+197670	smart00347	HTH_MARR	helix_turn_helix multipl	101
+197713	smart00418	HTH_ARSR	helix_turn_helix, Arseni	66
+197715	smart00421	HTH_LUXR	helix_turn_helix, Lux Re	58
+528952	cl00213	DNA_BRE_C	DNA breaking-rejoining e	0
+529030	cl00319	Gn_AT_II	N/A. Gn_AT_II_novel.  Th	0
+529067	cl00377	RpmE	Ribosomal protein L31 [T	0
+529076	cl00389	SIS	N/A. This is the C-termi	0
+529170	cl00569	BetT	Choline-glycine betaine 	0
+529429	cl01133	Asp-Al_Ex	Predicted Permease Membr	0
+447368	cl07428	Ivy	Inhibitor of vertebrate 	0
+447602	cl08299	LAGLIDADG_3	LAGLIDADG-like domain. T	0
+530402	cl09933	ACAD	Acyl-CoA dehydrogenase. 	0
+530505	cl11424	nitrilase	Nitrilase superfamily, i	0
+531134	cl21454	NADB_Rossmann	Rossmann-fold NAD(P)(+)-	0
+531135	cl21456	Periplasmic_Binding_Protein_Type_2	Type 2 periplasmic bindi	0
+531137	cl21460	HAD_like	Haloacid Dehalogenase-li	0
+452751	cl27487	HOK_GEF	Hok/gef family. small to	0
+452923	cl29107	Ligase_CoA	CoA-ligase. This domain 	0
+531754	cl29561	EAL	N/A. Putative diguanylat	0
+532173	cl38913	ABC_6TM_exporters	Six-transmembrane helica	0
+476869	cl39094	PHA03100	N/A. ankyrin repeat prot	0
+532251	cl40423	cupin_RmlC-like	RmlC-like cupin superfam	0
+532257	cl40437	TRP_2	Transient receptor ion c	0
+480982	cl46642	dTDP_sugar_isom	dTDP-4-dehydrorhamnose 3	0
+481008	cl46668	Ribosomal_L36	Ribosomal protein L36. R	0
+532797	cl46857	HTH_ARSR	N/A. This is the helical	0
+481199	cl46859	HTH_CRP	N/A. This helix-turn-hel	0

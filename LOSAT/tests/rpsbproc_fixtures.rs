@@ -1,9 +1,10 @@
 //! `losat rpsbproc` against NCBI's rpsbproc 0.5.1 (the binary of the 2025-05-13 package; bioconda's
 //! 0.5.1 on the BLAST+ 2.17.0 toolkit gave the same bytes): every case of
-//! `tests/fixtures/rpsbproc/CASES.tsv` (README.md there: the archives are NCBI rpsblast 2.17.0
-//! `-outfmt 11` of E. coli K-12 MG1655 proteins against CDD v3.22, the data files are CDD v3.22
-//! cut to the rows the archives reach). A `compare` case gives NCBI's standard output, standard
-//! error and exit status (and the `-o` file); a `refuse` case is refused by LOSAT (exit 1, the
+//! `tests/fixtures/rpsbproc/CASES.tsv` (README.md there: the archives are NCBI rpsblast and
+//! rpstblastn 2.17.0 `-outfmt 11` and `-outfmt 5` of E. coli K-12 MG1655 proteins and genome pieces
+//! against CDD v3.22, the data files are CDD v3.22 cut to the rows the archives reach). A `compare` case gives NCBI's standard output, standard
+//! error and exit status (and the `-o` file `out.txt` and the `-logfile` file `log.txt`); a
+//! `refuse` case is refused by LOSAT (exit 1, the
 //! last line of standard error `Error: ... is not supported by LOSAT's rpsbproc...`, standard
 //! output cut at a line end) with the bytes of `refused/` (LOSAT's own; README.md). NCBI is not
 //! run here.
@@ -19,7 +20,8 @@ fn fixtures() -> PathBuf {
 
 /// A directory of its own for one test (the tests of a binary run in parallel) holding a copy
 /// of the fixture's `arch/` and `data/` and of the files of `root/` (a copy, not a link:
-/// Windows), removed at the end.
+/// Windows; a gzip-compressed archive `arch/<name>.asn.gz` or `arch/<name>.xml.gz` unpacked to
+/// `arch/<name>.asn` or `arch/<name>.xml`), removed at the end.
 struct RunDir(PathBuf);
 
 impl RunDir {
@@ -44,13 +46,31 @@ impl RunDir {
     }
 }
 
-/// Copies the files of `from` into `to` (made if missing).
+/// Copies the files of `from` into `to` (made if missing); a file named `*.asn.gz` or `*.xml.gz`
+/// is unpacked to `*.asn` or `*.xml` (the archives of nucleotide queries and the XML inputs are
+/// stored compressed, README.md).
 fn copy_files(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();
     for entry in fs::read_dir(from).unwrap() {
         let entry = entry.unwrap();
-        if entry.file_type().unwrap().is_file() {
-            fs::copy(entry.path(), to.join(entry.file_name())).unwrap();
+        if !entry.file_type().unwrap().is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let packed = name.to_str().and_then(|name| {
+            name.strip_suffix(".gz")
+                .filter(|plain| plain.ends_with(".asn") || plain.ends_with(".xml"))
+        });
+        match packed {
+            Some(plain) => {
+                let mut reader =
+                    flate2::read::GzDecoder::new(fs::File::open(entry.path()).unwrap());
+                let mut out = fs::File::create(to.join(plain)).unwrap();
+                std::io::copy(&mut reader, &mut out).unwrap();
+            }
+            None => {
+                fs::copy(entry.path(), to.join(&name)).unwrap();
+            }
         }
     }
 }
@@ -61,7 +81,7 @@ impl Drop for RunDir {
     }
 }
 
-/// One run of `losat rpsbproc words...` in `dir` with `stdin` (a file of the fixtures, or
+/// One run of `losat rpsbproc words...` in `dir` with `stdin` (a file of the run directory, or
 /// nothing): stdout, stderr, exit status. No LOSAT or NCBI variable, no registry file
 /// (`NCBI_CONFIG_PATH` names the run directory, which has none).
 fn rpsbproc(dir: &Path, words: &[&str], stdin: Option<&Path>) -> (Vec<u8>, Vec<u8>, i32) {
@@ -104,12 +124,46 @@ fn cases() -> Vec<[String; 5]> {
         .collect()
 }
 
-/// Makes the data directory of a case's `setup` in `dir`: `data-with:<a>+<b>`, the directory
-/// `<b>/` holding the data files with those of `data_with/<a>/` and then of `data_with/<b>/` in
-/// their place; `data-without:<file>`, `data_missing/` without that file.
+/// Makes the files of a case's `setup` in `dir`, its parts separated by `,`: `data-with:<a>+<b>`,
+/// the directory `<b>/` holding the data files with those of `data_with/<a>/` and then of
+/// `data_with/<b>/` in their place; `data-without:<file>`, `data_missing/` without that file;
+/// `conf:<file>`, `conf/<file>` as `c.ini` (for `-conffile c.ini`); `ini:<file>`, `conf/<file>`
+/// as `rpsbproc.ini`; `ncbirc:<file>`, `conf/<file>` as the system-wide registry file that NCBI's
+/// application reads on the platform (`SYSTEM_WIDE_REGISTRY`). The files that a run makes and the
+/// registry files of the case before are removed first.
 fn set_up(dir: &Path, setup: &str) {
-    let _ = fs::remove_file(dir.join("out.txt"));
+    for made in [
+        "out.txt",
+        "log.txt",
+        "c.ini",
+        "rpsbproc.ini",
+        SYSTEM_WIDE_REGISTRY,
+    ] {
+        let _ = fs::remove_file(dir.join(made));
+    }
     let _ = fs::remove_dir_all(dir.join("data_missing"));
+    for part in setup.split(',') {
+        set_up_part(dir, part);
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:284-303 (quoted at
+// `ncbi_environment::SYSTEM_WIDE_REGISTRY`): the registry file that NCBI's application reads in
+// the current directory is `.ncbirc`, and `ncbi.ini` on Windows (`eName_RcOrIni`). The fixtures were frozen on Linux
+// with `.ncbirc`; a Windows run gives the file the name its NCBI reads.
+const SYSTEM_WIDE_REGISTRY: &str = if cfg!(windows) { "ncbi.ini" } else { ".ncbirc" };
+
+/// One part of `set_up`.
+fn set_up_part(dir: &Path, setup: &str) {
+    for (kind, name) in [
+        ("conf:", "c.ini"),
+        ("ini:", "rpsbproc.ini"),
+        ("ncbirc:", SYSTEM_WIDE_REGISTRY),
+    ] {
+        if let Some(file) = setup.strip_prefix(kind) {
+            fs::copy(fixtures().join("conf").join(file), dir.join(name)).unwrap();
+        }
+    }
     if let Some(with) = setup.strip_prefix("data-with:") {
         let layers: Vec<&str> = with.split('+').collect();
         let target = dir.join(layers[layers.len() - 1]);
@@ -156,32 +210,50 @@ fn assert_same(dir: &Path, case: &str, out: &[u8], err: &[u8], status: i32) {
     assert_eq!(status, rc, "{case}: exit status");
 }
 
-#[test]
-fn rpsbproc_gives_ncbis_bytes() {
-    let run_dir = RunDir::new("compare");
+/// Runs the rows of CASES.tsv whose `use` is `usage` and compares them with `oracle/`: the
+/// number of rows.
+fn compare_rows(stem: &str, usage: &str) -> usize {
+    let run_dir = RunDir::new(stem);
     let dir = &run_dir.0;
     let oracle = fixtures().join("oracle");
     let mut compared = 0;
-    for [case, usage, stdin, setup, arguments] in cases() {
-        if usage != "compare" {
+    for [case, row_usage, stdin, setup, arguments] in cases() {
+        if row_usage != usage {
             continue;
         }
         set_up(dir, &setup);
-        let stdin = (stdin != "-").then(|| fixtures().join(&stdin));
+        let stdin = (stdin != "-").then(|| dir.join(&stdin));
         let words: Vec<&str> = arguments.split(' ').collect();
         let (out, err, status) = rpsbproc(dir, &words, stdin.as_deref());
         assert_same(&oracle, &case, &out, &err, status);
-        let outfile = oracle.join(format!("{case}.outfile"));
-        if outfile.exists() {
+        for (suffix, made) in [("outfile", "out.txt"), ("log", "log.txt")] {
+            let expected = oracle.join(format!("{case}.{suffix}"));
+            let got = fs::read(dir.join(made)).ok();
             assert_eq!(
-                fs::read(dir.join("out.txt")).unwrap(),
-                fs::read(outfile).unwrap(),
-                "{case}: -o file"
+                got,
+                fs::read(&expected).ok(),
+                "{case}: the file {made} (expected {})",
+                expected.display()
             );
         }
         compared += 1;
     }
-    assert_eq!(compared, 132);
+    compared
+}
+
+#[test]
+fn rpsbproc_gives_ncbis_bytes() {
+    assert_eq!(compare_rows("compare", "compare"), 362);
+}
+
+// The rows of `use` `linux`: `-logfile /dev/stdout` writes the diagnostics into the pipe of the
+// standard output, where the report's part of a line that NCBI's `cout` keeps in glibc's buffer
+// (of `st_blksize`, 4096 for a pipe on Linux) comes after them (`rpsbproc::NcbiStream::Cout`).
+// NCBI's builds are Linux builds; the other platforms' buffers are not NCBI's.
+#[cfg(target_os = "linux")]
+#[test]
+fn rpsbproc_gives_ncbis_bytes_through_a_pipe_on_linux() {
+    assert_eq!(compare_rows("linux", "linux"), 1);
 }
 
 // The refusals end LOSAT with exit 1 and the refusal as the last line of standard error, and
@@ -198,7 +270,7 @@ fn rpsbproc_refuses_what_it_does_not_give() {
             continue;
         }
         set_up(dir, &setup);
-        let stdin = (stdin != "-").then(|| fixtures().join(&stdin));
+        let stdin = (stdin != "-").then(|| dir.join(&stdin));
         let words: Vec<&str> = arguments.split(' ').collect();
         let (out, err, status) = rpsbproc(dir, &words, stdin.as_deref());
         assert_eq!(status, 1, "{case}");
@@ -216,14 +288,15 @@ fn rpsbproc_refuses_what_it_does_not_give() {
         assert_same(&expected, &case, &out, &err, status);
         refused += 1;
     }
-    assert_eq!(refused, 5);
+    assert_eq!(refused, 16);
 }
 
 // The command line outside NCBI's report (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): `-version`
-// prints rpsbproc's version (NCBI: `rpsbproc: 0.5.1`), `-help` LOSAT's help, NCBI's toolkit
-// words such as `-dryrun` are refused with the other programs' message, an unknown word is
-// named as it was given, and a file name that is not UTF-8 is refused before anything is
-// written.
+// prints rpsbproc's version (NCBI: `rpsbproc: 0.5.1`), so does `-version-full` in NCBI's form
+// with LOSAT's values (line RG item E3), `-help` LOSAT's help,
+// `-dryrun=1` is an unknown word as in NCBI (`-dryrun` is not an argument), an
+// unknown word is named as it was given, and a file name that is not UTF-8 is refused before
+// anything is written.
 #[test]
 fn rpsbproc_command_line() {
     let run_dir = RunDir::new("cli");
@@ -238,12 +311,24 @@ fn rpsbproc_command_line() {
     let (out, _, status) = rpsbproc(dir, &["-help"], None);
     assert_eq!(status, 0);
     assert!(String::from_utf8(out).unwrap().contains("--infile"));
-    let (out, err, status) = rpsbproc(dir, &["-i", "arch/one.asn", "-d", "data", "-dryrun"], None);
+    let (out, err, status) = rpsbproc(
+        dir,
+        &["-i", "arch/one.asn", "-d", "data", "-version-full"],
+        None,
+    );
+    assert_eq!((status, err), (0, Vec::new()));
+    let out = String::from_utf8(out).unwrap();
+    assert!(
+        out.starts_with("rpsbproc: 0.5.1\n Package: LOSAT ")
+            && out.ends_with(" Package-Config:  \n GI-64bit:  TRUE\n"),
+        "{out}"
+    );
+    let (out, err, status) = rpsbproc(dir, &["-i", "arch/one.asn", "-dryrun=1"], None);
     assert!(out.is_empty());
     let err = String::from_utf8(err).unwrap();
     assert_eq!(status, 2, "{err}");
     assert!(
-        err.contains("the NCBI C++ Toolkit option -dryrun is not supported by LOSAT's rpsbproc"),
+        err.contains("unknown option or argument '-dryrun=1'"),
         "{err}"
     );
     let (_, _, status) = rpsbproc(dir, &["-i", "arch/one.asn", "-m", "xx"], None);
@@ -325,6 +410,20 @@ fn rpsbproc_refuses_reader_variables() {
         let (status, err) = run(name, value, input);
         assert_eq!(status, 0, "{name}={value}: {err}");
     }
+    // A dry run reads no archive (NCBI rpsbproc 0.5.1 passes with these variables: line RG E1c
+    // review 1, `r_dry_serial`).
+    let output = command(dir)
+        .env("SERIAL_VERIFY_DATA_READ", "no")
+        .args(["-i", "arch/one.asn", "-d", "data", "-dryrun"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{err}");
+    assert!(
+        err.ends_with("Dryrun passed, all resources are present and loaded successfully.\n"),
+        "{err}"
+    );
 }
 
 // `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 9: a failed write of the report stops LOSAT with

@@ -775,6 +775,16 @@ fn ncbi_percent_match(numerator: usize, denominator: usize) -> usize {
     }
 }
 
+/// The `Expect` label of an HSP's header: `Expect(n)` for an HSP of a linked set of n > 1 HSPs
+/// (`sum_n`, `BlastHSP::num`), else `Expect` (showalign.cpp:3593-3598, quoted at
+/// `write_hsp_info`).
+#[inline]
+fn expect_label(sum_n: Option<i32>) -> String {
+    sum_n
+        .filter(|&count| count > 1)
+        .map_or_else(|| "Expect".to_string(), |count| format!("Expect({count})"))
+}
+
 /// Write HSP score information
 ///
 /// Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp x_DisplayAlignInfo()
@@ -796,6 +806,17 @@ pub fn write_hsp_info<W: Write>(
     // NCBI: " Score = XXX bits (YYY),  Expect = Z.Ze-NN"
     let bit_score_str = format_bitscore_ncbi(h.bit_score);
     let evalue_str = format_evalue_ncbi(h.e_value);
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3593-3598
+    // ```c++
+    //             out<<" Score = "<<bit_score_buf<<" ";
+    //             out<<"bits ("<<aln_vec_info->score<<"),"<<"  ";
+    //             out<<"Expect";
+    //             if (aln_vec_info->sum_n > 0) {
+    //             out << "(" << aln_vec_info->sum_n << ")";
+    //             }
+    // ```
+    // An HSP of a linked set (psiblast's `-sum_stats true`) has its "sum_n" score, the set's size.
+    let expect = expect_label(hit.sum_n);
     // psiblast's first round has blastp's methods; rpsblast's redo marks its HSPs likewise.
     if matches!(config.program.as_str(), "blastp" | "psiblast" | "rpsblast") {
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3600-3603
@@ -812,14 +833,14 @@ pub fn write_hsp_info<W: Write>(
         };
         writeln!(
             writer,
-            " Score = {} bits ({}),  Expect = {}{}",
-            bit_score_str, h.raw_score, evalue_str, method
+            " Score = {} bits ({}),  {} = {}{}",
+            bit_score_str, h.raw_score, expect, evalue_str, method
         )?;
     } else {
         writeln!(
             writer,
-            " Score = {} bits ({}),  Expect = {}",
-            bit_score_str, h.raw_score, evalue_str
+            " Score = {} bits ({}),  {} = {}",
+            bit_score_str, h.raw_score, expect, evalue_str
         )?;
     }
 
@@ -1831,11 +1852,23 @@ fn write_psiblast_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io:
 // NCBI reference: c++/src/corelib/ncbistr.cpp:5088-5340 (WrapIt, fWrap_FlatFile)
 // enum EScore { eForced, ePunct, eComma, eSpace, eNewline };
 // if (score >= best_score && score_pos > pos0) { best_pos = score_pos; best_score = score; }
-// NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:279-291
-// NStr::Wrap(str, line_len, string_l, NStr::fWrap_FlatFile);
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:288-293
+// ```c++
+//     NStr::Wrap(str, line_len, string_l, flags);
+//     list<string>::iterator iter = string_l.begin();
+//     while(iter != string_l.end())
+//     {
+//        out << *iter;
+//        out << "\n";
+// ```
 // `NStr::Wrap` measures the `std::string` in bytes, so a line can end inside a UTF-8
-// sequence (`\xe6\xbc` and `\xa2` on two lines).
-fn write_flatfile_wrapped(writer: &mut impl Write, text: &[u8], width: usize) -> io::Result<()> {
+// sequence (`\xe6\xbc` and `\xa2` on two lines). Each line and its newline are NCBI's
+// insertions (`cli::insert`).
+fn write_flatfile_wrapped<W: Write + ?Sized>(
+    writer: &mut W,
+    text: &[u8],
+    width: usize,
+) -> io::Result<()> {
     let bytes = text;
     let mut pos = 0;
     // NCBI reference: c++/src/corelib/ncbistr.cpp:5100,5153-5157,5137
@@ -1900,8 +1933,8 @@ fn write_flatfile_wrapped(writer: &mut impl Write, text: &[u8], width: usize) ->
                 line.push(c);
             }
         }
-        writer.write_all(&line)?;
-        writer.write_all(b"\n")?;
+        crate::cli::insert(writer, &line)?;
+        crate::cli::insert(writer, b"\n")?;
         pos = best;
         if best_score == 3 {
             while pos < bytes.len() && bytes[pos] == b' ' {
@@ -2097,21 +2130,25 @@ fn write_blastp_database_header_spacing<W: Write>(
     Ok(())
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:712-746
-// ```c
-// out << label << "= ";
-// ...
-// out << "\nLength=";
-// out << cbs.GetInst().GetLength() <<"\n";
+/// The `Query=` block of a query of title `query_title` and length `query_length`, as NCBI's
+/// insertions (`cli::insert`; the organism report's stream counts them, outfmt 0's buffers them).
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:729
+// ```c++
+//         out << label << "= ";
 // ```
-fn write_blastp_query_header<W: Write>(
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:741-745
+// ```c++
+//         x_WrapOutputLine(all_id_str, line_len, out, html);
+//         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
+//             out << "\nLength=";
+//             out << cbs.GetInst().GetLength() <<"\n";
+//         }
+// ```
+pub(crate) fn write_blastp_query_header<W: Write + ?Sized>(
     writer: &mut W,
     query_title: &[u8],
     query_length: usize,
 ) -> io::Result<()> {
-    // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:729-746
-    // out << label << "= "; x_WrapOutputLine(all_id_str, line_len, out, html);
-    // out << "\nLength=" << cbs.GetInst().GetLength() << "\n";
     // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:732-734
     // ```c++
     //     string all_id_str = GetSeqIdString(cbs, believe_query);
@@ -2120,11 +2157,12 @@ fn write_blastp_query_header<W: Write>(
     // ```
     // The ID of a local query is not shown (`believe_query` false), so the line is the
     // title, raw (no decoding), without the white space at its ends.
-    write!(writer, "Query= ")?;
+    crate::cli::insert(writer, b"Query")?;
+    crate::cli::insert(writer, b"= ")?;
     write_flatfile_wrapped(writer, truncate_spaces(query_title), 68)?;
-    writeln!(writer)?;
-    writeln!(writer, "Length={}", query_length)?;
-    Ok(())
+    crate::cli::insert(writer, b"\nLength=")?;
+    crate::cli::insert(writer, query_length.to_string().as_bytes())?;
+    crate::cli::insert(writer, b"\n")
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1510-1514
@@ -5665,10 +5703,7 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
     // if (hsp->num > 1) scores.push_back(s_MakeScore("sum_n", ..., hsp->num));
     // NCBI c++/src/objtools/align_format/showalign.cpp:3595-3598:
     // if (aln_vec_info->sum_n > 0) out << "(" << aln_vec_info->sum_n << ")";
-    let expect = hit
-        .sum_n
-        .filter(|&count| count > 1)
-        .map_or_else(|| "Expect".to_string(), |count| format!("Expect({count})"));
+    let expect = expect_label(hit.sum_n);
     writeln!(
         writer,
         " Score = {} bits ({}),  {} = {}{}",

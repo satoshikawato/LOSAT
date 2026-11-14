@@ -105,7 +105,8 @@
 //!
 //! How the module relates to that code. Each row of the DP is the same recurrence as the
 //! cited loops. The diagonal term (`next_score`), the column gap (`best_gap`) and the
-//! X-drop test are evaluated lane by lane, in blocks of 8 (16-bit) or 16 (8-bit) cells.
+//! X-drop test are evaluated lane by lane, in blocks of 8 (16-bit), 16 (8-bit) or 4 (32-bit)
+//! cells.
 //! The row gap (`score_gap_row`), which the C loop carries from cell to cell, is a decayed
 //! prefix maximum over the lanes. The script bits have the values of the NCBI `SCRIPT_*`
 //! constants (or are the four-bit codes of them, `LOSAT_X_DPNIBBLE`), and the traceback walk is
@@ -114,6 +115,59 @@
 //! (`simd_kernels_match_scalar_loops_on_random_problems`) compares results with the
 //! scalar loop. The module is integer arithmetic only. A problem that does not fit the lanes
 //! is not handled here and the scalar port runs.
+//!
+//! 32-bit lanes. A problem whose X-drop the 16-bit lanes cannot hold (`fits_16bit`: an X-drop
+//! above about 26,700) runs on 32-bit lanes, 4 per vector (`kernel::align_body32`): the same
+//! blocks in the same order, the same script bits, traceback rows and walk, the same band and
+//! row-gap extension, 16 cells per step, with the stored value `score - base + bias` up to
+//! `i32::MAX` in place of 32767 (the unsigned saturating subtraction of the 16-bit lanes is
+//! `max(a - b, 0)` on lanes in `0 ..= i32::MAX`, `subsu32`). So the argument above holds as it
+//! stands, with one addition: the scores come from the same 16-bit tables, where an entry of
+//! -32768 may stand for a lower score (`build_row_table` clamps there; the BLASTNA gap letter's
+//! `INT4_MIN / 2`). The argument covers that clamp only for an X-drop below 32768, so the 32-bit
+//! kernel declines a problem in which a row letter meets such an entry with a column letter of
+//! the problem (`x32_amb_of`), and the scalar port runs it. Switch: `LOSAT_X_DP32` (strict set,
+//! `x_dp32`): `=0` runs neither the 32-bit lanes nor the clamp below, so such calls go to the
+//! scalar ports, as before.
+//!
+//! The X-drop clamp (`x_drop_for_lanes`). Let `M` be the rows, `N` the columns, `goe` =
+//! `gap_open + gap_extend`, `ge` = `gap_extend` (`>= 1`, `gap_open >= 0`, as every kernel
+//! requires), `max_m` the largest matrix score (at least 0; at most `MAX_M`, since a kernel
+//! declines a row table with a larger one), and
+//! `R = max_m * min(M, N) + 3 * goe + ge * (M + N + 1)`. For every X-drop `X >= R` the C loops
+//! (`ALIGN_EX`, `Blast_SemiGappedAlign`, `s_BlastAlignPackedNucl`) run the same steps and return
+//! the same offsets, score, fence flag and edit script; so the kernels run a call with `X > R` as
+//! one with `X = R`. `x_dropoff` enters the loops in three tests only: the end of row 0
+//! (`if (score < -x_dropoff) break`), the drop test (`best_score - score > x_dropoff`) and the
+//! band extension (`score_gap_row >= best_score - x_dropoff`); `num_extra_cells` (`x_dropoff /
+//! gap_extend + 3`) only sizes memory. Take `X >= R`.
+//! (a) Row 0 holds `-goe - ge * (i - 1) >= -R` at every column `i <= N`, so it is not cut:
+//!     `b_size = N + 1`.
+//! (b) Suppose no cell was dropped before the current one. Then each row starts at column 0
+//!     (`first_b_index` moves only on a drop) and runs to column `N`. Every score the loop keeps
+//!     for a cell, and every gap value derived from one, lies in
+//!     `[-(3 * goe + ge * (M + N + 1)), max_m * min(M, N)]`: above, because a path to a cell has
+//!     at most `min(M, N)` diagonal steps and a gap only costs (`best_score` is such a score, or
+//!     0); below, because column 0 of row `a` holds the column gap from the origin,
+//!     `-(goe + ge * (a - 1))` (`best_gap[0]` starts at `-goe` and loses `ge` per row), the row
+//!     gap at column `b` of row `a` is at least that minus `goe + ge * (b - 1)`, and a cell's
+//!     score, the maximum of its candidates, is at least its row gap; `best_gap` and
+//!     `score_gap_row` are at least a kept score minus `goe`. So `best_score - score < R <= X`:
+//!     the cell is kept. By induction no cell is dropped.
+//! (c) With `b_size = N + 1` the extension (`b_size <= N`) never runs and no `MININT` sentinel
+//!     is written (`if (b_size <= N)`); the only `MININT` values are the starts of each row
+//!     (`score`, `score_gap_row`), and the column gap of the first cell, a real value, wins the
+//!     maximum over them. (In a traceback the fence ends the DP (`*fence_hit`); without
+//!     `check_fence` a fence byte is a letter the kernels decline. Were the extension to run, its
+//!     values `score_gap_row - j * ge >= -(3 * goe + ge * (M + N - 3))` would pass it too.)
+//! So every test that reads `x_dropoff` has the same outcome for `X` and for `R`, and the cells
+//! visited (`cells`) are the same. In the kernels, `X` also sets the bias of the stored values
+//! (representation only) and `num_extra`, the room for the row past `bend`: with `R` the row can
+//! still reach column `N + 1`, since the loop runs on while the row gap passes the test, and
+//! `R / ge > N + 1` (the 32-bit lanes never size that room past column `N + 1` in any case).
+//! The clamp is taken only past the 16-bit lanes (`x_drop_for_lanes`), so that the calls of a
+//! search with its usual X-drops run as before; there it lets the 16-bit or 8-bit lanes take a
+//! small problem with a large X-drop, and the 32-bit lanes the others.
 
 #![allow(clippy::too_many_arguments)]
 
@@ -186,6 +240,18 @@ const PAD: usize = 32;
 const VMAX: i64 = 32767;
 /// Largest substitution score the 16-bit path accepts.
 const MAX_M: i32 = 2000;
+// No NCBI counterpart: the value range of the 32-bit lanes (`kernel::align_body32`).
+const VMAX32: i64 = i32::MAX as i64;
+
+// No NCBI counterpart (test only): counts of the 32-bit lanes on this thread: the calls they took
+// (`kernel::align_body32`), the calls they declined for a -32768 table entry (`x32_amb_of`), and
+// the moves of their rows with the band (`XdropScratch::x_room32`).
+#[cfg(test)]
+thread_local! {
+    pub(crate) static X32_RUNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static X32_AMB: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static X32_SHIFTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:541-545,3125-3134
 /// ```c
@@ -854,6 +920,202 @@ fn x_shift_lanes<T: Copy + Default>(v: &mut [T], d: usize, n: usize) {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:462-468,476-479
+// ```c
+//     if (num_extra_cells > gap_align->dp_mem_alloc) {
+//         gap_align->dp_mem_alloc = MAX(num_extra_cells + 100,
+//                                       2 * gap_align->dp_mem_alloc);
+// ...
+//     score_array = gap_align->dp_mem;
+//     score_array[0].best = 0;
+//     score_array[0].best_gap = -gap_open_extend;
+// ```
+// The 32-bit lanes' rows (`kernel::align_body32`): `best` and `best_gap` of `score_array` (`H` and
+// `E`) on 32-bit lanes. They are not a field of `XdropScratch` (a field would move the others and
+// change the code of every 8-bit and 16-bit kernel); a call takes a set from a pool that every
+// scratch shares (`X32_ROWS`, as `X_CHUNKS` holds trace chunks) and gives it back when it ends
+// (`X32Lease`), with its written lanes cleared (`dirty`) as `XdropScratch::reset` clears the other
+// rows; the pool is freed with the trace chunks when the last scratch goes.
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128"),
+    target_arch = "aarch64"
+))]
+struct Rows32 {
+    ha: Rows<i32>,
+    hb: Rows<i32>,
+    e: Rows<i32>,
+    /// The lanes written so far (`XdropScratch::dirty` of these rows).
+    dirty: usize,
+}
+
+// No NCBI counterpart: the sets of rows given back (`Rows32`).
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128"),
+    target_arch = "aarch64"
+))]
+static X32_ROWS: std::sync::Mutex<Vec<Rows32>> = std::sync::Mutex::new(Vec::new());
+
+// No NCBI counterpart: the pool's lock; the rows are plain memory, so poisoning carries no meaning.
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128"),
+    target_arch = "aarch64"
+))]
+fn x32_rows_lock() -> std::sync::MutexGuard<'static, Vec<Rows32>> {
+    X32_ROWS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+// No NCBI counterpart: one call's set of rows (`Rows32`), back to the pool when the call ends on
+// any path.
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128"),
+    target_arch = "aarch64"
+))]
+struct X32Lease(Option<Rows32>);
+
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128"),
+    target_arch = "aarch64"
+))]
+impl X32Lease {
+    /// A set from the pool, or an empty one, with the lanes its last call wrote set to 0.
+    fn take() -> Self {
+        let taken = x32_rows_lock().pop();
+        let mut w = taken.unwrap_or_else(|| Rows32 {
+            ha: Rows::new(0),
+            hb: Rows::new(0),
+            e: Rows::new(0),
+            dirty: 0,
+        });
+        let hi = (w.dirty + 2 * PAD + 32).min(w.ha.len());
+        w.ha[..hi].fill(0);
+        w.hb[..hi].fill(0);
+        w.e[..hi].fill(0);
+        w.dirty = 0;
+        X32Lease(Some(w))
+    }
+
+    #[inline(always)]
+    fn rows(&mut self) -> &mut Rows32 {
+        self.0.as_mut().expect("taken until the lease ends")
+    }
+}
+
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128"),
+    target_arch = "aarch64"
+))]
+impl Drop for X32Lease {
+    fn drop(&mut self) {
+        if let Some(w) = self.0.take() {
+            x32_rows_lock().push(w);
+        }
+    }
+}
+
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128"),
+    target_arch = "aarch64"
+))]
+impl XdropScratch {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:641-649
+    // ```c
+    //         if (last_b_index + num_extra_cells + 3 >= gap_align->dp_mem_alloc) {
+    //
+    //             gap_align->dp_mem_alloc = MAX(last_b_index + num_extra_cells + 100,
+    //                                           2 * gap_align->dp_mem_alloc);
+    // ```
+    // `fits` and `ensure` of the 32-bit lanes: their rows `w`, the column residues `sb` and the
+    // survivor words hold `lanes` and their margins. Only these grow (by doubling, as `grow`); the
+    // 16-bit and 8-bit rows, which these lanes do not use, keep their length. The decisions follow
+    // `sb`'s length, which the scratch keeps, not `w`'s, which comes from the pool.
+    #[inline(always)]
+    fn fits32(&self, w: &Rows32, lanes: usize) -> bool {
+        let n = lanes + 2 * PAD + 64;
+        self.sb.len() >= n && w.ha.len() >= n && self.surv.len() >= n / 32 + 8
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn grow32(&mut self, w: &mut Rows32, need: usize) {
+        let n = need.max(self.sb.len() * 2);
+        for r in [&mut w.ha, &mut w.hb, &mut w.e] {
+            if r.len() < n {
+                r.resize(n, 0);
+            }
+        }
+        if self.sb.len() < n {
+            self.sb.resize(n, 0);
+        }
+        if self.surv.len() < n / 32 + 8 {
+            self.surv.resize(n / 32 + 8, 0);
+        }
+    }
+
+    #[inline(always)]
+    fn ensure32(&mut self, w: &mut Rows32, lanes: usize) {
+        if !self.fits32(w, lanes) {
+            self.grow32(w, lanes + 2 * PAD + 64);
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:641-649
+    // ```c
+    //         if (last_b_index + num_extra_cells + 3 >= gap_align->dp_mem_alloc) {
+    //
+    //             gap_align->dp_mem_alloc = MAX(last_b_index + num_extra_cells + 100,
+    //                                           2 * gap_align->dp_mem_alloc);
+    // ```
+    // `x_room` for the 32-bit lanes: when half the column residues' lanes or more lie below the
+    // band start `first`, the lanes from `d` on move down to lane 0 in `w` (`x_shift_lanes`) and in
+    // `sb`, with the fence and bad-letter columns and `x_sh`, as `x_shift` moves them; then the rows
+    // grow if they still do not hold `lanes - d` (`ensure32`). The same values, so the same DP.
+    #[cold]
+    #[inline(never)]
+    fn x_room32(&mut self, first: usize, lanes: usize, w: &mut Rows32) -> usize {
+        let mut d = 0;
+        if 2 * first >= self.sb.len() {
+            d = first.saturating_sub(64) & !63;
+        }
+        #[cfg(test)]
+        if self.x_hold {
+            d = 0;
+        }
+        if d > 0 {
+            let n = w.dirty + 2 * PAD + 32;
+            x_shift_lanes(&mut w.ha, d, n);
+            x_shift_lanes(&mut w.hb, d, n);
+            x_shift_lanes(&mut w.e, d, n);
+            w.dirty = w.dirty.saturating_sub(d);
+            // `sb[PAD + k + 1]` holds column `k + x_sh`; lanes past `sb_filled` are filled before use
+            let n = (PAD + self.sb_filled + 1 + 32).min(self.sb.len());
+            if PAD + d < n {
+                self.sb.copy_within(PAD + d..n, PAD);
+            }
+            self.sb_filled = self.sb_filled.saturating_sub(d);
+            if self.fence_k != usize::MAX {
+                self.fence_k = self.fence_k.saturating_sub(d);
+            }
+            if self.bad_k != usize::MAX {
+                self.bad_k = self.bad_k.saturating_sub(d);
+            }
+            self.x_sh += d;
+            #[cfg(test)]
+            X32_SHIFTS.with(|n| n.set(n.get() + 1));
+        }
+        self.ensure32(w, lanes - d);
+        d
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:61,70-78,91-97,111-115,127-137
 // ```c
 // #define	CHUNKSIZE	2097152
@@ -1084,8 +1346,11 @@ impl XTrace {
     /// columns, the same bound the H buffers rely on with `fits(b_size + num_extra + 64)`), and
     /// stores one vector of trace bytes at `b0 - first` per step (half as many in the nibble
     /// layout), so a row ends before `bend - first + num_extra + 32`, inside the 96 bytes of
-    /// slack. A write past the reservation would leave the chunk and, at its limit, the
-    /// allocation.
+    /// slack. The 32-bit kernel (`align_body32_rows`) asks for
+    /// `n = bend - first + min(num_extra, len2 + 2 - bend) + 96`: its row also ends before column
+    /// `len2 + 17` (its blocks start below `limit <= len2 + 1`), and `bend <= len2 + 1`, so the
+    /// columns left past `bend` cover it where they are fewer than `num_extra`. A write past the
+    /// reservation would leave the chunk and, at its limit, the allocation.
     #[inline(always)]
     pub(crate) fn x_row(&mut self, n: usize) -> *mut u8 {
         let wp = self.wp;
@@ -1387,12 +1652,18 @@ impl XTrace {
 
 impl Drop for XdropScratch {
     // No NCBI counterpart: the scratch's chunks from the pool go back, and the last scratch alive
-    // frees the pool's chunks (`X_SCRATCHES`).
+    // frees the pool's chunks (`X_SCRATCHES`) and the 32-bit lanes' rows (`X32_ROWS`).
     fn drop(&mut self) {
         self.trace.x_purge();
         if X_SCRATCHES.fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 {
             let idle = std::mem::take(&mut *x_chunk_lock());
             drop(idle);
+            #[cfg(any(
+                target_arch = "x86_64",
+                all(target_arch = "wasm32", target_feature = "simd128"),
+                target_arch = "aarch64"
+            ))]
+            drop(std::mem::take(&mut *x32_rows_lock()));
         }
     }
 }
@@ -1404,6 +1675,17 @@ impl XdropScratch {
     pub(crate) fn x_trace_release(&mut self) {
         self.trace.x_purge();
     }
+}
+
+/// No NCBI counterpart: `LOSAT_X_DP32` (strict set, read once): a call whose X-drop the 16-bit
+/// lanes cannot hold runs with the clamp at the head of this file and, where the clamped X-drop is
+/// still past them, on the 32-bit lanes (`kernel::align_body32`). Off (`=0`): such a call returns
+/// None and the caller's scalar port runs it, as before. The same result either way (the clamp
+/// argument, and the 32-bit lanes' argument at the head of this file).
+pub(crate) fn x_dp32() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DP32"))
 }
 
 /// No NCBI counterpart: `LOSAT_X_DPNIBBLE` (strict set): the traceback memory of the scratches on
@@ -1670,6 +1952,58 @@ mod arch {
     pub unsafe fn lane7(v: V) -> i32 {
         _mm_extract_epi16(v, 7) as i16 as i32
     }
+    // 32-bit lanes (`kernel::align_body32`). (`splat_i32` and `gt_i32`: `x_xdrop_w128.rs`, which
+    // imports this layer whole, has a `splat32` and a `gt32` of its own.)
+    #[inline(always)]
+    pub unsafe fn splat_i32(x: i32) -> V {
+        _mm_set1_epi32(x)
+    }
+    #[inline(always)]
+    pub unsafe fn add32(a: V, b: V) -> V {
+        _mm_add_epi32(a, b)
+    }
+    #[inline(always)]
+    pub unsafe fn max32(a: V, b: V) -> V {
+        _mm_max_epi32(a, b)
+    }
+    #[inline(always)]
+    pub unsafe fn gt_i32(a: V, b: V) -> V {
+        _mm_cmpgt_epi32(a, b)
+    }
+    /// `a - b`, at least 0: for lanes `a`, `b` in `0 ..= i32::MAX` the unsigned saturating
+    /// subtraction (`subsu16` on 32-bit lanes; x86 has no instruction for it).
+    #[inline(always)]
+    pub unsafe fn subsu32(a: V, b: V) -> V {
+        _mm_max_epi32(_mm_sub_epi32(a, b), _mm_setzero_si128())
+    }
+    /// Lane 3 (32-bit) to every lane.
+    #[inline(always)]
+    pub unsafe fn bcast_last32(v: V) -> V {
+        _mm_shuffle_epi32(v, 0xFF)
+    }
+    #[inline(always)]
+    pub unsafe fn lane0_32(v: V) -> i32 {
+        _mm_cvtsi128_si32(v)
+    }
+    #[inline(always)]
+    pub unsafe fn lane3_32(v: V) -> i32 {
+        _mm_extract_epi32(v, 3)
+    }
+    /// 16-bit lanes 0..4, sign-extended to 32 bits.
+    #[inline(always)]
+    pub unsafe fn widen_lo16(v: V) -> V {
+        _mm_cvtepi16_epi32(v)
+    }
+    /// 16-bit lanes 4..8, sign-extended to 32 bits.
+    #[inline(always)]
+    pub unsafe fn widen_hi16(v: V) -> V {
+        _mm_cvtepi16_epi32(_mm_srli_si128(v, 8))
+    }
+    /// 32-bit to 16-bit with signed saturation: the lanes of `a`, then those of `b`.
+    #[inline(always)]
+    pub unsafe fn packs32(a: V, b: V) -> V {
+        _mm_packs_epi32(a, b)
+    }
 }
 
 // No NCBI counterpart: vector instruction wrappers (one operation on all lanes); they do not
@@ -1853,6 +2187,57 @@ mod arch {
     #[inline(always)]
     pub unsafe fn lane7(v: V) -> i32 {
         i16x8_extract_lane::<7>(v) as i32
+    }
+    // 32-bit lanes (`kernel::align_body32`)
+    #[inline(always)]
+    pub unsafe fn splat_i32(x: i32) -> V {
+        i32x4_splat(x)
+    }
+    #[inline(always)]
+    pub unsafe fn add32(a: V, b: V) -> V {
+        i32x4_add(a, b)
+    }
+    #[inline(always)]
+    pub unsafe fn max32(a: V, b: V) -> V {
+        i32x4_max(a, b)
+    }
+    #[inline(always)]
+    pub unsafe fn gt_i32(a: V, b: V) -> V {
+        i32x4_gt(a, b)
+    }
+    /// `a - b`, at least 0: for lanes `a`, `b` in `0 ..= i32::MAX` the unsigned saturating
+    /// subtraction (simd128 saturates 8-bit and 16-bit lanes only).
+    #[inline(always)]
+    pub unsafe fn subsu32(a: V, b: V) -> V {
+        i32x4_max(i32x4_sub(a, b), i32x4_splat(0))
+    }
+    /// Lane 3 (32-bit) to every lane.
+    #[inline(always)]
+    pub unsafe fn bcast_last32(v: V) -> V {
+        i32x4_shuffle::<3, 3, 3, 3>(v, v)
+    }
+    #[inline(always)]
+    pub unsafe fn lane0_32(v: V) -> i32 {
+        i32x4_extract_lane::<0>(v)
+    }
+    #[inline(always)]
+    pub unsafe fn lane3_32(v: V) -> i32 {
+        i32x4_extract_lane::<3>(v)
+    }
+    /// 16-bit lanes 0..4, sign-extended to 32 bits.
+    #[inline(always)]
+    pub unsafe fn widen_lo16(v: V) -> V {
+        i32x4_extend_low_i16x8(v)
+    }
+    /// 16-bit lanes 4..8, sign-extended to 32 bits.
+    #[inline(always)]
+    pub unsafe fn widen_hi16(v: V) -> V {
+        i32x4_extend_high_i16x8(v)
+    }
+    /// 32-bit to 16-bit with signed saturation: the lanes of `a`, then those of `b`.
+    #[inline(always)]
+    pub unsafe fn packs32(a: V, b: V) -> V {
+        i16x8_narrow_i32x4(a, b)
     }
 }
 
@@ -2074,6 +2459,64 @@ mod arch {
     #[inline(always)]
     pub unsafe fn lane7(v: V) -> i32 {
         vgetq_lane_s16::<7>(s16(v)) as i32
+    }
+    // 32-bit lanes (`kernel::align_body32`)
+    #[inline(always)]
+    unsafe fn s32(v: V) -> int32x4_t {
+        vreinterpretq_s32_u8(v)
+    }
+    #[inline(always)]
+    unsafe fn u32(v: V) -> uint32x4_t {
+        vreinterpretq_u32_u8(v)
+    }
+    #[inline(always)]
+    pub unsafe fn splat_i32(x: i32) -> V {
+        vreinterpretq_u8_s32(vdupq_n_s32(x))
+    }
+    #[inline(always)]
+    pub unsafe fn add32(a: V, b: V) -> V {
+        vreinterpretq_u8_s32(vaddq_s32(s32(a), s32(b)))
+    }
+    #[inline(always)]
+    pub unsafe fn max32(a: V, b: V) -> V {
+        vreinterpretq_u8_s32(vmaxq_s32(s32(a), s32(b)))
+    }
+    #[inline(always)]
+    pub unsafe fn gt_i32(a: V, b: V) -> V {
+        vreinterpretq_u8_u32(vcgtq_s32(s32(a), s32(b)))
+    }
+    /// `uqsub`: for lanes `a`, `b` in `0 ..= i32::MAX` the `max(a - b, 0)` of x86 and wasm.
+    #[inline(always)]
+    pub unsafe fn subsu32(a: V, b: V) -> V {
+        vreinterpretq_u8_u32(vqsubq_u32(u32(a), u32(b)))
+    }
+    /// Lane 3 (32-bit) to every lane.
+    #[inline(always)]
+    pub unsafe fn bcast_last32(v: V) -> V {
+        vreinterpretq_u8_u32(vdupq_laneq_u32::<3>(u32(v)))
+    }
+    #[inline(always)]
+    pub unsafe fn lane0_32(v: V) -> i32 {
+        vgetq_lane_s32::<0>(s32(v))
+    }
+    #[inline(always)]
+    pub unsafe fn lane3_32(v: V) -> i32 {
+        vgetq_lane_s32::<3>(s32(v))
+    }
+    /// 16-bit lanes 0..4, sign-extended to 32 bits.
+    #[inline(always)]
+    pub unsafe fn widen_lo16(v: V) -> V {
+        vreinterpretq_u8_s32(vmovl_s16(vget_low_s16(s16(v))))
+    }
+    /// 16-bit lanes 4..8, sign-extended to 32 bits.
+    #[inline(always)]
+    pub unsafe fn widen_hi16(v: V) -> V {
+        vreinterpretq_u8_s32(vmovl_high_s16(s16(v)))
+    }
+    /// 32-bit to 16-bit with signed saturation: the lanes of `a`, then those of `b` (`sqxtn`).
+    #[inline(always)]
+    pub unsafe fn packs32(a: V, b: V) -> V {
+        vreinterpretq_u8_s16(vqmovn_high_s32(vqmovn_s32(s32(a)), s32(b)))
     }
 }
 
@@ -2354,7 +2797,7 @@ mod kernel {
     }
 
     // No NCBI counterpart: the kernel of `align_body` for one trace layout (`NIB`: four-bit codes,
-    // `LOSAT_X_DPNIBBLE`).
+    // `LOSAT_X_DPNIBBLE`). Keep in step with `align_body32_rows`, its copy on 32-bit lanes.
     #[inline(always)]
     unsafe fn align_body_rows<const TB: bool, const NIB: bool>(
         q: &RowSeq<'_>,
@@ -3211,6 +3654,572 @@ mod kernel {
         finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
     }
 
+    // No NCBI counterpart: the lane masks of the 32-bit lanes; they do not change any value NCBI
+    // computes.
+    // -----------------------------------------------------------------
+    // 32-bit lanes (4 per vector): the 16-bit algorithm where its value range ends (`fits_16bit`).
+    // -----------------------------------------------------------------
+    static LANE_MASK32: [[i32; 4]; 5] = [
+        [0, 0, 0, 0],
+        [-1, 0, 0, 0],
+        [-1, -1, 0, 0],
+        [-1, -1, -1, 0],
+        [-1, -1, -1, -1],
+    ];
+
+    // No NCBI counterpart: the gap costs and constants of one call on 32-bit lanes.
+    struct Consts32 {
+        goe: V,
+        ge1: V,
+        ge2: V,
+        ramp4: V,
+        xv: V,
+        c3: V,
+        c10: V,
+        c40: V,
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:578-601,616-619,631
+    /// ```c
+    ///             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+    /// ...
+    ///             if (score < score_gap_col) {
+    ///                 script = SCRIPT_GAP_IN_B;
+    ///                 score = score_gap_col;
+    ///             }
+    ///             if (score < score_gap_row) {
+    ///                 script = SCRIPT_GAP_IN_A;
+    ///                 score = score_gap_row;
+    ///             }
+    ///             if (best_score - score > x_dropoff) {
+    /// ...
+    ///                 score_gap_row -= gap_extend;
+    ///                 score_gap_col -= gap_extend;
+    ///                 if (score_gap_col < (score - gap_open_extend)) {
+    ///                     score_array[b_index].best_gap = score - gap_open_extend;
+    /// ...
+    ///                 score_array[b_index].best = score;
+    /// ```
+    /// The same block as `block`, on 4 cells of 32 bits: the same operations in the same order,
+    /// with `subsu32` for `subsu16`. The row gap is the decayed prefix maximum over the 4 lanes
+    /// (two steps of shifts by one and two lanes) and the carry of the block before; the running
+    /// best is the prefix maximum over the 4 lanes.
+    ///
+    /// One block of 4 lanes at `b`. Returns (drop mask, script).
+    #[inline(always)]
+    unsafe fn block32<const TB: bool>(
+        c: &Consts32,
+        rs: &mut RowState,
+        hr: *const i32,
+        hw: *mut i32,
+        e: *mut i32,
+        b: usize,
+        s: V,
+        lane_mask: Option<V>,
+    ) -> (V, V) {
+        let hp = load(hr.add(b).sub(1));
+        let ep = load(e.add(b));
+        // `hp` in 0 ..= VMAX32 - MAX_M and a score of the 16-bit tables (-32768 ..= MAX_M): no
+        // overflow; a negative sum stands below every threshold, as 0 does
+        let d = add32(hp, s);
+        let h0 = max32(d, ep);
+        let v = subsu32(h0, c.goe);
+        // decayed prefix over the 4 lanes
+        let i1 = max32(v, subsu32(bsl4(v), c.ge1));
+        let i2 = max32(i1, subsu32(bsl8(i1), c.ge2));
+        let fx = bsl4(i2);
+        let fc = subsu32(bcast_last32(rs.tprev), c.ramp4);
+        let f = max32(fx, fc);
+        let mut hh = max32(h0, f);
+        if let Some(m) = lane_mask {
+            hh = and(hh, m);
+        }
+        let hg = subsu32(hh, c.goe);
+        let fs = subsu32(f, c.ge1);
+        rs.tprev = max32(hg, fs);
+        let es = subsu32(ep, c.ge1);
+        let en = max32(hg, es);
+        let gt = gt_i32(hh, rs.bestv);
+        let thr;
+        if mask8(gt) != 0 {
+            // A new best inside this block: exact running best per lane.
+            let y0 = bsl4(hh);
+            let y1 = max32(y0, bsl4(y0));
+            let y2 = max32(y1, bsl8(y1));
+            let pfx = max32(y2, rs.bestv);
+            thr = subsu32(pfx, c.xv);
+            let rec = gt_i32(hh, pfx);
+            let rm = mask8(rec);
+            rs.rec_b = b + ((31 - rm.leading_zeros()) >> 2) as usize;
+            rs.bestv = bcast_last32(max32(pfx, hh));
+            rs.thrv = subsu32(rs.bestv, c.xv);
+            rs.slow += 1;
+        } else {
+            thr = rs.thrv;
+        }
+        let drop = gt_i32(thr, hh);
+        store(hw.add(b), andnot(drop, hh));
+        store(e.add(b), en);
+        let scr = if TB {
+            let me = gt_i32(ep, d);
+            let mf = gt_i32(f, h0);
+            let op = andnot(mf, add32(c.c3, and(me, c.c3)));
+            let fb = andnot(gt_i32(hg, es), c.c40);
+            let fa = andnot(gt_i32(hg, fs), c.c10);
+            or(op, or(fb, fa))
+        } else {
+            zero()
+        };
+        (drop, scr)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:476-500,641-675
+    // ```c
+    //     score_array[0].best = 0;
+    //     score_array[0].best_gap = -gap_open_extend;
+    // ...
+    //     for (a_index = 1; a_index <= M; a_index++) {
+    // ...
+    //         if (last_b_index < b_size - 1) {
+    //             b_size = last_b_index + 1;
+    //         }
+    //         else {
+    //             while (score_gap_row >= (best_score - x_dropoff) && b_size <= N) {
+    // ...
+    //         if (b_size <= N) {
+    //             score_array[b_size].best = MININT;
+    //             score_array[b_size].best_gap = MININT;
+    //             b_size++;
+    // ```
+    // The whole DP on 32-bit lanes (`block32`), for the problems the 16-bit lanes do not hold
+    // (`fits_16bit`): the steps of `align_body` in the same order (row 0, then per row: column
+    // residues, fence, row table, rebase, blocks, band update) with 16 cells per step as there.
+    // It returns None for a problem that does not fit (the caller then runs the scalar port).
+    #[inline(always)]
+    pub(super) unsafe fn align_body32<const TB: bool>(
+        q: &RowSeq<'_>,
+        s: &ColSeq<'_>,
+        scores: &Scores<'_>,
+        len1: usize,
+        len2: usize,
+        gap_open: i32,
+        gap_extend: i32,
+        x_drop: i32,
+        check_fence: bool,
+        sc: &mut XdropScratch,
+    ) -> Option<XdropResult> {
+        if !TB {
+            align_body32_rows::<false, false>(
+                q,
+                s,
+                scores,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            )
+        } else if sc.x_nib {
+            align_body32_rows::<true, true>(
+                q,
+                s,
+                scores,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            )
+        } else {
+            align_body32_rows::<true, false>(
+                q,
+                s,
+                scores,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            )
+        }
+    }
+
+    // No NCBI counterpart: the 32-bit lanes' test of a row table (`x32_amb`): the columns whose
+    // 16-bit entry is -32768, which may stand for a lower score (`build_row_table` clamps there).
+    #[inline(never)]
+    unsafe fn x32_amb_of(t: *const u8) -> u32 {
+        let mut m = 0u32;
+        for c in 0..32 {
+            if *t.add(c) == 0 && *t.add(32 + c) == 0x80 {
+                m |= 1 << c;
+            }
+        }
+        m
+    }
+
+    // No NCBI counterpart: the kernel of `align_body32` for one trace layout (`NIB`: four-bit
+    // codes, `LOSAT_X_DPNIBBLE`).
+    #[inline(always)]
+    unsafe fn align_body32_rows<const TB: bool, const NIB: bool>(
+        q: &RowSeq<'_>,
+        s: &ColSeq<'_>,
+        scores: &Scores<'_>,
+        len1: usize,
+        len2: usize,
+        gap_open: i32,
+        gap_extend: i32,
+        x_drop: i32,
+        check_fence: bool,
+        sc: &mut XdropScratch,
+    ) -> Option<XdropResult> {
+        sc.ops.clear();
+        if len1 == 0 || len2 == 0 {
+            return Some(XdropResult {
+                a_offset: 0,
+                b_offset: 0,
+                score: 0,
+                fence_hit: false,
+                cells: 0,
+            });
+        }
+        let goe = gap_open.checked_add(gap_extend)?;
+        let mut x = x_drop;
+        if x < goe {
+            x = goe;
+        }
+        if gap_extend < 1 || gap_open < 0 {
+            return None;
+        }
+        // Stored value = score - base + bias, as on 16-bit lanes, up to VMAX32.
+        let bias = x as i64 + goe as i64 + MAX_M as i64 + 1;
+        let limit_rebase = VMAX32 - bias - MAX_M as i64;
+        if limit_rebase < MAX_M as i64 || gap_extend as i64 * 4 > VMAX32 {
+            return None;
+        }
+        let bias = bias as i32;
+        let limit_rebase = limit_rebase as i32;
+        let num_extra = (x / gap_extend + 3) as usize;
+        sc.reset();
+        #[cfg(test)]
+        X32_RUNS.with(|n| n.set(n.get() + 1));
+
+        // Row 0 goes to buffer A.
+        let mut lease = X32Lease::take();
+        let w = lease.rows();
+        sc.ensure32(w, num_extra.min(len2 + 2) + 16);
+        let mut b_size = 1usize;
+        {
+            let h = w.ha.as_mut_ptr().add(PAD);
+            let e = w.e.as_mut_ptr().add(PAD);
+            *h = bias;
+            *e = bias - goe;
+            let mut score = -goe;
+            for i in 1..=len2 {
+                if score < -x {
+                    break;
+                }
+                *h.add(i) = bias + score;
+                *e.add(i) = bias + score - goe;
+                score -= gap_extend;
+                b_size = i + 1;
+            }
+            // In row 1 the scalar loop never forms the diagonal into column
+            // b_size (that column is only created by the row-gap extension).
+            *h.add(b_size - 1) = 0;
+        }
+        w.dirty = b_size;
+        if TB {
+            sc.trace.x_row_zero(NIB, b_size);
+        }
+
+        let g = gap_extend;
+        let ramp4: [i32; 4] = [0, g, 2 * g, 3 * g];
+        let c = Consts32 {
+            goe: splat_i32(goe),
+            ge1: splat_i32(g),
+            ge2: splat_i32(2 * g),
+            ramp4: load(ramp4.as_ptr()),
+            xv: splat_i32(x),
+            c3: splat_i32(const { script_codes(NIB).0 } as i32),
+            c10: splat_i32(const { script_codes(NIB).1 } as i32),
+            c40: splat_i32(const { script_codes(NIB).2 } as i32),
+        };
+        let zero_v = zero();
+        let static_tabs: Option<*const u8> = match scores {
+            Scores::Tables { t, .. } => Some(t.data.as_ptr()),
+            _ => None,
+        };
+        let ncols = scores.ncols();
+        let mut cells: u64 = 0;
+        // the row letters whose table was tested (`x32_amb_of`) and the result; the column
+        // letters of the problem met so far
+        let (mut amb_ok, mut amb, mut present) = (0u32, [0u32; 32], 0u32);
+
+        let mut base: i32 = 0;
+        let mut best_rel: i32 = 0;
+        let mut a_off = 0usize;
+        let mut b_off = 0usize;
+        let mut first = 0usize;
+        let mut fence_hit = false;
+        // exclusive end of the lanes last written in each H buffer
+        let mut wend = [b_size, 0usize];
+        let mut cur = 0usize; // buffer holding the previous row
+
+        // the rows over the band (`XdropScratch::x_room32`): columns below are relative to `sc.x_sh`
+        let mut len2 = len2;
+        for a in 1..=len1 {
+            // the lanes past the band end the row may reach: `num_extra`, as on 16-bit lanes, and
+            // none past column `len2 + 1` (`b_size <= len2 + 1`; the X-drop of these lanes can
+            // exceed the columns left): the row's blocks end before `len2 + 17` and its stores
+            // before `len2 + 33`, inside `b_size + room + 64`
+            let room = num_extra.min(len2 + 2 - b_size);
+            if !sc.fits32(w, b_size + room + 64) {
+                let d = sc.x_room32(first, b_size + room + 64, w);
+                first -= d;
+                b_size -= d;
+                len2 -= d;
+                wend[0] = wend[0].saturating_sub(d);
+                wend[1] = wend[1].saturating_sub(d);
+            }
+            if sc.sb_filled < b_size {
+                let to = (b_size + 64).min(len2 + 1);
+                let sh = sc.x_sh;
+                for k in sc.sb_filled..to {
+                    let ch = s.get(k + sh);
+                    if ch as usize >= ncols {
+                        if check_fence && ch == FENCE_SENTRY {
+                            if sc.fence_k == usize::MAX {
+                                sc.fence_k = k;
+                            }
+                        } else if sc.bad_k == usize::MAX {
+                            sc.bad_k = k;
+                        }
+                    } else if k < len2 {
+                        present |= 1u32 << ch;
+                    }
+                    *sc.sb.get_unchecked_mut(PAD + k + 1) = ch;
+                }
+                sc.sb_filled = to;
+            }
+            if sc.bad_k < b_size {
+                return None;
+            }
+            let mut limit = len2 + 1;
+            let mut bend = b_size;
+            let mut fence_row = false;
+            if sc.fence_k < b_size {
+                limit = sc.fence_k;
+                bend = sc.fence_k;
+                fence_row = true;
+                if bend <= first {
+                    fence_hit = true;
+                    break;
+                }
+            }
+            let qa = q.get(a)? as usize;
+            if qa >= ncols {
+                return None;
+            }
+            cells += (b_size - first) as u64;
+            let t: *const u8 = if let Some(st) = static_tabs {
+                st.add(qa * TAB)
+            } else {
+                if sc.tab_ok & (1u32 << qa) == 0 {
+                    if !build_row_table(scores, qa, &mut sc.tabs[qa * TAB..(qa + 1) * TAB]) {
+                        return None;
+                    }
+                    sc.tab_ok |= 1u32 << qa;
+                }
+                sc.tabs.as_ptr().add(qa * TAB)
+            };
+            // No NCBI counterpart: a score of -32768 in the 16-bit table may be a clamped lower
+            // one; the 16-bit lanes need no more (their X-drop is below 32768), these lanes
+            // decline when this row's letter meets such an entry with a column letter of the
+            // problem.
+            if amb_ok & (1u32 << qa) == 0 {
+                amb[qa] = x32_amb_of(t);
+                amb_ok |= 1u32 << qa;
+            }
+            if amb[qa] & present != 0 {
+                #[cfg(test)]
+                X32_AMB.with(|n| n.set(n.get() + 1));
+                return None;
+            }
+            let (hr, hw) = if cur == 0 {
+                (w.ha.as_mut_ptr().add(PAD), w.hb.as_mut_ptr().add(PAD))
+            } else {
+                (w.hb.as_mut_ptr().add(PAD), w.ha.as_mut_ptr().add(PAD))
+            };
+            let e = w.e.as_mut_ptr().add(PAD);
+            let sb = sc.sb.as_ptr().add(PAD);
+            let t0lo = load(t);
+            let t1lo = load(t.add(16));
+            let t0hi = load(t.add(32));
+            let t1hi = load(t.add(48));
+
+            if best_rel > limit_rebase {
+                let dv = splat_i32(best_rel);
+                let mut b = first;
+                while b < b_size {
+                    store(hr.add(b), subsu32(load(hr.add(b)), dv));
+                    store(e.add(b), subsu32(load(e.add(b)), dv));
+                    b += 4;
+                }
+                base += best_rel;
+                best_rel = 0;
+            }
+            // no diagonal into the first lane of the band
+            *hr.add(first).sub(1) = 0;
+
+            let tr = if TB {
+                // SAFETY: room for every byte of the row loop (see `XTrace::x_row`; the row also
+                // ends before column `len2 + 17`, so `num_extra` may give way to the columns left
+                // past `bend`, `bend <= len2 + 1`)
+                sc.trace
+                    .x_row(bend - first + num_extra.min(len2 + 2 - bend) + 96)
+            } else {
+                core::ptr::null_mut()
+            };
+            let survw = sc.surv.as_mut_ptr();
+
+            let bestv0 = splat_i32(bias + best_rel);
+            let mut rs = RowState {
+                tprev: zero_v,
+                bestv: bestv0,
+                thrv: subsu32(bestv0, c.xv),
+                rec_b: 0,
+                slow: 0,
+            };
+            let mut b0 = first;
+            let mut it = 0usize;
+            loop {
+                // scores for the 16 lanes b0..b0+16 (lane b reads column b-1)
+                let idx = load(sb.add(b0));
+                let lo = lut32(t0lo, t1lo, idx);
+                let hi = lut32(t0hi, t1hi, idx);
+                let s_lo = unpacklo8(lo, hi);
+                let s_hi = unpackhi8(lo, hi);
+                let (s0, s1) = (widen_lo16(s_lo), widen_hi16(s_lo));
+                let (s2, s3) = (widen_lo16(s_hi), widen_hi16(s_hi));
+                let (d0, sc0, d1, sc1, d2, sc2, d3, sc3);
+                if b0 + 16 <= limit {
+                    (d0, sc0) = block32::<TB>(&c, &mut rs, hr, hw, e, b0, s0, None);
+                    (d1, sc1) = block32::<TB>(&c, &mut rs, hr, hw, e, b0 + 4, s1, None);
+                    (d2, sc2) = block32::<TB>(&c, &mut rs, hr, hw, e, b0 + 8, s2, None);
+                    (d3, sc3) = block32::<TB>(&c, &mut rs, hr, hw, e, b0 + 12, s3, None);
+                } else {
+                    let n = limit - b0;
+                    let m = |k: usize| load(LANE_MASK32[n.saturating_sub(4 * k).min(4)].as_ptr());
+                    (d0, sc0) = block32::<TB>(&c, &mut rs, hr, hw, e, b0, s0, Some(m(0)));
+                    (d1, sc1) = block32::<TB>(&c, &mut rs, hr, hw, e, b0 + 4, s1, Some(m(1)));
+                    (d2, sc2) = block32::<TB>(&c, &mut rs, hr, hw, e, b0 + 8, s2, Some(m(2)));
+                    (d3, sc3) = block32::<TB>(&c, &mut rs, hr, hw, e, b0 + 12, s3, Some(m(3)));
+                }
+                // the scripts (at most 0x7F) and drop masks (0 or -1) as on 16-bit lanes
+                if TB {
+                    let scr = packus16(packs32(sc0, sc1), packs32(sc2, sc3));
+                    if NIB {
+                        store64(tr.add((b0 - first) >> 1), nibs(scr));
+                    } else {
+                        store(tr.add(b0 - first), scr);
+                    }
+                }
+                // 2 bits per lane, 32 bits per iteration
+                let dm = mask8(packs32(d0, d1)) | (mask8(packs32(d2, d3)) << 16);
+                let w32 = it >> 1;
+                if it & 1 == 0 {
+                    *survw.add(w32) = (!dm) as u64;
+                } else {
+                    *survw.add(w32) |= ((!dm) as u64) << 32;
+                }
+                it += 1;
+                b0 += 16;
+                if b0 >= bend {
+                    if b0 >= limit {
+                        break;
+                    }
+                    if lane3_32(rs.tprev) < lane0_32(rs.thrv) {
+                        break;
+                    }
+                }
+            }
+            let proc_end = b0;
+            if proc_end > w.dirty {
+                w.dirty = proc_end;
+            }
+            // lanes this buffer held beyond what the row wrote are stale
+            let wi = 1 - cur;
+            if wend[wi] > proc_end {
+                let mut b = proc_end;
+                while b < wend[wi] {
+                    store(hw.add(b), zero_v);
+                    b += 4;
+                }
+            }
+            wend[wi] = proc_end;
+            cur = wi;
+            let rec = if TB {
+                sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first)
+            } else {
+                core::ptr::null()
+            };
+            if rs.slow != 0 {
+                b_off = rs.rec_b + sc.x_sh;
+                a_off = a;
+                best_rel = lane0_32(rs.bestv) - bias;
+                if TB {
+                    // No NCBI counterpart: the walk starts at this row's record (`XTrace::x_best`)
+                    sc.trace.x_best(rec);
+                }
+            }
+            if fence_row {
+                fence_hit = true;
+                break;
+            }
+            // survivors
+            let nwords = (it + 1) >> 1;
+            let mut wl = 0usize;
+            while wl < nwords && *survw.add(wl) == 0 {
+                wl += 1;
+            }
+            if wl == nwords {
+                break;
+            }
+            let first_new = first + wl * 32 + ((*survw.add(wl)).trailing_zeros() as usize >> 1);
+            let mut wr = nwords - 1;
+            while *survw.add(wr) == 0 {
+                wr -= 1;
+            }
+            let last = first + wr * 32 + ((63 - (*survw.add(wr)).leading_zeros() as usize) >> 1);
+            // columns right of the last survivor leave the band: E = -inf
+            store(e.add(last + 1), zero_v);
+            store(e.add(last + 5), zero_v);
+            store(e.add(last + 9), zero_v);
+            store(e.add(last + 13), zero_v);
+            if proc_end > last + 17 {
+                let mut b = last + 17;
+                while b < proc_end {
+                    *e.add(b) = 0;
+                    b += 1;
+                }
+            }
+            first = first_new;
+            b_size = last + 1;
+            if b_size <= len2 {
+                b_size += 1;
+            }
+        }
+
+        let best = base + best_rel;
+        finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
+    }
+
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:682-727
     /// ```c
     ///     a_index = *a_offset;
@@ -3456,6 +4465,42 @@ mod kernel {
     }
     x86_entry!(align_avx, align8_avx, "avx,ssse3,sse4.1,bmi1,lzcnt,popcnt");
     x86_entry!(align_sse, align8_sse, "ssse3,sse4.1");
+
+    // No NCBI counterpart: the entry points of `align_body32` with CPU features enabled (AVX or
+    // SSE), as `x86_entry!` makes them for the other lanes.
+    macro_rules! x86_entry32 {
+        ($name:ident, $feat:literal) => {
+            #[cfg(target_arch = "x86_64")]
+            #[target_feature(enable = $feat)]
+            pub(super) unsafe fn $name<const TB: bool>(
+                q: &RowSeq<'_>,
+                s: &ColSeq<'_>,
+                scores: &Scores<'_>,
+                len1: usize,
+                len2: usize,
+                gap_open: i32,
+                gap_extend: i32,
+                x_drop: i32,
+                check_fence: bool,
+                sc: &mut XdropScratch,
+            ) -> Option<XdropResult> {
+                align_body32::<TB>(
+                    q,
+                    s,
+                    scores,
+                    len1,
+                    len2,
+                    gap_open,
+                    gap_extend,
+                    x_drop,
+                    check_fence,
+                    sc,
+                )
+            }
+        };
+    }
+    x86_entry32!(align32_avx, "avx,ssse3,sse4.1,bmi1,lzcnt,popcnt");
+    x86_entry32!(align32_sse, "ssse3,sse4.1");
 }
 
 /// No NCBI counterpart: whether the vector kernels of this file (`mod kernel`) are compiled for
@@ -3497,6 +4542,20 @@ fn cpu_level() -> u8 {
     })
 }
 
+/// No NCBI counterpart (test only): whether the vector kernels run here: compiled for the target
+/// (`KERNEL_COMPILED`) and, on x86_64, a CPU with SSSE3 and SSE4.1 (`cpu_level`).
+#[cfg(test)]
+pub(crate) fn x_kernels_run() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        cpu_level() > 0
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        KERNEL_COMPILED
+    }
+}
+
 /// No NCBI counterpart: switch reader for timing; it does not change any value NCBI computes.
 ///
 /// LOSAT_X_DPNO8 keeps every call on the 16-bit lanes (for A/B timing).
@@ -3509,7 +4568,9 @@ fn use_8bit() -> bool {
 /// No NCBI counterpart: the test of whether the problem fits 8-bit lanes; a problem that does not
 /// fit runs on 16-bit lanes or on the scalar port.
 ///
-/// Largest matrix score if the 8-bit lanes can hold this problem.
+/// Largest matrix score if the 8-bit lanes can hold this problem. Never inlined, as before
+/// `max_score` had a second caller (`x_drop_bound`): the kernels that call it keep their code.
+#[inline(never)]
 fn fits_8bit(scores: &Scores<'_>, gap_open: i32, gap_extend: i32, x_drop: i32) -> Option<i32> {
     if !use_8bit() {
         return None;
@@ -3525,6 +4586,249 @@ fn fits_8bit(scores: &Scores<'_>, gap_open: i32, gap_extend: i32, x_drop: i32) -
     if 127 - bias - max_m as i64 >= 0 {
         Some(max_m)
     } else {
+        None
+    }
+}
+
+/// No NCBI counterpart: whether the 16-bit lanes can hold a problem with these gap costs and this
+/// X-drop: the value-range test of `kernel::align_body` (and of the 16-bit kernels of
+/// `x_xdrop_avx2.rs`, `x_xdrop_w128.rs` and `x_xdrop_neon2.rs`, which have the same test). Where
+/// it fails, `xdrop_align` runs the 32-bit lanes (`align_32bit`). Gap costs whose sum overflows
+/// count as fitting: every kernel declines them (`checked_add`).
+#[inline(always)]
+fn fits_16bit(gap_open: i32, gap_extend: i32, x_drop: i32) -> bool {
+    let Some(goe) = gap_open.checked_add(gap_extend) else {
+        return true;
+    };
+    let x = x_drop.max(goe);
+    let bias = x as i64 + goe as i64 + MAX_M as i64 + 1;
+    let limit_rebase = VMAX - bias - MAX_M as i64;
+    limit_rebase >= MAX_M as i64 && gap_extend as i64 * 8 <= VMAX
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:426-429,457-458,481-483,601,656,671-675
+/// ```c
+///     x_dropoff = gap_align->gap_x_dropoff;
+///
+///     if (x_dropoff < gap_open_extend)
+///         x_dropoff = gap_open_extend;
+/// ...
+///         num_extra_cells = x_dropoff / gap_extend + 3;
+/// ...
+///     for (i = 1; i <= N; i++) {
+///         if (score < -x_dropoff)
+///             break;
+/// ...
+///             if (best_score - score > x_dropoff) {
+/// ...
+///             while (score_gap_row >= (best_score - x_dropoff) && b_size <= N) {
+/// ...
+///         if (b_size <= N) {
+///             score_array[b_size].best = MININT;
+/// ```
+/// (The same uses of `x_dropoff` are at lines 783-786, 798, 816, 874, 946 and 954-955 of
+/// `Blast_SemiGappedAlign` and 3070-3071, 3083, 3101, 3158, 3229 and 3237-3238 of
+/// `s_BlastAlignPackedNucl`.)
+/// No NCBI counterpart: the X-drop the kernels run with: `x_drop`, or `R` when `x_drop > R`, the
+/// clamp at the head of this file. It returns `x_drop` itself when the 16-bit lanes hold it
+/// (`fits_16bit`), so the calls of a search with its usual X-drops run as before, and computes
+/// `R` only past them, where it lets the 16-bit or 8-bit lanes take a small problem.
+#[inline(always)]
+fn x_drop_for_lanes(
+    scores: &Scores<'_>,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+) -> i32 {
+    if fits_16bit(gap_open, gap_extend, x_drop) {
+        return x_drop;
+    }
+    x_drop_clamp(scores, len1, len2, gap_open, gap_extend, x_drop)
+}
+
+/// No NCBI counterpart: `R = max_m * min(M, N) + 3 * goe + ge * (M + N + 1)` and `min(x_drop, R)`
+/// (the clamp at the head of this file; `M` = `len1`, `N` = `len2`, `max_m` = the largest matrix
+/// score, at most `MAX_M`, and at least 0). Gap costs the kernels decline (`gap_extend < 1`,
+/// `gap_open < 0`) keep `x_drop`.
+#[cold]
+#[inline(never)]
+fn x_drop_clamp(
+    scores: &Scores<'_>,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+) -> i32 {
+    if gap_extend < 1 || gap_open < 0 {
+        return x_drop;
+    }
+    let r = x_drop_bound(scores, len1, len2, gap_open, gap_extend);
+    if x_drop as i64 > r {
+        // `r < x_drop <= i32::MAX`
+        r as i32
+    } else {
+        x_drop
+    }
+}
+
+/// No NCBI counterpart: `R` of the clamp (`x_drop_clamp`), saturating at `i64::MAX`.
+fn x_drop_bound(
+    scores: &Scores<'_>,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+) -> i64 {
+    // a matrix score the kernels use is at most `MAX_M` (`build_row_table`, `build_tables`)
+    let max_m = max_score(scores).map_or(MAX_M, |m| m.min(MAX_M)).max(0) as i64;
+    let goe = gap_open as i64 + gap_extend as i64;
+    let m = i64::try_from(len1).unwrap_or(i64::MAX);
+    let n = i64::try_from(len2).unwrap_or(i64::MAX);
+    max_m
+        .saturating_mul(m.min(n))
+        .saturating_add(3 * goe)
+        .saturating_add((gap_extend as i64).saturating_mul(m.saturating_add(n).saturating_add(1)))
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:766-770
+/// ```c
+///     if (!score_only) {
+///         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
+/// ```
+/// No NCBI counterpart: the dispatch of the 32-bit lanes (`kernel::align_body32`), for the calls
+/// the 16-bit lanes cannot hold (`fits_16bit`): the AVX or SSE build on x86_64 (`cpu_level`), the
+/// simd128 and NEON builds on wasm32 and aarch64. `tb` as in `xdrop_align`; `None`: the scalar
+/// port runs. Never inlined, so that `xdrop_align`, which holds the 8-bit and 16-bit kernels on
+/// wasm32 and aarch64, compiles as it did without the 32-bit bodies.
+#[inline(never)]
+fn align_32bit(
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    tb: bool,
+    check_fence: bool,
+    sc: &mut XdropScratch,
+) -> Option<XdropResult> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        // SAFETY: each entry's CPU features were detected at run time (`cpu_level`).
+        unsafe {
+            match (cpu_level(), tb) {
+                (0, _) => None,
+                (2, true) => kernel::align32_avx::<true>(
+                    q,
+                    s,
+                    scores,
+                    len1,
+                    len2,
+                    gap_open,
+                    gap_extend,
+                    x_drop,
+                    check_fence,
+                    sc,
+                ),
+                (2, false) => kernel::align32_avx::<false>(
+                    q,
+                    s,
+                    scores,
+                    len1,
+                    len2,
+                    gap_open,
+                    gap_extend,
+                    x_drop,
+                    check_fence,
+                    sc,
+                ),
+                (_, true) => kernel::align32_sse::<true>(
+                    q,
+                    s,
+                    scores,
+                    len1,
+                    len2,
+                    gap_open,
+                    gap_extend,
+                    x_drop,
+                    check_fence,
+                    sc,
+                ),
+                (_, false) => kernel::align32_sse::<false>(
+                    q,
+                    s,
+                    scores,
+                    len1,
+                    len2,
+                    gap_open,
+                    gap_extend,
+                    x_drop,
+                    check_fence,
+                    sc,
+                ),
+            }
+        }
+    }
+    #[cfg(any(
+        all(target_arch = "wasm32", target_feature = "simd128"),
+        target_arch = "aarch64"
+    ))]
+    {
+        // SAFETY: simd128 (wasm32) and NEON (aarch64) are compile-time features of this build.
+        unsafe {
+            if tb {
+                kernel::align_body32::<true>(
+                    q,
+                    s,
+                    scores,
+                    len1,
+                    len2,
+                    gap_open,
+                    gap_extend,
+                    x_drop,
+                    check_fence,
+                    sc,
+                )
+            } else {
+                kernel::align_body32::<false>(
+                    q,
+                    s,
+                    scores,
+                    len1,
+                    len2,
+                    gap_open,
+                    gap_extend,
+                    x_drop,
+                    check_fence,
+                    sc,
+                )
+            }
+        }
+    }
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128"),
+        target_arch = "aarch64"
+    )))]
+    {
+        let _ = (
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            tb,
+            check_fence,
+            sc,
+        );
         None
     }
 }
@@ -3767,6 +5071,81 @@ fn x_extra_dispatch(
     None
 }
 
+// No NCBI counterpart: whether a call of `xdrop_align` that the 16-bit lanes hold has recorded the
+// reference side of `LOSAT_X_DP32` (`x_dp32_mark_ref`). The side is recorded once per process, so
+// such a call tests this flag and calls nothing.
+static X_DP32_REF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// No NCBI counterpart: records the reference side of `LOSAT_X_DP32` (`x_reach!`: a call the 16-bit
+/// lanes hold, which the switch leaves to the 8-bit and 16-bit dispatch) while the switch is on, the
+/// first time such a call comes.
+#[cold]
+#[inline(never)]
+fn x_dp32_mark_ref() {
+    if x_dp32() {
+        crate::utils::xreach::x_reach!("LOSAT_X_DP32", false);
+    }
+    X_DP32_REF.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// No NCBI counterpart: `LOSAT_X_DP32`'s own path (`x_dp32`, `x_reach!`), for a call whose X-drop
+/// the 16-bit lanes cannot hold (`fits_16bit`; the calls the scalar ports took before). The X-drop
+/// is clamped (`x_drop_for_lanes`: `min(x_drop, R)`, which gives every result `x_drop` gives, the
+/// argument at the head of this file). A clamped X-drop the 16-bit lanes hold runs through
+/// `xdrop_align` again, so on the 8-bit or 16-bit lanes and their dispatch (`LOSAT_X_DPCAPTURE`
+/// records it there, with the clamped X-drop); one still past them runs on the 32-bit lanes
+/// (`align_32bit`; not recorded by `LOSAT_X_DPCAPTURE`, whose kernels decline such a call).
+/// Cold and never inlined: `xdrop_align` keeps the code it had without the switch, with one test
+/// in front.
+#[cold]
+#[inline(never)]
+fn xdrop_align_past16(
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    tb: bool,
+    check_fence: bool,
+    sc: &mut XdropScratch,
+) -> Option<XdropResult> {
+    crate::utils::xreach::x_reach!("LOSAT_X_DP32", true);
+    let x_drop = x_drop_for_lanes(scores, len1, len2, gap_open, gap_extend, x_drop);
+    if fits_16bit(gap_open, gap_extend, x_drop) {
+        // the 8-bit and 16-bit dispatch (which may record the reference side, `x_dp32_mark_ref`,
+        // as a call on those lanes does)
+        return xdrop_align(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            tb,
+            check_fence,
+            sc,
+        );
+    }
+    align_32bit(
+        q,
+        s,
+        scores,
+        len1,
+        len2,
+        gap_open,
+        gap_extend,
+        x_drop,
+        tb,
+        check_fence,
+        sc,
+    )
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:736-741,766-770
 /// ```c
 /// Blast_SemiGappedAlign(const Uint1* A, const Uint1* B, Int4 M, Int4 N,
@@ -3786,6 +5165,13 @@ fn x_extra_dispatch(
 ///
 /// Score-only (`tb == false`) or traceback X-drop alignment.
 /// `None` means "not handled here": the caller must run the scalar kernel.
+///
+/// No NCBI counterpart: with `LOSAT_X_DP32` on (`x_dp32`), a call whose X-drop the 16-bit lanes
+/// cannot hold goes to `xdrop_align_past16` (the clamp, then these lanes or the 32-bit lanes);
+/// every other call is the reference side of the switch (recorded once, `x_dp32_mark_ref`) and runs
+/// the dispatch below, unchanged.
+/// `=0`: every call runs the dispatch below, whose kernels decline such an X-drop at their first
+/// test, so the scalar port runs it, as before.
 pub(crate) fn xdrop_align(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
@@ -3799,6 +5185,25 @@ pub(crate) fn xdrop_align(
     check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
+    if !fits_16bit(gap_open, gap_extend, x_drop) {
+        if x_dp32() {
+            return xdrop_align_past16(
+                q,
+                s,
+                scores,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                tb,
+                check_fence,
+                sc,
+            );
+        }
+    } else if !X_DP32_REF.load(std::sync::atomic::Ordering::Relaxed) {
+        x_dp32_mark_ref();
+    }
     // EXPERIMENT (256-bit and 128-bit kernels, LOSAT_X_DPCAPTURE): see `x_extra_dispatch`. This
     // is one read of a value set once; when the dispatch returns None the code below runs.
     let on = x_extra_switches();
@@ -4809,6 +6214,654 @@ mod tests {
                 handled > 30 && spanned > 30,
                 "handled {handled}, spanned {spanned}"
             );
+        }
+    }
+
+    // No NCBI counterpart: a BLASTNA-like problem for the 32-bit lanes' tests: row letters 0..3
+    // (the packed subject of `s_BlastAlignPackedNucl`), column letters 0..3 with some N (14) and,
+    // in some problems, a gap letter (15), whose row and column hold `INT4_MIN / 2` as NCBI's
+    // matrix does (`blast_stat.c` `BlastScoreBlkNuclMatrixCreate`); `scale` multiplies the scores.
+    pub(super) fn nucleotide_problem(rng: &mut Rng, scale: i32, len: usize) -> Problem {
+        let n = 16;
+        let (reward, penalty) = (1 + rng.below(5) as i32, 1 + rng.below(5) as i32);
+        let mut m = vec![0i32; n * n];
+        for i in 0..n {
+            for j in 0..n {
+                let v = if i < 4 && j < 4 {
+                    if i == j {
+                        reward
+                    } else {
+                        -penalty
+                    }
+                } else {
+                    -(1 + rng.below(3) as i32)
+                };
+                m[i * n + j] = scale * v;
+            }
+        }
+        for i in 0..n {
+            m[i * n + 15] = i32::MIN / 2;
+            m[15 * n + i] = i32::MIN / 2;
+        }
+        let q: Vec<u8> = (0..len).map(|_| rng.below(4) as u8).collect();
+        let (ps, pi) = (rng.unit() * 0.5, rng.unit() * 0.05);
+        let mut s = Vec::new();
+        let mut i = 0;
+        while i < q.len() {
+            let u = rng.unit();
+            if u < pi {
+                for _ in 0..=rng.below(5) {
+                    s.push(rng.below(4) as u8);
+                }
+            } else if u < 2.0 * pi {
+                i += 1 + rng.below(5) as usize;
+                continue;
+            }
+            s.push(if rng.unit() < ps {
+                rng.below(4) as u8
+            } else {
+                q[i]
+            });
+            i += 1;
+        }
+        if !s.is_empty() {
+            for _ in 0..rng.below(3) {
+                let k = rng.below(s.len() as u64) as usize;
+                s[k] = 14;
+            }
+            if rng.below(8) == 0 {
+                let k = rng.below(s.len() as u64) as usize;
+                s[k] = 15;
+            }
+        }
+        Problem { q, s, n, m }
+    }
+
+    // No NCBI counterpart: the row letters of a problem in one of the forms the callers pass
+    // (`RowSeq`): 0 bytes forward, 1 bytes reversed, 2 NCBI2NA packed forward, 3 packed reversed
+    // (letters 0..3), with `get(a) == q[a - 1]` (`row_seq`).
+    fn row_data(q: &[u8], form: usize) -> Vec<u8> {
+        match form {
+            0 => q.to_vec(),
+            1 => q.iter().rev().copied().collect(),
+            2 => {
+                let mut d = vec![0u8; q.len() / 4 + 2];
+                for (i, &c) in q.iter().enumerate() {
+                    d[i / 4] |= c << (2 * (3 - i % 4));
+                }
+                d
+            }
+            _ => {
+                let len = q.len();
+                let mut d = vec![0u8; len / 4 + 2];
+                for a in 1..=len {
+                    d[(len - a) / 4] |= q[a - 1] << (2 * ((a - 1) % 4));
+                }
+                d
+            }
+        }
+    }
+
+    fn row_seq(data: &[u8], form: usize, len1: usize) -> RowSeq<'_> {
+        match form {
+            0 => RowSeq::Bytes {
+                data,
+                base: -1,
+                step: 1,
+            },
+            1 => RowSeq::Bytes {
+                data,
+                base: len1 as isize,
+                step: -1,
+            },
+            2 => RowSeq::PackedFwd {
+                data,
+                byte_offset: -1,
+            },
+            _ => RowSeq::PackedRev { data, len: len1 },
+        }
+    }
+
+    // No NCBI counterpart: the column letters forward or reversed (`ColSeq`), with
+    // `get(k) == p.s(k, len2, sentinel)`.
+    fn col_seq(data: &[u8], rev: bool, zero_from: usize) -> ColSeq<'_> {
+        if rev {
+            ColSeq {
+                data,
+                base: data.len() as isize - 1,
+                step: -1,
+                zero_from,
+            }
+        } else {
+            ColSeq {
+                data,
+                base: 0,
+                step: 1,
+                zero_from,
+            }
+        }
+    }
+
+    // No NCBI counterpart: `R` of the X-drop clamp (head of this file) from every score of the
+    // matrix, without the `MAX_M` cap of `x_drop_bound`.
+    fn clamp_bound(p: &Problem, len1: usize, len2: usize, go: i32, ge: i32) -> i64 {
+        let max_m = p.m.iter().copied().max().unwrap_or(0).max(0) as i64;
+        let goe = (go + ge) as i64;
+        max_m * len1.min(len2) as i64 + 3 * goe + ge as i64 * (len1 + len2 + 1) as i64
+    }
+
+    // No NCBI counterpart: gap costs of the 32-bit lanes' tests: the usual ones scaled, random
+    // ones, and gap extensions the 16-bit lanes cannot hold at any X-drop (`gap_extend * 8 >
+    // 32767`).
+    fn wide_gap_costs(rng: &mut Rng, scale: i32) -> (i32, i32) {
+        match rng.below(6) {
+            0 => (11 * scale, scale),
+            1 => (5 * scale, 2 * scale),
+            2 => (
+                rng.below(12) as i32 * scale,
+                (1 + rng.below(3) as i32) * scale,
+            ),
+            3 => (rng.below(3000) as i32, 4096 + rng.below(3000) as i32),
+            4 => (0, scale),
+            _ => (2 * scale, scale),
+        }
+    }
+
+    // 32-bit lanes (`kernel::align_body32`) and the X-drop clamp (`x_drop_for_lanes`): random
+    // problems (protein matrices of 28 letters and BLASTNA-like ones of 16, scores scaled up to
+    // 400 times; rows forward or reversed, one byte per letter or packed; columns forward or
+    // reversed; Flat matrices and prebuilt tables; score-only and traceback, with fences; both
+    // trace layouts; rows over the band or holding every column) with X-drops past the 16-bit
+    // lanes, up to 2^31 - 300, run through `xdrop_align` and through the scalar loops with the
+    // X-drop as given. The offsets, score, fence flag, edit script and cell count are compared.
+    // This is the unit test of both sides of `LOSAT_X_DP32` in one process: its `=0` side is the
+    // scalar ports, of which `reference` is the transliteration, run with the X-drop as given and
+    // no clamp (the blastn and blastp modules compare their own scalar ports the same way). It also
+    // counts the 32-bit calls that ended at a fence, that moved their rows with the band
+    // (`X32_SHIFTS`) and that declined for a -32768 table entry (`X32_AMB`).
+    #[test]
+    fn wide_lanes_match_scalar_loops_on_random_problems() {
+        let cases: usize = std::env::var("LOSAT_FUZZ_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(700);
+        let mut rng = Rng(0xD1B5_4A32_D192_ED03);
+        let mut sc = XdropScratch::new();
+        let (mut handled, mut wide, mut narrow, mut fences, mut ops_total) = (0, 0, 0, 0, 0);
+        let mut forms = [0usize; 4];
+        let mut wide_fences = 0usize;
+        let (shifts0, amb0) = (X32_SHIFTS.with(|n| n.get()), X32_AMB.with(|n| n.get()));
+        for case in 0..cases {
+            sc.x_test_rows([Some(128), Some(320), None][case % 3]);
+            sc.x_nib = case % 2 == 0;
+            let nucleotide = rng.below(2) == 0;
+            let scale = [1, 8, 32, 200, 400][rng.below(if nucleotide { 5 } else { 4 }) as usize];
+            let max_len = if rng.below(6) == 0 { 1500 } else { 400 };
+            let len = 1 + rng.below(max_len) as usize;
+            let mut p = if nucleotide {
+                nucleotide_problem(&mut rng, scale, len)
+            } else {
+                random_problem(&mut rng, 28, scale, len)
+            };
+            let (go, ge) = wide_gap_costs(&mut rng, scale);
+            let len1 = p.q.len();
+            let mut len2 = p.s.len();
+            if len2 == 0 {
+                continue;
+            }
+            let r = clamp_bound(&p, len1, len2, go, ge);
+            let x: i32 = match rng.below(6) {
+                0 => 26_000 + rng.below(40_000) as i32,
+                1 => (26_000 + rng.below(r.max(1) as u64) as i64).min(i32::MAX as i64 - 300) as i32,
+                2 => (r - 1 + rng.below(3) as i64).clamp(1, i32::MAX as i64 - 300) as i32,
+                3 => (1 << 20) + rng.below(1 << 30) as i32,
+                4 => i32::MAX - 300 - rng.below(1000) as i32,
+                _ => 1 + rng.below(i32::MAX as u64 - 300) as i32,
+            };
+            let row_form = rng.below(if nucleotide { 4 } else { 2 }) as usize;
+            let col_rev = rng.below(2) == 1;
+            let tables = if rng.below(3) == 0 {
+                let m = &p.m;
+                let n = p.n;
+                build_tables(&|a: u8, b: u8| m[a as usize * n + b as usize], n)
+            } else {
+                None
+            };
+            for tb in [false, true] {
+                let mut sentinel = false;
+                if tb {
+                    match rng.below(6) {
+                        0 => {
+                            p.s.push(FENCE_SENTRY);
+                            sentinel = true;
+                        }
+                        1 if len2 > 3 => {
+                            let k = 1 + rng.below(len2 as u64 - 1) as usize;
+                            p.s[k] = FENCE_SENTRY;
+                        }
+                        2 if len2 > 3 => {
+                            len2 = 1 + rng.below(len2 as u64 - 1) as usize;
+                            sentinel = rng.below(2) == 0;
+                        }
+                        _ => {}
+                    }
+                }
+                let expected = reference(&p, len1, len2, go, ge, x, tb, sentinel);
+                let rd = row_data(&p.q, row_form);
+                let rows = row_seq(&rd, row_form, len1);
+                let cd: Vec<u8> = if col_rev {
+                    p.s.iter().rev().copied().collect()
+                } else {
+                    p.s.clone()
+                };
+                let cols = col_seq(&cd, col_rev, if sentinel { usize::MAX } else { len2 });
+                for a in 1..=len1 {
+                    assert_eq!(rows.get(a), Some(p.q(a)), "case {case} row form {row_form}");
+                }
+                for k in 0..=len2 + 1 {
+                    assert_eq!(cols.get(k), p.s(k, len2, sentinel), "case {case} columns");
+                }
+                let scores = match &tables {
+                    Some(t) => Scores::Tables { t, n: p.n },
+                    None => Scores::Flat { data: &p.m, n: p.n },
+                };
+                let x_lanes = x_drop_for_lanes(&scores, len1, len2, go, ge, x);
+                assert!(x_lanes <= x);
+                let runs = X32_RUNS.with(|n| n.get());
+                let got = xdrop_align(
+                    &rows, &cols, &scores, len1, len2, go, ge, x, tb, tb, &mut sc,
+                );
+                let took_wide = X32_RUNS.with(|n| n.get()) > runs;
+                if x_kernels_run() {
+                    assert_eq!(
+                        took_wide,
+                        x_dp32() && !fits_16bit(go, ge, x_lanes),
+                        "case {case}: the 32-bit lanes run exactly where the 16-bit lanes end"
+                    );
+                }
+                let Some(got) = got else {
+                    continue;
+                };
+                handled += 1;
+                if took_wide {
+                    wide += 1;
+                    forms[row_form] += 1;
+                    wide_fences += usize::from(got.fence_hit);
+                } else if !fits_16bit(go, ge, x) {
+                    // a large X-drop that the clamp brought into the 16-bit or 8-bit lanes
+                    narrow += 1;
+                }
+                fences += usize::from(got.fence_hit);
+                ops_total += sc.ops.len();
+                assert_eq!(
+                    (got.a_offset, got.b_offset, got.score, got.fence_hit),
+                    (expected.0, expected.1, expected.2, expected.3),
+                    "case {case} tb={tb} nucleotide={nucleotide} scale={scale} go={go} ge={ge} \
+                     x={x} (lanes {x_lanes}, R {r}) len1={len1} len2={len2} rows {row_form} \
+                     reversed columns {col_rev} tables {}",
+                    tables.is_some()
+                );
+                assert_eq!(sc.ops, expected.4, "case {case} tb={tb} traceback");
+                if !got.fence_hit {
+                    assert_eq!(got.cells, expected.5, "case {case} tb={tb} cell count");
+                }
+            }
+        }
+        if x_kernels_run() && x_dp32() {
+            let shifts = X32_SHIFTS.with(|n| n.get()) - shifts0;
+            let amb = X32_AMB.with(|n| n.get()) - amb0;
+            assert!(
+                wide > cases / 2 && narrow > cases / 20 && fences > 0 && ops_total > 0,
+                "handled {handled}, 32-bit {wide}, clamped to 16/8-bit {narrow}, fences {fences}"
+            );
+            assert!(
+                wide_fences > 0 && shifts > 0 && amb > 0,
+                "32-bit fences {wide_fences}, row moves {shifts}, -32768 declines {amb}"
+            );
+            assert!(
+                forms.iter().all(|&f| f > 10),
+                "32-bit calls by row form {forms:?}"
+            );
+        }
+    }
+
+    // The 32-bit lanes on their own (`align_32bit`, no clamp) at X-drops up to the largest they
+    // hold, `i32::MAX - goe - 3 * MAX_M - 1` (every row rebases there), compared with the scalar
+    // loops; one past it they decline.
+    #[test]
+    fn wide_lanes_hold_x_drops_up_to_their_limit() {
+        let mut rng = Rng(0x94D0_49BB_1331_11EB);
+        let mut sc = XdropScratch::new();
+        let (mut handled, mut top_handled) = (0usize, 0usize);
+        for case in 0..80 {
+            sc.x_nib = case % 2 == 0;
+            let nucleotide = case % 3 == 0;
+            let scale = [1, 32, 200][case % 3];
+            let len = 1 + rng.below(if case % 5 == 0 { 1200 } else { 300 }) as usize;
+            let p = if nucleotide {
+                nucleotide_problem(&mut rng, scale, len)
+            } else {
+                random_problem(&mut rng, 28, scale, len)
+            };
+            let (go, ge) = wide_gap_costs(&mut rng, scale);
+            let (len1, len2) = (p.q.len(), p.s.len());
+            if len2 == 0 {
+                continue;
+            }
+            let top = (VMAX32 - (go + ge) as i64 - 3 * MAX_M as i64 - 1) as i32;
+            let x = match case % 4 {
+                0 => top,
+                1 => top - rng.below(1 << 20) as i32,
+                2 => 26_000 + rng.below(200_000) as i32,
+                _ => top + 1,
+            };
+            let row_form = rng.below(if nucleotide { 4 } else { 2 }) as usize;
+            let rd = row_data(&p.q, row_form);
+            let rows = row_seq(&rd, row_form, len1);
+            let cols = col_seq(&p.s, false, len2);
+            let scores = Scores::Flat { data: &p.m, n: p.n };
+            for tb in [false, true] {
+                let got = align_32bit(
+                    &rows, &cols, &scores, len1, len2, go, ge, x, tb, tb, &mut sc,
+                );
+                if x > top {
+                    assert!(got.is_none(), "case {case}: past the 32-bit lanes");
+                    continue;
+                }
+                let Some(got) = got else {
+                    continue;
+                };
+                handled += 1;
+                top_handled += usize::from(x == top);
+                let expected = reference(&p, len1, len2, go, ge, x, tb, false);
+                assert_eq!(
+                    (got.a_offset, got.b_offset, got.score, got.fence_hit),
+                    (expected.0, expected.1, expected.2, expected.3),
+                    "case {case} tb={tb} go={go} ge={ge} x={x} len1={len1} len2={len2}"
+                );
+                assert_eq!(sc.ops, expected.4, "case {case} tb={tb} traceback");
+                assert_eq!(got.cells, expected.5, "case {case} tb={tb} cell count");
+            }
+        }
+        if x_kernels_run() {
+            assert!(
+                handled > 60 && top_handled > 15,
+                "handled {handled}, at the limit {top_handled}"
+            );
+        }
+    }
+
+    // The X-drop clamp (head of this file) on the scalar loops themselves: for random problems
+    // (protein and BLASTNA-like matrices with their minus-infinity letters, fences, cut columns),
+    // the offsets, score, fence flag, edit script and cells with an X-drop of `R`, `R` plus a
+    // little and 2^31 - 300 are the same; and `x_drop_bound` is `R`.
+    #[test]
+    fn x_drop_clamp_keeps_every_scalar_result() {
+        let mut rng = Rng(0xBF58_476D_1CE4_E5B9);
+        let mut compared = 0usize;
+        for case in 0..400 {
+            let nucleotide = case % 2 == 0;
+            let scale = [1, 8, 32, 200][rng.below(4) as usize];
+            let len = 1 + rng.below(if case % 7 == 0 { 800 } else { 200 }) as usize;
+            let mut p = if nucleotide {
+                nucleotide_problem(&mut rng, scale, len)
+            } else {
+                random_problem(&mut rng, 28, scale, len)
+            };
+            let (go, ge) = wide_gap_costs(&mut rng, scale);
+            let len1 = p.q.len();
+            let mut len2 = p.s.len();
+            if len2 == 0 {
+                continue;
+            }
+            for tb in [false, true] {
+                let mut sentinel = false;
+                if tb {
+                    match rng.below(4) {
+                        0 => {
+                            p.s.push(FENCE_SENTRY);
+                            sentinel = true;
+                        }
+                        1 if len2 > 3 => {
+                            let k = 1 + rng.below(len2 as u64 - 1) as usize;
+                            p.s[k] = FENCE_SENTRY;
+                        }
+                        2 if len2 > 3 => {
+                            len2 = 1 + rng.below(len2 as u64 - 1) as usize;
+                            sentinel = rng.below(2) == 0;
+                        }
+                        _ => {}
+                    }
+                }
+                let r = clamp_bound(&p, len1, len2, go, ge);
+                if p.m.iter().all(|&v| v <= MAX_M) {
+                    let scores = Scores::Flat { data: &p.m, n: p.n };
+                    assert_eq!(x_drop_bound(&scores, len1, len2, go, ge), r);
+                }
+                if r > i32::MAX as i64 - 2000 {
+                    continue;
+                }
+                let at_r = reference(&p, len1, len2, go, ge, r as i32, tb, sentinel);
+                for x in [r as i32 + 1 + rng.below(1000) as i32, i32::MAX - 300] {
+                    let above = reference(&p, len1, len2, go, ge, x, tb, sentinel);
+                    assert_eq!(
+                        above, at_r,
+                        "case {case} tb={tb} go={go} ge={ge} R={r} x={x} len1={len1} len2={len2}"
+                    );
+                    compared += 1;
+                }
+            }
+        }
+        assert!(compared > 1000, "compared {compared}");
+    }
+
+    // A traceback and a score-only call with a large X-drop take the 32-bit lanes, not the scalar
+    // port (`xdrop_align` answers, and `X32_RUNS` counts the call), with the scalar loops'
+    // results; a small problem with the same X-drops takes the 16-bit or 8-bit lanes (the clamp).
+    #[test]
+    fn large_x_drop_takes_the_wide_lanes() {
+        let mut rng = Rng(0x2F2E_1A3B_99C4_0D17);
+        let mut sc = XdropScratch::new();
+        for (len, wide) in [(900usize, true), (20, false)] {
+            let mut p = random_problem(&mut rng, 28, 32, len);
+            // no minus-infinity column letter (the 32-bit lanes would decline it)
+            for c in p.s.iter_mut().filter(|c| **c == 0) {
+                *c = 1;
+            }
+            let (len1, len2) = (p.q.len(), p.s.len());
+            let rows = RowSeq::Bytes {
+                data: &p.q,
+                base: -1,
+                step: 1,
+            };
+            let cols = col_seq(&p.s, false, len2);
+            let scores = Scores::Flat { data: &p.m, n: p.n };
+            for x in [110_903, 1 << 30, i32::MAX - 300] {
+                for tb in [false, true] {
+                    let runs = X32_RUNS.with(|n| n.get());
+                    let got = xdrop_align(
+                        &rows,
+                        &cols,
+                        &scores,
+                        len1,
+                        len2,
+                        11 * 32,
+                        32,
+                        x,
+                        tb,
+                        tb,
+                        &mut sc,
+                    );
+                    let expected = reference(&p, len1, len2, 11 * 32, 32, x, tb, false);
+                    // past the 16-bit lanes with `LOSAT_X_DP32=0` (or without vector kernels):
+                    // the scalar port
+                    if !x_kernels_run() || !x_dp32() {
+                        assert!(got.is_none());
+                        continue;
+                    }
+                    let got = got.expect("a vector kernel answers");
+                    assert_eq!(
+                        X32_RUNS.with(|n| n.get()) - runs,
+                        usize::from(wide),
+                        "len {len} x {x} tb {tb}: the 32-bit lanes ran"
+                    );
+                    assert_eq!(
+                        (got.a_offset, got.b_offset, got.score, got.fence_hit),
+                        (expected.0, expected.1, expected.2, expected.3)
+                    );
+                    assert_eq!(sc.ops, expected.4);
+                    assert_eq!(got.cells, expected.5);
+                }
+            }
+        }
+    }
+
+    // The decline for a -32768 table entry (`x32_amb_of`) is what keeps such a call exact: with a
+    // gap opening of 40,000 and an X-drop of 1e6, a BLASTNA gap letter (`INT4_MIN / 2`, -32768 in
+    // the 16-bit tables) third in the columns gives the diagonal `H - 2^30` in the scalar loops, so
+    // the cell takes a gap (`H - 40,001`) and the 37 matches after it (+37,000) do not reach the
+    // best again, while with -32768 in its place they would (the scalar loops on the clamped
+    // matrix give another result). The 32-bit lanes take the call (`X32_RUNS`), decline it
+    // (`X32_AMB`), and `xdrop_align` leaves it to the scalar port (None).
+    #[test]
+    fn wide_lanes_decline_a_clamped_table_entry() {
+        let n = 16;
+        let mut m = vec![-1000i32; n * n];
+        for i in 0..4 {
+            m[i * n + i] = 1000;
+        }
+        for i in 0..n {
+            m[i * n + 15] = i32::MIN / 2;
+            m[15 * n + i] = i32::MIN / 2;
+        }
+        let q: Vec<u8> = (0..40usize).map(|i| ((i * 7 + i / 3) % 4) as u8).collect();
+        let mut s = q.clone();
+        s[2] = 15;
+        let p = Problem { q, s, n, m };
+        let (len1, len2) = (p.q.len(), p.s.len());
+        let (go, ge, x) = (40_000, 1, 1_000_000);
+        let rows = RowSeq::Bytes {
+            data: &p.q,
+            base: -1,
+            step: 1,
+        };
+        let cols = col_seq(&p.s, false, len2);
+        let scores = Scores::Flat { data: &p.m, n };
+        let mut sc = XdropScratch::new();
+        // the scalar loops: the alignment ends before the gap letter (score 2,000); with -32768 in
+        // its place it would run on through it
+        let expected = reference(&p, len1, len2, go, ge, x, true, false);
+        let mut clamped = p.m.clone();
+        for v in clamped.iter_mut() {
+            *v = (*v).max(i16::MIN as i32);
+        }
+        let as_clamped = Problem {
+            m: clamped,
+            q: p.q.clone(),
+            s: p.s.clone(),
+            n,
+        };
+        assert_ne!(
+            reference(&as_clamped, len1, len2, go, ge, x, true, false),
+            expected,
+            "the clamped entry would change the result"
+        );
+        for tb in [false, true] {
+            let (runs, amb) = (X32_RUNS.with(|n| n.get()), X32_AMB.with(|n| n.get()));
+            let direct = align_32bit(
+                &rows, &cols, &scores, len1, len2, go, ge, x, tb, tb, &mut sc,
+            );
+            let dispatched = xdrop_align(
+                &rows, &cols, &scores, len1, len2, go, ge, x, tb, tb, &mut sc,
+            );
+            assert!(direct.is_none() && dispatched.is_none(), "tb {tb}");
+            if x_kernels_run() {
+                let runs = X32_RUNS.with(|n| n.get()) - runs;
+                let amb = X32_AMB.with(|n| n.get()) - amb;
+                // the direct call always; the dispatched one with `LOSAT_X_DP32` on
+                assert_eq!((runs, amb), (1 + usize::from(x_dp32()), runs), "tb {tb}");
+            }
+        }
+    }
+
+    // No NCBI counterpart: the 32-bit operations of the `arch` layer against their definitions on
+    // random lanes, alike on x86_64, wasm32 simd128 and aarch64 NEON (`subsu32` on lanes in
+    // `0 ..= i32::MAX`, where the kernels use it).
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128"),
+        target_arch = "aarch64"
+    ))]
+    #[test]
+    fn arch_32bit_lanes_match_their_definitions() {
+        // the x86_64 `arch` layer runs inside the kernels' SSE4.1 entries (`x86_entry32!`)
+        #[cfg(target_arch = "x86_64")]
+        if !is_x86_feature_detected!("sse4.1") {
+            return;
+        }
+        use super::arch::*;
+        let mut rng = Rng(0x6A09_E667_F3BC_C909);
+        let lane = |rng: &mut Rng| -> i32 {
+            match rng.below(7) {
+                0 => 0,
+                1 => i32::MAX,
+                2 => i32::MIN,
+                3 => -1,
+                4 => rng.below(70_000) as i32 - 35_000,
+                5 => i16::MIN as i32 - rng.below(3) as i32 + 1,
+                _ => rng.next() as i32,
+            }
+        };
+        for _ in 0..20_000 {
+            let a: [i32; 4] = core::array::from_fn(|_| lane(&mut rng));
+            let b: [i32; 4] = core::array::from_fn(|_| lane(&mut rng));
+            let h: [i16; 8] = core::array::from_fn(|_| lane(&mut rng) as i16);
+            // SAFETY: SSE4.1 was detected above (x86_64); simd128 and NEON are compile-time
+            // features of the wasm32 and aarch64 builds; each load and store covers one array of
+            // 16 bytes.
+            unsafe {
+                let w = |v: V| {
+                    let mut o = [0i32; 4];
+                    store(o.as_mut_ptr(), v);
+                    o
+                };
+                let w16 = |v: V| {
+                    let mut o = [0i16; 8];
+                    store(o.as_mut_ptr(), v);
+                    o
+                };
+                let (va, vb, vh) = (load(a.as_ptr()), load(b.as_ptr()), load(h.as_ptr()));
+                let e: [i32; 4] = core::array::from_fn(|i| a[i].wrapping_add(b[i]));
+                assert_eq!(w(add32(va, vb)), e, "add32");
+                let e: [i32; 4] = core::array::from_fn(|i| a[i].max(b[i]));
+                assert_eq!(w(max32(va, vb)), e, "max32");
+                let e: [i32; 4] = core::array::from_fn(|i| -i32::from(a[i] > b[i]));
+                assert_eq!(w(gt_i32(va, vb)), e, "gt_i32");
+                let (pa, pb) = (a.map(|v| v & i32::MAX), b.map(|v| v & i32::MAX));
+                let e: [i32; 4] = core::array::from_fn(|i| (pa[i] - pb[i]).max(0));
+                let got = subsu32(load(pa.as_ptr()), load(pb.as_ptr()));
+                assert_eq!(w(got), e, "subsu32");
+                assert_eq!(w(splat_i32(a[1])), [a[1]; 4], "splat_i32");
+                assert_eq!(w(bcast_last32(va)), [a[3]; 4], "bcast_last32");
+                assert_eq!(
+                    (lane0_32(va), lane3_32(va)),
+                    (a[0], a[3]),
+                    "lane0_32, lane3_32"
+                );
+                let e: [i32; 4] = core::array::from_fn(|i| h[i] as i32);
+                assert_eq!(w(widen_lo16(vh)), e, "widen_lo16");
+                let e: [i32; 4] = core::array::from_fn(|i| h[4 + i] as i32);
+                assert_eq!(w(widen_hi16(vh)), e, "widen_hi16");
+                let e: [i16; 8] = core::array::from_fn(|i| {
+                    let v = if i < 4 { a[i] } else { b[i - 4] };
+                    v.clamp(i16::MIN as i32, i16::MAX as i32) as i16
+                });
+                assert_eq!(w16(packs32(va, vb)), e, "packs32");
+                for (n, got) in [(1, bsl4(va)), (2, bsl8(va))] {
+                    let e: [i32; 4] = core::array::from_fn(|i| if i >= n { a[i - n] } else { 0 });
+                    assert_eq!(w(got), e, "bsl{}", 4 * n);
+                }
+            }
         }
     }
 

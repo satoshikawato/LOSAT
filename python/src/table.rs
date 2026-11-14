@@ -18,10 +18,10 @@ use arrow_array::{
 use arrow_ipc::reader::StreamReader;
 use arrow_ipc::writer::StreamWriter;
 use arrow_schema::ArrowError;
+use losat::api::{HspRecord, Strand};
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyCapsule, PySlice, PyType};
-use LOSAT::api::{HspRecord, Strand};
 
 fn ints(hsps: &[HspRecord], value: impl Fn(&HspRecord) -> usize) -> ArrayRef {
     Arc::new(Int64Array::from_iter_values(

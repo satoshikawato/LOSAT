@@ -3,22 +3,6 @@
 version = 4
 
 [[package]]
-name = "LOSAT"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "bzip2",
- "clap",
- "flate2",
- "indicatif",
- "rayon",
- "rustc-hash",
- "rustix",
- "ruzstd",
- "windows-sys",
-]
-
-[[package]]
 name = "anstream"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -353,13 +337,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
-name = "losat-web-adapter"
-version = "0.1.0"
+name = "losat"
+version = "0.2.0"
 dependencies = [
- "LOSAT",
+ "anyhow",
  "bzip2",
  "clap",
  "flate2",
+ "indicatif",
+ "rayon",
+ "rustc-hash",
+ "rustix",
+ "ruzstd",
+ "windows-sys",
+]
+
+[[package]]
+name = "losat-web-adapter"
+version = "0.1.0"
+dependencies = [
+ "bzip2",
+ "clap",
+ "flate2",
+ "losat",
  "sha2",
 ]
 

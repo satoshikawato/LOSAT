@@ -1,0 +1,11 @@
+Blast-db-mask-info ::= {
+  algo-id 0,
+  algo-program dust,
+  algo-options "opt1",
+  masks {
+    masks {
+    int { from 10, to 40, id patent { seqid 2, cit { country "US", id number "RE33188" } } }
+    },
+    more FALSE
+  }
+}

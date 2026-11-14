@@ -898,7 +898,7 @@ impl<R: Read> FastaReader<R> {
             }
             self.lines.next_line();
             let raw = self.lines.take_line();
-            // `NStr::TruncateSpaces_Unsafe(line)` (`eTrunc_Both`).
+            // `NStr::TruncateSpaces_Unsafe(line)` (`eTrunc_Both`, fasta.cpp:376).
             let line = truncate_spaces(&raw);
             if line.is_empty() || matches!(line[0], b'!' | b'#' | b';') {
                 self.lines.put_line(raw);

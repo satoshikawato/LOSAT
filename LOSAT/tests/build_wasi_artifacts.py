@@ -90,8 +90,10 @@ def main():
         for previous, expected in recorded.items():
             if digest(previous) != expected:
                 raise RuntimeError(f"build overwrote another artifact: {previous}")
-        # A reactor is the cdylib of the library crate `LOSAT`; a command is the `losat` binary.
-        built = target / kind / triple / "release" / ("LOSAT.wasm" if kind.endswith("reactor") else "losat.wasm")
+        # The reactor is the cdylib of the library crate `losat` and the command is the `losat`
+        # binary; both are `release/losat.wasm`, and each build names its target (`--lib` or
+        # `--bin losat`, SPECS) so that Cargo copies only that one there.
+        built = target / kind / triple / "release" / "losat.wasm"
         destination = out / f"losat-{kind}.wasm"
         guard = write_artifact(args.node, kind, built, destination)
         # The identity is the written artifact's (the guard keeps the imports, exports and memory).

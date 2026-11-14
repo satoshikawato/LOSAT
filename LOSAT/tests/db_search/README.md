@@ -67,6 +67,14 @@ FASTA files:
   10000, overlap 100: [0, 10000) and [9900, 20600)); rows `db.split.*` against `LOSAT/tests/seqdb/db/prot_v4`.
 - `vol2.faa`: `A` (record p10 of `LOSAT/tests/seqdb/prot.faa`) and `B`, the same with every fifth letter
   replaced by `W` (`A` where it is `W`); `vol2_q.faa`: `A` as the query.
+- `q3b_chains.faa` (rows `db.ps.q3b.*` of psiblast `-sum_stats true`, line RG item Q3b): eight subjects made of parts
+  of `LOSAT/tests/fasta/psiblast/tk.faa` with some letters changed and random letters between them (a fixed
+  pseudo-random generator), whose HSPs with that query form linked sets: two parts far apart (`split2`), close
+  (`split2_close`) and in reverse order (`reversed2`), three parts (`split3`), overlapping parts (`overlap`), two weak
+  parts (`weak2`), one part (`single`) and one part three times (`tandem`).
+- `q3b_long.faa` (rows `db.ps.q3b.long.*` and `db.oldfsc.blastp.split.6`): one protein of 21,000 random letters (a fixed
+  pseudo-random generator) with `LOSAT/tests/fasta/psiblast/tk.faa` planted at 500, 9,800, 14,000 and 20,500 (cut at the
+  end), a query that NCBI splits into chunks of 10,000 that overlap by 100.
 
 Databases (all `-blastdb_version 4`, no `-parse_seqids`; only `.pin .psq .phr` are kept, the `.pjs` file
 makeblastdb also writes was deleted). Run from `LOSAT/`:
@@ -86,6 +94,8 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
     rm tests/db_search/vol2_nophr.01.phr
     makeblastdb -in tests/db_search/bxchunk.faa -dbtype prot -out tests/db_search/bxchunk \
         -title "proteins planted in bxchunk_q.fna" -blastdb_version 4
+    makeblastdb -in tests/db_search/q3b_chains.faa -dbtype prot -out tests/db_search/q3b_chains \
+        -title "subjects whose HSPs with tests/fasta/psiblast/tk.faa form linked sets" -blastdb_version 4
 
 `wm_s60k` (rows `db.wm.*`, line NP M2: `-window_masker_db`) is the subject `s60k.fa` of
 `LOSAT/tests/blastn_regression_fixtures.py`, with only `.nin .nsq .nhr` kept:
@@ -704,8 +714,12 @@ Where the reports read their subjects one by one (line DBID taxrow; `ids/txr_p` 
 --taxrow-only`, a decoy `gb|DDD00001.1|` without hits, A `gb|AAA00001.1|` taxid 9606, the best hit of `ids/txr_q.faa` /
 `ids/txr_q.fna`, and B `gb|BBB00001.1|` taxid 99990; `ids/txr_q2.*` end with a query without hits): with `PRE_FETCH_SEQS_LIMIT=0` NCBI's formatter loads each subject when it formats it, so the offset error of
 `tests/seqdb/taxdb/offset_last_past_end` comes between A's and B's tabular rows, description lines and BLAST XML `Hit`s
-where both streams go to one file. `tests/taxonomy_read_order.rs` compares LOSAT's merged stream with NCBI 2.17.0's
-(`tests/fixtures/taxonomy_read_order`) in the six programs, with `ids/prd_txself` for a plural name's open.
+where both streams go to one file; the organism report (outfmt 18) reads each subject after the `Query=` block, before the
+lookups of its taxids. `tests/taxonomy_read_order.rs` compares LOSAT's merged stream with NCBI 2.17.0's
+(`tests/fixtures/taxonomy_read_order`) in the six programs, with `ids/prd_txself` for a plural name's open, and
+`ids/txr_s` and `ids/txr_sn` (`make_ids.py --taxrow-only`; F `gb|FFF00001.1|` taxid 99990, a fragment of the query that
+`-sorthits 3` puts before A) for the order of the pairwise report's reads (line DBID taxrow2): `bad_magic`'s open comes
+before F's description line, where the sorted report reads first.
 
 Review 3 of pssmread (rows `db.id.prd3.*`; `ids/prd_np` and its version 4 copy `ids/prd_np_4` from `ids/prd_np.faa`, A and B
 without `-parse_seqids` and taxid 99990 by `-taxid 99990`, and `ids/prd_tc` from `ids/prd_tc.faa`, A taxid 99990 and B taxid
@@ -1238,6 +1252,36 @@ BLAST+ 2.17.0 on the workstation (`env_blast`; two rows checked against the rele
 bytes); the `db.ak.bp.err.*` rows (NCBI's `CStringException` texts, exit 255, which carry the path of NCBI's build tree:
 `p_bad_nseq`, `p_bad_first`, `p_bad_min`, `p_bad_stlen`, `p_bad_two` without and with `-taxids`) with the release build on the
 developer machine.
+
+Rows `db.ak.*.e0*` (D1a-2, `remaining-gaps-20261112/D/fixtures/make_d1a2_fixtures.py`): alias files `e_p*` over the
+protein volume of no OID `../seqdb/db/empty` and `e_n*` over `aliaskeys/en` (a version 4 nucleotide index of no sequence)
+with `NSEQ 1` and `LENGTH 100` (A), `LENGTH 100` (B), `STATS_TOTLEN 100` (C), `STATS_NSEQ 1` and `STATS_TOTLEN 100` (D),
+`NSEQ 1` (F) and `NSEQ 1` and `STATS_TOTLEN 100` (G): NCBI reads the length of OID 0 only where the statistics' total is
+not positive (F: `Database memory map file error`, PSIBLAST `OID not found`); otherwise it searches no sequence, with each
+query's warning where `GetNumSeqs` is 0 (B, C, D); BLASTN and TBLASTX divide B's and C's 100 letters by 0 sequences
+(SIGFPE: LOSAT's refusal). Frozen with the release build on the developer machine (2026-11-13; the same bytes as the
+workstation's probes p4c_dp, p4c_dn).
+
+Rows `db.ak.*.ord.*` (D1a-2): the order of a search database's errors, NCBI's (probes p4c_e*, p4c_f2): the list, the alias
+files' counts, the formatter's reopening of each name, then the headers and the accession tables. `o_mix` and `o_mixs` are
+`multidb/na` (with the accession table) and `multidb/nnp` (without) under `NSEQ abc` / `STATS_NSEQ abc`, with `-seqidlist`
+(the list's `DB contains no accession info.` first) and `-taxids` (the alias file's error); `o_np` is `nnp` alone, `o_v4`
+the version 4 `multidb/n4a` (`Taxonomy filtering is not supported in v4 BLAST dbs` first); `o_dh` and `o_dhs` are over
+`dh`, a copy of `multidb/p4a` whose header file is 4,096 bytes of 0xff (the alias file's error, before any header is
+read). Frozen with the release build on the developer machine (the `CStringException` texts carry its path).
+
+Rows `db.oir.*` (D1a-2 part 2, `remaining-gaps-20261112/D/SURVEY_D1a2_A.md`, `remaining-gaps-20261112/D/fixtures/make_d1a2a_fixtures.py`
+and `build_o.sh`): the probe cases `p4a_*` of that survey, each command of a search program a row (the row id ends with the
+command's index in the probe case; the commands with `-num_threads 4` are left out, the harness runs each row at 1 and 4
+threads; `-taxids` and `-negative_taxids` with `-no_taxid_expansion`). `oidrange/` holds the cases' alias files
+(`<case>_<name>.pal|nal`, over `../taxfilter/tfp`, `tfn`, `tfn.00` and `o`) and `o`: `o.faa`, ten sequences of `tfp` as
+`lcl|o0`..`lcl|o9`, made with NCBI BLAST+ 2.17.0 `makeblastdb -in o.faa -dbtype prot -out o -parse_seqids -blastdb_version 5
+-taxid 10116 -title o`; NCBI sorts the volumes by name, so `o` holds the OIDs 0-9 and `tfp` 10-32 wherever both are in a
+`-db`. `FIRST_OID` and `LAST_OID` of 2^31 or more (NCBI's negative `int`s: a negative first OID keeps no OID, a negative last
+OID is no bound and ends the iteration range at 0, `FIRST_OID 2147483648` gives `INT_MAX`), and the iteration range of the only
+alias file of a `-db` with another database or volume (a search reads the listed OIDs inside it; with `-taxids` or
+`-seqidlist` every listed OID, and the statistics count NCBI's loop over the list, which can pass the first listed OID and the
+OID at the range's end). Frozen with the release build on the developer machine (2026-11-13).
 
 ## psiblast's id options (line RG, series Q, Q1)
 

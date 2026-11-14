@@ -18,7 +18,7 @@
 //! The records are those of NCBI's HSPs (the starts, lengths and scores printed in the
 //! files; an e-value or bit score as its 15 printed digits, which give back the same double).
 
-use super::encoder::{Encoder, SerialError};
+use super::encoder::{Encoder, ReplacedChar, SerialError, StreamPosition, Traced};
 use super::{write_query, SeqAlignError, SerialFormat};
 use crate::blastinput::app::Program;
 use crate::common::GapEditOp::{self, Del, Ins, Sub};
@@ -487,14 +487,84 @@ fn json_strings_are_escaped_as_ncbi() {
     assert_eq!(buf, b"\"a\\\"b\\\\c\\u0001\\u001F\x7f\xc3\xa9d\"");
 }
 
-/// A byte outside the visible range is an error of the ASN.1 text encoder (the callers
-/// refuse such titles before the search).
+/// A byte outside the visible range is an error of the ASN.1 text encoder (its callers refuse
+/// such strings, or write the document again through `Traced`).
 #[test]
 fn asn_text_records_a_non_visible_byte() {
     let mut buf = Vec::new();
     let mut enc = super::asn_text::AsnTextEncoder::new(&mut buf);
     enc.visible_str(b"a\tb");
     assert_eq!(enc.error(), Some(SerialError::NonVisibleChar(b'\t')));
+    assert_eq!(enc.take_replaced(), Vec::new());
+}
+
+/// Through `Traced`, each byte outside the visible range is `#` and a `ReplacedChar` at the
+/// line where NCBI checks it: before the byte's wrap (NCBI 2.17.0 convert2blastmask, probe RG
+/// K/k4/probe case c_txt_w62: the two bytes of the first `é` at the 63rd and 64th place of a
+/// line that wraps at the second are both on line 4, the next `é` on line 5). A flush before
+/// the end keeps the document.
+#[test]
+fn asn_text_with_frames_replaces_each_byte_at_its_line() {
+    // `  m "` is 5 columns: the wrap comes before the 75th byte of the string (column 79).
+    let string = [
+        b"a".repeat(73),
+        "\u{e9}\u{e9}".as_bytes().to_vec(),
+        b"b".to_vec(),
+    ]
+    .concat();
+    let mut sink = Vec::new();
+    let mut buf = Vec::new();
+    let mut enc = Traced::new(super::asn_text::AsnTextEncoder::new(&mut buf), 0);
+    enc.begin_document("T");
+    enc.begin_sequence("T");
+    enc.member("n", 0);
+    enc.int(1);
+    enc.end_member();
+    enc.flush_to(&mut sink, false).unwrap();
+    enc.member("m", 1);
+    enc.visible_str(&string);
+    enc.end_member();
+    enc.member("l", 2);
+    enc.begin_list(false);
+    enc.element();
+    enc.visible_str(b"x");
+    enc.element();
+    enc.visible_str(b"\x7fy");
+    enc.end_list();
+    enc.end_member();
+    enc.end_sequence();
+    enc.end_document();
+    assert_eq!(enc.error(), None);
+    let replaced = enc.take_replaced_chars();
+    enc.flush_to(&mut sink, true).unwrap();
+    let text = String::from_utf8(sink).unwrap();
+    assert_eq!(
+        text,
+        format!(
+            "T ::= {{\n  n 1,\n  m \"{}\n####b\",\n  l {{\n    \"x\",\n    \"#y\"\n  }}\n}}\n",
+            "a".repeat(73)
+        )
+    );
+    let at = |byte: u8, line: u64, trace: &str, string: &[u8]| ReplacedChar {
+        trace: trace.to_string(),
+        byte,
+        position: StreamPosition::Line(line),
+        string: std::sync::Arc::from(string),
+    };
+    assert_eq!(
+        replaced,
+        vec![
+            at(0xc3, 3, "T.m", &string),
+            at(0xa9, 3, "T.m", &string),
+            at(0xc3, 4, "T.m", &string),
+            at(0xa9, 4, "T.m", &string),
+            at(0x7f, 7, "T.l.E", b"\x7fy"),
+        ]
+    );
+    assert_eq!(
+        replaced[4].message(),
+        b"T.l.E\nBad char [0x7F] in string at line 7\n\x7fy".to_vec()
+    );
 }
 
 /// `COStreamBuffer::PutInt4`.
@@ -713,4 +783,41 @@ fn a_subject_with_strings_writes_the_use_this_seqid_ext() {
         assert!(named.contains(EXT), "{named}");
         assert!(!document(1).contains("use_this_seqid"));
     }
+}
+
+/// The bytes replaced in one string share one copy of it, and the lines go on from the last
+/// replaced byte (a string of 20,000 bytes, every other one DEL: 10,000 posts of NCBI, each with
+/// the whole string).
+#[test]
+fn replaced_bytes_of_a_long_string_share_it() {
+    let string: Vec<u8> = (0..20_000)
+        .map(|at| if at % 2 == 0 { b'a' } else { 0x7f })
+        .collect();
+    let mut buf = Vec::new();
+    let mut enc = Traced::new(super::asn_text::AsnTextEncoder::new(&mut buf), 0);
+    enc.begin_document("T");
+    enc.begin_sequence("T");
+    enc.member("m", 0);
+    enc.visible_str(&string);
+    enc.end_member();
+    enc.end_sequence();
+    enc.end_document();
+    let replaced = enc.take_replaced_chars();
+    assert_eq!(replaced.len(), 10_000);
+    assert!(replaced
+        .iter()
+        .all(|byte| std::sync::Arc::ptr_eq(&byte.string, &replaced[0].string)));
+    assert_eq!(&replaced[0].string[..], &string[..]);
+    // `  m "` and 73 more bytes fill line 2 to column 78; each later line holds 78 bytes.
+    let lines: Vec<u64> = replaced
+        .iter()
+        .map(|byte| match byte.position {
+            StreamPosition::Line(line) => line,
+            StreamPosition::Byte(_) => unreachable!(),
+        })
+        .collect();
+    assert_eq!(lines[0], 2);
+    assert!(lines.windows(2).all(|pair| pair[0] <= pair[1]));
+    let text_lines = buf.iter().filter(|&&byte| byte == b'\n').count() as u64;
+    assert!(lines[9_999] <= text_lines);
 }

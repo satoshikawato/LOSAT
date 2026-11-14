@@ -8,8 +8,9 @@
 //! calls for an `eDouble` key (`CArg_Double`: every real argument of the BLAST programs and
 //! rpsbproc, `blastinput::value_parsers::ncbi_double`, and segmasker's `-locut` and `-hicut`,
 //! `ncbi_app::args`): [`string_to_double_posix_or_local`]; and NCBI's own decimal reader
-//! `NStr::StringToDoublePosix` that it calls, which the ASN.1 text reader calls too for a REAL
-//! (`report::serial::asn_text_reader`): [`string_to_double_posix`].
+//! `NStr::StringToDoublePosix` that it calls, which the ASN.1 text and XML readers call too for a
+//! REAL (`report::serial::asn_text_reader`, `report::serial::xml_reader`):
+//! [`string_to_double_posix`].
 //!
 //! Only these flag sets are ported: the leading and trailing symbols, `fMandatorySign`,
 //! `fDecimalPosix` and `fConvErr_NoThrow` of `StringToDouble` are not (no caller passes them).
@@ -190,11 +191,16 @@ pub(crate) struct PosixDouble {
     pub(crate) end: usize,
 }
 
-/// NCBI's `HUGE_VAL/HUGE_VAL` (`NCBI_FAKE_WARNING`), which GCC leaves to the run time (the
-/// division raises the invalid-operation flag): `divsd` of x86-64 gives its default NaN, the
-/// "QNaN floating-point indefinite" with the sign bit set (NCBI's corelib, `nfix/probe/x87`:
-/// `nan` reads as 0xfff8000000000000).
-const HUGE_VAL_DIV_HUGE_VAL: f64 = f64::from_bits(0xfff8_0000_0000_0000);
+/// NCBI's `HUGE_VAL/HUGE_VAL` (`NCBI_FAKE_WARNING`), the NaN of NCBI's readers of a REAL (`nan`
+/// of `StringToDoublePosix`, `NOT-A-NUMBER` of ASN.1 text): GCC leaves the division to the run
+/// time (it raises the invalid-operation flag), and `divsd` of x86-64 gives its default NaN, the
+/// "QNaN floating-point indefinite", whose sign bit is set, so that an `ostream` prints it `-nan`
+/// (NCBI's corelib, `nfix/probe/x87`: `nan` reads as 0xfff8000000000000; NCBI rpsbproc 0.5.1,
+/// both builds, PS16d review oracles O1 `x_nan` and `x_mnan`, `Parameters_expect` `nan` and
+/// `-nan`; O2 `a_nan`, an archive's E-value threshold `NOT-A-NUMBER`; O1 `s_doc2nan`, a kept
+/// `Hsp_evalue` `nan`: `-nan` on the SESSION and DOMAINS lines). `StringToDoublePosix` gives it
+/// for `nan` whatever the sign before it.
+pub(crate) const NCBI_NAN: f64 = f64::from_bits(0xfff8_0000_0000_0000);
 
 /// The x87 `long double` constant `1e<n>L` of `StringToDoublePosix` (`NCBI_CONST_LONGDOUBLE`):
 /// `1e-15` to `1e15` and the multiples of 16 up to 256 of either sign.
@@ -574,7 +580,7 @@ pub(crate) fn string_to_double_posix(text: &[u8], finite: bool) -> PosixDouble {
             if !anydigits {
                 if !dot && (c == b'n' || c == b'N') && starts_with_ignore_case(ptr, b"nan") {
                     return PosixDouble {
-                        value: HUGE_VAL_DIV_HUGE_VAL,
+                        value: NCBI_NAN,
                         end: ptr + 3,
                     };
                 }

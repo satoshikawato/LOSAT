@@ -6,11 +6,12 @@
 //! ([`ThrowSite`]); with them `NStr::PrintableString`, which their messages quote the string
 //! with, `NStr::StringToUInt8_DataSize` (`-max_file_sz`, module `data_size`) and
 //! `NStr::StringToDouble` with glibc's `strtod` and NCBI's own `NStr::StringToDoublePosix`
-//! (module `double`: the real arguments, rpsbproc's bit score thresholds, the constraints of the
-//! arguments and the REAL values of the ASN.1 text reader). Also the string functions that more
-//! than one port calls: `NStr::ParseEscapes` (makeblastdb's titles and the registry reader),
-//! `NStr::TruncateSpaces` (each `ETrunc`: the FASTA readers, the argument readers, the format
-//! guess), `NStr::IsBlank`, `NStr::StringToBool` and C's `isspace`.
+//! (module `double`: the real arguments, the SEG locut and hicut, rpsbproc's bit score
+//! thresholds, the constraints of the arguments and the REAL values of the ASN.1 text and XML
+//! readers). Also the string functions that more than one port calls: `NStr::ParseEscapes`
+//! (makeblastdb's titles and the registry reader), `NStr::TruncateSpaces` (each `ETrunc`: the
+//! FASTA readers, the argument readers, the format guess), `NStr::IsBlank`, `NStr::StringToBool`
+//! and C's `isspace`.
 //!
 //! Not ported: `fConvErr_NoThrow` and the errno bookkeeping of `CS2N_Guard` (a caller that passes
 //! `fConvErr_NoThrow` takes NCBI's 0 for an error itself), the bases other than 10 (but 16 of
@@ -27,7 +28,7 @@ mod double;
 
 pub use data_size::string_to_uint8_data_size;
 pub(crate) use double::{
-    string_to_double, string_to_double_posix, string_to_double_posix_or_local,
+    string_to_double, string_to_double_posix, string_to_double_posix_or_local, NCBI_NAN,
 };
 
 use std::borrow::Cow;
@@ -54,6 +55,11 @@ pub(crate) const ALLOW_TRAILING_SYMBOLS: Flags = (1 << 22) | ALLOW_TRAILING_SPAC
 
 /// `isspace` in the C locale: the space, `\t`, `\n`, `\v`, `\f` and `\r` (a `const fn` for the
 /// character tables built at compile time).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3156 (`s_TruncateSpaces`)
+/// ```c++
+///         while ( isspace((unsigned char) str[beg]) ) {
+/// ```
 pub(crate) const fn is_space(c: u8) -> bool {
     matches!(c, b'\t'..=b'\r' | b' ')
 }
@@ -184,7 +190,7 @@ const fn convert_site(line: u32, function: &'static str) -> ThrowSite {
 
 /// `NStr::PrintableString(str)` with its default mode `fNewLine_Quote | fNonAscii_Passthru`
 /// (both 0) and language C: what `CS2N_Guard::Message` quotes the input string with, and the
-/// form in which `CFastaReader` keeps a definition line (fasta.cpp:601, read back by
+/// form in which `CFastaReader` keeps a definition line (fasta.cpp:600, read back by
 /// makeblastdb, `writedb::fasta_source::title`, and written by the archive, `report::archive`).
 /// Ported branches: `s_PrintableString` with `mode == 0`, `lang == eLanguage_C`
 /// (so `fNewLine_Passthru`, `fNonAscii_Quote`, `fPrintable_Full` and `eLanguage_Javascript` are
@@ -1197,9 +1203,24 @@ pub(crate) fn parse_escapes(str: &[u8]) -> Result<Vec<u8>, &'static str> {
 //     str = s_TruncateSpaces(str, where, CTempString());
 // }
 // ```
-// `NStr::TruncateSpaces`, `TruncateSpaces_Unsafe` and `TruncateSpacesInPlace` cut the same bytes;
-// the three functions below are its `where`, as the slice of `str` that is left (empty when every
-// byte is a space).
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3182-3185
+// ```c++
+// string NStr::TruncateSpaces(const string& str, ETrunc where)
+// {
+//     return s_TruncateSpaces(str, where, kEmptyStr);
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3197-3235 (`TruncateSpacesInPlace(string&
+// str, ETrunc where)`: the loops of `s_TruncateSpaces` over `str.data()`, then)
+// ```c++
+//     if ( beg | (end - length) ) { // if either beg != 0 or end != length
+//         str.replace(0, length, str, beg, end - beg);
+//     }
+// }
+// ```
+// `NStr::TruncateSpaces`, `TruncateSpaces_Unsafe` and the two `TruncateSpacesInPlace` cut the same
+// bytes; the four functions below are its `where`, as the slice of `str` that is left (empty when
+// every byte is a space), `truncate_spaces_str` for a `string`.
 /// `NStr::TruncateSpaces(str)` (`eTrunc_Both`, as `TruncateSpacesInPlace`): `str` without the C
 /// `isspace` spaces at its ends.
 pub(crate) fn truncate_spaces(str: &[u8]) -> &[u8] {

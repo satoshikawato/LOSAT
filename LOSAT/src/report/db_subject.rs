@@ -1084,7 +1084,10 @@ impl ParsedSubject {
         // A nucleotide title stops at the end of the string (approved exception 2 of
         // PD-LOSAT-NCBI-DEFECTS for BLASTN, TBLASTN and TBLASTX).
         if protein && defline.reads_past_end {
-            return Err("a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes)");
+            return Err(concat!(
+                "a title ",
+                crate::report::defline::punctuation_title!()
+            ));
         }
         let end = defline
             .text
@@ -1448,6 +1451,92 @@ impl ParsedSubject {
                     taxid: defline.taxid.unwrap_or(0),
                     taxonomy: HitTaxonomy::Unnamed,
                 }
+            })
+            .collect()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:935-976
+    // ```c++
+    // CTaxFormat::SSeqInfo *CTaxFormat::x_FillTaxDispParams(const CRef< CBlast_def_line > &bdl,
+    //                                      const CBioseq_Handle& bsp_handle,
+    //                                      double bits,
+    //                                      double evalue,
+    // 		                             list<string>& use_this_seqid)
+    // {
+    //     SSeqInfo *seqInfo = NULL;
+    //
+    // 	const list<CRef<CSeq_id> > ids = bdl->GetSeqid();
+    // 	TGi gi =  CAlignFormatUtil::GetGiForSeqIdList(ids);
+    //     CRef<CSeq_id> wid = FindBestChoice(ids, CSeq_id::WorstRank);
+    //     bool match = CAlignFormatUtil::MatchSeqInSeqList(gi, wid, use_this_seqid);
+    //
+    //     if(use_this_seqid.empty() || match) {
+    // 		...
+    // 		seqInfo->seqID = FindBestChoice(ids, CSeq_id::WorstRank);
+    // 		seqInfo->label =  CAlignFormatUtil::GetLabel(seqInfo->seqID);//Just accession without db part like ref| or pdbd|
+    // ```
+    /// The definition lines of the organism report (outfmt 18, `report::tax_report`): of a
+    /// database sequence, each line that a positive list keeps (`heading_shows`) with the label of
+    /// its `WorstRank`-best id without version, its title (the Bioseq's generated title where it
+    /// has none) and its taxid; of a `-subject` record (no `Blast-def-line`), the Bioseq's
+    /// `WorstRank`-best id, its generated title and taxid 0 (`TaxDefline::of_record`). A generated
+    /// title that LOSAT does not write as NCBI is a `TaxTitle::Refused` (those of the outfmt 0
+    /// heading, which shows the same title, `common::database::check_shown_parsed_subject`; the
+    /// one made from the taxonomy database only where the report shows it); `taxdb_found`:
+    /// whether `taxdb.bti` is on the search path (NCBI then names the organism in a title made
+    /// from the source). NCBI BLAST+ 2.17.0 keeps the positive list in an ungapped search too
+    /// (probe `T/t2/fix1` `f1.d3.*.sl*`: tblastx and `blastn -ungapped` with `-seqidlist` show the
+    /// listed line alone for a subject of 2 to 5 HSPs).
+    pub fn tax_deflines(
+        &self,
+        protein: bool,
+        taxdb_found: bool,
+    ) -> Vec<crate::report::tax_report::TaxDefline> {
+        use crate::report::tax_report::{
+            generated_title, TaxDefline, TaxTitle, TITLE_FROM_TAXONOMY,
+        };
+        let label_of = |id: Option<&ParsedSeqId>| {
+            let mut label = Vec::new();
+            if let Some(id) = id {
+                label::format_label(id, false, &mut label);
+            }
+            label
+        };
+        let refused = |reason: &str, shown_only: bool| TaxTitle::Refused {
+            reason: reason.to_owned(),
+            shown_only,
+        };
+        let generated = || -> TaxTitle {
+            if taxdb_found && self.title_from_taxonomy() {
+                return refused(TITLE_FROM_TAXONOMY, true);
+            }
+            if self.title_suffix_adjusted(protein) {
+                return refused("has a definition line without a title and a title ending in ']' that NCBI BLAST+ rewrites from the taxids (x_AdjustProteinTitleSuffix)", false);
+            }
+            if let Err(reason) = self.generated_title_fetched() {
+                return refused(&reason, false);
+            }
+            let title = self.target().title.as_deref().unwrap_or_default();
+            generated_title(title, protein, &self.bioseq_ids())
+        };
+        if self.record {
+            return vec![TaxDefline {
+                label: label_of(find_best(&self.target().ids, text_score)),
+                title: generated(),
+                taxid: 0,
+            }];
+        }
+        self.set
+            .deflines
+            .iter()
+            .filter(|defline| self.heading_shows(defline))
+            .map(|defline| TaxDefline {
+                label: label_of(defline.display_id()),
+                title: match defline.title.as_deref() {
+                    Some(title) if !title.is_empty() => TaxTitle::Text(title.to_vec()),
+                    _ => generated(),
+                },
+                taxid: defline.taxid.unwrap_or(0),
             })
             .collect()
     }

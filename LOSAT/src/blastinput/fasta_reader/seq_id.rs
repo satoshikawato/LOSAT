@@ -566,7 +566,7 @@ fn x_identify_accession(main: &[u8], has_version: bool) -> Option<SeqIdLine> {
 /// at that throw, so a line is FASTA exactly when it is neither tagged, an identified
 /// accession, nor a whitelisted general ID.
 pub(super) fn classify(line: &[u8]) -> SeqIdLine {
-    // `NStr::TruncateSpaces_Unsafe(the_id_in, NStr::eTrunc_Both)`.
+    // `NStr::TruncateSpaces_Unsafe(the_id_in, NStr::eTrunc_Both)` (Seq_id.cpp:2459).
     let line = crate::ncbi_str::truncate_spaces(line);
     // blast_fasta_input.cpp:132: `!line.empty() && isalnum(line.data()[0]&0xff)`.
     if line.first().is_none_or(|&first| !alnum(first)) {

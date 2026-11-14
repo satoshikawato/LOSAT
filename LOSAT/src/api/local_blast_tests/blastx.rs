@@ -1,7 +1,7 @@
 //! The shared BLASTX entry `run_local` in process: what the entry itself does (its observer, its
 //! refusals of hand-set arguments and of format sets, its typed errors), not what the command line
 //! writes. The tests that compare the entry's reports with the `losat` binary go through
-//! `LOSAT::api` (`LOSAT/tests/run_local_blastx.rs`); the tests of the same name here check the
+//! `losat::api` (`LOSAT/tests/run_local_blastx.rs`); the tests of the same name here check the
 //! halves of those that the api does not reach.
 
 use std::path::{Path, PathBuf};

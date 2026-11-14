@@ -143,10 +143,13 @@ static TOOL: Tool = Tool {
 //     return CDustMaskApplication().AppMain(argc, argv);
 // }
 // ```
-/// Runs `dustmasker` with `words` (the command line after `losat dustmasker`) on the process's
-/// standard streams; the exit status.
-pub(crate) fn run(words: &[OsString]) -> i32 {
-    crate::ncbi_app::run(&TOOL, words, app::run)
+/// Runs `dustmasker` with `words` (the command line after `losat dustmasker`), after its
+/// application start `start`, on the process's standard streams; the exit status.
+pub(crate) fn run(
+    words: &[OsString],
+    start: &crate::blastinput::ncbi_environment::ApplicationStart,
+) -> i32 {
+    crate::ncbi_app::run(&TOOL, words, start, app::run)
 }
 
 /// The run of one command line with `input` as its standard input, its output on `out` and its
@@ -203,26 +206,34 @@ mod tests {
         );
     }
 
-    // The NCBI C++ Toolkit options that LOSAT's dustmasker refuses, as blastdbcmd does.
+    // The library run refuses `-xmlhelp`, which the command line answers with NCBI's XML, as
+    // blastdbcmd's (line RG DECISIONS E2x-1).
     #[test]
-    fn toolkit_options_are_refused_as_blastdbcmd_refuses_them() {
-        for (line, word) in [
-            (&["-xmlhelp"][..], "-xmlhelp"),
-            (&["-version-full"], "-version-full"),
-            (&["-version-full-xml"], "-version-full-xml"),
-            (&["-version-full-json"], "-version-full-json"),
+    fn the_library_refuses_xmlhelp_as_blastdbcmd_does() {
+        assert_eq!(
+            run_words(&["-xmlhelp"]),
+            (
+                1,
+                String::new(),
+                format!("Error: {}\n", crate::cli::xml_help_refusal("DUSTMASKER"))
+            )
+        );
+    }
+
+    // The full versions are NCBI's forms with LOSAT's values, printed before the arguments are
+    // read (line RG item E3; NCBI BLAST+ 2.17.0 `dustmasker -version-full`: `dustmasker: 1.0.0`).
+    #[test]
+    fn the_full_versions_are_dustmasker_s() {
+        use crate::ncbi_version::{print, VersionRequest};
+        for (word, request) in [
+            ("-version-full", VersionRequest::Full),
+            ("-version-full-xml", VersionRequest::FullXml),
+            ("-version-full-json", VersionRequest::FullJson),
         ] {
             assert_eq!(
-                run_words(line),
-                (
-                    1,
-                    String::new(),
-                    format!(
-                        "Error: the NCBI BLAST+ option {word} is not supported by LOSAT's \
-                         DUSTMASKER\n"
-                    )
-                ),
-                "{line:?}"
+                run_words(&["-level", "x", word, "-version"]),
+                (0, print(request, "dustmasker", "1.0.0"), String::new()),
+                "{word}"
             );
         }
     }
@@ -318,27 +329,46 @@ mod tests {
         }
     }
 
-    // The file of `-conffile` is read, and `-dryrun` run, by the command line's application
-    // start; the library API, which these runs are (no start), refuses them as blastdbcmd's does.
+    // The library API's run (`run_with`) runs NCBI's application start as the command line's
+    // does (line RG item E1w-2): the file of `-conffile` is loaded in place of `dustmasker.ini` (a
+    // name that is not a file is NCBI's critical post and abort, exit status 255: the table's row
+    // `conf_missing`), and `-dryrun` ends the run after the arguments, reading no input.
     #[test]
-    fn conffile_and_dryrun_are_refused_without_the_command_line_s_application_start() {
-        for (line, word) in [
-            (&["-conffile", "x.ini"][..], "-conffile"),
-            (&["-dryrun"], "-dryrun"),
+    fn conffile_and_dryrun_run_as_on_the_command_line() {
+        let missing = "losat-dustmasker-unit-missing.ini";
+        assert_eq!(
+            run_words(&["-conffile", missing]),
+            (
+                255,
+                String::new(),
+                format!("Critical: (106.23) Registry file \"{missing}\" not found, aborting.\n")
+            )
+        );
+        let dir = std::env::temp_dir().join(format!(
+            "losat-dustmasker-unit-conffile-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let conffile = dir.join("c.ini");
+        std::fs::write(&conffile, "[BLAST]\n").unwrap();
+        let conffile = conffile.to_str().unwrap();
+        let missing_input = dir.join("missing.fa");
+        let missing_input = missing_input.to_str().unwrap();
+        for line in [
+            &["-dryrun"][..],
+            &["-in", missing_input, "-dryrun"],
+            &["-conffile", conffile, "-dryrun"],
+            &["-dryrun", "-outfmt", "fasta", "-in", missing_input],
         ] {
             assert_eq!(
                 run_words(line),
-                (
-                    1,
-                    String::new(),
-                    format!(
-                        "Error: {}\n",
-                        crate::cli::toolkit_file_word_refusal("dustmasker", word)
-                    )
-                ),
+                (0, String::new(), String::new()),
                 "{line:?}"
             );
         }
+        // A file that loads changes nothing: the empty input's run, as without it.
+        assert_eq!(run_words(&["-conffile", conffile]), run_words(&[]));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // `s_StringToInt8` reads a hexadecimal value of a key without a constraint (NCBI 2.17.0:

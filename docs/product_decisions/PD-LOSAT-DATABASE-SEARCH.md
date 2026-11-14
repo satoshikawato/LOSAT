@@ -169,14 +169,22 @@ into), the statistics read `STATS_*` before `GetNumSeqs` and `GetTotalLength`, t
 print the walks, and the OID ranges select the OIDs of the volume set (nested ranges ANDed,
 two paths to one volume ORed, a taxid or seqid list ANDed with them). A value that NCBI's
 `NStr` functions do not convert is NCBI's `Error: <what()>`, exit status 255, in NCBI's order of
-the walks. `VDBLIST` is ignored (NCBI's `CSeqDB` does not read it). Refused until item D1a-2:
-`NSEQ` negative as NCBI's `int`, `LENGTH` 0 or at least 2^63 while sequences are included,
-`LENGTH` of 10^18 or more (NCBI's commas lose digits), `FIRST_OID` or `LAST_OID` of 2^31 or
-more, and the OID range of a top alias file that NCBI sets as its iteration range while other
-OIDs are included (another name of the same `-db`). Refused for good: a statistics count of 0
-(an alias file's `NSEQ 0`) in a search without the Gumbel block (BLASTN, TBLASTX, and BLASTP,
-BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX also with `-ungapped`), where
-NCBI divides by zero (SIGFPE). With the Gumbel block, a TBLASTN database whose `GetMinLength` is
+the walks. `VDBLIST` is ignored (NCBI's `CSeqDB` does not read it). Since item D1a-2
+(2026-11-13): a `FIRST_OID` or `LAST_OID` of 2^31 or more is NCBI's negative `int`; the OID
+range of the only alias file of a `-db` is NCBI's iteration range, also with another name of the
+same `-db` (a taxid or seqid list's search reads every listed OID, as NCBI's list forgets the
+range); a `LENGTH` or `STATS_TOTLEN` over volumes without sequences is searched as NCBI searches
+it (no hit, the empty-database warning where no count is given); `blastdbcmd -ipg` and
+`-ipg_batch` write a PIG whose OID a range leaves out, as NCBI's formatter reads by OID; and a
+database's errors come in NCBI's order (a list, the alias files' values, the first header, the
+accession tables). Refused until item D1a-3: `NSEQ` negative as NCBI's `int`, `LENGTH` 0 or at
+least 2^63 while sequences are included (NCBI computes the statistics of each subject, or reads
+a negative `Int8`), `LENGTH` of 10^18 or more (NCBI's commas lose digits); until item D1a-4:
+OID ranges, `STATS_NSEQ`, `STATS_TOTLEN` and `MIN_SEQ_LENGTH` in RPSBLAST databases. Refused for
+good: a statistics count of 0 (an alias file's `NSEQ 0`, or its `LENGTH` or `STATS_TOTLEN` over
+volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without the Gumbel block
+(BLASTN, TBLASTX, and BLASTP, BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX
+also with `-ungapped`), where NCBI divides by zero (SIGFPE). With the Gumbel block, a TBLASTN database whose `GetMinLength` is
 below 3 (an alias file's `MIN_SEQ_LENGTH` 1 or 2) fails as NCBI's does: `BLAST engine error: The
 average subject length is too short`, exit status 3.
 
@@ -203,7 +211,7 @@ is an explicit error of `LOSAT/src/seqdb`:
 | --- | --- |
 | A header with a Seq-id other than `gnl|BL_ORD_ID|n` of the sequence's number n in its volume | parsed Seq-ids (P4); searched since version 1.3, section "Databases with parsed Seq-ids" |
 | Alias keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `OID_MASK_TYPE`, `MEMB_BIT`, `MASKLIST` | filters (P4); `FIRST_OID`, `LAST_OID` read since line RG D1a, `VDBLIST` ignored as NCBI's reader ignores it |
-| Alias keys `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`; `NSEQ` or `LENGTH` whose value is not the number of sequences or the total length of the alias file's databases | read since line RG D1a (2026-11-12) as NCBI's walks; the values listed above as refused until D1a-2 |
+| Alias keys `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`; `NSEQ` or `LENGTH` whose value is not the number of sequences or the total length of the alias file's databases | read since line RG D1a (2026-11-12) as NCBI's walks; the values listed above as refused until D1a-3 and D1a-4 |
 | A name that lists several databases | one database per search (P4); searched since version 1.2 |
 | A volume listed more than once, a group alias file (`index.alx`) in a directory, two volumes of one name in different directories | NCBI derives counts or the volume order from them in ways the reader does not reproduce; since version 1.2 two volumes of one name in different directories are read (NCBI orders them by base name, then path); since line RG D1a a volume listed more than once is read once and counted per alias node, as NCBI does |
 | Column files of a volume (mask data of `makeblastdb -mask_data`) | not read; searched since 2026-11-11 (line SW, SW8 follow-up 2): NCBI's searches open no column file without a database mask named by `-db_soft_mask`, `-db_hard_mask` or an imported search strategy (`-import_search_strategy`; LOSAT refuses all three), so LOSAT searches the volume without reading them, whatever they hold |
@@ -228,7 +236,8 @@ in one `-db` (searched since version 1.2), index files cut short, NCBI's thresho
 ## What `losat makeblastdb` of stage DB-2 writes and rejects
 
 `losat makeblastdb -in FASTA[ FASTA...] -dbtype prot|nucl -out NAME [-title T] [-max_file_sz S]
-[-blastdb_version 4|5] [-logfile F] [-parse_seqids] [-hash_index] [-taxid N | -taxid_map F]`
+[-blastdb_version 4|5] [-logfile F] [-parse_seqids] [-hash_index] [-taxid N | -taxid_map F]
+[-mask_data F[,F...] [-mask_id I[,I...] [-mask_desc D[,D...]]]]`
 writes the files of `makeblastdb` (format version 5 unless `-blastdb_version 4` is given): sequence files
 (`.psq`, `.nsq`) and header files (`.phr`, `.nhr`) byte for byte, the index file (`.pin`,
 `.nin`) but for the creation date, for several volumes the alias file (`.pal`, `.nal`)
@@ -246,7 +255,12 @@ the version 5 tax-id files. As in makeblastdb, `-taxid_map -` reads the map from
 input (before the FASTA input, so with `-in -` the map takes all of it), a map file whose reading
 fails (a directory) keeps the lines read before the failure without a message, and a plain FASTA
 id with a control byte or a byte from 0x80 up is not a valid local id: the definition line keeps
-the id up to that byte. Several input files can be named in
+the id up to that byte. `-mask_data` (with `-mask_id` and `-mask_desc`) reads the masks of
+dustmasker, segmasker, windowmasker and convert2blastmask, in ASN.1 text or binary, and writes the
+mask column of each volume (`.?aa`, `.?ab`, `.?ac`, version 4 and 5 alike) as makeblastdb does;
+a mask reaches a sequence by the same Seq-id handle as in NCBI (so `-parse_seqids` is needed for
+masks that name accessions, and the log, the "Mask file:" lines, and the messages of the masks
+are makeblastdb's). Several input files can be named in
 `-in` (as makeblastdb splits the value), and `-logfile` redirects the log and the messages
 to a file (appended); as in makeblastdb, `-logfile -` keeps them on the standard streams,
 and `-logfile /dev/null` and `-logfile ""` discard the messages (the empty name then ends
@@ -276,7 +290,7 @@ exception reports do; a makeblastdb built elsewhere (bioconda, macOS, Windows) n
 
 | Not written or rejected | Why |
 | --- | --- |
-| `-randomize`, `-mask_data`, `-mask_id`, `-mask_desc`, `-gi_mask`, `-gi_mask_name`, `-oid_masks`, `-metadata_output_prefix` | not implemented; each is an explicit error that names the option |
+| `-randomize`, `-gi_mask`, `-gi_mask_name`, `-oid_masks`, `-metadata_output_prefix` | not implemented; each is an explicit error that names the option (`-gi_mask` and `-gi_mask_name` write GI-indexed mask files, a later item of line NP) |
 | `[BLAST] MAX_SEQID_LENGTH` (registry or `NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH`) with `-parse_seqids`, when makeblastdb uses the value (the first layer that has the entry gives a number `NStr::StringToUInt` converts, not 0; an empty, unconvertible or 0 value is ignored by makeblastdb and accepted by LOSAT); `[BLAST] LONG_SEQID` | they change which FASTA ids makeblastdb parses; LOSAT keeps NCBI's defaults and refuses to run |
 | `-input_type` other than `fasta` | FASTA only (plain, or named `.gz`, `.bz2`, `.zst`: inflated while it is read, in any case of the suffix, as makeblastdb decides it; `-in -` reads the standard input as it comes). Every gzip member, bzip2 stream and zstd frame of a concatenated file is read, where makeblastdb reads every gzip member but only the first bzip2 stream or zstd frame and drops the rest silently (`PD-LOSAT-NCBI-DEFECTS`, the makeblastdb exception). A `.gz` file is read as makeblastdb's decompressor (`CZipDecompressor`) reads it (`GzipMembers` in `LOSAT/src/blastinput/compressed.rs`, which inflates with zlib-rs, a Rust port of zlib's inflate, where makeblastdb calls the host's zlib: the official Linux build links `libz.so.1`, and a host whose `libz.so.1` is zlib-ng's zlib-compatible build could in principle differ on damaged data): neither a member's trailer (CRC-32 and length) nor its header CRC is checked, a trailer cut short reads as the whole member, a member's header must end within the next 4 KiB, bytes after the last member are read only where makeblastdb reads them (fewer than 4 KiB that inflate to no byte, such as up to four zero bytes or a line feed), and a file that does not start with a gzip header is read as a zlib stream, up to that stream's end. A file that is not what its name says, or is cut short (for `.gz`: where makeblastdb's decompressor fails too), stops the build with `losat makeblastdb: -in: 'x.gz' is named .gz but is not gzip data (...)` (exit status 1, the files removed as for another failed input); makeblastdb warns about the decompressor's error, says the file does not appear to be FASTA, and ends with `BLAST failed to write output` (exit status 6) |
 | NCBI settings that change makeblastdb's messages or stored titles (`DIAG_*`, `NCBI_CONFIG_*`, registry entries outside the accepted list, a non-empty `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS`) | as for the search programs: LOSAT refuses to run instead of giving a different result |
@@ -358,8 +372,6 @@ Version 5 and the options added to the writer:
   the same name in the current directory, which NCBI's reader finds first) adds nothing.
 - `-logfile` is read as makeblastdb's option, not wherever it stands in the command line
   (makeblastdb's corelib also finds it as the value of another option).
-- Of several `-in` files, one that exists and cannot be opened is an error (exit status 255)
-  that removes what the earlier files added; makeblastdb skips it without a word.
 - LMDB's lock files (`NAME.pdb-lock`, `NAME.ptf-lock`) are made as makeblastdb makes them:
   LMDB creates each when it opens its environment, before the data file, with 8192 bytes of a
   lock region that no transaction has used, and the writer removes it when it is destroyed,
@@ -388,9 +400,6 @@ Version 5 and the options added to the writer:
 
 Errors that makeblastdb does not detect, or detects elsewhere:
 
-- An input file that cannot be opened: makeblastdb does not test its stream and ends with
-  exit status 0 and a missing database. LOSAT removes the files of the build and ends with
-  `Error: <path>: <system error>` and exit status 255.
 - On Windows, an output directory that exists but is not writable: makeblastdb stops before
   its log (it reads the directory's access rights). LOSAT does not read them: a version 4
   build writes its files to nowhere, as any file that cannot be created, and ends where the
@@ -398,7 +407,8 @@ Errors that makeblastdb does not detect, or detects elsewhere:
   stops where LMDB cannot create its lock file (`LMDB runtime error: mdb_env_open: ...`, as
   above). From the code; not run on Windows.
 - Usage errors (unknown option, missing `-dbtype`, `-taxid -1`, `-taxid_map` without
-  `-parse_seqids` or with `-taxid`) end with exit status 2 and the text of LOSAT's option
+  `-parse_seqids` or with `-taxid`, `-mask_id` without `-mask_data`, `-mask_desc` without
+  `-mask_id`) end with exit status 2 and the text of LOSAT's option
   parser, as in every LOSAT subcommand; makeblastdb uses 1.
 - With more volumes than the process may hold open files, makeblastdb writes the database
   and ends with exit status 2 ("Too many open files"). LOSAT resolves the finished
@@ -445,6 +455,32 @@ ordinal id it would have had in the earlier volume, so makeblastdb and LOSAT bot
 "Duplicate seq_ids are found: GNL|BL_ORD_ID|n" when that volume holds more than n sequences.
 `-taxid_map` lines end at a line feed on every platform (makeblastdb on macOS also ends them at a
 carriage return).
+
+Mask data (`-mask_data`): every Seq-loc alternative of a mask is read (`null`, `empty`, `whole`,
+`int`, `packed-int`, `pnt`, `packed-pnt`, `mix`, `equiv`, `bond`; a `feat` or a Seq-loc of several
+Seq-ids ends the run with NCBI's "Cannot get masked range Seq-id"), several Seq-locs of one
+sequence are combined as makeblastdb combines them, empty and whole ranges included, and a `giim`
+Seq-id finds the masks that makeblastdb gives it (which follows the order of the mask files). What
+makeblastdb reads and LOSAT refuses (`losat makeblastdb: ...`, exit status 1, without
+makeblastdb's closing "No sequences matched any of the masks provided."):
+
+- A string with a byte outside 0x20-0x7e, which NCBI repairs and logs, and a `UTF8String` tag
+  where a `VisibleString` belongs (`mask data that LOSAT does not read: ...`): LOSAT does not
+  write NCBI's diagnostics for them.
+- Ranges whose order NCBI takes from memory addresses: ranges of two different Seq-id handles
+  with the same packed number (`gi|5` and `gb|AY000005.1|`; a local id and a `general` string
+  tag; two `giim` handles of one number) written on one strand of one sequence and algorithm,
+  when the two orders write different ranges. That order shows only in the files of a build that
+  succeeds, so the error comes at the end of such a build and names the Seq-ids and the sequence;
+  an error of makeblastdb that comes later in the run (a mask of the same sequence past its end, a
+  later sequence or input file that fails) is reported as makeblastdb reports it. The files are
+  left as makeblastdb leaves them after an error of its build at the last sequence (none in
+  version 4; `NAME.nos`, `NAME.not`, `NAME.ntf`, `NAME.nto` in version 5, `.p..` for proteins),
+  where the refusal of a mask string comes before the build and leaves none.
+
+A mask file that NCBI's reader rejects as damaged is no refusal: both programs stop, LOSAT with
+exit status 255 and `Error: mask data in '<file>': <LOSAT's text>` where NCBI prints an
+exception report that names its build tree.
 
 Undefined behaviour of NCBI that is not reproduced:
 

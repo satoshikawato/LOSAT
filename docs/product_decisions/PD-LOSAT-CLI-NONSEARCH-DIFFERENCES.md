@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.18
+- Version: 1.21
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -30,7 +30,14 @@
   same standing instruction); 1.17 2026-11-13 (`-help-full` runs in every program as `-help`, and
   the reader stops at a help flag as NCBI's; line RG item E2, the ask of 2026-11-12);
   1.18 2026-11-13 (`losat convert2blastmask` in the scope and in exception 10; line RG, item K3;
-  Owner-delegated, the same standing instruction)
+  Owner-delegated, the same standing instruction); 1.19 2026-11-13 (the full versions run in every
+  program; a failed write of a version or help is dropped as NCBI's, and exception 10 covers a
+  closed pipe there; line RG item E3, RG DECISIONS E3-1 to E3-4, Owner-delegated, the same
+  standing instruction); 1.20 2026-11-14 (`-xmlhelp` runs on the command line of every program:
+  NCBI's XML without the arguments that LOSAT refuses by name, exception 1; line RG item E2x,
+  the Owner's choice of 2026-11-13, RG DECISIONS E2x-1); 1.21 2026-11-14 (the library API runs
+  `-logfile`, `-conffile` and `-dryrun` as the command line does; line RG item E1w-2, RG DECISIONS
+  E1w2-1 to E1w2-11, Owner-delegated, the same standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -57,7 +64,11 @@ BLAST+.
    (unknown option, missing value, a value that does not parse, a value outside a
    declared range such as `-word_size 3`) prints LOSAT's parser message and exits with
    code 2; NCBI prints its USAGE text and the `CArgException` and exits with code 1.
-   `-help`, `-help-full` (since version 1.17) and `-h` print LOSAT's help text. Errors that NCBI raises after parsing the
+   `-help`, `-help-full` (since version 1.17) and `-h` print LOSAT's help text. `-xmlhelp`
+   (since version 1.20) prints NCBI BLAST+ 2.17.0's XML of the program's arguments without the
+   arguments that LOSAT refuses by name and the dependencies that name them: the definitions of
+   the arguments that LOSAT runs are NCBI's (the Owner's choice of 2026-11-13, RG DECISIONS
+   E2x-1). Errors that NCBI raises after parsing the
    arguments (`BLAST query/options error: ...`, input errors such as a missing
    `-subject`, engine errors) are not covered and must match NCBI.
 2. **Thread count with `-subject`.** LOSAT searches with the requested `-num_threads`.
@@ -171,12 +182,13 @@ BLAST+.
    with exit code 0. Nothing is written to standard error after the failure (no progress
    line). A failed write to standard error (its reader has closed: NCBI's rpsbproc ends by
    SIGPIPE, exit status 141 from the shell, PS16a review oracle M1) ends LOSAT at once with exit
-   code 4 and no message; so does a failed write of rpsbproc's help or version, after the
-   message above. A successful run is identical to NCBI's. The function is `rpsbproc::run`
+   code 4 and no message; so does a failed write of rpsbproc's help (its text, or since version
+   1.20 its `-xmlhelp` XML) or version, after the message above. A successful run is identical to NCBI's. The function is `rpsbproc::run`
    (`LOSAT/src/rpsbproc/mod.rs`, `Report`). Release-notes sentence: If `losat rpsbproc` cannot
    write its report, it stops with `rpsbproc failed to write output` (exit status 4), where
    NCBI's rpsbproc 0.5.1 drops the writes and continues with exit status 0.
-10. **Closed pipe in blastdbcmd's, dustmasker's, segmasker's and convert2blastmask's output**
+10. **Closed pipe in blastdbcmd's, dustmasker's, segmasker's and convert2blastmask's output,
+   and in every program's version and help**
    (version 1.13, 2026-11-13, Owner-delegated; line RG, item K1, RG DECISIONS K1-8; version 1.14
    the same day, item K1b, K1b-3 and K1b-5; version 1.16 the same day, segmasker, item K2, K2-5;
    version 1.18 the same day, convert2blastmask, item K3). A write of NCBI's blastdbcmd 2.17.0,
@@ -188,6 +200,11 @@ BLAST+.
    As NCBI's `cerr` is tied to `cout`, the programs flush their output before each line of
    diagnostics, so the closed pipe is met before the line (and with `2>&1` the lines come after
    the output written before them, as NCBI's do).
+   Since version 1.19 (line RG item E3, RG DECISIONS E3-3) the same holds for the version, help
+   and argument-error texts of every other program but rpsbproc (exception 9): a closed pipe
+   drops the text and the program ends with its exit status (0 for a version or a help), where
+   NCBI's is ended by SIGPIPE (`cli::main_entry::write_dropping_errors`); a full disk is dropped
+   as NCBI drops it.
    On Windows, where NCBI's write fails without a signal, a closed pipe is a failed write like
    a full disk. A failed write that is not a closed pipe (`-out /dev/full`) is NCBI's: where
    NCBI writes to the `ostream` itself (dustmasker's `interval`, `acclist` and `fasta`,
@@ -233,16 +250,22 @@ BLAST+.
   Since version 1.11 `-logfile` and `-conffile` are no longer refused on the command line of
   BLASTN, BLASTP, BLASTX, TBLASTN, TBLASTX, PSIBLAST and RPSBLAST (and `-conffile` of
   makeblastdb and blastdbcmd): they run as in NCBI (`README.md`, NCBI C++ Toolkit options).
-  The library API and the Web engine still refuse them, and BLASTX refuses the other
-  words by name, as the other programs do. Since version 1.12 `-dryrun` is no longer refused on
+  The library API (until version 1.21) and the Web engine still refuse them, and BLASTX refuses
+  the other words by name, as the other programs do. Since version 1.12 `-dryrun` is no longer refused on
   the command line of those seven programs, makeblastdb and blastdbcmd: the arguments are read
   and checked, then nothing runs, exit status 0, as NCBI's default `DryRun`
   (`ncbiapp.cpp:705-707`, 292-296). An argument error is reported as without `-dryrun`
   (exception 1), and the parser's refusals of an NCBI option that LOSAT does not run, or of a
   value form it does not read, stay (LOSAT has no definition to check them as NCBI does; line RG
   DECISIONS E1b-2), as do the refusals of registry and environment settings (some, such as
-  `DIAG_POST_LEVEL`, make NCBI write `DryRun`'s message; DECISIONS E1b-6). The library API and
-  the Web engine refuse it. Since version 1.15 `losat rpsbproc` runs the three on the command
+  `DIAG_POST_LEVEL`, make NCBI write `DryRun`'s message; DECISIONS E1b-6). The Web engine refuses
+  it, and so did the library API until version 1.21. Since version 1.21 the library API (and
+  pylosat) runs `-logfile`, `-conffile` and `-dryrun` as the command line does (line RG item
+  E1w-2): a call whose arguments have one of them, or that reads NCBI's settings, runs the
+  application start; the `-logfile` file gets what the command line writes there, the registry
+  and environment settings that the command line refuses are the call's error, and a `-dryrun`
+  call reads no record and searches nothing (an empty report per format, no `-out` file). The
+  library's tools print the versions to their output. Since version 1.15 `losat rpsbproc` runs the three on the command
   line too: `-logfile` takes rpsbproc's diagnostics (its `LOG_POST_X` messages and the reports
   of an exception; its own `cerr` lines stay on the standard error), `-conffile` is loaded in
   place of `rpsbproc.ini`, and `-dryrun` runs rpsbproc's own `DryRun` after its `Init`
@@ -255,9 +278,29 @@ BLAST+.
   (`ncbiapp.cpp:685-697`; NCBI's makeblastdb adds its hidden `-randomize`, which LOSAT refuses, so
   LOSAT's text has no hidden option to add). The reader stops at `-h`, `-help` and `-help-full` as
   NCBI's (`ncbiargs.cpp:2840-2852`): an argument after one is not read. `-xmlhelp` (in an option's
-  place) and the full versions stay refused, in makeblastdb too (line RG item E2). The library API
+  place) and the full versions stay refused, in makeblastdb too (line RG item E2); since version
+  1.20 `-xmlhelp` is not refused on the command line (exception 1): it stops the reader as `-help`
+  does and prints NCBI's XML without the arguments refused by name (`ncbiapp.cpp:685-690`,
+  `ncbiargs.cpp:3870-3950`), and the library API and the Web engine refuse it, in every program
+  (line RG item E2x). The library API
   answers `-help-full` as `-help` (the help text in its error), and the Web app and ABI v1's BLASTX
-  and TBLASTN refuse it with their other help words.
+  and TBLASTN refuse it with their other help words. Since version 1.19 the full versions are no
+  longer refused: every program prints `-version-full`, `-version-full-xml` and
+  `-version-full-json` where NCBI's application reads them (`ncbiapp.cpp:980-997`, before `--`, in
+  an option's value too, before the configuration and the arguments), in NCBI's forms
+  (`version.cpp:728-884`) with NCBI's first line and the application's version, and LOSAT's
+  package as in `-version`: the text's `Package:` line names LOSAT, the XML and JSON package is
+  `LOSAT` with its version, and the values that NCBI's build writes about itself
+  (`Package-Config`'s configure line, `Build-Signature`, the build dates and revisions,
+  `Stable-Components-Version`, `Production-Version`, `Built-As`, rpsbproc's toolkit component)
+  are not written; the keys NCBI writes whenever there is a package stay, empty (line RG
+  DECISIONS E3-1). The library API and the Web engine refuse the versions, `-version` too, but
+  in blastdbcmd, dustmasker, segmasker and convert2blastmask, whose library runs print them as
+  their `-version` (E3-2), and, since version 1.21, makeblastdb, whose library run prints them
+  to its output (line RG DECISIONS E1w2-6). A failed write of a program's
+  version, help or argument error (`-version > /dev/full`) is dropped, as NCBI's `cout` drops it
+  (exit status 0 for a version or a help), where LOSAT's earlier write panicked (exit status
+  134); a closed pipe there is exception 10; rpsbproc keeps exception 9 (E3-3).
 - **FASTA input that NCBI's `CFastaReader` reads differently**: the explicit rejections
   stay (TD-12) until a dedicated session before S17 ports the `CFastaReader` functions
   on the path, together with the adapter's index scan (plan §10).

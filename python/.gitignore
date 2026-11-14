@@ -4,3 +4,4 @@ target/
 .pytest_cache/
 *.so
 *.pyd
+dist/

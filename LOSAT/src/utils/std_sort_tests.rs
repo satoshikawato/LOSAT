@@ -12,7 +12,7 @@
 //! reaches the heap sort (made by the PS16a review, `heapties.py`, its permutation g++'s; a
 //! Python transcription of libstdc++, `pysort.py` there, finds these 5 rows reaching the heap).
 
-use super::std_sort;
+use super::{final_insertion_sort, std_sort, try_std_sort, unguarded_partition, OutOfRange};
 
 #[derive(Clone, Copy, Debug)]
 struct Element {
@@ -98,4 +98,88 @@ fn std_sort_adversary_is_bounded_by_the_heap_sort() {
     sorted.sort_unstable();
     assert_eq!(values, sorted);
     assert!(comparisons < 200_000, "{comparisons}");
+}
+
+/// rpsbproc's `TDomAlignOrderByEValue` on (E-value, bit score) with C++'s comparisons of doubles.
+fn by_e_value(a: &(f64, f64, usize), b: &(f64, f64, usize)) -> bool {
+    if a.0 < b.0 {
+        true
+    } else if a.0 > b.0 {
+        false
+    } else {
+        a.1 > b.1
+    }
+}
+
+// `try_std_sort` against libstdc++ 13's `std::sort` with E-values and bit scores that may be NaN
+// (no strict weak order): the permutations of `LOSAT/tests/unit/std_sort_nan_vectors.tsv`, made by
+// `nansortgen.cpp` of the task folder of item PS16d (g++ 13.3, the range sorted between guard
+// elements that mark a read outside it; no row reads outside: the comparison stays asymmetric
+// with a NaN, so libstdc++'s sentinels hold). Keys `e:b`, `n` for NaN.
+#[test]
+fn std_sort_gives_libstdcxx_permutations_with_nan_keys() {
+    let table = include_str!("../../tests/unit/std_sort_nan_vectors.tsv");
+    let key = |text: &str| {
+        if text == "n" {
+            f64::NAN
+        } else {
+            text.parse().unwrap()
+        }
+    };
+    let mut cases = 0;
+    for line in table.lines() {
+        let mut fields = line.split('\t');
+        let name = fields.next().unwrap();
+        let mut elements: Vec<(f64, f64, usize)> = fields
+            .next()
+            .unwrap_or("")
+            .split(',')
+            .filter(|text| !text.is_empty())
+            .enumerate()
+            .map(|(index, pair)| {
+                let (e, b) = pair.split_once(':').unwrap();
+                (key(e), key(b), index)
+            })
+            .collect();
+        let expected: Vec<usize> = fields
+            .next()
+            .unwrap_or("")
+            .split(',')
+            .filter(|text| !text.is_empty())
+            .map(|text| text.parse().unwrap())
+            .collect();
+        assert_eq!(
+            try_std_sort(&mut elements, &mut by_e_value),
+            Ok(()),
+            "{name}"
+        );
+        let got: Vec<usize> = elements.iter().map(|element| element.2).collect();
+        assert_eq!(got, expected, "{name}");
+        cases += 1;
+    }
+    assert_eq!(cases, 86);
+}
+
+// The two loops of libstdc++'s sort that a comparison without sentinels drives out of the vector
+// (stl_algo.h:1790-1806, 1867-1887, quoted at the functions): `OutOfRange` before the read.
+#[test]
+fn unguarded_loops_that_would_leave_the_vector() {
+    let mut always = |_: &u32, _: &u32| true;
+    // The first scan of `__unguarded_partition` past the end.
+    let mut values = [1u32, 2, 3, 4];
+    assert_eq!(
+        unguarded_partition(&mut values, 1, 4, 0, &mut always),
+        Err(OutOfRange)
+    );
+    // The walk of `__unguarded_linear_insert` (`__final_insertion_sort` after the first 16)
+    // before the start: element 16 goes before every other.
+    let mut values: Vec<u32> = (0..17).rev().collect();
+    let mut less = |a: &u32, b: &u32| a < b;
+    assert_eq!(
+        final_insertion_sort(&mut values, 0, 17, &mut less),
+        Err(OutOfRange)
+    );
+    // A strict weak order stays inside (the first 16 hold the least element).
+    let mut values: Vec<u32> = (0..17).collect();
+    assert_eq!(final_insertion_sort(&mut values, 0, 17, &mut less), Ok(()));
 }

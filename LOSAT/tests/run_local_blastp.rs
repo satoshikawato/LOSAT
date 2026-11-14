@@ -1,4 +1,4 @@
-//! The BLASTP search of `LOSAT::api` (which calls the shared entry `run_local`) writes several
+//! The BLASTP search of `losat::api` (which calls the shared entry `run_local`) writes several
 //! output formats from one search. Every format must be byte-identical to the CLI run that
 //! requests only that format, and the warnings must equal that run's standard error.
 //! (Identity with the previous release over the regression manifests is checked by
@@ -10,8 +10,8 @@ mod run_local_support;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use losat::api::{Error, Outcome, Program};
 use run_local_support::{cli_out_path, read_records, temp_path, Files, TempFasta, Written};
-use LOSAT::api::{Error, Outcome, Program};
 
 const CUSTOM: &str =
     "6 qseqid sseqid pident length qstart qend sstart send evalue bitscore qseq sseq btop";

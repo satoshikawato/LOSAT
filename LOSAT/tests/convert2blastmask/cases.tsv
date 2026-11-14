@@ -1,7 +1,9 @@
 # name<TAB>arguments (shell words, run in this directory; "< file" = stdin). NCBI BLAST+ 2.17.0 convert2blastmask, the official Linux x64 release (local oracle), 2026-11-13, ad-RG-K-6 (line RG item K3):
 # in/ made by remaining-gaps-20261112/K/k3/probe/gen_inputs.py; conf/malformed.ini is that of tests/segmasker. Run without LOSAT_, NCBI_ and BLAST variables but NCBI_CONFIG_PATH (this directory) and BLAST_USAGE_REPORT=false (NCBI only).
-# Not frozen: -version, -version-full and -xmlhelp (LOSAT prints its own version and refuses the others, as dustmasker), the -out /dev/full rows of the maskinfo formats (LOSAT refuses a failed write of the serial stream) and -masking_options with a byte outside the visible ASCII range in maskinfo_asn1_text and maskinfo_asn1_bin (NCBI writes # for it and posts an error; LOSAT refuses it, as in an archive).
+# help_xml (-xmlhelp, line RG item E2x) comes from the local official NCBI BLAST+ 2.17.0 (2026-11-14, ad-RG-E-8). Not frozen: -version and -version-full (LOSAT prints its own versions, NCBI's forms with LOSAT's package, as dustmasker; line RG item E3), the -out /dev/full rows of the maskinfo formats (LOSAT refuses a failed write of the serial stream).
 # gapinv_* (a lower case letter at position 4294967295, kInvalidSeqPos: no interval opens there; RG DECISIONS K3-8) frozen 2026-11-13 by ad-RG-K-7 with the local official release, in/gapinv.fa by hand (the F2 review's inv.fa). gapwrap0_* and gapwrap1_* (>? lines that sum to 2^32 or more; RG DECISIONS K3-6): frozen on ws with its NCBI BLAST+ 2.17.0 (env_blast) under a 32 GiB address space, since NCBI allocates the run of N of gapwrap1 (4 GiB, 8.4 GB resident); in/gapwrap*.fa written by hand.
+# opt_utf8, opt_utf8_bin, opt_utf8_quote, opt_tab, opt_tab_bin, opt_del, opt_wrap, opt_wrap_bin, opt_ctrl_xml, opt_utf8_log and opt_long_utf8 (a -masking_options byte outside the visible ASCII range: NCBI writes # for it and posts error 803.7 with the member, the line or byte and, in ASN.1 text and binary, the string; RG DECISIONS K4-1; not frozen: a -masking_options value that is not UTF-8, a command-line word that LOSAT refuses) frozen 2026-11-14 by ad-RG-K-10 with the local official release.
+# id_del_txt, id_del_bin, id_del_xml and id_del_gnl (a DEL byte in -parse_seqids ids, which NCBI's id parser keeps: # and error 803.7 at ...id.local.str / ...id.general.tag.str; RG DECISIONS K4-1) frozen 2026-11-14 by ad-RG-K-10 with the local official release; in/id_del.fa and in/id_del_gnl.fa are the review's lc_two.fa and lc_gnl2.fa (K/k4/review/probe/in).
 ambig_int	-in in/ambig.fa -masking_algorithm dust -masking_options o -outfmt interval
 ambig_txt	-in in/ambig.fa -masking_algorithm dust -masking_options o
 ambig_ps	-in in/ambig.fa -masking_algorithm dust -masking_options o -parse_seqids
@@ -164,9 +166,9 @@ nucE_ps	-in in/nucE.fa -masking_algorithm dust -masking_options o -parse_seqids
 nucE2_int	-in in/nucE2.fa -masking_algorithm dust -masking_options o -outfmt interval
 nucE2_txt	-in in/nucE2.fa -masking_algorithm dust -masking_options o
 nucE2_ps	-in in/nucE2.fa -masking_algorithm dust -masking_options o -parse_seqids
-nul_int	-in in/nul.fa -masking_algorithm dust -masking_options o -outfmt interval
-nul_txt	-in in/nul.fa -masking_algorithm dust -masking_options o
-nul_ps	-in in/nul.fa -masking_algorithm dust -masking_options o -parse_seqids
+nul_int	-in in/nul_bytes.fa -masking_algorithm dust -masking_options o -outfmt interval
+nul_txt	-in in/nul_bytes.fa -masking_algorithm dust -masking_options o
+nul_ps	-in in/nul_bytes.fa -masking_algorithm dust -masking_options o -parse_seqids
 prot_int	-in in/prot.fa -masking_algorithm dust -masking_options o -outfmt interval
 prot_txt	-in in/prot.fa -masking_algorithm dust -masking_options o
 prot_ps	-in in/prot.fa -masking_algorithm dust -masking_options o -parse_seqids
@@ -223,6 +225,7 @@ noargs
 h	-h
 help	-help
 help_full	-help-full
+help_xml	-xmlhelp
 h_noalgo	-h -in in/lc.fa
 outfmt_bad	-in in/lc.fa -masking_algorithm dust -masking_options o -outfmt fasta
 outfmt_seqloc	-in in/lc.fa -masking_algorithm dust -masking_options o -outfmt seqloc_xml
@@ -251,6 +254,17 @@ opt_empty_xml	-in in/lc.fa -masking_algorithm dust -masking_options '' -outfmt m
 opt_utf8_xml	-in in/lc.fa -masking_algorithm dust -masking_options 'é' -outfmt maskinfo_xml
 opt_long	-in in/lc.fa -masking_algorithm dust -masking_options 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
 opt_spaces	-in in/lc.fa -masking_algorithm dust -masking_options '  -window 64 -level 20  '
+opt_utf8	-in in/lc.fa -masking_algorithm dust -masking_options 'é window=64'
+opt_utf8_bin	-in in/lc.fa -masking_algorithm dust -masking_options 'é window=64' -outfmt maskinfo_asn1_bin
+opt_utf8_quote	-in in/lc.fa -masking_algorithm dust -masking_options '"é"x'
+opt_tab	-in in/lc.fa -masking_algorithm dust -masking_options 'a	b'
+opt_tab_bin	-in in/lc.fa -masking_algorithm dust -masking_options 'a	b' -outfmt maskinfo_asn1_bin
+opt_del	-in in/lc.fa -masking_algorithm dust -masking_options 'ab'
+opt_wrap	-in in/lc.fa -masking_algorithm dust -masking_options 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaéébbbbbbbbbbbbbbbbbbbb'
+opt_wrap_bin	-in in/lc.fa -masking_algorithm dust -masking_options 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaéébbbbbbbbbbbbbbbbbbbb' -outfmt maskinfo_asn1_bin
+opt_ctrl_xml	-in in/lc.fa -masking_algorithm dust -masking_options 'a	bcé' -outfmt maskinfo_xml
+opt_utf8_log	-in in/lc.fa -masking_algorithm dust -masking_options 'é' -logfile /dev/null
+opt_long_utf8	-in in/lc.fa -masking_algorithm dust -masking_options 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaécccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' -outfmt maskinfo_asn1_text
 in_missing	-in in/nonexistent.fa -masking_algorithm dust -masking_options o
 in_dir	-in in -masking_algorithm dust -masking_options o
 out_bad	-in in/lc.fa -masking_algorithm dust -masking_options o -out /nonexistent/x.asn
@@ -266,3 +280,7 @@ logfile_argerr	-in in/lc.fa -masking_options o -logfile /dev/null
 logfile_ok	-in in/lc.fa -masking_algorithm dust -masking_options o -logfile /dev/null -outfmt interval
 conf_malformed	-conffile conf/malformed.ini -in in/lc.fa -masking_algorithm dust -masking_options o
 dryrun	-dryrun -in in/lc.fa -masking_algorithm dust -masking_options o
+id_del_txt	-in in/id_del.fa -masking_algorithm dust -masking_options o -parse_seqids
+id_del_bin	-in in/id_del.fa -masking_algorithm dust -masking_options o -parse_seqids -outfmt maskinfo_asn1_bin
+id_del_xml	-in in/id_del.fa -masking_algorithm dust -masking_options o -parse_seqids -outfmt maskinfo_xml
+id_del_gnl	-in in/id_del_gnl.fa -masking_algorithm dust -masking_options o -parse_seqids

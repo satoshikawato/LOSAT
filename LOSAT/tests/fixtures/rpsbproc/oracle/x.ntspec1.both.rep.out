@@ -1,0 +1,49 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_ntspec1.xml
+#Output data file:	(stdout)
+#Annotation data at:	xnew
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSTBLASTN 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	5000	mg00017_80001-85000
+DOMAINS
+1	Query_1[3]	Non-specific	506937	4389	5000	8.74743e-145	447.525	NF007063	PRK09508	C	-
+1	Query_1[-1]	Specific	272939	894	1943	0	639.448	TIGR00169	leuB	-	529099
+1	Query_1[-2]	Specific	503205	1961	3529	0	1138.52	NF002084	PRK00915.1-1	-	-
+1	Query_1[-3]	Non-specific	504533	1	864	0	633.311	NF004016	PRK05478	C	-
+1	Query_1[-3]	Specific	507224	3625	3708	2.25674e-05	42.6644	NF007397	PRK09925	-	-
+ENDDOMAINS
+SITES
+1	Query_1[-2]	Specific	active site	R3493-3491,D3490-3488,Q3481-3479,E3400-3398,R3307-3305,H3241-3239,S3115-3113,E3109-3107,P3025-3023,T3019-3017,H2926-2924,H2920-2918	12	0	163678
+1	Query_1[-2]	Specific	catalytic residues	R3493-3491,D3490-3488,E3400-3398	3	0	163678
+1	Query_1[-2]	Specific	metal binding site	H2926-2924,H2920-2918	2	0	163678
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

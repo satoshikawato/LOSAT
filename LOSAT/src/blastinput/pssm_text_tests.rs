@@ -88,7 +88,10 @@ fn reals_are_read_with_ncbis_arithmetic() {
     assert_eq!(real_of("{ +7, 10, 1 }"), 70.0);
     assert_eq!(real_of("PLUS-INFINITY"), f64::INFINITY);
     assert_eq!(real_of("minus-infinity"), f64::NEG_INFINITY);
-    assert!(real_of("NOT-A-NUMBER").is_nan());
+    // `HUGE_VAL/HUGE_VAL` of NCBI's x86-64 builds: the sign bit set (`ncbi_str::NCBI_NAN`;
+    // PS16d review oracle O2 `a_nan` prints `-nan`), also for the word form `nan`.
+    assert!(real_of("NOT-A-NUMBER").is_nan() && real_of("NOT-A-NUMBER").is_sign_negative());
+    assert!(real_of("nan").is_nan() && real_of("nan").is_sign_negative());
     assert_eq!(real_of("0.5"), 0.5);
     assert_eq!(real_of("-2.5e3"), -2500.0);
     assert_eq!(real_of("00.25"), 0.25);

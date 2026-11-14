@@ -1,0 +1,7 @@
+
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+100          alpha                                   default options used                    
+101          beta:2                                  default options used                    
+102          gamma                                   default options used                    

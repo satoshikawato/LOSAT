@@ -76,8 +76,8 @@ use crate::blastinput::value_parsers::*;
 // ASN.1 and ASCII PSSMs (`pssm.rs`); with `-in_pssm` the
 // query is a PSSM, searched with the PSSM's stages (`in_pssm.rs`, `algorithm::pssm_search`), in
 // rounds and with the PSSM files too (`in_pssm_files.rs`);
-// `-in_msa` and `-phi_pattern` are refused by the parser (`cli.rs` `is_unported_psiblast_arg`),
-// `-sum_stats true` with the options (`into_blastp_args`). The values are
+// `-in_msa` and `-phi_pattern` are refused by the parser (`cli.rs` `is_unported_psiblast_arg`).
+// The values are
 // read as NCBI's argument parser reads them (`value_parsers.rs`); the checks that NCBI makes
 // after reading them are blastp's (`BlastpArgs::check_options`, with psiblast's program).
 #[derive(Args, Debug, Clone)]
@@ -188,8 +188,8 @@ pub struct PsiblastArgs {
     // ```
     // psiblast's `CGenericSearchArgs` keeps it (psiblast_args.cpp:67; blastp suppresses it). A
     // gapped protein search does not link HSPs by default (blast_options.c:1460-1471), so `false`
-    // is psiblast's search; `true` (`BLAST_LinkHsps` in every round) is refused with the options
-    // (`into_blastp_args`).
+    // is psiblast's search; `true` links the HSPs of each subject in every round
+    // (`BlastpArgs::sum_stats`, `core::link_hsps`).
     #[arg(long, value_parser = ncbi_boolean, help = "Use sum statistics")]
     pub sum_stats: Option<bool>,
     #[arg(long, value_parser = psiblast_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
@@ -516,19 +516,6 @@ impl PsiblastArgs {
             );
         }
         Self::check_outfmt(&self.outfmt)?;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:410-414
-        // ```c
-        //     if (hitParams->do_sum_stats) {
-        //         status = BLAST_LinkHsps(program_number, hsp_list, queryInfo,
-        //                                 subject_length, sbp,
-        //                                 hitParams->link_hsp_params, TRUE);
-        // ```
-        // With sum statistics NCBI's gapped protein search links the HSPs of each subject (the
-        // even-gap linking, link_hsps.c `s_BlastEvenGapLinkHSPs`) and gives the linked sets'
-        // e-values in every round, item Q3b of line RG.
-        if self.sum_stats == Some(true) {
-            bail!("-sum_stats true (NCBI BLAST+ links the HSPs of each subject with sum statistics) is not supported by LOSAT's PSIBLAST");
-        }
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (quoted at
         // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM of
         // `-in_pssm` in round 1)
@@ -579,6 +566,7 @@ impl PsiblastArgs {
             xdrop_gap: self.xdrop_gap,
             xdrop_gap_final: self.xdrop_gap_final,
             gap_trigger: Some(self.gap_trigger),
+            sum_stats: self.sum_stats == Some(true),
             window_size: self.window_size,
             matrix: self.matrix,
             gap_open: self.gap_open,
@@ -594,6 +582,7 @@ impl PsiblastArgs {
             export_search_strategy: None,
             strategy: None,
             app: BlastpApp::Psiblast,
+            subject_taxdb: None,
             inclusion_ethresh: Some(self.inclusion_ethresh),
             first_query_ordinal: self.first_query_ordinal,
             psiblast_pssm: Some(crate::algorithm::psiblast::pssm::PsiblastPssmOptions {
@@ -881,7 +870,7 @@ mod tests {
     }
 
     #[test]
-    fn the_x_drops_gap_trigger_and_culling_reach_blastps_search() {
+    fn the_x_drops_gap_trigger_culling_and_sum_stats_reach_blastps_search() {
         let blastp = |extra: &[&str]| parse(extra).unwrap().into_blastp_args();
         let args = blastp(&[
             "-culling_limit",
@@ -908,9 +897,15 @@ mod tests {
         let args = blastp(&[]).unwrap();
         assert_eq!(args.gap_trigger, Some(22.0));
         assert_eq!(args.culling_limit, None);
-        // Sum statistics link the HSPs (item Q3b).
-        let error = blastp(&["-sum_stats", "true"]).unwrap_err().to_string();
-        assert!(error.contains("-sum_stats true"), "{error}");
+        assert!(!args.sum_stats);
+        // Sum statistics link the HSPs, in every spelling of NCBI's boolean.
+        for spelling in ["true", "T", "t", "1", "yes"] {
+            assert!(
+                blastp(&["-sum_stats", spelling]).unwrap().sum_stats,
+                "{spelling}"
+            );
+        }
+        assert!(!blastp(&["-sum_stats", "false"]).unwrap().sum_stats);
         // NCBI's constraint of -culling_limit (0 or more).
         assert!(parse(&["-culling_limit", "-1"]).is_err());
     }

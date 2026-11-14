@@ -174,6 +174,12 @@ impl OutputSink<'_> {
         })
     }
 
+    /// Opens the sink as the stream of the format's report (`cli::NcbiOstream`, which the organism
+    /// report of outfmt 18 takes): `open`'s writer, passed on as it is.
+    pub(crate) fn ostream(&mut self) -> io::Result<crate::cli::NcbiOstream<'_>> {
+        self.open().map(crate::cli::NcbiOstream::new)
+    }
+
     /// The caller's receiver of the side files of outfmt 13 and 14 (`OutputSink::Files`).
     pub fn side_files(&self) -> Option<&crate::report::blast_xml2::SideFileSink> {
         match self {
@@ -212,12 +218,17 @@ impl FormatOutput<'_> {
             .or(out)
     }
 
+    /// The report of this output's `-outfmt` (`None` for a value that NCBI's reading refuses).
+    pub(crate) fn report_format(&self) -> Option<crate::blastinput::app::ReportFormat> {
+        use crate::blastinput::app::{parse_formatting_string, ReportFormat};
+        parse_formatting_string(self.outfmt)
+            .ok()
+            .and_then(|choice| ReportFormat::from_number(choice.number))
+    }
+
     /// Whether this output is the BLAST archive (outfmt 11).
     fn is_archive(&self) -> bool {
-        use crate::blastinput::app::{parse_formatting_string, ReportFormat};
-        parse_formatting_string(self.outfmt).is_ok_and(|choice| {
-            ReportFormat::from_number(choice.number) == Some(ReportFormat::ArchiveFormat)
-        })
+        self.report_format() == Some(crate::blastinput::app::ReportFormat::ArchiveFormat)
     }
 }
 

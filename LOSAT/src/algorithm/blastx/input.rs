@@ -844,7 +844,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 None => None,
             };
             // The `isspace` skip before the title (`eTrunc_Begin`), then
-            // `NStr::TruncateSpacesInPlace(processed_title)` at its end.
+            // `NStr::TruncateSpacesInPlace(processed_title)` at its end (fasta.cpp:2038).
             let title_bytes = match &believed {
                 Some(defline) => truncate_spaces_begin(&line[defline.title_search..]),
                 None => truncate_spaces_begin(&line[1..]),

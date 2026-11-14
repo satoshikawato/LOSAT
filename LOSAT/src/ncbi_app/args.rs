@@ -271,6 +271,9 @@ pub(crate) enum ArgsError {
     Usage,
     /// `-help` (`CArgHelpException::eHelpFull`): the full description on stdout, exit status 0.
     Help,
+    /// `-xmlhelp` (`CArgHelpException::eHelpXml`): the description in XML on stdout, exit status
+    /// 0 (`ncbi_xmlhelp`).
+    XmlHelp,
     /// A `CArgException` of the reader.
     Invalid(ArgException),
     /// A value that NCBI's reader takes in a way LOSAT does not reproduce: LOSAT's refusal.
@@ -654,10 +657,8 @@ fn create_arg(
             // `-help-full` adds the hidden arguments, of which LOSAT's programs have none: the
             // text is that of `-help` (probe C05 of line BDC).
             "-help" | "-help-full" => return Err(ArgsError::Help),
-            // The help in XML.
-            "-xmlhelp" => {
-                return Err(ArgsError::Refused(tool.unsupported_option(arg1)));
-            }
+            // The help in XML (`ncbi_xmlhelp`).
+            "-xmlhelp" => return Err(ArgsError::XmlHelp),
             _ => {}
         }
         if eq_separator {

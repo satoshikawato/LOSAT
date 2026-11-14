@@ -2,8 +2,8 @@
 // a public database. It runs only when the user asks ("Fetch"), never on load or on Run, and
 // its request carries only the accession (web/AGENTS.md rule 4). The browser implementation
 // is src/infra/browser/accession-fetcher.ts; tests use src/infra/fake/fake-fetcher.ts.
+import type { SequenceKind } from 'losat/domain';
 import type { FetchSourceId } from '../domain/accession';
-import type { SequenceKind } from '../domain/programs';
 
 export interface FetchRequest {
   readonly source: FetchSourceId;

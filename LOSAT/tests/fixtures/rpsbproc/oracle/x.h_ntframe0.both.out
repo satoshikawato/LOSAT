@@ -1,0 +1,49 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_h_n_frame0.xml
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSTBLASTN 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	5000	mg00067_330001-335000
+DOMAINS
+1	Query_1	Non-specific	507226	3	1493	0	1021.94	NF007399	PRK09928	N	-
+1	Query_1	Specific	214491	2698	3420	1.20804e-94	305.681	smart00052	EAL	-	531754
+1	Query_1	Specific	440348	3555	4406	7.48505e-41	151.943	COG0583	LysR	-	-
+1	Query_1	Specific	517306	4564	4995	2.01694e-14	71.8738	pfam06496	DUF1097	-	-
+1	Query_1	Specific	99777	2446	2610	5.90383e-09	53.6924	cd06170	LuxR_C_like	-	532797
+ENDDOMAINS
+SITES
+1	Query_1	Specific	putative dimerization interface	L3590,Q3591,L3593,R3594,C3598,N3600,Q3601,L3602,L3603,Y3604,T3605,A3606,E3697,D3698,T3699,A3700,H3701,T3702,G3708,W3709,L3711,H3712	23	22	176122
+1	Query_1	Specific	DNA binding residues	S2446,E2447,K2448,S2461,V2462,T2463,R2471,S2472,K2474,T2475,S2477,H2478,Q2479,K2480,K2481,D2492	16	16	99777
+1	Query_1	Specific	dimerization interface	M2457,G2459,S2461,D2492,I2493,T2494,R2497,F2500	9	8	99777
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

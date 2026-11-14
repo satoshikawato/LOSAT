@@ -22,7 +22,15 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
     if extra.iter().any(|key| {
         matches!(
             key.split('=').next().unwrap_or(key),
-            "-query" | "-subject" | "-out" | "-h" | "-help" | "-help-full" | "--help" | "--version"
+            "-query"
+                | "-subject"
+                | "-out"
+                | "-h"
+                | "-help"
+                | "-help-full"
+                | "-xmlhelp"
+                | "--help"
+                | "--version"
         )
     }) {
         bail!("file/help arguments are unsupported for the BLASTX web API");
@@ -291,7 +299,7 @@ pub(crate) fn run_pair(
                             let mut results =
                                 searched.next().expect("one search per queued batch")?;
                             report::render_queries(
-                                &mut output,
+                                &mut crate::cli::NcbiOstream::new(Box::new(&mut output)),
                                 &mut *diagnostics.borrow_mut(),
                                 &options,
                                 queries,
@@ -377,7 +385,7 @@ pub(crate) fn run_pair(
                 //                	    formatter.PrintOneResultSet(**result, query_batch);
                 // ```
                 report::render_queries(
-                    &mut output,
+                    &mut crate::cli::NcbiOstream::new(Box::new(&mut output)),
                     &mut *diagnostics.borrow_mut(),
                     &options,
                     queries,

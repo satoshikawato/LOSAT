@@ -271,12 +271,14 @@ impl EvenGapLinkParams {
         }
     }
 
-    /// `strand_factor` (link_hsps.c:513): the number of contexts of a query frame of the linking.
-    fn strand_factor(&self) -> usize {
+    /// The query frame of the linking a context belongs to: `context / strand_factor`
+    /// (link_hsps.c:513; `strand_factor` is 3 for a translated query, else 1), with the division
+    /// by a constant.
+    fn query_frame(&self, context: usize) -> usize {
         if self.query_translated {
-            3
+            context / 3
         } else {
-            1
+            context
         }
     }
 }
@@ -423,12 +425,12 @@ struct Helper {
 // 		return -1;
 // 	return 0;
 // ```
-/// `s_RevCompareHSPsTbn` (the subject frames are all 0), with `context / strand_factor` in place
-/// of `context`: `s_RevCompareHSPsTbx` (link_hsps.c:331-375) for a translated query, whose
-/// `NUM_FRAMES / 2` is the `strand_factor` 3.
-fn rev_compare_tbn(h1: &LinkHsp, h2: &LinkHsp, strand_factor: usize) -> Ordering {
-    (h1.context / strand_factor)
-        .cmp(&(h2.context / strand_factor))
+/// `s_RevCompareHSPsTbn` (the subject frames are all 0), with the query frame (`frame1`, `frame2`:
+/// `context / strand_factor`) in place of `context`: `s_RevCompareHSPsTbx` (link_hsps.c:331-375)
+/// for a translated query, whose `NUM_FRAMES / 2` is the `strand_factor` 3.
+fn rev_compare_tbn(h1: &LinkHsp, frame1: usize, h2: &LinkHsp, frame2: usize) -> Ordering {
+    frame1
+        .cmp(&frame2)
         .then(h2.query_offset.cmp(&h1.query_offset))
         .then(h2.query_end.cmp(&h1.query_end))
         .then(h2.subject_offset.cmp(&h1.subject_offset))
@@ -482,11 +484,23 @@ fn rev_compare_tbn(h1: &LinkHsp, h2: &LinkHsp, strand_factor: usize) -> Ordering
 // ```
 /// `s_FwdCompareHSPs`, and with a `strand_factor` of 3 `s_FwdCompareHSPsTransl`
 /// (link_hsps.c:157-188).
-fn fwd_compare(h1: &LinkHsp, h2: &LinkHsp, strand_factor: usize) -> Ordering {
-    (h1.context / strand_factor)
-        .cmp(&(h2.context / strand_factor))
-        .then(h1.query_offset.cmp(&h2.query_offset))
-        .then(h1.subject_offset.cmp(&h2.subject_offset))
+fn fwd_compare(h1: &SortedHsp, h2: &SortedHsp) -> Ordering {
+    h1.frame
+        .cmp(&h2.frame)
+        .then(h1.hsp.query_offset.cmp(&h2.hsp.query_offset))
+        .then(h1.hsp.subject_offset.cmp(&h2.hsp.subject_offset))
+}
+
+/// An HSP in the order of the first sort, with what the linking reads of it on every pass: its
+/// query frame (`context / strand_factor`) and the terms its score adds to a set's `xsum`,
+/// `score * kbp[context]->Lambda` and `kbp[context]->logK` (the same values NCBI computes on each
+/// pass, so the sums keep their bits).
+#[derive(Debug, Clone, Copy)]
+struct SortedHsp {
+    hsp: LinkHsp,
+    frame: usize,
+    score_lambda: f64,
+    log_k: f64,
 }
 
 /// `BLAST_LinkHsps`'s linking of a list `items` in place: each item's linking view (`hsp`) is
@@ -565,16 +579,27 @@ pub(crate) fn even_gap_link_hsps(
     let gap_decay_rate = params.gap_decay_rate;
     let cutoff = [params.cutoff_small_gap as i64, params.cutoff_big_gap as i64];
     let ignore_small_gaps = params.cutoff_small_gap == 0;
-    let strand_factor = params.strand_factor();
-
     // `link_hsp_array`: the input positions in the order of `s_RevCompareHSPsTbn` (`Tbx`).
+    let frames_of: Vec<usize> = hsps.iter().map(|h| params.query_frame(h.context)).collect();
     let mut order: Vec<usize> = (0..total_number_of_hsps).collect();
-    order.sort_by(|&a, &b| rev_compare_tbn(&hsps[a], &hsps[b], strand_factor));
+    order.sort_by(|&a, &b| rev_compare_tbn(&hsps[a], frames_of[a], &hsps[b], frames_of[b]));
     // Slot 0 is `hp_start`; the HSP at sorted position `i` is slot `i + 1`, read from a copy in that
     // order (one load where `hsps[order[i]]` takes two).
-    let sorted: Vec<LinkHsp> = order.iter().map(|&i| hsps[i]).collect();
+    let sorted: Vec<SortedHsp> = order
+        .iter()
+        .map(|&i| {
+            let hsp = hsps[i];
+            let c = contexts(hsp.context);
+            SortedHsp {
+                hsp,
+                frame: frames_of[i],
+                score_lambda: hsp.score as f64 * c.lambda,
+                log_k: c.log_k,
+            }
+        })
+        .collect();
     let mut nodes: Vec<Node> = vec![Node::default(); total_number_of_hsps + 1];
-    let hsp_of = |slot: usize| -> &LinkHsp { &sorted[slot - 1] };
+    let hsp_of = |slot: usize| -> &LinkHsp { &sorted[slot - 1].hsp };
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:510-536
     // ```c
@@ -614,9 +639,7 @@ pub(crate) fn even_gap_link_hsps(
         frames.last_mut().expect("one frame").1 += 1;
         nodes[slot].prev = (index > 0).then_some(slot - 1);
         nodes[slot].next = (index + 1 < total_number_of_hsps).then_some(slot + 1);
-        if index > 0
-            && hsp_of(slot).context / strand_factor != hsp_of(slot - 1).context / strand_factor
-        {
+        if index > 0 && sorted[index].frame != sorted[index - 1].frame {
             frames.last_mut().expect("one frame").1 -= 1;
             frames.push((slot, 1));
             nodes[slot - 1].next = None;
@@ -664,7 +687,7 @@ pub(crate) fn even_gap_link_hsps(
             &mut lh_helper,
             frame_start,
             frame_count,
-            &hsp_of,
+            &sorted,
             contexts,
             subject_length,
             LinkConstants {
@@ -697,7 +720,7 @@ pub(crate) fn even_gap_link_hsps(
     // with equal fields in the slots' order and the second keeps that order among them, so the
     // second alone, on the slots' order, gives the same list.
     let mut array: Vec<usize> = (1..=total_number_of_hsps).collect();
-    array.sort_by(|&a, &b| fwd_compare(hsp_of(a), hsp_of(b), strand_factor));
+    array.sort_by(|&a, &b| fwd_compare(&sorted[a - 1], &sorted[b - 1]));
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1006-1080
     // ```c
@@ -779,12 +802,12 @@ struct LinkConstants {
 
 /// The linking of one query frame (`for (frame_index=0; ...)` of `s_BlastEvenGapLinkHSPs`).
 #[allow(clippy::too_many_arguments)]
-fn link_frame<'a>(
+fn link_frame(
     nodes: &mut [Node],
     lh_helper: &mut [Helper],
     frame_start: usize,
     frame_count: usize,
-    hsp_of: &impl Fn(usize) -> &'a LinkHsp,
+    sorted: &[SortedHsp],
     contexts: &dyn Fn(usize) -> LinkContext,
     subject_length_orig: i32,
     k: LinkConstants,
@@ -797,6 +820,7 @@ fn link_frame<'a>(
         cutoff,
         ignore_small_gaps,
     } = k;
+    let hsp_of = |slot: usize| -> &LinkHsp { &sorted[slot - 1].hsp };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:554-591
     // ```c
     //       hp_start = s_LinkHSPStructReset(hp_start);
@@ -853,9 +877,8 @@ fn link_frame<'a>(
     // `H_hsp_xsum + score*kbp[H->hsp->context]->Lambda - kbp[H->hsp->context]->logK`, added in
     // C's order: the score's term first, then logK subtracted.
     let add_xsum = |h_hsp_xsum: f64, slot: usize| {
-        let hsp = hsp_of(slot);
-        let c = contexts(hsp.context);
-        h_hsp_xsum + hsp.score as f64 * c.lambda - c.log_k
+        let s = &sorted[slot - 1];
+        h_hsp_xsum + s.score_lambda - s.log_k
     };
 
     while number_of_hsps > 0 {

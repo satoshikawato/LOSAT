@@ -1,0 +1,629 @@
+# RPSTBLASTN 2.17.0+
+# Query: w0 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w1 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w2 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w3 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w3	CDD:102	42.857	14	8	0	146	187	83	96	5.2	18.5
+# RPSTBLASTN 2.17.0+
+# Query: w4 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w5 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w6 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w7 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w7	CDD:103	31.818	22	15	0	25	90	8	29	5.6	16.9
+# RPSTBLASTN 2.17.0+
+# Query: w8 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w9 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w10 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w11 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w11	CDD:101	34.783	23	15	0	76	8	8	30	1.2	19.6
+# RPSTBLASTN 2.17.0+
+# Query: w12 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w13 long
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w13n nrun
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w14 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w15 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+w15	CDD:103	37.500	16	8	1	8	49	69	84	3.8	16.2
+w15	CDD:101	41.667	12	7	0	19	54	45	56	7.3	15.8
+# RPSTBLASTN 2.17.0+
+# Query: w16 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w17 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w17	CDD:101	47.619	21	10	1	39	101	6	25	4.0	17.3
+# RPSTBLASTN 2.17.0+
+# Query: w18 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w19 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w20 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w21 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w22 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w23 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w24 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w25 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w26 empty
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w27 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w28 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w28	CDD:101	35.000	20	11	1	38	97	127	144	1.3	20.0
+# RPSTBLASTN 2.17.0+
+# Query: w29 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w30 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w31 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w32 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w33 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w34 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w35 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w36 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w37 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w38 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w39 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w40 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w41 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w42 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w43 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w44 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w45 hit 0 95-133
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+w45	CDD:101	100.000	39	0	0	4	120	95	133	7.64e-22	76.3
+w45	CDD:101	22.222	18	14	0	24	77	55	72	1.9	18.5
+# RPSTBLASTN 2.17.0+
+# Query: w46 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w46	CDD:103	38.462	13	8	0	55	93	27	39	8.2	18.5
+# RPSTBLASTN 2.17.0+
+# Query: w47 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w47	CDD:101	45.455	11	6	0	35	3	179	189	4.8	18.1
+# RPSTBLASTN 2.17.0+
+# Query: w48 hit 1 97-133
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w48	CDD:102	97.368	38	1	0	119	6	96	133	1.92e-22	73.9
+# RPSTBLASTN 2.17.0+
+# Query: w49 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w50 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w51 hit 2 114-150
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w51	CDD:103	100.000	37	0	0	4	114	114	150	5.95e-23	79.0
+# RPSTBLASTN 2.17.0+
+# Query: w52 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w53 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w53	CDD:102	46.667	15	8	0	138	94	50	64	2.6	19.6
+# RPSTBLASTN 2.17.0+
+# Query: w54 hit 0 124-169
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w54	CDD:101	100.000	46	0	0	139	2	124	169	1.28e-27	87.4
+# RPSTBLASTN 2.17.0+
+# Query: w55 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w56 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w57 hit 1 118-166
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+w57	CDD:102	100.000	49	0	0	5	151	118	166	3.33e-32	99.0
+w57	CDD:102	31.034	29	19	1	152	69	53	81	3.5	18.1
+# RPSTBLASTN 2.17.0+
+# Query: w58 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w58	CDD:101	27.273	22	16	0	78	13	20	41	2.7	18.1
+# RPSTBLASTN 2.17.0+
+# Query: w59 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w60 hit 2 88-122
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w60	CDD:103	100.000	35	0	0	115	11	88	122	1.93e-23	76.3
+# RPSTBLASTN 2.17.0+
+# Query: w61 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w62 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w63 hit 0 145-188
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w63	CDD:101	100.000	44	0	0	3	134	145	188	7.45e-27	85.5
+# RPSTBLASTN 2.17.0+
+# Query: w64 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w64	CDD:103	28.571	21	15	0	57	119	6	26	3.3	18.1
+# RPSTBLASTN 2.17.0+
+# Query: w65 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w66 hit 1 74-124
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w66	CDD:102	100.000	51	0	0	153	1	74	124	5.13e-34	103
+# RPSTBLASTN 2.17.0+
+# Query: w67 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w68 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w69 hit 2 65-127
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w69	CDD:103	100.000	63	0	0	7	195	65	127	2.95e-40	124
+# RPSTBLASTN 2.17.0+
+# Query: w70 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w71 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w72 hit 0 64-124
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w72	CDD:101	100.000	61	0	0	192	10	64	124	2.34e-35	108
+# RPSTBLASTN 2.17.0+
+# Query: w73 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w74 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w75 hit 1 98-133
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w75	CDD:102	100.000	36	0	0	8	115	98	133	4.75e-21	70.1
+# RPSTBLASTN 2.17.0+
+# Query: w76 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w77 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w78 hit 2 68-134
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w78	CDD:103	100.000	67	0	0	201	1	68	134	6.84e-46	134
+# RPSTBLASTN 2.17.0+
+# Query: w79 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w80 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w81 hit 0 75-119
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w81	CDD:101	100.000	45	0	0	10	144	75	119	6.73e-22	77.0
+# RPSTBLASTN 2.17.0+
+# Query: w82 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w83 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w84 hit 1 42-92
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w84	CDD:102	100.000	51	0	0	155	3	42	92	1.42e-37	112
+# RPSTBLASTN 2.17.0+
+# Query: w85 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w86 long
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w86n nrun
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w87 hit 2 91-129
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w87	CDD:103	100.000	39	0	0	11	127	91	129	8.03e-27	85.1
+# RPSTBLASTN 2.17.0+
+# Query: w88 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w89 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w89	CDD:102	55.556	9	4	0	60	34	129	137	1.1	17.7
+# RPSTBLASTN 2.17.0+
+# Query: w90 hit 0 61-111
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w90	CDD:101	100.000	51	0	0	159	7	61	111	1.20e-27	87.8
+# RPSTBLASTN 2.17.0+
+# Query: w91 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w92 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w92	CDD:101	41.176	17	10	0	128	78	101	117	2.0	18.9
+# RPSTBLASTN 2.17.0+
+# Query: w93 hit 1 8-49
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w93	CDD:102	100.000	42	0	0	2	127	8	49	1.95e-27	86.7
+# RPSTBLASTN 2.17.0+
+# Query: w94 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w95 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w96 hit 2 69-122
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w96	CDD:103	100.000	54	0	0	163	2	69	122	1.04e-35	108
+# RPSTBLASTN 2.17.0+
+# Query: w97 hyphens
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w97	CDD:102	44.444	9	5	0	1	27	167	175	7.8	16.5
+# RPSTBLASTN 2.17.0+
+# Query: w98 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w99 hit 0 39-83
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+w99	CDD:101	95.745	47	2	0	4	144	37	83	1.93e-25	85.9
+w99	CDD:101	27.273	22	16	0	120	55	43	64	1.9	18.9
+# RPSTBLASTN 2.17.0+
+# Query: w100 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w100	CDD:103	75.000	8	2	0	195	218	181	188	4.7	18.9
+# RPSTBLASTN 2.17.0+
+# Query: w101 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w102 hit 1 39-105
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w102	CDD:102	95.714	70	3	0	210	1	39	108	5.20e-49	143
+# RPSTBLASTN 2.17.0+
+# Query: w103 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w104 title CGCGCCCTGTGATCCACCGGGTACG
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w105 hit 2 11-54
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w105	CDD:103	100.000	44	0	0	2	133	11	54	7.03e-25	80.1
+# RPSTBLASTN 2.17.0+
+# Query: w106 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w107 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w108 hit 0 146-186
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w108	CDD:101	97.674	43	1	0	133	5	144	186	2.77e-25	81.3
+# RPSTBLASTN 2.17.0+
+# Query: w109 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w110 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w110	CDD:101	55.556	9	4	0	47	73	132	140	4.7	16.2
+# RPSTBLASTN 2.17.0+
+# Query: w111 hit 1 39-98
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w111	CDD:102	98.361	61	1	0	3	185	38	98	7.15e-45	132
+# RPSTBLASTN 2.17.0+
+# Query: w112 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w113 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w114 hit 2 29-67
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+w114	CDD:103	95.122	41	2	0	124	2	29	69	4.43e-24	78.2
+w114	CDD:103	31.250	32	19	1	96	10	41	72	0.99	19.2
+# RPSTBLASTN 2.17.0+
+# Query: w115 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w116 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w117 hit 0 37-84
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w117	CDD:101	100.000	48	0	0	6	149	37	84	1.68e-28	89.7
+# RPSTBLASTN 2.17.0+
+# Query: w118 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w119 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w120 hit 1 9-63
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w120	CDD:102	96.552	58	2	0	176	3	7	64	7.34e-40	119
+# RPSTBLASTN 2.17.0+
+# Query: w121 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w122 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w123 hit 2 6-62
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w123	CDD:103	100.000	58	0	0	3	176	6	63	1.59e-34	105
+# RPSTBLASTN 2.17.0+
+# Query: w124 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w124	CDD:103	23.684	38	25	1	200	99	152	189	1.4	20.4
+# RPSTBLASTN 2.17.0+
+# Query: w125 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w126 hit 0 70-124
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w126	CDD:101	96.491	57	2	0	177	7	68	124	1.29e-31	98.2
+# RPSTBLASTN 2.17.0+
+# Query: w127 rnd
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+w127	CDD:101	28.571	21	15	0	94	32	46	66	5.1	16.5
+# RPSTBLASTN 2.17.0+
+# Query: w128 rnd
+# Database: rps_mini3v
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w129 hit 1 58-115
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+w129	CDD:102	100.000	59	0	0	5	181	57	115	4.38e-40	119
+w129	CDD:102	53.333	15	7	0	73	29	72	86	6.6	17.7
+# BLAST processed 132 queries

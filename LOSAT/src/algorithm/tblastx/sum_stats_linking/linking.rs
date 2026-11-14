@@ -4496,16 +4496,32 @@ mod tests {
             verify: true,
             wide_keys: false,
         };
-        let (linked, _) = link_with_both_kernels(chain(32_770), &cutoffs, options, "32,770");
-        assert_eq!(linked.len(), 32_770);
-        assert!(
-            linked.iter().all(|h| h.num == -32766 && h.e_value == 0.0),
-            "{:?}",
-            &linked[..2]
-        );
+        // The count of the set's first HSP (`hsp_link.num`), then every HSP's after the output
+        // list is hooked up (link_hsps.c:1044-1061 copies the first one's count to the set).
+        let counts = |n: usize| {
+            let (mut linked, _) = link_with_both_kernels(chain(n), &cutoffs, options, "chain");
+            assert_eq!(linked.len(), n);
+            let heads: Vec<i16> = linked
+                .iter()
+                .filter(|h| h.start_of_chain)
+                .map(|h| h.hsp_link_num)
+                .collect();
+            assert!(linked.iter().all(|h| h.linked_set), "{:?}", &linked[..2]);
+            let evalues: Vec<f64> = linked.iter().map(|h| h.e_value).collect();
+            let nums: Vec<i32> = replay_ncbi_output_list(linked.iter_mut().collect())
+                .iter()
+                .map(|h| h.num)
+                .collect();
+            (heads, evalues, nums)
+        };
+        let (heads, evalues, nums) = counts(32_770);
+        assert_eq!(heads, [-32766]);
+        assert!(evalues.iter().all(|&e| e == 0.0), "{:?}", &evalues[..2]);
+        assert!(nums.iter().all(|&n| n == -32766), "{:?}", &nums[..2]);
         // One HSP fewer than the wrap keeps its count.
-        let (linked, _) = link_with_both_kernels(chain(32_767), &cutoffs, options, "32,767");
-        assert!(linked.iter().all(|h| h.num == 32_767), "{:?}", &linked[..2]);
+        let (heads, _, nums) = counts(32_767);
+        assert_eq!(heads, [32_767]);
+        assert!(nums.iter().all(|&n| n == 32_767), "{:?}", &nums[..2]);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:495,939-952
@@ -4527,9 +4543,9 @@ mod tests {
     fn large_gaps_only_do_not_divide_by_the_gap_probability() {
         let hits = || {
             fast_test_hits(&[
-                (100, 130, 200, 230, 60),
-                (300, 330, 400, 430, 55),
-                (500, 530, 600, 630, 50),
+                (100, 130, 200, 230, 120),
+                (300, 330, 400, 430, 110),
+                (500, 530, 600, 630, 100),
             ])
         };
         let large_only = |gap_prob: f64| LinkHspCutoffs {
@@ -4543,7 +4559,14 @@ mod tests {
                 link_with_both_kernels(hits(), &large_only(0.0), options, "gap_prob 0");
             let (with_half, _) =
                 link_with_both_kernels(hits(), &large_only(0.5), options, "gap_prob 0.5");
-            assert!(with_zero.iter().all(|h| h.num == 3), "{with_zero:?}");
+            // One set of the three HSPs, with an E-value below the INT4_MAX ceiling.
+            let heads: Vec<i16> = with_zero
+                .iter()
+                .filter(|h| h.start_of_chain)
+                .map(|h| h.hsp_link_num)
+                .collect();
+            assert_eq!(heads, [3], "{with_zero:?}");
+            assert!(with_zero.iter().all(|h| h.e_value < 1.0), "{with_zero:?}");
             for (a, b) in with_zero.iter().zip(&with_half) {
                 assert_eq!(a.e_value.to_bits(), b.e_value.to_bits(), "{a:?} {b:?}");
             }

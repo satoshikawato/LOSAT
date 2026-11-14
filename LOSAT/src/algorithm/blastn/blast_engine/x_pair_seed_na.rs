@@ -105,7 +105,7 @@ static X_OWNER_SCAN_NS: AtomicU64 = AtomicU64::new(0);
 static X_WAIT_NS: AtomicU64 = AtomicU64::new(0);
 
 /// The inputs of the seed stage of one subject chunk with a table that is not two-stage,
-/// borrowed from `collect_prelim_hits_for_chunk` (the same names as there; `word_length` is
+/// borrowed from `prelim_subject::prelim_chunk_hits` (the same names as there; `word_length` is
 /// its `safe_k`, the word length and the lookup word length of these tables).
 pub(in super::super) struct NaInputs<'a> {
     pub(in super::super) pv_direct_lookup: Option<&'a PvDirectLookup>,
@@ -841,7 +841,7 @@ fn seed_stage_of(
 ///                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
 ///     }
 /// ```
-/// Dispatch of `collect_prelim_hits_for_chunk` for a table that is not two-stage: the seed
+/// Dispatch of `prelim_subject::prelim_chunk_hits` for a table that is not two-stage: the seed
 /// stage of this chunk (the loop above with its one-hit extension) when LOSAT_X_PAIRPARNA is
 /// on and the chunk is in scope; `true` means it has run and the reference scan is skipped.
 /// `fold_scratch` holds the allocations of LOSAT_X_PAIRPARFOLD's partition tables and buffers

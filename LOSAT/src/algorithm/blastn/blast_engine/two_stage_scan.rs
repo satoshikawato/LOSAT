@@ -1,6 +1,6 @@
 //! The scan of a blastn subject chunk with a two-stage lookup table (`TwoStageLookup`: every table
 //! of megablast and dc-megablast, and the tables of `-task blastn` whose lookup width is below the
-//! word size), as `search_query_batch`'s `collect_prelim_hits_for_chunk` runs it when PAIRPAR
+//! word size), as `prelim_subject::prelim_chunk_hits` runs it when PAIRPAR
 //! (`x_pair_seed.rs`; for a discontiguous table `x_pair_seed_disc.rs`) does not take the chunk, on
 //! one thread (`scan_two_stage_lookup`): the subject's words in scan order, through the
 //! discontiguous scan (`scan_subject_disc_words_with_ranges`; with LOSAT_X_DCCSR, a table laid out
@@ -44,7 +44,7 @@
 //! `BlastnTiming`; `scan_subject_kmers_with_ranges`, `scan_subject_disc_words_with_ranges`,
 //! `select_mb_scan_kind`, `diag_hash_insert_window`, `x_mb_hit_prefetch`, `x_bn_pv_once` and
 //! `OFFSET_ARRAY_SIZE`). Its function is the statements of the branch of
-//! `collect_prelim_hits_for_chunk` that were there, in their order; the strips scans of PAIRPAR
+//! `prelim_chunk_hits` that were there, in their order; the strips scans of PAIRPAR
 //! (`x_pair_seed.rs` `scan_strip`, `x_pair_seed_disc.rs` `scan_strip_disc`) walk the lookup hits
 //! in the order `on_word` does. What the scan reads that is the same for every word of a chunk is
 //! `TwoStageScanInputs`, and what it writes is `TwoStageScanState`, both built once per chunk.
@@ -62,7 +62,7 @@ use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::algorithm::blastn::lookup::TwoStageLookup;
 
 /// What the scan of one subject chunk with a two-stage table reads that is the same for every
-/// word, in groups below. Built once per chunk by `collect_prelim_hits_for_chunk`, after PAIRPAR
+/// word, in groups below. Built once per chunk by `prelim_chunk_hits`, after PAIRPAR
 /// declines the chunk, with the names there; every field is a shared reference or a `Copy` value.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1597-1602,1625-1634
@@ -149,9 +149,9 @@ pub(super) struct TwoStageScanInputs<'a> {
 /// What the scan writes: the chunk's initial hits, the diagonal table (the array's levels and
 /// lengths, or the hash), the batch of offset pairs, and the debug counters (the subject positions
 /// scanned, the lookup hits, the seeds in the debug window, the hits under the cutoff and the hits
-/// saved). Built once per chunk by `collect_prelim_hits_for_chunk` with `TwoStageScanInputs`, from
+/// saved). Built once per chunk by `prelim_chunk_hits` with `TwoStageScanInputs`, from
 /// its scratch and its counters (references only, the types the scan had as a branch of that
-/// closure); its borrows end with the call.
+/// fn); its borrows end with the call.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1603-1606
 /// (`BlastNaWordFinder`)
@@ -216,14 +216,14 @@ pub(super) struct TwoStageScanState<'s> {
 ///          }
 ///       }
 /// ```
-/// `#[inline(always)]`: the branch of `collect_prelim_hits_for_chunk` that this was stays in that
-/// closure's code (one copy in each instance of `search_query_batch`). Out of line, its
+/// `#[inline(always)]`: the branch of `prelim_chunk_hits` that this was stays in that
+/// fn's code (one copy in each of its two instances, over `UNGAPPED`). Out of line, its
 /// dc-megablast scan loop (LOSAT_X_BNDCONE=0, then inlined in this fn) took another register
 /// allocation and block layout: one more instruction and five executed instructions of
 /// loop-alignment padding per subject byte (+0.84 % for a 3,000-letter query, callgrind, n1).
 /// `on_word` and the other callbacks stay functions of their own, as they were. Their closures no
 /// longer sit in the generic over `UNGAPPED`, so they, and the generic scans called with them, have
-/// one instance for both instances of `search_query_batch` and run out of line: the discontiguous
+/// one instance for both instances of `prelim_chunk_hits` and run out of line: the discontiguous
 /// scan's loop (13.46 M -> 13.39 M instructions for that query) and the LOSAT_X_DCCSR ring's scan
 /// (26.67 M -> 27.04 M for a 600 kb x 300 kb pair).
 #[inline(always)]

@@ -34,7 +34,7 @@ use crate::algorithm::rps_search::volumes::{
     RpsVolumeSet, RpsVolumeSetup,
 };
 use crate::algorithm::tblastx::lookup::{
-    prepare_blosum62_lookup_query_for_word_size, BlastAaLookupTable, QueryContext,
+    prepare_blosum62_lookup_query_for_word_size, QueryContext,
 };
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
@@ -195,22 +195,7 @@ pub(super) fn rps_contexts(
 ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
     let (_, _, contexts) =
         prepare_blosum62_lookup_query_for_word_size(query_frames, args.word_size, false);
-    let table = BlastAaLookupTable {
-        backbone: Vec::new(),
-        overflow: Vec::new(),
-        pv: Vec::new(),
-        frame_bases: Vec::new(),
-        num_contexts: 0,
-        query_length: 0,
-        word_length: args.word_size as i32,
-        alphabet_size: crate::core::blast_util::BLASTAA_SIZE as i32,
-        charsize: 5,
-        mask: 0,
-        longest_chain: 0,
-        threshold: 0,
-        row_max: Vec::new(),
-    };
-    (BlastpRuntimeLookup::Aa(table), contexts)
+    (super::empty_aa_lookup(args.word_size), contexts)
 }
 
 /// The per-run values of the search that `run_resolved_in_pool` computed for blastp.

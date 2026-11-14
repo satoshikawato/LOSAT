@@ -376,6 +376,7 @@ fn run_queries(
 
                     strategy_next: None,
                     call_requests: None,
+                    x_plan_blocks: false,
                 },
                 super::x_lookup_ahead::XAheadBlock::none(),
             );

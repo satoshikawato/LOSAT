@@ -31,6 +31,8 @@ mod blastp_listed_lean;
 mod blastp_lookup_ahead;
 #[path = "../blastp_lookup_flat.rs"]
 mod blastp_lookup_flat;
+#[path = "../blastp_prelim_blocks.rs"]
+mod blastp_prelim_blocks;
 #[path = "../blastp_prelim_compact.rs"]
 mod blastp_prelim_compact;
 #[path = "../blastp_prelim_free.rs"]

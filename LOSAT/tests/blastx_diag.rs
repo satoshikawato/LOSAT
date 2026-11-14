@@ -30,6 +30,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod temp_support;
+use temp_support::TempPath;
+
 /// The switch off: the reference seed loop (the switch is in the strict set).
 const OFF: (&str, &str) = ("LOSAT_X_BXDIAG", "0");
 
@@ -105,7 +108,8 @@ impl Inputs {
         write_fasta(&query, &queries);
         write_fasta(&subject, &proteins);
         let db = dir.join("db");
-        let made = losat(&[])
+        let (mut command, _log) = losat(&[]);
+        let made = command
             .arg("makeblastdb")
             .arg("-in")
             .arg(&subject)
@@ -137,7 +141,7 @@ impl Drop for Inputs {
 /// names a file of its own: a binary built with the `blastx-worker-probe` feature (`cargo test
 /// --all-features`, as in CI) needs that file name as soon as a search has more than one thread,
 /// and it selects nothing.
-fn losat(env: &[(&str, &str)]) -> Command {
+fn losat(env: &[(&str, &str)]) -> (Command, TempPath) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -150,13 +154,16 @@ fn losat(env: &[(&str, &str)]) -> Command {
             command.env_remove(name);
         }
     }
+    let log = TempPath::keep_on_failure(temp_path("worker.log"));
     command
-        .env("LOSAT_BLASTX_WORKER_LOG", temp_path("worker.log"))
+        .env("LOSAT_BLASTX_WORKER_LOG", &log)
         .envs(env.iter().copied());
-    command
+    (command, log)
 }
 
 struct Run {
+    /// The worker log of the search: kept when the test panics, removed with the run otherwise.
+    _log: TempPath,
     stdout: Vec<u8>,
     stderr: String,
     code: Option<i32>,
@@ -174,12 +181,14 @@ impl Run {
 }
 
 fn blastx(args: &[&str], env: &[(&str, &str)]) -> Run {
-    let output = losat(env)
+    let (mut command, log) = losat(env);
+    let output = command
         .arg("blastx")
         .args(args)
         .output()
         .expect("run LOSAT");
     Run {
+        _log: log,
         stdout: output.stdout,
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         code: output.status.code(),

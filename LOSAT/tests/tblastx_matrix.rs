@@ -28,6 +28,9 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
+mod temp_support;
+use temp_support::{Finished, TempFile};
+
 const QUERY: &str = "tests/fasta/outfmt0/tblastx_multi_query.fasta";
 const SUBJECT: &str = "tests/fasta/outfmt0/tblastx_multi_subject.fasta";
 const DB_QUERY: &str = "tests/db_search/xslice_q.fna";
@@ -43,17 +46,24 @@ fn fixture(name: &str) -> Vec<u8> {
     fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
 
-fn run(args: &[&str], threads: &str) -> Output {
+fn run(args: &[&str], threads: &str) -> Finished<Output, TempFile> {
     run_with_stdin(args, threads, b"")
 }
 
 /// LOSAT with `stdin` on a pipe (written, then closed).
-fn run_with_stdin(args: &[&str], threads: &str, stdin: &[u8]) -> Output {
+fn run_with_stdin(args: &[&str], threads: &str, stdin: &[u8]) -> Finished<Output, TempFile> {
     run_with_env(args, threads, stdin, &[])
 }
 
 /// `run_with_stdin` with the variables `envs` set for the run.
-fn run_with_env(args: &[&str], threads: &str, stdin: &[u8], envs: &[(&str, &Path)]) -> Output {
+/// The `Output` stays with the run's worker log (removed when it is dropped, kept when the test
+/// panics).
+fn run_with_env(
+    args: &[&str],
+    threads: &str,
+    stdin: &[u8],
+    envs: &[(&str, &Path)],
+) -> Finished<Output, TempFile> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let name_text = name.to_string_lossy();
@@ -64,10 +74,8 @@ fn run_with_env(args: &[&str], threads: &str, stdin: &[u8], envs: &[(&str, &Path
     for name in ["BATCH_SIZE", "CHUNK_SIZE", "BLASTDB", "BLASTMAT"] {
         command.env_remove(name);
     }
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_tblastx_matrix_worker.log"),
-    );
+    let log = TempFile::keep_on_failure("losat_tblastx_matrix_worker", "worker.log");
+    command.env("LOSAT_BLASTX_WORKER_LOG", &log);
     for (name, value) in envs {
         command.env(name, value);
     }
@@ -87,7 +95,7 @@ fn run_with_env(args: &[&str], threads: &str, stdin: &[u8], envs: &[(&str, &Path
         .expect("stdin")
         .write_all(stdin)
         .expect("write stdin");
-    child.wait_with_output().expect("LOSAT output")
+    Finished::new(child.wait_with_output().expect("LOSAT output"), log)
 }
 
 /// LOSAT prints NCBI's bytes of `case` and exits with `status`, at 1, 4, 8 and 16 threads.

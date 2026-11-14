@@ -5,6 +5,33 @@ use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod temp_support;
+use temp_support::TempPath;
+
+/// The files `<base>.<extension>` of a database that `makeblastdb` wrote, removed when dropped
+/// (kept when the test panics).
+struct DatabaseFiles(PathBuf);
+
+impl Drop for DatabaseFiles {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            return;
+        }
+        // No `unwrap` in a `Drop`: a directory that cannot be read leaves its files.
+        let (Some(name), Some(parent)) = (self.0.file_name(), self.0.parent()) else {
+            return;
+        };
+        let prefix = format!("{}.", name.to_string_lossy());
+        if let Ok(entries) = fs::read_dir(parent) {
+            for entry in entries.flatten() {
+                if entry.file_name().to_string_lossy().starts_with(&prefix) {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
+    }
+}
+
 fn temp_path(stem: &str, extension: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -835,6 +862,7 @@ fn makeblastdb_writes_a_database_and_makedb_is_unknown() {
     )
     .unwrap();
     let base = temp_path("makeblastdb", "db");
+    let _database = DatabaseFiles(base.clone());
     let (input_text, base_text) = (input.to_str().unwrap(), base.to_str().unwrap());
     let output = run_losat(&[
         "makeblastdb",
@@ -905,6 +933,7 @@ fn makeblastdb_parse_seqids_hash_index_and_taxid_map() {
     let map = temp_path("mkdb_parse_map", "txt");
     fs::write(&map, "NP_000001.1 9606\nsecond 10090\n").unwrap();
     let base = temp_path("mkdb_parse", "db");
+    let _database = DatabaseFiles(base.clone());
     let (input_text, map_text, base_text) = (
         input.to_str().unwrap(),
         map.to_str().unwrap(),
@@ -1162,6 +1191,8 @@ fn mt_mode_does_not_change_the_output() {
     fs::write(&protein, format!(">p\n{MT_PROTEIN}\n")).unwrap();
     fs::write(&nucleotide, format!(">n\n{MT_NUCLEOTIDE}\n")).unwrap();
     let (protein, nucleotide) = (protein.to_str().unwrap(), nucleotide.to_str().unwrap());
+    // The worker logs of the runs: removed at the end of the test, kept when it panics.
+    let logs = std::cell::RefCell::new(Vec::new());
     for (program, query, subject) in [
         ("blastn", nucleotide, nucleotide),
         ("blastp", protein, protein),
@@ -1175,7 +1206,9 @@ fn mt_mode_does_not_change_the_output() {
             let mut command = clean_losat_command();
             // A build with the diagnostics feature needs this log for two or more threads.
             if cfg!(feature = "diagnostics") {
-                command.env("LOSAT_BLASTX_WORKER_LOG", temp_path("mt_worker", "log"));
+                let log = TempPath::keep_on_failure(temp_path("mt_worker", "log"));
+                command.env("LOSAT_BLASTX_WORKER_LOG", &log);
+                logs.borrow_mut().push(log);
             }
             command.args(words).output().expect("run LOSAT")
         };

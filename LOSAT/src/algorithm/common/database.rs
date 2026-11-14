@@ -4833,14 +4833,41 @@ mod taxdb_prepass_tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests")
     }
 
+    /// A database and the empty current directory it was opened from (its search path keeps it for
+    /// the files looked for later), which is removed with it.
+    struct Opened {
+        db: SeqDb,
+        cwd: PathBuf,
+    }
+
+    impl std::ops::Deref for Opened {
+        type Target = SeqDb;
+
+        fn deref(&self) -> &SeqDb {
+            &self.db
+        }
+    }
+
+    impl Drop for Opened {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.cwd);
+        }
+    }
+
     /// The database `name` of `tests/fixtures/outfmt16/db` opened with `BLASTDB=taxdb`
     /// (`None`: not set), from an empty current directory.
-    fn database(name: &str, taxdb: Option<&Path>) -> SeqDb {
-        let cwd = std::env::temp_dir().join(format!("losat_prepass_cwd_{}", std::process::id()));
+    fn database(name: &str, taxdb: Option<&Path>) -> Opened {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let cwd = std::env::temp_dir().join(format!(
+            "losat_prepass_cwd_{}_{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
         std::fs::create_dir_all(&cwd).unwrap();
         let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None).unwrap();
         let path = root().join("fixtures/outfmt16/db").join(name);
-        SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap()
+        let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap();
+        Opened { db, cwd }
     }
 
     fn variant(name: &str) -> PathBuf {

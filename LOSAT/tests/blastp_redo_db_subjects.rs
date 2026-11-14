@@ -25,6 +25,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{TempFile, TempPath};
+
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fasta")
@@ -35,15 +38,19 @@ fn fixture(name: &str) -> PathBuf {
 struct Run {
     stdout: Vec<u8>,
     stderr: String,
+    /// The run's worker log, when the test made one: kept until the caller has done with the run,
+    /// and kept on disk when a test panics.
+    _log: Option<TempFile>,
 }
 
-/// A directory of the test `test` (the tests of this file run in parallel).
-fn work_dir(test: &str) -> PathBuf {
+/// A directory of the test `test` (the tests of this file run in parallel), removed with what is
+/// in it when the value is dropped.
+fn work_dir(test: &str) -> TempPath {
     let dir =
         std::env::temp_dir().join(format!("losat-bpredodbsubj-{}-{test}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    TempPath::new(dir)
 }
 
 /// A protein database of the fixture's subject proteome (`MejoMJNV.faa`, 124 sequences), made with
@@ -110,12 +117,15 @@ fn blastp(query: &Path, db: &Path, threads: u32, vars: &[(&str, &str)], outfmt: 
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bpredodbsubj-worker.log"),
-        );
-    }
+    // A worker log of this run when the environment names none: it goes with the `Run`, is removed
+    // when the `Run` is dropped, and is kept when the test panics.
+    let log = std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+        .is_none()
+        .then(|| {
+            let log = TempFile::keep_on_failure("losat-bpredodbsubj-worker", "worker.log");
+            command.env("LOSAT_BLASTX_WORKER_LOG", &log);
+            log
+        });
     let output = command
         .arg("blastp")
         .arg("-query")
@@ -137,6 +147,7 @@ fn blastp(query: &Path, db: &Path, threads: u32, vars: &[(&str, &str)], outfmt: 
     let run = Run {
         stdout: output.stdout,
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        _log: log,
     };
     assert!(
         output.status.success(),

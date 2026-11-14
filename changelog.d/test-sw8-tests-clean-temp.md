@@ -1,0 +1,1 @@
+- Tests no longer leave temporary files behind; worker logs are kept only for failing tests.

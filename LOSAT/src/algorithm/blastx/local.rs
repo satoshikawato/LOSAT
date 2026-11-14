@@ -312,7 +312,15 @@ fn scan_xml_titles(
         .map(|options| options.outfmt)
         .filter(|outfmt| matches!(outfmt, 5 | 13..=16))
         .collect();
-    if structured.is_empty() || batch_size == 0 {
+    // A matrix name that NCBI's BLAST XML report data does not know fails the report data before
+    // any report is written (`blast_xml::xml_matrix_failure`, `native::run_inner`): no title is
+    // checked.
+    if structured.is_empty()
+        || batch_size == 0
+        || resolved
+            .iter()
+            .any(|options| super::blast_xml::xml_matrix_failure(options, subject_set).is_some())
+    {
         return Ok(super::blast_xml::QueryScan::default());
     }
     let holds_back = subject_set && !structured.contains(&5);

@@ -1116,15 +1116,45 @@ pub(super) fn xml2_writer(
     Xml2Writer::with_document(Xml2Document::with_files(kind, delayed, files), params)
 }
 
-/// Writes the documents of every query of `batches` (one query batch) through `document` (BLAST
-/// XML, or the XML2 / JSON documents) to `writer`: the document's header before the first query
-/// of the run, each query's Iteration or report, and nothing else; the end of the document is
-/// `write_epilog`'s. Everything NCBI cannot write is refused before this call's first byte, for
-/// the reports that the document writes: the query titles and messages, the titles of the
-/// subjects with hits (and, with a hold, the whole run's bytes stay in memory, `HeldOutput`). A
-/// run that stops after this batch (`stops`) never writes the `-subject` report of its last
-/// query, which NCBI holds back (`written_queries`). NCBI's messages about the taxonomy database
-/// go to `diagnostics` at the first `Hit` that needs them.
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121
+// ```c++
+//     m_IsBl2Seq = (m_DbName == kEmptyStr ? true : false);
+// ```
+/// Where BLASTX's report of `options.outfmt` stops for a matrix name that NCBI's BLAST XML report
+/// data does not know (`blast_xml::matrix::xml_formatting_failure`): the XML2 and JSON documents of
+/// a search of subject records (`subject_set`: `-subject`, `m_IsBl2Seq`; BLASTX does not iterate)
+/// hold each query's report back. The one decision of the batch whose report fails
+/// (`write_blastx_xml`), of the end of a run of one query (`report::write_epilog`) and of the
+/// reads of the titles before the search that such a run skips (`native::run_inner`,
+/// `local::scan_xml_titles`).
+pub(super) fn xml_matrix_failure(
+    options: &ResolvedOptions,
+    subject_set: bool,
+) -> Option<crate::report::blast_xml::matrix::XmlMatrixFailure> {
+    crate::report::blast_xml::matrix::xml_formatting_failure(
+        [options.outfmt.to_string().as_str()],
+        &options.matrix,
+        subject_set,
+    )
+}
+
+/// NCBI's error for a matrix name that its BLAST XML report data does not know
+/// (`xml_matrix_failure`), which `native::report_error` writes as its engine error
+/// (`BLAST engine error: unsupported score matrix`, exit status 3).
+pub(super) fn xml_matrix_error() -> anyhow::Error {
+    anyhow::anyhow!("unsupported score matrix")
+}
+
+/// Writes the documents of every query of `batches` (one query batch, after the
+/// `queries_before` queries of the batches before it) through `document` (BLAST XML, or the XML2
+/// / JSON documents) to `writer`: the document's header before the first query of the run, each
+/// query's Iteration or report, and nothing else; the end of the document is `write_epilog`'s.
+/// Everything NCBI cannot write is refused before this call's first byte, for the reports that
+/// the document writes: the query titles and messages, the titles of the subjects with hits
+/// (and, with a hold, the whole run's bytes stay in memory, `HeldOutput`). A run that stops after
+/// this batch (`stops`) never writes the `-subject` report of its last query, which NCBI holds
+/// back (`written_queries`). NCBI's messages about the taxonomy database go to `diagnostics` at
+/// the first `Hit` that needs them.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_blastx_xml<W: StructuredXml>(
     writer: &mut impl Write,
@@ -1135,6 +1165,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
+    queries_before: usize,
     stops: bool,
 ) -> Result<()> {
     let gapped_karlin = gapped_karlin(options);
@@ -1147,11 +1178,20 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     //             NCBI_THROW(blast::CBlastException, eInvalidArgument,
     //                         "unsupported score matrix");
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389 (quoted at
+    // `blast_xml::matrix::XmlMatrixFailure`)
     // The formatting table is found by the name as typed (`strcmp`): a lower-case name stops the
-    // report data of the first query (`BLAST engine error:`, exit 3), before any byte of it.
-    // (`native::report_error` writes it as NCBI's engine error.)
+    // report data of the run's first query, or of its second where the report is held
+    // (`xml_matrix_failure`), in the batch of that query (`BLAST engine error:`, exit 3), before
+    // any byte of the reports; a batch before it writes nothing (its reader messages and request
+    // posts are the batch loop's). (`native::report_error` writes it as NCBI's engine error.)
     let Some(positives) = FormattingMatrix::new(&options.matrix) else {
-        anyhow::bail!("unsupported score matrix");
+        if xml_matrix_failure(options, matches!(shown, ShownSubjects::Fasta { .. }))
+            .is_some_and(|failure| failure.fails_in(queries_before..queries_before + queries.len()))
+        {
+            return Err(xml_matrix_error());
+        }
+        return Ok(());
     };
     let (db_name, db_num, db_len) = match shown {
         ShownSubjects::Fasta { .. } => (String::new(), 0, 0),

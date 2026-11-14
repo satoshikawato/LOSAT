@@ -6742,6 +6742,38 @@ fn psiblast_stop_at_pssm_query(
     batches
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121, :196
+// ```c++
+//     m_IsBl2Seq = (m_DbName == kEmptyStr ? true : false);
+//     ...
+//     m_IsIterative = options.IsIterativeSearch();
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:862-866
+// ```c++
+// CBlastOptions::IsIterativeSearch() const{
+//     switch ( GetProgram()) {
+//     	case ePSIBlast :
+//     	case ePSITblastn :
+//     	case eDeltaBlast :
+//     		return true;
+// ```
+/// Where blastp's (and psiblast's) run of the formats of `outputs` stops for a matrix name that
+/// NCBI's BLAST XML report data does not know (`blast_xml::matrix::xml_formatting_failure`): the
+/// XML2 and JSON documents hold each query's report back for a search without a database
+/// (`-subject`, `m_IsBl2Seq`) and for psiblast (`m_IsIterative`). The one decision behind the
+/// search strategy's last request (`search`) and the formats' error (`run_call`).
+fn blastp_xml_matrix_failure(
+    args: &ResolvedBlastpArgs,
+    outputs: &ReportOutputs<'_>,
+    database: bool,
+) -> Option<crate::report::blast_xml::matrix::XmlMatrixFailure> {
+    crate::report::blast_xml::matrix::xml_formatting_failure(
+        outputs.formats.iter().map(|format| format.outfmt),
+        &args.matrix_name,
+        !database || args.app == BlastpApp::Psiblast,
+    )
+}
+
 /// The search of `run_local` and of the CLI, after NCBI's processing of the options and
 /// the reading of the subjects: `Query is Empty!` for records without a query, the query
 /// batch size, the subjects without letters, the XInclude formats (`xinclude`, the CLI's
@@ -7171,18 +7203,17 @@ fn search(
     //             NCBI_THROW(blast::CBlastException, eInvalidArgument,
     //                         "unsupported score matrix");
     // ```
-    // NCBI fails when it formats the first batch's results in BLAST XML with a matrix name that
-    // its XML data does not know ("unsupported score matrix", `run_resolved_in_pool`'s format
-    // loop): the search strategy's file then holds the first batch's request alone (probe 7 of
-    // RG-F1, `-matrix blosum62` with outfmt 5 and 16), whichever call writes it.
+    // NCBI fails when it formats a batch's results in BLAST XML with a matrix name that its XML
+    // data does not know ("unsupported score matrix", `run_resolved_in_pool`'s format loop): the
+    // batch of the run's first searched query, or of its second where the report is held
+    // (`blastp_xml_matrix_failure`); the search strategy's file then holds the requests up to that
+    // batch's (probe 7 of RG-F1, probe K4f of line RG), whichever call writes them. A held report
+    // that fails at the run's end, or a run that stops before, writes every request it makes.
     if let Some(strategy) = args.strategy.as_ref() {
-        if crate::report::blast_xml::matrix::xml_formatting_fails(
-            outputs.formats.iter().map(|format| format.outfmt),
-            &args.matrix_name,
-        ) {
-            if let Some(end) = batches.first_request_end() {
-                strategy.stop_after(end);
-            }
+        if let Some(end) = blastp_xml_matrix_failure(&args, outputs, database.is_some())
+            .and_then(|failure| batches.xml_matrix_request_end(failure))
+        {
+            strategy.stop_after(end);
         }
     }
     let x_plan = x_query_block_plan(
@@ -14886,6 +14917,9 @@ fn run_call(
             })
             .collect()
     };
+    // Where the run's BLAST XML family formats fail for a matrix name that NCBI's XML does not
+    // know (`blastp_xml_matrix_failure`; `None` for a name it knows).
+    let xml_matrix_failure = blastp_xml_matrix_failure(&args, outputs, database.is_some());
     let observer = &mut outputs.observer;
     if let Some(observer) = observer.as_deref_mut() {
         for (q_idx, stats) in query_stats().into_iter().enumerate() {
@@ -14941,8 +14975,8 @@ fn run_call(
     };
     // The search strategy's requests of the call's batches (`-export_search_strategy`): NCBI has
     // written every one of them before it formats them, so they are written here (`CallRequests`;
-    // a matrix name that the XML formats do not know stops them after the run's first batch,
-    // `search`).
+    // a matrix name that the XML formats do not know stops them after the batch whose formatting
+    // fails, `search`).
     if let Some(call) = reports.call_requests {
         call.end_at(query_records.len())?;
     }
@@ -15163,21 +15197,49 @@ fn run_call(
                         return Ok(());
                     }
                     None => {
-                        // The prolog is written before the search (`PrintProlog`); the report
-                        // data's constructor throws for the first query, after the reader's
-                        // messages of its batch and NCBI's posts of the bytes replaced in the
-                        // batch's search strategy request (`query_posts`).
-                        if let Some(kind) = xml2_kind {
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389
+                        // (quoted at `blast_xml::matrix::XmlMatrixFailure`: the XML2 and JSON
+                        // report of a `-subject` or psiblast run is made when the next query's
+                        // results arrive, or in `PrintEpilog`)
+                        // The report data's constructor throws for the run's first searched query,
+                        // or for its second where the report is held (`blastp_xml_matrix_failure`):
+                        // in the call of that query, after the reader's messages of the batches up
+                        // to its own and NCBI's posts of the bytes replaced in their search strategy
+                        // requests (`query_posts`); a call of the queries before it writes those
+                        // and no report. A run of one searched query whose report is held fails at
+                        // its end (the last call, with the epilog), unless the run's stop
+                        // (`QueryBatches::stop`, written by `search`) ends it first. The XML2 and
+                        // JSON prolog is written before the search (`PrintProlog`), once: with the
+                        // run's first call.
+                        let failure = xml_matrix_failure
+                            .expect("an XML format of a matrix name that NCBI's XML does not know");
+                        if let (Some(kind), true) = (xml2_kind, reports.x_prolog) {
                             let mut writer = format.sink.open()?;
                             writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(
                                 kind,
                             ))?;
                             writer.flush()?;
                         }
+                        let first = ranges.searched_base;
+                        let failing = failure
+                            .query()
+                            .checked_sub(first)
+                            .filter(|&query| query < query_records.len());
                         if let Some(warnings) = warnings.as_mut() {
-                            warnings.before_query(0, &mut std::io::sink())?;
+                            for query in 0..failing.map_or(query_records.len(), |query| query + 1) {
+                                warnings.before_query(query, &mut std::io::sink())?;
+                            }
                         }
-                        return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
+                        if failing.is_some()
+                            || (reports.last_call
+                                && reports.epilog
+                                && failure.fails_at_end(first + query_records.len()))
+                        {
+                            return Err(
+                                crate::report::blast_xml::matrix::unsupported_score_matrix(),
+                            );
+                        }
+                        return Ok(());
                     }
                 };
                 let mut writer = format.sink.open()?;

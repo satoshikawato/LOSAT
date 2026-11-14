@@ -1280,12 +1280,22 @@ pub(super) fn render_queries_with(
             subjects,
             shown,
             batches,
+            queries_before,
             stops,
         );
     }
     if let Some(xml2) = xml2 {
         return super::blast_xml::write_blastx_xml(
-            writer, stderr, xml2, options, queries, subjects, shown, batches, stops,
+            writer,
+            stderr,
+            xml2,
+            options,
+            queries,
+            subjects,
+            shown,
+            batches,
+            queries_before,
+            stops,
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
@@ -2026,6 +2036,16 @@ pub(crate) fn write_epilog(
     queries: usize,
     xml2: Option<&mut super::blast_xml::RunXml2>,
 ) -> Result<()> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2204-2212 (quoted at
+    // `blast_xml::matrix::XmlMatrixFailure`)
+    // A run of one query whose XML2 or JSON report is held makes its report data in
+    // `PrintEpilog`: a matrix name that NCBI's XML does not know fails there, before the epilog
+    // (`blast_xml::xml_matrix_failure`).
+    if super::blast_xml::xml_matrix_failure(options, matches!(shown, ShownSubjects::Fasta { .. }))
+        .is_some_and(|failure| failure.fails_at_end(queries))
+    {
+        return Err(super::blast_xml::xml_matrix_error());
+    }
     if options.outfmt == 0 {
         crate::report::pairwise::write_blastx_epilog(
             writer,

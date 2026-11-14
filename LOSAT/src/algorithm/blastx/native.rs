@@ -800,7 +800,15 @@ fn run_inner(
         )
     };
     let mut read_ahead_scopes = None;
-    if let Some(held) = &held {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (quoted at
+    // `blast_xml::write_blastx_xml`)
+    // A matrix name that NCBI's BLAST XML report data does not know fails the report data before
+    // any report is written (`blast_xml::xml_matrix_failure`): NCBI writes no title, so nothing is
+    // checked or held.
+    if let (Some(held), None) = (
+        &held,
+        super::blast_xml::xml_matrix_failure(&options, database.is_none()),
+    ) {
         // A query that is not a regular file (a pipe, `<(...)`, `/dev/stdin` from a pipe, a
         // FIFO) or `-query -` cannot be read a second time: the read before the search would
         // take every byte (DECISIONS 22). Refused before the search.

@@ -98,21 +98,113 @@ pub fn is_structured_xml(outfmt: &str) -> bool {
 //             NCBI_THROW(blast::CBlastException, eInvalidArgument,
 //                         "unsupported score matrix");
 // ```
-/// Whether a protein program's run of the formats `outfmts` with the score matrix `matrix_name`
-/// (as typed) stops when NCBI formats its first result: a BLAST XML family format
-/// (`is_structured_xml`) makes its report data, whose matrix is found by `strcmp` of the name
-/// (`packed_matrix`). The one decision behind the error (`unsupported_score_matrix`) and the
-/// search strategy's stop after the first batch's request (`StrategyExport::stop_after`) of
-/// BLASTP, TBLASTN and TBLASTX.
-pub fn xml_formatting_fails<'a>(
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2392
+// ```c++
+// 	if((m_IsIterative) || (m_IsBl2Seq)) {
+// 		if(m_AccumulatedResults.empty()) {
+// 			...
+// 			m_AccumulatedResults.push_back(res);
+// 			...
+// 		else {
+// 			CConstRef<CSeq_id> query_id = results.GetSeqId();
+// 			if(m_AccumulatedResults[0].GetSeqId()->Match(*query_id)) {
+// 				m_AccumulatedResults.push_back(res);
+// 			}
+// 			else {
+// 				CRef <CBlastSearchQuery> q = m_AccumulatedQueries->GetBlastSearchQuery(0);
+// 				if(m_IsBl2Seq) {
+// 				    CCmdLineBlastXML2ReportData report_data(q, m_AccumulatedResults, m_Options,
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2204-2212
+// ```c++
+// CBlastFormat::PrintEpilog(const blast::CBlastOptions& options)
+// {
+//     if ((m_FormatType == CFormattingArgs::eXml2) || (m_FormatType == CFormattingArgs::eJson) ||
+//         (m_FormatType == CFormattingArgs::eXml2_S) || (m_FormatType == CFormattingArgs::eJson_S)) {
+//     	if(!m_AccumulatedResults.empty()) {
+//     		CRef <CBlastSearchQuery> q = m_AccumulatedQueries->GetBlastSearchQuery(0);
+//     		if(m_IsBl2Seq) {
+//     			CCmdLineBlastXML2ReportData report_data(q, m_AccumulatedResults, m_Options,
+// ```
+/// Where NCBI's run stops when its BLAST XML family report data does not know the matrix name
+/// (`xml_formatting_failure`): the report data, and with it the error, is made where NCBI writes
+/// a query's report (NCBI BLAST+ 2.17.0, probe K/k4f of line RG, 221 runs).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum XmlMatrixFailure {
+    /// BLAST XML (outfmt 5), and the XML2 and JSON documents of a `-db` search of a program that
+    /// does not iterate: each result's report is written as it is formatted, so the batch of the
+    /// run's first searched query fails.
+    FirstQuery,
+    /// The XML2 and JSON documents of a `-subject` search (`m_IsBl2Seq`) or of an iterative
+    /// program (`m_IsIterative`: psiblast, tblastn `-in_pssm`): a query's report is held until a
+    /// result of the next query arrives, so the batch of the run's second searched query fails,
+    /// after its reader messages and search strategy request and before anything of its reports;
+    /// a run of one searched query fails at its end (`PrintEpilog`) instead of writing the
+    /// epilog, unless another error ends it first.
+    SecondQueryOrEnd,
+}
+
+impl XmlMatrixFailure {
+    /// The run's searched query (0-based, in the run's order) whose batch fails as NCBI formats
+    /// it.
+    pub fn query(self) -> usize {
+        match self {
+            Self::FirstQuery => 0,
+            Self::SecondQueryOrEnd => 1,
+        }
+    }
+
+    /// Whether NCBI fails while it formats the batch of the run's searched queries `batch`.
+    pub fn fails_in(self, batch: std::ops::Range<usize>) -> bool {
+        batch.contains(&self.query())
+    }
+
+    /// Whether NCBI fails at the end of a run whose batches searched `searched` queries and
+    /// ended without an error (its epilog makes the held report of the one query).
+    pub fn fails_at_end(self, searched: usize) -> bool {
+        self == Self::SecondQueryOrEnd && searched == 1
+    }
+}
+
+/// Whether and where a protein program's run of the formats `outfmts` with the score matrix
+/// `matrix_name` (as typed) stops in its formats: a BLAST XML family format
+/// (`is_structured_xml`) makes report data, whose matrix is found by `strcmp` of the name
+/// (`packed_matrix`). `holds_back` is NCBI's `m_IsBl2Seq || m_IsIterative`: a `-subject`
+/// search, psiblast, tblastn `-in_pssm`. With several formats (the library), the first to fail
+/// stops the run. The one decision behind the error (`unsupported_score_matrix`) and the search
+/// strategy's last request (`StrategyExport::stop_after`) of BLASTP (psiblast too), TBLASTN,
+/// TBLASTX and BLASTX.
+pub fn xml_formatting_failure<'a>(
     outfmts: impl IntoIterator<Item = &'a str>,
     matrix_name: &str,
-) -> bool {
-    packed_matrix(matrix_name).is_none() && outfmts.into_iter().any(is_structured_xml)
+    holds_back: bool,
+) -> Option<XmlMatrixFailure> {
+    if packed_matrix(matrix_name).is_some() {
+        return None;
+    }
+    outfmts
+        .into_iter()
+        .filter(|outfmt| is_structured_xml(outfmt))
+        .map(|outfmt| {
+            if holds_back && !is_blast_xml(outfmt) {
+                XmlMatrixFailure::SecondQueryOrEnd
+            } else {
+                XmlMatrixFailure::FirstQuery
+            }
+        })
+        .min_by_key(|failure| failure.query())
+}
+
+/// Whether `outfmt` is BLAST XML (5), whose report is never held (blast_format.cpp:707-743).
+fn is_blast_xml(outfmt: &str) -> bool {
+    crate::blastinput::app::parse_formatting_string(outfmt)
+        .ok()
+        .and_then(|choice| crate::blastinput::app::ReportFormat::from_number(choice.number))
+        == Some(crate::blastinput::app::ReportFormat::Xml)
 }
 
 /// NCBI's error when it formats a result in BLAST XML with a score matrix that its XML data does
-/// not know (`xml_formatting_fails`): `CATCH_ALL`'s engine error, exit status 3.
+/// not know (`xml_formatting_failure`): `CATCH_ALL`'s engine error, exit status 3.
 pub fn unsupported_score_matrix() -> anyhow::Error {
     crate::cli::NativeError {
         exit: 3,
@@ -168,20 +260,66 @@ mod tests {
     fn the_xml_formats_fail_for_a_name_ncbi_does_not_spell() {
         for outfmt in ["5", "13", "14", "15", "16", " 5"] {
             assert!(is_structured_xml(outfmt), "{outfmt}");
-            assert!(xml_formatting_fails([outfmt], "blosum62"), "{outfmt}");
-            assert!(!xml_formatting_fails([outfmt], "BLOSUM62"), "{outfmt}");
+            for holds_back in [false, true] {
+                let failure = xml_formatting_failure([outfmt], "blosum62", holds_back);
+                let held = holds_back && outfmt.trim() != "5";
+                assert_eq!(
+                    failure,
+                    Some(if held {
+                        XmlMatrixFailure::SecondQueryOrEnd
+                    } else {
+                        XmlMatrixFailure::FirstQuery
+                    }),
+                    "{outfmt} {holds_back}"
+                );
+                assert_eq!(
+                    xml_formatting_failure([outfmt], "BLOSUM62", holds_back),
+                    None,
+                    "{outfmt}"
+                );
+            }
         }
         for outfmt in ["0", "6", "7 qseqid", "8", "11", "12", "17", "abc"] {
             assert!(!is_structured_xml(outfmt), "{outfmt}");
-            assert!(!xml_formatting_fails([outfmt], "blosum62"), "{outfmt}");
+            assert_eq!(
+                xml_formatting_failure([outfmt], "blosum62", true),
+                None,
+                "{outfmt}"
+            );
         }
-        assert!(xml_formatting_fails(["6", "16"], "blosum62"));
+        assert_eq!(
+            xml_formatting_failure(["6", "16"], "blosum62", false),
+            Some(XmlMatrixFailure::FirstQuery)
+        );
+        // Several formats: the first to fail stops the run.
+        assert_eq!(
+            xml_formatting_failure(["16", "15"], "blosum62", true),
+            Some(XmlMatrixFailure::SecondQueryOrEnd)
+        );
+        assert_eq!(
+            xml_formatting_failure(["16", "5"], "blosum62", true),
+            Some(XmlMatrixFailure::FirstQuery)
+        );
         let error = unsupported_score_matrix();
         let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
         assert_eq!(
             (native.exit, native.message.as_str()),
             (3, "BLAST engine error: unsupported score matrix\n")
         );
+    }
+
+    /// Where the run stops (probe K/k4f, NCBI 2.17.0): the batch of the first searched query, or
+    /// of the second when the report is held (`-subject` 13-16: 3 batches of one query wrote
+    /// the requests of Query_1 and Query_2), or the end of a run of one query.
+    #[test]
+    fn a_held_report_fails_with_the_second_query_or_at_the_end() {
+        let first = XmlMatrixFailure::FirstQuery;
+        let held = XmlMatrixFailure::SecondQueryOrEnd;
+        assert!(first.fails_in(0..1) && first.fails_in(0..3) && !first.fails_in(1..2));
+        assert!(!held.fails_in(0..1) && held.fails_in(1..2) && held.fails_in(0..3));
+        assert!(!held.fails_in(2..3) && !held.fails_in(1..1));
+        assert!(held.fails_at_end(1) && !held.fails_at_end(0) && !held.fails_at_end(2));
+        assert!(!first.fails_at_end(1));
     }
 
     #[test]

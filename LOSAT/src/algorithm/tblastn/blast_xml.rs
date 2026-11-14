@@ -132,26 +132,6 @@ pub(super) struct PreparedXml {
     taxa_notes: crate::algorithm::common::database::TaxdbNotes,
 }
 
-/// NCBI's error for a matrix that its formatting table does not know, thrown by the report
-/// data's constructor when a query is formatted.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218
-/// ```c++
-///     else {
-///         string prog_name = Blast_ProgramNameFromType(
-///                                            m_Options.GetProgramType());
-///         if (prog_name != "blastn" && prog_name != "megablast") {
-///             NCBI_THROW(blast::CBlastException, eInvalidArgument,
-///                         "unsupported score matrix");
-/// ```
-/// (the matrix table is made from the name as typed, as BLASTP's.)
-pub(super) fn unsupported_matrix(matrix_name: &str, has_queries: bool) -> Result<()> {
-    if FormattingMatrix::new(matrix_name).is_none() && has_queries {
-        return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
-    }
-    Ok(())
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
 // ```c++
 //     // find the first valid context corresponding to this query
@@ -215,7 +195,8 @@ pub(super) fn prepare(
             && parameters.lengths.len() >= query_records.len(),
         "TBLASTN query statistics count mismatch"
     );
-    unsupported_matrix(matrix_name, !query_records.is_empty())?;
+    // A matrix name that the formatting table does not know stops a run with queries before its
+    // reports (`stage_e_report::xml_matrix_failure`, `render`): here only a run without a query.
     let positives = FormattingMatrix::new(matrix_name);
     let stats = query_stats(parameters, query_validity, scoring);
     let has_hits = |hitlist: &KappaResultHitList| {
@@ -427,7 +408,7 @@ impl PreparedXml {
         writer.write_all(&buf)?;
         buf.clear();
         let Some(positives) = &self.positives else {
-            // A run without a query (with one, `prepare` refuses) and a matrix the formatting
+            // A run without a query (with one, `render` stops before) and a matrix the formatting
             // table does not know (`-matrix blosum62`: TBLASTN runs it, the table does not):
             // NCBI never builds the table and writes the epilog alone (for outfmt 5 its end of
             // line).

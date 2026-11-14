@@ -338,19 +338,35 @@ fn blastp_query_blocks_do_not_change_the_strategy_file() {
             check(case, &[("LOSAT_X_BPQBLOCK", "0")], threads, "qblock0");
         }
     }
-    // NCBI fails when it formats the first batch in BLAST XML: the file holds the first batch's
-    // request alone, in or out of the blocks.
-    let xml = cases
-        .iter()
-        .find(|case| case.name == "blastp.sub.xmlmatrix.batches")
-        .expect("row blastp.sub.xmlmatrix.batches");
-    for block in ["1", "0"] {
-        check(
-            xml,
-            &[("LOSAT_X_BPQBLOCK", block)],
-            "1",
-            &format!("xmlqblock{block}"),
-        );
+    // NCBI fails when it formats the batch of the first query in BLAST XML, or of the second query
+    // in a `-subject` XML2 document, which holds each report back (probe K4f of line RG): the file
+    // holds the requests up to that batch's, in or out of the blocks. With blocks of one batch the
+    // XML2 run's failure comes in the second block's call, after a first call that writes the
+    // prolog and the first batch's posts alone.
+    for name in [
+        "blastp.sub.xmlmatrix.batches",
+        "blastp.sub.xmlmatrix.batches.f16",
+    ] {
+        let xml = cases
+            .iter()
+            .find(|case| case.name == name)
+            .unwrap_or_else(|| panic!("row {name}"));
+        for block in ["1", "0"] {
+            let reach = reach_support::Reach::new("strategy_bp_xml");
+            check(
+                xml,
+                &[("LOSAT_X_BPQBLOCK", block), reach.var()],
+                "1",
+                &format!("xmlqblock{block}"),
+            );
+            if block == "1" && name.ends_with(".f16") {
+                let sides = reach.sides("LOSAT_X_BPQBLOCK");
+                assert!(
+                    sides.0,
+                    "{name}: LOSAT_X_BPQBLOCK did not take the block search: {sides:?}"
+                );
+            }
+        }
     }
 }
 

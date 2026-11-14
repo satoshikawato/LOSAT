@@ -236,7 +236,7 @@ pub(crate) struct Reader<S: AsnSource> {
     /// objistr.cpp:1854-1895, `eFNP_ReplaceAndWarn`, the default of `SERIAL_WRONG_CHARS_READ`),
     /// which a reader that sets this does not reproduce.
     visible_only: bool,
-    /// Whether the refusals of the lexical layer (a REAL or a string that LOSAT does not read)
+    /// Whether the refusals of the lexical layer (a string that LOSAT does not read, above)
     /// are noted in `refusal` and the reading goes on (a reader that must know whether NCBI's
     /// reader would read the whole object before it refuses), rather than returned at once.
     defer_refusals: bool,

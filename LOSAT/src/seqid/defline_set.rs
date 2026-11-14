@@ -1391,11 +1391,21 @@ fn object_id_match(a: &ObjectId, b: &ObjectId) -> bool {
 fn object_id_number(tag: &ObjectId) -> Option<i64> {
     match tag {
         ObjectId::Id(id) => Some(i64::from(*id)),
-        ObjectId::Str(text) => match crate::ncbi_str::string_to_int8(text, 0).ok()? {
-            0 => (text.len() == 1).then_some(0),
-            value if value > 0 => (!matches!(text[0], b'0' | b'+')).then_some(value),
-            value => (text[1] != b'0').then_some(value),
-        },
+        ObjectId::Str(text) => {
+            // `StringToInt8` with no flags fails at a first byte other than a digit or a sign
+            // (no spaces): such a text is `e_Str` without the conversion and its exception.
+            if !text
+                .first()
+                .is_some_and(|&c| c.is_ascii_digit() || c == b'+' || c == b'-')
+            {
+                return None;
+            }
+            match crate::ncbi_str::string_to_int8(text, 0).ok()? {
+                0 => (text.len() == 1).then_some(0),
+                value if value > 0 => (!matches!(text[0], b'0' | b'+')).then_some(value),
+                value => (text[1] != b'0').then_some(value),
+            }
+        }
     }
 }
 

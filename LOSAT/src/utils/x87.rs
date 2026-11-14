@@ -174,7 +174,7 @@ impl X87 {
         product
     }
 
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1057-1059, 1159-1161, 1198-1200
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1056-1057, 1159-1161, 1206-1207
     // ```c++
     //                 second_mul *= NCBI_CONST_LONGDOUBLE(10.);
     //                 third = third * NCBI_CONST_LONGDOUBLE(10.) + c;
@@ -230,7 +230,7 @@ impl X87 {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1057-1059, 1159-1161
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1057, 1159-1161
     // ```c++
     //                 third = third * NCBI_CONST_LONGDOUBLE(10.) + c;
     //     ...

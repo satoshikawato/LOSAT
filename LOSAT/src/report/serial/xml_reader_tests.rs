@@ -206,6 +206,10 @@ fn numbers() {
         );
     }
     assert_eq!(real("1e999"), Ok(Some(f64::MAX)));
+    // An exponent that overflows NCBI's `int` (undefined behaviour; NCBI's wrapped exponent gives
+    // DBL_MAX) in LOSAT's widened arithmetic: DBL_MIN with `fDecimalPosixFinite`
+    // (PD-LOSAT-NCBI-DEFECTS exception 11).
+    assert_eq!(real("1.55e-2147483647"), Ok(Some(f64::MIN_POSITIVE)));
     assert!(fails(real("1e5x")));
     assert!(fails(real("1 2")));
     let big = |text: &str| {

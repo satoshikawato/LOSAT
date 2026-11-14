@@ -150,12 +150,13 @@ pub(crate) fn string_to_double(s: &[u8]) -> Result<f64, NcbiException> {
 //         }
 //     }
 // ```
-// `StringToDoublePosix` reads further than glibc's `strtod` only for a decimal mantissa followed
-// by an `e` or `E` that ends the text (`1e`, `2.5E`: it keeps the mark when nothing follows it and
-// steps back to it before a sign or another byte; an exponent with digits `strtod` reads as
-// well; a comma is never its decimal point; its `inf` and `nan` end where `strtod`'s do or
-// before). Its `errno` (`EINVAL` without digits, `ERANGE`) never turns a number of `strtod` into
-// an error: it is `EINVAL` only where `strtod` reads nothing either.
+// `StringToDoublePosix` reads further than glibc's `strtod` for a decimal mantissa followed by an
+// `e` or `E` that ends the text (`1e`, `2.5E`: it keeps the mark when nothing follows it and steps
+// back to it before a sign or another byte; an exponent with digits `strtod` reads as well), and
+// for an `inf` after a dot (`.inf`, `-.Infinity`: its `inf` is read after a dot, its `nan` is not;
+// `strtod` reads neither). A comma is never its decimal point; its other `inf` and its `nan` end
+// where `strtod`'s do or before. Its `errno` (`EINVAL` without digits, `ERANGE`) never turns a
+// number of `strtod` into an error: it is `EINVAL` only where `strtod` reads nothing either.
 /// `NStr::StringToDouble(str, NStr::fDecimalPosixOrLocal)`: as [`string_to_double`], but a comma
 /// passes the check of the first byte (no number then starts there, and the error is that of
 /// no number), and NCBI's own reader `StringToDoublePosix` ([`string_to_double_posix`]) reads the
@@ -200,6 +201,20 @@ pub(crate) struct PosixDouble {
 /// `-nan`; O2 `a_nan`, an archive's E-value threshold `NOT-A-NUMBER`; O1 `s_doc2nan`, a kept
 /// `Hsp_evalue` `nan`: `-nan` on the SESSION and DOMAINS lines). `StringToDoublePosix` gives it
 /// for `nan` whatever the sign before it.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1082-1087
+// ```c++
+//                 if ( !dot && (c == 'n' || c == 'N') &&
+//                      NStr::strncasecmp(ptr,"nan",3)==0) {
+//                     if (endptr) {
+//                         *endptr = (char*)(ptr+3);
+//                     }
+//                     return HUGE_VAL/HUGE_VAL; /* NCBI_FAKE_WARNING */
+// ```
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:810-811
+// ```c++
+//         } else if (NStr::strncasecmp(tmp.data(),"NOT-A-NUMBER", 12) == 0) {
+// 	    return HUGE_VAL/HUGE_VAL; /* NCBI_FAKE_WARNING */
+// ```
 pub(crate) const NCBI_NAN: f64 = f64::from_bits(0xfff8_0000_0000_0000);
 
 /// The x87 `long double` constant `1e<n>L` of `StringToDoublePosix` (`NCBI_CONST_LONGDOUBLE`):
@@ -477,13 +492,15 @@ fn long_double_pow10(n: i64) -> X87 {
 /// it). The `long double` arithmetic of NCBI's x86-64 build is the x87 unit's (`X87`, rounded to
 /// 64 bits each time); a mantissa of more than 18 digits goes through `third` and `second_mul`,
 /// whose x87 values pass the largest 80-bit value from some 4,900 digits on and become the
-/// infinity (`None` here). The `errno` it sets is not kept: NCBI's callers do not read it
-/// (`string_to_double_posix_or_local`, `CObjectIStreamAsn::ReadDouble`).
+/// infinity (`None` here). The `errno` it sets is not kept: no result depends on it
+/// (`string_to_double_posix_or_local` reads it, where it is `EINVAL` only if `strtod` read nothing
+/// too; `CObjectIStreamAsn::ReadDouble` and `CObjectIStreamXml::ReadDouble` do not).
 ///
 /// NCBI's `int` counters and exponent (`digits`, `dot_position`, `expvalue`, `exponent`) are
 /// `i64` here, and `expvalue * 10 + digit` and `exponent ± expvalue` saturate at its ends: where
 /// NCBI's `int` overflows (a signed overflow, undefined in C++; NCBI's corelib wraps
-/// `1.55e-2147483647`'s exponent to 2147483647 and gives the infinity), LOSAT computes the
+/// `1.55e-2147483647`'s exponent to 2147483647 and gives the infinity, `DBL_MAX` with
+/// `fDecimalPosixFinite`; PD-LOSAT-NCBI-DEFECTS exception 11), LOSAT computes the
 /// exponent without the wrap, as the Owner's rule of 2026-10-10 has it for NCBI's signed
 /// overflows (OWNER_DECISIONS 2026-10-10, NCBI parity DECISIONS 17 of 2026-10-22
 /// 「広い型になおしましょう」): `1.55e-2147483647` is 0 (`DBL_MIN` with `fDecimalPosixFinite`). Every
@@ -648,12 +665,18 @@ pub(crate) fn string_to_double_posix(text: &[u8], finite: bool) -> PosixDouble {
             };
         }
     }
-    // `(long double)first * first_mul + second` is exact (below 10^18 < 2^64).
+    // `(long double)first * first_mul + second` is exact (below 10^18 < 2^64). Without digits
+    // after the 18th (`digits <= 18`), `second_mul` is 1 and `third` 0, so NCBI's `* second_mul +
+    // third` is exact and is skipped.
     let mut ret = if first_mul > 1 {
         let integer = X87::from_u64(u64::from(first) * u64::from(first_mul) + u64::from(second));
-        second_mul
-            .and_then(|mul| integer.checked_mul(mul))
-            .and_then(|ret| third.and_then(|third| ret.checked_add(third)))
+        if digits <= 18 {
+            Some(integer)
+        } else {
+            second_mul
+                .and_then(|mul| integer.checked_mul(mul))
+                .and_then(|ret| third.and_then(|third| ret.checked_add(third)))
+        }
     } else {
         Some(X87::from_u32(first))
     };

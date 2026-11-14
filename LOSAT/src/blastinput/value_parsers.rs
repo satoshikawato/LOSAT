@@ -217,8 +217,8 @@ pub fn ncbi_int8(value: &str) -> Result<i64, String> {
 /// fDecimalPosixOrLocal)` (`ncbi_str::string_to_double_posix_or_local`): the first byte is a
 /// digit, a point, a comma or a sign, glibc's `strtod` reads the number (decimal, hexadecimal,
 /// the infinities, NaN with its sign and `n-char-sequence`) or NCBI's own `StringToDoublePosix`
-/// where it reads further (a mantissa that ends in `e` or `E`, in x87 extended precision), and
-/// the number ends the value. LOSAT's message for NCBI's conversion error: "expected a number".
+/// where it reads further (a mantissa that ends in `e` or `E`, in x87 extended precision, and an
+/// `inf` after a point, `.inf`), and the number ends the value. LOSAT's message for NCBI's conversion error: "expected a number".
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:460-469
 /// ```c++
@@ -1164,6 +1164,9 @@ mod tests {
             // the infinities, and NaN with glibc's sign and payload
             ("1e400", 0x7ff0_0000_0000_0000),
             ("+Infinity", 0x7ff0_0000_0000_0000),
+            // `StringToDoublePosix` reads an `inf` after a point, which `strtod` does not
+            (".inf", 0x7ff0_0000_0000_0000),
+            ("-.Infinity", 0xfff0_0000_0000_0000),
             ("-nan", 0xfff8_0000_0000_0000),
             ("-nan(1)", 0xfff8_0000_0000_0001),
             ("+nan(5)", 0x7ff8_0000_0000_0005),

@@ -131,13 +131,18 @@ fn refusals_wait_for_the_whole_object() {
     assert!(read_all(then_bad.as_bytes()).is_empty());
     // REALs that LOSAT once refused are read (line SW, SW8): a mantissa of more than 18 digits,
     // as NCBI reads it, and an exponent that overflows NCBI's `int` (undefined behaviour), in
-    // LOSAT's widened arithmetic (0, which the word form's `fDecimalPosixFinite` makes DBL_MIN).
+    // LOSAT's widened arithmetic (0, which the word form's `fDecimalPosixFinite` makes DBL_MIN;
+    // NCBI's wrapped exponent gives DBL_MAX, PD-LOSAT-NCBI-DEFECTS exception 11).
     for real in ["{ 5047423181640891234, 10, -61 }", "1.55e-2147483647"] {
         let read_real = text.replace("{ 504742318164089, 10, -57 }", real);
         assert_ne!(read_real, text);
         let read = read_all(read_real.as_bytes());
         assert_eq!(read.len(), 1);
-        assert!(read[0].is_ok(), "{real}");
+        let archive = read[0].as_ref().unwrap_or_else(|e| panic!("{real}: {e}"));
+        let e_value = archive.results.alignments.as_ref().unwrap()[0].e_value;
+        if real == "1.55e-2147483647" {
+            assert_eq!(e_value, Some(f64::MIN_POSITIVE));
+        }
     }
 }
 

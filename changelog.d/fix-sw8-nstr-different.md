@@ -12,7 +12,8 @@
   NCBI's value; it was refused.
 - A `-in_pssm` file (psiblast, tblastn) or a rpsbproc archive or XML input with a REAL of more than 18 significant digits is read
   with NCBI's value, and one whose exponent overflows NCBI's 32-bit arithmetic (`1.55e-2147483647`, undefined in
-  NCBI) with the value of the exact exponent (0, or the smallest normal double where NCBI clamps); both were refused.
+  NCBI) with the value of the exact exponent (the smallest normal double, where NCBI's wrapped exponent gives the
+  largest double); both were refused.
 - `-in_pssm` (psiblast, tblastn) counts a vertical tab as white space, as NCBI does: an ASN.1 text PSSM with vertical
   tabs in a comment is searched (it got "Unsupported format for PSSM"), and an XML file that begins with a vertical
   tab is refused as an XML PSSM, as one without it is.

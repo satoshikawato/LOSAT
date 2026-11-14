@@ -14,7 +14,8 @@ pub struct LinkHspCutoffs {
     pub cutoff_big_gap: i32,
     /// Gap probability (may be set to 0 for small search spaces)
     pub gap_prob: f64,
-    /// Whether to ignore small gaps (when gap_prob=0)
+    /// Whether to ignore small gaps: `cutoff_small_gap == 0` (NCBI link_hsps.c:495). In TBLASTX
+    /// that is the search space of at most 8 windows, where gap_prob is 0 too.
     pub ignore_small_gaps: bool,
 }
 

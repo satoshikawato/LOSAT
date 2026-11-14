@@ -1862,11 +1862,13 @@ impl<K: LinkKey> LinkRounds<'_, K> {
             if let Some(bi) = best[0] {
                 addback(tree, 0, bi, stats);
                 addback_hsps.push(bi as u32);
-                let k = num[0][bi] as usize;
-                let divisor = gap_decay_divisor(gap_decay_rate, k);
+                // NCBI's Int2 count: a wrapped (negative) count is not "> 1" (link_hsps.c:918),
+                // and BLAST_GapDecayDivisor takes it as an unsigned.
+                let k = num[0][bi];
+                let divisor = gap_decay_divisor(gap_decay_rate, k as usize);
                 prob[0] = small_gap_sum_e(
                     WINDOW_SIZE,
-                    k as i16,
+                    k,
                     xsum[0][bi],
                     eff_query_len as i32,
                     eff_subject_len as i32,
@@ -1882,10 +1884,10 @@ impl<K: LinkKey> LinkRounds<'_, K> {
                 }
             }
             if let Some(bi) = best[1] {
-                let k = num[1][bi] as usize;
-                let divisor = gap_decay_divisor(gap_decay_rate, k);
+                let k = num[1][bi];
+                let divisor = gap_decay_divisor(gap_decay_rate, k as usize);
                 prob[1] = ncbi_large_gap_sum_e(
-                    k as i16,
+                    k,
                     xsum[1][bi],
                     eff_query_len as i32,
                     eff_subject_len as i32,
@@ -1912,27 +1914,20 @@ impl<K: LinkKey> LinkRounds<'_, K> {
             // ...
             // ordering_method = eLinkLargeGaps;
             // ```
-            // Only large gaps are considered when cutoff[0] == 0.
+            // Only large gaps are considered when cutoff[0] == 0, and their E-value is not
+            // divided by `1 - gap_prob`.
             addback(tree, 1, bi, stats);
             addback_hsps.push(bi as u32);
-            let k = num[1][bi] as usize;
-            let divisor = gap_decay_divisor(gap_decay_rate, k);
+            let k = num[1][bi];
+            let divisor = gap_decay_divisor(gap_decay_rate, k as usize);
             prob[1] = ncbi_large_gap_sum_e(
-                k as i16,
+                k,
                 xsum[1][bi],
                 eff_query_len as i32,
                 eff_subject_len as i32,
                 eff_search_space,
                 divisor,
             );
-            if k > 1 {
-                let denom = 1.0 - gap_prob;
-                if denom == 0.0 || (prob[1] / denom) > int4_max {
-                    prob[1] = int4_max;
-                } else {
-                    prob[1] /= denom;
-                }
-            }
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:936-937

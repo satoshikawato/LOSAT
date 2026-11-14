@@ -10,8 +10,17 @@ use super::params::LinkHspCutoffs;
 
 /// `CalculateLinkHSPCutoffs` of a TBLASTX search with one subject (`calculate_link_hsp_cutoffs`
 /// with a translated subject: the subject's and the database's lengths in nucleotides
-/// are divided by 3). `ignore_small_gaps` is the branch of a search space of at most 8 windows,
-/// the one that sets `gap_prob` to 0.
+/// are divided by 3). `ignore_small_gaps` is NCBI's `cutoff[0] == 0` (link_hsps.c:495), the rule
+/// of `core::link_hsps`. TBLASTX's small-gap cutoff is 0 only in the branch of a search space of at
+/// most 8 windows, the one that sets `gap_prob` to 0: otherwise it is at least `cutoff_score_min`,
+/// the smallest context cutoff `MIN(e-value cutoff, gap_trigger, cutoff_score_max)`, each at least
+/// 1 (BLAST_Cutoffs raises a cutoff from 1 only, blast_stat.c:4090-4130; the 22-bit gap trigger
+/// of TBLASTX's matrices is positive).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:495
+/// ```c
+///    ignore_small_gaps = (cutoff[0] == 0);
+/// ```
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
 /// ```c
@@ -40,7 +49,7 @@ pub fn calculate_link_hsp_cutoffs_ncbi(
         cutoff_small_gap: link.cutoff_small_gap,
         cutoff_big_gap: link.cutoff_big_gap,
         gap_prob: link.gap_prob,
-        ignore_small_gaps: link.gap_prob == 0.0,
+        ignore_small_gaps: link.cutoff_small_gap == 0,
     };
     // NCBI computes these values without unconditional stderr diagnostics.
     if crate::utils::xenv::debug_cutoffs_is_some() && subject_len_nucl > 600_000 {

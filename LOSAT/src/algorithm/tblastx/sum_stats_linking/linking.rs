@@ -1841,11 +1841,10 @@ fn link_hsp_group_ncbi(
     // NCBI: path_changed tracks whether any removed HSP had linked_to > 0
     // If path_changed == 0, we can skip chain validation entirely
     let mut path_changed = true;
-    // NCBI `link_hsps.c` sets `gap_prob = link_hsp_params->gap_prob;` regardless
-    // of `ignore_small_gaps` (cutoff[0]==0). The adjustment by `1-gap_prob`
-    // for INDEX 1 is still applied when `num>1`.
-    // NOTE: gap_prob is now passed in from calculate_link_hsp_cutoffs_ncbi
-    // and may be 0 for small search spaces (NCBI line 1076)
+    // NCBI `link_hsps.c` sets `gap_prob = link_hsp_params->gap_prob;` (:468) regardless of
+    // `ignore_small_gaps` (cutoff[0]==0, :495). With small gaps the E-values of sets of more than
+    // one HSP are divided by `gap_prob` and `1-gap_prob` (:918-935); with large gaps only they are
+    // not divided (:939-952). gap_prob is 0 for small search spaces (blast_parameters.c:1081).
 
     while remaining > 0 {
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:603-652
@@ -2118,12 +2117,20 @@ fn link_hsp_group_ncbi(
                         + (i_score as f64) * query_contexts[ctx_idx].karlin_params.lambda
                         - log_k_by_ctx[ctx_idx];
 
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:756
+                    // ```c
+                    //                     H->hsp_link.num[index] = H_hsp_num+1;
+                    // ```
+                    // `H_hsp_num` is an Int4 and `num` an Int2: the store keeps the low 16 bits, so
+                    // the count of a set of more than 32,767 HSPs wraps (DECISIONS Q3c-1, Q3e).
+                    let new_num = h_num.wrapping_add(1);
+
                     // is_target_hsp is already defined at line 1085, reuse it here
                     if is_target_hsp {
                         eprintln!(
                             "[DEBUG_CHAINING] INDEX 0 update: new_sum={}, num={}, link={}",
                             new_sum,
-                            h_num + 1,
+                            new_num,
                             if h_link != SENTINEL_IDX {
                                 h_link
                             } else {
@@ -2134,7 +2141,7 @@ fn link_hsp_group_ncbi(
 
                     // NCBI lines 755-758: Update sum, num, link, lh_helper
                     pool_hsp_links[i].sum[0] = new_sum;
-                    pool_hsp_links[i].num[0] = h_num + 1;
+                    pool_hsp_links[i].num[0] = new_num;
                     pool_hsp_links[i].link[0] = h_link;
                     pool_lh_helpers[h_lh_idx].sum[0] = new_sum;
 
@@ -2300,13 +2307,19 @@ fn link_hsp_group_ncbi(
                 let new_xsum = h_xsum
                     + (i_score as f64) * query_contexts[ctx_idx].karlin_params.lambda
                     - log_k_by_ctx[ctx_idx];
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:871
+                // ```c
+                //                  H->hsp_link.num[index] = H_hsp_num+1;
+                // ```
+                // The Int4 sum stored into the Int2 count wraps, as at index 0.
+                let new_num = h_num.wrapping_add(1);
 
                 // is_target_hsp is already defined at line 1218, reuse it here
                 if is_target_hsp {
                     eprintln!(
                         "[DEBUG_CHAINING] INDEX 1 update: new_sum={}, num={}, link={}",
                         new_sum,
-                        h_num + 1,
+                        new_num,
                         if h_link != SENTINEL_IDX {
                             h_link
                         } else {
@@ -2317,7 +2330,7 @@ fn link_hsp_group_ncbi(
 
                 // NCBI lines 870-873: Update sum, num, link, lh_helper
                 pool_hsp_links[i].sum[1] = new_sum;
-                pool_hsp_links[i].num[1] = h_num + 1;
+                pool_hsp_links[i].num[1] = new_num;
                 pool_hsp_links[i].link[1] = h_link;
                 pool_lh_helpers[h_lh_idx].sum[1] = new_sum;
 
@@ -2392,12 +2405,14 @@ fn link_hsp_group_ncbi(
                 // Mirror the persistent addback even if another chain is selected.
                 maximum_tree.update(bi, DualMaximum::active(bi, pool_hsp_links[bi].sum));
 
-                let num = pool_hsp_links[bi].num[0] as usize;
+                // The count is NCBI's Int2: a wrapped (negative) count is not "> 1"
+                // (link_hsps.c:918), and BLAST_GapDecayDivisor takes it as an unsigned.
+                let num = pool_hsp_links[bi].num[0];
                 let xsum = pool_hsp_links[bi].xsum[0];
-                let divisor = gap_decay_divisor(gap_decay_rate, num);
+                let divisor = gap_decay_divisor(gap_decay_rate, num as usize);
                 prob[0] = small_gap_sum_e(
                     WINDOW_SIZE,
-                    num as i16,
+                    num,
                     xsum,
                     eff_query_len as i32,
                     eff_subject_len as i32,
@@ -2419,11 +2434,11 @@ fn link_hsp_group_ncbi(
 
             // NCBI lines 924-935: Also compute prob[1] for large gaps when small gaps enabled
             if let Some(bi) = best[1] {
-                let num = pool_hsp_links[bi].num[1] as usize;
+                let num = pool_hsp_links[bi].num[1];
                 let xsum = pool_hsp_links[bi].xsum[1];
-                let divisor = gap_decay_divisor(gap_decay_rate, num);
+                let divisor = gap_decay_divisor(gap_decay_rate, num as usize);
                 prob[1] = ncbi_large_gap_sum_e(
-                    num as i16,
+                    num,
                     xsum,
                     eff_query_len as i32,
                     eff_subject_len as i32,
@@ -2440,35 +2455,42 @@ fn link_hsp_group_ncbi(
                 }
             }
         } else {
-            // NCBI lines 939-952: Only consider large gaps
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:939-952
+            // ```c
+            //          else
+            //          {
+            //             /* We only consider the case of big gaps. */
+            //             best[1]->hsp_link.sum[1] +=
+            //                (best[1]->hsp_link.num[1])*cutoff[1];
+            //
+            //             prob[1] = BLAST_LargeGapSumE(
+            //                          best[1]->hsp_link.num[1],
+            //                          best[1]->hsp_link.xsum[1],
+            //                          query_length, subject_length,
+            //                          query_info->contexts[query_context].eff_searchsp,
+            //                          BLAST_GapDecayDivisor(gap_decay_rate,
+            //                                               best[1]->hsp_link.num[1]));
+            //             ordering_method = eLinkLargeGaps;
+            //          }
+            // ```
+            // Only large gaps: the E-value is not divided by `1 - gap_prob`.
             if let Some(bi) = best[1] {
-                // NCBI lines 942-943: Add back cutoff*num
                 pool_hsp_links[bi].sum[1] +=
                     i64::from(pool_hsp_links[bi].num[1]) * i64::from(cutoff_big);
-                // NCBI c++/src/algo/blast/core/link_hsps.c:942-943:
-                // best[1]->hsp_link.sum[1] += (best[1]->hsp_link.num[1])*cutoff[1];
                 // Mirror the persistent addback even if another chain is selected.
                 maximum_tree.update(bi, DualMaximum::active(bi, pool_hsp_links[bi].sum));
 
-                let num = pool_hsp_links[bi].num[1] as usize;
+                let num = pool_hsp_links[bi].num[1];
                 let xsum = pool_hsp_links[bi].xsum[1];
-                let divisor = gap_decay_divisor(gap_decay_rate, num);
+                let divisor = gap_decay_divisor(gap_decay_rate, num as usize);
                 prob[1] = ncbi_large_gap_sum_e(
-                    num as i16,
+                    num,
                     xsum,
                     eff_query_len as i32,
                     eff_subject_len as i32,
                     eff_search_space,
                     divisor,
                 );
-                if num > 1 {
-                    let denom = 1.0 - gap_prob;
-                    if denom == 0.0 || (prob[1] / denom) > int4_max {
-                        prob[1] = int4_max;
-                    } else {
-                        prob[1] /= denom;
-                    }
-                }
             }
         }
 
@@ -4446,5 +4468,85 @@ mod tests {
         let (_, stats) = link_with_both_kernels(chain(2_100_000_000), &cutoffs, plain, "(b)");
         assert_eq!(stats.wide_groups, 0, "{stats:?}");
         assert!(stats.clamped > 0, "{stats:?}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:756,871,918,932
+    // ```c
+    //                     H->hsp_link.num[index] = H_hsp_num+1;
+    // ...
+    //             if( best[0]->hsp_link.num[0] > 1 ) {
+    // ...
+    //             if( best[1]->hsp_link.num[1] > 1 ) {
+    // ```
+    // `H_hsp_num` is an Int4 stored into the Int2 count: the count of a set of 32,770 HSPs wraps
+    // to -32766, which is not "> 1", and the sum statistics give a count below 1 the E-value 0
+    // (s_BlastSumP, blast_stat.c:4390-4391: `if (r < 1) return 0.;`). Both kernels keep NCBI's
+    // count (the literal port overflowed an i16 here in builds with overflow checks).
+    #[test]
+    fn a_set_of_more_than_32767_hsps_takes_the_wrapped_int2_count() {
+        let chain = |n: usize| -> Vec<UngappedHit> {
+            fast_test_hits(
+                &(0..n)
+                    .map(|i| (3 * i, 3 * i + 2, 3 * i, 3 * i + 2, 60))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let cutoffs = fast_test_cutoffs();
+        let options = IncrOptions {
+            verify: true,
+            wide_keys: false,
+        };
+        let (linked, _) = link_with_both_kernels(chain(32_770), &cutoffs, options, "32,770");
+        assert_eq!(linked.len(), 32_770);
+        assert!(
+            linked.iter().all(|h| h.num == -32766 && h.e_value == 0.0),
+            "{:?}",
+            &linked[..2]
+        );
+        // One HSP fewer than the wrap keeps its count.
+        let (linked, _) = link_with_both_kernels(chain(32_767), &cutoffs, options, "32,767");
+        assert!(linked.iter().all(|h| h.num == 32_767), "{:?}", &linked[..2]);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:495,939-952
+    // ```c
+    //    ignore_small_gaps = (cutoff[0] == 0);
+    // ...
+    //          else
+    //          {
+    //             /* We only consider the case of big gaps. */
+    // ...
+    //             prob[1] = BLAST_LargeGapSumE(
+    // ...
+    //             ordering_method = eLinkLargeGaps;
+    //          }
+    // ```
+    // With large gaps only, the E-value of a set is not divided by `1 - gap_prob`: the same
+    // HSPs give the same E-values whatever gap_prob is.
+    #[test]
+    fn large_gaps_only_do_not_divide_by_the_gap_probability() {
+        let hits = || {
+            fast_test_hits(&[
+                (100, 130, 200, 230, 60),
+                (300, 330, 400, 430, 55),
+                (500, 530, 600, 630, 50),
+            ])
+        };
+        let large_only = |gap_prob: f64| LinkHspCutoffs {
+            cutoff_small_gap: 0,
+            cutoff_big_gap: 30,
+            gap_prob,
+            ignore_small_gaps: true,
+        };
+        for options in VERIFIED {
+            let (with_zero, _) =
+                link_with_both_kernels(hits(), &large_only(0.0), options, "gap_prob 0");
+            let (with_half, _) =
+                link_with_both_kernels(hits(), &large_only(0.5), options, "gap_prob 0.5");
+            assert!(with_zero.iter().all(|h| h.num == 3), "{with_zero:?}");
+            for (a, b) in with_zero.iter().zip(&with_half) {
+                assert_eq!(a.e_value.to_bits(), b.e_value.to_bits(), "{a:?} {b:?}");
+            }
+        }
     }
 }

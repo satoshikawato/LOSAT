@@ -1474,7 +1474,11 @@ mod tests {
             ("TPA:TSA: ", true),
             ("TPA:TSA: ", false),
         ] {
-            assert_eq!(database_subject_id(title.as_bytes(), protein), Ok(None), "{title:?}");
+            assert_eq!(
+                database_subject_id(title.as_bytes(), protein),
+                Ok(None),
+                "{title:?}"
+            );
         }
         for title in [", ,", "; ;"] {
             assert!(

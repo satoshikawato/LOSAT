@@ -11332,12 +11332,14 @@ fn write_reports_untimed(
         (Some(reported), SubjectSource::Database(database))
             if output_formats.iter().any(|format| format.is_tabular()) =>
         {
-            Some(reported.tabular_subject_ids(
-                database.oid_map(),
-                output_formats
-                    .iter()
-                    .any(|format| format.tabular_reads_subject()),
-            )?)
+            Some(
+                reported.tabular_subject_ids(
+                    database.oid_map(),
+                    output_formats
+                        .iter()
+                        .any(|format| format.tabular_reads_subject()),
+                )?,
+            )
         }
         _ => None,
     };

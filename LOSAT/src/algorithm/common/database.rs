@@ -2107,10 +2107,8 @@ pub(crate) fn tabular_subject_ids(
                 Some(subject) => subject
                     .tabular_saccver(protein)
                     .map_err(|problem| parsed_refusal(ordinal, &format!("has {problem}"), program)),
-                None => {
-                    tabular_subject_id(&record.title, oids.oid(ordinal), protein, program)
-                        .map(|id| std::sync::Arc::from(id.accession()))
-                }
+                None => tabular_subject_id(&record.title, oids.oid(ordinal), protein, program)
+                    .map(|id| std::sync::Arc::from(id.accession())),
             };
             match id {
                 Err(_) if !reads => Ok(std::sync::Arc::from(&b""[..])),
@@ -2283,8 +2281,13 @@ pub(crate) fn reports_may_refuse(
                         .map_err(|_| ReportRefusal::Headers)?;
                     if !protein {
                         let oid = db.oid(ordinal);
-                        check_tabular_stored_title(stored.taxonomy_title, shown.words, oid, program)
-                            .map_err(|_| ReportRefusal::Headers)?;
+                        check_tabular_stored_title(
+                            stored.taxonomy_title,
+                            shown.words,
+                            oid,
+                            program,
+                        )
+                        .map_err(|_| ReportRefusal::Headers)?;
                     }
                 }
                 if shown.pairwise {
@@ -2725,7 +2728,10 @@ mod tests {
         assert_eq!(general, TabularSubjectId::General(oid));
         assert_eq!(&*general.id(), b"gnl|BL_ORD_ID|1");
         assert_eq!(&*general.accession(), b"BL_ORD_ID:1");
-        assert_eq!(&*tabular_seqid(&general.accession(), oid, b" ", false), b"gnl|BL_ORD_ID|1");
+        assert_eq!(
+            &*tabular_seqid(&general.accession(), oid, b" ", false),
+            b"gnl|BL_ORD_ID|1"
+        );
         let word = tabular_subject_id(b"BL_ORD_ID:1 own", oid, false, "BLASTN").unwrap();
         assert_eq!(word, TabularSubjectId::Word(b"BL_ORD_ID:1".to_vec()));
         assert_eq!(
@@ -2734,7 +2740,10 @@ mod tests {
         );
         // Another sequence's accession of that form is a word of its title.
         let other = crate::seqdb::Oid::of_unrestricted(2);
-        assert_eq!(&*tabular_seqid(b"BL_ORD_ID:1", other, b"BL_ORD_ID:1", false), b"BL_ORD_ID:1");
+        assert_eq!(
+            &*tabular_seqid(b"BL_ORD_ID:1", other, b"BL_ORD_ID:1", false),
+            b"BL_ORD_ID:1"
+        );
         assert!(tabular_subject_id(b", ,", oid, true, "BLASTP")
             .unwrap_err()
             .to_string()
@@ -2745,8 +2754,14 @@ mod tests {
     fn the_tabular_taxonomy_refusal_needs_a_printed_subject_id() {
         use crate::report::tabular::PrintedIds;
         let oid = crate::seqdb::Oid::of_unrestricted(3);
-        let ids = PrintedIds { subject: true, all: false };
-        let all = PrintedIds { subject: false, all: true };
+        let ids = PrintedIds {
+            subject: true,
+            all: false,
+        };
+        let all = PrintedIds {
+            subject: false,
+            all: true,
+        };
         assert!(check_tabular_stored_title(true, ids, oid, "BLASTN")
             .unwrap_err()
             .to_string()

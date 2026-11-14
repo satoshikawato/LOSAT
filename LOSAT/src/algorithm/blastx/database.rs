@@ -555,7 +555,12 @@ impl ReportedSubjects {
                 // that read nothing of the subject.
                 let id = if shown && tabular_reads {
                     let oid = database.db.oid(ordinal);
-                    Some(shared::tabular_subject_id(&title, oid, true, database.program)?)
+                    Some(shared::tabular_subject_id(
+                        &title,
+                        oid,
+                        true,
+                        database.program,
+                    )?)
                 } else {
                     None
                 };

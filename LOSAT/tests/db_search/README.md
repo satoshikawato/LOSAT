@@ -538,6 +538,15 @@ positive taxid in `x_GetTaxDefline`'s order of the lines that the taxid list kee
 `-negative_taxids 100001` with `-no_taxid_expansion`, which NCBI applies to a version 5 database only), with
 `blastdbcmd -target_only` the target's line first and the others after it.
 
+Subjects and queries whose title NCBI cannot decode (line RG item T7; rows `db.t7.*`): `t7/` holds the inputs of the
+survey probe of T7 (its `gen.py`): `nq.fna`, `pq.faa` and their two-query forms `nq2x.fna`, `pq2x.faa`; `nqbad.fna`,
+`pqbad.faa` (a query title `qbad x\x81y title`); subject sets `lone` (`Subject_9 bad x\x81y title`), `bg` and `gb`
+(that title and a good one), `bb` (two such titles), `plain` (`bad x\x81y title`, no `Subject_` word), `lat`, `latp`
+(cp1252 `caf\xe9`), `utf` (UTF-8 `\xc3\xa9`), `good` and `gen` (titles that `GenerateDefline` changes: `Subject_4.`,
+`Subject_5 a &amp; b,`, `TPA: s7 third ~`), each as `.fna` and `.faa`. The alias files `t5/nt7_bf`, `t5/pt7_bf` (the
+sequence of taxid 100009, whose name has 0x81, then 100001) and `t5/nt7_fb`, `t5/pt7_fb` (the other order) are
+`make_t5.py`'s.
+
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title
 `, ,` NCBI's `x_CleanAndCompress` reads past the end of where it makes the tabular id of a protein; the query

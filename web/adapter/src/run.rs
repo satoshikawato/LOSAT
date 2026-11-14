@@ -3537,6 +3537,33 @@ mod tests {
     // A coding sequence of the protein of `q_idx_is_the_registered_index`.
     const CODING: &[u8] = b"ATGAAAACCGCGTATATTGCGAAACAGCGTCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGTCAGCTGGAAGAACGTCTGGGCCTGATTGAAGTGCAGGCGCCGATTCTGAGCCGTGTGGGCGATGGCACCCAGGATAACCTGAGCGGCGCGGAAAAAGCGGTGCAGGTGAAAGTGAAAGCGCTGCCGGATGCGCAG";
 
+    // Line RG item T7 (PD-LOSAT-NCBI-DEFECTS 1.26): a subject titled `Subject_9 bad x\x81y title`,
+    // whose title NCBI's `GenerateDefline` cannot decode (a `Subject_` first word and a byte in no
+    // encoding NCBI guesses), runs as the CLI runs it: the default tabular formats, which every run
+    // writes, stop where NCBI stops (at the row's `saccver`, a null pointer), so the run fails with
+    // the CLI's refusal, after the search; BLASTX reads the title as its bytes as the other programs
+    // do (it refused it in its reader before).
+    #[test]
+    fn a_subject_title_ncbi_cannot_decode_fails_as_the_cli() {
+        let protein = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
+        let title = b"Subject_9 bad x\x81y title";
+        for (program, query, subject) in [
+            ("blastn", CODING, &CODING[..]),
+            ("tblastx", CODING, &CODING[..]),
+            ("blastx", CODING, &protein[..]),
+        ] {
+            let query = [FastaRecord::new("Query_1", b"q", query)];
+            let subject = [FastaRecord::new("Subject_1", title, subject)];
+            let words = [program, "-query", "q", "-subject", "s"];
+            let error = run(&words, &query, &subject).unwrap_err();
+            assert!(
+                error.contains("subject record 1 (Subject_9)")
+                    && error.contains("null pointer exception (exit 255)"),
+                "{program}: {error}"
+            );
+        }
+    }
+
     // BLASTX searches a nucleotide query against protein subjects and writes every format, the
     // HSP records and the warnings as the other programs do, one search for each hit list size:
     // with -num_alignments 0 the tabular search fails alone with NCBI's error on stream 3, and

@@ -1,0 +1,7 @@
+# BLASTP 2.17.0+
+# Query: pdq query of the duplicated record
+# Database: tests/db_search/t5/p_100009
+# Fields: query id, subject id, evalue
+# 1 hits found
+pdq	Unknown	6.18e-175
+# BLAST processed 1 queries

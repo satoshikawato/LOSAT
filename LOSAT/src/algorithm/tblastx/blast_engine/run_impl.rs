@@ -3645,6 +3645,9 @@ fn run_batch_loop(
                 _ => SubjectFetch::Every,
             }
         });
+    // Where the run's BLAST XML family formats fail for a matrix name that NCBI's XML does not
+    // know (`BatchReports::xml_matrix_failure`; `None` for a name it knows).
+    let xml_matrix_failure = reports.xml_matrix_failure(outputs);
     // The search strategy's requests of the batches (`-export_search_strategy`), with every
     // `-subject` record.
     let requests = args.strategy.as_ref().map(|_| {
@@ -3875,27 +3878,6 @@ fn run_batch_loop(
             }
             message.push('\n');
             return Err(crate::cli::NativeError { exit: 3, message }.into());
-        }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (the
-        // BLAST XML report data of the first query that NCBI formats: the matrix of its
-        // formatting table, found by the name as typed with `strcmp`)
-        // ```c++
-        //     else {
-        //         string prog_name = Blast_ProgramNameFromType(
-        //                                            m_Options.GetProgramType());
-        //         if (prog_name != "blastn" && prog_name != "megablast") {
-        //             NCBI_THROW(blast::CBlastException, eInvalidArgument,
-        //                         "unsupported score matrix");
-        // ```
-        // NCBI searches the first batch and writes nothing of it (the XML2 and JSON documents
-        // only their start, `PrintProlog`); the search does not change the output.
-        if crate::report::blast_xml::matrix::xml_formatting_fails(
-            outputs.formats.iter().map(|format| format.outfmt),
-            args.matrix_name(),
-        ) {
-            reports.write_before_failed_batch(outputs, done, &warnings)?;
-            batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-            return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
         }
         warnings[start].append(&batch_warnings);
         let batch = match take(start..end) {
@@ -4194,6 +4176,38 @@ fn run_batch_loop(
                 }
             }
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (the
+        // BLAST XML report data of a query that NCBI formats: the matrix of its formatting table,
+        // found by the name as typed with `strcmp`)
+        // ```c++
+        //     else {
+        //         string prog_name = Blast_ProgramNameFromType(
+        //                                            m_Options.GetProgramType());
+        //         if (prog_name != "blastn" && prog_name != "megablast") {
+        //             NCBI_THROW(blast::CBlastException, eInvalidArgument,
+        //                         "unsupported score matrix");
+        // ```
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:197-205 (quoted above: the
+        // batch's prefetch, then `PrintOneResultSet` of each of its results)
+        // NCBI fails where it formats the batch of the run's first searched query, or of its
+        // second where the report is held (`BatchReports::xml_matrix_failure`;
+        // `XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id, the second as
+        // LOSAT refuses two queries of one id first, above): after the batch's
+        // search, the read of its titles (and LOSAT's refusal of two queries of one id, above) and
+        // its prefetch, whose errors come first. It writes nothing of the batch's reports or of
+        // the batches' before (the XML2 and JSON documents only their start, `PrintProlog`): the
+        // reader messages and posts of the batches before (`write_before_failed_batch`), then
+        // those of this batch up to the failing query, with its prefetch's messages. A run of one
+        // searched query whose report is held fails after the loop. TBLASTX writes each batch's
+        // search strategy request at the batch's start (above), so no request follows the
+        // failing batch's.
+        if let Some(failure) = xml_matrix_failure.filter(|failure| failure.fails_in(start..end)) {
+            reports.write_before_failed_batch(outputs, done, &warnings)?;
+            for posts in &warnings[start..=failure.query()] {
+                posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+            }
+            return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
+        }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1450-1452
         // ```c
         //     if (results.HasWarnings()) {
@@ -4277,6 +4291,16 @@ fn run_batch_loop(
             done.spans.push(start..end);
         }
         input_start = input_end;
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2204-2212 (quoted at
+    // `blast_xml::matrix::XmlMatrixFailure`: `PrintEpilog` makes the held report of the run's one
+    // query)
+    // A run of one searched query whose report is held fails at its end, instead of the epilog,
+    // after what the batch loop wrote before a failing batch (the prologs, the batches' reader
+    // messages and posts).
+    if xml_matrix_failure.is_some_and(|failure| failure.fails_at_end(done.searched.len())) {
+        reports.write_before_failed_batch(outputs, done, &warnings)?;
+        return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
     }
     reports.write(outputs, done, &warnings, true)
 }
@@ -4562,9 +4586,17 @@ impl BatchReports<'_> {
         done: SearchedBatches,
         warnings: &[Posts],
     ) -> Result<()> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389 (quoted
+        // at `blast_xml::matrix::XmlMatrixFailure`)
+        // With a matrix name that NCBI's XML does not know, the batches before a failing batch
+        // wrote no report: the XML formats are not streamed (`report_stream`), and their queries
+        // come before the failing query (`xml_matrix_failure`), the one query of a run whose
+        // report is held, which NCBI never writes. What they wrote is their reader messages and
+        // posts, after the prologs.
+        let xml_matrix_failed = self.xml_matrix_failure(outputs).is_some();
         if self.queries_written.get() > 0 {
             Ok(())
-        } else if done.searched.is_empty() {
+        } else if done.searched.is_empty() || xml_matrix_failed {
             write_pairwise_prologs(outputs, self.args, self.subjects, false)?;
             // The XML2 and JSON documents start with their prolog too, and outfmt 20 with its line
             // of the field names (and its formatter's warning, `tabular::write_tabular_prolog`).
@@ -4589,10 +4621,31 @@ impl BatchReports<'_> {
                     _ => {}
                 }
             }
+            for posts in &warnings[..done.searched.len()] {
+                posts.write(&mut *outputs.diagnostics, self.args.archive.as_ref())?;
+            }
             Ok(())
         } else {
             self.write(outputs, done, warnings, false)
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121 (quoted at
+    // `blast_xml2::reports_held`)
+    /// Where the run of the formats of `outputs` stops for a matrix name that NCBI's BLAST XML
+    /// report data does not know (`blast_xml::matrix::xml_formatting_failure`), with the facts of
+    /// the search: subject records (`-subject`, `m_IsBl2Seq`); TBLASTX does not iterate. The one
+    /// decision of the batch loop's error (`run_batch_loop`).
+    fn xml_matrix_failure(
+        &self,
+        outputs: &ReportOutputs<'_>,
+    ) -> Option<crate::report::blast_xml::matrix::XmlMatrixFailure> {
+        crate::report::blast_xml::matrix::xml_formatting_failure(
+            outputs.formats.iter().map(|format| format.outfmt),
+            self.args.matrix_name(),
+            matches!(self.subjects, ShownSubjects::Fasta { .. }),
+            false,
+        )
     }
 }
 

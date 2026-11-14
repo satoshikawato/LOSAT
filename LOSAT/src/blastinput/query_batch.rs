@@ -567,6 +567,25 @@ impl QueryBatches {
         }
     }
 
+    /// Where the searched queries end of the batch whose formatting NCBI fails for a matrix name
+    /// its BLAST XML report data does not know (`blast_xml::matrix::XmlMatrixFailure`): the
+    /// search strategy's last request (`StrategyExport::stop_after`). The batch of the run's first
+    /// searched query (as `first_request_end`), or of its second when the report is held
+    /// (`XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id); `None`
+    /// when a held report fails at the run's end or the run stops before: every request that
+    /// the run makes is written (probe K/k4f: `-subject` 13-16 with one query and an empty second
+    /// batch wrote both requests and stopped with that batch's error).
+    pub(crate) fn xml_matrix_request_end(
+        &self,
+        failure: crate::report::blast_xml::matrix::XmlMatrixFailure,
+    ) -> Option<usize> {
+        let query = failure.query();
+        if query == 0 {
+            return self.first_request_end();
+        }
+        (query < self.searched_done).then(|| self.searched_span(query).end)
+    }
+
     /// The searched queries of the batch of the searched query `query`.
     pub(crate) fn searched_span(&self, query: usize) -> std::ops::Range<usize> {
         let after = self
@@ -968,6 +987,53 @@ mod tests {
         assert_eq!(batches.starts, vec![(0, 0), (2, 2), (4, 4)]);
         let starts: Vec<(usize, usize)> = (0..5).map(|q| batches.start_of(q)).collect();
         assert_eq!(starts, vec![(0, 0), (0, 0), (2, 2), (2, 2), (4, 4)]);
+    }
+
+    // Probe K4f of line RG (NCBI 2.17.0, `-matrix blosum62`): the strategy's last request is that
+    // of the batch of the run's first searched query, or of its second where the report is held;
+    // a held run of one searched query (also one that an empty batch stops) writes every request.
+    #[test]
+    fn the_xml_matrix_failure_ends_the_requests_at_its_batch() {
+        use super::QueryReading;
+        use crate::blastinput::fasta_reader::FastaRecord;
+        use crate::blastinput::seq_range::QueryInput;
+        use crate::report::blast_xml::matrix::XmlMatrixFailure;
+        let batches_of = |lengths: &[usize], batch_size: u32| {
+            let records: Vec<FastaRecord> = lengths
+                .iter()
+                .enumerate()
+                .map(|(i, &len)| FastaRecord::new(format!("q{i}"), b"", &vec![b'A'; len]))
+                .collect();
+            let input = QueryInput::whole(&records);
+            super::read_query_batches(
+                &records,
+                &records,
+                &input,
+                QueryReading::Records,
+                batch_size,
+                true,
+                None,
+            )
+        };
+        let (first, held) = (
+            XmlMatrixFailure::FirstQuery,
+            XmlMatrixFailure::SecondQueryOrEnd,
+        );
+        // Three batches of one query; one batch of three.
+        let three = batches_of(&[4, 7, 3], 1);
+        assert_eq!(three.xml_matrix_request_end(first), Some(1));
+        assert_eq!(three.xml_matrix_request_end(held), Some(2));
+        let one_batch = batches_of(&[4, 7, 3], 100);
+        assert_eq!(one_batch.xml_matrix_request_end(first), Some(3));
+        assert_eq!(one_batch.xml_matrix_request_end(held), Some(3));
+        // One query; one query and a batch without letters, which stops the run.
+        let alone = batches_of(&[4], 1);
+        assert_eq!(alone.xml_matrix_request_end(first), Some(1));
+        assert_eq!(alone.xml_matrix_request_end(held), None);
+        let stopped = batches_of(&[4, 0], 1);
+        assert!(stopped.stop.is_some() && stopped.searched_done == 1);
+        assert_eq!(stopped.xml_matrix_request_end(first), Some(1));
+        assert_eq!(stopped.xml_matrix_request_end(held), None);
     }
 
     /// The records of `fasta` read with `-parse_deflines` (BLASTP's reader).

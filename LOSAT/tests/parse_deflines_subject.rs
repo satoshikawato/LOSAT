@@ -826,7 +826,7 @@ fn of1_run(args: &[&str]) -> (i32, String, String) {
     )
 }
 
-// Line RG T3b (PD-LOSAT-NCBI-DEFECTS 1.23, 1.26): `bself.fa` is a record whose second copy of its first
+// Line RG T3b (PD-LOSAT-NCBI-DEFECTS 1.23, 1.28): `bself.fa` is a record whose second copy of its first
 // 80 letters (5 letters inserted in the middle) aligns best and whose ungapped third copy holds the
 // longest segment. With the record as the query (`-query_loc 1-80`) and the subject (`-subject_loc
 // 81-325`) under `-parse_deflines`, NCBI BLAST+ 2.17.0's merge of formats 1 to 4 leaves the record's
@@ -875,7 +875,7 @@ fn blastn_query_anchored_abort_is_refused_after_the_prolog() {
     }
 }
 
-// Line RG T3b (PD-LOSAT-NCBI-DEFECTS 1.26): a database sequence whose Seq-align id (`bnqid`:
+// Line RG T3b (PD-LOSAT-NCBI-DEFECTS 1.28): a database sequence whose Seq-align id (`bnqid`:
 // `lcl|Query_1`) or display id (`bnqgi`: `gi|777|lcl|Query_1`) is the id NCBI BLAST+ gives the first
 // query read without `-parse_deflines`: NCBI's formats 1 to 4 show that query's title in its
 // description line (and its letters in the rows of the Seq-align id; probes `bn.t3b.d.qid.f1`,

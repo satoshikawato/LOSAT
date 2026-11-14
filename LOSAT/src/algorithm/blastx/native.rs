@@ -36,7 +36,6 @@ use crate::report::blast_xml2::{FsSideFiles, NoSideFiles, RunSideFiles, Xml2Kind
 use anyhow::{bail, Result};
 use std::{
     fmt,
-    fs::File,
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
     // ```c++
     // bool CStreamLineReader::AtEOF(void) const
@@ -45,7 +44,7 @@ use std::{
     //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
     // }
     // ```
-    io::{self, BufWriter, Seek, SeekFrom, Write},
+    io::{self, Seek, SeekFrom, Write},
     path::Path,
 };
 
@@ -584,33 +583,6 @@ fn run_inner(
     let query_file =
         crate::blastinput::input_files::open_input(&args.query, "query", program.upper)
             .map_err(early_archive_error)?;
-    let destination: Box<dyn Write> =
-        match (args.out.as_deref().filter(|p| *p != Path::new("-")), &hold) {
-            // The organism report's file or standard output as NCBI's buffer writes it
-            // (`cli::report_destination_through`), with the hold after the buffer: what the hold
-            // keeps is what the buffer writes, where the buffer writes it.
-            (path, hold) if tax_report => crate::cli::report_destination_through(
-                path.map(|path| {
-                    File::create(path)
-                        .map(|file| Box::new(file) as Box<dyn Write + Send>)
-                        .map_err(|_| inaccessible("out", path))
-                })
-                .transpose()?,
-                true,
-                |device| match hold {
-                    Some(hold) => Box::new(hold.writer(device)),
-                    None => device,
-                },
-            ),
-            (Some(path), Some(hold)) => Box::new(hold.writer(Box::new(
-                File::create(path).map_err(|_| inaccessible("out", path))?,
-            ))),
-            (None, Some(hold)) => Box::new(hold.writer(Box::new(io::stdout()))),
-            (None, None) => Box::new(io::stdout().lock()),
-            (Some(path), None) => {
-                Box::new(File::create(path).map_err(|_| inaccessible("out", path))?)
-            }
-        };
     // BLAST XML (outfmt 5) and the XML2 and JSON documents (outfmt 13 to 16): the output can
     // hold the whole document in memory (`blast_xml::HeldOutput`), decided below before the
     // search.
@@ -628,11 +600,36 @@ fn run_inner(
         kind.is_files()
             .then(|| super::blast_xml::HeldSideFiles::new(Box::new(FsSideFiles::new(out, kind))))
     });
-    let (destination, held) = if structured_xml {
-        let held = super::blast_xml::HeldOutput::new(destination, side_files.clone());
-        (Box::new(held.clone()) as Box<dyn Write>, Some(held))
-    } else {
-        (destination, None)
+    // The `-out` file, where NCBI opens it (`cli::create_out_file`, one owner with the library).
+    let create = |path: &Path| crate::cli::create_out_file(path, None);
+    let mut held = None;
+    // The report's stream (`cli::NcbiOstream`). The organism report's: NCBI's buffer of the file or
+    // of standard output, with the hold after it, so that what the hold keeps is what the buffer
+    // writes, where the buffer writes it. Every other format's: LOSAT's buffer before the file or
+    // standard output, behind the hold and the held document.
+    let stream = match (out_file, &hold) {
+        (Some(path), hold) if tax_report => {
+            crate::cli::NcbiOstream::file(create(path)?, hold.as_ref())
+        }
+        (None, hold) if tax_report => crate::cli::NcbiOstream::standard_output(hold.as_ref()),
+        (out_file, hold) => {
+            let destination: Box<dyn Write> = match (out_file, hold) {
+                (Some(path), Some(hold)) => Box::new(hold.writer(Box::new(create(path)?))),
+                (None, Some(hold)) => Box::new(hold.writer(Box::new(io::stdout()))),
+                (None, None) => Box::new(io::stdout().lock()),
+                (Some(path), None) => Box::new(create(path)?),
+            };
+            crate::cli::NcbiOstream::buffered(match structured_xml {
+                true => Box::new(
+                    held.insert(super::blast_xml::HeldOutput::new(
+                        destination,
+                        side_files.clone(),
+                    ))
+                    .clone(),
+                ),
+                false => destination,
+            })
+        }
     };
     // The run's standard error goes through the held output (`HeldOutput::stderr`): a held
     // document gets the texts written in the meantime where NCBI writes them. The structured
@@ -643,13 +640,7 @@ fn run_inner(
     }
     // The run keeps its output in the caller's slot: an error of NCBI's own is followed by the
     // error archive in the same output (`run`).
-    // The organism report's stream is NCBI's buffer (`cli::report_destination_through`), which
-    // takes each write as one of NCBI's insertions (`cli::NcbiOstream`): no buffer of LOSAT's
-    // comes before it.
-    let writer = output.insert(crate::cli::NcbiOstream::new(match tax_report {
-        true => destination,
-        false => Box::new(BufWriter::new(destination)),
-    }));
+    let writer = output.insert(stream);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
     // ```c++
     //     if(hitlist_size < 5){
@@ -758,24 +749,26 @@ fn run_inner(
     options.filtered_empty = database
         .as_ref()
         .is_some_and(|database| database.filtered_empty());
-    // A custom tabular field list that shows a plural name of the taxonomy database asks
-    // whether `taxdb.bti` is on the search path: its formatters warn without it. A `-db` search
-    // asks its database; a `-subject` search the search path of NCBI's databases (the
-    // environment and the registry), as BLASTP's and BLASTN's.
-    if options
-        .tabular
-        .is_some_and(|spec| spec.looks_up_every_taxid())
-    {
-        options.taxdb_found = match &database {
-            Some(database) => database.taxdb_found(),
-            // The organism report's lookups open the run's own database.
-            None if options.outfmt == 18 => {
-                options.subject_taxdb =
-                    crate::algorithm::common::database::SubjectTaxdb::of(&settings, "BLASTX")?;
-                options.subject_taxdb.is_some()
+    // A custom tabular field list that looks every taxid up (the plural names of the taxonomy
+    // database, the organism report) asks whether `taxdb.bti` is on the search path: the plural
+    // names' formatters warn without it. A `-db` search asks its database; a `-subject` search
+    // the search path of NCBI's databases (the environment and the registry), as BLASTP's and
+    // BLASTN's (`local::subject_taxonomy`).
+    match &database {
+        Some(database) => {
+            if options
+                .tabular
+                .is_some_and(|spec| spec.looks_up_every_taxid())
+            {
+                options.taxdb_found = database.taxdb_found();
             }
-            None => crate::algorithm::common::database::subject_taxdb_found(&settings, "BLASTX")?,
-        };
+        }
+        None => super::local::subject_taxonomy(
+            std::slice::from_mut(&mut options),
+            Some(&crate::algorithm::common::database::TaxdbSetting::of(
+                &settings,
+            )),
+        )?,
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -972,19 +965,25 @@ fn run_inner(
         if !query_is_regular {
             archive::refuse_irregular_query(archived, program.upper)?;
         }
-        let refusable =
-            archive::prescan_query_titles(
-                query_prescan
-                    .as_ref()
-                    .expect("the second handle of a regular query"),
-                &query_settings,
-                args.lcase_masking,
-                &options,
-                batch_size,
-                query_range.as_ref(),
-                archived,
-                strategic,
-            )? || archive::check_request_titles(&subjects, "subject", archived, strategic).is_err();
+        let refusable = archive::prescan_query_titles(
+            query_prescan
+                .as_ref()
+                .expect("the second handle of a regular query"),
+            &query_settings,
+            args.lcase_masking,
+            &options,
+            batch_size,
+            query_range.as_ref(),
+            archived,
+            strategic,
+        )? || archive::check_request_titles(
+            &subjects,
+            "subject",
+            program.upper,
+            archived,
+            strategic,
+        )
+        .is_err();
         if let (true, Some(hold)) = (refusable, &hold) {
             hold.hold();
         }
@@ -1034,7 +1033,7 @@ fn run_inner(
     // of the reports, as rpsblast refuses them (`args::RpsTblastnSearch::for_database`, once per
     // run).
     if let Some(search) = options.rpstblastn.clone() {
-        let search = search.for_database(&options, database.as_ref())?;
+        let search = search.for_database(&options, database.as_ref(), strategy.is_some())?;
         // What each batch's RPS set-up writes into the options handle, which the search strategy's
         // later requests hold (`OptionsHandle::pass`): the search for the database knows its
         // volumes' costs.
@@ -1236,7 +1235,12 @@ fn run_inner(
             // is dropped, `run`); only a run whose read before the search found such a title can
             // refuse (`titles_may_refuse`).
             if titles_may_refuse {
-                archive::check_batch_titles(queries, subject_records, queries_before == 0)?;
+                archive::check_batch_titles(
+                    queries,
+                    subject_records,
+                    queries_before == 0,
+                    program.upper,
+                )?;
             }
             return archive::write_blastx_archive(
                 &archive::ArchiveCall {
@@ -2343,18 +2347,23 @@ pub fn run(
     let mut output: Option<crate::cli::NcbiOstream<'static>> = None;
     let mut archive: Option<crate::report::archive::ArchiveHandle> = None;
     let mut hold: Option<archive::ArchiveHold<Box<dyn Write + Send>>> = None;
-    let result = run_inner(args, settings, &mut output, &mut archive, &mut hold);
+    let mut result = run_inner(args, settings, &mut output, &mut archive, &mut hold);
+    // What a run with the archive or the search strategy held for the refusal of a later batch's
+    // title (`archive::ArchiveHold`): NCBI's archives, report and messages when one of its own
+    // errors stops the run before that batch, written before the error's text and archive (a
+    // write that fails there is the run's error, as where the run without the hold wrote it);
+    // dropped after LOSAT's refusal.
+    if let (Some(hold), Err(error)) = (&hold, &result) {
+        if let Some(writer) = output.as_mut() {
+            let _ = writer.flush();
+        }
+        if let Err(write_error) = hold.end_with(error) {
+            result = Err(write_error);
+        }
+    }
     if let (Some(handle), Some(writer)) = (&archive, output.as_mut()) {
         match &result {
             Err(error) => {
-                // What the run held for the refusal of a later batch's title
-                // (`archive::ArchiveHold`): NCBI's archives and messages when one of its own
-                // errors stops the run before that batch, written before the error's text and
-                // archive; dropped after LOSAT's refusal.
-                if let Some(hold) = &hold {
-                    let _ = writer.flush();
-                    hold.end_with(error);
-                }
                 if let Some(lines) = archive::error_lines(error, false) {
                     let _ = crate::report::archive::write_error_archive_after_post(
                         handle, error, &lines, writer,
@@ -2368,13 +2377,6 @@ pub fn run(
             }
         }
         let _ = writer.flush();
-    } else if let (None, Some(hold), Err(error)) = (&archive, &hold, &result) {
-        // A run with the search strategy and no archive: what it held for the refusal of a later
-        // batch's title, as above (NCBI's error writes no archive).
-        if let Some(writer) = output.as_mut() {
-            let _ = writer.flush();
-        }
-        hold.end_with(error);
     }
     result
 }
@@ -2399,7 +2401,7 @@ fn write_run_error_archive(
     };
     let destination: Option<Box<dyn Write>> =
         match args.out.as_deref().filter(|p| *p != Path::new("-")) {
-            Some(path) => File::create(path)
+            Some(path) => crate::cli::create_out_file(path, None)
                 .ok()
                 .map(|file| Box::new(file) as Box<dyn Write>),
             None => Some(Box::new(io::stdout().lock())),

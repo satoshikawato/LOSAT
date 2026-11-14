@@ -54,7 +54,12 @@
   an imported search strategy, all three of which LOSAT still refuses; the reader of stage DB-1
   refused such a volume; the same day line DBID pssmread made psiblast's PSSM read each alignment's
   letters by its Seq-align id as NCBI's scope gets them, another sequence's or none with NCBI's
-  warning, which line DBID pssmrows refused)
+  warning, which line DBID pssmrows refused; on 2026-11-14 line DBID ordname wrote the tabular
+  subject id of a sequence without parsed Seq-ids whose title gives no word (a title of spaces, a
+  nucleotide's empty title) as NCBI does, the general id `gnl|BL_ORD_ID|n` and `BL_ORD_ID:n` with
+  its OID, which version 1.0 refused, and refused it where the taxonomy database names the tax id
+  of a nucleotide's empty title, from which NCBI makes the id, as line DBID H3 refused outfmt 0,
+  only for a table that prints a subject id, which version 1.0 refused for every table)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -539,8 +544,9 @@ search code with a different subject source.
 - Residues: a stored `O` is read as `X` for the search and as `O` for the composition-based
   redo (NCBI compares the stored bytes there); `U`, `B`, `Z`, `J`, `*` as stored.
 - Reports: the `Database:` lines of outfmt 0 (title, counts, `Posted date`), `>` and the
-  stored title, subject ids made from the title as NCBI makes them (`gnl|BL_ORD_ID|n` is
-  never shown), `# Database:` of outfmt 7 with the `-db` value as given.
+  stored title, subject ids made from the title as NCBI makes them (the general id
+  `gnl|BL_ORD_ID|n`, `BL_ORD_ID:n` for the accessions, with n the sequence's OID, only for a
+  title that gives no word), `# Database:` of outfmt 7 with the `-db` value as given.
 - Errors: NCBI's texts and exit statuses for a database that is not found or cannot be
   read, at the point where NCBI reports them (a header file is first read when the reports
   of a query batch are made).
@@ -554,8 +560,8 @@ Rejected explicitly (NCBI runs these, or crashes, or LOSAT cannot reproduce what
 | `-searchsp` | NCBI then uses a different statistics path (`OLD_FSC`, no Gumbel block); a stage of its own |
 | A database sequence with a gap residue (`-`, stored by makeblastdb), a byte above the protein alphabet, or a sequence not between two NUL bytes | NCBI's `-db` never aligns a stored gap and its formatter counts it as a gap; not reproduced |
 | A database sequence without parsed Seq-ids with more or fewer than one definition line | makeblastdb without `-parse_seqids` writes one; a sequence with parsed Seq-ids may have several (version 1.3) |
-| A reported subject whose title gives no subject id (a title of spaces: NCBI shows `gnl|BL_ORD_ID|n`), or whose title NCBI's cleaner reads past (titles like `, ,`: NCBI crashes) | tabular formats, and outfmt 0 for the second |
-| In outfmt 0, a shown subject with an empty title and a tax id (makeblastdb `-taxid`) that the taxonomy database names (line DBID H3; all six programs) | NCBI makes the title from the tax id and the taxonomy database, as for a sequence with parsed Seq-ids: `unnamed protein product [Homo sapiens]`, for a nucleotide `Homo sapiens`. For a tax id that it does not name (not in it, no `taxdb.btd`, a database that does not open) NCBI writes the stored title, as LOSAT does; the other formats show the stored title or its first word |
+| A reported subject whose title NCBI's cleaner reads past (titles like `, ,`: NCBI crashes) | tabular formats and outfmt 0 |
+| In outfmt 0, a shown subject with an empty title and a tax id (makeblastdb `-taxid`) that the taxonomy database names (line DBID H3; all six programs) | NCBI makes the title from the tax id and the taxonomy database, as for a sequence with parsed Seq-ids: `unnamed protein product [Homo sapiens]`, for a nucleotide `Homo sapiens`. For a tax id that it does not name (not in it, no `taxdb.btd`, a database that does not open) NCBI writes the stored title, as LOSAT does; the other formats show the stored title or its first word, but a nucleotide's tabular subject id is the first word of the title made from the tax id (BLASTN's row below) |
 | A reported title with a raw byte outside ' '..'~' in the header file | NCBI prints `#` and a warning a number of times that depends on the format and the field |
 | `-dbsize` whose effective search space overflows NCBI's `Int8` | NCBI's arithmetic overflows |
 | A database of more letters than the target's `usize` (32-bit targets) | |
@@ -615,7 +621,7 @@ Rejected explicitly, besides what BLASTP `-db` and the reader reject (the same r
 | Rejected | Why |
 | --- | --- |
 | `-searchsp`, `-db_soft_mask`, `-db_hard_mask` | a stage of its own; masks are not read (P4). Since 2026-11-14 `-db_soft_mask` and `-db_hard_mask` are searched (line NP, M4a-2a and M4a-2b; section "BLASTN database masks") |
-| A reported subject whose title gives no subject id: a title of spaces, or an empty title (NCBI writes `gnl|BL_ORD_ID|n` and `BL_ORD_ID:n`; for a protein an empty title gives `unnamed`, which BLASTP writes) | as BLASTP: ids of the general form are not written |
+| In the tabular formats that print a subject id (the default fields, `sseqid`, `sacc`, `saccver`, `sallseqid`, `sallacc`), a reported subject with an empty title and a tax id that the taxonomy database names (line DBID ordname) | NCBI makes the title from the tax id, as in outfmt 0 (line DBID H3, the row of BLASTP), and prints its first word, the organism's (`Homo` for 9606), in the place of the id; the other fields show the stored title (`N/A`) and the taxonomy as LOSAT does. A title of spaces, and an empty title without such a tax id, give no word: NCBI prints the general id, `gnl|BL_ORD_ID|n` for `sseqid` and `BL_ORD_ID:n` for `sacc` and `saccver` with n the sequence's OID, as LOSAT does (for a protein an empty title gives `unnamed`) |
 | `-dbsize` whose effective search space overflows NCBI's `Int8` | NCBI's arithmetic overflows |
 | A database of more letters than the target's `usize` (32-bit targets) | |
 

@@ -296,9 +296,11 @@ pub(crate) struct ReportedSubjects {
     records: Vec<FastaRecord>,
     titles: Vec<Arc<[u8]>>,
     tabular_ids: Vec<String>,
-    /// The ordinal id of each rank, ascending (the Seq-ids of the Seq-annots,
-    /// `general { db "BL_ORD_ID", tag id <oid> }`).
+    /// The ordinal id of each rank, ascending.
     ordinals: Vec<u32>,
+    /// The OID of each rank, which names a sequence without parsed Seq-ids (the Seq-ids of the
+    /// Seq-annots, `general { db "BL_ORD_ID", tag id <oid> }`).
+    oids: Vec<crate::seqdb::Oid>,
     /// By rank: the Blast-def-line taxid and what the taxonomy database says of it, and the
     /// taxonomy database's messages of the batch (XML2 and JSON with `-db` only; empty
     /// otherwise, which reads as no taxid).
@@ -312,8 +314,9 @@ pub(crate) struct ReportedSubjects {
     /// ids and titles come from their definition lines (`report::db_subject`), and `titles`
     /// holds the title of their first definition line.
     parsed: Vec<Option<Arc<ParsedSubject>>>,
-    /// `sacc` and `saccver` of the sequences with parsed Seq-ids by rank, with `tabular`
-    /// (empty without them; the others' are their `sseqid`).
+    /// `sacc` and `saccver` of the sequences with parsed Seq-ids and of those with the general id
+    /// (`shared::TabularSubjectId::General`) by rank, with `tabular` (empty without them; the
+    /// others' are their `sseqid`).
     tabular_accessions: Vec<Option<[String; 2]>>,
     /// What a custom tabular field list reads beyond the default report's ids
     /// (`read_tabular`; empty and `None` otherwise).
@@ -557,20 +560,36 @@ impl ReportedSubjects {
                 // An unreported subject's id is never written, nor an id of a table of fields
                 // that read nothing of the subject.
                 let id = if shown && tabular_reads {
-                    shared::tabular_subject_id(&title, ordinal, true, database.program)?
+                    let oid = database.db.oid(ordinal);
+                    Some(shared::tabular_subject_id(
+                        &title,
+                        oid,
+                        true,
+                        database.program,
+                    )?)
                 } else {
-                    Vec::new()
+                    None
                 };
                 // A stored title is a VisibleString (checked above), so its id is ASCII.
+                let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
                 reported
                     .tabular_ids
-                    .push(String::from_utf8_lossy(&id).into_owned());
+                    .push(id.as_ref().map_or_else(String::new, |id| text(&id.id())));
+                if let Some(id @ shared::TabularSubjectId::General(_)) = &id {
+                    if reported.tabular_accessions.is_empty() {
+                        reported.tabular_accessions = vec![None; listed.len()];
+                    }
+                    let accession = text(&id.accession());
+                    reported.tabular_accessions[reported.ordinals.len()] =
+                        Some([accession.clone(), accession]);
+                }
             }
             let encoded = subjects.read_encoded(oid)?;
+            // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
+            // (line DI-8).
+            let db_oid = database.db.oid(ordinal);
             reported.records.push(FastaRecord {
-                // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the
-                // OID (line DI-8).
-                internal_id: format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
+                internal_id: db_oid.fasta_id(),
                 title: String::from_utf8_lossy(&title).into_owned(),
                 sequence: encoded
                     .iter()
@@ -582,6 +601,7 @@ impl ReportedSubjects {
             });
             reported.titles.push(title);
             reported.ordinals.push(ordinal);
+            reported.oids.push(db_oid);
         }
         // Ranks keep the order of the ordinal ids, so every tie broken by subject index
         // is broken as before.
@@ -889,6 +909,11 @@ impl ReportedSubjects {
         self.ordinals[rank]
     }
 
+    /// The OID of rank `rank` (`gnl|BL_ORD_ID|n`).
+    pub(crate) fn oid(&self, rank: usize) -> crate::seqdb::Oid {
+        self.oids[rank]
+    }
+
     /// The Blast-def-line taxid of the sequence of rank `rank` (0 for none, and for a run that
     /// does not read taxids).
     pub(crate) fn taxid(&self, rank: usize) -> i32 {
@@ -918,7 +943,7 @@ impl ReportedSubjects {
     }
 
     /// The tabular `sseqid`, `sacc` and `saccver` of rank `rank` (only with `tabular` in
-    /// `for_batch`): the same id for a sequence without parsed Seq-ids.
+    /// `for_batch`): the same id for a sequence without parsed Seq-ids whose title gives a word.
     pub(crate) fn tabular_ids(&self, rank: usize) -> [&str; 3] {
         let id = self.tabular_id(rank);
         match self.tabular_accessions.get(rank).and_then(Option::as_ref) {

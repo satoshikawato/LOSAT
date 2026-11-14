@@ -100,10 +100,14 @@ pub(super) fn search_rounds(
                 .then(|| subject_source.fasta_records()),
             args.lcase_masking,
             args.app.name(),
+            args.psi_search.as_ref().and_then(|psi| psi.request_pssm()),
         )
     });
+    // Only requests that are written are looked at: a run that stops before its first batch's
+    // request (the PSSM query's "Remote PSI-BL2SEQ is not supported", `psiblast_stop_at_pssm_query`)
+    // has none, whatever its subjects' titles.
     if let Some(requests) = requests.as_ref() {
-        if titles_may_refuse {
+        if titles_may_refuse && batches.searched_done > 0 {
             requests.check_titles(&searched_queries[..batches.searched_done])?;
         }
         if let Some(span) = batches.stop_batch.clone() {
@@ -135,12 +139,18 @@ pub(super) fn search_rounds(
             // `kbp_psi` that is not valid, a database without sequences or whose sequence file
             // cannot be opened, `psiblast_stop_at_invalid_query`) comes after round 1 has written
             // the input PSSM's files; NCBI's check of the PSSM (`validation_error`) stops before
-            // (NCBI 2.17.0, probes `y.*`, `y2.*` of the PS5c review; line PS DECISIONS 31).
+            // (NCBI 2.17.0, probes `y.*`, `y2.*` of the PS5c review; line PS DECISIONS 31), and so
+            // do the search strategy's request without a database and the PSSM engine's scores
+            // (`PsiSearch::stop_before_search`: `SaveSearchStrategy` and `CPsiBlast` before the
+            // rounds).
             let search_error = error.downcast_ref::<crate::cli::NativeError>().is_some()
-                && args
-                    .psi_search
-                    .as_deref()
-                    .is_some_and(|psi| psi.validation_error.is_none());
+                && args.psi_search.as_deref().is_some_and(|psi| {
+                    psi.stop_before_search(
+                        args.strategy.is_some(),
+                        subject_source.database().is_some(),
+                    )
+                    .is_none()
+                });
             if let Some(input) = plan.input.as_ref().filter(|_| search_error) {
                 let (asn, ascii) = input.files(&plan.request)?;
                 RoundFiles::new(
@@ -596,8 +606,8 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 // #define BLAST_EXPECT_VALUE 10.0 /**< by default, alignments whose expect
 // ```
 // The Seq-id of a subject is its key (`rounds::SetKey`, `SubjectKeys`): a `-subject` record's
-// index (`lcl|Subject_N`), a database sequence's ordinal id (`gnl|BL_ORD_ID|oid`, the hit lists
-// name it by its rank among the listed ones), or its parsed Seq-align id. The PSSM's multiple
+// index (`lcl|Subject_N`), a database sequence's OID (`gnl|BL_ORD_ID|oid`; the hit lists name it
+// by its rank among the listed ones, `SubjectKeys` maps the rank to the OID), or its parsed Seq-align id. The PSSM's multiple
 // alignment counts its rows by the same keys and joins following Seq-aligns whose ids `Match`
 // (`pssm::input_msa`). Keys that differ but that NCBI's handles can take for one are refused
 // where NCBI compares them (`rounds::HandleIndex`): in the inclusion sets before the round's
@@ -753,8 +763,9 @@ impl FoundBefore {
 /// PSSMs (`round_outcome`, `next_pssm`, `psiblast_pssms`).
 #[derive(Clone, Copy)]
 pub(super) struct SubjectKeys<'a> {
-    /// The ordinal ids of a database's listed subjects (`None` for `-subject` records).
-    pub(super) listed_ordinals: Option<&'a [u32]>,
+    /// The ordinal ids of a database's listed subjects with the database's OID of each
+    /// (`None` for `-subject` records).
+    pub(super) listed_ordinals: Option<(&'a [u32], crate::seqdb::OidMap<'a>)>,
     /// The parsed Seq-ids of a database's subjects by rank (empty without them).
     pub(super) parsed: &'a [Option<Arc<ParsedSubject>>],
     /// What the PSSM reads by those Seq-align ids where it is not the subject's own letters
@@ -816,10 +827,13 @@ impl SubjectKeys<'_> {
     pub(super) fn key(&self, s_idx: u32) -> SetKey {
         match self.listed_ordinals {
             None => SetKey::Index(s_idx),
-            Some(ordinals) => match self.parsed.get(s_idx as usize).and_then(Option::as_deref) {
-                Some(subject) => SetKey::Id(subject.alignment_id().clone()),
-                None => SetKey::Index(ordinals[s_idx as usize]),
-            },
+            Some((ordinals, oids)) => {
+                match self.parsed.get(s_idx as usize).and_then(Option::as_deref) {
+                    Some(subject) => SetKey::Id(subject.alignment_id().clone()),
+                    // The Seq-align id `gnl|BL_ORD_ID|<oid>` (`SetKey::ordinal_id`).
+                    None => SetKey::Index(oids.oid(ordinals[s_idx as usize]).get()),
+                }
+            }
         }
     }
 }

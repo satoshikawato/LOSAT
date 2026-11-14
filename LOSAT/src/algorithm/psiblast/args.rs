@@ -204,7 +204,7 @@ pub struct PsiblastArgs {
     pub out: Option<PathBuf>,
     /// The search strategy file (`-export_search_strategy`, quoted at
     /// `BlastpArgs::export_search_strategy`), created by the search's `run` before the other options
-    /// are read (with `-in_pssm` refused: item F1b-2 of line RG).
+    /// are read (`-in_pssm` included: the request holds the PSSM, `PsiSearch::request`).
     #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
     pub export_search_strategy: Option<PathBuf>,
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]
@@ -485,21 +485,6 @@ impl PsiblastArgs {
     /// blastp's arguments for psiblast's search, after LOSAT's refusals of what it does not run
     /// (the rounds of a range, and the output formats of the later items of the series).
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
-        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:281-287
-        // ```c++
-        //         if (pssm.NotEmpty())
-        //         {
-        //             _ASSERT(queries.Empty());
-        //             if(num_iters != 0)
-        //             	retval.Reset(new blast::CExportStrategy(pssm, opts_hndl, search_db, client_id, num_iters));
-        // ```
-        // A PSSM query's request holds the PSSM as read (`queries pssm`), which item F1b-2 of line
-        // RG writes; refused before the file is made.
-        if self.export_search_strategy.is_some() && self.in_pssm.is_some() {
-            bail!(
-                "-export_search_strategy with -in_pssm is not supported by LOSAT's PSIBLAST yet (NCBI writes a PSI-BLAST request that holds the PSSM with -db and stops with \"Remote PSI-BL2SEQ is not supported\" with -subject)"
-            );
-        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1277-1281
         // ```c++
         //     if (m_DbTarget == eProteinDb) {
@@ -607,7 +592,7 @@ impl PsiblastArgs {
             strategy: None,
             request_inputs,
             app: BlastpApp::Psiblast,
-            subject_taxdb: None,
+            taxdb_setting: None,
             inclusion_ethresh: Some(self.inclusion_ethresh),
             first_query_ordinal: self.first_query_ordinal,
             psiblast_pssm: Some(crate::algorithm::psiblast::pssm::PsiblastPssmOptions {
@@ -658,10 +643,7 @@ impl PsiblastArgs {
             .map(crate::core::blast_util::ncbi_int4_from_double);
         inputs.window_size = self.window_size;
         inputs.soft_masking = self.soft_masking;
-        inputs.seg = self
-            .seg
-            .as_deref()
-            .and_then(|value| seg_filter(value, "PSIBLAST"));
+        inputs.seg = self.seg.as_deref().and_then(seg_filter);
         if let Ok((mode, unified_p)) =
             crate::blastinput::app::parse_comp_based_stats(&self.comp_based_stats, true, false)
         {

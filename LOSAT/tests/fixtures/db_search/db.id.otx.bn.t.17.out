@@ -1,0 +1,5 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_1	LN:577
+@PG	ID:0	VN:2.17.0+	CL:/home/kawato/micromamba/bin/blastn -db tests/db_search/taxfilter/tfu_n -query tests/db_search/taxfilter/q.fna -taxids 9606 -outfmt 17 -num_threads 1 	PN:blastn
+BL_ORD_ID:3	0	Query_1	1	255	577M	*	0	0	*	*	AS:i:577	EV:f:0	NM:i:0	PI:f:100.00	BS:f:1066.64
+BL_ORD_ID:1	0	Query_1	1	255	545M1D31M	*	0	0	*	*	AS:i:516	EV:f:0	NM:i:1	PI:f:96.70	BS:f:953.992

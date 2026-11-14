@@ -151,12 +151,16 @@ fn search_records(
     if subjects.is_empty() {
         return Err(engine("Empty CBlastQueryVector"));
     }
+    // `-out` (`run_to_file`) is made where the command line opens it (`native::run`).
+    crate::api::local_blast::open_out(&mut outputs.formats)?;
     check_filtering(args)?;
     let query_range = parse_query_range(args)?;
     let mut resolved = check_resolutions(args, &choices, resolutions, &mut **diagnostics)?;
     for options in &mut resolved {
         options.query_range = query_range;
     }
+    // The taxonomy database of the reports, where the command line asks (`native::run`).
+    subject_taxonomy(&mut resolved, args.taxdb_setting.as_ref())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:213-217
     // ```c++
     //         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
@@ -227,6 +231,26 @@ fn search_records(
         },
         outputs,
     )
+}
+
+/// What the reports `resolved` of a `-subject` search ask of the taxonomy database, through
+/// `setting` (`common::database::subject_taxonomy`): asked by the command line (`native::run`)
+/// and by a search of records (`search_records`) at the same point, after the options are
+/// resolved. The reports share the organism report's database, as the other programs' formats.
+pub(super) fn subject_taxonomy(
+    resolved: &mut [ResolvedOptions],
+    setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
+) -> Result<()> {
+    let taxonomy = crate::algorithm::common::database::subject_taxonomy(
+        setting,
+        "BLASTX",
+        resolved.iter().filter_map(|options| options.tabular),
+    )?;
+    for options in resolved {
+        options.taxdb_found = taxonomy.found.unwrap_or(false);
+        options.subject_taxdb = taxonomy.taxdb.clone();
+    }
+    Ok(())
 }
 
 /// A `-db` search's part of `report_batches`.
@@ -412,7 +436,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         .collect();
     let writers = formats
         .iter_mut()
-        .map(|format| format.sink.ostream())
+        .map(|format| crate::cli::NcbiOstream::sink(&mut format.sink))
         .collect::<io::Result<Vec<_>>>()?;
     // The archive (outfmt 11) refuses a title where it writes the batch, after its search
     // (`archive::check_batch_titles`, below): when a batch that the search may write has a query
@@ -432,7 +456,8 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                 deliver,
                 &mut |_| Ok(()),
             )
-        }) || (database.is_none() && archive::check_titles(subjects, "subject").is_err()));
+        }) || (database.is_none()
+            && archive::check_titles(subjects, "subject", resolved[0].program().upper).is_err()));
     // A run in which a `-subject` title (refused with its first hit) or the message of a query
     // (refused where NCBI does not search its batch) could still be refused by those documents
     // holds every format in order, as the archive's titles do and as the command line holds its
@@ -453,13 +478,13 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
             });
     let hold = (titles_may_refuse || xml_may_refuse).then(archive::ArchiveHold::new);
     // The hold comes between a format's stream and the caller's writer, which has no stream of
-    // NCBI's (`cli::NcbiOstream`): it keeps the bytes in order.
+    // NCBI's (`cli::NcbiOstream::held`): it keeps the writes and flushes in order.
     let mut writers: Vec<crate::cli::NcbiOstream<'_>> = match &hold {
         Some(hold) => {
             hold.hold();
             writers
                 .into_iter()
-                .map(|writer| crate::cli::NcbiOstream::new(Box::new(hold.writer(writer))))
+                .map(|writer| crate::cli::NcbiOstream::held(hold.writer(writer)))
                 .collect()
         }
         None => writers,
@@ -499,13 +524,14 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     // `ReportOutputs::finish_archive`) and nothing after LOSAT's refusal (`ArchiveHold::end_with`);
     // when only the documents are, nothing after one of their refusals and the bytes of the
     // batches before after any other error (`ArchiveHold::end_document_with`), as the command line.
+    // A write that fails there is the run's error in place of the run's own, as without the hold.
     // The observer's events of a held run come before its bytes reach their sinks, so a position
     // read from a sink at an event is not that of the event (`FormatObserver`): the same for every
     // hold of this function, a `-subject` run's too.
     match (&hold, &written) {
         (Some(hold), Ok(_)) => hold.release()?,
-        (Some(hold), Err(error)) if titles_may_refuse => hold.end_with(error),
-        (Some(hold), Err(error)) => hold.end_document_with(error),
+        (Some(hold), Err(error)) if titles_may_refuse => hold.end_with(error)?,
+        (Some(hold), Err(error)) => hold.end_document_with(error)?,
         (None, _) => {}
     }
     let (run_hits, run_subjects) = written?;
@@ -701,6 +727,7 @@ fn write_run(
                 queries,
                 database.is_none().then_some(subjects),
                 queries_before == 0,
+                search_options.program().upper,
             )?;
         }
         let hits = match made_hits {
@@ -968,6 +995,8 @@ fn search_database(
     let list = args
         .db_filter
         .resolve(&settings, &mut *outputs.diagnostics)?;
+    // `-out` (`run_to_file`) is made where the command line opens it (`native::run`).
+    outputs.open_out()?;
     check_filtering(args)?;
     let query_range = parse_query_range(args)?;
     let mut resolved = check_resolutions(args, &choices, resolutions, &mut *outputs.diagnostics)?;
@@ -1140,14 +1169,11 @@ fn parse_subject_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
 // ```
 /// The filtering handler (`CFilteringArgs`), which comes after the subjects are read and before
 /// the query options and formatting handlers: NCBI's error of `-seg` (`BlastxArgs::seg_spec`;
-/// `resolve_with_format` keeps it with the other deferred errors, LOSAT's refusal of a value that
-/// NCBI reads comes from `resolve_with_format`).
+/// `resolve_with_format` keeps it with the other deferred errors).
 pub(super) fn check_filtering(args: &BlastxArgs) -> Result<()> {
     match args.seg_spec() {
-        Err(app::SegOptionError::Ncbi(message)) => {
-            Err(options_error(SemanticOptionsError::from(message).into()))
-        }
-        Ok(_) | Err(app::SegOptionError::Losat(_)) => Ok(()),
+        Err(message) => Err(options_error(SemanticOptionsError::from(message).into())),
+        Ok(_) => Ok(()),
     }
 }
 

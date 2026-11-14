@@ -851,6 +851,13 @@ a result that LOSAT does not reproduce.
 | A protein with a tax id and a title ending in `]`, where a definition line has no title (0) or the id is `lcl|Subject_N` (tabular formats) | 0, tabular formats | With `taxdb.bti` on the search path `x_AdjustProteinTitleSuffix` rewrites the title from the tax ids; without it NCBI keeps the title | 2 |
 | A title in no encoding that NCBI recognises, for an `lcl|Subject_N` id | tabular formats | Not compared | |
 
+A sequence without parsed Seq-ids whose title, or whose empty title's name in the taxonomy database,
+is in no encoding that NCBI recognises is NCBI's in every format: the tabular rows of NCBI's catch
+(`Unknown`, the Seq-align id `gnl|BL_ORD_ID|n` in `sallseqid`, the titles and taxonomy of the row
+before) and refused only where NCBI stops or prints an uninitialised number (`sacc`, `saccver`, a
+first row's `staxid`; [`PD-LOSAT-NCBI-DEFECTS`](PD-LOSAT-NCBI-DEFECTS.md) version 1.26, line RG
+item T7).
+
 A tabular field list reads the sequence that NCBI's formatters find by the Seq-align id only with
 the default fields, a subject id (`sseqid`, `sgi`, `sacc`, `saccver`, `sallseqid`, `sallgi`,
 `sallacc`), a title, tax id or name, `sstrand`, `slen`, or a field of the alignment's letters

@@ -178,7 +178,7 @@ fn subject_taxonomy_is_ncbis_in_the_command_line_and_the_library() {
             }
         }
         // The plural names with a setting that LOSAT cannot read: the command line's refusal, the
-        // library's too.
+        // library's too (its error is the text after the command line's `Error: `, `api`).
         let words = words(&[
             program,
             "-query",
@@ -188,12 +188,18 @@ fn subject_taxonomy_is_ncbis_in_the_command_line_and_the_library() {
             "-outfmt",
             "6 qseqid sseqid sscinames",
         ]);
-        let cli = both(
-            &dir,
-            &words,
-            &[("NCBI_CONFIG__BLAST__BLASTDB", unreadable.clone())],
+        let envs = [("NCBI_CONFIG__BLAST__BLASTDB", unreadable.clone())];
+        let cli = run_binary_in(Path::new(BIN), &dir, &words, &envs);
+        let library = run_binary_in(&example_binary("library_command_line"), &dir, &words, &envs);
+        assert_eq!(cli.status.code(), Some(1), "{program}: {cli:?}");
+        assert_eq!(
+            (
+                library.status.code(),
+                format!("Error: {}", text(&library.stderr))
+            ),
+            (Some(1), text(&cli.stderr)),
+            "{program}: the library"
         );
-        assert_ne!(cli.status.code(), Some(0), "{program}: {cli:?}");
     }
     let _ = fs::remove_dir_all(&dir);
 }
@@ -218,7 +224,7 @@ fn run_to_file_makes_out_where_the_command_line_does() {
         assert!(
             text(&cli.stderr).ends_with(
                 "Command line argument error: Argument \"out\". File is not accessible:  `nodir/out.txt'\n"
-            ) && text(&cli.stderr).contains("Warning"),
+            ) && text(&cli.stderr).contains("Hyphens are invalid"),
             "{program}: {cli:?}"
         );
         // tblastx's run messages go to `-logfile`: the same file from both.
@@ -232,7 +238,10 @@ fn run_to_file_makes_out_where_the_command_line_does() {
                 logs.push(fs::read_to_string(dir.join("log.txt")).unwrap());
             }
             assert_eq!(logs[1], logs[0], "{program} -logfile");
-            assert!(logs[0].contains("Warning") && logs[0].contains("File is not accessible"));
+            assert!(
+                logs[0].contains("Hyphens are invalid")
+                    && logs[0].contains("File is not accessible")
+            );
         }
         // An error of the formatting handler (AIRR, outfmt 19) after `-out` is made: an empty file
         // from both.

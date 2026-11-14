@@ -385,6 +385,35 @@ impl PsiSearch {
     /// `PsiBlastSetupScoreBlock` for the round's options (`setup_messages`). The query stays the
     /// FASTA query: `CPsiBlastImpl::SetPssm` replaces only the PSSM.
     ///
+    /// With `-query_loc` the query is round 1's range (`query`, cut from its record) while the
+    /// PSSM is the whole record's (`s_GetQueryBioseq` gives the record's Bioseq to the PSSM
+    /// engine, `blast_engine::psi_round::next_pssm`): the search reads the PSSM's rows at the
+    /// query's offsets, 0 to the range's length, so the range's first letter meets the record's
+    /// first row (NCBI 2.17.0 `-query_loc 20-300 -num_iterations 3`: round 2 aligns rows 19-190,
+    /// round 1's alignment, as the record's letters 39-210 at 4.494 % identities; series Q, Q4a).
+    /// No row past the range is read: the kernels, the lookup table of the query's offsets and
+    /// the position-based composition-based statistics index the PSSM by the query's offset in
+    /// its range (`pssm_search::rows`), and the Karlin values are the PSSM's own. Without
+    /// `-query_loc` the query is the record and every row is read.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:303-310
+    /// ```c++
+    ///                         CConstRef<CBioseq> seq =
+    ///                          s_GetQueryBioseq(query, scope, pssm);
+    ///                         pssm =
+    ///                          ComputePssmForNextIteration(*seq, aln, psi_opts, scope,
+    ///                                      results_1st_query.GetAncillaryData());
+    ///                         psiblast->SetPssm(pssm);
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:157-161 (`s_GetQueryBioseq`)
+    /// ```c++
+    ///         if (query->GetQuerySeqLoc(0)->GetId()) {
+    ///             CBioseq_Handle bh =
+    ///                 scope->GetBioseqHandle(*query->GetQuerySeqLoc(0)->GetId());
+    ///             _ASSERT(bh);
+    ///             retval.Reset(bh.GetBioseqCore());
+    /// ```
+    ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:173-181
     /// ```c++
     /// CPsiBlastImpl::SetPssm(CConstRef<objects::CPssmWithParameters> pssm)
@@ -406,15 +435,16 @@ impl PsiSearch {
         setup_messages: Vec<String>,
     ) -> Self {
         let stat = |value: f64| (value != 0.0).then_some(value);
+        let read = query.seq().len();
         Self {
             pssm: rows::QueryPssm {
-                rows: pssm.scores.clone(),
+                rows: pssm.scores[..read].to_vec(),
             },
             freq_ratios: pssm
                 .diagnostics
                 .frequency_ratios
-                .clone()
-                .unwrap_or_default(),
+                .as_deref()
+                .map_or_else(Vec::new, |ratios| ratios[..read].to_vec()),
             stats: PssmStats {
                 lambda_ungapped: stat(pssm.ungapped.lambda),
                 kappa_ungapped: stat(pssm.ungapped.k),

@@ -483,7 +483,7 @@ pub struct PsiblastArgs {
 
 impl PsiblastArgs {
     /// blastp's arguments for psiblast's search, after LOSAT's refusals of what it does not run
-    /// (the rounds of a range, and the output formats of the later items of the series).
+    /// (the output formats of the later items of the series).
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1277-1281
         // ```c++
@@ -494,32 +494,9 @@ impl PsiblastArgs {
         //         }
         // ```
         // A query given as a PSSM (`-in_pssm`) runs its rounds as a FASTA query's, round 1 with the
-        // input PSSM (item PS5b).
-        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:147-165
-        // ```c++
-        // s_GetQueryBioseq(CConstRef<CBlastQueryVector> query, CRef<CScope> scope,
-        //                  CRef<CPssmWithParameters> pssm)
-        // {
-        //     CConstRef<CBioseq> retval;
-        //
-        //     if (pssm) {
-        //         retval.Reset(&pssm->SetQuery().SetSeq());
-        //     } else {
-        //         _ASSERT(query.NotEmpty());
-        //         if (query->GetQuerySeqLoc(0)->GetId()) {
-        //             CBioseq_Handle bh =
-        //                 scope->GetBioseqHandle(*query->GetQuerySeqLoc(0)->GetId());
-        // ```
-        // The PSSM of the next round is made of the whole record's Bioseq while the search keeps
-        // the range: NCBI's later rounds align a PSSM of the record to the range (NCBI 2.17.0
-        // `-query_loc 20-300 -num_iterations 6`: 4.494 % identities in round 2), an output that
-        // LOSAT does not reproduce.
-        if self.num_iterations != 1 && self.query_loc.is_some() {
-            bail!(
-                "-query_loc with -num_iterations {} (NCBI BLAST+'s later rounds align the PSSM of the whole record to the range) is not supported by LOSAT's PSIBLAST",
-                self.num_iterations
-            );
-        }
+        // input PSSM (item PS5b), and a range of the query (`-query_loc`) runs them as NCBI does:
+        // the later rounds search the range with the PSSM of the whole record
+        // (`PsiSearch::from_engine`, series Q, Q4a).
         Self::check_outfmt(&self.outfmt)?;
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (quoted at
         // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM of
@@ -780,7 +757,7 @@ mod tests {
 
     // psiblast_app.cpp:246-321 (`rounds.rs`): the rounds of a FASTA query run (0: until
     // convergence), and those of `-in_pssm` (PS5b, with one round too when a PSSM file is
-    // written); with `-query_loc` they are refused.
+    // written), with `-query_loc` too (Q4a).
     #[test]
     fn rounds_run_and_the_later_output_formats_are_refused() {
         for (rounds, plan) in [("0", Some(0)), ("2", Some(2)), ("1", None)] {
@@ -816,14 +793,16 @@ mod tests {
         assert_eq!(in_pssm(&[]), None);
         assert_eq!(in_pssm(&["-out_pssm", "f"]), Some(1));
         assert_eq!(in_pssm(&["-out_ascii_pssm", "f"]), Some(1));
-        let error = parse(&["-num_iterations", "2", "-query_loc", "1-20"])
+        let ranged = parse(&["-num_iterations", "2", "-query_loc", "1-20"])
             .unwrap()
             .into_blastp_args()
-            .unwrap_err()
-            .to_string();
-        assert!(
-            error.contains("-query_loc with -num_iterations 2"),
-            "{error}"
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert_eq!(
+            ranged.psi_rounds.as_ref().map(|plan| plan.num_iterations),
+            Some(2),
+            "the rounds of a range run"
         );
         let error = parse(&["-num_iterations", "3", "-seg", "yes"])
             .unwrap()

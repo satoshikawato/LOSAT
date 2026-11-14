@@ -59,6 +59,7 @@ pub(super) fn search_rounds(
     plan: &PsiRoundPlan,
     query_records: &[FastaRecord],
     searched_queries: &[FastaRecord],
+    query_input: &seq_range::QueryInput,
     batches: QueryBatches,
     subjects: &SubjectSet<'_>,
     subject_source: BlastpSubjectSource<'_>,
@@ -169,6 +170,7 @@ pub(super) fn search_rounds(
                 plan,
                 query_records,
                 searched_queries,
+                query_input,
                 &batches,
                 subjects,
                 subject_source,
@@ -236,6 +238,7 @@ fn run_queries(
     plan: &PsiRoundPlan,
     query_records: &[FastaRecord],
     searched_queries: &[FastaRecord],
+    query_input: &seq_range::QueryInput,
     batches: &QueryBatches,
     subjects: &SubjectSet<'_>,
     subject_source: BlastpSubjectSource<'_>,
@@ -263,7 +266,18 @@ fn run_queries(
     let mut calls = 0usize;
     for &(input_start, query) in &batches.starts {
         let records = std::slice::from_ref(&searched_queries[query]);
-        let query_input = seq_range::QueryInput::whole(records);
+        // The query as round 1 searches it, in every round: with `-query_loc` its range of the
+        // record (`placements`; the PSSM is made of the whole record, `next_pssm`, and searched
+        // at the range's offsets, `PsiSearch::from_engine`). A psiblast batch holds one record.
+        let query_input = seq_range::QueryInput {
+            placements: seq_range::Placements(
+                query_input.placements.get(query).into_iter().collect(),
+            ),
+            ordinals: vec![0],
+            input_lengths: vec![query_records[input_start].seq().len()],
+            skipped: vec![false],
+            range_length: query_input.range_length,
+        };
         let ranges = BlastpRanges {
             input_records: std::slice::from_ref(&query_records[input_start]),
             query_input: &query_input,

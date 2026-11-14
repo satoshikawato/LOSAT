@@ -7,7 +7,7 @@
 // i32 as a signed number, so a pointer of 2 GiB or more arrives negative: every pointer
 // and length is converted with `>>> 0` before it is used as an offset into the memory.
 import type { RecordKey } from '../../domain/dataset.js';
-import type { StartResult } from '../../ports/engine.js';
+import { FileReadError, type StartResult } from '../../ports/engine.js';
 import type { Compression } from '../../ports/inflate.js';
 
 /** Stream 2: the JSON response of describe, register, scan_end, inflate_begin, start and file_end. */
@@ -420,10 +420,11 @@ export type FileLoader = Pick<ReactorAbi, 'stoppedBy' | 'fileBegin' | 'chunkBuff
  * file, kind 2) and returns its *file* JSON: `file_begin` with the file's size, its bytes in chunks of
  * at most `FILE_CHUNK_BYTES` read from the Blob one at a time and given through one buffer of engine
  * memory taken once, `file_end`. A file that the engine refuses (a chunk or its end), or that cannot
- * be read, is released, unless the instance stopped, so that its name is free again; the buffer is
- * given back in every case. `call` wraps each call into the instance (the Engine worker counts them
- * as uses of the threaded instance). The reads wait: other calls of the instance may run between the
- * chunks, so a file that must meet no other call goes to an instance of its own.
+ * be read (`FileReadError`, with the browser's reason), is released, unless the instance stopped, so
+ * that its name is free again; the buffer is given back in every case. `call` wraps each call into
+ * the instance (the Engine worker counts them as uses of the threaded instance). The reads wait:
+ * other calls of the instance may run between the chunks, so a file that must meet no other call
+ * goes to an instance of its own.
  */
 export async function loadFile(
   abi: FileLoader,
@@ -438,7 +439,12 @@ export async function loadFile(
   try {
     buffer = call(() => abi.chunkBuffer(Math.max(1, Math.min(FILE_CHUNK_BYTES, size))));
     for (let offset = 0; offset < size; offset += FILE_CHUNK_BYTES) {
-      const bytes = new Uint8Array(await file.slice(offset, Math.min(size, offset + FILE_CHUNK_BYTES)).arrayBuffer());
+      let bytes: Uint8Array;
+      try {
+        bytes = new Uint8Array(await file.slice(offset, Math.min(size, offset + FILE_CHUNK_BYTES)).arrayBuffer());
+      } catch (error) {
+        throw new FileReadError(error instanceof Error ? error.message : String(error), { cause: error });
+      }
       call(() => abi.fileChunk(handle, bytes, buffer!));
     }
     return call(() => abi.fileEnd(handle));

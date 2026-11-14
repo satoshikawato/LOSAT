@@ -25,6 +25,7 @@ import { fastaParser, programById } from '../domain/programs';
 import { isTerminal, type ConffileSnapshot, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
+import { registryName, unreadableConffile } from './conffile';
 import { taskOf } from './results';
 import { Store } from './store';
 
@@ -157,9 +158,10 @@ export class Coordinator {
       }
       if (!start.ok) return start;
       let conffile: Prepared['conffile'];
-      const { conffile: conffileName, dryRun } = start.start;
-      // An empty name (`-conffile=`) names no file that the engine can hold: its message stands.
-      if (conffileName !== null && conffileName !== '' && request.conffile !== undefined) {
+      const { dryRun } = start.start;
+      // The file chosen for the argv's -conffile, under its name (`registryName`: none for `-conffile=`).
+      const conffileName = registryName(start.start);
+      if (conffileName !== undefined && request.conffile !== undefined) {
         const chosen = request.conffile;
         let read = reads.get(chosen);
         if (read === undefined) reads.set(chosen, (read = this.readConffile(chosen)));
@@ -167,7 +169,7 @@ export class Coordinator {
           const { file, sha256 } = await read;
           conffile = { snapshot: Object.freeze({ name: conffileName, fileName: chosen.name, size: file.size, sha256 }), file };
         } catch (error) {
-          return { ok: false, message: `The file of -conffile ${conffileName} (${chosen.name}) could not be read: ${errorMessage(error)}` };
+          return { ok: false, message: unreadableConffile(conffileName, chosen.name, error) };
         }
       }
       let validation: ValidationResult;

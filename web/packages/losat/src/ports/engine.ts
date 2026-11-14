@@ -150,6 +150,24 @@ export class InputMismatchError extends Error {
   }
 }
 
+/**
+ * Thrown (as a rejection) by `validate` or `run` when the file given with it (the registry file of
+ * `-conffile`, a WindowMasker counts file) could not be read, as a browser refuses a file chosen from the
+ * disk that changed after it was chosen: the message is the browser's. An error that crosses a worker
+ * keeps its name only (`isFileReadError`).
+ */
+export class FileReadError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'FileReadError';
+  }
+}
+
+/** Whether an error is a FileReadError, also one rebuilt from its name after it crossed a worker. */
+export function isFileReadError(error: unknown): error is Error {
+  return error instanceof Error && error.name === 'FileReadError';
+}
+
 /** Thrown (as a rejection) by `run` after `cancel` was called for that run. */
 export class RunCancelledError extends Error {
   constructor(readonly runId: string) {

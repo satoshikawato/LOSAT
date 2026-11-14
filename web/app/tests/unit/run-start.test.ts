@@ -11,7 +11,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { instantiateSerial, reactorControl, reopening, WasmEngine } from 'losat';
 import { readStoredZip, type RegistryFile, type RunFile } from 'losat/domain';
-import { runFilesOf, withRunFiles, type EngineRunRequest } from 'losat/ports';
+import { FileReadError, isFileReadError, runFilesOf, withRunFiles, type EngineRunRequest } from 'losat/ports';
 import { findReactors } from '../../build/reactors';
 import { outputFileName, runFileName } from '../../src/domain/output-format';
 import { EngineRuntime } from '../../../packages/losat/src/infra/engine-worker/runtime';
@@ -403,6 +403,18 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
     const trapped = fakeExports({ trapValidate: true });
     await expect(reactorControl(async () => shared, async () => trapped.abi).validate(['blastp', '-conffile', 'c.ini'], registry)).rejects.toThrow(EngineStoppedError);
     expect(trapped.log).toEqual(['begin 2 c.ini 8', 'chunk 9 [BLAST]\n', 'end 9', 'validate blastp -conffile c.ini']);
+    // A file that the browser no longer reads (it changed after it was chosen): a FileReadError with the
+    // browser's reason, the file released, no validation.
+    const reason = 'The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired.';
+    const unreadable = { size: 8, slice: () => ({ arrayBuffer: () => Promise.reject(new DOMException(reason, 'NotReadableError')) }) } as unknown as Blob;
+    const own = fakeExports();
+    const error = await reactorControl(async () => shared, async () => own.abi)
+      .validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: unreadable })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(FileReadError);
+    expect(isFileReadError(error)).toBe(true);
+    expect((error as Error).message).toBe(reason);
+    expect(own.log).toEqual(['begin 2 c.ini 8', 'release 9']);
     expect(log).toEqual([]);
   });
 });
@@ -768,9 +780,9 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
     const before = shared.memoryBytes();
     expect(await control.validate(argv, { name: 'settings.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true });
     expect((await control.validate(argv, { name: 'settings.ini', file: new Blob(['[x\n']) })).ok).toBe(false);
-    // A file of 24 MiB (three chunks): a section and comment lines.
+    // A file of 24 MiB and 26 bytes (four chunks, the last of 26 bytes): a section and comment lines.
     const large = new Blob(['[BLAST]\n', '; a comment line of the registry file\n'.repeat(Math.ceil((24 * 1024 * 1024) / 38))]);
-    expect(large.size).toBeGreaterThan(3 * FILE_CHUNK_BYTES - 64);
+    expect(large.size).toBe(3 * FILE_CHUNK_BYTES + 26);
     expect(await control.validate(argv, { name: 'settings.ini', file: large })).toEqual({ ok: true });
     expect(shared.memoryBytes()).toBe(before);
     expect(await control.validate(argv)).toEqual(missing);

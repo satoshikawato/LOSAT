@@ -10,7 +10,8 @@
 // (line RG E1w-3b). The task and the genetic codes are shown elsewhere (SearchPanel, InputPanel).
 import { computed, ref } from 'vue';
 import type { CountsLoader } from '../application/counts';
-import { conffileName as conffileOf, type DraftState, type SearchDraft } from '../application/draft';
+import { registryName } from '../application/conffile';
+import type { DraftState, SearchDraft } from '../application/draft';
 import { fieldRows, pairRows, sectionShown, sectionsAt, type PairRow } from '../domain/parameters';
 import { programById, type ParameterField as Field } from '../domain/programs';
 import { formatBytes } from './format';
@@ -39,7 +40,7 @@ const extraChanged = computed(() => extra.value.trim() !== '');
 /** A refusal of a word typed there, or of its text, marks the row's text box (WA2-AX-05). */
 const extraRefused = computed(() => refusal(props.state)?.extra === true);
 /** The name that the argv's -conffile gives, as the engine's start read it; undefined without one, or for an empty one. */
-const conffileName = computed(() => conffileOf(props.state));
+const conffileName = computed(() => registryName(props.state.start));
 /** The file chosen for it. */
 const conffile = computed(() => props.state.conffiles[props.state.program]);
 const conffileInput = ref<HTMLInputElement | null>(null);

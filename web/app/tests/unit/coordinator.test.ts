@@ -407,6 +407,48 @@ describe('Coordinator', () => {
     expect(held.size).toBe(0);
   });
 
+  // Review 3 L4: the bytes of a run's registry file go when the run ends however it ends: completed (above),
+  // failed, or cancelled while it runs.
+  it("lets the run's registry file go when the run fails or is cancelled while it runs", async () => {
+    const engine = new ManualEngine();
+    engine.startResult = startOf({ conffile: 'settings.ini' });
+    const { coordinator } = setup(engine);
+    const held = (coordinator as unknown as { conffiles: Map<string, Blob> }).conffiles;
+    const chosen = new File(['[BLAST]\n'], 'my settings.ini');
+    const failed = (await coordinator.enqueue({ ...request, extra: ['-conffile', 'settings.ini'], conffile: chosen })).runId!;
+    await waitFor(coordinator, failed, 'running');
+    expect(held.has(failed)).toBe(true);
+    engine.fail(failed, 'BLAST engine error: x');
+    await waitFor(coordinator, failed, 'failed');
+    expect(held.size).toBe(0);
+    const cancelled = (await coordinator.enqueue({ ...request, extra: ['-conffile', 'settings.ini'], conffile: chosen })).runId!;
+    await waitFor(coordinator, cancelled, 'running');
+    expect(held.has(cancelled)).toBe(true);
+    coordinator.cancel(cancelled);
+    engine.fail(cancelled, 'cancelled');
+    await waitFor(coordinator, cancelled, 'cancelled');
+    expect(held.size).toBe(0);
+  });
+
+  // Review 3 L2: a chosen file that changed or went after it was chosen cannot be read at "Run LOSAT".
+  it('does not queue a request whose -conffile file cannot be read, says so, and holds nothing', async () => {
+    const engine = new ManualEngine();
+    engine.startResult = startOf({ conffile: 'settings.ini' });
+    const { coordinator } = setup(engine);
+    const held = (coordinator as unknown as { conffiles: Map<string, Blob> }).conffiles;
+    const chosen = new File(['[BLAST]\n'], 'my settings.ini');
+    chosen.arrayBuffer = () =>
+      Promise.reject(new DOMException('The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired.', 'NotReadableError'));
+    expect(await coordinator.enqueue({ ...request, extra: ['-conffile', 'settings.ini'], conffile: chosen })).toEqual({
+      ok: false,
+      message:
+        'The file chosen for -conffile settings.ini (my settings.ini) could not be read: The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired. Choose it again.',
+    });
+    expect(engine.registries).toEqual([]);
+    expect(coordinator.state.get().runs).toHaveLength(0);
+    expect(held.size).toBe(0);
+  });
+
   it('does not queue a request whose argv the engine cannot start, with its message', async () => {
     const engine = new ManualEngine();
     engine.startResult = { ok: false, message: "error: unexpected argument '-version' found" };

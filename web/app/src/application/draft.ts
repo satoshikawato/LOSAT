@@ -27,7 +27,7 @@ import {
   type RegistryFile,
   type SequenceKind,
 } from 'losat/domain';
-import type { EngineGateway, InputCheck, ProgramDescription, StartInfo } from 'losat/ports';
+import { isFileReadError, type EngineGateway, type InputCheck, type ProgramDescription, type StartInfo } from 'losat/ports';
 import {
   accessionLines,
   accessionsOnALine,
@@ -53,6 +53,7 @@ import { fastaParser, programById, PROGRAMS, sequenceKind } from '../domain/prog
 import { regionProblem, regionValue, type RegionText } from '../domain/region';
 import type { DataGateway } from '../ports/data';
 import type { AccessionFetcher, FetchResult } from '../ports/fetch';
+import { registryName, unreadableConffile } from './conffile';
 import type { EnqueueAllResult, SearchRequest } from './coordinator';
 import { SourceRace, type RaceStanding } from './source-race';
 import { SourceRefs } from './source-refs';
@@ -253,6 +254,8 @@ export class SearchDraft {
   private readonly race: SourceRace;
   /** The argv of the latest validation that the engine accepted (the prepare hint's argv). */
   private validArgv: readonly string[] | undefined;
+  /** The validation that runs, or the last one: the next waits for it (validateInTurn). */
+  private validationTurn: Promise<void> = Promise.resolve();
   private nextKey = 1;
 
   constructor(private readonly deps: DraftDeps) {
@@ -939,7 +942,7 @@ export class SearchDraft {
     }
     // The file of the argv's -conffile, which the engine's start named at the validation (idle).
     const state = this.state.get();
-    const conffile = conffileName(state) === undefined ? undefined : state.conffiles[program];
+    const conffile = registryName(state.start) === undefined ? undefined : state.conffiles[program];
     const resolved = {
       query: await Promise.all(groups.query.map((group) => this.resolveGroup(group))),
       subject: await Promise.all(groups.subject.map((group) => this.resolveGroup(group))),
@@ -1261,7 +1264,20 @@ export class SearchDraft {
   private scheduleValidation(): void {
     // A validation of an older argv that is still running is not shown.
     this.nextGeneration('validate');
-    this.debounce('validate', () => this.track(this.validate()));
+    this.debounce('validate', () => this.track(this.validateInTurn()));
+  }
+
+  /**
+   * One validation at a time, the latest winning: one that comes while another runs waits for it, and
+   * then validates only if no newer change came meanwhile. So a validation with the file of -conffile,
+   * which the Data worker reads on an instance of its own, never runs beside another one that reads the
+   * file again, and none starts for an argv that is already out of date.
+   */
+  private validateInTurn(): Promise<void> {
+    const generation = this.generations.get('validate');
+    const turn = this.validationTurn.then(() => (this.generations.get('validate') === generation ? this.validate() : undefined));
+    this.validationTurn = turn.catch(() => undefined);
+    return turn;
   }
 
   private async validate(): Promise<void> {
@@ -1284,20 +1300,27 @@ export class SearchDraft {
     this.set({ validation: { state: 'checking' } });
     let validation: Validation;
     let start: StartInfo | undefined;
+    let registry: ChosenRegistryFile | undefined;
     try {
       // NCBI's application start first (line RG E1w-3b): the name of the registry file that the argv
       // reads, under which the chosen file is checked. An argv that it cannot start (a version word)
       // has the parser's message, as validate gives it.
       const started = await this.deps.engine.start(argv);
+      // A newer change came meanwhile: its validation follows, and this one reads no file.
+      if (this.generations.get('validate') !== generation) return;
       if (!started.ok) {
         validation = { state: 'invalid', message: started.message };
       } else {
         start = started.start;
-        const result = await this.deps.engine.validate(argv, this.registryFile(program, start));
+        registry = this.registryFile(program, start);
+        const result = await this.deps.engine.validate(argv, registry);
         validation = result.ok ? { state: 'ok' } : { state: 'invalid', message: result.message };
       }
     } catch (error) {
-      validation = { state: 'invalid', message: messageOf(error) };
+      // The chosen file changed or went after it was chosen: the browser no longer reads it.
+      const message =
+        registry !== undefined && isFileReadError(error) ? unreadableConffile(registry.name, registry.file.name, error) : messageOf(error);
+      validation = { state: 'invalid', message };
     }
     if (this.generations.get('validate') !== generation) return;
     this.validArgv = validation.state === 'ok' ? argv : undefined;
@@ -1305,14 +1328,11 @@ export class SearchDraft {
     this.prepareEngine();
   }
 
-  /**
-   * The registry file of the argv's `-conffile`: the chosen file under the argv's name; undefined
-   * without either. An empty name (`-conffile=`) names no file that the engine can hold, and gets the
-   * engine's message.
-   */
-  private registryFile(program: ProgramId, start: StartInfo): RegistryFile | undefined {
+  /** The registry file of the argv's `-conffile`: the chosen file under the argv's name (`registryName`); undefined without either. */
+  private registryFile(program: ProgramId, start: StartInfo): ChosenRegistryFile | undefined {
+    const name = registryName(start);
     const file = this.state.get().conffiles[program];
-    return !start.conffile || file === undefined ? undefined : { name: start.conffile, file };
+    return name === undefined || file === undefined ? undefined : { name, file };
   }
 
   /**
@@ -1458,13 +1478,9 @@ function fetchProblem(result: Exclude<FetchResult, { ok: true }>, source: FetchS
   }
 }
 
-/**
- * The name that the argv's `-conffile` gives, as the engine's start read it, for which the form asks
- * for a file and the search reads the one chosen; undefined without `-conffile`, and for an empty name
- * (`-conffile=`), which names no file that the engine can hold (the engine's message stands).
- */
-export function conffileName(state: DraftState): string | undefined {
-  return state.start?.conffile || undefined;
+/** The registry file of a validation: the File chosen for `-conffile`, under the argv's name. */
+interface ChosenRegistryFile extends RegistryFile {
+  readonly file: File;
 }
 
 /** Whether the form holds inputs: a pasted text (accessions too) or a source of either role. */

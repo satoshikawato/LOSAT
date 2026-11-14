@@ -18133,4 +18133,54 @@ mod tests {
             .expect("pool");
         }
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3405-3437 (quoted at
+    // `blastp_get_start_for_gapped_alignment_int4_length`)
+    /// BLASTP's gapped start of a one-hit HSP of negative length, which its gapped stage keeps
+    /// inline, gives what TBLASTN's and BLASTX's shared one gives (`gapalign::gapped_start_int4`
+    /// over windows that read past a sequence as NULLBs), with every matrix, for windows inside the
+    /// sequences, ending on their NULLBs and past them.
+    #[test]
+    fn the_inline_one_hit_gapped_start_is_the_shared_one() {
+        use crate::algorithm::blastp::gapalign::{gapped_start_int4, gapped_start_window};
+        let mut state = 0x2f2f_u64;
+        let mut next = |bound: usize| -> usize {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((state >> 33) % bound as u64) as usize
+        };
+        let mut above = 0;
+        for matrix in ScoringMatrix::ALL {
+            for _ in 0..3000 {
+                let query: Vec<u8> = (0..1 + next(30)).map(|_| 1 + next(27) as u8).collect();
+                let q_start = next(query.len());
+                // Half the subjects copy the query's letters from the same start, so that windows
+                // sum above 0.
+                let (subject, s_start) = if next(2) == 0 {
+                    let subject: Vec<u8> = (0..1 + next(30)).map(|_| 1 + next(27) as u8).collect();
+                    let s_start = next(subject.len());
+                    (subject, s_start)
+                } else {
+                    (query.clone(), q_start)
+                };
+                let length = -1 - next(4) as i32;
+                let inline = blastp_get_start_for_gapped_alignment_int4_length(
+                    &query, &subject, q_start, length, s_start, matrix,
+                );
+                let shared = gapped_start_int4(
+                    &gapped_start_window(&query, q_start),
+                    &gapped_start_window(&subject, s_start),
+                    q_start,
+                    matrix,
+                );
+                assert_eq!(
+                    inline, shared,
+                    "{matrix:?} {query:?} {subject:?} {q_start} {s_start}"
+                );
+                above += usize::from(shared != q_start);
+            }
+        }
+        assert!(above > 100, "{above}");
+    }
 }

@@ -24,6 +24,7 @@ pub mod asn_text;
 pub(crate) mod asn_text_reader;
 pub mod encoder;
 pub mod json;
+mod out_buffer;
 pub mod pssm;
 pub mod real;
 pub mod seqalign;

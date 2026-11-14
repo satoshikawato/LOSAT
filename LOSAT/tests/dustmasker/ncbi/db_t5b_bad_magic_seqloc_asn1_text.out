@@ -1,0 +1,198 @@
+Seq-loc ::= packed-int {
+  {
+    from 229,
+    to 236,
+    id genbank {
+      accession "AB410000",
+      version 1
+    }
+  },
+  {
+    from 512,
+    to 521,
+    id genbank {
+      accession "AB410000",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 229,
+    to 236,
+    id genbank {
+      accession "AB410001",
+      version 1
+    }
+  },
+  {
+    from 512,
+    to 521,
+    id genbank {
+      accession "AB410001",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 229,
+    to 236,
+    id genbank {
+      accession "AB410002",
+      version 1
+    }
+  },
+  {
+    from 512,
+    to 521,
+    id genbank {
+      accession "AB410002",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 229,
+    to 236,
+    id genbank {
+      accession "AB410003",
+      version 1
+    }
+  },
+  {
+    from 512,
+    to 521,
+    id genbank {
+      accession "AB410003",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 229,
+    to 236,
+    id genbank {
+      accession "AB410004",
+      version 1
+    }
+  },
+  {
+    from 512,
+    to 521,
+    id genbank {
+      accession "AB410004",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 229,
+    to 236,
+    id genbank {
+      accession "AB410005",
+      version 1
+    }
+  },
+  {
+    from 512,
+    to 521,
+    id genbank {
+      accession "AB410005",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 229,
+    to 236,
+    id genbank {
+      accession "AB410006",
+      version 1
+    }
+  },
+  {
+    from 512,
+    to 521,
+    id genbank {
+      accession "AB410006",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 229,
+    to 236,
+    id genbank {
+      accession "AB410007",
+      version 1
+    }
+  },
+  {
+    from 512,
+    to 521,
+    id genbank {
+      accession "AB410007",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 229,
+    to 236,
+    id genbank {
+      accession "AB410009",
+      version 1
+    }
+  },
+  {
+    from 512,
+    to 521,
+    id genbank {
+      accession "AB410009",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 229,
+    to 236,
+    id genbank {
+      accession "AB410010",
+      version 1
+    }
+  },
+  {
+    from 512,
+    to 521,
+    id genbank {
+      accession "AB410010",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 229,
+    to 236,
+    id genbank {
+      accession "AB410011",
+      version 1
+    }
+  },
+  {
+    from 512,
+    to 521,
+    id genbank {
+      accession "AB410011",
+      version 1
+    }
+  }
+}

@@ -120,6 +120,8 @@ mod seqalign_samples;
 mod suite_layout;
 #[path = "../tax_report_streams.rs"]
 mod tax_report_streams;
+#[path = "../taxdb_tool_texts.rs"]
+mod taxdb_tool_texts;
 #[path = "../taxonomy_read_order.rs"]
 mod taxonomy_read_order;
 #[path = "../web_v1_search_space.rs"]

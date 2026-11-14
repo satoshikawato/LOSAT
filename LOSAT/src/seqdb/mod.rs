@@ -900,6 +900,11 @@ impl SeqDb {
         self.find_volume(ordinal).map(|at| at.volume)
     }
 
+    /// The number of the volume that holds NCBI's OID `oid` ([`SeqDb::locate_oid`]).
+    pub fn oid_volume(&self, oid: u32) -> Result<usize, SeqDbError> {
+        self.locate_oid(oid).map(|at| at.volume)
+    }
+
     /// Opens the one database at the path `name` (without extension), taken
     /// as it is: a space or a double quote in it is a character of the path
     /// (`alias::resolve_one_name`). Everything else is as in [`SeqDb::open`],

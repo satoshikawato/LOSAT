@@ -97,6 +97,29 @@ pub struct TaxNames {
     pub super_kingdom: Vec<u8>,
 }
 
+/// What `CSeqDBTaxInfo::GetTaxNames` gives for a taxid ([`TaxDb::lookup`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaxLookup {
+    /// False before the search finds the taxid (a missing database, a taxid outside the
+    /// index or not in it): the caller's `info.taxid` is not set.
+    NotInIndex,
+    /// False after the search found it (`info.taxid = tax_id`; seqdbtax.cpp:258-259): the offset
+    /// error of the last entry, a record of no positive size or not of four fields.
+    Unnamed,
+    /// True: the names.
+    Named(TaxNames),
+}
+
+impl TaxLookup {
+    /// The names, `None` where NCBI's lookup returns false.
+    pub fn into_names(self) -> Option<TaxNames> {
+        match self {
+            TaxLookup::Named(names) => Some(names),
+            TaxLookup::NotInIndex | TaxLookup::Unnamed => None,
+        }
+    }
+}
+
 /// The two files, open.
 #[derive(Debug)]
 struct Files {
@@ -354,15 +377,23 @@ impl TaxDb {
         tax_id: i32,
         messages: &mut Vec<String>,
     ) -> Result<Option<TaxNames>, SeqDbError> {
+        Ok(self.lookup(tax_id, messages)?.into_names())
+    }
+
+    /// [`Self::names`], telling apart the two ways in which NCBI's lookup returns false: before
+    /// its search finds the taxid in the index ([`TaxLookup::NotInIndex`]: `info.taxid` keeps
+    /// its value) and after ([`TaxLookup::Unnamed`]: `info.taxid = tax_id`, the names stay empty),
+    /// which blastdbcmd's `-tax_info` writes apart (`N/A` or empty names).
+    pub fn lookup(&self, tax_id: i32, messages: &mut Vec<String>) -> Result<TaxLookup, SeqDbError> {
         let Some(files) = &self.files else {
-            return Ok(None);
+            return Ok(TaxLookup::NotInIndex);
         };
         let mut low_index: i32 = 0;
         let mut high_index: i32 = files.count - 1;
         let low_taxid = Self::entry(files, low_index)?.0;
         let high_taxid = Self::entry(files, high_index)?.0;
         if tax_id < low_taxid || tax_id > high_taxid {
-            return Ok(None);
+            return Ok(TaxLookup::NotInIndex);
         }
         let mut new_index = (low_index + high_index) / 2;
         let mut old_index = new_index;
@@ -386,14 +417,14 @@ impl TaxDb {
         }
         let (found, begin_data) = Self::entry(files, new_index)?;
         if found != tax_id {
-            return Ok(None);
+            return Ok(TaxLookup::NotInIndex);
         }
         let end_data: u32 = if new_index == high_index {
             // Last index is special...
             let end = files.data.len() as u32;
             if end < begin_data {
                 messages.push(MSG_OFFSET_ERROR.to_string());
-                return Ok(None);
+                return Ok(TaxLookup::Unnamed);
             }
             end
         } else {
@@ -403,7 +434,7 @@ impl TaxDb {
         // `Uint4` difference.
         let size = end_data.wrapping_sub(begin_data) as i32;
         if size <= 0 {
-            return Ok(None);
+            return Ok(TaxLookup::Unnamed);
         }
         let begin = u64::from(begin_data);
         let end = begin + size as u64;
@@ -422,7 +453,7 @@ impl TaxDb {
         }
         let mut record = files.data.read_range(begin.min(len), end.min(len))?;
         record.resize(size as usize, 0);
-        Ok(split_record(tax_id, &record))
+        Ok(split_record(tax_id, &record).map_or(TaxLookup::Unnamed, TaxLookup::Named))
     }
 
     /// The number of entries of the index (`m_AllTaxidCount`); 0 for a database NCBI treats as
@@ -731,6 +762,18 @@ impl LazyTaxDb {
         self.open_into(messages)?.names(tax_id, messages)
     }
 
+    /// [`TaxDb::lookup`] through the lazily opened database, the texts as [`LazyTaxDb::names`]
+    /// appends them.
+    pub fn lookup(&self, tax_id: i32, messages: &mut Vec<String>) -> Result<TaxLookup, SeqDbError> {
+        self.open_into(messages)?.lookup(tax_id, messages)
+    }
+
+    /// [`TaxDb::offset_error_taxid`] of the lazily opened database (this opens it, dropping the
+    /// texts of opening: ask it after the run's first lookup).
+    pub fn offset_error_taxid(&self) -> Result<Option<i32>, SeqDbError> {
+        self.open_into(&mut Vec::new())?.offset_error_taxid()
+    }
+
     /// [`TaxDb::entry_count`] of the lazily opened database (this opens it).
     pub fn entry_count(&self) -> Result<u64, SeqDbError> {
         Ok(self.open_into(&mut Vec::new())?.entry_count())
@@ -824,6 +867,42 @@ mod tests {
         let mut messages = Vec::new();
         let names = db.names(taxid, &mut messages).unwrap();
         (names, messages)
+    }
+
+    // seqdbtax.cpp:258-259 (`info.taxid = tax_id` once the search finds the taxid, before the
+    // lookup can still fail): blastdbcmd's `-tax_info` writes empty names then, `N/A` only for a
+    // taxid the search does not find (probe of line RG T5b, `T/t5b/out/extra`).
+    #[test]
+    fn a_lookup_tells_a_taxid_not_found_from_one_found_without_names() {
+        let lookup = |variant: &str, taxid: i32| {
+            let mut messages = Vec::new();
+            let found = open_fixture(variant)
+                .unwrap()
+                .lookup(taxid, &mut messages)
+                .unwrap();
+            (found, messages)
+        };
+        assert!(matches!(lookup("good", 9606), (TaxLookup::Named(_), m) if m.is_empty()));
+        for taxid in [150, 0, 77777, 100000] {
+            assert_eq!(lookup("good", taxid), (TaxLookup::NotInIndex, Vec::new()));
+        }
+        // A record without three tabs, an empty record of the last entry, the offset error.
+        assert_eq!(lookup("tabs0", 9606), (TaxLookup::Unnamed, Vec::new()));
+        assert_eq!(lookup("tabs1", 9606), (TaxLookup::Unnamed, Vec::new()));
+        assert_eq!(
+            lookup("offset_last_at_end", 99990),
+            (TaxLookup::Unnamed, Vec::new())
+        );
+        assert_eq!(
+            lookup("offset_last_past_end", 99990),
+            (TaxLookup::Unnamed, vec![MSG_OFFSET_ERROR.to_string()])
+        );
+        // A database NCBI treats as missing finds no taxid.
+        assert_eq!(
+            lookup("bad_magic", 9606),
+            (TaxLookup::NotInIndex, Vec::new())
+        );
+        assert_eq!(lookup("no_bti", 9606), (TaxLookup::NotInIndex, Vec::new()));
     }
 
     fn names_of_lazy(lazy: &LazyTaxDb, taxid: i32) -> (Option<TaxNames>, Vec<String>) {

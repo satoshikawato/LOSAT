@@ -523,6 +523,17 @@ positive taxid in `x_GetTaxDefline`'s order of the lines that the taxid list kee
 `-negative_taxids 100001` with `-no_taxid_expansion`, which NCBI applies to a version 5 database only), with
 `blastdbcmd -target_only` the target's line first and the others after it.
 
+A damaged taxonomy database in dustmasker, segmasker and blastdbcmd (line RG item T5b): `t5b/make_t5b.py` (run from
+`LOSAT/` with the directory of NCBI's makeblastdb) writes the version 5 databases `t5b/nm`, `t5b/pm` (volume 1) and
+`t5b/nmb`, `t5b/pmb` (volume 2) with `-parse_seqids` and a `-taxid_map` (the letters of `ids/ndup.fna` and
+`ids/pdup.faa`), the alias files `t5b/nmv`, `t5b/pmv` over both, and `t5b/batch.txt` (the ids with taxid 99990).
+Volume 1: two titled sequences without a taxid, titled and untitled 9606, untitled 99990, titled 150 (the slot of
+99990 in NCBI's 256-slot taxonomy cache of a volume), titled 99990, one of two lines 99990 and 150, untitled 77777;
+volume 2: untitled 99990, titled 9606. With `../seqdb/taxdb/<variant>` on the search path they serve the rows
+`db_t5b_*` of `../dustmasker` and `../segmasker` (`-conffile conf/t5b_<variant>.ini`), the blastdbcmd cases
+`T5B101`-`T5B504` (`../blastdbcmd_discovery.rs`) and `../taxdb_tool_texts.rs` (the merged streams, `-logfile`, and
+the runs on `btd_empty` where NCBI crashes, which LOSAT refuses).
+
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title
 `, ,` NCBI's `x_CleanAndCompress` reads past the end of where it makes the tabular id of a protein; the query

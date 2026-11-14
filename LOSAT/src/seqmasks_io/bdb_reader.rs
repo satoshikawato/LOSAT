@@ -35,6 +35,10 @@ pub(crate) struct BdbRecord {
     pub taxname: Option<std::sync::Arc<[u8]>>,
     /// IUPACna letters of a nucleotide, NCBIstdaa codes of a protein.
     pub residues: Vec<u8>,
+    /// The `ERR_POST` texts of the taxonomy database that NCBI's `GetBioseq` writes while it
+    /// reads the sequence ([`MaskBdbReader::next_record`]), to be posted before the sequence is
+    /// written (`seqmasks_io::run::post_read_texts`).
+    pub texts: Vec<String>,
 }
 
 /// Why the reader gave no record.
@@ -86,9 +90,9 @@ pub(crate) struct MaskBdbReader {
     title_printed: bool,
     /// The program's name in LOSAT's refusals.
     program: &'static str,
-    /// The taxonomy database of the search path (`CSeqDBTaxInfo`), opened at the first name asked
-    /// for.
-    taxdb: Option<crate::seqdb::taxdb::LazyTaxDb>,
+    /// The taxonomy database of the search path (`CSeqDBTaxInfo`, opened at the first lookup) and
+    /// the lookups of the volumes' caches, each `GetBioseq` a load.
+    taxdb: crate::algorithm::common::database::TaxdbRun,
 }
 
 /// Whether the writer of `outfmt` prints the title of a sequence (`CMaskWriter::IdToString`).
@@ -117,16 +121,13 @@ impl MaskBdbReader {
         // `GetNumOIDs`, not the OIDs that the alias files' ranges include.
         let db = SeqDb::open_every_oid_in(name, molecule, &path)
             .map_err(|error| database_error(error, program))?;
-        let taxdb = db
-            .search_path()
-            .map(|path| crate::seqdb::taxdb::LazyTaxDb::new(path.clone()));
         Ok(MaskBdbReader {
             db,
             molecule,
             oid: 0,
             title_printed,
             program,
-            taxdb,
+            taxdb: crate::algorithm::common::database::TaxdbRun::sequential(),
         })
     }
 
@@ -156,16 +157,6 @@ impl MaskBdbReader {
             .map(|defline| defline.ids.clone())
             .unwrap_or_default();
         let title = set.bioseq_title();
-        // NCBI makes the title of a sequence without one from its BioSource (the taxonomy
-        // names of a definition line with a taxid; seqdbvol.cpp:1100-1188).
-        let taxname = if self.title_printed
-            && set.first_source_taxid(None).is_some()
-            && bioseq_title_from_source(&title, &bioseq_facts(&ids))
-        {
-            self.source_taxname(oid, &set)?
-        } else {
-            None
-        };
         let residues = match self.molecule {
             SeqType::Nucleotide => {
                 let length = self.db.nucleotide_length(oid).map_err(error)?;
@@ -180,11 +171,32 @@ impl MaskBdbReader {
                 .protein(0)
                 .to_vec(),
         };
+        // `GetBioseq` gives no Bioseq for a sequence without letters, before its lookups
+        // (seqdbvol.cpp:1380-1386), and the writer prints none.
+        let has_source = !residues.is_empty() && set.first_source_taxid(None).is_some();
+        let mut texts = Vec::new();
+        if has_source {
+            texts = self
+                .taxdb
+                .bioseq_texts(&self.db, oid, &set, None)
+                .map_err(|error| lookup_refusal(oid, error))?;
+        }
+        // NCBI makes the title of a sequence without one from its BioSource (the taxonomy
+        // names of a definition line with a taxid; seqdbvol.cpp:1100-1188).
+        let taxname = if self.title_printed
+            && has_source
+            && bioseq_title_from_source(&title, &bioseq_facts(&ids))
+        {
+            self.source_taxname(oid, &set)?
+        } else {
+            None
+        };
         Ok(Some(BdbRecord {
             ids,
             title,
             taxname,
             residues,
+            texts,
         }))
     }
 
@@ -206,12 +218,10 @@ impl MaskBdbReader {
     //                 found_taxid_in_taxonomy_blastdb = false;
     //             }
     // ```
-    // `GetBioseq` looks up the taxid of each definition line, in the order of the definition
-    // lines (without a target id: `DeflineSet::taxonomy_lookups(None)`), and the first source
-    // names the organism (`DeflineSet::first_source_taxid`, `report::defline::SourceTaxname::of_names`).
-    // The texts that a lookup writes (those of opening a damaged taxonomy database, the offset
-    // error) and a lookup that reads past the mapped end of `taxdb.btd` (NCBI reads unmapped
-    // memory) are LOSAT's refusals, as blastdbcmd's (`blastdbcmd::retrieve::Source::tax_names`).
+    // The first source names the organism (`DeflineSet::first_source_taxid`,
+    // `report::defline::SourceTaxname::of_names`). The load of the sequence
+    // (`TaxdbRun::bioseq_texts`, in `next_record` before this) made the lookups and has their
+    // texts; the name is asked again here, and its texts are dropped.
     /// The name of the organism of the first source of the sequence `oid`, whose definition lines
     /// are `set`, from which NCBI makes its empty title.
     fn source_taxname(
@@ -219,37 +229,30 @@ impl MaskBdbReader {
         oid: u32,
         set: &crate::seqid::DeflineSet,
     ) -> Result<Option<std::sync::Arc<[u8]>>, BdbError> {
-        let Some(taxdb) = &self.taxdb else {
+        let Some(taxid) = set.first_source_taxid(None) else {
             return Ok(None);
         };
-        let first_source = set.first_source_taxid(None);
-        let taxids = set.taxonomy_lookups(None);
-        let mut first = None;
-        for (index, &taxid) in taxids.iter().enumerate() {
-            if taxids[..index].contains(&taxid) {
-                continue;
-            }
-            let mut messages = Vec::new();
-            let names = taxdb.names(taxid, &mut messages).map_err(|error| {
-                BdbError::Unsupported(format!(
-                    "sequence {oid} of the database, without a title and with the taxid {taxid}, \
-                     whose lookup in the taxonomy database fails ({error}),"
-                ))
-            })?;
-            if let Some(message) = messages.first() {
-                return Err(BdbError::Unsupported(format!(
-                    "sequence {oid} of the database, without a title and with the taxid {taxid}, \
-                     whose lookup in the taxonomy database writes a diagnostic ({message}),"
-                )));
-            }
-            if Some(taxid) == first_source {
-                first = crate::report::defline::SourceTaxname::of_names(names.as_ref())
-                    .name()
-                    .unwrap_or_default();
-            }
-        }
-        Ok(first)
+        let names = self
+            .taxdb
+            .lookup(&self.db, taxid, &mut Vec::new())
+            .map_err(|error| lookup_refusal(oid, error))?
+            .into_names();
+        Ok(
+            crate::report::defline::SourceTaxname::of_names(names.as_ref())
+                .name()
+                .unwrap_or_default(),
+        )
     }
+}
+
+/// LOSAT's refusal of the sequence `oid` whose taxonomy lookup failed with `error`: a record
+/// that reaches past the mapped end of `taxdb.btd` (NCBI reads unmapped memory and crashes,
+/// PD-LOSAT-NCBI-DEFECTS rule 3), or a taxonomy database that does not open or read.
+fn lookup_refusal(oid: u32, error: SeqDbError) -> BdbError {
+    BdbError::Unsupported(format!(
+        "sequence {oid} of the database, whose taxid's lookup in the taxonomy database fails \
+         ({error}),"
+    ))
 }
 
 // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1785-1813

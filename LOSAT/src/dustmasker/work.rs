@@ -10,7 +10,9 @@ use crate::seqdb::mask::FilterProgram;
 use crate::seqdb::SeqType;
 use crate::seqid::ParsedSeqId;
 use crate::seqmasks_io::bdb_reader::{prints_title, BdbError, MaskBdbReader};
-use crate::seqmasks_io::run::{finish, serial_write_failure, write_failure, RunFailure};
+use crate::seqmasks_io::run::{
+    finish, post_read_texts, serial_write_failure, write_failure, RunFailure,
+};
 use crate::seqmasks_io::writer::{MaskWriter, MaskedBioseq, Serial, WriteError};
 
 use super::masker::dust_masks_skip_ns;
@@ -39,6 +41,9 @@ pub(super) struct Record {
     /// (`seqmasks_io::bdb_reader::BdbRecord::taxname`); none for a FASTA record.
     pub taxname: Option<std::sync::Arc<[u8]>>,
     pub iupac: Vec<u8>,
+    /// The taxonomy database's texts of reading a database sequence
+    /// (`seqmasks_io::bdb_reader::BdbRecord::texts`); none for a FASTA record.
+    pub texts: Vec<String>,
 }
 
 /// How a run stops early.
@@ -286,6 +291,7 @@ fn masks_of_input(
     let window = options.window as u32;
     let linker = options.linker as u32;
     while let Some(record) = source.next_record()? {
+        post_read_texts::<Failure>(&record.texts, out, diag)?;
         if record.iupac.is_empty() {
             continue;
         }
@@ -382,6 +388,7 @@ impl SequenceSource for DatabaseSource {
             title: Some(record.title),
             taxname: record.taxname,
             iupac: record.residues,
+            texts: record.texts,
         }))
     }
 }

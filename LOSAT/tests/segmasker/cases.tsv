@@ -511,3 +511,18 @@ db_r100_mask	-infmt blastdb -in db/r100 -outfmt maskinfo_asn1_text
 db_t5_fasta	-infmt blastdb -in ../db_search/t5/pclean -outfmt fasta -conffile conf/t5.ini
 db_t5_interval	-infmt blastdb -in ../db_search/t5/pclean -outfmt interval -conffile conf/t5.ini
 db_t5_fasta_ps	-infmt blastdb -in ../db_search/t5/ppall -outfmt fasta -parse_seqids -conffile conf/t5.ini
+# A damaged taxonomy database (line RG item T5b): ../db_search/t5b (make_t5b.py there), the taxonomy database ../seqdb/taxdb/<variant> on the search path of conf/t5b_<variant>.ini; as dustmasker's rows of T5b. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-14, ad-RG-T5-4.
+db_t5b_bad_magic_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_bad_magic.ini
+db_t5b_bad_magic_interval	-infmt blastdb -in ../db_search/t5b/pmv -outfmt interval -conffile conf/t5b_bad_magic.ini
+db_t5b_bad_magic_seqloc_asn1_text	-infmt blastdb -in ../db_search/t5b/pmv -outfmt seqloc_asn1_text -conffile conf/t5b_bad_magic.ini
+db_t5b_bad_magic_maskinfo_asn1_text	-infmt blastdb -in ../db_search/t5b/pmv -outfmt maskinfo_asn1_text -conffile conf/t5b_bad_magic.ini
+db_t5b_offset_last_past_end_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_offset_last_past_end.ini
+db_t5b_offset_last_past_end_interval	-infmt blastdb -in ../db_search/t5b/pmv -outfmt interval -conffile conf/t5b_offset_last_past_end.ini
+db_t5b_offset_last_past_end_seqloc_asn1_text	-infmt blastdb -in ../db_search/t5b/pmv -outfmt seqloc_asn1_text -conffile conf/t5b_offset_last_past_end.ini
+db_t5b_offset_last_past_end_maskinfo_asn1_text	-infmt blastdb -in ../db_search/t5b/pmv -outfmt maskinfo_asn1_text -conffile conf/t5b_offset_last_past_end.ini
+db_t5b_good_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_good.ini
+db_t5b_bad_magic_le_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_bad_magic_le.ini
+db_t5b_count_zero_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_count_zero.ini
+db_t5b_count_smaller_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_count_smaller.ini
+db_t5b_count_larger_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_count_larger.ini
+db_t5b_index_trailing_8_fasta	-infmt blastdb -in ../db_search/t5b/pmv -outfmt fasta -conffile conf/t5b_index_trailing_8.ini

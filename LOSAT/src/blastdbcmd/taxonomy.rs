@@ -5,6 +5,7 @@
 use std::collections::BTreeSet;
 use std::io::{BufWriter, Write};
 
+use crate::algorithm::common::database::TaxdbRun;
 use crate::blastinput::db_filter::{NO_TAXONOMY_WARNING, TAXONOMY_FILE};
 use crate::ncbi_app::args::{arg_message, Args};
 use crate::ncbi_app::files::{
@@ -13,7 +14,7 @@ use crate::ncbi_app::files::{
 use crate::ncbi_str::{string_to_int, ALLOW_LEADING_SPACES, ALLOW_TRAILING_SPACES};
 use crate::seqdb::file::DbFile;
 use crate::seqdb::tax_sqlite::TaxonomySqlite;
-use crate::seqdb::taxdb::{LazyTaxDb, TaxNames};
+use crate::seqdb::taxdb::{TaxLookup, TaxNames};
 use crate::seqdb::{SearchPath, SeqDb};
 
 use super::{database_error, refusal, Diag};
@@ -337,26 +338,39 @@ impl TaxFields {
     // 		m_Out << "\n";
     // 	}
     // ```
-    /// `PrintEntry`: the line of `taxid` with its `names` (`None`: NCBI's `N/A`) and its
-    /// number of sequences.
-    fn line(&self, taxid: i32, names: Option<&TaxNames>, num_seqs: usize, out: &mut Vec<u8>) {
-        const NA: &[u8] = b"N/A";
+    /// `PrintEntry`: the line of `taxid` with its `names` and its number of sequences.
+    fn line(&self, taxid: i32, names: &LineNames, num_seqs: usize, out: &mut Vec<u8>) {
+        let name = |pick: fn(&TaxNames) -> &[u8]| -> &[u8] {
+            match names {
+                LineNames::Named(names) => pick(names),
+                LineNames::Empty => b"",
+                LineNames::NotAvailable => b"N/A",
+            }
+        };
         for (i, field) in self.fields.iter().enumerate() {
             out.extend_from_slice(&self.separators[i]);
             match field {
                 Field::TaxId => out.extend_from_slice(taxid.to_string().as_bytes()),
-                Field::SciName => out.extend_from_slice(names.map_or(NA, |n| &n.scientific_name)),
-                Field::CommonName => out.extend_from_slice(names.map_or(NA, |n| &n.common_name)),
-                Field::SuperKingdom => {
-                    out.extend_from_slice(names.map_or(NA, |n| &n.super_kingdom))
-                }
-                Field::BlastName => out.extend_from_slice(names.map_or(NA, |n| &n.blast_name)),
+                Field::SciName => out.extend_from_slice(name(|n| &n.scientific_name)),
+                Field::CommonName => out.extend_from_slice(name(|n| &n.common_name)),
+                Field::SuperKingdom => out.extend_from_slice(name(|n| &n.super_kingdom)),
+                Field::BlastName => out.extend_from_slice(name(|n| &n.blast_name)),
                 Field::NumSeqs => out.extend_from_slice(num_seqs.to_string().as_bytes()),
             }
         }
         out.extend_from_slice(self.separators.last().map_or(&[][..], Vec::as_slice));
         out.push(b'\n');
     }
+}
+
+/// The names of a `-tax_info` line (`SSeqDBTaxInfo` after `GetTaxNames`).
+enum LineNames {
+    /// The lookup found them.
+    Named(TaxNames),
+    /// The lookup found the taxid and no names (`info.taxid` set, the names empty).
+    Empty,
+    /// The lookup did not find the taxid, or the taxid is 0: NCBI's `N/A`.
+    NotAvailable,
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:700-733
@@ -396,16 +410,16 @@ impl TaxFields {
 // ```
 // NCBI's exceptions escape to `Run`: the format's (`CInputException`, exit status 1), the
 // reader's (`CSeqDBException`, exit status 2) after the lines already written. Taxid 0 (the
-// sequences without one) is a taxid like any other; taxdb has no names for it (T12).
+// sequences without one) is a taxid like any other; taxdb has no names for it (T12). The
+// `info.taxid` that `GetTaxNames` sets when its search finds the taxid (seqdbtax.cpp:258-259)
+// stays set where it then returns false (the offset error, a record not of four fields): such a
+// line has the taxid and empty names, `N/A` only where the search did not find it, and always
+// for taxid 0 (probe of line RG T5b, `T/t5b/out/extra`). The lookups' texts (`ERR_POST`: of
+// opening the database, the offset error) come before the line, after those written (the
+// `endl` of the count, `cerr`'s tie).
 /// `-tax_info` of `db`: the number of its taxids, then a line for each, ascending, to `out`;
 /// the exit status.
-pub(super) fn tax_info(
-    db: &SeqDb,
-    args: &Args,
-    path: &SearchPath,
-    diag: &mut Diag,
-    out: &mut Ostream<'_>,
-) -> i32 {
+pub(super) fn tax_info(db: &SeqDb, args: &Args, diag: &mut Diag, out: &mut Ostream<'_>) -> i32 {
     let fmt = args.value("outfmt").unwrap_or("%f");
     let Ok(fields) = TaxFields::parse(fmt.as_bytes()) else {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-176
@@ -428,24 +442,25 @@ pub(super) fn tax_info(
         Ok(tax_ids) => tax_ids,
         Err(error) => return database_error(diag, error),
     };
-    let taxdb = LazyTaxDb::new(path.clone());
+    let taxdb = TaxdbRun::sequential();
     let mut sink = BufWriter::new(out);
     let _ = writeln!(sink, "# of Tax IDs in Database: {}", tax_ids.len());
     let mut line = Vec::new();
     for &taxid in &tax_ids {
         let names = if fields.need_names {
             let mut messages = Vec::new();
-            match taxdb.names(taxid, &mut messages) {
-                Ok(names) if messages.is_empty() => names,
-                Ok(_) => {
-                    if flush_before_diagnostic(&mut sink) {
-                        return 0;
-                    }
-                    return diag.refuse(&refusal(&format!(
-                        "a taxonomy database NCBI opens with a diagnostic ({})",
-                        messages[0]
-                    )));
+            let lookup = taxdb.lookup(db, taxid, &mut messages);
+            for message in &messages {
+                if flush_before_diagnostic(&mut sink) {
+                    return 0;
                 }
+                diag.err_post(message);
+            }
+            match lookup {
+                Ok(_) if taxid == 0 => LineNames::NotAvailable,
+                Ok(TaxLookup::Named(names)) => LineNames::Named(names),
+                Ok(TaxLookup::Unnamed) => LineNames::Empty,
+                Ok(TaxLookup::NotInIndex) => LineNames::NotAvailable,
                 Err(error) => {
                     if flush_before_diagnostic(&mut sink) {
                         return 0;
@@ -454,7 +469,7 @@ pub(super) fn tax_info(
                 }
             }
         } else {
-            None
+            LineNames::NotAvailable
         };
         let num_seqs = if fields.need_num_seqs {
             match lookup.tax_ids_to_oids(&BTreeSet::from([taxid])) {
@@ -470,7 +485,7 @@ pub(super) fn tax_info(
             0
         };
         line.clear();
-        fields.line(taxid, names.as_ref(), num_seqs, &mut line);
+        fields.line(taxid, &names, num_seqs, &mut line);
         // `out` is the run's `ncbi_app::files::Ostream`: a failed write does nothing, as in
         // NCBI's stream (no exception is enabled on it); a closed pipe ends the program, where
         // SIGPIPE ends NCBI's.
@@ -496,7 +511,7 @@ mod tests {
             super_kingdom: b"Eukaryota".to_vec(),
         };
         let mut out = Vec::new();
-        fields.line(9606, Some(&names), 3, &mut out);
+        fields.line(9606, &LineNames::Named(names), 3, &mut out);
         out
     }
 
@@ -535,7 +550,17 @@ mod tests {
     fn missing_names_are_not_available() {
         let fields = TaxFields::parse(b"%f").unwrap();
         let mut out = Vec::new();
-        fields.line(0, None, 0, &mut out);
+        fields.line(0, &LineNames::NotAvailable, 0, &mut out);
         assert_eq!(out, b"0\tN/A\tN/A\tN/A\tN/A\n");
+    }
+
+    // NCBI's lines for a taxid found in the index without names (probe of line RG T5b,
+    // `T/t5b/out/extra/tabs0.taxinfo.ncbi.out`: `9606||||`).
+    #[test]
+    fn a_taxid_found_without_names_has_empty_names() {
+        let fields = TaxFields::parse(b"%T|%S|%L|%K|%B").unwrap();
+        let mut out = Vec::new();
+        fields.line(9606, &LineNames::Empty, 0, &mut out);
+        assert_eq!(out, b"9606||||\n");
     }
 }

@@ -390,7 +390,7 @@ impl DeflineSet {
     }
 
     /// `taxonomy_lookups` as an iterator.
-    fn taxonomy_order<'a>(
+    pub fn taxonomy_order<'a>(
         &'a self,
         target: Option<&ParsedSeqId>,
     ) -> impl Iterator<Item = i32> + 'a {

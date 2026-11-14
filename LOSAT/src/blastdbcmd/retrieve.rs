@@ -9,14 +9,15 @@
 use std::collections::BTreeSet;
 use std::io::{BufWriter, Write};
 
+use crate::algorithm::common::database::TaxdbRun;
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{input_lines, read_input_file, Cin, LineEnds, Ostream};
 use crate::ncbi_str::string_to_non_negative_int;
 use crate::seqdb::isam::{seqdb_simplify_accession, SimplifyError};
 use crate::seqdb::lookup::{IdLookup, ID_OVERFLOWS};
 use crate::seqdb::tax_files::NO_ACCESSION_INFO;
-use crate::seqdb::taxdb::{LazyTaxDb, TaxNames};
-use crate::seqdb::{MaskRanges, SearchPath, SeqDb, SeqDbError, SeqLocation, SeqType};
+use crate::seqdb::taxdb::TaxNames;
+use crate::seqdb::{MaskRanges, SeqDb, SeqDbError, SeqLocation, SeqType};
 use crate::seqid::accguide::parse_flags::{ANY_LOCAL, DEFAULT, PARTIAL_OK, RAW_TEXT};
 use crate::seqid::label::{content, fasta};
 use crate::seqid::parse::seq_id_from_text;
@@ -102,16 +103,18 @@ pub(super) struct Source<'a> {
     /// `m_DbIsProtein`: `protein`, but for a taxid list whether `-dbtype` is `prot`
     /// (`x_InitBlastDB_TaxIdList`). It decides whether `-strand minus` is taken.
     dbtype_protein: bool,
-    taxdb: LazyTaxDb,
+    /// The taxonomy database of the search path (NCBI's one per process) and the lookups of the
+    /// volumes' caches, each `GetBioseq` of the FASTA formatter a load.
+    taxdb: TaxdbRun,
 }
 
 impl<'a> Source<'a> {
-    fn new(db: &'a SeqDb, path: &SearchPath, dbtype_protein: bool) -> Self {
+    fn new(db: &'a SeqDb, dbtype_protein: bool) -> Self {
         Source {
             db,
             protein: db.seqtype() == SeqType::Protein,
             dbtype_protein,
-            taxdb: LazyTaxDb::new(path.clone()),
+            taxdb: TaxdbRun::sequential(),
         }
     }
 
@@ -225,17 +228,82 @@ impl<'a> Source<'a> {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1614-1621
+    // ```c++
+    // void CSeqDBImpl::GetTaxInfo(TTaxId taxid, SSeqDBTaxInfo & info)
+    // {
+    //     if (! CSeqDBTaxInfo::GetTaxNames(taxid, info)) {
+    //         CNcbiOstrstream oss;
+    //         oss << "Taxid " << taxid << " not found";
+    //         NCBI_THROW(CSeqDBException, eArgErr, CNcbiOstrstreamToString(oss));
+    //     }
+    // }
+    // ```
     /// `CSeqDB::GetTaxInfo(taxid)`: the names of the taxonomy database on the search path,
-    /// `None` where NCBI's lookup throws (no database, no such taxid).
+    /// `None` where NCBI's lookup throws (no database, no such taxid), and the `ERR_POST` texts
+    /// of the lookup (of opening the database, when it is the run's first lookup, and the offset
+    /// error), which NCBI writes where it looks the taxid up. Err: a lookup that reads past the
+    /// mapped end of `taxdb.btd` (NCBI crashes), LOSAT's refusal.
+    pub fn tax_info(&self, taxid: i32) -> Result<(Option<TaxNames>, Vec<String>), Stop> {
+        let mut texts = Vec::new();
+        let names = self.taxdb.lookup(self.db, taxid, &mut texts)?.into_names();
+        Ok((names, texts))
+    }
+
+    /// The names of `taxid` that the Bioseq's source holds (a title made from it): the load of
+    /// the sequence ([`Source::post_bioseq_texts`], before) wrote the lookup's texts.
     pub fn tax_names(&self, taxid: i32) -> Result<Option<TaxNames>, Stop> {
-        let mut messages = Vec::new();
-        let names = self.taxdb.names(taxid, &mut messages)?;
-        if let Some(message) = messages.first() {
-            return Err(Stop::refused(format!(
-                "a taxonomy database NCBI opens with a diagnostic ({message})"
-            )));
+        Ok(self
+            .taxdb
+            .lookup(self.db, taxid, &mut Vec::new())?
+            .into_names())
+    }
+
+    /// The lookups of `CSeqDB::GetBioseq` of the OID `oid`, whose definition lines are `set`, for
+    /// the target id `target` (`DeflineSet::taxonomy_lookups`), for a Bioseq that NCBI makes (one
+    /// with definition lines and letters): their texts posted to `out` before any byte of the
+    /// sequence ([`TaxdbRun::bioseq_texts`]). Err: LOSAT's refusal of a lookup NCBI crashes on.
+    pub fn post_bioseq_texts(
+        &self,
+        oid: u32,
+        set: &DeflineSet,
+        target: Option<&ParsedSeqId>,
+        out: &mut Output<'_, '_>,
+    ) -> Result<(), Stop> {
+        let texts = self.taxdb.bioseq_texts(self.db, oid, set, target)?;
+        for text in texts {
+            out.post(&text)?;
         }
-        Ok(names)
+        Ok(())
+    }
+}
+
+/// The retrieval's output and its diagnostics, NCBI's `cout` and the `cerr` tied to it.
+pub(super) struct Output<'a, 'b> {
+    out: &'a mut dyn Write,
+    diag: &'a mut Diag<'b>,
+}
+
+// NCBI's `cerr` is tied to `cout` (the C++ standard's `cerr.tie()`): before each line of
+// diagnostics NCBI's stream flushes the output, so the two come out in the order they were
+// written, and on a closed pipe SIGPIPE ends NCBI's process before the line is written.
+impl Output<'_, '_> {
+    /// `ERR_POST(Error << message)` of the retrieval: the output is flushed first (to the file
+    /// or the pipe, `cerr`'s tie), and a closed pipe ends the retrieval without the line.
+    pub fn post(&mut self, message: &str) -> Result<(), Stop> {
+        self.out.flush().map_err(Stop::write)?;
+        self.diag.err_post(message);
+        Ok(())
+    }
+}
+
+impl Write for Output<'_, '_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.out.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.out.flush()
     }
 }
 
@@ -301,7 +369,7 @@ impl Formatter {
         oid: u32,
         config: &Config,
         target: Option<&str>,
-        out: &mut dyn Write,
+        out: &mut Output<'_, '_>,
     ) -> Result<(), Stop> {
         match self {
             Formatter::Fasta(fasta) => fasta.write(source, oid, config, target, out),
@@ -342,14 +410,13 @@ pub(super) fn parse_target(text: &str) -> Result<ParsedSeqId, Stop> {
 pub(super) fn process(
     db: &SeqDb,
     args: &Args,
-    path: &SearchPath,
     diag: &mut Diag,
     stdin: &mut Cin<'_>,
     out: &mut Ostream<'_>,
     tax_ids: Option<&BTreeSet<i32>>,
     dbtype_protein: bool,
 ) -> i32 {
-    let source = Source::new(db, path, dbtype_protein);
+    let source = Source::new(db, dbtype_protein);
     let mut sink = BufWriter::new(&mut *out);
     let result = request(args, &source, tax_ids, diag, stdin, &mut sink);
     // The output is flushed before the last diagnostic, as `cerr`'s tie flushes NCBI's.
@@ -444,9 +511,8 @@ fn request(
         ids: &ids,
         formatter: &mut formatter,
         target_only,
-        diag,
         stdin,
-        out,
+        output: Output { out, diag },
     };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:819-846
     // ```c++
@@ -1046,22 +1112,15 @@ struct Run<'a, 'b, 'c> {
     ids: &'a DbIds<'a>,
     formatter: &'a mut Formatter,
     target_only: bool,
-    diag: &'a mut Diag<'b>,
     /// The standard input, which a batch file `-` reads.
     stdin: &'a mut Cin<'c>,
-    out: &'a mut dyn Write,
+    output: Output<'a, 'b>,
 }
 
-// NCBI's `cerr` is tied to `cout` (the C++ standard's `cerr.tie()`): before each line of
-// diagnostics NCBI's stream flushes the output, so the two come out in the order they were
-// written, and on a closed pipe SIGPIPE ends NCBI's process before the line is written.
 impl Run<'_, '_, '_> {
-    /// `ERR_POST(Error << message)` of the retrieval: the output is flushed first (to the file
-    /// or the pipe, `cerr`'s tie), and a closed pipe ends the retrieval without the line.
+    /// `ERR_POST(Error << message)` of the retrieval ([`Output::post`]).
     fn post(&mut self, message: &str) -> Result<(), Stop> {
-        self.out.flush().map_err(Stop::write)?;
-        self.diag.err_post(message);
-        Ok(())
+        self.output.post(message)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:457-462
@@ -1093,7 +1152,7 @@ impl Run<'_, '_, '_> {
             self.source.db.set_up_oid_list();
         }
         self.formatter
-            .write(self.source, oid, config, target, self.out)
+            .write(self.source, oid, config, target, &mut self.output)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:411-416
@@ -1430,7 +1489,7 @@ impl Run<'_, '_, '_> {
     fn ipg(&mut self, pig: i32, config: &Config) -> Result<bool, Stop> {
         match self.pig_to_oid(pig)? {
             Some(oid) => self.write(oid, config, None)?,
-            None => self.formatter.write_missing(self.out)?,
+            None => self.formatter.write_missing(&mut self.output)?,
         }
         Ok(false)
     }

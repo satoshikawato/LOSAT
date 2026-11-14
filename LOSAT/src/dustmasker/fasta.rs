@@ -39,6 +39,7 @@ impl<R: Read> SequenceSource for FastaSource<R> {
             title: record.title,
             taxname: None,
             iupac: record.letters,
+            texts: Vec::new(),
         }))
     }
 }

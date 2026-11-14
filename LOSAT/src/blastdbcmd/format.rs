@@ -11,7 +11,7 @@ use crate::seqid::rank::{find_best, text_score};
 use crate::seqid::{BlastDefline, DeflineSet, ParsedSeqId};
 
 use super::letters::{hash_text, sequence_hash};
-use super::retrieve::{numeric_target, parse_target, Config, Source, Stop};
+use super::retrieve::{numeric_target, parse_target, Config, Output, Source, Stop};
 
 /// `NOT_AVAILABLE`.
 const NOT_AVAILABLE: &str = "N/A";
@@ -165,14 +165,15 @@ impl FormatSpec {
     // ```
     /// Writes the lines of sequence `oid` to `out`: one per definition line (the one of
     /// `target` alone with `-target_only`), or one line when no specifier reads them. The
-    /// line NCBI has written up to an unknown specifier is written before its error.
+    /// line NCBI has written up to an unknown specifier is written before its error. The texts
+    /// of a line's taxonomy lookups (`GetTaxInfo` of `%L %B %K %S %C %N`) are posted before it.
     pub fn write(
         &self,
         source: &Source,
         oid: u32,
         config: &Config,
         target: Option<&str>,
-        out: &mut dyn Write,
+        out: &mut Output<'_, '_>,
     ) -> Result<(), Stop> {
         let mut seq = Vec::new();
         let mut hash = String::new();
@@ -191,7 +192,13 @@ impl FormatSpec {
         let mut line = Vec::new();
         let mut print = |defline: Option<&BlastDefline>, line: &mut Vec<u8>| -> Result<(), Stop> {
             line.clear();
-            let printed = self.x_print(source, oid, length, defline, &seq, &hash, &masks, line);
+            let mut texts = Vec::new();
+            let printed = self.x_print(
+                source, oid, length, defline, &seq, &hash, &masks, line, &mut texts,
+            );
+            for text in &texts {
+                out.post(text)?;
+            }
             // `out` writes to an `ncbi_app::files::Ostream` (`retrieve::process`): a failed write
             // does nothing, as in NCBI's `ostream`; a closed pipe ends the retrieval.
             out.write_all(line).map_err(Stop::write)?;
@@ -291,7 +298,8 @@ impl FormatSpec {
     //     m_Out << endl;
     // }
     // ```
-    /// One line into `line`; `Err` after the part NCBI writes before an unknown specifier.
+    /// One line into `line`, the texts of its taxonomy lookups into `texts`; `Err` after the
+    /// part NCBI writes before an unknown specifier.
     fn x_print(
         &self,
         source: &Source,
@@ -302,9 +310,10 @@ impl FormatSpec {
         hash: &str,
         masks: &[String],
         line: &mut Vec<u8>,
+        texts: &mut Vec<String>,
     ) -> Result<(), Stop> {
         let fields = match defline {
-            Some(defline) => Some(DeflineFields::extract(source, defline, &self.types)?),
+            Some(defline) => Some(DeflineFields::extract(source, defline, &self.types, texts)?),
             None => None,
         };
         let empty = DeflineFields::default();
@@ -700,9 +709,15 @@ impl DeflineFields {
     //     return retval;
     // }
     // ```
-    /// The fields of `defline` that the specifiers `types` read. The sum of the memberships
-    /// is taken in 64 bits (NCBI's `int` would overflow: LOSAT does not reproduce that).
-    fn extract(source: &Source, defline: &BlastDefline, types: &[u8]) -> Result<Self, Stop> {
+    /// The fields of `defline` that the specifiers `types` read, the texts of their taxonomy
+    /// lookups appended to `texts`. The sum of the memberships is taken in 64 bits (NCBI's
+    /// `int` would overflow: LOSAT does not reproduce that).
+    fn extract(
+        source: &Source,
+        defline: &BlastDefline,
+        types: &[u8],
+        texts: &mut Vec<String>,
+    ) -> Result<Self, Stop> {
         let wants = |kinds: &[u8]| types.iter().any(|t| kinds.contains(t));
         let mut fields = DeflineFields::default();
         if wants(b"g") {
@@ -733,7 +748,9 @@ impl DeflineFields {
             let tax_id = defline.taxid.unwrap_or(0);
             fields.tax_id = tax_id.to_string();
             if wants(b"LBKS") {
-                match source.tax_names(tax_id)? {
+                let (names, lookup_texts) = source.tax_info(tax_id)?;
+                texts.extend(lookup_texts);
+                match names {
                     Some(names) => {
                         fields.scientific_name = names.scientific_name;
                         fields.common_name = names.common_name;
@@ -767,7 +784,9 @@ impl DeflineFields {
                     fields
                         .leaf_node_common_names
                         .extend_from_slice(separator.as_bytes());
-                    match source.tax_names(tax_id)? {
+                    let (names, lookup_texts) = source.tax_info(tax_id)?;
+                    texts.extend(lookup_texts);
+                    match names {
                         Some(names) => {
                             fields
                                 .leaf_node_scientific_names

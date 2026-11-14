@@ -182,7 +182,6 @@ fn run_body(
         return retrieve::process(
             &db,
             args,
-            &path,
             diag,
             stdin,
             &mut out,
@@ -199,10 +198,10 @@ fn run_body(
             return metadata::metadata(&db, name, args, &path, diag, &mut out);
         }
         if args.given("tax_info") {
-            return taxonomy::tax_info(&db, args, &path, diag, &mut out);
+            return taxonomy::tax_info(&db, args, diag, &mut out);
         }
         let protein = db.seqtype() == SeqType::Protein;
-        return retrieve::process(&db, args, &path, diag, stdin, &mut out, None, protein);
+        return retrieve::process(&db, args, diag, stdin, &mut out, None, protein);
     }
     // NCBI prints the date bytes of the index file; the reader keeps them as text
     // (`SeqDb::date`), with U+FFFD for bytes that are not UTF-8.

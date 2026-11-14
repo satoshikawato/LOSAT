@@ -303,3 +303,20 @@ id_del_seqloc_bin	-in in/id_del.fa -outfmt seqloc_asn1_bin -parse_seqids
 id_del_maskinfo_txt	-in in/id_del.fa -outfmt maskinfo_asn1_text -parse_seqids
 id_del_maskinfo_bin	-in in/id_del.fa -outfmt maskinfo_asn1_bin -parse_seqids
 id_del_int_ps	-in in/id_del.fa -parse_seqids
+# A damaged taxonomy database (line RG item T5b): ../db_search/t5b (make_t5b.py there), the taxonomy database ../seqdb/taxdb/<variant> on the search path of conf/t5b_<variant>.ini. NCBI's GetBioseq looks up each positive taxid of every sequence it reads, whatever the format: the texts of opening a damaged database once, at the first lookup (Error: Error: Tax database file has wrong magic number., Error: SeqDB: Taxid metadata indicates ...), and the offset error of the last entry at each lookup that misses the volume's 256-slot cache; exit status 0. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-14, ad-RG-T5-4.
+db_t5b_bad_magic_fasta	-infmt blastdb -in ../db_search/t5b/nmv -outfmt fasta -conffile conf/t5b_bad_magic.ini
+db_t5b_bad_magic_interval	-infmt blastdb -in ../db_search/t5b/nmv -outfmt interval -conffile conf/t5b_bad_magic.ini
+db_t5b_bad_magic_acclist	-infmt blastdb -in ../db_search/t5b/nmv -outfmt acclist -conffile conf/t5b_bad_magic.ini
+db_t5b_bad_magic_seqloc_asn1_text	-infmt blastdb -in ../db_search/t5b/nmv -outfmt seqloc_asn1_text -conffile conf/t5b_bad_magic.ini
+db_t5b_bad_magic_maskinfo_asn1_text	-infmt blastdb -in ../db_search/t5b/nmv -outfmt maskinfo_asn1_text -conffile conf/t5b_bad_magic.ini
+db_t5b_offset_last_past_end_fasta	-infmt blastdb -in ../db_search/t5b/nmv -outfmt fasta -conffile conf/t5b_offset_last_past_end.ini
+db_t5b_offset_last_past_end_interval	-infmt blastdb -in ../db_search/t5b/nmv -outfmt interval -conffile conf/t5b_offset_last_past_end.ini
+db_t5b_offset_last_past_end_acclist	-infmt blastdb -in ../db_search/t5b/nmv -outfmt acclist -conffile conf/t5b_offset_last_past_end.ini
+db_t5b_offset_last_past_end_seqloc_asn1_text	-infmt blastdb -in ../db_search/t5b/nmv -outfmt seqloc_asn1_text -conffile conf/t5b_offset_last_past_end.ini
+db_t5b_offset_last_past_end_maskinfo_asn1_text	-infmt blastdb -in ../db_search/t5b/nmv -outfmt maskinfo_asn1_text -conffile conf/t5b_offset_last_past_end.ini
+db_t5b_good_fasta	-infmt blastdb -in ../db_search/t5b/nmv -outfmt fasta -conffile conf/t5b_good.ini
+db_t5b_bad_magic_le_fasta	-infmt blastdb -in ../db_search/t5b/nmv -outfmt fasta -conffile conf/t5b_bad_magic_le.ini
+db_t5b_count_zero_fasta	-infmt blastdb -in ../db_search/t5b/nmv -outfmt fasta -conffile conf/t5b_count_zero.ini
+db_t5b_count_smaller_fasta	-infmt blastdb -in ../db_search/t5b/nmv -outfmt fasta -conffile conf/t5b_count_smaller.ini
+db_t5b_count_larger_fasta	-infmt blastdb -in ../db_search/t5b/nmv -outfmt fasta -conffile conf/t5b_count_larger.ini
+db_t5b_index_trailing_8_fasta	-infmt blastdb -in ../db_search/t5b/nmv -outfmt fasta -conffile conf/t5b_index_trailing_8.ini

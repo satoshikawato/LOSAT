@@ -69,6 +69,15 @@ impl HitListHsp for XPrelimHsp {
     fn query_length(&self) -> usize {
         self.hsp.query_length
     }
+    #[inline]
+    fn move_to_query(&mut self, q_idx: u32, offset: i32, query_length: usize) {
+        self.hsp.query_context = q_idx as i32;
+        self.hsp.q_idx = q_idx;
+        self.hsp.query_length = query_length;
+        self.hsp.query_start += offset;
+        self.hsp.query_end += offset;
+        self.hsp.gapped_query_start += offset;
+    }
 }
 
 // No NCBI counterpart: rebuilds the hit list of full HSPs from the compact one (same counts, same
@@ -284,6 +293,59 @@ mod tests {
             best_evalue: f64::MAX,
         };
         (full, compact)
+    }
+
+    // The rebase of a hit list (`query_split::rebase_hit_list`) moves both element types alike (the
+    // expanded rebased compact list is the rebased full list), and moves the full list's HSPs as the
+    // chunk merge moved them before the rebase was shared (its loop, inlined here); offset 0 (a block
+    // of the search of all queries) and a chunk part's offset.
+    #[test]
+    fn a_rebased_compact_list_expands_to_the_rebased_full_list() {
+        let hsps = [
+            prelim(57, (4, 90), (10, 97), 1e-12),
+            prelim(40, (100, 180), (3, 80), 1e-6),
+        ];
+        let mut full = BlastpHitList::new(10);
+        let mut compact = BlastpHitList::new(10);
+        for oid in [3u32, 7, 1] {
+            let (f, c) = lists_of(oid, &hsps);
+            full.update(f);
+            compact.update(c);
+        }
+        for (q_idx, offset, query_length) in [(5u32, 0i32, 300usize), (2, 1234, 9000)] {
+            let mut old = full.clone();
+            for list in old.hsplist_array.iter_mut().take(old.hsplist_count) {
+                for hsp in &mut list.hsps {
+                    hsp.query_context = q_idx as i32;
+                    hsp.q_idx = q_idx;
+                    hsp.query_length = query_length;
+                    hsp.q_start += offset as usize;
+                    hsp.q_end += offset as usize;
+                    hsp.gapped_q_start += offset;
+                }
+                list.query_index = q_idx;
+            }
+            let mut rebased_full = full.clone();
+            super::super::query_split::rebase_hit_list(
+                &mut rebased_full,
+                q_idx,
+                offset,
+                query_length,
+            );
+            let mut rebased_compact = compact.clone();
+            super::super::query_split::rebase_hit_list(
+                &mut rebased_compact,
+                q_idx,
+                offset,
+                query_length,
+            );
+            assert_eq!(rebased_full.hsplist_count, 3);
+            for (a, b) in rebased_full.hsplist_array.iter().zip(&old.hsplist_array) {
+                assert_eq!((a.oid, a.query_index), (b.oid, b.query_index));
+                assert!(a.hsps.iter().zip(&b.hsps).all(|(x, y)| same_hsp(x, y)));
+            }
+            assert_same_hit_lists(q_idx as usize, Some(&old), Some(rebased_compact));
+        }
     }
 
     #[test]

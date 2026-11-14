@@ -4,7 +4,7 @@
 
 use std::cmp::Ordering;
 
-use super::hsp::{score_compare_hsps, BlastpHitList, BlastpHspList};
+use super::hsp::{score_compare_hsps, BlastpHitList, BlastpHspList, HitListHsp};
 
 /// One query part of a chunk: the batch query it belongs to (the index of its preliminary
 /// hit list among the batch's), its offset in that query and that query's length.
@@ -68,18 +68,7 @@ pub(crate) fn merge_query_chunk(
         let Some(mut hitlist) = hitlist else {
             continue;
         };
-        let offset = part.offset as usize;
-        for list in hitlist.hsplist_array.iter_mut().take(hitlist.hsplist_count) {
-            for hsp in &mut list.hsps {
-                hsp.query_context = part.q_idx as i32;
-                hsp.q_idx = part.q_idx;
-                hsp.query_length = part.query_length;
-                hsp.q_start += offset;
-                hsp.q_end += offset;
-                hsp.gapped_q_start += part.offset;
-            }
-            list.query_index = part.q_idx;
-        }
+        rebase_hit_list(&mut hitlist, part.q_idx, part.offset, part.query_length);
         hit_list_merge(
             hitlist,
             &mut merged[part.batch_query],
@@ -92,6 +81,36 @@ pub(crate) fn merge_query_chunk(
         for list in hitlist.hsplist_array.iter_mut().take(count) {
             sort_by_score(list);
         }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:518-526 (quoted in full
+// at `merge_query_chunk`)
+// ```c
+//                hsp->context = context_list[local_context];
+//                hsp->query.offset += offset_list[local_context];
+//                hsp->query.end += offset_list[local_context];
+//                hsp->query.gapped_start += offset_list[local_context];
+//            ...
+//            hsplist->query_index = global_query;
+// ```
+/// The HSP lists of `hitlist` moved to query `q_idx`, whose letters start `offset` letters before
+/// the HSPs' query coordinates, of `query_length` letters (`HitListHsp::move_to_query` on each HSP,
+/// and each list's `query_index`): a query chunk's part merged into its query
+/// (`merge_query_chunk`), or (LOSAT_X_BPQBLOCK) the compact list of a block's query moved to the
+/// query's index among all queries (`blast_engine.rs` `x_prelim_blocks`; offset 0: a blastp HSP's
+/// query coordinates are relative to its context).
+pub(crate) fn rebase_hit_list<H: HitListHsp>(
+    hitlist: &mut BlastpHitList<H>,
+    q_idx: u32,
+    offset: i32,
+    query_length: usize,
+) {
+    for list in hitlist.hsplist_array.iter_mut().take(hitlist.hsplist_count) {
+        for hsp in &mut list.hsps {
+            hsp.move_to_query(q_idx, offset, query_length);
+        }
+        list.query_index = q_idx;
     }
 }
 

@@ -40,24 +40,16 @@ pub(crate) enum Post {
 }
 
 impl Post {
-    /// The line that a BLAST application of NCBI posts on its standard error (its diagnostic
-    /// prefix `program`, the program's name in lower case), with its line feed.
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:5672-5695 (quoted at
-    // `ncbi_exception::NcbiException::report_default_ex`: `<severity>: (<code>.<subcode>) `)
+    /// The line that a BLAST application of NCBI posts on its standard error, with its
+    /// diagnostic prefix `program` (the program's name in lower case): the one owner of each
+    /// post's text (`ReplacedChar::post`, `ncbi_exception::error_post_line`).
     pub(crate) fn line(&self, program: &str) -> Vec<u8> {
-        let mut line = b"Error: ".to_vec();
         match self {
-            Post::BadChar(replaced) => {
-                let (code, subcode) = ReplacedChar::ERR_CODE;
-                line.extend_from_slice(format!("({code}.{subcode}) [{program}] ").as_bytes());
-                line.extend_from_slice(&replaced.message());
-            }
+            Post::BadChar(replaced) => replaced.post(Some(program)),
             Post::Error(text) => {
-                line.extend_from_slice(format!("[{program}] {text}").as_bytes());
+                crate::ncbi_exception::error_post_line(None, Some(program), text.as_bytes())
             }
         }
-        line.push(b'\n');
-        line
     }
 }
 

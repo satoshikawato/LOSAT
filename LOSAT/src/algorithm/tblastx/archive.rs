@@ -26,7 +26,6 @@
 //! +1: 0 when that context is not valid), which is the `EffectiveSearchSpace` option of the
 //! batch (`SplitQuery_SetEffectiveSearchSpace`, `BlastOptions` memento: the first context).
 
-use std::borrow::Cow;
 use std::io::Write;
 use std::ops::Range;
 
@@ -37,19 +36,15 @@ use super::report::SubjectLetters;
 use super::seqalign::{query_records_of, SeqalignSubjects};
 use super::subjects::SubjectSetNumbers;
 use super::TblastxArgs;
-use crate::algorithm::common::masks::lowercase_runs;
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
-use crate::blastinput::value_parsers::SegSpec;
 use crate::core::blast_util::ncbi_int4_from_double;
-use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
-use crate::report::archive::strategy::StrategyExport;
+use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
-    defline_of, ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive,
-    KaBlock,
+    ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
 };
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
@@ -93,19 +88,7 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     // `MaskAtHash` is recorded with the value given (the class always sets it: false when absent).
     inputs.soft_masking = args.soft_masking;
     inputs.window_size = args.window_size;
-    inputs.seg = args.seg_spec().ok().map(|spec| match spec {
-        SegSpec::No => Filter::No,
-        SegSpec::Yes => Filter::Yes,
-        SegSpec::WindowLocutHicut {
-            window,
-            locut,
-            hicut,
-        } => Filter::Seg {
-            window,
-            locut,
-            hicut,
-        },
-    });
+    inputs.seg = args.seg_spec().ok().map(Filter::from);
     inputs.culling_limit = args.culling_limit;
     inputs.query_gencode = i32::from(args.query_gencode);
     inputs.db_gencode = i32::from(args.db_gencode);
@@ -121,43 +104,69 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
 pub(crate) fn handle_for(
     args: &TblastxArgs,
     archive_requested: bool,
+    options: &crate::report::archive::OptionsHandle,
 ) -> Result<Option<ArchiveHandle>> {
     if !archive_requested {
         return Ok(None);
     }
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
-    ArchiveHandle::for_program(&option_inputs(args), args.database_name(), "TBLASTX").map(Some)
+    ArchiveHandle::for_program(
+        &option_inputs(args),
+        args.database_name(),
+        "TBLASTX",
+        options,
+    )
+    .map(Some)
 }
 
-/// The search strategy export of a run (`-export_search_strategy`), into `file`
-/// (`strategy::create_strategy_file`), with TBLASTX's recorded options and `-db` name, and the
-/// `HitlistSize` of the run's format `outfmt` (`report_counts`; the archive's is outfmt 11's,
-/// `blastp::archive::strategy_for`).
-pub(crate) fn strategy_for(
-    args: &TblastxArgs,
-    outfmt: i32,
-    file: std::fs::File,
-) -> Result<StrategyExport> {
-    let mut inputs = option_inputs(args);
-    inputs.hitlist_size = crate::report::archive::strategy::hitlist_size(
-        outfmt,
-        args.max_target_seqs,
-        args.num_descriptions,
-        args.num_alignments,
-    );
-    StrategyExport::for_file(file, &inputs, args.database_name(), "TBLASTX")
+/// The requests of a run's batches (`RunRequests`): nucleotide queries and subjects, the
+/// `-subject` records `subjects` (`None` for `-db`), and with `-lcase_masking` (`lcase_masking`)
+/// the lower-case runs of each query in both frames of a translated query.
+pub(super) fn requests(
+    subjects: Option<&[FastaRecord]>,
+    lcase_masking: bool,
+) -> RunRequests<'_, FastaRecord> {
+    RunRequests::new(
+        RequestPolicy {
+            query_protein: false,
+            subject_protein: false,
+            lcase: lcase_masking.then_some(LcaseFrames::PlusAndMinus),
+        },
+        subjects,
+        "TBLASTX",
+    )
 }
 
-/// `report::archive::check_request_titles` for TBLASTX's records: the archive's (`archive`) and
-/// the search strategy's (`strategy`).
-pub(crate) fn check_request_titles(
-    records: &[FastaRecord],
-    role: &str,
-    archive: bool,
-    strategy: bool,
-) -> Result<()> {
-    crate::report::archive::check_request_titles(records, role, "TBLASTX", archive, strategy)
+/// `report::archive::check_titles` for TBLASTX's records (the archive's; the search strategy's
+/// requests check theirs where they are written, `RunRequests::write`).
+pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
+    crate::report::archive::check_titles(records, role, "TBLASTX")
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
+// ```c++
+// inline Int8
+// CBlastOptionsLocal::GetEffectiveSearchSpace() const
+// {
+//     if (m_EffLenOpts->num_searchspaces == 0)
+//         return 0;
+//
+//     return m_EffLenOpts->searchsp_eff[0];
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+// ```c++
+//     int status = m_PrelimSearch->CheckInternalData();
+//     if (status != 0)
+//     {
+//          // Search was not run, but we send back an empty CSearchResultSet.
+// ```
+/// The `EffectiveSearchSpace` option of a batch whose first query has the statistics `first`
+/// (`BatchArchive::searched_space`, `StrategyExport::note_searched`): the effective search space
+/// of context 0, when NCBI searched the batch.
+pub(super) fn batch_searched_space(searched: bool, first: &TblastxQueryStats) -> Option<i64> {
+    searched.then_some(first.context0_search_space)
 }
 
 pub(crate) use crate::report::archive::error_lines;
@@ -292,21 +301,17 @@ impl<'a> AlignSource for TblastxAligns<'a> {
     }
 }
 
-/// Calls `each` with the queries and the request inputs of each batch of `data.spans`, in order
-/// (`BatchArchive`; the archive and the search strategy file write their documents from it). The
-/// results' masks are read only `with_masks`: the search strategy's requests do not hold them.
+/// Calls `each` with the queries and the archive of each batch of `data.spans`, in order
+/// (`BatchArchive`: its request, `RunRequests::with_batch`, and its results).
 fn for_each_batch(
     data: &ArchiveData<'_>,
-    with_masks: bool,
     mut each: impl FnMut(Range<usize>, &BatchArchive<'_>) -> Result<()>,
 ) -> Result<()> {
-    let requests = BatchRequests {
-        queries: data.queries,
-        subject_records: data.subject_records,
-        query_placements: data.query_placements,
-        lcase_masking: data.lcase_masking,
-    };
-    requests.for_each(data.spans, |span, request| {
+    let requests = requests(Some(data.subject_records), data.lcase_masking);
+    for span in data.spans.iter().cloned() {
+        if span.is_empty() {
+            continue;
+        }
         let first = span.start;
         let searched = data.searched[first];
         let records = &data.queries[span.clone()];
@@ -314,7 +319,7 @@ fn for_each_batch(
 
         // The results' masks are those of the search, so only a searched batch has them.
         let mut results_masks: Vec<MaskEntry> = Vec::new();
-        if searched && with_masks {
+        if searched {
             for (index, record) in (span.start..).zip(records) {
                 results_masks.extend(query_results_masks(
                     record,
@@ -342,117 +347,19 @@ fn for_each_batch(
             }
             None => ([KaBlock::missing(false), KaBlock::missing(true)], 0, 0),
         };
-        let batch = BatchArchive {
-            masks: &results_masks,
-            ka_blocks,
-            search_space,
-            length_adjustment,
-            searched_space: searched.then_some(stats.context0_search_space),
-            ..*request
-        };
-        each(span, &batch)
-    })
-}
-
-/// What the requests of a call's batches read: the queries (each cut to its `-query_loc`), the
-/// `-subject` records (empty for `-db`), the placements of the queries and `-lcase_masking`.
-struct BatchRequests<'a> {
-    queries: &'a [FastaRecord],
-    subject_records: &'a [FastaRecord],
-    query_placements: &'a Placements,
-    lcase_masking: bool,
-}
-
-impl BatchRequests<'_> {
-    /// Calls `each` with the request inputs of each batch of `spans`, in order: a
-    /// `BatchArchive` without the search's parts (no masks, missing blocks, no search space).
-    fn for_each(
-        &self,
-        spans: &[Range<usize>],
-        mut each: impl FnMut(Range<usize>, &BatchArchive<'_>) -> Result<()>,
-    ) -> Result<()> {
-        // The Bioseq inputs borrow their deflines: keep them alive for the whole call.
-        let subject_deflines: Vec<Cow<'_, [u8]>> =
-            self.subject_records.iter().map(defline_of).collect();
-        let subjects_input: Vec<BioseqInput<'_>> = self
-            .subject_records
-            .iter()
-            .zip(&subject_deflines)
-            .map(|(record, defline)| BioseqInput {
-                id: &record.local_id,
-                ids: record.believed().map(|ids| ids.ids.as_slice()),
-                seq_loc: None,
-                defline,
-                title: &record.title,
-                letters: record.archive_letters(),
-                protein: false,
-            })
-            .collect();
-        for span in spans.iter().cloned() {
-            if span.is_empty() {
-                continue;
-            }
-            let records = &self.queries[span.clone()];
-            let deflines: Vec<Cow<'_, [u8]>> = records.iter().map(defline_of).collect();
-            let queries: Vec<BioseqInput<'_>> = records
-                .iter()
-                .zip(&deflines)
-                .map(|(record, defline)| BioseqInput {
-                    id: &record.local_id,
-                    ids: record.believed().map(|ids| ids.ids.as_slice()),
-                    seq_loc: record.archive_seq_loc(),
-                    defline,
-                    title: &record.title,
-                    letters: record.archive_letters(),
-                    protein: false,
-                })
-                .collect();
-            let first = span.start;
-
-            // `RequiredStart` / `RequiredEnd`: a `-query_loc` that is not the first query's
-            // whole length.
-            let placements = self.query_placements;
-            let required = if placements.ranged() {
-                let placement = &placements.0[first];
-                let cut = self.queries[first].seq().len();
-                (cut != placement.length)
-                    .then_some((placement.offset as i32, (placement.offset + cut) as i32 - 1))
-            } else {
-                None
-            };
-
-            // `-lcase_masking`: the `LCaseMask` parameters of the request are the lower-case runs
-            // of each whole query record, each one for both strands (as BLASTX's `lcase_masks`).
-            let mut lcase_masks: Vec<MaskEntry> = Vec::new();
-            if self.lcase_masking {
-                for record in records {
-                    for run in lowercase_runs(record.archive_letters()) {
-                        for frame in [Frame::Plus1, Frame::Minus1] {
-                            lcase_masks.push(MaskEntry {
-                                id: record.local_id.clone(),
-                                best: record.believed().map(|ids| ids.best.clone()),
-                                frame,
-                                intervals: vec![run],
-                            });
-                        }
-                    }
-                }
-            }
+        requests.with_batch(records, placements.get(first), |request| {
             let batch = BatchArchive {
-                queries: &queries,
-                subjects: &subjects_input,
-                required,
-                lcase_masks: &lcase_masks,
-                masks: &[],
-                ka_blocks: [KaBlock::missing(false), KaBlock::missing(true)],
-                search_space: 0,
-                length_adjustment: 0,
-                searched_space: None,
+                request: *request,
+                masks: &results_masks,
+                ka_blocks,
+                search_space,
+                length_adjustment,
+                searched_space: batch_searched_space(searched, stats),
             };
-            each(span, &batch)?;
-        }
-        Ok(())
+            each(span, &batch)
+        })?;
     }
+    Ok(())
 }
 
 /// Writes the archive of each batch of `data.spans` to `writer`; `warnings` writes the warnings
@@ -472,7 +379,7 @@ pub(super) fn write_tblastx_archives(
         },
         gapped: false,
     };
-    for_each_batch(data, true, |span, batch| {
+    for_each_batch(data, |span, batch| {
         if let Some(warnings) = warnings.as_deref_mut() {
             for index in span.clone() {
                 warnings.before_query(index, &mut *writer)?;
@@ -488,43 +395,6 @@ pub(super) fn write_tblastx_archives(
             span,
         };
         write_archive(handle, batch, &mut aligns, &mut *writer)
-    })
-}
-
-/// Writes the search strategy's request of each batch of `data.spans`
-/// (`StrategyExport::write_batch`; TBLASTX's `LCaseMask` parameters are the lower-case runs, the
-/// same before and after the search).
-pub(super) fn write_tblastx_strategy(
-    strategy: &StrategyExport,
-    data: &ArchiveData<'_>,
-) -> Result<()> {
-    for_each_batch(data, false, |_, batch| {
-        strategy.write_batch(batch, batch.lcase_masks)
-    })
-}
-
-/// Writes the search strategy's request of the batch of the queries `span` of `queries`, whose
-/// search fails (a sequence or header file of the database that cannot be read, the setup's
-/// errors): NCBI writes a batch's request before its search (tblastx_app.cpp:181), so the file
-/// holds that batch's request after those of the batches before (NCBI BLAST+ 2.17.0, probe 4 of
-/// RG-F1), and no request follows it. `subject_records` are the `-subject` records (empty for
-/// `-db`).
-pub(super) fn write_tblastx_failed_strategy(
-    strategy: &StrategyExport,
-    queries: &[FastaRecord],
-    subject_records: &[FastaRecord],
-    query_placements: &Placements,
-    lcase_masking: bool,
-    span: Range<usize>,
-) -> Result<()> {
-    let requests = BatchRequests {
-        queries,
-        subject_records,
-        query_placements,
-        lcase_masking,
-    };
-    requests.for_each(&[span], |_, batch| {
-        strategy.write_batch(batch, batch.lcase_masks)
     })
 }
 

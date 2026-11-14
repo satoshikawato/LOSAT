@@ -1,0 +1,31 @@
+
+                                          Tax BLAST report                                          
+
+Query= pq1 query protein one
+
+Length=300
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ 0         s1 subject one two HSPs                                                     313   3e-80   
+ 2         s3 subject three with a title that is longer than the description column... 247   4e-60   
+ 10        s11 subject eleven strong then planted weak HSP                             211   2e-49   
+ 8         s9 subject nine                                                             168   2e-36   
+ 1         s2 subject two                                                              159   9e-34   
+ 7         s8 subject eight                                                            147   4e-30   
+ 6         s7 subject seven taxid not in taxdb                                         141   2e-28   
+ 5         s6 subject six                                                              139   9e-28   
+ 3         s4 subject four                                                             138   2e-27   
+ 4         s5 subject five 131    s 2e-25    e Accession  a <@descr_text@> d <... 131   2e-25   
+ 9         s10 subject ten                                                             94.0  5e-14   
+
+                                          Tax BLAST report                                          
+
+Query= pq2 unrelated query (no hits)
+
+Length=40
+
+                                           Organism Report                                           
+Accession...  Description... Score... E-value... 

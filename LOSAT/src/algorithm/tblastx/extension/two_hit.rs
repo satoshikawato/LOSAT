@@ -160,7 +160,7 @@ unsafe fn extend_left_ungapped_simd128<S: TbxScore>(
 }
 
 #[inline(always)]
-fn extend_left_ungapped<S: TbxScore>(
+pub(super) fn extend_left_ungapped<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
     s_seq: &[u8],
@@ -351,7 +351,7 @@ unsafe fn extend_right_ungapped_simd128<S: TbxScore>(
 }
 
 #[inline(always)]
-fn extend_right_ungapped<S: TbxScore>(
+pub(super) fn extend_right_ungapped<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
     s_seq: &[u8],

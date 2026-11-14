@@ -104,7 +104,7 @@ use crate::blastinput::fasta_reader::{
     ReaderConfig,
 };
 use crate::blastinput::input_files::{
-    check_utf8_file_name, is_blank, open_input, write_empty_subject_warnings_by_length,
+    check_utf8_file_name, open_input, write_empty_subject_warnings_by_length,
 };
 use crate::blastinput::query_batch::{BatchSizeMixer, QueryReading, NO_DATA_MESSAGE};
 use crate::blastinput::seq_range::{
@@ -227,6 +227,14 @@ mod x_qgroup_par;
 // private types of this file).
 #[path = "pair_extend.rs"]
 mod pair_extend;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684 (the loop of
+// `BlastNaWordFinder`) with `s_BlastNaExtendDirect` (:963-1030) and the scanners of
+// c++/src/algo/blast/core/blast_nascan.c.
+// The scan of a chunk with a table that is not two-stage and the steps of each seed it finds
+// (a child module, so that it uses the private types of this file).
+#[path = "na_scan.rs"]
+mod na_scan;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:503-578 (the chunk loop of
 // `s_BlastSearchEngineCore` after the word finder),
@@ -1116,9 +1124,9 @@ impl DiagHashTable {
     /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:396-449
     /// (`s_BlastDiagHashInsert`, quoted above `insert_memo`).
     /// `insert_memo` without the memo of LOSAT_X_DIAGLV2 (the code before that switch): the reference
-    /// folds (`pair_extend::extend_offset_pairs` for a two-stage table, the seed closure of the
-    /// other tables), which never read the memo (it lives in the strips stages of dc-megablast
-    /// only, rebuilt at each stage's start: `x_diag_lv.rs`), the one-hit strips folds
+    /// folds (`pair_extend::extend_offset_pairs` for a two-stage table, `na_scan::scan_na_lookup`
+    /// for the other tables), which never read the memo (it lives in the strips stages of
+    /// dc-megablast only, rebuilt at each stage's start: `x_diag_lv.rs`), the one-hit strips folds
     /// (`x_pair_seed.rs` `fold`, `x_pair_seed_na.rs` `fold_na`), and the strips fold of
     /// dc-megablast in its instance with LOSAT_X_FOLDLEAN off on a table without the memo.
     #[inline(never)]
@@ -5839,14 +5847,14 @@ struct BlastnReportInputs<'a> {
     /// (`BatchResults::batches`).
     archive: Option<&'a crate::report::archive::ArchiveHandle>,
     batch_spans: &'a [std::ops::Range<usize>],
-    /// The run's search strategy export (`-export_search_strategy`).
-    strategy: Option<&'a crate::report::archive::strategy::StrategyExport>,
     /// Whether both strands of each query are searched (`-strand both`).
     both_strands: bool,
     minus_strand: bool,
     /// Whether `taxdb.bti` is on NCBI's search path, for the custom tabular reports
     /// (`ShownSubjects::tabular_taxdb_found`).
     tabular_taxdb_found: bool,
+    /// The taxonomy database of a `-subject` search's organism report (`BlastnArgs::subject_taxdb`).
+    subject_taxdb: Option<&'a crate::algorithm::common::database::SubjectTaxdb>,
 }
 
 impl BlastnReportInputs<'_> {
@@ -5951,8 +5959,7 @@ fn blastn_pairwise_report(
     Ok((queries, pairwise_report))
 }
 
-/// The queries of the call's batches as the archive and the search strategy take them
-/// (`archive::for_each_batch`).
+/// The queries of the call's batches as the archive takes them (`archive::for_each_batch`).
 fn call_batches<'a>(
     report: &'a BlastnReportInputs<'a>,
     query_lengths: &'a [usize],
@@ -5980,6 +5987,25 @@ fn call_batches<'a>(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
+// ```c++
+// inline Int8
+// CBlastOptionsLocal::GetEffectiveSearchSpace() const
+// {
+//     if (m_EffLenOpts->num_searchspaces == 0)
+//         return 0;
+//
+//     return m_EffLenOpts->searchsp_eff[0];
+// }
+// ```
+/// The `EffectiveSearchSpace` option of a batch whose first query is `first` (an index of
+/// `query_eff_searchsp`'s queries, two contexts each): the search space of its context 0, the
+/// option `SplitQuery_SetEffectiveSearchSpace` sets. The archive's (`archive_first_context`) and
+/// the search strategy's (`run_in_pool`, `StrategyExport::note_searched`).
+fn context0_search_space(query_eff_searchsp: &[i64], first: usize) -> i64 {
+    query_eff_searchsp[2 * first]
+}
+
 /// The values of the first query of a batch (`first`, an index of the call) that the archive
 /// takes (`archive::FirstContext`): the blocks and search statistics of its first valid
 /// context (`CBlastAncillaryData`, blast_results.cpp:72-115; the plus strand's, or the minus
@@ -5990,7 +6016,7 @@ fn archive_first_context(
     query_lengths: &[usize],
     first: usize,
 ) -> Result<archive::FirstContext> {
-    let context0_space = report.query_eff_searchsp[2 * first];
+    let context0_space = context0_search_space(report.query_eff_searchsp, first);
     let Some(blocks) = report.context_karlin[2 * first + report.first_context] else {
         return Ok(archive::FirstContext {
             karlin: None,
@@ -6638,22 +6664,6 @@ fn post_process_hits_and_write(
             observer.query_stats(q_idx, stats);
         }
     }
-    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:280-282
-    // ```c++
-    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-    //
-    //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
-    // ```
-    // The search strategy's request of each batch (`-export_search_strategy`), which NCBI writes
-    // before the batch's search: the file is apart from the reports, and its documents are those
-    // of the batches the run reports.
-    if let Some(strategy) = report.strategy {
-        archive::write_blastn_strategy(
-            strategy,
-            &call_batches(report, query_lengths, &unsearched),
-            &|first| archive_first_context(report, query_lengths, first),
-        )?;
-    }
     // The warnings are written once, with the first format (`QueryWarnings`).
     let mut warning_lines = Some(query_warnings);
     // Every structured format of the call is XML2 or JSON: none writes the report that a
@@ -6684,7 +6694,7 @@ fn post_process_hits_and_write(
             )
             || output_format
                 .tabular_spec()
-                .is_some_and(|spec| spec.checks_taxdb()))
+                .is_some_and(|spec| spec.looks_up_every_taxid()))
         .then(|| {
             let first = warning_lines.take();
             let warnings = crate::report::query_warnings::QueryWarnings::of_posts(
@@ -6706,7 +6716,7 @@ fn post_process_hits_and_write(
         // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
         //     : m_FormatType(format_type), ..., m_Outfile(outfile),
         // ```
-        let mut writer = format.sink.open()?;
+        let mut writer = format.sink.ostream()?;
         if output_format == BlastnOutputFormat::Pairwise {
             let (queries, pairwise_report) = pairwise_data
                 .as_ref()
@@ -7155,7 +7165,7 @@ fn post_process_hits_and_write(
                 format_warnings.as_mut(),
             )?;
         }
-        writer.flush()?;
+        std::io::Write::flush(&mut writer)?;
     }
     // Without an output format the warnings are written all at once.
     if let Some(handle) = report.archive {
@@ -7232,7 +7242,7 @@ fn write_custom_tabular(
     subject_title: &str,
     subject_ids: &[Arc<[u8]>],
     unsearched: &[bool],
-    writer: &mut dyn std::io::Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
     probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
@@ -7261,9 +7271,12 @@ fn write_custom_tabular(
         ),
         _ => (Vec::new(), Vec::new()),
     };
+    // A `-subject` search's organism report looks names up in the run's database.
     let names = match report.database_reader {
         Some(database) => database.tabular_names(spec, &taxonomy)?,
-        None => None,
+        None => report
+            .subject_taxdb
+            .map(|taxdb| taxdb.report_names("BLASTN")),
     };
     let subjects = match report.database_ordinals {
         Some(ordinals) if report.database_reader.is_some() => TabularSubjects::Database {
@@ -7280,6 +7293,45 @@ fn write_custom_tabular(
             parsed: report.database_parsed,
         },
     };
+    // Outfmt 18, the organism report: the `Query=` block shows the query record's length, also
+    // with `-query_loc` (as outfmt 0's, `QueryNames`).
+    if spec.kind == crate::report::tabular::TabularKind::TaxReport {
+        let queries: Vec<crate::report::tax_report::TaxQuery<'_>> = hit_lists
+            .iter()
+            .enumerate()
+            .map(|(q_idx, hit_list)| crate::report::tax_report::TaxQuery {
+                title: query_titles
+                    .get(q_idx)
+                    .map_or(&b""[..], |title| title.as_ref()),
+                length: report
+                    .ranges
+                    .queries
+                    .placements
+                    .length(q_idx, query_lengths.get(q_idx).copied().unwrap_or_default()),
+                hsps: hit_list
+                    .iter()
+                    .flat_map(|hit_list| &hit_list.hsplist_array)
+                    .flat_map(|hsp_list| &hsp_list.hsps)
+                    .map(|hsp| crate::report::tax_report::TaxHsp {
+                        subject: hsp.s_idx as usize,
+                        evalue: hsp.e_value,
+                        bit_score: hsp.bit_score,
+                    })
+                    .collect(),
+            })
+            .collect();
+        return crate::algorithm::common::tabular::write_tax_report(
+            &subjects,
+            report.subjects.records(),
+            false,
+            report.tabular_taxdb_found,
+            names.as_ref(),
+            "BLASTN",
+            &queries,
+            writer,
+            warnings,
+        );
+    }
     let tab = BlastnTabular {
         spec,
         queries: report.queries,
@@ -7302,7 +7354,7 @@ fn write_custom_tabular(
 }
 
 /// `settings` are the NCBI application settings that LOSAT reproduces
-/// (`ncbi_environment::check_ncbi_application_settings`): the data loaders decide whether
+/// (`ncbi_environment::ApplicationSettings`): the data loaders decide whether
 /// the readers of the subjects and the queries try a first line as a Seq-id
 /// (`ReaderConfig`).
 ///
@@ -7342,32 +7394,44 @@ pub fn run(
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
     // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
     // there too (`cli_output_formats`). `GetExportSearchStrategyStream` comes first: it creates
-    // the search strategy file (`strategy::create_strategy_file`), which an error after it
+    // the search strategy file (`strategy::open_strategy_file`), which an error after it
     // leaves empty.
-    let strategy_file = args
-        .export_search_strategy
-        .as_deref()
-        .map(|path| {
-            check_utf8_file_name(path, "export_search_strategy", "BLASTN")?;
-            crate::report::archive::strategy::create_strategy_file(
-                path,
-                args.out.as_deref(),
-                "BLASTN",
-            )
-        })
-        .transpose()?;
+    let strategy_file = crate::report::archive::strategy::open_strategy_file(
+        args.export_search_strategy.as_deref(),
+        args.out.as_deref(),
+        "BLASTN",
+    )?;
     let output_formats = cli_output_formats(&args.outfmt, args.out.as_deref())?;
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot
     // write, before anything is read or written.
     let archive_requested = output_formats.contains(&BlastnOutputFormat::Archive);
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
-    args.archive = archive::handle_for(&args, args.dust_filtering.as_deref(), archive_requested)?
-        .map(|handle| handle.with_outfmt_text(&args.outfmt));
-    // The search strategy's request, with the refusals of the archive's.
+    // The run's options handle, which its archive and its search strategy share.
+    let options = crate::report::archive::OptionsHandle::default();
+    args.archive = archive::handle_for(
+        &args,
+        args.dust_filtering.as_deref(),
+        archive_requested,
+        &options,
+    )?
+    .map(|handle| handle.with_outfmt_text(&args.outfmt));
+    // The search strategy's request, with the refusals of the archive's, and the archive's
+    // options handle.
     args.strategy = strategy_file
         .map(|file| {
-            let outfmt = app::parse_formatting_string(&args.outfmt)?.number;
-            archive::strategy_for(&args, args.dust_filtering.as_deref(), outfmt, file)
+            crate::report::archive::strategy::StrategyExport::for_run(
+                file,
+                archive::option_inputs(&args, args.dust_filtering.as_deref()),
+                app::parse_formatting_string(&args.outfmt)?.number,
+                crate::report::archive::strategy::HitlistArgs {
+                    max_target_seqs: args.max_target_seqs,
+                    num_descriptions: args.num_descriptions,
+                    num_alignments: args.num_alignments,
+                },
+                args.database_name(),
+                "BLASTN",
+                &options,
+            )
         })
         .transpose()?;
     // LOSAT's thread capability is checked before any input or output, as before.
@@ -7434,7 +7498,7 @@ pub fn run(
     // database is opened after every option handler has run (`search_cli`). With `-subject` it
     // reads the subjects here, before the query and the output are opened.
     let archive = args.archive.clone();
-    let mut stderr = std::io::stderr();
+    let mut stderr = crate::cli::CliStderr::process();
     let mut archive_tee;
     let diagnostics: &mut (dyn std::io::Write + Send) = match &archive {
         Some(handle) => {
@@ -7516,7 +7580,12 @@ pub fn run(
     let out_file = open_out_file(&args)?;
     let outfmt = args.outfmt.clone();
     let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
-    let mut report = cli_report_stream(out_file);
+    let tax_report = output_formats.iter().any(|format| {
+        format
+            .tabular_spec()
+            .is_some_and(|spec| spec.kind == crate::report::tabular::TabularKind::TaxReport)
+    });
+    let mut report = crate::cli::ReportStream::of_cli(out_file, tax_report);
     let result = {
         let mut outputs =
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut report), &mut *diagnostics);
@@ -7578,7 +7647,7 @@ pub fn run(
     // The outfmt 0 formatter's stream throws when a write fails (oracle: `-out /dev/full`,
     // exit 6). For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
     // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if report.failed && pairwise {
+    if report.failed && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
             message: "BLAST failed to write output\n".to_string(),
@@ -7611,7 +7680,7 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = cli_report_stream(out_file);
+        let mut report = crate::cli::ReportStream::of_cli(out_file, false);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -7635,19 +7704,6 @@ fn open_out_file(args: &BlastnArgs) -> Result<Option<std::io::BufWriter<std::fs:
             None => None,
         },
     )
-}
-
-/// The report stream of the command line: the `-out` file, or standard output.
-fn cli_report_stream(
-    out_file: Option<std::io::BufWriter<std::fs::File>>,
-) -> crate::cli::ReportStream {
-    crate::cli::ReportStream {
-        inner: match out_file {
-            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
-            None => crate::cli::report_standard_output(),
-        },
-        failed: false,
-    }
 }
 
 struct CliSubjects {
@@ -7829,6 +7885,17 @@ fn open_search_database(
     {
         args.tabular_taxdb = Some(match database.as_ref() {
             Some(database) => database.taxdb_found(),
+            // The organism report's lookups open the run's own database.
+            None if output_formats.iter().any(|format| {
+                format
+                    .tabular_spec()
+                    .is_some_and(|spec| spec.kind == crate::report::tabular::TabularKind::TaxReport)
+            }) =>
+            {
+                args.subject_taxdb =
+                    crate::algorithm::common::database::SubjectTaxdb::of(settings, "BLASTN")?;
+                args.subject_taxdb.is_some()
+            }
             None => super::super::tabular::subject_taxdb_found(settings)?,
         });
     }
@@ -8275,8 +8342,13 @@ pub fn run_local(
     });
     if archive_requested && args.db.is_none() {
         QueryStrand::parse(&args.strand)?;
-        args.archive = archive::handle_for(&args, args.dust_filtering.as_deref(), true)?
-            .map(|handle| outputs.with_archive_outfmt(handle));
+        args.archive = archive::handle_for(
+            &args,
+            args.dust_filtering.as_deref(),
+            true,
+            &crate::report::archive::OptionsHandle::default(),
+        )?
+        .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(args, query_records, subject_records, view)
@@ -8403,6 +8475,7 @@ pub fn run_local_database(
         &args,
         args.dust_filtering.as_deref(),
         output_formats.contains(&BlastnOutputFormat::Archive),
+        &crate::report::archive::OptionsHandle::default(),
     )?
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
@@ -8997,8 +9070,13 @@ struct QueryBatching {
 /// it splits a query batch (`search_query_chunks`), and otherwise searches as NCBI.
 fn query_batching_from_environment(megablast: bool) -> Result<QueryBatching> {
     let read = |variable: &str| -> Result<Option<i32>> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:59-60
+        // ```c++
+        //     char* chunk_sz_str = getenv("CHUNK_SIZE");
+        //     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
+        // ```
         match std::env::var_os(variable) {
-            Some(value) if !is_blank(value.as_encoded_bytes()) => {
+            Some(value) if !crate::ncbi_str::is_blank(value.as_encoded_bytes()) => {
                 match crate::blastinput::query_batch::ncbi_string_to_int(&value) {
                     Some(number) => Ok(Some(number)),
                     None => anyhow::bail!(
@@ -9650,6 +9728,19 @@ fn run_in_pool(
     // (`Posts::write`).
     let archive = args.archive.clone();
     let archive = archive.as_ref();
+    // The search strategy's requests of the batches (`-export_search_strategy`), with every
+    // `-subject` record.
+    let requests = args.strategy.as_ref().map(|_| {
+        archive::requests(
+            match source {
+                SubjectSource::Prepared(prepared) => {
+                    Some(subject_ranges.records.unwrap_or(prepared.records))
+                }
+                SubjectSource::Database(_) => None,
+            },
+            args.lcase_masking,
+        )
+    });
     let mut query_eff_searchsp = Vec::with_capacity(2 * lengths.len());
     // EXPERIMENT (LOSAT_X_QSTREAM, LOSAT_X_BNQPACK): the searched records of the batches taken,
     // kept where a writer reads them after their batch: the reports after the loop and the
@@ -9821,6 +9912,24 @@ fn run_in_pool(
             }
             .into());
         }
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:280-282
+        // ```c++
+        //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+        //
+        //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
+        // ```
+        // The batch's search strategy request (`-export_search_strategy`): once its query factory
+        // is made, before its set-up (the masks of `-window_masker_db` first) and search, so every
+        // error of the batch from here on follows it (the file is apart from the reports). Its
+        // `EffectiveSearchSpace` option is the one the batch before left (`note_searched` below).
+        if let (Some(strategy), Some(requests)) = (args.strategy.as_ref(), requests.as_ref()) {
+            requests.write(
+                strategy,
+                start,
+                batch_records.searched(),
+                query_input.placements.get(start),
+            )?;
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:518-530
         // ```c
         //     for(TSeqPos index = 0; index < queries.Size(); index++) {
@@ -9906,13 +10015,6 @@ fn run_in_pool(
                 } else {
                     before(outputs)?;
                 }
-                write_failed_batch_strategy(
-                    &args,
-                    batch_records.searched(),
-                    start,
-                    &report_ranges,
-                    source,
-                )?;
                 batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
                 masker_warnings.write(&mut *outputs.diagnostics, archive)?;
                 return Err(failure.into());
@@ -9995,13 +10097,6 @@ fn run_in_pool(
             } else {
                 before(outputs)?;
             }
-            write_failed_batch_strategy(
-                &args,
-                batch_records.searched(),
-                start,
-                &report_ranges,
-                source,
-            )?;
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
             let mut message = String::from("BLAST engine error: ");
             for _ in start..end {
@@ -10134,13 +10229,6 @@ fn run_in_pool(
                     } else {
                         before(outputs)?;
                     }
-                    write_failed_batch_strategy(
-                        &args,
-                        batch_records.searched(),
-                        start,
-                        &report_ranges,
-                        source,
-                    )?;
                     // The failing batch was read (its title warnings) before its search.
                     warnings[start].write(&mut *outputs.diagnostics, archive)?;
                     return Err(error);
@@ -10152,17 +10240,6 @@ fn run_in_pool(
                 // traceback's of ambiguity data that it cannot decode, `x_rpt_stream`); the off
                 // path writes no report here.
                 Err(error) => {
-                    // NCBI's error of the first batch's search (`database_search_error`; not
-                    // LOSAT's refusal): the batch's search strategy request was written before it.
-                    if input_start == 0 && error.is::<crate::cli::NativeError>() {
-                        write_failed_batch_strategy(
-                            &args,
-                            batch_records.searched(),
-                            start,
-                            &report_ranges,
-                            source,
-                        )?;
-                    }
                     let written = if stream.acting() { start } else { 0 };
                     for query_warnings in &warnings[written..=start] {
                         query_warnings.write(&mut *outputs.diagnostics, archive)?;
@@ -10171,6 +10248,16 @@ fn run_in_pool(
                 }
             },
         };
+        // The batch's set-up has written its `EffectiveSearchSpace` option, which the next batch's
+        // search strategy request holds.
+        if let Some(strategy) = args.strategy.as_ref() {
+            strategy.note_searched(
+                start..end,
+                batch
+                    .searched
+                    .then(|| context0_search_space(&batch.query_eff_searchsp, 0)),
+            )?;
+        }
         // The batch's LOSAT_TIMING block, where its search wrote it before.
         if !batch.timing.is_empty() {
             eprint!("{}", batch.timing);
@@ -10301,13 +10388,6 @@ fn run_in_pool(
                 } else {
                     before(outputs)?;
                 }
-                write_failed_batch_strategy(
-                    &args,
-                    batch_records.searched(),
-                    start,
-                    &report_ranges,
-                    source,
-                )?;
                 warnings[start].write(&mut *outputs.diagnostics, archive)?;
                 return Err(error);
             }
@@ -10357,7 +10437,7 @@ fn run_in_pool(
                 let plural_names = taxdb_found
                     && matches!(
                         output_formats.first(),
-                        Some(BlastnOutputFormat::CustomTabular(spec)) if spec.checks_taxdb()
+                        Some(BlastnOutputFormat::CustomTabular(spec)) if spec.looks_up_every_taxid()
                     );
                 let rows_open = |hit_lists: &[Option<BlastnHitList>]| -> Result<()> {
                     if plural_names
@@ -10375,14 +10455,18 @@ fn run_in_pool(
                 };
                 // A query's own fetches where the batch's prefetch is off: the texts of the
                 // subjects its report reads, kept by subject where the first format writes them
-                // where it reads each (`BlastnOutputFormat::places_subject_reads`), else returned
-                // for the query's warnings.
-                let places = output_formats
+                // where it reads each (`ReportFormat::places_subject_reads`), else returned for the
+                // query's warnings.
+                let first_report = outputs
+                    .formats
                     .first()
-                    .is_some_and(|format| format.places_subject_reads());
+                    .and_then(crate::api::local_blast::FormatOutput::report_format);
+                let places = first_report
+                    .is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
                 // The pairwise report reads its subjects in the order of its `-sorthits`.
-                let pairwise = matches!(output_formats.first(), Some(BlastnOutputFormat::Pairwise))
-                    .then(|| args.formatting.report_sort());
+                let pairwise = (first_report
+                    == Some(crate::blastinput::app::ReportFormat::Pairwise))
+                .then(|| args.formatting.report_sort());
                 let query_fetch = |query: usize,
                                    shown: &[Option<BlastnHitList>],
                                    reads: &mut [QueryReads]|
@@ -10498,9 +10582,11 @@ fn run_in_pool(
         // Karlin-Altschul parameters.
         // A structured format (outfmt 8, 12) writes no result warnings
         // (`ReportFormat::writes_query_warnings`); the warnings go with the first format.
-        let result_warnings = output_formats
+        let result_warnings = outputs
+            .formats
             .first()
-            .is_none_or(|format| format.writes_query_warnings());
+            .and_then(crate::api::local_blast::FormatOutput::report_format)
+            .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings);
         let filtered_empty = match source {
             SubjectSource::Database(database) => database.filtered_empty(),
             _ => false,
@@ -10572,16 +10658,13 @@ fn run_in_pool(
         // reports and the reader's messages that come with them. It comes before the first byte:
         // the reports of the batches before are written after the loop where a query's title is
         // refused (`x_rpt_stream::Off::ArchiveTitle`), and the first batch's are the first.
-        // The search strategy's requests are refused with them (`check_request_titles`).
-        let (archive, strategy) = (args.archive.is_some(), args.strategy.is_some());
-        if archive || strategy {
-            archive::check_request_titles(batch_records.searched(), "query", archive, strategy)?;
+        // (The search strategy's requests check their titles where they are written, above.)
+        if args.archive.is_some() {
+            archive::check_titles(batch_records.searched(), "query")?;
             if let (0, SubjectSource::Prepared(prepared)) = (start, source) {
-                archive::check_request_titles(
+                archive::check_titles(
                     subject_ranges.records.unwrap_or(prepared.records),
                     "subject",
-                    archive,
-                    strategy,
                 )?;
             }
         }
@@ -10899,62 +10982,6 @@ struct BatchResults<'a> {
     /// batch's prefetch counts its own Seq-aligns, `common::database::BatchPrefetch`); empty
     /// when the call is one batch.
     batches: &'a [std::ops::Range<usize>],
-}
-
-/// Writes the search strategy request (`-export_search_strategy`) of the failing batch, whose
-/// searched queries are `records` (the call's searched queries from `start`): NCBI writes it
-/// after making the batch's query factory and before its search (blastn_app.cpp:282), so a batch
-/// whose search fails (its setup, the masks of `-window_masker_db`, a sequence or header file of
-/// the database that cannot be read) has one, after those of the batches before (NCBI BLAST+
-/// 2.17.0, probe 4 of RG-F1). A batch that fails while it is read, or without a query, has none.
-fn write_failed_batch_strategy(
-    args: &BlastnArgs,
-    records: &[FastaRecord],
-    start: usize,
-    ranges: &ReportRanges<'_>,
-    source: SubjectSource<'_>,
-) -> Result<()> {
-    let Some(strategy) = args.strategy.as_ref() else {
-        return Ok(());
-    };
-    let placements = crate::blastinput::seq_range::Placements(
-        ranges
-            .queries
-            .placements
-            .0
-            .get(start..start + records.len())
-            .map_or_else(Vec::new, <[_]>::to_vec),
-    );
-    let prepared_records;
-    let subject_records = match source {
-        SubjectSource::Prepared(prepared) => {
-            prepared_records = prepared.letters();
-            Some(
-                ranges
-                    .subjects
-                    .records
-                    .unwrap_or_else(|| prepared_records.records()),
-            )
-        }
-        SubjectSource::Database(_) => None,
-    };
-    archive::write_blastn_failed_strategy(
-        strategy,
-        &archive::CallBatches {
-            queries: records,
-            query_lengths: &[],
-            query_placements: &placements,
-            subject_records,
-            query_masks: &[],
-            dust_masks: &[],
-            unsearched: &[],
-            lcase_masking: args.lcase_masking,
-            window_masker: false,
-            both_strands: args.strand == "both",
-            minus_strand: QueryStrand::from_option(&args.strand) == QueryStrand::Minus,
-            spans: &[],
-        },
-    )
 }
 
 /// Writes what NCBI has written when a query batch fails, before its error: the reports of
@@ -11317,10 +11344,10 @@ fn write_reports_untimed(
         },
         archive: args.archive.as_ref(),
         batch_spans: results.batches,
-        strategy: args.strategy.as_ref(),
         both_strands: args.strand == "both",
         minus_strand: QueryStrand::from_option(&args.strand) == QueryStrand::Minus,
         tabular_taxdb_found: subjects.shown.tabular_taxdb_found,
+        subject_taxdb: args.subject_taxdb.as_ref(),
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:482-496
     // ```c++
@@ -12686,15 +12713,17 @@ fn search_query_batch<const UNGAPPED: bool>(
                 let hit_len_array = &mut subject_scratch.hit_len_array;
                 let diag_hash = &mut subject_scratch.diag_hash;
                 // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the two retrieves of the
-                // diagonal hash below (`pair_extend::extend_offset_pairs` for a two-stage table,
-                // the seed closure of the other tables) skip the walk of a bucket whose cells all
-                // lie below the level bound, unless diagnostics print what they read.
+                // diagonal hash in the scans called below (`pair_extend::extend_offset_pairs` for a
+                // two-stage table, `na_scan::scan_na_lookup` for the other tables) skip the walk of
+                // a bucket whose cells all lie below the level bound, unless diagnostics print what
+                // they read.
                 let x_lv_ref = diag_hash.x_lv_on()
                     && !(debug_enabled || blastn_trace_enabled || debug_window.is_some());
                 if diag_hash.x_lv_on() {
                     crate::utils::xreach::x_reach!("LOSAT_X_DIAGLV", use_diag_hash && x_lv_ref);
-                    // EXPERIMENT (LOSAT_X_DIAGLV2): the reference fold below never reads the memo
-                    // (the strips stage of dc-megablast records its own side).
+                    // EXPERIMENT (LOSAT_X_DIAGLV2): the reference folds called below
+                    // (`pair_extend::extend_offset_pairs`, `na_scan::scan_na_lookup`) never read
+                    // the memo (the strips stage of dc-megablast records its own side).
                     if x_diag_lv::lv2_on() {
                         crate::utils::xreach::x_reach!("LOSAT_X_DIAGLV2", false);
                     }
@@ -13494,11 +13523,11 @@ fn search_query_batch<const UNGAPPED: bool>(
                     //     total_hits += num_hits;
                     // }
                     // ```
-                    // Dispatch point of LOSAT_X_PAIRPARNA: `x_pair_seed::run_na` runs this block
-                    // (scan, diagonal hash, ungapped extension; one-hit diagonal-hash scope only)
-                    // with the subject scan in strips on the pool threads and the pairs folded in
-                    // the scan order; `continue` ends the one-iteration strand loop. Otherwise
-                    // the code below runs.
+                    // Dispatch point of LOSAT_X_PAIRPARNA: `x_pair_seed::run_na` does what
+                    // `na_scan::scan_na_lookup` does (scan, diagonal hash, ungapped extension;
+                    // one-hit diagonal-hash scope only) with the subject scan in strips on the pool
+                    // threads and the pairs folded in the scan order; `continue` ends the
+                    // one-iteration strand loop. Otherwise `na_scan::scan_na_lookup` runs.
                     if x_pair_seed::run_na(
                         &x_pair_seed::NaInputs {
                             pv_direct_lookup: pv_direct_lookup_ref,
@@ -13539,784 +13568,69 @@ fn search_query_batch<const UNGAPPED: bool>(
                     ) {
                         continue;
                     }
-                    let scan_start = if timing_enabled {
-                        Some(std::time::Instant::now())
-                    } else {
-                        None
-                    };
-                    let mut scan_pause_ns: u64 = 0;
-                    let mb_scan_kind = select_mb_scan_kind(safe_k, scan_step, subject_masked);
-                    // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the level bound's constants
-                    // of this chunk's seeds (`s_end` adds `safe_k`).
-                    let x_lv_seeds = x_diag_lv::LvSeeds::new(window_size > 0, safe_k, window_size);
-                    scan_subject_kmers_with_ranges(
-                        search_seq_packed,
-                        s_len,
-                        safe_k,
-                        safe_k,
-                        scan_step,
-                        subject_seq_ranges,
-                        subject_masked,
-                        mb_scan_kind,
-                        |kmer_start, s_range, current_kmer| {
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
-                            // ```c
-                            // for (; s <= s_end; s += scan_step) {
-                            //     num_hits = s_BlastLookupGetNumHits(lookup, index);
-                            //     if (num_hits == 0)
-                            //         continue;
-                            //     s_BlastLookupRetrieve(lookup,
-                            //                           index,
-                            //                           offset_pairs + total_hits,
-                            //                           ...);
-                            //     total_hits += num_hits;
-                            // }
-                            // ```
-                            if debug_enabled {
-                                dbg_total_s_positions += 1;
-                            }
-
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:41-79
-                            // ```c
-                            // num_hits = s_BlastLookupGetNumHits(lookup, index);
-                            // if (num_hits == 0)
-                            //     continue;
-                            // s_BlastLookupRetrieve(lookup,
-                            //                       index,
-                            //                       offset_pairs + total_hits,
-                            //                       s_off);
-                            // ```
-                            // Phase 2: Use PV-based direct lookup (O(1) with fast PV filtering) for word_size <= 13
-                            // For word_size > 13, use NCBI NaLookupTable array-backed lookup
-                            let matches_slice: &[u32] = if use_direct_lookup {
-                                // Use PV for fast filtering before accessing the lookup table
-                                pv_direct_lookup_ref
-                                    .map(|pv_dl| pv_dl.get_hits_checked(current_kmer))
-                                    .unwrap_or(&[])
-                            } else {
-                                // Use NaLookupTable for larger word sizes
-                                na_lookup_ref
-                                    .map(|na_lt| na_lt.get_hits_checked(current_kmer))
-                                    .unwrap_or(&[])
-                            };
-
-                            for &q_off_1 in matches_slice {
-                                if debug_enabled {
-                                    dbg_seeds_found += 1;
-                                }
-                                if q_off_1 == 0 {
-                                    continue;
-                                }
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1412
-                                // ```c
-                                // offset_pairs[i].qs_offsets.q_off = q_off - 1;
-                                // ```
-                                let q_off0 = q_off_1 as usize - 1;
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:900-903
-                                // ```c
-                                // Int4 context = BSearchContextInfo(q_off, query_info);
-                                // ```
-                                let context_idx = query_context_index.context_for_offset(q_off0);
-                                let ctx = &query_contexts[context_idx];
-                                let q_idx = context_idx as u32;
-
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:268-269
-                                // ```c
-                                // Uint1 *q_start = query->sequence;
-                                // ```
-                                let q_seq_blastna = encoded_queries_blastna[context_idx];
-                                let q_pos_usize = q_off0 - ctx.query_offset as usize;
-
-                                // Use pre-computed cutoff score (computed once per query-subject pair)
-                                let cutoff_score = cutoff_scores[context_idx];
-
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:663-664
-                                // ```c
-                                // diag = s_off + diag_table->diag_array_length - q_off;
-                                // real_diag = diag & diag_table->diag_mask;
-                                // ```
-                                let (diag_array_length, diag_mask) = if use_array_indexing {
-                                    (diag_table_length as isize, diag_table_mask)
-                                } else {
-                                    (0isize, 0isize)
-                                };
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:663-664
-                                // ```c
-                                // diag = s_off + diag_table->diag_array_length - q_off;
-                                // real_diag = diag & diag_table->diag_mask;
-                                // ```
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:828-829
-                                // ```c
-                                // diag = s_off - q_off;
-                                // s_end = s_off + word_length;
-                                // ```
-                                // `q_off` is the concatenated BLAST query offset returned by the
-                                // lookup table, not the per-context query position used for output
-                                // and sequence indexing. Keeping the diagonal in the global query
-                                // coordinate space preserves NCBI's two-hit last_hit history across
-                                // plus/minus blastn query contexts.
-                                let diag = if use_array_indexing {
-                                    (kmer_start as isize + diag_array_length - q_off0 as isize)
-                                        & diag_mask
-                                } else {
-                                    kmer_start as isize - q_off0 as isize
-                                };
-
-                                // Check if this seed is in the debug window
-                                let s_pos = kmer_start + chunk.offset;
-                                let in_window =
-                                    if let Some((q_start, q_end, s_start, s_end)) = debug_window {
-                                        q_pos_usize >= q_start
-                                            && q_pos_usize <= q_end
-                                            && s_pos >= s_start
-                                            && s_pos <= s_end
-                                    } else {
-                                        false
-                                    };
-
-                                if debug_enabled && in_window {
-                                    dbg_window_seeds += 1;
-                                }
-
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
-                                // ```c
-                                // num_hits = s_BlastLookupGetNumHits(lookup, index);
-                                // if (num_hits == 0)
-                                //     continue;
-                                // s_BlastLookupRetrieve(lookup, index,
-                                //                       offset_pairs + total_hits, ...);
-                                // ```
-                                if blastn_trace_enabled
-                                    && blastn_trace::should_trace_range(
-                                        "seed",
-                                        q_idx,
-                                        s_idx,
-                                        s_id,
-                                        q_pos_usize,
-                                        q_pos_usize.saturating_add(safe_k),
-                                        kmer_start.saturating_add(chunk.offset),
-                                        kmer_start
-                                            .saturating_add(safe_k)
-                                            .saturating_add(chunk.offset),
-                                        ctx.len,
-                                        ctx.frame,
-                                    )
-                                {
-                                    blastn_trace::log(
-                                        "seed",
-                                        format!(
-                                            "subject={}({}) context={} q_off={} s_off={} word_length={} lookup_index={} diag={} hits_for_lookup={}",
-                                            s_id,
-                                            s_idx,
-                                            q_idx,
-                                            q_pos_usize,
-                                            s_pos,
-                                            safe_k,
-                                            current_kmer,
-                                            diag,
-                                            matches_slice.len()
-                                        ),
-                                    );
-                                }
-
-                                // NCBI BLAST does NOT check mask_array/mask_hash at seed level
-                                // NCBI reference: na_ungapped.c:671-672
-                                // NCBI only checks: if (s_off_pos < last_hit) return 0;
-                                // This check happens below using hit_level_array[real_diag].last_hit
-                                // The mask_array/mask_hash check above was LOSAT-specific and caused excessive filtering
-                                // REMOVED to match NCBI BLAST behavior
-
-                                // NCBI reference: na_ungapped.c:656-672
-                                // Two-hit filter: check if there's a previous hit within window_size
-                                // NCBI: Boolean two_hits = (window_size > 0);
-                                // NCBI: last_hit = hit_level_array[real_diag].last_hit;
-                                // NCBI: hit_saved = hit_level_array[real_diag].flag;
-                                // NCBI: if (s_off_pos < last_hit) return 0;  // hit within explored area
-                                // NCBI: if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) { ... }
-                                let diag_idx = if use_array_indexing {
-                                    diag as usize
-                                } else {
-                                    0 // Not used for hash indexing
-                                };
-
-                                // Get current diagonal state
-                                let (last_hit, hit_saved) =
-                                    if use_array_indexing && diag_idx < diag_array_size {
-                                        let diag_entry = &hit_level_array[diag_idx];
-                                        (diag_entry.last_hit, diag_entry.flag != 0)
-                                    } else if !use_array_indexing {
-                                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:833-836
-                                        // ```c
-                                        // rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
-                                        // if(!rc)  last_hit = 0;
-                                        // ```
-                                        // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same
-                                        // decisions without the walk of a bucket below the bound
-                                        // (`s_off_pos` below).
-                                        let (level, _hit_len, hit_saved) = if x_lv_ref {
-                                            diag_hash.retrieve_below::<false>(
-                                                diag as i32,
-                                                &x_lv_seeds,
-                                                kmer_start + diag_offset as usize,
-                                            )
-                                        } else {
-                                            diag_hash.retrieve(diag as i32)
-                                        }
-                                        .unwrap_or((0, 0, false));
-                                        (level, hit_saved)
-                                    } else {
-                                        (0, false)
-                                    };
-
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:656-672
-                                // ```c
-                                // last_hit = hit_level_array[real_diag].last_hit;
-                                // s_off_pos = s_off + diag_table->offset;
-                                // if (s_off_pos < last_hit) return 0;
-                                // ```
-                                // In LOSAT, we use kmer_start directly (0-based), but need to add offset for comparison
-                                let s_off_pos = kmer_start + diag_offset as usize;
-                                let s_off_pos_i32 = s_off_pos as i32;
-
-                                // Hit within explored area should be rejected
-                                if s_off_pos_i32 < last_hit {
-                                    continue;
-                                }
-
-                                // NCBI reference: na_ungapped.c:674-683
-                                // After two-hit check, call type_of_word for two-hit mode
-                                // if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
-                                //     word_type = s_TypeOfWord(...);
-                                //     if (!word_type) return 0;
-                                //     s_end += extended;
-                                //     s_end_pos += extended;
-                                // }
-                                let two_hits = window_size > 0;
-                                let mut q_off = q_pos_usize;
-                                let mut s_off = kmer_start;
-                                let mut s_end = kmer_start + safe_k;
-                                let mut s_end_pos = s_end + diag_offset as usize;
-                                let mut off_found = false;
-                                let mut hit_ready = true;
-                                let query_mask = ctx.masks.as_slice();
-                                let diag_hash_window = if !use_array_indexing {
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:825-826, 939-941
-                                    // ```c
-                                    // Delta = MIN(word_params->options->scan_range, window_size - word_length);
-                                    // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-                                    //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
-                                    //                       hit_ready, s_off_pos, window_size + Delta + 1);
-                                    // ```
-                                    diag_hash_insert_window(window_size, scan_range, safe_k)
-                                } else {
-                                    0
-                                };
-
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:459-489
-                                // ```c
-                                // static NCBI_INLINE Boolean s_IsSeedMasked(...)
-                                // {
-                                //     ...
-                                //     return !(((T_Lookup_Callback)(lookup_wrap->lookup_callback))
-                                //                                      (lookup_wrap, index, q_pos));
-                                // }
-                                // ```
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:121-133
-                                // ```c
-                                // if (! PV_TEST(pv, index, PV_ARRAY_BTS)) {
-                                //     return FALSE;
-                                // }
-                                // num_hits = lookup->thick_backbone[index].num_used;
-                                // lookup_pos = (num_hits <= NA_HITS_PER_CELL) ?
-                                //              lookup->thick_backbone[index].payload.entries :
-                                //              lookup->overflow + lookup->thick_backbone[index].payload.overflow_cursor;
-                                // for (i=0; i<num_hits; ++i) {
-                                //     if (lookup_pos[i] == q_pos) return TRUE;
-                                // }
-                                // ```
-                                #[expect(
-                                    clippy::manual_contains,
-                                    reason = "a linear scan of the cell's hits with an early exit, as NCBI's loop (na_ungapped.c:131-133); slice::contains would switch this per-seed check to std's chunked search"
-                                )]
-                                let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
-                                    if s_pos + safe_k > s_len {
-                                        return true;
-                                    }
-                                    let kmer = mask_lookup_index(
-                                        packed_kmer_at_seed_mask(search_seq_packed, s_pos, safe_k),
-                                        safe_k,
-                                    );
-                                    let hits: &[u32] = if use_direct_lookup {
-                                        pv_direct_lookup_ref
-                                            .map(|pv_dl| pv_dl.get_hits_checked(kmer))
-                                            .unwrap_or(&[])
-                                    } else {
-                                        na_lookup_ref
-                                            .map(|na_lt| na_lt.get_hits_checked(kmer))
-                                            .unwrap_or(&[])
-                                    };
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1027-1034
-                                    // ```c
-                                    // /* Also add 1 to all indices, because lookup table indices count
-                                    //    from 1. */
-                                    // mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-                                    // mb_lt->hashtable[ecode] = index;
-                                    // ```
-                                    let q_off_1 = (ctx.query_offset as usize + q_pos + 1) as u32;
-                                    !hits.iter().any(|&hit_q_off| hit_q_off == q_off_1)
-                                };
-
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-676
-                                // ```c
-                                // if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
-                                //     word_type = s_TypeOfWord(...);
-                                // ```
-                                let s_end_pos_i32 = s_end_pos as i32;
-                                let window_end = last_hit + window_size as i32;
-                                if two_hits && (hit_saved || s_end_pos_i32 > window_end) {
-                                    // NCBI reference: na_ungapped.c:677-680
-                                    // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
-                                    //                          query_mask, query_info, s_range,
-                                    //                          word_length, lut_word_length, lut, TRUE, &extended);
-                                    // For non-two-stage lookup, word_length == lut_word_length, so type_of_word returns (1, 0)
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
-                                    // ```c
-                                    // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
-                                    //                          query_mask, query_info, s_range,
-                                    //                          word_length, lut_word_length, lut, TRUE, &extended);
-                                    // ```
-                                    let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
-                                        q_off,
-                                        s_off,
-                                        !query_mask.is_empty(),
-                                        ctx.len,
-                                        s_range,
-                                        safe_k, // word_length
-                                        safe_k, // lut_word_length (same for non-two-stage)
-                                        true,   // check_double = TRUE
-                                        &mut is_seed_masked,
-                                    );
-                                    let word_type = wt;
-                                    let extended = ext;
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
-                                    // ```c
-                                    // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
-                                    //                          query_mask, query_info, s_range,
-                                    //                          word_length, lut_word_length, lut, TRUE, &extended);
-                                    // ```
-                                    q_off = q_off_adj;
-                                    s_off = s_off_adj;
-
-                                    // NCBI: if (!word_type) return 0;
-                                    if word_type == 0 {
-                                        // Non-word, skip this hit
-                                        continue;
-                                    }
-
-                                    // NCBI: s_end += extended;
-                                    // NCBI: s_end_pos += extended;
-                                    s_end += extended;
-                                    s_end_pos += extended;
-
-                                    // NCBI reference: na_ungapped.c:685-717 (the diagonal array's,
-                                    // `s_BlastnDiagTableExtendInitialHit`) and :852-886 (the hash's,
-                                    // `s_BlastnDiagHashExtendInitialHit`) - off-diagonal search
-                                    if word_type == 1 {
-                                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:686-687,853-854
-                                        // ```c
-                                        //         if (word_type == 1) {
-                                        //             /* try off-diagonals */
-                                        // ...
-                                        //         if (word_type == 1) {
-                                        //             /* try off-diagonal */
-                                        // ```
-                                        off_found = pair_extend::off_diagonal_found(
-                                            pair_extend::OffDiagonal {
-                                                use_array_indexing,
-                                                window_size,
-                                                scan_range,
-                                                word_length: safe_k,
-                                                diag_array_length,
-                                                diag_mask,
-                                                diag_array_size,
-                                                hit_level_array,
-                                                hit_len_array,
-                                                diag_hash,
-                                                diag,
-                                                s_off_pos,
-                                                s_end_pos,
-                                            },
-                                        );
-
-                                        if !off_found {
-                                            // NCBI reference: na_ungapped.c:713-716
-                                            // if (!off_found) {
-                                            //     /* This is a new hit */
-                                            //     hit_ready = 0;
-                                            // }
-                                            hit_ready = false;
-                                        }
-                                    }
-                                } else {
-                                    // NCBI reference: na_ungapped.c:718-726
-                                    // else if (check_masks) {
-                                    //     /* check the masks for the word */
-                                    //     if(!s_TypeOfWord(query, subject, &q_off, &s_off,
-                                    //                     query_mask, query_info, s_range,
-                                    //                     word_length, lut_word_length, lut, FALSE, &extended)) return 0;
-                                    //     /* update the right end*/
-                                    //     s_end += extended;
-                                    //     s_end_pos += extended;
-                                    // }
-                                    // In NCBI, check_masks is TRUE by default (only FALSE when lut->stride is true)
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
-                                    // ```c
-                                    // if(!s_TypeOfWord(query, subject, &q_off, &s_off,
-                                    //                 query_mask, query_info, s_range,
-                                    //                 word_length, lut_word_length, lut, FALSE, &extended)) return 0;
-                                    // ```
-                                    let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
-                                        q_off,
-                                        s_off,
-                                        !query_mask.is_empty(),
-                                        ctx.len,
-                                        s_range,
-                                        safe_k, // word_length
-                                        safe_k, // lut_word_length (same for non-two-stage)
-                                        false,  // check_double = FALSE (not in two-hit block)
-                                        &mut is_seed_masked,
-                                    );
-                                    if wt == 0 {
-                                        // Non-word, skip this hit
-                                        continue;
-                                    }
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
-                                    // ```c
-                                    // if(!s_TypeOfWord(query, subject, &q_off, &s_off,
-                                    //                 query_mask, query_info, s_range,
-                                    //                 word_length, lut_word_length, lut, FALSE, &extended)) return 0;
-                                    // ```
-                                    q_off = q_off_adj;
-                                    s_off = s_off_adj;
-                                    // NCBI: s_end += extended;
-                                    // NCBI: s_end_pos += extended;
-                                    s_end += ext;
-                                    s_end_pos += ext;
-                                    // hit_ready remains true (default) - extension will proceed
-                                }
-
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:728-766
-                                // ```c
-                                // if (hit_ready) {
-                                //     if (word_params->ungapped_extension) {
-                                //         ...
-                                //     }
-                                // }
-                                // ```
-                                if !hit_ready {
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
-                                    // ```c
-                                    // hit_level_array[real_diag].last_hit = s_end_pos;
-                                    // hit_level_array[real_diag].flag = hit_ready;
-                                    // if (two_hits) {
-                                    //     diag_table->hit_len_array[real_diag] =
-                                    //         (hit_ready) ? 0 : s_end_pos - s_off_pos;
-                                    // }
-                                    // ```
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
-                                    // ```c
-                                    // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-                                    //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
-                                    //                       hit_ready, s_off_pos, window_size + Delta + 1);
-                                    // ```
-                                    if use_array_indexing && diag_idx < diag_array_size {
-                                        hit_level_array[diag_idx].last_hit = s_end_pos as i32;
-                                        hit_level_array[diag_idx].flag = 0;
-                                        if two_hits {
-                                            hit_len_array[diag_idx] = (s_end_pos - s_off_pos) as u8;
-                                        }
-                                    } else if !use_array_indexing {
-                                        diag_hash.insert_plain(
-                                            diag as i32,
-                                            s_end_pos as i32,
-                                            (s_end_pos - s_off_pos) as i32,
-                                            false,
-                                            s_off_pos as i32,
-                                            diag_hash_window,
-                                        );
-                                    }
-                                    continue;
-                                }
-
-                                // Now do ungapped extension from the adjusted position
-                                // Use q_off and s_off (adjusted by type_of_word if called)
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:740-749
-                                // ```c
-                                // if (word_params->matrix_only_scoring || word_length < 11)
-                                //    s_NuclUngappedExtendExact(..., -(cutoffs->x_dropoff), ...);
-                                // else
-                                //    s_NuclUngappedExtend(..., s_end, s_off, -(cutoffs->x_dropoff),
-                                //                         word_params->nucl_score_table,
-                                //                         cutoffs->reduced_nucl_cutoff_score);
-                                // ```
-                                let x_dropoff = x_dropoff_scores[context_idx];
-                                let reduced_cutoff = reduced_cutoff_scores[context_idx];
-                                let ungapped_start = if timing_enabled {
-                                    Some(std::time::Instant::now())
-                                } else {
-                                    None
-                                };
-                                let ungapped = if safe_k < 11 {
-                                    extend_hit_ungapped_exact_ncbi(
-                                        q_seq_blastna,
-                                        search_seq_packed,
-                                        q_off,
-                                        s_off,
-                                        s_len,
-                                        x_dropoff,
-                                        &score_matrix,
-                                    )
-                                } else {
-                                    extend_hit_ungapped_approx_ncbi(
-                                        q_seq_blastna,
-                                        search_seq_packed,
-                                        q_off,
-                                        s_off,
-                                        s_end,
-                                        s_len,
-                                        x_dropoff,
-                                        &nucl_score_table,
-                                        reduced_cutoff,
-                                        &score_matrix,
-                                    )
-                                };
-                                if let Some(ungapped_start) = ungapped_start {
-                                    let elapsed_ns = ungapped_start.elapsed().as_nanos() as u64;
-                                    if let Some(timing) = timing_ref {
-                                        timing.ungapped_ns.fetch_add(
-                                            elapsed_ns,
-                                            std::sync::atomic::Ordering::Relaxed,
-                                        );
-                                        timing
-                                            .ungapped_calls
-                                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                    }
-                                    scan_pause_ns = scan_pause_ns.saturating_add(elapsed_ns);
-                                }
-                                let qs = ungapped.q_start;
-                                let qe = ungapped.q_start + ungapped.length;
-                                let ss = ungapped.s_start;
-                                let ungapped_se = ungapped.s_start + ungapped.length;
-                                let ungapped_score = ungapped.score;
-
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:740-758
-                                // ```c
-                                // s_NuclUngappedExtendExact(..., -(cutoffs->x_dropoff), ungapped_data);
-                                // ...
-                                // if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
-                                //     BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
-                                // }
-                                // ```
-                                if blastn_trace_enabled
-                                    && blastn_trace::should_trace_range(
-                                        "ungapped",
-                                        q_idx,
-                                        s_idx,
-                                        s_id,
-                                        qs,
-                                        qe,
-                                        ss.saturating_add(chunk.offset),
-                                        ungapped_se.saturating_add(chunk.offset),
-                                        ctx.len,
-                                        ctx.frame,
-                                    )
-                                {
-                                    blastn_trace::log(
-                                        "ungapped",
-                                        format!(
-                                            "subject={}({}) context={} seed=({}, {}) ungapped=q{}..{} s{}..{} raw_score={} cutoff={} x_dropoff={} off_found={} accepted={}",
-                                            s_id,
-                                            s_idx,
-                                            q_idx,
-                                            q_off,
-                                            s_off.saturating_add(chunk.offset),
-                                            qs,
-                                            qe,
-                                            ss.saturating_add(chunk.offset),
-                                            ungapped_se.saturating_add(chunk.offset),
-                                            ungapped_score,
-                                            cutoff_score,
-                                            x_dropoff,
-                                            off_found,
-                                            off_found || ungapped_score >= cutoff_score
-                                        ),
-                                    );
-                                }
-
-                                // NCBI reference: na_ungapped.c:757-758
-                                // s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset;
-                                // This is the END of the UNGAPPED extension, used for last_hit update
-                                let ungapped_s_end_pos = ungapped_se + diag_offset as usize;
-
-                                // Skip if ungapped score is too low
-                                // NCBI reference: na_ungapped.c:752
-                                // if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
-                                // Use dynamically calculated cutoff_score instead of fixed threshold
-                                // off_found is set by off-diagonal search
-                                // NCBI: if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
-                                if !(off_found || ungapped_score >= cutoff_score) {
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:752-760
-                                    // ```c
-                                    // if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
-                                    //     ...
-                                    // } else {
-                                    //     hit_ready = 0;
-                                    // }
-                                    // ```
-                                    hit_ready = false;
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
-                                    // ```c
-                                    // hit_level_array[real_diag].last_hit = s_end_pos;
-                                    // hit_level_array[real_diag].flag = hit_ready;
-                                    // if (two_hits) {
-                                    //     diag_table->hit_len_array[real_diag] =
-                                    //         (hit_ready) ? 0 : s_end_pos - s_off_pos;
-                                    // }
-                                    // ```
-                                    if use_array_indexing && diag_idx < diag_array_size {
-                                        hit_level_array[diag_idx].last_hit = s_end_pos as i32;
-                                        hit_level_array[diag_idx].flag =
-                                            if hit_ready { 1 } else { 0 };
-                                        if two_hits {
-                                            hit_len_array[diag_idx] = if hit_ready {
-                                                0
-                                            } else {
-                                                (s_end_pos - s_off_pos) as u8
-                                            };
-                                        }
-                                    } else if !use_array_indexing {
-                                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
-                                        // ```c
-                                        // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-                                        //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
-                                        //                       hit_ready, s_off_pos, window_size + Delta + 1);
-                                        // ```
-                                        diag_hash.insert_plain(
-                                            diag as i32,
-                                            s_end_pos as i32,
-                                            if hit_ready {
-                                                0
-                                            } else {
-                                                (s_end_pos - s_off_pos) as i32
-                                            },
-                                            hit_ready,
-                                            s_off_pos as i32,
-                                            diag_hash_window,
-                                        );
-                                    }
-                                    if debug_enabled {
-                                        dbg_ungapped_low += 1;
-                                    }
-                                    if in_window && debug_mode {
-                                        eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos_usize, s_pos, ungapped_score, min_ungapped_score);
-                                    }
-                                    continue;
-                                }
-
-                                if debug_enabled {
-                                    dbg_gapped_attempted += 1;
-                                }
-
-                                if in_window && debug_mode {
-                                    eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> COLLECT UNGAPPED (score={}, len={})", q_pos_usize, s_pos, ungapped_score, qe - qs);
-                                }
-
-                                // NCBI architecture: Collect ungapped hit for batch processing
-                                // NCBI reference: blast_gapalign.c:3824 - init_hsp_array is sorted by score DESCENDING
-                                x_push_ungapped(
-                                    ungapped_hits,
-                                    UngappedHit {
-                                        context_idx: q_idx,
-                                        query_idx: ctx.query_idx,
-                                        query_frame: ctx.frame,
-                                        query_context_offset: ctx.query_offset,
-                                        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
-                                        // ```c
-                                        // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
-                                        // ```
-                                        seed_q_off: q_off as u32,
-                                        seed_s_off: s_off as u32,
-                                        qs: qs as u32,
-                                        qe: qe as u32,
-                                        ss: ss as u32,
-                                        se: ungapped_se as u32,
-                                        score: ungapped_score,
-                                    },
-                                );
-
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
-                                // ```c
-                                // hit_level_array[real_diag].last_hit = s_end_pos;
-                                // hit_level_array[real_diag].flag = hit_ready;
-                                // if (two_hits) {
-                                //     diag_table->hit_len_array[real_diag] =
-                                //         (hit_ready) ? 0 : s_end_pos - s_off_pos;
-                                // }
-                                // ```
-                                // Update hit_level_array after collecting ungapped hit
-                                // (hit_ready is 1 here: flag 1, hit length 0)
-                                if use_array_indexing && diag_idx < diag_array_size {
-                                    hit_level_array[diag_idx].last_hit = ungapped_s_end_pos as i32;
-                                    hit_level_array[diag_idx].flag = 1;
-                                    if two_hits {
-                                        hit_len_array[diag_idx] = 0;
-                                    }
-                                } else if !use_array_indexing {
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
-                                    // ```c
-                                    // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-                                    //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
-                                    //                       hit_ready, s_off_pos, window_size + Delta + 1);
-                                    // ```
-                                    diag_hash.insert_plain(
-                                        diag as i32,
-                                        ungapped_s_end_pos as i32,
-                                        0,
-                                        true,
-                                        s_off_pos as i32,
-                                        diag_hash_window,
-                                    );
-                                }
-                            }
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
+                    // ```c
+                    //     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
+                    //
+                    //         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
+                    // ...
+                    //         hits_extended += extend(offset_pairs, hitsfound, word_params,
+                    // ...
+                    //     }
+                    // ```
+                    // The reference scan of this chunk and the steps of the seeds it finds
+                    // (`na_scan::scan_na_lookup`), with what they read and write, built once per
+                    // chunk.
+                    na_scan::scan_na_lookup(
+                        &na_scan::NaScanInputs {
+                            search_seq_packed,
+                            s_len,
+                            safe_k,
+                            scan_step,
+                            subject_seq_ranges,
+                            subject_masked,
+                            use_direct_lookup,
+                            pv_direct_lookup_ref,
+                            na_lookup_ref,
+                            query_context_index: &query_context_index,
+                            query_contexts,
+                            encoded_queries_blastna: &encoded_queries_blastna,
+                            cutoff_scores,
+                            chunk,
+                            use_array_indexing,
+                            diag_table_length,
+                            diag_table_mask,
+                            diag_array_size,
+                            diag_offset,
+                            x_lv_ref,
+                            window_size,
+                            scan_range,
+                            x_dropoff_scores,
+                            reduced_cutoff_scores,
+                            score_matrix: &score_matrix,
+                            nucl_score_table: &nucl_score_table,
+                            debug_enabled,
+                            debug_window,
+                            blastn_trace_enabled,
+                            s_idx,
+                            s_id,
+                            debug_mode,
+                            min_ungapped_score,
+                            timing_enabled,
+                            timing_ref,
+                        },
+                        &mut na_scan::NaScanState {
+                            ungapped_hits: &mut *ungapped_hits,
+                            hit_level_array: &mut *hit_level_array,
+                            hit_len_array: &mut *hit_len_array,
+                            diag_hash: &mut *diag_hash,
+                            dbg_total_s_positions: &mut dbg_total_s_positions,
+                            dbg_seeds_found: &mut dbg_seeds_found,
+                            dbg_window_seeds: &mut dbg_window_seeds,
+                            dbg_ungapped_low: &mut dbg_ungapped_low,
+                            dbg_gapped_attempted: &mut dbg_gapped_attempted,
                         },
                     );
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
-                    // ```c
-                    // for (; s <= s_end; s += scan_step) {
-                    //     num_hits = s_BlastLookupGetNumHits(lookup, index);
-                    //     if (num_hits == 0)
-                    //         continue;
-                    //     s_BlastLookupRetrieve(lookup,
-                    //                           index,
-                    //                           offset_pairs + total_hits,
-                    //                           ...);
-                    //     total_hits += num_hits;
-                    // }
-                    // ```
-                    if let Some(scan_start) = scan_start {
-                        let elapsed_ns = scan_start.elapsed().as_nanos() as u64;
-                        let scan_ns = elapsed_ns.saturating_sub(scan_pause_ns);
-                        if let Some(timing) = timing_ref {
-                            timing
-                                .scan_ns
-                                .fetch_add(scan_ns, std::sync::atomic::Ordering::Relaxed);
-                            timing
-                                .scan_calls
-                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        }
-                    }
                 } // end of if/else for two-stage vs original lookup
             } // end of strand loop
 
@@ -17107,10 +16421,22 @@ mod tests {
                 "{outfmt}"
             );
         }
-        for outfmt in ["1", "18"] {
-            assert_eq!(
-                cli_output_formats(outfmt, file).unwrap_err().to_string(),
-                format!("output format {outfmt} is not supported by LOSAT's BLASTN")
+        assert_eq!(
+            cli_output_formats("1", file).unwrap_err().to_string(),
+            "output format 1 is not supported by LOSAT's BLASTN"
+        );
+        // Outfmt 18, the organism report (line RG T2), rides the custom tabular report's hit
+        // lists; NCBI keeps no field list for it.
+        for outfmt in ["18", "18 qseqid"] {
+            let formats = cli_output_formats(outfmt, file).unwrap();
+            assert!(
+                matches!(
+                    formats.as_slice(),
+                    [BlastnOutputFormat::CustomTabular(spec)]
+                        if spec.kind == crate::report::tabular::TabularKind::TaxReport
+                            && spec.fields.is_empty()
+                ),
+                "{outfmt}: {formats:?}"
             );
         }
         // SAM (OF6) reads its words and ignores the rest and a delimiter.

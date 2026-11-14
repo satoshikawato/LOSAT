@@ -3,24 +3,25 @@
 // of the counts and its record, the browser's download (Range, restart, failures), the loader's
 // line, the OPFS store, and the warm-up that leaves the option out.
 import { describe, expect, it } from 'vitest';
+import { sha256Hex } from 'losat';
+import type { ReactorAbi } from 'losat';
+import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG } from 'losat/domain';
 import { CountsLoader } from '../../src/application/counts';
 import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { SearchDraft } from '../../src/application/draft';
 import { buildArgv } from '../../src/domain/argv';
-import { COUNTS_HOST, countsName, countsUrl, parseTaxid, WINDOW_MASKER_TAXID_FLAG } from '../../src/domain/counts';
+import { COUNTS_HOST, countsName, countsUrl, parseTaxid } from '../../src/domain/counts';
 import { changedFields, formControlOf, formParameters, setFields, type EngineOption } from '../../src/domain/parameters';
-import { programById, WINDOW_MASKER_FLAG } from '../../src/domain/programs';
+import { programById } from '../../src/domain/programs';
 import { BrowserCountsDownloader } from '../../src/infra/browser/counts-downloader';
-import { sha256Hex } from '../../src/infra/browser/platform';
 import { OpfsCountsStore } from '../../src/infra/data/counts-store';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
-import { warmUp } from '../../src/infra/engine-worker/warm-up';
+import { warmUp } from '../../../packages/losat/src/infra/engine-worker/warm-up';
 import { FakeCountsDeletionChannel, FakeCountsDownloader, MemoryCountsStore, type FakeCountsFile } from '../../src/infra/fake/fake-counts';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
-import type { ReactorAbi } from '../../src/infra/reactor/abi';
 import { COUNTS_BUSY, COUNTS_CHANGED, type CountsStore } from '../../src/ports/counts';
 import type { DownloadProgress } from '../../src/ports/example';
 import { MemoryOpfs } from './support/memory-opfs';

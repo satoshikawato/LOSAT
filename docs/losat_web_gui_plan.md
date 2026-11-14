@@ -234,7 +234,7 @@ Service Worker：release を固定した資産キャッシュだけ
 web/
   AGENTS.md                  # web/ 以下の規約
   adapter/                   # S05 で新設。Rust cdylib。ABI v2。wasm32-wasip1 と wasm32-wasip1-threads の reactor
-    Cargo.toml               # LOSAT = { path = "../../LOSAT", default-features = false }、features は parallel / wasm-threads を明示
+    Cargo.toml               # losat = { path = "../../LOSAT", default-features = false }、features は parallel / wasm-threads を明示
   app/                       # Vite + Vue 3 + TypeScript（S01 で新設）
     public/_headers          # 応答ヘッダーの唯一の定義（COOP / COEP / CORP / CSP）
     build/headers.ts         # _headers を読み、Vite と試験に渡す
@@ -352,7 +352,7 @@ formatter は、HSP の行（outfmt 6/7）や節（outfmt 0 のスコアの行�
 
 ### 4.8 ABI v2
 
-契約は [`docs/web/abi_v2.md`](web/abi_v2.md) にある（S01 で下書き、S05 で確定）。`describe` は program ごとに対応する出力形式を返し、`run` はその形式だけを出す。アプリ側から見た型は `web/app/src/ports/engine.ts` で、HSP レコードの項目を変えるときは同じコミットで両方を変える。成果物は `losat-web-serial.wasm` と `losat-web-threads.wasm` の 2 つで、ビルドの条件は TD-6、共有メモリの最大値は TD-7 のとおりにする。
+契約は [`docs/web/abi_v2.md`](web/abi_v2.md) にある（S01 で下書き、S05 で確定）。`describe` は program ごとに対応する出力形式を返し、`run` はその形式だけを出す。アプリ側から見た型は `web/packages/losat/src/ports/engine.ts` で、HSP レコードの項目を変えるときは同じコミットで両方を変える。成果物は `losat-web-serial.wasm` と `losat-web-threads.wasm` の 2 つで、ビルドの条件は TD-6、共有メモリの最大値は TD-7 のとおりにする。
 
 ### 4.9 NCBI 側の拠り所（固定 commit `598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4`、`/mnt/c/Users/genom/GitHub/ncbi-blast/`）
 
@@ -416,7 +416,7 @@ Combined は、複数ファイルのレコードをつないだ 1 回の実行�
 - 状態は `Queued → Preparing → Running → Finalizing → Completed | Cancelled | Failed`。実行は常に 1 つで、待ち行列は FIFO（S01 で実装）。
 - 取消と確定の順序：実行は `Finalizing` に入るまで取消せる。`Finalizing` の後の取消は受け付けず、その実行は完了する（S01 で実装）。
 - 段階のイベントは、実行中で取消されていない実行のものだけを受け付ける。S09 で Worker を作り直すようになったら、イベントに `runtimeGeneration` を付け、古い世代のものを捨てる。
-- Auto のスレッド数（S09 で決めた。上限は 2026-10-18 に変えた）：入力（query と subject の FASTA）が 20,000 バイト未満なら serial、それ以上なら論理プロセッサの半分（1 MB 未満は最大 8、1 MB 以上は最大 32）。手動の指定はそのまま使う（`src/infra/engine-worker/policy.ts`）。結果の印は、V-BR がその program をその数のスレッドで走らせた時だけ Supported になるので、V-BR は program ごとに 1 から 32 の全部の数を走らせる（WA-RS-03、2026-11-04）。
+- Auto のスレッド数（S09 で決めた。上限は 2026-10-18 に変えた）：入力（query と subject の FASTA）が 20,000 バイト未満なら serial、それ以上なら論理プロセッサの半分（1 MB 未満は最大 8、1 MB 以上は最大 32）。手動の指定はそのまま使う（`web/packages/losat/src/infra/engine-worker/policy.ts`）。結果の印は、V-BR がその program をその数のスレッドで走らせた時だけ Supported になるので、V-BR は program ごとに 1 から 32 の全部の数を走らせる（WA-RS-03、2026-11-04）。
 - instance の作り直し（S09 で決めた）：検索の後の linear memory が 512 MiB 以上なら作り直す（S09 の時点の threaded の最大値 1 GiB の半分。最大値を上げた後も 512 MiB のままにする：linear memory は縮まないので、大きな検索の後のメモリをブラウザに返すための値である）。実行回数では作り直さない（G12 の対策。linear memory は最初の 1〜3 回の検索で水準に達し、増え続けなかった）。
 - 設計書 §9.4 の Wake Lock の選択、終了前の注意、スリープやバックグラウンドからの復帰時の状態確認（S12、`REQ-22`）：Wake Lock は利用者が選び、Run が実行中か待っている間、ページが見えている間だけ持つ。Run が実行中か待っている間は離れる前に注意する。2026-11-04（WA-IN-06、`ncbi_ui_mapping.md` §4）からは、結果のある Run（Completed）がある間と、検索フォームに入力（貼った文か source）がある間も注意する：次の訪問で戻さず（REQ-20）server にも無いので、再読み込みで消えると戻せない。Run を消す操作が無いので、最初の Run が完了した後は tab の間ずっと注意する。Run があるまま 1 秒以上隠れたページが戻ると、隠れていた時間、Run ごとの前と今の状態、Data worker の応答を示す。タブを閉じても検索が続くとは言わない。
 

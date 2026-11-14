@@ -23,7 +23,7 @@ use super::{SeqDb, SeqDbError, SeqLocation};
 /// A filtering algorithm of the database (`GetMaskAlgorithmDetails`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaskAlgorithm {
-    /// The database-wide id (the `algo_id` of [`SeqDb::mask_ranges`]).
+    /// The database-wide id (the `algo_id` of [`SeqDb::mask_ranges_at`]).
     pub id: i32,
     /// The program: a `Blast-filter-program` number, or a name.
     pub program: String,
@@ -33,7 +33,7 @@ pub struct MaskAlgorithm {
     pub options: String,
 }
 
-/// What [`SeqDb::mask_ranges`] found.
+/// What [`SeqDb::mask_ranges_at`] found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MaskRanges {
     /// The masked ranges `(start, end)` of the algorithm in the sequence (`end` is
@@ -121,18 +121,99 @@ pub(super) fn ncbi_split(s: &str) -> Vec<&str> {
     }
 }
 
-/// The name of a `Blast-filter-program` value (`blastdb.asn:51-59`).
+// NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.asn:51-59
+// ```text
+// Blast-filter-program ::= INTEGER {
+//     not-set             (0),
+//     dust                (10),
+//     seg                 (20),
+//     windowmasker        (30),
+//     repeat              (40),
+//     other               (100),
+//     max                 (255)
+// }
+// ```
+/// The named values of `Blast-filter-program`, with their names as NCBI prints them: the one
+/// table of LOSAT (the mask writers of the masking tools, makeblastdb's mask reader and
+/// registry, and this reader of the column), made from [`FilterProgram`], so a name or value
+/// belongs to its variant whatever the order of the variants.
+pub(crate) const FILTER_PROGRAMS: [(&str, i32); FilterProgram::ALL.len()] = {
+    let mut table = [("", 0); FilterProgram::ALL.len()];
+    let mut i = 0;
+    while i < table.len() {
+        let program = FilterProgram::ALL[i];
+        table[i] = (program.name(), program.value());
+        i += 1;
+    }
+    table
+};
+
+/// A named value of `Blast-filter-program`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FilterProgram {
+    NotSet,
+    Dust,
+    Seg,
+    Windowmasker,
+    Repeat,
+    Other,
+    Max,
+}
+
+// Every variant is in `FilterProgram::ALL`, once, in the order of the enum: the discriminant of
+// the last one gives the count, and each position holds the variant of that discriminant.
+const _: () = {
+    assert!(FilterProgram::ALL.len() == FilterProgram::Max as usize + 1);
+    let mut i = 0;
+    while i < FilterProgram::ALL.len() {
+        assert!(FilterProgram::ALL[i] as usize == i);
+        i += 1;
+    }
+};
+
+impl FilterProgram {
+    /// Every variant, in blastdb.asn's order (the rows of [`FILTER_PROGRAMS`]).
+    pub(crate) const ALL: [FilterProgram; 7] = [
+        FilterProgram::NotSet,
+        FilterProgram::Dust,
+        FilterProgram::Seg,
+        FilterProgram::Windowmasker,
+        FilterProgram::Repeat,
+        FilterProgram::Other,
+        FilterProgram::Max,
+    ];
+
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            FilterProgram::NotSet => "not-set",
+            FilterProgram::Dust => "dust",
+            FilterProgram::Seg => "seg",
+            FilterProgram::Windowmasker => "windowmasker",
+            FilterProgram::Repeat => "repeat",
+            FilterProgram::Other => "other",
+            FilterProgram::Max => "max",
+        }
+    }
+
+    pub(crate) const fn value(self) -> i32 {
+        match self {
+            FilterProgram::NotSet => 0,
+            FilterProgram::Dust => 10,
+            FilterProgram::Seg => 20,
+            FilterProgram::Windowmasker => 30,
+            FilterProgram::Repeat => 40,
+            FilterProgram::Other => 100,
+            FilterProgram::Max => 255,
+        }
+    }
+}
+
+/// The name of a `Blast-filter-program` value.
 fn filter_program_name(value: i32) -> Option<&'static str> {
-    Some(match value {
-        0 => "not-set",
-        10 => "dust",
-        20 => "seg",
-        30 => "windowmasker",
-        40 => "repeat",
-        100 => "other",
-        255 => "max",
-        _ => return None,
-    })
+    FILTER_PROGRAMS
+        .iter()
+        .find(|&&(_, number)| number == value)
+        .map(|&(name, _)| name)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2143-2165

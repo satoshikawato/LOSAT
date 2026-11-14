@@ -413,6 +413,7 @@ export LOSAT_X_DCSEEDLEAN=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DIAGLV2=1
 export LOSAT_X_DISCLUTPAR=1
+export LOSAT_X_DP32=1
 export LOSAT_X_DPEMASK=1
 export LOSAT_X_DPNEON2=1
 export LOSAT_X_DPNIBBLE=1
@@ -741,6 +742,36 @@ Same values, faster computation:
   AVX2 only; the rule is `x_xdrop_avx2::available()`): the same values, lane width and band steps
   as the 128-bit kernels, so the same result and edit script; a call the 256-bit kernel does not
   take runs on the 128-bit kernel (`utils/x_xdrop_avx2.rs`). `LOSAT_X_DPNOAVX=1` turns it off.
+- `LOSAT_X_DP32=1` (every program's vector X-drop DP, speed; in the strict set from #1097,
+  2026-11-14; `=0` returns to the previous path) a call whose X-drop the 16-bit lanes cannot hold
+  (raw X above about 26,700, or `gap_extend > 4095`: `fits_16bit`, the 16-bit kernels' own value-range test)
+  no longer returns None to the caller's scalar port (`ALIGN_EX`, `Blast_SemiGappedAlign`,
+  `s_BlastAlignPackedNucl`). First the X-drop is clamped to `R = max_m * min(M, N) + 3 * goe + ge * (M + N + 1)`:
+  for every X >= R the C loops drop no cell and give the same offsets, score, fence flag, edit script and cells
+  (the argument is at the head of `utils/xdrop_simd.rs`), so a small problem with a huge X-drop runs on the
+  16-bit or 8-bit lanes; a call whose clamped X-drop is still past them runs on 32-bit lanes, 4 per vector, on
+  x86_64 (SSE4.1 / AVX), aarch64 (NEON) and wasm32 (simd128) alike (`kernel::align_body32`: the 16-bit
+  kernel's recurrence, blocks, script bits, traceback rows, walk and band, with values up to `i32::MAX`). It
+  declines a call in which a row letter meets a column letter whose 16-bit table entry is -32768 (perhaps a
+  clamped lower score), and the scalar port runs that call. `=0` runs neither the clamp nor the 32-bit lanes.
+  The rule (conditional, not a new rule: the path runs exactly where the scalar fallback ran,
+  `docs/decisions/SWITCH_APPROVALS.md` (ii)) is marked per call (`x_reach!`: own path = an X-drop past the
+  16-bit lanes, which the switch clamps onto the 16-bit or 8-bit lanes or runs on the 32-bit lanes). The 8-bit
+  and 16-bit kernels' machine code is unchanged (x86_64 objdump of every function of the release binary
+  against dev 3733304a0: 4,502 functions the same, among them every 8/16-bit kernel, `walk`, `XTrace` and
+  `build_row_table`; `xdrop_align` (637 -> 619 instructions) and `fits_8bit` (`max_score` no longer inlined)
+  differ, 67 functions differ only in the `x_reach!` line number the new line moved by one, the rest are the
+  new 32-bit functions). Evidence: the random tests of `utils/xdrop_simd.rs`
+  (`wide_lanes_*`, `x_drop_clamp_keeps_every_scalar_result`, X-drops up to 2^31 - 300) and the blastn / blastp
+  tests that compare the dispatched extensions with their scalar ports in one process
+  (`wide_lanes_give_the_scalar_ports_results`); `tests/blastn_dp32.rs` and `tests/blastp_dp32.rs` compare whole
+  reports with `=0`. One-thread timing on a quiet core of the workstation (node 1, the same run, user + system
+  seconds) of `blastn -task blastn -xdrop_gap_final 1e5`, 12 kb x 20 kb: NCBI 55.5, dev 3733304a0 39.5, with the
+  switch 18.8, all three reports equal; `-xdrop_gap 1e5` 36.0 -> 17.3 (NCBI 51.2), dc-megablast
+  `-xdrop_gap_final 1e6` 17.5 -> 7.4 (NCBI 22.5); max RSS 294 -> 258 MB (NCBI 273). The default path keeps
+  its time and max RSS (same-run A/B against dev of megablast, blastn, dc-megablast, blastp, blastx, tblastn
+  and tblastx: CPU x0.9988-x1.0023, user instructions x0.99994-x1.00082; blastx over 31 pairs x1.0001,
+  where dev against itself gives x0.9997).
 - `LOSAT_X_DPEMASK=1` (with the 256-bit AVX2 kernel, speed; in the strict set from the pull request that
   added it, 2026-10-19; `=0` returns to the previous kernel) the 8-bit
   256-bit X-drop kernel (`align8`: blastp's and the translated programs' score-only DP, blastn's
@@ -4245,8 +4276,9 @@ Scheduling (each value computed by one thread with the original function; order 
   letters, both strands counted, so about 4000 query letters; `window_size` and `scan_range` 0, unmasked subject, no
   debug or trace). The pool threads scan strips (512 x max(threads, 4) of them, at least 512 subject offsets each: 512
   offsets on 3 Mb from 12 threads on) with the scan kernel of the reference
-  (`run.rs`, the branch after `if two_stage_lookup_ref.is_none()`), each lookup hit becoming a seed with the context of
-  its query offset, and the pairs are folded in scan order through a copy of the reference's one-hit diagonal-hash code
+  (`scan_na_lookup` in `blastn/blast_engine/na_scan.rs`, which `run.rs` calls after
+  `if two_stage_lookup_ref.is_none()`), each lookup hit becoming a seed with the context of its query offset, and the
+  pairs are folded in scan order through a copy of the reference's one-hit diagonal-hash code
   (`last_hit` test, `s_TypeOfWord`, the ungapped extension on the context's query slice, the cutoff, every insert;
   `blastn/blast_engine/x_pair_seed_na.rs`); with `LOSAT_X_PAIRPARFOLD` (default) the fold is split by diagonal-hash
   bucket over the threads, without it the owner folds. Every lookup hit is a seed here (about 100 per subject offset for
@@ -4417,7 +4449,7 @@ Scheduling (each value computed by one thread with the original function; order 
   test), which are the only readers of the retrieve; the insert still walks the chain itself, and the next
   seed reads only the table, so the bound needs no term for the insert, and the hit list and the table
   are the reference's (`blastn/blast_engine/x_diag_lv.rs`, exactness argument in its header). It acts in
-  the two reference scans (`extend_offset_pairs` for the two-stage tables, and the seed closure of the
+  the two reference scans (`extend_offset_pairs` for the two-stage tables, and `scan_na_lookup` for the
   other tables, which blastn-short's word 7 reaches; not with debug, trace or window diagnostics, which
   print the values read) and in the strips folds of PAIRPAR and `LOSAT_X_PAIRPARDISC`; the off-diagonal
   retrieves (`scan_range`) stay walks. With the switch off the table has no bounds, an insert tests the
@@ -6801,6 +6833,14 @@ Scheduling (each value computed by one thread with the original function; order 
   where every stripe walks all source cells: x0.68 at 4). Measured (workstation node 1, against dev, 800 cDNAs x 8
   yeast proteins at 32 threads): the cap with serial builds x1.28 (2026-10-26, a probe), with this build x0.985
   (2026-10-27, 7 rounds in swapped order).
+  The compressed lookup table (`-word_size` 6 and 7, and any table its bucket fill declines; line NP SC9b (2),
+  2026-11-14) is built the same way, in ceil(threads / K) parts with K the compressed table's (`LOSAT_X_BXCLUTCAP`),
+  by the parallel flat builder (`tblastx/lookup/x_clut_par.rs` `x_try_build_flat_in_parts`, the one-latch passes;
+  the same table slot for slot, `blastx_tables_built_in_parts_are_the_one_part_tables`). Its build was 131 of 138
+  thread-seconds of 800 cDNAs x scer_pep at word size 6 and 8 threads. Workstation node 1 against dev 51f974c26:
+  word size 6 at 8 / 16 / 32 threads x0.41 / x0.29 / x0.21 of the time with 78 / 82 / 74 % of the memory, word
+  size 7 x0.36 / x0.25 / x0.18, BLOSUM45 word size 6 at 8 threads x0.34. Word 5's bucket fill (pooled `u16`
+  vectors) stays on the unit's thread: built in parts it took x0.61 of the time but +62 % of the maximum RSS.
 - `LOSAT_X_BXCTXONCE=1` (BLASTX, speed and memory; in the strict set from the pull request that added it: on unless
   `=0` or `LOSAT_X_DEFAULT=0`; acts where the `LOSAT_X_BXDIAG` fused loop runs): the fused loop's context table of a
   query batch (`XContextTable`, the binary search's index at every query offset) is made once per lookup table and

@@ -2,9 +2,11 @@
 //! (line DBID taxrow; review 3 H2 of line DBID pssmread). Where `PRE_FETCH_SEQS_LIMIT` turns a
 //! batch's prefetch off, NCBI's formatter loads each subject when it formats it: at a tabular row
 //! that reads it, at its description line (or, for one the table does not show, at its
-//! alignment's heading) and at its BLAST XML `Hit`. The first load of a blob looks its taxids up,
-//! and NCBI's diagnostics go to `cerr`, which flushes `cout` first: the texts land between the
-//! report's lines where both streams go to one file (a terminal, `2>&1`). Each case's expectation is
+//! alignment's heading), at its BLAST XML `Hit` and, in the organism report (outfmt 18), at each
+//! Seq-align that the report does not skip, before the lookups of its taxids (after the `Query=`
+//! block, before `Organism Report`). The first load of a blob looks its taxids up, and NCBI's
+//! diagnostics go to `cerr`, which flushes `cout` first: the texts land between the report's
+//! lines where both streams go to one file (a terminal, `2>&1`). Each case's expectation is
 //! NCBI 2.17.0's merged stream of the same run (`tests/fixtures/taxonomy_read_order/<case>.txt`):
 //! `ids/txr_p` and `ids/txr_n` (`make_ids.py --taxrow-only`) hold a decoy without hits (so a
 //! subject's rank among the reported ones is not its ordinal id), A (taxid 9606, the best hit) and
@@ -17,11 +19,20 @@
 //! alignments, blast_format.cpp:1523-1530): in `ids/txr_s` and `ids/txr_sn` F (taxid 99990, a
 //! fragment of the query with every letter identical) comes before A with `-sorthits 3`, so the
 //! damaged `bad_magic`'s open, which the first read writes, comes before F's description line.
+//! The XML2 and JSON documents of outfmt 16 and 15 (`*.j15`, `*.j16`; line DBID json) load every
+//! subject of a query's report before they write any of it, after the document's start
+//! (`PrintProlog`, before the search) and outfmt 15's separator `,` (blast_format.cpp:2337-2342):
+//! the texts of a query's `Hit`s come between the separator and the report, with two queries
+//! with hits (`txr_q3.faa`, `txr_q2.fna`).
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
 //! ```c++
 //!        		const CBioseq_Handle& subject_bh =
 //!                 scope.GetBioseqHandle(align.GetSeq_id(1));
+//! ```
+//! NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:997
+//! ```c++
+//!             const CBioseq_Handle& handle = m_Scope.GetBioseqHandle(*subid);
 //! ```
 
 use std::process::{Command, Stdio};
@@ -337,6 +348,81 @@ const CASES: &[(&str, &str, &str, &str, &str, &[&str], &str)] = &[
         &["-evalue", "1e-50"],
         "7 qseqid sseqid evalue",
     ),
+    // The organism report (outfmt 18) reads the subject of each Seq-align it does not skip after
+    // the query's `Query=` block, then looks up the taxids of its definition lines (review 2 of
+    // line RG T2, D1; NCBI's runs of `T/t2/review2/probe7.sh`).
+    (
+        "blastp.f18",
+        "offset_last_past_end",
+        "blastp",
+        "txr_p",
+        "txr_q.faa",
+        &[],
+        "18",
+    ),
+    (
+        "blastp.f18q2",
+        "offset_last_past_end",
+        "blastp",
+        "txr_p",
+        "txr_q2.faa",
+        &[],
+        "18",
+    ),
+    (
+        "blastp.f18sci",
+        "bad_magic",
+        "blastp",
+        "prd_txself",
+        "prd_q.faa",
+        &[],
+        "18",
+    ),
+    (
+        "blastx.f18",
+        "offset_last_past_end",
+        "blastx",
+        "txr_p",
+        "txr_q.fna",
+        &[],
+        "18",
+    ),
+    (
+        "tblastn.f18",
+        "offset_last_past_end",
+        "tblastn",
+        "txr_n",
+        "txr_q.faa",
+        &[],
+        "18",
+    ),
+    (
+        "blastn.f18",
+        "offset_last_past_end",
+        "blastn",
+        "txr_n",
+        "txr_q.fna",
+        &["-task", "blastn"],
+        "18",
+    ),
+    (
+        "tblastx.f18",
+        "offset_last_past_end",
+        "tblastx",
+        "txr_n",
+        "txr_q.fna",
+        &[],
+        "18",
+    ),
+    (
+        "tblastx.f18q2",
+        "offset_last_past_end",
+        "tblastx",
+        "txr_n",
+        "txr_q2.fna",
+        &["-evalue", "1e-50"],
+        "18",
+    ),
     (
         "blastp.s3",
         "bad_magic",
@@ -390,6 +476,78 @@ const CASES: &[(&str, &str, &str, &str, &str, &[&str], &str)] = &[
         "txr_q.fna",
         &["-task", "megablast", "-sorthits", "3"],
         "0",
+    ),
+    (
+        "blastp.j15",
+        "offset_last_past_end",
+        "blastp",
+        "txr_p",
+        "txr_q3.faa",
+        &[],
+        "15",
+    ),
+    (
+        "blastp.j16",
+        "offset_last_past_end",
+        "blastp",
+        "txr_p",
+        "txr_q3.faa",
+        &[],
+        "16",
+    ),
+    (
+        "blastp.j16b",
+        "bad_magic",
+        "blastp",
+        "txr_p",
+        "txr_q3.faa",
+        &[],
+        "16",
+    ),
+    (
+        "blastx.j15",
+        "offset_last_past_end",
+        "blastx",
+        "txr_p",
+        "txr_q2.fna",
+        &[],
+        "15",
+    ),
+    (
+        "tblastn.j15",
+        "offset_last_past_end",
+        "tblastn",
+        "txr_n",
+        "txr_q3.faa",
+        &[],
+        "15",
+    ),
+    (
+        "tblastx.j15",
+        "offset_last_past_end",
+        "tblastx",
+        "txr_n",
+        "txr_q2.fna",
+        &["-evalue", "1e-50", "-max_hsps", "1"],
+        "15",
+    ),
+    (
+        "blastn.j15",
+        "offset_last_past_end",
+        "blastn",
+        "txr_n",
+        "txr_q2.fna",
+        &["-task", "blastn"],
+        "15",
+    ),
+    (
+        "megablast.j16",
+        "offset_last_past_end",
+        "blastn",
+        "txr_n",
+        "txr_q2.fna",
+        &["-task", "megablast"],
+        "16",
     ),
 ];
 

@@ -157,7 +157,7 @@ pub(super) struct TblastxTabular<'a, 'r> {
 /// `run.epilog`. `probe` marks each row (the format observer).
 pub(super) fn write_tblastx_tabular(
     tab: &TblastxTabular<'_, '_>,
-    writer: &mut dyn Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     mut warnings: Option<&mut QueryWarnings<'_>>,
     mut probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
@@ -226,6 +226,40 @@ pub(super) fn write_tblastx_tabular(
             .map(|(_, hsp)| hsp.hit.s_idx as usize)
     };
     let names = run.tabular_names;
+    // Outfmt 18, the organism report: the `Query=` block shows the query record's length, also
+    // with `-query_loc` (as outfmt 0's).
+    if spec.kind == crate::report::tabular::TabularKind::TaxReport {
+        let mut queries: Vec<crate::report::tax_report::TaxQuery<'_>> = run
+            .queries
+            .iter()
+            .enumerate()
+            .map(|(q_idx, query)| crate::report::tax_report::TaxQuery {
+                title: tab.query_titles[q_idx],
+                length: run.ranges.input.placements.length(q_idx, query.seq().len()),
+                hsps: Vec::new(),
+            })
+            .collect();
+        for hsp in hits {
+            queries[hsp.hit.q_idx as usize]
+                .hsps
+                .push(crate::report::tax_report::TaxHsp {
+                    subject: hsp.hit.s_idx as usize,
+                    evalue: hsp.hit.e_value,
+                    bit_score: hsp.hit.bit_score,
+                });
+        }
+        return crate::algorithm::common::tabular::write_tax_report(
+            &subjects,
+            run.subjects,
+            false,
+            taxdb_found,
+            names,
+            PROGRAM,
+            &queries,
+            writer,
+            warnings,
+        );
+    }
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;
     // those of the other ids are `ReportedSubjects::tabular_subject_ids`'.
     if needs.all_deflines {

@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::sync::Mutex;
 
-use LOSAT::api::FastaRecord;
-use LOSAT::web_adapter::{
+use losat::api::FastaRecord;
+use losat::web_adapter::{
     read_all, FastaInputSource, ParseErrorCode, ReadError, ReaderConfig, RecordSource,
 };
 
@@ -250,10 +250,10 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
     // A query of white space only is NCBI's `Query is Empty!` at run time; a query with
     // blank and comment lines only is not empty, and its first batch (`eEOF`, no query)
     // fails every run, so `register` fails with NCBI's error (port plan Q2).
-    if role == ROLE_QUERY && records.is_empty() && !LOSAT::web_adapter::is_blank(bytes) {
+    if role == ROLE_QUERY && records.is_empty() && !losat::web_adapter::is_blank(bytes) {
         return Err(format!(
             "{:#}",
-            LOSAT::web_adapter::engine_error("Empty CBlastQueryVector")
+            losat::web_adapter::engine_error("Empty CBlastQueryVector")
         )
         .trim_end_matches('\n')
         .to_string());

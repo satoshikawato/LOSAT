@@ -1353,6 +1353,7 @@ mod tests {
 
     fn hsp(oid: u32, e_value: f64) -> BlastpHsp {
         BlastpHsp {
+            num: 1,
             identity: 50.0,
             length: 10,
             mismatch: 5,
@@ -2534,6 +2535,7 @@ mod tests {
             query_is_translated: false,
             subject_is_translated: false,
             cutoff_score: 1,
+            do_link_hsps: false,
         }
     }
 

@@ -123,7 +123,7 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: web/app/package-lock.json
+          cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npm run check
         if: matrix.project == 'chromium'
@@ -257,6 +257,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: reactors
@@ -266,18 +268,38 @@ jobs:
           name: native
           path: ${{ runner.temp }}/native
       - run: chmod +x ${{ runner.temp }}/native/losat
+      # The npm package `losat` (web/packages/losat, plan LIB-4) built from this run's reactors:
+      # its tests check what `npm pack` puts in it, its manifest and ABI table, and run its README's
+      # example on the serial reactor against NCBI's frozen bytes. V-ABI below runs the reactor files
+      # of this build, so the package carries the modules that V-ABI checks. The packed tarball is
+      # kept for 7 days; publishing it is the maintainer's act.
+      - name: The npm package losat
+        working-directory: web
+        env:
+          LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
+        run: |
+          npm ci
+          npm run build -w losat
+          npm test -w losat
+          mkdir -p ${{ runner.temp }}/npm-package
+          (cd packages/losat/dist && npm pack --pack-destination ${{ runner.temp }}/npm-package)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-package
+          path: ${{ runner.temp }}/npm-package/
+          retention-days: 7
       # One process per reactor, at once (`--engines`): the serial reactor runs each search with 1
       # thread, the threaded one with 1, 2 and 4, and each process runs the CLI for its own
       # comparisons. In one process, one reactor after the other, the step took 11.6 min (p50 of
       # 69 runs, 2026-11-12/13; serial 43 %, threaded 57 %) and was the longest path of the
       # workflow in 46 of them. The first process to fail ends the step and stops the other.
-      - name: V-ABI (quick suite)
+      - name: V-ABI (quick suite) on the package's reactors
         run: |
           python3 web/adapter/tools/v_abi_cases.py --suite quick --out ${{ runner.temp }}/v-abi-cases.json
           for engine in serial threads; do
             node web/adapter/tests/v_abi.js --native ${{ runner.temp }}/native/losat \
-              --serial ${{ runner.temp }}/reactors/losat-web-serial.wasm \
-              --threads ${{ runner.temp }}/reactors/losat-web-threads.wasm \
+              --serial web/packages/losat/dist/reactors/losat-web-serial.wasm \
+              --threads web/packages/losat/dist/reactors/losat-web-threads.wasm \
               --cases ${{ runner.temp }}/v-abi-cases.json --engines "$engine" &
           done
           wait -n || { kill $(jobs -p) 2>/dev/null; exit 1; }
@@ -337,7 +359,7 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: web/app/package-lock.json
+          cache-dependency-path: web/package-lock.json
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: reactors
@@ -352,11 +374,15 @@ jobs:
       # waited on every package, holding the job for hours; this step stops it instead.
       - run: npx playwright install --with-deps ${{ matrix.browsers }}
         timeout-minutes: 10
-      - name: RecordScanner contract and inflation on the serial reactor (Node)
+      # Every unit test that needs the reactors (about 90 s): engine-runtime (the RecordScanner
+      # contract, inflation, describe), hsp-correspondence (the HSP records against every outfmt 0
+      # fixture), engine-memory and window-masker. Until 2026-11-14 only engine-runtime ran here, and
+      # the PS7 rows of the manifest (2026-11-12) broke hsp-correspondence unseen.
+      - name: Unit tests on the reactors (Node)
         if: matrix.project == 'chromium' && matrix.shard == '1/2'
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
-        run: npx vitest run tests/unit/engine-runtime.test.ts
+        run: npx vitest run
       - name: V-BR and every E2E test with the engine in the build (${{ matrix.project }} ${{ matrix.shard }})
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors

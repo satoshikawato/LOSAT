@@ -8,6 +8,7 @@
 use std::io::Write;
 
 use crate::ncbi_app::files::{ends_like_sigpipe, Ostream};
+use crate::ncbi_app::Diag;
 
 use super::fasta_reader::ios_failure_what;
 use super::writer::{writes_serial_objects, MaskWriter, WriteError};
@@ -101,12 +102,13 @@ pub(crate) fn serial_write_failure<F: RunFailure>(
 pub(crate) fn finish<F: RunFailure>(
     writer: MaskWriter,
     out: &mut Ostream<'_>,
+    diag: &mut Diag,
     mut result: Result<(), F>,
     outfmt: &str,
     program: &str,
 ) -> Result<(), F> {
     if !matches!(&result, Err(failure) if failure.stops_writing()) {
-        if let Err(error) = writer.finish(out) {
+        if let Err(error) = writer.finish(out, diag) {
             result = Err(write_failure(error, program));
         }
     }

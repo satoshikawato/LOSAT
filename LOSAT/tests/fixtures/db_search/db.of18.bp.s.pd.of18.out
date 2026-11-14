@@ -1,0 +1,31 @@
+
+                                          Tax BLAST report                                          
+
+Query= pq1 query protein one
+
+Length=300
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                              Zero taxid sp. (zero common) [zeroblast]                              
+ s1        subject one two HSPs                                                        313   5e-109  
+ s3        subject three with a title that is longer than the description column of... 247   4e-87   
+ s11       subject eleven strong then planted weak HSP                                 211   1e-71   
+ s9        subject nine                                                                168   7e-57   
+ s2        subject two                                                                 159   4e-53   
+ s8        subject eight                                                               147   1e-48   
+ s7        subject seven taxid not in taxdb                                            141   2e-46   
+ s6        subject six                                                                 139   1e-45   
+ s4        subject four                                                                138   3e-45   
+ s5        subject five 131    s 9e-43    e Accession  a <@descr_text@> d <@ta... 131   9e-43   
+ s10       subject ten                                                                 94.0  2e-28   
+
+                                          Tax BLAST report                                          
+
+Query= pq2 unrelated query (no hits)
+
+Length=40
+
+                                           Organism Report                                           
+Accession...  Description... Score... E-value... 

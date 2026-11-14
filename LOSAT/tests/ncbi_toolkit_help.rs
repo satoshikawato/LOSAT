@@ -133,18 +133,138 @@ fn help_full_writes_the_help_in_every_place() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// NCBI BLAST+ 2.17.0's `-xmlhelp` of `program`, frozen (`src/ncbi_xmlhelp/`).
+fn ncbi_xml(program: &str) -> Vec<u8> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/ncbi_xmlhelp")
+        .join(format!("{program}.xml"));
+    fs::read(path).unwrap()
+}
+
+/// The names of the arguments (`<key name="NAME" ...>`, `<flag name="NAME" ...>`) of `xml`.
+fn argument_names(xml: &[u8]) -> Vec<String> {
+    String::from_utf8_lossy(xml)
+        .lines()
+        .filter(|line| line.starts_with("<key name=\"") || line.starts_with("<flag name=\""))
+        .map(|line| line.split('"').nth(1).unwrap().to_string())
+        .collect()
+}
+
+// NCBI BLAST+ 2.17.0 probes `xml`, `xml_args`, `xml_h`, `xml_hf`, `xml_unk`, `xml_log`, `unk_xml`,
+// `xml_eq` (line RG item E2): the XML on stdout, exit status 0, the reader stopped at `-xmlhelp`
+// (the words after it not read, those before it read first). LOSAT's XML is NCBI's without the
+// arguments that LOSAT refuses by name (line RG DECISIONS E2x-1): the whole of NCBI's for the
+// programs that refuse none, NCBI's lines in its order for the others.
 #[test]
-fn xmlhelp_is_refused_by_name_in_every_program() {
+fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
     let dir = scratch("xml");
-    for (program, _) in PROGRAMS {
-        let output = run_in(&dir, program, &["-xmlhelp"]);
-        assert_ne!(output.status.code(), Some(0), "{program}");
-        assert!(output.stdout.is_empty(), "{program}");
-        let text = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            text.contains("option -xmlhelp is not supported by LOSAT's"),
-            "{program}: {text}"
+    fs::write(
+        dir.join("p.fa"),
+        ">p\nMKVLAAGIVALLLAAGCSSHKEEAPKAEETKPAEAPK\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("n.fa"),
+        ">n\nATGAAAGTGCTGGCGGCGGGCATTGTGGCGCTGCTGCTGGCGGCGGGCTGCAGCAGCCATAAA\n",
+    )
+    .unwrap();
+    for (program, value_option) in PROGRAMS
+        .iter()
+        .copied()
+        .chain([("convert2blastmask", "-out")])
+    {
+        let xml = run_in(&dir, program, &["-xmlhelp"]);
+        assert_eq!(xml.status.code(), Some(0), "{program}");
+        assert!(xml.stderr.is_empty(), "{program}");
+        let ncbi = ncbi_xml(program);
+        if matches!(
+            program,
+            "blastdbcmd" | "dustmasker" | "segmasker" | "convert2blastmask"
+        ) {
+            assert_eq!(xml.stdout, ncbi, "{program}");
+        } else {
+            let text = String::from_utf8(xml.stdout.clone()).unwrap();
+            let ncbi_text = String::from_utf8(ncbi.clone()).unwrap();
+            let mut ncbi_lines = ncbi_text.lines();
+            for line in text.lines() {
+                assert!(
+                    ncbi_lines.any(|ncbi_line| ncbi_line == line),
+                    "{program}: {line}"
+                );
+            }
+            assert!(text.starts_with("<?xml version=\"1.0\"?>\n<ncbi_application"));
+            assert!(text.contains(&format!("<name>{program}</name>\n<version>")));
+            assert!(text.ends_with("</arguments>\n</ncbi_application>\n"));
+            // Each argument left out is refused by name: by the parser (`-name 1 -h`), or by the
+            // run of a search (blastp's and psiblast's `-use_sw_tback`, blastp's and tblastn's
+            // `-ungapped` with `-comp_based_stats 0`; rpstblastn's `-ungapped`, which needs a
+            // database, is in `cli::RUN_REFUSALS` with them). The arguments left in are read
+            // (`ncbi_xmlhelp_tests`).
+            let kept = argument_names(&xml.stdout);
+            for name in argument_names(&ncbi) {
+                if kept.contains(&name) {
+                    continue;
+                }
+                let word = format!("-{name}");
+                let flag = ncbi_text.contains(&format!("<flag name=\"{name}\""));
+                let words = if flag {
+                    vec![&*word, "-h"]
+                } else {
+                    vec![&*word, "1", "-h"]
+                };
+                let refused = run_in(&dir, program, &words);
+                let mut message = String::from_utf8_lossy(&refused.stderr).into_owned();
+                let subject = if program == "tblastn" { "n.fa" } else { "p.fa" };
+                if refused.status.code() == Some(0) && program != "rpstblastn" {
+                    let search = ["-query", "p.fa", "-subject", subject, &word];
+                    let cbs = ["-comp_based_stats", "0"];
+                    let words = [&search[..], if name == "ungapped" { &cbs } else { &[] }].concat();
+                    message =
+                        String::from_utf8_lossy(&run_in(&dir, program, &words).stderr).into_owned();
+                }
+                assert!(
+                    message.contains(&format!("-{name} is not supported by LOSAT's"))
+                        || message.contains(&format!("-{name} ("))
+                            && message.contains("is not supported by LOSAT's")
+                        || message.contains(&format!("unsupported BLASTX option '-{name}'"))
+                        || program == "rpstblastn" && name == "ungapped",
+                    "{program} -{name}: {message}"
+                );
+            }
+        }
+        for words in [
+            &["-xmlhelp", "-h"][..],
+            &["-xmlhelp", "-help-full"],
+            &["-xmlhelp", "-bogus"],
+            &["-xmlhelp", value_option],
+            &["-dryrun", "-xmlhelp"],
+        ] {
+            let output = run_in(&dir, program, words);
+            assert_eq!(output.status.code(), Some(0), "{program} {words:?}");
+            assert_eq!(output.stdout, xml.stdout, "{program} {words:?}");
+            assert!(output.stderr.is_empty(), "{program} {words:?}");
+        }
+        // The word before it is read first (`unk_xml`: NCBI's USAGE error), as before `-help`.
+        let unknown = run_in(&dir, program, &["-bogus", "-xmlhelp"]);
+        let unknown_help = run_in(&dir, program, &["-bogus", "-help"]);
+        assert_ne!(unknown.status.code(), Some(0), "{program}");
+        assert_eq!(
+            unknown.status.code(),
+            unknown_help.status.code(),
+            "{program}"
         );
+        assert_eq!(unknown.stderr, unknown_help.stderr, "{program}");
+        // `-xmlhelp=1` is no help flag (`xml_eq`: an argument error, exit status not 0).
+        let eq = run_in(&dir, program, &["-xmlhelp=1"]);
+        assert_ne!(eq.status.code(), Some(0), "{program}");
+        assert!(eq.stdout.is_empty(), "{program}");
+        // The words read before the arguments come first: the log file is made (`xml_log`).
+        let log = dir.join("log.txt");
+        let _ = fs::remove_file(&log);
+        let logged = run_in(&dir, program, &["-xmlhelp", "-logfile", "log.txt"]);
+        assert_eq!(logged.stdout, xml.stdout, "{program}");
+        assert_eq!(fs::read(&log).ok(), Some(Vec::new()), "{program}");
+        fs::remove_file(&log).unwrap();
     }
     let _ = fs::remove_dir_all(&dir);
 }

@@ -1,6 +1,8 @@
 // Composition root: the only module that chooses implementations for the ports.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
 import { VERIFICATION_TABLE } from 'virtual:losat-verification';
+import { WasmEngine, type RenewalLimits, type RuntimeEnd } from 'losat';
+import type { EngineGateway } from 'losat/ports';
 import { Attention } from './application/attention';
 import { Coordinator } from './application/coordinator';
 import { SearchDraft } from './application/draft';
@@ -8,7 +10,6 @@ import { CountsLoader } from './application/counts';
 import { ExampleLoader } from './application/examples';
 import { ResultsBrowser } from './application/results';
 import type { Downloader } from './ports/download';
-import type { EngineGateway } from './ports/engine';
 import { BrowserAccessionFetcher } from './infra/browser/accession-fetcher';
 import { browserCountsDeletions } from './infra/browser/counts-deletions';
 import { BrowserCountsDownloader } from './infra/browser/counts-downloader';
@@ -17,8 +18,6 @@ import { BrowserFileDownloader } from './infra/browser/example-downloader';
 import { browserPage } from './infra/browser/page';
 import { browserDownloader, browserFileSaver } from './infra/browser/platform';
 import { startDataWorker } from './infra/data-worker/gateway';
-import { WasmEngine, type RuntimeEnd } from './infra/engine-worker/gateway';
-import type { RenewalLimits } from './infra/engine-worker/policy';
 import { FakeEngine } from './infra/fake/fake-engine';
 
 export interface App {
@@ -40,9 +39,9 @@ export interface App {
 export interface AppOptions {
   /** Where exports go; the browser's download by default. */
   readonly downloader?: Downloader;
-  /** When the engine runtime is renewed (src/infra/engine-worker/policy.ts); tests lower it. */
+  /** When the engine runtime is renewed (the package's src/infra/engine-worker/policy.ts); tests lower it. */
   readonly renewal?: Partial<RenewalLimits>;
-  /** Told how each engine runtime ended (src/infra/engine-worker/gateway.ts); tests record it. */
+  /** Told how each engine runtime ended (the package's src/infra/engine-worker/gateway.ts); tests record it. */
   readonly onRuntimeEnd?: (end: RuntimeEnd) => void;
 }
 

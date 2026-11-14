@@ -1,71 +1,24 @@
 // The engine reactors (docs/web/abi_v2.md §2) enter the build from the directory that
 // web/adapter/tools/build_reactors.py writes: `LOSAT_WEB_REACTORS=<output dir>`. The
-// plugin checks the two modules against the SHA-256 of that build's artifacts.json, copies
-// them into the build as engine/losat-web-<serial|threads>-<sha256 prefix>.wasm, and
-// provides their URLs and digests to the application as the module `virtual:losat-engine`.
-// Without the variable, the build has no engine (ENGINE_ASSETS is null) and the
-// application uses the FakeEngine, with its banner (web/AGENTS.md rule 7).
-//
-// The threaded module is served with the shared-memory guard of the Node host
-// (LOSAT/tests/wasi_shared_memory.js, applied by LOSAT/tests/wasi_thread_host.js before it
-// compiles the module): V8 (Node, and Chromium in S09) can run a bulk memory operation
-// against stale bounds after another thread grew the shared memory. The guard is the same
-// function, so the browsers run the bytes that V-ABI runs; it changes no search code. The
-// build stops rather than serve an unguarded threaded module: the guard throws on an encoding
-// that it declines, and a module in which it finds nothing to guard is refused here. An
-// artifact that is guarded already (it carries the guard's record) is served as it is, once
-// that guard verifies. The guard also lets the waits of the module end with their worker: WebKit
-// never ends a worker whose thread waits without a timeout, and keeps its shared memory, so each
-// wait records its address, and once the keeper ends the waits (shared-memory.ts endWaits) they
-// wait in slices with a call of the module's import sched_yield between them. It can do so only
-// in a module that imports sched_yield, so a threaded module without that import is refused here.
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
+// package's reader (web/packages/losat/build/reactors.ts) checks the two modules against the
+// SHA-256 of that build's artifacts.json and guards the threaded one; the plugin copies them into
+// the build as engine/losat-web-<serial|threads>-<sha256 prefix>.wasm, and provides their URLs and
+// digests to the application as the module `virtual:losat-engine`. Without the variable, the
+// build has no engine (ENGINE_ASSETS is null) and the application uses the FakeEngine, with its
+// banner (web/AGENTS.md rule 7).
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { join, resolve } from 'node:path';
 import type { Plugin } from 'vite';
+import { REACTOR_KINDS, REACTORS_ENV, readReactors, type ReactorBytes } from '../../packages/losat/build/reactors.ts';
 
-interface Guarded {
-  readonly bytes: Uint8Array;
-  /** The operations that this call guarded (0 for an artifact that is guarded already). */
-  readonly fill: number;
-  readonly copy: number;
-  readonly grow: number;
-  readonly atomic: number;
-  /** The guard's record in the module, or null when it found nothing to guard. */
-  readonly record: { readonly version: number; readonly fill: number; readonly copy: number; readonly grow: number; readonly atomic: number } | null;
-}
+export { REACTORS_ENV };
 
-/** The guard of LOSAT/tests/wasi_shared_memory.js, loaded only for a build with the engine. */
-function guardSharedMemory(bytes: Uint8Array): Guarded & { readonly slicesWaits: boolean } {
-  const guard = createRequire(import.meta.url)('../../../LOSAT/tests/wasi_shared_memory.js') as {
-    guardSharedMemory: (bytes: Uint8Array) => Guarded;
-    verifyGuarded(bytes: Uint8Array): unknown;
-    slicesWaits(bytes: Uint8Array): boolean;
-  };
-  const guarded = guard.guardSharedMemory(bytes);
-  // The guard returns an artifact that carries its record as it is, so the record is checked here.
-  if (guarded.record !== null) guard.verifyGuarded(guarded.bytes);
-  return { ...guarded, slicesWaits: guard.slicesWaits(guarded.bytes) };
-}
-
-export const REACTORS_ENV = 'LOSAT_WEB_REACTORS';
 const VIRTUAL_ID = 'virtual:losat-engine';
 const RESOLVED_ID = `\0${VIRTUAL_ID}`;
-const NAMES = ['serial', 'threads'] as const;
+const NAMES = REACTOR_KINDS;
 
-export interface ReactorFile {
+export interface ReactorFile extends ReactorBytes {
   /** The file name in the build. */
   readonly name: string;
-  /** The bytes that the build serves. */
-  readonly bytes: Uint8Array;
-  /** SHA-256 of the served bytes. */
-  readonly sha256: string;
-  /** SHA-256 of the artifact of build_reactors.py (artifacts.json). */
-  readonly artifactSha256: string;
-  /** The transformation of the artifact, if any. */
-  readonly transform?: string;
 }
 
 export interface Reactors {
@@ -78,37 +31,12 @@ export interface Reactors {
 export function findReactors(env: NodeJS.ProcessEnv = process.env): Reactors | undefined {
   const value = env[REACTORS_ENV];
   if (value === undefined || value === '') return undefined;
-  const dir = resolve(value);
-  const artifacts = JSON.parse(readFileSync(join(dir, 'artifacts.json'), 'utf8')) as {
-    artifacts?: Record<string, { sha256?: string }>;
-  };
-  const file = (kind: (typeof NAMES)[number]): ReactorFile => {
-    const path = join(dir, `losat-web-${kind}.wasm`);
-    const artifact = readFileSync(path);
-    const artifactSha256 = sha256Hex(artifact);
-    const recorded = artifacts.artifacts?.[kind]?.sha256;
-    if (artifactSha256 !== recorded) {
-      throw new Error(`${path}: its SHA-256 ${artifactSha256} is not the one in artifacts.json (${String(recorded)})`);
-    }
-    if (kind === 'serial') {
-      return { name: `engine/losat-web-serial-${artifactSha256.slice(0, 16)}.wasm`, bytes: artifact, sha256: artifactSha256, artifactSha256 };
-    }
-    const guarded = guardSharedMemory(artifact);
-    if (guarded.record === null) throw new Error(`${path}: the shared-memory guard found no memory.fill, memory.copy, memory.grow or atomic instruction to guard`);
-    if (!guarded.slicesWaits) {
-      throw new Error(`${path}: the threaded module does not import wasi_snapshot_preview1.sched_yield, so its waits would not end when the page ends their worker`);
-    }
-    const where = guarded.fill + guarded.copy + guarded.grow + guarded.atomic === 0 ? 'in the artifact' : 'LOSAT/tests/wasi_shared_memory.js';
-    const sha256 = sha256Hex(guarded.bytes);
-    return {
-      name: `engine/losat-web-threads-${sha256.slice(0, 16)}.wasm`,
-      bytes: guarded.bytes,
-      sha256,
-      artifactSha256,
-      transform: `shared-memory guard (${where}: ${guarded.record.fill} fills, ${guarded.record.copy} copies, ${guarded.record.grow} grows, ${guarded.record.atomic} atomics)`,
-    };
-  };
-  return { dir, serial: file('serial'), threads: file('threads') };
+  const build = readReactors(value);
+  const named = (kind: (typeof NAMES)[number]): ReactorFile => ({
+    ...build[kind],
+    name: `engine/losat-web-${kind}-${build[kind].sha256.slice(0, 16)}.wasm`,
+  });
+  return { dir: build.dir, serial: named('serial'), threads: named('threads') };
 }
 
 /**
@@ -163,8 +91,4 @@ export function losatEngine(options: { readonly reactors?: Reactors | undefined;
       });
     },
   };
-}
-
-function sha256Hex(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex');
 }

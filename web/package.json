@@ -1,0 +1,9 @@
+{
+  "name": "losat-web-workspace",
+  "private": true,
+  "description": "npm workspaces of LOSAT Web: the package `losat` (packages/losat) and the application that uses it (app).",
+  "workspaces": [
+    "packages/losat",
+    "app"
+  ]
+}

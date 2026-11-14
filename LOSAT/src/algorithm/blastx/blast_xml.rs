@@ -1050,8 +1050,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             let mut reads = crate::report::query_warnings::ReadCursor::new(std::slice::from_ref(
                 shown.query_reads(batch.query_ordinal + qidx),
             ));
-            let mut marks: Vec<(usize, u32)> = Vec::new();
-            let marking = reads.is_some();
+            // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): those texts
+            // and the taxonomy database's messages.
+            let mut posts = crate::report::query_warnings::HitPosts::new(reads.is_some());
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
                 // A copy of one record of the database that follows another is shown in its
                 // `Hit`.
@@ -1075,9 +1076,6 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 );
                 for range in hits {
                     let first = lists[range.start].oid;
-                    if let Some(at) = sink.position().filter(|_| marking) {
-                        marks.push((at, first as u32));
-                    }
                     let names = subject_cache
                         .get(&first)
                         .context("names of a subject with hits")?;
@@ -1085,7 +1083,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     // NCBI's messages about the taxonomy database: opening and the volume's
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time.
-                    taxdb_printer.at_names(first, names, &mut *diagnostics)?;
+                    posts.hit(sink.position(), first as u32, |texts| {
+                        taxdb_printer.at_names(first, names, texts)
+                    })?;
                     sink.hit(&hit, |hsps| {
                         for list in lists[range]
                             .iter()
@@ -1140,18 +1140,18 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             });
             // A failed query leaves its partial bytes in `buf`, which the error return drops.
             written?;
-            match reads.as_mut() {
-                Some(reads) => {
-                    crate::report::query_warnings::write_at_marks(
-                        &buf,
-                        &marks,
-                        &mut *writer,
-                        |subject, writer| reads.subject_read(0, subject, writer, &mut *diagnostics),
-                    )?;
-                    // A text whose read no `Hit` placed comes after the query's report.
-                    reads.before_query(1, &mut *writer, &mut *diagnostics)?;
-                }
-                None => writer.write_all(&buf)?,
+            posts.write(
+                &buf,
+                &mut *writer,
+                &mut *diagnostics,
+                |subject, writer, sink| match reads.as_mut() {
+                    Some(reads) => reads.subject_read(0, subject, writer, sink),
+                    None => Ok(()),
+                },
+            )?;
+            // A text whose read no `Hit` placed comes after the query's report.
+            if let Some(reads) = reads.as_mut() {
+                reads.before_query(1, &mut *writer, &mut *diagnostics)?;
             }
             buf.clear();
         }

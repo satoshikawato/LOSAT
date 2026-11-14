@@ -1,0 +1,12 @@
+Blast-db-mask-info ::= {
+  algo-id 0,
+  algo-program windowmasker,
+  algo-options "",
+  masks {
+    masks {
+      int { from 10, to 20, strand plus, id gi 5 },
+      int { from 30, to 40, strand plus, id genbank { accession "AY000005", version 1 } }
+    },
+    more FALSE
+  }
+}

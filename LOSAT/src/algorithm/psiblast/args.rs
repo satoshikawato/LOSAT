@@ -76,8 +76,8 @@ use crate::blastinput::value_parsers::*;
 // ASN.1 and ASCII PSSMs (`pssm.rs`); with `-in_pssm` the
 // query is a PSSM, searched with the PSSM's stages (`in_pssm.rs`, `algorithm::pssm_search`), in
 // rounds and with the PSSM files too (`in_pssm_files.rs`);
-// `-in_msa` and `-phi_pattern` are refused by the parser (`cli.rs` `is_unported_psiblast_arg`),
-// `-sum_stats true` with the options (`into_blastp_args`). The values are
+// `-in_msa` and `-phi_pattern` are refused by the parser (`cli.rs` `is_unported_psiblast_arg`).
+// The values are
 // read as NCBI's argument parser reads them (`value_parsers.rs`); the checks that NCBI makes
 // after reading them are blastp's (`BlastpArgs::check_options`, with psiblast's program).
 #[derive(Args, Debug, Clone)]
@@ -188,8 +188,8 @@ pub struct PsiblastArgs {
     // ```
     // psiblast's `CGenericSearchArgs` keeps it (psiblast_args.cpp:67; blastp suppresses it). A
     // gapped protein search does not link HSPs by default (blast_options.c:1460-1471), so `false`
-    // is psiblast's search; `true` (`BLAST_LinkHsps` in every round) is refused with the options
-    // (`into_blastp_args`).
+    // is psiblast's search; `true` links the HSPs of each subject in every round
+    // (`BlastpArgs::sum_stats`, `core::link_hsps`).
     #[arg(long, value_parser = ncbi_boolean, help = "Use sum statistics")]
     pub sum_stats: Option<bool>,
     #[arg(long, value_parser = psiblast_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
@@ -202,6 +202,11 @@ pub struct PsiblastArgs {
     pub num_threads: usize,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
+    /// The search strategy file (`-export_search_strategy`, quoted at
+    /// `BlastpArgs::export_search_strategy`), created by the search's `run` before the other options
+    /// are read (with `-in_pssm` refused: item F1b-2 of line RG).
+    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]
     pub max_target_seqs: Option<usize>,
     // NCBI blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
@@ -480,6 +485,21 @@ impl PsiblastArgs {
     /// blastp's arguments for psiblast's search, after LOSAT's refusals of what it does not run
     /// (the rounds of a range, and the output formats of the later items of the series).
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:281-287
+        // ```c++
+        //         if (pssm.NotEmpty())
+        //         {
+        //             _ASSERT(queries.Empty());
+        //             if(num_iters != 0)
+        //             	retval.Reset(new blast::CExportStrategy(pssm, opts_hndl, search_db, client_id, num_iters));
+        // ```
+        // A PSSM query's request holds the PSSM as read (`queries pssm`), which item F1b-2 of line
+        // RG writes; refused before the file is made.
+        if self.export_search_strategy.is_some() && self.in_pssm.is_some() {
+            bail!(
+                "-export_search_strategy with -in_pssm is not supported by LOSAT's PSIBLAST yet (NCBI writes a PSI-BLAST request that holds the PSSM with -db and stops with \"Remote PSI-BL2SEQ is not supported\" with -subject)"
+            );
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1277-1281
         // ```c++
         //     if (m_DbTarget == eProteinDb) {
@@ -516,19 +536,6 @@ impl PsiblastArgs {
             );
         }
         Self::check_outfmt(&self.outfmt)?;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:410-414
-        // ```c
-        //     if (hitParams->do_sum_stats) {
-        //         status = BLAST_LinkHsps(program_number, hsp_list, queryInfo,
-        //                                 subject_length, sbp,
-        //                                 hitParams->link_hsp_params, TRUE);
-        // ```
-        // With sum statistics NCBI's gapped protein search links the HSPs of each subject (the
-        // even-gap linking, link_hsps.c `s_BlastEvenGapLinkHSPs`) and gives the linked sets'
-        // e-values in every round, item Q3b of line RG.
-        if self.sum_stats == Some(true) {
-            bail!("-sum_stats true (NCBI BLAST+ links the HSPs of each subject with sum statistics) is not supported by LOSAT's PSIBLAST");
-        }
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (quoted at
         // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM of
         // `-in_pssm` in round 1)
@@ -538,6 +545,10 @@ impl PsiblastArgs {
             || (self.in_pssm.is_some()
                 && (self.out_pssm.is_some() || self.out_ascii_pssm.is_some())))
         .then(|| u32::try_from(self.num_iterations).unwrap_or(0));
+        let request_inputs = self
+            .export_search_strategy
+            .is_some()
+            .then(|| Box::new(self.option_inputs()));
         Ok(BlastpArgs {
             query: self.query,
             subject: self.subject,
@@ -579,6 +590,7 @@ impl PsiblastArgs {
             xdrop_gap: self.xdrop_gap,
             xdrop_gap_final: self.xdrop_gap_final,
             gap_trigger: Some(self.gap_trigger),
+            sum_stats: self.sum_stats == Some(true),
             window_size: self.window_size,
             matrix: self.matrix,
             gap_open: self.gap_open,
@@ -591,9 +603,11 @@ impl PsiblastArgs {
             subject_loc: self.subject_loc,
             outfmt: self.outfmt,
             archive: None,
-            export_search_strategy: None,
+            export_search_strategy: self.export_search_strategy,
             strategy: None,
+            request_inputs,
             app: BlastpApp::Psiblast,
+            subject_taxdb: None,
             inclusion_ethresh: Some(self.inclusion_ethresh),
             first_query_ordinal: self.first_query_ordinal,
             psiblast_pssm: Some(crate::algorithm::psiblast::pssm::PsiblastPssmOptions {
@@ -614,6 +628,52 @@ impl PsiblastArgs {
             formatting: self.formatting,
             rps: None,
         })
+    }
+
+    /// The options that psiblast's search strategy requests record (`options::algorithm_options`
+    /// of `RequestKind::Psiblast`: NCBI's argument classes of `psiblast_args.cpp` and their
+    /// conditions), from the arguments as given. `HitlistSize` is the request's
+    /// (`StrategyExport::for_run`); the database lists are the database's
+    /// (`OptionsHandle::set_database_filter`).
+    pub(crate) fn option_inputs(&self) -> crate::report::archive::options::OptionInputs {
+        use crate::report::archive::options::{seg_filter, OptionInputs, RequestKind};
+        let mut inputs = OptionInputs::new(RequestKind::Psiblast, "blastp");
+        inputs.dbsize = self.dbsize;
+        inputs.searchsp = self.searchsp;
+        inputs.sum_stats = self.sum_stats;
+        inputs.evalue = self.evalue;
+        inputs.gapopen = self.gap_open;
+        inputs.gapextend = self.gap_extend;
+        inputs.matrix = self.matrix.clone();
+        // `-xdrop_ungap` is never recorded (`SetXDropoff` has no remote option).
+        inputs.xdrop_gap = self.xdrop_gap;
+        inputs.xdrop_gap_final = self.xdrop_gap_final;
+        inputs.word_size = self.word_size;
+        inputs.qcov_hsp_perc = self.qcov_hsp_perc;
+        inputs.max_hsps = self.max_hsps_per_subject.map(|count| count as i32);
+        inputs.culling_limit = self.culling_limit;
+        // `static_cast<int>` of the double, as BLASTP's (`blastp::archive::option_inputs`).
+        inputs.threshold = self
+            .threshold
+            .map(crate::core::blast_util::ncbi_int4_from_double);
+        inputs.window_size = self.window_size;
+        inputs.soft_masking = self.soft_masking;
+        inputs.seg = self
+            .seg
+            .as_deref()
+            .and_then(|value| seg_filter(value, "PSIBLAST"));
+        if let Ok((mode, unified_p)) =
+            crate::blastinput::app::parse_comp_based_stats(&self.comp_based_stats, true, false)
+        {
+            inputs.comp_based_stats = mode as i32;
+            inputs.unified_p = unified_p;
+        }
+        inputs.use_sw_tback = self.use_sw_tback;
+        inputs.gap_trigger = self.gap_trigger;
+        inputs.pseudocount = self.pseudocount;
+        inputs.inclusion_ethresh = self.inclusion_ethresh;
+        inputs.num_iterations = Some(self.num_iterations);
+        inputs
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2744-2748
@@ -881,7 +941,7 @@ mod tests {
     }
 
     #[test]
-    fn the_x_drops_gap_trigger_and_culling_reach_blastps_search() {
+    fn the_x_drops_gap_trigger_culling_and_sum_stats_reach_blastps_search() {
         let blastp = |extra: &[&str]| parse(extra).unwrap().into_blastp_args();
         let args = blastp(&[
             "-culling_limit",
@@ -908,9 +968,15 @@ mod tests {
         let args = blastp(&[]).unwrap();
         assert_eq!(args.gap_trigger, Some(22.0));
         assert_eq!(args.culling_limit, None);
-        // Sum statistics link the HSPs (item Q3b).
-        let error = blastp(&["-sum_stats", "true"]).unwrap_err().to_string();
-        assert!(error.contains("-sum_stats true"), "{error}");
+        assert!(!args.sum_stats);
+        // Sum statistics link the HSPs, in every spelling of NCBI's boolean.
+        for spelling in ["true", "T", "t", "1", "yes"] {
+            assert!(
+                blastp(&["-sum_stats", spelling]).unwrap().sum_stats,
+                "{spelling}"
+            );
+        }
+        assert!(!blastp(&["-sum_stats", "false"]).unwrap().sum_stats);
         // NCBI's constraint of -culling_limit (0 or more).
         assert!(parse(&["-culling_limit", "-1"]).is_err());
     }

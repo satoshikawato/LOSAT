@@ -87,8 +87,8 @@ impl DustSpec {
 ///                     static_cast<Uint4>(m_Options->GetDustFilteringWindow()),
 ///                     static_cast<Uint4>(m_Options->GetDustFilteringLinker()));
 /// ```
-/// `NStr::Split` keeps the empty fields between adjacent spaces, and `NStr::StringToInt`
-/// reads what `i32::from_str` reads.
+/// `NStr::Split` keeps the empty fields between adjacent spaces; `NStr::StringToInt` (flags 0)
+/// is `ncbi_str::string_to_int`.
 pub fn parse_dust_filtering(value: &str) -> Result<DustSpec, String> {
     match value {
         "no" => return Ok(DustSpec::No),
@@ -99,9 +99,9 @@ pub fn parse_dust_filtering(value: &str) -> Result<DustSpec, String> {
     if tokens.len() != 3 {
         return Err("Invalid number of arguments to filtering option".into());
     }
+    // `NStr::StringToInt(tokens[i])`, flags 0.
     let number = |token: &str| {
-        token
-            .parse::<i32>()
+        crate::ncbi_str::string_to_int(token.as_bytes(), 0)
             .map_err(|_| "Invalid input for filtering parameters".to_string())
     };
     let (level, window, linker) = (number(tokens[0])?, number(tokens[1])?, number(tokens[2])?);
@@ -149,28 +149,10 @@ pub fn parse_dust_filtering(value: &str) -> Result<DustSpec, String> {
 ///         if (ch == '0'  &&  (next == 'x' || next == 'X')) {
 ///             pos += 2;
 /// ```
-/// `NStr::StringToInt8` in base 10 reads what `i64::from_str` reads (an optional sign and
-/// ASCII digits); in base 16 it reads the hexadecimal digits after the prefix.
+/// `CArg_Integer` derives from `CArg_Int8`: `s_StringToInt8` is `ncbi_int8` (its messages),
+/// then the range of `int`.
 pub fn ncbi_integer(value: &str) -> Result<i32, String> {
-    let int8 = match value.parse::<i64>() {
-        Ok(n) => n,
-        Err(_)
-            if value
-                .get(..2)
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("0x")) =>
-        {
-            let digits = &value[2..];
-            if !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                return Err("expected an integer".into());
-            }
-            if digits.is_empty() {
-                0
-            } else {
-                i64::from_str_radix(digits, 16).map_err(|_| "Integer value is out of range")?
-            }
-        }
-        Err(_) => return Err("expected an integer".into()),
-    };
+    let int8 = ncbi_int8(value)?;
     i32::try_from(int8).map_err(|_| "Integer value is out of range".to_string())
 }
 
@@ -205,24 +187,27 @@ pub fn ncbi_integer(value: &str) -> Result<i32, String> {
 ///     }
 /// }
 /// ```
+/// `NStr::StringToInt8(value)` and `NStr::StringToInt8(value, 0, 16)` are
+/// `ncbi_str::string_to_int8` and `ncbi_str::string_to_int8_base`. LOSAT's messages: "expected
+/// an integer" for a value that neither reads (a byte after `0x` that is not a hexadecimal
+/// digit included, which is tested first: NCBI's base 16 conversion throws on an overflow
+/// before it reaches such a byte, ncbistr.cpp:852), "Integer value is out of range" for a
+/// hexadecimal number beyond `Int8`.
 pub fn ncbi_int8(value: &str) -> Result<i64, String> {
-    match value.parse::<i64>() {
+    use crate::ncbi_str::{string_to_int8, string_to_int8_base};
+    let value = value.as_bytes();
+    match string_to_int8(value, 0) {
         Ok(n) => Ok(n),
         Err(_)
             if value
                 .get(..2)
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("0x")) =>
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"0x")) =>
         {
-            let digits = &value[2..];
-            if !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            if !value[2..].iter().all(u8::is_ascii_hexdigit) {
                 return Err("expected an integer".into());
             }
-            if digits.is_empty() {
-                Ok(0)
-            } else {
-                i64::from_str_radix(digits, 16)
-                    .map_err(|_| "Integer value is out of range".to_string())
-            }
+            string_to_int8_base(value, 0, 16)
+                .map_err(|_| "Integer value is out of range".to_string())
         }
         Err(_) => Err("expected an integer".into()),
     }
@@ -301,81 +286,10 @@ pub fn ncbi_string_to_double(value: &str) -> Result<f64, NcbiDoubleError> {
         .map_err(|_| NcbiDoubleError::Unsupported)
 }
 
-/// Whether glibc's `strtod` reads all of `value` (the C locale), as `NStr::StringToDouble`
-/// with its default flags requires (the SEG locut and hicut, blast_args.cpp:405-406; an
-/// argument of type double also tries NCBI's own reader, `fDecimalPosixOrLocal`, which
-/// reads more, such as `1e`): NCBI fails the conversion of a value that it does not end at.
-/// The forms are a sign, then a decimal number (digits with one optional point, at least
-/// one digit, and an optional exponent with digits), a hexadecimal number (`0x`, hex digits
-/// with one optional point, at least one digit, and an optional binary exponent `p` with
-/// digits), `inf`, `infinity`, `nan` or `nan(` letters, digits and `_` `)`, ignoring case.
-///
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:1332-1343,1367-1374
-/// ```c
-///         n = strtod(begptr, &endptr);
-/// ...
-///     if ( !endptr  ||  endptr == begptr ) {
-///         S2N_CONVERT_ERROR(double, kEmptyStr, EINVAL, s_DiffPtr(endptr, begptr) + pos);
-///     }
-/// ...
-///     pos += s_DiffPtr(endptr, begptr);
-/// ...
-///     CHECK_ENDPTR(double);
-/// ```
-pub fn strtod_reads_whole(value: &str) -> bool {
-    let rest = value.strip_prefix(['+', '-']).unwrap_or(value).as_bytes();
-    let lower = rest.to_ascii_lowercase();
-    if lower == b"inf" || lower == b"infinity" || lower == b"nan" {
-        return true;
-    }
-    if let Some(inner) = lower
-        .strip_prefix(b"nan(")
-        .and_then(|r| r.strip_suffix(b")"))
-    {
-        return inner
-            .iter()
-            .all(|&b| b.is_ascii_alphanumeric() || b == b'_');
-    }
-    let (digits, exponent, hex): (fn(&u8) -> bool, u8, bool) = match lower.strip_prefix(b"0x") {
-        Some(_) => (u8::is_ascii_hexdigit, b'p', true),
-        None => (u8::is_ascii_digit, b'e', false),
-    };
-    let mantissa_and_exponent = if hex { &lower[2..] } else { &lower[..] };
-    let mut index = 0;
-    let mut seen_digit = false;
-    let mut seen_point = false;
-    while let Some(byte) = mantissa_and_exponent.get(index) {
-        if digits(byte) {
-            seen_digit = true;
-        } else if *byte == b'.' && !seen_point {
-            seen_point = true;
-        } else {
-            break;
-        }
-        index += 1;
-    }
-    if !seen_digit {
-        return false;
-    }
-    let tail = &mantissa_and_exponent[index..];
-    if tail.is_empty() {
-        return true;
-    }
-    match tail.split_first() {
-        Some((&mark, power)) if mark == exponent => {
-            let power = power
-                .strip_prefix(b"+")
-                .or_else(|| power.strip_prefix(b"-"))
-                .unwrap_or(power);
-            !power.is_empty() && power.iter().all(u8::is_ascii_digit)
-        }
-        _ => false,
-    }
-}
-
-/// An integer argument with a constraint: NCBI's constraint reads the value again with
-/// `NStr::StringToDouble`, which does not read a `0x` prefix without digits (the only form
-/// that `ncbi_integer` reads and `strtod` does not end at), so the value is illegal.
+/// An integer argument with a constraint: after the conversion, NCBI's constraint reads the
+/// value again with `NStr::StringToDouble` (default flags, `ncbi_str::string_to_double`), which
+/// does not read a `0x` prefix without digits (the only form that `ncbi_integer` reads and
+/// `strtod` does not end at), so the value is illegal.
 ///
 /// NCBI reference: c++/include/algo/blast/blastinput/blast_input_aux.hpp:110-113
 /// ```c
@@ -396,10 +310,17 @@ pub fn strtod_reads_whole(value: &str) -> bool {
 ///         }
 /// ```
 fn ncbi_constrained_integer(value: &str) -> Result<i32, String> {
-    if value.eq_ignore_ascii_case("0x") {
+    let n = ncbi_integer(value)?;
+    if !reads_as_double(value) {
         return Err("Illegal value".into());
     }
-    ncbi_integer(value)
+    Ok(n)
+}
+
+/// Whether the constraint's `NStr::StringToDouble(value)` (default flags) reads `value`
+/// (`ncbi_constrained_integer`).
+fn reads_as_double(value: &str) -> bool {
+    crate::ncbi_str::string_to_double(value.as_bytes()).is_ok()
 }
 
 /// An integer argument of `CArg_Integer` with NCBI's lower bound (`at_least`,
@@ -423,11 +344,12 @@ pub fn ncbi_integer_at_least(value: &str, at_least: i32) -> Result<i32, String> 
 ///     arg_desc.SetConstraint(kArgEffSearchSpace,
 ///                            new CArgAllowValuesGreaterThanOrEqual(0));
 /// ```
+/// The constraint reads the value as `ncbi_constrained_integer`'s does.
 pub fn nonnegative_ncbi_int8(value: &str) -> Result<i64, String> {
-    if value.eq_ignore_ascii_case("0x") {
+    let n = ncbi_int8(value)?;
+    if !reads_as_double(value) {
         return Err("Illegal value".into());
     }
-    let n = ncbi_int8(value)?;
     if n < 0 {
         return Err("expected an integer >= 0".into());
     }
@@ -508,11 +430,10 @@ pub fn report_count(value: &str) -> Result<usize, String> {
 /// ...
 /// DEFINE_CARGALLOW_SET_CLASS(CArgAllowIntegerSet, int, NStr::StringToInt);
 /// ```
-/// `NStr::StringToInt` in base 10 reads what `i32::from_str` reads (an optional sign and
-/// ASCII digits, `ncbi_integer`).
+/// `NStr::StringToInt(value)` (flags 0) is `ncbi_str::string_to_int`.
 pub fn blastn_template_length(value: &str) -> Result<u8, String> {
     ncbi_constrained_integer(value)?;
-    match value.parse::<i32>() {
+    match crate::ncbi_str::string_to_int(value.as_bytes(), 0) {
         Ok(n @ (16 | 18 | 21)) => Ok(n as u8),
         _ => Err("expected one of 16, 18, 21".into()),
     }
@@ -632,11 +553,37 @@ pub fn tblastx_query_coverage(value: &str) -> Result<f64, String> {
 // return (genetic_codes.find(val) != genetic_codes.end());
 // ```
 pub fn genetic_code(value: &str) -> Result<u8, String> {
-    let n = value.parse::<u8>().map_err(|_| "invalid genetic code")?;
+    let n = genetic_code_number(value).ok_or("invalid genetic code")?;
     if !matches!(n, 1..=6 | 9..=16 | 21..=31 | 33) {
         return Err("unsupported genetic code".into());
     }
     Ok(n)
+}
+
+/// The number of a genetic code argument as `CArgAllowGeneticCodeInteger` converts it
+/// (`NStr::StringToInt(value)`, flags 0: `ncbi_str::string_to_int`), when it is 0 to 255 and
+/// written without a minus sign; `None` for the other values, for which LOSAT's message says
+/// "invalid" (`genetic_code`, TBLASTN's `tblastn_genetic_code`) where it says "unsupported" for
+/// a number of that range outside NCBI's codes. NCBI refuses both alike.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:998-1007
+/// ```c++
+/// class CArgAllowGeneticCodeInteger : public CArgAllow
+/// {
+/// protected:
+///      /// Overloaded method from CArgAllow
+///      virtual bool Verify(const string& value) const {
+///          static int gcs[] = {1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33};
+///          static const set<int> genetic_codes(gcs, gcs+sizeof(gcs)/sizeof(*gcs));
+///          const int val = NStr::StringToInt(value);
+///          return (genetic_codes.find(val) != genetic_codes.end());
+///      }
+/// ```
+pub(crate) fn genetic_code_number(value: &str) -> Option<u8> {
+    match crate::ncbi_str::string_to_int(value.as_bytes(), 0) {
+        Ok(n) if !value.starts_with('-') => u8::try_from(n).ok(),
+        _ => None,
+    }
 }
 
 // NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-51
@@ -849,7 +796,7 @@ pub fn tblastx_threshold(value: &str) -> Result<f64, String> {
 }
 
 /// A Boolean argument (`CArg_Boolean`, read with `NStr::StringToBool`:
-/// `blastinput/ncbi_environment.rs` `ncbi_string_to_bool`).
+/// `ncbi_str::string_to_bool`).
 ///
 /// NCBI reference: c++/src/corelib/ncbiargs.cpp:489-497
 /// ```c
@@ -864,7 +811,7 @@ pub fn tblastx_threshold(value: &str) -> Result<f64, String> {
 ///     }
 /// ```
 pub fn ncbi_boolean(value: &str) -> Result<bool, String> {
-    crate::blastinput::ncbi_environment::ncbi_string_to_bool(value)
+    crate::ncbi_str::string_to_bool(value)
         .ok_or_else(|| format!("Argument cannot be converted: `{value}'"))
 }
 
@@ -1134,6 +1081,79 @@ mod tests {
         }
     }
 
+    // LOSAT's messages for the integers NCBI cannot convert (`s_StringToInt8`, then the range of
+    // `int` for `CArg_Integer`): a byte after `0x` that is not a hexadecimal digit is tested before
+    // the base 16 overflow.
+    #[test]
+    fn integer_arguments_name_what_failed() {
+        for value in ["0x10000000000000000g", "9223372036854775808", "abc", "0x5g"] {
+            assert_eq!(
+                ncbi_int8(value),
+                Err("expected an integer".to_string()),
+                "{value}"
+            );
+        }
+        assert_eq!(
+            ncbi_int8("0x8000000000000000"),
+            Err("Integer value is out of range".to_string())
+        );
+        for value in [
+            "2147483648",
+            "0x80000000",
+            "-2147483649",
+            "0x8000000000000000",
+        ] {
+            assert_eq!(
+                ncbi_integer(value),
+                Err("Integer value is out of range".to_string()),
+                "{value}"
+            );
+        }
+        assert_eq!(
+            ncbi_integer("9223372036854775808"),
+            Err("expected an integer".to_string())
+        );
+    }
+
+    // `CArgAllowGeneticCodeInteger::Verify` (`NStr::StringToInt(value)`, blast_args.cpp:998-1007):
+    // LOSAT says "invalid" for what is not a number of 0 to 255 written without a minus sign and
+    // "unsupported" for a number of that range that is not one of NCBI's codes.
+    #[test]
+    fn genetic_codes_are_read_as_ncbi_reads_them() {
+        for (value, expected) in [("1", 1), ("+5", 5), ("005", 5), ("33", 33), ("255", 255)] {
+            assert_eq!(genetic_code_number(value), Some(expected), "{value}");
+        }
+        for value in [
+            "-0",
+            "-5",
+            "256",
+            "2147483648",
+            "",
+            " 5",
+            "5 ",
+            "5.0",
+            "0x",
+            "0x5",
+        ] {
+            assert_eq!(genetic_code_number(value), None, "{value:?}");
+            assert_eq!(
+                genetic_code(value),
+                Err("invalid genetic code".to_string()),
+                "{value:?}"
+            );
+        }
+        for value in ["0", "7", "8", "17", "32", "34", "255"] {
+            assert_eq!(
+                genetic_code(value),
+                Err("unsupported genetic code".to_string()),
+                "{value}"
+            );
+        }
+        for (value, expected) in [("+5", 5), ("005", 5), ("11", 11), ("33", 33)] {
+            assert_eq!(genetic_code(value), Ok(expected), "{value}");
+        }
+    }
+
     #[test]
     fn reals_follow_ncbi_first_character_rule() {
         for (value, expected) in [("1e-5", 1e-5), (".5", 0.5), ("+2", 2.0), ("-0", 0.0)] {
@@ -1166,35 +1186,6 @@ mod tests {
             assert!(ncbi_double(value, "BLASTN")
                 .unwrap_err()
                 .contains("not supported by LOSAT's BLASTN"));
-        }
-    }
-
-    #[test]
-    fn strtod_reads_whole_follows_glibc() {
-        for value in [
-            "1",
-            "+1",
-            "-.5",
-            "5.",
-            "1e5",
-            "1E-5",
-            "0x10",
-            "0X1p3",
-            "0x.8p-1",
-            "0x1.",
-            "inf",
-            "+INFINITY",
-            "-nan",
-            "nan(x_1)",
-            "1e400",
-        ] {
-            assert!(strtod_reads_whole(value), "{value}");
-        }
-        for value in [
-            "1e", "1e+", "2.5x", "2,2", ".", "+.", ".e1", "0x", "0x.", "0x1p", "1_0", "--5",
-            "2.5.5", "nan(", "nan(-)", "infx", "",
-        ] {
-            assert!(!strtod_reads_whole(value), "{value}");
         }
     }
 }

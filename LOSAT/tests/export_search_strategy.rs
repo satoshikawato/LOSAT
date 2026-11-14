@@ -1,5 +1,6 @@
-//! `-export_search_strategy FILE` of blastn, blastp, blastx, tblastn and tblastx against the bytes
-//! that NCBI BLAST+ 2.17.0 `-num_threads 1` writes (line RG, item F1): the strategy file (one
+//! `-export_search_strategy FILE` of blastn, blastp, blastx, tblastn and tblastx (line RG, item F1),
+//! and of psiblast with a FASTA query, rpsblast and rpstblastn (item F1b-1), against the bytes
+//! that NCBI BLAST+ 2.17.0 `-num_threads 1` writes: the strategy file (one
 //! `Blast4-request` per query batch, written before the batch's search), the standard output, the
 //! standard error and the exit status, with `-subject` and `-db`, several batches (`BATCH_SIZE`;
 //! from the second request on, `EffectiveSearchSpace` is the batch before's), `-searchsp`,
@@ -11,15 +12,22 @@
 //! errors (the file is made after the argument parser and before the other options are read: an
 //! error after it leaves the file empty, the parser's errors leave an existing file alone).
 //! The first batch's request alone when NCBI fails to format that batch in BLAST XML (a matrix
-//! name its XML data does not know). The rows that LOSAT refuses (DECISIONS 15, 21 and 26 of line
-//! RG; tblastn `-in_pssm`, item F1b) check the refusal. blastp's query blocks and the `0` side of
+//! name its XML data does not know). psiblast's request of each query (before its rounds, with the
+//! search space of the query before; `Web_StepNumber`), rpsblast's and rpstblastn's (the profile
+//! database's length and `.aux` costs in the requests after the first; `-mt_mode 1` at 4 and 8
+//! threads writes NCBI's `-num_threads 1` file, DECISIONS F1b-2). The rows that LOSAT refuses
+//! (DECISIONS 15, 21 and 26 of line RG; `-in_pssm` of tblastn and psiblast, item F1b-2) check the
+//! refusal. blastp's query blocks and the `0` side of
 //! the default-on switches that the strategy's paths cross write the same files.
 //!
 //! The cases are the rows of `tests/fixtures/strategy/cases.tsv` (its header says what the
 //! columns mean); the frozen bytes are `tests/fixtures/strategy/<name>.ss`, `.out` and `.err`,
 //! written by NCBI's program run from a copy of `LOSAT/` (the RG-F1 freeze script
-//! `remaining-gaps-20261112/F/f1/freeze_strategy.py` of the line's records, on ws `env_blast`
-//! 2.17.0). Every row runs at 1, 4 and 8 threads.
+//! `remaining-gaps-20261112/F/f1/freeze_strategy.py` of the line's records, NCBI BLAST+ 2.17.0).
+//! Every row runs at 1, 4 and 8 threads. An env value `{rps:NAMES[-EXT]}` is a folder of the
+//! run's own with the profile databases NAMES (`+`-separated) of `tests/db_search/rps` inflated,
+//! without their files of extension EXT, and the files NAMES with a `/` copied (`rps_databases`);
+//! NCBI's messages name it `{RPS}`.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -90,7 +98,81 @@ fn frozen(name: &str, ext: &str) -> Option<Vec<u8>> {
 
 /// One run of the case from `LOSAT/` in a clean environment plus the case's and `extra_env`;
 /// `{ss}` is `ss`. Standard input is empty.
+/// NCBI's messages were frozen on Linux. On Windows LOSAT writes the platform's separators, as
+/// NCBI's Windows build does: `\` in paths and `;` between the directories of a search path
+/// (`in search path [{ENGINE};;]` for Linux's `[{ENGINE}::]`).
+fn unix_separators(text: &str) -> String {
+    let text = text.replace('\\', "/");
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    const MARK: &str = "in search path [";
+    while let Some(at) = rest.find(MARK) {
+        let (head, tail) = rest.split_at(at + MARK.len());
+        out.push_str(head);
+        let end = tail.find(']').unwrap_or(tail.len());
+        out.push_str(&tail[..end].replace(';', ":"));
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `{rps:NAMES[-EXT]}`: the profile databases NAMES (separated by `+`) of `tests/db_search/rps`,
+/// their `NAME.*.gz` files inflated into `dir/rpsdb` without those of extension EXT (`-aux`: no
+/// `.aux` file); a NAME with a `/` is a file of `LOSAT/` copied there (an alias file). The
+/// folder's path.
+fn rps_databases(spec: &str, dir: &Path) -> PathBuf {
+    use std::io::Read;
+    let (names, drop) = match spec.split_once('-') {
+        Some((names, extension)) => (names, Some(format!(".{extension}"))),
+        None => (spec, None),
+    };
+    let target = dir.join("rpsdb");
+    std::fs::create_dir_all(&target).unwrap();
+    for file in names.split('+').filter(|name| name.contains('/')) {
+        let file = Path::new(file);
+        std::fs::copy(engine().join(file), target.join(file.file_name().unwrap())).unwrap();
+    }
+    let source = engine().join("tests/db_search/rps");
+    for entry in std::fs::read_dir(&source).unwrap() {
+        let file = entry.unwrap().file_name().to_string_lossy().into_owned();
+        let Some(stem) = file.strip_suffix(".gz") else {
+            continue;
+        };
+        if !names
+            .split('+')
+            .any(|name| stem.starts_with(&format!("{name}.")))
+            || drop
+                .as_deref()
+                .is_some_and(|extension| stem.ends_with(extension))
+        {
+            continue;
+        }
+        let mut bytes = Vec::new();
+        flate2::read::GzDecoder::new(std::fs::File::open(source.join(&file)).unwrap())
+            .read_to_end(&mut bytes)
+            .unwrap();
+        std::fs::write(target.join(stem), bytes).unwrap();
+    }
+    target
+}
+
+/// The value of an env cell in the run's folder `dir` (`rps_databases`).
+fn env_value(value: &str, dir: &Path) -> String {
+    match value
+        .strip_prefix("{rps:")
+        .and_then(|spec| spec.strip_suffix('}'))
+    {
+        Some(spec) => rps_databases(spec, dir)
+            .to_str()
+            .expect("UTF-8 path")
+            .to_string(),
+        None => value.to_string(),
+    }
+}
+
 fn run(case: &Case, ss: &Path, extra_env: &[(&str, &str)], threads: &str) -> Output {
+    let dir = ss.parent().expect("the run's folder");
     let ss = ss.to_str().expect("UTF-8 path");
     let mut command = Command::new(BIN);
     command
@@ -110,7 +192,7 @@ fn run(case: &Case, ss: &Path, extra_env: &[(&str, &str)], threads: &str) -> Out
         }
     }
     for (name, value) in &case.env {
-        command.env(name, value);
+        command.env(name, env_value(value, dir));
     }
     for (name, value) in extra_env {
         command.env(name, value);
@@ -175,7 +257,19 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str, label: &str) {
                     crate::outfmt11_blastx::first_difference(&output.stdout, &want_out)
                 );
                 let engine = engine();
+                let rps = dir.join("rpsdb");
+                let mut stderr = stderr;
+                for form in [std::fs::canonicalize(&rps).unwrap_or_default(), rps] {
+                    if !form.as_os_str().is_empty() {
+                        stderr = stderr.replace(form.to_str().unwrap(), "{RPS}");
+                    }
+                }
                 let stderr = stderr.replace(engine.to_str().unwrap(), "{ENGINE}");
+                let stderr = if cfg!(windows) {
+                    unix_separators(&stderr)
+                } else {
+                    stderr
+                };
                 let want_err = frozen(&case.name, "err").unwrap_or_default();
                 assert_eq!(
                     stderr,
@@ -283,45 +377,63 @@ fn switches_off_write_the_same_strategy_files() {
     }
 }
 
-/// blastx refuses a query that is not a regular file (a pipe) with the strategy, as with outfmt 11
-/// (DECISIONS 26 of line RG): the titles of the whole input are read before the first batch.
+/// blastx and rpstblastn (BLASTX's driver) refuse a query that is not a regular file (a pipe) with
+/// the strategy, as with outfmt 11 (DECISIONS 26 of line RG): the titles of the whole input are
+/// read before the first batch. The refusal names the program (review 3 of F1b-1, R3-4).
 #[test]
-fn blastx_refuses_a_piped_query() {
+fn a_piped_query_is_refused() {
     use std::io::Write;
     let dir = std::env::temp_dir().join(format!("losat_strategy_pipe_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let ss = dir.join("s.ss");
-    let query = std::fs::read(engine().join("tests/fasta/outfmt11/arch_bx_q.fna")).unwrap();
-    let mut child = Command::new(BIN)
-        .current_dir(engine())
-        .args([
+    let rps = rps_databases("rps_mini", &dir);
+    let runs: [(&str, &str, &[&str], Option<&Path>); 2] = [
+        (
             "blastx",
-            "-query",
-            "-",
-            "-subject",
-            "tests/fasta/outfmt11/arch_bx_s.faa",
-        ])
-        .args([
-            "-outfmt",
-            "6",
-            "-export_search_strategy",
-            ss.to_str().unwrap(),
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("run losat");
-    // The refusal may come before the whole input is read.
-    let _ = child.stdin.take().unwrap().write_all(&query);
-    let output = child.wait_with_output().unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(1), "{stderr}");
-    assert!(output.stdout.is_empty());
-    assert!(
-        stderr.contains("unsupported BLASTX query input for -export_search_strategy"),
-        "{stderr}"
-    );
+            "tests/fasta/outfmt11/arch_bx_q.fna",
+            &["-subject", "tests/fasta/outfmt11/arch_bx_s.faa"],
+            None,
+        ),
+        (
+            "rpstblastn",
+            "tests/fasta/rps/nq4.fna",
+            &["-db", "rps_mini", "-comp_based_stats", "0"],
+            Some(&rps),
+        ),
+    ];
+    for (program, query, target, blastdb) in runs {
+        let query = std::fs::read(engine().join(query)).unwrap();
+        let mut command = Command::new(BIN);
+        command
+            .current_dir(engine())
+            .args([program, "-query", "-"])
+            .args(target)
+            .args([
+                "-outfmt",
+                "6",
+                "-export_search_strategy",
+                ss.to_str().unwrap(),
+            ])
+            .env_remove("BLASTDB")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(blastdb) = blastdb {
+            command.env("BLASTDB", blastdb);
+        }
+        let mut child = command.spawn().expect("run losat");
+        // The refusal may come before the whole input is read.
+        let _ = child.stdin.take().unwrap().write_all(&query);
+        let output = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{program}: {stderr}");
+        assert!(output.stdout.is_empty(), "{program}");
+        let expected = format!(
+            "unsupported {} query input for -export_search_strategy",
+            program.to_uppercase()
+        );
+        assert!(stderr.contains(&expected), "{program}: {stderr}");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

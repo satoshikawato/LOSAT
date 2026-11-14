@@ -2,6 +2,7 @@
 // sorting and filtering with engine values, the limits and the orientation, the
 // verification badge, and the ResultsBrowser's selection by HSP identity.
 import { describe, expect, it } from 'vitest';
+import type { HspRecord, ProgramDescription } from 'losat/ports';
 import type { AppState, RunView } from '../../src/application/coordinator';
 import { ResultsBrowser, type ResultsDeps } from '../../src/application/results';
 import { Store } from '../../src/application/store';
@@ -28,7 +29,6 @@ import {
   type VerificationTable,
 } from '../../src/domain/verification';
 import type { RunSnapshot } from '../../src/domain/run';
-import type { HspRecord, ProgramDescription } from '../../src/ports/engine';
 
 // --- a small run: two queries (the second without hits), three subjects ----------------------
 

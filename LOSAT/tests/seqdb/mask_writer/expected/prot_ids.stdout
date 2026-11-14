@@ -1,0 +1,13 @@
+
+
+Building a new DB, current time: <T>
+New DB name:   <OUT>
+New DB title:  mask writer fixture
+Sequence type: Protein
+Keep MBits: T
+Maximum file size: 3000000000B
+Mask file: seg.asnt
+Mask file: seg_o.asnt
+Adding sequences from FASTA; added 5 sequences in <S> seconds.
+
+

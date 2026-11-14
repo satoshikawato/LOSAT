@@ -1,3 +1,4 @@
+import type { SequenceKind } from 'losat/domain';
 // Geometry of the dot plot (S13b; docs/web/ncbi_ui_mapping.md, "Dot Plot"), after the Owner's
 // blast2dotplot.py: X is the query and Y the subject, the origin at the top left with subject
 // positions growing downward, and the same scale on both axes. Positions run from 0 to the
@@ -6,7 +7,6 @@
 // the whole plot, so that the scale stays the same on both axes at every zoom. Where one axis is
 // protein and the other nucleotide (TBLASTN, BLASTX), a residue counts as 3 letters for the
 // proportions only (S13b decision 26), so that the HSPs run at 45°; positions stay the records'.
-import type { SequenceKind } from './programs';
 
 /** The lengths of the query (x) and the subject (y) records, in their letters. */
 export interface Extent {

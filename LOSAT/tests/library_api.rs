@@ -1,4 +1,4 @@
-//! The library API (`LOSAT::api`, docs/losat_library_surface_plan.md §6): a search of records in
+//! The library API (`losat::api`, docs/losat_library_surface_plan.md §6): a search of records in
 //! memory writes the bytes of the command line, one report per `-outfmt`, with the command line's
 //! warnings; the typed values are the columns of `-outfmt 6` and the `Statistics` of outfmt 5; two
 //! searches at once give the reports of each alone; the example writes nothing to standard error;
@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::library_examples::example_binary;
 
-use LOSAT::api::{
+use losat::api::{
     describe, read_fasta, read_inputs, run, run_batches, run_blastdbcmd, run_collect,
     run_dustmasker, run_makeblastdb, run_to_file, validate, Error, FastaRecord, HspRecord, Inputs,
     Outcome, Program, Role, Strand, ValueKind, API_OWNED,
@@ -1439,7 +1439,7 @@ fn engine_tests(name: &str) -> String {
 
 impl DatabaseCase {
     /// The query file's records and the search, as `-db` runs them.
-    fn read(&self) -> (Vec<u8>, Vec<FastaRecord>, LOSAT::api::Search) {
+    fn read(&self) -> (Vec<u8>, Vec<FastaRecord>, losat::api::Search) {
         let bytes = std::fs::read(engine_tests(self.query)).unwrap();
         let search = validate(self.program, self.options).unwrap();
         let (records, none) = read_inputs(&search, &bytes, b"").unwrap();
@@ -1610,6 +1610,88 @@ fn a_database_fails_as_on_the_command_line() {
     let outcome = run_collect(&search, Inputs::database(&[], &db), &["6"]).unwrap();
     assert_eq!(outcome.diagnostics, b"Warning: [blastn] Query is Empty!\n");
     assert!(outcome.reports[0].bytes.is_empty());
+}
+
+/// `run_makeblastdb` takes the masking options of the command line (`-mask_data`, `-mask_id`,
+/// `-mask_desc`): the database it writes has the mask column of the command line's, read back
+/// by `blastdbcmd` through the library and through the binary alike.
+#[test]
+fn a_masked_database_made_through_the_library_equals_the_command_lines() {
+    let seqdb = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb");
+    let fasta = seqdb.join("mask_nucl.fna");
+    let masks = seqdb.join("mask_writer/dust.asnt");
+    let (fasta, masks) = (fasta.to_str().unwrap(), masks.to_str().unwrap());
+    let directory = temp_path("masked");
+    std::fs::create_dir_all(&directory).unwrap();
+    let library = directory.join("library");
+    let binary = directory.join("binary");
+    let words = |name: &Path| -> Vec<String> {
+        [
+            "-in",
+            fasta,
+            "-dbtype",
+            "nucl",
+            "-title",
+            "masked",
+            "-out",
+            name.to_str().unwrap(),
+            "-mask_data",
+            masks,
+            "-mask_id",
+            "dust1",
+            "-mask_desc",
+            "the masks of dustmasker",
+        ]
+        .map(str::to_string)
+        .to_vec()
+    };
+    let argv = words(&library);
+    let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
+    let (mut log, mut warnings) = (Vec::new(), Vec::new());
+    run_makeblastdb(&argv, &mut std::io::empty(), &mut log, &mut warnings).unwrap();
+    assert!(
+        String::from_utf8_lossy(&log).contains(&format!("Mask file: {masks}\n")),
+        "{}",
+        String::from_utf8_lossy(&log)
+    );
+    assert!(warnings.is_empty());
+    let cli = command(env!("CARGO_BIN_EXE_losat"))
+        .arg("makeblastdb")
+        .args(words(&binary))
+        .output()
+        .unwrap();
+    assert!(
+        cli.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cli.stderr)
+    );
+    assert!(cli.stderr.is_empty());
+    // The algorithm of `-mask_id` is the first free id from 100 on.
+    for name in [&library, &binary] {
+        let name = name.to_str().unwrap();
+        let words = ["-db", name, "-entry", "all", "-outfmt", "%o %m100"];
+        let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
+        run_blastdbcmd(&words, &mut std::io::empty(), &mut output, &mut diagnostics).unwrap();
+        let text = String::from_utf8_lossy(&output).into_owned();
+        assert!(text.starts_with("0 199-281;\n"), "{text}");
+        assert!(diagnostics.is_empty());
+        let cli = command(env!("CARGO_BIN_EXE_losat"))
+            .arg("blastdbcmd")
+            .args(words)
+            .output()
+            .unwrap();
+        assert_eq!(output, cli.stdout);
+    }
+    // The dependencies of the options are the parser's.
+    let error = run_makeblastdb(
+        &["-dbtype", "nucl", "-mask_id", "x"],
+        &mut std::io::empty(),
+        &mut std::io::sink(),
+        &mut std::io::sink(),
+    )
+    .unwrap_err();
+    assert!(matches!(error, Error::Argv(_)), "{error}");
+    assert!(error.message().contains("mask_data"), "{error}");
 }
 
 #[test]

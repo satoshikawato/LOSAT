@@ -727,6 +727,11 @@ impl BlastnDatabase {
         option.resolve(&self.db, &self.name, PROGRAM, warning)
     }
 
+    /// LOSAT's refusal of mixed accession tables (`shared::check_accession_tables`).
+    pub(super) fn check_accession_tables(&self) -> Result<()> {
+        shared::check_accession_tables(&self.db, PROGRAM)
+    }
+
     /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`).
     pub(super) fn check_mask_limits(&self, mask: &ResolvedMask) -> Result<()> {
         mask.check_losat_limits(&self.db, PROGRAM)
@@ -780,7 +785,8 @@ impl BlastnDatabase {
         masks: &mut MaskBlock,
         ranges: &mut Vec<(i32, i32)>,
     ) -> Result<()> {
-        let stored = self.stored_masks(block, ordinal, algo_id, masks)?;
+        let stored =
+            self.stored_masks(block, ordinal, algo_id, masks, shared::search_read_error_of)?;
         complement_soft_ranges(stored, length, ranges);
         Ok(())
     }
@@ -811,7 +817,7 @@ impl BlastnDatabase {
             );
         };
         Ok(self
-            .stored_masks(block, ordinal, algo_id, masks)?
+            .stored_masks(block, ordinal, algo_id, masks, shared::database_error_of)?
             .iter()
             .map(|&(start, end)| {
                 crate::utils::dust::MaskedInterval::new(start as usize, end as usize)
@@ -821,7 +827,9 @@ impl BlastnDatabase {
 
     /// The stored masks of database sequence `ordinal` of the block `block` for the algorithm
     /// `algo_id` (`SeqDb::read_mask_block`, `MaskBlock::ranges`), with the reader's errors as
-    /// the command line reports them. A volume without the algorithm is a refusal that the search
+    /// `error` reports them: the preliminary search's (`shared::search_read_error_of`, as its
+    /// reads of the sequences: NCBI reads the masks in the search's `GetSequence`), the reports'
+    /// (`shared::database_error_of`). A volume without the algorithm is a refusal that the search
     /// made before it started (`SeqDb::check_search_masks`).
     fn stored_masks<'m>(
         &self,
@@ -829,6 +837,7 @@ impl BlastnDatabase {
         ordinal: u32,
         algo_id: i32,
         masks: &'m mut MaskBlock,
+        error: fn(&SeqDbError, &str) -> anyhow::Error,
     ) -> Result<&'m [(u32, u32)]> {
         self.db.read_mask_block(block, algo_id, masks);
         match masks.ranges(block.first + (ordinal - block.first_ordinal)) {
@@ -836,7 +845,7 @@ impl BlastnDatabase {
             Ok(BlockMasks::AlgorithmNotInVolume) => Err(anyhow::anyhow!(
                 "LOSAT internal error: the volume of sequence {ordinal} has no mask algorithm {algo_id}"
             )),
-            Err(error) => Err(shared::database_error_of(error.error(), PROGRAM)),
+            Err(read) => Err(error(read.error(), PROGRAM)),
         }
     }
 }

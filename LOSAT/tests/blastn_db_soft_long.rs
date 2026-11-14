@@ -13,6 +13,11 @@
 //!
 //! The run writes about 7 MB into a temporary directory and takes a few seconds (3.5 s for the
 //! eight searches with the test profile on one local machine).
+//!
+//! The second test (review 2 T1) searches a database of two volumes of 400 sequences of about
+//! 1,000 letters, most with masks (`write_volume_inputs`), at 1, 4 and 8 threads: the preliminary
+//! stage reads it in many blocks, split across the workers, and reads each block's masks once
+//! (`SeqDb::read_mask_block`); the rows are NCBI's (`dbmask_vols.<task>.6.out`).
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -199,6 +204,160 @@ fn chunked_database_sequences_scan_their_soft_ranges_as_ncbi() {
         }
     }
     if std::env::var_os("DBMASK_LONG_DIR").is_none() {
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    assert!(failed.is_empty(), "rows differ from NCBI's: {failed:?}");
+}
+
+/// The sequences of the two-volume database, their length range and the volume size limit
+/// (`-max_file_sz`) that cuts them into two volumes.
+const VOLUME_SEQUENCES: usize = 400;
+const VOLUME_MAX_FILE_SZ: &str = "64000";
+
+/// Writes `vols.fna` (400 sequences of 900 to 1,099 letters), `vols_masks.asnt` (up to three
+/// masks of 20 to 139 letters per sequence, a quarter of the sequences without any; a mask may
+/// overlap the one before it) and `vq.fna` (24 queries over sequences of both volumes, with one
+/// letter in 40 changed: copies of a sequence's first mask with 10 letters on each side, which
+/// the masks keep from seeding, and of 400 letters) into `dir`.
+fn write_volume_inputs(dir: &Path) {
+    let mut prng = Prng(20_261_115);
+    let sequences: Vec<Vec<u8>> = (0..VOLUME_SEQUENCES)
+        .map(|_| {
+            let length = 900 + (prng.next() % 200) as usize;
+            (0..length).map(|_| prng.letter()).collect()
+        })
+        .collect();
+    let mut fasta = String::new();
+    for (i, sequence) in sequences.iter().enumerate() {
+        writeln!(fasta, ">v{} volume block test", i + 1).unwrap();
+        for line in sequence.chunks(80) {
+            fasta.push_str(std::str::from_utf8(line).unwrap());
+            fasta.push('\n');
+        }
+    }
+    std::fs::write(dir.join("vols.fna"), fasta).unwrap();
+    let mut locations = Vec::new();
+    let mut first_masks = vec![None; sequences.len()];
+    for (i, sequence) in sequences.iter().enumerate() {
+        let count = (prng.next() % 4) as usize;
+        let mut items = Vec::new();
+        let mut from = 50 + (prng.next() % 250) as usize;
+        for _ in 0..count {
+            let to = from + 19 + (prng.next() % 120) as usize;
+            if to >= sequence.len() {
+                break;
+            }
+            first_masks[i].get_or_insert((from, to));
+            items.push(format!(
+                "        {{\n          from {from},\n          to {to},\n          id local id {}\n        }}",
+                i + 1
+            ));
+            // The next mask starts up to 20 letters inside this one, or after it.
+            from = (to + (prng.next() % 260) as usize).saturating_sub(20);
+        }
+        if !items.is_empty() {
+            locations.push(format!(
+                "      packed-int {{\n{}\n      }}",
+                items.join(",\n")
+            ));
+        }
+    }
+    let mut masks = String::from(
+        "Blast-db-mask-info ::= {\n  algo-id 2,\n  algo-program dust,\n  algo-options \"two \
+         volumes\",\n  masks {\n    masks {\n",
+    );
+    masks.push_str(&locations.join(",\n"));
+    masks.push_str("\n    },\n    more FALSE\n  }\n}\n");
+    std::fs::write(dir.join("vols_masks.asnt"), masks).unwrap();
+    let mut queries = String::new();
+    for n in 0..24 {
+        let sequence = n * (VOLUME_SEQUENCES / 24) + 3;
+        let (from, end) = match first_masks[sequence] {
+            Some((from, to)) if n % 3 != 2 => (from - 10, to + 11),
+            _ => {
+                let from = (prng.next() % 400) as usize;
+                (from, from + 400)
+            }
+        };
+        let mut letters = sequences[sequence][from..end].to_vec();
+        for letter in letters.iter_mut() {
+            if prng.next().is_multiple_of(40) {
+                *letter = prng.letter();
+            }
+        }
+        writeln!(queries, ">vq{n} v{} {from}", sequence + 1).unwrap();
+        queries.push_str(std::str::from_utf8(&letters).unwrap());
+        queries.push('\n');
+    }
+    std::fs::write(dir.join("vq.fna"), queries).unwrap();
+}
+
+#[test]
+fn masked_searches_of_two_volumes_in_many_blocks_equal_ncbi_at_any_thread_count() {
+    let dir = match std::env::var_os("DBMASK_VOLS_DIR") {
+        Some(dir) => PathBuf::from(dir),
+        None => {
+            std::env::temp_dir().join(format!("losat-blastn-db-soft-vols-{}", std::process::id()))
+        }
+    };
+    std::fs::create_dir_all(&dir).unwrap();
+    write_volume_inputs(&dir);
+    let db = dir.join("vols").to_str().unwrap().to_string();
+    let output = losat()
+        .arg("makeblastdb")
+        .arg("-in")
+        .arg(dir.join("vols.fna"))
+        .args([
+            "-dbtype",
+            "nucl",
+            "-out",
+            &db,
+            "-max_file_sz",
+            VOLUME_MAX_FILE_SZ,
+        ])
+        .arg("-mask_data")
+        .arg(dir.join("vols_masks.asnt"))
+        .output()
+        .expect("run losat makeblastdb");
+    assert!(
+        output.status.success(),
+        "makeblastdb: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        dir.join("vols.01.nsq").exists() && !dir.join("vols.02.nsq").exists(),
+        "the database has two volumes"
+    );
+    let mut failed = Vec::new();
+    for task in ["megablast", "dc-megablast", "blastn", "blastn-short"] {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/db_search_long")
+            .join(format!("dbmask_vols.{task}.6.out"));
+        let expected =
+            std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        for threads in [1, 4, 8] {
+            let mut search = losat();
+            search
+                .arg("blastn")
+                .arg("-query")
+                .arg(dir.join("vq.fna"))
+                .args(["-db", &db, "-db_soft_mask", "11", "-task", task])
+                .args(["-outfmt", "6", "-num_threads", &threads.to_string()]);
+            if task == "blastn-short" {
+                search.args(["-evalue", "1e-5"]);
+            }
+            let output = search.output().expect("run losat blastn");
+            assert!(
+                output.status.success() && output.stderr.is_empty(),
+                "{task} at {threads} threads: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            if output.stdout != expected {
+                failed.push(format!("{task} at {threads} threads"));
+            }
+        }
+    }
+    if std::env::var_os("DBMASK_VOLS_DIR").is_none() {
         std::fs::remove_dir_all(&dir).unwrap();
     }
     assert!(failed.is_empty(), "rows differ from NCBI's: {failed:?}");

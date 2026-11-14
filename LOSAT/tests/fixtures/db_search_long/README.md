@@ -13,3 +13,20 @@ blastn -query lq.fna -db long -db_soft_mask 11 -task dc-megablast -outfmt 6 -num
 blastn -query lq.fna -db long -db_soft_mask 11 -task blastn -outfmt 6 -num_threads 1 > dbmask_long.blastn.6.out
 blastn -query lq.fna -db long -db_soft_mask 11 -task blastn-short -evalue 1e-5 -outfmt 6 -num_threads 1 > dbmask_long.blastn-short.6.out
 ```
+
+`dbmask_vols.<task>.6.out`: NCBI BLAST+ 2.17.0's rows of the second test of `tests/blastn_db_soft_long.rs` (review 2 T1):
+`-db_soft_mask` on a database of two volumes (`-max_file_sz 64000`) of 400 sequences of about 1,000 letters, most
+with up to three masks (some overlapping the one before), searched in many blocks at 1, 4 and 8 threads. The test
+writes `vols.fna`, `vols_masks.asnt` and `vq.fna`; `DBMASK_VOLS_DIR=<dir>` keeps them. NCBI's own makeblastdb gives the
+same `.nsq`, `.nhr`, `.nab` and `.nac` files (the dates and the title differ). Frozen with:
+
+```
+makeblastdb -in vols.fna -dbtype nucl -out vols -max_file_sz 64000 -mask_data vols_masks.asnt
+blastn -query vq.fna -db vols -db_soft_mask 11 -task megablast -outfmt 6 -num_threads 1 > dbmask_vols.megablast.6.out
+blastn -query vq.fna -db vols -db_soft_mask 11 -task dc-megablast -outfmt 6 -num_threads 1 > dbmask_vols.dc-megablast.6.out
+blastn -query vq.fna -db vols -db_soft_mask 11 -task blastn -outfmt 6 -num_threads 1 > dbmask_vols.blastn.6.out
+blastn -query vq.fna -db vols -db_soft_mask 11 -task blastn-short -evalue 1e-5 -outfmt 6 -num_threads 1 > dbmask_vols.blastn-short.6.out
+```
+
+NCBI's rows at `-num_threads 8` are the same. Without `-db_soft_mask` NCBI finds 24, 24, 115 and 24 rows (masked: 14, 14,
+94 and 24): the queries over a first mask with 10 letters on each side lose their seeds.

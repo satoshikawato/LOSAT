@@ -1030,6 +1030,9 @@ fn run_inner(
     // bl2seq report, and a `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert stops it before each
     // batch's report; LOSAT refuses both before the search, where an empty query has already
     // ended the run as NCBI ends it (`Query is Empty!`, exit status 0).
+    if let Some(database) = &database {
+        database.check_accession_tables()?;
+    }
     app::check_search_environment(
         program.upper,
         database.is_none(),

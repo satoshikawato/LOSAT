@@ -193,6 +193,10 @@ pub enum SeqDbError {
     },
     /// A file is not a valid database file.
     Format { path: PathBuf, message: String },
+    /// A file fails one of the integrity checks of NCBI's reader (`SEQDB_FILE_ASSERT`, a
+    /// `CSeqDBException` whose text names a line of NCBI's source): LOSAT's words, and NCBI's
+    /// text where NCBI's search replaces it ([`SeqDbError::ncbi_search_message`]).
+    Integrity { path: PathBuf, message: String },
     /// A valid database that needs something LOSAT does not read.
     Unsupported { path: PathBuf, message: String },
     /// A request outside the database (ordinal id, block range).
@@ -211,7 +215,9 @@ impl std::fmt::Display for SeqDbError {
             SeqDbError::Open { path, source } | SeqDbError::Io { path, source } => {
                 write!(f, "{}: {}", path.display(), source)
             }
-            SeqDbError::Format { path, message } => write!(f, "{}: {}", path.display(), message),
+            SeqDbError::Format { path, message } | SeqDbError::Integrity { path, message } => {
+                write!(f, "{}: {}", path.display(), message)
+            }
             SeqDbError::Unsupported { path, message } => {
                 write!(f, "{}: unsupported database: {}", path.display(), message)
             }
@@ -362,6 +368,7 @@ impl SeqDbError {
                 }
             }
             SeqDbError::Io { .. }
+            | SeqDbError::Integrity { .. }
             | SeqDbError::Unsupported { .. }
             | SeqDbError::Range(_)
             | SeqDbError::Ncbi(_) => None,
@@ -413,13 +420,18 @@ impl SeqDbError {
     // reports a `CBlastException` (`BLAST engine error: <text>`, exit status
     // `BLAST_ENGINE_ERROR`, 3; blast_app_util.hpp:155, 216-219). A volume
     // whose sequence file is missing is reported this way, because NCBI opens
-    // that file when the search reads its first sequence.
+    // that file when the search reads its first sequence, and so is a failed
+    // integrity check of a file the search reads (`SeqDbError::Integrity`: the
+    // mask column's offsets and blobs, seqsrc_seqdb.cpp:318-321).
     /// The text NCBI BLAST+ gives when this error is raised while the search
-    /// reads the sequences of the database: a search program prints
-    /// `BLAST engine error: <text>` and ends with exit status 3. `None`: the
-    /// error is LOSAT's ([`Self::ncbi_message`] is `None` too).
+    /// reads the sequences (or their masks) of the database: a search program
+    /// prints `BLAST engine error: <text>` and ends with exit status 3. `None`:
+    /// the error is LOSAT's ([`Self::ncbi_message`] is `None` too).
     pub fn ncbi_search_message(&self) -> Option<&'static str> {
         const TOO_MANY: &str = "Too many open files, please raise the open file limit";
+        if let SeqDbError::Integrity { .. } = self {
+            return Some("Database memory map file error");
+        }
         match self.ncbi_message()? {
             message if message == TOO_MANY => Some(TOO_MANY),
             _ => Some("Database memory map file error"),
@@ -686,7 +698,7 @@ impl SeqDb {
     /// it from one that holds only the ordinal ids.
     ///
     /// Column files (the mask data of `makeblastdb -mask_data`, user columns) are not read
-    /// when the database is opened: [`SeqDb::mask_algorithms`] and [`SeqDb::mask_ranges`]
+    /// when the database is opened: [`SeqDb::mask_algorithms`] and [`SeqDb::mask_ranges_at`]
     /// (`losat blastdbcmd`) open them on first use, as NCBI does, and LOSAT's searches never
     /// ask for them (`Volume::open_as`).
     pub fn open_in(name: &str, seqtype: SeqType, path: &SearchPath) -> Result<Self, SeqDbError> {

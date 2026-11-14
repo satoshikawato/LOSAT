@@ -1355,3 +1355,18 @@ makeblastdb -in subj.fna -dbtype nucl -out edge2 -title "edge masks 2" -blastdb_
 ```
 
 `edge1` has the algorithms 11 to 15 in that order, `edge2` 11 to 16.
+
+Review 2 of M4a-2a added damaged copies of `a5` and alias files over `p5 zz5`:
+
+```
+mkdir dmg dmg3 && cp a5.* dmg/ && cp a5.* dmg3/
+truncate -s 360 dmg/a5.nac dmg/a5.nab
+for f in dmg3/a5.nac dmg3/a5.nab; do printf '\x00\x00\x10\x00' | dd of=$f bs=1 seek=8 conv=notrunc; done
+```
+
+`dmg/a5` has mask data files cut inside the blob of `s1` (a range past the end of the data file: NCBI's
+`SEQDB_FILE_ASSERT`), `dmg3/a5` a first blob whose algorithm 11 states 4096 pairs (`CBlastDbBlob::x_ReadRaw: hit end
+of data`); NCBI's search reports both as `BLAST engine error: Database memory map file error`, exit status 3. The alias
+files `zr_t2.nal`, `zr_p5.nal` and `zr_t1.nal` give `DBLIST p5 zz5` with the OID ranges 7-7 (`t2` alone, no mask
+data), 3-5 (`s3`-`s5`) and 1-6 (`s1`-`s5` and `t1`, which has mask data that `zz5`'s volume reads without the
+algorithm 11 of the list): NCBI reads masks of `zz5` only in the last.

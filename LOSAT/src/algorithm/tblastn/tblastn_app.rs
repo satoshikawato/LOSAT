@@ -1347,6 +1347,9 @@ fn search(
     } else {
         0
     };
+    if let Some(database) = database {
+        database.check_accession_tables()?;
+    }
     app::check_search_environment("TBLASTN", database.is_none(), outputs.only_archive())?;
     app::check_query_split_environment("TBLASTN", false, true)??;
     let subjects = subject_records;

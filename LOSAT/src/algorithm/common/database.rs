@@ -65,8 +65,8 @@ pub(crate) fn open_search_database(
         Err(reason) => return Err(DatabaseOpenError::Registry(reason.clone())),
     };
     let path = SearchPath::from_environment(registry).map_err(DatabaseOpenError::Reader)?;
-    // The errors of the alias files' counts depend on the list, and those of the headers and the
-    // accession tables come after them (`restrict_database`).
+    // The errors of the alias files' counts depend on the list, and those of the headers come
+    // after them (`restrict_database`).
     SeqDb::open_search_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)
 }
 
@@ -131,10 +131,10 @@ pub(crate) fn open_database(
 /// p4c_f2 of line RG D1a-2): the alias files' tree and ranges (`open_database`), the list, the
 /// alias files' counts (`SeqDb::check_alias_values`), the id of a database mask (`mask`, BLASTN's
 /// `-db_soft_mask` / `-db_hard_mask`: `DbMaskOption::validate_at_open`), the formatter's
-/// reopening of each name (`SeqDb::read_name_records`), then what NCBI meets only when it reads
-/// the sequences' headers and reports: LOSAT's refusal of mixed accession tables
-/// (`SeqDb::check_accession_tables`) and the first headers (`check_seqids`, whose answer it
-/// returns: whether the database has parsed Seq-ids).
+/// reopening of each name (`SeqDb::read_name_records`), then the first headers (`check_seqids`,
+/// whose answer it returns: whether the database has parsed Seq-ids). LOSAT's refusal of mixed
+/// accession tables, which NCBI meets only at its reports, comes later
+/// (`check_accession_tables`).
 pub(crate) fn restrict_database(
     db: &mut SeqDb,
     name: &str,
@@ -182,11 +182,27 @@ pub(crate) fn restrict_database(
     }
     db.read_name_records(name, mask.is_some())
         .map_err(|error| database_error(error, program))?;
-    db.check_accession_tables()
-        .map_err(|error| database_error(error, program))?;
     // A database with parsed Seq-ids is read (line DBID), unless a variable changes NCBI's choice
     // of its Seq-ids.
     check_seqids(db, settings, program)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:208-211
+// ```c++
+//         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())) {
+//            	ERR_POST(Warning << "Query is Empty!");
+//            	return BLAST_EXIT_SUCCESS;
+//         }
+// ```
+/// LOSAT's refusal of a search database whose version 5 files mix files with and without the
+/// accession table (`SeqDb::check_accession_tables`): NCBI searches it and fails at the reports
+/// of a hit with a parsed Seq-id, so a program refuses it with its other limits, where NCBI
+/// starts the search: after `Query is Empty!` (NCBI then ends with exit status 0) and the
+/// formatter's errors (BLASTN's `-db_soft_mask` id that a name of the list lacks; review 2 F2 of
+/// series NP, M4a-2a).
+pub(crate) fn check_accession_tables(db: &SeqDb, program: &str) -> Result<()> {
+    db.check_accession_tables()
+        .map_err(|error| database_error(error, program))
 }
 
 /// `restrict_database` with a list.
@@ -390,6 +406,12 @@ pub(crate) fn check_statistics_count(db: &SeqDb, program: &str) -> Result<()> {
 /// the others (`PreliminaryReadError`), because NCBI has written the outfmt 0 prolog and
 /// read the query batch before it.
 pub(crate) fn search_read_error(error: SeqDbError, program: &str) -> anyhow::Error {
+    search_read_error_of(&error, program)
+}
+
+/// [`search_read_error`] of an error that its owner keeps (`seqdb::MaskBlock`: the masks that the
+/// preliminary search reads with each sequence, seqsrc_seqdb.cpp:318-321).
+pub(crate) fn search_read_error_of(error: &SeqDbError, program: &str) -> anyhow::Error {
     match error.ncbi_search_message() {
         Some(text) => PreliminaryReadError(text).into(),
         None => refusal(&error.to_string(), program),

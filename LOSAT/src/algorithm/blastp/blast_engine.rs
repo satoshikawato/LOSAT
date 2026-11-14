@@ -6706,6 +6706,9 @@ fn search(
             seq_range::QueryInput::whole(query_records),
         ),
     };
+    if let Some(database) = database {
+        database.check_accession_tables()?;
+    }
     check_blastp_environment(args.app, database.is_none(), outputs.only_archive())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
     // ```c++

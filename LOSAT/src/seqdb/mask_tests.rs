@@ -120,7 +120,7 @@ fn open_masked(name: &str) -> Result<SeqDb, SeqDbError> {
 
 fn format_message(error: &SeqDbError) -> &str {
     match error {
-        SeqDbError::Format { message, .. } => message,
+        SeqDbError::Format { message, .. } | SeqDbError::Integrity { message, .. } => message,
         other => panic!("expected a format error, got {other}"),
     }
 }
@@ -1412,4 +1412,91 @@ fn a_block_of_blobs_gives_each_sequence_s_blob_or_the_first_error() {
         .as_ref()
         .unwrap_err()
         .contains("the offset array of the column ends before the entry of sequence 4"));
+}
+
+/// A mask column of `num_oids` sequences written by the column writer of `makeblastdb
+/// -mask_data` into `dir` (`edge.naa`, `edge.nab`, `edge.nac`), whose sequences `with_blob`
+/// have a blob of 8 bytes and the others none.
+fn write_edge_column(dir: &TempDir, num_oids: u32, with_blob: &[u32]) -> super::column::Column {
+    let base = dir.name("edge");
+    let mut column = crate::writedb::mask_data::column::Column::new(
+        &base,
+        false,
+        0,
+        &Default::default(),
+        b"Fri Nov 14 12:00:00 2026",
+        0,
+    );
+    for oid in 0..num_oids {
+        let blob: &[u8] = if with_blob.contains(&oid) {
+            &[0, 0, 0, 1, 0, 0, 0, 2]
+        } else {
+            &[]
+        };
+        column.add_blob(blob, blob).unwrap();
+    }
+    column.close().unwrap();
+    column.rename_single();
+    super::column::Column::open(&dir.path("edge.naa"), &dir.path("edge.nac")).unwrap()
+}
+
+// No NCBI counterpart (reads only): the window of `Column::first_blob_in` (16,384 entries per
+// read of the offset array) is LOSAT's; NCBI's search reads the blob of each searched sequence
+// (seqsrc_seqdb.cpp:318-321).
+/// `Column::first_blob_in` (the D5 scan of a search with `-db_soft_mask`) reads the offset array
+/// 16,384 entries at a time: a blob on either side of a window's edge is found from a start at,
+/// before and after a window's start, a range that ends at the blob finds none, and a damaged
+/// entry past the edge ends the scan as `Column::read_blobs` meets it, with an integrity error
+/// that a search reports as NCBI's (review 2 T3 and F1 of series NP, M4a-2a).
+#[test]
+fn the_offset_scan_finds_a_blob_on_either_side_of_its_window_edge() {
+    const WINDOW: u32 = 1 << 14;
+    let num_oids = 2 * WINDOW + 10;
+    for at in [WINDOW - 1, WINDOW, WINDOW + 1, 2 * WINDOW] {
+        let dir = TempDir::new("edge");
+        let column = write_edge_column(&dir, num_oids, &[at]);
+        for first in [0, 1, WINDOW - 1, at] {
+            assert_eq!(
+                column.first_blob_in(first, num_oids),
+                Some(true),
+                "{at} from {first}"
+            );
+        }
+        assert_eq!(column.first_blob_in(0, at), None, "{at}: before it");
+        assert_eq!(
+            column.first_blob_in(at + 1, num_oids),
+            None,
+            "{at}: after it"
+        );
+        assert_eq!(column.first_blob_in(at, at + 1), Some(true), "{at}: itself");
+        let mut blobs = super::column::ColumnBlobs::default();
+        column.read_blobs(0, num_oids, &mut blobs);
+        assert_eq!(blobs.blob(at).unwrap().len(), 8);
+        assert!(blobs.blob(at - 1).unwrap().is_empty());
+    }
+    // The entry that ends the blob of WINDOW + 1 (and starts the next) set past the data file:
+    // the scan from before the edge stops there without a blob (`Some(false)`), and the reader
+    // of the blobs fails that sequence with an integrity error.
+    let dir = TempDir::new("edge");
+    drop(write_edge_column(&dir, num_oids, &[2 * WINDOW]));
+    let offsets_end = std::fs::metadata(dir.path("edge.naa")).unwrap().len() as usize;
+    let entry = offsets_end - 4 * (num_oids - (WINDOW + 1)) as usize;
+    patch(&dir.path("edge.naa"), entry, &1000i32.to_be_bytes());
+    let column = super::column::Column::open(&dir.path("edge.naa"), &dir.path("edge.nac")).unwrap();
+    assert_eq!(column.first_blob_in(0, num_oids), Some(false));
+    assert_eq!(column.first_blob_in(WINDOW + 2, num_oids), Some(false));
+    let mut blobs = super::column::ColumnBlobs::default();
+    column.read_blobs(WINDOW - 5, WINDOW + 5, &mut blobs);
+    assert!(blobs.blob(WINDOW).unwrap().is_empty());
+    let error = blobs.blob(WINDOW + 1).unwrap_err();
+    assert!(matches!(error, SeqDbError::Integrity { .. }), "{error}");
+    assert_eq!(
+        format_message(error),
+        "byte range 0..1000 passes the end of the file (8 bytes)"
+    );
+    assert_eq!(error.ncbi_message(), None);
+    assert_eq!(
+        error.ncbi_search_message(),
+        Some("Database memory map file error")
+    );
 }

@@ -40,8 +40,13 @@ export interface VerificationTable {
   readonly programs: Readonly<Partial<Record<ProgramId, ProgramVerification>>>;
 }
 
-/** Flags that do not belong to a profile: the inputs, the outputs and the threads. */
-const NOT_OPTIONS = new Set(['-query', '-subject', '-out', '-outfmt', '-num_threads']);
+/**
+ * Flags that do not belong to a profile: the inputs, the outputs and the threads, and the file of
+ * `-logfile`, which names a file of the run's messages as `-out` names its output: the search's
+ * outputs do not change with it (line RG E1w-3b). `-conffile` and `-dryrun` change what the run
+ * reads or does, and stay options (no record compares them).
+ */
+const NOT_OPTIONS = new Set(['-query', '-subject', '-out', '-outfmt', '-num_threads', '-logfile']);
 /** Flags whose value is a coordinate range of the inputs (S11): a profile has the flag, not the range. */
 const RANGE_OPTIONS = new Set(['-query_loc', '-subject_loc']);
 export const RANGE_VALUE = '<range>';

@@ -1,0 +1,7 @@
+BLAST Database error: Filtering algorithm ID 30 is not supported.
+
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+11           dust                                    window=64; level=20; linker=1           
+

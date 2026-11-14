@@ -1,4 +1,4 @@
-// Main-thread side of the Data worker: a DataGateway, and the engine's describe/validate,
+// Main-thread side of the Data worker: a DataGateway, and the engine's describe/start/validate,
 // whose calls run in the worker.
 import { DATA_WORKER_METHODS, type DataWorkerApi } from './methods';
 import { rpcClient } from './rpc';

@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { CUSTOM_OUTPUT, OUTPUT_FORMATS } from 'losat/domain';
 import {
-  CUSTOM_OUTPUT,
   customOutfmt,
   FORMAT_NAMES,
   formatNumber,
   isBinaryOutput,
-  OUTPUT_FORMATS,
   outfmtOf,
   outfmtOption,
   outputFileName,

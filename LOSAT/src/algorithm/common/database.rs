@@ -65,11 +65,9 @@ pub(crate) fn open_search_database(
         Err(reason) => return Err(DatabaseOpenError::Registry(reason.clone())),
     };
     let path = SearchPath::from_environment(registry).map_err(DatabaseOpenError::Reader)?;
-    // The errors of the alias files' counts depend on the list (`restrict_database`).
-    let db = SeqDb::open_search_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)?;
-    db.check_accession_tables()
-        .map_err(DatabaseOpenError::Reader)?;
-    Ok(db)
+    // The errors of the alias files' counts depend on the list, and those of the headers and the
+    // accession tables come after them (`restrict_database`).
+    SeqDb::open_search_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)
 }
 
 /// Why `open_search_database` could not open a database.
@@ -96,6 +94,30 @@ pub(crate) fn open_database(
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:109-139
+// ```c++
+//         if (gi_list || neg_list || m_Aliases.NeedTotalsScan(m_VolSet)) {
+//             m_NeedTotalsScan = true;
+//             x_InitIdSet();
+//         }
+//         ...
+//         if (m_NeedTotalsScan) {
+//             ...
+//             x_ScanTotals(true, & m_NumSeqs, & m_TotalLength,
+//                                & m_MaxLength, & m_MinLength, locked);
+//
+//         } else {
+//             m_NumSeqs     = x_GetNumSeqs();
+//             m_TotalLength = x_GetTotalLength();
+//             m_MaxLength   = x_GetMaxLength();
+//             m_MinLength   = x_GetMinLength();
+//             ...
+//         }
+//         m_NumSeqsStats     = x_GetNumSeqsStats();
+//         m_TotalLengthStats = x_GetTotalLengthStats();
+// ```
+// The list is resolved in the totals scan (`x_ScanTotals`, `CSeqDBGiListSet`: its errors and
+// warnings), before the alias files' statistics keys are read.
 /// Restricts the search's database `db` (opened as `name` by `open_database`) to the taxid or
 /// seqid list of the command line (line DI-8, `DbFilterArgs::resolve`; none: the whole
 /// database), as NCBI's `CSeqDB` opened with the list (`SeqDb::restrict`), then reads what its
@@ -104,13 +126,22 @@ pub(crate) fn open_database(
 /// (`LOG_POST(Warning << ...)`: the text alone; `ERR_POST`: `Warning: [<program>] <text>`,
 /// the program in lower case as `SetDiagPostPrefix` names it; an `ERR_POST` of an error
 /// before a throw: `Error: [<program>] <text>`), before an error too.
+///
+/// The one owner of the order of a search database's errors, which is NCBI's (probes p4c_e*,
+/// p4c_f2 of line RG D1a-2): the alias files' tree and ranges (`open_database`), the list, the
+/// alias files' counts (`SeqDb::check_alias_values`), the formatter's reopening of each name
+/// (`SeqDb::read_name_records`), then what NCBI meets only when it reads the sequences' headers
+/// and reports: LOSAT's refusal of mixed accession tables (`SeqDb::check_accession_tables`) and
+/// the first headers (`check_seqids`, whose answer it returns: whether the database has parsed
+/// Seq-ids).
 pub(crate) fn restrict_database(
     db: &mut SeqDb,
     name: &str,
     list: Option<&crate::seqdb::DbList>,
     diagnostics: &mut dyn std::io::Write,
+    settings: &ApplicationSettings,
     program: &str,
-) -> Result<()> {
+) -> Result<bool> {
     if let Some(list) = list {
         apply_list(db, list, diagnostics, program)?;
     }
@@ -119,18 +150,28 @@ pub(crate) fn restrict_database(
     // without it, before the search (`pairwise_database`), and meets the others there.
     db.check_alias_values()
         .map_err(|error| database_error(error, program))?;
-    // NCBI asks for the length of OID 0 only where the statistics' total is not positive
-    // (blast_setup.c:925-937, quoted at `SeqDb::statistics_numbers`): over volumes without
-    // sequences an alias file's `LENGTH` or `STATS_TOTLEN` makes NCBI search none instead of
-    // its `Database memory map file error`, which LOSAT does not follow (line RG, D1a-2).
-    if db.num_oids() == 0 && !db.statistics_length_is_empty() {
-        return Err(refusal(
-            "an alias file's LENGTH or STATS_TOTLEN over volumes without sequences",
+    if db.is_restricted() && db.statistics_per_subject() {
+        return Err(database_error(
+            SeqDbError::Unsupported {
+                path: std::path::PathBuf::from(name),
+                message: format!(
+                    "the total length of NCBI's scan of the list is 0 while the search reads {} \
+                     sequences (the scan stops at the FIRST_OID-LAST_OID range of the only alias \
+                     file of the -db), so NCBI computes the statistics of each subject on its \
+                     own; LOSAT does not search such a database with this list yet",
+                    db.num_seqs()
+                ),
+            },
             program,
         ));
     }
     db.read_name_records(name)
-        .map_err(|error| database_error(error, program))
+        .map_err(|error| database_error(error, program))?;
+    db.check_accession_tables()
+        .map_err(|error| database_error(error, program))?;
+    // A database with parsed Seq-ids is read (line DBID), unless a variable changes NCBI's choice
+    // of its Seq-ids.
+    check_seqids(db, settings, program)
 }
 
 /// `restrict_database` with a list.
@@ -155,15 +196,18 @@ fn apply_list(
     restricted.map_err(|error| database_error(error, program))
 }
 
-/// Tells the BLAST archive of the run (`archive`, `None` without one) what the database's list
-/// makes of its request (`ArchiveHandle::set_database_filter`). `empty_length` is whether the
+/// Tells the BLAST archive of the run (`archive`, `None` without one) and its search strategy
+/// export (`strategy`) what the database's list makes of their requests: the run's options
+/// handle, made once per run and shared by both (`report::archive::OptionsHandle::set_database_filter`).
+/// `empty_length` is whether the
 /// total length of the statistics is not positive (`SeqDb::statistics_length_is_empty`: a list
 /// that kept no sequence, without `STATS_TOTLEN`). `dbsize` is whether `-dbsize` is given: the
 /// `EffectiveSearchSpace` option then counts the length adjustment with no sequence, while the
 /// searches read the length of OID 0 as one sequence (probes E14 and E17 of line DI-8): LOSAT
-/// refuses it.
+/// refuses it (the strategy's requests after the first carry that option too).
 pub(crate) fn note_archive_database_filter(
     archive: Option<&crate::report::archive::ArchiveHandle>,
+    strategy: Option<&crate::report::archive::strategy::StrategyExport>,
     filter: &crate::blastinput::db_filter::DbFilterArgs,
     list_taxids: &[i32],
     empty_length: bool,
@@ -171,18 +215,34 @@ pub(crate) fn note_archive_database_filter(
     dbsize: bool,
     program: &str,
 ) -> Result<()> {
-    let Some(handle) = archive else {
+    if archive.is_none() && strategy.is_none() {
         return Ok(());
-    };
+    }
     if empty_length && dbsize {
+        let option = if archive.is_some() {
+            "-outfmt 11"
+        } else {
+            "-export_search_strategy"
+        };
         anyhow::bail!(
-            "-dbsize with -outfmt 11 and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
+            "-dbsize with {option} and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
         );
     }
-    handle.set_database_filter(
+    let options = match (archive, strategy) {
+        (Some(handle), strategy) => {
+            anyhow::ensure!(
+                strategy.is_none_or(|strategy| strategy.options().same(handle.options())),
+                "LOSAT internal error: the archive and the search strategy of one run have two options handles"
+            );
+            handle.options()
+        }
+        (None, Some(strategy)) => strategy.options(),
+        (None, None) => return Ok(()),
+    };
+    options.set_database_filter(
         filter.archive_parameter(list_taxids),
         empty_length && !searchsp,
-    );
+    )?;
     Ok(())
 }
 
@@ -248,15 +308,17 @@ pub(crate) fn refusal(reason: &str, program: &str) -> anyhow::Error {
     anyhow::anyhow!("{reason}; this database is not supported by LOSAT's {program}")
 }
 
+/// What LOSAT refuses where the statistics read 0 sequences of a positive total length
+/// (`check_statistics_count`, and BLASTX's own check of its statistics).
+pub(crate) const STATISTICS_COUNT_ZERO: &str = "the statistics count 0 sequences of the database (an alias file's NSEQ 0, or its LENGTH or STATS_TOTLEN over volumes without sequences), by which NCBI BLAST+ divides its length";
+
 /// LOSAT's refusal of statistics that read 0 sequences of a positive total length
 /// (`SeqDb::statistics_count_is_zero`), for a search of `program` without the Gumbel block:
-/// NCBI BLAST+ 2.17.0 divides the total by 0 there and crashes (DECISIONS 14 of line RG).
+/// NCBI BLAST+ 2.17.0 divides the total by 0 there and crashes (DECISIONS 14 of line RG; an
+/// alias file's `LENGTH` 100 alone over a volume of no OID, probe p4c_dn_nB of D1a-2: SIGFPE).
 pub(crate) fn check_statistics_count(db: &SeqDb, program: &str) -> Result<()> {
     if db.statistics_count_is_zero() {
-        return Err(refusal(
-            "the statistics count 0 sequences of the database (an alias file's NSEQ 0), by which NCBI BLAST+ divides its length",
-            program,
-        ));
+        return Err(refusal(STATISTICS_COUNT_ZERO, program));
     }
     Ok(())
 }
@@ -1553,8 +1615,9 @@ fn reported_header(
 
 /// With `-parse_deflines`, LOSAT's refusal of a reported database sequence whose Seq-align id is
 /// the id of a query of the scope `queries` (`query_batch::QueryScopes::of_query` of a query that
-/// reports it): NCBI's scope finds the query instead, so its reports show the query's title and
-/// letters for the database sequence (`dropin-survey-20261029/DI7/DECISIONS.md` 8). Every report
+/// reports it; a query whose ids the reports show: `-parse_deflines`, and the PSSM query of
+/// `-in_pssm` whose Seq-id is not one local id): NCBI's scope finds the query instead, so its
+/// reports show the query's title and letters for the database sequence (`dropin-survey-20261029/DI7/DECISIONS.md` 8). Every report
 /// of a query batch asks for its own scope, also of a sequence whose header an earlier batch read.
 pub(crate) fn refuse_id_of_a_query(
     subject: &crate::report::db_subject::ParsedSubject,
@@ -1566,8 +1629,9 @@ pub(crate) fn refuse_id_of_a_query(
     if queries.has_key(&keys.own) {
         return Err(parsed_refusal(
             ordinal,
-            "has the Seq-id of a query read with -parse_deflines in the query batch that reports \
-             it (in any with outfmt 5; NCBI BLAST+ shows the query for it)",
+            "has the Seq-id of a query read with -parse_deflines (or of the PSSM query of \
+             -in_pssm) in the query batch that reports it (in any with outfmt 5; NCBI BLAST+ shows \
+             the query for it)",
             program,
         ));
     }
@@ -1576,8 +1640,8 @@ pub(crate) fn refuse_id_of_a_query(
             ordinal,
             &format!(
                 "has the Seq-align id {}, which NCBI BLAST+'s scope can match weakly to the id \
-                 of a query read with -parse_deflines in the query batch that reports it (in any \
-                 with outfmt 5): an accession with a version for one without, a name with or \
+                 of a query read with -parse_deflines (or of the PSSM query of -in_pssm) in the \
+                 query batch that reports it (in any with outfmt 5): an accession with a version for one without, a name with or \
                  without an accession, a pir or prf accession as a name; NCBI BLAST+ then shows \
                  the query for it",
                 String::from_utf8_lossy(&subject.alignment_fasta())
@@ -1629,16 +1693,13 @@ pub(crate) fn parsed_refusal(ordinal: u32, reason: &str, program: &str) -> anyho
     )))
 }
 
-/// The check of a search program's database right after it is opened: the first header of
-/// each volume is read, as before line DBID, and only a header with parsed Seq-ids is let
-/// through (`SeqDb::has_parsed_seqids`; every search program reads such a database). Returns whether the
-/// database has parsed Seq-ids; such a database is LOSAT's refusal where a variable changes
-/// NCBI's choice of its Seq-ids (`ApplicationSettings::seq_id_rank_variable`).
-pub(crate) fn check_seqids(
-    db: &SeqDb,
-    settings: &ApplicationSettings,
-    program: &str,
-) -> Result<bool> {
+/// The check of a search program's database at the end of its opening (`restrict_database`):
+/// the first header of each volume is read, as before line DBID, and only a header with parsed
+/// Seq-ids is let through (`SeqDb::has_parsed_seqids`; every search program reads such a
+/// database). Returns whether the database has parsed Seq-ids; such a database is LOSAT's refusal
+/// where a variable changes NCBI's choice of its Seq-ids
+/// (`ApplicationSettings::seq_id_rank_variable`).
+fn check_seqids(db: &SeqDb, settings: &ApplicationSettings, program: &str) -> Result<bool> {
     let parsed = db
         .has_parsed_seqids()
         .map_err(|error| database_error(error, program))?;
@@ -2793,7 +2854,7 @@ pub(crate) struct TaxdbRun {
     collision: std::sync::OnceLock<Option<(std::path::PathBuf, String)>>,
     /// The texts of opening the database when the rows of a tabular report opened it, kept for
     /// those rows ([`TaxdbRun::open_for_rows`], [`tabular_names`]).
-    rows_open: std::sync::Mutex<Vec<String>>,
+    rows_open: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 /// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_texts`]).
@@ -3534,13 +3595,61 @@ pub(crate) fn read_reported_taxonomy(
 ///    		if(resolved.empty())
 /// ```
 pub(crate) fn subject_taxdb_found(settings: &ApplicationSettings, program: &str) -> Result<bool> {
+    Ok(subject_search_path(settings, program)?
+        .resolve_file("taxdb.bti")
+        .is_some())
+}
+
+/// The search path of NCBI's databases of a `-subject` search (`subject_taxdb_found`).
+fn subject_search_path(settings: &ApplicationSettings, program: &str) -> Result<SearchPath> {
     let registry = match &settings.blastdb {
         Ok(value) => value.as_deref(),
         Err(reason) => bail!("{reason}; this is not supported by LOSAT's {program}"),
     };
-    let path =
-        SearchPath::from_environment(registry).map_err(|error| database_error(error, program))?;
-    Ok(path.resolve_file("taxdb.bti").is_some())
+    SearchPath::from_environment(registry).map_err(|error| database_error(error, program))
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
+// ```c++
+// bool CSeqDBTaxInfo::GetTaxNames(TTaxId           tax_id,
+//                                 SSeqDBTaxInfo  & info  )
+// {
+// 	static CTaxDBFileInfo t;
+// ```
+/// The taxonomy database of a `-subject` search's organism report (outfmt 18): NCBI's
+/// `GetTaxNames` opens its static `CTaxDBFileInfo` through the search path of NCBI's databases at
+/// the report's first lookup. One per run, as a `-db` search's (`TaxdbRun`), made by the command
+/// line with `subject_taxdb_found` (`run_local`'s callers give no search path: none, DECISIONS 7
+/// of line CLI C2, every lookup fails).
+#[derive(Clone, Debug)]
+pub struct SubjectTaxdb(std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>);
+
+impl SubjectTaxdb {
+    /// The run's database where `taxdb.bti` is on the search path of `settings` (else `None`),
+    /// not opened before the report's first lookup. A registry value that LOSAT does not read as
+    /// NCBI is its refusal (`subject_taxdb_found`); `program` names it.
+    pub(crate) fn of(settings: &ApplicationSettings, program: &str) -> Result<Option<Self>> {
+        let path = subject_search_path(settings, program)?;
+        Ok(path.resolve_file("taxdb.bti").is_some().then(|| {
+            SubjectTaxdb(std::sync::Arc::new(crate::seqdb::taxdb::LazyTaxDb::new(
+                path,
+            )))
+        }))
+    }
+
+    /// The names that the organism report of a query batch asks for in it
+    /// (`TabularNames::for_report`); a database that LOSAT cannot read as NCBI does is refused as
+    /// in [`tabular_names`].
+    pub(crate) fn report_names(&self, program: &str) -> crate::report::tabular::TabularNames {
+        crate::report::tabular::TabularNames::for_report(
+            crate::report::tax_report::TaxNamesDb::new(
+                std::sync::Arc::clone(&self.0),
+                None,
+                taxdb_error,
+            ),
+            program,
+        )
+    }
 }
 
 /// The names of the taxonomy database that the rows of a tabular report with a name field look
@@ -3561,6 +3670,18 @@ pub(crate) fn tabular_names<'t>(
     let Some(search_path) = db.search_path() else {
         return Ok(None);
     };
+    // The organism report (outfmt 18) looks each taxid up itself where NCBI's report does
+    // (`report::tax_report::TaxLookups`), the texts of an open by earlier rows first.
+    if spec.kind == crate::report::tabular::TabularKind::TaxReport {
+        return Ok(Some(crate::report::tabular::TabularNames::for_report(
+            crate::report::tax_report::TaxNamesDb::new(
+                run.taxdb(search_path),
+                Some(std::sync::Arc::clone(&run.rows_open)),
+                taxdb_error,
+            ),
+            program,
+        )));
+    }
     let names = crate::report::tabular::TabularNames::look_up(
         spec,
         &run.taxdb(search_path),
@@ -3634,6 +3755,45 @@ pub(crate) fn prefetch_messages<'s>(
     subjects: impl IntoIterator<Item = (u32, Option<&'s crate::report::db_subject::ParsedSubject>)>,
     program: &str,
 ) -> Result<Vec<u8>> {
+    let reads = subject_read_texts(
+        db,
+        run,
+        subjects
+            .into_iter()
+            .map(|(ordinal, parsed)| (0, ordinal, parsed)),
+        false,
+        program,
+    )?;
+    Ok(reads.into_iter().flat_map(|(_, text)| text).collect())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:819-838
+// ```c++
+//     bool setSubjectTaxInfoAll = (x_IsFieldRequested(eSubjectTaxIds) ||
+//     						     x_IsFieldRequested(eSubjectSciNames) ||
+//     ...
+//     if(setSubjectIds || setSubjectTaxInfo || setSubjectTaxInfoAll || setSubjectTitle ||
+//        x_IsFieldRequested(eSubjectStrand) || setSubjectId)
+//     {
+//         try {
+//        		const CBioseq_Handle& subject_bh =
+//                 scope.GetBioseqHandle(align.GetSeq_id(1));
+// ```
+/// [`prefetch_messages`] of `subjects`, each `(key, ordinal, parsed Seq-ids)`, by subject: the
+/// text that the first read of each subject writes, with the subject's `key` (the name a report
+/// writer gives it), in the order of `subjects`; a subject whose read writes nothing has no
+/// entry. A query's report whose batch's prefetch is off writes each where it reads the subject
+/// (`report::query_warnings::SubjectReads`). `rows_open`: the report's rows look the plural
+/// names up (taxid 0 too, `TaxdbRun::open_for_rows`), each row after it loads its subject, so
+/// the first row opens the taxonomy database after the first subject's read, where that read
+/// did not.
+pub(crate) fn subject_read_texts<'s, K>(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    subjects: impl IntoIterator<Item = (K, u32, Option<&'s crate::report::db_subject::ParsedSubject>)>,
+    rows_open: bool,
+    program: &str,
+) -> Result<Vec<(K, Vec<u8>)>> {
     if !run.found(db) {
         return Ok(Vec::new());
     }
@@ -3643,12 +3803,13 @@ pub(crate) fn prefetch_messages<'s>(
     run.refuse_cache_collision(db, program)?;
     let taxdb = run.taxdb(search_path);
     let lower = program.to_ascii_lowercase();
-    let mut text = String::new();
+    let mut reads = Vec::new();
     let mut fetched: std::collections::HashSet<u32> = Default::default();
-    for (ordinal, parsed) in subjects {
+    for (key, ordinal, parsed) in subjects {
         if !fetched.insert(ordinal) {
             continue;
         }
+        let first = fetched.len() == 1;
         // A subject with parsed Seq-ids is read by its Seq-align id (`prefetch_reads`: the blob of
         // the sequence the scope gets, whose taxids its volume looks up). In
         // the formats that read the Bioseq, `ParsedSubject::fetched` refuses every subject that
@@ -3657,16 +3818,25 @@ pub(crate) fn prefetch_messages<'s>(
         // (`prefetched_ranks`). One without them is read by its ordinal id, its own blob.
         let blob = match parsed {
             Some(subject) => match prefetch_reads(db, ordinal, subject, true, program)? {
-                Ok(Some(blob)) => blob,
-                Ok(None) => continue,
+                Ok(Some(blob)) => Some(blob),
+                Ok(None) => None,
                 Err(reason) => return Err(parsed_refusal(ordinal, &reason, program)),
             },
-            None => ordinal,
+            None => Some(ordinal),
         };
-        let lookups = blob_taxids(db, ordinal, parsed, blob, program)?;
-        run.volume_lookups_of(db, &taxdb, blob, &lookups, &lower, &mut text, program)?;
+        if let Some(blob) = blob {
+            let lookups = blob_taxids(db, ordinal, parsed, blob, program)?;
+            let mut text = String::new();
+            run.volume_lookups_of(db, &taxdb, blob, &lookups, &lower, &mut text, program)?;
+            if !text.is_empty() {
+                reads.push((key, text.into_bytes()));
+            }
+        }
+        if first && rows_open {
+            run.open_for_rows(db, program)?;
+        }
     }
-    Ok(text.into_bytes())
+    Ok(reads)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513

@@ -12,7 +12,6 @@
 //! the document, this module gathers what it holds from the hit lists, the query masks and
 //! the Karlin-Altschul blocks that BLASTN keeps for its other formats.
 
-use std::borrow::Cow;
 use std::io::Write;
 use std::ops::Range;
 
@@ -27,12 +26,12 @@ use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
 use crate::blastinput::value_parsers::{parse_dust_filtering, DustSpec};
-use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
-    defline_of, ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive,
-    KaBlock,
+    ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
+    RequestInputs,
 };
 #[cfg(test)]
 use crate::report::diag_log::ERROR;
@@ -53,6 +52,9 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs.word_size = args.word_size.map(|size| size as i32);
     inputs.perc_identity = args.percent_identity;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
+    // (`-ungapped` with outfmt 11 is refused, `cli_output_formats`; the search strategy records
+    // it, probe `ung` of RG-F1.)
+    inputs.ungapped = args.ungapped;
     inputs.max_hsps = args.max_hsps_per_subject.map(|count| count as i32);
     inputs.penalty = args.penalty;
     inputs.reward = args.reward;
@@ -106,36 +108,62 @@ pub(crate) fn handle_for(
     args: &BlastnArgs,
     dust: Option<&str>,
     archive_requested: bool,
+    options: &crate::report::archive::OptionsHandle,
 ) -> Result<Option<ArchiveHandle>> {
     if !archive_requested {
         return Ok(None);
     }
-    ArchiveHandle::for_program(&option_inputs(args, dust), args.database_name(), "BLASTN").map(Some)
+    ArchiveHandle::for_program(
+        &option_inputs(args, dust),
+        args.database_name(),
+        "BLASTN",
+        options,
+    )
+    .map(Some)
 }
 
-/// `report::archive::check_titles` for BLASTN's records.
+/// The requests of a run's batches (`RunRequests`): nucleotide queries and subjects (the
+/// `-subject` records `subjects`, `None` for `-db`), and with `-lcase_masking` (`lcase_masking`)
+/// the lower-case runs of each query for both strands. Before the search (the search strategy's
+/// requests) the query vector's mask has no DUST or WindowMasker interval yet, which
+/// `x_CalculateMasks` adds in the search (probe `lcq` of RG-F1); the archive writes its own
+/// `LCaseMask` parameters (`for_each_batch`).
+pub(crate) fn requests(
+    subjects: Option<&[FastaRecord]>,
+    lcase_masking: bool,
+) -> RunRequests<'_, FastaRecord> {
+    RunRequests::new(
+        RequestPolicy {
+            query_protein: false,
+            subject_protein: false,
+            lcase: lcase_masking.then_some(LcaseFrames::PlusTwice),
+        },
+        subjects,
+        "BLASTN",
+    )
+}
+
+/// `report::archive::check_titles` for BLASTN's records (the archive's; the search strategy's
+/// requests check theirs where they are written, `RunRequests::write`).
 pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
     crate::report::archive::check_titles(records, role, "BLASTN")
 }
 
 pub(crate) use crate::report::archive::error_lines;
 
-/// What the archive of a call needs: the call's queries (one batch, or several when the
-/// reports of every batch are written after the search) and their data.
-pub(crate) struct ArchiveCall<'a> {
-    pub handle: &'a ArchiveHandle,
+/// The queries of a call's batches and what their archives read (`for_each_batch`).
+pub(crate) struct CallBatches<'a> {
+    /// The call's queries: one batch, or several when the reports of every batch are written
+    /// after the search.
     pub queries: &'a [FastaRecord],
     pub query_lengths: &'a [usize],
     pub query_placements: &'a Placements,
     /// `-subject`: every subject record, whole (the Bioseqs of the request).
     pub subject_records: Option<&'a [FastaRecord]>,
-    /// The subject names of the Seq-aligns.
-    pub subjects: SubjectNames<'a>,
-    pub subject_placements: &'a Placements,
-    pub hit_lists: &'a [Option<BlastnHitList>],
     pub query_masks: &'a [Vec<MaskedInterval>],
     /// The DUST-only masks of the call's queries (plus strand, in the searched letters),
     /// made for every query; with `-window_masker_db` (`window_masker`) the WindowMasker masks.
+    /// Only the archive reads them (empty without it).
     pub dust_masks: &'a [Vec<MaskedInterval>],
     pub unsearched: &'a [bool],
     pub lcase_masking: bool,
@@ -144,6 +172,16 @@ pub(crate) struct ArchiveCall<'a> {
     pub minus_strand: bool,
     /// The queries of each batch of the call, in order; empty for a call that is one batch.
     pub spans: &'a [Range<usize>],
+}
+
+/// What the archive of a call needs: the call's batches and their results.
+pub(crate) struct ArchiveCall<'a> {
+    pub handle: &'a ArchiveHandle,
+    pub batches: CallBatches<'a>,
+    /// The subject names of the Seq-aligns.
+    pub subjects: SubjectNames<'a>,
+    pub subject_placements: &'a Placements,
+    pub hit_lists: &'a [Option<BlastnHitList>],
 }
 
 /// The values of a batch's first query that `search-stats`, `ka-blocks` and the
@@ -293,15 +331,18 @@ fn lcase_mask_intervals(
         .collect()
 }
 
-/// Writes the archive of each batch of `call` to `writer`; `warnings` writes the warnings
-/// of a batch's queries (to the diagnostics, which saves them as the batch's messages)
-/// before its archive. `first_context(first_query)` gives the values of a batch's first
-/// query.
-pub(crate) fn write_blastn_archives(
-    call: &ArchiveCall<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+/// Calls `each` with the queries and the archive of each batch of `call`, in order
+/// (`BatchArchive`: its request, `RunRequests::with_batch`, and its results).
+/// `first_context(first_query)` gives the values of a batch's first query.
+///
+/// The `LCaseMask` parameters are the masks of NCBI's query vector after the search, which hold
+/// the DUST or WindowMasker intervals that the search added (`lcase_mask_intervals`), so the
+/// archive writes its own (the search strategy's requests, written before the search, hold the
+/// lower-case runs only, `requests`).
+pub(crate) fn for_each_batch(
+    call: &CallBatches<'_>,
     first_context: &dyn Fn(usize) -> Result<FirstContext>,
-    writer: &mut dyn Write,
+    mut each: impl FnMut(Range<usize>, &BatchArchive<'_>) -> Result<()>,
 ) -> Result<()> {
     let whole = [0..call.queries.len()];
     let spans: &[Range<usize>] = if call.spans.is_empty() {
@@ -309,70 +350,15 @@ pub(crate) fn write_blastn_archives(
     } else {
         call.spans
     };
-    let run = RunRecord {
-        program: Program::Blastn,
-        db_title: call.subjects.db_title(),
-        gapped: true,
-    };
-    // The Bioseq inputs borrow their deflines: keep them alive for the whole call.
-    let subject_deflines: Vec<Cow<'_, [u8]>> = call
-        .subject_records
-        .map(|records| records.iter().map(defline_of).collect())
-        .unwrap_or_default();
-    let subjects_input: Vec<BioseqInput<'_>> = call
-        .subject_records
-        .map(|records| {
-            records
-                .iter()
-                .zip(&subject_deflines)
-                .map(|(record, defline)| BioseqInput {
-                    id: &record.local_id,
-                    ids: record.believed().map(|ids| ids.ids.as_slice()),
-                    seq_loc: None,
-                    defline,
-                    title: &record.title,
-                    letters: record.archive_letters(),
-                    protein: false,
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    // The request without `LCaseMask` parameters: the archive writes its own (above).
+    let requests = requests(call.subject_records, false);
     for span in spans.iter().cloned() {
         if span.is_empty() {
             continue;
         }
-        if let Some(warnings) = warnings.as_deref_mut() {
-            for index in span.clone() {
-                warnings.before_query(index, &mut *writer)?;
-            }
-        }
-        let records = &call.queries[span.clone()];
-        let deflines: Vec<Cow<'_, [u8]>> = records.iter().map(defline_of).collect();
-        let queries: Vec<BioseqInput<'_>> = records
-            .iter()
-            .zip(&deflines)
-            .map(|(record, defline)| BioseqInput {
-                id: &record.local_id,
-                ids: record.believed().map(|ids| ids.ids.as_slice()),
-                seq_loc: record.archive_seq_loc(),
-                defline,
-                title: &record.title,
-                letters: record.archive_letters(),
-                protein: false,
-            })
-            .collect();
         let first = span.start;
         let searched = !call.unsearched[first];
         let context = first_context(first)?;
-
-        let required = if call.query_placements.ranged() {
-            let placement = &call.query_placements.0[first];
-            let cut = call.queries[first].seq().len();
-            (cut != placement.length)
-                .then_some((placement.offset as i32, (placement.offset + cut) as i32 - 1))
-        } else {
-            None
-        };
 
         let mut masks: Vec<MaskEntry> = Vec::new();
         let mut lcase_masks: Vec<MaskEntry> = Vec::new();
@@ -424,32 +410,63 @@ pub(crate) fn write_blastn_archives(
             ],
             None => [KaBlock::missing(false), KaBlock::missing(true)],
         };
-        let batch = BatchArchive {
-            queries: &queries,
-            subjects: &subjects_input,
-            required,
-            lcase_masks: &lcase_masks,
-            masks: &masks,
-            ka_blocks,
-            search_space: context.search_space,
-            length_adjustment: context.length_adjustment,
-            searched_space: searched.then_some(context.context0_space),
-        };
+        requests.with_batch(
+            &call.queries[span.clone()],
+            call.query_placements.get(first),
+            |request| {
+                let batch = BatchArchive {
+                    request: RequestInputs {
+                        lcase_masks: &lcase_masks,
+                        ..*request
+                    },
+                    masks: &masks,
+                    ka_blocks,
+                    search_space: context.search_space,
+                    length_adjustment: context.length_adjustment,
+                    searched_space: searched.then_some(context.context0_space),
+                };
+                each(span, &batch)
+            },
+        )?;
+    }
+    Ok(())
+}
+
+/// Writes the archive of each batch of `call` to `writer`; `warnings` writes the warnings
+/// of a batch's queries (to the diagnostics, which saves them as the batch's messages)
+/// before its archive. `first_context(first_query)` gives the values of a batch's first
+/// query.
+pub(crate) fn write_blastn_archives(
+    call: &ArchiveCall<'_>,
+    mut warnings: Option<&mut QueryWarnings<'_>>,
+    first_context: &dyn Fn(usize) -> Result<FirstContext>,
+    writer: &mut dyn Write,
+) -> Result<()> {
+    let run = RunRecord {
+        program: Program::Blastn,
+        db_title: call.subjects.db_title(),
+        gapped: true,
+    };
+    for_each_batch(&call.batches, first_context, |span, batch| {
+        if let Some(warnings) = warnings.as_deref_mut() {
+            for index in span.clone() {
+                warnings.before_query(index, &mut *writer)?;
+            }
+        }
         let mut aligns = BlastnAligns {
             run,
             queries: QueryNames {
-                records: call.queries,
-                searched_lengths: call.query_lengths,
-                placements: call.query_placements,
+                records: call.batches.queries,
+                searched_lengths: call.batches.query_lengths,
+                placements: call.batches.query_placements,
             },
             subjects: call.subjects,
             subject_placements: call.subject_placements,
             hit_lists: &call.hit_lists[span.clone()],
-            first,
+            first: span.start,
         };
-        write_archive(call.handle, &batch, &mut aligns, writer)?;
-    }
-    Ok(())
+        write_archive(call.handle, batch, &mut aligns, &mut *writer)
+    })
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use std::sync::{Mutex, PoisonError};
 
 use clap::CommandFactory;
-use LOSAT::web_adapter::Cli;
+use losat::web_adapter::Cli;
 
 use crate::json;
 use crate::run::Program;
@@ -34,18 +34,19 @@ const ADAPTER_OWNED: [&str; 6] = [
 const GENETIC_CODE_PROBE: u32 = 64;
 
 /// The options of `program` that a search of records takes none of (the PSSM files: tblastn's
-/// `-in_pssm`, which the browser refuses until line PS's PSW1): the library API's list
-/// (`LOSAT::web_adapter::records_refused_options`), so that both `describe`s leave out the same
+/// `-in_pssm`, which the browser refuses until line PS's PSW1; the search strategy file
+/// `-export_search_strategy`, until line RG's F1w gives it as a side file): the library API's list
+/// (`losat::web_adapter::records_refused_options`), so that both `describe`s leave out the same
 /// options.
 fn records_refused(program: Program) -> &'static [&'static str] {
     let program = match program {
-        Program::Blastp => LOSAT::api::Program::Blastp,
-        Program::Tblastn => LOSAT::api::Program::Tblastn,
-        Program::Blastn => LOSAT::api::Program::Blastn,
-        Program::Tblastx => LOSAT::api::Program::Tblastx,
-        Program::Blastx => LOSAT::api::Program::Blastx,
+        Program::Blastp => losat::api::Program::Blastp,
+        Program::Tblastn => losat::api::Program::Tblastn,
+        Program::Blastn => losat::api::Program::Blastn,
+        Program::Tblastx => losat::api::Program::Tblastx,
+        Program::Blastx => losat::api::Program::Blastx,
     };
-    LOSAT::web_adapter::records_refused_options(program)
+    losat::web_adapter::records_refused_options(program)
 }
 
 /// Each program's response after its first `describe`: the response is pure, and its
@@ -193,11 +194,23 @@ mod tests {
         }
     }
 
-    // tblastn's `-in_pssm` (a PSSM query file): the browser refuses it until line PS's PSW1, and
-    // neither `describe` lists it (the library API's list, `records_refused`).
+    // tblastn's `-in_pssm` (a PSSM query file): the browser refuses it until line PS's PSW1; the
+    // search strategy file of the five programs: until line RG's F1w. Neither `describe` lists
+    // them (the library API's list, `records_refused`).
     #[test]
     fn options_a_search_of_records_does_not_take_are_not_described() {
-        assert_eq!(records_refused(Program::Tblastn), ["in_pssm"]);
+        assert_eq!(
+            records_refused(Program::Tblastn),
+            ["in_pssm", "export_search_strategy"]
+        );
+        for program in [
+            Program::Blastn,
+            Program::Blastp,
+            Program::Blastx,
+            Program::Tblastx,
+        ] {
+            assert_eq!(records_refused(program), ["export_search_strategy"]);
+        }
         for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
             let described = describe(program).unwrap();
             for flag in records_refused(Program::parse(program).unwrap()) {

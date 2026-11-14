@@ -422,6 +422,17 @@ pub struct BlastpArgs {
     pub mt_mode: Option<u8>,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
+    /// ```c++
+    ///     arg_desc.AddOptionalKey(kArgOutputSearchStrategy,
+    ///                             "filename",
+    ///                             "File name to record the search strategy used",
+    ///                             CArgDescriptions::eOutputFile);
+    /// ```
+    /// The search strategy file (`report::archive::strategy`), created by `run` before the other
+    /// options are read.
+    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     // An omitted value keeps the default hit list size (500) and NCBI's numbers of
     // descriptions and alignments of the pairwise report (500, 250).
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]
@@ -493,8 +504,8 @@ pub struct BlastpArgs {
     //     }
     // ```
     // BLASTP's X-drops in bits; `None`: the defaults of every task (`ResolvedBlastpArgs`).
-    // psiblast's parser refuses them (`cli.rs` `is_unported_psiblast_arg`); rpsblast's are its
-    // RPS engine's (`rps`).
+    // psiblast's are its parser's (`PsiblastArgs::xdrop_ungap`); rpsblast's are its RPS engine's
+    // (`rps`).
     #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = blastp_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
     pub xdrop_ungap: Option<f64>,
     #[arg(long = "xdrop_gap", value_name = "float_value", value_parser = blastp_real, help = "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]")]
@@ -590,10 +601,24 @@ pub struct BlastpArgs {
     /// reads the arguments (`archive::handle_for`).
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// The run's search strategy export (`-export_search_strategy`), made by `run`
+    /// (`strategy::StrategyExport::for_run`).
+    #[arg(skip)]
+    pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
+    /// The recorded options of the search strategy's requests of an application whose search is
+    /// BLASTP's (psiblast, rpsblast: `archive::option_inputs`), made by its command line from its
+    /// own arguments as given, with `-export_search_strategy`; `None` for BLASTP's.
+    #[arg(skip)]
+    pub request_inputs: Option<Box<crate::report::archive::options::OptionInputs>>,
     /// The application whose search this is: psiblast's command line sets it
     /// (`algorithm/psiblast`).
     #[arg(skip)]
     pub app: BlastpApp,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), which a
+    /// library call (`api::run`) reads from the application settings, as the command line
+    /// does (`common::database::SubjectTaxdb`); `None` elsewhere. Not a public option.
+    #[arg(skip)]
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1117-1119
     // ```c++
     //     if (args[kArgPSIInclusionEThreshold]) {
@@ -604,6 +629,26 @@ pub struct BlastpArgs {
     /// (`PSI_INCLUSION_ETHRESH`, which blastp's options have too).
     #[arg(skip)]
     pub inclusion_ethresh: Option<f64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:584-591
+    // ```c
+    //    if (Blast_ProgramIsNucleotide(program_number)) {
+    //       ...
+    //    } else {
+    //       ...
+    //       (*options)->gap_trigger = BLAST_GAP_TRIGGER_PROT;
+    // ```
+    /// psiblast's `-gap_trigger` in bits (`CGapTriggerArgs`); `None` keeps the options' default
+    /// (`BLAST_GAP_TRIGGER_PROT`, 22 bits), the only value of blastp and rpsblast, which have no
+    /// such argument.
+    #[arg(skip)]
+    pub gap_trigger: Option<f64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1460-1471 (quoted at
+    // `ResolvedBlastpArgs::sum_stats`)
+    /// psiblast's `-sum_stats true` (`CGenericSearchArgs`): every round links the HSPs of each
+    /// subject with sum statistics (`core::link_hsps`). blastp and rpsblast have no such argument
+    /// (NCBI's rpsblast's `-sum_stats true` is refused, `rps_hooks`).
+    #[arg(skip)]
+    pub sum_stats: bool,
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
     // ```c++
     //     int GetLocalIdCounterInitValue() const { return m_LocalIdCounter; }
@@ -815,6 +860,23 @@ pub struct ResolvedBlastpArgs {
     pub x_drop_ungapped_bits: f64,
     pub x_drop_gapped_bits: f64,
     pub x_drop_final_bits: f64,
+    /// The gap trigger in bits (`kOptions->gap_trigger`): psiblast's `-gap_trigger`, or
+    /// `BLAST_GAP_TRIGGER_PROT`. Every round converts it with the query's ungapped block
+    /// (`kbp_std`) into the cutoff of the ungapped alignments that a gapped extension starts from.
+    pub gap_trigger_bits: f64,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:777-784
+    // ```c
+    //    params->do_sum_stats = options->do_sum_stats;
+    // ...
+    //    if (params->do_sum_stats) {
+    //       BlastLinkHSPParametersNew(program_number, gapped_calculation,
+    //                                 &params->link_hsp_params);
+    // ```
+    /// `hit_params->do_sum_stats`: psiblast's `-sum_stats true`. The search links the HSPs of each
+    /// subject (`core::link_hsps`) in the preliminary stage, the traceback and the
+    /// composition-based redo, and lowers the cutoff scores of the HSPs it keeps
+    /// (`BlastHitSavingParametersUpdate`).
+    pub sum_stats: bool,
     pub window_size: usize,
     /// The matrix as the command line names it (NCBI keeps the spelling); `scoring.matrix`
     /// is its LOSAT matrix when LOSAT has it, otherwise BLOSUM62 (and the search rejects
@@ -843,6 +905,8 @@ pub struct ResolvedBlastpArgs {
     pub outfmt: String,
     /// The run's BLAST archive (outfmt 11), shared by the blocks and batches of the run.
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// The run's search strategy export (`BlastpArgs::strategy`), shared as the archive is.
+    pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// The application whose search this is (`BlastpArgs::app`).
     pub app: BlastpApp,
     /// The inclusion threshold (`psi_options->inclusion_ethresh`): psiblast's
@@ -869,6 +933,9 @@ pub struct ResolvedBlastpArgs {
     /// for `run_local`, which has no search path (C2 DECISIONS 7). A `-db` search asks its
     /// database (`BlastpDatabase::taxdb_found`).
     pub subject_taxdb_found: bool,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made with
+    /// `subject_taxdb_found` (`common::database::SubjectTaxdb`); `None` otherwise.
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
 }
 
 impl ResolvedBlastpArgs {
@@ -1265,7 +1332,7 @@ impl BlastpArgs {
             evalue: options.evalue,
             psiblast: self.app == BlastpApp::Psiblast,
             psi_tblastn: false,
-            // blastp's `-xdrop_ungap`, or rpsblast's (`RpsSearch`); psiblast's parser refuses it.
+            // blastp's and psiblast's `-xdrop_ungap`, or rpsblast's (`RpsSearch`).
             x_dropoff: self
                 .xdrop_ungap
                 .or_else(|| self.rps.as_ref().and_then(|rps| rps.x_drop_ungapped_bits)),
@@ -1401,6 +1468,10 @@ impl BlastpArgs {
             x_drop_final_bits: self.xdrop_gap_final.unwrap_or(f64::from(
                 crate::algorithm::tblastx::constants::X_DROP_GAPPED_FINAL,
             )),
+            gap_trigger_bits: self
+                .gap_trigger
+                .unwrap_or(crate::algorithm::tblastx::constants::GAP_TRIGGER_BIT_SCORE),
+            sum_stats: self.sum_stats,
             window_size: usize::try_from(options.window_size).unwrap_or(0),
             matrix_name: options.matrix_name,
             scoring: ProteinScoringSpec {
@@ -1434,6 +1505,7 @@ impl BlastpArgs {
             query_range,
             outfmt: self.outfmt.clone(),
             archive: self.archive.clone(),
+            strategy: self.strategy.clone(),
             first_query_ordinal: self.first_query_ordinal,
             psi_pssm,
             psi_search,
@@ -1444,7 +1516,8 @@ impl BlastpArgs {
                 .inclusion_ethresh
                 .unwrap_or(super::blast_engine::PSI_INCLUSION_ETHRESH),
             traceback_hitlist: 0,
-            subject_taxdb_found: false,
+            subject_taxdb_found: self.subject_taxdb.is_some(),
+            subject_taxdb: self.subject_taxdb.clone(),
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:60-66 (no word
         // threshold for RPS-BLAST: the reports print none, blast_format.cpp:2281-2284)

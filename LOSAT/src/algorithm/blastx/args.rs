@@ -164,6 +164,17 @@ pub struct BlastxArgs {
     // ```
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
+    /// ```c++
+    ///     arg_desc.AddOptionalKey(kArgOutputSearchStrategy,
+    ///                             "filename",
+    ///                             "File name to record the search strategy used",
+    ///                             CArgDescriptions::eOutputFile);
+    /// ```
+    /// The search strategy file (`report::archive::strategy`), created by `run` before the other
+    /// options are read.
+    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:99-100
     // ```c++
     //         arg_desc.AddDefaultKey(kTask, "task_name", "Task to execute",
@@ -453,6 +464,23 @@ pub struct BlastxArgs {
     /// BLASTX's search of the query batches; `None` in every BLASTX run.
     #[arg(skip)]
     pub(crate) rpstblastn: Option<std::sync::Arc<dyn RpsTblastnSearch>>,
+    /// The recorded options of RPSTBLASTN's search strategy requests (`archive::option_inputs`),
+    /// made by its command line from its own arguments as given, with `-export_search_strategy`;
+    /// `None` in every BLASTX run.
+    #[arg(skip)]
+    pub(crate) request_inputs: Option<Box<crate::report::archive::options::OptionInputs>>,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), which a
+    /// library call (`api::run`) reads from the application settings, as the command line
+    /// does (`common::database::SubjectTaxdb`); `None` elsewhere. Not a public option.
+    #[arg(skip)]
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
+    /// The settings by which a search of the library looks up the file of an unknown matrix
+    /// (`ResolvedOptions::find_matrix_file`), from its application start: set by `api::run` for an
+    /// ungapped search whose `-matrix` NCBI's tables do not have (`unknown_matrix_name`) and by
+    /// `run_local_database`; `None` for the command line, which looks it up with its own
+    /// settings (`native::run`), and LOSAT Web, which has no file system. Not a public option.
+    #[arg(skip)]
+    pub matrix_search: Option<crate::blastinput::ncbi_environment::MatrixSearch>,
 }
 
 /// The search of RPSTBLASTN's query batches (`rps_search::translated`, series PR item PS12a,
@@ -471,8 +499,9 @@ pub(crate) trait RpsTblastnSearch: std::fmt::Debug + Send + Sync {
         database: Option<&super::database::BlastxDatabase>,
     ) -> Result<std::sync::Arc<dyn RpsTblastnSearch>>;
     /// `native::run_query_batches` of RPSTBLASTN: the query batches of `read`, searched against
-    /// the profile volumes of `database`, each handed to `render` in the reader's order. Returns
-    /// the number of queries reported.
+    /// the profile volumes of `database`, each handed to `take` (the search strategy's request,
+    /// before its search) and to `render` in the reader's order. Returns the number of queries
+    /// reported.
     #[allow(clippy::too_many_arguments)]
     fn run_query_batches(
         &self,
@@ -482,7 +511,17 @@ pub(crate) trait RpsTblastnSearch: std::fmt::Debug + Send + Sync {
         diagnostics: &mut dyn std::io::Write,
         search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
         render: &mut super::native::BatchRender<'_>,
+        take: &mut dyn FnMut(&[super::input::FastaRecord], usize) -> Result<()>,
     ) -> Result<usize>;
+    /// What each query batch's set-up of the search writes into NCBI's options handle beyond the
+    /// batch's search space (`rps_search::volumes::search_sets`; `-searchsp` and `-dbsize` as
+    /// given), which the search strategy's requests after the first hold.
+    fn handle_sets(
+        &self,
+        database: Option<&super::database::BlastxDatabase>,
+        searchsp: Option<i64>,
+        dbsize: Option<i64>,
+    ) -> Vec<crate::report::archive::options::Param>;
     /// Whether the batches' results are merged over a database of several volumes, as NCBI's
     /// `CLocalRPSBlast` merges them: the merge keeps only NCBI's messages of error severity (no
     /// query warning, `report::query_warning`) and gives a batch that was not searched an empty
@@ -708,8 +747,9 @@ pub struct ResolvedOptions {
     /// first query batch fails with "Unknown error code -1" (`query_setup.rs`).
     pub unknown_matrix: bool,
     /// The file that NCBI BLAST+ reads for `unknown_matrix`'s name
-    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found by the command line after
-    /// the options are resolved; `None` elsewhere. The first query batch is refused then
+    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found by the command line and the
+    /// library API after the options are resolved (`find_matrix_file`); `None` in LOSAT Web. The
+    /// first query batch is refused then
     /// (`query_setup::matrix_error_message`).
     pub matrix_file: Option<std::path::PathBuf>,
     pub gap_open: i32,
@@ -819,6 +859,9 @@ pub struct ResolvedOptions {
     /// `native::run` (`-db`: the database's search path, `-subject`: NCBI's). False otherwise,
     /// as Web reads it (DECISIONS 7 of line CLI C2).
     pub taxdb_found: bool,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), set with
+    /// `taxdb_found` (`common::database::SubjectTaxdb`); `None` otherwise.
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
     /// A list kept no sequence of the database (`SeqDb::filtered_empty`): the queries of the
     /// searched batches have `EMPTY_DATABASE_MESSAGE`.
     pub filtered_empty: bool,
@@ -848,6 +891,21 @@ pub(crate) const AA_LOOKUP_TABLE: i32 = 3;
 pub(crate) const COMPRESSED_AA_LOOKUP_TABLE: i32 = 4;
 
 impl ResolvedOptions {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1301-1306 (quoted at
+    // `ncbi_environment::ApplicationSettings::matrix_file`: `BlastFindMatrixPath`)
+    /// Looks up the file that NCBI reads for `unknown_matrix`'s name with `search`
+    /// (`MatrixSearch::file`) into `matrix_file`, after the options are resolved: the command
+    /// line's run (`native::run`) and the library's searches (`local::read_format_options`).
+    pub(crate) fn find_matrix_file(
+        &mut self,
+        search: &crate::blastinput::ncbi_environment::MatrixSearch,
+    ) -> Result<()> {
+        if self.unknown_matrix {
+            self.matrix_file = search.file(&self.matrix).map_err(anyhow::Error::msg)?;
+        }
+        Ok(())
+    }
+
     /// Whether the search's lookup table is the compressed one (`-word_size` 5 to 7, blastx-fast).
     pub(crate) fn compressed_lookup(&self) -> bool {
         self.lookup_type == COMPRESSED_AA_LOOKUP_TABLE
@@ -897,6 +955,13 @@ impl ResolvedOptions {
 //
 // ```
 impl BlastxArgs {
+    /// Whether the search is ungapped with a `-matrix` that NCBI's tables do not have: the name
+    /// that NCBI looks for as a file (`ResolvedOptions::unknown_matrix`, which the resolution
+    /// sets for such a search; a gapped one refuses the name first).
+    pub(crate) fn unknown_matrix_name(&self) -> bool {
+        self.ungapped && blastx_matrix(self.matrix.as_deref().unwrap_or("BLOSUM62")).is_none()
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3642
     // ```c++
     //     CRef<CBlastOptionsHandle> retval(x_CreateOptionsHandle(locality, args));
@@ -1457,7 +1522,8 @@ impl BlastxArgs {
             outfmt,
             fields,
             tabular,
-            taxdb_found: false,
+            taxdb_found: self.subject_taxdb.is_some(),
+            subject_taxdb: self.subject_taxdb.clone(),
             filtered_empty: false,
             num_threads: self.num_threads,
             query_range: None,
@@ -1514,8 +1580,13 @@ impl BlastxArgs {
     //             	ITERATE(CSearchResultSet, result, *results) {
     //                	    formatter.PrintOneResultSet(**result, query_batch);
     // ```
-    pub fn run(self) -> Result<()> {
-        super::native::run(&self)
+    /// Runs the search with the settings of the program's application start
+    /// (`ApplicationStart::settings`).
+    pub(crate) fn run(
+        self,
+        settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    ) -> Result<()> {
+        super::native::run(&self, settings)
     }
 
     /// The program of the run's texts (`ProgramName`).

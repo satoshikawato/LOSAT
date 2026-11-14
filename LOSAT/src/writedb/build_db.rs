@@ -7,9 +7,13 @@
 use std::io::{Read, Write};
 use std::path::Path;
 
+use super::bioseq::{Bioseq, PastSeqPos};
 use super::deflines;
 use super::dir_entry;
-use super::fasta_source::{FastaBioseqSource, Warn};
+use super::fasta_source::reader::past_seq_pos_refusal;
+use super::fasta_source::{FastaBioseqSource, SourceErrorKind, Warn};
+use super::mask_data::range_set::address_order_refusal;
+use super::mask_data::{ranges_are_empty, MaskedRangeSet};
 use super::platform::Platform;
 use super::taxid_set::TaxIdSet;
 use super::time::LocalTime;
@@ -17,6 +21,9 @@ use super::writer::{DbVersion, Indices, WriteDb};
 use super::WriteDbError;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::seqdb::{SeqDbError, SeqType};
+use crate::seqid::model::ObjectId;
+use crate::seqid::rank::{best_rank_score, find_best};
+use crate::seqid::ParsedSeqId;
 
 /// `CBuildDatabase` for a FASTA input without parsed Seq-ids.
 pub struct BuildDatabase<'a> {
@@ -28,6 +35,15 @@ pub struct BuildDatabase<'a> {
     parse_ids: bool,
     /// `m_Taxids` (`SetTaxids`).
     taxids: TaxIdSet,
+    /// `m_MaskData`: the masked ranges of the sequences, when makeblastdb read mask data
+    /// (`SetMaskDataSource`).
+    mask_data: Option<MaskedRangeSet>,
+    /// `m_FoundMatchingMasks`.
+    found_matching_masks: bool,
+    /// LOSAT's refusal of the first sequence whose masks NCBI writes in the order of memory
+    /// addresses (`mask_data::range_set`). It is raised by `end_build` only when the build would
+    /// otherwise succeed, so that every error of NCBI that comes later in the run comes first.
+    address_order: Option<WriteDbError>,
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:852-927
@@ -451,6 +467,13 @@ fn create_path(dir: &str) -> bool {
 //     }
 // ```
 const CREATE_PATH_FAILED: ThrowSite = create_directories_site(1063);
+/// `s_FixBioseqDeltas`' throw for a protein delta (`CBuildDatabase::past_seq_pos`).
+const PROTEIN_DELTA: ThrowSite = ThrowSite {
+    file: "src/objtools/blast/seqdb_writer/build_db.cpp",
+    line: 303,
+    kind: "CMultisourceException::eArgErr",
+    function: Some("BLASTDB::ncbi::s_FixBioseqDeltas"),
+};
 const NO_WRITE_ACCESS: ThrowSite = create_directories_site(1069);
 
 /// A throw of `CMultisourceException` (`eOutputFileError`) at `line` of build_db.cpp.
@@ -826,6 +849,8 @@ impl<'a> BuildDatabase<'a> {
             platform,
             indices,
         );
+        let mut output_db = output_db;
+        output_db.set_column_date_fallback(now.log_time().as_bytes());
         Ok(Self {
             is_protein,
             log,
@@ -833,6 +858,9 @@ impl<'a> BuildDatabase<'a> {
             output_dbname,
             parse_ids: indices.full,
             taxids: TaxIdSet::default(),
+            mask_data: None,
+            found_matching_masks: false,
+            address_order: None,
         })
     }
 
@@ -859,6 +887,112 @@ impl<'a> BuildDatabase<'a> {
     pub fn taxid_message(&self) -> Option<&'static str> {
         (!self.taxids.has_ever_fixed_id())
             .then_some("Error: [makeblastdb] No sequences matched any of the taxids provided.")
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1583-1594
+    // ```c++
+    // int
+    // CBuildDatabase::RegisterMaskingAlgorithm(EBlast_filter_program program,
+    //                                          const string        & options,
+    //                                          const string        & name)
+    // {
+    //     return m_OutputDb->RegisterMaskAlgorithm(program, options, name);
+    // }
+    // ```
+    /// `RegisterMaskingAlgorithm(program, options, name)`: see
+    /// [`WriteDb::register_mask_algorithm`].
+    pub fn register_masking_algorithm(
+        &mut self,
+        program: i32,
+        options: &[u8],
+        name: &[u8],
+    ) -> Result<i32, WriteDbError> {
+        self.output_db
+            .register_mask_algorithm(program, options, name)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1596-1607
+    // ```c++
+    // int
+    // CBuildDatabase::RegisterMaskingAlgorithm(const string        & program,
+    //                                          const string        & description,
+    //                                          const string        & options)
+    // {
+    //     return m_OutputDb->RegisterMaskAlgorithm(program, description, options);
+    // }
+    // ```
+    // The first argument of this overload is the id of `-mask_id` (the call
+    // in makeblastdb.cpp:966 passes `id_list[i], desc_list[i], opts`).
+    /// `RegisterMaskingAlgorithm(id, description, options)`: see
+    /// [`WriteDb::register_mask_algorithm_id`].
+    pub fn register_masking_algorithm_id(
+        &mut self,
+        id: &[u8],
+        description: &[u8],
+        options: &[u8],
+    ) -> Result<i32, WriteDbError> {
+        self.output_db
+            .register_mask_algorithm_id(id, description, options)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1609-1612
+    // ```c++
+    // void CBuildDatabase::SetMaskDataSource(IMaskDataSource & ranges)
+    // {
+    //     m_MaskData.Reset(& ranges);
+    // }
+    // ```
+    // The masks are looked up by the Seq-ids of each sequence (`bs->GetId()`): with
+    // `-parse_seqids` the parsed ids, else its `local id` (`add_masks_for_seq_id`).
+    /// `SetMaskDataSource`: the masked ranges of the sequences. makeblastdb calls it when it
+    /// reads the first mask list that has masks, with an empty set, and goes on inserting into
+    /// it through [`Self::mask_data_source_mut`] (`process_mask_data` does the same); every
+    /// insert comes before the first sequence is added.
+    pub fn set_mask_data_source(&mut self, ranges: MaskedRangeSet) {
+        self.mask_data = Some(ranges);
+    }
+
+    /// The set that `set_mask_data_source` handed over, to insert into.
+    pub fn mask_data_source_mut(&mut self) -> Option<&mut MaskedRangeSet> {
+        self.mask_data.as_mut()
+    }
+
+    /// `m_FoundMatchingMasks`: whether a sequence has been given mask data.
+    #[cfg(test)]
+    pub fn found_matching_masks(&self) -> bool {
+        self.found_matching_masks
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1204-1210
+    // ```c++
+    // CBuildDatabase::~CBuildDatabase()
+    // {
+    //     if (m_MaskData.NotEmpty() && !m_FoundMatchingMasks) {
+    //         ERR_POST(Error << "No sequences matched any of the masks provided.\n"
+    //                        << "Please ensure that the -parse_seqids option is used "
+    //                        << "in the\nfiltering program as well as makeblastdb.");
+    //     }
+    // ```
+    // The message is posted when the `CBuildDatabase` is destroyed: in makeblastdb, when the
+    // application object goes (`m_DB` is a member), so after the log of `EndBuild`, after the
+    // exception message of a failed build and after the metadata file. The caller of LOSAT's
+    // build calls this at that point.
+    /// The destructor's diagnostic: `warn` gets the message (without its final newline)
+    /// when mask data were read and no sequence matched.
+    pub fn post_destruction_diagnostics(&self, warn: Warn<'_>) {
+        if self.mask_data.is_some() && !self.found_matching_masks {
+            warn(
+                b"Error: [makeblastdb] No sequences matched any of the masks provided.\n\
+                  Please ensure that the -parse_seqids option is used in the\n\
+                  filtering program as well as makeblastdb.",
+            );
+        }
+    }
+
+    /// Test hook: see [`WriteDb::set_column_date`].
+    #[cfg(test)]
+    pub(crate) fn set_column_date(&mut self, index: usize, date: &[u8]) {
+        self.output_db.set_column_date(index, date);
     }
 
     /// `GetOutputDbName`: the absolute name of the database.
@@ -932,7 +1066,8 @@ impl<'a> BuildDatabase<'a> {
     //     return found;
     // ```
     // The FASTA source applies `s_FixBioseqDeltas` before it hands a
-    // sequence over; its errors arrive as errors of the source.
+    // sequence over; its errors arrive as errors of the source. A record past
+    // NCBI's 32-bit length comes without data and meets it here (`past_seq_pos`).
     /// `AddSequences(IBioseqSource &)`: `true` when a sequence was added.
     fn add_sequences<R: Read>(
         &mut self,
@@ -942,12 +1077,9 @@ impl<'a> BuildDatabase<'a> {
         let mut found = false;
         let start = std::time::Instant::now();
         let mut count = 0u64;
-        while let Some(mut bioseq) = source.next_bioseq(warn).map_err(|error| {
-            if error.out_of_memory {
-                WriteDbError::OutOfMemory
-            } else {
-                WriteDbError::Creation(error.message)
-            }
+        while let Some(mut bioseq) = source.next_bioseq(warn).map_err(|error| match error.kind {
+            SourceErrorKind::Creation => WriteDbError::Creation(error.message),
+            SourceErrorKind::OutOfMemory => WriteDbError::OutOfMemory,
         })? {
             let bioseq_id = bioseq.first_id_fasta();
             if let Some(parsed) = bioseq.parsed.as_mut() {
@@ -988,19 +1120,47 @@ impl<'a> BuildDatabase<'a> {
                     let mut headers = deflines::extract_bioseq_deflines(&bioseq, &mut *warn);
                     self.output_db.post_extracted_deflines(&headers);
                     self.taxids.fix_tax_id(&mut headers);
+                    if let Some(past) = bioseq.past_seq_pos {
+                        return Err(self.past_seq_pos(past, &bioseq, &bioseq_id, &mut *warn));
+                    }
                     if bioseq.seq_data.is_some() {
+                        // `bs->GetId()`: the ids after `AddSequences`' edit of the ones of the
+                        // other molecule type (`localize_other_molecule`, above).
+                        let ids = self
+                            .mask_data
+                            .is_some()
+                            .then(|| bioseq.parsed.as_ref().map(|parsed| parsed.ids.clone()))
+                            .flatten();
                         self.output_db.add_sequence(bioseq)?;
                         self.output_db.set_deflines(headers);
                         added = true;
+                        if let Some(ids) = ids {
+                            self.add_masks_for_seq_id(&ids, &bioseq_id)?;
+                        }
                     }
                 } else {
                     // The definition line without `-parse_seqids` gets the global taxid
                     // of `-taxid` (or 0); `-taxid_map` requires `-parse_seqids`.
                     self.output_db.extract_bioseq_deflines(&bioseq);
+                    if let Some(past) = bioseq.past_seq_pos {
+                        return Err(self.past_seq_pos(past, &bioseq, &bioseq_id, &mut *warn));
+                    }
                     if bioseq.seq_data.is_some() {
+                        // `bs->GetId()` is the `local id N` that `CFastaReader` numbers the
+                        // sequences by (`CSeqIdGenerator::GenerateID` without a prefix); a
+                        // number that is no `int` matches none.
+                        let ids: Vec<ParsedSeqId> = self
+                            .mask_data
+                            .is_some()
+                            .then(|| bioseq.local_id.parse::<i32>().ok())
+                            .flatten()
+                            .map(|number| ParsedSeqId::Local(ObjectId::Id(number)))
+                            .into_iter()
+                            .collect();
                         self.output_db.add_sequence(bioseq)?;
                         self.output_db.set_taxid(self.taxids.global_taxid());
                         added = true;
+                        self.add_masks_for_seq_id(&ids, &bioseq_id)?;
                     }
                 }
             }
@@ -1026,6 +1186,56 @@ impl<'a> BuildDatabase<'a> {
             );
         }
         Ok(found)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:446-466
+    // ```c++
+    // void
+    // CBuildDatabase::x_AddMasksForSeqId(const list< CRef<CSeq_id> >& ids)
+    // {
+    //     if (m_MaskData.Empty()) {
+    //         return;
+    //     }
+    //
+    //     const CMaskedRangesVector& rng = m_MaskData->GetRanges(ids);
+    //     if (rng.empty()) {
+    //         return;
+    //     }
+    //
+    //     vector <TGi> gis;
+    //     ITERATE(list< CRef<CSeq_id> >, id, ids) {
+    //         if ((*id)->IsGi()) {
+    //             gis.push_back((*id)->GetGi());
+    //         }
+    //     }
+    //     m_OutputDb->SetMaskData(rng, gis);
+    //     m_FoundMatchingMasks = true;
+    // }
+    // ```
+    // The Seq-ids are `bs->GetId()`: the parsed ids of a sequence with `-parse_seqids`, its
+    // `local id` without it. A sequence with no 31-bit local id has none.
+    //
+    // Where NCBI's order of the ranges is the memory addresses', LOSAT's order is written, so that
+    // `SetMaskData`'s checks of all the algorithms and the rest of the build run as in NCBI; the
+    // first such sequence is kept (`sequence`: its first Seq-id) for `end_build`.
+    fn add_masks_for_seq_id(
+        &mut self,
+        ids: &[ParsedSeqId],
+        sequence: &str,
+    ) -> Result<(), WriteDbError> {
+        let Some(mask_data) = self.mask_data.as_mut() else {
+            return Ok(());
+        };
+        let found = mask_data.get_ranges(ids);
+        if ranges_are_empty(found.ranges) {
+            return Ok(());
+        }
+        self.output_db.set_mask_data(found.ranges)?;
+        self.found_matching_masks = true;
+        if let (None, Some(seq_ids)) = (&self.address_order, &found.address_ordered) {
+            self.address_order = Some(address_order_refusal(seq_ids, sequence));
+        }
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1403-1420
@@ -1068,6 +1278,53 @@ impl<'a> BuildDatabase<'a> {
             let _ = self.end_build(true, warn);
         }
         result
+    }
+
+    /// `s_FixBioseqDeltas` on a record past NCBI's 32-bit length (`Bioseq::past_seq_pos`),
+    /// after the definition lines (`x_EditAndAddBioseq`), whose diagnostics come first.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:297-304
+    /// ```c++
+    ///     if (bs->GetInst().CanGetMol() &&
+    ///         !CSeq_inst::IsNa(bs->GetInst().GetMol())) {
+    ///         CConstRef<CSeq_id> id = FindBestChoice(bs->GetId(), CSeq_id::BestRank);
+    ///         CNcbiOstrstream oss;
+    ///         oss << id->AsFastaString() << ": Protein delta sequences are not supported.";
+    ///         string msg = CNcbiOstrstreamToString(oss);
+    ///         NCBI_THROW(CMultisourceException, eArg, msg);
+    ///     }
+    /// ```
+    #[cold]
+    fn past_seq_pos(
+        &mut self,
+        past: PastSeqPos,
+        bioseq: &Bioseq,
+        bioseq_id: &str,
+        warn: Warn<'_>,
+    ) -> WriteDbError {
+        self.post_diagnostics(warn);
+        match past {
+            PastSeqPos::ProteinDelta => {
+                let best_id = match &bioseq.parsed {
+                    Some(parsed) => {
+                        let mut out = Vec::new();
+                        if let Some(id) = find_best(&parsed.ids, best_rank_score) {
+                            crate::seqid::label::fasta(id, &mut out);
+                        }
+                        String::from_utf8_lossy(&out).into_owned()
+                    }
+                    None => format!("lcl|{}", bioseq.local_id),
+                };
+                WriteDbError::Exception(NcbiException::new(
+                    PROTEIN_DELTA,
+                    format!("{best_id}: Protein delta sequences are not supported."),
+                ))
+            }
+            PastSeqPos::Refused { length } => WriteDbError::Other(format!(
+                "{} is not supported by LOSAT's makeblastdb",
+                past_seq_pos_refusal(bioseq_id, length)
+            )),
+        }
     }
 
     /// Hands the diagnostics that the writer posted since the last call to
@@ -1136,13 +1393,29 @@ impl<'a> BuildDatabase<'a> {
     // A `Close` that threw leaves files open: they are removed open (their later writes go to
     // the removed files), and the writer's destructors run after the removal
     // (`WriteDb::destroy_after_failed_close`).
+    //
+    // LOSAT's refusal of masks whose order NCBI takes from memory addresses (`address_order`)
+    // comes here, when the build would otherwise succeed: after a close that did not fail, in an
+    // `EndBuild` without `erase`. It ends the build as an error of NCBI's build ends it
+    // (`EndBuild(true)` in `AddFasta`, build_db.cpp:1415-1417): the files that `ListFiles` names
+    // are removed, which leaves what NCBI leaves after its error at the last sequence (nothing in
+    // version 4; the `.nos`, `.not`, `.ntf` and `.nto` files in version 5). The other refusal
+    // raised inside the build, `mask_data`'s column that is created too late, comes from
+    // `SetMaskData` inside `AddFasta` and so ends the build in the same way. A build that ends
+    // with an error (`erase`, a failed close) reports that error and drops the refusal: NCBI's
+    // order never reaches a file there.
     /// `EndBuild`: closes the database; with `erase`, or when closing fails,
     /// removes its files. `Ok(false)` when no volume was created. `warn`
-    /// takes the diagnostics of the close.
+    /// takes the diagnostics of the close. A pending refusal of LOSAT (`address_order`) is
+    /// raised after a close without `erase` that did not fail, with the files removed.
     pub fn end_build(&mut self, erase: bool, warn: Warn<'_>) -> Result<bool, WriteDbError> {
         let close_error = self.output_db.close().err();
         self.post_diagnostics(warn);
-        let erase = erase || close_error.is_some();
+        let refusal = self
+            .address_order
+            .take()
+            .filter(|_| !erase && close_error.is_none());
+        let erase = erase || close_error.is_some() || refusal.is_some();
         let vols = self.output_db.list_volumes();
         let files = self.output_db.list_files();
         let _ = writeln!(self.log);
@@ -1157,6 +1430,9 @@ impl<'a> BuildDatabase<'a> {
             }
         }
         let _ = writeln!(self.log);
+        if let Some(refusal) = refusal {
+            return Err(refusal);
+        }
         if close_error.is_some() {
             self.output_db.destroy_after_failed_close();
         }

@@ -456,6 +456,75 @@ pub(super) fn write_blastp_tabular(
     write_tabular_rows::<false>(tab, hit_lists, writer, warnings, probe, rows)
 }
 
+/// Writes the organism report (outfmt 18, `report::tax_report`) of every query of `hit_lists`
+/// (indexed by query) to `writer`, each query's warnings before its report: the caption, the
+/// `Query=` block of its title (`tab.query_titles`) with the length of its record
+/// (`record_lengths`), and the table of its reported HSPs in the hit lists' order. The report is
+/// made before the batch's first byte (`tax_report::report_batch`), so that LOSAT's refusals come
+/// before it; `tab.names` carries the run's taxonomy database.
+pub(super) fn write_blastp_tax_report(
+    tab: &BlastpTabular<'_>,
+    record_lengths: &[usize],
+    hit_lists: &[Option<BlastpHitList>],
+    writer: &mut crate::cli::NcbiOstream<'_>,
+    warnings: Option<&mut QueryWarnings<'_>>,
+) -> Result<()> {
+    use crate::report::tax_report::{report_batch, write_report, TaxHsp, TaxPlain, TaxQuery};
+    let parsed = match &tab.subjects {
+        TabularSubjects::Records { parsed, .. } | TabularSubjects::Database { parsed, .. } => {
+            *parsed
+        }
+    };
+    let queries: Vec<TaxQuery<'_>> = hit_lists
+        .iter()
+        .enumerate()
+        .map(|(q_idx, hit_list)| TaxQuery {
+            title: tab
+                .query_titles
+                .get(q_idx)
+                .map_or(&b""[..], |title| title.as_ref()),
+            length: record_lengths.get(q_idx).copied().unwrap_or_default(),
+            hsps: hit_list
+                .iter()
+                .flat_map(reported)
+                .flat_map(|hsp_list| &hsp_list.hsps)
+                .map(|hsp| TaxHsp {
+                    subject: hsp.s_idx as usize,
+                    evalue: hsp.e_value,
+                    bit_score: hsp.bit_score,
+                })
+                .collect(),
+        })
+        .collect();
+    let plain = |s_idx: usize| match &tab.subjects {
+        TabularSubjects::Records { records, .. } => TaxPlain::Record {
+            local_id: records[s_idx].local_id.as_bytes(),
+            title: &records[s_idx].title,
+        },
+        TabularSubjects::Database {
+            ordinals,
+            titles,
+            taxonomy,
+            ..
+        } => TaxPlain::Stored {
+            ordinal: ordinals.get(s_idx).copied().unwrap_or_default(),
+            title: titles.get(s_idx).map_or(&[][..], |title| title),
+            taxid: taxonomy.get(s_idx).map_or(0, |taxonomy| taxonomy.taxid),
+        },
+    };
+    let report = report_batch(
+        &queries,
+        parsed,
+        plain,
+        true,
+        tab.taxdb_found,
+        tab.names,
+        tab.app.name(),
+    )?;
+    write_report(writer, warnings, &queries, &report)?;
+    Ok(())
+}
+
 /// rpsblast's report (`write_tabular_rows` with the gate of its rows on NCBI's alignment block,
 /// `needs_rows`). Cold and out of line (no NCBI counterpart: code placement only), so that
 /// blastp's and psiblast's writer keeps the default path's code.
@@ -484,6 +553,8 @@ fn write_tabular_rows<const RPS: bool>(
 ) -> Result<()> {
     let spec = tab.spec;
     let needs = spec.needs();
+    // Which rows read their subject (`TabularSpec::subject_fetch`).
+    let fetch = spec.subject_fetch(crate::blastinput::app::Program::Blastp);
     let rows_read = if RPS {
         needs_rows(needs.rows, spec, tab.app)
     } else {
@@ -668,6 +739,21 @@ fn write_tabular_rows<const RPS: bool>(
                 qcovus: -1,
             };
             for hsp in &hsp_list.hsps {
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+                // ```c++
+                //        		const CBioseq_Handle& subject_bh =
+                //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+                // ```
+                // A row that reads the subject loads it first where the query's batch did not
+                // prefetch it: the texts of its taxonomy lookups follow the rows before it
+                // (`QueryWarnings::subject_read`), before those of the row's own lookups.
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    if warnings.reads_with_texts(q_idx) && fetch.reads(hsp.num_ident) {
+                        writer.write_all(&buf)?;
+                        buf.clear();
+                        warnings.subject_read(q_idx, hsp.s_idx, &mut *writer)?;
+                    }
+                }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.
                 if let (Some(names), Some(warnings)) = (tab.names, warnings.as_deref_mut()) {
@@ -908,6 +994,7 @@ mod tests {
         let before = [b"Warning: q1\n".to_vec()];
         let mut warnings = QueryWarnings::new(&before, &mut err);
         write_blastp_tabular(&tab, hit_lists, &mut out, Some(&mut warnings), None, None).unwrap();
+        drop(warnings);
         (
             String::from_utf8(out).unwrap(),
             String::from_utf8(err).unwrap(),

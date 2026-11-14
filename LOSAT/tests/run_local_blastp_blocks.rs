@@ -5,7 +5,7 @@
 //! The switch is read once per process, so every search runs in a child process: this test
 //! binary again, running only `child_search` with the variables of its arm (`BATCH_SIZE` makes
 //! small batches and `LOSAT_X_BPQBLOCK=1` closes a block at every batch end, so the fixture pair has
-//! three blocks or more). The child searches through `LOSAT::api` (`run_collect`: the hit records
+//! three blocks or more). The child searches through `losat::api` (`run_collect`: the hit records
 //! and the observer, which the API gives `run_local`; `run`: neither) and writes what the call
 //! wrote (each output, the warnings, the hit records as `Debug` text and the ranges of the rows
 //! and sections) to files, after checking the ranges against the outputs and the records (each
@@ -31,8 +31,8 @@ mod run_local_support;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use losat::api::{read_fasta, Program, Role};
 use run_local_support::{assert_observer_ranges, field, temp_path, Files};
-use LOSAT::api::{read_fasta, Program, Role};
 
 const CUSTOM: &str =
     "6 qseqid sseqid pident length qstart qend sstart send evalue bitscore qseq sseq btop";
@@ -93,7 +93,7 @@ impl Drop for Inputs {
 
 /// What the call gives the caller besides the outputs: `run` (no hit records, no observer) or
 /// `run_collect` (the hit records and the observer). The calls that `run_local` takes with the
-/// observer alone or with `OutputSink::File` sinks cannot be made through `LOSAT::api`.
+/// observer alone or with `OutputSink::File` sinks cannot be made through `losat::api`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Observe {
     /// No hit records, no observer.
@@ -425,7 +425,7 @@ fn calls_the_block_search_takes_and_does_not() {
     // An output the block search does not write (outfmt 15 and 16); the block search off (with one
     // outfmt 6 output with the records and the observer, and with three outputs). (The calls with
     // the observer alone and with outputs that are not the caller's writers cannot be made through
-    // `LOSAT::api`: `run_collect` gives the records with the observer, `run` neither.)
+    // `losat::api`: `run_collect` gives the records with the observer, `run` neither.)
     for (formats, observe, extra) in [
         (&["0", "6", "7", "15", "16"][..], Observe::Both, None),
         (&WEB[1..2], Observe::Both, Some(BLOCK_OFF)),

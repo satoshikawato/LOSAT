@@ -1,0 +1,36 @@
+Blast-db-mask-info ::= {
+  algo-id 0,
+  algo-program dust,
+  algo-options "o",
+  masks {
+    masks {
+      int {
+        from 0,
+        to 3,
+        id gi 123
+      },
+      int {
+        from 0,
+        to 3,
+        id gi 123
+      },
+      int {
+        from 0,
+        to 3,
+        id embl {
+          accession "X12345",
+          version 1
+        }
+      },
+      int {
+        from 0,
+        to 3,
+        id tpg {
+          accession "BK000001",
+          version 1
+        }
+      }
+    },
+    more FALSE
+  }
+}

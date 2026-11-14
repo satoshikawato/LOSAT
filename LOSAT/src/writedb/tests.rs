@@ -24,17 +24,17 @@ use makeblastdb_fix_cases::{FixCase, FIX_CASES};
 
 /// The platform of every expected file here: makeblastdb 2.17.0 on Linux x86-64. The tests
 /// write its files on whatever platform they run on (`Platform`).
-const LINUX: Platform = Platform::LINUX_X86_64;
+pub(super) const LINUX: Platform = Platform::LINUX_X86_64;
 
-fn seqdb_fixtures() -> PathBuf {
+pub(super) fn seqdb_fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb")
 }
 
 /// A directory of this test run, removed when the value is dropped.
-struct TempDir(PathBuf);
+pub(super) struct TempDir(pub(super) PathBuf);
 
 impl TempDir {
-    fn new(label: &str) -> Self {
+    pub(super) fn new(label: &str) -> Self {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -48,7 +48,7 @@ impl TempDir {
         Self(dir)
     }
 
-    fn base(&self, name: &str) -> String {
+    pub(super) fn base(&self, name: &str) -> String {
         self.0.join(name).to_string_lossy().into_owned()
     }
 }
@@ -60,7 +60,7 @@ impl Drop for TempDir {
 }
 
 /// The creation date stored in an index file of makeblastdb.
-fn stored_date(index_file: &Path, seqtype: SeqType) -> String {
+pub(super) fn stored_date(index_file: &Path, seqtype: SeqType) -> String {
     let bytes = std::fs::read(index_file).unwrap();
     let index = crate::seqdb::index::IndexFile::parse(&bytes, seqtype, index_file).unwrap();
     let date: Vec<u8> = index.date.iter().copied().take_while(|&b| b != 0).collect();
@@ -69,7 +69,7 @@ fn stored_date(index_file: &Path, seqtype: SeqType) -> String {
 
 /// The local time that `LocalTime::index_date` formats as `date`
 /// ("Oct 12, 2026  3:22 PM").
-fn time_of(date: &str) -> LocalTime {
+pub(super) fn time_of(date: &str) -> LocalTime {
     let months = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
@@ -91,7 +91,7 @@ fn time_of(date: &str) -> LocalTime {
     time
 }
 
-fn files_named(dir: &Path, prefix: &str) -> Vec<String> {
+pub(super) fn files_named(dir: &Path, prefix: &str) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
@@ -167,6 +167,7 @@ fn protein_bioseqs(path: &Path) -> Vec<Bioseq> {
             // The reader hands over capital letters.
             seq_data: Some(SeqData::Ncbieaa(residues.to_ascii_uppercase())),
             parsed: None,
+            past_seq_pos: None,
         })
         .collect()
 }
@@ -465,7 +466,7 @@ fn an_existing_database_of_the_same_name_is_removed() {
 
 /// The log with the markers of `makeblastdb_app_cases.rs` in place of the
 /// build time, the output path and the seconds of the timed line.
-fn log_with_markers(log: &[u8]) -> Vec<u8> {
+pub(super) fn log_with_markers(log: &[u8]) -> Vec<u8> {
     let lines: Vec<Vec<u8>> = log
         .split(|&b| b == b'\n')
         .map(|line| {
@@ -487,7 +488,7 @@ fn log_with_markers(log: &[u8]) -> Vec<u8> {
     lines.join(&b'\n')
 }
 
-fn replace_bytes(text: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
+pub(super) fn replace_bytes(text: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     let mut rest = text;
     while let Some(at) = rest.windows(from.len()).position(|w| w == from) {
@@ -524,6 +525,9 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
             hash_index: false,
             taxid: None,
             taxid_map: None,
+            mask_data: None,
+            mask_id: None,
+            mask_desc: None,
         };
         // A run that writes no database stores no date; any time will do.
         let now = time_of(if case.date.is_empty() {
@@ -534,6 +538,7 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
+            None,
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -618,12 +623,16 @@ fn makedb_version(
         hash_index: false,
         taxid: None,
         taxid_map: None,
+        mask_data: None,
+        mask_id: None,
+        mask_desc: None,
     };
     let now = time_of("Oct 12, 2026  9:00 PM");
     let (mut log, mut messages) = (Vec::new(), Vec::new());
     let mut stdin = stdin;
     let status = run_with(
         &args,
+        None,
         Some(&now),
         LINUX,
         &mut stdin,
@@ -1343,6 +1352,7 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
             length: 2,
             seq_data: Some(SeqData::Ncbieaa(b"MK".to_vec())),
             parsed: None,
+            past_seq_pos: None,
         };
         db.extract_bioseq_deflines(&bioseq);
         db.add_sequence(bioseq).unwrap();
@@ -1374,7 +1384,7 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
 
 /// The parsed `losat makeblastdb` arguments of a makeblastdb command line (the
 /// words after the program's name).
-fn parse_makedb_words(words: &[String]) -> MakedbArgs {
+pub(super) fn parse_makedb_words(words: &[String]) -> MakedbArgs {
     use crate::cli::{Cli, Commands};
     let mut argv = vec!["losat".to_string(), "makeblastdb".to_string()];
     argv.extend(words.iter().cloned());
@@ -1453,6 +1463,7 @@ fn run_v5_case(case: &V5Case) {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
+            None,
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -1547,31 +1558,40 @@ fn the_metadata_files_of_version_5_are_makeblastdb_s() {
     run_v5_cases("J_");
 }
 
-/// One of several `-in` files that exists and cannot be opened: LOSAT stops the build with
-/// exit status 255 and removes what the earlier files added, as for a late error (makeblastdb
-/// reads nothing from it and goes on; PD-LOSAT-DATABASE-SEARCH, DECISIONS 20 of the makedb-v5
-/// line).
+/// `-in` files that exist and cannot be opened, as makeblastdb 2.17.0 has them (also a compressed
+/// name, sw8 probe 2026-11-13): after the warning that the file does "NOT appear to be FASTA",
+/// the build skips it, without its "Adding sequences" line, and ends with exit status 0; a build
+/// of such files alone ends with "No volumes were created." and writes no file.
 #[cfg(unix)]
 #[test]
-fn an_input_file_that_cannot_be_opened_stops_the_build() {
+fn input_files_that_cannot_be_opened_are_skipped() {
     use std::os::unix::fs::PermissionsExt;
     let tmp = TempDir::new("unreadable");
     let locked = tmp.base("locked.fa");
-    std::fs::write(&locked, b">l\nMKV\n").unwrap();
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let locked_gz = tmp.base("locked.fa.gz");
+    for path in [&locked, &locked_gz] {
+        std::fs::write(path, b">l\nMKV\n").unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    }
     if std::fs::File::open(&locked).is_ok() {
         // A user who reads every file (root): there is no file that cannot be opened.
         return;
     }
-    let base = tmp.base("db");
-    for version in ["4", "5"] {
+    let warning = |name: &str| {
+        format!(
+            "Warning: [makeblastdb] \nInput file {name} does NOT appear to be FASTA (processing \
+             anyway).\nAdvise validating database with 'blastdbcheck -dbtype [prot|nucl] -db \
+             ${{DBNAME}}'\n\n"
+        )
+    };
+    let build = |input: &str, dir: &TempDir, version: &str| {
         let words: Vec<String> = [
             "-in",
-            &format!("tests/writedb_v5/a.fa {locked}"),
+            input,
             "-dbtype",
             "prot",
             "-out",
-            &base,
+            &dir.base("db"),
             "-title",
             "t",
             "-blastdb_version",
@@ -1585,41 +1605,66 @@ fn an_input_file_that_cannot_be_opened_stops_the_build() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
+            None,
             Some(&now),
             LINUX,
             &mut std::io::empty(),
             &mut out,
             &mut err,
         );
-        let err = String::from_utf8_lossy(&err).into_owned();
         let out = String::from_utf8_lossy(&out).into_owned();
-        assert_eq!(status, 255, "v{version}: {err}");
+        (status, out, String::from_utf8_lossy(&err).into_owned())
+    };
+    for version in ["4", "5"] {
+        // Read after the readable file and before it: the database is that file's.
+        let alone = TempDir::new("unreadable-alone");
+        let (status, out, err) = build("tests/writedb_v5/a.fa", &alone, version);
+        assert_eq!((status, err.as_str()), (0, ""), "v{version}");
+        let expected = files_named(&alone.0, "db.");
+        for (input, skipped) in [
+            (format!("tests/writedb_v5/a.fa {locked}"), &locked),
+            (format!("{locked_gz} tests/writedb_v5/a.fa"), &locked_gz),
+        ] {
+            let dir = TempDir::new("unreadable-mixed");
+            let (status, out_mixed, err) = build(&input, &dir, version);
+            assert_eq!(status, 0, "v{version} {input}: {err}");
+            assert_eq!(err, warning(skipped), "v{version} {input}");
+            assert_eq!(
+                out_mixed
+                    .matches("Adding sequences from FASTA; added 2 sequences in ")
+                    .count(),
+                1,
+                "v{version} {input}: {out_mixed}"
+            );
+            assert_eq!(
+                out_mixed.lines().count(),
+                out.lines().count(),
+                "v{version} {input}"
+            );
+            assert_eq!(files_named(&dir.0, "db."), expected, "v{version} {input}");
+            for name in &expected {
+                assert!(
+                    std::fs::read(dir.0.join(name)).unwrap()
+                        == std::fs::read(alone.0.join(name)).unwrap(),
+                    "v{version} {input}: {name}"
+                );
+            }
+        }
+        // Only files that cannot be opened.
+        let dir = TempDir::new("unreadable-only");
+        let (status, out, err) = build(&format!("{locked} {locked_gz}"), &dir, version);
+        assert_eq!(status, 0, "v{version}: {err}");
+        assert_eq!(err, warning(&locked) + &warning(&locked_gz), "v{version}");
         assert!(
-            err.starts_with(&format!(
-                "Warning: [makeblastdb] \nInput file {locked} does NOT appear to be FASTA \
-                 (processing anyway).\n"
-            )),
-            "v{version}: {err}"
-        );
-        assert!(
-            err.ends_with("\n") && err.contains(&format!("\nError: {locked}: ")),
-            "v{version}: {err}"
-        );
-        // The first file was read into the database before the second failed.
-        assert!(
-            out.contains("Adding sequences from FASTA; added 2 sequences in "),
+            out.ends_with("Maximum file size: 3000000000B\n\nNo volumes were created.\n\n"),
             "v{version}: {out}"
         );
-        // The volumes and the LMDB file are removed. Of version 5 the tax-id lookup files and
-        // the `.ptf` stay, as after makeblastdb's own late errors (`ListFiles` names the `.pdb`
-        // only; the late-error cases E_late and E_late1 of the makedb-v5 S2 gate).
-        let left: Vec<String> = files_named(&tmp.0, "db.");
-        let expected: &[&str] = if version == "4" {
-            &[]
-        } else {
-            &["db.pot", "db.ptf", "db.pto"]
-        };
-        assert_eq!(left, expected, "v{version}");
+        assert!(!out.contains("Adding sequences"), "v{version}: {out}");
+        assert_eq!(
+            files_named(&dir.0, "db."),
+            Vec::<String>::new(),
+            "v{version}"
+        );
     }
 }
 
@@ -1641,6 +1686,7 @@ fn run_parse_case(case: &ParseCase) {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let status = run_with(
         &args,
+        None,
         Some(&now),
         LINUX,
         &mut std::io::empty(),
@@ -1742,7 +1788,15 @@ fn run_fix_case(case: &FixCase) {
     });
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let mut stdin = case.stdin;
-    let status = run_with(&args, Some(&now), LINUX, &mut stdin, &mut out, &mut err);
+    let status = run_with(
+        &args,
+        None,
+        Some(&now),
+        LINUX,
+        &mut stdin,
+        &mut out,
+        &mut err,
+    );
     let show = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
     let err = build_tree_masked(&v5_markers(&err, &dir));
     let out = v5_markers(&out, &dir);
@@ -1843,6 +1897,7 @@ fn parse_seqids_v5_run(label: &str, input: &str, extra: &[&str]) -> (i32, String
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let status = run_with(
         &args,
+        None,
         Some(&now),
         LINUX,
         &mut std::io::empty(),
@@ -1940,6 +1995,7 @@ fn s2_gate() {
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let status = run_with(
                 &args,
+                None,
                 Some(&now),
                 LINUX,
                 &mut std::io::empty(),
@@ -1982,6 +2038,7 @@ fn s3a_gate() {
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let status = run_with(
                 &args,
+                None,
                 Some(&now),
                 LINUX,
                 &mut std::io::empty(),
@@ -2024,6 +2081,7 @@ fn s3b_gate() {
                     };
                     run_with(
                         &args,
+                        None,
                         Some(&now),
                         LINUX,
                         &mut std::io::empty(),

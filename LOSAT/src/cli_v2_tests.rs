@@ -356,9 +356,44 @@ fn makedb_takes_makeblastdb_s_option_names() {
         );
     }
 
+    // `-mask_data` takes a list of files, `-mask_id` needs `-mask_data` and `-mask_desc` needs
+    // `-mask_id` (makeblastdb.cpp:259-277); the parser's errors end with exit status 2 as those of
+    // `-taxid_map` above.
+    assert_eq!(defaults.mask_data, None);
+    assert_eq!((defaults.mask_id, defaults.mask_desc), (None, None));
+    let given = args(
+        makedb(&[
+            "-dbtype",
+            "prot",
+            "-mask_data",
+            "a.asnt,b.asnb",
+            "-mask_id",
+            "x,y",
+            "-mask_desc",
+            "d1,d2",
+        ])
+        .unwrap(),
+    );
+    assert_eq!(given.mask_data.as_deref(), Some("a.asnt,b.asnb"));
+    assert_eq!(given.mask_id.as_deref(), Some("x,y"));
+    assert_eq!(given.mask_desc.as_deref(), Some("d1,d2"));
+    for words in [
+        &["-dbtype", "prot", "-mask_id", "x"][..],
+        &["-dbtype", "prot", "-mask_data", "a", "-mask_desc", "d"],
+        &["-dbtype", "prot", "-mask_desc", "d", "-mask_id", "x"],
+        &["-dbtype", "prot", "-mask_data"],
+    ] {
+        let err = makedb(words).unwrap_err();
+        assert_eq!(err.exit_code(), 2, "{words:?}: {err}");
+        assert!(
+            !err.to_string().contains("not supported"),
+            "{words:?}: {err}"
+        );
+    }
+
     // The options of makeblastdb that LOSAT does not implement are named (`-h` and
     // `-version` are served: `makeblastdb_is_a_name_of_makedb`).
-    for option in ["-mask_data", "-gi_mask", "-randomize", "-oid_masks"] {
+    for option in ["-gi_mask", "-gi_mask_name", "-randomize", "-oid_masks"] {
         let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();
         assert!(
             err.to_string().contains(&format!(
@@ -992,16 +1027,13 @@ fn numeric_values_are_validated_before_io() {
         unreachable!("blastn")
     };
     assert_eq!(args.gap_open, Some(0));
-    // NCBI's other blastn tasks and options are rejected explicitly (AGENTS.md rule 2).
-    for extra in [&["-task", "rmblastn"][..], &["-version"]] {
-        let mut words = vec!["-outfmt", "6"];
-        words.extend_from_slice(extra);
-        let error = crate::cli::render_message(&parse("blastn", &words).unwrap_err());
-        assert!(
-            error.contains("not supported by LOSAT's BLASTN"),
-            "{extra:?}: {error}"
-        );
-    }
+    // NCBI's other blastn tasks are rejected explicitly (AGENTS.md rule 2). (`-version` is the
+    // command line's, which the parser's callers refuse by name: line RG item E3,
+    // `version_words_in_an_option_value_are_read_as_ncbi_reads_them`.)
+    let error = crate::cli::render_message(
+        &parse("blastn", &["-outfmt", "6", "-task", "rmblastn"]).unwrap_err(),
+    );
+    assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
     // `-ungapped` is NCBI's flag (blast_args.cpp:917) and LOSAT's BLASTN searches with it (O4a).
     let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-ungapped"])
         .unwrap()
@@ -1326,7 +1358,9 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "2", None, UNSUPPORTED),
         (ALL, "3", None, UNSUPPORTED),
         (ALL, "4", None, UNSUPPORTED),
-        (ALL, "18", None, UNSUPPORTED),
+        // Line RG T2: the organism report in every program.
+        (SHARED, "18", None, Writes(TaxFormat)),
+        (SHARED, "18 qseqid", None, Writes(TaxFormat)),
         // Line CLI C2: BLASTN (PR 1), TBLASTN and TBLASTX (PR 2), BLASTP and BLASTX (PR 3) write 10
         // and 20 with the shared tabular writer.
         (SHARED, "10", None, Writes(CommaSeparatedValues)),
@@ -1565,14 +1599,6 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("blastp", &["-gilist", "ids.gil"]),
         ("blastp", &["-db_soft_mask", "21"]),
         ("blastp", &["-db_hard_mask", "21"]),
-        ("blastp", &["-version"]),
-        // Line RG X1 ported the X-drops to BLASTP, not to PSIBLAST.
-        ("psiblast", &["-xdrop_gap_final", "30"]),
-        ("psiblast", &["-xdrop_gap", "30"]),
-        ("psiblast", &["-xdrop_ungap", "3"]),
-        ("blastp", &["-xmlhelp"]),
-        ("tblastn", &["-version-full"]),
-        ("tblastx", &["-help-full"]),
     ] {
         let error = crate::cli::render_message(&parse(program, words).unwrap_err());
         assert!(
@@ -1902,38 +1928,77 @@ fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
 }
 
 #[test]
-fn toolkit_words_in_an_option_value_are_rejected_as_options() {
+fn version_words_in_an_option_value_are_read_as_ncbi_reads_them() {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001: the application reads
     // -version, -version-full*, -dryrun, -logfile and -conffile anywhere before `--`, also
-    // in an option's value (`-out -version` prints the version). LOSAT rejects the full
-    // versions (D9) in that place too, instead of writing a file named "-version". The parser refuses
-    // `-version` (the Web engine's); the command line prints it before parsing
-    // (`ncbi_version_request_reads_the_word_before_the_arguments`).
+    // in an option's value (`-out -version` prints the version). The command line prints the
+    // versions before parsing (`ncbi_version_request_reads_the_word_before_the_arguments`); the
+    // parser's callers without the command line's application start (the library API and the
+    // Web engine) refuse them by name in that place too, instead of writing a file named
+    // "-version" (line RG item E3). `-version=1` is an unknown option, as in NCBI
+    // (`Unknown argument: "version"`, exit status 1; LOSAT's parser error, exception 1).
     for (program, upper) in [
         ("blastn", "BLASTN"),
         ("blastp", "BLASTP"),
         ("tblastn", "TBLASTN"),
         ("tblastx", "TBLASTX"),
     ] {
-        for words in [&["-out", "-version"][..], &["-evalue", "-version-full"]] {
+        for words in [
+            &["-out", "-version"][..],
+            &["-evalue", "-version-full"],
+            &["-version-full-xml"],
+            &["-out", "o.txt", "-version-full-json"],
+        ] {
             let error = parse(program, words).unwrap_err().to_string();
             assert!(
-                error.contains(&format!("is not supported by LOSAT's {upper}")),
+                error.contains(&format!(
+                    "the NCBI C++ Toolkit option {} runs on the command line of LOSAT's {upper} only",
+                    words.last().unwrap()
+                )),
                 "{program} {words:?}: {error}"
+            );
+        }
+        for word in ["-version=1", "-version-full=1"] {
+            let error = parse(program, &[word]).unwrap_err().to_string();
+            assert!(
+                error.contains(&format!("unknown option or argument '{word}'")),
+                "{program} {word}: {error}"
             );
         }
         assert!(parse(program, &["-out", "o.txt"]).is_ok(), "{program}");
     }
 }
 
+// No NCBI counterpart: the command line's entry makes the application start of the program that
+// `argv[1]` names when it is one of `ENTRY_NAMES`, and runs a parsed command with that start
+// (`cli::main_entry`, which holds the start of every command it parses).
+#[test]
+fn every_command_is_an_entry_name() {
+    use clap::CommandFactory;
+    let command = Cli::command();
+    for sub in command.get_subcommands() {
+        for name in std::iter::once(sub.get_name()).chain(sub.get_all_aliases()) {
+            assert!(
+                crate::cli::ENTRY_NAMES.contains(&name),
+                "the command {name} is not one of ENTRY_NAMES"
+            );
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (quoted at
 // `ncbi_environment::preparse`): `-logfile FILE` and `-conffile FILE` go to the argument reader
 // with their values, a last `-logfile` or `-conffile` without one is dropped. The command line's
-// application start reads them (`cli::main_entry`); a parser's caller without one, as these
-// tests and the library API and the Web engine, refuses them (`toolkit_file_word_error`).
+// application start reads them (`cli::main_entry`, `try_parse_from_start`), and so does the start
+// of each library call (`api::start`, `try_parse_from_library`, line RG item E1w-2); the Web
+// engine's parser, which runs none, refuses them (`toolkit_file_word_error`).
 #[test]
-fn toolkit_file_options_need_the_command_lines_application_start() {
-    assert!(crate::blastinput::ncbi_environment::application_start_of_process().is_none());
+fn toolkit_file_options_need_an_application_start() {
+    let library = |program: &str, extra: &[&str]| {
+        let mut argv = vec!["losat", program, "-query", "q.fa", "-subject", "s.fa"];
+        argv.extend(extra);
+        crate::cli::try_parse_from_library::<Cli, _, _>(argv)
+    };
     for (program, upper) in [
         ("blastn", "BLASTN"),
         ("blastp", "BLASTP"),
@@ -1941,26 +2006,42 @@ fn toolkit_file_options_need_the_command_lines_application_start() {
         ("tblastn", "TBLASTN"),
         ("tblastx", "TBLASTX"),
     ] {
+        for (words, name) in [
+            (&["-logfile", "log.txt"][..], "-logfile"),
+            (&["-logfile=log.txt"], "-logfile"),
+            (&["-conffile", "x.ini"], "-conffile"),
+            (&["-conffile=x.ini"], "-conffile"),
+            (&["-out", "-conffile=x.ini"], "-conffile"),
+            // `-dryrun` is the value of `-logfile`.
+            (&["-logfile", "-dryrun"], "-logfile"),
+            // `-dryrun` (line RG item E1b): the command line's entry ends the run after the
+            // arguments; in an option's value too, as NCBI reads it there.
+            (&["-dryrun"], "-dryrun"),
+            (&["-evalue", "1", "-dryrun"], "-dryrun"),
+            (&["-out", "-dryrun"], "-dryrun"),
+        ] {
+            let error = parse(program, words).unwrap_err().to_string();
+            assert!(
+                error.contains(&format!(
+                    "the NCBI C++ Toolkit option {name} runs on the command line and in the library API of LOSAT's {upper} only: the Web engine runs no NCBI application start, which reads it"
+                )),
+                "{program} {words:?}: {error}"
+            );
+        }
+        // The library's parser takes them, as the command line's does after its start (`-out`
+        // without a value aside: the library refuses `-out` itself, `api::search`).
         for words in [
             &["-logfile", "log.txt"][..],
             &["-logfile=log.txt"],
             &["-conffile", "x.ini"],
             &["-conffile=x.ini"],
-            &["-out", "-conffile=x.ini"],
             &["-logfile", "-dryrun"],
-            // `-dryrun` (line RG item E1b): the command line's entry ends the run after the
-            // arguments; in an option's value too, as NCBI reads it there.
             &["-dryrun"],
             &["-evalue", "1", "-dryrun"],
-            &["-out", "-dryrun"],
+            &["-dryrun", "-logfile", "log.txt", "-conffile", "x.ini"],
         ] {
-            let error = parse(program, words).unwrap_err().to_string();
-            assert!(
-                error.contains(&format!(
-                    "runs on the command line of LOSAT's {upper} only: the library API and the Web engine run no NCBI application start"
-                )),
-                "{program} {words:?}: {error}"
-            );
+            let parsed = library(program, words);
+            assert!(parsed.is_ok(), "{program} {words:?}: {:?}", parsed.err());
         }
         // A last word without its value is dropped, as NCBI drops it.
         assert!(
@@ -1973,20 +2054,109 @@ fn toolkit_file_options_need_the_command_lines_application_start() {
         );
         // `-out` then has no value: the parser's error.
         assert!(parse(program, &["-out", "-logfile"]).is_err(), "{program}");
+        // After the command line's application start of the program, its parser reads them (the
+        // start is a value of the entry: a test makes one without changing the process).
+        for words in [
+            &["-logfile", "log.txt"][..],
+            &["-conffile=x.ini"],
+            &["-evalue", "1", "-dryrun"],
+        ] {
+            let start =
+                crate::blastinput::ncbi_environment::ApplicationStart::of_process(program, words);
+            let mut argv = vec!["losat", program, "-query", "q.fa", "-subject", "s.fa"];
+            argv.extend(words);
+            let parsed = crate::cli::try_parse_from_start::<Cli, _, _>(argv, &start);
+            assert!(parsed.is_ok(), "{program} {words:?}: {:?}", parsed.err());
+        }
+        // The versions, which the command line prints before parsing (line RG item E3), are
+        // refused by the library's parser and the Web engine's alike (line RG item E1w-2).
+        for word in ["-version", "-version-full-json"] {
+            let text = format!(
+                "the NCBI C++ Toolkit option {word} runs on the command line of LOSAT's {upper} only: the library API and the Web engine do not write NCBI's version text"
+            );
+            for error in [
+                parse(program, &["-out", word]).unwrap_err(),
+                library(program, &["-out", word]).unwrap_err(),
+            ] {
+                assert!(
+                    error.to_string().contains(&text),
+                    "{program} {word}: {error}"
+                );
+            }
+        }
     }
-    // makeblastdb's library run refuses `-conffile` too; a last word without value is dropped.
-    let makedb = |words: &[&str]| {
+    // makeblastdb: the Web engine's parser refuses `-conffile` and `-dryrun` (makeblastdb takes
+    // `-logfile`, its own argument), the library's takes them (`api::run_makeblastdb` runs the
+    // start); a last word without value is dropped.
+    let argv = |words: &[&'static str]| {
         let mut argv = vec!["losat", "makeblastdb", "-in", "x.faa", "-dbtype", "prot"];
-        argv.extend(words);
-        try_parse_from::<Cli, _, _>(argv)
+        argv.extend_from_slice(words);
+        argv
     };
-    let error = makedb(&["-conffile", "c.ini"]).unwrap_err().to_string();
-    assert!(
-        error.contains("runs on the command line of LOSAT's makeblastdb only"),
-        "{error}"
-    );
+    let makedb = |words: &[&'static str]| try_parse_from::<Cli, _, _>(argv(words));
+    let library_makedb =
+        |words: &[&'static str]| crate::cli::try_parse_from_library::<Cli, _, _>(argv(words));
+    for (words, name) in [
+        (&["-conffile", "c.ini"][..], "-conffile"),
+        (&["-dryrun"], "-dryrun"),
+        (&["-logfile", "log.txt", "-dryrun"], "-dryrun"),
+    ] {
+        let error = makedb(words).unwrap_err().to_string();
+        assert!(
+            error.contains(&format!(
+                "the NCBI C++ Toolkit option {name} runs on the command line and in the library API of LOSAT's makeblastdb only: the Web engine runs no NCBI application start, which reads it"
+            )),
+            "{words:?}: {error}"
+        );
+        let parsed = library_makedb(words);
+        assert!(parsed.is_ok(), "{words:?}: {:?}", parsed.err());
+    }
+    assert!(makedb(&["-logfile", "log.txt"]).is_ok());
     assert!(makedb(&["-conffile"]).is_ok());
     assert!(makedb(&["-logfile"]).is_ok());
+    assert!(library_makedb(&["-conffile"]).is_ok());
+    // So do the versions, which the command line prints before parsing (line RG item E3): the
+    // library's makeblastdb prints them before it parses (`api::run_makeblastdb`).
+    for word in [
+        "-version",
+        "-version-full",
+        "-version-full-xml",
+        "-version-full-json",
+    ] {
+        for error in [
+            makedb(&["-title", word]).unwrap_err(),
+            library_makedb(&["-title", word]).unwrap_err(),
+        ] {
+            assert!(
+                error.to_string().contains(&format!(
+                    "the NCBI C++ Toolkit option {word} runs on the command line and in the library API of LOSAT's makeblastdb only: the Web engine does not write NCBI's version text"
+                )),
+                "{error}"
+            );
+        }
+    }
+    // The programs that the library API does not run: the refusals name the command line alone.
+    for (program, upper) in [("rpsblast", "RPSBLAST"), ("rpstblastn", "RPSTBLASTN")] {
+        let refused = |word: &'static str| {
+            try_parse_from::<Cli, _, _>(["losat", program, "-query", "q.fa", "-db", "d", word])
+                .unwrap_err()
+                .to_string()
+        };
+        let error = refused("-dryrun");
+        assert!(
+            error.contains(&format!(
+                "the NCBI C++ Toolkit option -dryrun runs on the command line of LOSAT's {upper} only: the Web engine runs no NCBI application start, which reads it"
+            )),
+            "{program}: {error}"
+        );
+        let error = refused("-version");
+        assert!(
+            error.contains(&format!(
+                "the NCBI C++ Toolkit option -version runs on the command line of LOSAT's {upper} only: the Web engine does not write NCBI's version text"
+            )),
+            "{program}: {error}"
+        );
+    }
 }
 
 #[test]
@@ -2108,9 +2278,9 @@ fn makedb_is_not_a_command_and_makeblastdb_checks_apply() {
         ("x.faa", Some("db"))
     );
     // The checks that name the command apply.
-    let error = makedb(&["-mask_data"]).unwrap_err().to_string();
+    let error = makedb(&["-gi_mask"]).unwrap_err().to_string();
     assert!(
-        error.contains("the NCBI BLAST+ option -mask_data is not supported by LOSAT's makeblastdb"),
+        error.contains("the NCBI BLAST+ option -gi_mask is not supported by LOSAT's makeblastdb"),
         "{error}"
     );
     assert!(makedb(&["-parse_seqids"]).is_ok());
@@ -2148,6 +2318,97 @@ fn short_help_h_is_display_help_for_every_program() {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3020-3023, 2840-2852 (quoted at
+// `cli::try_parse_from`)
+// NCBI's reader stops at its help flags, the words before them read; `-help-full` is `-help` with
+// the hidden arguments, of which LOSAT's programs run none (NCBI BLAST+ 2.17.0: the same bytes in
+// every place but makeblastdb's hidden `-randomize`; line RG item E2).
+#[test]
+fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {
+    // The help a command line gives: clap's for LOSAT's texts, NCBI's for rpstblastn's.
+    let help = |program: &str, words: &[&str]| -> String {
+        let mut argv = vec!["losat", program];
+        argv.extend(words);
+        match try_parse_from::<Cli, _, _>(argv) {
+            Err(error) => {
+                assert_eq!(error.exit_code(), 0, "{program} {words:?}: {error}");
+                format!("{:?} {}", error.kind(), crate::cli::render_message(&error))
+            }
+            Ok(Cli {
+                command: Commands::Rpstblastn(args),
+            }) => args
+                .ncbi_help_text()
+                .unwrap_or_else(|| panic!("{program} {words:?}: no help"))
+                .to_string(),
+            Ok(_) => panic!("{program} {words:?}: no help"),
+        }
+    };
+    for (program, value_option) in [
+        ("blastn", "-out"),
+        ("blastp", "-out"),
+        ("blastx", "-out"),
+        ("tblastn", "-out"),
+        ("tblastx", "-out"),
+        ("psiblast", "-out"),
+        ("rpsblast", "-out"),
+        ("rpstblastn", "-out"),
+        ("makeblastdb", "-title"),
+        ("rpsbproc", "-o"),
+    ] {
+        let full = help(program, &["-help"]);
+        let short = help(program, &["-h"]);
+        for words in [
+            &["-help-full"][..],
+            &["-help-full", "-h"],
+            &["-help", "-h"],
+            &["-help-full", "-help-full"],
+            &["-help-full", "-xmlhelp"],
+            &["-help-full", "-bogus"],
+            &["-help", "-bogus"],
+            &["-help-full", value_option],
+            &["-help", value_option],
+            &["-help-full", "-evalue", "abc"],
+        ] {
+            assert_eq!(help(program, words), full, "{program} {words:?}");
+        }
+        for words in [
+            &["-h", "-help-full"][..],
+            &["-h", "-help"],
+            &["-h", "-xmlhelp"],
+            &["-h", "-bogus"],
+            &["-h", value_option],
+        ] {
+            assert_eq!(help(program, words), short, "{program} {words:?}");
+        }
+        // A word before the flag is read first.
+        let error = try_parse_from::<Cli, _, _>(["losat", program, "-bogus", "-help-full"])
+            .err()
+            .unwrap_or_else(|| panic!("{program}: -bogus read"));
+        assert_ne!(error.exit_code(), 0, "{program}");
+    }
+    // As an option's value, `-help-full` is the value; outside a program it is no flag.
+    assert!(parse("blastn", &["-out", "-help-full"]).is_ok());
+    assert!(try_parse_from::<Cli, _, _>(["losat", "-help-full"]).is_err());
+    assert_ne!(
+        try_parse_from::<Cli, _, _>(["losat", "-help-full"])
+            .err()
+            .map(|error| error.exit_code()),
+        Some(0)
+    );
+    // `-xmlhelp` prints NCBI's XML on the command line (line RG item E2x, `ncbi_xmlhelp_tests`);
+    // the library API, which these tests are (no application start), refuses it by name.
+    for program in ["blastn", "makeblastdb", "rpsbproc"] {
+        let error = try_parse_from::<Cli, _, _>(["losat", program, "-xmlhelp"]).unwrap_err();
+        let text = crate::cli::render_message(&error);
+        assert!(
+            text.contains(
+                "the NCBI C++ Toolkit option -xmlhelp runs on the command line of LOSAT's"
+            ),
+            "{program}: {text}"
+        );
+    }
+}
+
 #[test]
 fn ncbi_version_request_reads_the_word_before_the_arguments() {
     use crate::cli::ncbi_version_request;
@@ -2173,8 +2434,37 @@ fn ncbi_version_request_reads_the_word_before_the_arguments() {
     assert!(version(&["losat", "blastn", "-logfile", "-version"]).is_none());
     assert!(version(&["losat", "makeblastdb", "-conffile", "-version"]).is_none());
     assert!(version(&["losat", "blastn", "-logfile=x", "-version"]).is_some());
-    assert!(version(&["losat", "blastn", "-version-full"]).is_none());
     assert!(version(&["losat", "blastn", "-version=1"]).is_none());
+    assert!(version(&["losat", "blastn", "-version-full=1"]).is_none());
+    // The full versions (line RG item E3, `ncbi_version::print`): the first version word is
+    // printed.
+    let full = version(&[
+        "losat",
+        "blastn",
+        "-evalue",
+        "x",
+        "-version-full",
+        "-version",
+    ])
+    .unwrap();
+    assert!(
+        full.starts_with("blastn: 2.17.0+\n Package: LOSAT ")
+            && full.ends_with(
+                ", output compatible with blast 2.17.0\n Package-Config:  \n GI-64bit:  TRUE\n"
+            ),
+        "{full}"
+    );
+    assert!(version(&["losat", "makeblastdb", "-title", "-version-full-xml"])
+        .unwrap()
+        .contains("<appname>makeblastdb</appname>\n<version_info major=\"2\" minor=\"17\" patch_level=\"0\"/>\n"));
+    assert!(version(&["losat", "rpsbproc", "-version-full-json", "-version"])
+        .unwrap()
+        .contains("\"appname\": \"rpsbproc\",\n    \"version_info\": {\"major\": 0, \"minor\": 5, \"patch_level\": 1},\n"));
+    assert!(version(&["losat", "rpstblastn", "-version-full"])
+        .unwrap()
+        .starts_with("rpstblastn: 2.17.0+\n"));
+    assert!(version(&["losat", "blastn", "--", "-version-full"]).is_none());
+    assert!(version(&["losat", "blastn", "-logfile", "-version-full"]).is_none());
     assert!(version(&["losat", "-version"]).is_none());
     assert!(version(&["losat", "--version"]).is_none());
     assert!(version(&["losat", "nosuch", "-version"]).is_none());

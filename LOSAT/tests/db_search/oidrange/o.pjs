@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "o",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "o",
+  "number-of-letters": 1415,
+  "number-of-sequences": 10,
+  "last-updated": "2026-11-13T15:58:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 51660,
+  "bytes-to-cache": 1586,
+  "files": [
+    "o.pdb",
+    "o.phr",
+    "o.pin",
+    "o.pog",
+    "o.pos",
+    "o.pot",
+    "o.psq",
+    "o.ptf",
+    "o.pto"
+  ]
+}

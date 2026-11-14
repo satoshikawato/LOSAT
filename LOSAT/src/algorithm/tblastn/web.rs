@@ -35,7 +35,16 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<TblastnArgs> {
     if extra.iter().any(|key| {
         matches!(
             key.split('=').next().unwrap_or(key),
-            "-query" | "-subject" | "-out" | "-h" | "-help" | "--help" | "-version" | "--version"
+            "-query"
+                | "-subject"
+                | "-out"
+                | "-h"
+                | "-help"
+                | "-help-full"
+                | "-xmlhelp"
+                | "--help"
+                | "-version"
+                | "--version"
         )
     }) {
         bail!("file/help arguments are unsupported for the TBLASTN web API");

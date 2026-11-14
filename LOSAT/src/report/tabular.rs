@@ -293,7 +293,7 @@ pub fn parse_fields(spec: &str) -> Vec<TabularField> {
 /// ```
 /// Returns NCBI's message; the field list (`spec`) is searched as text, as NCBI does.
 pub fn custom_delimiter_conflict(spec: &str, delimiter: &str) -> Option<String> {
-    let spec = super::outfmt6::truncate_spaces(spec.as_bytes());
+    let spec = crate::ncbi_str::truncate_spaces(spec.as_bytes());
     if spec.is_empty() {
         return None;
     }
@@ -329,6 +329,11 @@ pub enum TabularKind {
     Csv,
     /// outfmt 20: outfmt 10 after a line of the field names.
     CsvWithHeader,
+    /// outfmt 18, the organism report (`report::tax_report`): no fields; it reads the final hit
+    /// lists as the tabular reports do (NCBI's `PrintOneResultSet` writes it after the same
+    /// checks of the results, from the same Seq-align set), and each subject's Bioseq,
+    /// definition lines and the names of their taxids.
+    TaxReport,
 }
 
 /// A tabular report with its field list and delimiter.
@@ -362,6 +367,12 @@ pub struct TabularNeeds {
 /// default field list, whose `saccver` reads it.
 pub fn reads_subject(spec: Option<&TabularSpec>, program: crate::blastinput::app::Program) -> bool {
     spec.is_none_or(|spec| spec.reads_subject(program))
+}
+
+/// [`TabularSpec::writes_rows`] of a tabular report of `spec`, `None` for the default fields:
+/// the one rule by which the programs make (and refuse) the tabular subject ids of a report.
+pub fn writes_rows(spec: Option<&TabularSpec>) -> bool {
+    spec.is_none_or(TabularSpec::writes_rows)
 }
 
 /// Which rows of a tabular report read the subject's Bioseq in NCBI's formatter
@@ -414,7 +425,8 @@ pub struct PrintedIds {
 }
 
 impl PrintedIds {
-    /// The ids of the report of `spec`, `None` for the default fields.
+    /// The ids of the report of `spec`, `None` for the default fields; none of the organism
+    /// report (`TabularSpec::writes_rows`).
     pub fn of(spec: Option<&TabularSpec>) -> Self {
         let Some(spec) = spec else {
             return Self {
@@ -422,6 +434,9 @@ impl PrintedIds {
                 all: false,
             };
         };
+        if !spec.writes_rows() {
+            return Self::default();
+        }
         Self {
             subject: spec.has_any(&[
                 TabularField::SubjectSeqId,
@@ -462,6 +477,14 @@ impl TabularSpec {
             ReportFormat::TabularWithComments => (TabularKind::Commented, "\t"),
             ReportFormat::CommaSeparatedValues => (TabularKind::Csv, ","),
             ReportFormat::CommaSeparatedValuesWithHeader => (TabularKind::CsvWithHeader, ","),
+            // NCBI's `ParseFormattingString` keeps no field list for outfmt 18.
+            ReportFormat::TaxFormat => {
+                return Some(TabularSpec {
+                    kind: TabularKind::TaxReport,
+                    fields: Vec::new(),
+                    delimiter: String::new(),
+                })
+            }
             _ => return None,
         };
         let fields = parse_fields(&choice.spec);
@@ -595,6 +618,18 @@ impl TabularSpec {
     /// for the letters of `nident` and the frames ([`SubjectFetch::WithIdentities`]).
     pub fn subject_fetch(&self, program: crate::blastinput::app::Program) -> SubjectFetch {
         use crate::blastinput::app::Program;
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:996-1000
+        // ```c++
+        //         try {
+        //             const CBioseq_Handle& handle = m_Scope.GetBioseqHandle(*subid);
+        //             if( !handle ) continue;
+        //
+        //             const CRef<CBlast_def_line_set> bdlRef =  CSeqDB::ExtractBlastDefline(handle);
+        // ```
+        // The organism report reads the Bioseq of each HSP that it does not skip.
+        if self.kind == TabularKind::TaxReport {
+            return SubjectFetch::Every;
+        }
         let no_fetch = program == Program::Blastn;
         let translated = matches!(
             program,
@@ -678,6 +713,14 @@ impl TabularSpec {
     }
 
     pub fn needs(&self) -> TabularNeeds {
+        // The organism report shows the names of each definition line's taxid.
+        if self.kind == TabularKind::TaxReport {
+            return TabularNeeds {
+                taxonomy: true,
+                taxonomy_names: true,
+                ..TabularNeeds::default()
+            };
+        }
         const NAMES: [TabularField; 8] = [
             SubjectSciName,
             SubjectCommonName,
@@ -728,6 +771,23 @@ impl TabularSpec {
             SubjectBlastNames,
             SubjectSuperKingdoms,
         ])
+    }
+
+    /// Whether the report writes rows of fields: every tabular report but the organism report
+    /// (outfmt 18), whose table shows the labels and titles of the subjects' definition lines
+    /// (`report::tax_report`, taxFormat.cpp:935-976) and never a row's subject ids (`sseqid`,
+    /// `saccver`: `GetSeqIdList` and `s_ReplaceLocalId`, tabular.cpp:522-532), so that the
+    /// refusals of those ids (`PrintedIds`, the programs' tabular subject ids) do not apply to it.
+    /// The Bioseq reads (`subject_fetch`) and the taxonomy (`needs`) apply to both.
+    pub fn writes_rows(&self) -> bool {
+        self.kind != TabularKind::TaxReport
+    }
+
+    /// Whether the report looks every taxid of its subjects up in the taxonomy database, 0 too:
+    /// the plural names (`x_SetTaxInfoAll`, `checks_taxdb`) and the organism report (outfmt 18,
+    /// `CTaxFormat::x_InitBlastDBTaxInfo`); its rows write the texts of those lookups.
+    pub fn looks_up_every_taxid(&self) -> bool {
+        self.checks_taxdb() || self.kind == TabularKind::TaxReport
     }
 
     /// Whether a singular name is among the fields (`x_SetTaxInfo` looks `staxid` up).
@@ -907,6 +967,8 @@ pub struct TabularNames {
     /// What `GetTaxInfo` returned for each taxid (`None` when it threw), and the texts of its
     /// lookup, which every lookup of the taxid writes.
     answers: std::collections::HashMap<i32, (Option<crate::seqdb::taxdb::TaxNames>, Vec<String>)>,
+    /// The organism report's (outfmt 18) database, which it asks itself (`for_report`).
+    report: Option<crate::report::tax_report::TaxNamesDb>,
 }
 
 impl TabularNames {
@@ -924,6 +986,7 @@ impl TabularNames {
             open: Vec::new(),
             opened: std::cell::Cell::new(false),
             answers: Default::default(),
+            report: None,
         };
         let (plural, singular) = (spec.checks_taxdb(), spec.has_singular_names());
         let mut asked: Vec<i32> = Vec::new();
@@ -968,6 +1031,23 @@ impl TabularNames {
         self.answers
             .get(&taxid)
             .and_then(|(found, _)| found.as_ref())
+    }
+
+    /// The names of the organism report (outfmt 18), which looks each taxid up itself where NCBI's
+    /// report does (`report::tax_report::TaxLookups`) in the run's database `db`.
+    pub fn for_report(db: crate::report::tax_report::TaxNamesDb, program: &str) -> Self {
+        TabularNames {
+            program: program.to_ascii_lowercase(),
+            open: Vec::new(),
+            opened: std::cell::Cell::new(false),
+            answers: Default::default(),
+            report: Some(db),
+        }
+    }
+
+    /// The organism report's database (`for_report`).
+    pub fn report_db(&self) -> Option<&crate::report::tax_report::TaxNamesDb> {
+        self.report.as_ref()
     }
 
     /// The standard-error lines of the lookups of one row of a subject of `taxonomy`, in NCBI's
@@ -1235,6 +1315,19 @@ impl TabularWriter<'_> {
                 SubjectAccession => out.extend_from_slice(subject.accession),
                 SubjectAccessionVersion => out.extend_from_slice(subject.accession_version),
                 SubjectGi => push_num(out, subject.gi),
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:224-231
+                // ```c++
+                // void CBlastTabularInfo::x_PrintSubjectAllSeqIds(void)
+                // {
+                //     ITERATE(vector<list<CRef<CSeq_id> > >, iter, m_SubjectIds) {
+                //         if (iter != m_SubjectIds.begin())
+                //             m_Ostream << ";";
+                //         m_Ostream << s_GetSeqIdListString(*iter, eFullId);
+                //     }
+                // }
+                // ```
+                // `x_PrintSubjectAllGis` and `x_PrintSubjectAllAccessions` (tabular.cpp:238-264)
+                // are the same loop with `eGi` and `eAccession`.
                 SubjectAllSeqIds | SubjectAllGis | SubjectAllAccessions => {
                     if subject.all_ids.is_empty() {
                         match field {
@@ -1370,6 +1463,51 @@ impl TabularWriter<'_> {
                         out.extend_from_slice(&joined);
                     }
                 }
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:387-440
+                // ```c++
+                // void CBlastTabularInfo::x_PrintSubjectAllTitles ()
+                // {
+                // 	if(m_SubjectDefline.NotEmpty() && m_SubjectDefline->CanGet() &&
+                // 	   m_SubjectDefline->IsSet() && !m_SubjectDefline->Get().empty())
+                // 	{
+                // 		const list<CRef<CBlast_def_line> > & defline = m_SubjectDefline->Get();
+                // 		list<CRef<CBlast_def_line> >::const_iterator iter = defline.begin();
+                // 		for(; iter != defline.end(); ++iter)
+                // 		{
+                // 			if (iter != defline.begin())
+                // 						 m_Ostream << "<>";
+                //
+                // 			if((*iter)->IsSetTitle())
+                // 			{
+                // 				if((*iter)->GetTitle().empty())
+                // 					m_Ostream << NA;
+                // 				else
+                // 					m_Ostream << (*iter)->GetTitle();
+                // 			}
+                // 			else
+                // 				m_Ostream << NA;
+                // 		}
+                // 	}
+                // 	else
+                // 		m_Ostream << NA;
+                //
+                // }
+                //
+                // void CBlastTabularInfo::x_PrintSubjectTitle()
+                // ...
+                // 			if(defline.front()->IsSetTitle())
+                // 			{
+                // 				if(defline.front()->GetTitle().empty())
+                // 					m_Ostream << NA;
+                // 				else
+                // 					m_Ostream << defline.front()->GetTitle();
+                // 			}
+                // 			else
+                // 				m_Ostream << NA;
+                // ```
+                // `x_PrintSubjectTitle` is the `stitle` arm below, `x_PrintSubjectAllTitles` the
+                // `salltitles` arm after it. An absent title is empty in `titles`, so both read as
+                // `N/A`.
                 SubjectTitle => match subject.titles.and_then(|titles| titles.first()) {
                     Some(title) if !title.is_empty() => out.extend_from_slice(title),
                     _ => out.extend_from_slice(NA),
@@ -1930,6 +2068,7 @@ mod tests {
             ]
             .into_iter()
             .collect(),
+            report: None,
         };
         let three = TabularTaxonomy {
             taxid: 9606,
@@ -1977,6 +2116,7 @@ mod tests {
             ]
             .into_iter()
             .collect(),
+            report: None,
         };
         let none = TabularTaxonomy::default();
         assert!(names.row_messages(&spec, &none).is_empty());

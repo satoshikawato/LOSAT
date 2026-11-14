@@ -326,6 +326,10 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     let mut masks: Vec<QueryMask> = Vec::new();
     let (mut window, mut query_row, mut subject_row): (Vec<u8>, Vec<u8>, Vec<u8>) =
         (Vec::new(), Vec::new(), Vec::new());
+    // The document's start (`StructuredXml::start`), before the first query's warnings.
+    document.start(&mut buf);
+    writer.write_all(&buf)?;
+    buf.clear();
     for (q_idx, query) in queries.iter().enumerate() {
         // The query's warnings come before its document (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {
@@ -363,6 +367,15 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
             searched: run.searched[q_idx],
             masks: &masks,
         };
+        // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): the texts of the
+        // subjects that the query's report reads one by one (`QueryWarnings::subject_read`) and
+        // the taxonomy database's messages.
+        let mut posts = crate::report::query_warnings::HitPosts::new(
+            warnings
+                .as_deref()
+                .is_some_and(|warnings| warnings.reads_with_texts(q_idx)),
+        );
+        let posting = warnings.is_some();
         let written = document.query(&xml_run, &xml_query, &mut buf, |sink| {
             let mut first = 0usize;
             while first < query_hits.len() {
@@ -384,9 +397,13 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time
                 // (nothing for the other formats).
-                if let Some(warnings) = warnings.as_deref_mut() {
-                    taxdb_printer.at_names(s_idx as usize, subject, &mut *warnings.sink)?;
-                }
+                posts.hit(sink.position(), s_idx, |texts| {
+                    if posting {
+                        taxdb_printer.at_names(s_idx as usize, subject, texts)
+                    } else {
+                        Ok(())
+                    }
+                })?;
                 sink.hit(&hit, |hsps| {
                     for hsp in &query_hits[first..end] {
                         run.subject_letters.rows_into(
@@ -448,7 +465,13 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         });
         // A failed query leaves its partial bytes in `buf`, which the error return drops.
         written?;
-        writer.write_all(&buf)?;
+        crate::report::query_warnings::write_hit_posts(
+            &buf,
+            &posts,
+            q_idx,
+            writer,
+            warnings.as_deref_mut(),
+        )?;
         buf.clear();
     }
     if run.epilog {

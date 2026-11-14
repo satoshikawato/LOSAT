@@ -70,6 +70,9 @@ pub(crate) struct TranslatedRpsSearch {
     /// Whether the database has several volumes, whose results NCBI merges
     /// (`RpsTblastnSearch::merges_volumes`); set by `for_database`.
     pub(crate) several_volumes: bool,
+    /// The volumes' matrix and gap costs as their set-up read them (`RpsVolumeSetup::costs`), for
+    /// the search strategy's requests (`handle_sets`); set by `for_database`.
+    pub(crate) costs: Option<(String, i32, i32)>,
 }
 
 impl RpsTblastnSearch for TranslatedRpsSearch {
@@ -107,6 +110,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         }
         Ok(Arc::new(Self {
             several_volumes: volumes.order.len() > 1,
+            costs: setup.costs(volumes.first()),
             ..self.clone()
         }))
     }
@@ -119,6 +123,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         diagnostics: &mut dyn Write,
         search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
         render: &mut BatchRender<'_>,
+        take: &mut dyn FnMut(&[FastaRecord], usize) -> Result<()>,
     ) -> Result<usize> {
         let Some(database) = database else {
             bail!("a search without -db is not supported by LOSAT's {PROGRAM}");
@@ -149,6 +154,9 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
                     if queries.is_empty() {
                         return Err(engine("Empty CBlastQueryVector"));
                     }
+                    // The batch's search strategy request (`SaveSearchStrategy`, quoted in the
+                    // module's header), before its search.
+                    take(queries, processed)?;
                     let mut results = vec![self
                         .search_batch(
                             queries,
@@ -182,6 +190,22 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
 
     fn merges_volumes(&self) -> bool {
         self.several_volumes
+    }
+
+    fn handle_sets(
+        &self,
+        database: Option<&BlastxDatabase>,
+        searchsp: Option<i64>,
+        dbsize: Option<i64>,
+    ) -> Vec<crate::report::archive::options::Param> {
+        database.map_or_else(Vec::new, |database| {
+            crate::algorithm::rps_search::volumes::search_sets(
+                database.x_seqdb(),
+                self.costs.clone(),
+                searchsp,
+                dbsize,
+            )
+        })
     }
 }
 
@@ -413,9 +437,7 @@ impl TranslatedRpsSearch {
         // DECISIONS 38 D3: every probed query (`out/u.*` of the design) segfaults after the
         // search, valgrind: a read at address 0 in `BLAST_ComputeTraceback_MT`.
         if self.ungapped {
-            bail!(
-                "-ungapped (NCBI BLAST+ 2.17.0's rpstblastn crashes after an ungapped search) is not supported by LOSAT's {PROGRAM}"
-            );
+            bail!("{}", crate::cli::run_refusal(PROGRAM, "ungapped"));
         }
         Ok(())
     }
@@ -709,6 +731,7 @@ mod tests {
 
     fn hsp(frame: i32, score: i32, q: (usize, usize), s: (usize, usize)) -> BlastpHsp {
         BlastpHsp {
+            num: 1,
             identity: 50.0,
             length: q.1 - q.0 + 2,
             mismatch: 1,
@@ -800,6 +823,7 @@ mod tests {
             hsps: evalues
                 .iter()
                 .map(|&e| BlastpHsp {
+                    num: 1,
                     e_value: e,
                     ..hsp(1, 10, (1, 9), (1, 9))
                 })
@@ -856,6 +880,7 @@ mod tests {
             use_sw_tback: false,
             comp_based_stats: "0".to_string(),
             several_volumes: false,
+            costs: None,
         };
         assert!(search.check_options().is_ok());
         search.search.sum_stats = true;

@@ -14,11 +14,10 @@ use anyhow::Result;
 /// 	if(! (in >> c))
 /// 		return true;
 /// ```
-/// `in >> c` skips the characters of C's `isspace`.
+/// `in >> c` skips the characters of C's `isspace`: the test is `NStr::IsBlank`'s
+/// (`ncbi_str::is_blank`), public for the Web adapter (`web_adapter::is_blank`).
 pub fn is_blank(bytes: &[u8]) -> bool {
-    bytes
-        .iter()
-        .all(|byte| matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'))
+    crate::ncbi_str::is_blank(bytes)
 }
 
 /// Opens a FASTA input of `program` as NCBI's argument does when a handler asks for its stream: `-` is

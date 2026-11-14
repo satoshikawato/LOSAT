@@ -20,6 +20,15 @@ outcome.query_stats[0].eff_space  # what fixed the E-values of the first query
 outcome.diagnostics               # what the command line writes to its standard error
 ```
 
+## Installation
+
+pylosat is not on PyPI yet. Build a wheel here with [maturin](https://www.maturin.rs/)
+(`maturin build --release`) and install it with `pip`, or take one from a run of the workflow
+[`Python wheels`](../.github/workflows/python-wheels.yml). It builds a wheel for each platform of
+LOSAT's release binaries (Linux x86_64 and aarch64, macOS arm64 and x86_64, Windows x64), each for
+CPython 3.10 and later, installs it and checks one search against the command line's output. A
+run keeps its wheels for 7 days.
+
 ## Options
 
 `Search` takes the program and the command line's options, each as a keyword without its dash:
@@ -81,13 +90,15 @@ pylosat.makeblastdb("-dbtype", "prot", "-out", "proteins", input=fasta_text)
 print(pylosat.blastdbcmd("-db", "proteins", "-info").text)
 print(pylosat.dustmasker("-outfmt", "fasta", input=nucleotide_fasta).text)
 print(pylosat.segmasker("-outfmt", "fasta", input=protein_fasta).text)
+print(pylosat.convert2blastmask("-masking_algorithm", "other", "-masking_options", "mine",
+                                input=lowercase_masked_fasta).text)
 ```
 
-`makeblastdb`, `blastdbcmd`, `dustmasker` and `segmasker` take the command line's words and return a
+`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask` take the command line's words and return a
 `ToolOutput`, what it writes to standard output (`bytes`, `text`) and to standard error
 (`diagnostics`). `input` is what the command line reads as standard input, so a database can be
-built from FASTA in memory, ids given to `blastdbcmd -entry_batch -`, and sequences in memory
-masked. A failure raises `SearchError` with what the command line writes to its standard error.
+built from FASTA in memory, ids given to `blastdbcmd -entry_batch -`, sequences in memory
+masked, and the lower case letters of FASTA in memory turned into masking information. A failure raises `SearchError` with what the command line writes to its standard error.
 
 ## Long searches
 

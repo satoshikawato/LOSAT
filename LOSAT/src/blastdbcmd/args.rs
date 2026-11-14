@@ -425,10 +425,10 @@ mod tests {
             parse(&words(&["-info", "-help-full"])).unwrap_err(),
             ArgsError::Help
         );
-        assert!(matches!(
-            parse(&words(&["-info", "-xmlhelp"])),
-            Err(ArgsError::Refused(_))
-        ));
+        assert_eq!(
+            parse(&words(&["-info", "-xmlhelp"])).unwrap_err(),
+            ArgsError::XmlHelp
+        );
         // `-version` is taken before the reader; the reader does not know it.
         assert_eq!(
             messages(&["-version=1"]).1,

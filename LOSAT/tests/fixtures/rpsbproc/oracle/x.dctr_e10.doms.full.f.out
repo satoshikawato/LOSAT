@@ -1,0 +1,40 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_dctr_e10.xml
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Domain hits
+#Output format -- tab-delimited table
+#Show superfamilies: YES
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSBLAST 2.17.0+	Cdd	BLOSUM62	10
+QUERY	Query_1	Peptide	176	NP_417964.1 putative DNA-binding transcriptional regulator DctR [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	197715	113	169	2.71276e-15	66.3966	smart00421	HTH_LUXR	-	481199
+1	Query_1	Specific	99777	116	172	6.40329e-15	65.6336	cd06170	LuxR_C_like	-	532797
+1	Query_1	Specific	442052	28	168	1.27742e-09	54.7618	COG2771	CsgD	N	-
+1	Query_1	Non-specific	441799	116	168	6.3722e-07	46.4238	COG2197	CitB	N	-
+1	Query_1	Non-specific	513237	115	169	6.45932e-07	44.5136	pfam00196	GerE	-	532797
+1	Query_1	Non-specific	443623	115	168	0.00837599	35.4614	COG4566	FixJ	N	-
+ENDDOMAINS
+SUPERFAMILIES
+1	Query_1	Superfamily	0	113	169	2.71276e-15	66.3966	cl46859	HTH_CRP	-	-
+ENDSUPERFAMILIES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

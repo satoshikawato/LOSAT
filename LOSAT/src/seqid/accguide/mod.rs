@@ -285,16 +285,19 @@ fn format_key(letters: usize, digits: usize) -> u32 {
     ((letters as u32 & 0xffff) << 16) | (digits as u32 & 0xffff)
 }
 
-/// `NStr::StringToNumeric(str, &value)` of a bit position: 0 when it is not a number that
-/// fits.
+/// `NStr::StringToUInt(str, NStr::fConvErr_NoThrow)` (`ncbi_str::string_to_uint`, 0 for an
+/// error) of the guide's numbers (`version`, the `<letters>+<digits>` of a rule) and of a bit
+/// position (`NStr::StringToNumeric(str, &value)`, `x_SplitSpecial`). These are ASCII digits
+/// alone: the guide is compiled in (`rules.txt`), and the bit positions of an accession are cut
+/// from the digits after its letters (`x_IdentifyAccession` keys the rules by their counts); on
+/// such text NCBI's throwing `StringToNumeric` forms read the same values.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1048
+/// ```c++
+///         hints.version = NStr::StringToUInt(tokens[1], NStr::fConvErr_NoThrow);
+/// ```
 fn bit_number(digits: &[u8]) -> u32 {
-    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
-        return 0;
-    }
-    std::str::from_utf8(digits)
-        .ok()
-        .and_then(|text| text.parse().ok())
-        .unwrap_or(0)
+    crate::ncbi_str::string_to_uint(digits).unwrap_or(0)
 }
 
 /// `SAccGuide::x_SplitSpecial(acc, fmt)`: the length of the prefix that keys the special

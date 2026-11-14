@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { toProgramDescription } from 'losat';
+import { REGION_FLAG, type ProgramId } from 'losat/domain';
 import { duplicateIds } from '../../src/domain/dataset';
 import { geneticCodeLabel } from '../../src/domain/genetic-codes';
 import {
@@ -29,28 +31,18 @@ import {
   COMPOSITION_MODES,
   fastaParser,
   MATRICES,
+  programById,
   PROGRAMS,
   PROTEIN_GAP_COSTS,
   PROTEIN_WORD_SIZES,
-  programById,
   residueUnit,
   searchSummary,
   searchSummaryParts,
   sequenceKind,
   type ParameterField,
-  type ProgramId,
 } from '../../src/domain/programs';
-import {
-  REGION_FLAG,
-  regionFromPositions,
-  regionProblem,
-  regionProblemFields,
-  regionRange,
-  regionValue,
-  swappedRegion,
-} from '../../src/domain/region';
+import { regionFromPositions, regionProblem, regionProblemFields, regionRange, regionValue, swappedRegion } from '../../src/domain/region';
 import { estimateKind, looksLikeOtherKind } from '../../src/domain/sequence-kind';
-import { toProgramDescription } from '../../src/infra/reactor/control';
 
 const valueOption = (flag: string, defaultValue?: string, choices?: readonly string[]): EngineOption => ({
   flag,
@@ -188,6 +180,43 @@ describe('formParameters', () => {
       ).toEqual([
         ['-num_descriptions', '7'],
         ['-num_alignments', '3'],
+      ]);
+    }
+  });
+
+  it('has the pairwise report options -line_length, -sorthits and -sorthsps after "Number of alignments" in Other Parameters of the five programs, with the sort orders in the words of the engine\'s help', () => {
+    const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
+    const report = ['-line_length', '-sorthits', '-sorthsps'];
+    for (const program of PROGRAMS) {
+      const options = toProgramDescription(described[program.id]).parameters;
+      const other = describedSections(program, options).find((section) => section.title === 'Other Parameters');
+      const flags = other?.fields.map((field) => field.flag) ?? [];
+      const at = flags.indexOf('-num_alignments');
+      expect(flags.slice(at + 1, at + 4), program.id).toEqual(report);
+      const fields = other!.fields.slice(at + 1, at + 4);
+      expect(fields.map((field) => [field.label, field.kind]), program.id).toEqual([
+        ['Alignment line length', 'text'],
+        ['Sort hits by', 'choice'],
+        ['Sort HSPs by', 'choice'],
+      ]);
+      for (const field of fields.slice(1)) {
+        const option = options.find((o) => o.flag === field.flag)!;
+        expect(fieldChoices(field, option), `${program.id} ${field.flag}`).toEqual(['0', '1', '2', '3', '4']);
+        // Each name is the engine's "N = <words>" of its help (NCBI BLAST+'s), shown as "N: <words>".
+        for (const choice of ['0', '1', '2', '3', '4']) {
+          const words = field.choiceLabels?.[choice]?.replace(/^\d: /, '');
+          expect(option.help, `${program.id} ${field.flag} ${choice}`).toContain(`${choice} = ${words}`);
+        }
+      }
+      // Without a value the form writes nothing: no -sorthits is not -sorthits 0 (outfmt 0's table has five columns with any value).
+      expect(formParameters(program, {}, options, 'algorithm'), program.id).toEqual([]);
+      expect(
+        formParameters(program, { '-line_length': '80', '-sorthits': '1', '-sorthsps': '3' }, options, 'algorithm'),
+        program.id,
+      ).toEqual([
+        ['-line_length', '80'],
+        ['-sorthits', '1'],
+        ['-sorthsps', '3'],
       ]);
     }
   });

@@ -15,10 +15,10 @@ use std::fmt::Write as _;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use sha2::{Digest, Sha256};
-use LOSAT::web_adapter::{
+use losat::web_adapter::{
     discover_stat_type_in, CountsSource, MaskerParams, StatFile, StatType, UnitCounts, WinMaskError,
 };
+use sha2::{Digest, Sha256};
 
 use crate::json;
 

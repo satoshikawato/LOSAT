@@ -1,8 +1,10 @@
 //! The definition lines of one database sequence (`Blast-def-line-set`) and the choices that
 //! every report makes from them: the Seq-align id (`alignment_id`), the definition line of the
 //! subject Bioseq (`bioseq_defline`) and of the shown id (`display_defline`), and the joins of
-//! the formats that show every definition line (tabular `sall*`, `salltitles`, `staxids`, the
-//! XML `Hit_def`, the lines of an outfmt 0 alignment block).
+//! the formats that show every definition line (the XML `Hit_def`, the lines of an outfmt 0
+//! alignment block; the tabular `sall*`, `salltitles` and `staxids` are made by
+//! `report::db_subject::ParsedSubject`, `report::tabular::TabularTaxonomy` and the tabular
+//! writer from these definition lines).
 //!
 //! NCBI's formatters read the definition lines through the object manager: the Seq-align id
 //! is resolved to the sequence again, whose Bioseq holds the ids and title of one definition
@@ -77,9 +79,6 @@ pub enum TabularId {
     Accession,
     /// `saccver` (`eAccVersion`).
     AccessionVersion,
-    /// `sgi` (`eGi`).
-    #[cfg(test)]
-    Gi,
 }
 
 impl BlastDefline {
@@ -329,21 +328,13 @@ impl DeflineSet {
     //     case e_Local:
     //         SetLocal().SetStrOrId(acc);
     // ```
-    // `TruncateSpaces` drops the bytes that C's `isspace` takes; `SetStrOrId` gives an
-    // integer tag for a label that reads as one, which `compare` treats as the same tag.
+    // `TruncateSpaces_Unsafe` (`eTrunc_Both`) is `ncbi_str::truncate_spaces`; `SetStrOrId` gives
+    // an integer tag for a label that reads as one, which `compare` treats as the same tag.
     pub fn bioseq_defline(&self, target: &ParsedSeqId) -> Option<usize> {
         let mut label = Vec::new();
         content(target, true, &mut label);
-        let is_space = |c: &u8| matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r');
-        let start = label
-            .iter()
-            .position(|c| !is_space(c))
-            .unwrap_or(label.len());
-        let end = label
-            .iter()
-            .rposition(|c| !is_space(c))
-            .map_or(start, |end| end + 1);
-        let local = ParsedSeqId::Local(ObjectId::Str(label[start..end].to_vec()));
+        let acc = crate::ncbi_str::truncate_spaces(&label);
+        let local = ParsedSeqId::Local(ObjectId::Str(acc.to_vec()));
         self.deflines
             .iter()
             .position(|defline| seqid_in(&defline.ids, target) || seqid_in(&defline.ids, &local))
@@ -446,180 +437,6 @@ impl DeflineSet {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:590-603
-    // ```c++
-    //     if (bdlRef.NotEmpty() && bdlRef->CanGet() && bdlRef->IsSet() && !bdlRef->Get().empty()){
-    //     	ITERATE(CBlast_def_line_set::Tdata, itr, bdlRef->Get()) {
-    //             if((*itr)->IsSetTaxid()) {
-    //                     if((*itr)->GetTaxid() != ZERO_TAX_ID) {
-    //                     	m_SubjectTaxId = (*itr)->GetTaxid();
-    //                     	break;
-    //                     }
-    //             }
-    //     	}
-    //     }
-    //
-    //     if(m_SubjectTaxId == ZERO_TAX_ID) {
-    //           m_SubjectTaxId = sequence::GetTaxId(handle);
-    //     }
-    // ```
-    // The fall-back finds nothing: the Bioseq's taxonomy descriptors are those of its
-    // definition line's taxid when it is above 0 (`x_GetTaxonomy`, seqdbvol.cpp:1131-1137),
-    // and then the loop has found a non-zero taxid already.
-    /// The `staxid` of the set: the first non-zero `taxid` (`x_SetTaxInfo`), 0 for none.
-    #[cfg(test)]
-    pub fn first_taxid(&self) -> i32 {
-        self.deflines
-            .iter()
-            .filter_map(|defline| defline.taxid)
-            .find(|&taxid| taxid != 0)
-            .unwrap_or(0)
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:647-670
-    // ```c++
-    //     if (bdlRef.NotEmpty() && bdlRef->CanGet() && bdlRef->IsSet() && !bdlRef->Get().empty()){
-    //     	ITERATE(CBlast_def_line_set::Tdata, itr, bdlRef->Get()) {
-    //     		CBlast_def_line::TTaxIds t = (*itr)->GetTaxIds();
-    //     		m_SubjectTaxIds.insert(t.begin(), t.end());
-    //     	}
-    //     }
-    //
-    //     if(m_SubjectTaxIds.empty()) {
-    //             CSeqdesc_CI desc_s(handle, CSeqdesc::e_Source);
-    //             for (;desc_s; ++desc_s) {
-    //                      TTaxId t = desc_s->GetSource().GetOrg().GetTaxId();
-    //                      if(t != ZERO_TAX_ID) {
-    //                     	 m_SubjectTaxIds.insert(t);
-    //                      }
-    //             }
-    //
-    //             CSeqdesc_CI desc(handle, CSeqdesc::e_Org);
-    //             for (; desc; ++desc) {
-    //                     TTaxId t= desc->GetOrg().GetTaxId();
-    //                     if(t != ZERO_TAX_ID) {
-    //                     	m_SubjectTaxIds.insert(t);
-    //                     }
-    //             }
-    //     }
-    // ```
-    // The fall-back finds nothing for the reason given at `first_taxid`: a definition line
-    // with a taxid above 0 makes `GetTaxIds` non-empty. `m_SubjectTaxIds` is a `set`.
-    /// The `staxids` of the set: the union of every definition line's `GetTaxIds`
-    /// (`x_SetTaxInfoAll`), in ascending order.
-    #[cfg(test)]
-    pub fn tax_ids(&self) -> BTreeSet<i32> {
-        let mut ids = BTreeSet::new();
-        for defline in &self.deflines {
-            ids.extend(defline.tax_ids());
-        }
-        ids
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:544-555
-    // ```c++
-    //     if (bdlRef.NotEmpty() && bdlRef->CanGet() && bdlRef->IsSet() && !bdlRef->Get().empty()){
-    //         vector< CConstRef<CSeq_id> > original_seqids;
-    //
-    //         ITERATE(CBlast_def_line_set::Tdata, itr, bdlRef->Get()) {
-    //             original_seqids.clear();
-    //             ITERATE(CBlast_def_line::TSeqid, id, (*itr)->GetSeqid()) {
-    //                 original_seqids.push_back(*id);
-    //             }
-    //             list<CRef<objects::CSeq_id> > next_seqid_list;
-    //             // Next call replaces BL_ORD_ID if found.
-    //             CShowBlastDefline::GetSeqIdList(bh,original_seqids,next_seqid_list);
-    //             m_SubjectIds.push_back(next_seqid_list);
-    //         }
-    // ```
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:224-231
-    // ```c++
-    // void CBlastTabularInfo::x_PrintSubjectAllSeqIds(void)
-    // {
-    //     ITERATE(vector<list<CRef<CSeq_id> > >, iter, m_SubjectIds) {
-    //         if (iter != m_SubjectIds.begin())
-    //             m_Ostream << ";";
-    //         m_Ostream << s_GetSeqIdListString(*iter, eFullId);
-    //     }
-    // }
-    // ```
-    // `x_PrintSubjectAllGis` and `x_PrintSubjectAllAccessions` (tabular.cpp:238-264) are the
-    // same loop with `eGi` and `eAccession`.
-    /// The tabular field of `kind` for each definition line, `;`-joined (`sallseqid`,
-    /// `sallacc`, `sallgi`): `tabular_id` of the line's ids after `seq_id_list` with
-    /// `title_word` (the subject Bioseq's, the same for every line).
-    #[cfg(test)]
-    pub fn tabular_all(&self, kind: TabularId, title_word: &[u8], out: &mut Vec<u8>) {
-        for (i, defline) in self.deflines.iter().enumerate() {
-            if i > 0 {
-                out.push(b';');
-            }
-            tabular_id(&seq_id_list(&defline.ids, title_word), kind, out);
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:387-440
-    // ```c++
-    // void CBlastTabularInfo::x_PrintSubjectAllTitles ()
-    // {
-    // 	if(m_SubjectDefline.NotEmpty() && m_SubjectDefline->CanGet() &&
-    // 	   m_SubjectDefline->IsSet() && !m_SubjectDefline->Get().empty())
-    // 	{
-    // 		const list<CRef<CBlast_def_line> > & defline = m_SubjectDefline->Get();
-    // 		list<CRef<CBlast_def_line> >::const_iterator iter = defline.begin();
-    // 		for(; iter != defline.end(); ++iter)
-    // 		{
-    // 			if (iter != defline.begin())
-    // 						 m_Ostream << "<>";
-    //
-    // 			if((*iter)->IsSetTitle())
-    // 			{
-    // 				if((*iter)->GetTitle().empty())
-    // 					m_Ostream << NA;
-    // 				else
-    // 					m_Ostream << (*iter)->GetTitle();
-    // 			}
-    // 			else
-    // 				m_Ostream << NA;
-    // 		}
-    // 	}
-    // 	else
-    // 		m_Ostream << NA;
-    //
-    // }
-    //
-    // void CBlastTabularInfo::x_PrintSubjectTitle()
-    // ...
-    // 			if(defline.front()->IsSetTitle())
-    // 			{
-    // 				if(defline.front()->GetTitle().empty())
-    // 					m_Ostream << NA;
-    // 				else
-    // 					m_Ostream << defline.front()->GetTitle();
-    // 			}
-    // 			else
-    // 				m_Ostream << NA;
-    // ```
-    /// `stitle`: the first title, `N/A` for an empty or absent one or no definition line.
-    #[cfg(test)]
-    pub fn first_title(&self, out: &mut Vec<u8>) {
-        tabular_title(self.deflines.first(), out);
-    }
-
-    /// `salltitles`: every title as `stitle` prints it, `<>`-joined.
-    #[cfg(test)]
-    pub fn all_titles(&self, out: &mut Vec<u8>) {
-        if self.deflines.is_empty() {
-            out.extend_from_slice(NOT_AVAILABLE);
-        }
-        for (i, defline) in self.deflines.iter().enumerate() {
-            if i > 0 {
-                out.extend_from_slice(b"<>");
-            }
-            tabular_title(Some(defline), out);
-        }
-    }
-
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:266-304
     // ```c++
     //         bdlRef->PutTargetGiFirst(this_gi_first);
@@ -693,17 +510,6 @@ impl DeflineSet {
     }
 }
 
-#[cfg(test)]
-const NOT_AVAILABLE: &[u8] = b"N/A";
-
-#[cfg(test)]
-fn tabular_title(defline: Option<&BlastDefline>, out: &mut Vec<u8>) {
-    match defline.and_then(|defline| defline.title.as_deref()) {
-        Some(title) if !title.is_empty() => out.extend_from_slice(title),
-        _ => out.extend_from_slice(NOT_AVAILABLE),
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:165-197
 // ```c++
 // static string
@@ -741,10 +547,13 @@ fn tabular_title(defline: Option<&BlastDefline>, out: &mut Vec<u8>) {
 // }
 // ```
 // NCBI dereferences the best id of an empty list (accession kinds); every definition line
-// that makeblastdb writes has an id, and LOSAT writes `Unknown` for none.
+// that makeblastdb writes has an id, and LOSAT writes `Unknown` for none. `eGi` prints a
+// number: the tabular `sgi` and `sallgi` are `BlastDefline::gi` of the definition lines, as
+// `seq_id_list` replaces no GI (`report::db_subject::ParsedSubject::tabular_gi`,
+// `all_tabular_ids`).
 /// The tabular id of `kind` of the id list `ids` (`s_GetSeqIdListString`): `Unknown` for an
-/// empty result. The subject fields (`sseqid`, `sacc`, `saccver`, `sgi`) take the ids of the
-/// subject Bioseq's definition line (`bioseq_defline`) after `seq_id_list`.
+/// empty result. The subject fields (`sseqid`, `sacc`, `saccver`) take the ids of the subject
+/// Bioseq's definition line (`bioseq_defline`) after `seq_id_list`.
 pub fn tabular_id(ids: &[ParsedSeqId], kind: TabularId, out: &mut Vec<u8>) {
     let start = out.len();
     match kind {
@@ -754,8 +563,6 @@ pub fn tabular_id(ids: &[ParsedSeqId], kind: TabularId, out: &mut Vec<u8>) {
                 content(best, kind == TabularId::AccessionVersion, out);
             }
         }
-        #[cfg(test)]
-        TabularId::Gi => number(out, first_gi(ids)),
     }
     if out.len() == start {
         out.extend_from_slice(b"Unknown");

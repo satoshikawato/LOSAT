@@ -7,7 +7,7 @@
 //! one at a time.
 //!
 //! Rules:
-//! - The adapter names the engine through `LOSAT::api` (public items) and this module only.
+//! - The adapter names the engine through `losat::api` (public items) and this module only.
 //! - Each item is named on its own (no glob, no module), so a new item shows in the pull
 //!   request's diff of this file, and every item here is one the adapter uses.
 //! - The adapter is code outside the crate: a function here must be sound for every value a
@@ -85,12 +85,13 @@ pub use crate::blastinput::fasta_reader::{
 pub use crate::blastinput::input_files::is_blank;
 
 /// The options of `program`'s command line that a search of records does not take: the PSSM
-/// files (psiblast's, and tblastn's `-in_pssm`, the query as a PSSM file). The library API refuses
-/// them and its `describe` leaves them out (`api::search::pssm_file_options`, the one list); the
+/// files (psiblast's, and tblastn's `-in_pssm`, the query as a PSSM file) and the search strategy
+/// file. The library API refuses
+/// them and its `describe` leaves them out (`api::search::file_options`, the one list); the
 /// browser refuses `-in_pssm` (`tblastn::check_options`, until line PS's PSW1), and the adapter's
 /// `describe` leaves them out.
 pub fn records_refused_options(program: crate::api::Program) -> &'static [&'static str] {
-    crate::api::pssm_file_options(program)
+    crate::api::file_options(program)
 }
 
 // The WindowMasker unit counts of `-window_masker_db` that the adapter holds in memory under their

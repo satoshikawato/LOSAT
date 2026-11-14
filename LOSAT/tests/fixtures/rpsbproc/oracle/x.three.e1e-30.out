@@ -1,0 +1,36 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_three.xml
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	1e-30
+#Redundancy:	Full
+#Data requested:	Domain hits
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSBLAST 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	176	NP_417964.1 putative DNA-binding transcriptional regulator DctR [Escherichia coli str. K-12 substr. MG1655]
+ENDQUERY
+QUERY	Query_2	Peptide	8	YP_009518762.2 protein YmdG [Escherichia coli str. K-12 substr. MG1655]
+ENDQUERY
+QUERY	Query_3	Peptide	250	NP_416077.4 putative antitermination protein Q [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_3	Specific	515680	155	242	8.4221e-35	119.758	pfam03589	Antiterm	-	-
+ENDDOMAINS
+ENDQUERY
+ENDSESSION	1
+ENDDATA

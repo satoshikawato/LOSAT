@@ -1,0 +1,15 @@
+
+                                          Tax BLAST report                                          
+
+Query= q
+
+Length=250
+Error: [blastp] Error: Offset error at end of taxdb file.
+Error: [blastp] Error: Offset error at end of taxdb file.
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ AAA00001  a_title                                                                     461   3e-171  
+ DDD00001  decoy                                                                       14.2  8.9     

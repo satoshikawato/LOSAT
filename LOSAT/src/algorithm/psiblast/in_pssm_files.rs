@@ -46,19 +46,18 @@ use anyhow::{bail, Result};
 
 use crate::core::blast_util::{BLASTAA_SIZE, BLAST_SCORE_MIN};
 use crate::core::psi::KarlinBlk;
-use crate::report::serial::pssm::{ObjectId, PssmSeqId, PssmWithParameters, SeqData};
+use crate::report::serial::pssm::{PssmWithParameters, SeqData};
 
 use super::pssm::{AsciiPssmDiagnostics, PssmRequest};
 #[cfg(test)]
 use crate::algorithm::pssm_search::in_pssm::with_computed_scores;
 use crate::algorithm::pssm_search::in_pssm::InPssmFile;
 
-/// The query PSSM of psiblast's rounds with `-in_pssm` (`rounds::PsiRoundPlan::input`): the
-/// Seq-id of its query, which the PSSM of each later round keeps (the first Seq-align's query id),
-/// and, when a PSSM file is written, the object that `SavePssmToFile` writes.
+/// The query PSSM of psiblast's rounds with `-in_pssm` (`rounds::PsiRoundPlan::input`): when a
+/// PSSM file is written, the object that `SavePssmToFile` writes. (The Seq-id that the PSSM of
+/// each later round keeps is `PsiSearch::query_seq_loc_id`.)
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct InPssmRounds {
-    pub(crate) id: ObjectId,
     object: Option<PssmWithParameters>,
 }
 
@@ -79,21 +78,8 @@ pub(crate) struct InPssmRounds {
 /// A PSSM that `CPsiBlastValidate::Pssm` refuses gets NCBI's error when the search starts, before
 /// any file (the batch stop, `blast_engine::psiblast_stop_at_invalid_pssm`).
 pub(crate) fn rounds_input(file: InPssmFile, request: &PssmRequest) -> Result<InPssmRounds> {
-    let id = match file
-        .object
-        .pssm
-        .query
-        .as_ref()
-        .map(|query| query.ids.as_slice())
-    {
-        Some([PssmSeqId::Local(id)]) => id.clone(),
-        // `in_pssm::psi_search_and_object` has refused any other query.
-        _ => bail!(
-            "a PSSM query whose Seq-id is not one local id is not supported by LOSAT's PSIBLAST"
-        ),
-    };
     if !file.valid {
-        return Ok(InPssmRounds { id, object: None });
+        return Ok(InPssmRounds { object: None });
     }
     if request.asn_path.is_some() {
         if !file.skipped.is_empty() {
@@ -118,7 +104,6 @@ pub(crate) fn rounds_input(file: InPssmFile, request: &PssmRequest) -> Result<In
     }
     let files = request.asn_path.is_some() || request.ascii_path.is_some();
     Ok(InPssmRounds {
-        id,
         object: files.then_some(file.object),
     })
 }
@@ -406,8 +391,10 @@ fn ascii_pssm(object: &PssmWithParameters) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::report::serial::pssm::{
-        FormatRpsDbParameters, Pssm, PssmIntermediateData, PssmParameters, PssmQuery, SeqInst,
+        FormatRpsDbParameters, ObjectId, Pssm, PssmIntermediateData, PssmParameters, PssmQuery,
+        SeqInst,
     };
+    use crate::seqid::ParsedSeqId;
 
     /// A PSSM of `columns` positions of the letter M whose query has the Seq-id `id`.
     fn pssm(id: ObjectId, columns: usize, rows: usize) -> PssmWithParameters {
@@ -420,7 +407,7 @@ mod tests {
                 row_labels: None,
                 by_row: Some(false),
                 query: Some(PssmQuery {
-                    ids: vec![PssmSeqId::Local(id)],
+                    ids: vec![ParsedSeqId::Local(id)],
                     titles: None,
                     inst: SeqInst {
                         repr: ("raw", 2),
@@ -503,10 +490,7 @@ mod tests {
             }
         };
         let input = rounds_input(file(vec![], false, true), &request(false, false)).unwrap();
-        assert_eq!(
-            (input.id.clone(), input.object.is_none()),
-            (ObjectId::Id(7), true)
-        );
+        assert!(input.object.is_none());
         let input = rounds_input(file(vec![], false, true), &request(true, false)).unwrap();
         assert!(input.object.is_some());
         let error = rounds_input(
@@ -586,7 +570,6 @@ mod tests {
         let mut object = pssm(ObjectId::Str(b"myq".to_vec()), 1, 28);
         with_computed_scores(&mut object, &[[0; BLASTAA_SIZE]], GAPPED);
         let input = InPssmRounds {
-            id: ObjectId::Str(b"myq".to_vec()),
             object: Some(object),
         };
         let ungapped = KarlinBlk {

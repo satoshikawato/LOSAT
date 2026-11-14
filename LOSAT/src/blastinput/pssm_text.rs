@@ -27,15 +27,14 @@
 //! PS5b). An empty `descr` is NCBI's error (`CSeq_descr::PostRead`). A string keeps its bytes as
 //! read (NCBI replaces a byte outside the visible range by `#` with an error message; a PSSM that
 //! LOSAT writes has none, `algorithm::psiblast::pssm`). LOSAT reads the forms below and refuses the others with an error
-//! naming its line: a query `Seq-entry` that is a `set`, a `Seq-id` other than `local`, `gi`,
-//! `general` and the `Textseq-id` ones, `Seq-data` other than `iupacaa`, `ncbieaa` and
-//! `ncbistdaa`, and a REAL mantissa of more than 18 digits.
+//! naming its line: a query `Seq-entry` that is a `set`, `Seq-data` other than `iupacaa`, `ncbieaa`
+//! and `ncbistdaa`, and a REAL mantissa of more than 18 digits. The query's Seq-ids, of every
+//! alternative, are read by the shared Seq-id reader (`seqid::asn_text`).
 
 use crate::report::serial::asn_text_reader::{is_first_id_char, Reader, SliceSource};
 use crate::report::serial::pssm::{
-    FormatRpsDbParameters, ObjectId, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters,
-    PssmQuery, PssmSeqId, PssmWithParameters, SeqData, SeqInst, TextseqId, SEQ_INST_MOL,
-    SEQ_INST_REPR, TEXTSEQ_VARIANTS,
+    FormatRpsDbParameters, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters, PssmQuery,
+    PssmWithParameters, SeqData, SeqInst, SEQ_INST_MOL, SEQ_INST_REPR,
 };
 
 /// A PSSM that the reader cannot read: the line (from 1) where it stopped and why (the error of
@@ -75,7 +74,7 @@ pub fn read_pssm_with_parameters_and_skips(
 ) -> Result<(PssmWithParameters, Vec<&'static str>)> {
     let mut reader = Reader::new(SliceSource::new(text), "PSSM", "PSSM reader");
     let c = reader.skip_white_space()?;
-    let id = reader.scan_end_of_id(is_first_id_char(c));
+    let id = reader.scan_end_of_id(is_first_id_char(c))?;
     let id = reader.src.text(id);
     if id != b"PssmWithParameters" {
         return Err(reader.error(format!(
@@ -98,18 +97,6 @@ impl<'a> Reader<SliceSource<'a>> {
     fn member_id(&mut self) -> Result<&'a [u8]> {
         let id = self.member_id_range()?;
         Ok(self.src.text(id))
-    }
-
-    fn object_id(&mut self) -> Result<ObjectId> {
-        let variant = self.member_id()?;
-        match variant {
-            b"id" => Ok(ObjectId::Id(self.int4()?)),
-            b"str" => Ok(ObjectId::Str(self.string()?)),
-            _ => Err(self.error(format!(
-                "unexpected Object-id variant {}",
-                String::from_utf8_lossy(variant)
-            ))),
-        }
     }
 
     fn pssm_with_parameters(&mut self) -> Result<PssmWithParameters> {
@@ -238,56 +225,6 @@ impl<'a> Reader<SliceSource<'a>> {
             "Seqdesc"
         })?;
         Ok(None)
-    }
-
-    fn seq_id(&mut self) -> Result<PssmSeqId> {
-        let variant = self.member_id()?;
-        match variant {
-            b"local" => Ok(PssmSeqId::Local(self.object_id()?)),
-            b"gi" => Ok(PssmSeqId::Gi(self.int8()?)),
-            b"general" => {
-                let mut members = self.begin_members()?;
-                let (mut db, mut tag) = (None, None);
-                while let Some(index) = self.next_member(&mut members, &["db", "tag"])? {
-                    match index {
-                        0 => db = Some(self.string()?),
-                        _ => tag = Some(self.object_id()?),
-                    }
-                }
-                Ok(PssmSeqId::General {
-                    db: db.ok_or_else(|| self.error("member db missing"))?,
-                    tag: tag.ok_or_else(|| self.error("member tag missing"))?,
-                })
-            }
-            _ => {
-                let Some(&(name, tag)) = TEXTSEQ_VARIANTS
-                    .iter()
-                    .find(|(name, _)| name.as_bytes() == variant)
-                else {
-                    return Err(self.error(format!(
-                        "a query Seq-id {} is not supported by LOSAT's PSSM reader",
-                        String::from_utf8_lossy(variant)
-                    )));
-                };
-                let mut members = self.begin_members()?;
-                let mut id = TextseqId::default();
-                while let Some(index) =
-                    self.next_member(&mut members, &["name", "accession", "release", "version"])?
-                {
-                    match index {
-                        0 => id.name = Some(self.string()?),
-                        1 => id.accession = Some(self.string()?),
-                        2 => id.release = Some(self.string()?),
-                        _ => id.version = Some(self.int4()?),
-                    }
-                }
-                Ok(PssmSeqId::Textseq {
-                    variant: name,
-                    tag,
-                    id,
-                })
-            }
-        }
     }
 
     fn seq_inst(&mut self) -> Result<SeqInst> {

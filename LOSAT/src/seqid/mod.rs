@@ -8,10 +8,14 @@
 //!   `Set`).
 //! - `model`: the Seq-id value of every alternative (`ParsedSeqId`) and its serial writer
 //!   (outfmt 8, 9, 11, 12, through `report::seqid::SeqId::Db`).
+//! - `asn_text`: the reader of a Seq-id of NCBI's ASN.1 text (rpsbproc's archive, the PSSMs of
+//!   `-in_pssm`).
 //! - `ber`: the BER decoding of a header record (`decode_full_set`), whose reader
 //!   `seqdb::header` shares for the ordinal ids of a database without parsed Seq-ids.
 //! - `label`: the printings (`fasta`, `content`, `format_label`, `bare`,
 //!   `seqid_list_string`, `first_gi`).
+//! - `mask_handle`: when two Seq-ids are one `CSeq_id_Handle` (what `makeblastdb -mask_data`
+//!   matches a mask to a sequence by).
 //! - `rank`: `text_score` (Score, WorstRank), `best_rank_score` and `find_best`.
 //! - `defline_set`: the definition lines of one sequence, the Seq-align id, the definition
 //!   line of the subject Bioseq and of the shown id, and the joins of the formats that show
@@ -23,10 +27,12 @@
 //! database with parsed Seq-ids from `seqdb::SeqDb::defline_set`.
 
 pub mod accguide;
+pub(crate) mod asn_text;
 pub mod ber;
 pub mod defline_set;
 pub mod id_scope;
 pub mod label;
+pub(crate) mod mask_handle;
 pub mod model;
 pub mod parse;
 pub mod rank;

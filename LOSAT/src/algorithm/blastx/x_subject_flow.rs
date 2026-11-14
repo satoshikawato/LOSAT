@@ -110,8 +110,8 @@ impl XTasks {
         if n == 0 || u32::try_from(n).is_err() {
             return None;
         }
-        let total = match subjects.total_length() {
-            Ok(total) if total > 0 => total as u128,
+        let total = match subjects.included_length() {
+            Some(total) if total > 0 => u128::from(total),
             _ => return None,
         };
         // `k` times the mean length, rounded up.
@@ -163,12 +163,10 @@ fn shadow() -> bool {
 }
 
 /// No NCBI counterpart: whether the subject loop runs as a flow, and with how many subjects per
-/// task (fewer inside the capped batch flow, `x_bx_mem::flow_subjects_per_task`). Not with
-/// diagnostics (they keep every subject's seeds), without a pool, with one task only, or when a
-/// diagonal offset could pass 2^30 (module comment).
+/// task (fewer inside the capped batch flow, `x_bx_mem::flow_subjects_per_task`). Not without a
+/// pool, with one task only, or when a diagonal offset could pass 2^30 (module comment).
 pub(super) fn chosen(
     pool: &crate::utils::threading::SearchPool<'_>,
-    diagnostics: bool,
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
 ) -> Option<usize> {
@@ -180,7 +178,7 @@ pub(super) fn chosen(
         subjects.len(),
         subjects_per_task()?,
     );
-    let own = fits(k, pool, diagnostics, options, subjects);
+    let own = fits(k, pool, options, subjects);
     crate::utils::xreach::x_reach!("LOSAT_X_BXSUBJFLOW", own);
     own.then_some(k)
 }
@@ -189,11 +187,10 @@ pub(super) fn chosen(
 pub(super) fn fits(
     k: usize,
     pool: &crate::utils::threading::SearchPool<'_>,
-    diagnostics: bool,
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
 ) -> bool {
-    !(diagnostics || !pool.enabled() || pool.threads() < 2 || subjects.len() <= k)
+    !(!pool.enabled() || pool.threads() < 2 || subjects.len() <= k)
         && offsets_stay_below_2_30(options.window_size, subjects.longest_length())
 }
 
@@ -216,7 +213,6 @@ const CHUNK_FLOW_MIN_SUBJECTS: usize = 2_048;
 /// computes (the sink sees the chunks in order either way, `search::search_core`).
 pub(super) fn chunks_in_order(
     pool: &crate::utils::threading::SearchPool<'_>,
-    diagnostics: bool,
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
 ) -> bool {
@@ -225,7 +221,7 @@ pub(super) fn chunks_in_order(
         return false;
     }
     let own = subjects_per_task().is_some_and(|k| {
-        fits(k, pool, diagnostics, options, subjects)
+        fits(k, pool, options, subjects)
             && subjects.len()
                 >= CHUNK_FLOW_MIN_SUBJECTS.max(CHUNK_FLOW_SUBJECTS_PER_THREAD * pool.threads())
     });
@@ -239,7 +235,6 @@ pub(super) fn chunks_in_order(
 /// condition of its own.
 pub(super) fn crosses_chunks(
     pool: &crate::utils::threading::SearchPool<'_>,
-    diagnostics: bool,
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
     chunks: usize,
@@ -248,7 +243,7 @@ pub(super) fn crosses_chunks(
     if chunks < 2 || !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCHUNKCROSS")) {
         return None;
     }
-    let k = chosen(pool, diagnostics, options, subjects);
+    let k = chosen(pool, options, subjects);
     crate::utils::xreach::x_reach!("LOSAT_X_BXCHUNKCROSS", k.is_some());
     k
 }
@@ -293,7 +288,6 @@ fn search_task(
             lookup,
             diagonals,
             xdrop,
-            false,
             oid,
             x_containment,
         ) {

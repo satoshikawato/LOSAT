@@ -121,6 +121,9 @@ pub(super) struct TblastnTabular<'a> {
     /// The default report's tabular subject ids (`sseqid`, `sacc`, `saccver`), by subject index
     /// or rank (`stage_e_report::tabular_subject_ids`, `ReportedSubjects::tabular_subject_ids`).
     pub subject_ids: &'a [Arc<[u8]>],
+    /// The records of a subject set (`-subject`; the organism report shows their local ids and
+    /// titles).
+    pub subject_records: &'a [FastaRecord],
     pub shown: &'a ShownSubjects<'a>,
     /// By query: whether NCBI did not search its batch (outfmt 7's lines without a count).
     pub query_batch_skipped: &'a [bool],
@@ -199,7 +202,7 @@ fn reported_ranks(hitlists: &[KappaResultHitList]) -> impl Iterator<Item = usize
 pub(super) fn write_tblastn_tabular(
     tab: &TblastnTabular<'_>,
     hitlists: &[KappaResultHitList],
-    writer: &mut dyn Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     mut warnings: Option<&mut QueryWarnings<'_>>,
     mut probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
@@ -208,6 +211,8 @@ pub(super) fn write_tblastn_tabular(
         "TBLASTN tabular report query count mismatch"
     );
     let spec = tab.spec;
+    // Which rows read their subject (`TabularSpec::subject_fetch`).
+    let fetch = spec.subject_fetch(crate::blastinput::app::Program::Tblastn);
     let needs = spec.needs();
     let nident_alone = nident_alone(spec);
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
@@ -244,6 +249,47 @@ pub(super) fn write_tblastn_tabular(
         },
     };
     let names = tab.inputs.names.as_ref();
+    // Outfmt 18, the organism report: the `Query=` block shows the query record's length, also
+    // with `-query_loc` (as outfmt 0's).
+    if spec.kind == TabularKind::TaxReport {
+        let titles: Vec<_> = tab.queries.iter().map(FastaRecord::query_line).collect();
+        let queries: Vec<crate::report::tax_report::TaxQuery<'_>> = tab
+            .queries
+            .iter()
+            .zip(hitlists)
+            .enumerate()
+            .map(
+                |(q_idx, (query, hitlist))| crate::report::tax_report::TaxQuery {
+                    title: &titles[q_idx],
+                    length: tab.ranges.queries.length(q_idx, query.seq().len()),
+                    hsps: hitlist
+                        .lists()
+                        .iter()
+                        .flat_map(|list| {
+                            list.hsps.hsps.iter().zip(&list.payloads).map(
+                                move |(linked, payload)| crate::report::tax_report::TaxHsp {
+                                    subject: list.oid as usize,
+                                    evalue: linked.evalue,
+                                    bit_score: payload.bit_score,
+                                },
+                            )
+                        })
+                        .collect(),
+                },
+            )
+            .collect();
+        return crate::algorithm::common::tabular::write_tax_report(
+            &subjects,
+            tab.subject_records,
+            false,
+            tab.inputs.taxdb_found,
+            names,
+            PROGRAM,
+            &queries,
+            writer,
+            warnings,
+        );
+    }
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;
     // those of the other ids are `ReportedSubjects::tabular_subject_ids`'.
     if needs.all_deflines {
@@ -373,6 +419,25 @@ pub(super) fn write_tblastn_tabular(
             let whole_length = i32::try_from(record_length(oid))?;
             let mut translation = None;
             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+                // ```c++
+                //        		const CBioseq_Handle& subject_bh =
+                //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+                // ```
+                // A row that reads the subject (`TabularSpec::subject_fetch`, by the Seq-align's
+                // identities for `nident` alone, `database::reads_subject`) loads it first where
+                // the query's batch did not prefetch it: the texts of its taxonomy lookups follow
+                // the rows before it (`QueryWarnings::subject_read`), before those of the row's
+                // own lookups.
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    if warnings.reads_with_texts(q_idx)
+                        && fetch.reads(usize::try_from(payload.num_ident).unwrap_or(0))
+                    {
+                        writer.write_all(&buf)?;
+                        buf.clear();
+                        warnings.subject_read(q_idx, oid as u32, &mut *writer)?;
+                    }
+                }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.
                 if let (Some(names), Some(warnings)) = (names, warnings.as_deref_mut()) {
@@ -390,14 +455,7 @@ pub(super) fn write_tblastn_tabular(
                 // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105: the nucleotide
                 // coordinates of a translated frame, descending on a minus frame (the default
                 // row's, `write_tabular`).
-                let (s_start, s_end) = if frame > 0 {
-                    (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
-                } else {
-                    (
-                        subject_len - 3 * hsp.s_start + frame + 1,
-                        subject_len - 3 * hsp.s_end + frame + 2,
-                    )
-                };
+                let (s_start, s_end) = super::stage_e_report::subject_endpoints(hsp, subject_len);
                 let (q_start, q_end, s_start, s_end) = record_coordinates(
                     tab.ranges,
                     q_idx,

@@ -13,16 +13,15 @@ use std::io::Read;
 use super::defline_ids;
 use super::line_reader::BufferedLineReader;
 use super::pack::{self, Coding, Segment};
-use super::title::printable_string;
 use crate::blastinput::fasta_reader::reader::{
     canonicalize_string, convert_bad_indexes_to_string, gap_type_info, linkage_evidence_value,
     seq_data_in_title_warning, GapType, LinkEvid, Problem, LINKAGE_UNSPECIFIED,
 };
-use crate::blastinput::fasta_reader::stream::{
-    input_space, trim_input_end, trim_input_space, trim_input_start,
-};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::seqid::accguide::SeqIdWarning;
+use crate::ncbi_str::{
+    is_blank, is_space, printable_string, string_to_uint, truncate_spaces, truncate_spaces_begin,
+};
+use crate::seqid::accguide::{identify_seq_id, parse_flags, SeqIdWarning, F_NUC, F_PROT};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 use crate::seqid::rank::{best_rank_score, find_best};
 use crate::writedb::bioseq::SeqData;
@@ -59,17 +58,35 @@ const FASTA_BIOSEQ_SOURCE_IGNORED_PROBLEMS: [Problem; 3] = [
     Problem::TooLong,
 ];
 
+/// The molecule flags of a caller: `fAssumeNuc` or `fAssumeProt` with `fForceType`
+/// (makeblastdb, the mask reader: every record is of the input's molecule), or none of the
+/// three (convert2blastmask: the ids of a definition line, else the residues, tell it,
+/// `AssignMolType`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Molecule {
+    Nucleotide,
+    Protein,
+    Guessed,
+}
+
 /// The `CFastaReader::EFlags` of a caller, the problems it tells the reader to ignore, and
-/// whether the reader stops at makeblastdb's length limit. `fForceType` is set for every
-/// caller: the molecule is the input's (`fAssumeProt` or `fAssumeNuc`). Where ids are parsed,
-/// `fParseRawID` is set (`-parse_seqids`; makeblastdb's `long_ids` is false), and
-/// `fParseGaps` is set only for nucleotide input.
+/// whether the reader stops at makeblastdb's length limit. Where ids are parsed, makeblastdb
+/// and the mask reader set `fParseRawID` (`-parse_seqids`; makeblastdb's `long_ids` is false),
+/// and `fParseGaps` is set only for nucleotide input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ReaderFlags {
-    /// `fAssumeProt`, else `fAssumeNuc`.
-    pub(crate) protein: bool,
+    /// `fAssumeNuc` or `fAssumeProt` with `fForceType`, or none of them.
+    pub(crate) molecule: Molecule,
     /// `fNoParseID` is not set: the ids of each definition line are parsed.
     pub(crate) parse_ids: bool,
+    /// `fParseRawID`: an id without a `|` is parsed as an accession (`fParse_RawText`), not as
+    /// a local id.
+    pub(crate) parse_raw_id: bool,
+    /// The reader of convert2blastmask (`CMaskFromFasta`, a subclass): it keeps the masked
+    /// intervals of each record (`SaveMask` before each record makes `m_CurrentMask`, so lower
+    /// case letters open intervals) and reads a data line that starts with a digit as an
+    /// interval (`FastaReader::take_masks`).
+    pub(crate) mask_from_fasta: bool,
     /// `fParseGaps`: a hyphen of a nucleotide sequence is a gap, and `>?` lines stay gaps.
     pub(crate) parse_gaps: bool,
     /// `fRequireID`: a definition line without ids is an error (with `parse_ids`).
@@ -131,8 +148,14 @@ impl ReaderFlags {
     /// ```
     pub(crate) const fn fasta_bioseq_source(protein: bool, parse_ids: bool) -> Self {
         Self {
-            protein,
+            molecule: if protein {
+                Molecule::Protein
+            } else {
+                Molecule::Nucleotide
+            },
             parse_ids,
+            parse_raw_id: parse_ids,
+            mask_from_fasta: false,
             parse_gaps: !protein,
             require_id: parse_ids,
             quick_id_check: true,
@@ -173,8 +196,38 @@ impl ReaderFlags {
     /// No length limit applies: the masking programs read a record of any length.
     pub(crate) const fn mask_fasta_reader(protein: bool, parse_seqids: bool) -> Self {
         Self {
-            protein,
+            molecule: if protein {
+                Molecule::Protein
+            } else {
+                Molecule::Nucleotide
+            },
             parse_ids: parse_seqids,
+            parse_raw_id: parse_seqids,
+            mask_from_fasta: false,
+            parse_gaps: false,
+            require_id: false,
+            quick_id_check: false,
+            disable_no_residues: false,
+            ignored_problems: &[],
+            build_db_length_limit: false,
+        }
+    }
+
+    /// The flags of `CMaskFromFasta(input, parse_seqids)` (convert2blastmask): `fNoParseID`
+    /// without `-parse_seqids`, else none: no `fForceType`, no `fAssumeNuc` or `fAssumeProt`
+    /// and no `fParseRawID`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:56-57
+    /// ```c++
+    ///     CMaskFromFasta(CNcbiIstream & input, bool parse_seqids)
+    ///         : CFastaReader(input, (parse_seqids ? 0 : CFastaReader::fNoParseID)) {}
+    /// ```
+    pub(crate) const fn mask_from_fasta(parse_seqids: bool) -> Self {
+        Self {
+            molecule: Molecule::Guessed,
+            parse_ids: parse_seqids,
+            parse_raw_id: false,
+            mask_from_fasta: true,
             parse_gaps: false,
             require_id: false,
             quick_id_check: false,
@@ -192,6 +245,7 @@ pub(crate) enum ErrCode {
     Eof,
     NoDefline,
     NoIds,
+    Ambiguous,
     IdTooLong,
     NoResidues,
     InvalidId,
@@ -224,6 +278,7 @@ impl ErrCode {
             ErrCode::Eof => "CObjReaderParseException::eEOF",
             ErrCode::NoDefline => "CObjReaderParseException::eNoDefline",
             ErrCode::NoIds => "CObjReaderParseException::eNoIDs",
+            ErrCode::Ambiguous => "CObjReaderParseException::eAmbiguous",
             ErrCode::IdTooLong => "CObjReaderParseException::eIDTooLong",
             ErrCode::NoResidues => "CObjReaderParseException::eNoResidues",
             ErrCode::InvalidId => "CObjReaderParseException::eInvalidID",
@@ -266,6 +321,9 @@ pub(crate) enum Thrower {
     ///             eDiag_Error);
     /// ```
     PostError,
+    /// `NCBI_THROW2` of `CFastaReader::AssignMolType` (fasta.cpp:1606, quoted at
+    /// `RecordState::assign_mol_type`).
+    AssignMolType,
 }
 
 /// A `CObjReaderParseException` of the reader.
@@ -315,6 +373,11 @@ impl ParseError {
                 77,
                 Some("ncbi::objects::s_PostError"),
             ),
+            Thrower::AssignMolType => (
+                "src/objtools/readers/fasta.cpp",
+                1606,
+                Some("ncbi::objects::CFastaReader::AssignMolType"),
+            ),
         };
         let site = ThrowSite {
             file,
@@ -331,6 +394,9 @@ impl ParseError {
 pub(crate) enum ReadError {
     /// The reader's own exception.
     Parse(ParseError),
+    /// Another exception of NCBI's thrown while a record is read: the `CStringException` of
+    /// an interval line of `CMaskFromFasta` (`ReaderFlags::mask_from_fasta`).
+    Ncbi(Box<NcbiException>),
     /// An allocation whose size the input states could not be made
     /// (`std::bad_alloc` in NCBI, which no reader catches).
     OutOfMemory,
@@ -379,7 +445,49 @@ pub(crate) enum SeqInst {
     },
     /// A record longer than 2,147,483,647 residues, which `CBuildDatabase::AddSequences`
     /// rejects by its length before it reads the sequence data: LOSAT does not build it.
+    /// `length` is NCBI's (`TSeqPos`, see `PastSeqPos`).
     TooLong { length: u64 },
+    /// A record of 4,294,967,296 residues or more, counting the letters of its gaps, that
+    /// makeblastdb's length check does not stop. NCBI counts a record's length in a `TSeqPos`
+    /// (`GetCurrentPos`, `m_TotalGapLength`, `SGap::m_uLen`, `m_CurrentGapLength`), which wraps
+    /// there, and goes on with a `Seq-inst` of the wrapped length, `seq_pos_length`, whose data
+    /// is longer (`form`). LOSAT does not build it (no allocation for the gaps).
+    /// convert2blastmask, which reads only the masks, writes them (their positions wrap as
+    /// NCBI's, `RecordState::current_pos_with_gaps`); makeblastdb follows NCBI where NCBI
+    /// skips the record or stops before it builds the data (`fasta_source::next_bioseq`) and
+    /// refuses it where NCBI builds it; dustmasker and segmasker refuse it (NCBI's object
+    /// manager reads the first `seq_pos_length` letters, the gaps as `N` or `X`, after
+    /// allocating the substituted run when the gaps are not kept; a kept gap of 4294967295,
+    /// `kInvalidSeqPos`, is its error instead: not ported yet, line RG series K). `length` is the
+    /// record's, counted on.
+    PastSeqPos {
+        length: u64,
+        seq_pos_length: u64,
+        form: PastSeqPosForm,
+    },
+}
+
+/// The `Seq-inst` that NCBI's `AssembleSeq` makes of a `SeqInst::PastSeqPos` record.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum PastSeqPosForm {
+    /// No gap is kept (no gaps, or runs of `N` or `X` substituted for them): `repr raw`, or
+    /// a delta of literals only, over the residues.
+    Residues,
+    /// The gaps are kept (`fParseGaps`, or `>?` lines whose lengths sum to a multiple of 2^32,
+    /// so that `m_TotalGapLength` is 0): `repr delta`, whose first piece is a literal.
+    Delta,
+    /// As `Delta`, with a gap of unknown length (`Seq-loc null`, a lone hyphen) first.
+    DeltaFromNull,
+}
+
+/// What LOSAT refuses in a program that reads the residues of a `SeqInst::PastSeqPos` record
+/// `id` of `length` letters (the text before `is not supported by LOSAT's <program>`).
+pub(crate) fn past_seq_pos_refusal(id: &str, length: u64) -> String {
+    format!(
+        "a FASTA record of 4,294,967,296 letters or more, counting the letters of its gaps \
+         ({id}: {} letters; NCBI counts the length of a record in 32 bits, which wrap there),",
+        crate::ncbi_str::with_commas(length)
+    )
 }
 
 /// A record as `CFastaReader::ReadOneSeq` returns it.
@@ -396,6 +504,9 @@ pub(crate) struct Record {
     pub(crate) defline_field: Vec<u8>,
     /// The title descriptor (`x_ApplyMods`), if the record has one.
     pub(crate) title_descr: Option<Vec<u8>>,
+    /// `CBioseq::IsAa()`: the molecule of the input (`fForceType`), or the one
+    /// `AssignMolType` found.
+    pub(crate) is_aa: bool,
     pub(crate) inst: SeqInst,
 }
 
@@ -515,7 +626,8 @@ const RESIDUE_MIN: u8 = b'*';
 ///             break;
 ///         }
 /// ```
-/// `bIsNuc` is `fAssumeNuc` (`fForceType`). No caller sets `fLetterGaps` or
+/// `bIsNuc` is `fAssumeNuc` (`fForceType`), or without `fForceType` the nucleotide that the
+/// ids named (`RecordState::is_nuc`). No caller sets `fLetterGaps` or
 /// `fHyphensIgnoreAndWarn`: `bAllowLetterGaps` is false, and `bHyphensAreGaps` is
 /// `fParseGaps`, so a hyphen is a gap with `fParseGaps` (makeblastdb's nucleotide input)
 /// and a residue without it (makeblastdb's protein input, the mask reader's input).
@@ -560,9 +672,9 @@ struct RecordState {
     /// `m_Gaps`.
     gaps: Vec<Gap>,
     /// `m_CurrentGapLength`: the hyphens read since the last residue (their character,
-    /// `m_CurrentGapChar`, is always `-`).
-    current_gap_length: u64,
-    /// `m_TotalGapLength`.
+    /// `m_CurrentGapChar`, is always `-`), a `TSeqPos` (a run of 2^32 hyphens is none).
+    current_gap_length: u32,
+    /// `m_TotalGapLength`, counted on (NCBI's `TSeqPos` wraps at 2^32: `assemble_seq`).
     total_gap_length: u64,
     /// `m_CurrentSeqTitles`.
     titles: Vec<LineText>,
@@ -579,6 +691,14 @@ struct RecordState {
     hist_old_id: Option<ParsedSeqId>,
     /// The bad positions of a data line, reused.
     bad_positions: Vec<u32>,
+    /// `Seq-inst.mol` of the record before `AssignMolType` (`ReaderFlags::molecule` is
+    /// `Guessed`): `Some(true)` for a protein, `Some(false)` for a nucleotide, set by
+    /// `ParseDefLine` from the ids (`xSetSeqMol`); `None` while it is not set.
+    mol: Option<bool>,
+    /// `m_MaskRangeStart` (`kInvalidSeqPos` is `None`).
+    mask_start: Option<u32>,
+    /// `CMaskFromFasta::m_mask`.
+    masks: Vec<(u32, u32)>,
 }
 
 /// NCBI's `CFastaReader` over a `CBufferedLineReader`.
@@ -657,18 +777,25 @@ impl<R: Read> FastaReader<R> {
                 title_descr: None,
                 local_id: 0,
                 bad_positions: Vec::new(),
+                mol: None,
+                mask_start: None,
+                masks: Vec::new(),
             },
         }
-    }
-
-    /// `CBioseq::IsAa()` of every record: the molecule is the input's (`assemble_seq`).
-    pub(crate) fn is_protein(&self) -> bool {
-        self.state.flags.protein
     }
 
     /// The ids of each definition line are parsed (`-parse_seqids`).
     pub(crate) fn parses_ids(&self) -> bool {
         self.state.flags.parse_ids
+    }
+
+    /// With `ReaderFlags::mask_from_fasta`, `CMaskFromFasta::GetMask()` of the record that
+    /// `read_one_seq` read last (after an error, what it had read of that record): the
+    /// intervals of its lower case letters and of its interval lines (0-based, inclusive), in
+    /// the order in which they were closed or read; empty otherwise. The intervals stay with the reader (not in `Record`) so that the
+    /// records of the other programs, which never have any, are not made larger.
+    pub(crate) fn take_masks(&mut self) -> Vec<(u32, u32)> {
+        std::mem::take(&mut self.state.masks)
     }
 
     /// `GetLineReader().AtEOF()`.
@@ -821,6 +948,20 @@ impl<R: Read> FastaReader<R> {
     /// none. Without `fDLOptional` data before a definition line is the `eNoDefline`
     /// error. `CBadResiduesException` comes only with `fValidate`, which is not set.
     pub(crate) fn read_one_seq(&mut self, warn: ReaderWarn<'_>) -> Result<Record, ReadError> {
+        if self.state.flags.mask_from_fasta {
+            self.read_one_seq_of::<true>(warn)
+        } else {
+            self.read_one_seq_of::<false>(warn)
+        }
+    }
+
+    /// `read_one_seq` with `ReaderFlags::mask_from_fasta` as `MASK_FROM_FASTA`: the records of
+    /// the other readers take no step of convert2blastmask's masks but `close_mask`, which has
+    /// nothing open to close for them (one choice per record).
+    fn read_one_seq_of<const MASK_FROM_FASTA: bool>(
+        &mut self,
+        warn: ReaderWarn<'_>,
+    ) -> Result<Record, ReadError> {
         let state = &mut self.state;
         state.seq_data.clear();
         state.gaps.clear();
@@ -829,6 +970,11 @@ impl<R: Read> FastaReader<R> {
         state.titles.clear();
         state.defline_field.clear();
         state.title_descr = None;
+        state.mol = None;
+        // `m_MaskRangeStart = kInvalidSeqPos`; `CMaskFromFasta::GetNextSequence` clears its
+        // intervals (`m_mask.clear()`) before `ReadOneSeq`.
+        state.mask_start = None;
+        state.masks.clear();
 
         let mut need_defline = true;
         while !self.lines.at_eof() {
@@ -862,7 +1008,8 @@ impl<R: Read> FastaReader<R> {
             self.lines.next_line();
             let line_number = self.lines.line_number();
             let raw = self.lines.line();
-            let line = trim_input_space(raw);
+            // `NStr::TruncateSpaces_Unsafe(line)` (`eTrunc_Both`, fasta.cpp:376).
+            let line = truncate_spaces(raw);
             if line.is_empty() || matches!(line[0], b'!' | b'#' | b';') {
                 continue;
             }
@@ -879,13 +1026,15 @@ impl<R: Read> FastaReader<R> {
             }
             let raw_length = raw.len();
             match line.strip_prefix(b">?_") {
-                Some(rest) => state.parse_data_line(
+                Some(rest) => state.parse_data_line::<MASK_FROM_FASTA>(
                     &[b">".as_slice(), rest].concat(),
                     raw_length,
                     line_number,
                     warn,
                 )?,
-                None => state.parse_data_line(line, raw_length, line_number, warn)?,
+                None => {
+                    state.parse_data_line::<MASK_FROM_FASTA>(line, raw_length, line_number, warn)?
+                }
             }
         }
 
@@ -898,13 +1047,14 @@ impl<R: Read> FastaReader<R> {
             )));
         }
 
-        let inst = state.assemble_seq(self.lines.line_number(), warn)?;
+        let (inst, is_aa) = state.assemble_seq(self.lines.line_number(), warn)?;
         Ok(Record {
             local_id: state.local_id,
             ids: std::mem::take(&mut state.ids),
             hist_old_id: state.hist_old_id.take(),
             defline_field: std::mem::take(&mut state.defline_field),
             title_descr: state.title_descr.take(),
+            is_aa,
             inst,
         })
     }
@@ -1033,9 +1183,10 @@ impl RecordState {
     ///         seq_id->SetLocal().SetId(n);
     /// ```
     /// `defline` starts with `>` except for an empty line (`BufferedLineReader`'s module
-    /// comment), which returns before the test of its first character. The molecule is
-    /// not set here (`fForceType`); without `-parse_seqids` no range is parsed
-    /// (`fNoParseID`).
+    /// comment), which returns before the test of its first character. With `fForceType`
+    /// the molecule is not set here; without it (`Molecule::Guessed`) the ids set it
+    /// (`xSetSeqMol`, before a ranged id is replaced). Without `-parse_seqids` no range is
+    /// parsed (`fNoParseID`).
     fn parse_def_line(
         &mut self,
         defline: &[u8],
@@ -1048,10 +1199,10 @@ impl RecordState {
         self.hist_old_id = None;
         let len = defline.len();
         let mut has_range = false;
-        if len > 1 && !defline[1..].iter().all(|&byte| input_space(byte)) {
+        if len > 1 && !is_blank(&defline[1..]) {
             let start = 1 + defline[1..]
                 .iter()
-                .position(|&byte| !input_space(byte))
+                .position(|&byte| !is_space(byte))
                 .unwrap_or(len - 1);
             let mut title_start = start;
             if self.flags.parse_ids {
@@ -1093,7 +1244,7 @@ impl RecordState {
                 }
                 let (range_len, _, _) = defline_ids::parse_range(&defline[start..pos]);
                 let id_string = &defline[start..pos - range_len];
-                if id_string.iter().all(|&byte| input_space(byte)) {
+                if is_blank(id_string) {
                     return Err(ParseError::new(
                         Thrower::ParseDefline,
                         ErrCode::Format,
@@ -1104,14 +1255,15 @@ impl RecordState {
                 title_start = pos;
                 self.ids = defline_ids::process_ids(
                     id_string,
-                    self.flags.protein,
+                    self.flags.molecule == Molecule::Protein,
                     self.flags.quick_id_check,
+                    self.flags.parse_raw_id,
                     line_number,
                     warn,
                 )?;
                 has_range = range_len > 0;
             }
-            while title_start < len && input_space(defline[title_start]) {
+            while title_start < len && is_space(defline[title_start]) {
                 title_start += 1;
             }
             if title_start < len {
@@ -1141,6 +1293,19 @@ impl RecordState {
             // The ids are empty only for a definition line that is blank after its `>`
             // (`ParseDefline` returns before it reads ids); without `fRequireID` (the mask
             // reader) `PostProcessIDs` generates the record's id.
+            //
+            // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:584-589
+            // ```c++
+            //     else if (!TestFlag(fForceType)) {
+            //         CSeq_inst::EMol mol;
+            //         if (xSetSeqMol(data.ids, mol)) {
+            //             m_CurrentSeq->SetInst().SetMol(mol);
+            //         }
+            //     }
+            // ```
+            if !self.ids.is_empty() && self.flags.molecule == Molecule::Guessed {
+                self.mol = mol_of_ids(&self.ids, warn);
+            }
             if self.ids.is_empty() {
                 if self.flags.require_id {
                     return Err(ParseError::fasta_error(
@@ -1269,6 +1434,7 @@ impl RecordState {
     /// `bIgnoreHyphens` is false: a hyphen counts as good. `bIsNuc` is true for nucleotide
     /// input (`fAssumeNuc | fForceType`). The warning about ambiguous nucleotides is an
     /// ignored problem of makeblastdb.
+    #[inline(always)]
     fn check_data_line(
         &self,
         s: &[u8],
@@ -1278,7 +1444,7 @@ impl RecordState {
         if !self.seq_data.is_empty() {
             return Ok(());
         }
-        let is_nuc = !self.flags.protein;
+        let is_nuc = self.is_nuc();
         let (mut good, mut bad, mut ambig_nuc) = (0usize, 0usize, 0usize);
         let len_to_check = s.len().min(70);
         for &c in &s[..len_to_check] {
@@ -1289,7 +1455,7 @@ impl RecordState {
                 }
             } else if c == b'-' {
                 good += 1;
-            } else if input_space(c) || c.is_ascii_digit() {
+            } else if is_space(c) || c.is_ascii_digit() {
                 // White space and digits are neutral.
             } else if c == b';' {
                 break;
@@ -1428,13 +1594,20 @@ impl RecordState {
     /// length while the line is read; `x_CloseGap` reads that length (`close_gap`). The
     /// fast copy of `fSkipCheck` is not taken (no `fSkipCheck`). `x_NucOrProt()` is empty:
     /// the molecule is set only in `AssembleSeq`.
-    fn parse_data_line(
+    fn parse_data_line<const MASK_FROM_FASTA: bool>(
         &mut self,
         s: &[u8],
         raw_length: usize,
         line_number: u64,
         warn: ReaderWarn<'_>,
-    ) -> Result<(), ParseError> {
+    ) -> Result<(), ReadError> {
+        // `CMaskFromFasta::ParseDataLine`: an interval line is read as the residue `A`.
+        let s = if MASK_FROM_FASTA && s[0].is_ascii_digit() {
+            self.parse_interval(s)?;
+            &b"A"[..]
+        } else {
+            s
+        };
         if s.starts_with(b">?") {
             self.parse_gap_line(s, line_number, warn);
             return Ok(());
@@ -1442,7 +1615,7 @@ impl RecordState {
         self.check_data_line(s, line_number, warn)?;
 
         // `fParseGaps` is set only for nucleotide input (`ReaderFlags`).
-        let actions = if self.flags.protein {
+        let actions = if !self.is_nuc() {
             &PROTEIN_ACTIONS
         } else if self.flags.parse_gaps {
             &NUCLEOTIDE_GAP_ACTIONS
@@ -1458,11 +1631,15 @@ impl RecordState {
                 SPACE => {}
                 COMMENT => break,
                 GAP => {
+                    if MASK_FROM_FASTA {
+                        self.close_mask();
+                    }
                     let run = 1 + s[pos + 1..]
                         .iter()
                         .position(|&byte| byte != c)
                         .unwrap_or(s.len() - pos - 1);
-                    self.current_gap_length += run as u64;
+                    // `m_CurrentGapLength += pos2 - pos`, a `TSeqPos`.
+                    self.current_gap_length = self.current_gap_length.wrapping_add(run as u32);
                     pos += run - 1;
                 }
                 BAD => self.bad_positions.push(pos as u32),
@@ -1474,6 +1651,9 @@ impl RecordState {
                         .iter()
                         .position(|&byte| actions[byte as usize] < RESIDUE_MIN)
                         .unwrap_or(s.len() - pos - 1);
+                    if MASK_FROM_FASTA {
+                        self.mask_run(&s[pos..pos + run]);
+                    }
                     self.seq_data
                         .extend(s[pos..pos + run].iter().map(|&byte| actions[byte as usize]));
                     pos += run - 1;
@@ -1493,6 +1673,204 @@ impl RecordState {
             );
         }
         Ok(())
+    }
+
+    /// `bIsNuc` of `ParseDataLine` and of `CheckDataLine`: `fAssumeNuc` (with `fForceType`),
+    /// or, without `fForceType`, a `Seq-inst.mol` of `na` that the ids set (`ParseDefLine`).
+    /// The two tests agree for every caller's flags (quoted at `check_data_line` and at the
+    /// action tables).
+    fn is_nuc(&self) -> bool {
+        match self.flags.molecule {
+            Molecule::Nucleotide => true,
+            Molecule::Protein => false,
+            Molecule::Guessed => self.mol == Some(false),
+        }
+    }
+
+    /// `GetCurrentPos(ePosWithGapsAndSegs)` (no `fInSegSet`, so `m_SegmentBase` is 0), a
+    /// `TSeqPos`.
+    fn current_pos_with_gaps(&self) -> u32 {
+        (self.seq_data.len() as u64 + self.total_gap_length) as u32
+    }
+
+    /// `OpenMask` and `CloseMask` of the residues of `run`, which are about to be stored: a
+    /// lower case letter is `eCharType_MaskedNonGap` (`OpenMask`), any other residue
+    /// `eCharType_NormalNonGap` (`CloseMask`, before the position moves past it).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:944-955
+    /// ```c++
+    ///         case eCharType_NormalNonGap:
+    ///             CloseGap(pos == 0);
+    ///             m_SeqData[m_CurrentPos] = c;
+    ///             CloseMask();
+    ///             ++m_CurrentPos;
+    ///             break;
+    ///         case eCharType_MaskedNonGap:
+    ///             CloseGap(pos == 0);
+    ///             m_SeqData[m_CurrentPos] = s_ASCII_MustBeLowerToUpper(c);
+    ///             OpenMask();
+    ///             ++m_CurrentPos;
+    ///             break;
+    /// ```
+    /// NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:494-500
+    /// ```c++
+    /// inline
+    /// void CFastaReader::OpenMask()
+    /// {
+    ///     if (m_MaskRangeStart == kInvalidSeqPos  &&  m_CurrentMask.NotEmpty()) {
+    ///         x_OpenMask();
+    ///     }
+    /// }
+    /// ```
+    /// `CMaskFromFasta` keeps its own copy of each interval (`x_OpenMask`, `x_CloseMask`,
+    /// quoted at `close_mask`). Only `parse_data_line::<true>` (convert2blastmask) calls it,
+    /// once for each run of residues, so it is not cold: the other readers' instance has no call.
+    fn mask_run(&mut self, run: &[u8]) {
+        let base = self.current_pos_with_gaps();
+        for (i, byte) in run.iter().enumerate() {
+            let pos = base.wrapping_add(i as u32);
+            if byte.is_ascii_lowercase() {
+                // `m_MaskRangeStart` is `kInvalidSeqPos` (4294967295) while no interval is
+                // open: one opened there stays closed (`x_OpenMask` stores that value).
+                if self.mask_start.is_none() && pos != u32::MAX {
+                    self.mask_start = Some(pos);
+                }
+            } else if let Some(start) = self.mask_start.take() {
+                self.masks.push((start, pos.wrapping_sub(1)));
+            }
+        }
+    }
+
+    /// `CloseMask()`: the open interval ends before the current position.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:94-105
+    /// ```c++
+    ///     // hack to deal with fasta format
+    ///     virtual void x_OpenMask(void) {
+    ///         CFastaReader::x_OpenMask();
+    ///         m_from = GetCurrentPos(ePosWithGapsAndSegs);
+    ///     }
+    ///
+    ///     virtual void x_CloseMask(void) {
+    ///         CFastaReader::x_CloseMask();
+    ///         m_hasMask = true;
+    ///         m_mask.push_back(CMaskWriter::TMaskedInterval(m_from,
+    ///                                  GetCurrentPos(ePosWithGapsAndSegs)-1));
+    ///     }
+    /// ```
+    /// (`CFastaReader::x_CloseMask` adds the same interval to `m_CurrentMask`, which
+    /// convert2blastmask does not read.)
+    fn close_mask(&mut self) {
+        if let Some(start) = self.mask_start.take() {
+            let end = self.current_pos_with_gaps().wrapping_sub(1);
+            self.masks.push((start, end));
+        }
+    }
+
+    /// `CMaskFromFasta::ParseDataLine` of a line that starts with a digit: the interval
+    /// `from - to` (`parse_data_line` then reads a residue `A` in its place).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:76-92
+    /// ```c++
+    ///     // hack to deal with interval format
+    ///     virtual void ParseDataLine(const TStr &s,
+    ///         ILineErrorListener * pMessageListener)
+    ///     {
+    ///         if (s[0] >= '0' && s[0] <= '9' && s.find('-') > 0) {
+    ///             string s1, s2;
+    ///             NStr::SplitInTwo(s,"-",s1,s2);
+    ///             m_hasMask = true;
+    ///             m_mask.push_back(CMaskWriter::TMaskedInterval(
+    ///                                  NStr::StringToUInt(NStr::TruncateSpaces(s1)),
+    ///                                  NStr::StringToUInt(NStr::TruncateSpaces(s2))));
+    ///             // fake a sequence data to make CFastaReader happy
+    ///             CFastaReader::ParseDataLine("A", pMessageListener);
+    ///         } else {
+    ///             CFastaReader::ParseDataLine(s, pMessageListener);
+    ///         }
+    ///     }
+    /// ```
+    /// `s.find('-')` is never 0 after a digit (`npos` without one), so every such line is an
+    /// interval: without `-` the second number is the empty string, an error. GCC evaluates
+    /// the two conversions from the right: the second number's error is the one reported
+    /// (convert2blastmask 2.17.0: `1abc` reports `''`, `0x10 - 5` reports `'0x10'`). `s` is
+    /// the line without its spaces at both ends (`ReadOneSeq`, quoted at
+    /// `FastaReader::read_one_seq`).
+    #[cold]
+    fn parse_interval(&mut self, s: &[u8]) -> Result<(), ReadError> {
+        let (s1, s2) = match s.iter().position(|&byte| byte == b'-') {
+            Some(dash) => (&s[..dash], &s[dash + 1..]),
+            None => (s, &[][..]),
+        };
+        let to = string_to_uint(truncate_spaces(s2))
+            .map_err(|error| ReadError::Ncbi(Box::new(error)))?;
+        let from = string_to_uint(truncate_spaces(s1))
+            .map_err(|error| ReadError::Ncbi(Box::new(error)))?;
+        self.masks.push((from, to));
+        Ok(())
+    }
+
+    /// `AssignMolType` without `fForceType`, `fAssumeNuc` or `fAssumeProt`: whether the record
+    /// is a protein (`IsAa()`; a `mol` of `not-set`, for a record without residues, is not).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1575-1610
+    /// ```c++
+    ///     if (inst.IsSetMol()) {
+    ///         if (inst.GetMol() == CSeq_inst::eMol_na && !m_SeqData.empty()) {
+    ///             sRefineNaMol(m_SeqData.data(),
+    ///                     m_SeqData.data() + min(m_SeqData.length(), SIZE_TYPE(4096)),
+    ///                     *m_CurrentSeq);
+    ///         }
+    ///         return;
+    ///     }
+    ///
+    ///     if (m_SeqData.empty()) {
+    ///         // Nothing else to go on, but that's OK (no sequence to worry
+    ///         // about encoding); however, Seq-inst.mol is still mandatory.
+    ///         inst.SetMol(CSeq_inst::eMol_not_set);
+    ///         return;
+    ///     }
+    ///
+    ///
+    ///     // Do the residue frequencies suggest a specific type?
+    ///     SIZE_TYPE length = min(m_SeqData.length(), SIZE_TYPE(4096));
+    ///     const auto& data = m_SeqData.data();
+    ///     switch (CFormatGuess::SequenceType(data, length, strictness)) {
+    ///     case CFormatGuess::eNucleotide:
+    ///     {
+    ///         if (!sRefineNaMol(data, data+length, *m_CurrentSeq)) {
+    ///             inst.SetMol(CSeq_inst::eMol_na);
+    ///         }
+    ///         return;
+    ///     }
+    ///     case CFormatGuess::eProtein:     inst.SetMol(CSeq_inst::eMol_aa);  return;
+    ///     default:
+    ///         if (default_mol == CSeq_inst::eMol_not_set) {
+    ///             NCBI_THROW2(CObjReaderParseException, eAmbiguous,
+    ///                         "CFastaReader: Unable to determine sequence type (is it nucleotide? protein?) around line " + NStr::NumericToString(LineNumber()),
+    ///                         LineNumber());
+    /// ```
+    /// (`sRefineNaMol` makes an `na` a `dna` or an `rna`, which is not a protein either; no
+    /// caller sets `fStrictGuess` or `fLaxGuess`.)
+    fn assign_mol_type(&self, line_number: u64) -> Result<bool, ParseError> {
+        if let Some(is_aa) = self.mol {
+            return Ok(is_aa);
+        }
+        if self.seq_data.is_empty() {
+            return Ok(false);
+        }
+        let length = self.seq_data.len().min(4096);
+        match sequence_type(&self.seq_data[..length]) {
+            Some(is_aa) => Ok(is_aa),
+            None => Err(ParseError::new(
+                Thrower::AssignMolType,
+                ErrCode::Ambiguous,
+                format!(
+                    "CFastaReader: Unable to determine sequence type (is it nucleotide? protein?) around line {line_number}"
+                ),
+                line_number,
+            )),
+        }
     }
 
     /// `CloseGap(atStartOfLine)`: ends the run of hyphens, if one is open.
@@ -1582,7 +1960,7 @@ impl RecordState {
         if self.current_gap_length == 0 {
             return;
         }
-        let mut len = self.current_gap_length;
+        let mut len = u64::from(self.current_gap_length);
         let pos = self.seq_data.len();
         if len == 1
             && (seq_data_length == pos
@@ -1707,21 +2085,18 @@ impl RecordState {
     fn parse_gap_line(&mut self, line: &[u8], line_number: u64, warn: ReaderWarn<'_>) {
         self.close_gap(false, self.seq_data.len(), 0);
 
-        let mut remaining = trim_input_space(&line[2..]);
+        let mut remaining = truncate_spaces(&line[2..]);
         let position = self.seq_data.len();
         if let Some(rest) = remaining.strip_prefix(b"unk") {
-            remaining = trim_input_start(rest);
+            remaining = truncate_spaces_begin(rest);
         }
         let digits = remaining
             .iter()
             .position(|byte| !byte.is_ascii_digit())
             .unwrap_or(remaining.len());
-        // `NStr::StringToUInt` with `fConvErr_NoThrow`: 0 for an empty string and for a
-        // value above 4,294,967,295.
-        let mut gap_size = std::str::from_utf8(&remaining[..digits])
-            .ok()
-            .and_then(|text| text.parse::<u32>().ok())
-            .unwrap_or(0);
+        // `NStr::StringToUInt(sDigits, NStr::fConvErr_NoThrow)`: 0 for an empty string and for
+        // a value above 4,294,967,295.
+        let mut gap_size = string_to_uint(&remaining[..digits]).unwrap_or(0);
         if gap_size == 0 {
             post_warning(
                 self.flags.ignored_problems,
@@ -1731,7 +2106,7 @@ impl RecordState {
             );
             gap_size = 1;
         }
-        remaining = trim_input_start(&remaining[digits..]);
+        remaining = truncate_spaces_begin(&remaining[digits..]);
 
         let mut mods: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
         while !remaining.is_empty() {
@@ -1759,10 +2134,10 @@ impl RecordState {
                 );
                 break;
             };
-            let key = trim_input_space(&remaining[1..equal]).to_vec();
-            let value = trim_input_space(&remaining[equal + 1..close]).to_vec();
+            let key = truncate_spaces(&remaining[1..equal]).to_vec();
+            let value = truncate_spaces(&remaining[equal + 1..close]).to_vec();
             mods.push((key, value));
-            remaining = trim_input_start(&remaining[close + 1..]);
+            remaining = truncate_spaces_begin(&remaining[close + 1..]);
         }
         // `multimap` iterates in key order (the order of insertion for equal keys).
         mods.sort_by(|left, right| left.0.cmp(&right.0));
@@ -1895,7 +2270,8 @@ impl RecordState {
     ///     }
     /// }
     /// ```
-    /// The molecule is the input's (`AssignMolType` with `fForceType`):
+    /// The molecule is the input's (`AssignMolType` with `fForceType`), or without it the
+    /// one that the ids named or the letters show (`assign_mol_type`):
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1569-1573
     /// ```c++
@@ -1933,7 +2309,8 @@ impl RecordState {
     /// `Seq-data` that the database writer cannot read (`SeqData::Other`).
     ///
     /// The run of `X` or `N` is as long as the `>?` lines say, up to 2,147,483,647 residues
-    /// for a few bytes of input (makeblastdb's limit; the mask reader has none). NCBI
+    /// for a few bytes of input (makeblastdb's limit; the mask reader's is 4,294,967,295,
+    /// past which the record is `SeqInst::PastSeqPos` and nothing is allocated). NCBI
     /// reserves the whole string at once and a failure is a `std::bad_alloc` (makeblastdb:
     /// "BLAST ran out of memory"); here it is the error of this function
     /// (`ReadError::OutOfMemory`), where an allocation that aborts the process would lose
@@ -1954,21 +2331,57 @@ impl RecordState {
         &mut self,
         line_number: u64,
         warn: ReaderWarn<'_>,
-    ) -> Result<SeqInst, ReadError> {
+    ) -> Result<(SeqInst, bool), ReadError> {
         self.close_gap(false, self.seq_data.len(), 0);
+        self.close_mask();
+        let is_aa = match self.flags.molecule {
+            Molecule::Protein => true,
+            Molecule::Nucleotide => false,
+            Molecule::Guessed => self.assign_mol_type(line_number)?,
+        };
 
         let titles = std::mem::take(&mut self.titles);
         for title in &titles {
             self.parse_title(&title.text, warn);
         }
 
+        // `GetCurrentPos(ePosWithGaps)` is a `TSeqPos`: NCBI's length of the record is
+        // `length` modulo 2^32, and makeblastdb tests that one (`SeqInst::PastSeqPos`).
         let length = self.seq_data.len() as u64 + self.total_gap_length;
-        if self.flags.build_db_length_limit && length > i32::MAX as u64 {
-            return Ok(SeqInst::TooLong { length });
+        let seq_pos_length = u64::from(length as u32);
+        if self.flags.build_db_length_limit && seq_pos_length > i32::MAX as u64 {
+            return Ok((
+                SeqInst::TooLong {
+                    length: seq_pos_length,
+                },
+                is_aa,
+            ));
+        }
+        if length != seq_pos_length {
+            // The gaps stay a delta when they are parsed, or when their sum wraps to 0 (the
+            // `m_TotalGapLength > 0` test of the substitution below).
+            let form = match self.gaps.first() {
+                Some(first) if self.flags.parse_gaps || self.total_gap_length as u32 == 0 => {
+                    if first.position == 0 && first.length == 0 {
+                        PastSeqPosForm::DeltaFromNull
+                    } else {
+                        PastSeqPosForm::Delta
+                    }
+                }
+                _ => PastSeqPosForm::Residues,
+            };
+            return Ok((
+                SeqInst::PastSeqPos {
+                    length,
+                    seq_pos_length,
+                    form,
+                },
+                is_aa,
+            ));
         }
 
         if !self.flags.parse_gaps && self.total_gap_length > 0 {
-            let gap_char = if self.flags.protein { b'X' } else { b'N' };
+            let gap_char = if is_aa { b'X' } else { b'N' };
             let mut new_data = Vec::new();
             new_data
                 .try_reserve_exact(length as usize)
@@ -1997,13 +2410,11 @@ impl RecordState {
                     line_number,
                 )));
             }
-            return Ok(SeqInst::Virtual);
+            return Ok((SeqInst::Virtual, is_aa));
         }
-        if self.flags.protein {
-            return Ok(SeqInst::Raw {
-                length,
-                seq_data: SeqData::Ncbieaa(std::mem::take(&mut self.seq_data)),
-            });
+        if is_aa {
+            let seq_data = SeqData::Ncbieaa(std::mem::take(&mut self.seq_data));
+            return Ok((SeqInst::Raw { length, seq_data }, is_aa));
         }
 
         let mut pieces = Vec::new();
@@ -2041,13 +2452,17 @@ impl RecordState {
                 },
                 DeltaSeq::LocNull | DeltaSeq::Gap { .. } => SeqData::Other,
             };
-            return Ok(SeqInst::Raw { length, seq_data });
+            return Ok((SeqInst::Raw { length, seq_data }, is_aa));
         }
-        Ok(SeqInst::Delta {
-            length,
-            residues: std::mem::take(&mut self.seq_data),
-            pieces,
-        })
+        let residues = std::mem::take(&mut self.seq_data);
+        Ok((
+            SeqInst::Delta {
+                length,
+                residues,
+                pieces,
+            },
+            is_aa,
+        ))
     }
 
     /// `ParseTitle`: the reader's warning about residues at the end of a title, and the
@@ -2121,8 +2536,13 @@ impl RecordState {
                 warn,
             );
         }
-        if let Some(message) = seq_data_in_title_warning(text, self.flags.protein) {
-            let problem = if self.flags.protein {
+        let assumed = match self.flags.molecule {
+            Molecule::Nucleotide => Some(false),
+            Molecule::Protein => Some(true),
+            Molecule::Guessed => None,
+        };
+        if let Some((message, protein)) = seq_data_in_title_warning(text, assumed) {
+            let problem = if protein {
                 Problem::UnexpectedAminoAcids
             } else {
                 Problem::UnexpectedNucResidues
@@ -2137,10 +2557,149 @@ impl RecordState {
                 warn,
             );
         }
-        let processed_title = trim_input_end(trim_input_start(text));
+        // `NStr::TruncateSpacesInPlace(processed_title)` (`eTrunc_Both`, fasta.cpp:2038).
+        let processed_title = truncate_spaces(text);
         if !processed_title.is_empty() {
             self.title_descr = Some(processed_title.to_vec());
         }
+    }
+}
+
+/// `xSetSeqMol`: the molecule that the first id with one names (`IdentifyAccession`):
+/// `Some(true)` for a protein, `Some(false)` for a nucleotide.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:548-563
+/// ```c++
+/// bool CFastaReader::xSetSeqMol(const list<CRef<CSeq_id>>& ids, CSeq_inst_Base::EMol& mol) {
+///
+///     for (auto pId : ids) {
+///         const CSeq_id::EAccessionInfo acc_info = pId->IdentifyAccession();
+///         if (acc_info & CSeq_id::fAcc_nuc) {
+///             mol = CSeq_inst::eMol_na;
+///             return true;
+///         }
+///
+///         if (acc_info & CSeq_id::fAcc_prot) {
+///             mol = CSeq_inst::eMol_aa;
+///             return true;
+///         }
+///     }
+///     return false;
+/// }
+/// ```
+fn mol_of_ids(ids: &[ParsedSeqId], warn: ReaderWarn<'_>) -> Option<bool> {
+    ids.iter().find_map(|id| {
+        let info = identify_seq_id(
+            id,
+            parse_flags::ANY_RAW | parse_flags::ANY_LOCAL,
+            &mut |w| warn(ReaderWarning::SeqId(w)),
+        );
+        if info & F_NUC != 0 {
+            Some(false)
+        } else if info & F_PROT != 0 {
+            Some(true)
+        } else {
+            None
+        }
+    })
+}
+
+/// `CFormatGuess::SequenceType(data, length, eST_Default)` of the stored residues (upper case
+/// letters, `*` and `-`): `Some(false)` for `eNucleotide`, `Some(true)` for `eProtein`, `None`
+/// for `eUndefined`.
+///
+/// NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:250-268,318-374
+/// ```c++
+///         for ( const char* s = "ACGNTU"; *s; ++s ) {
+///             ... symbol_type_table[c] |= fDNA_Main_Alphabet; (and lower case)
+///         }
+///         for ( const char* s = "BDHKMRSVWY"; *s; ++s ) {
+///             ... symbol_type_table[c] |= fDNA_Ambig_Alphabet;
+///         }
+///         for ( const char* s = "ACDEFGHIKLMNPQRSTVWYBZX"; *s; ++s ) {
+///             ... symbol_type_table[c] |= fProtein_Alphabet;
+///         }
+///         symbol_type_table[(int)'-'] |= fDNA_Main_Alphabet | fProtein_Alphabet;
+///         symbol_type_table[(int)'*'] |= fProtein_Alphabet;
+/// ...
+///     for (unsigned i = 0; i < length; ++i) {
+///         unsigned char c = str[i];
+///         unsigned char type = symbol_type_table[c];
+///         if ( type & fDNA_Main_Alphabet ) {
+///             ++main_nuc_content;
+///         } else if ( type & fDNA_Ambig_Alphabet ) {
+///             ++ambig_content;
+///         } else if ( !(type & (fSpace | fDigit)) ) {
+///             ++bad_nuc_content;
+///         }
+///
+///         if ( type & fProtein_Alphabet ) {
+///             ++amino_acid_content;
+///         } else if ( type & fAlpha ) {
+///             ++exotic_aa_content;
+///         } else if ( !(type & (fSpace | fDigit)) ) {
+///             ++bad_aa_content;
+///         }
+///     }
+///
+///     switch (strictness) {
+///     ...
+///     case eST_Default:
+///         if (bad_nuc_content + ambig_content <= main_nuc_content / 9
+///             ||  (bad_nuc_content + ambig_content <= main_nuc_content / 3  &&
+///                  bad_nuc_content <= (main_nuc_content + ambig_content) / 19)) {
+///             // >=90% main alph. (ACGTUN-) or >=75% main and >=95% 4na-encodable
+///             return eNucleotide;
+///         } else if (bad_aa_content + exotic_aa_content
+///                    <= amino_acid_content / 9) {
+///             // >=90% relatively standard protein residues.  (JOU don't count.)
+///             return eProtein;
+///         }
+///
+///     case eST_Strict: // Must be 100% encodable
+///         if (bad_nuc_content == 0  &&  ambig_content <= main_nuc_content / 3) {
+///             return eNucleotide;
+///         } else if (bad_aa_content == 0
+///                    &&  exotic_aa_content <= amino_acid_content / 9) {
+///             return eProtein;
+///         }
+///     }
+///
+///     return eUndefined;
+/// ```
+/// The stored residues have no space or digit.
+fn sequence_type(data: &[u8]) -> Option<bool> {
+    let (mut main_nuc, mut ambig, mut bad_nuc) = (0usize, 0usize, 0usize);
+    let (mut amino_acid, mut exotic_aa, mut bad_aa) = (0usize, 0usize, 0usize);
+    for &c in data {
+        let c = c.to_ascii_uppercase();
+        if b"ACGNTU-".contains(&c) {
+            main_nuc += 1;
+        } else if b"BDHKMRSVWY".contains(&c) {
+            ambig += 1;
+        } else if !(is_space(c) || c.is_ascii_digit()) {
+            bad_nuc += 1;
+        }
+        if b"ACDEFGHIKLMNPQRSTVWYBZX*-".contains(&c) {
+            amino_acid += 1;
+        } else if c.is_ascii_alphabetic() {
+            exotic_aa += 1;
+        } else if !(is_space(c) || c.is_ascii_digit()) {
+            bad_aa += 1;
+        }
+    }
+    if bad_nuc + ambig <= main_nuc / 9
+        || (bad_nuc + ambig <= main_nuc / 3 && bad_nuc <= (main_nuc + ambig) / 19)
+    {
+        Some(false)
+    } else if bad_aa + exotic_aa <= amino_acid / 9 {
+        Some(true)
+    } else if bad_nuc == 0 && ambig <= main_nuc / 3 {
+        Some(false)
+    } else if bad_aa == 0 && exotic_aa <= amino_acid / 9 {
+        Some(true)
+    } else {
+        None
     }
 }
 

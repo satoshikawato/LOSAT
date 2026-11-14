@@ -144,6 +144,8 @@ fmt_seqloc_asn1_binary	-in in/basic.fa -outfmt seqloc_asn1_binary
 unknown_opt	-in in/basic.fa -foo
 help_h	-h
 help_help	-help
+# help_xml (-xmlhelp, line RG item E2x): env_blast on ws, 2026-11-13 (ad-RG-E-5, line RG item E2 probe).
+help_xml	-xmlhelp
 help_noargs_extra	extra_positional
 ps_flag_value	-in in/basic.fa -parse_seqids true
 dup_opt	-in in/basic.fa -window 10 -window 20
@@ -285,7 +287,13 @@ dryrun_basic	-in in/basic.fa -dryrun
 dryrun_missing_input	-in in/nonexist.fa -dryrun
 dryrun_bad_window	-dryrun -window abc
 # Alias values that only a search reads differently (review 2 of K1, F5): db/len0.nal (DBLIST basic, LENGTH 0), db/nseqneg.nal (NSEQ -5), db/firstbig.nal (FIRST_OID 3000000000), and the ranged db/oidr with another name (db/short). NCBI's CMaskBDBReader reads every OID with GetBioseq, as without the alias file. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-13, ad-RG-K-3.
+# id_del_* (a DEL byte in a -parse_seqids id: # and error 803.7 in the serial formats, as it is in interval; RG DECISIONS K4-1) frozen 2026-11-14 by ad-RG-K-10 with the local official NCBI BLAST+ 2.17.0 release; in/id_del.fa is the review's du_lcl.fa (remaining-gaps-20261112/K/k4/review/probe/in).
 db_len0_acclist	-infmt blastdb -in db/len0 -outfmt acclist
 db_nseqneg_interval	-infmt blastdb -in db/nseqneg -outfmt interval
 db_firstbig_fasta	-infmt blastdb -in db/firstbig -outfmt fasta
 db_oidr_short_acclist	-infmt blastdb -in "db/oidr db/short" -outfmt acclist
+id_del_seqloc_txt	-in in/id_del.fa -outfmt seqloc_asn1_text -parse_seqids
+id_del_seqloc_bin	-in in/id_del.fa -outfmt seqloc_asn1_bin -parse_seqids
+id_del_maskinfo_txt	-in in/id_del.fa -outfmt maskinfo_asn1_text -parse_seqids
+id_del_maskinfo_bin	-in in/id_del.fa -outfmt maskinfo_asn1_bin -parse_seqids
+id_del_int_ps	-in in/id_del.fa -parse_seqids

@@ -169,11 +169,10 @@ impl RpsTraceback<'_> {
                 },
                 k.ln(),
                 (redo.gap_open, redo.gap_extend),
-                self.x_drop_final,
+                (redo.x_drop_final_bits, self.x_drop_final),
                 matrix,
                 std::mem::take(&mut scratch.gap),
             )
-            .with_final_x_drop_bits(redo.x_drop_final_bits, self.x_drop_final)
             .with_bound_check();
             let hsps: Vec<BlastpPreliminaryHsp> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
             let redone = RedoMatch {
@@ -187,6 +186,8 @@ impl RpsTraceback<'_> {
                 rps_roles: true,
                 // rpsblast's databases are BLOSUM62's (the others are refused).
                 matrix: crate::config::ScoringMatrix::Blosum62,
+                // rpsblast refuses `-sum_stats true`.
+                link: None,
             }
             .redo_match(&mut run, list.oid, &hsps, query);
             let exceeded = run.bound_exceeded();

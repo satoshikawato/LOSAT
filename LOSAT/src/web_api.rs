@@ -332,6 +332,7 @@ fn parse_blastn_args(
         window_masker_registry: None,
         // ABI v1 writes no tabular field list.
         tabular_taxdb: None,
+        subject_taxdb: None,
         strand: "both".to_string(),
         // The frozen web ABI v1 (plan TD-1) has no ranges.
         query_loc: None,
@@ -353,6 +354,8 @@ fn parse_blastn_args(
         scan_step: 0,
         outfmt: "6".to_string(),
         archive: None,
+        export_search_strategy: None,
+        strategy: None,
         command_line: None,
         // The command line's progress bar; a web search writes nothing to standard error.
         progress_bar: false,
@@ -482,7 +485,10 @@ fn parse_tblastx_args(
         query_loc: None,
         subject_loc: None,
         archive: None,
+        export_search_strategy: None,
+        strategy: None,
         tabular_taxdb: None,
+        subject_taxdb: None,
         first_query_ordinal: 0,
         matrix_file: None,
     };
@@ -659,8 +665,14 @@ fn parse_blastp_args(
         subject_loc: None,
         outfmt: "6".to_string(),
         archive: None,
+        export_search_strategy: None,
+        strategy: None,
+        request_inputs: None,
         app: blastp::args::BlastpApp::Blastp,
+        subject_taxdb: None,
         inclusion_ethresh: None,
+        gap_trigger: None,
+        sum_stats: false,
         first_query_ordinal: 0,
         psiblast_pssm: None,
         formatting: Default::default(),
@@ -1559,6 +1571,11 @@ mod tests {
         );
         assert_eq!(
             run_pair("tblastn", query_text, subject_text, "6", "-out\0x"),
+            Err("file/help arguments are unsupported for the TBLASTN web API".to_string())
+        );
+        // `-help-full` asks for the CLI's help, as `-help` (line RG item E2).
+        assert_eq!(
+            run_pair("tblastn", query_text, subject_text, "6", "-help-full"),
             Err("file/help arguments are unsupported for the TBLASTN web API".to_string())
         );
         // The serial module has no threads to give (as the CLI built without them).

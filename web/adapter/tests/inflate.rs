@@ -11,12 +11,12 @@
 use std::io::{Read, Write};
 use std::sync::Mutex;
 
+use losat::web_adapter::Compression;
 use losat_web_adapter::emit::{CHUNK, EMITTED, STREAM_INFLATED, STREAM_RESPONSE};
 use losat_web_adapter::{
     losat_web2_inflate_begin, losat_web2_inflate_chunk, losat_web2_inflate_end,
     losat_web2_last_error_len, losat_web2_last_error_ptr,
 };
-use LOSAT::web_adapter::Compression;
 
 /// The module has one last error: the tests take turns to call the exports and read it.
 static CALLS: Mutex<()> = Mutex::new(());

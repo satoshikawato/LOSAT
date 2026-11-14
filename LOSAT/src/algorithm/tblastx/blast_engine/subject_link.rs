@@ -115,7 +115,7 @@ pub(super) struct SubjectLinkArgs<'a> {
     pub(super) contexts_ref: &'a [QueryContext],
     pub(super) subject_frame_bases: &'a [i32],
     /// NCBI Parity: Pass pre-computed length_adjustment and eff_searchsp per context.
-    /// These values are stored in query_info->contexts[ctx] in NCBI and referenced
+    /// These values are stored in `query_info->contexts[ctx]` in NCBI and referenced
     /// by link_hsps.c for BLAST_SmallGapSumE/BLAST_LargeGapSumE calculations.
     pub(super) length_adj_per_context: &'a [i64],
     /// See `length_adj_per_context`.

@@ -636,7 +636,7 @@ pub fn subject_parameters(
     let gumbel_block_used = options.has_gumbel_block();
     if !gumbel_block_used && db_count == 0 && db_length > 0 {
         return Err(crate::algorithm::common::database::refusal(
-            "the statistics count 0 sequences of the database (an alias file's NSEQ 0), by which NCBI BLAST+ divides its length",
+            crate::algorithm::common::database::STATISTICS_COUNT_ZERO,
             "BLASTX",
         ));
     }

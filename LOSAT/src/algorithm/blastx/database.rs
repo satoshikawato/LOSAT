@@ -100,10 +100,9 @@ impl BlastxDatabase {
         program: &'static str,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Protein, settings, program)?;
-        // A database with parsed Seq-ids is read (line DBID, ID2a), unless a variable changes
-        // NCBI's choice of its Seq-ids.
-        let parsed_seqids = shared::check_seqids(&db, settings, program)?;
-        shared::restrict_database(&mut db, name, list, diagnostics, program)?;
+        // A database with parsed Seq-ids is read (line DBID, ID2a).
+        let parsed_seqids =
+            shared::restrict_database(&mut db, name, list, diagnostics, settings, program)?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -204,7 +203,7 @@ impl BlastxDatabase {
     /// query batch with a valid context, which the caller fails with it. The search checks each
     /// sequence where it first reads it (`XStreamDb::x_check`).
     pub(crate) fn x_open_stream(&self) -> Result<usize> {
-        if self.db.num_oids() == 0 {
+        if self.db.first_oid_read_fails() {
             return Err(PreliminaryReadError("Database memory map file error").into());
         }
         let count = self.db.num_seqs();
@@ -249,7 +248,7 @@ pub(super) fn x_check_whole(db: &SeqDb) -> Result<usize> {
 
 /// `x_check_whole` of a run of the program `program` (`BlastxDatabase::program`).
 fn x_check_whole_named(db: &SeqDb, program: &str) -> Result<usize> {
-    if db.num_oids() == 0 {
+    if db.first_oid_read_fails() {
         return Err(PreliminaryReadError("Database memory map file error").into());
     }
     let mut longest = 0;
@@ -317,6 +316,10 @@ pub(crate) struct ReportedSubjects {
     /// `PRE_FETCH_SEQS_LIMIT` turned the batch's prefetch off (`fetch_by_query`): the writers
     /// write them after the query's warnings (`ShownSubjects::query_fetches`).
     query_fetches: std::collections::BTreeMap<usize, Vec<u8>>,
+    /// The texts of the subjects that each query's report reads one by one (`fetch_by_query`),
+    /// by query ordinal, where the format's writer places them at the reads
+    /// (`report::query_warnings::ReadCursor`; `ShownSubjects::query_reads`).
+    query_reads: std::collections::BTreeMap<usize, crate::report::query_warnings::QueryReads>,
 }
 
 /// The values of a custom tabular report's fields that read more of the reported sequences than
@@ -622,12 +625,23 @@ impl ReportedSubjects {
     /// subject only for its identities ask in every batch: BLASTX writes each batch's reports
     /// before the next is searched, so a run whose later rows may look a tax id up refuses at
     /// its first batch, before any byte (also where none of them does, as before).
+    /// `places`: the format's writer writes each query's texts where it reads each subject
+    /// (`query_reads`; outfmt 0, 5 and the tabular rows); `rows_open`: the rows look the plural
+    /// names up (`shared::subject_read_texts`). The subjects are read in the order of the hit
+    /// lists, or, for the pairwise report (`pairwise`, its `-sorthits` and `-sorthsps`), in the
+    /// order of its sorted groups (`QueryGroup::read_order` of the rows' hits: each list's HSPs
+    /// that the reports show in the reports' order, `HspList::evalue_order`, with the values of
+    /// their rows, `report::hsp_scores`).
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn fetch_by_query(
         &mut self,
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
         rows: SubjectFetch,
+        places: bool,
+        rows_open: bool,
+        pairwise: Option<crate::report::hit_sort::ReportSort>,
     ) -> Result<()> {
         if rows == SubjectFetch::Never && crate::algorithm::common::database::prefetch_always_off()
         {
@@ -635,23 +649,67 @@ impl ReportedSubjects {
         }
         for batch in batches {
             for (index, lists) in batch.queries.iter().enumerate() {
-                let subjects = lists
-                    .iter()
-                    .filter(|list| {
-                        list.hsps.iter().any(|hsp| {
-                            super::report::has_seqalign(hsp, gapped) && rows.reads(hsp.identity)
+                let ranks: Vec<u32> = match pairwise {
+                    Some(sort) => {
+                        let query_length = batch.prepared.original_lengths[index];
+                        let mut hits = Vec::new();
+                        for list in lists {
+                            for hsp in list.evalue_order() {
+                                if super::report::has_seqalign(hsp, gapped) {
+                                    hits.push((
+                                        list.oid as u32,
+                                        super::report::hsp_scores(hsp, query_length)?,
+                                    ));
+                                }
+                            }
+                        }
+                        crate::report::x_pairwise_par::QueryGroup::read_order(
+                            hits,
+                            |scores| *scores,
+                            |previous, rank| {
+                                crate::report::db_subject::rank_joins_as_copy(
+                                    &self.parsed,
+                                    previous as usize,
+                                    rank as usize,
+                                )
+                            },
+                            sort,
+                            false,
+                        )
+                    }
+                    None => lists
+                        .iter()
+                        .filter(|list| {
+                            list.hsps.iter().any(|hsp| {
+                                super::report::has_seqalign(hsp, gapped) && rows.reads(hsp.identity)
+                            })
                         })
-                    })
-                    .map(|list| (self.ordinals[list.oid], self.parsed_subject(list.oid)));
-                let messages = shared::prefetch_messages(
+                        .map(|list| list.oid as u32)
+                        .collect(),
+                };
+                let subjects = ranks.into_iter().map(|rank| {
+                    (
+                        rank,
+                        self.ordinals[rank as usize],
+                        self.parsed_subject(rank as usize),
+                    )
+                });
+                let reads = shared::subject_read_texts(
                     &database.db,
                     &database.taxdb,
                     subjects,
+                    rows_open,
                     database.program,
                 )?;
-                if !messages.is_empty() {
-                    self.query_fetches
-                        .insert(batch.query_ordinal + index, messages);
+                if reads.is_empty() {
+                    continue;
+                }
+                let ordinal = batch.query_ordinal + index;
+                if places {
+                    self.query_reads.insert(ordinal, reads);
+                } else {
+                    let messages = reads.into_iter().flat_map(|(_, text)| text).collect();
+                    self.query_fetches.insert(ordinal, messages);
                 }
             }
         }
@@ -662,6 +720,13 @@ impl ReportedSubjects {
     /// batch prefetched).
     pub(crate) fn query_fetches(&self, ordinal: usize) -> &[u8] {
         self.query_fetches.get(&ordinal).map_or(&[], Vec::as_slice)
+    }
+
+    /// The texts of the subjects that the query `ordinal`'s report reads one by one, where its
+    /// writer places them (`fetch_by_query` with `places`); empty otherwise.
+    pub(crate) fn query_reads(&self, ordinal: usize) -> &crate::report::query_warnings::QueryReads {
+        static NONE: crate::report::query_warnings::QueryReads = Vec::new();
+        self.query_reads.get(&ordinal).unwrap_or(&NONE)
     }
 
     /// The messages of every query's own fetches, in query order, for a format that writes no
@@ -1132,7 +1197,7 @@ mod tests {
                 hsp.identity = identities;
             }
             reported
-                .fetch_by_query(&database, &batches, true, rows)
+                .fetch_by_query(&database, &batches, true, rows, false, false, None)
                 .unwrap();
             [
                 reported.query_fetches(0).to_vec(),

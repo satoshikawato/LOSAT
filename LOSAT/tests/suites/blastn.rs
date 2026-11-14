@@ -19,6 +19,8 @@ mod blastn_dc_seed_lean;
 mod blastn_diag_lv;
 #[path = "../blastn_disc_lookup_par.rs"]
 mod blastn_disc_lookup_par;
+#[path = "../blastn_dp32.rs"]
+mod blastn_dp32;
 #[path = "../blastn_few_subj.rs"]
 mod blastn_few_subj;
 #[path = "../blastn_greedy_row_fuse.rs"]

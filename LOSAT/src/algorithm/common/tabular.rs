@@ -134,6 +134,42 @@ impl SubjectValues<'_> {
 }
 
 impl<'a> TabularSubjects<'a> {
+    /// The parsed subjects by subject index (empty when none has parsed Seq-ids).
+    pub(crate) fn parsed(&self) -> &'a [Option<Arc<ParsedSubject>>] {
+        match *self {
+            TabularSubjects::Records { parsed, .. } | TabularSubjects::Database { parsed, .. } => {
+                parsed
+            }
+        }
+    }
+
+    /// Subject `s_idx` without its parsed Seq-ids as the organism report (outfmt 18,
+    /// `report::tax_report`) reads it; `records` are the records of a subject set (a database's
+    /// are its own).
+    pub(crate) fn tax_plain(
+        &self,
+        s_idx: usize,
+        records: &'a [FastaRecord],
+    ) -> crate::report::tax_report::TaxPlain<'a> {
+        use crate::report::tax_report::TaxPlain;
+        match *self {
+            TabularSubjects::Records { .. } => TaxPlain::Record {
+                local_id: records[s_idx].local_id.as_bytes(),
+                title: &records[s_idx].title,
+            },
+            TabularSubjects::Database {
+                ordinals,
+                records,
+                taxonomy,
+                ..
+            } => TaxPlain::Stored {
+                ordinal: ordinals.get(s_idx).copied().unwrap_or_default(),
+                title: records.get(s_idx).map_or(&[][..], |record| &record.title),
+                taxid: taxonomy.get(s_idx).map_or(0, |taxonomy| taxonomy.taxid),
+            },
+        }
+    }
+
     /// The values of subject `s_idx` that the fields of `spec` show; `program` names the program
     /// in LOSAT's refusal of a sequence with parsed Seq-ids whose ids it does not write as NCBI.
     pub(crate) fn values(
@@ -360,5 +396,38 @@ pub(crate) fn write_tabular_prolog(
         matrix: None,
     }
     .prolog(writer)?;
+    Ok(())
+}
+
+/// Writes the organism report (outfmt 18, `report::tax_report`) of the queries `queries` (title,
+/// record length and HSPs in report order) of a program whose adapter has the shared subjects
+/// `subjects` (`records`: a subject set's records), each query's warnings before its report. The
+/// report is made before the batch's first byte (`tax_report::report_batch`), so that LOSAT's
+/// refusals come before it; `names` carries the run's taxonomy database (`None`: no `taxdb.bti`
+/// on the search path). `protein`: the subjects are proteins; `taxdb_found`: whether `taxdb.bti`
+/// is on the search path.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_tax_report(
+    subjects: &TabularSubjects<'_>,
+    records: &[FastaRecord],
+    protein: bool,
+    taxdb_found: bool,
+    names: Option<&TabularNames>,
+    program: &str,
+    queries: &[crate::report::tax_report::TaxQuery<'_>],
+    writer: &mut crate::cli::NcbiOstream<'_>,
+    warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
+) -> Result<()> {
+    use crate::report::tax_report::{report_batch, write_report};
+    let report = report_batch(
+        queries,
+        subjects.parsed(),
+        |s_idx| subjects.tax_plain(s_idx, records),
+        protein,
+        taxdb_found,
+        names,
+        program,
+    )?;
+    write_report(writer, warnings, queries, &report)?;
     Ok(())
 }

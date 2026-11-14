@@ -744,7 +744,7 @@ fn db_word_count_increment(counts: &mut [u8], word: u64, max_word_count: u8) {
 pub struct PvDirectLookup {
     /// The actual lookup table storing 1-based query offsets (q_off + 1)
     lookup: DirectKmerLookup,
-    /// Presence vector - bit i is set if lookup[i] is non-empty
+    /// Presence vector - bit i is set if `lookup[i]` is non-empty
     pv: Vec<PvArrayType>,
     /// Log2 compression factor for the PV array (pv_array_bts)
     pv_array_bts: usize,

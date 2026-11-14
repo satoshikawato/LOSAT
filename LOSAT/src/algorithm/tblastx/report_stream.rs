@@ -67,7 +67,8 @@
 //!   taxonomy database; the refusal of NCBI's taxonomy cache, which the batches ask for where
 //!   NCBI fetches a subject, so possibly in a later batch, `Off::TaxonomyCache`; a database with parsed Seq-ids of more than
 //!   `common::database::PARSED_CHECK_SEQUENCES_MAX` sequences is not read and keeps its reports
-//!   after the loop, `Off::LargeParsed`; blastn's reads nothing before the search since
+//!   after the loop, `Off::LargeParsed`; a query title that the search strategy's requests cannot
+//!   write, `Off::StrategyTitles`; blastn's reads nothing before the search since
 //!   2026-11-03 and refuses in the batch that reports the sequence). The refusals that depend on the
 //!   arguments only (the matrix, the `-seg` value) come in the first batch, where nothing of the
 //!   stream is written yet. With one batch (the first batch takes every query record) nothing can
@@ -145,6 +146,9 @@ pub(super) enum Off {
     /// Under `-parse_deflines`, two query records of the run with one id, which a batch could
     /// refuse (`query_batch::QueryScopes`).
     QueryIds,
+    /// `-export_search_strategy`: a query title that ASN.1 text cannot write, which the request of
+    /// a later batch would refuse (`RunRequests::write`, before the batch's search).
+    StrategyTitles,
 }
 
 impl Off {
@@ -167,6 +171,7 @@ impl Off {
             Off::Database(ReportRefusal::Joined) => "database_joined",
             Off::Database(ReportRefusal::Taxonomy) => "database_taxonomy",
             Off::QueryIds => "query_ids",
+            Off::StrategyTitles => "strategy_titles",
         }
     }
 }
@@ -244,6 +249,17 @@ pub(super) fn check(
         > i128::from(i64::MAX)
     {
         return Err(Off::SearchSpace);
+    }
+    // The search strategy's request of each batch refuses a query title that ASN.1 text cannot
+    // write where it is written, before the batch's search (`run_batch_loop`): a later batch's
+    // would follow the reports of the batches before (a subject's comes with the first batch).
+    if args.strategy.is_some()
+        && query_runs
+            .records
+            .iter()
+            .any(|record| !crate::report::archive::ArchiveEncoding::Text.writes_text(&record.title))
+    {
+        return Err(Off::StrategyTitles);
     }
     // Under `-parse_deflines`, two queries of the run with one id, which a batch's scope could
     // hold (`QueryScopes`), and with `-db` the scope of every query for the database's sequences

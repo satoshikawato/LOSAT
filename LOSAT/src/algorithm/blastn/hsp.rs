@@ -136,39 +136,6 @@ impl BlastnOutputFormat {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
-    // ```c++
-    //        		const CBioseq_Handle& subject_bh =
-    //                 scope.GetBioseqHandle(align.GetSeq_id(1));
-    // ```
-    /// Whether the report's writer writes the texts of the subjects that a query's report reads
-    /// one by one where it reads each (`QueryWarnings::subject_read`): outfmt 0 (description
-    /// lines and alignment headings), 5 (`Hit`s) and the tabular rows; the others write them
-    /// before the query's report.
-    pub(crate) fn places_subject_reads(self) -> bool {
-        matches!(
-            self,
-            BlastnOutputFormat::Pairwise
-                | BlastnOutputFormat::Tabular
-                | BlastnOutputFormat::TabularWithComments
-                | BlastnOutputFormat::CustomTabular(_)
-                | BlastnOutputFormat::Xml
-        )
-    }
-
-    /// Whether NCBI writes a query's result warnings with its report
-    /// (`ReportFormat::writes_query_warnings`): not for the structured formats.
-    pub(crate) fn writes_query_warnings(self) -> bool {
-        !matches!(
-            self,
-            BlastnOutputFormat::Seqalign(_)
-                | BlastnOutputFormat::Xml
-                | BlastnOutputFormat::Xml2(_)
-                | BlastnOutputFormat::Archive
-                | BlastnOutputFormat::Sam(_)
-        )
-    }
-
     /// The SAM document of outfmt 17.
     pub(crate) fn sam_spec(self) -> Option<crate::report::sam::SamSpec> {
         match self {
@@ -219,14 +186,13 @@ impl BlastnOutputFormat {
     }
 
     /// Whether the format is one of the tabular formats (outfmt 6, 7, 10 and 20), which read the
-    /// tabular subject IDs.
+    /// tabular subject IDs (`report::tabular::writes_rows`: not the organism report).
     pub(crate) fn is_tabular(self) -> bool {
-        matches!(
-            self,
-            BlastnOutputFormat::Tabular
-                | BlastnOutputFormat::TabularWithComments
-                | BlastnOutputFormat::CustomTabular(_)
-        )
+        match self {
+            BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments => true,
+            BlastnOutputFormat::CustomTabular(spec) => spec.writes_rows(),
+            _ => false,
+        }
     }
 
     /// Whether the format is a table whose fields read the sequence that NCBI's formatter finds

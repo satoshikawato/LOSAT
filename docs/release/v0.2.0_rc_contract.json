@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "release": "v0.2.0",
-  "package_name": "LOSAT",
+  "package_name": "losat",
   "package_version": "0.2.0",
   "integration_base_sha": "",
   "integration_base_sha_note": "filled on the cut day with the candidate commit C (dev head promoted to main)",
@@ -558,7 +558,7 @@
       "archive_format": "tar.gz",
       "filename": "LOSAT-0.2.0-wasm32-wasip1.tar.gz",
       "features": "no-default-features",
-      "build_command": "cargo build --release --target wasm32-wasip1 --no-default-features --locked",
+      "build_command": "cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --locked",
       "runner_script": "LOSAT/tests/run_losat_wasi.js",
       "historical_certification_binary_sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47"
     },
@@ -570,7 +570,7 @@
       "archive_format": "tar.gz",
       "filename": "LOSAT-0.2.0-wasm32-wasip1-threads.tar.gz",
       "features": "wasm-threads",
-      "build_command": "cargo build --release --target wasm32-wasip1-threads --features wasm-threads --locked",
+      "build_command": "cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads --locked",
       "runner_script": "LOSAT/tests/run_losat_wasi_threads.js",
       "historical_certification_binary_sha256": null,
       "historical_certification_note": "no v0.1.0 certification binary for this target"
@@ -581,7 +581,7 @@
       "runner": "ubuntu-24.04",
       "binary_name": null,
       "archive_format": "crate",
-      "filename": "LOSAT-0.2.0.crate",
+      "filename": "losat-0.2.0.crate",
       "features": "default",
       "build_command": "cargo package --locked",
       "historical_certification_binary_sha256": null

@@ -422,9 +422,7 @@ impl TranslatedRpsSearch {
         // DECISIONS 38 D3: every probed query (`out/u.*` of the design) segfaults after the
         // search, valgrind: a read at address 0 in `BLAST_ComputeTraceback_MT`.
         if self.ungapped {
-            bail!(
-                "-ungapped (NCBI BLAST+ 2.17.0's rpstblastn crashes after an ungapped search) is not supported by LOSAT's {PROGRAM}"
-            );
+            bail!("{}", crate::cli::run_refusal(PROGRAM, "ungapped"));
         }
         Ok(())
     }
@@ -718,6 +716,7 @@ mod tests {
 
     fn hsp(frame: i32, score: i32, q: (usize, usize), s: (usize, usize)) -> BlastpHsp {
         BlastpHsp {
+            num: 1,
             identity: 50.0,
             length: q.1 - q.0 + 2,
             mismatch: 1,
@@ -809,6 +808,7 @@ mod tests {
             hsps: evalues
                 .iter()
                 .map(|&e| BlastpHsp {
+                    num: 1,
                     e_value: e,
                     ..hsp(1, 10, (1, 9), (1, 9))
                 })

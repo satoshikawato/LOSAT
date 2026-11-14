@@ -1,0 +1,182 @@
+name: Python wheels
+
+# The wheels of pylosat (python/, the Python binding of the library API; plan
+# docs/losat_library_surface_plan.md §4.3, LIB-5): one abi3 wheel per platform, for CPython 3.10
+# and later, built as the native release binaries are (release-readiness-v020.yml, job
+# native-artifacts): on the same runner images, for their host targets, with Rust 1.92.0 and, by
+# python/Cargo.toml and python/.cargo/config.toml, LOSAT's release profile (panic = "unwind" aside)
+# and x86-64 rustflags. `maturin build` runs on the runner itself; `--compatibility pypi` fails a
+# wheel whose tags PyPI would refuse and `--auditwheel check` one that needs a library outside the
+# manylinux set, instead of copying it into the wheel. On Linux the manylinux tag is the oldest glibc
+# that the wheel's symbols allow, as for the release binary built on the same image.
+#
+# Each wheel is installed into a fresh virtual environment of the oldest and of the newest CPython
+# it serves, and a blastp search through it must write the report and the diagnostics whose hashes
+# the command line is checked against on every pull request (python/tools/wheel_smoke.py). The job
+# summary shows each wheel's tags and size. The wheels are kept as workflow artifacts for 7 days;
+# nothing is uploaded anywhere else (publishing to PyPI is the maintainer's act).
+#
+# When it runs (the macOS jobs are the scarce runners: see platform-checks.yml):
+#  - workflow_dispatch and push to main when the binding, the engine or the smoke's inputs change:
+#    the five platforms;
+#  - weekly: GitHub starts schedules only on main, so the scheduled run starts a run of dev (job
+#    `dev`, as in nightly.yml) and fails when the last completed run of dev did not pass;
+#  - a pull request that changes python/ or this file, once it is not a draft: Linux x64 only. An
+#    engine change alone builds the binding in python.yml (debug) and its wheels on main and weekly.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'python/**'
+      - 'LOSAT/src/**'
+      - 'LOSAT/build.rs'
+      - 'LOSAT/Cargo.toml'
+      - 'LOSAT/Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'docs/evidence/losat_web_e1a/baseline/hashes.tsv'
+      - 'LOSAT/tests/fasta/SicyWSV.faa'
+      - 'LOSAT/tests/fasta/PajaWSV.faa'
+      - '.github/workflows/python-wheels.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'python/**'
+      - '.github/workflows/python-wheels.yml'
+  schedule:
+    - cron: '7 21 * * 6'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  wheel:
+    name: wheel ${{ matrix.runner }}
+    if: >-
+      github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft)
+    strategy:
+      fail-fast: false
+      matrix:
+        # The runners of the release binaries: Linux x64, Linux arm64, Windows x64, macOS arm64,
+        # macOS x64.
+        runner: >-
+          ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]'
+          || '["ubuntu-24.04", "ubuntu-24.04-arm", "windows-2025", "macos-15", "macos-15-intel"]') }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # The smoke's inputs are compared byte for byte; keep Git for Windows from turning them into
+      # CRLF (as in platform-checks.yml).
+      - name: Check out without line-ending conversion
+        if: runner.os == 'Windows'
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.92.0
+
+      # The oldest CPython the abi3 wheel serves (abi3-py310, python/Cargo.toml) and the newest.
+      - id: oldest
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.10'
+      - id: newest
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.14'
+
+      - name: Build the wheel
+        working-directory: python
+        env:
+          PYTHON: ${{ steps.newest.outputs.python-path }}
+          # The toolchain above. Without it, the build's first cargo call had rustup add the clippy,
+          # rustfmt and Wasm targets of the root rust-toolchain.toml to the toolchain, which failed on
+          # ubuntu-24.04-arm ("detected conflict: 'bin/cargo-clippy'", 2026-11-13); the release
+          # build needs none of them.
+          RUSTUP_TOOLCHAIN: 1.92.0
+        run: |
+          set -euo pipefail
+          # The maturin of python.yml's tests, pinned in one place.
+          "$PYTHON" -m pip install --disable-pip-version-check --quiet "$(grep '^maturin==' tests/requirements.txt)"
+          "$PYTHON" -m maturin build --release --locked --compatibility pypi --auditwheel check \
+            --interpreter "$PYTHON" --out dist
+
+      - name: Install it in fresh environments and search
+        working-directory: python
+        env:
+          OLDEST: ${{ steps.oldest.outputs.python-path }}
+          NEWEST: ${{ steps.newest.outputs.python-path }}
+          RUNNER_LABEL: ${{ matrix.runner }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "::error::expected one wheel in python/dist, found ${#wheels[@]}"
+            exit 1
+          fi
+          wheel=$GITHUB_WORKSPACE/python/${wheels[0]}
+          {
+            echo "### pylosat wheel, $RUNNER_LABEL"
+            echo
+            echo "| Python | wheel | tags | size | blastp report (SicyWSV x PajaWSV, outfmt 6) |"
+            echo "|---|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for oldest_or_newest in oldest newest; do
+            if [ $oldest_or_newest = oldest ]; then python=$OLDEST; else python=$NEWEST; fi
+            venv=$RUNNER_TEMP/venv-$oldest_or_newest
+            "$python" -m venv "$venv"
+            if [ "$RUNNER_OS" = Windows ]; then py=$venv/Scripts/python.exe; else py=$venv/bin/python; fi
+            "$py" -m pip install --disable-pip-version-check --quiet --no-index --no-deps "$wheel"
+            # Outside the checkout and with -I, so that the import finds the wheel's pylosat.
+            (cd "$RUNNER_TEMP" && "$py" -I "$GITHUB_WORKSPACE/python/tools/wheel_smoke.py" \
+              --repo "$GITHUB_WORKSPACE" --wheel "$wheel") | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pylosat-wheel-${{ matrix.runner }}
+          path: python/dist/*.whl
+          if-no-files-found: error
+          retention-days: 7
+
+  dev:
+    name: start the run of dev
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Start a run of dev and check the last completed one
+        run: |
+          set -euo pipefail
+          last=$(gh run list --workflow python-wheels.yml --branch dev --event workflow_dispatch \
+            --status completed --limit 1 --json conclusion,headSha,url \
+            --jq '.[] | [.conclusion, .headSha, .url] | @tsv')
+          gh workflow run python-wheels.yml --ref dev
+          echo "Started a wheels run of dev."
+          if [ -z "$last" ]; then
+            echo "No completed wheels run of dev yet."
+            exit 0
+          fi
+          read -r conclusion sha url <<< "$last"
+          if [ "$conclusion" != success ]; then
+            echo "::error::The last wheels run of dev (${sha:0:9}) ended '$conclusion': $url"
+            exit 1
+          fi
+          echo "The last wheels run of dev (${sha:0:9}) passed: $url"

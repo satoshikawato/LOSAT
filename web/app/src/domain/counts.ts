@@ -4,9 +4,6 @@
 // the taxonomy ID box, application/counts.ts), the browser keeps it, and the search reads it under
 // the name that the engine looks for (docs/web/abi_v2.md §4).
 
-/** Flag of BLASTN's taxonomy ID option, the companion of `-window_masker_db` in the form's row. */
-export const WINDOW_MASKER_TAXID_FLAG = '-window_masker_taxid';
-
 /** The site that the counts come from, as the line names it. */
 export const COUNTS_HOST = 'ftp.ncbi.nlm.nih.gov';
 

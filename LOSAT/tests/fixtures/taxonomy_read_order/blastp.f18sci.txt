@@ -1,0 +1,10 @@
+
+                                          Tax BLAST report                                          
+
+Query= q
+
+Length=250
+Error: [blastp] Error: Tax database file has wrong magic number.
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 

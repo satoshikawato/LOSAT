@@ -296,7 +296,9 @@ pub(crate) type XPreliminary = (usize, Vec<QueryFrame>, bool, XKept);
 pub(crate) type XKept = Option<(Arc<SequenceBlock>, usize)>;
 
 /// The read of a `-db` stream that failed in the search of one query batch, with the smallest
-/// ordinal id (`Subjects::Stream`). The subjects after it are not searched (`skips`); those before
+/// ordinal id (`Subjects::Stream`), or the subject of the batch whose search LOSAT does not
+/// support (the one-hit word finder's HSP of a length that is not positive, `scan_chunk_one_hit`
+/// in `blast_engine/run_impl.rs`). The subjects after it are not searched (`skips`); those before
 /// it are, so the error kept does not depend on the threads or their order. Each query batch
 /// has its own: a batch that the pipe runs early does not stop the batch before it.
 pub(crate) struct XReadFailure {

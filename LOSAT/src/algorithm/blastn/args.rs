@@ -548,6 +548,11 @@ pub struct BlastnArgs {
     /// give no search path: not found). Not a public option.
     #[arg(skip)]
     pub tabular_taxdb: Option<bool>,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made by the
+    /// command line with `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere.
+    /// Not a public option.
+    #[arg(skip)]
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
     // ```c++
     //         arg_desc.AddDefaultKey(kArgStrand, "strand",
@@ -769,7 +774,7 @@ pub struct BlastnArgs {
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
     /// The run's search strategy export (`-export_search_strategy`), made by `run`
-    /// (`archive::strategy_for`).
+    /// (`strategy::StrategyExport::for_run`).
     #[arg(skip)]
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
 

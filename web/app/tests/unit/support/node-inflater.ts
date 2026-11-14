@@ -1,10 +1,10 @@
-// A test double of the engine's inflation (src/ports/inflate.ts) over Node's zlib, for the tests of
+// A test double of the engine's inflation (web/packages/losat/src/ports/inflate.ts) over Node's zlib, for the tests of
 // the flows around it (the draft, the run coordinator). It names the compression by the suffix as
 // the engine's rule does (`.gz`, `.bz2`, `.zst`, in any case) and inflates the whole file at its
 // end. It is not the engine's decoder: tests/unit/engine-runtime.test.ts checks the reactor's bytes
 // and sentences, and web/adapter/tests/inflate.rs the adapter's.
 import { gunzipSync, zstdDecompressSync } from 'node:zlib';
-import type { Compression, FileInflater, InflatedSink, Inflation } from '../../../src/ports/inflate';
+import type { Compression, FileInflater, InflatedSink, Inflation } from 'losat/ports';
 
 const SUFFIXES: readonly (readonly [string, Compression])[] = [
   ['.gz', 'gzip'],

@@ -1,0 +1,47 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_mstate.xml
+#Output data file:	(stdout)
+#Annotation data at:	sites
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSBLAST 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	158	NP_414781.1 RadC-like JAB domain-containing protein YkfG [Escherichia coli str. K-12 substr. MG1655]
+SITES
+1	Query_1	Specific	Zn binding site	H107,H109,D120	3	3	501540
+ENDSITES
+ENDQUERY
+QUERY	Query_2	Peptide	148	NP_416506.1 RadC-like JAB domain-containing protein YeeS [Escherichia coli str. K-12 substr. MG1655]
+SITES
+1	Query_2	Specific	Zn binding site	H97,H99,D110	3	3	501540
+ENDSITES
+ENDQUERY
+QUERY	Query_3	Peptide	185	NP_416542.1 dTDP-4-dehydrorhamnose 3,5-epimerase [Escherichia coli str. K-12 substr. MG1655]
+SITES
+1	Query_3	Specific	active site	N49,S51,H62,Q64,K72,H119,Y132,D169	8	8	380337
+1	Query_3	Specific	homodimer interface	R23,G24,F25,F26,Y27,E28,S29,F30,N31,S33,Q47,D48,N49,H50,S51,R52,S53,S54,V57,R59,T77,K133,Y137,S166	24	24	380337
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

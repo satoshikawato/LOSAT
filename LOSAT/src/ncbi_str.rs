@@ -1,25 +1,42 @@
 //! The functions of NCBI's `NStr` (`c++/src/corelib/ncbistr.cpp`) that LOSAT's ports call to
-//! convert numbers (makeblastdb, the database readers, blastdbcmd, the Seq-id parser, the taxid
-//! lists and rpsbproc's data loader `rpsbproc::data`): base 10, the flags each caller passes, and
-//! the `CStringException` each throws, with the place it is thrown from ([`ThrowSite`]); with them
-//! `NStr::PrintableString`, which their messages quote the string with,
-//! `NStr::StringToUInt8_DataSize` (`-max_file_sz`, module `data_size`) and `NStr::StringToDouble`
-//! with glibc's `strtod` (rpsbproc's bit score thresholds, module `double`). Also the string
-//! functions that more than one port calls: `NStr::ParseEscapes` (makeblastdb's titles and the
-//! registry reader) and `NStr::TruncateSpaces`.
+//! convert numbers (the argument readers of the BLAST programs, makeblastdb and its FASTA
+//! reader, the database readers, blastdbcmd, the Seq-id parser and its accession guide, the
+//! taxid lists and rpsbproc's data loader `rpsbproc::data`): base 10, the flags each caller
+//! passes, and the `CStringException` each throws, with the place it is thrown from
+//! ([`ThrowSite`]); with them `NStr::PrintableString`, which their messages quote the string
+//! with, `NStr::StringToUInt8_DataSize` (`-max_file_sz`, module `data_size`) and
+//! `NStr::StringToDouble` with glibc's `strtod` (rpsbproc's bit score thresholds, the
+//! constraints of the integer arguments and the test of the SEG locut and hicut, module
+//! `double`). Also the string functions that more than one port calls: `NStr::ParseEscapes`
+//! (makeblastdb's titles and the registry reader), `NStr::TruncateSpaces` (each `ETrunc`: the
+//! FASTA readers, the argument readers, the format guess), `NStr::IsBlank`, `NStr::StringToBool`
+//! and C's `isspace`.
 //!
 //! Not ported: `fConvErr_NoThrow` and the errno bookkeeping of `CS2N_Guard` (a caller that passes
 //! `fConvErr_NoThrow` takes NCBI's 0 for an error itself), the bases other than 10 (but 16 of
-//! `StringToInt8`, which the argument reader tries, `ncbi_app::args`), and the flags no caller
-//! passes (`fMandatorySign`, `fAllowCommas`, `fAllowLeadingSymbols` beyond its spaces).
-//! Also here: `NStr::StringToNonNegativeInt`. Copies of some of these functions remain elsewhere
-//! (`blastinput::value_parsers`, `writedb`, `report::outfmt6`), not yet folded here.
+//! `StringToInt8`, which the argument readers try, `ncbi_app::args` and
+//! `blastinput::value_parsers`), and the flags no caller passes (`fMandatorySign`,
+//! `fAllowCommas`, `fAllowLeadingSymbols` beyond its spaces).
+//! Also here: `NStr::StringToNonNegativeInt`.
+//!
+//! Conversions of their own remain where calling these would change what LOSAT does, each left
+//! for a fix of its own: `CArg_Double`'s `NStr::StringToDouble(value, fDecimalPosixOrLocal)`
+//! (`blastinput::value_parsers::ncbi_string_to_double`, which refuses the hexadecimal forms and
+//! an exponent mark without digits) and the SEG locut and hicut read with it
+//! (`blastinput::app::read_seg_option`), the `TruncateSpacesInPlace(input, eTrunc_Begin)` of the
+//! PSSM format guess (`algorithm::pssm_search::in_pssm`, `trim_ascii_start`, which keeps a
+//! vertical tab), the full `NStr::StringToDoublePosix` of the ASN.1 text reader
+//! (`report::serial::asn_text_reader`, beside the subset in `double`), and the
+//! `NStr::StringToInt8` of an object id (`seqid::defline_set::object_id_number`, different only
+//! for an embedded NUL). The parsers of the frozen web ABI v1 keep theirs.
 
 mod data_size;
 mod double;
 
 pub use data_size::string_to_uint8_data_size;
 pub(crate) use double::{string_to_double, string_to_double_posix_or_local, PosixOrLocalError};
+
+use std::borrow::Cow;
 
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 
@@ -41,9 +58,15 @@ pub(crate) const ALLOW_TRAILING_SPACES: Flags = 1 << 21;
 /// `NStr::fAllowTrailingSymbols`: any bytes after the number (white space included).
 pub(crate) const ALLOW_TRAILING_SYMBOLS: Flags = (1 << 22) | ALLOW_TRAILING_SPACES;
 
-/// `isspace` in the C locale.
-pub(crate) fn is_space(c: u8) -> bool {
-    c == b' ' || (b'\t'..=b'\r').contains(&c)
+/// `isspace` in the C locale: the space, `\t`, `\n`, `\v`, `\f` and `\r` (a `const fn` for the
+/// character tables built at compile time).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3156 (`s_TruncateSpaces`)
+/// ```c++
+///         while ( isspace((unsigned char) str[beg]) ) {
+/// ```
+pub(crate) const fn is_space(c: u8) -> bool {
+    matches!(c, b'\t'..=b'\r' | b' ')
 }
 
 /// `atoi` of glibc, which NCBI's Linux builds call: `(int) strtol(s, NULL, 10)` in the C locale
@@ -170,11 +193,15 @@ const fn convert_site(line: u32, function: &'static str) -> ThrowSite {
     }
 }
 
-/// `NStr::PrintableString(str)` with its default mode `fNewLine_Quote | fNonAscii_Passthru` (both 0) and language C,
-/// which is what `CS2N_Guard::Message` uses on the input string.
+/// `NStr::PrintableString(str)` with its default mode `fNewLine_Quote | fNonAscii_Passthru`
+/// (both 0) and language C: what `CS2N_Guard::Message` quotes the input string with, and the
+/// form in which `CFastaReader` keeps a definition line (fasta.cpp:600, read back by
+/// makeblastdb, `writedb::fasta_source::title`, and written by the archive, `report::archive`).
 /// Ported branches: `s_PrintableString` with `mode == 0`, `lang == eLanguage_C`
-/// (so `fNewLine_Passthru`, `fNonAscii_Quote`, `fPrintable_Full` and `eLanguage_Javascript` are not ported).
-pub(crate) fn printable_string(str_: &[u8]) -> String {
+/// (so `fNewLine_Passthru`, `fNonAscii_Quote`, `fPrintable_Full` and `eLanguage_Javascript` are
+/// not ported). `isprint` is the C locale's (0x20 to 0x7E), so every byte of the result is
+/// printable ASCII; it borrows `str_` when nothing is escaped (NCBI returns a copy of it).
+pub(crate) fn printable_string(str_: &[u8]) -> Cow<'_, [u8]> {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3736-3742
     // ```c++
     //     unique_ptr<CNcbiOstrstream> out;
@@ -186,11 +213,11 @@ pub(crate) fn printable_string(str_: &[u8]) -> String {
     //         switch (c) {
     // ```
     let mut out: Option<Vec<u8>> = None;
-    let mut j: usize = 0;
-    for i in 0..str_.len() {
+    let mut j = 0;
+    for (i, &byte) in str_.iter().enumerate() {
         let mut octal = false;
-        let mut c = str_[i];
-        match c {
+        let mut c = byte;
+        match byte {
             // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3743-3771
             // ```c++
             //         case '\a':
@@ -253,8 +280,9 @@ pub(crate) fn printable_string(str_: &[u8]) -> String {
             //             continue;
             // ```
             b'?' => {
-                if !((i != 0 && str_[i - 1] == b'?') || (i < str_.len() - 1 && str_[i + 1] == b'?'))
-                {
+                let after_one = i > 0 && str_[i - 1] == b'?';
+                let before_one = i + 1 < str_.len() && str_[i + 1] == b'?';
+                if !after_one && !before_one {
                     continue;
                 }
             }
@@ -273,14 +301,9 @@ pub(crate) fn printable_string(str_: &[u8]) -> String {
             //             }
             //             continue;
             // ```
-            _ => {
-                // fNonAscii_Quote is not set; isprint of the "C" locale is 0x20..=0x7e
-                if !(0x20..=0x7e).contains(&c) {
-                    octal = true;
-                } else {
-                    continue;
-                }
-            }
+            // fNonAscii_Quote is not set; isprint of the "C" locale is 0x20..=0x7e
+            0x20..=0x7e => continue,
+            _ => octal = true,
         }
         // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3797-3803
         // ```c++
@@ -292,11 +315,9 @@ pub(crate) fn printable_string(str_: &[u8]) -> String {
         //         }
         //         out->put('\\');
         // ```
-        let out_buf = out.get_or_insert_with(Vec::new);
-        if i > j {
-            out_buf.extend_from_slice(&str_[j..i]);
-        }
-        out_buf.push(b'\\');
+        let out = out.get_or_insert_with(|| Vec::with_capacity(str_.len() + 8));
+        out.extend_from_slice(&str_[j..i]);
+        out.push(b'\\');
         // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3804-3831
         // ```c++
         //         if (c == '\n') {
@@ -331,22 +352,19 @@ pub(crate) fn printable_string(str_: &[u8]) -> String {
         // `c == '\n'` cannot be true here: c was changed to 'n' above (no fNewLine_Passthru).
         if octal {
             // fPrintable_Full is not set
-            let mut reduce = i == str_.len() - 1 || str_[i + 1] < b'0' || b'7' < str_[i + 1];
-            let mut val: Vec<u8> = Vec::with_capacity(3);
-            let mut v = c >> 6;
+            let mut reduce = i == str_.len() - 1 || !(b'0'..=b'7').contains(&str_[i + 1]);
+            let v = c >> 6;
             if v != 0 || !reduce {
-                val.push(b'0' + v);
+                out.push(b'0' + v);
                 reduce = false;
             }
-            v = (c >> 3) & 7;
+            let v = (c >> 3) & 7;
             if v != 0 || !reduce {
-                val.push(b'0' + v);
+                out.push(b'0' + v);
             }
-            v = c & 7;
-            val.push(b'0' + v);
-            out_buf.extend_from_slice(&val);
+            out.push(b'0' + (c & 7));
         } else {
-            out_buf.push(c);
+            out.push(c);
         }
         // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3832-3832
         // ```c++
@@ -368,15 +386,13 @@ pub(crate) fn printable_string(str_: &[u8]) -> String {
     //     // All characters are good - return (a copy of) the original string
     //     return str;
     // ```
-    let i = str_.len();
-    if j != 0 && i > j {
-        out.as_mut()
-            .expect("out is set whenever j != 0")
-            .extend_from_slice(&str_[j..i]);
-    }
+    // `out` is set exactly when `j != 0`; the rest is empty when `i == j`.
     match out {
-        Some(buf) => String::from_utf8_lossy(&buf).into_owned(),
-        None => String::from_utf8_lossy(str_).into_owned(),
+        Some(mut out) => {
+            out.extend_from_slice(&str_[j..]);
+            Cow::Owned(out)
+        }
+        None => Cow::Borrowed(str_),
     }
 }
 
@@ -417,7 +433,7 @@ fn convert_error(
 ) -> NcbiException {
     let mut s = format!(
         "Cannot convert string '{}' to {to_type}",
-        printable_string(str)
+        String::from_utf8_lossy(&printable_string(str))
     );
     if !msg.is_empty() {
         s.push_str(", ");
@@ -587,7 +603,8 @@ pub(crate) fn string_to_int8(s: &[u8], flags: Flags) -> Result<i64, NcbiExceptio
 // ```
 // `pos0` is set before the radix check: a `0x` with no digit after it is 0 (`pos != pos0`).
 /// `NStr::StringToInt8(str, flags, base)` in base 10 or 16 (`s_StringToInt8` of the argument
-/// reader tries 16 after 10, `ncbi_app::args`), `flags` as for [`string_to_int8`].
+/// readers tries 16 after 10: `ncbi_app::args`, `blastinput::value_parsers::ncbi_int8`), `flags`
+/// as for [`string_to_int8`].
 pub(crate) fn string_to_int8_base(s: &[u8], flags: Flags, base: u8) -> Result<i64, NcbiException> {
     debug_assert!(base == 10 || base == 16, "only bases 10 and 16 are ported");
     let at = |pos: usize| s.get(pos).copied().unwrap_or(0);
@@ -1170,18 +1187,113 @@ pub(crate) fn parse_escapes(str: &[u8]) -> Result<Vec<u8>, &'static str> {
 //         _ASSERT(beg <= end  &&  !isspace((unsigned char) str[end]));
 //         ++end;
 //     }
+//     _ASSERT(beg < end  &&  end <= length);
+//     if ( beg | (end - length) ) { // if either beg != 0 or end != length
+//         return str.substr(beg, end - beg);
+//     }
+//     else {
+//         return str;
+//     }
+// }
 // ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3187-3195
+// ```c++
+// CTempString NStr::TruncateSpaces_Unsafe(const CTempString str, ETrunc where)
+// {
+//     return s_TruncateSpaces(str, where, CTempString());
+// }
+//
+// void NStr::TruncateSpacesInPlace(CTempString& str, ETrunc where)
+// {
+//     str = s_TruncateSpaces(str, where, CTempString());
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3182-3185
+// ```c++
+// string NStr::TruncateSpaces(const string& str, ETrunc where)
+// {
+//     return s_TruncateSpaces(str, where, kEmptyStr);
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3197-3235 (`TruncateSpacesInPlace(string&
+// str, ETrunc where)`: the loops of `s_TruncateSpaces` over `str.data()`, then)
+// ```c++
+//     if ( beg | (end - length) ) { // if either beg != 0 or end != length
+//         str.replace(0, length, str, beg, end - beg);
+//     }
+// }
+// ```
+// `NStr::TruncateSpaces`, `TruncateSpaces_Unsafe` and the two `TruncateSpacesInPlace` cut the same
+// bytes; the four functions below are its `where`, as the slice of `str` that is left (empty when
+// every byte is a space), `truncate_spaces_str` for a `string`.
 /// `NStr::TruncateSpaces(str)` (`eTrunc_Both`, as `TruncateSpacesInPlace`): `str` without the C
 /// `isspace` spaces at its ends.
 pub(crate) fn truncate_spaces(str: &[u8]) -> &[u8] {
-    let Some(beg) = str.iter().position(|&c| !is_space(c)) else {
-        return &[];
-    };
+    truncate_spaces_end(truncate_spaces_begin(str))
+}
+
+/// `NStr::TruncateSpaces(str, NStr::eTrunc_Begin)`: `str` without the C `isspace` spaces at its
+/// start.
+pub(crate) fn truncate_spaces_begin(str: &[u8]) -> &[u8] {
+    let beg = str.iter().position(|&c| !is_space(c)).unwrap_or(str.len());
+    &str[beg..]
+}
+
+/// `NStr::TruncateSpaces(str, NStr::eTrunc_End)`: `str` without the C `isspace` spaces at its
+/// end.
+pub(crate) fn truncate_spaces_end(str: &[u8]) -> &[u8] {
     let end = str
         .iter()
         .rposition(|&c| !is_space(c))
-        .map_or(beg, |end| end + 1);
+        .map_or(0, |end| end + 1);
+    &str[..end]
+}
+
+/// [`truncate_spaces`] of a `str` (`NStr::TruncateSpaces` of a `string`): the spaces are ASCII
+/// bytes, so what is left starts and ends at characters.
+pub(crate) fn truncate_spaces_str(str: &str) -> &str {
+    let beg = str.len() - truncate_spaces_begin(str.as_bytes()).len();
+    let end = truncate_spaces_end(str.as_bytes()).len().max(beg);
     &str[beg..end]
+}
+
+/// `NStr::StringToBool(str)`: `None` where NCBI throws.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2817-2839
+/// ```c
+/// bool NStr::StringToBool(const CTempString str)
+/// {
+///     if ( str == "1"  ||
+///          AStrEquiv(str, s_kTrueString,  PNocase())  ||
+///          AStrEquiv(str, s_kTString,     PNocase())  ||
+///          AStrEquiv(str, s_kYesString,   PNocase())  ||
+///          AStrEquiv(str, s_kYString,     PNocase())  ||
+///          AStrEquiv(str, s_kOnString,    PNocase()) ) {
+///         errno = 0;
+///         return true;
+///     }
+///     if ( str == "0"  ||
+///          AStrEquiv(str, s_kFalseString, PNocase())  ||
+///          AStrEquiv(str, s_kFString,     PNocase())  ||
+///          AStrEquiv(str, s_kNoString,    PNocase())  ||
+///          AStrEquiv(str, s_kNString,     PNocase())  ||
+///          AStrEquiv(str, s_kOffString,   PNocase()) ) {
+///         errno = 0;
+///         return false;
+///     }
+///     NCBI_THROW2(CStringException, eConvert,
+///                 "String cannot be converted to bool", 0);
+/// }
+/// ```
+pub(crate) fn string_to_bool(value: &str) -> Option<bool> {
+    let is = |word: &str| value.eq_ignore_ascii_case(word);
+    if value == "1" || is("true") || is("t") || is("yes") || is("y") || is("on") {
+        Some(true)
+    } else if value == "0" || is("false") || is("f") || is("no") || is("n") || is("off") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1952-1993
@@ -1792,10 +1904,12 @@ mod tests {
     // ncbistr.cpp:3736-3844 (`s_PrintableString`, quoted at `printable_string`): C escapes for
     // the quotes, the backslash, the control characters and `??` (`?` only next to another `?`),
     // octal for the other bytes outside 0x20..0x7e, in as few digits as the next byte allows
-    // (blastdbcmd's messages and rpsbproc's data loader quote with it).
+    // (blastdbcmd's messages and rpsbproc's data loader quote with it; makeblastdb's titles are
+    // kept in it).
     #[test]
     fn printable_string_escapes_as_ncbi() {
-        let printable = |text: &str| printable_string(text.as_bytes());
+        let printable =
+            |text: &str| String::from_utf8(printable_string(text.as_bytes()).into_owned()).unwrap();
         assert_eq!(printable("a'b\"c\\d"), "a\\'b\\\"c\\\\d");
         assert_eq!(printable("x\ty"), "x\\ty");
         assert_eq!(printable("1\n2"), "1\\n2");
@@ -1805,12 +1919,26 @@ mod tests {
         assert_eq!(printable("é"), "\\303\\251");
         assert_eq!(printable("a&b"), "a&b");
         assert_eq!(printable("\u{7f}"), "\\177");
-        assert_eq!(printable_string(b"a\tb"), "a\\tb");
-        assert_eq!(printable_string(b"'\"\\"), "\\'\\\"\\\\");
-        assert_eq!(printable_string(b"??x?"), "\\?\\?x?");
-        assert_eq!(printable_string(b"\x01x"), "\\1x");
-        assert_eq!(printable_string(b"\x017"), "\\0017");
-        assert_eq!(printable_string(&[0xc3, 0xa9]), "\\303\\251");
+        assert_eq!(&*printable_string(b">plain title 1"), b">plain title 1");
+        assert!(matches!(printable_string(b">a&b?c"), Cow::Borrowed(_)));
+        assert_eq!(&*printable_string(b"'\"\\"), b"\\'\\\"\\\\");
+        assert_eq!(&*printable_string(b"??x?"), b"\\?\\?x?");
+        assert_eq!(
+            &*printable_string(b"\x07\x08\x0c\r\x0b\n"),
+            b"\\a\\b\\f\\r\\v\\n"
+        );
+        // Octal: as few digits as the next byte allows.
+        assert_eq!(&*printable_string(b"\x01x"), b"\\1x");
+        assert_eq!(&*printable_string(b"\x017"), b"\\0017");
+        assert_eq!(&*printable_string(b"\x00"), b"\\0");
+        assert_eq!(&*printable_string(b"\x1f8"), b"\\378");
+        assert_eq!(&*printable_string(b"\x7f\x80\xff"), b"\\177\\200\\377");
+    }
+
+    #[test]
+    fn parse_escapes_reads_printable_string_back() {
+        let all: Vec<u8> = (0..=255u8).chain([b'1', b'?', b'?', 0, b'7']).collect();
+        assert_eq!(parse_escapes(&printable_string(&all)).unwrap(), all);
     }
 
     /// `NStr::IsBlank` is C `isspace` over the whole string: the six spaces of the C locale
@@ -1862,6 +1990,46 @@ mod tests {
         assert_eq!(truncate_spaces(b"\x0b a b\r\n"), b"a b");
         assert_eq!(truncate_spaces(b"a"), b"a");
         assert_eq!(truncate_spaces(b"\0 \xa0"), b"\0 \xa0");
+        assert_eq!(truncate_spaces(b" \x0b\x0cid x\t\r "), b"id x");
+        assert_eq!(truncate_spaces(b"\xa0id\xa0"), b"\xa0id\xa0");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3145-3180 (quoted at
+    // `truncate_spaces`): `eTrunc_Begin` and `eTrunc_End` cut one end each, and the `string` form
+    // cuts what the bytes' form cuts.
+    #[test]
+    fn truncate_spaces_cuts_one_end_for_begin_and_end() {
+        assert_eq!(truncate_spaces_begin(b""), b"");
+        assert_eq!(truncate_spaces_begin(b" \t\n\x0b\x0c\r"), b"");
+        assert_eq!(truncate_spaces_begin(b"\x0b a b\r\n"), b"a b\r\n");
+        assert_eq!(truncate_spaces_begin(b"\xa0 a"), b"\xa0 a");
+        assert_eq!(truncate_spaces_end(b""), b"");
+        assert_eq!(truncate_spaces_end(b" \t\n\x0b\x0c\r"), b"");
+        assert_eq!(truncate_spaces_end(b"\x0b a b\r\n"), b"\x0b a b");
+        assert_eq!(truncate_spaces_end(b"a \xa0"), b"a \xa0");
+        assert_eq!(truncate_spaces_str(""), "");
+        assert_eq!(truncate_spaces_str(" \t\n\x0b\x0c\r"), "");
+        assert_eq!(truncate_spaces_str("\x0b é b\r\n"), "é b");
+        assert_eq!(truncate_spaces_str("\u{a0}a\u{85}"), "\u{a0}a\u{85}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2817-2839 (quoted at
+    // `string_to_bool`).
+    #[test]
+    fn ncbis_booleans() {
+        for (text, value) in [
+            ("1", Some(true)),
+            ("TRUE", Some(true)),
+            ("t", Some(true)),
+            ("On", Some(true)),
+            ("0", Some(false)),
+            ("No", Some(false)),
+            ("off", Some(false)),
+            ("", None),
+            ("2", None),
+        ] {
+            assert_eq!(string_to_bool(text), value, "{text:?}");
+        }
     }
 
     // NCBI BLAST+ 2.17.0 (line NP M3d, `M/m3d/ws/run2.sh`): the parameters (base 0) and units

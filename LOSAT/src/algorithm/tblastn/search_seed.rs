@@ -1047,7 +1047,37 @@ pub(super) fn x_scan_plan(
 /// aa_ungapped.c:492-516 consumes it (`for (i = 0; i < hits; ++i)`).
 /// `subject` holds the unit's frame from the chunk's first residue on (the frame's `aa_seq`
 /// from `1 + chunk.offset`, or the residues the unit translated, `x_unit_residues`).
+#[inline(always)]
 pub(super) fn x_scan_unit(
+    plan: &XScanPlan,
+    unit: usize,
+    subject: &[u8],
+    pairs: &mut Vec<BlastOffsetPair>,
+    on_pairs: impl FnMut(&[BlastOffsetPair]),
+) {
+    x_scan_unit_of::<true>(plan, unit, subject, pairs, on_pairs)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:494-500 and 760-764
+// ```c
+//     scan_range[0] = 0;
+//     scan_range[1] = subject->seq_ranges[0].left;
+//     scan_range[2] = subject->seq_ranges[0].right - wordsize;
+//
+//     if (scan_range[2] < scan_range[1])
+//         scan_range[2] = scan_range[1];
+// ...
+//     scan_range[0] = 0;
+//     scan_range[1] = subject->seq_ranges[0].left;
+//     scan_range[2] = subject->seq_ranges[0].right - wordsize;
+//
+//     while (scan_range[1] <= scan_range[2]) {
+// ```
+/// `x_scan_unit` of the two-hit word finder (`CLAMP`: a first range shorter than a word scans
+/// the word at its left end, aa_ungapped.c:499-500) or of the one-hit word finder (`-window_size
+/// 0`, `s_BlastAaWordFinder_OneHit`: no such clamp, so a unit whose first range is shorter than
+/// a word is not scanned at all).
+pub(super) fn x_scan_unit_of<const CLAMP: bool>(
     plan: &XScanPlan,
     unit: usize,
     subject: &[u8],
@@ -1072,6 +1102,9 @@ pub(super) fn x_scan_unit(
             for (range_index, &(left, right)) in ranges.iter().enumerate() {
                 let mut end = right - word_length;
                 if range_index == 0 && end < left {
+                    if !CLAMP {
+                        break;
+                    }
                     end = left;
                 }
                 let mut scan_range = [0, left, end];
@@ -1128,6 +1161,22 @@ pub(super) fn x_scan_unit(
         //     scan_range[2] = scan_range[1];
         let mut end = right - lookup.word_length;
         if range_index == 0 && end < left {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:762-765 and
+            // c++/src/algo/blast/core/masksubj.inl:58-68
+            // ```c
+            //     while (scan_range[1] <= scan_range[2]) {
+            //         /* scan the subject sequence for hits */
+            //         hits = scansub(lookup_wrap, subject,
+            // ...
+            //     while (range[1] > range[2]) {
+            //         range[0]++;
+            // ```
+            // The one-hit word finder's loop does not start on a first range shorter than a
+            // word, so `scansub`, which would step to the next ranges, is never called: the unit
+            // has no hit.
+            if !CLAMP {
+                break;
+            }
             end = left;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1098-1101 and
             // c++/src/algo/blast/core/blast_stat.c:1559-1575
@@ -3118,5 +3167,93 @@ mod tests {
                 "the exact word at {s_off}: {whole:?}"
             );
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:494-505 and 760-765
+    // ```c
+    //     if (scan_range[2] < scan_range[1])
+    //         scan_range[2] = scan_range[1];
+    //
+    //     while (scan_range[1] <= scan_range[2]) {
+    // ...
+    //     scan_range[2] = subject->seq_ranges[0].right - wordsize;
+    //
+    //     while (scan_range[1] <= scan_range[2]) {
+    // ```
+    #[test]
+    fn x_scan_unit_of_one_hit_does_not_scan_a_unit_whose_first_range_is_short() {
+        let query = b"MKVLAAGIVGLLLAAGCSSHKEEAKSGGLW";
+        let codon = |letter: u8| -> &'static [u8] {
+            match letter {
+                b'A' => b"GCT",
+                b'C' => b"TGT",
+                b'E' => b"GAA",
+                b'G' => b"GGT",
+                b'H' => b"CAT",
+                b'I' => b"ATT",
+                b'K' => b"AAA",
+                b'L' => b"CTG",
+                b'M' => b"ATG",
+                b'S' => b"TCT",
+                b'V' => b"GTT",
+                b'W' => b"TGG",
+                other => panic!("no codon for {}", other as char),
+            }
+        };
+        let subject: Vec<u8> = query.iter().flat_map(|&l| codon(l).to_vec()).collect();
+        let mut plan = x_scan_plan(
+            &[query.as_slice()],
+            SubjectNt::Letters(&subject).into(),
+            1,
+            None,
+            11,
+            false,
+            ScoringMatrix::Blosum62,
+            3,
+            &std::sync::OnceLock::new(),
+            &XCompressedSide::default(),
+            None,
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        let frame = plan.subject.frames[0].clone();
+        let length = query.len() as i32;
+        let chunk = TranslatedChunk {
+            offset: 0,
+            length: query.len(),
+        };
+        plan.subject = std::sync::Arc::new(XSubjectPlan {
+            frames: vec![frame],
+            units: vec![
+                // A first range of two letters, then the rest.
+                (0, chunk, vec![(0, 2), (5, length)]),
+                // A first range of a word, then the rest.
+                (0, chunk, vec![(0, 3), (5, length)]),
+            ],
+        });
+        let residues = &plan.subject.frames[0].aa_seq[1..];
+        let mut pairs = Vec::new();
+        let mut scan = |unit: usize, one_hit: bool| {
+            let mut words = Vec::new();
+            let mut on_pairs = |filled: &[BlastOffsetPair]| {
+                words.extend(filled.iter().map(|p| (p.q_off, p.s_off)));
+            };
+            if one_hit {
+                x_scan_unit_of::<false>(&plan, unit, residues, &mut pairs, &mut on_pairs);
+            } else {
+                x_scan_unit(&plan, unit, residues, &mut pairs, &mut on_pairs);
+            }
+            words
+        };
+        // The two-hit scan raises the short first range to its word at 0 and goes on.
+        let two_hit = scan(0, false);
+        assert!(two_hit.contains(&(0, 0)), "{two_hit:?}");
+        assert!(two_hit.contains(&(5, 5)), "{two_hit:?}");
+        // The one-hit scan never starts: no word of the unit.
+        assert_eq!(scan(0, true), Vec::new());
+        // A first range of a word: both scans are the same.
+        assert_eq!(scan(1, true), scan(1, false));
+        assert!(scan(1, true).contains(&(0, 0)));
     }
 }

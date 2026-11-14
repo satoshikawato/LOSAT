@@ -1,5 +1,7 @@
 use std::io::{self, Write};
 
+use crate::ncbi_str::truncate_spaces;
+
 // =============================================================================
 // NCBI Output Format Types
 // =============================================================================
@@ -493,53 +495,6 @@ pub fn write_hit_fields_bytes<W: Write>(
     writeln!(writer)
 }
 
-/// `NStr::TruncateSpaces(text)` (`eTrunc_Both`): `text` without the white space at its
-/// ends (`isspace` of an `unsigned char` in the C locale: 0x09-0x0D and the space).
-///
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:3145-3175
-/// ```c
-/// template <class TStr>
-/// TStr s_TruncateSpaces(const TStr& str, NStr::ETrunc where,
-///                       const TStr& empty_str)
-/// {
-///     SIZE_TYPE length = str.length();
-///     if (length == 0) {
-///         return empty_str;
-///     }
-///     SIZE_TYPE beg = 0;
-///     if (where == NStr::eTrunc_Begin  ||  where == NStr::eTrunc_Both) {
-///         _ASSERT(beg < length);
-///         while ( isspace((unsigned char) str[beg]) ) {
-///             if (++beg == length) {
-///                 return empty_str;
-///             }
-///         }
-///     }
-///     SIZE_TYPE end = length;
-///     if ( where == NStr::eTrunc_End  ||  where == NStr::eTrunc_Both ) {
-///         _ASSERT(beg < end);
-///         while (isspace((unsigned char) str[--end])) {
-///             if (beg == end) {
-///                 return empty_str;
-///             }
-///         }
-///         _ASSERT(beg <= end  &&  !isspace((unsigned char) str[end]));
-///         ++end;
-///     }
-/// ```
-pub fn truncate_spaces(text: &[u8]) -> &[u8] {
-    let is_space = |byte: &u8| matches!(byte, 0x09..=0x0D | b' ');
-    let begin = text
-        .iter()
-        .position(|byte| !is_space(byte))
-        .unwrap_or(text.len());
-    let end = text
-        .iter()
-        .rposition(|byte| !is_space(byte))
-        .map_or(begin, |last| last + 1);
-    &text[begin..end]
-}
-
 /// The `# Query: ` line of the outfmt 7 header of a query with the title `query_title`
 /// (the bytes as they are; the ID of a local query is not shown).
 ///
@@ -820,9 +775,5 @@ mod tests {
             write_outfmt7_query_line(&mut out, &title).unwrap();
             assert_eq!(out, line, "{defline:?}");
         }
-        // `NStr::TruncateSpaces`: 0x09-0x0D and the space at both ends.
-        assert_eq!(truncate_spaces(b" \x0b\x0cid x\t\r "), b"id x");
-        assert_eq!(truncate_spaces(b" \n "), b"");
-        assert_eq!(truncate_spaces(b"\xa0id\xa0"), b"\xa0id\xa0");
     }
 }

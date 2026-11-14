@@ -9,12 +9,13 @@ use crate::ncbi_app::files::{file_exception, open_input_file, Cin, Ostream};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{err_post_x, NcbiException};
 use crate::report::pairwise::cpp_default_double;
+use crate::seqdb::mask::FilterProgram;
 use crate::seqdb::SeqType;
 use crate::seqid::ParsedSeqId;
 use crate::seqmasks_io::bdb_reader::{iupacaa_letters, prints_title, BdbError, MaskBdbReader};
 use crate::seqmasks_io::fasta_reader::{MaskFastaReader, MaskReadError};
 use crate::seqmasks_io::run::{finish, serial_write_failure, write_failure, RunFailure};
-use crate::seqmasks_io::writer::{FilterProgram, MaskWriter, MaskedBioseq, Serial, WriteError};
+use crate::seqmasks_io::writer::{MaskWriter, MaskedBioseq, Serial, WriteError};
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 use crate::utils::seg::{SegMasker, SegParams};
 
@@ -145,7 +146,7 @@ pub(super) fn run(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
-    match run_masks(args, settings, stdin, out) {
+    match run_masks(args, settings, stdin, out, diag) {
         Ok(()) => 0,
         Err(Failure::Caught(exception)) => {
             diag.cerr(format!("{}\n", exception.what()).as_bytes());
@@ -168,6 +169,7 @@ fn run_masks(
     settings: &ApplicationSettings,
     stdin: &mut Cin<'_>,
     out: &mut dyn Write,
+    diag: &mut Diag,
 ) -> Result<(), Failure> {
     let value = |name| args.value(name).expect("a key with a default");
     // `CSegMasker masker(args["window"].AsInteger(), args["locut"].AsDouble(), ...)`: a value
@@ -212,12 +214,12 @@ fn run_masks(
                 iupac: &record.iupacaa,
                 protein: true,
             };
-            writer.print(&seq, &mask, parse_seqids, &mut out)?;
+            writer.print(&seq, &mask, parse_seqids, &mut out, diag)?;
             serial_write_failure::<Failure>(&out, outfmt, super::PROGRAM)?;
         }
         Ok(())
     })();
-    finish(writer, &mut out, result, outfmt, super::PROGRAM)
+    finish(writer, &mut out, diag, result, outfmt, super::PROGRAM)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/segmask/segmask.cpp:40-52

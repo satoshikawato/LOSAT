@@ -122,6 +122,7 @@ fn write_search<E, F>(
     params: &Xml2Run,
     query: &XmlQuery<'_>,
     scratch: &mut Scratch,
+    start: usize,
     hits: F,
 ) -> Result<()>
 where
@@ -164,6 +165,7 @@ where
                 masks: query.masks,
                 scratch: &mut *scratch,
                 hits: 0,
+                start,
             };
             hits(&mut HitSink::new(&mut writer))?;
         }
@@ -191,6 +193,7 @@ fn write_report<E, F>(
     params: &Xml2Run,
     query: &XmlQuery<'_>,
     scratch: &mut Scratch,
+    start: usize,
     hits: F,
 ) -> Result<()>
 where
@@ -242,14 +245,14 @@ where
     match params.target {
         Xml2Target::Database => {
             enc.variant("Results", "search", 1);
-            write_search(enc, run, params, query, scratch, hits)?;
+            write_search(enc, run, params, query, scratch, start, hits)?;
             enc.end_variant();
         }
         Xml2Target::Subjects(_) => {
             enc.variant("Results", "bl2seq", 2);
             enc.begin_list(false);
             enc.element();
-            write_search(enc, run, params, query, scratch, hits)?;
+            write_search(enc, run, params, query, scratch, start, hits)?;
             enc.end_list();
             enc.end_variant();
         }
@@ -273,9 +276,19 @@ struct Xml2Hits<'a, E> {
     masks: &'a [crate::report::blast_xml::QueryMask],
     scratch: &'a mut Scratch,
     hits: i32,
+    /// Where the report that this call writes starts in the output (`Xml2Document::report`):
+    /// the query's own or, for a `-subject` run, the one held before it (no database, so no
+    /// posts at its `Hit`s).
+    start: usize,
 }
 
 impl<E: Encoder> HitWrite for Xml2Hits<'_, E> {
+    /// The start of the report written now: NCBI makes the whole report's data, loading the
+    /// subject of each `Hit`, before it writes any of it (`Xml2Document::report`).
+    fn position(&self) -> usize {
+        self.start
+    }
+
     fn hit(
         &mut self,
         hit: &XmlHit<'_>,
@@ -460,11 +473,6 @@ impl Xml2Writer<RunSideFiles> {
 }
 
 impl<F: SideFiles> Xml2Writer<F> {
-    /// Writes the document's start to `out` now (`Xml2Document::start`).
-    pub fn start(&mut self, out: &mut Vec<u8>) {
-        self.document.start(out);
-    }
-
     pub fn with_document(document: Xml2Document<F>, params: Xml2Run) -> Self {
         Self {
             document,
@@ -492,9 +500,9 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
     where
         H: FnOnce(&mut HitSink<'_>) -> Result<()>,
     {
-        self.report.clear();
         // NCBI sums the database counts of the document when it formats a query's report
-        // (`common::database::check_report_sums`): LOSAT refuses the sums NCBI overflows here.
+        // (`common::database::check_report_sums`): LOSAT refuses the sums NCBI overflows here,
+        // before the framing writes anything.
         let outfmt = match self.document.kind() {
             Xml2Kind::Files13 => 13,
             Xml2Kind::Files14 => 14,
@@ -512,30 +520,33 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
                 &run.program.to_ascii_uppercase(),
             ));
         }
-        let params = &self.params;
-        let result = match self.document.kind() {
-            Xml2Kind::Single16 => {
-                let mut enc = XmlEncoder::xml2_report(&mut self.report);
-                write_report(&mut enc, run, params, query, &mut self.scratch, hits)
-            }
-            Xml2Kind::Files14 => {
-                let mut enc = XmlEncoder::xml2_document(&mut self.report);
-                write_report(&mut enc, run, params, query, &mut self.scratch, hits)
-            }
-            Xml2Kind::Single15 => {
-                let mut enc = JsonEncoder::array_element(&mut self.report);
-                write_report(&mut enc, run, params, query, &mut self.scratch, hits)
-            }
-            Xml2Kind::Files13 => {
-                let mut enc = JsonEncoder::new(&mut self.report);
-                write_report(&mut enc, run, params, query, &mut self.scratch, hits)
-            }
-        };
-        if let Err(error) = result {
-            self.report.clear();
-            return Err(error);
-        }
-        self.document.report(&mut self.report, out)
+        let (params, scratch) = (&self.params, &mut self.scratch);
+        let kind = self.document.kind();
+        // The report is made after the framing's separator, where the `Hit`s load their subjects
+        // (`HitSink::position`: the start of the report written now).
+        self.document
+            .report(&mut self.report, out, |start, report| match kind {
+                Xml2Kind::Single16 => {
+                    let mut enc = XmlEncoder::xml2_report(report);
+                    write_report(&mut enc, run, params, query, scratch, start, hits)
+                }
+                Xml2Kind::Files14 => {
+                    let mut enc = XmlEncoder::xml2_document(report);
+                    write_report(&mut enc, run, params, query, scratch, start, hits)
+                }
+                Xml2Kind::Single15 => {
+                    let mut enc = JsonEncoder::array_element(report);
+                    write_report(&mut enc, run, params, query, scratch, start, hits)
+                }
+                Xml2Kind::Files13 => {
+                    let mut enc = JsonEncoder::new(report);
+                    write_report(&mut enc, run, params, query, scratch, start, hits)
+                }
+            })
+    }
+
+    fn start(&mut self, out: &mut Vec<u8>) {
+        self.document.start(out);
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()> {

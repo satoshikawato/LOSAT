@@ -91,9 +91,9 @@
 //! to `s_off_pos - 19`; with one hit (megablast, blastn, blastn-short) the bound is
 //! `s_off_pos + 1`. `retrieve_below` returns `None` without a walk when the bucket's
 //! `max_level` is below the bound, and is `retrieve` otherwise. The callers: the retrieves of the
-//! two reference scans, `extend_offset_pairs` (`pair_extend.rs`, two-stage tables) and the seed
-//! closure of the other tables (`run.rs`), not while the debug, trace or window diagnostics print
-//! what they read; the one-hit fold of PAIRPAR (`x_pair_seed.rs` `fold`), the
+//! two reference scans, `extend_offset_pairs` (`pair_extend.rs`, two-stage tables) and
+//! `scan_na_lookup` (`na_scan.rs`, the other tables), not while the debug, trace or window
+//! diagnostics print what they read; the one-hit fold of PAIRPAR (`x_pair_seed.rs` `fold`), the
 //! two-hit fold of `LOSAT_X_PAIRPARDISC` (`x_pair_seed_disc.rs` `fold_two_hit`), the na fold
 //! of `LOSAT_X_PAIRPARNA` (`x_pair_seed_na.rs` `fold_na_t`) and the bucket-split folds of
 //! `LOSAT_X_PAIRPARFOLD` (`x_pair_seed_part.rs` `last_hit`). The

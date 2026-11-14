@@ -1,12 +1,13 @@
 import { gzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
+import { sha256Hex } from 'losat';
+import type { WholeFileInflater } from 'losat/ports';
 import { siteHeaders } from '../../build/headers';
 import { SearchDraft } from '../../src/application/draft';
 import { ExampleLoader } from '../../src/application/examples';
 import { EXAMPLE_BYTE_LIMIT, EXAMPLE_SETS, exampleById, exampleHost, exampleQuery, examplesFor } from '../../src/domain/examples';
 import { PROGRAMS, programById, sequenceKind } from '../../src/domain/programs';
 import { BrowserFileDownloader } from '../../src/infra/browser/example-downloader';
-import { sha256Hex } from '../../src/infra/browser/platform';
 import { DataService } from '../../src/infra/data/data-service';
 import { inflateFile } from '../../src/infra/data/inflate';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
@@ -15,7 +16,6 @@ import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import type { DownloadProgress, DownloadResult, ExampleDeletions, ExampleStore } from '../../src/ports/example';
-import type { WholeFileInflater } from '../../src/ports/inflate';
 import { NodeInflater } from './support/node-inflater';
 
 const SIXTEEN_S = exampleById('refseq-16s-bacteria');

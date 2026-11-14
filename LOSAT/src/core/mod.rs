@@ -20,6 +20,8 @@
 // Utilities
 pub mod blast_encoding;
 pub mod blast_util;
+/// The even-gap linking of a gapped search's HSPs with sum statistics (psiblast's `-sum_stats true`).
+pub(crate) mod link_hsps;
 /// The X-drops in raw scores of the protein programs (`-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final`).
 pub(crate) mod x_drop;
 

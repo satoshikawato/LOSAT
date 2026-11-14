@@ -1,0 +1,49 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_ntr67seg.xml
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSTBLASTN 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	5000	mg00067_330001-335000
+DOMAINS
+1	Query_1[1]	Specific	214491	2698	3420	1.20804e-94	305.681	smart00052	EAL	-	531754
+1	Query_1[1]	Specific	99777	2446	2610	5.90383e-09	53.6924	cd06170	LuxR_C_like	-	532797
+1	Query_1[3]	Non-specific	507226	3	1493	0	998.056	NF007399	PRK09928	N	-
+1	Query_1[-1]	Specific	440348	3555	4406	4.69362e-35	135.379	COG0583	LysR	-	-
+1	Query_1[-3]	Specific	517306	4564	4995	2.01694e-14	71.8738	pfam06496	DUF1097	-	-
+ENDDOMAINS
+SITES
+1	Query_1[1]	Specific	DNA binding residues	S2446-2448,E2449-2451,K2452-2454,S2491-2493,V2494-2496,T2497-2499,R2521-2523,S2524-2526,K2530-2532,T2533-2535,S2539-2541,H2542-2544,Q2545-2547,K2548-2550,K2551-2553,D2584-2586	16	0	99777
+1	Query_1[1]	Specific	dimerization interface	M2479-2481,G2485-2487,S2491-2493,D2584-2586,I2587-2589,T2590-2592,R2599-2601,F2608-2610	9	0	99777
+1	Query_1[-1]	Specific	putative dimerization interface	L4091-4089,Q4088-4086,L4082-4080,K4079-4077,P4067-4065,C4061-4059,Q4058-4056,I4055-4053,T4052-4050,V4049-4047,T4046-4044,T4043-4041,S3770-3768,I3767-3765,L3764-3762,V3761-3759,P3758-3756,D3755-3753,Q3737-3735,C3734-3732,I3728-3726,L3725-3723	23	0	176122
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

@@ -2,9 +2,9 @@
 // no text and says why, as the Results do; an export that is not saved says why in the same place;
 // a read or an export that ends after a later choice, a later export or a reset changes nothing (WA2-BR-01).
 import { describe, expect, it } from 'vitest';
+import type { RunOutput } from 'losat/domain';
 import type { RunView } from '../../src/application/coordinator';
 import { OutputReader, OutputSaver, saveOutput, type OutputPort } from '../../src/application/outputs';
-import type { RunOutput } from '../../src/domain/output-format';
 import { RESULTS_REMOVED_MESSAGE, StorageRemovedError } from '../../src/infra/data/block-store';
 
 function run(number: number): RunView {

@@ -228,8 +228,10 @@ pub struct Xml2Document<F: SideFiles = NoSideFiles> {
     kind: Xml2Kind,
     /// `m_XMLFileCount`: the reports written so far.
     written: u32,
-    /// Whether the document's start has been written (NCBI writes it before the search; LOSAT
-    /// at the first write, which gives the same bytes on the output stream).
+    /// Whether the document's start has been written. NCBI writes it before the search
+    /// (`PrintProlog`); LOSAT where the program writes it (`start`: BLASTX before the search, the
+    /// others' reports before the warnings of their first query, `StructuredXml::start`), else
+    /// with the first report or the epilog.
     started: bool,
     /// A `-subject` run (`m_IsBl2Seq`): a report is written when the next one arrives.
     delayed: bool,
@@ -312,8 +314,9 @@ impl<F: SideFiles> Xml2Document<F> {
     }
 
     /// Writes the document's start now, when a program writes it before its first report
-    /// (`PrintProlog`, before the search; BLASTX does, so that a run that stops at its first
-    /// batch still has it). The first report or the epilog then writes no start of its own.
+    /// (`PrintProlog`, before the search: BLASTX, so that a run that stops at its first batch
+    /// still has it; the reports of the other programs before the warnings of their first query,
+    /// `StructuredXml::start`). The first report or the epilog then writes no start of its own.
     pub fn start(&mut self, out: &mut Vec<u8>) {
         self.prolog(out);
     }
@@ -326,11 +329,40 @@ impl<F: SideFiles> Xml2Document<F> {
         out.extend_from_slice(&prolog_bytes(self.kind));
     }
 
-    /// Hands one query's complete report (`x_PrintXML2Report`): appends to `out` what the
-    /// framing writes now. `report` is left empty. For a `-subject` run the report is held
-    /// and the one held before it is written.
-    pub fn report(&mut self, report: &mut Vec<u8>, out: &mut Vec<u8>) -> Result<()> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:877-882
+    // ```c++
+    // BlastJSON_FormatReport(const IBlastXML2ReportData* data, CNcbiOstream *out_stream )
+    // {
+    // 	blastxml2::CBlastOutput2 bxmlout;
+    // 	try {
+    // 		s_FillBlastOutput(bxmlout, data);
+    // 		s_WriteJSONObjectNoHeader(bxmlout, out_stream);
+    // ```
+    /// Hands one query's report (`x_PrintXML2Report`): appends to `out` what the framing writes
+    /// before the report that this call writes (the document's start if it is not written yet,
+    /// outfmt 15's separator `,\n` before every report but the first), then `make` formats the
+    /// query's report into `report`, given where the report written now starts in `out`, and the
+    /// framing appends that report to `out`; `report` is left empty. NCBI writes the separator
+    /// (`x_WriteXML2`, blast_format.cpp:2337-2342) before `s_FillBlastOutput` loads the report's
+    /// subjects, and writes the report after those loads: what they post comes between the two.
+    /// For a `-subject` run the report is held and the one held before it is written. A failure of `make` returns it with the framing's bytes in `out` (the caller
+    /// truncates `out`) and the document's count of reports unchanged.
+    pub fn report(
+        &mut self,
+        report: &mut Vec<u8>,
+        out: &mut Vec<u8>,
+        make: impl FnOnce(usize, &mut Vec<u8>) -> Result<()>,
+    ) -> Result<()> {
         self.prolog(out);
+        // The report written now: this one, or for a `-subject` run the one held before it.
+        if !self.delayed || self.has_pending {
+            self.separator(out);
+        }
+        report.clear();
+        if let Err(error) = make(out.len(), report) {
+            report.clear();
+            return Err(error);
+        }
         if self.delayed {
             // The report just made is held; the one held before it is written now.
             let had_pending = std::mem::replace(&mut self.has_pending, true);
@@ -360,20 +392,23 @@ impl<F: SideFiles> Xml2Document<F> {
             return Ok(());
         }
         let pending = std::mem::take(&mut self.pending);
+        self.separator(out);
         self.write(&pending, out)
     }
 
-    /// `x_WriteXML2`: one report into the stream or its own file.
+    /// `x_WriteXML2`'s separator of outfmt 15's reports: `,\n` before every report but the first.
+    fn separator(&self, out: &mut Vec<u8>) {
+        if self.kind == Xml2Kind::Single15 && self.written > 0 {
+            out.extend_from_slice(b",\n");
+        }
+    }
+
+    /// `x_WriteXML2`: one report into the stream (after its separator, `separator`) or its own
+    /// file.
     fn write(&mut self, report: &[u8], out: &mut Vec<u8>) -> Result<()> {
         self.written += 1;
         match self.kind {
-            Xml2Kind::Single16 => out.extend_from_slice(report),
-            Xml2Kind::Single15 => {
-                if self.written > 1 {
-                    out.extend_from_slice(b",\n");
-                }
-                out.extend_from_slice(report);
-            }
+            Xml2Kind::Single16 | Xml2Kind::Single15 => out.extend_from_slice(report),
             Xml2Kind::Files14 | Xml2Kind::Files13 => {
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:770-774
                 // ```c++
@@ -396,6 +431,7 @@ impl<F: SideFiles> Xml2Document<F> {
         self.prolog(out);
         if std::mem::replace(&mut self.has_pending, false) {
             let pending = std::mem::take(&mut self.pending);
+            self.separator(out);
             self.write(&pending, out)?;
         }
         match self.kind {

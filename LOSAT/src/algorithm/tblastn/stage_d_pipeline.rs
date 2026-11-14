@@ -604,7 +604,7 @@ fn x_searched_side_by_side(subjects: SubjectLetters<'_>, batches: usize, threads
 /// `LOSAT_X_TBNBATCHRULE`, on the batches that are not searched side by side, and only natively: in
 /// WebAssembly only the main thread can start threads (the WASI thread hosts give a thread a
 /// `thread-spawn` that fails, `tests/wasi_thread_host.js` and
-/// `web/app/src/infra/reactor/instance.ts`), and each own pool is built on a thread of its own, so
+/// `web/packages/losat/src/infra/reactor/instance.ts`), and each own pool is built on a thread of its own, so
 /// its threads could not start there (os error 6).
 #[cfg(feature = "parallel")]
 fn x_tbn_own_pools() -> bool {

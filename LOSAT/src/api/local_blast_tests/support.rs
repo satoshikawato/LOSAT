@@ -1,7 +1,7 @@
 //! The harness shared by the in-crate `run_local` tests of every program: one sink per requested
 //! format, the collected hit records, and the byte range that the observer reports for
 //! every HSP in every format. (The tests that compare with the `losat` binary are integration
-//! tests and use `LOSAT::api`: `tests/run_local_support/mod.rs`.)
+//! tests and use `losat::api`: `tests/run_local_support/mod.rs`.)
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};

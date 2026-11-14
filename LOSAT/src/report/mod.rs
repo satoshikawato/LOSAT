@@ -13,6 +13,7 @@ pub mod sam;
 pub mod seqid;
 pub mod serial;
 pub mod tabular;
+pub mod tax_report;
 pub(crate) mod x_pairwise_par;
 
 pub use outfmt6::*;

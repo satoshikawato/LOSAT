@@ -54,8 +54,11 @@ impl KaBlock {
     }
 }
 
-/// What one archive holds, besides the request's options (`ArchiveHandle::request`).
-pub struct BatchArchive<'a> {
+/// What the request of one query batch reads besides the run's options (`ArchiveRequest`): the
+/// archive's and the search strategy's (`requests::RunRequests` makes it from the batch's
+/// records).
+#[derive(Clone, Copy)]
+pub struct RequestInputs<'a> {
     /// The batch's queries, in order.
     pub queries: &'a [BioseqInput<'a>],
     /// `-subject`: every subject (the request's `database` is `None` then).
@@ -65,6 +68,12 @@ pub struct BatchArchive<'a> {
     pub required: Option<(i32, i32)>,
     /// The `LCaseMask` parameters, in order.
     pub lcase_masks: &'a [MaskEntry],
+}
+
+/// What one archive holds, besides the request's options (`ArchiveHandle::request`).
+pub struct BatchArchive<'a> {
+    /// The batch's request.
+    pub request: RequestInputs<'a>,
     /// The `masks` of the results.
     pub masks: &'a [MaskEntry],
     /// The ungapped and the gapped block of the batch's first query.
@@ -249,14 +258,13 @@ fn write_ka_block<E: Encoder>(enc: &mut E, block: &KaBlock) {
 // ```
 /// Writes the `body` member of a `Blast4-request`: the `queue-search` request of one query
 /// batch. The archive (`write_search_archive`) and the search strategy file
-/// (`strategy::write_strategy`) share it, as NCBI builds both with `CExportStrategy`.
-/// `lcase_masks` are the `LCaseMask` parameters and `search_space_option` the
-/// `EffectiveSearchSpace` option that the request has when it is written.
+/// (`strategy::StrategyExport::write_request`) share it, as NCBI builds both with
+/// `CExportStrategy`. `search_space_option` is the `EffectiveSearchSpace` option that the
+/// request has when it is written.
 fn write_request_body<E: Encoder>(
     out: &mut ArchiveOut<'_, E>,
     request: &super::ArchiveRequest,
-    batch: &BatchArchive<'_>,
-    lcase_masks: &[MaskEntry],
+    batch: &RequestInputs<'_>,
     search_space_option: Option<i64>,
     database_list: Option<&Param>,
 ) {
@@ -377,7 +385,7 @@ fn write_request_body<E: Encoder>(
     out.enc.end_named();
     out.enc.end_member();
 
-    if batch.required.is_some() || !lcase_masks.is_empty() || database_list.is_some() {
+    if batch.required.is_some() || !batch.lcase_masks.is_empty() || database_list.is_some() {
         out.enc.member("program-options", 6);
         out.enc.begin_named("Blast4-parameters");
         out.enc.begin_list(false);
@@ -392,7 +400,7 @@ fn write_request_body<E: Encoder>(
                 );
             }
         }
-        for mask in lcase_masks {
+        for mask in batch.lcase_masks {
             out.enc.element();
             out.enc.begin_sequence("Blast4-parameter");
             out.enc.member("name", 0);
@@ -444,8 +452,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     write_request_body(
         out,
         request,
-        batch,
-        batch.lcase_masks,
+        &batch.request,
         search_space_option,
         database_list,
     );
@@ -508,21 +515,13 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
 pub(super) fn write_strategy_document<E: Encoder>(
     out: &mut ArchiveOut<'_, E>,
     request: &super::ArchiveRequest,
-    batch: &BatchArchive<'_>,
-    lcase_masks: &[MaskEntry],
+    batch: &RequestInputs<'_>,
     search_space_option: Option<i64>,
     database_list: Option<&Param>,
 ) {
     out.enc.begin_document("Blast4-request");
     out.enc.begin_sequence("Blast4-request");
-    write_request_body(
-        out,
-        request,
-        batch,
-        lcase_masks,
-        search_space_option,
-        database_list,
-    );
+    write_request_body(out, request, batch, search_space_option, database_list);
     out.enc.end_sequence();
     out.enc.end_document();
 }
@@ -578,7 +577,7 @@ pub fn write_archive<A: AlignSource>(
 ) -> Result<()> {
     let messages = handle.take_messages();
     let space = handle.search_space_option(batch.searched_space);
-    let list = handle.database_list();
+    let list = handle.options().database_list();
     let request = handle.request();
     match handle.encoding() {
         ArchiveEncoding::Nothing => Ok(()),
@@ -589,15 +588,7 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 io_error: None,
             };
-            write_search_archive(
-                &mut out,
-                request,
-                batch,
-                space,
-                list.as_ref(),
-                &messages,
-                aligns,
-            )?;
+            write_search_archive(&mut out, request, batch, space, list, &messages, aligns)?;
             out.finish()
         }
         ArchiveEncoding::Text => {
@@ -607,15 +598,7 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 io_error: None,
             };
-            write_search_archive(
-                &mut out,
-                request,
-                batch,
-                space,
-                list.as_ref(),
-                &messages,
-                aligns,
-            )?;
+            write_search_archive(&mut out, request, batch, space, list, &messages, aligns)?;
             out.finish()
         }
         ArchiveEncoding::Binary => {
@@ -625,15 +608,7 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 io_error: None,
             };
-            write_search_archive(
-                &mut out,
-                request,
-                batch,
-                space,
-                list.as_ref(),
-                &messages,
-                aligns,
-            )?;
+            write_search_archive(&mut out, request, batch, space, list, &messages, aligns)?;
             out.finish()
         }
     }

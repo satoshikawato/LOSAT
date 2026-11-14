@@ -7,17 +7,21 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { constants as zlib, gzipSync, zstdCompressSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  instantiateSerial,
+  loadReactor,
+  ReactorInflater,
+  ReactorInputChecker,
+  ReactorScanner,
+  reopening,
+  toProgramDescription,
+} from 'losat';
+import type { FastaParserKind } from 'losat/domain';
+import { INFLATED_TOO_LARGE } from 'losat/ports';
 import { findReactors } from '../../build/reactors';
-import { EngineStoppedError, ReactorAbi, stopMessage, type AbiExports } from '../../src/infra/reactor/abi';
-import { ABI_EXPORTS, inspectReactor } from '../../src/infra/reactor/artifact';
-import { instantiateSerial, loadReactor } from '../../src/infra/reactor/instance';
-import { ReactorInputChecker } from '../../src/infra/reactor/checker';
-import { ReactorInflater } from '../../src/infra/reactor/inflater';
+import { EngineStoppedError, ReactorAbi, stopMessage, type AbiExports } from '../../../packages/losat/src/infra/reactor/abi';
+import { ABI_EXPORTS, inspectReactor } from '../../../packages/losat/src/infra/reactor/artifact';
 import { inflateFile } from '../../src/infra/data/inflate';
-import { INFLATED_TOO_LARGE } from '../../src/ports/inflate';
-import { toProgramDescription } from '../../src/infra/reactor/control';
-import { ReactorScanner, reopening } from '../../src/infra/reactor/scanner';
-import type { FastaParserKind } from '../../src/domain/dataset';
 import { PROGRAMS } from '../../src/domain/programs';
 import {
   AUTO_MANY_THREADS_FROM_BYTES,
@@ -27,14 +31,14 @@ import {
   chooseThreads,
   DEFAULT_RENEWAL,
   renewalReason,
-} from '../../src/infra/engine-worker/policy';
-import { InstanceUse } from '../../src/infra/engine-worker/instance-use';
-import { EngineRuntime } from '../../src/infra/engine-worker/runtime';
-import { warmUp, warmUpInputs } from '../../src/infra/engine-worker/warm-up';
+} from '../../../packages/losat/src/infra/engine-worker/policy';
+import { InstanceUse } from '../../../packages/losat/src/infra/engine-worker/instance-use';
+import { EngineRuntime } from '../../../packages/losat/src/infra/engine-worker/runtime';
+import { warmUp, warmUpInputs } from '../../../packages/losat/src/infra/engine-worker/warm-up';
 
 // The runtime's calls of the warm-up are counted; the warm-up itself runs as it is.
-vi.mock('../../src/infra/engine-worker/warm-up', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/infra/engine-worker/warm-up')>();
+vi.mock('../../../packages/losat/src/infra/engine-worker/warm-up', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../packages/losat/src/infra/engine-worker/warm-up')>();
   return { ...actual, warmUp: vi.fn(actual.warmUp) };
 });
 import { RECORD_SCANNER_CASES } from '../contract/record-scanner.contract';

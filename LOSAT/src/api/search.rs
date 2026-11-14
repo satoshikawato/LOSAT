@@ -93,6 +93,31 @@ impl Search {
         &self.argv
     }
 
+    /// Whether the argv has `-dryrun`: every search of it runs the NCBI application start (it
+    /// opens the file of `-logfile`, loads the file of `-conffile`) and checks the settings, then
+    /// ends without a search, as the command line's dry run does. [`run`](super::run()) writes
+    /// nothing, [`run_collect`](super::run_collect) gives an empty report per format,
+    /// [`run_to_file`](super::run_to_file) makes no file and [`run_batches`](super::run_batches)
+    /// one batch of no query. The records are not read then: the inputs may be empty.
+    pub fn dry_run(&self) -> bool {
+        use crate::blastinput::ncbi_environment::{preparse, Preparsed};
+        matches!(preparse(&self.argv), Preparsed::Words { dryrun: true, .. })
+    }
+
+    /// Whether a search of this argv runs the NCBI application start at its beginning: the argv
+    /// has `-logfile`, `-conffile` or `-dryrun`, which the start reads (`api::start`).
+    pub(crate) fn starts(&self) -> bool {
+        use crate::blastinput::ncbi_environment::{log_file, preparse, Preparsed};
+        log_file(&self.argv).is_some()
+            || matches!(
+                preparse(&self.argv),
+                Preparsed::Words {
+                    conffile: Some(_),
+                    ..
+                } | Preparsed::Words { dryrun: true, .. }
+            )
+    }
+
     /// The parsed arguments, with either kind of subject: `validate` accepted one of them. The
     /// reader's options come from here before the search refuses what the API does not take
     /// (`parse`).
@@ -228,9 +253,10 @@ fn parse_words(
         subject_flag,
         subject,
     ];
-    let cli: Cli =
-        crate::cli::try_parse_from(words.iter().copied().chain(argv.iter().map(String::as_str)))
-            .map_err(|error| Error::Argv(crate::cli::render_message(&error)))?;
+    let cli: Cli = crate::cli::try_parse_from_library(
+        words.iter().copied().chain(argv.iter().map(String::as_str)),
+    )
+    .map_err(|error| Error::Argv(crate::cli::render_message(&error)))?;
     Ok(cli.command)
 }
 

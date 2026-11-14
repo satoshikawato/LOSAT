@@ -27,12 +27,16 @@
 //! - `masks`: the `Blast4-mask` lists (results and the `LCaseMask` options);
 //! - `writer`: the document.
 //!
-//! What a run keeps from one archive to the next is `ArchiveState`: the diagnostics saved
-//! since the last archive (`DiagLog`) and the last `EffectiveSearchSpace`.
+//! What a run keeps from one archive to the next is `RunState`: the diagnostics saved since the
+//! last archive (`DiagLog`) and where the archives' `EffectiveSearchSpace` option stands
+//! (`SearchSpaceCarry`); what the run's database list makes of every request is the run's
+//! `OptionsHandle`, which the archive and the search strategy share.
+//! - `requests`: the request inputs of a batch from its records.
 
 pub mod bioseq;
 pub mod masks;
 pub mod options;
+pub mod requests;
 pub mod strategy;
 pub mod writer;
 
@@ -40,7 +44,7 @@ use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -50,7 +54,7 @@ use options::OptionInputs;
 
 pub use writer::{
     write_archive, write_error_archive, AlignSource, ArchiveOut, BatchArchive, KaBlock,
-    SearchedContext0,
+    RequestInputs, SearchedContext0,
 };
 
 /// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes.
@@ -146,29 +150,12 @@ impl ArchiveEncoding {
 /// ```
 /// The conversion throws (and nothing is written) for text after the number, such as
 /// `11 qseqid`; the batches' archives accept such a text (`-outfmt "11 <spec>"`), only the
-/// error archive does not. `TruncateSpaces` strips `isspace` characters at both ends,
-/// `StringToInt` takes an optional sign and decimal digits (leading zeros allowed) that fit an
-/// `int`.
+/// error archive does not. `TruncateSpaces` (`eTrunc_Both`) and `StringToInt` (flags 0) are
+/// `ncbi_str::truncate_spaces` and `ncbi_str::string_to_int`.
 pub fn writes_error_archive(outfmt: &str) -> bool {
-    let is_space = |c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r');
-    let text = outfmt.trim_matches(is_space);
-    let (negative, digits) = match text.as_bytes().first() {
-        Some(b'+') => (false, &text[1..]),
-        Some(b'-') => (true, &text[1..]),
-        _ => (false, text),
-    };
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return false;
-    }
-    let mut value: i64 = 0;
-    for b in digits.bytes() {
-        value = value * 10 + i64::from(b - b'0');
-        if value > i64::from(i32::MAX) + 1 {
-            return false;
-        }
-    }
-    let value = if negative { -value } else { value };
-    value == i64::from(crate::blastinput::app::output_format::ARCHIVE_FORMAT)
+    use crate::ncbi_str::{string_to_int, truncate_spaces};
+    string_to_int(truncate_spaces(outfmt.as_bytes()), 0)
+        .is_ok_and(|value| value == crate::blastinput::app::output_format::ARCHIVE_FORMAT)
 }
 
 /// The `queue-search` request of a run, as the options handle and the arguments make it.
@@ -224,7 +211,7 @@ impl ArchiveRequest {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173 (quoted
-// at `ArchiveHandle::set_database_filter`) and c++/src/algo/blast/api/effsearchspace_calc.cpp:111-121
+// at `OptionsHandle::set_database_filter`) and c++/src/algo/blast/api/effsearchspace_calc.cpp:111-121
 // ```c++
 //     BlastEffectiveLengthsParametersNew(opts_memento->m_EffLenOpts,
 //                                        db_num_bases, db_num_seqs,
@@ -279,15 +266,124 @@ impl RequestLength {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:280-282,304-306
+// ```c++
+//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+//
+//             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
+//     ...
+//             if (isArchiveFormat) {
+//                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+// ```
+/// What NCBI's options handle (`m_OptsHndl`) holds for the requests of a run beyond the options
+/// of the command line: the database list's parameter and how the database's statistics make the
+/// `EffectiveSearchSpace` option of a searched batch (`RequestLength`). One
+/// handle per run, which the archive (`ArchiveHandle`) and the search strategy
+/// (`strategy::StrategyExport`) share, as NCBI's applications hand the one handle to
+/// `SaveSearchStrategy` and `WriteArchive`; it is set once, where the database is opened
+/// (`common::database::note_archive_database_filter`). The `EffectiveSearchSpace` option that
+/// the search writes into the handle batch by batch is carried by each writer
+/// (`SearchSpaceCarry`): the strategy's request of a batch is written before the batch's search
+/// and its archive after it, and LOSAT writes some archives after the searches of later batches,
+/// so each writer passes the batches at its own place.
+#[derive(Clone, Debug, Default)]
+pub struct OptionsHandle(Arc<OnceLock<DatabaseFilter>>);
+
+#[derive(Debug)]
+struct DatabaseFilter {
+    /// The `TaxidList` or `NegativeTaxidList` program option.
+    list: Option<options::Param>,
+    /// How the `EffectiveSearchSpace` option of a searched batch is made.
+    request_length: RequestLength,
+}
+
+/// Where one writer of a run's requests (the archive, the search strategy) stands in the run's
+/// `EffectiveSearchSpace` option: the option after the batches it has passed
+/// (`OptionsHandle::pass`), absent before a searched batch.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SearchSpaceCarry(Option<i64>);
+
+impl SearchSpaceCarry {
+    /// The `EffectiveSearchSpace` option of the next request.
+    pub fn option(self) -> Option<i64> {
+        self.0
+    }
+}
+
+impl OptionsHandle {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173
+    // ```c++
+    //     Int8 total_length = BlastSeqSrcGetTotLenStats(seqsrc);
+    //     if (total_length <= 0)
+    //         total_length = BlastSeqSrcGetTotLen(seqsrc);
+    //     Int4 num_seqs = BlastSeqSrcGetNumSeqsStats(seqsrc);
+    //     if (num_seqs <= 0)
+    //         num_seqs = BlastSeqSrcGetNumSeqs(seqsrc);
+    //
+    //     CEffectiveSearchSpaceCalculator calc(full_query_fact, *options,
+    //                                          num_seqs, total_length,
+    //                                          full_data->m_ScoreBlk->GetPointer());
+    // ```
+    /// What the database's list and statistics make of the requests: its `program-options`
+    /// parameter (`DbFilterArgs::archive_parameter`), and how the `EffectiveSearchSpace` option
+    /// of a searched batch is made (`RequestLength`, `common::database::note_archive_database_filter`):
+    /// for a statistics length that is not positive it is not the search's own value, though the
+    /// statistics of the results read the length of OID 0 (`SeqDb::statistics`). Set once per
+    /// run, where the database is opened; a second setting is LOSAT's internal error.
+    pub fn set_database_filter(
+        &self,
+        list: Option<options::Param>,
+        request_length: RequestLength,
+    ) -> anyhow::Result<()> {
+        let set = self.0.set(DatabaseFilter {
+            list,
+            request_length,
+        });
+        anyhow::ensure!(
+            set.is_ok(),
+            "LOSAT internal error: the database's list is set twice in one run"
+        );
+        Ok(())
+    }
+
+    /// The `TaxidList` or `NegativeTaxidList` program option (`set_database_filter`).
+    pub fn database_list(&self) -> Option<&options::Param> {
+        self.0.get().and_then(|filter| filter.list.as_ref())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:177-181
+    // ```c++
+    //     vector<Int8> eff_searchsp;
+    //     for (size_t index = 0; index <= (size_t)qinfo->last_context; index++) {
+    //         eff_searchsp.push_back(calc.GetEffSearchSpaceForContext(index));
+    //     }
+    //     options->SetEffectiveSearchSpace(eff_searchsp);
+    // ```
+    /// Moves `carry` past a batch: `searched` is the batch's context 0 when the batch was
+    /// searched (`SplitQuery_SetEffectiveSearchSpace` writes its `EffectiveSearchSpace` option
+    /// into the handle: the search's own value, or what `RequestLength` makes of it), and `None`
+    /// for a batch NCBI does not search, which leaves the option as the batch before left it.
+    pub fn pass(&self, carry: &mut SearchSpaceCarry, searched: Option<SearchedContext0>) {
+        if let Some(context0) = searched {
+            let length = self
+                .0
+                .get()
+                .map_or(RequestLength::Search, |filter| filter.request_length);
+            carry.0 = Some(length.space(context0));
+        }
+    }
+
+    /// Whether `self` and `other` are the same handle.
+    pub fn same(&self, other: &OptionsHandle) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct RunState {
     log: DiagLog,
-    /// The `EffectiveSearchSpace` of the last searched batch (`None` before one).
-    last_search_space: Option<i64>,
-    /// The `TaxidList` or `NegativeTaxidList` program option (`set_database_filter`).
-    database_list: Option<options::Param>,
-    /// How the `EffectiveSearchSpace` option of a searched batch is made (`set_database_filter`).
-    request_length: RequestLength,
+    /// The `EffectiveSearchSpace` option after the archives written so far.
+    carry: SearchSpaceCarry,
     /// Whether the diagnostics that are written now are not the archive's (the warnings that
     /// another format of the same search writes, which a run of the archive alone does not).
     muted: bool,
@@ -307,6 +403,8 @@ impl Inner {
 struct Shared {
     encoding: ArchiveEncoding,
     request: ArchiveRequest,
+    /// The run's options handle (shared with the search strategy, `OptionsHandle`).
+    options: OptionsHandle,
     /// Whether the error archives are written (`writes_error_archive` of the `-outfmt` text;
     /// true when the run has no such text).
     error_archive: AtomicBool,
@@ -328,7 +426,8 @@ impl std::fmt::Debug for ArchiveHandle {
 impl ArchiveHandle {
     /// The handle of a run of `inputs.program` that writes the archive (`-outfmt 11`): the
     /// request from the recorded options, `ARCHIVE_FORMAT` read once. `database` is the
-    /// `-db` argument as typed (`None` for `-subject`); `label` names the program in a refusal.
+    /// `-db` argument as typed (`None` for `-subject`); `label` names the program in a refusal;
+    /// `options` is the run's options handle (made once per run; its search strategy shares it).
     /// Refuses, before anything is written, what LOSAT cannot write: a `-db` name or a
     /// `-window_masker_db` path with a byte that `ArchiveEncoding::writes_text` refuses (NCBI
     /// writes `#` and diagnostics there). These are the only strings the archive copies from
@@ -339,8 +438,15 @@ impl ArchiveHandle {
         inputs: &OptionInputs,
         database: Option<&str>,
         label: &str,
+        options: &OptionsHandle,
     ) -> anyhow::Result<Self> {
-        Self::for_encoding(ArchiveEncoding::from_env(), inputs, database, label)
+        Self::for_encoding(
+            ArchiveEncoding::from_env(),
+            inputs,
+            database,
+            label,
+            options,
+        )
     }
 
     /// `for_program` for a given encoding (`ARCHIVE_FORMAT` read by the caller).
@@ -349,20 +455,30 @@ impl ArchiveHandle {
         inputs: &OptionInputs,
         database: Option<&str>,
         label: &str,
+        options: &OptionsHandle,
     ) -> anyhow::Result<Self> {
         Ok(Self::new(
             encoding,
             ArchiveRequest::for_inputs(encoding, inputs, database, label, "-outfmt 11")?,
+            options.clone(),
         ))
     }
 
-    pub fn new(encoding: ArchiveEncoding, request: ArchiveRequest) -> Self {
+    /// The handle of a run's archive, with the run's options handle `options`.
+    pub fn new(encoding: ArchiveEncoding, request: ArchiveRequest, options: OptionsHandle) -> Self {
         Self(Arc::new(Shared {
             encoding,
             request,
+            options,
             error_archive: AtomicBool::new(true),
             state: Mutex::new(Inner::default()),
         }))
+    }
+
+    /// The run's options handle, which the run's search strategy shares
+    /// (`strategy::StrategyExport::for_run`).
+    pub fn options(&self) -> &OptionsHandle {
+        &self.0.options
     }
 
     pub fn encoding(&self) -> ArchiveEncoding {
@@ -458,42 +574,12 @@ impl ArchiveHandle {
 
     /// The `EffectiveSearchSpace` option of the next archive: the batch's own value when
     /// the batch was searched (kept for the batches after it), else the one of the last
-    /// searched batch, which is absent before one.
+    /// searched batch, which is absent before one (`OptionsHandle::pass`).
     pub fn search_space_option(&self, searched: Option<writer::SearchedContext0>) -> Option<i64> {
         self.with_state(|state| {
-            if let Some(context0) = searched {
-                state.last_search_space = Some(state.request_length.space(context0));
-            }
-            state.last_search_space
+            self.0.options.pass(&mut state.carry, searched);
+            state.carry.option()
         })
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173
-    // ```c++
-    //     Int8 total_length = BlastSeqSrcGetTotLenStats(seqsrc);
-    //     if (total_length <= 0)
-    //         total_length = BlastSeqSrcGetTotLen(seqsrc);
-    //     Int4 num_seqs = BlastSeqSrcGetNumSeqsStats(seqsrc);
-    //     if (num_seqs <= 0)
-    //         num_seqs = BlastSeqSrcGetNumSeqs(seqsrc);
-    //
-    //     CEffectiveSearchSpaceCalculator calc(full_query_fact, *options,
-    //                                          num_seqs, total_length,
-    //                                          full_data->m_ScoreBlk->GetPointer());
-    // ```
-    /// What the database's list and statistics make of the request: its `program-options`
-    /// parameter (`DbFilterArgs::archive_parameter`), and how its `EffectiveSearchSpace` option
-    /// is made (`RequestLength`, `common::database::note_archive_database_filter`).
-    pub fn set_database_filter(&self, list: Option<options::Param>, request_length: RequestLength) {
-        self.with_state(|state| {
-            state.database_list = list;
-            state.request_length = request_length;
-        });
-    }
-
-    /// The `TaxidList` or `NegativeTaxidList` program option (`set_database_filter`).
-    pub fn database_list(&self) -> Option<options::Param> {
-        self.with_state(|state| state.database_list.clone())
     }
 }
 
@@ -509,15 +595,19 @@ fn is_visible(byte: u8) -> bool {
 /// and binary a byte outside `0x20..=0x7E`; in XML NCBI writes the byte, and only a control
 /// byte is refused). `role` is `query` or `subject`. The encoding is the environment's
 /// (`ArchiveEncoding::from_env`).
-pub fn check_titles(records: &[FastaRecord], role: &str, label: &str) -> anyhow::Result<()> {
+pub(crate) fn check_titles<R: requests::RequestRecord>(
+    records: &[R],
+    role: &str,
+    label: &str,
+) -> anyhow::Result<()> {
     check_titles_for(ArchiveEncoding::from_env(), records, role, label)
 }
 
 /// `check_titles` for a given encoding (a caller that checks record by record reads the
 /// environment once).
-pub fn check_titles_for(
+pub(crate) fn check_titles_for<R: requests::RequestRecord>(
     encoding: ArchiveEncoding,
-    records: &[FastaRecord],
+    records: &[R],
     role: &str,
     label: &str,
 ) -> anyhow::Result<()> {
@@ -539,8 +629,8 @@ pub fn request_title_encoding(archive: bool, strategy: bool) -> Option<ArchiveEn
 /// `check_titles` for the requests of a run: the archive's (`archive`, in the environment's
 /// encoding) and the search strategy's (`strategy`, always ASN.1 text,
 /// `strategy::StrategyExport`).
-pub fn check_request_titles(
-    records: &[FastaRecord],
+pub(crate) fn check_request_titles<R: requests::RequestRecord>(
+    records: &[R],
     role: &str,
     label: &str,
     archive: bool,
@@ -561,20 +651,23 @@ pub fn check_request_titles(
     Ok(())
 }
 
-fn check_titles_in(
+/// The refusal of the first of `records` whose title `encoding` cannot write as NCBI does
+/// (`check_titles`), for the requests that `option` asks for (`-outfmt 11`,
+/// `-export_search_strategy`).
+pub(crate) fn check_titles_in<R: requests::RequestRecord>(
     encoding: ArchiveEncoding,
-    records: &[FastaRecord],
+    records: &[R],
     role: &str,
     label: &str,
     option: &str,
 ) -> anyhow::Result<()> {
     if let Some(record) = records
         .iter()
-        .find(|record| !encoding.writes_text(&record.title))
+        .find(|record| !encoding.writes_text(record.title()))
     {
         return Err(anyhow::Error::new(TitleRefusal(format!(
             "the title of the {role} {} has a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML), which is not supported by LOSAT's {label} with {option}",
-            record.local_id
+            record.local_id()
         ))));
     }
     Ok(())
@@ -734,7 +827,14 @@ mod tests {
             inputs
         };
         let ok = |encoding, path: Option<&str>, db: Option<&str>| {
-            ArchiveHandle::for_encoding(encoding, &inputs(path), db, "BLASTN").is_ok()
+            ArchiveHandle::for_encoding(
+                encoding,
+                &inputs(path),
+                db,
+                "BLASTN",
+                &OptionsHandle::default(),
+            )
+            .is_ok()
         };
         for encoding in [
             ArchiveEncoding::Text,
@@ -766,6 +866,7 @@ mod tests {
             &inputs(Some("w\u{e9}")),
             None,
             "BLASTN",
+            &OptionsHandle::default(),
         )
         .unwrap_err()
         .to_string();
@@ -796,6 +897,7 @@ mod tests {
                 algorithm: Vec::new(),
                 database: None,
             },
+            OptionsHandle::default(),
         );
         assert_eq!(handle.search_space_option(None), None);
         let searched = |space| {
@@ -809,17 +911,37 @@ mod tests {
         assert_eq!(handle.search_space_option(searched(0)), Some(0));
         assert_eq!(handle.search_space_option(None), Some(0));
         // A statistics length of 0, and a negative one (probe run2 of line RG D1a-3: the query's
-        // length, 142).
-        handle.set_database_filter(None, RequestLength::Lengths(None));
-        assert_eq!(handle.search_space_option(searched(8738)), Some(0));
-        handle.set_database_filter(None, RequestLength::Lengths(Some((i64::MIN + 1, 23))));
-        assert_eq!(handle.search_space_option(searched(15_876)), Some(142));
-        handle.set_database_filter(None, RequestLength::Lengths(Some((-1, -5))));
+        // length, 142): the run's options handle is set once, so each case has its own.
+        let with_length = |length| {
+            let handle = ArchiveHandle::new(
+                ArchiveEncoding::Text,
+                ArchiveRequest {
+                    program: "blastp",
+                    service: "plain",
+                    algorithm: Vec::new(),
+                    database: None,
+                },
+                OptionsHandle::default(),
+            );
+            handle.options().set_database_filter(None, length).unwrap();
+            handle
+        };
         assert_eq!(
-            handle.search_space_option(Some(writer::SearchedContext0 {
-                space: 0,
-                query_length: 0,
-            })),
+            with_length(RequestLength::Lengths(None)).search_space_option(searched(8738)),
+            Some(0)
+        );
+        assert_eq!(
+            with_length(RequestLength::Lengths(Some((i64::MIN + 1, 23))))
+                .search_space_option(searched(15_876)),
+            Some(142)
+        );
+        assert_eq!(
+            with_length(RequestLength::Lengths(Some((-1, -5)))).search_space_option(Some(
+                writer::SearchedContext0 {
+                    space: 0,
+                    query_length: 0,
+                }
+            )),
             Some(0)
         );
     }
@@ -834,6 +956,7 @@ mod tests {
                 algorithm: Vec::new(),
                 database: None,
             },
+            OptionsHandle::default(),
         );
         let mut seen: Vec<u8> = Vec::new();
         {
@@ -892,6 +1015,7 @@ mod tests {
                     algorithm: Vec::new(),
                     database: None,
                 },
+                OptionsHandle::default(),
             )
         };
         let lines = vec![(ERROR, b"Error: x".to_vec())];

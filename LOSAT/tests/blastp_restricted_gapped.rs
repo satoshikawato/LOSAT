@@ -1,5 +1,6 @@
 //! BLASTP restricted gapped alignments (`s_RestrictedGappedAlign`) and their exact redo, with
-//! and without `LOSAT_X_BPGAP`, against NCBI BLAST+ 2.17.0.
+//! and without `LOSAT_X_BPGAP`, against NCBI BLAST+ 2.17.0, and psiblast's first round, which
+//! aligns exactly.
 //!
 //! `LOSAT_X_BPGAP` is in the strict set (`src/utils/xswitch.rs`): it is on by default, unless its
 //! variable is `0`. Every test states the
@@ -231,7 +232,7 @@ fn inputs() -> &'static (PathBuf, PathBuf) {
 }
 
 /// The query and subject files of the psiblast test (series RG Q3d's set a2), written once:
-/// four random queries, and among 1,500 random subjects of 400 letters, at every 75th subject
+/// four random queries, and 1,500 subjects of 400 random letters except at every 75th subject
 /// from 0 to 1,425, a copy of query `j % 4` (`j` the copy's rank) with 55, 58, 60, 62 or 64 % of
 /// its letters replaced (the five copies of a query in that order) and an insertion or deletion
 /// about every sixth letter.
@@ -283,17 +284,13 @@ fn write_inputs(
     files
 }
 
-/// One BLASTP run with `variables` and no other `LOSAT_*` variable except
-/// `LOSAT_BLASTX_WORKER_LOG` (a build with the worker probe writes to it as soon as a pool
-/// starts, so the caller's value is kept, or a file of the tests is named).
-/// Returns the report and standard error.
+/// One BLASTP run of the BLASTP inputs (`run`).
 fn blastp(threads: usize, variables: &[(&str, &str)]) -> (String, String) {
     let args = ["-outfmt", OUTFMT, "-evalue", "0.001"];
     run("blastp", inputs(), &args, threads, variables)
 }
 
-/// One psiblast run (one round) of the psiblast inputs with `-comp_based_stats cbs`, as
-/// `blastp` runs BLASTP.
+/// One psiblast run (one round) of the psiblast inputs with `-comp_based_stats cbs` (`run`).
 fn psiblast(cbs: &str, threads: usize, variables: &[(&str, &str)]) -> (String, String) {
     let args = [
         "-outfmt",
@@ -306,7 +303,10 @@ fn psiblast(cbs: &str, threads: usize, variables: &[(&str, &str)]) -> (String, S
     run("psiblast", psiblast_inputs(), &args, threads, variables)
 }
 
-/// One run of `program` on `files` (query, subject) with `args`, as `blastp` describes.
+/// One run of `program` on `files` (query, subject) with `args`, with `variables` and no other
+/// `LOSAT_*` variable except `LOSAT_BLASTX_WORKER_LOG` (a build with the worker probe writes to it
+/// as soon as a pool starts, so the caller's value is kept, or a file of the tests is named).
+/// Returns the report and standard error.
 fn run(
     program: &str,
     files: &(PathBuf, PathBuf),

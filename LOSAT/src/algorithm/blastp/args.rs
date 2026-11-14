@@ -81,8 +81,10 @@ pub enum BlastpCompositionMode {
 // ```
 /// The NCBI application whose search the blastp engine runs: blastp, the first round of
 /// psiblast (`algorithm/psiblast`), whose program is `ePSIBlast` (`eBlastTypePsiBlast` in the
-/// core) with the same search as blastp until a PSSM exists, or rpsblast (`algorithm/rpsblast`),
-/// whose search blastp's driver hands to the RPS engine (`algorithm::rps_search`).
+/// core) with blastp's search until a PSSM exists except blastp's restricted gapped alignment
+/// (blast_parameters.c:852-855, `blast_engine::blastp_restricted_align_enabled`), or rpsblast
+/// (`algorithm/rpsblast`), whose search blastp's driver hands to the RPS engine
+/// (`algorithm::rps_search`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BlastpApp {
     #[default]

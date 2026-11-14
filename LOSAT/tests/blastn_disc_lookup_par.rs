@@ -21,6 +21,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 mod reach_support;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), and
@@ -139,7 +142,8 @@ fn database() -> (Temp, String) {
     }
     std::fs::write(&set, bytes).unwrap();
     let db = dir.0.join("set").to_str().unwrap().to_string();
-    let output = losat()
+    let (mut command, _log) = losat();
+    let output = command
         .arg("makeblastdb")
         .arg("-in")
         .arg(&set)
@@ -159,7 +163,7 @@ fn database() -> (Temp, String) {
 /// a file of this process when the environment has none): a binary built with the
 /// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
 /// soon as a search has more than one thread, and it selects nothing.
-fn losat() -> Command {
+fn losat() -> (Command, Option<TempFile>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -169,16 +173,8 @@ fn losat() -> Command {
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join(format!(
-                "losat_disclutpar_{}_worker.log",
-                std::process::id()
-            )),
-        );
-    }
-    command
+    let log = worker_log_if_unset(&mut command, "blastn_disc_lookup_par_worker");
+    (command, log)
 }
 
 type Var<'a> = (&'a str, &'a str);
@@ -197,8 +193,9 @@ fn blastn(
     extra: &[&str],
     threads: u32,
     vars: &[Var<'_>],
-) -> (Vec<u8>, String) {
-    let output = losat()
+) -> (Vec<u8>, String, Option<TempFile>) {
+    let (mut command, log) = losat();
+    let output = command
         .arg("blastn")
         .arg("-query")
         .arg(queries)
@@ -215,7 +212,7 @@ fn blastn(
         output.status.success(),
         "{extra:?} {vars:?} threads {threads}: {stderr}"
     );
-    (output.stdout, stderr)
+    (output.stdout, stderr, log)
 }
 
 /// For one search (`subject` and `extra` arguments): the report with the switch off at one
@@ -224,10 +221,12 @@ fn blastn(
 /// only.
 fn check(subject: &[&str], extra: &[&str], env: &[Var<'_>]) {
     let queries = queries();
-    let (expected, expected_stderr) = blastn(&queries, subject, extra, 1, &joined(&[env, &[OFF]]));
+    let (expected, expected_stderr, _log) =
+        blastn(&queries, subject, extra, 1, &joined(&[env, &[OFF]]));
     assert!(!expected.is_empty(), "{extra:?}: no hits");
     for threads in [1, 4, 8, 16] {
-        let (report, stderr) = blastn(&queries, subject, extra, threads, &joined(&[env, &[OFF]]));
+        let (report, stderr, _log) =
+            blastn(&queries, subject, extra, threads, &joined(&[env, &[OFF]]));
         assert!(
             report == expected,
             "{extra:?} threads {threads}: off differs"
@@ -235,7 +234,7 @@ fn check(subject: &[&str], extra: &[&str], env: &[Var<'_>]) {
         assert_eq!(stderr, expected_stderr, "{extra:?} threads {threads}");
         for (on, what) in [(&[][..], "default"), (&[SWITCH][..], "on")] {
             let reach = reach_support::Reach::new("disclutpar");
-            let (report, stderr) = blastn(
+            let (report, stderr, _log) = blastn(
                 &queries,
                 subject,
                 extra,
@@ -374,14 +373,14 @@ fn several_batches_and_split_chunks() {
         &[("BATCH_SIZE", "10000")][..],
         &[("BATCH_SIZE", "1000000"), ("CHUNK_SIZE", "7000")][..],
     ] {
-        let (expected, expected_stderr) = blastn(&queries, &subject, &extra, 1, env);
+        let (expected, expected_stderr, _log) = blastn(&queries, &subject, &extra, 1, env);
         assert!(!expected.is_empty(), "{env:?}: no hits");
-        let (report, stderr) = blastn(&queries, &subject, &extra, 4, &joined(&[env, &[OFF]]));
+        let (report, stderr, _log) = blastn(&queries, &subject, &extra, 4, &joined(&[env, &[OFF]]));
         assert!(report == expected, "{env:?}: off differs");
         assert_eq!(stderr, expected_stderr, "{env:?}");
         for on in [&[][..], &[SWITCH][..]] {
             let reach = reach_support::Reach::new("disclutpar-batches");
-            let (report, stderr) = blastn(
+            let (report, stderr, _log) = blastn(
                 &queries,
                 &subject,
                 &extra,
@@ -418,9 +417,10 @@ fn megablast_with_and_without_a_template() {
         &[],
     );
     let queries = queries();
-    let (expected, expected_stderr) = blastn(&queries, &args(&s), &["-task", "megablast"], 1, &[]);
+    let (expected, expected_stderr, _log) =
+        blastn(&queries, &args(&s), &["-task", "megablast"], 1, &[]);
     let reach = reach_support::Reach::new("disclutpar-megablast");
-    let (report, stderr) = blastn(
+    let (report, stderr, _log) = blastn(
         &queries,
         &args(&s),
         &["-task", "megablast"],
@@ -446,14 +446,14 @@ fn timing_line_is_printed() {
     let s = subject();
     let subject = args(&s);
     let extra = ["-task", "dc-megablast"];
-    let (expected, _) = blastn(&queries, &subject, &extra, 1, &[]);
+    let (expected, _, _log) = blastn(&queries, &subject, &extra, 1, &[]);
     for (threads, vars, on_pool) in [
         (4, &[("LOSAT_TIMING", "1"), SWITCH][..], true),
         (4, &[("LOSAT_TIMING", "1")][..], true),
         (4, &[("LOSAT_TIMING", "1"), OFF][..], false),
         (1, &[("LOSAT_TIMING", "1"), SWITCH][..], false),
     ] {
-        let (report, stderr) = blastn(&queries, &subject, &extra, threads, vars);
+        let (report, stderr, _log) = blastn(&queries, &subject, &extra, threads, vars);
         assert!(report == expected, "{vars:?} {threads}: the report differs");
         let line = stderr
             .lines()
@@ -490,7 +490,7 @@ fn timing_line_is_printed() {
         }
     }
     // Megablast builds no discontiguous table: no line.
-    let (_, stderr) = blastn(
+    let (_, stderr, _log) = blastn(
         &queries,
         &subject,
         &["-task", "megablast"],
@@ -533,20 +533,21 @@ fn dc_megablast_across_chunk_boundaries() {
             "18",
         ][..],
     ] {
-        let (expected, expected_stderr) = blastn(&query, &subject, extra, 1, &[OFF]);
+        let (expected, expected_stderr, _log) = blastn(&query, &subject, extra, 1, &[OFF]);
         assert!(!expected.is_empty(), "{extra:?}: no hits");
-        let (report, stderr) = blastn(&query, &subject, extra, 4, &[OFF]);
+        let (report, stderr, _log) = blastn(&query, &subject, extra, 4, &[OFF]);
         assert!(report == expected, "{extra:?}: off differs");
         assert_eq!(stderr, expected_stderr, "{extra:?}");
         let reach = reach_support::Reach::new("disclutpar-chunks");
-        let (report, stderr) = blastn(&query, &subject, extra, 4, &[SWITCH, reach.var()]);
+        let (report, stderr, _log) = blastn(&query, &subject, extra, 4, &[SWITCH, reach.var()]);
         assert!(report == expected, "{extra:?}: on differs");
         assert_eq!(stderr, expected_stderr, "{extra:?}");
         assert!(
             reach.sides("LOSAT_X_DISCLUTPAR").0,
             "{extra:?}: no table was built on a pool"
         );
-        let (report, stderr) = blastn(&query, &subject, extra, 4, &[SWITCH, ("LOSAT_TIMING", "1")]);
+        let (report, stderr, _log) =
+            blastn(&query, &subject, extra, 4, &[SWITCH, ("LOSAT_TIMING", "1")]);
         assert!(
             report == expected,
             "{extra:?}: on with LOSAT_TIMING differs"
@@ -581,7 +582,7 @@ fn dc_megablast_csr_of_a_large_table() {
     let subject_path = fasta("AP027131.fasta");
     let subject = ["-subject", subject_path.to_str().unwrap()];
     let extra = &["-task", "dc-megablast"][..];
-    let (expected, expected_stderr) = blastn(&query, &subject, extra, 1, &[]);
+    let (expected, expected_stderr, _log) = blastn(&query, &subject, extra, 1, &[]);
     assert!(!expected.is_empty(), "no hits");
     let field = |line: &str, name: &str| -> u64 {
         line.split_whitespace()
@@ -590,10 +591,10 @@ fn dc_megablast_csr_of_a_large_table() {
             .unwrap_or_else(|| panic!("no {name} in: {line}"))
     };
     for threads in [1, 4] {
-        let (report, stderr) = blastn(&query, &subject, extra, threads, &[CSR]);
+        let (report, stderr, _log) = blastn(&query, &subject, extra, threads, &[CSR]);
         assert!(report == expected, "threads {threads}: on differs");
         assert_eq!(stderr, expected_stderr, "threads {threads}");
-        let (report, stderr) = blastn(
+        let (report, stderr, _log) = blastn(
             &query,
             &subject,
             extra,

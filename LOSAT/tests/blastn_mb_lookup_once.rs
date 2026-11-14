@@ -25,6 +25,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 const SWITCH: (&str, &str) = ("LOSAT_X_MBLUTONCE", "1");
 const OFF: (&str, &str) = ("LOSAT_X_MBLUTONCE", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
@@ -48,7 +51,7 @@ fn blastn(
     subject: &str,
     threads: u32,
     switches: &[(&str, &str)],
-) -> (Vec<u8>, String) {
+) -> (Vec<u8>, String, Option<TempFile>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -58,12 +61,7 @@ fn blastn(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join(format!("losat_mblutonce_worker_{}.log", std::process::id())),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastn_mb_lookup_once_worker");
     // LOSAT_X_BNCSRPACK lays out every contiguous table of 4^8 to 4^11 cells as CSR, with no
     // chains to fill: `-task blastn`'s tables keep the chains these tests are about with it off.
     command.env("LOSAT_X_BNCSRPACK", "0");
@@ -84,7 +82,7 @@ fn blastn(
         output.status.success(),
         "{task} {switches:?} threads {threads}: {stderr}"
     );
-    (output.stdout, stderr)
+    (output.stdout, stderr, log)
 }
 
 /// The value of `name` (`name=VALUE`) in the line of `stderr` that starts with `prefix`.
@@ -106,11 +104,11 @@ const ONCE: &str = "[TIMING] x_mb_lookup_once: ";
 /// `LOSAT_TIMING`, and at one thread; the read-once fill counted where
 /// it ran.
 fn check(task: &str, query: &str, subject: &str) {
-    let (reference, stderr) = blastn(task, query, subject, 4, &[OFF]);
+    let (reference, stderr, _log) = blastn(task, query, subject, 4, &[OFF]);
     assert!(!reference.is_empty(), "{task}: no hits");
     assert_eq!(stderr, "", "{task}");
     for switches in [&[SWITCH][..], &[]] {
-        let (report, stderr) = blastn(task, query, subject, 4, switches);
+        let (report, stderr, _log) = blastn(task, query, subject, 4, switches);
         assert!(
             report == reference,
             "{task} {switches:?}: the report differs"
@@ -119,7 +117,7 @@ fn check(task: &str, query: &str, subject: &str) {
     }
 
     // With the switch off: the fill of `x_mb_lookup_par` makes every pool build.
-    let (report, stderr) = blastn(task, query, subject, 4, &[OFF, TIMING]);
+    let (report, stderr, _log) = blastn(task, query, subject, 4, &[OFF, TIMING]);
     assert!(report == reference, "{task}");
     let parallel = field(&stderr, BUILD, "parallel=");
     assert!(parallel > 0, "{task}: no table on the pool:\n{stderr}");
@@ -127,7 +125,7 @@ fn check(task: &str, query: &str, subject: &str) {
     assert!(!stderr.contains(ONCE), "{task}: {stderr}");
 
     for switches in [&[SWITCH, TIMING][..], &[TIMING]] {
-        let (report, stderr) = blastn(task, query, subject, 4, switches);
+        let (report, stderr, _log) = blastn(task, query, subject, 4, switches);
         assert!(report == reference, "{task} {switches:?}");
         assert_eq!(field(&stderr, BUILD, "parallel="), parallel, "{task}");
         assert_eq!(
@@ -142,7 +140,7 @@ fn check(task: &str, query: &str, subject: &str) {
         );
     }
 
-    let (report, stderr) = blastn(task, query, subject, 1, &[SWITCH, TIMING]);
+    let (report, stderr, _log) = blastn(task, query, subject, 1, &[SWITCH, TIMING]);
     assert!(report == reference, "{task} at one thread");
     assert_eq!(field(&stderr, BUILD, "parallel="), 0, "{task}: {stderr}");
     assert_eq!(field(&stderr, BUILD, "once="), 0, "{task}: {stderr}");
@@ -162,9 +160,9 @@ fn blastn_gives_the_same_report_and_reads_its_table_once() {
 #[test]
 fn megablast_prefaults_the_table_where_the_first_chunk_is_dense() {
     let (task, query) = ("megablast", "LC738868.fasta");
-    let (reference, _) = blastn(task, query, query, 8, &[OFF]);
+    let (reference, _, _log) = blastn(task, query, query, 8, &[OFF]);
     assert!(!reference.is_empty());
-    let (report, stderr) = blastn(task, query, query, 8, &[TIMING]);
+    let (report, stderr, _log) = blastn(task, query, query, 8, &[TIMING]);
     assert!(report == reference, "the report differs with the round");
     let fills = field(&stderr, ONCE, "fills=");
     assert!(fills > 0, "{stderr}");
@@ -174,7 +172,7 @@ fn megablast_prefaults_the_table_where_the_first_chunk_is_dense() {
         touches > 12_000 && touches <= 12_290,
         "nearly every page of the 4^12 table of 3-byte cells: {stderr}"
     );
-    let (report, stderr) = blastn(task, query, query, 8, &[MB24_OFF, TIMING]);
+    let (report, stderr, _log) = blastn(task, query, query, 8, &[MB24_OFF, TIMING]);
     assert!(report == reference, "the report differs with 4-byte cells");
     assert_eq!(field(&stderr, ONCE, "prefault_rounds="), fills, "{stderr}");
     let touches = field(&stderr, ONCE, "prefault_touches=");
@@ -182,13 +180,13 @@ fn megablast_prefaults_the_table_where_the_first_chunk_is_dense() {
         touches > 16_000 && touches <= 16_385,
         "nearly every page of the 4^12 table of 4-byte cells: {stderr}"
     );
-    let (report, stderr) = blastn(task, query, query, 8, &[PREFAULT_OFF, TIMING]);
+    let (report, stderr, _log) = blastn(task, query, query, 8, &[PREFAULT_OFF, TIMING]);
     assert!(report == reference, "the report differs without the round");
     assert_eq!(field(&stderr, ONCE, "fills="), fills, "{stderr}");
     assert_eq!(field(&stderr, ONCE, "prefault_rounds="), 0, "{stderr}");
     assert_eq!(field(&stderr, ONCE, "prefault_touches="), 0, "{stderr}");
     // 2 threads: a first chunk of 65,536 positions, below 8 per 1,024 of the 4^12 cells.
-    let (report, stderr) = blastn(task, query, query, 2, &[TIMING]);
+    let (report, stderr, _log) = blastn(task, query, query, 2, &[TIMING]);
     assert!(report == reference, "the report differs at 2 threads");
     assert_eq!(field(&stderr, ONCE, "prefault_rounds="), 0, "{stderr}");
 }

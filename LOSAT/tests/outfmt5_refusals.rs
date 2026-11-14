@@ -15,6 +15,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod temp_support;
+use temp_support::{Finished, TempFile};
+
 fn temp_dir(stem: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -29,12 +32,12 @@ fn temp_dir(stem: &str) -> PathBuf {
     dir
 }
 
-fn run(args: &[&std::ffi::OsStr]) -> Output {
+fn run(args: &[&std::ffi::OsStr]) -> Finished<Output, TempFile> {
     run_with(args, &[])
 }
 
 /// `run` with the extra environment variables `env` (NCBI's own `BATCH_SIZE`, for example).
-fn run_with(args: &[&std::ffi::OsStr], env: &[(&str, &str)]) -> Output {
+fn run_with(args: &[&std::ffi::OsStr], env: &[(&str, &str)]) -> Finished<Output, TempFile> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") {
@@ -42,15 +45,14 @@ fn run_with(args: &[&std::ffi::OsStr], env: &[(&str, &str)]) -> Output {
         }
     }
     // An --all-features binary at 2+ threads keeps this variable (see the other tests).
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_outfmt5_worker.log"),
-    );
+    let log = TempFile::keep_on_failure("losat_outfmt5_worker", "worker.log");
+    command.env("LOSAT_BLASTX_WORKER_LOG", &log);
     command.envs(env.iter().copied());
-    command.args(args).output().expect("run LOSAT")
+    let output = command.args(args).output().expect("run LOSAT");
+    Finished::new(output, log)
 }
 
-fn run_str(args: &[&str]) -> Output {
+fn run_str(args: &[&str]) -> Finished<Output, TempFile> {
     let args: Vec<&std::ffi::OsStr> = args.iter().map(std::ffi::OsStr::new).collect();
     run(&args)
 }

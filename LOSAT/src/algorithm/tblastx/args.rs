@@ -336,16 +336,23 @@ pub struct TblastxArgs {
     #[arg(skip)]
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
-    /// by the command line before the search where a tabular field list shows a name of the
-    /// taxonomy database (`algorithm::tblastx::tabular`); `None` elsewhere (`run_local`'s callers
-    /// give no search path: not found, DECISIONS 7 of line CLI C2). Not a public option.
+    /// before the search where a tabular field list looks every taxid up (the plural names of the
+    /// taxonomy database, the organism report; `algorithm::tblastx::tabular`), by the command line
+    /// and the library (`common::database::subject_taxonomy`); `None` elsewhere (LOSAT Web has no
+    /// files: not found). Not a public option.
     #[arg(skip)]
     pub tabular_taxdb: Option<bool>,
-    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made by the
-    /// command line with `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere.
-    /// Not a public option.
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made with
+    /// `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere. Not a public option.
     #[arg(skip)]
     pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
+    /// The `[BLAST] BLASTDB` setting through which a `-subject` search's tabular reports look for
+    /// the taxonomy database (`common::database::subject_taxonomy`), which a search of records of
+    /// the library (`api::run`) reads from the call's application settings when a report looks
+    /// every taxid up; `None` elsewhere (the command line passes its settings, LOSAT Web has no
+    /// files). Not a public option.
+    #[arg(skip)]
+    pub taxdb_setting: Option<crate::algorithm::common::database::TaxdbSetting>,
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
     // ```c++
     //     int GetLocalIdCounterInitValue() const { return m_LocalIdCounter; }
@@ -358,8 +365,9 @@ pub struct TblastxArgs {
     #[arg(skip)]
     pub first_query_ordinal: usize,
     /// The file that NCBI BLAST+ reads for a `-matrix` that its tables do not have
-    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found by the command line before
-    /// the search; `None` elsewhere. Not a public option.
+    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found before the search by the
+    /// command line and the library API (`find_matrix_file`); `None` in LOSAT Web. Not a public
+    /// option.
     #[arg(skip)]
     pub matrix_file: Option<std::path::PathBuf>,
 }
@@ -422,6 +430,23 @@ impl TblastxArgs {
         } else {
             TblastxMatrix::Unknown
         }
+    }
+
+    /// Looks up the file that NCBI reads for an `Unknown` matrix (`scoring_matrix`) with `search`
+    /// (`MatrixSearch::file`) into `matrix_file`: the first step of the command line's run
+    /// (`run`) and of the library's searches (`run_local_database`, `api::run`'s search of
+    /// records), before the options and the outputs, as NCBI's score block, which looks for it
+    /// when it sets up a batch, refuses the run there (`run_in_pool`).
+    pub(crate) fn find_matrix_file(
+        &mut self,
+        search: &crate::blastinput::ncbi_environment::MatrixSearch,
+    ) -> anyhow::Result<()> {
+        if self.scoring_matrix() == TblastxMatrix::Unknown {
+            self.matrix_file = search
+                .file(self.matrix_name())
+                .map_err(anyhow::Error::msg)?;
+        }
+        Ok(())
     }
 
     /// The word threshold: `-threshold`, or the matrix's suggestion for a translated subject.
@@ -495,7 +520,7 @@ impl TblastxArgs {
     /// The -seg value as NCBI's filtering handler reads it (`check_options` reports its
     /// errors first).
     pub fn seg_spec(&self) -> anyhow::Result<SegSpec> {
-        crate::blastinput::app::parse_seg_option(&self.seg, "TBLASTX")
+        crate::blastinput::app::parse_seg_option(&self.seg)
     }
 
     /// `-soft_masking` (`mask_at_hash`): the SEG intervals keep words out of the lookup table but

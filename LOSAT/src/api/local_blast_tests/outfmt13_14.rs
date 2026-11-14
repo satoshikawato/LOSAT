@@ -34,6 +34,15 @@ fn temp_dir(stem: &str) -> PathBuf {
     dir
 }
 
+/// A directory made by `temp_dir`, removed with what is in it when the value is dropped.
+struct TempDir(PathBuf);
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
 /// A `run_local` call without an output file and without a receiver of side files
 /// (`OutputSink::Files`) cannot write 13 and 14: the shared entries of BLASTP and BLASTN stop at
 /// NCBI's XInclude error.
@@ -128,9 +137,10 @@ fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_and_tblastx() {
     use crate::cli::{try_parse_from, Cli, Commands};
     let (pquery, nsubject) = (inputs().join("qprot_bad.faa"), inputs().join("snucl.fna"));
     let nquery = inputs().join("qnucl_valid.fna");
+    let scratch = TempDir(temp_dir("rl"));
     let pquery = {
         // qprot_bad.faa has a bad third record: use the first two
-        let valid = temp_dir("rl").join("qprot_valid.faa");
+        let valid = scratch.0.join("qprot_valid.faa");
         let text = fs::read_to_string(&pquery).unwrap();
         fs::write(&valid, text.split(">q3").next().unwrap()).unwrap();
         valid
@@ -190,11 +200,11 @@ fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_and_tblastx() {
     }
 }
 
-/// A receiver of side files that keeps them in memory (`SideFileReceiver`).
+/// A receiver of side files that keeps them in memory (`report::run_files::FileReceiver`).
 #[derive(Default)]
 struct Received(std::sync::Mutex<Vec<(String, Vec<u8>)>>);
 
-impl crate::report::blast_xml2::SideFileReceiver for Received {
+impl crate::report::run_files::FileReceiver for Received {
     fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
         self.0
             .lock()

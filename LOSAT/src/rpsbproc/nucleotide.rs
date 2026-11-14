@@ -621,7 +621,7 @@ fn translated_residue(frame: &Frame, curr: i64) -> Result<u8, PrintError> {
 /// `print_site`): `xres + COORDSBASE` in `int`, `xres + codonEnd + COORDSBASE` (minus strand
 /// `xres - codonEnd + COORDSBASE`) in `unsigned int`. The `int` arithmetic that overflows (`pr -
 /// 1` of `MinusPr2PlusNA` at `INT_MIN`, `xres + 1` at `INT_MAX`; undefined) is computed as its
-/// value (`frames::minus_pr_to_plus_na`, `printed_position`; PD-LOSAT-NCBI-DEFECTS exception 11).
+/// value (`frames::minus_pr_to_plus_na`, `printed_position`; PD-LOSAT-NCBI-DEFECTS exception 12).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:949,1456-1457,1631-1633
 // ```c++
 // 	static constexpr const SeqLen_t codonEnd = READINGFRAME::RF_SIZE - 1;
@@ -735,7 +735,7 @@ fn print_motifs(
 /// `GetLeft() + COORDSBASE` in `int`, `GetRight() + codonEnd + COORDSBASE` (minus strand
 /// `- codonEnd`) in `unsigned int`, after `Pr2NaConvert` of the set (not empty: `mostly_mapped`).
 /// The `int` arithmetic that overflows (`domains::pr2na_ends`,
-/// and `+ 1` at `INT_MAX`; undefined) is computed as its value (PD-LOSAT-NCBI-DEFECTS exception 11).
+/// and `+ 1` at `INT_MAX`; undefined) is computed as its value (PD-LOSAT-NCBI-DEFECTS exception 12).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1746-1747,1788-1789
 // ```c++
 // 								iterM->iterAlignRec->pAlign->Pr2NaConvert(featsegs);

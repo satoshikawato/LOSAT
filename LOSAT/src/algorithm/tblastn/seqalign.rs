@@ -115,18 +115,18 @@ pub(super) fn query_records_of<'a>(
         if list.hsps.hsps.is_empty() {
             continue;
         }
-        let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
+        let s_idx = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
         let subject = subjects.len() as u32;
         subjects.push(SubjectRecord {
-            id: match (shown.parsed_subject(oid), shown.ordinal(oid)) {
+            id: match (shown.parsed_subject(s_idx), shown.oid(s_idx)) {
                 (Some(parsed), _) => SeqId::Db(parsed.alignment_id()),
-                (None, Some(ordinal)) => SeqId::BlOrdId(ordinal),
-                (None, None) => SeqId::Local(&subject_records[oid].local_id),
+                (None, Some(db_oid)) => SeqId::BlOrdId(db_oid),
+                (None, None) => SeqId::Local(&subject_records[s_idx].local_id),
             },
-            searched_length: i32::try_from(subject_letters.length(oid))?,
+            searched_length: i32::try_from(subject_letters.length(s_idx))?,
             // A database's sequences have no subject remap (`RunRecord::remaps_subjects`).
-            offset: i32::try_from(ranges.subjects.offset(oid))?,
-            use_this_seqid: crate::report::db_subject::use_this_seqid(shown.parsed_subject(oid)),
+            offset: i32::try_from(ranges.subjects.offset(s_idx))?,
+            use_this_seqid: crate::report::db_subject::use_this_seqid(shown.parsed_subject(s_idx)),
         });
         for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
             let hsp = &linked.hsp;

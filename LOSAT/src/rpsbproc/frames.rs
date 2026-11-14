@@ -21,7 +21,7 @@
 //! functions below follow C++'s conversions: an expression with an `unsigned int` operand is
 //! computed modulo 2^32 and stored back in an `int` (two's complement in NCBI's build). A
 //! position argument is an `i64`: an `int` that NCBI's arithmetic took past its range holds its
-//! mathematical value (PD-LOSAT-NCBI-DEFECTS exception 11), and its conversion to `unsigned int`
+//! mathematical value (PD-LOSAT-NCBI-DEFECTS exception 12), and its conversion to `unsigned int`
 //! is that value modulo 2^32.
 
 /// `READINGFRAME::RF_SIZE`.
@@ -53,7 +53,7 @@ pub(crate) fn plus_pr_to_plus_na(pr: i64, rfidx: u32) -> i32 {
 
 /// `MinusPr2PlusNA`: the plus-strand position of the first base of the codon of residue `pr`
 /// of a minus-strand frame. `pr - 1` is `int` arithmetic, which overflows at `INT_MIN`
-/// (undefined in C++): it is computed as its value (PD-LOSAT-NCBI-DEFECTS exception 11), whose
+/// (undefined in C++): it is computed as its value (PD-LOSAT-NCBI-DEFECTS exception 12), whose
 /// product with `RF_SIZE` converts it to `unsigned int` (modulo 2^32).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:230-237
 // ```c++

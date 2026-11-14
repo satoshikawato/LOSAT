@@ -38,6 +38,7 @@ pub use cutoffs::calculate_link_hsp_cutoffs_ncbi;
 // ```
 // Re-export main linking functions
 pub use linking::apply_sum_stats_even_gap_linking_with_parallel;
+pub(crate) use linking::link_one_hit_with_int4_ends;
 
 // The in-place HSP list path
 // (tblastx/x_hsp_inplace.rs, a child module of `linking`). `ungapped_hit_sort.rs` calls its sort

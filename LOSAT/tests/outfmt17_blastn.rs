@@ -17,26 +17,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+mod temp_support;
+use temp_support::{home_and_worker_log, unique_dir, Finished, RunFiles};
+
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/outfmt17")
 }
 
-fn temp_dir(stem: &str) -> PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system time before Unix epoch")
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!(
-        "losat_outfmt17_{stem}_{}_{}",
-        std::process::id(),
-        nanos
-    ));
-    fs::create_dir_all(&dir).expect("temp dir");
-    dir
-}
-
-/// LOSAT with no `LOSAT_*`, `NCBI*` or `BLAST*` variable of the caller, an empty home, and `env`.
-fn command(env: &[(&str, &str)]) -> Command {
+/// LOSAT with no `LOSAT_*`, `NCBI*` or `BLAST*` variable of the caller, an empty home, and `env`;
+/// with the home and the worker log, which are removed when the returned files are dropped (the
+/// log is kept when the test panics).
+fn command(env: &[(&str, &str)]) -> (Command, RunFiles) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -47,23 +38,20 @@ fn command(env: &[(&str, &str)]) -> Command {
     for name in ["BATCH_SIZE", "CHUNK_SIZE", "BLASTDB"] {
         command.env_remove(name);
     }
-    let home = std::env::temp_dir().join("losat_outfmt17_home");
-    fs::create_dir_all(&home).expect("empty home");
-    command.env("HOME", &home).env("USERPROFILE", &home);
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_outfmt17_worker.log"),
-    );
+    let files = home_and_worker_log(&mut command, "losat_outfmt17");
     command.envs(env.iter().copied());
-    command
+    (command, files)
 }
 
-fn run_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
-    command(env)
+/// A run of LOSAT: its `Output`, which stays with the run's files until the caller drops it.
+fn run_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Finished<Output> {
+    let (mut command, files) = command(env);
+    let output = command
         .current_dir(dir)
         .args(args)
         .output()
-        .expect("run LOSAT")
+        .expect("run LOSAT");
+    Finished::new(output, files)
 }
 
 /// The SAM document without the CL tag of its @PG line: the bytes from the `\tCL:` that follows
@@ -386,7 +374,7 @@ fn a_header_file_that_cannot_be_read_writes_nothing() {
 #[test]
 fn an_empty_query_file_writes_nothing() {
     let dir = fixtures();
-    let scratch = temp_dir("empty");
+    let scratch = unique_dir("losat_outfmt17_empty");
     let empty = scratch.join("empty.fna");
     fs::write(&empty, b"").unwrap();
     for format in ["17", "17 SQ SR"] {
@@ -435,7 +423,7 @@ fn an_empty_query_file_writes_nothing() {
 #[test]
 fn a_file_sink_holds_the_document_of_standard_output() {
     let dir = fixtures();
-    let scratch = temp_dir("out");
+    let scratch = unique_dir("losat_outfmt17_out");
     for (query, extra, env, rc) in [
         ("q_multi3.fna", &[][..], BATCHES, 0),
         ("qnucl_bad.fna", &[][..], BATCHES, 1),

@@ -30,7 +30,7 @@
 //! and the input file is not looked at), step 6 prints the message, and step 7 still posts the
 //! "No sequences matched any of the masks provided." message when a mask list with masks was
 //! read before the failure (`BuildDatabase::mask_data_source_mut` is set). A file that ends where
-//! `more TRUE` announced a continuation ([`MaskDataError::EofInContinuation`]) is such a failure
+//! `more TRUE` announced a continuation ([`MaskFileError::EofInContinuation`]) is such a failure
 //! with no message and exit status 0: makeblastdb leaves without a database and without an error
 //! (`CATCH_ALL` ignores a `CIOException` that is not a flush failure).
 //!
@@ -152,8 +152,8 @@ impl MaskDataError {
     ///   algorithm id ("losat makeblastdb: ...", status 1).
     /// * [`MaskFileError::Malformed`]: a file that NCBI's serial reader refuses. NCBI ends with
     ///   status 255 and "Error: NCBI C++ Exception: ..." (a `CSerialException`, whose text names
-    ///   the directory of NCBI's build and is not reproduced); LOSAT prints "Error: mask data in
-    ///   '<file>': <its own text>" with status 255. NCBI's `std::bad_alloc` for a string whose
+    ///   the directory of NCBI's build and is not reproduced); LOSAT prints `Error: mask data in
+    ///   '<file>': <its own text>` with status 255. NCBI's `std::bad_alloc` for a string whose
     ///   length cannot be allocated (status 4, "BLAST ran out of memory") depends on the memory
     ///   of the host and is not told apart.
     /// * [`MaskFileError::Unsupported`]: NCBI reads the file and LOSAT does not

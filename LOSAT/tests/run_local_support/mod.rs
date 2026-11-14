@@ -475,3 +475,23 @@ fn alignment_span(section: &str, label: &str) -> (usize, usize) {
         .expect("last coordinate");
     (first, last)
 }
+
+/// The build tree that NCBI's reports name: that of the official Linux x64 release of BLAST+
+/// 2.17.0 (`ncbi_exception::NCBI_BUILD_ROOT` in the crate).
+pub const NCBI_BUILD_ROOT: &str = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
+
+/// NCBI's report of the `CStringException` that `NStr::StringToInt` (flags 0) throws for `value`
+/// at `line` of ncbistr.cpp and position `pos`, as `CATCH_ALL` writes it (`Error: ` and `what()`,
+/// exit status 255; blast_app_util.hpp:248-251): line 640 is the `int` range check of
+/// `StringToInt`, 852 the overflow of `StringToInt8`, 861 no digit and 870 a byte after the
+/// digits.
+pub fn string_to_int_exception(value: &str, line: u32, pos: usize) -> String {
+    let (function, kind) = match line {
+        640 => ("StringToInt", "int, overflow"),
+        852 => ("StringToInt8", "Int8, overflow"),
+        _ => ("StringToInt8", "Int8"),
+    };
+    format!(
+        "Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/corelib/ncbistr.cpp\", line {line}: Error: (CStringException::eConvert) ncbi::NStr::{function}() - Cannot convert string '{value}' to {kind} (m_Pos = {pos})\n\n"
+    )
+}

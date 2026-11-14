@@ -31,6 +31,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod temp_support;
+use temp_support::TempPath;
+
 const OFF: (&str, &str) = ("LOSAT_X_BXUNGAPSENT", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_BXUNGAPSENTSHADOW", "1");
 const DIRECT: (&str, &str) = ("LOSAT_X_BXDIAG", "0");
@@ -100,7 +103,8 @@ impl Inputs {
         std::fs::write(&query, bases("AP027131.fasta", 30_000)).unwrap();
         std::fs::write(&subject, head("AP027133.faa", 150)).unwrap();
         let db = dir.join("db");
-        let made = losat(&[])
+        let (mut command, _log) = losat(&[]);
+        let made = command
             .arg("makeblastdb")
             .arg("-in")
             .arg(&subject)
@@ -132,7 +136,7 @@ impl Drop for Inputs {
 /// names a file of its own: a binary built with the `blastx-worker-probe` feature (`cargo test
 /// --all-features`, as in CI) needs that file name as soon as a search has more than one thread,
 /// and it selects nothing.
-fn losat(env: &[(&str, &str)]) -> Command {
+fn losat(env: &[(&str, &str)]) -> (Command, TempPath) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -145,13 +149,16 @@ fn losat(env: &[(&str, &str)]) -> Command {
             command.env_remove(name);
         }
     }
+    let log = TempPath::keep_on_failure(temp_path("worker.log"));
     command
-        .env("LOSAT_BLASTX_WORKER_LOG", temp_path("worker.log"))
+        .env("LOSAT_BLASTX_WORKER_LOG", &log)
         .envs(env.iter().copied());
-    command
+    (command, log)
 }
 
 struct Run {
+    /// The worker log of the search: kept when the test panics, removed with the run otherwise.
+    _log: TempPath,
     stdout: Vec<u8>,
     stderr: String,
     code: Option<i32>,
@@ -190,12 +197,14 @@ impl Run {
 }
 
 fn blastx(args: &[&str], env: &[(&str, &str)]) -> Run {
-    let output = losat(env)
+    let (mut command, log) = losat(env);
+    let output = command
         .arg("blastx")
         .args(args)
         .output()
         .expect("run LOSAT");
     Run {
+        _log: log,
         stdout: output.stdout,
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         code: output.status.code(),
@@ -289,6 +298,71 @@ fn reports_do_not_depend_on_the_sentinel_extension() {
                         run.shadow("compared"),
                         None,
                         "{run_name} printed a shadow line"
+                    );
+                }
+                let _ = std::fs::remove_dir_all(&reach);
+            }
+        }
+    }
+}
+
+/// Word sizes 2 and 4 (item SC9b-1 of line NP) take the path as word size 3 does: the same report
+/// as `=0`, in the fused and the direct loop, BLOSUM62 and another matrix, `blastx-fast`
+/// and `-ungapped`; the shadow compares extensions and records the switch's new side.
+#[test]
+fn word_sizes_2_and_4_take_the_path() {
+    let inputs = Inputs::new();
+    let query = inputs.query.to_str().unwrap();
+    let subject = inputs.subject.to_str().unwrap();
+    let fused_shadow = [SHADOW, FUSED[0], FUSED[1]];
+    for word in ["2", "4"] {
+        for extra in [
+            &[][..],
+            &["-matrix", "PAM30"][..],
+            &["-task", "blastx-fast"][..],
+            &["-ungapped", "-comp_based_stats", "0"][..],
+        ] {
+            let mut args = vec![
+                "-query",
+                query,
+                "-subject",
+                subject,
+                "-query_gencode",
+                "4",
+                "-outfmt",
+                "6",
+                "-evalue",
+                "10",
+                "-word_size",
+                word,
+            ];
+            args.extend_from_slice(extra);
+            let off = blastx(&args, &[OFF]);
+            assert_eq!(off.code, Some(0), "w{word} {extra:?}: {}", off.stderr);
+            assert!(!off.stdout.is_empty(), "w{word} {extra:?}: no hits");
+            let arms: [(&str, &[(&str, &str)]); 3] = [
+                ("default", &[]),
+                ("shadow", &[SHADOW]),
+                ("shadow fused", &fused_shadow),
+            ];
+            for (label, env) in arms {
+                let (run, reach) = blastx_reach(&args, env);
+                let run_name = format!("w{word} {extra:?} {label}");
+                assert_eq!(run.code, Some(0), "{run_name}: {}", run.stderr);
+                assert!(
+                    run.stdout == off.stdout,
+                    "{run_name}: report differs from =0"
+                );
+                assert_eq!(run.messages(), off.messages(), "{run_name}");
+                assert_eq!(
+                    reached(&reach, "LOSAT_X_BXUNGAPSENT"),
+                    (true, false),
+                    "{run_name}"
+                );
+                if label != "default" {
+                    assert!(
+                        run.shadow("compared").expect("shadow line") > 0,
+                        "{run_name}"
                     );
                 }
                 let _ = std::fs::remove_dir_all(&reach);

@@ -56,6 +56,18 @@ pub(super) struct TblastnDatabase {
 }
 
 impl TblastnDatabase {
+    /// LOSAT's refusal of mixed accession tables (`shared::check_accession_tables`), with the
+    /// program's other limits.
+    pub(super) fn check_accession_tables(&self) -> Result<()> {
+        shared::check_accession_tables(&self.db, PROGRAM)
+    }
+
+    /// The OIDs of the database's ordinal ids, which name the reported sequences without
+    /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
+    pub(super) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
+        self.db.oid_map()
+    }
+
     /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
     pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
         self.db.set_reports_show_gis(show_gis);
@@ -91,7 +103,7 @@ impl TblastnDatabase {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed_seqids =
-            shared::restrict_database(&mut db, name, list, diagnostics, settings, PROGRAM)?;
+            shared::restrict_database(&mut db, name, list, None, diagnostics, settings, PROGRAM)?;
         let total = db.total_length();
         usize::try_from(total)
             .ok()
@@ -160,6 +172,12 @@ impl TblastnDatabase {
     /// file error` (`SeqDb::first_oid_read_fails`: no OID, and statistics that read OID 0).
     pub(super) fn first_oid_read_fails(&self) -> bool {
         self.db.first_oid_read_fails()
+    }
+
+    /// What a PSSM search's first read of the database meets (`shared::PsiSearchReadFailure`:
+    /// NCBI's `CPsiBlast` gives SeqDB's own error).
+    pub(super) fn pssm_search_read_failure(&self) -> Option<shared::PsiSearchReadFailure> {
+        shared::PsiSearchReadFailure::of(&self.db)
     }
 
     /// LOSAT's refusal of statistics of 0 sequences for a search without the Gumbel block
@@ -564,14 +582,33 @@ pub(super) fn reported_subjects(
     // Seq-ids that outfmt 0 shows.
     let mut taxdb_found: Option<bool> = None;
     for (rank, &ordinal) in ordinals.iter().enumerate() {
-        let header = titles
-            .get(&ordinal)
-            .with_context(|| format!("database sequence {ordinal} has no title read"))?;
+        let header = titles.get(&ordinal).with_context(|| {
+            format!(
+                "database sequence {} has no title read",
+                database.db.oid(ordinal)
+            )
+        })?;
         let title = match header {
             ReportedHeader::Stored(stored) => {
-                shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                shared::check_reported_title(
+                    stored.replaced_bytes,
+                    || database.db.oid(ordinal),
+                    PROGRAM,
+                )?;
                 if shown.pairwise {
-                    shared::check_shown_stored_title(stored.taxonomy_title, ordinal, PROGRAM)?;
+                    shared::check_shown_stored_title(
+                        stored.taxonomy_title,
+                        || database.db.oid(ordinal),
+                        PROGRAM,
+                    )?;
+                }
+                if shown.tabular {
+                    shared::check_tabular_stored_title(
+                        stored.taxonomy_title,
+                        shown.words,
+                        || database.db.oid(ordinal),
+                        PROGRAM,
+                    )?;
                 }
                 stored.title.clone()
             }
@@ -597,7 +634,7 @@ pub(super) fn reported_subjects(
         records.push(FastaRecord {
             // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
             // (line DI-8).
-            local_id: format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
+            local_id: database.db.oid(ordinal).fasta_id(),
             title,
             sequence: Vec::new(),
             warnings: Vec::new(),
@@ -609,9 +646,12 @@ pub(super) fn reported_subjects(
             let SubjectLetters::Packed(stores) = stores else {
                 unreachable!("a -db search holds its sequences")
             };
-            stores
-                .get(ordinal as usize)
-                .with_context(|| format!("database sequence {ordinal} was not read"))
+            stores.get(ordinal as usize).with_context(|| {
+                format!(
+                    "database sequence {} was not read",
+                    database.db.oid(ordinal)
+                )
+            })
         };
         lengths.push(if letters {
             let store = match stores {
@@ -640,6 +680,7 @@ pub(super) fn reported_subjects(
                         let rank = usize::try_from(list.oid).ok()?;
                         Some((ordinals[rank], parsed[rank].as_deref()?))
                     }),
+                database.db.oid_map(),
                 PROGRAM,
             )?;
         }
@@ -658,10 +699,15 @@ impl ReportedSubjects {
     /// sequence, by rank (`algorithm::common::database::tabular_subject_ids`). A sequence whose
     /// id LOSAT cannot write as NCBI is an error before any format is written where a tabular
     /// report `reads` the subject, else its id is empty.
-    pub(super) fn tabular_subject_ids(&self, reads: bool) -> Result<Vec<Arc<[u8]>>> {
+    pub(super) fn tabular_subject_ids(
+        &self,
+        oids: crate::seqdb::OidMap<'_>,
+        reads: bool,
+    ) -> Result<Vec<Arc<[u8]>>> {
         shared::tabular_subject_ids(
             &self.records,
             &self.ordinals,
+            oids,
             &self.parsed,
             false,
             reads,
@@ -716,7 +762,7 @@ mod tests {
             db: {
                 let mut db =
                     SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
-                db.read_name_records(path.to_str().unwrap()).unwrap();
+                db.read_name_records(path.to_str().unwrap(), false).unwrap();
                 db
             },
             name: name.to_string(),

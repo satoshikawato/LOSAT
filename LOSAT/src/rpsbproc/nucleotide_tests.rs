@@ -1,7 +1,7 @@
 //! The refusals of a nucleotide query's SITES and MOTIFS lines (NCBI's `TranslateAll` of fewer
 //! than 3 bases or reverse-complement letters, a site residue outside its frame's translation),
 //! and the codon and motif positions whose `int` arithmetic overflows (computed as their values,
-//! PD-LOSAT-NCBI-DEFECTS exception 11).
+//! PD-LOSAT-NCBI-DEFECTS exception 12).
 
 use super::*;
 use crate::rpsbproc::archive::{Align, Segs, StdLoc, StdPair};
@@ -100,7 +100,7 @@ fn residues_outside_the_translation() {
 // rpsbproc_main.cpp:949,1456-1457,1631-1633 (quoted at `codon`): the plus-strand codon of a
 // residue, `xres + 1` in `int` and `xres +/- 2 + 1` in `unsigned int` (wraps). `xres + 1` at
 // `INT_MAX` and `MinusPr2PlusNA`'s `pr - 1` at `INT_MIN` overflow `int` (undefined): computed as
-// their values (PD-LOSAT-NCBI-DEFECTS exception 11), which equal the codon of the residue next to
+// their values (PD-LOSAT-NCBI-DEFECTS exception 12), which equal the codon of the residue next to
 // it, which does not overflow, moved by 3 bases.
 #[test]
 fn codons_and_their_overflow() {
@@ -133,7 +133,7 @@ fn codons_and_their_overflow() {
 // rpsbproc_main.cpp:1746-1747,1788-1789 (quoted at `motif_ends`): `GetLeft() + 1` in `int` and
 // `GetRight() +/- 2 + 1` in `unsigned int` after `Pr2NaConvert`. A set past `int`'s range, a
 // minus-strand residue at `INT_MIN` (`domains::pr2na_ends`) and `GetLeft() + 1` at `INT_MAX`
-// overflow `int` (undefined): computed as their values (PD-LOSAT-NCBI-DEFECTS exception 11;
+// overflow `int` (undefined): computed as their values (PD-LOSAT-NCBI-DEFECTS exception 12;
 // PS16-Q1 oracle `ntmotifmax` and its nearby input, the motif one residue lower).
 #[test]
 fn motif_ends_and_their_overflow() {

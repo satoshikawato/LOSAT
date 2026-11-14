@@ -335,8 +335,7 @@ fn x_shadow_check(kept: &[(usize, SubjectComputation)], failed_at: Option<usize>
                 && ca.raw == cb.raw
                 && ca.purged == cb.purged
                 && ca.containment == cb.containment
-                && ca.prepared_link.map(|(c, f)| (c, f.to_bits()))
-                    == cb.prepared_link.map(|(c, f)| (c, f.to_bits())),
+                && ca.prepared_link == cb.prepared_link,
             "LOSAT_X_BXSUBJFLOWSHADOW: subject {oa} differs"
         );
     }

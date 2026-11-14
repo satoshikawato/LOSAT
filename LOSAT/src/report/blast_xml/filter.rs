@@ -51,8 +51,10 @@ pub fn filter_string(
             text.push_str("L;");
         } else {
             text.push_str(&truncated(format!(
-                "S {} {:.1} {:.1};",
-                seg.0, seg.1, seg.2
+                "S {} {} {};",
+                seg.0,
+                glibc_fixed1(seg.1),
+                glibc_fixed1(seg.2)
             )));
         }
     }
@@ -74,6 +76,17 @@ pub fn filter_string(
         text.push('F');
     }
     text.into_bytes()
+}
+
+/// glibc's `%1.1f`: one decimal, the infinities as `inf` and `-inf`, NaN as `nan` or `-nan` by
+/// its sign bit (Rust prints NaN as `NaN`). NCBI 2.17.0's blastp `-seg "12 2.2 -nan"` writes
+/// `S 12 2.2 -nan;`, `-seg "12 +nan(1) 2.5"` `S 12 nan 2.5;` (sw8/nfix/probe/seg2).
+fn glibc_fixed1(value: f64) -> String {
+    match value {
+        nan if nan.is_nan() && nan.is_sign_negative() => "-nan".into(),
+        nan if nan.is_nan() => "nan".into(),
+        value => format!("{value:.1}"),
+    }
 }
 
 /// `snprintf(buffer, 24, ...)`: at most 23 bytes.
@@ -173,6 +186,21 @@ mod tests {
             s(filter_string(None, Some((10, 0.45, 0.125)), None, false)),
             "S 10 0.5 0.1;"
         );
+    }
+
+    // NCBI 2.17.0 blastp `-outfmt 5` with `-seg` cuts that are not finite (sw8/nfix/probe/seg2).
+    #[test]
+    fn infinite_and_nan_seg_cutoffs_are_printed_as_glibc_prints_them() {
+        let seg =
+            |locut: f64, hicut: f64| s(filter_string(None, Some((12, locut, hicut)), None, false));
+        assert_eq!(seg(f64::INFINITY, 2.5), "S 12 inf 2.5;");
+        assert_eq!(seg(2.2, -f64::NAN), "S 12 2.2 -nan;");
+        assert_eq!(
+            seg(f64::from_bits(0x7ff8_0000_0000_0001), 2.5),
+            "S 12 nan 2.5;"
+        );
+        assert_eq!(seg(f64::NEG_INFINITY, 2.5), "S 12 -inf 2.5;");
+        assert_eq!(seg(-f64::NAN, -f64::NAN), "S 12 -nan -nan;");
     }
 
     #[test]

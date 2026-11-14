@@ -37,7 +37,7 @@ use super::domains::SubjectStarts;
 /// the `int` sums of the set algebra (`from - 1`, `to + 1`, the total residues, the mapping's
 /// `diff` and `ori_from` sums) do not overflow where NCBI's do (positions near 2^31 of a crafted
 /// alignment; undefined in C++): they are computed as their values and kept, under
-/// PD-LOSAT-NCBI-DEFECTS exception 11 (the Owner's rule of 2026-10-10 and Q1 = B of 2026-11-14).
+/// PD-LOSAT-NCBI-DEFECTS exception 12 (the Owner's rule of 2026-10-10 and Q1 = B of 2026-11-14).
 /// The positions that come in are `int`s and the `unsigned int` arithmetic is done modulo 2^32,
 /// so every result NCBI defines is the same.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

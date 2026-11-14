@@ -204,7 +204,7 @@ pub(super) fn prepare(
     query_batch_skipped: &[bool],
     scoring: LocalStageDScoring,
     matrix_name: &str,
-    seg: Option<&SegParams>,
+    seg_filter: Option<(i32, f64, f64)>,
     ranges: &ReportRanges<'_>,
     xml2: bool,
     only_xml2: bool,
@@ -273,37 +273,37 @@ pub(super) fn prepare(
         if list.hsps.hsps.is_empty() {
             continue;
         }
-        let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
-        if subject_names[oid].is_some() {
+        let s_idx = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
+        if subject_names[s_idx].is_some() {
             continue;
         }
         let record = subject_records
-            .get(oid)
+            .get(s_idx)
             .context("TBLASTN subject OID out of range")?;
-        subject_names[oid] = Some(match shown.ordinal(oid) {
+        subject_names[s_idx] = Some(match shown.oid(s_idx) {
             None => match record.believed() {
                 Some(ids) => SubjectNames::of_believed(ids, record.title(), false),
                 None => SubjectNames::of_record(record.local_id.as_bytes(), record.title(), false),
             }
             .map_err(|refusal| refusal.error(PROGRAM, "a subject title"))?,
             // The taxid is shown by XML2 alone (`taxa` is empty for the other formats).
-            Some(ordinal) => match shown.parsed_subject(oid) {
+            Some(db_oid) => match shown.parsed_subject(s_idx) {
                 Some(parsed) => SubjectNames::of_parsed(
                     parsed,
-                    taxa.parsed_taxonomy.get(oid).map_or(&[], Vec::as_slice),
+                    taxa.parsed_taxonomy.get(s_idx).map_or(&[], Vec::as_slice),
                 ),
                 None => SubjectNames::of_database_sequence(
-                    ordinal,
+                    db_oid,
                     record.title(),
-                    taxa.taxids.get(oid).copied().unwrap_or(0),
-                    taxa.taxonomy.get(oid).cloned().unwrap_or_default(),
+                    taxa.taxids.get(s_idx).copied().unwrap_or(0),
+                    taxa.taxonomy.get(s_idx).cloned().unwrap_or_default(),
                 ),
             }
             .map_err(|refusal| refusal.error(PROGRAM, "a database title"))?,
         });
         // The whole record (`-subject_loc` searches part of it).
-        subject_lengths[oid] =
-            i32::try_from(ranges.subjects.length(oid, subject_letters.length(oid)))?;
+        subject_lengths[s_idx] =
+            i32::try_from(ranges.subjects.length(s_idx, subject_letters.length(s_idx)))?;
     }
     let (db_name, db_num, db_len) = match shown {
         ShownSubjects::Fasta { .. } => (String::new(), 0, 0),
@@ -329,12 +329,20 @@ pub(super) fn prepare(
     Ok(PreparedXml {
         values,
         positives,
-        filter: filter::filter_string(
-            None,
-            seg.map(|seg| (seg.window as i32, seg.locut, seg.hicut)),
-            None,
-            values.soft_masking,
-        ),
+        // NCBI prints the filtering options (`BlastFilteringOptionsToString` of `SSegOptions`), as
+        // blastp, blastx and tblastx do, not the parameters `SegParametersNewAa` makes of them.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1146-1154
+        // ```c
+        //         sparamsp = SegParametersNewAa();
+        //         sparamsp->overlaps = TRUE;
+        //         if (seg_options->window > 0)
+        //             sparamsp->window = seg_options->window;
+        //         if (seg_options->locut > 0.0)
+        //             sparamsp->locut = seg_options->locut;
+        //         if (seg_options->hicut > 0.0)
+        //             sparamsp->hicut = seg_options->hicut;
+        // ```
+        filter: filter::filter_string(None, seg_filter, None, values.soft_masking),
         matrix_name: matrix_name.to_string(),
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,

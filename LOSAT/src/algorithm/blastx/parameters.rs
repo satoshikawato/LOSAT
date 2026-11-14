@@ -656,19 +656,7 @@ pub fn subject_parameters(
     )?;
     let gapped = gapped_karlin(options);
     let gumbel = gumbel_block(options, db_length);
-    let decay = if options.sum_stats
-        && (!options.gapped
-            || options.max_intron_length == 0
-            || (options.max_intron_length - 2) / 3 > 0)
-    {
-        if options.gapped {
-            0.1
-        } else {
-            0.5
-        }
-    } else {
-        0.0
-    };
+    let decay = super::linking::link_parameters(options).map_or(0.0, |link| link.gap_decay_rate);
     // The average context length is that of the query batch (a reader batch searched in several
     // units has one: `reader_batch.rs`, c++/src/algo/blast/core/blast_parameters.c:954-957).
     let avg_q = i32::try_from(batch.batch_concatenated_length() / batch.batch_context_count())?;

@@ -24,7 +24,7 @@ use super::prosite::{MapEnd, MatchError, ProSite};
 /// A mapped residue (`TSeg_base::TResiduePos`): its position on the query (`curr`) and the
 /// position on the model it came from (`ori`). NCBI's are `SeqPos_t` (`int`); LOSAT's `i64`s hold
 /// the values of NCBI's `int` arithmetic past `int`'s range (`domains::translated_pos_map`,
-/// PD-LOSAT-NCBI-DEFECTS exception 11).
+/// PD-LOSAT-NCBI-DEFECTS exception 12).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ResiduePos {
     pub(crate) curr: i64,

@@ -27,6 +27,7 @@ export const ABI_EXPORTS: readonly string[] = Object.freeze([
   'losat_web2_last_error_ptr',
   'losat_web2_last_error_len',
   'losat_web2_describe',
+  'losat_web2_start',
   'losat_web2_validate',
   'losat_web2_register',
   'losat_web2_release',

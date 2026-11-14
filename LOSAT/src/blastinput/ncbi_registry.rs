@@ -143,9 +143,10 @@ pub(crate) fn last_value<'a>(
 /// probe `nul`: the line ends there, and no empty line follows). The post is a `Critical` of
 /// `Corelib_Reg` (110, error_codes.hpp:53), which the old post format writes as
 /// `Critical: (110.6) ` before the text, and ends with a line feed (what() ends with one too,
-/// so an empty line follows).
-pub(crate) fn syntax_error_notice(error: &NcbiException) -> String {
-    syntax_error_post(error, "")
+/// so an empty line follows). The exception's place names the build tree of NCBI's `program`
+/// (`ncbi_exception::build_root`: rpsbproc is built apart from BLAST+).
+pub(crate) fn syntax_error_notice(error: &NcbiException, program: &str) -> String {
+    syntax_error_post(error, program, "")
 }
 
 /// `syntax_error_notice` posted while `program` runs, after its application has set its
@@ -154,12 +155,12 @@ pub(crate) fn syntax_error_notice(error: &NcbiException) -> String {
 /// that of blastn's `-window_masker_taxid` (NCBI BLAST+ 2.17.0, 2026-11-12:
 /// `Critical: (110.6) [blastn] CNcbiRegistry: ...`, the rest as at the start).
 pub(crate) fn running_syntax_error_notice(error: &NcbiException, program: &str) -> String {
-    syntax_error_post(error, &format!("[{program}] "))
+    syntax_error_post(error, program, &format!("[{program}] "))
 }
 
-/// The post of `syntax_error_notice` with the diagnostics' `prefix`.
-fn syntax_error_post(error: &NcbiException, prefix: &str) -> String {
-    let what = error.what();
+/// The post of `syntax_error_notice` of `program` with the diagnostics' `prefix`.
+fn syntax_error_post(error: &NcbiException, program: &str, prefix: &str) -> String {
+    let what = error.what_in(crate::ncbi_exception::build_root(program));
     let what = what.split('\0').next().unwrap_or_default();
     format!(
         "Critical: (110.6) {prefix}CNcbiRegistry: Syntax error in system-wide configuration file: {what}\n"

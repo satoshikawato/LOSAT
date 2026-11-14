@@ -33,7 +33,7 @@
 //! (its chunks' calls stop after their preliminary stage and drop theirs when they return).
 //!
 //! Why the reports are the same. The tables are read only by the scan of the preliminary stage
-//! (`collect_prelim_hits_for_chunk`); the batch's values derived from them before the scan (the
+//! (`prelim_subject::prelim_chunk_hits`); the batch's values derived from them before the scan (the
 //! offset array size, the shape of the subject search) are plain numbers kept in their own
 //! variables. Dropping memory changes no value that the search computes. No floating-point
 //! operation is involved.

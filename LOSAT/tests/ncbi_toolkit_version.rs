@@ -243,6 +243,82 @@ fn the_full_versions_come_before_the_configuration() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// The library's tools (`api::run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`,
+/// `run_segmasker`, `run_convert2blastmask`) run NCBI's application start as the command line
+/// does: they print the versions to their output (line RG item E1w-2 for makeblastdb). The search
+/// programs of the library return reports, and refuse the words (`cli::version_word_refusal`).
+/// The library runs are `examples/library_command_line`, in the command line's environment.
+#[test]
+fn the_library_s_tools_print_the_versions_as_the_command_line() {
+    let dir = scratch("library");
+    let example = crate::library_examples::example_binary("library_command_line");
+    let library = |program: &str, words: &[&str]| {
+        let mut command = Command::new(&example);
+        command
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("HOME", "/nonexistent")
+            .env("BLAST_USAGE_REPORT", "false")
+            .current_dir(&dir)
+            .arg(program)
+            .args(words)
+            .stdin(Stdio::null());
+        command.output().unwrap()
+    };
+    for (program, version, numbers, value_option) in PROGRAMS {
+        let tool = matches!(
+            program,
+            "makeblastdb" | "blastdbcmd" | "dustmasker" | "segmasker" | "convert2blastmask"
+        );
+        for word in [
+            "-version",
+            "-version-full",
+            "-version-full-xml",
+            "-version-full-json",
+        ] {
+            let text = expected(program, version, numbers, word);
+            for words in [
+                &[word][..],
+                &[value_option, word],
+                &["-dryrun", word],
+                &[word, "-conffile", "missing.ini"],
+                &["-logfile", "log.txt", word],
+            ] {
+                // The example takes the search programs' `-out` itself.
+                if !tool && words[0] == value_option {
+                    continue;
+                }
+                let output = library(program, words);
+                if tool {
+                    assert_eq!(
+                        (
+                            output.status.code(),
+                            String::from_utf8_lossy(&output.stdout).into_owned(),
+                            output.stderr.len()
+                        ),
+                        (Some(0), text.clone(), 0),
+                        "{program} {words:?}"
+                    );
+                } else if matches!(program, "rpsblast" | "rpstblastn" | "rpsbproc") {
+                    // Not in the library.
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    assert_eq!(output.status.code(), Some(1), "{program} {words:?}");
+                    assert!(
+                        stderr.contains(&format!(
+                            "the NCBI C++ Toolkit option {word} runs on the command line of LOSAT's {} only: the library API and the Web engine do not write NCBI's version text",
+                            program.to_ascii_uppercase()
+                        )),
+                        "{program} {words:?}: {stderr}"
+                    );
+                }
+            }
+        }
+        let _ = fs::remove_file(dir.join("log.txt"));
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
 // NCBI writes the version to `cout` and never checks it: a full disk drops it, exit status 0
 // (probes `vf_devfull`, `vx_devfull`, `ver_devfull`). rpsbproc's failed write of its version is
 // LOSAT's exception 9 (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES): exit status 4 with its message.

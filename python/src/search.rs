@@ -66,8 +66,19 @@ impl Loaded {
         (subject, subject_name): NamedSubject,
     ) -> Result<Self, api::Error> {
         let search = checked(program, argv)?;
-        let query_bytes = query.bytes(Role::Query)?;
         let database = subject.is_none();
+        // A dry run reads no record, as the command line's does not (`Search::dry_run`).
+        if search.dry_run() {
+            return Ok(Self {
+                search,
+                query: Vec::new(),
+                subject: Vec::new(),
+                query_name,
+                subject_name,
+                database,
+            });
+        }
+        let query_bytes = query.bytes(Role::Query)?;
         let subject_bytes = match &subject {
             Some(subject) => subject.bytes(Role::Subject)?,
             None => Cow::Borrowed(&[][..]),

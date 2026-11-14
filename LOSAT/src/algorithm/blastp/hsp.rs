@@ -652,7 +652,7 @@ pub(crate) fn link_hsp_list<H: LinkedHspValues>(
                 score: hsp.raw_score(),
             }
         },
-        &[context],
+        |_| context,
         subject_length,
         params,
         |hsp, linked| hsp.take_linked(linked),

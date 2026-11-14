@@ -509,7 +509,8 @@ fn x_merge_one_frame<R: XRecord>(
             Vec::new()
         } else {
             let exact = Vec::with_capacity(x_frame_capacity::<UngappedHit>(init_hsps.len()));
-            let mut hits = convert_init_hsps_unsorted(init_hsps, inp.contexts, inp.s_frames, exact);
+            let mut hits =
+                convert_init_hsps_unsorted::<false>(init_hsps, inp.contexts, inp.s_frames, exact);
             x_sort_k1_runs(&mut hits);
             hits
         };
@@ -522,7 +523,8 @@ fn x_merge_one_frame<R: XRecord>(
                 hits,
                 chunk.offset,
                 chunk.overlap,
-            );
+            )
+            .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED);
         }
     }
     KM_CHUNKS.fetch_add(chunks_merged, AtomicOrdering::Relaxed);

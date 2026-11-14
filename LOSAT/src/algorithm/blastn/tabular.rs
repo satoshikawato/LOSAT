@@ -130,26 +130,6 @@ pub(crate) fn write_tabular_prolog_warning(
     Ok(())
 }
 
-/// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search (`x_CheckTaxDB`'s
-/// `SeqDB_ResolveDbPath("taxdb.bti")`: the current directory, `BLASTDB` and the registry's
-/// `[BLAST] BLASTDB`, as a database is looked for, `seqdb::SearchPath`). A registry value that
-/// LOSAT does not read as NCBI is its refusal, as for `-db`.
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
-/// ```c++
-/// void CBlastTabularInfo::x_CheckTaxDB()
-/// {
-///    	if( x_IsFieldRequested(eSubjectSciNames) ||
-///     ...
-///    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
-///    		if(resolved.empty())
-/// ```
-pub(crate) fn subject_taxdb_found(
-    settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
-) -> Result<bool> {
-    crate::algorithm::common::database::subject_taxdb_found(settings, PROGRAM)
-}
-
 /// Writes the report of every query of `hit_lists` (indexed by query) to `writer`, each query's
 /// warnings (and the taxonomy database's warning of its formatter) before its lines, outfmt 20's
 /// header line first when `tab.prolog` and outfmt 7's last line after the last query when

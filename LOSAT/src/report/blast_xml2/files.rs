@@ -31,6 +31,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::framing::{SideFiles, Xml2Kind};
+use crate::report::run_files::FileReceiver;
 
 /// The characters `CDirEntry::SplitPath` takes as the end of the directory part: `/` on Unix;
 /// `:`, `/` and `\` on Windows.
@@ -209,15 +210,6 @@ impl SideFiles for FsSideFiles {
     }
 }
 
-/// The receiver of the side files of an outfmt 13 or 14 run that a caller without files takes
-/// in place of the files next to `-out` (LOSAT Web, `api::local_blast::OutputSink::Files`). No
-/// NCBI counterpart: NCBI writes the files (`FsSideFiles`).
-pub trait SideFileReceiver: Send + Sync {
-    /// The n-th side file, whole: `name` is the path that `FsSideFiles` would write it to for the
-    /// sink's `-out` (`SideFileSink::out`), `bytes` the report.
-    fn receive(&self, name: &[u8], bytes: &[u8]) -> io::Result<()>;
-}
-
 /// The side files of a run given to the caller's receiver, named as `FsSideFiles` names them for a
 /// `-out` of the caller's choosing; the master file lists them by the same rule
 /// (`FsSideFiles::listed`). A `-out` without a directory and without the extension `.xml` or
@@ -225,11 +217,11 @@ pub trait SideFileReceiver: Send + Sync {
 #[derive(Clone)]
 pub struct SideFileSink {
     out: PathBuf,
-    receiver: Arc<dyn SideFileReceiver>,
+    receiver: Arc<dyn FileReceiver>,
 }
 
 impl SideFileSink {
-    pub fn new(out: impl Into<PathBuf>, receiver: Arc<dyn SideFileReceiver>) -> Self {
+    pub fn new(out: impl Into<PathBuf>, receiver: Arc<dyn FileReceiver>) -> Self {
         Self {
             out: out.into(),
             receiver,
@@ -250,10 +242,10 @@ impl SideFileSink {
     }
 }
 
-/// `SideFiles` that hand each side file to a `SideFileReceiver` (`SideFileSink::side_files`).
+/// `SideFiles` that hand each side file to a `FileReceiver` (`SideFileSink::side_files`).
 pub struct ReceivedSideFiles {
     names: FsSideFiles,
-    receiver: Arc<dyn SideFileReceiver>,
+    receiver: Arc<dyn FileReceiver>,
 }
 
 impl SideFiles for ReceivedSideFiles {
@@ -284,7 +276,7 @@ impl SideFiles for ReceivedSideFiles {
 /// One side file for a receiver from `create`: the bytes are kept and handed over at the first
 /// flush, or when it is dropped without one.
 struct Received<'a> {
-    receiver: &'a dyn SideFileReceiver,
+    receiver: &'a dyn FileReceiver,
     name: Vec<u8>,
     bytes: Vec<u8>,
     delivered: bool,

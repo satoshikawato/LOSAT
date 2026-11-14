@@ -114,9 +114,9 @@ const COORDSBASE: i64 = 1;
 /// residues of the SITES and MOTIFS lines, the first base of a nucleotide query's codon and motif).
 /// NCBI's sum overflows at `INT_MAX` (undefined in C++; both 0.5.1 builds print -2147483648, PS16c
 /// review oracle `plusmax`): LOSAT adds in `i64`, so it prints 2147483648, as NCBI prints the
-/// position of a hit moved away from the limit (PD-LOSAT-NCBI-DEFECTS exception 11, the Owner's
+/// position of a hit moved away from the limit (PD-LOSAT-NCBI-DEFECTS exception 12, the Owner's
 /// rule of 2026-10-10 and Q1 = B of 2026-11-14). `position` holds an `int`'s value, past `int`'s
-/// range where NCBI's arithmetic took it there (exception 11 too).
+/// range where NCBI's arithmetic took it there (exception 12 too).
 fn printed_position(position: impl Into<i64>) -> i64 {
     position.into() + COORDSBASE
 }
@@ -2621,7 +2621,7 @@ mod tests {
     // COORDSBASE` of a hit that ends at 2^31 - 1 overflows `int` (both 0.5.1 builds print
     // -2147483648: PS16c review oracle `plusmax`); its value, 2^31, is what NCBI prints for the hit
     // moved 3 bases down plus 3 (PS16-Q1 oracle `ntplusmax` and its nearby input `ntplusmax3`;
-    // PD-LOSAT-NCBI-DEFECTS exception 11). The XML input's `INT_MIN - 1` prints `INT_MIN`.
+    // PD-LOSAT-NCBI-DEFECTS exception 12). The XML input's `INT_MIN - 1` prints `INT_MIN`.
     #[test]
     fn printed_positions_past_int() {
         assert_eq!(printed_position(i32::MAX), 2_147_483_648);

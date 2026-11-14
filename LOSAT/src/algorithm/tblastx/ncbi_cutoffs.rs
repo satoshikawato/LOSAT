@@ -20,10 +20,10 @@ const K_SMALL_FLOAT: f64 = 1.0e-297;
 /// #define CUTOFF_E_TBLASTX 1e-300
 pub const CUTOFF_E_TBLASTX: f64 = 1e-300;
 
-/// Default gap decay rate for sum statistics
+/// Default gap decay rate for sum statistics (`core::link_hsps` owns the constant)
 /// Reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:107
 /// #define BLAST_GAP_DECAY_RATE 0.5
-pub const BLAST_GAP_DECAY_RATE: f64 = 0.5;
+pub(crate) use crate::core::link_hsps::BLAST_GAP_DECAY_RATE;
 
 /// Calculate x_dropoff raw score from bit score using UNGAPPED Karlin params.
 ///

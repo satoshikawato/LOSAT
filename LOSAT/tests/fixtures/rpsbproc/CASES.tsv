@@ -404,3 +404,6 @@ x.h_ntmqfmin.rep	widened	-	data-with:nt	-i arch/x_h_n_mqfmin.xml -d nt -t both -
 x.h_ntmqfmin1.rep	compare	-	data-with:nt	-i arch/x_h_n_mqfmin1.xml -d nt -t both -m rep
 x.h_ntphfmin.rep	widened	-	data-with:nt	-i arch/x_h_n_phfmin.xml -d nt -t both -m rep
 x.h_ntphfmin1.rep	compare	-	data-with:nt	-i arch/x_h_n_phfmin1.xml -d nt -t both -m rep
+i_ncbirc_garbage	compare	-	ncbirc:garbage.ini	-i arch/one.asn -d data
+i_ncbirc_sec_dry	compare	-	ncbirc:sec.ini	-i arch/one.asn -d data -dryrun
+i_ncbirc_quote_log	compare	-	ncbirc:quote.ini	-i arch/one.asn -d data -logfile log.txt

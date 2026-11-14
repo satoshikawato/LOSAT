@@ -859,7 +859,7 @@ fn process_cd_query(
         }
         // (A NaN E-value or bit score, `NOT-A-NUMBER` in the text, is kept: `domains::calculate`
         // sorts the hits as NCBI's `std::sort` does and refuses only where that sort would read
-        // outside its vector; the DOMAINS line prints it `-nan`, `asn_text_reader::NCBI_NAN`.)
+        // outside its vector; the DOMAINS line prints it `-nan`, `ncbi_str::NCBI_NAN`.)
         let dom = match (dom, &align.segs) {
             (Some(mut dom), _) => {
                 dom.pssm_id = pssm_id;
@@ -883,7 +883,7 @@ fn process_cd_query(
         // oracle `plusmax`: both 0.5.1 builds print -2147483648), and so may the overlap sets of
         // `Calculate` that start from the range (`GetTotalResidues`' `to - from + 1`, the `+ 1`
         // of `Cross` and `Merge`): computed as their values (`printed_position`, `segset::Seg`;
-        // PD-LOSAT-NCBI-DEFECTS exception 11).
+        // PD-LOSAT-NCBI-DEFECTS exception 12).
         query.aligns.push(dom);
     }
     if !query.is_na {
@@ -1157,7 +1157,7 @@ mod tests {
     // id LOSAT does not look up. A kept hit whose range starts or ends at 2^31 - 1, whose
     // DOMAINS line overflows NCBI's `int` (PS16c review oracle `plusmax`, PS16-Q1 oracle
     // `ntplusmax` and its nearby input), is kept whatever the strand, with its range
-    // (PD-LOSAT-NCBI-DEFECTS exception 11). A hit whose PSSM-ID is 0 is dropped before it is
+    // (PD-LOSAT-NCBI-DEFECTS exception 12). A hit whose PSSM-ID is 0 is dropped before it is
     // classified or printed.
     #[test]
     fn refusals_of_translated_hits() {

@@ -8,7 +8,7 @@
 //! last line of standard error `Error: ... is not supported by LOSAT's rpsbproc...`, standard
 //! output cut at a line end) with the bytes of `refused/` (LOSAT's own; README.md); a `widened`
 //! case gives the bytes of `widened/`, LOSAT's own where NCBI's `int` coordinate arithmetic
-//! overflows (PD-LOSAT-NCBI-DEFECTS exception 11; each beside a `compare` case of its nearby
+//! overflows (PD-LOSAT-NCBI-DEFECTS exception 12; each beside a `compare` case of its nearby
 //! input, README.md). NCBI is not run here.
 
 use std::fs;
@@ -245,11 +245,11 @@ fn compare_rows(stem: &str, usage: &str, expected: &str) -> usize {
 
 #[test]
 fn rpsbproc_gives_ncbis_bytes() {
-    assert_eq!(compare_rows("compare", "compare", "oracle"), 381);
+    assert_eq!(compare_rows("compare", "compare", "oracle"), 384);
 }
 
 // The rows where NCBI's `int` coordinate arithmetic overflows (undefined; NCBI's 0.5.1 builds wrap
-// it): LOSAT computes it as its value (PD-LOSAT-NCBI-DEFECTS exception 11), and its bytes equal
+// it): LOSAT computes it as its value (PD-LOSAT-NCBI-DEFECTS exception 12), and its bytes equal
 // NCBI's for the row's nearby input (a `compare` row) moved back by the shift that README.md names.
 #[test]
 fn rpsbproc_widens_ncbis_int_overflows() {
@@ -258,7 +258,7 @@ fn rpsbproc_widens_ncbis_int_overflows() {
 
 // Each `widened` row's bytes are NCBI's bytes of its nearby `compare` row moved back by the shift
 // that `widened/PAIRS.tsv` names (the input file's name, and the printed numbers it lists, each of
-// which must occur): the evidence of PD-LOSAT-NCBI-DEFECTS exception 11 kept as a check, so that
+// which must occur): the evidence of PD-LOSAT-NCBI-DEFECTS exception 12 kept as a check, so that
 // `widened/` cannot drift from NCBI's nearby bytes.
 #[test]
 fn widened_rows_are_their_nearby_rows_moved_back() {

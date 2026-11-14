@@ -25,8 +25,7 @@
 //! ```
 #![warn(missing_docs, unused)]
 
-use std::fs::File;
-use std::io::{self, BufWriter, Write};
+use std::io::{self, Write};
 use std::ops::Range;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -38,10 +37,11 @@ use super::local_blast::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_database_blastn,
     run_local_database_blastp, run_local_database_blastx, run_local_database_tblastn,
     run_local_database_tblastx, run_local_tblastn, run_local_tblastx, with_run_pool,
-    FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs, ReportedSubject,
+    FormatObserver, FormatOutput, HspIndex, OutFile, OutputSink, ReportOutputs, ReportedSubject,
 };
 use super::program::Program;
 use super::search::Search;
+use super::start::{CallStart, RunLog, RunSink};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::{
     parse_optional_range, record_interval, RangeRole, RecordInterval, SequenceRange,
@@ -131,7 +131,7 @@ pub struct HspRecord {
     /// keeps its place).
     pub q_idx: usize,
     /// 0-based index of the subject record in the inputs; for a database
-    /// (`Inputs::database`), the sequence's ordinal id (the `n` of `gnl|BL_ORD_ID|n`).
+    /// (`Inputs::database`), the sequence's OID (the `n` of `gnl|BL_ORD_ID|n`).
     pub s_idx: usize,
     /// 0-based position of the HSP among the HSPs of its query.
     pub rank: usize,
@@ -506,18 +506,18 @@ pub(super) fn searched_queries(
     )
 }
 
-/// The `-query_loc` of the program's arguments and the program's name in NCBI's messages.
-fn query_loc(command: &Commands) -> (Option<&str>, &'static str) {
+/// The `-query_loc` of the program's arguments.
+fn query_loc(command: &Commands) -> Option<&str> {
     match command {
-        Commands::Blastp(a) => (a.query_loc.as_deref(), "BLASTP"),
-        Commands::Tblastn(a) => (a.query_loc.as_deref(), "TBLASTN"),
-        Commands::Blastn(a) => (a.query_loc.as_deref(), "BLASTN"),
-        Commands::Tblastx(a) => (a.query_loc.as_deref(), "TBLASTX"),
-        Commands::Blastx(a) => (a.query_loc.as_deref(), "BLASTX"),
-        Commands::Psiblast(a) => (a.query_loc.as_deref(), "BLASTP"),
-        Commands::Rpsblast(a) => (a.query_loc.as_deref(), "RPSBLAST"),
-        Commands::Rpstblastn(a) => (a.query_loc.as_deref(), "RPSTBLASTN"),
-        Commands::Makedb(_) | Commands::Rpsbproc(_) => (None, ""),
+        Commands::Blastp(a) => a.query_loc.as_deref(),
+        Commands::Tblastn(a) => a.query_loc.as_deref(),
+        Commands::Blastn(a) => a.query_loc.as_deref(),
+        Commands::Tblastx(a) => a.query_loc.as_deref(),
+        Commands::Blastx(a) => a.query_loc.as_deref(),
+        Commands::Psiblast(a) => a.query_loc.as_deref(),
+        Commands::Rpsblast(a) => a.query_loc.as_deref(),
+        Commands::Rpstblastn(a) => a.query_loc.as_deref(),
+        Commands::Makedb(_) | Commands::Rpsbproc(_) => None,
     }
 }
 
@@ -533,8 +533,7 @@ fn query_loc(command: &Commands) -> (Option<&str>, &'static str) {
 /// The `-query_loc` interval of the program's arguments. A value that the search will refuse
 /// has no interval here.
 pub(super) fn query_range_of(command: &Commands) -> Option<SequenceRange> {
-    let (query_loc, program) = query_loc(command);
-    parse_optional_range(query_loc, RangeRole::Query, program)
+    parse_optional_range(query_loc(command), RangeRole::Query)
         .ok()
         .flatten()
 }
@@ -645,40 +644,75 @@ pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usiz
 //     }
 //     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
 // ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
+// ```c++
+// bool CSeqDBTaxInfo::GetTaxNames(TTaxId           tax_id,
+//                                 SSeqDBTaxInfo  & info  )
+// {
+// 	static CTaxDBFileInfo t;
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
+// ```c++
+// void CBlastTabularInfo::x_CheckTaxDB()
+// {
+//    	if( x_IsFieldRequested(eSubjectSciNames) ||
+//     ...
+//    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
+// ```
+// The formatters of the plural names (`x_CheckTaxDB`) and the organism report (outfmt 18) look
+// the taxonomy database up themselves, through the search path of NCBI's databases: a search of
+// records reads the application settings for them, as the command line does, and the search asks
+// where the command line asks (`common::database::subject_taxonomy`).
+/// The `[BLAST] BLASTDB` setting of the call (`start`) when a report of `outputs` looks every
+/// taxid up (the plural names of the taxonomy database, the organism report); `None` otherwise,
+/// without reading the settings.
+fn taxdb_setting(
+    outputs: &mut ReportOutputs<'_>,
+    start: &mut CallStart,
+) -> anyhow::Result<Option<crate::algorithm::common::database::TaxdbSetting>> {
+    use crate::blastinput::app::{parse_formatting_string, ReportFormat};
+    let looks_up = outputs.formats.iter().any(|format| {
+        parse_formatting_string(format.outfmt).is_ok_and(|choice| {
+            ReportFormat::from_number(choice.number)
+                .and_then(|report| crate::report::tabular::TabularSpec::of(report, &choice))
+                .is_some_and(|spec| spec.looks_up_every_taxid())
+        })
+    });
+    if !looks_up {
+        return Ok(None);
+    }
+    let settings = start.settings(&mut *outputs.diagnostics)?;
+    Ok(Some(crate::algorithm::common::database::TaxdbSetting::of(
+        &settings,
+    )))
+}
+
 // NCBI's application layer reads its environment and registry files before its own code runs,
 // and a database is found by them (the `BLASTDB` search path); LOSAT rejects the settings that
 // change the output. A search of records reads neither, but for the directory of BLASTN's
-// `-window_masker_taxid` and the taxonomy database of the organism report (outfmt 18), which
-// NCBI's library looks for itself.
+// `-window_masker_taxid`, the taxonomy database of the plural names and the organism report
+// (outfmt 18) and the file of a `-matrix` that NCBI's tables do not have (TBLASTX, ungapped
+// BLASTX), which NCBI's library looks for itself. The settings are the call's application start's
+// (`start::CallStart::settings`).
 /// One `run_local` call: the program's entry for the parsed arguments and `inputs`.
 pub(super) fn run_local(
     command: Commands,
     inputs: Inputs<'_>,
     outputs: &mut ReportOutputs<'_>,
+    start: &mut CallStart,
 ) -> anyhow::Result<()> {
     let (query, subject) = (inputs.query, inputs.subject);
     if inputs.database {
-        use crate::blastinput::ncbi_environment::library_application_settings;
-        let settings = |name: &str| library_application_settings(name).map_err(anyhow::Error::msg);
+        let settings = start.settings(&mut *outputs.diagnostics)?;
         return match command {
-            Commands::Blastp(args) => {
-                run_local_database_blastp(args, query, settings("blastp")?, outputs)
-            }
-            Commands::Tblastn(args) => {
-                run_local_database_tblastn(args, query, settings("tblastn")?, outputs)
-            }
-            Commands::Blastn(args) => {
-                run_local_database_blastn(args, query, settings("blastn")?, outputs)
-            }
-            Commands::Tblastx(args) => {
-                run_local_database_tblastx(args, query, settings("tblastx")?, outputs)
-            }
-            Commands::Blastx(args) => {
-                run_local_database_blastx(args, query, settings("blastx")?, outputs)
-            }
+            Commands::Blastp(args) => run_local_database_blastp(args, query, settings, outputs),
+            Commands::Tblastn(args) => run_local_database_tblastn(args, query, settings, outputs),
+            Commands::Blastn(args) => run_local_database_blastn(args, query, settings, outputs),
+            Commands::Tblastx(args) => run_local_database_tblastx(args, query, settings, outputs),
+            Commands::Blastx(args) => run_local_database_blastx(args, query, settings, outputs),
             Commands::Psiblast(args) => {
                 let args = psiblast_args(args, outputs)?;
-                run_local_database_blastp(args, query, settings("psiblast")?, outputs)
+                run_local_database_blastp(args, query, settings, outputs)
             }
             Commands::Rpsblast(_)
             | Commands::Rpstblastn(_)
@@ -688,42 +722,17 @@ pub(super) fn run_local(
             }
         };
     }
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
-    // ```c++
-    // bool CSeqDBTaxInfo::GetTaxNames(TTaxId           tax_id,
-    //                                 SSeqDBTaxInfo  & info  )
-    // {
-    // 	static CTaxDBFileInfo t;
-    // ```
-    // The organism report (outfmt 18) looks the taxonomy database up itself, through the search
-    // path of NCBI's databases: a search of records reads the application settings for it, as
-    // the command line does (`common::database::SubjectTaxdb`).
-    use crate::algorithm::common::database::SubjectTaxdb;
-    let subject_taxdb = |name: &str| -> anyhow::Result<Option<SubjectTaxdb>> {
-        let tax_report = outputs.formats.iter().any(|format| {
-            crate::blastinput::app::parse_formatting_string(format.outfmt)
-                .is_ok_and(|choice| choice.number == 18)
-        });
-        if !tax_report {
-            return Ok(None);
-        }
-        let settings = crate::blastinput::ncbi_environment::library_application_settings(name)
-            .map_err(anyhow::Error::msg)?;
-        SubjectTaxdb::of(&settings, &name.to_ascii_uppercase())
-    };
     match command {
         Commands::Blastp(mut args) => {
-            args.subject_taxdb = subject_taxdb("blastp")?;
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             run_local_blastp(args, query, subject, "", "", outputs)
         }
         Commands::Tblastn(mut args) => {
-            args.subject_taxdb = subject_taxdb("tblastn")?;
-            args.tabular_taxdb = args.subject_taxdb.as_ref().map(|_| true);
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             run_local_tblastn(args, query, subject, outputs)
         }
         Commands::Blastn(mut args) => {
-            args.subject_taxdb = subject_taxdb("blastn")?;
-            args.tabular_taxdb = args.subject_taxdb.as_ref().map(|_| true);
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-448
             // ```c++
             //     if (args.Exist(kArgWindowMaskerDatabase) &&
@@ -747,25 +756,34 @@ pub(super) fn run_local(
             // the environment and `.ncbirc`; LOSAT reads it with the application settings, as
             // a database search of the library does.
             if args.window_masker_taxid.is_some_and(|taxid| taxid != 0) {
-                use crate::blastinput::ncbi_environment::library_application_settings;
-                let settings =
-                    library_application_settings("blastn").map_err(anyhow::Error::msg)?;
+                let settings = start.settings(&mut *outputs.diagnostics)?;
                 args.window_masker_registry = Some(settings.window_masker_registry);
                 args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
             }
             run_local_blastn(args, query, subject, outputs)
         }
         Commands::Tblastx(mut args) => {
-            args.subject_taxdb = subject_taxdb("tblastx")?;
-            args.tabular_taxdb = args.subject_taxdb.as_ref().map(|_| true);
+            // The file of a `-matrix` that NCBI's tables do not have, first, as the command
+            // line's `run` looks it up (with the call's settings; `TblastxArgs::find_matrix_file`).
+            if args.scoring_matrix() == crate::algorithm::tblastx::args::TblastxMatrix::Unknown {
+                let settings = start.settings(&mut *outputs.diagnostics)?;
+                args.find_matrix_file(&settings.matrix_search)?;
+            }
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             run_local_tblastx(args, query, subject, outputs)
         }
         Commands::Blastx(mut args) => {
-            args.subject_taxdb = subject_taxdb("blastx")?;
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            // The file of a `-matrix` that NCBI's tables do not have, looked up after the options
+            // are resolved, as on the command line (`ResolvedOptions::find_matrix_file`).
+            if args.unknown_matrix_name() {
+                args.matrix_search = Some(start.settings(&mut *outputs.diagnostics)?.matrix_search);
+            }
             run_local_blastx(args, query, subject, outputs)
         }
         Commands::Psiblast(args) => {
-            let args = psiblast_args(args, outputs)?;
+            let mut args = psiblast_args(args, outputs)?;
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             run_local_blastp(args, query, subject, "", "", outputs)
         }
         Commands::Rpsblast(_)
@@ -825,11 +843,13 @@ pub(super) fn check_inputs(search: &Search, inputs: Inputs<'_>) -> Result<(), Er
 
 /// The searches of a call: `formats` grouped by hit list size (`search_groups`), and the threads
 /// of the pool they share. A `-outfmt` value that the command line rejects, and a call without
-/// formats (the engines refuse one), fail here, before any search.
+/// formats (the engines refuse one), fail here, before any search; the command line's error of
+/// a value goes to tblastx's `-logfile` file, as there (`RunLog::post`).
 fn searches(
     search: &Search,
     inputs: Inputs<'_>,
     formats: &[&str],
+    log: &mut RunLog,
 ) -> Result<(Vec<Vec<usize>>, usize), Error> {
     use crate::blastinput::app::output_format::ARCHIVE_FORMAT;
     use crate::blastinput::app::parse_formatting_string;
@@ -842,7 +862,10 @@ fn searches(
         .map(|outfmt| {
             parse_formatting_string(outfmt)
                 .map(|choice| choice.number)
-                .map_err(|error| Error::Argv(format!("{error:#}")))
+                .map_err(|error| {
+                    log.post(&error);
+                    Error::Argv(format!("{error:#}"))
+                })
         })
         .collect::<Result<_, _>>()?;
     if numbers.contains(&ARCHIVE_FORMAT) {
@@ -875,38 +898,46 @@ pub fn run(
     reports: &mut [(&str, &mut (dyn Write + Send))],
     diagnostics: &mut (dyn Write + Send),
 ) -> Result<(), Error> {
+    let mut start = CallStart::new(search, inputs, &mut *diagnostics)?;
+    if start.dry_run() {
+        return Ok(());
+    }
+    let mut log = start.take_log();
     let formats: Vec<&str> = reports.iter().map(|(outfmt, _)| *outfmt).collect();
-    let (groups, threads) = searches(search, inputs, &formats)?;
+    let (groups, threads) = searches(search, inputs, &formats, &mut log)?;
     let mut writers: Vec<Option<&mut (dyn Write + Send)>> = reports
         .iter_mut()
         .map(|(_, writer)| Some(&mut **writer))
         .collect();
     with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
         for (ordinal, group) in groups.iter().enumerate() {
+            let command = search.command(inputs)?;
             // The warnings of the first search include the reader's and the queries' warnings
             // that the next searches repeat; the command line writes them once.
             let mut repeated = Vec::new();
-            let sink: &mut (dyn Write + Send) = if ordinal == 0 {
-                &mut *diagnostics
+            let mut sink = if ordinal == 0 {
+                log.sink(&mut *diagnostics, true)
             } else {
-                &mut repeated
+                log.sink(&mut repeated, false)
             };
-            let mut outputs = ReportOutputs {
-                formats: group
-                    .iter()
-                    .map(|&position| FormatOutput {
-                        outfmt: formats[position],
-                        sink: OutputSink::Writer(
-                            writers[position].take().expect("one group per format"),
-                        ),
-                    })
-                    .collect(),
-                diagnostics: sink,
-                hits: None,
-                observer: None,
+            let result = {
+                let mut outputs = ReportOutputs {
+                    formats: group
+                        .iter()
+                        .map(|&position| FormatOutput {
+                            outfmt: formats[position],
+                            sink: OutputSink::Writer(
+                                writers[position].take().expect("one group per format"),
+                            ),
+                        })
+                        .collect(),
+                    diagnostics: &mut sink,
+                    hits: None,
+                    observer: None,
+                };
+                run_local(command, inputs, &mut outputs, &mut start)
             };
-            run_local(search.command(inputs)?, inputs, &mut outputs)
-                .map_err(|error| Error::search(&error))?;
+            result.map_err(|error| sink.failed(&error))?;
         }
         Ok(())
     })
@@ -929,6 +960,13 @@ pub fn run(
 /// come through here: the file is the master file, which names the side files that the search
 /// writes next to it (`path_1.json` or `path_1.xml`, ...). The error is the command line's, as in
 /// [`run`].
+///
+/// `path` is the command line's `-out`: its parser checks the name (NCBI's `Illegal value` for a
+/// file name of 256 bytes or more, dry run or not), and the search makes the file where the
+/// command line makes `-out`, after it has read the subjects (or the taxid or seqid list of `-db`)
+/// and before it processes the options: an error before that point leaves no file, an error after
+/// it an empty one, and the subjects' warnings come before an error of a file that cannot be made.
+/// A dry run makes no file.
 pub fn run_to_file(
     search: &Search,
     inputs: Inputs<'_>,
@@ -942,47 +980,62 @@ pub fn run_to_file(
             "run_to_file writes a file: `run` gives a report to a writer".to_string(),
         ));
     }
+    let search = &search.writing_to(path);
+    let mut start = CallStart::new(search, inputs, &mut *diagnostics)?;
+    // The command line's dry run does not make the `-out` file (line RG item E1b).
+    if start.dry_run() {
+        return Ok(());
+    }
+    // tblastx writes the errors of an `-outfmt` value and of an `-out` it cannot make to its
+    // `-logfile` file, as its other errors (`RunLog::failed`).
+    let mut log = start.take_log();
     let threads = {
         let formats = [outfmt];
-        searches(search, inputs, &formats)?.1
+        searches(search, inputs, &formats, &mut log)?.1
     };
-    let mut command = search.command(inputs)?;
-    set_output_file(&mut command, path);
-    let file =
-        File::create(path).map_err(|_| Error::search(&crate::cli::inaccessible("out", path)))?;
-    let mut file = BufWriter::new(file);
+    let command = search.command(inputs)?;
+    let mut file = OutFile::new(path, out_file_program(search.program()));
     with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
-        let mut outputs = ReportOutputs {
-            formats: vec![FormatOutput {
-                outfmt,
-                sink: OutputSink::Writer(&mut file),
-            }],
-            diagnostics: &mut *diagnostics,
-            hits: None,
-            observer: None,
+        let mut sink = log.sink(&mut *diagnostics, true);
+        let result = {
+            let mut outputs = ReportOutputs {
+                formats: vec![FormatOutput {
+                    outfmt,
+                    sink: OutputSink::Out(&mut file),
+                }],
+                diagnostics: &mut sink,
+                hits: None,
+                observer: None,
+            };
+            run_local(command, inputs, &mut outputs, &mut start)
         };
-        run_local(command, inputs, &mut outputs).map_err(|error| Error::search(&error))
+        result.map_err(|error| {
+            // TBLASTX's command line removes a `-out` that it made and left empty after a title
+            // that the archive cannot hold (`run`).
+            if search.program() == Program::Tblastx
+                && error
+                    .downcast_ref::<crate::report::archive::TitleRefusal>()
+                    .is_some()
+            {
+                file.remove_new_empty();
+            }
+            sink.failed(&error)
+        })
     })?;
     file.flush()
         .map_err(|error| Error::search(&anyhow::Error::from(error)))
 }
 
-/// The search's `-out` file: a report names its side files by it (`run_to_file`).
-fn set_output_file(command: &mut Commands, path: &Path) {
-    let out = Some(path.to_path_buf());
-    match command {
-        Commands::Blastp(args) => args.out = out,
-        Commands::Tblastn(args) => args.out = out,
-        Commands::Blastn(args) => args.out = out,
-        Commands::Tblastx(args) => args.out = out,
-        Commands::Blastx(args) => args.out = out,
-        Commands::Psiblast(args) => args.out = out,
-        Commands::Rpsblast(_)
-        | Commands::Rpstblastn(_)
-        | Commands::Makedb(_)
-        | Commands::Rpsbproc(_) => {
-            unreachable!("Program::parse admits the search programs only")
-        }
+/// The program whose `-out` file names must be UTF-8, as its command line checks them
+/// (`cli::create_out_file`): every search program but BLASTX.
+fn out_file_program(program: Program) -> Option<&'static str> {
+    match program {
+        Program::Blastn => Some("BLASTN"),
+        Program::Blastp => Some("BLASTP"),
+        Program::Psiblast => Some("PSIBLAST"),
+        Program::Tblastn => Some("TBLASTN"),
+        Program::Tblastx => Some("TBLASTX"),
+        Program::Blastx => None,
     }
 }
 
@@ -1003,7 +1056,8 @@ fn collect_one(
     inputs: Inputs<'_>,
     formats: &[&str],
     positions: &[usize],
-    diagnostics: &mut (dyn Write + Send),
+    start: &mut CallStart,
+    mut sink: RunSink<'_>,
 ) -> Result<Searched, Error> {
     let command = search.command(inputs)?;
     let query_range = query_range_of(&command);
@@ -1023,13 +1077,13 @@ fn collect_one(
                     sink: OutputSink::Writer(writer),
                 })
                 .collect(),
-            diagnostics,
+            diagnostics: &mut sink,
             hits: Some(&mut on_hits),
             observer: Some(&mut recorder),
         };
-        run_local(command, inputs, &mut outputs)
+        run_local(command, inputs, &mut outputs, start)
     };
-    result.map_err(|error| Error::search(&error))?;
+    result.map_err(|error| sink.failed(&error))?;
     if let Some((hsp, _)) = recorder.open.iter().flatten().next() {
         recorder.fault(format!("HSP {hsp} started but did not end"));
     }
@@ -1206,22 +1260,43 @@ pub fn run_collect(
     inputs: Inputs<'_>,
     formats: &[&str],
 ) -> Result<Outcome, Error> {
-    let (groups, threads) = searches(search, inputs, formats)?;
     let mut diagnostics: Vec<u8> = Vec::new();
+    let mut start = CallStart::new(search, inputs, &mut diagnostics)?;
+    if start.dry_run() {
+        return Ok(Outcome {
+            reports: formats
+                .iter()
+                .map(|outfmt| Report {
+                    outfmt: outfmt.to_string(),
+                    bytes: Vec::new(),
+                    spans: Vec::new(),
+                    subject_headings: Vec::new(),
+                })
+                .collect(),
+            hsps: Vec::new(),
+            query_stats: vec![None; inputs.query.len()],
+            diagnostics,
+        });
+    }
+    let mut log = start.take_log();
+    let (groups, threads) = searches(search, inputs, formats, &mut log)?;
     let mut searched: Vec<Searched> = Vec::new();
     // The searches of one call share one thread pool (`with_run_pool`), as the command line's
     // one search has one.
     with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
         for (ordinal, group) in groups.iter().enumerate() {
             // The warnings of the first search include the reader's and the queries' warnings
-            // that the next searches repeat; the command line writes them once.
-            let mut scratch = Vec::new();
-            let sink: &mut (dyn Write + Send) = if ordinal == 0 {
-                &mut diagnostics
+            // that the next searches repeat; the command line writes them once (the next
+            // searches' do not go to the `-logfile` file either; a failure does, as in `run`).
+            let mut repeated = Vec::new();
+            let sink = if ordinal == 0 {
+                log.sink(&mut diagnostics, true)
             } else {
-                &mut scratch
+                log.sink(&mut repeated, false)
             };
-            searched.push(collect_one(search, inputs, formats, group, sink)?);
+            searched.push(collect_one(
+                search, inputs, formats, group, &mut start, sink,
+            )?);
         }
         Ok(())
     })?;

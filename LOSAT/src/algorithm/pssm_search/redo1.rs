@@ -1081,7 +1081,7 @@ fn link_redone(
             subject_end: hsp.align.match_end,
             score: hsp.align.score,
         },
-        &[context],
+        |_| context,
         subject_length,
         &link.params,
         |hsp, linked| {

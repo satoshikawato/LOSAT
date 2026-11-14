@@ -17,6 +17,9 @@ use std::process::Command;
 #[cfg(target_os = "linux")]
 use std::process::Output;
 
+mod temp_support;
+use temp_support::{unique_dir, TempFile, TempPath};
+
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 
 /// One `losat psiblast -db tests/db_search/paja -query tests/fasta/psiblast/<query>
@@ -58,15 +61,15 @@ fn losat_psiblast(home: &Path) -> Command {
     command
 }
 
-/// An empty directory of the test's own for the PSSM files, and one for HOME.
-fn scratch(tag: &str) -> (PathBuf, PathBuf) {
-    let base =
-        std::env::temp_dir().join(format!("losat_psiblast_pssm_{tag}_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+/// An empty directory of the test's own for the PSSM files, and one for HOME: the two are in a
+/// directory that is removed (with the files) when the first value, which the test keeps to its
+/// end, is dropped.
+fn scratch(tag: &str) -> (TempPath, PathBuf, PathBuf) {
+    let base = unique_dir(&format!("losat_psiblast_pssm_{tag}"));
     let (files, home) = (base.join("files"), base.join("home"));
     std::fs::create_dir_all(&files).unwrap();
     std::fs::create_dir_all(&home).unwrap();
-    (files, home)
+    (base, files, home)
 }
 
 #[cfg(target_os = "linux")]
@@ -89,7 +92,7 @@ fn path(path: &Path) -> &str {
 #[cfg(target_os = "linux")]
 #[test]
 fn a_report_write_error_leaves_the_pssm_files_as_they_were() {
-    let (dir, home) = scratch("full");
+    let (_base, dir, home) = scratch("full");
     let file = dir.join("p.asn");
     let failed = |args: &[&str]| {
         let output = psiblast("two.faa", args, &home);
@@ -145,7 +148,7 @@ fn a_report_write_error_leaves_the_pssm_files_as_they_were() {
 #[cfg(target_os = "linux")]
 #[test]
 fn an_unwritable_pssm_file_stops_after_the_querys_report() {
-    let (dir, home) = scratch("devfull");
+    let (_base, dir, home) = scratch("devfull");
     let output = psiblast(
         "two.faa",
         &["-out_pssm", "/dev/full", "-outfmt", "7"],
@@ -169,7 +172,7 @@ fn an_unwritable_pssm_file_stops_after_the_querys_report() {
 #[cfg(target_os = "linux")]
 #[test]
 fn a_pssm_file_that_is_a_report_stream_is_refused_before_the_search() {
-    let (dir, home) = scratch("alias");
+    let (_base, dir, home) = scratch("alias");
     let report = dir.join("r.txt");
     for (args, text) in [
         (
@@ -202,7 +205,7 @@ fn a_pssm_file_that_is_a_report_stream_is_refused_before_the_search() {
 // the file, and NCBI's errors name the file `-`.
 #[test]
 fn in_pssm_dash_reads_the_standard_input() {
-    let (_, home) = scratch("stdin");
+    let (_base, _, home) = scratch("stdin");
     let pssm =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/db_search/db.ps.asn.rnd.6.asn");
     let run = |in_pssm: &str, stdin: std::process::Stdio| {
@@ -223,13 +226,10 @@ fn in_pssm_dash_reads_the_standard_input() {
         (named.status.code(), &named.stdout, &named.stderr)
     );
     let truncated = std::fs::read(&pssm).unwrap();
-    let half = std::env::temp_dir().join(format!(
-        "losat_psiblast_pssm_stdin_cut_{}.asn",
-        std::process::id()
-    ));
+    let half = TempFile::new("losat_psiblast_pssm_stdin_cut", "cut.asn");
     std::fs::write(&half, &truncated[..truncated.len() / 2]).unwrap();
     let cut = run("-", std::fs::File::open(&half).unwrap().into());
-    let _ = std::fs::remove_file(&half);
+    drop(half);
     assert_eq!(cut.status.code(), Some(1));
     assert_eq!(
         cut.stderr,
@@ -251,7 +251,7 @@ fn in_pssm_dash_reads_the_standard_input() {
 #[cfg(target_os = "linux")]
 #[test]
 fn an_unwritable_pssm_file_stops_the_rounds_after_the_round_before() {
-    let (dir, home) = scratch("rounds");
+    let (_base, dir, home) = scratch("rounds");
     let run = |iterations: &str, args: &[&str]| {
         let mut command = losat_psiblast(&home);
         command
@@ -292,7 +292,7 @@ fn an_unwritable_pssm_file_stops_the_rounds_after_the_round_before() {
 #[cfg(target_os = "linux")]
 #[test]
 fn an_unwritable_pssm_file_of_in_pssm_stops_before_round_1() {
-    let (dir, home) = scratch("in_pssm_rounds");
+    let (_base, dir, home) = scratch("in_pssm_rounds");
     let run = |outfmt: &str, args: &[&str]| {
         let mut command = losat_psiblast(&home);
         command
@@ -354,7 +354,7 @@ fn an_unwritable_pssm_file_of_in_pssm_stops_before_round_1() {
 #[cfg(unix)]
 #[test]
 fn a_missing_sequence_file_is_the_readers_database_error() {
-    let (_, home) = scratch("nopsq");
+    let (_base, _, home) = scratch("nopsq");
     let output = losat_psiblast(&home)
         .args(["-query", "tests/fasta/psiblast/tk.faa"])
         .args(["-db", "tests/db_search/arch_sprot_nopsq"])

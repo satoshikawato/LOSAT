@@ -55,7 +55,7 @@ const GAP_THRESHOLD: i64 = 35;
 // ```
 // (`m_iFrom` and `m_iTo` are `i64`: the XML input's `GetQuery_from() - COORDSBASE` of
 // `-2147483648` stores `INT_MIN - 1` there, the value of NCBI's overflowing `int` arithmetic,
-// PD-LOSAT-NCBI-DEFECTS exception 11; an archive's are `int`s, converted from `TSeqPos`.)
+// PD-LOSAT-NCBI-DEFECTS exception 12; an archive's are `int`s, converted from `TSeqPos`.)
 #[derive(Clone, Debug)]
 pub(crate) struct DomAlign {
     pub(crate) pssm_id: u32,
@@ -136,7 +136,7 @@ impl DomAlign {
 /// `int`s; LOSAT keeps `i32`s, 4 bytes a segment, until a start past `int`'s range comes, and
 /// `i64`s from then on: `ParseAlignStrings` of the XML input moves its `int` `hf` past the range
 /// with `++hf`, `--hf` (and `- COORDSBASE` of an `Hsp_hit-from` of `-2147483648`), which LOSAT
-/// computes as their values (PD-LOSAT-NCBI-DEFECTS exception 11). An archive's starts are `int`s
+/// computes as their values (PD-LOSAT-NCBI-DEFECTS exception 12). An archive's starts are `int`s
 /// (converted from `TSeqPos`), so they stay narrow, and so does every start of a real document.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:1121
 // ```c++
@@ -456,10 +456,10 @@ pub(crate) fn parse_align(seg: &DenseSeg, align: &Align, pssm_id: u32) -> DomAli
 // The types decide the arithmetic: `GetFrom`/`GetTo`/`GetPoint` are `TSeqPos` (unsigned)
 // stored in `SeqPos_t` (`int`, wraps in NCBI's build); `t - f + 1` is `int` arithmetic, which
 // overflows for an interval of 2^31 positions or more (undefined): computed as its value
-// (PD-LOSAT-NCBI-DEFECTS exception 11), which `push_back` converts to the `unsigned int` of
+// (PD-LOSAT-NCBI-DEFECTS exception 12), which `push_back` converts to the `unsigned int` of
 // `m_vecLens` (modulo 2^32); `m_iFrom % RF_SIZE`, `*iterMS / RF_SIZE` and the minus-strand sum
 // are `unsigned int` arithmetic (wraps); `m_iTo + 1` is `int` (`m_iTo` is at least 0), which
-// overflows for a hit that ends at 2^31 - 1: computed as its value (exception 11), which the
+// overflows for a hit that ends at 2^31 - 1: computed as its value (exception 12), which the
 // division by the `unsigned int` `RF_SIZE` converts modulo 2^32. A segment whose subject location is
 // neither `int` nor `pnt` leaves its query start without a subject start and length: the
 // vectors differ in length, which the plus-strand code and the classification read within
@@ -717,7 +717,7 @@ struct Facility {
 // is never printed.
 // (`m_uiLength - (sstart + len)` is `unsigned int` arithmetic stored in an `int`, of the start's
 // value modulo 2^32 where the XML input took it past `int` (`SubjectStarts`); `iNMissing` is
-// that value (PD-LOSAT-NCBI-DEFECTS exception 11); the ratios
+// that value (PD-LOSAT-NCBI-DEFECTS exception 12); the ratios
 // divide doubles, so a model of length 0 gives an infinity or a NaN as NCBI's does. A NaN E-value
 // or bit score makes `TDomAlignOrderByEValue` no strict weak order (`order_by_e_value`): libstdc++'s
 // sort, which `try_std_sort` follows step by step, is then still defined while it reads inside the
@@ -1172,7 +1172,7 @@ pub(crate) fn map_seg_set(set: &mut SegSet, align: &DomAlign) {
 // (`qLen - rfidx` and `c + offset` are `unsigned int` arithmetic, which wraps; `c + offset`
 // is stored in an `int`. `++c` and `ori_from + inc` are `int` arithmetic, which overflows past
 // `INT_MAX` (undefined; a mapped range at the limit, made by hand): computed as their values,
-// which the plus strand stores as they are (PD-LOSAT-NCBI-DEFECTS exception 11); a position
+// which the plus strand stores as they are (PD-LOSAT-NCBI-DEFECTS exception 12); a position
 // outside the translation is then read by the out-of-range rules of its reader.)
 pub(crate) fn translated_pos_map(
     set: &SegSet,
@@ -1217,7 +1217,7 @@ pub(crate) fn translated_pos_map(
 /// positions on the query's plus strand for a hit of a translated query; the set's own ends
 /// for the others (`None`: an empty set). A position that NCBI's `int` arithmetic took past
 /// `int`'s range holds its value, and `pr - 1` of `INT_MIN` is computed as its value
-/// (`frames::minus_pr_to_plus_na`; PD-LOSAT-NCBI-DEFECTS exception 11): the conversions after
+/// (`frames::minus_pr_to_plus_na`; PD-LOSAT-NCBI-DEFECTS exception 12): the conversions after
 /// them are `unsigned int`'s, modulo 2^32.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:1137-1177
 // ```c++

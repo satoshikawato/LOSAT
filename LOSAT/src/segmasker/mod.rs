@@ -220,8 +220,8 @@ mod tests {
             |line: &[&str]| -> Vec<String> { line.iter().map(|word| word.to_string()).collect() };
         let args = crate::ncbi_app::args::parse(&TOOL, &words(&[])).unwrap();
         assert_eq!(args.integer("window"), Some(12));
-        assert_eq!(args.double("locut"), Some(Ok(2.2)));
-        assert_eq!(args.double("hicut"), Some(Ok(2.5)));
+        assert_eq!(args.double("locut"), Some(2.2));
+        assert_eq!(args.double("hicut"), Some(2.5));
         assert_eq!(args.value("infmt"), Some("fasta"));
         assert_eq!(args.value("outfmt"), Some("interval"));
         let args = crate::ncbi_app::args::parse(
@@ -230,33 +230,46 @@ mod tests {
         )
         .unwrap();
         assert_eq!(args.integer("window"), Some(16));
-        assert_eq!(args.double("locut"), Some(Ok(2.0)));
-        let hicut = args.double("hicut").unwrap().unwrap();
+        assert_eq!(args.double("locut"), Some(2.0));
+        let hicut = args.double("hicut").unwrap();
         assert!(hicut.is_nan() && hicut.is_sign_negative());
         assert!(crate::ncbi_app::args::parse(&TOOL, &words(&["-locut", "2,2"])).is_err());
     }
 
-    // A `-locut` that NCBI computes in extended precision is read as NCBI's reader reads it (the
-    // usage of `-h`, rc 0), and refused where `Run` reads it (review of line RG item K2, L1).
+    // A `-locut` of more than 18 digits before a final `e`, which NCBI's `StringToDoublePosix`
+    // adds up in x87 extended precision (refused after the review of line RG item K2, L1, until
+    // line SW, SW8): NCBI 2.17.0's bits (its corelib, `swebok-improve-20261105/sw8/nfix/probe/x87`)
+    // and its masks of in/basic.fa with `-hicut 3.5`.
     #[test]
-    fn an_extended_precision_value_is_refused_by_the_run() {
-        let value = "1.23456789012345678901e";
-        let (status, out, err) = run_words(&["-locut", value, "-h"], b"");
-        assert_eq!(
-            (status, out, err),
-            (0, crate::ncbi_app::short_usage(HELP), String::new())
-        );
-        assert_eq!(
-            run_words(&["-locut", value], b">a\nQ\n"),
+    fn an_extended_precision_value_is_read_as_ncbi_reads_it() {
+        let input = b">seq1 low complexity test\n\
+            MKVLAAGIVALLLAAQQQQQQQQQQQQQQQQPPPPPPPPGSGSGSGSGSGSAEDKLMNVWY\n\
+            RTSHCFIPKLEDGHKLMNRSTVWY\n";
+        let words =
+            |line: &[&str]| -> Vec<String> { line.iter().map(|word| word.to_string()).collect() };
+        for (locut, bits, masks) in [
             (
-                1,
-                String::new(),
-                format!(
-                    "Error: the value '{value}' of -locut, which NCBI computes in extended \
-                     precision, is not supported by LOSAT's SEGMASKER\n"
+                "1.23456789012345678901e",
+                0x3ff3_c0ca_428c_59fb_u64,
+                "15 - 50\n",
+            ),
+            (
+                "3.30000000000000000000000000001e",
+                0x400a_6666_6666_6666,
+                "2 - 14\n15 - 50\n65 - 81\n",
+            ),
+        ] {
+            let args = crate::ncbi_app::args::parse(&TOOL, &words(&["-locut", locut])).unwrap();
+            assert_eq!(args.double("locut").unwrap().to_bits(), bits);
+            assert_eq!(
+                run_words(&["-locut", locut, "-hicut", "3.5"], input),
+                (
+                    0,
+                    format!(">seq1 low complexity test\n{masks}"),
+                    String::new()
                 )
-            )
-        );
+            );
+        }
     }
 
     // A database byte above 127 (tests/segmasker/db/r201: the byte 201 for two X) is undefined in
@@ -411,26 +424,47 @@ mod tests {
         }
     }
 
-    // The file of `-conffile` is read, and `-dryrun` run, by the command line's application
-    // start; the library API, which these runs are (no start), refuses them as dustmasker's does.
+    // The library API's run (`run_with`) runs NCBI's application start as the command line's
+    // does (line RG item E1w-2): the file of `-conffile` is loaded in place of `segmasker.ini` (a
+    // name that is not a file is NCBI's critical post and abort, exit status 255: the table's row
+    // `conf_missing`), and `-dryrun` ends the run after the arguments, reading no input.
     #[test]
-    fn conffile_and_dryrun_are_refused_without_the_command_line_s_application_start() {
-        for (line, word) in [
-            (&["-conffile", "x.ini"][..], "-conffile"),
-            (&["-dryrun"], "-dryrun"),
+    fn conffile_and_dryrun_run_as_on_the_command_line() {
+        let missing = "losat-segmasker-unit-missing.ini";
+        assert_eq!(
+            run_words(&["-conffile", missing], b""),
+            (
+                255,
+                String::new(),
+                format!("Critical: (106.23) Registry file \"{missing}\" not found, aborting.\n")
+            )
+        );
+        let dir = std::env::temp_dir().join(format!(
+            "losat-segmasker-unit-conffile-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let conffile = dir.join("c.ini");
+        std::fs::write(&conffile, "[BLAST]\n").unwrap();
+        let conffile = conffile.to_str().unwrap();
+        let missing_input = dir.join("missing.fa");
+        let missing_input = missing_input.to_str().unwrap();
+        let record = b">p\nMKKLLPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPGGGGGHHHH\n";
+        for line in [
+            &["-dryrun"][..],
+            &["-in", missing_input, "-dryrun"],
+            &["-conffile", conffile, "-dryrun"],
         ] {
             assert_eq!(
-                run_words(line, b""),
-                (
-                    1,
-                    String::new(),
-                    format!(
-                        "Error: {}\n",
-                        crate::cli::toolkit_file_word_refusal("segmasker", word)
-                    )
-                ),
+                run_words(line, record),
+                (0, String::new(), String::new()),
                 "{line:?}"
             );
         }
+        // A file that loads changes nothing.
+        let plain = run_words(&[], record);
+        assert!(!plain.1.is_empty());
+        assert_eq!(run_words(&["-conffile", conffile], record), plain);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

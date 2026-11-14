@@ -89,7 +89,7 @@ fn frame_conversions() {
     assert_eq!(minus_pr_to_plus_na(0, 3, 5000), 4999);
     assert_eq!(minus_pr_to_plus_na(10, 5, 5000), 5000 - 27 - 6);
     // `pr - 1` of `INT_MIN` overflows `int` (undefined): its value, -2^31 - 1, is 2^31 - 1
-    // modulo 2^32 in the product (PD-LOSAT-NCBI-DEFECTS exception 11); the residue after it
+    // modulo 2^32 in the product (PD-LOSAT-NCBI-DEFECTS exception 12); the residue after it
     // (`INT_MIN + 1`, no overflow) gives the base 3 below.
     let min = i64::from(i32::MIN);
     assert_eq!(minus_pr_to_plus_na(min, 3, 5000), -2_147_478_649);

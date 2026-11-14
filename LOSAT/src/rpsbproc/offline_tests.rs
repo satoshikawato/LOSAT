@@ -219,7 +219,7 @@ fn undefined_reads_and_writes() {
 // `GetQuery_from() - COORDSBASE`, `GetQuery_to() - COORDSBASE` and `GetHit_from() - COORDSBASE`
 // of `-2147483648` overflow `int` (offl_cd_align_proc.cpp:166-167, 234, quoted at `parse_hsp`;
 // undefined): computed as their value, `INT_MIN - 1`, which `m_iFrom`, `m_iTo` and the domain's
-// start keep (PD-LOSAT-NCBI-DEFECTS exception 11). Each equals NCBI's result for `-2147483647`
+// start keep (PD-LOSAT-NCBI-DEFECTS exception 12). Each equals NCBI's result for `-2147483647`
 // (no overflow) moved by one: the `replace` at `m_iFrom`'s `size_t` throws one position lower
 // (PS16-Q1 oracles `xqfmin` and `xqfmin1`), the range ends and the domain starts one lower.
 #[test]
@@ -257,7 +257,7 @@ fn message_of(q: &OfflineQuery) -> String {
 
 // "See if NA" (offl_cd_align_proc.cpp:209-228): `m_iTo - m_iFrom + 1` is `int` arithmetic; a span
 // of `INT_MAX + 1` or more overflows (undefined): computed as its value, compared as an `unsigned
-// int` (modulo 2^32) with `aaRes` (PD-LOSAT-NCBI-DEFECTS exception 11). It is reached only while
+// int` (modulo 2^32) with `aaRes` (PD-LOSAT-NCBI-DEFECTS exception 12). It is reached only while
 // `m_dimTranslated[0]` is empty (a protein query of length 0); this one commits nothing and its
 // `replace` at `m_iFrom` (-1) throws, as NCBI's (PS16-Q1 oracle `xspan`).
 #[test]
@@ -272,7 +272,7 @@ fn span_that_overflows_int() {
 
 // `++hf` and `--hf` of `ParseAlignStrings` past `int`'s limits (offl_cd_align_proc.cpp:51-122;
 // undefined): computed as their values, which `m_vecSStarts` keeps (PD-LOSAT-NCBI-DEFECTS
-// exception 11): a hit from `INT_MAX` with a query gap after it (PS16-Q1 oracle `xhfmax`, whose
+// exception 12): a hit from `INT_MAX` with a query gap after it (PS16-Q1 oracle `xhfmax`, whose
 // nearby input starts 5 lower), and one whose `hf += segLen` wraps to `INT_MIN` (an `unsigned
 // int` sum stored in the `int`) before a domain gap (`--hf`). `qf` reaches no limit: `replace`
 // checks it against the string first.
@@ -311,7 +311,7 @@ fn domain_positions_that_overflow_int() {
 // The `int` positions of an alignment string (offl_cd_align_proc.cpp:51-122, 190-228, quoted at
 // `parse_hsp` and `parse_align_strings`): `++alnResIdx` and `++start` pass `INT_MAX` in an
 // `Hsp_qseq` of 2^31 letters or more and are computed as their values (PD-LOSAT-NCBI-DEFECTS
-// exception 11, line PS `DECISIONS.md` 59; checked end to end on ws, PS16-Q1 oracle `q31`, an
+// exception 12, line PS `DECISIONS.md` 59; checked end to end on ws, PS16-Q1 oracle `q31`, an
 // `Hsp_qseq` of 2^31 + 8 letters against NCBI's output for 2^31 - 128). A string read at an `int`
 // index: the index as a `size_t` (a negative one is past any length), the terminating 0 at the
 // length. "See if NA"'s `t0 = t1 + 1` converts a `size_t` to `int`: from 2^31 a negative `t0`,
@@ -442,7 +442,7 @@ fn fixture_data() -> CddData {
 // `s_doc2nan`: `-nan` on the DOMAINS line, exit 0).
 #[test]
 fn nan_scores_are_classified() {
-    use crate::report::serial::asn_text_reader::NCBI_NAN;
+    use crate::ncbi_str::NCBI_NAN;
     let data = fixture_data();
     let q_seq = b"VLLPPGPFTRRQAQAVTTTYSNITLEDDQGSHFRLVVRDTEGRMVWRAWNFEPDAGEGLNRYIRTSGIRT";
     for (e_value, bit_score) in [(NCBI_NAN, 133.904), (5e-43, NCBI_NAN)] {

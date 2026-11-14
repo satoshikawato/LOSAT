@@ -127,7 +127,7 @@ fn a_minus_strand_hit_of_a_translated_query() {
 // minus strand reads past (refused); `null` and `empty` segments are skipped; a `pnt` is a
 // position of length 1. A subject interval whose length `t - f + 1` overflows `int` (undefined)
 // has the length's value modulo 2^32, the `unsigned int` of `m_vecLens` (PD-LOSAT-NCBI-DEFECTS
-// exception 11; PS16-Q1 oracle `ntslen` and its nearby input `ntslen1`, one position shorter).
+// exception 12; PS16-Q1 oracle `ntslen` and its nearby input `ntslen1`, one position shorter).
 #[test]
 fn std_seg_forms() {
     let none =
@@ -214,7 +214,7 @@ fn locations_are_read_in_ncbis_order() {
 // biodata_blast.cpp:178-182 (quoted at `parse_std_align`): `alignedLen = (dst.m_iTo + 1) /
 // RF_SIZE` of a minus-strand hit is `int` arithmetic, which overflows for a hit that ends at
 // 2^31 - 1 (undefined): its value, 2^31, divided as an `unsigned int` (PD-LOSAT-NCBI-DEFECTS
-// exception 11; PS16-Q1 oracle `ntminusmax`), gives 715,827,882 codons, as the hit one base
+// exception 12; PS16-Q1 oracle `ntminusmax`), gives 715,827,882 codons, as the hit one base
 // shorter does (no overflow). A plus-strand hit with that end parses as it is.
 #[test]
 fn a_minus_strand_hit_that_ends_at_int_max() {
@@ -235,7 +235,7 @@ fn a_minus_strand_hit_that_ends_at_int_max() {
 // basedata.cpp:1137-1177 and segset_impl.hpp:281-290 (quoted at `pr2na_ends`): a range of the
 // set past `int`'s range (NCBI's set arithmetic overflowed before) and, on the minus strand, a
 // residue at `INT_MIN` (`MinusPr2PlusNA`'s `pr - 1`) are computed as their values, which the
-// conversions to `unsigned int` take modulo 2^32 (PD-LOSAT-NCBI-DEFECTS exception 11).
+// conversions to `unsigned int` take modulo 2^32 (PD-LOSAT-NCBI-DEFECTS exception 12).
 #[test]
 fn ends_that_overflow_int() {
     let plus = parse_std_align(

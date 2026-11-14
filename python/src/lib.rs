@@ -100,6 +100,14 @@ fn validate(program: &str, argv: Vec<String>) -> PyResult<()> {
     Ok(())
 }
 
+/// Whether a checked argv has `-dryrun` (`api::Search::dry_run`).
+#[pyfunction]
+fn dry_run(program: &str, argv: Vec<String>) -> PyResult<bool> {
+    Ok(search::checked(program, &argv)
+        .map_err(exception)?
+        .dry_run())
+}
+
 #[pymodule]
 fn _pylosat(module: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = module.py();
@@ -113,6 +121,7 @@ fn _pylosat(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<search::Batches>()?;
     module.add_function(wrap_pyfunction!(describe, module)?)?;
     module.add_function(wrap_pyfunction!(validate, module)?)?;
+    module.add_function(wrap_pyfunction!(dry_run, module)?)?;
     module.add_function(wrap_pyfunction!(search::run, module)?)?;
     module.add_function(wrap_pyfunction!(search::run_to_file, module)?)?;
     module.add_function(wrap_pyfunction!(search::makeblastdb, module)?)?;

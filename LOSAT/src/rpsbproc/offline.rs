@@ -372,13 +372,13 @@ impl OfflineQuery {
     // `Hsp_identity` and `Hsp_query-frame`, in this order, after the E-value test. What the
     // types decide: `GetQuery_from() - COORDSBASE` (and `GetQuery_to()`'s, `GetHit_from()`'s)
     // overflows `int` for `-2147483648` (undefined): computed as its value, `INT_MIN - 1`, which
-    // `m_iFrom`, `m_iTo` and `hfrom` keep (PD-LOSAT-NCBI-DEFECTS exception 11, as for an archive's
+    // `m_iFrom`, `m_iTo` and `hfrom` keep (PD-LOSAT-NCBI-DEFECTS exception 12, as for an archive's
     // coordinates; PS16-Q1 oracles `xqfmin`, `xqtmin`, `xhfmin` and their nearby inputs);
     // `m_iTo / 3` is then an `int` again, and `(m_iTo / 3) << 2` is C++20's `int` shift (NCBI's
     // builds are C++20: modulo 2^32), or-ed into the `unsigned int` frame; `rf - 1`,
     // `MinusId2PlusRFIdx` and the frame conversions are `unsigned int` arithmetic (`frames`, of
     // the values modulo 2^32); `m_iTo - m_iFrom + 1` is `int` (computed as its value where it
-    // overflows, exception 11) compared as `unsigned int` (modulo 2^32) with the `unsigned int`
+    // overflows, exception 12) compared as `unsigned int` (modulo 2^32) with the `unsigned int`
     // `aaRes`, which `t1 - t0` (a `size_t`) adds to modulo 2^32;
     // `m_dimTranslated[rfidx].size() - alignedLen` is a `size_t` difference passed as the
     // `unsigned int` `qofs`. `hseq` is read at the indices of `qseq`: its terminating 0 at its
@@ -419,7 +419,7 @@ impl OfflineQuery {
         let aln_len = qseq.len() as u32;
         // `++alnResIdx` passes `INT_MAX` when the first 2^31 columns or more of an `Hsp_qseq` of
         // 2^31 letters or more are gaps (undefined): computed as its value, compared with `alnLen`
-        // as an `unsigned int` (PD-LOSAT-NCBI-DEFECTS exception 11, line PS `DECISIONS.md` 59). It
+        // as an `unsigned int` (PD-LOSAT-NCBI-DEFECTS exception 12, line PS `DECISIONS.md` 59). It
         // stops at `alnLen`, so it reads `qseq` within its length.
         let mut aln_res_idx: i64 = 0;
         while (aln_res_idx as u32) < aln_len
@@ -579,7 +579,7 @@ impl OfflineQuery {
     // and the `unsigned int` `start - segLen` (line PS `DECISIONS.md` 59; it stops at `n`, within
     // the string); `++qf`, `--qf`, `++hf` and `--hf` are `int`, undefined past its limits: computed
     // as their values, which `qf`, `hf` and `m_vecSStarts` keep (`domains::SubjectStarts`;
-    // PD-LOSAT-NCBI-DEFECTS exception 11; PS16-Q1 oracles `xhfmax`, `xhfmin` and their nearby
+    // PD-LOSAT-NCBI-DEFECTS exception 12; PS16-Q1 oracles `xhfmax`, `xhfmin` and their nearby
     // inputs). `hf` starts from `Hsp_hit-from` and passes them with a hit near `INT_MAX` or
     // `INT_MIN`; `qf` starts from `m_iFrom` (`INT_MIN - 1` for an `Hsp_query-from` of
     // `-2147483648`), a `size_t` far past the string's length that the first `replace` throws at.
@@ -795,7 +795,7 @@ impl AlignedQuery for [u8] {
 // 							}
 // 						}
 // (`offl_cd_align_proc.cpp`, `ParseBlastOutput`.) `t0 < alnLen` compares as `unsigned int` (`alnLen`
-// is the length modulo 2^32); `++t0` is computed as its value (exception 11, `DECISIONS.md` 59);
+// is the length modulo 2^32); `++t0` is computed as its value (exception 12, `DECISIONS.md` 59);
 // `aaRes += t1 - t0` adds modulo 2^32. `t0 = t1 + 1` stores a `size_t` in the `int` (modulo 2^32,
 // C++20): from 2^31 on a negative `t0`, whose `qseq[t0]` NCBI reads far past the string
 // (`qseq_at` refuses it), and at 2^32 a `t0` of 0 or another position the loop has passed, from
@@ -902,7 +902,7 @@ fn write_residue(text: &mut [u8], at: i64, c: u8) -> Result<(), ProcessError> {
 //       }
 // ```
 // (`_M_limit(pos, n)` is `min(n, size() - pos)`. `qf`, an `int` (its value past `int`'s range
-// where exception 11 took it there), is the `size_t` `pos`: a negative one is beyond any length.)
+// where exception 12 took it there), is the `size_t` `pos`: a negative one is beyond any length.)
 fn string_replace(
     text: &mut Vec<u8>,
     pos: i64,

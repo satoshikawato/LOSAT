@@ -31,7 +31,13 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
+
+mod temp_support;
+use temp_support::TempFile;
+
+/// The worker log of one search, when the test made one: it lives as long as the caller keeps
+/// it, so a failed assertion on the search's result finds it still there.
+type WorkerLog = Option<TempFile>;
 
 const OFF: (&str, &str) = ("LOSAT_X_MBLUTKEEP", "0");
 const SWITCH: (&str, &str) = ("LOSAT_X_MBLUTKEEP", "1");
@@ -63,40 +69,35 @@ fn letters(name: &str) -> String {
         .collect()
 }
 
-/// A query file of these records in the temporary directory, named after this test process.
-fn query_file(name: &str, records: &[(String, &str)]) -> PathBuf {
+/// A query file of these records in a temporary directory of its own, removed with the file when
+/// the value is dropped.
+fn query_file(name: &str, records: &[(String, &str)]) -> TempFile {
     let text: String = records
         .iter()
         .map(|(title, seq)| format!(">{title}\n{seq}\n"))
         .collect();
-    let path = std::env::temp_dir().join(format!(
-        "losat_mblutkeep_{name}_{}.fasta",
-        std::process::id()
-    ));
+    let path = TempFile::new("losat_mblutkeep", &format!("{name}.fasta"));
     std::fs::write(&path, text).expect("write the query file");
     path
 }
 
-/// The four genomes in one query file (written once per test binary).
-fn genomes() -> &'static Path {
-    static FILE: OnceLock<PathBuf> = OnceLock::new();
-    FILE.get_or_init(|| {
-        let names = ["LC738868", "LC738869", "LC738870", "LC738873"];
-        let seqs: Vec<String> = names
-            .iter()
-            .map(|name| letters(&format!("{name}.fasta")))
-            .collect();
-        let records: Vec<(String, &str)> = names
-            .iter()
-            .zip(&seqs)
-            .map(|(name, seq)| (name.to_string(), seq.as_str()))
-            .collect();
-        query_file("genomes", &records)
-    })
+/// The four genomes in one query file (written per call).
+fn genomes() -> TempFile {
+    let names = ["LC738868", "LC738869", "LC738870", "LC738873"];
+    let seqs: Vec<String> = names
+        .iter()
+        .map(|name| letters(&format!("{name}.fasta")))
+        .collect();
+    let records: Vec<(String, &str)> = names
+        .iter()
+        .zip(&seqs)
+        .map(|(name, seq)| (name.to_string(), seq.as_str()))
+        .collect();
+    query_file("genomes", &records)
 }
 
 /// Four pieces of `len` letters, one from the middle of each genome, in one query file.
-fn middles(len: usize) -> PathBuf {
+fn middles(len: usize) -> TempFile {
     let names = ["LC738868", "LC738869", "LC738870", "LC738873"];
     let seqs: Vec<String> = names
         .iter()
@@ -118,8 +119,13 @@ fn middles(len: usize) -> PathBuf {
 /// variables (and batch-size variables). `LOSAT_BLASTX_WORKER_LOG` stays, or is set to a file of
 /// this test when the environment has none: a binary built with the `blastx-worker-probe` feature
 /// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more than
-/// one thread, and it selects nothing. Returns the report and the standard error.
-fn blastn(task: &str, query: &Path, threads: u32, switches: &[(&str, &str)]) -> (Vec<u8>, String) {
+/// one thread, and it selects nothing. Returns the report, the standard error and that log.
+fn blastn(
+    task: &str,
+    query: &Path,
+    threads: u32,
+    switches: &[(&str, &str)],
+) -> (Vec<u8>, String, WorkerLog) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -129,12 +135,15 @@ fn blastn(task: &str, query: &Path, threads: u32, switches: &[(&str, &str)]) -> 
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join(format!("losat_mblutkeep_worker_{}.log", std::process::id())),
-        );
-    }
+    // Its own worker log: returned with the result, removed when the caller drops it, kept when
+    // the test panics.
+    let log = std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+        .is_none()
+        .then(|| {
+            let log = TempFile::keep_on_failure("losat_mblutkeep_worker", "worker.log");
+            command.env("LOSAT_BLASTX_WORKER_LOG", &log);
+            log
+        });
     // LOSAT_X_BNCSRPACK lays out every contiguous table of 4^8 to 4^11 cells as CSR, with no
     // chains to fill: `-task blastn`'s tables keep the chains these tests are about with it off.
     command.env("LOSAT_X_BNCSRPACK", "0");
@@ -155,7 +164,7 @@ fn blastn(task: &str, query: &Path, threads: u32, switches: &[(&str, &str)]) -> 
         output.status.success(),
         "{task} {switches:?} threads {threads}: {stderr}"
     );
-    (output.stdout, stderr)
+    (output.stdout, stderr, log)
 }
 
 /// The value of `name` (`name=VALUE`) in the line of `stderr` that starts with `prefix`.
@@ -176,15 +185,15 @@ fn field(stderr: &str, prefix: &str, name: &str) -> u64 {
 /// where they ran. No run sets `LOSAT_X_MBLUTKEEP=1` alone: unset and `1` are the same switch
 /// state.
 fn check(task: &str, query: &Path) {
-    let (reference, stderr) = blastn(task, query, 4, &[OFF, BATCH, TIMING]);
+    let (reference, stderr, _log) = blastn(task, query, 4, &[OFF, BATCH, TIMING]);
     assert!(!reference.is_empty(), "{task}: no hits");
     assert!(!stderr.contains(KEEP), "{task}: {stderr}");
-    let (report, stderr) = blastn(task, query, 4, &[BATCH]);
+    let (report, stderr, _log) = blastn(task, query, 4, &[BATCH]);
     assert!(report == reference, "{task}: the report differs");
     assert_eq!(stderr, "", "{task}: the switch writes nothing");
 
     for threads in [4, 1] {
-        let (report, stderr) = blastn(task, query, threads, &[BATCH, TIMING]);
+        let (report, stderr, _log) = blastn(task, query, threads, &[BATCH, TIMING]);
         assert!(report == reference, "{task} threads {threads}");
         let builds = field(&stderr, BUILD, "builds=");
         let kept = field(&stderr, KEEP, "kept=");
@@ -201,12 +210,12 @@ fn check(task: &str, query: &Path) {
 
         // At 4 threads the search with the switch off is `reference` itself.
         if threads == 1 {
-            let (report, stderr) = blastn(task, query, threads, &[OFF, BATCH, TIMING]);
+            let (report, stderr, _log) = blastn(task, query, threads, &[OFF, BATCH, TIMING]);
             assert!(report == reference, "{task} threads {threads}");
             assert!(!stderr.contains(KEEP), "{task}: {stderr}");
         }
         // Set, the switch keeps the table on the original fill loops too.
-        let (report, stderr) = blastn(
+        let (report, stderr, _log) = blastn(
             task,
             query,
             threads,
@@ -219,7 +228,7 @@ fn check(task: &str, query: &Path) {
 
 #[test]
 fn megablast_gives_the_same_report_on_a_kept_table() {
-    check("megablast", genomes());
+    check("megablast", &genomes());
 }
 
 #[test]
@@ -240,11 +249,12 @@ fn blastn_two_stage_tables_go_through_the_keep() {
 // without the switch and in the fresh one with it.
 #[test]
 fn megablast_runs_the_prefault_round_on_fresh_tables_only() {
-    let (reference, stderr) = blastn("megablast", genomes(), 8, &[OFF, BATCH, TIMING]);
+    let genomes = genomes();
+    let (reference, stderr, _log) = blastn("megablast", &genomes, 8, &[OFF, BATCH, TIMING]);
     let builds = field(&stderr, BUILD, "builds=");
     assert_eq!(field(&stderr, ONCE, "fills="), builds, "{stderr}");
     assert_eq!(field(&stderr, ONCE, "prefault_rounds="), builds, "{stderr}");
-    let (report, stderr) = blastn("megablast", genomes(), 8, &[BATCH, TIMING]);
+    let (report, stderr, _log) = blastn("megablast", &genomes, 8, &[BATCH, TIMING]);
     assert!(report == reference);
     let fresh = field(&stderr, KEEP, "fresh=");
     assert_eq!(fresh, 1, "{stderr}");
@@ -252,11 +262,18 @@ fn megablast_runs_the_prefault_round_on_fresh_tables_only() {
 }
 
 /// The same report with the switch off and on, and the keep's counts (`kept=`, `fresh=`) as
-/// given.
-fn check_counts(task: &str, query: &Path, env: &[(&str, &str)], kept: u64, fresh: u64) -> String {
-    let (reference, _) = blastn(task, query, 4, &[env, &[OFF]].concat());
+/// given. Returns the standard error of the run with the switch on and the worker logs of both
+/// runs, which live until the caller's own assertions are done.
+fn check_counts(
+    task: &str,
+    query: &Path,
+    env: &[(&str, &str)],
+    kept: u64,
+    fresh: u64,
+) -> (String, (WorkerLog, WorkerLog)) {
+    let (reference, _, log_off) = blastn(task, query, 4, &[env, &[OFF]].concat());
     assert!(!reference.is_empty(), "{task}: no hits");
-    let (report, stderr) = blastn(task, query, 4, &[env, &[TIMING, STATS]].concat());
+    let (report, stderr, log_on) = blastn(task, query, 4, &[env, &[TIMING, STATS]].concat());
     assert!(report == reference, "{task} {env:?}: the report differs");
     assert_eq!(
         field(&stderr, KEEP, "kept="),
@@ -268,7 +285,7 @@ fn check_counts(task: &str, query: &Path, env: &[(&str, &str)], kept: u64, fresh
         fresh,
         "{task} {env:?}:\n{stderr}"
     );
-    stderr
+    (stderr, (log_off, log_on))
 }
 
 // Megablast of LC738868 (a table of 4^12 cells) and then four 100 kb pieces of LC738869 (4^11
@@ -315,7 +332,7 @@ fn packed_tables_share_the_kept_table_with_chains() {
             records.push(genome.clone());
         }
         let query = query_file(name, &records);
-        let stderr = check_counts("megablast", &query, &[BATCH, PACK_ON], 0, fresh);
+        let (stderr, _logs) = check_counts("megablast", &query, &[BATCH, PACK_ON], 0, fresh);
         assert_eq!(field(&stderr, KEEP, "csr="), csr, "{name}:\n{stderr}");
         assert_eq!(
             field(&stderr, CSR_BUILDS, "builds="),
@@ -350,7 +367,7 @@ fn csr_and_chain_builds_share_the_kept_table() {
     ];
     let query = query_file("csr_chains", &records);
     for task in ["dc-megablast", "blastn"] {
-        let stderr = check_counts(task, &query, &[BATCH], 2, 1);
+        let (stderr, _logs) = check_counts(task, &query, &[BATCH], 2, 1);
         assert_eq!(field(&stderr, KEEP, "csr="), 1, "{task}:\n{stderr}");
     }
 }

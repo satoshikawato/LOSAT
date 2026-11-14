@@ -102,7 +102,7 @@
 //!   before its arguments are read (a missing `-conffile` file) and that the parser refuses too
 //!   (two `-conffile`) gets the parser's error there. As any error of [`run_collect`] and
 //!   [`run_batches`], one of the start carries its message alone: the start's messages before it
-//!   (a usage report's) were in the call's diagnostics, which an error does not return; [`run`]
+//!   (a usage report's) were in the call's diagnostics, which an error does not return; [`run()`]
 //!   has written them to its writer.
 //! - [`run_batches`] searches one of NCBI's query batches at a time: the host reports progress
 //!   between batches and stops the search by not asking for the next one. Inside a batch only

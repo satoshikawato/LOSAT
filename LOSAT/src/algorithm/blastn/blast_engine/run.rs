@@ -236,6 +236,15 @@ mod pair_extend;
 #[path = "na_scan.rs"]
 mod na_scan;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684 (the loop of
+// `BlastNaWordFinder`) with a megablast scanner of c++/src/algo/blast/core/blast_nascan.c
+// (`s_MBChooseScanSubject`, :2602) and `s_BlastNaExtend` (na_ungapped.c:1052-1174).
+// The scan of a chunk with a two-stage table, which collects the offset pairs and hands each
+// batch to the steps of the pairs (a child module, so that it uses the private types of this
+// file).
+#[path = "two_stage_scan.rs"]
+mod two_stage_scan;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:503-578 (the chunk loop of
 // `s_BlastSearchEngineCore` after the word finder),
 // c++/src/algo/blast/core/blast_gapalign.c:3664-4114 (`BLAST_GetGappedScore`; :3850 is the loop
@@ -7747,8 +7756,7 @@ fn read_cli_subjects(
     //         }
     // ```
     // The subject range is read after the subject file is opened, before it is read.
-    let subject_range =
-        parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "BLASTN")?;
+    let subject_range = parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
     // ```c++
     //     CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
@@ -8163,7 +8171,7 @@ fn search_cli(
 ///     }
 /// ```
 fn parse_query_range(args: &BlastnArgs) -> Result<Option<SequenceRange>> {
-    parse_optional_range(args.query_loc.as_deref(), RangeRole::Query, "BLASTN")
+    parse_optional_range(args.query_loc.as_deref(), RangeRole::Query)
 }
 
 /// The ranges of a search: the query range as given, and the subjects' ranges.
@@ -8402,8 +8410,7 @@ fn run_local_formats(
     crate::utils::threading::validate_threads(args.num_threads)?;
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
-    let subject_range =
-        parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "BLASTN")?;
+    let subject_range = parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject)?;
     for record in &subject_records[..subjects_read(subject_records, subject_range.as_ref())] {
         outputs.diagnostics.write_all(&record.warnings)?;
     }
@@ -8798,25 +8805,25 @@ fn search(
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
     megablast_index.check()?;
-    app::check_search_environment(
-        "BLASTN",
-        !matches!(subjects, Subjects::Database(_)),
-        outputs.only_archive(),
-    )?;
-    let mut batching = query_batching_from_environment(
+    app::check_search_environment("BLASTN", !matches!(subjects, Subjects::Database(_)))?;
+    // The variables' error stops the run after the outfmt 0 prolog (`run_in_pool`).
+    let batching = query_batching_from_environment(
         super::super::coordination::task_uses_megablast_chunks(&args.task),
-    )?;
-    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:263-264
-    // ```c++
-    //         if (batch_size) {
-    //             input.SetBatchSize(batch_size);
-    // ```
-    // The caller's records are one batch (`BlastnArgs::one_query_batch`): a size that the
-    // records do not reach, fixed as `BATCH_SIZE` fixes it.
-    if args.one_query_batch {
-        batching.fixed_batch_size = i32::MAX;
-        batching.batch_size = i32::MAX as u32;
-    }
+    )
+    .map(|(mut batching, overlap_error)| {
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:263-264
+        // ```c++
+        //         if (batch_size) {
+        //             input.SetBatchSize(batch_size);
+        // ```
+        // The caller's records are one batch (`BlastnArgs::one_query_batch`): a size that the
+        // records do not reach, fixed as `BATCH_SIZE` fixes it.
+        if args.one_query_batch {
+            batching.fixed_batch_size = i32::MAX;
+            batching.batch_size = i32::MAX as u32;
+        }
+        (batching, overlap_error)
+    });
     // The query range applies to every query record as NCBI's batch reader reads it
     // (`cut_queries`): a record is searched cut, and one whose interval starts just past
     // its end is a query without data (`run_in_pool`).
@@ -8981,8 +8988,7 @@ pub(crate) struct QueryBatchSizes {
 impl QueryBatchSizes {
     pub(crate) fn new(args: &BlastnArgs, subjects: &[FastaRecord]) -> Result<Self> {
         use crate::blastinput::seq_range::{record_interval, RecordInterval};
-        let subject_range =
-            parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "BLASTN")?;
+        let subject_range = parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject)?;
         let total_length: i64 = subjects
             .iter()
             .map(|record| match subject_range.as_ref() {
@@ -9023,7 +9029,7 @@ impl QueryBatchSizes {
     }
 
     fn of_total_length(args: &BlastnArgs, total_length: i64) -> Result<Self> {
-        let mut batching = query_batching_from_environment(
+        let (mut batching, _) = query_batching_from_environment(
             super::super::coordination::task_uses_megablast_chunks(&args.task),
         )?;
         let mut mixer = BatchSizeMixer::new(batching.split.mixer_max_batch_size());
@@ -9077,46 +9083,34 @@ struct QueryBatching {
 ///     m_NumChunks = SplitQuery_CalculateNumChunks(m_Options->GetProgramType(),
 ///         &m_ChunkSize, m_TotalQueryLength, m_LocalQueryData->GetNumQueries());
 /// ```
-/// A value that `NStr::StringToInt` cannot convert makes NCBI stop with its
-/// `CStringException`, whose text names the source path of the oracle's build (exit 255);
-/// LOSAT rejects it. A negative `CHUNK_SIZE` is a `size_t` near 2^64; LOSAT rejects it where
-/// it splits a query batch (`search_query_chunks`), and otherwise searches as NCBI.
-fn query_batching_from_environment(megablast: bool) -> Result<QueryBatching> {
-    let read = |variable: &str| -> Result<Option<i32>> {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:59-60
-        // ```c++
-        //     char* chunk_sz_str = getenv("CHUNK_SIZE");
-        //     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
-        // ```
-        match std::env::var_os(variable) {
-            Some(value) if !crate::ncbi_str::is_blank(value.as_encoded_bytes()) => {
-                match crate::blastinput::query_batch::ncbi_string_to_int(&value) {
-                    Some(number) => Ok(Some(number)),
-                    None => anyhow::bail!(
-                        "the environment variable {variable} has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's BLASTN",
-                        value.to_string_lossy()
-                    ),
-                }
-            }
-            _ => Ok(None),
-        }
-    };
-    let chunk_size = read("CHUNK_SIZE")?;
+/// A `CHUNK_SIZE` or `BATCH_SIZE` that `NStr::StringToInt` cannot convert is the `Err`: its
+/// `CStringException` (`app::environment_int`), which stops NCBI after the outfmt 0 prolog and
+/// before the first batch is read (`run_in_pool`). `OVERLAP_CHUNK_SIZE` is read by the query
+/// splitter of each batch, after the batch is read: one that it cannot convert is the second
+/// value, its exception, which stops the first batch there (`run_in_pool`); no batch is split
+/// with it, so the sizes count it as unset. The batch sizes alone (`QueryBatchSizes`) do not
+/// depend on it. A negative `CHUNK_SIZE` is a `size_t` near 2^64; LOSAT rejects it where it splits
+/// a query batch (`search_query_chunks`), and otherwise searches as NCBI.
+fn query_batching_from_environment(megablast: bool) -> Result<(QueryBatching, Result<()>)> {
+    use crate::blastinput::app::read_query_split_variable;
+    let chunk_size = read_query_split_variable("CHUNK_SIZE")?;
     let fixed_batch_size = crate::blastinput::query_batch::get_query_batch_size(
         std::env::var_os("BATCH_SIZE").as_deref(),
     )
-    .map_err(|value| {
-        anyhow::anyhow!(
-            "the environment variable BATCH_SIZE has the value {value:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's BLASTN"
-        )
-    })?;
-    let overlap = read("OVERLAP_CHUNK_SIZE")?;
+    .map_err(|e| crate::cli::NativeError::exception(&e))?;
+    let (overlap, overlap_error) = match read_query_split_variable("OVERLAP_CHUNK_SIZE") {
+        Ok(overlap) => (overlap, Ok(())),
+        Err(error) => (None, Err(error)),
+    };
     let split = SplitSizes::new(megablast, chunk_size, overlap);
-    Ok(QueryBatching {
-        fixed_batch_size,
-        batch_size: fixed_batch_size as u32,
-        split,
-    })
+    Ok((
+        QueryBatching {
+            fixed_batch_size,
+            batch_size: fixed_batch_size as u32,
+            split,
+        },
+        overlap_error,
+    ))
 }
 
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -9537,7 +9531,7 @@ fn run_in_pool(
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
-    mut batching: QueryBatching,
+    batching: Result<(QueryBatching, Result<()>)>,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:258-261
     // ```c++
@@ -9621,6 +9615,16 @@ fn run_in_pool(
     // throws at the prolog's first flush when the write fails (blast_format.cpp:118-119),
     // before any query is read or searched.
     write_pairwise_prologs(outputs, &output_formats, megablast, &shown, true)?;
+    // The mixer's `CHUNK_SIZE` and then `BATCH_SIZE` are read here, after the prolog and before
+    // the first batch: a value that NCBI cannot convert stops the run with its exception
+    // (`query_batching_from_environment`), as a batch size of 0 does below.
+    let (mut batching, mut overlap_error) = match batching {
+        Ok(batching) => batching,
+        Err(error) => {
+            write_pairwise_prologs(outputs, &output_formats, megablast, &shown, false)?;
+            return Err(error);
+        }
+    };
     let mut mixer = BatchSizeMixer::new(batching.split.mixer_max_batch_size());
     if batching.fixed_batch_size == 0 {
         // A database's total is the `Int8` of its index files (`GetDbTotalLength` sums
@@ -9942,6 +9946,45 @@ fn run_in_pool(
                 batch_records.searched(),
                 query_input.placements.get(start),
             )?;
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.hpp:104-106
+        // ```c++
+        //     SBlastSetupData(CRef<IQueryFactory> qf, CRef<CBlastOptions> opts)
+        //         : m_InternalData(new SInternalData),
+        //       m_QuerySplitter(new CQuerySplitter(qf, opts))
+        // ```
+        // The query splitter of the batch reads `CHUNK_SIZE` (converted already by the mixer) and
+        // `OVERLAP_CHUNK_SIZE` before the batch's queries are set up (their masks below): a value
+        // that NCBI cannot convert stops the first batch here, after its reader's messages
+        // (`query_batching_from_environment`).
+        if input_start == 0 {
+            if let Err(error) = std::mem::replace(&mut overlap_error, Ok(())) {
+                write_before_failed_batch(
+                    &args,
+                    queries.before(&kept, start),
+                    ReportSubjects {
+                        source,
+                        shown: &shown,
+                        titles: &titles,
+                    },
+                    &report_ranges,
+                    outputs,
+                    &output_formats,
+                    BatchResults {
+                        hit_lists,
+                        warnings: &warnings[..start],
+                        reads: &query_reads[..start],
+                        lengths: &lengths[..start],
+                        unsearched,
+                        query_masks: &query_masks,
+                        context_karlin: &context_karlin,
+                        query_eff_searchsp: &query_eff_searchsp,
+                        batches: &batch_spans,
+                    },
+                )?;
+                batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
+                return Err(error);
+            }
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:518-530
         // ```c
@@ -10328,30 +10371,7 @@ fn run_in_pool(
                     );
                 }
             }
-            let read =
-                database::read_titles(database, &batch_hit_lists, &mut titles).and_then(|()| {
-                    let Some(scopes) = query_scopes.as_ref() else {
-                        return Ok(());
-                    };
-                    crate::algorithm::common::database::refuse_reported_ids_of_queries(
-                        &titles,
-                        batch_hit_lists
-                            .iter()
-                            .enumerate()
-                            .flat_map(|(query, hit_list)| {
-                                hit_list.iter().flat_map(move |hit_list| {
-                                    let count =
-                                        hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                                    hit_list.hsplist_array[..count]
-                                        .iter()
-                                        .map(move |hsp_list| (start + query, hsp_list.oid))
-                                })
-                            }),
-                        scopes,
-                        "BLASTN",
-                    )
-                });
-            if let Err(error) = read {
+            if let Err(error) = database::read_titles(database, &batch_hit_lists, &mut titles) {
                 let error = match error.downcast::<database::HeaderReadError>() {
                     Ok(failure) => failure.error,
                     // LOSAT's refusal: the warnings of the batches read so far, as for the
@@ -10404,6 +10424,80 @@ fn run_in_pool(
                 warnings[start].write(&mut *outputs.diagnostics, archive)?;
                 return Err(error);
             }
+        }
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:304-309
+        // ```c++
+        //             if (isArchiveFormat) {
+        //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+        //                 m_Bah.ResetMessages();
+        //             } else {
+        //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+        //                 			                        fmt_args->GetFormattedOutputChoice());
+        // ```
+        // The prefetch before the batch's reports reads `PRE_FETCH_SEQS_LIMIT`, after the batch's
+        // search (a database's titles are read in its traceback, above): a value that NCBI cannot
+        // convert stops the first batch here, after its reader's messages and before its query
+        // warnings (`app::check_prefetch_environment`).
+        if let Err(error) =
+            crate::blastinput::app::check_prefetch_environment(outputs.only_archive())
+        {
+            write_before_failed_batch(
+                &args,
+                queries.before(&kept, start),
+                ReportSubjects {
+                    source,
+                    shown: &shown,
+                    titles: &titles,
+                },
+                &report_ranges,
+                outputs,
+                &output_formats,
+                BatchResults {
+                    hit_lists,
+                    warnings: &warnings[..start],
+                    reads: &query_reads[..start],
+                    lengths: &lengths[..start],
+                    unsearched,
+                    query_masks: &query_masks,
+                    context_karlin: &context_karlin,
+                    query_eff_searchsp: &query_eff_searchsp,
+                    batches: &batch_spans,
+                },
+            )?;
+            warnings[start].write(&mut *outputs.diagnostics, archive)?;
+            return Err(error);
+        }
+        // LOSAT's refusal of a reported sequence with the id of a query of its scope, after
+        // NCBI's own errors of the batch (the prefetch's above): the warnings of the batches read
+        // so far, as for a refusal of a title (above).
+        if let (SubjectSource::Database(_), Some(scopes)) = (source, query_scopes.as_ref()) {
+            let refused = crate::algorithm::common::database::refuse_reported_ids_of_queries(
+                &titles,
+                batch_hit_lists
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(query, hit_list)| {
+                        hit_list.iter().flat_map(move |hit_list| {
+                            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                            hit_list.hsplist_array[..count]
+                                .iter()
+                                .map(move |hsp_list| (start + query, hsp_list.oid))
+                        })
+                    }),
+                scopes,
+                "BLASTN",
+            );
+            if let Err(error) = refused {
+                // EXPERIMENT (LOSAT_X_RPTSTREAM): those of the batches before were written with
+                // their reports.
+                let written = if stream.acting() { start } else { 0 };
+                for query_warnings in &warnings[written..=start] {
+                    query_warnings.write(&mut *outputs.diagnostics, archive)?;
+                }
+                return Err(error);
+            }
+        }
+        if let SubjectSource::Database(database) = source {
             for hit_list in batch_hit_lists.iter_mut().flatten() {
                 drop_hsps_of_score_zero(hit_list);
             }
@@ -10843,8 +10937,8 @@ fn x_query_batch_letters(task: &str) -> u64 {
     match query_batching_from_environment(super::super::coordination::task_uses_megablast_chunks(
         task,
     )) {
-        Ok(batching) if batching.fixed_batch_size != 0 => u64::from(batching.batch_size),
-        Ok(batching) => u64::from(batching.split.mixer_max_batch_size() as u32),
+        Ok((batching, _)) if batching.fixed_batch_size != 0 => u64::from(batching.batch_size),
+        Ok((batching, _)) => u64::from(batching.split.mixer_max_batch_size() as u32),
         Err(_) => 0,
     }
 }
@@ -12726,8 +12820,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                 let hit_len_array = &mut subject_scratch.hit_len_array;
                 let diag_hash = &mut subject_scratch.diag_hash;
                 // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the two retrieves of the
-                // diagonal hash in the scans called below (`pair_extend::extend_offset_pairs` for a
-                // two-stage table, `na_scan::scan_na_lookup` for the other tables) skip the walk of
+                // diagonal hash in the scans called below (`two_stage_scan::scan_two_stage_lookup`,
+                // through `pair_extend::extend_offset_pairs`, for a two-stage table,
+                // `na_scan::scan_na_lookup` for the other tables) skip the walk of
                 // a bucket whose cells all lie below the level bound, unless diagnostics print what
                 // they read.
                 let x_lv_ref = diag_hash.x_lv_on()
@@ -12822,11 +12917,13 @@ fn search_query_batch<const UNGAPPED: bool>(
                     //                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
                     //     }
                     // ```
-                    // Dispatch point of PAIRPAR: `x_pair_seed::run` runs this block (scan,
-                    // word extension, diagonal hash, ungapped extension; one-hit diagonal-hash
-                    // scope only) with the subject scan in strips on the pool threads and the
-                    // pairs folded by this thread in the scan order; `continue` ends the
-                    // one-iteration strand loop. Otherwise the code below runs.
+                    // Dispatch point of PAIRPAR: `x_pair_seed::run` does what
+                    // `two_stage_scan::scan_two_stage_lookup` does (scan, word extension, diagonal
+                    // table, ungapped extension; in the scopes of `x_pair_seed.rs` and, for a
+                    // discontiguous table, `x_pair_seed_disc.rs`) with the subject scan in strips
+                    // and the pairs folded by this thread in the scan order; `continue` ends the
+                    // one-iteration strand loop. Otherwise `two_stage_scan::scan_two_stage_lookup`
+                    // runs.
                     if x_pair_seed::run(
                         &x_pair_seed::Inputs {
                             two_stage,
@@ -12873,653 +12970,71 @@ fn search_query_batch<const UNGAPPED: bool>(
                     ) {
                         continue;
                     }
-                    // For two-stage lookup, use lut_word_length (8) for scanning
-                    let lut_word_length = two_stage.lut_word_length();
-                    let word_length = two_stage.word_length();
-                    // NCBI's small-query table always keeps `masked_locations`, so
-                    // `s_TypeOfWord` checks the lookup words of every word hit (the
-                    // compressed query reads ambiguity codes as bases, and the lookup
-                    // table has no words with ambiguity codes).
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:407-411
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-498
                     // ```c
-                    //     if (locations &&
-                    //         lookup->word_length > lookup->lut_word_length ) {
-                    //         /* because we use compressed query, we must always check masked location*/
-                    //         lookup->masked_locations = s_SeqLocListInvert(locations, query->length);
-                    //     }
+                    //         if (aux_struct->WordFinder) {
+                    //             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
+                    //                                    word_params, aux_struct->ewp,
+                    //                                    aux_struct->offset_pairs,
+                    //                                    kScanSubjectOffsetArraySize,
+                    //                                    init_hitlist, ungapped_stats);
                     // ```
-                    let small_na_word =
-                        (!small_na_compressed_query.is_empty()).then(|| SmallNaWord {
-                            compressed_query: &small_na_compressed_query,
-                            subject_packed: search_seq_packed,
-                            query_length: encoded_query_concat_blastna.len(),
-                            word_length,
-                            lut_word_length,
-                        });
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:663-664
-                    // ```c
-                    // diag = s_off + diag_table->diag_array_length - q_off;
-                    // real_diag = diag & diag_table->diag_mask;
-                    // ```
-                    let (diag_array_length, diag_mask) = if use_array_indexing {
-                        (diag_table_length as isize, diag_table_mask)
-                    } else {
-                        (0isize, 0isize)
-                    };
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:825-826, 939-941
-                    // ```c
-                    // Delta = MIN(word_params->options->scan_range, window_size - word_length);
-                    // if (Delta < 0) Delta = 0;
-                    // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-                    //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
-                    //                       hit_ready, s_off_pos, window_size + Delta + 1);
-                    // ```
-                    let diag_hash_window = if !use_array_indexing {
-                        diag_hash_insert_window(window_size, scan_range, word_length)
-                    } else {
-                        0
-                    };
-
-                    let two_hits = window_size > 0;
-                    // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the level bound's constants
-                    // of this chunk's seeds.
-                    let x_lv_seeds = x_diag_lv::LvSeeds::new(two_hits, word_length, window_size);
-
-                    // DEBUG: Count loop iterations
-                    let mut dbg_left_ext_iters = 0usize;
-                    let mut dbg_right_ext_iters = 0usize;
-                    let mut dbg_ungapped_ext_calls = 0usize;
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
-                    // ```c
-                    // for (; s <= s_end; s += scan_step) {
-                    //     num_hits = s_BlastLookupGetNumHits(lookup, index);
-                    //     if (num_hits == 0)
-                    //         continue;
-                    //     s_BlastLookupRetrieve(lookup,
-                    //                           index,
-                    //                           offset_pairs + total_hits,
-                    //                           ...);
-                    //     total_hits += num_hits;
-                    // }
-                    // ```
-                    let scan_start = if timing_enabled {
-                        Some(std::time::Instant::now())
-                    } else {
-                        None
-                    };
-                    let mut scan_pause_ns: u64 = 0;
-                    let dbg_start_time = if debug_enabled {
-                        Some(std::time::Instant::now())
-                    } else {
-                        None
-                    };
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:451-497
-                    // ```c
-                    // const int kScanSubjectOffsetArraySize = GetOffsetArraySize(lookup);
-                    // hitsfound = scansub(lookup_wrap, subject, offset_pairs,
-                    //                     kScanSubjectOffsetArraySize, &scan_range[1]);
-                    // if (hitsfound == 0) continue;
-                    // hits_extended += extend(offset_pairs, hitsfound, ...);
-                    // ```
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1482-1534
-                    // ```c
-                    // Int4 total_hits = 0;
-                    // ...
-                    // if (total_hits >= max_hits)
-                    //     break;
-                    // ...
-                    // total_hits += s_BlastMBLookupRetrieve(mb_lt,
-                    //     index, offset_pairs + total_hits, s_off);
-                    // ```
-                    let offset_pairs = subject_scratch.offset_pairs.as_mut_slice();
-                    let mut offset_pairs_len = 0usize;
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:451-497
-                    // ```c
-                    // const int kScanSubjectOffsetArraySize = GetOffsetArraySize(lookup);
-                    // hitsfound = scansub(lookup_wrap, subject, offset_pairs,
-                    //                     kScanSubjectOffsetArraySize, &scan_range[1]);
-                    // if (hitsfound == 0) continue;
-                    // hits_extended += extend(offset_pairs, hitsfound, ...);
-                    // ```
-                    let x_hit_prefetch = x_mb_hit_prefetch();
-                    // What the steps of the offset pairs of this chunk
-                    // (`pair_extend::extend_offset_pairs`) read, built once per chunk.
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1052-1060
-                    // ```c
-                    // s_BlastNaExtend(const BlastOffsetPair * offset_pairs, Int4 num_hits,
-                    //                 const BlastInitialWordParameters * word_params,
-                    //                 LookupTableWrap * lookup_wrap,
-                    //                 BLAST_SequenceBlk * query,
-                    //                 BLAST_SequenceBlk * subject, Int4 ** matrix,
-                    //                 BlastQueryInfo * query_info,
-                    //                 Blast_ExtendWord * ewp,
-                    //                 BlastInitHitList * init_hitlist,
-                    //                 Uint4 s_range)
-                    // ```
-                    let pair_inputs = pair_extend::PairExtendInputs {
-                        small_na_word: &small_na_word,
-                        small_na_aligned_one_byte,
-                        subject_masked,
-                        word_length,
-                        lut_word_length,
-                        search_seq_packed,
-                        encoded_query_concat_blastna_with_sentinels,
-                        debug_enabled,
-                        x_hit_prefetch,
-                        query_context_index: &query_context_index,
-                        query_contexts,
-                        cutoff_scores,
-                        s_len,
-                        chunk,
-                        debug_window,
-                        use_array_indexing,
-                        diag_array_length,
-                        diag_mask,
-                        diag_array_size,
-                        diag_offset,
-                        x_lv_ref,
-                        x_lv_seeds,
-                        two_stage,
-                        two_hits,
-                        window_size,
-                        scan_range,
-                        diag_hash_window,
-                        encoded_query_concat_blastna,
-                        x_dropoff_scores,
-                        reduced_cutoff_scores,
-                        score_matrix: &score_matrix,
-                        nucl_score_table: &nucl_score_table,
-                        blastn_trace_enabled,
-                        s_idx,
-                        s_id,
-                        debug_mode,
-                        min_ungapped_score,
-                        timing_enabled,
-                        timing_ref,
-                    };
-                    // What the steps of the offset pairs of this chunk write, held by the scan's
-                    // callbacks for the whole scan.
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1058-1059
-                    // ```c
-                    //                 Blast_ExtendWord * ewp,
-                    //                 BlastInitHitList * init_hitlist,
-                    // ```
-                    let mut pair_state = pair_extend::PairExtendState {
-                        ungapped_hits: &mut *ungapped_hits,
-                        hit_level_array: &mut *hit_level_array,
-                        hit_len_array: &mut *hit_len_array,
-                        diag_hash: &mut *diag_hash,
-                        dbg_window_seeds: &mut dbg_window_seeds,
-                        dbg_left_ext_iters: &mut dbg_left_ext_iters,
-                        dbg_right_ext_iters: &mut dbg_right_ext_iters,
-                        dbg_ungapped_ext_calls: &mut dbg_ungapped_ext_calls,
-                        dbg_ungapped_low: &mut dbg_ungapped_low,
-                        dbg_gapped_attempted: &mut dbg_gapped_attempted,
-                    };
-
-                    let mut on_word =
-                        |kmer_start: usize,
-                         s_range: usize,
-                         current_lut_kmer: u64,
-                         second_template_index: Option<u64>| {
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
-                            // ```c
-                            // for (; s <= s_end; s += scan_step) {
-                            //     num_hits = s_BlastLookupGetNumHits(lookup, index);
-                            //     if (num_hits == 0)
-                            //         continue;
-                            //     s_BlastLookupRetrieve(lookup,
-                            //                           index,
-                            //                           offset_pairs + total_hits,
-                            //                           ...);
-                            //     total_hits += num_hits;
-                            // }
-                            // ```
-                            if debug_enabled {
-                                dbg_total_s_positions += 1;
-                            }
-
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
-                            // ```c
-                            // for (; s <= s_end; s += scan_step) {
-                            //     num_hits = s_BlastLookupGetNumHits(lookup, index);
-                            //     if (num_hits == 0)
-                            //         continue;
-                            //     s_BlastLookupRetrieve(lookup,
-                            //                           index,
-                            //                           offset_pairs + total_hits,
-                            //                           ...);
-                            //     total_hits += num_hits;
-                            // }
-                            // ```
-                            if debug_mode || blastn_debug {
-                                // DEBUG: Track processing time
-                                let _dbg_start = std::time::Instant::now();
-                            }
-
-                            // Lookup using lut_word_length k-mer
-                            let matches_len = if debug_mode || blastn_debug {
-                                two_stage.count_hits(current_lut_kmer)
-                            } else {
-                                0
-                            };
-
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
-                            // ```c
-                            // for (; s <= s_end; s += scan_step) {
-                            //     num_hits = s_BlastLookupGetNumHits(lookup, index);
-                            //     if (num_hits == 0)
-                            //         continue;
-                            //     s_BlastLookupRetrieve(lookup,
-                            //                           index,
-                            //                           offset_pairs + total_hits,
-                            //                           ...);
-                            //     total_hits += num_hits;
-                            // }
-                            // ```
-                            // DEBUG: Log max matches
-                            if (debug_mode || blastn_debug) && matches_len > 1000 {
-                                eprintln!(
-                                    "[WARN] Large matches_slice: len={} for kmer at position {}",
-                                    matches_len, kmer_start
-                                );
-                            }
-
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1504-1533
-                            // ```c
-                            // max_hits -= mb_lt->longest_chain;
-                            // if (total_hits >= max_hits)
-                            //     break;
-                            // total_hits += s_BlastMBLookupRetrieve(mb_lt,
-                            //     index, offset_pairs + total_hits, s_off);
-                            // ```
-                            if offset_pairs_len >= OFFSET_ARRAY_SIZE {
-                                pair_extend::extend_offset_pairs(
-                                    &pair_inputs,
-                                    &mut pair_state,
-                                    offset_pairs,
-                                    &mut offset_pairs_len,
-                                    &mut scan_pause_ns,
-                                    true,
-                                );
-                            }
-
-                            // For each match, add to the offset_pairs buffer.
-                            two_stage.for_each_hit(current_lut_kmer, |q_off_1| {
-                                if debug_enabled {
-                                    dbg_seeds_found += 1;
-                                }
-                                if q_off_1 != 0 {
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
-                                    // ```c
-                                    // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-                                    // offset_pairs[i++].qs_offsets.s_off = s_off;
-                                    // ```
-                                    offset_pairs[offset_pairs_len] = OffsetPair {
-                                        q_off: q_off_1 as usize - 1,
-                                        s_off: kmer_start,
-                                        s_range,
-                                    };
-                                    offset_pairs_len += 1;
-                                }
-                            });
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1456-1469
-                            // ```c
-                            // /** access the megablast lookup table with two templates */
-                            // #define MB_ACCESS_HITS2()                               \
-                            //    if (total_hits >= max_hits)                          \
-                            //        break;                                           \
-                            //    if (s_BlastMBLookupHasHits(mb_lt, index)) {          \
-                            //        total_hits += s_BlastMBLookupRetrieve(mb_lt,     \
-                            //                   index, offset_pairs + total_hits,     \
-                            //                   scan_range[0]);                               \
-                            //    }                                                    \
-                            //    if (s_BlastMBLookupHasHits(mb_lt, index2)) {         \
-                            //        total_hits += s_BlastMBLookupRetrieve2(mb_lt,    \
-                            //                   index2, offset_pairs + total_hits,    \
-                            //                   scan_range[0]);                               \
-                            //    }
-                            // ```
-                            // The second template's hits of the same subject offset follow
-                            // the first template's (`longest_chain` counts both chains).
-                            if let Some(second_template_index) = second_template_index {
-                                two_stage.for_each_hit2(second_template_index, |q_off_1| {
-                                    if debug_enabled {
-                                        dbg_seeds_found += 1;
-                                    }
-                                    offset_pairs[offset_pairs_len] = OffsetPair {
-                                        q_off: q_off_1 as usize - 1,
-                                        s_off: kmer_start,
-                                        s_range,
-                                    };
-                                    offset_pairs_len += 1;
-                                });
-                            }
-
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255-288
-                            // ```c
-                            // offset_array_size = OFFSET_ARRAY_SIZE +
-                            //     ((BlastMBLookupTable*)lookup->lut)->longest_chain;
-                            // ```
-                            if offset_pairs_len >= offset_array_size {
-                                pair_extend::extend_offset_pairs(
-                                    &pair_inputs,
-                                    &mut pair_state,
-                                    offset_pairs,
-                                    &mut offset_pairs_len,
-                                    &mut scan_pause_ns,
-                                    true,
-                                );
-                            }
-                        };
-                    if let Some(disc) = two_stage.disc() {
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1684
-                        // ```c
-                        //     scan_range[0] = 0;  /* subject seq mask index */
-                        //     scan_range[1] = 0;	/* start pos of scan */
-                        //     scan_range[2] = subject->length - lut_word_length; /*end pos (inclusive) of scan*/
-                        //
-                        //     /* if sequence is masked, fall back to generic scanner and extender */
-                        //     if (subject->mask_type != eNoSubjMasking) {
-                        //         if (lookup_wrap->lut_type == eMBLookupTable &&
-                        //             ((BlastMBLookupTable *) lookup_wrap->lut)->discontiguous) {
-                        //             /* discontiguous scan subs assumes any (non-aligned starting offset */
-                        //         } else {
-                        //             ...
-                        //         }
-                        //         /* generic scanner permits any (non-aligned) starting offset */
-                        //         scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
-                        //         scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
-                        //     }
-                        //     ...
-                        //     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-                        //
-                        //         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-                        //         ...
-                        //         hits_extended += extend(offset_pairs, hitsfound, word_params,
-                        //                                 lookup_wrap, query, subject, matrix,
-                        //                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
-                        //     }
-                        // ```
-                        // EXPERIMENT (LOSAT_X_DCCSR): a table laid out as CSR has no chains; its
-                        // words go through `x_on_word_csr`, `on_word`'s statements for one template
-                        // with the cell's run (the chain's offsets in the chain's order) instead of
-                        // the chain walk, in the same order, each `RING` words late through the ring
-                        // that prefetches their cells' offsets and runs (`lookup::x_dc_csr`). `on_word`
-                        // keeps its two callers, so its code is the one without the switch.
-                        if let Some(csr) = disc.x_csr() {
-                            let mut x_on_word_csr = |(kmer_start, s_range, index): (
-                                usize,
-                                usize,
-                                u64,
-                            )| {
-                                if debug_enabled {
-                                    dbg_total_s_positions += 1;
-                                }
-                                let run: &[u32] = if two_stage.has_hits(index) {
-                                    csr.run(index as usize)
-                                } else {
-                                    &[]
-                                };
-                                if (debug_mode || blastn_debug) && run.len() > 1000 {
-                                    eprintln!(
-                                        "[WARN] Large matches_slice: len={} for kmer at position {}",
-                                        run.len(),
-                                        kmer_start
-                                    );
-                                }
-                                if offset_pairs_len >= OFFSET_ARRAY_SIZE {
-                                    pair_extend::extend_offset_pairs(
-                                        &pair_inputs,
-                                        &mut pair_state,
-                                        offset_pairs,
-                                        &mut offset_pairs_len,
-                                        &mut scan_pause_ns,
-                                        true,
-                                    );
-                                }
-                                for &q_off_1 in run {
-                                    if debug_enabled {
-                                        dbg_seeds_found += 1;
-                                    }
-                                    offset_pairs[offset_pairs_len] = OffsetPair {
-                                        q_off: q_off_1 as usize - 1,
-                                        s_off: kmer_start,
-                                        s_range,
-                                    };
-                                    offset_pairs_len += 1;
-                                }
-                                if offset_pairs_len >= offset_array_size {
-                                    pair_extend::extend_offset_pairs(
-                                        &pair_inputs,
-                                        &mut pair_state,
-                                        offset_pairs,
-                                        &mut offset_pairs_len,
-                                        &mut scan_pause_ns,
-                                        true,
-                                    );
-                                }
-                            };
-                            let mut ring: x_dc_csr::Ring<'_, (usize, usize, u64)> =
-                                x_dc_csr::Ring::new(csr);
-                            scan_subject_disc_words_with_ranges(
-                                search_seq_packed,
-                                s_len,
-                                disc,
-                                subject_seq_ranges,
-                                subject_masked,
-                                |s_off, s_range, index, index2| {
-                                    debug_assert!(index2.is_none());
-                                    ring.push(
-                                        (s_off, s_range, index),
-                                        |w| w.2 as usize,
-                                        &mut x_on_word_csr,
-                                    )
-                                },
-                            );
-                            ring.flush(&mut x_on_word_csr);
-                        } else {
-                            scan_subject_disc_words_with_ranges(
-                                search_seq_packed,
-                                s_len,
-                                disc,
-                                subject_seq_ranges,
-                                subject_masked,
-                                |s_off, s_range, index, index2| {
-                                    on_word(s_off, s_range, index, index2)
-                                },
-                            );
-                        }
-                    } else if let Some(csr) = two_stage.x_mb_csr() {
-                        // EXPERIMENT (LOSAT_X_BNCSR): a contiguous table laid out as CSR has no
-                        // chains; its words with hits (the presence test of `for_each_hit` first)
-                        // go through `x_on_word_csr`, `on_word`'s statements with the cell's run
-                        // (the chain's offsets in the chain's order) instead of the chain walk, in
-                        // the same order, each `RING` words late through the ring that prefetches
-                        // their cells' offsets and runs (`lookup::x_dc_csr`). Every word still
-                        // counts for the debug summary, as in `on_word`. A batch of pairs that
-                        // reached `OFFSET_ARRAY_SIZE` goes before the next word with hits (`on_word`:
-                        // before the next word), with the same pairs, and before that word's warning,
-                        // so the debug output keeps its order. `on_word` keeps its two callers, so its
-                        // code is the one without the switch.
-                        // EXPERIMENT (LOSAT_X_BNCSRPACK): the form of the table's head is chosen
-                        // once (`x_dc_csr::XHead`), and `x_scan_csr!` expands to each form's scan,
-                        // so the scan of a head of one element per cell is the one without the
-                        // switch.
-                        // EXPERIMENT (LOSAT_X_BNPVONCE): a packed head's presence bits hold one bit
-                        // per cell, so its scan (`$pv` false) tests the word there only, not first
-                        // in the coarser presence vector, whose bit stands for several cells; for
-                        // a head whose bits fit the cache (`x_bn_pv_once`).
-                        // The trait's methods are called in two of the three scans below only, so
-                        // it is imported here and not in the macro's body.
-                        use x_dc_csr::XRing as _;
-                        macro_rules! x_scan_csr {
-                            ($head:expr, $pv:expr) => {{
-                                use x_dc_csr::XHead;
-                                let head = $head;
-                            let mut x_on_word_csr =
-                                |(kmer_start, s_range, index): (usize, usize, u64)| {
-                                    if offset_pairs_len >= OFFSET_ARRAY_SIZE {
-                                        pair_extend::extend_offset_pairs(
-                                            &pair_inputs,
-                                            &mut pair_state,
-                                            offset_pairs,
-                                            &mut offset_pairs_len,
-                                            &mut scan_pause_ns,
-                                            true,
-                                        );
-                                    }
-                                    let run: &[u32] = head.run(index as usize);
-                                    if (debug_mode || blastn_debug) && run.len() > 1000 {
-                                        eprintln!(
-                                        "[WARN] Large matches_slice: len={} for kmer at position {}",
-                                        run.len(),
-                                        kmer_start
-                                    );
-                                    }
-                                    for &q_off_1 in run {
-                                        if debug_enabled {
-                                            dbg_seeds_found += 1;
-                                        }
-                                        offset_pairs[offset_pairs_len] = OffsetPair {
-                                            q_off: q_off_1 as usize - 1,
-                                            s_off: kmer_start,
-                                            s_range,
-                                        };
-                                        offset_pairs_len += 1;
-                                    }
-                                    if offset_pairs_len >= offset_array_size {
-                                        pair_extend::extend_offset_pairs(
-                                            &pair_inputs,
-                                            &mut pair_state,
-                                            offset_pairs,
-                                            &mut offset_pairs_len,
-                                            &mut scan_pause_ns,
-                                            true,
-                                        );
-                                    }
-                                };
-                            let mut ring = head.ring::<(usize, usize, u64)>();
-                            let mb_scan_kind =
-                                select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
-                            scan_subject_kmers_with_ranges(
-                                search_seq_packed,
-                                s_len,
-                                word_length,
-                                lut_word_length,
-                                scan_step,
-                                &subject_seq_ranges,
-                                subject_masked,
-                                mb_scan_kind,
-                                |kmer_start, s_range, current_lut_kmer| {
-                                    if debug_enabled {
-                                        dbg_total_s_positions += 1;
-                                    }
-                                    if !$pv || two_stage.has_hits(current_lut_kmer) {
-                                        ring.push(
-                                            (kmer_start, s_range, current_lut_kmer),
-                                            |w| w.2 as usize,
-                                            &mut x_on_word_csr,
-                                        );
-                                    }
-                                },
-                            );
-                            ring.flush(&mut x_on_word_csr);
-                            }};
-                        }
-                        match csr.x_packed() {
-                            Some(packed) if x_bn_pv_once(&packed) => x_scan_csr!(packed, false),
-                            Some(packed) => x_scan_csr!(packed, true),
-                            None => x_scan_csr!(csr, true),
-                        }
-                    } else {
-                        let mb_scan_kind =
-                            select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
-                        scan_subject_kmers_with_ranges(
+                    // The reference scan of this chunk and the steps of the offset pairs it collects
+                    // (`two_stage_scan::scan_two_stage_lookup`), with what they read and write, built once per
+                    // chunk.
+                    two_stage_scan::scan_two_stage_lookup(
+                        &two_stage_scan::TwoStageScanInputs {
+                            two_stage,
                             search_seq_packed,
                             s_len,
-                            word_length,
-                            lut_word_length,
                             scan_step,
                             subject_seq_ranges,
                             subject_masked,
-                            mb_scan_kind,
-                            |kmer_start, s_range, current_lut_kmer| {
-                                on_word(kmer_start, s_range, current_lut_kmer, None)
-                            },
-                        );
-                    }
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
-                    // ```c
-                    // for (; s <= s_end; s += scan_step) {
-                    //     num_hits = s_BlastLookupGetNumHits(lookup, index);
-                    //     if (num_hits == 0)
-                    //         continue;
-                    //     s_BlastLookupRetrieve(lookup,
-                    //                           index,
-                    //                           offset_pairs + total_hits,
-                    //                           ...);
-                    //     total_hits += num_hits;
-                    // }
-                    // ```
-                    if let Some(scan_start) = scan_start {
-                        let elapsed_ns = scan_start.elapsed().as_nanos() as u64;
-                        let scan_ns = elapsed_ns.saturating_sub(scan_pause_ns);
-                        if let Some(timing) = timing_ref {
-                            timing
-                                .scan_ns
-                                .fetch_add(scan_ns, std::sync::atomic::Ordering::Relaxed);
-                            timing
-                                .scan_calls
-                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        }
-                    }
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:451-497
-                    // ```c
-                    // hitsfound = scansub(lookup_wrap, subject, offset_pairs,
-                    //                     kScanSubjectOffsetArraySize, &scan_range[1]);
-                    // if (hitsfound == 0) continue;
-                    // hits_extended += extend(offset_pairs, hitsfound, ...);
-                    // ```
-                    if offset_pairs_len > 0 {
-                        pair_extend::extend_offset_pairs(
-                            &pair_inputs,
-                            &mut pair_state,
-                            offset_pairs,
-                            &mut offset_pairs_len,
-                            &mut scan_pause_ns,
-                            false,
-                        );
-                    }
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
-                    // ```c
-                    // for (; s <= s_end; s += scan_step) {
-                    //     num_hits = s_BlastLookupGetNumHits(lookup, index);
-                    //     if (num_hits == 0)
-                    //         continue;
-                    //     s_BlastLookupRetrieve(lookup,
-                    //                           index,
-                    //                           offset_pairs + total_hits,
-                    //                           ...);
-                    //     total_hits += num_hits;
-                    // }
-                    // ```
-                    // DEBUG: Log stats for this subject
-                    if debug_mode || blastn_debug {
-                        if let Some(dbg_start_time) = dbg_start_time {
-                            let elapsed = dbg_start_time.elapsed();
-                            eprintln!("[PERF] Subject scan took {:?}: left_ext={}, right_ext={}, ungapped={}, seeds={}, valid_pos={}",
-                                    elapsed, dbg_left_ext_iters, dbg_right_ext_iters, dbg_ungapped_ext_calls,
-                                    dbg_seeds_found, dbg_total_s_positions);
-                        }
-                    }
+                            offset_array_size,
+                            small_na_compressed_query: &small_na_compressed_query,
+                            small_na_aligned_one_byte,
+                            encoded_query_concat_blastna_with_sentinels,
+                            query_context_index: &query_context_index,
+                            query_contexts,
+                            cutoff_scores,
+                            chunk,
+                            use_array_indexing,
+                            diag_table_length,
+                            diag_table_mask,
+                            diag_array_size,
+                            diag_offset,
+                            x_lv_ref,
+                            window_size,
+                            scan_range,
+                            encoded_query_concat_blastna,
+                            x_dropoff_scores,
+                            reduced_cutoff_scores,
+                            score_matrix: &score_matrix,
+                            nucl_score_table: &nucl_score_table,
+                            debug_enabled,
+                            debug_mode,
+                            blastn_debug,
+                            debug_window,
+                            blastn_trace_enabled,
+                            s_idx,
+                            s_id,
+                            min_ungapped_score,
+                            timing_enabled,
+                            timing_ref,
+                        },
+                        &mut two_stage_scan::TwoStageScanState {
+                            ungapped_hits: &mut *ungapped_hits,
+                            hit_level_array: &mut *hit_level_array,
+                            hit_len_array: &mut *hit_len_array,
+                            diag_hash: &mut *diag_hash,
+                            offset_pairs: &mut subject_scratch.offset_pairs,
+                            dbg_total_s_positions: &mut dbg_total_s_positions,
+                            dbg_seeds_found: &mut dbg_seeds_found,
+                            dbg_window_seeds: &mut dbg_window_seeds,
+                            dbg_ungapped_low: &mut dbg_ungapped_low,
+                            dbg_gapped_attempted: &mut dbg_gapped_attempted,
+                        },
+                    );
                 }
                 if two_stage_lookup_ref.is_none() {
                     // Original lookup method (for non-two-stage lookup)

@@ -29,6 +29,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::TempFile;
+
 mod reach_support;
 
 fn fixture(name: &str) -> PathBuf {
@@ -41,15 +44,16 @@ fn fixture(name: &str) -> PathBuf {
 struct Run {
     stdout: Vec<u8>,
     stderr: String,
+    /// The run's worker log, when the test made one: kept until the caller has done with the run,
+    /// and kept on disk when a test panics.
+    _log: Option<TempFile>,
 }
 
 /// A protein database of the fixture's subject proteome (`MejoMJNV.faa`, 124 sequences), made with
-/// `losat makeblastdb` in a directory of this test; returns the database name.
-fn subject_database() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("losat-bplistedlean-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let name = dir.join("MejoMJNV");
+/// `losat makeblastdb` in a directory of this test; returns the database name, whose directory is
+/// removed with it when the value is dropped.
+fn subject_database() -> TempFile {
+    let name = TempFile::new("losat-bplistedlean", "MejoMJNV");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makeblastdb")
         .arg("-in")
@@ -106,12 +110,15 @@ fn blastp(query: &Path, db: &Path, threads: u32, vars: &[(&str, &str)], outfmt: 
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bplistedlean-worker.log"),
-        );
-    }
+    // A worker log of this run when the environment names none: it goes with the `Run`, is removed
+    // when the `Run` is dropped, and is kept when the test panics.
+    let log = std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+        .is_none()
+        .then(|| {
+            let log = TempFile::keep_on_failure("losat-bplistedlean-worker", "worker.log");
+            command.env("LOSAT_BLASTX_WORKER_LOG", &log);
+            log
+        });
     let output = command
         .arg("blastp")
         .arg("-query")
@@ -133,6 +140,7 @@ fn blastp(query: &Path, db: &Path, threads: u32, vars: &[(&str, &str)], outfmt: 
     let run = Run {
         stdout: output.stdout,
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        _log: log,
     };
     assert!(
         output.status.success(),

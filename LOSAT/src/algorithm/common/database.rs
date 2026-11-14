@@ -287,11 +287,7 @@ pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error 
     //     }                                                                       \
     // ```
     if let Some(exception) = error.ncbi_exception() {
-        return NativeError {
-            exit: 255,
-            message: format!("Error: {}\n", exception.what()),
-        }
-        .into();
+        return NativeError::exception(exception).into();
     }
     match error.ncbi_message() {
         Some(text) => NativeError {
@@ -1081,11 +1077,12 @@ impl BatchReads {
     }
 }
 
-/// `PRE_FETCH_SEQS_LIMIT` as `NStr::StringToInt` reads it; `None` when it is not set or is no
-/// integer.
+/// The limit of `PRE_FETCH_SEQS_LIMIT` (`app::prefetch_seqs_limit`); `None` when it is not set. A
+/// value that NCBI cannot convert stops the first batch before its prefetch
+/// (`app::check_prefetch_environment`), so no batch's prefetch is decided by it: the plans made
+/// before the search count it as unset.
 fn prefetch_seqs_limit() -> Option<i32> {
-    std::env::var_os("PRE_FETCH_SEQS_LIMIT")
-        .and_then(|value| crate::blastinput::query_batch::ncbi_string_to_int(&value))
+    crate::blastinput::app::prefetch_seqs_limit().ok().flatten()
 }
 
 impl<'a> HeaderReader<'a> {
@@ -1298,18 +1295,53 @@ impl<'a> HeaderReader<'a> {
             Ok(oids) => oids,
             Err(error) => return failed(error),
         };
+        // LOSAT's own search of the keys in another letter case (version 5, a name or a `pir` or
+        // `prf` id): where it fails, NCBI's exact lookup may still succeed, so the holders are
+        // unknown (review 1 of line DBID pircase, L1).
+        let variants = match lookup.case_variant_oids(id) {
+            Ok(oids) => oids,
+            Err(error) => {
+                return (
+                    Some(FoundInstead::CaseUnknown(
+                        error.ncbi_message().unwrap_or_else(|| error.to_string()),
+                    )),
+                    None,
+                    None,
+                )
+            }
+        };
         let mut keys = Vec::new();
         crate::report::db_subject::scope_keys(subject, &mut keys);
+        // A sequence found under a key in another letter case holds such an id where it holds one
+        // of the Seq-align id's own handle: the key of a name is the same in every alternative and
+        // release, which the handles keep apart (`gb||locusy` and `emb||LOCUSY`, `sp||NAMEY` and
+        // `tr||namey`: review 1 of line DBID pircase, H1).
+        let handle = (!variants.is_empty())
+            .then(|| {
+                crate::seqid::mask_handle::mask_handle_key(id)
+                    .ok()
+                    .flatten()
+            })
+            .flatten();
         // The first was compared above. Besides a sequence given instead, any other holder
         // (also a copy of the subject's record) is one the scope can read for it.
         let mut also_held = None;
-        for other in oids
+        for (other, variant) in oids
             .iter()
             .chain(&folded)
-            .filter(|&&oid| oid != own && Some(oid) != first)
-            .map(|&oid| self.db.ordinal_of(oid))
+            .map(|oid| (oid, false))
+            .chain(variants.iter().map(|oid| (oid, true)))
+            .filter(|&(&oid, _)| oid != own && Some(oid) != first)
+            .map(|(&oid, variant)| (self.db.ordinal_of(oid), variant))
         {
-            if !self.holds_key(other, &keys, crate::seqid::defline_set::scope_keys) {
+            let held = if variant {
+                handle
+                    .as_deref()
+                    .is_some_and(|handle| self.holds_handle(other, handle))
+            } else {
+                self.holds_key(other, &keys, crate::seqid::defline_set::scope_keys)
+            };
+            if !held {
                 continue;
             }
             if given.is_some() {
@@ -1421,6 +1453,21 @@ impl<'a> HeaderReader<'a> {
                     && self.copy_of(subject, ordinal, other) == RecordCopy::Differs
             })
             .map(WeakMatch::Held))
+    }
+
+    /// Whether a Seq-id of the sequence `ordinal` is one `CSeq_id_Handle` with the key `handle`
+    /// (`seqid::mask_handle::mask_handle_key`).
+    fn holds_handle(&self, ordinal: u32, handle: &[u8]) -> bool {
+        let Ok(crate::seqdb::SequenceHeader::Parsed(set)) = self.db.read_header(ordinal) else {
+            return false;
+        };
+        set.deflines
+            .iter()
+            .flat_map(|defline| &defline.ids)
+            .any(|id| {
+                crate::seqid::mask_handle::mask_handle_key(id)
+                    .is_ok_and(|key| key.as_deref() == Some(handle))
+            })
     }
 
     /// Whether a Seq-id of the sequence `ordinal` has one of the keys `keys` that `key_of` gives
@@ -4497,7 +4544,10 @@ pub(crate) fn scope_bioseq(
         }
         None
         | Some(
-            FoundInstead::AlsoHeld(_) | FoundInstead::OtherTaxids(_) | FoundInstead::CopyApart(..),
+            FoundInstead::AlsoHeld(_)
+            | FoundInstead::CaseUnknown(_)
+            | FoundInstead::OtherTaxids(_)
+            | FoundInstead::CopyApart(..),
         ) => Ok(ScopeBioseq {
             blob: Some(ordinal),
             bioseq: subject.bioseq_holds_alignment_id(),
@@ -4889,14 +4939,41 @@ mod taxdb_prepass_tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests")
     }
 
+    /// A database and the empty current directory it was opened from (its search path keeps it for
+    /// the files looked for later), which is removed with it.
+    struct Opened {
+        db: SeqDb,
+        cwd: PathBuf,
+    }
+
+    impl std::ops::Deref for Opened {
+        type Target = SeqDb;
+
+        fn deref(&self) -> &SeqDb {
+            &self.db
+        }
+    }
+
+    impl Drop for Opened {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.cwd);
+        }
+    }
+
     /// The database `name` of `tests/fixtures/outfmt16/db` opened with `BLASTDB=taxdb`
     /// (`None`: not set), from an empty current directory.
-    fn database(name: &str, taxdb: Option<&Path>) -> SeqDb {
-        let cwd = std::env::temp_dir().join(format!("losat_prepass_cwd_{}", std::process::id()));
+    fn database(name: &str, taxdb: Option<&Path>) -> Opened {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let cwd = std::env::temp_dir().join(format!(
+            "losat_prepass_cwd_{}_{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
         std::fs::create_dir_all(&cwd).unwrap();
         let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None).unwrap();
         let path = root().join("fixtures/outfmt16/db").join(name);
-        SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap()
+        let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap();
+        Opened { db, cwd }
     }
 
     fn variant(name: &str) -> PathBuf {

@@ -34,6 +34,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fasta")
@@ -61,7 +64,7 @@ fn blastp(
     threads: u32,
     vars: &[(&str, &str)],
     extra: &[&str],
-) -> (Vec<u8>, Vec<DiagCounts>, String) {
+) -> (Vec<u8>, Vec<DiagCounts>, String, Option<TempFile>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -73,12 +76,7 @@ fn blastp(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bpdiag-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastp_diag_batch_worker");
     let output = command
         .arg("blastp")
         .arg("-query")
@@ -113,7 +111,7 @@ fn blastp(
             }
         })
         .collect();
-    (output.stdout, counts, stderr)
+    (output.stdout, counts, stderr, log)
 }
 
 /// Checks one search's `[TIMING] x_bpdiag` line: `LOSAT_X_BPDIAG_SIMD=0` runs the scalar batch,
@@ -246,7 +244,7 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
     for (query, subject, thread_counts, every_run) in &pairs {
         let every_run = *every_run;
         for &threads in *thread_counts {
-            let (reference, reference_counts, _) =
+            let (reference, reference_counts, _, _log) =
                 blastp(query, subject, threads, PER_HIT, &["-outfmt", "6"]);
             assert!(!reference.is_empty(), "the pair has a report");
             assert!(
@@ -255,7 +253,8 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
             );
             // The fixture pair without the run of `LOSAT_X_BPDEFER=0`.
             for &(vars, simd, defer) in batched.iter().filter(|run| every_run || run.2) {
-                let (rows, counts, _) = blastp(query, subject, threads, vars, &["-outfmt", "6"]);
+                let (rows, counts, _, _log) =
+                    blastp(query, subject, threads, vars, &["-outfmt", "6"]);
                 let what = format!("{} threads {threads} {vars:?}", query.display());
                 assert!(rows == reference, "{what}: rows differ");
                 check_counts(&counts, simd, defer, &what);

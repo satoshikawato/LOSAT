@@ -2462,10 +2462,9 @@ impl FastaStream<std::fs::File> {
 }
 
 /// How the search reads its query file: `-parse_deflines`, the search's ids and `-strand`
-/// (`FastaStream`'s fields). The reads of the file before the search
-/// (`blast_xml::prescan_queries`, `archive::prescan_query_titles`) read it the same way, so that
-/// they see the search's records and titles and stop at the reader error that stops the search
-/// (under `-parse_deflines`, a first line that is not a defline).
+/// (`FastaStream`'s fields). The read of the file before the search (`blast_xml::prescan_queries`)
+/// reads it the same way, so that it sees the search's records and titles and stops at the reader
+/// error that stops the search (under `-parse_deflines`, a first line that is not a defline).
 pub(crate) struct QueryStreamSettings {
     pub(crate) parse_deflines: bool,
     pub(crate) id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
@@ -2666,10 +2665,10 @@ pub(crate) fn parse_fasta_stream_keeping<R: Read>(
 
 /// `parse_fasta_stream_keeping` without keeping the records: the reader drops each batch once it
 /// has delivered it, so that a read of a query file holds one reader batch, not the file (the
-/// search's queries, as NCBI's loop holds one batch: `emit_fasta_batch`; and the reads of them
-/// before the search, `blast_xml::prescan_queries` and `archive::prescan_query_titles`, which have
-/// no NCBI counterpart: NCBI reads the query file once, and these reads are LOSAT's, for its
-/// refusals before the first byte). The batches, their records and their numbers are the same.
+/// search's queries, as NCBI's loop holds one batch: `emit_fasta_batch`; and the read of them
+/// before the search, `blast_xml::prescan_queries`, which has no NCBI counterpart: NCBI reads the
+/// query file once, and this read is LOSAT's, for its refusals before the first byte). The
+/// batches, their records and their numbers are the same.
 pub(crate) fn read_fasta_stream_batches<R: Read>(
     stream: &mut FastaStream<R>,
     protein: bool,

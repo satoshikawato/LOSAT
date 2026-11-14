@@ -116,20 +116,19 @@ impl ArchiveEncoding {
     }
 
     /// Whether this encoding writes every byte of `text` into a VisibleString of the archive
-    /// as NCBI does, without a diagnostic.
+    /// as it is, without a diagnostic.
     ///
     /// Text and binary: only `0x20..=0x7E` (`GoodVisibleChar`); NCBI writes `#` for any other
-    /// byte and posts a `Bad char` diagnostic for each, whose text and place LOSAT does not
-    /// reproduce. XML: the archive's stream has no encoding, so every byte is written as it
-    /// is (TAB, LF and CR as character references) except `0x01..=0x1F` without those three,
-    /// which `x_VerifyChar` (`BAD_CHAR`) replaces by `#` with a diagnostic
-    /// (objostrxml.cpp:548-565).
+    /// byte and posts error 803.7 for each (`encoder::ReplacedChar`). XML: the archive's stream
+    /// has no encoding, so every byte is written as it is (TAB, LF and CR as character
+    /// references) except `0x01..=0x1F` without those three, which `x_VerifyChar` (`BAD_CHAR`)
+    /// replaces by `#` with the post (objostrxml.cpp:548-565).
     pub fn writes_text(self, text: &[u8]) -> bool {
         match self {
             ArchiveEncoding::Xml => !text
                 .iter()
                 .any(|byte| matches!(byte, 0x01..=0x08 | 0x0b | 0x0c | 0x0e..=0x1f)),
-            _ => text.iter().all(|&byte| is_visible(byte)),
+            _ => text.iter().all(|byte| (0x20..=0x7E).contains(byte)),
         }
     }
 }
@@ -173,27 +172,9 @@ pub struct ArchiveRequest {
 }
 
 impl ArchiveRequest {
-    /// The request of a run of `inputs.program` (`ArchiveHandle::for_program` has the
-    /// refusals): `option` is what asks for it, `-outfmt 11` or `-export_search_strategy`.
-    pub(crate) fn for_inputs(
-        encoding: ArchiveEncoding,
-        inputs: &OptionInputs,
-        database: Option<&str>,
-        label: &str,
-        option: &str,
-    ) -> anyhow::Result<Self> {
-        for (what, text) in [
-            ("-db name", database),
-            ("-window_masker_db path", inputs.window_masker_db.as_deref()),
-        ] {
-            if let Some(text) = text {
-                if !encoding.writes_text(text.as_bytes()) {
-                    anyhow::bail!(
-                        "a {what} with a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML) is not supported by LOSAT's {label} with {option}"
-                    );
-                }
-            }
-        }
+    /// The request of a run of `inputs.program`: `database` is the `-db` argument as typed
+    /// (`None` for `-subject`).
+    pub(crate) fn for_inputs(inputs: &OptionInputs, database: Option<&str>) -> Self {
         let program = match inputs.program {
             Program::Blastn => "blastn",
             Program::Blastp => "blastp",
@@ -201,12 +182,25 @@ impl ArchiveRequest {
             Program::Tblastn => "tblastn",
             Program::Tblastx => "tblastx",
         };
-        Ok(Self {
+        Self {
             program,
             service: options::service(inputs.program, &inputs.task),
             algorithm: options::algorithm_options(inputs),
             database: database.map(|name| name.as_bytes().to_vec()),
-        })
+        }
+    }
+
+    /// Whether `encoding` writes the strings that the request copies from the command line as
+    /// they are (`ArchiveEncoding::writes_text`): the `-db` name and the string options (the
+    /// `-window_masker_db` path, the `-index_name`, the matrix name).
+    pub(crate) fn written_as_is(&self, encoding: ArchiveEncoding) -> bool {
+        self.database
+            .as_deref()
+            .is_none_or(|name| encoding.writes_text(name))
+            && self.algorithm.iter().all(|param| match &param.value {
+                options::ParamValue::Str(value) => encoding.writes_text(value.as_bytes()),
+                _ => true,
+            })
     }
 }
 
@@ -367,27 +361,14 @@ impl std::fmt::Debug for ArchiveHandle {
 impl ArchiveHandle {
     /// The handle of a run of `inputs.program` that writes the archive (`-outfmt 11`): the
     /// request from the recorded options, `ARCHIVE_FORMAT` read once. `database` is the
-    /// `-db` argument as typed (`None` for `-subject`); `label` names the program in a refusal;
-    /// `options` is the run's options handle (made once per run; its search strategy shares it).
-    /// Refuses, before anything is written, what LOSAT cannot write: a `-db` name or a
-    /// `-window_masker_db` path with a byte that `ArchiveEncoding::writes_text` refuses (NCBI
-    /// writes `#` and diagnostics there). These are the only strings the archive copies from
-    /// the command line: the `-matrix` name is one of the supported matrices (the parser
-    /// refuses any other before the search, in letters, digits and case only), and the other
-    /// recorded options are numbers or switches.
+    /// `-db` argument as typed (`None` for `-subject`); `options` is the run's options handle
+    /// (made once per run; its search strategy shares it).
     pub fn for_program(
         inputs: &OptionInputs,
         database: Option<&str>,
-        label: &str,
         options: &OptionsHandle,
-    ) -> anyhow::Result<Self> {
-        Self::for_encoding(
-            ArchiveEncoding::from_env(),
-            inputs,
-            database,
-            label,
-            options,
-        )
+    ) -> Self {
+        Self::for_encoding(ArchiveEncoding::from_env(), inputs, database, options)
     }
 
     /// `for_program` for a given encoding (`ARCHIVE_FORMAT` read by the caller).
@@ -395,14 +376,13 @@ impl ArchiveHandle {
         encoding: ArchiveEncoding,
         inputs: &OptionInputs,
         database: Option<&str>,
-        label: &str,
         options: &OptionsHandle,
-    ) -> anyhow::Result<Self> {
-        Ok(Self::new(
+    ) -> Self {
+        Self::new(
             encoding,
-            ArchiveRequest::for_inputs(encoding, inputs, database, label, "-outfmt 11")?,
+            ArchiveRequest::for_inputs(inputs, database),
             options.clone(),
-        ))
+        )
     }
 
     /// The handle of a run's archive, with the run's options handle `options`.
@@ -503,6 +483,15 @@ impl ArchiveHandle {
         written
     }
 
+    /// Writes `text` to `diagnostics` without saving it: NCBI's posts while it writes an archive,
+    /// which its `ResetMessages` after the archive drops (blastn_app.cpp:305-306).
+    pub fn write_unsaved(&self, diagnostics: &mut dyn Write, text: &[u8]) -> std::io::Result<()> {
+        let muted = self.with_state(|state| std::mem::replace(&mut state.muted, true));
+        let written = diagnostics.write_all(text);
+        self.with_state(|state| state.muted = muted);
+        written
+    }
+
     /// Whether messages are saved since the last archive.
     pub fn has_messages(&self) -> bool {
         self.with_state(|state| !state.log.is_empty())
@@ -524,108 +513,98 @@ impl ArchiveHandle {
     }
 }
 
-/// Whether `byte` is one of NCBI's visible characters (`GoodVisibleChar`: `' '` to `'~'`).
-/// In the text and binary archives NCBI writes `#` for any other byte of a VisibleString and
-/// posts a diagnostic for each, whose text and place LOSAT does not reproduce (XML: see
-/// `ArchiveEncoding::writes_text`).
-fn is_visible(byte: u8) -> bool {
-    (0x20..=0x7E).contains(&byte)
-}
-
-/// The refusal of a title that `encoding` cannot write as NCBI does (`writes_text`: in text
-/// and binary a byte outside `0x20..=0x7E`; in XML NCBI writes the byte, and only a control
-/// byte is refused). `role` is `query` or `subject`. The encoding is the environment's
-/// (`ArchiveEncoding::from_env`).
-pub(crate) fn check_titles<R: requests::RequestRecord>(
-    records: &[R],
-    role: &str,
-    label: &str,
-) -> anyhow::Result<()> {
-    check_titles_for(ArchiveEncoding::from_env(), records, role, label)
-}
-
-/// `check_titles` for a given encoding (a caller that checks record by record reads the
-/// environment once).
-pub(crate) fn check_titles_for<R: requests::RequestRecord>(
-    encoding: ArchiveEncoding,
-    records: &[R],
-    role: &str,
-    label: &str,
-) -> anyhow::Result<()> {
-    check_titles_in(encoding, records, role, label, "-outfmt 11")
-}
-
-/// The encoding whose rule the titles of a run's requests follow, for a reader that checks
-/// record by record: ASN.1 text when the run writes a search strategy (whose refusals hold the
-/// archive's in every encoding, `ArchiveEncoding::writes_text`), else the archive's
-/// (`ArchiveEncoding::from_env`); `None` without either (`check_request_titles`).
-pub fn request_title_encoding(archive: bool, strategy: bool) -> Option<ArchiveEncoding> {
-    if strategy {
-        Some(ArchiveEncoding::Text)
-    } else {
-        archive.then(ArchiveEncoding::from_env)
-    }
-}
-
-/// `check_titles` for the requests of a run: the archive's (`archive`, in the environment's
-/// encoding) and the search strategy's (`strategy`, always ASN.1 text,
-/// `strategy::StrategyExport`).
-pub(crate) fn check_request_titles<R: requests::RequestRecord>(
-    records: &[R],
-    role: &str,
-    label: &str,
-    archive: bool,
-    strategy: bool,
-) -> anyhow::Result<()> {
-    if archive {
-        check_titles(records, role, label)?;
-    }
-    if strategy {
-        check_titles_in(
-            ArchiveEncoding::Text,
-            records,
-            role,
-            label,
-            "-export_search_strategy",
-        )?;
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
+// ```c++
+// void CBlastAppDiagHandler::Post(const SDiagMessage & mess)
+// {
+// 	if(m_handler != NULL) {
+// 		m_handler->Post(mess);
+// 	}
+// 	if(m_save) {
+// 		CRef<CBlast4_error> d(new CBlast4_error);
+// 		string m;
+// 		mess.Write(m);
+// 		d->SetMessage(NStr::Sanitize(m));
+// 		d->SetCode((int)mess.m_Severity);
+// 		...
+// 			m_messages.push_back(d);
+// ```
+/// Posts error 803.7 of each byte that NCBI's stream replaced in a document of the run of
+/// `program` (`encoder::ReplacedChar`, with the application's prefix: `SetDiagPostPrefix(
+/// "blastn")`) on `diagnostics`. With the run's archive `archive`, a post of the search strategy
+/// (`saved`) is a message of the batch's archive, as every post while NCBI's handler saves them;
+/// the posts of an archive are not (`ArchiveHandle::write_unsaved`).
+pub(crate) fn post_replaced(
+    diagnostics: &mut dyn Write,
+    archive: Option<&ArchiveHandle>,
+    saved: bool,
+    program: &str,
+    replaced: &[crate::report::serial::encoder::ReplacedChar],
+) -> std::io::Result<()> {
+    for byte in replaced {
+        let text = byte.post(Some(program));
+        match archive {
+            Some(handle) if saved => handle.write_post(diagnostics, ERROR, &text)?,
+            Some(handle) => handle.write_unsaved(diagnostics, &text)?,
+            None => diagnostics.write_all(&text)?,
+        }
     }
     Ok(())
 }
 
-/// The refusal of the first of `records` whose title `encoding` cannot write as NCBI does
-/// (`check_titles`), for the requests that `option` asks for (`-outfmt 11`,
-/// `-export_search_strategy`).
-pub(crate) fn check_titles_in<R: requests::RequestRecord>(
+/// An encoder that writes nothing and finds whether `encoding` writes every VisibleString it is
+/// given as it is (`ArchiveEncoding::writes_text`): the Seq-ids of a record are checked with the
+/// writer that writes them (`report::seqid::SeqId::write`).
+struct StringsAsIs {
     encoding: ArchiveEncoding,
-    records: &[R],
-    role: &str,
-    label: &str,
-    option: &str,
-) -> anyhow::Result<()> {
-    if let Some(record) = records
-        .iter()
-        .find(|record| !encoding.writes_text(record.title()))
-    {
-        return Err(anyhow::Error::new(TitleRefusal(format!(
-            "the title of the {role} {} has a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML), which is not supported by LOSAT's {label} with {option}",
-            record.local_id()
-        ))));
-    }
-    Ok(())
+    as_is: bool,
 }
 
-/// The error of `check_titles`, so that a caller can tell this refusal from the others (to
-/// remove an `-out` file it created for nothing).
-#[derive(Debug)]
-pub struct TitleRefusal(String);
-
-impl std::fmt::Display for TitleRefusal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+impl StringsAsIs {
+    fn new(encoding: ArchiveEncoding) -> Self {
+        Self {
+            encoding,
+            as_is: true,
+        }
     }
 }
 
-impl std::error::Error for TitleRefusal {}
+impl crate::report::serial::encoder::Encoder for StringsAsIs {
+    fn begin_document(&mut self, _: &str) {}
+    fn end_document(&mut self) {}
+    fn begin_sequence(&mut self, _: &str) {}
+    fn end_sequence(&mut self) {}
+    fn member(&mut self, _: &str, _: u8) {}
+    fn end_member(&mut self) {}
+    fn begin_list(&mut self, _: bool) {}
+    fn element(&mut self) {}
+    fn end_list(&mut self) {}
+    fn variant(&mut self, _: &str, _: &str, _: u8) {}
+    fn end_variant(&mut self) {}
+    fn int(&mut self, _: i32) {}
+    fn big_int(&mut self, _: i64) {}
+    fn enumerated(&mut self, _: &str, _: i32) {}
+    fn named_int(&mut self, _: &str, _: i32) {}
+    fn boolean(&mut self, _: bool) {}
+    fn visible_str(&mut self, value: &[u8]) {
+        self.as_is &= self.encoding.writes_text(value);
+    }
+    fn real(&mut self, _: f64) {}
+    fn octets(&mut self, _: &[u8]) {}
+    fn error(&self) -> Option<crate::report::serial::encoder::SerialError> {
+        None
+    }
+}
+
+/// Whether `encoding` writes the strings of the Seq-id `id` as they are.
+pub(crate) fn seq_id_written_as_is(
+    encoding: ArchiveEncoding,
+    id: crate::report::seqid::SeqId<'_>,
+) -> bool {
+    let mut check = StringsAsIs::new(encoding);
+    id.write(&mut check);
+    check.as_is
+}
 
 /// The error lines of a run that stopped with `error`, when NCBI writes an error archive for
 /// it (`PrintErrorArchive` after its `CATCH_ALL`): the errors of the application's `Run`,
@@ -757,75 +736,72 @@ mod tests {
         assert_eq!(of("bi"), ArchiveEncoding::Nothing);
     }
 
-    /// The strings the archive copies from the command line are refused before the first byte
-    /// where the encoding cannot write them as NCBI does: text and binary write `#` for a byte
-    /// outside `0x20..=0x7E`, XML writes every byte but a control one as it is.
+    /// The strings the archive copies from the command line are written as they are where the
+    /// encoding does: text and binary write `#` for a byte outside `0x20..=0x7E`, XML writes
+    /// every byte but a control one as it is (`writes_text`); such a request is written through
+    /// `Traced` (`writer::write_archive`).
     #[test]
-    fn a_db_name_or_masker_path_the_encoding_cannot_write_is_refused() {
-        let inputs = |path: Option<&str>| {
+    fn a_request_tells_whether_its_strings_are_written_as_they_are() {
+        let as_is = |encoding, path: Option<&str>, db: Option<&str>| {
             let mut inputs = OptionInputs::new(Program::Blastn, "megablast");
             inputs.window_masker_db = path.map(str::to_string);
-            inputs
-        };
-        let ok = |encoding, path: Option<&str>, db: Option<&str>| {
-            ArchiveHandle::for_encoding(
-                encoding,
-                &inputs(path),
-                db,
-                "BLASTN",
-                &OptionsHandle::default(),
-            )
-            .is_ok()
+            ArchiveRequest::for_inputs(&inputs, db).written_as_is(encoding)
         };
         for encoding in [
             ArchiveEncoding::Text,
             ArchiveEncoding::Binary,
             ArchiveEncoding::Xml,
         ] {
-            assert!(ok(encoding, None, None));
-            assert!(ok(encoding, Some("wm&<\"'q/mg.obinary"), Some("d b&<")));
-            // A control byte: NCBI writes `#` and a diagnostic, but TAB, LF and CR in XML.
+            assert!(as_is(encoding, None, None));
+            assert!(as_is(encoding, Some("wm&<\"'q/mg.obinary"), Some("d b&<")));
+            // A control byte: NCBI writes `#` and a post, but TAB, LF and CR in XML.
             for bad in ["a\x01b", "a\x1fb", "a\x0bb", "a\x0eb"] {
-                assert!(!ok(encoding, Some(bad), None), "{encoding:?} {bad:?}");
-                assert!(!ok(encoding, None, Some(bad)), "{encoding:?} {bad:?}");
+                assert!(!as_is(encoding, Some(bad), None), "{encoding:?} {bad:?}");
+                assert!(!as_is(encoding, None, Some(bad)), "{encoding:?} {bad:?}");
             }
         }
         for good in ["a\tb", "a\nb", "a\rb"] {
-            assert!(ok(ArchiveEncoding::Xml, Some(good), Some(good)));
-            assert!(!ok(ArchiveEncoding::Text, Some(good), None));
+            assert!(as_is(ArchiveEncoding::Xml, Some(good), Some(good)));
+            assert!(!as_is(ArchiveEncoding::Text, Some(good), None));
         }
-        // Bytes from 0x7F up: refused in text and binary, written as they are in XML.
+        // Bytes from 0x7F up: replaced in text and binary, written as they are in XML.
         for high in ["wm\u{e9}/mg.obinary", "d\u{7f}b", "\u{1f600}"] {
-            assert!(ok(ArchiveEncoding::Xml, Some(high), Some(high)), "{high:?}");
+            assert!(
+                as_is(ArchiveEncoding::Xml, Some(high), Some(high)),
+                "{high:?}"
+            );
             for encoding in [ArchiveEncoding::Text, ArchiveEncoding::Binary] {
-                assert!(!ok(encoding, Some(high), None), "{encoding:?} {high:?}");
-                assert!(!ok(encoding, None, Some(high)), "{encoding:?} {high:?}");
+                assert!(!as_is(encoding, Some(high), None), "{encoding:?} {high:?}");
+                assert!(!as_is(encoding, None, Some(high)), "{encoding:?} {high:?}");
             }
         }
-        let refusal = ArchiveHandle::for_encoding(
-            ArchiveEncoding::Text,
-            &inputs(Some("w\u{e9}")),
-            None,
-            "BLASTN",
-            &OptionsHandle::default(),
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(refusal.contains("-window_masker_db path"), "{refusal}");
-        assert!(refusal.contains("-outfmt 11"), "{refusal}");
     }
 
+    /// A record's title and Seq-ids: in text and binary a byte outside `0x20..=0x7E`, in XML a
+    /// control byte (which no FASTA title or id holds: NCBI's reader ends the title there).
     #[test]
-    fn titles_with_high_bytes_are_refused_in_text_and_binary_only() {
-        let records = [FastaRecord::new("Query_1", "caf\u{e9}".as_bytes(), b"ACGT")];
+    fn a_bioseq_tells_whether_its_strings_are_written_as_they_are() {
+        use requests::RequestRecord;
+        let caf = FastaRecord::new("Query_1", "caf\u{e9}".as_bytes(), b"ACGT");
+        let del = FastaRecord::new("Query_1", b"ti\x7ftle", b"ACGT");
+        let plain = FastaRecord::new("Query_1", b"title", b"ACGT");
         for encoding in [ArchiveEncoding::Text, ArchiveEncoding::Binary] {
-            let refusal = check_titles_for(encoding, &records, "query", "BLASTN").unwrap_err();
-            assert!(refusal.is::<TitleRefusal>());
+            assert!(!caf.bioseq(false).written_as_is(encoding));
+            assert!(!del.bioseq(false).written_as_is(encoding));
+            assert!(plain.bioseq(false).written_as_is(encoding));
         }
-        assert!(check_titles_for(ArchiveEncoding::Xml, &records, "query", "BLASTN").is_ok());
-        let del = [FastaRecord::new("Query_1", b"ti\x7ftle", b"ACGT")];
-        assert!(check_titles_for(ArchiveEncoding::Xml, &del, "query", "BLASTN").is_ok());
-        assert!(check_titles_for(ArchiveEncoding::Text, &del, "query", "BLASTN").is_err());
+        assert!(caf.bioseq(false).written_as_is(ArchiveEncoding::Xml));
+        assert!(del.bioseq(false).written_as_is(ArchiveEncoding::Xml));
+        // A parsed local id with DEL (NCBI's `CSeq_id::CheckLocalID` takes it).
+        let ids = [crate::seqid::ParsedSeqId::Local(
+            crate::seqid::model::ObjectId::Str(b"a\x7fb".to_vec()),
+        )];
+        let bioseq = bioseq::BioseqInput {
+            ids: Some(&ids),
+            ..plain.bioseq(false)
+        };
+        assert!(!bioseq.written_as_is(ArchiveEncoding::Text));
+        assert!(bioseq.written_as_is(ArchiveEncoding::Xml));
     }
 
     #[test]

@@ -109,17 +109,15 @@ pub(crate) fn handle_for(
     dust: Option<&str>,
     archive_requested: bool,
     options: &crate::report::archive::OptionsHandle,
-) -> Result<Option<ArchiveHandle>> {
+) -> Option<ArchiveHandle> {
     if !archive_requested {
-        return Ok(None);
+        return None;
     }
-    ArchiveHandle::for_program(
+    Some(ArchiveHandle::for_program(
         &option_inputs(args, dust),
         args.database_name(),
-        "BLASTN",
         options,
-    )
-    .map(Some)
+    ))
 }
 
 /// The requests of a run's batches (`RunRequests`): nucleotide queries and subjects (the
@@ -128,10 +126,7 @@ pub(crate) fn handle_for(
 /// requests) the query vector's mask has no DUST or WindowMasker interval yet, which
 /// `x_CalculateMasks` adds in the search (probe `lcq` of RG-F1); the archive writes its own
 /// `LCaseMask` parameters (`for_each_batch`).
-pub(crate) fn requests(
-    subjects: Option<&[FastaRecord]>,
-    lcase_masking: bool,
-) -> RunRequests<'_, FastaRecord> {
+pub(crate) fn requests(subjects: Option<&[FastaRecord]>, lcase_masking: bool) -> RunRequests<'_> {
     RunRequests::new(
         RequestPolicy {
             query_protein: false,
@@ -139,14 +134,7 @@ pub(crate) fn requests(
             lcase: lcase_masking.then_some(LcaseFrames::PlusTwice),
         },
         subjects,
-        "BLASTN",
     )
-}
-
-/// `report::archive::check_titles` for BLASTN's records (the archive's; the search strategy's
-/// requests check theirs where they are written, `RunRequests::write`).
-pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    crate::report::archive::check_titles(records, role, "BLASTN")
 }
 
 pub(crate) use crate::report::archive::error_lines;
@@ -434,11 +422,12 @@ pub(crate) fn for_each_batch(
 
 /// Writes the archive of each batch of `call` to `writer`; `warnings` writes the warnings
 /// of a batch's queries (to the diagnostics, which saves them as the batch's messages)
-/// before its archive. `first_context(first_query)` gives the values of a batch's first
+/// before its archive, and its sink gets NCBI's posts of the bytes that the archive's stream
+/// replaces (`write_archive`). `first_context(first_query)` gives the values of a batch's first
 /// query.
 pub(crate) fn write_blastn_archives(
     call: &ArchiveCall<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
     first_context: &dyn Fn(usize) -> Result<FirstContext>,
     writer: &mut dyn Write,
 ) -> Result<()> {
@@ -448,10 +437,8 @@ pub(crate) fn write_blastn_archives(
         gapped: true,
     };
     for_each_batch(&call.batches, first_context, |span, batch| {
-        if let Some(warnings) = warnings.as_deref_mut() {
-            for index in span.clone() {
-                warnings.before_query(index, &mut *writer)?;
-            }
+        for index in span.clone() {
+            warnings.before_query(index, &mut *writer)?;
         }
         let mut aligns = BlastnAligns {
             run,
@@ -465,7 +452,13 @@ pub(crate) fn write_blastn_archives(
             hit_lists: &call.hit_lists[span.clone()],
             first: span.start,
         };
-        write_archive(call.handle, batch, &mut aligns, &mut *writer)
+        write_archive(
+            call.handle,
+            batch,
+            &mut aligns,
+            &mut *writer,
+            &mut *warnings.sink,
+        )
     })
 }
 

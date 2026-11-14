@@ -109,151 +109,29 @@ pub(crate) fn handle_for(
     args: &BlastxArgs,
     archive_requested: bool,
     options: &crate::report::archive::OptionsHandle,
-) -> Result<Option<ArchiveHandle>> {
+) -> Option<ArchiveHandle> {
     if !archive_requested {
-        return Ok(None);
+        return None;
     }
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
     let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
-    ArchiveHandle::for_program(&option_inputs(args), database, "BLASTX", options).map(Some)
-}
-
-/// The refusal of a title that the archive cannot write as NCBI does
-/// (`report::archive::ArchiveEncoding::writes_text`: in text and binary a byte outside
-/// `0x20..=0x7E`, in XML a control byte) for BLASTX's records, before the first byte.
-pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    crate::report::archive::check_titles(records, role, "BLASTX")
-}
-
-/// `report::archive::check_request_titles` for BLASTX's records: the archive's (`archive`) and
-/// the search strategy's (`strategy`, as `RunRequests::write` checks them).
-pub(crate) fn check_request_titles(
-    records: &[FastaRecord],
-    role: &str,
-    archive: bool,
-    strategy: bool,
-) -> Result<()> {
-    crate::report::archive::check_request_titles(records, role, "BLASTX", archive, strategy)
+    Some(ArchiveHandle::for_program(
+        &option_inputs(args),
+        database,
+        options,
+    ))
 }
 
 pub(crate) use crate::report::archive::error_lines;
 
-/// Whether the query is a regular file, decided on the handle already open (`fstat`), before any
-/// second `open` by path: `prescan_query_titles` reads the file a second time, which would take
-/// bytes from a pipe (`<(...)`, `/dev/stdin`) or wait for a writer of a named FIFO.
-pub(crate) fn query_is_regular(file: &std::fs::File) -> bool {
-    file.metadata().is_ok_and(|metadata| metadata.is_file())
-        && crate::blastinput::input_files::has_stream_position(file)
-}
-
-/// The refusal of a query for which `query_is_regular` is false, with the archive (`archive`)
-/// or the search strategy.
-pub(crate) fn refuse_irregular_query(archive: bool) -> Result<()> {
-    let option = if archive {
-        "-outfmt 11"
-    } else {
-        "-export_search_strategy"
-    };
-    anyhow::bail!("unsupported BLASTX query input for {option}: use a regular file")
-}
-
-/// Reads the query file once before the search, batch by batch as the search reads it
-/// (`batch_size` letters, the run's), and returns whether a batch that the search may write holds
-/// a query whose title the archive cannot write (`batches_may_refuse`). The file must be a regular
-/// file (`query_is_regular`). It is read as the search reads it (`settings`: under
-/// `-parse_deflines`, a first line that is not a defline is the reader error, where the scan ends
-/// as the search does), and the records are cut to `range` as the search cuts them: a record the
-/// range skips is never written and is not scanned. It keeps no defline, so LOSAT's refusal of a
-/// Seq-id range in a defline (`refuse_range_in_archive`, which the search with the archive makes)
-/// does not stop it, and keeping the deflines would keep whole records under `-query_loc`. A batch
-/// size of 0 reads no query (NCBI's first batch is empty and the search stops at it): nothing is
-/// scanned. `archive` and `strategy` are the requests whose titles are looked at (the archive's,
-/// the search strategy's).
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn prescan_query_titles(
-    file: &std::fs::File,
-    settings: &super::input::QueryStreamSettings,
-    lowercase: bool,
-    options: &ResolvedOptions,
-    batch_size: usize,
-    range: Option<&crate::blastinput::seq_range::SequenceRange>,
-    archive: bool,
-    strategy: bool,
-) -> Result<bool> {
-    use std::io::Seek;
-    if batch_size == 0 {
-        return Ok(false);
-    }
-    // A second handle on the open file (a `.gz` query is an unnamed inflated file that no path
-    // reaches, `input_files::open_file_input`); the handles share one position, put back below.
-    let start = (&*file).stream_position()?;
-    let mut stream = settings.stream_before_search(file.try_clone()?);
-    let found = batches_may_refuse(options, archive, strategy, &mut |deliver| {
-        super::input::read_fasta_stream_batches(
-            &mut stream,
-            false,
-            lowercase,
-            batch_size,
-            false,
-            range,
-            deliver,
-            &mut |_| Ok(()),
-        )
-    });
-    drop(stream);
-    (&*file).seek(std::io::SeekFrom::Start(start))?;
-    Ok(found)
-}
-
-/// Whether one of the reader batches that `read` gives its argument, in order, holds a query whose
-/// title the archive cannot write (`check_titles`), up to the batch that stops the run before its
-/// search: the end of `read` (a reader error, or another error of LOSAT's reading, which the search
-/// meets in its place) or a batch that NCBI fails at its set-up (`written_batch`); the records of
-/// that batch, never written, are not looked at. Such a title is refused where the archive of its
-/// batch is written, after the batch's search (`check_batch_titles`), since NCBI writes no archive
-/// of a batch whose search fails; until then the run holds what it writes (`ArchiveHold`), so that
-/// the refusal follows no byte (`prescan_query_titles` for the command line, the records of
-/// `local::report_batches`).
-///
-/// `archive` and `strategy` are the requests whose titles are looked at. The search strategy's
-/// request of a batch comes before the batch's search (`native::run_inner`'s `take`), so a batch
-/// that fails its set-up has one (with its titles), and an empty batch has none
-/// (`Empty CBlastQueryVector` comes before it).
-pub(crate) fn batches_may_refuse(
-    options: &ResolvedOptions,
-    archive: bool,
-    strategy: bool,
-    read: &mut dyn FnMut(&mut dyn FnMut(&[FastaRecord]) -> Result<()>) -> Result<()>,
-) -> bool {
-    let mut found = false;
-    let _ = read(&mut |batch| {
-        let written = written_batch(batch, options);
-        if (strategy
-            && !batch.is_empty()
-            && check_request_titles(batch, "query", false, true).is_err())
-            || (archive && written && check_titles(batch, "query").is_err())
-        {
-            found = true;
-            anyhow::bail!("a title the requests cannot write");
-        }
-        if !written {
-            anyhow::bail!("NCBI stops the run at this batch");
-        }
-        Ok(())
-    });
-    found
-}
-
-/// No NCBI counterpart: the output streams of a run in which a later batch may still be refused,
-/// by the archive for a title (`batches_may_refuse`) or, in a library call, by a BLAST XML, XML2 or
-/// JSON document (`local::report_batches`), held in the order in which they are written: each write keeps
-/// its bytes with the index of its stream (`writer`), so that `release` writes them in that order
-/// (the archives of the batches and the messages between them, as a stream that both go to reads
-/// them from NCBI) and `discard` drops them. Outside `hold` the bytes pass through. Shared, so that
-/// the diagnostics stream behind the archive's message log (`report::archive::DiagTee`) can be one
-/// of its streams. The side files of an outfmt 13 or 14 document of the run follow it
-/// (`side_files`): held, written before the streams and dropped as they are.
+/// No NCBI counterpart: the output streams of a library call in which a later batch may still be
+/// refused by a BLAST XML, XML2 or JSON document (`local::report_batches`), held in the order in
+/// which they are written: each write keeps its bytes with the index of its stream (`writer`), so
+/// that `release` writes them in that order (the reports of every format, as a stream that they
+/// all go to reads them from NCBI) and `discard` drops them. Outside `hold` the bytes pass
+/// through. The side files of an outfmt 13 or 14 document of the run follow it (`side_files`):
+/// held, written before the streams and dropped as they are.
 pub(crate) struct ArchiveHold<S: Write>(std::sync::Arc<std::sync::Mutex<HoldState<S>>>);
 
 struct HoldState<S> {
@@ -375,22 +253,8 @@ impl<S: Write> ArchiveHold<S> {
         }
     }
 
-    /// The end of a run that stopped with `error` and held its output for the archive's titles
-    /// (`batches_may_refuse`): one of NCBI's own errors (`NativeError`: the errors after which NCBI
-    /// writes its error archive, `error_lines`, and, in a library call that writes other formats
-    /// too, a side file that cannot be opened or an output that cannot be written) follows the
-    /// bytes of the batches before it, which NCBI wrote (released); LOSAT's refusal (the title of
-    /// the batch, or another) follows no byte (dropped).
-    pub(crate) fn end_with(&self, error: &anyhow::Error) {
-        if error.is::<crate::cli::NativeError>() {
-            let _ = self.release();
-        } else {
-            self.discard();
-        }
-    }
-
-    /// The end of a run that stopped with `error` and held its output only for its BLAST XML, XML2
-    /// or JSON documents: dropped after one of the refusals that such a hold is for
+    /// The end of a run that stopped with `error` and held its output for its BLAST XML, XML2 or
+    /// JSON documents: dropped after one of the refusals that such a hold is for
     /// (`blast_xml::drops_held_document`), written after any other error (the bytes of the batches
     /// before it, as the run without a hold writes them), as the command line's document
     /// (`blast_xml::HeldOutput`).
@@ -428,37 +292,6 @@ impl<S: Write> Write for HoldWriter<S> {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-284
-// ```c++
-//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-//     ...
-//                 results = lcl_blast.Run();
-//     ...
-//             if (fmt_args->ArchiveFormatRequested(args)) {
-//                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-// ```
-/// The refusal of a title that the archive of a query batch cannot write (`check_titles`), made
-/// where the batch's archive is written, after its search (and, with `-db`, the read of its
-/// definition lines): the archive of each batch that NCBI completes holds the batch's queries and,
-/// with `-subject`, every subject (`subjects`, checked with the run's first batch, `first`). The
-/// batch that stops the run writes neither: a reader error, `Empty CBlastQueryVector`, a batch
-/// whose set-up fails (`written_batch`), and a batch whose search fails (the sequence file or a
-/// header file of `-db` that NCBI cannot read); the error archive holds no sequence. (The search
-/// strategy's request of a batch, written before its search, checks its titles there,
-/// `RunRequests::write`.)
-pub(crate) fn check_batch_titles(
-    queries: &[FastaRecord],
-    subjects: Option<&[FastaRecord]>,
-    first: bool,
-) -> Result<()> {
-    check_titles(queries, "query")?;
-    match subjects {
-        Some(subjects) if first => check_titles(subjects, "subject"),
-        _ => Ok(()),
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
 // ```c++
 // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
@@ -490,7 +323,7 @@ pub(crate) struct CallBatch<'a> {
     /// The batch's queries; `BatchResults::query_ordinal` indexes them.
     pub queries: &'a [FastaRecord],
     /// The requests of the run's archives (`requests`, with every `-subject` record; made once).
-    pub requests: &'a RunRequests<'a, FastaRecord>,
+    pub requests: &'a RunRequests<'a>,
     /// The results of the batch: one entry, or several when the search split a batch above
     /// 10002 letters (`BATCH_SIZE`).
     pub batches: &'a [BatchResults],
@@ -560,7 +393,7 @@ pub(crate) fn batch_searched_space(batches: &[BatchResults]) -> Option<i64> {
 /// `-subject` records `subjects`, `None` for `-db`), and the lower-case runs of each query in both
 /// frames of a translated query (the reader keeps them only with `-lcase_masking`,
 /// `FastaRecord::archive_lowercase_runs`).
-pub(crate) fn requests(subjects: Option<&[FastaRecord]>) -> RunRequests<'_, FastaRecord> {
+pub(crate) fn requests(subjects: Option<&[FastaRecord]>) -> RunRequests<'_> {
     RunRequests::new(
         RequestPolicy {
             query_protein: false,
@@ -568,7 +401,6 @@ pub(crate) fn requests(subjects: Option<&[FastaRecord]>) -> RunRequests<'_, Fast
             lcase: Some(LcaseFrames::PlusAndMinus),
         },
         subjects,
-        "BLASTX",
     )
 }
 
@@ -613,14 +445,6 @@ impl RequestRecord for FastaRecord {
             frame,
             intervals,
         }
-    }
-
-    fn title(&self) -> &[u8] {
-        self.title.as_bytes()
-    }
-
-    fn local_id(&self) -> &str {
-        &self.internal_id
     }
 }
 
@@ -781,8 +605,13 @@ fn with_batch(
 
 /// Writes the archive of the batch of `call` to `writer`: the messages saved since the last
 /// archive (the reader's warnings of the batch, the option warnings), the request, the
-/// alignments of every query, the masks and the statistics of the first query.
-pub(crate) fn write_blastx_archive(call: &ArchiveCall<'_>, writer: &mut dyn Write) -> Result<()> {
+/// alignments of every query, the masks and the statistics of the first query. NCBI's posts of
+/// the bytes that the archive's stream replaces go to `diagnostics` (`write_archive`).
+pub(crate) fn write_blastx_archive(
+    call: &ArchiveCall<'_>,
+    writer: &mut dyn Write,
+    diagnostics: &mut dyn Write,
+) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastx,
         db_title: match &call.names {
@@ -799,15 +628,15 @@ pub(crate) fn write_blastx_archive(call: &ArchiveCall<'_>, writer: &mut dyn Writ
             names: &call.names,
             batches: call.batch.batches,
         };
-        write_archive(call.handle, batch, &mut aligns, writer)
+        write_archive(call.handle, batch, &mut aligns, writer, diagnostics)
     })
 }
 
 #[cfg(test)]
 mod hold_tests {
-    //! `ArchiveHold`: what a run that held its output writes when it ends, by what it held for
-    //! (`end_with`: the archive's titles; `end_document_with`: the XML, XML2 and JSON documents),
-    //! and the side files of outfmt 13 and 14 that follow it (`side_files`).
+    //! `ArchiveHold`: what a run that held its output writes when it ends (`end_document_with`:
+    //! the XML, XML2 and JSON documents), and the side files of outfmt 13 and 14 that follow it
+    //! (`side_files`).
     use super::*;
     use crate::cli::NativeError;
     use crate::report::blast_xml2::SideFiles;
@@ -910,23 +739,6 @@ mod hold_tests {
     /// error archive follows it (`error_lines`), and NCBI wrote the bytes before it all the same.
     fn side_file_error() -> anyhow::Error {
         crate::report::blast_xml2::framing::side_file_open_error()
-    }
-
-    #[test]
-    fn the_archives_hold_writes_after_ncbis_error_and_drops_after_any_refusal() {
-        for ncbis in [ncbis_error(), side_file_error()] {
-            let (hold, streams) = held_run();
-            hold.end_with(&ncbis);
-            assert_eq!(written(&streams), ALL, "{ncbis}");
-        }
-        for refusal in [
-            document_refusal(),
-            anyhow::anyhow!("this is not supported by LOSAT's BLASTX"),
-        ] {
-            let (hold, streams) = held_run();
-            hold.end_with(&refusal);
-            assert_eq!(written(&streams), NOTHING, "{refusal}");
-        }
     }
 
     #[test]

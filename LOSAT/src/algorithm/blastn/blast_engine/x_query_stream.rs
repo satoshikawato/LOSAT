@@ -329,11 +329,7 @@ impl Rule {
 
 /// The first reading: the loop of `read_queries` (`GetNextSeqBatch` until `End()`), each record's
 /// length kept and the record dropped, and how the reading ended (with the warnings of the record
-/// whose reading failed, as `read_queries` keeps them). With `titles` (the encoding of the BLAST
-/// archive's or the search strategy's requests, `report::archive::request_title_encoding`), also
-/// whether a record has a title that they cannot write (`check_request_titles`), which the batch loop
-/// refuses in the batch NCBI completes with it (`run.rs` `run_in_pool`) and which keeps the
-/// reports after the loop (`x_rpt_stream::Off::ArchiveTitle`).
+/// whose reading failed, as `read_queries` keeps them).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140-152
 /// ```c++
@@ -351,31 +347,23 @@ impl Rule {
 ///             throw;
 ///         }
 /// ```
-fn scan<R: Read>(
-    source: &mut FastaInputSource<R>,
-    titles: Option<crate::report::archive::ArchiveEncoding>,
-) -> (Vec<usize>, QueryEnd, bool) {
+fn scan<R: Read>(source: &mut FastaInputSource<R>) -> (Vec<usize>, QueryEnd) {
     let mut lengths = Vec::new();
-    let mut archive_title = false;
     loop {
         if source.end() {
-            return (lengths, QueryEnd::Input, archive_title);
+            return (lengths, QueryEnd::Input);
         }
         let mut warnings = Vec::new();
         match source.next_sequence(&mut |message: &[u8]| {
             warnings.extend_from_slice(message);
             Ok(())
         }) {
-            Ok(record) => {
-                archive_title |=
-                    titles.is_some_and(|encoding| !encoding.writes_text(&record.title));
-                lengths.push(record.sequence.len());
-            }
+            Ok(record) => lengths.push(record.sequence.len()),
             Err(ReadError::Parse {
                 code: ParseErrorCode::Eof,
                 ..
-            }) => return (lengths, QueryEnd::EofError, archive_title),
-            Err(error) => return (lengths, QueryEnd::Error { error, warnings }, archive_title),
+            }) => return (lengths, QueryEnd::EofError),
+            Err(error) => return (lengths, QueryEnd::Error { error, warnings }),
         }
     }
 }
@@ -392,9 +380,6 @@ struct Acting {
     query_input: QueryInput,
     /// The searched length of each searched query.
     lengths: Vec<usize>,
-    /// The BLAST archive (outfmt 11) or the search strategy: a record has a title that their
-    /// requests cannot write (`scan`).
-    archive_title: bool,
     ranged: bool,
     scan: Duration,
     /// The first reading took the parts' lengths (`x_query_scan_par.rs`).
@@ -477,9 +462,8 @@ impl Store {
         config: ReaderConfig,
         range: Option<&SequenceRange>,
         threads: usize,
-        titles: Option<crate::report::archive::ArchiveEncoding>,
     ) -> Result<(Store, QueryEnd)> {
-        Store::read_with(opening, source, config, range, titles, |file, start| {
+        Store::read_with(opening, source, config, range, |file, start| {
             super::x_query_scan_par::lengths(file, start, config, threads)
         })
     }
@@ -491,27 +475,18 @@ impl Store {
         source: &mut FastaInputSource<File>,
         config: ReaderConfig,
         range: Option<&SequenceRange>,
-        titles: Option<crate::report::archive::ArchiveEncoding>,
         in_parts: impl FnOnce(&File, u64) -> Option<super::x_query_scan_par::Scan>,
     ) -> Result<(Store, QueryEnd)> {
         let (again, start) = opening
             .again
             .expect("LOSAT_X_QSTREAM reads a file it can read again");
         let started = Instant::now();
-        // The BLAST archive (outfmt 11): this reading sees every record's title (`scan`).
         // The lengths read in parts on the search's threads, from the second handle at the position
         // the source starts from; where the parts are not taken, the source reads them (its
         // position is where it was: the parts read at offsets).
         // A part's reader numbers its records from the part's first (`-parse_deflines`, whose
         // records with ids take no number and whose reader adds every record to the search's
         // scope of ids, is never read batch by batch: `run.rs`).
-        // The parts see no title (`archive_title` below is false there): a run whose requests'
-        // titles are looked at (`titles`) keeps the deflines (`with_defline`), so it never reads
-        // in parts.
-        anyhow::ensure!(
-            titles.is_none() || config.keep_defline,
-            "LOSAT internal error: a reading that looks at the requests' titles keeps no defline"
-        );
         let parts = if !config.keep_defline && !config.parse_deflines {
             in_parts(&again, start)
         } else {
@@ -519,11 +494,11 @@ impl Store {
         };
         let scan_par = parts.is_some();
         // (The parts are not read for the archive, which keeps the deflines.)
-        let (input_lengths, spans, end, archive_title) = match parts {
-            Some(parts) => (parts.lengths, Some(parts.spans), QueryEnd::Input, false),
+        let (input_lengths, spans, end) = match parts {
+            Some(parts) => (parts.lengths, Some(parts.spans), QueryEnd::Input),
             None => {
-                let (lengths, end, archive_title) = scan(source, titles);
-                (lengths, None, end, archive_title)
+                let (lengths, end) = scan(source);
+                (lengths, None, end)
             }
         };
         let scan = started.elapsed();
@@ -556,7 +531,6 @@ impl Store {
                 ranged: range.is_some(),
                 query_input,
                 lengths,
-                archive_title,
                 scan,
                 scan_par,
                 state: Mutex::new(State {
@@ -1005,21 +979,6 @@ impl<'a> Queries<'a> {
         }
     }
 
-    /// Whether an input record has a title that the BLAST archive (outfmt 11, `archive`) or the
-    /// search strategy (`strategy`) cannot write (`check_request_titles`; the records of a
-    /// LOSAT_X_BNQPACK `Store` are never theirs, whose queries' letters the requests read:
-    /// `x_query_drop::Rule`).
-    pub(super) fn archive_title(&self, archive: bool, strategy: bool) -> bool {
-        match self {
-            Queries::Records { input, .. } => crate::report::archive::check_request_titles(
-                input, "query", "BLASTN", archive, strategy,
-            )
-            .is_err(),
-            Queries::Streamed(store) => store.acting().archive_title,
-            Queries::Taken(_) => false,
-        }
-    }
-
     /// Writes the reader's warnings of every input record, in input order (a search that reads
     /// every batch and searches none).
     pub(super) fn write_input_warnings(&self, out: &mut (dyn Write + Send)) -> Result<()> {
@@ -1335,7 +1294,7 @@ mod tests {
         assert!(opening.acts());
         let mut source = FastaInputSource::from_file(file, config());
         assert!(!source.stream_is_empty());
-        Store::read(opening, &mut source, config(), range, 1, None).expect("the first reading")
+        Store::read(opening, &mut source, config(), range, 1).expect("the first reading")
     }
 
     /// The records as `search_cli` reads them without the switch.
@@ -1463,16 +1422,9 @@ mod tests {
         assert!(opening.acts());
         let mut source = FastaInputSource::from_file(file, config());
         assert!(!source.stream_is_empty());
-        Store::read_with(
-            opening,
-            &mut source,
-            config(),
-            range,
-            None,
-            |file, start| {
-                super::super::x_query_scan_par::small_lengths(file, start, config(), threads)
-            },
-        )
+        Store::read_with(opening, &mut source, config(), range, |file, start| {
+            super::super::x_query_scan_par::small_lengths(file, start, config(), threads)
+        })
         .expect("the first reading")
     }
 
@@ -1892,7 +1844,7 @@ mod tests {
             let old = old(&file.0);
             let mut source = FastaInputSource::from_file(File::open(&file.0).unwrap(), config());
             assert!(!source.stream_is_empty());
-            let (lengths, end, _) = scan(&mut source, None);
+            let (lengths, end) = scan(&mut source);
             let old_lengths: Vec<usize> = old.records.iter().map(|r| r.seq().len()).collect();
             assert_eq!(lengths, old_lengths, "seed {seed}");
             assert_eq!(end_text(&end), end_text(&old.end), "seed {seed}");

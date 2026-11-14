@@ -574,7 +574,9 @@ pub(super) fn render(
                     render.handle,
                     render,
                     &archive_data(),
-                    warnings.as_mut(),
+                    warnings
+                        .as_mut()
+                        .expect("the BLAST archive writes its posts to the diagnostics"),
                     &mut writer,
                 )?
             }

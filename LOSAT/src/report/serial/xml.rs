@@ -225,9 +225,9 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
 
     /// `x_VerifyChar` of the control character `byte`: `ReplaceVisibleChar` without the
     /// string, reported at the line (`Replaced`, `encoder::Traced`); `write_string` then writes
-    /// `#`. The line is 1 + the ends of line of the document that the encoder holds (all of it
-    /// through `Traced`), counted on from the last call: the XML stream only appends (the `>`
-    /// that `value_attribute` takes back is no end of line).
+    /// `#`. The line is 1 + the ends of line that the encoder holds (`Traced` adds those that
+    /// `flush_to` handed on, which starts the count again), counted on from the last call: the XML
+    /// stream only appends (the `>` that `value_attribute` takes back is no end of line).
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:548-554
     /// ```c++
@@ -809,6 +809,8 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
         if end > self.start {
             sink.write_all(&self.out[self.start..end])?;
             self.out.drain(self.start..end);
+            // `replace` counts again from the bytes held (`encoder::Traced` adds those handed on).
+            (self.lines_to, self.lines) = (self.start, 0);
         }
         Ok(())
     }

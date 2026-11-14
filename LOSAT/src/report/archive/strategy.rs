@@ -65,8 +65,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 
 use super::options::OptionInputs;
-use super::writer::{text_out, write_strategy_document, RequestInputs};
-use super::{ArchiveEncoding, ArchiveRequest, OptionsHandle, SearchSpaceCarry};
+use super::writer::{write_strategy_request, RequestInputs};
+use super::{ArchiveHandle, ArchiveRequest, OptionsHandle, SearchSpaceCarry};
 
 struct State {
     sink: Box<dyn Write + Send>,
@@ -228,26 +228,17 @@ pub fn open_strategy_file(
 
 impl StrategyExport {
     /// The export of a run of `inputs.program` into `sink` (`create_strategy_file`). `database`
-    /// is the `-db` argument as NCBI keeps it (`None` for `-subject`); `label` names the program
-    /// in a refusal; `options` is the run's options handle, which its archive shares.
-    /// The request is the archive's (`ArchiveRequest::for_inputs`), with the same refusal of a
-    /// `-db` name or `-window_masker_db` path that ASN.1 text cannot hold.
+    /// is the `-db` argument as NCBI keeps it (`None` for `-subject`); `options` is the run's
+    /// options handle, which its archive shares. The request is the archive's
+    /// (`ArchiveRequest::for_inputs`).
     pub fn new(
         sink: Box<dyn Write + Send>,
         inputs: &OptionInputs,
         database: Option<&str>,
-        label: &str,
         options: OptionsHandle,
-    ) -> Result<Self> {
-        let request = ArchiveRequest::for_inputs(
-            ArchiveEncoding::Text,
-            inputs,
-            database,
-            label,
-            "-export_search_strategy",
-        )?;
-        Ok(Self(Arc::new(Shared {
-            request,
+    ) -> Self {
+        Self(Arc::new(Shared {
+            request: ArchiveRequest::for_inputs(inputs, database),
             options,
             state: Mutex::new(State {
                 sink,
@@ -256,7 +247,7 @@ impl StrategyExport {
                 noted_through: 0,
                 stop: usize::MAX,
             }),
-        })))
+        }))
     }
 
     /// The export of a run into its strategy file (`open_strategy_file`), buffered: the program's
@@ -269,15 +260,13 @@ impl StrategyExport {
         outfmt: i32,
         counts: HitlistArgs,
         database: Option<&str>,
-        label: &str,
         options: &OptionsHandle,
-    ) -> Result<Self> {
+    ) -> Self {
         inputs.hitlist_size = hitlist_size(outfmt, counts);
         Self::new(
             Box::new(std::io::BufWriter::new(file)),
             &inputs,
             database,
-            label,
             options.clone(),
         )
     }
@@ -310,15 +299,19 @@ impl StrategyExport {
 
     /// Writes the request of the batch of the run's searched queries `queries`, where NCBI writes
     /// it: after the batch is read and made a query factory, before its search. `make` builds the
-    /// request (from the batch's records, `requests::RunRequests`; it may refuse first) and hands
-    /// it to its argument, which writes it with the `EffectiveSearchSpace` option the batches
-    /// before left (`note_searched`), all under one lock. Returns false, calling nothing, when the
-    /// request is not to be written (`takes`). The requests are written in the run's order, each
-    /// starting where the one before ended, after the batch before was noted; anything else is
-    /// LOSAT's internal error.
+    /// request (from the batch's records, `requests::RunRequests`) and hands it to its argument,
+    /// which writes it with the `EffectiveSearchSpace` option the batches before left
+    /// (`note_searched`), all under one lock. NCBI's posts of the bytes that ASN.1 text replaces
+    /// in it go to `diagnostics` and are messages of the run's archive `archive`
+    /// (`super::post_replaced`). Returns false, calling nothing, when the request is not to be
+    /// written (`takes`). The requests are written in the run's order, each starting where the
+    /// one before ended, after the batch before was noted; anything else is LOSAT's internal
+    /// error.
     pub fn write_with(
         &self,
         queries: Range<usize>,
+        diagnostics: &mut dyn Write,
+        archive: Option<&ArchiveHandle>,
         make: impl FnOnce(&mut dyn FnMut(&RequestInputs<'_>) -> Result<()>) -> Result<()>,
     ) -> Result<bool> {
         self.with_state(|state| {
@@ -333,16 +326,22 @@ impl StrategyExport {
             );
             let shared = &self.0;
             make(&mut |request| {
-                let mut buf = Vec::new();
-                let mut out = text_out(&mut buf, &mut *state.sink);
-                write_strategy_document(
-                    &mut out,
+                let written = write_strategy_request(
+                    &mut *state.sink,
                     &shared.request,
                     request,
                     state.carry.option(),
                     shared.options.database_list(),
+                    |replaced| {
+                        super::post_replaced(
+                            &mut *diagnostics,
+                            archive,
+                            true,
+                            shared.request.program,
+                            replaced,
+                        )
+                    },
                 );
-                let written = out.finish();
                 // The file is complete after every request: the command line's exit does not run
                 // destructors.
                 let flushed = state.sink.flush();
@@ -355,13 +354,14 @@ impl StrategyExport {
         })
     }
 
-    /// `write_with` of a request already made.
+    /// `write_with` of a request already made, without an archive.
     pub fn write_request(
         &self,
         queries: Range<usize>,
         request: &RequestInputs<'_>,
+        diagnostics: &mut dyn Write,
     ) -> Result<bool> {
-        self.write_with(queries, |write| write(request))
+        self.write_with(queries, diagnostics, None, |write| write(request))
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:177-181
@@ -480,10 +480,8 @@ mod tests {
             Box::new(sink.clone()),
             &inputs,
             Some("in/db/bp"),
-            "BLASTP",
             OptionsHandle::default(),
-        )
-        .unwrap();
+        );
         (export, sink)
     }
 
@@ -507,12 +505,14 @@ mod tests {
     fn each_batch_is_a_request_with_the_search_space_of_the_batch_before() {
         let (export, sink) = export(None);
         let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
-        assert!(export.write_request(0..1, &request(&queries, &[])).unwrap());
+        assert!(export
+            .write_request(0..1, &request(&queries, &[]), &mut std::io::sink())
+            .unwrap());
         assert_eq!(sink.text(), FIRST);
         export.note_searched(0..1, Some(817_380)).unwrap();
         for (at, searched) in [(1, None), (2, Some(5)), (3, None)] {
             assert!(export
-                .write_request(at..at + 1, &request(&queries, &[]))
+                .write_request(at..at + 1, &request(&queries, &[]), &mut std::io::sink())
                 .unwrap());
             export.note_searched(at..at + 1, searched).unwrap();
         }
@@ -541,13 +541,21 @@ mod tests {
             intervals: vec![(2, 5)],
         };
         export
-            .write_request(0..1, &request(&queries, std::slice::from_ref(&mask)))
+            .write_request(
+                0..1,
+                &request(&queries, std::slice::from_ref(&mask)),
+                &mut std::io::sink(),
+            )
             .unwrap();
         export.note_searched(0..1, Some(1_000_000)).unwrap();
         export.options().set_database_filter(None, true).unwrap();
-        export.write_request(1..2, &request(&queries, &[])).unwrap();
+        export
+            .write_request(1..2, &request(&queries, &[]), &mut std::io::sink())
+            .unwrap();
         export.note_searched(1..2, Some(77)).unwrap();
-        export.write_request(2..3, &request(&queries, &[])).unwrap();
+        export
+            .write_request(2..3, &request(&queries, &[]), &mut std::io::sink())
+            .unwrap();
         export.note_searched(2..3, None).unwrap();
         let all = sink.text();
         let docs: Vec<&str> = all.split("Blast4-request ::= ").skip(1).collect();
@@ -578,15 +586,21 @@ mod tests {
         let (export, sink) = export(None);
         let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
         assert!(export.takes(0..2));
-        assert!(export.write_request(0..2, &request(&queries, &[])).unwrap());
+        assert!(export
+            .write_request(0..2, &request(&queries, &[]), &mut std::io::sink())
+            .unwrap());
         export.note_searched(0..2, Some(5)).unwrap();
         // The same batch, and a part of it: not taken, nothing written.
         assert!(!export.takes(0..2));
         assert!(!export.takes(1..2));
-        assert!(!export.write_request(0..2, &request(&queries, &[])).unwrap());
+        assert!(!export
+            .write_request(0..2, &request(&queries, &[]), &mut std::io::sink())
+            .unwrap());
         export.note_searched(0..2, Some(9)).unwrap();
         assert_eq!(sink.text(), FIRST);
-        assert!(export.write_request(2..3, &request(&queries, &[])).unwrap());
+        assert!(export
+            .write_request(2..3, &request(&queries, &[]), &mut std::io::sink())
+            .unwrap());
         assert_eq!(sink.text(), [FIRST.to_string(), with_space(5)].concat());
     }
 
@@ -596,10 +610,14 @@ mod tests {
         let (export, sink) = export(None);
         let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
         export.stop_after(1);
-        assert!(export.write_request(0..1, &request(&queries, &[])).unwrap());
+        assert!(export
+            .write_request(0..1, &request(&queries, &[]), &mut std::io::sink())
+            .unwrap());
         export.note_searched(0..1, Some(5)).unwrap();
         assert!(!export.takes(1..2));
-        assert!(!export.write_request(1..2, &request(&queries, &[])).unwrap());
+        assert!(!export
+            .write_request(1..2, &request(&queries, &[]), &mut std::io::sink())
+            .unwrap());
         export.note_searched(1..2, Some(6)).unwrap();
         assert_eq!(sink.text(), FIRST);
     }
@@ -610,10 +628,12 @@ mod tests {
     fn a_gap_between_requests_is_an_error() {
         let (export, _) = export(None);
         let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
-        export.write_request(0..1, &request(&queries, &[])).unwrap();
+        export
+            .write_request(0..1, &request(&queries, &[]), &mut std::io::sink())
+            .unwrap();
         export.note_searched(0..1, None).unwrap();
         let gap = export
-            .write_request(2..3, &request(&queries, &[]))
+            .write_request(2..3, &request(&queries, &[]), &mut std::io::sink())
             .unwrap_err();
         assert!(gap.to_string().contains("LOSAT internal error"), "{gap}");
         // A batch noted out of order too.
@@ -625,7 +645,7 @@ mod tests {
     #[test]
     fn one_options_handle_serves_the_archive_and_the_strategy() {
         let handle = ArchiveHandle::new(
-            ArchiveEncoding::Text,
+            crate::report::archive::ArchiveEncoding::Text,
             ArchiveRequest {
                 program: "blastp",
                 service: "plain",
@@ -639,10 +659,8 @@ mod tests {
             Box::new(sink.clone()),
             &OptionInputs::new(Program::Blastp, "blastp"),
             Some("in/db/bp"),
-            "BLASTP",
             handle.options().clone(),
-        )
-        .unwrap();
+        );
         assert!(export.options().same(handle.options()));
         let list = crate::report::archive::options::Param {
             name: "TaxidList",
@@ -653,9 +671,13 @@ mod tests {
             .set_database_filter(Some(list), true)
             .unwrap();
         let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
-        export.write_request(0..1, &request(&queries, &[])).unwrap();
+        export
+            .write_request(0..1, &request(&queries, &[]), &mut std::io::sink())
+            .unwrap();
         export.note_searched(0..1, Some(5)).unwrap();
-        export.write_request(1..2, &request(&queries, &[])).unwrap();
+        export
+            .write_request(1..2, &request(&queries, &[]), &mut std::io::sink())
+            .unwrap();
         let all = sink.text();
         assert_eq!(all.matches("name \"TaxidList\"").count(), 2, "{all}");
         assert!(all.contains("value big-integer 0\n"), "{all}");

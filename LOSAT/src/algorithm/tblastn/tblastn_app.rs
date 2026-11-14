@@ -145,8 +145,7 @@ impl TblastnArgs {
         )?;
         let choice = app::parse_formatting_string(&args.outfmt)?;
         let format = app::report_format(&choice, app::Program::Tblastn, args.out.as_deref())?;
-        // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot
-        // write, before anything is read or written.
+        // The BLAST archive (outfmt 11): its request, before anything is read or written.
         // The error archives follow the `-outfmt` text (`writes_error_archive`).
         // The run's options handle, which its archive and its search strategy share.
         let options = crate::report::archive::OptionsHandle::default();
@@ -154,13 +153,12 @@ impl TblastnArgs {
             &args,
             format == Some(app::ReportFormat::ArchiveFormat),
             &options,
-        )?
+        )
         .map(|handle| handle.with_outfmt_text(&args.outfmt));
-        // The search strategy's request, with the refusals of the archive's, and the archive's
-        // options handle.
+        // The search strategy's request, with the archive's options handle.
         args.strategy = strategy_file
             .map(|file| {
-                crate::report::archive::strategy::StrategyExport::for_run(
+                anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
                     file,
                     super::archive::option_inputs(&args),
                     choice.number,
@@ -170,9 +168,8 @@ impl TblastnArgs {
                         num_alignments: args.num_alignments,
                     },
                     args.database_name(),
-                    "TBLASTN",
                     &options,
-                )
+                ))
             })
             .transpose()?;
         let archive = args.archive.clone();
@@ -1026,8 +1023,8 @@ pub fn run_local(
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
-    // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
-    // cannot write, and a diagnostics stream that saves the messages. The records' deflines are
+    // The BLAST archive (outfmt 11) among the formats: its request and a diagnostics stream that
+    // saves the messages. The records' deflines are
     // those the caller's reader kept; records without one get `>` and their title.
     let archive_requested = outputs
         .formats
@@ -1038,7 +1035,7 @@ pub fn run_local(
             &args,
             true,
             &crate::report::archive::OptionsHandle::default(),
-        )?
+        )
         .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
@@ -1106,7 +1103,7 @@ pub fn run_local_database(
         &args,
         archive_requested,
         &crate::report::archive::OptionsHandle::default(),
-    )?
+    )
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
     match args.archive.clone() {
@@ -1495,12 +1492,9 @@ fn search(
             resolved.lcase_masking,
         )
     });
-    // The titles that the BLAST archive (outfmt 11) cannot write are refused after the batches
-    // are searched (below): the batch that stops the run here, and one whose search fails, write
-    // no archive.
     if batches.searched_done == 0 && batches.stop.is_some() {
         // A first batch whose set-up fails has its search strategy request, written before the
-        // prolog (a refusal of its titles follows no byte).
+        // prolog.
         if let (Some(strategy), Some(requests), Some(span)) = (
             args.strategy.as_ref(),
             requests.as_ref(),
@@ -1511,6 +1505,8 @@ fn search(
                 span.start,
                 &searched_queries[span.clone()],
                 query_input.placements.get(span.start),
+                &mut *outputs.diagnostics,
+                args.archive.as_ref(),
             )?;
         }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
@@ -1749,6 +1745,8 @@ fn search(
                     range.start,
                     &queries[range.clone()],
                     query_input.placements.get(range.start),
+                    &mut *outputs.diagnostics,
+                    args.archive.as_ref(),
                 )?;
             }
             let (mut batch_results, batch_lengths, batch_karlin, batch_validity) = {
@@ -1962,42 +1960,6 @@ fn search(
             }
             None => queries,
         };
-        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:277-294
-        // ```c++
-        //                 query =  input->GetNextSeqBatch(*scope);
-        //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
-        //     ...
-        //                     results = lcl_blast.Run();
-        //     ...
-        //                 if (fmt_args->ArchiveFormatRequested(args)) {
-        //                     formatter.WriteArchive(*query_factory, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-        // ```
-        // The archive of each batch that NCBI completes holds its queries and, with `-subject`,
-        // every subject. The batch that stops the run writes neither: a reader error, `Empty
-        // CBlastQueryVector` or a batch of queries without letters (`read_query_batches`), and a
-        // batch whose search fails (`failed`: the sequence file or a header file that NCBI cannot
-        // read); the error archive holds no sequence. So a title the archive cannot write is
-        // refused here, where the batches have been searched and their definition lines read, and
-        // before the first byte of any report.
-        // (The search strategy's requests check their titles where they are written, in the
-        // loop above.)
-        if args.archive.is_some() && !queries.is_empty() {
-            super::archive::check_titles(queries, "query")?;
-            super::archive::check_titles(subject_records, "subject")?;
-        }
-        // The request of the batch that stops the run (every query without letters) comes after
-        // these reports (below): its titles are refused before them, when the reports end with
-        // that batch (no batch failed, and NCBI's formats do not stop first).
-        if let (Some(strategy), Some(requests), Some(span), None) = (
-            args.strategy.as_ref(),
-            requests.as_ref(),
-            batches.stop_batch.clone(),
-            &failed,
-        ) {
-            if strategy.takes(span.clone()) {
-                requests.check_titles(&searched_queries[span])?;
-            }
-        }
         // NCBI c++/src/algo/blast/format/blast_format.cpp:1443-1451:
         // if (results.HasWarnings()) ERR_POST(Warning << results.GetWarningStrings());
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
@@ -2451,6 +2413,8 @@ fn search(
             span.start,
             &searched_queries[span.clone()],
             query_input.placements.get(span.start),
+            &mut *outputs.diagnostics,
+            args.archive.as_ref(),
         )?;
     }
     if let Some((warnings, error)) = batches.stop {

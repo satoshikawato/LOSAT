@@ -878,8 +878,7 @@ pub fn run(
         crate::blastinput::app::Program::Tblastx,
         args.out.as_deref(),
     )?;
-    // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
-    // before anything is read or written.
+    // The BLAST archive (outfmt 11): its request, before anything is read or written.
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
     // The run's options handle, which its archive and its search strategy share.
     let options = crate::report::archive::OptionsHandle::default();
@@ -887,13 +886,12 @@ pub fn run(
         &args,
         format == Some(crate::blastinput::app::ReportFormat::ArchiveFormat),
         &options,
-    )?
+    )
     .map(|handle| handle.with_outfmt_text(&args.outfmt));
-    // The search strategy's request, with the refusals of the archive's, and the archive's
-    // options handle.
+    // The search strategy's request, with the archive's options handle.
     args.strategy = strategy_file
         .map(|file| {
-            crate::report::archive::strategy::StrategyExport::for_run(
+            anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
                 file,
                 super::super::archive::option_inputs(&args),
                 choice.number,
@@ -903,9 +901,8 @@ pub fn run(
                     num_alignments: args.num_alignments,
                 },
                 args.database_name(),
-                "TBLASTX",
                 &options,
-            )
+            ))
         })
         .transpose()?;
     let archive = args.archive.clone();
@@ -980,13 +977,7 @@ pub fn run(
             return Err(error);
         }
     };
-    // Whether this run creates `-out` (a Q3 refusal removes a file it created for nothing).
-    let out_is_new = args
-        .out
-        .as_deref()
-        .is_some_and(|path| path.as_os_str() != "-" && !path.exists());
     let out_file = open_out_file(&args)?;
-    let out_path = args.out.clone();
     let pairwise = format == Some(crate::blastinput::app::ReportFormat::Pairwise);
     // LOSAT's reports read the format number that NCBI reads: the number and the custom fields,
     // or the value as given when it has a delimiter, which `normalized` drops and the custom
@@ -1037,21 +1028,6 @@ pub fn run(
     }
     // What was written before an error (such as the outfmt 0 prolog) stays in the file.
     let flushed = std::io::Write::flush(&mut stream);
-    // A title that the archive cannot hold is refused where NCBI would write its Bioseq, which
-    // is known only after the search. When the file was not there and nothing was written to it,
-    // no empty file is left behind (the other programs create `-out` before their option checks,
-    // as NCBI does, and leave it empty: DECISIONS 24 f of line NP, series SM).
-    let write_failed = stream.failed;
-    drop(stream);
-    if out_is_new
-        && matches!(&result, Err(error) if error.downcast_ref::<crate::report::archive::TitleRefusal>().is_some())
-    {
-        if let Some(path) = out_path.as_deref() {
-            if std::fs::metadata(path).is_ok_and(|meta| meta.len() == 0) {
-                let _ = std::fs::remove_file(path);
-            }
-        }
-    }
     // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:252-255
     // ```c
     //     catch (const std::ios::failure&) {                                      \
@@ -1062,7 +1038,7 @@ pub fn run(
     // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119).
     // For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
     // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if write_failed && (pairwise || tax_report) {
+    if stream.failed && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
             message: "BLAST failed to write output\n".to_string(),
@@ -1657,8 +1633,8 @@ pub fn run_local(
     // NCBI parses -outfmt before its option handlers read the subjects (BLASTN's
     // `run_local`); `search` checks the formats again.
     check_report_formats(outputs, args.out.as_deref())?;
-    // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
-    // cannot write, and a diagnostics stream that saves the messages. The records' deflines are
+    // The BLAST archive (outfmt 11) among the formats: its request and a diagnostics stream that
+    // saves the messages. The records' deflines are
     // those the caller's reader kept; records without one get `>` and their title.
     let archive_requested = outputs
         .formats
@@ -1669,7 +1645,7 @@ pub fn run_local(
             &args,
             true,
             &crate::report::archive::OptionsHandle::default(),
-        )?
+        )
         .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
@@ -1743,7 +1719,7 @@ pub fn run_local_database(
         &args,
         archive_requested,
         &crate::report::archive::OptionsHandle::default(),
-    )?
+    )
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
     match args.archive.clone() {
@@ -2433,9 +2409,13 @@ fn write_tblastx_outputs(
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
         // So do the warnings of the formatters of a tabular field list that shows a taxonomy
-        // name (`x_CheckTaxDB`, `tabular`).
+        // name (`x_CheckTaxDB`, `tabular`), and NCBI's posts of the bytes that the archive's
+        // stream replaces (`write_tblastx_archives`).
         let mut warnings = (warning_lines.is_some()
-            || matches!(output_format, report::TblastxOutputFormat::Xml2(_))
+            || matches!(
+                output_format,
+                report::TblastxOutputFormat::Xml2(_) | report::TblastxOutputFormat::Archive
+            )
             || matches!(
                 output_format,
                 report::TblastxOutputFormat::CustomTabular(spec) if spec.looks_up_every_taxid()
@@ -2676,7 +2656,9 @@ fn write_tblastx_outputs(
                 crate::algorithm::tblastx::archive::write_tblastx_archives(
                     handle,
                     &archive_data(run, &hits, &engine_counts, &subjects),
-                    warnings.as_mut(),
+                    warnings
+                        .as_mut()
+                        .expect("the BLAST archive writes its posts to the diagnostics"),
                     &mut writer,
                 )?
             }
@@ -3551,6 +3533,8 @@ fn run_batch_loop(
                 start,
                 &query_records[start..end],
                 input.placements.get(start),
+                &mut *outputs.diagnostics,
+                args.archive.as_ref(),
             )?;
         }
         // The query splitter reads its environment variables for every batch, before the
@@ -4147,18 +4131,6 @@ impl BatchReports<'_> {
             };
             &batch_runs
         };
-        // The BLAST archive (outfmt 11) writes the Bioseq of every query of the batches NCBI
-        // completes and, with `-subject`, of every subject in each archive: a title it cannot
-        // write is refused before the first byte, exactly where NCBI would write that Bioseq.
-        // NCBI writes none of them when no batch is completed (an error archive or nothing).
-        // (The search strategy's requests check their titles where they are written,
-        // `run_batch_loop`.)
-        if self.args.archive.is_some() && !reported.is_empty() {
-            super::super::archive::check_titles(queries, "query")?;
-            if let ShownSubjects::Fasta { records, .. } = self.subjects {
-                super::super::archive::check_titles(records, "subject")?;
-            }
-        }
         let mut hits = done.hits;
         // `-db`: the reported sequences by rank (their records hold the stored titles, their
         // letters are read from the stored codes).

@@ -398,11 +398,12 @@ fn rewrite_and_post(
 ) -> Option<SerialError> {
     out.truncate(start);
     let (error, replaced) = match serial {
-        Serial::AsnText => encode_traced(AsnTextEncoder::new(out), start, document),
-        Serial::AsnBinary => encode_traced(AsnBinaryEncoder::new(out), start, document),
+        Serial::AsnText => encode_traced(Traced::new(AsnTextEncoder::new(out), start), document),
+        Serial::AsnBinary => {
+            encode_traced(Traced::new(AsnBinaryEncoder::new(out), start), document)
+        }
         Serial::Xml => encode_traced(
-            XmlEncoder::ncbi_object(out, module(document)),
-            start,
+            Traced::xml(XmlEncoder::ncbi_object(out, module(document)), start),
             document,
         ),
     };
@@ -413,14 +414,11 @@ fn rewrite_and_post(
     error
 }
 
-/// `encode` through `Traced` of `enc`, which appends to a buffer of `start` bytes, and the
-/// replaced bytes.
+/// `encode` through `enc` and the replaced bytes.
 fn encode_traced<E: Encoder>(
-    enc: E,
-    start: usize,
+    mut enc: Traced<E>,
     document: &Document<'_>,
 ) -> (Option<SerialError>, Vec<ReplacedChar>) {
-    let mut enc = Traced::new(enc, start);
     let error = encode(&mut enc, document);
     (error, enc.take_replaced_chars())
 }

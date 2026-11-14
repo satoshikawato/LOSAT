@@ -64,7 +64,6 @@ pub(super) fn search_rounds(
     subject_source: BlastpSubjectSource<'_>,
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
-    titles_may_refuse: bool,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:191-196 (the
     // chunks of a split query are set up without the PSSM; `in_pssm::check_in_pssm_options`)
@@ -128,7 +127,6 @@ pub(super) fn search_rounds(
                 outputs,
                 pool,
                 epilog,
-                titles_may_refuse,
             )
         })?;
     }
@@ -191,7 +189,6 @@ fn run_queries(
     outputs: &mut ReportOutputs<'_>,
     pool: &crate::utils::threading::SearchPool<'_>,
     epilog: bool,
-    titles_may_refuse: bool,
 ) -> Result<()> {
     let mut files = RoundFiles::new(
         &plan.request,
@@ -311,7 +308,6 @@ fn run_queries(
                     last_call: false,
                     psi_round: Some(&io),
                     stopped_pssms: None,
-                    titles_may_refuse,
                     query_scopes: batches
                         .query_scopes
                         .as_ref()

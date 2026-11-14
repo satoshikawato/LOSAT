@@ -5156,8 +5156,7 @@ pub fn run(
     )?;
     let choice = app::parse_formatting_string(&args.outfmt)?;
     let format = app::report_format(&choice, app::Program::Blastp, args.out.as_deref())?;
-    // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
-    // before anything is read or written.
+    // The BLAST archive (outfmt 11): its request, before anything is read or written.
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
     // The run's options handle, which its archive and its search strategy share.
     let options = crate::report::archive::OptionsHandle::default();
@@ -5165,13 +5164,12 @@ pub fn run(
         &args,
         format == Some(crate::blastinput::app::ReportFormat::ArchiveFormat),
         &options,
-    )?
+    )
     .map(|handle| handle.with_outfmt_text(&args.outfmt));
-    // The search strategy's request, with the refusals of the archive's, and the archive's
-    // options handle.
+    // The search strategy's request, with the archive's options handle.
     args.strategy = strategy_file
         .map(|file| {
-            crate::report::archive::strategy::StrategyExport::for_run(
+            anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
                 file,
                 super::archive::option_inputs(&args),
                 choice.number,
@@ -5181,9 +5179,8 @@ pub fn run(
                     num_alignments: args.num_alignments,
                 },
                 args.db.as_deref().map(crate::seqdb::db_argument_name),
-                "BLASTP",
                 &options,
-            )
+            ))
         })
         .transpose()?;
     // LOSAT's thread capability is checked before any input or output, as for BLASTN.
@@ -5931,8 +5928,7 @@ pub fn run_local(
     if args.db.is_some() {
         bail!("-db (a database search) is not supported in the browser yet");
     }
-    // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
-    // cannot write (the titles with the query batches, `search`), and a diagnostics stream that
+    // The BLAST archive (outfmt 11) among the formats: its request and a diagnostics stream that
     // saves the messages.
     let archive_requested = outputs
         .formats
@@ -5943,7 +5939,7 @@ pub fn run_local(
             &args,
             true,
             &crate::report::archive::OptionsHandle::default(),
-        )?
+        )
         .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
@@ -6058,7 +6054,7 @@ pub fn run_local_database(
         &args,
         archive_requested,
         &crate::report::archive::OptionsHandle::default(),
-    )?
+    )
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
     match args.archive.clone() {
@@ -6777,28 +6773,6 @@ fn search(
     if !batches.starts.is_empty() {
         check_identity_compressed_lookup_of(&args)?;
     }
-    // The titles that the BLAST archive (outfmt 11) cannot write are refused where the archive
-    // of the searched batches is written (`run_resolved_in_pool`), after their search: the batch
-    // that stops the run here, and one whose search fails, write no archive. The titles are read
-    // once here: only when a searched query or a subject has such a title does a call check its
-    // own (`BlastpReports::titles_may_refuse`).
-    // The search strategy's requests are refused with them (`check_request_titles`).
-    let (archive, strategy) = (args.archive.is_some(), args.strategy.is_some());
-    let titles_may_refuse = (archive || strategy)
-        && (super::archive::check_request_titles(
-            &searched_queries[..batches.searched_done],
-            "query",
-            archive,
-            strategy,
-        )
-        .is_err()
-            || super::archive::check_request_titles(
-                subject_source.fasta_records(),
-                "subject",
-                archive,
-                strategy,
-            )
-            .is_err());
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523 (quoted below)
     // psiblast's rounds of FASTA queries (`-num_iterations` other than 1): the round driver,
     // one search per round per query (`psi_round`).
@@ -6813,7 +6787,6 @@ fn search(
             subject_source,
             subject_label,
             outputs,
-            titles_may_refuse,
         );
     }
     // NCBI reference: c++/src/app/blast/blastp_app.cpp:294-295
@@ -6885,7 +6858,6 @@ fn search(
             last_call: true,
             psi_round: None,
             stopped_pssms: Some(&stopped),
-            titles_may_refuse,
             query_scopes: batches
                 .query_scopes
                 .as_ref()
@@ -7046,7 +7018,6 @@ fn search(
         subject_source,
         outputs,
         batch_size,
-        titles_may_refuse,
     );
     if x_plan.is_none() {
         super::x_query_blocks::x_reach_block_search(false);
@@ -7304,7 +7275,6 @@ fn search(
                                 last_call: index + 1 == blocks.len(),
                                 psi_round: None,
                                 stopped_pssms: None,
-                                titles_may_refuse,
                                 query_scopes: batches
                                     .query_scopes
                                     .as_ref()
@@ -7344,8 +7314,8 @@ fn search(
     }
     // The search strategy's request of a batch outside every call (`-export_search_strategy`): the
     // batch that stops or fails the run when no batch before it was searched, written before any
-    // output of the run (`CallRequests` releases the others).
-    let write_alone = |span: std::ops::Range<usize>| -> Result<()> {
+    // output of the run (`CallRequests` releases the others), its posts on `diagnostics`.
+    let write_alone = |span: std::ops::Range<usize>, diagnostics: &mut dyn Write| -> Result<()> {
         match args.strategy.as_ref() {
             Some(strategy) => super::archive::requests(
                 subject_source
@@ -7359,6 +7329,8 @@ fn search(
                 span.start,
                 &searched_queries[span.clone()],
                 query_input.placements.get(span.start),
+                diagnostics,
+                args.archive.as_ref(),
             ),
             None => Ok(()),
         }
@@ -7420,7 +7392,7 @@ fn search(
                     Some(next_request(span)),
                 )?;
             } else {
-                write_alone(span)?;
+                write_alone(span, &mut *outputs.diagnostics)?;
                 write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
             }
             outputs
@@ -7435,10 +7407,9 @@ fn search(
         // ```
         // The first batch fails after the outfmt 0 prolog. A batch whose set-up fails (every query
         // without letters) has its search strategy request: NCBI made its query factory before
-        // the search (`QueryBatches::stop_batch`); it is written before the prolog (a refusal of
-        // its title follows no byte).
+        // the search (`QueryBatches::stop_batch`); it is written before the prolog.
         if let Some(span) = batches.stop_batch.clone() {
-            write_alone(span)?;
+            write_alone(span, &mut *outputs.diagnostics)?;
         }
         write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
     } else {
@@ -7525,7 +7496,6 @@ fn x_query_block_plan(
     subject_source: BlastpSubjectSource<'_>,
     outputs: &ReportOutputs<'_>,
     batch_size: u32,
-    titles_may_refuse: bool,
 ) -> Option<(
     Vec<super::x_query_blocks::XBlockReport>,
     Vec<std::ops::Range<usize>>,
@@ -7542,13 +7512,6 @@ fn x_query_block_plan(
         || batches.searched_done != queries.len()
         || batches.input_done != queries.len()
     {
-        return None;
-    }
-    // A title that the archive cannot write is refused where the archive of the searched batches
-    // is written, after their search (`run_resolved_in_pool`): a block's archive would come before
-    // the refusal of a later block's title, so such a run takes the search of all queries
-    // (`titles_may_refuse`, `search`).
-    if titles_may_refuse {
         return None;
     }
     // Several outputs, the hit records or an observer. Each
@@ -8208,8 +8171,8 @@ fn preliminary_search_error(
     }
     let written = (|| -> Result<()> {
         // The failed batch's search strategy request (a chunk's is that of its query's batch,
-        // `search_split_query_batches`): the call's first, whose search fails; its titles are
-        // refused before the prolog.
+        // `search_split_query_batches`): the call's first, whose search fails; it is written
+        // before the prolog.
         if let (Some(call), Some(batch)) = (
             reports.call_requests,
             query_batches
@@ -8217,7 +8180,11 @@ fn preliminary_search_error(
                 .find(|batch| !batch.searched.is_empty())
                 .filter(|_| !chunk),
         ) {
-            call.end_at(batch.searched.end)?;
+            call.end_at(
+                batch.searched.end,
+                &mut *outputs.diagnostics,
+                args.archive.as_ref(),
+            )?;
         }
         // EXPERIMENT (LOSAT_X_BPQBLOCK): a block after the first of the block search follows
         // the prolog that the first block wrote.
@@ -8285,16 +8252,17 @@ struct NextRequest<'a> {
 // ```
 /// The search strategy's requests (`-export_search_strategy`) of a call's batches. NCBI writes a
 /// batch's request before its search, and BLASTP searches a call's batches together, so the call
-/// marks where it ends (`end_at`: every batch before the formats, or the batch an NCBI error of the
-/// call belongs to) and `run_resolved_in_pool` releases the requests up to there in one place
-/// (`release`), through the run's cursor (`StrategyExport::write_with`: a request written already,
-/// by a search of the batches again, is not written twice), each followed by its batch's searched
-/// space; on success also the request of the batch that follows the call (`NextRequest`). A call
-/// that ends with an NCBI error without a mark is LOSAT's internal error, so that no error path
-/// drops requests silently.
+/// writes the requests where it ends (`end_at`: every batch before the formats, or the batch an
+/// NCBI error of the call belongs to), through the run's cursor (`StrategyExport::write_with`: a
+/// request written already, by a search of the batches again, is not written twice), each
+/// followed by its batch's searched space, and marks that place; `run_resolved_in_pool` releases
+/// the call's requests in one place (`release`): on success every batch's (those that no mark
+/// wrote) and the request of the batch that follows the call (`NextRequest`). A call that ends
+/// with an NCBI error without a mark is LOSAT's internal error, so that no error path drops
+/// requests silently.
 struct CallRequests<'a> {
     strategy: crate::report::archive::strategy::StrategyExport,
-    requests: crate::report::archive::requests::RunRequests<'a, FastaRecord>,
+    requests: crate::report::archive::requests::RunRequests<'a>,
     /// The call's queries and their placements, from the run's query `base`.
     records: &'a [FastaRecord],
     placements: &'a seq_range::Placements,
@@ -8360,17 +8328,17 @@ impl<'a> CallRequests<'a> {
     }
 
     /// The call ends at its query `through`: NCBI has written the requests of the batches before
-    /// it (every batch before the formats; the batch an NCBI error belongs to). Their titles are
-    /// refused now, before the output of the call's end (`RunRequests::check_titles`).
-    fn end_at(&self, through: usize) -> Result<()> {
-        for span in self.spans.iter().filter(|span| span.start < through) {
-            if self
-                .strategy
-                .takes(self.base + span.start..self.base + span.end)
-            {
-                self.requests.check_titles(&self.records[span.clone()])?;
-            }
-        }
+    /// it (every batch before the formats; the batch an NCBI error belongs to), so they are
+    /// written now (`write_through`), before the output of the call's end, and the place is
+    /// marked. NCBI's posts of the bytes that ASN.1 text replaces in them go to `diagnostics` and
+    /// are messages of the run's archive `archive` (`RunRequests::write`).
+    fn end_at(
+        &self,
+        through: usize,
+        diagnostics: &mut dyn std::io::Write,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+    ) -> Result<()> {
+        self.write_through(through, diagnostics, archive)?;
         *self
             .through
             .lock()
@@ -8378,41 +8346,14 @@ impl<'a> CallRequests<'a> {
         Ok(())
     }
 
-    /// The titles of the batch that follows the call (`NextRequest`), refused before the call's
-    /// reports when its request is to be written.
-    fn check_next(&self) -> Result<()> {
-        match self.next {
-            Some(next)
-                if self
-                    .strategy
-                    .takes(next.first_query..next.first_query + next.records.len()) =>
-            {
-                self.requests.check_titles(next.records)
-            }
-            _ => Ok(()),
-        }
-    }
-
-    /// Writes the requests of the call that ended with `result`: on success every batch's and the
-    /// next one's; after an error those up to the call's mark. A call that stops with a header file
-    /// NCBI cannot read writes none (`search` searches the batches before it again), and so does a
-    /// refusal of LOSAT's.
-    fn release(&self, result: &Result<()>) -> Result<()> {
-        let mark = *self
-            .through
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let through = match (result, mark) {
-            (Ok(()), _) => self.records.len(),
-            (Err(_), Some(through)) => through,
-            (Err(error), None) => {
-                anyhow::ensure!(
-                    !error.is::<crate::cli::NativeError>(),
-                    "LOSAT internal error: a blastp call ended with NCBI's error without the batch where its search strategy requests end ({error})"
-                );
-                return Ok(());
-            }
-        };
+    /// Writes the requests of the call's batches that start before its query `through` (those
+    /// written already are not made again), each followed by its batch's searched space.
+    fn write_through(
+        &self,
+        through: usize,
+        diagnostics: &mut dyn std::io::Write,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+    ) -> Result<()> {
         let searched = self
             .searched
             .lock()
@@ -8428,15 +8369,49 @@ impl<'a> CallRequests<'a> {
                 queries.start,
                 &self.records[span.clone()],
                 self.placements.get(span.start),
+                &mut *diagnostics,
+                archive,
             )?;
             self.strategy.note_searched(queries, space)?;
         }
+        Ok(())
+    }
+
+    /// Writes the requests of the call that ended with `result` (`end_at` wrote those up to its
+    /// mark): on success every batch's and the next one's, the next one's posts after the call's
+    /// reports (`diagnostics`, `archive` as `end_at`'s); after an error those up to the call's
+    /// mark. A call that stops with a header file NCBI cannot read writes none (`search` searches
+    /// the batches before it again), and so does a refusal of LOSAT's.
+    fn release(
+        &self,
+        result: &Result<()>,
+        diagnostics: &mut dyn std::io::Write,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+    ) -> Result<()> {
+        let mark = *self
+            .through
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let through = match (result, mark) {
+            (Ok(()), _) => self.records.len(),
+            (Err(_), Some(through)) => through,
+            (Err(error), None) => {
+                anyhow::ensure!(
+                    !error.is::<crate::cli::NativeError>(),
+                    "LOSAT internal error: a blastp call ended with NCBI's error without the batch where its search strategy requests end ({error})"
+                );
+                return Ok(());
+            }
+        };
+        self.write_through(through, &mut *diagnostics, archive)?;
         if let (Ok(()), Some(next)) = (result, self.next) {
             self.requests.write(
                 &self.strategy,
                 next.first_query,
                 next.records,
                 next.placement,
+                diagnostics,
+                archive,
             )?;
         }
         Ok(())
@@ -8520,9 +8495,13 @@ fn unsearched_batches_then_engine_error(
         split_search_spaces: None,
     };
     // The first searched batch's search strategy request follows those of the batches before
-    // (`CallRequests`); its titles are refused before their reports.
+    // (`CallRequests`), written before their reports.
     if let Some(call) = reports.call_requests {
-        if let Err(error) = call.end_at(batch.searched.end) {
+        if let Err(error) = call.end_at(
+            batch.searched.end,
+            &mut *outputs.diagnostics,
+            args.archive.as_ref(),
+        ) {
             return error;
         }
     }
@@ -8540,7 +8519,6 @@ fn unsearched_batches_then_engine_error(
         psi_round: None,
         // BLASTP only (`args.app` above): no psiblast PSSM stops here.
         stopped_pssms: None,
-        titles_may_refuse: reports.titles_may_refuse,
         query_scopes: reports.query_scopes,
         strategy_next: None,
         call_requests: None,
@@ -8604,10 +8582,6 @@ struct BlastpReports<'a> {
     /// messages come where a run that does not stop writes them. `None` (or empty) elsewhere.
     stopped_pssms:
         Option<&'a std::sync::Mutex<Option<crate::algorithm::psiblast::pssm::PssmFiles>>>,
-    /// With the BLAST archive (outfmt 11): a searched query or a subject that `search` read has a
-    /// title the archive cannot write, so the call checks its own queries and subjects where it
-    /// writes the archive (`run_resolved_in_pool`); without such a title no call can refuse.
-    titles_may_refuse: bool,
     /// Under `-parse_deflines` against a database, the scopes of the call's queries
     /// (`query_batch::QueryScopes`, numbered from the call's first), whose ids the reported
     /// subjects must not have (`ListedTitles::refuse_ids_of_queries`); `None` elsewhere.
@@ -8843,8 +8817,6 @@ fn search_split_query_batches(
                     last_call: false,
                     psi_round: None,
                     stopped_pssms: None,
-                    // The call of the whole query writes the archive.
-                    titles_may_refuse: false,
                     query_scopes: None,
                     strategy_next: None,
                     call_requests: None,
@@ -8856,7 +8828,7 @@ fn search_split_query_batches(
             // batches before it, one at a time, and wrote their requests).
             if let Err(error) = searched {
                 if let Some(call) = call {
-                    call.end_at(range.end)?;
+                    call.end_at(range.end, &mut *outputs.diagnostics, args.archive.as_ref())?;
                 }
                 return Err(error);
             }
@@ -9390,6 +9362,7 @@ fn run_resolved_in_pool(
         call_requests: call.as_ref(),
         ..*reports
     };
+    let archive = args.archive.clone();
     let result = run_call(
         args,
         query_records,
@@ -9404,7 +9377,9 @@ fn run_resolved_in_pool(
         x_ahead,
     );
     match &call {
-        Some(call) => call.release(&result).and(result),
+        Some(call) => call
+            .release(&result, &mut *outputs.diagnostics, archive.as_ref())
+            .and(result),
         None => result,
     }
 }
@@ -13382,37 +13357,6 @@ fn run_call(
     if let (Some(titles), Some(scopes)) = (listed_titles.as_ref(), reports.query_scopes) {
         titles.refuse_ids_of_queries(&hit_lists, scopes)?;
     }
-    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-281
-    // ```c++
-    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-    //     ...
-    //                 results = lcl_blast.Run();
-    //     ...
-    //             if (fmt_args->ArchiveFormatRequested(args)) {
-    //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results,  0, m_Bah.GetMessages());
-    // ```
-    // The BLAST archive (outfmt 11) of each batch that NCBI completes holds its queries and,
-    // with `-subject`, every subject. The batch that stops the run writes neither: a reader
-    // error, `Empty CBlastQueryVector` or a batch of queries without letters (`search`), and a
-    // batch whose search fails (the sequence file that its preliminary search cannot read,
-    // `preliminary_search_error`, or a header file that its definition lines cannot be read
-    // from, above: `search` searches the batches before again); the error archive holds no
-    // sequence. So a title the archive cannot write is refused here, where the call's batches
-    // have been searched and their definition lines read, and before the first byte of any
-    // report. (The block search, which writes each block's archive, does not run when a title
-    // could be refused, `x_query_block_plan`.) Only a run whose read found such a title can
-    // refuse (`BlastpReports::titles_may_refuse`).
-    if reports.titles_may_refuse {
-        let (archive, strategy) = (args.archive.is_some(), args.strategy.is_some());
-        super::archive::check_request_titles(query_records, "query", archive, strategy)?;
-        super::archive::check_request_titles(subject_records, "subject", archive, strategy)?;
-    }
-    // The request that the run writes once this call's batches are formatted (the batch that
-    // stops the run or fails): its titles are refused here too, before any report.
-    if let Some(call) = reports.call_requests {
-        call.check_next()?;
-    }
     #[allow(clippy::type_complexity)]
     let (subject_records, subject_titles, shown_subjects): (
         &[FastaRecord],
@@ -14353,11 +14297,15 @@ fn run_call(
         spans: &[],
     };
     // The search strategy's requests of the call's batches (`-export_search_strategy`): NCBI has
-    // written every one of them before it formats them (`CallRequests`, released where the call
-    // ends; a matrix name that the XML formats do not know stops them after the run's first batch,
+    // written every one of them before it formats them, so they are written here (`CallRequests`;
+    // a matrix name that the XML formats do not know stops them after the run's first batch,
     // `search`).
     if let Some(call) = reports.call_requests {
-        call.end_at(query_records.len())?;
+        call.end_at(
+            query_records.len(),
+            &mut *outputs.diagnostics,
+            args.archive.as_ref(),
+        )?;
     }
     // Every structured format of the call is XML2 or JSON: none writes the report that a
     // `-subject` document holds back (`blast_xml::write_blastp_xml`).
@@ -14486,7 +14434,9 @@ fn run_call(
                 };
                 super::archive::write_blastp_archives(
                     &call,
-                    warnings.as_mut(),
+                    warnings
+                        .as_mut()
+                        .expect("the BLAST archive writes its posts to the diagnostics"),
                     &first_context,
                     &mut writer,
                 )?;

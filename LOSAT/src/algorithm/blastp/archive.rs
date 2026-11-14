@@ -119,23 +119,24 @@ pub(crate) fn handle_for(
     args: &BlastpArgs,
     archive_requested: bool,
     options: &crate::report::archive::OptionsHandle,
-) -> Result<Option<ArchiveHandle>> {
+) -> Option<ArchiveHandle> {
     if !archive_requested {
-        return Ok(None);
+        return None;
     }
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
     let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
-    ArchiveHandle::for_program(&option_inputs(args), database, "BLASTP", options).map(Some)
+    Some(ArchiveHandle::for_program(
+        &option_inputs(args),
+        database,
+        options,
+    ))
 }
 
 /// The requests of a run's batches (`RunRequests`): protein queries and subjects (the `-subject`
 /// records `subjects`, `None` for `-db`), and with `-lcase_masking` (`lcase_masking`) one `notset`
 /// mask of each query's lower-case runs (SEG is never one).
-pub(crate) fn requests(
-    subjects: Option<&[FastaRecord]>,
-    lcase_masking: bool,
-) -> RunRequests<'_, FastaRecord> {
+pub(crate) fn requests(subjects: Option<&[FastaRecord]>, lcase_masking: bool) -> RunRequests<'_> {
     RunRequests::new(
         RequestPolicy {
             query_protein: true,
@@ -143,19 +144,7 @@ pub(crate) fn requests(
             lcase: lcase_masking.then_some(LcaseFrames::NotSet),
         },
         subjects,
-        "BLASTP",
     )
-}
-
-/// `report::archive::check_request_titles` for BLASTP's records: the archive's (`archive`) and
-/// the search strategy's (`strategy`).
-pub(crate) fn check_request_titles(
-    records: &[FastaRecord],
-    role: &str,
-    archive: bool,
-    strategy: bool,
-) -> Result<()> {
-    crate::report::archive::check_request_titles(records, role, "BLASTP", archive, strategy)
 }
 
 pub(crate) use crate::report::archive::error_lines;
@@ -328,11 +317,12 @@ pub(crate) fn for_each_batch(
 
 /// Writes the archive of each batch of `call` to `writer`; `warnings` writes the warnings
 /// of a batch's queries (to the diagnostics, which saves them as the batch's messages)
-/// before its archive. `first_context(first_query)` gives the values of a batch's first
+/// before its archive, and its sink gets NCBI's posts of the bytes that the archive's stream
+/// replaces (`write_archive`). `first_context(first_query)` gives the values of a batch's first
 /// query.
 pub(crate) fn write_blastp_archives(
     call: &ArchiveCall<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
     first_context: &dyn Fn(usize) -> FirstContext,
     writer: &mut dyn Write,
 ) -> Result<()> {
@@ -344,10 +334,8 @@ pub(crate) fn write_blastp_archives(
         gapped: true,
     };
     for_each_batch(&call.batches, first_context, |span, batch| {
-        if let Some(warnings) = warnings.as_deref_mut() {
-            for index in span.clone() {
-                warnings.before_query(index, &mut *writer)?;
-            }
+        for index in span.clone() {
+            warnings.before_query(index, &mut *writer)?;
         }
         let mut aligns = BlastpAligns {
             run,
@@ -362,7 +350,13 @@ pub(crate) fn write_blastp_archives(
             engine_counts: call.engine_counts,
             first: span.start,
         };
-        write_archive(call.handle, batch, &mut aligns, &mut *writer)
+        write_archive(
+            call.handle,
+            batch,
+            &mut aligns,
+            &mut *writer,
+            &mut *warnings.sink,
+        )
     })
 }
 

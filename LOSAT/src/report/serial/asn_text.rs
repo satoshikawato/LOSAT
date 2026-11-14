@@ -89,11 +89,10 @@ impl<'b> AsnTextEncoder<'b> {
         });
     }
 
-    /// `m_Output.GetLine()`: 1 + the ends of line of the document that the encoder holds (all of
-    /// it through `encoder::Traced`). The count goes on from the start of the line of the last
-    /// call: the string wrap inserts its end of line in the current line only, and the lines
-    /// before it are final. (After a flush that dropped bytes, which `Traced` prevents, it
-    /// counts the bytes held.)
+    /// `m_Output.GetLine()`: 1 + the ends of line that the encoder holds (`encoder::Traced` adds
+    /// those that `flush_to` handed on, which starts the count again). The count goes on from the
+    /// start of the line of the last call: the string wrap inserts its end of line in the current
+    /// line only, and the lines before it are final.
     fn line(&mut self) -> u64 {
         if self.lines_to < self.start || self.lines_to > self.out.len() {
             self.lines_to = self.start;
@@ -696,6 +695,8 @@ impl Encoder for AsnTextEncoder<'_> {
         }
         sink.write_all(&self.out[self.start..keep_from])?;
         self.out.drain(self.start..keep_from);
+        // `line` counts again from the bytes held (`encoder::Traced` adds those handed on).
+        (self.lines_to, self.lines) = (self.start, 0);
         Ok(())
     }
 

@@ -192,6 +192,20 @@ impl ReplacedChar {
         }
         message
     }
+
+    /// The text of the post on the diagnostics stream: `Error: (803.7) `, the application's
+    /// prefix (`SetDiagPostPrefix`) in brackets when it has one, the message and an end of line
+    /// (the severity, code, prefix and text of `SDiagMessage::x_OldWrite`).
+    pub fn post(&self, prefix: Option<&str>) -> Vec<u8> {
+        let (code, subcode) = Self::ERR_CODE;
+        let mut text = format!("Error: ({code}.{subcode}) ").into_bytes();
+        if let Some(prefix) = prefix {
+            text.extend_from_slice(format!("[{prefix}] ").as_bytes());
+        }
+        text.extend_from_slice(&self.message());
+        text.push(b'\n');
+        text
+    }
 }
 
 /// The calls of NCBI's `CObjectOStream` that the serialized BLAST reports make.
@@ -328,30 +342,37 @@ enum Frame {
     Named(String),
     /// A container: nothing.
     List,
-    /// A container element: `.E`.
-    Element,
+    /// A container element: `.E`, unless `shown` is false (an element of a named type in
+    /// NCBI's XML stream, `Traced::name_element`).
+    Element { shown: bool },
 }
 
 /// The encoder `E` (ASN.1 text, ASN.1 binary, or XML in the archive's object mode, whose
 /// `variant_string_list` is the trait's sequence of calls; not the standard-XML mode of outfmt
 /// 14 / 16, which writes it otherwise) with NCBI's object stack, for the posts of the bytes that
-/// it replaces (`ReplacedChar`). A caller that posts NCBI's messages
-/// writes a document again through it when the first writing reported
-/// `SerialError::NonVisibleChar`; it writes the strings with `visible_str_replacing`. The
-/// encoders by themselves keep no stack and replace nothing, so that the documents without
-/// such a byte are written as before.
+/// it replaces (`ReplacedChar`). A caller that posts NCBI's messages writes a document through
+/// it when one of its strings has such a byte (the archive and the search strategy decide that
+/// before they write, `report::archive`; the mask writers write a document again when the first
+/// writing reported `SerialError::NonVisibleChar`); it writes the strings with
+/// `visible_str_replacing`. The encoders by themselves keep no stack and replace nothing, so that
+/// the documents without such a byte are written as before.
 ///
-/// The whole document stays in `E`'s buffer until `flush_to(.., true)` (a flush before the end
-/// does nothing), so that the encoder's positions count from the document's start: the text
-/// and XML encoders count the lines from their start, and `base` is the length of the binary
-/// encoder's buffer before the document.
+/// The positions count from the document's start: `flush_to` hands the encoder's final bytes on
+/// as the encoder does and counts them (the bytes for the binary stream, the ends of line for the
+/// text and XML streams), and `base` is the length of the encoder's buffer before the document.
 ///
-/// (NCBI's XML stream pushes no container element frame for an element of a named type
-/// (`WillHaveName`, objostrxml.cpp:1186-1209), so its trace has no `.E` there; no XML document
-/// that LOSAT traces has such a list with a string that can hold a control character.)
+/// NCBI's XML stream pushes no container element frame for an element of a named type
+/// (`WillHaveName`, objostrxml.cpp:1186-1209), so its trace has no `.E` there: `Traced::xml`
+/// drops the frame of an element whose value starts with a named type
+/// (`begin_sequence`, `begin_named`, `variant`).
 pub struct Traced<E> {
     inner: E,
     base: u64,
+    /// Whether the stream is NCBI's XML stream (`name_element`).
+    xml: bool,
+    /// The bytes and the ends of line of the document that `flush_to` handed on.
+    flushed_bytes: u64,
+    flushed_lines: u64,
     root: String,
     frames: Vec<Frame>,
     replaced: Vec<ReplacedChar>,
@@ -362,15 +383,46 @@ fn no_string() -> std::sync::Arc<[u8]> {
     std::sync::Arc::from(&[][..])
 }
 
+/// A sink that counts what it hands on (`Traced::flush_to`).
+struct Counted<'s> {
+    sink: &'s mut dyn std::io::Write,
+    bytes: u64,
+    lines: u64,
+}
+
+impl std::io::Write for Counted<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.sink.write(buf)?;
+        self.bytes += written as u64;
+        self.lines += buf[..written].iter().filter(|&&byte| byte == b'\n').count() as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.sink.flush()
+    }
+}
+
 impl<E: Encoder> Traced<E> {
-    /// `inner`, which appends a document to a buffer of `base` bytes.
+    /// `inner` (ASN.1 text or binary), which appends a document to a buffer of `base` bytes.
     pub fn new(inner: E, base: usize) -> Self {
         Self {
             inner,
             base: base as u64,
+            xml: false,
+            flushed_bytes: 0,
+            flushed_lines: 0,
             root: String::new(),
             frames: Vec::new(),
             replaced: Vec::new(),
+        }
+    }
+
+    /// `new` of NCBI's XML object stream (`name_element`).
+    pub fn xml(inner: E, base: usize) -> Self {
+        Self {
+            xml: true,
+            ..Self::new(inner, base)
         }
     }
 
@@ -414,8 +466,8 @@ impl<E: Encoder> Traced<E> {
                     stack.push('.');
                     stack.push_str(name);
                 }
-                Frame::Element => stack.push_str(".E"),
-                Frame::List => {}
+                Frame::Element { shown: true } => stack.push_str(".E"),
+                Frame::Element { shown: false } | Frame::List => {}
             }
         }
         stack
@@ -432,8 +484,10 @@ impl<E: Encoder> Traced<E> {
         let shared: std::sync::Arc<[u8]> = std::sync::Arc::from(string);
         for byte in replaced {
             let position = match byte.position {
-                StreamPosition::Byte(offset) => StreamPosition::Byte(offset - self.base),
-                line => line,
+                StreamPosition::Byte(offset) => {
+                    StreamPosition::Byte(self.flushed_bytes + offset - self.base)
+                }
+                StreamPosition::Line(line) => StreamPosition::Line(self.flushed_lines + line),
             };
             self.replaced.push(ReplacedChar {
                 trace: trace.clone(),
@@ -455,8 +509,41 @@ impl<E: Encoder> Traced<E> {
 
     /// `EndContainerElement` of the open element, if any.
     fn end_element(&mut self) {
-        if matches!(self.frames.last(), Some(Frame::Element)) {
+        if matches!(self.frames.last(), Some(Frame::Element { .. })) {
             self.frames.pop();
+        }
+    }
+
+    /// The value of the element just opened starts with the named type `type_name`: NCBI's
+    /// XML stream has no element frame for it.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1186-1202
+    /// ```c++
+    /// bool CObjectOStreamXml::WillHaveName(TTypeInfo elementType)
+    /// {
+    ///     while ( elementType->GetName().empty() ) {
+    ///         if ( elementType->GetTypeFamily() != eTypeFamilyPointer )
+    ///             return false;
+    ///         elementType = CTypeConverter<CPointerTypeInfo>::SafeCast(
+    ///             elementType)->GetPointedType();
+    ///     }
+    ///     // found named type
+    ///     return true;
+    /// }
+    ///
+    /// void CObjectOStreamXml::BeginContainerElement(TTypeInfo elementType)
+    /// {
+    ///     if ( !WillHaveName(elementType) ) {
+    ///         BeginArrayElement(elementType);
+    ///     }
+    /// }
+    /// ```
+    /// (`WriteContainerContents`, 1255-1316, pushes `eFrameArrayElement` under the same test.)
+    fn name_element(&mut self, type_name: &str) {
+        if self.xml && !type_name.is_empty() {
+            if let Some(Frame::Element { shown }) = self.frames.last_mut() {
+                *shown = false;
+            }
         }
     }
 }
@@ -473,12 +560,14 @@ impl<E: Encoder> Encoder for Traced<E> {
         self.inner.end_document();
     }
     fn begin_sequence(&mut self, type_name: &str) {
+        self.name_element(type_name);
         self.inner.begin_sequence(type_name);
     }
     fn end_sequence(&mut self) {
         self.inner.end_sequence();
     }
     fn begin_named(&mut self, type_name: &str) {
+        self.name_element(type_name);
         self.inner.begin_named(type_name);
     }
     fn end_named(&mut self) {
@@ -498,7 +587,7 @@ impl<E: Encoder> Encoder for Traced<E> {
     }
     fn element(&mut self) {
         self.end_element();
-        self.frames.push(Frame::Element);
+        self.frames.push(Frame::Element { shown: true });
         self.inner.element();
     }
     fn end_list(&mut self) {
@@ -507,6 +596,7 @@ impl<E: Encoder> Encoder for Traced<E> {
         self.inner.end_list();
     }
     fn variant(&mut self, type_name: &str, name: &str, tag: u8) {
+        self.name_element(type_name);
         self.frames.push(Frame::Named(name.to_string()));
         self.inner.variant(type_name, name, tag);
     }
@@ -547,11 +637,15 @@ impl<E: Encoder> Encoder for Traced<E> {
         self.inner.buffered()
     }
     fn flush_to(&mut self, sink: &mut dyn std::io::Write, all: bool) -> std::io::Result<()> {
-        if all {
-            self.inner.flush_to(sink, true)
-        } else {
-            Ok(())
-        }
+        let mut counted = Counted {
+            sink,
+            bytes: 0,
+            lines: 0,
+        };
+        let flushed = self.inner.flush_to(&mut counted, all);
+        self.flushed_bytes += counted.bytes;
+        self.flushed_lines += counted.lines;
+        flushed
     }
     fn error(&self) -> Option<SerialError> {
         self.inner.error()

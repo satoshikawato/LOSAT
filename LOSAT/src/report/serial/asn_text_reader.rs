@@ -1488,15 +1488,26 @@ pub(crate) fn real_of_parts(
 /// where glibc's result is the double above the nearest one (its error bound is 0.52 units in
 /// the last place, and 10^23 and 10^210 lie almost halfway between two doubles). The table keeps
 /// the bytes the same on every platform; `libm_pow10_is_glibcs_pow` checks it against the C
-/// library on Linux. The powers from 10^-400 to 10^400 are computed once and kept (a stream of
-/// archives reads hundreds of thousands of REALs); the others as they are asked for.
+/// library on Linux. The powers from 10^-400 to 10^400 are kept once computed, each the first time
+/// it is asked for (a stream of archives reads hundreds of thousands of REALs, a PSSM a few hundred,
+/// of a handful of exponents: computing all 801 at the first REAL cost 735,000 instructions); the
+/// others as they are asked for.
 pub(crate) fn libm_pow10(exp: i32) -> f64 {
-    static TABLE: std::sync::OnceLock<Vec<f64>> = std::sync::OnceLock::new();
-    if (-400..=400).contains(&exp) {
-        let table = TABLE.get_or_init(|| (-400..=400).map(libm_pow10_of).collect());
-        return table[(exp + 400) as usize];
+    use std::sync::atomic::{AtomicU64, Ordering};
+    // A power not yet computed: a NaN's bits, which no power of ten has (10^-400 is +0.0).
+    const NOT_YET: u64 = u64::MAX;
+    static TABLE: [AtomicU64; 801] = [const { AtomicU64::new(NOT_YET) }; 801];
+    if !(-400..=400).contains(&exp) {
+        return libm_pow10_of(exp);
     }
-    libm_pow10_of(exp)
+    let slot = &TABLE[(exp + 400) as usize];
+    let bits = slot.load(Ordering::Relaxed);
+    if bits != NOT_YET {
+        return f64::from_bits(bits);
+    }
+    let value = libm_pow10_of(exp);
+    slot.store(value.to_bits(), Ordering::Relaxed);
+    value
 }
 
 /// `libm_pow10` computed.

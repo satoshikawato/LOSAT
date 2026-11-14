@@ -53,8 +53,12 @@ pub(crate) fn read_pssm(text: &[u8]) -> PssmRead {
     let (value, posts) = read_document(text, named::PSSMWITHPARAMETERS);
     PssmRead {
         result: value
-            .map_err(PssmReadError::Ncbi)
-            .and_then(|value| pssm_of(&value).map_err(PssmReadError::Refused)),
+            .map_err(|error| match error {
+                // LOSAT's own limit of the lexical reader: a refusal, not NCBI's error.
+                ReadError::Unsupported(what) => PssmReadError::Refused(what),
+                error => PssmReadError::Ncbi(error),
+            })
+            .and_then(|value| pssm_of(value).map_err(PssmReadError::Refused)),
         posts,
     }
 }
@@ -65,65 +69,81 @@ pub(crate) fn read_pssm_with_parameters(text: &[u8]) -> Result<PssmWithParameter
     read_pssm(text).result
 }
 
-// The typed boundary: the model of the value read. The value has the table's shape (the reader
-// read it under the table), so a mandatory member is there and each member has its type's form.
+// The typed boundary: the model of the value read, its parts moved out of it. The value has the
+// table's shape (the reader read it under the table), so a mandatory member is there and each
+// member has its type's form.
 
-fn member<'v>(value: &'v Value, ty: u16, name: &str) -> Option<&'v Value> {
-    value.member(member_index(ty, name))
+/// The member `name` of the SEQUENCE `value` of the type `ty`, taken out, when set.
+fn take(value: &mut Value, ty: u16, name: &str) -> Option<Value> {
+    value.take_member(member_index(ty, name))
 }
 
-fn int(value: &Value) -> i64 {
+fn int(value: Value) -> i64 {
     match value {
-        Value::Int(n) => *n,
+        Value::Int(n) => n,
         other => unreachable!("an INTEGER of the table, not {other:?}"),
     }
 }
 
 /// An INTEGER of Int4 storage.
-fn int4(value: &Value) -> i32 {
+fn int4(value: Value) -> i32 {
     i32::try_from(int(value)).expect("an Int4 of the table")
 }
 
-fn boolean(value: &Value) -> bool {
+fn boolean(value: Value) -> bool {
     match value {
-        Value::Bool(value) => *value,
+        Value::Bool(value) => value,
         other => unreachable!("a BOOLEAN of the table, not {other:?}"),
     }
 }
 
-fn real(value: &Value) -> f64 {
+fn real(value: Value) -> f64 {
     match value {
-        Value::Real(value) => *value,
+        Value::Real(value) => value,
         other => unreachable!("a REAL of the table, not {other:?}"),
     }
 }
 
-fn string(value: &Value) -> Vec<u8> {
+fn string(value: Value) -> Vec<u8> {
     match value {
-        Value::Str(text) => text.clone(),
+        Value::Str(text) => text,
         other => unreachable!("a string of the table, not {other:?}"),
     }
 }
 
-fn list<T>(value: &Value, each: impl Fn(&Value) -> T) -> Vec<T> {
+fn list(value: Value) -> Vec<Value> {
     match value {
-        Value::List(items) => items.iter().map(each).collect(),
+        Value::List(items) => items,
         other => unreachable!("a SEQUENCE OF of the table, not {other:?}"),
     }
 }
 
-fn choice(value: &Value) -> (usize, &Value) {
+/// A SEQUENCE OF INTEGER of Int4 storage.
+fn int4s(value: Value) -> Vec<i32> {
     match value {
-        Value::Choice(index, value) => (usize::from(*index), value),
+        Value::Int4s(values) => values,
+        other => unreachable!("a SEQUENCE OF INTEGER of the table, not {other:?}"),
+    }
+}
+
+/// A SEQUENCE OF REAL.
+fn reals(value: Value) -> Vec<f64> {
+    match value {
+        Value::Reals(values) => values,
+        other => unreachable!("a SEQUENCE OF REAL of the table, not {other:?}"),
+    }
+}
+
+fn choice(value: Value) -> (usize, Value) {
+    match value {
+        Value::Choice(index, value) => (usize::from(index), *value),
         other => unreachable!("a CHOICE of the table, not {other:?}"),
     }
 }
 
 /// An ENUMERATED value: its name in the list of the member's type, and its number.
-fn enumerated(value: &Value, ty: u16, name: &str) -> (&'static str, i32) {
-    let Value::Enum(number) = value else {
-        unreachable!("an ENUMERATED of the table, not {value:?}")
-    };
+fn enumerated(value: Value, ty: u16, name: &str) -> (&'static str, i32) {
+    let number = enum_number(value);
     let member_ty = members(ty)[member_index(ty, name)].ty;
     let Kind::Enumerated { values, .. } = resolved(member_ty).kind else {
         unreachable!("{name} is an ENUMERATED")
@@ -131,20 +151,20 @@ fn enumerated(value: &Value, ty: u16, name: &str) -> (&'static str, i32) {
     let name = values
         .values()
         .iter()
-        .find(|value| value.value == *number)
+        .find(|value| value.value == number)
         .map(|value| value.name())
         .expect("an ENUMERATED number has a name");
-    (name, *number)
+    (name, number)
 }
 
-fn enum_number(value: &Value) -> i32 {
+fn enum_number(value: Value) -> i32 {
     match value {
-        Value::Enum(number) => *number,
+        Value::Enum(number) => number,
         other => unreachable!("an ENUMERATED of the table, not {other:?}"),
     }
 }
 
-fn object_id(value: &Value) -> ObjectId {
+fn object_id(value: Value) -> ObjectId {
     match choice(value) {
         (0, value) => ObjectId::Id(int4(value)),
         (_, value) => ObjectId::Str(string(value)),
@@ -152,23 +172,23 @@ fn object_id(value: &Value) -> ObjectId {
 }
 
 /// The model of a `PssmWithParameters` value, or LOSAT's refusal.
-fn pssm_of(value: &Value) -> Result<PssmWithParameters, String> {
+fn pssm_of(mut value: Value) -> Result<PssmWithParameters, String> {
     const T: u16 = named::PSSMWITHPARAMETERS;
     Ok(PssmWithParameters {
-        pssm: pssm(member(value, T, "pssm").expect("mandatory"))?,
-        params: member(value, T, "params").map(params),
+        pssm: pssm(take(&mut value, T, "pssm").expect("mandatory"))?,
+        params: take(&mut value, T, "params").map(params),
     })
 }
 
-fn pssm(value: &Value) -> Result<Pssm, String> {
+fn pssm(mut value: Value) -> Result<Pssm, String> {
     const T: u16 = named::PSSM;
-    let get = |name: &str| member(value, T, name);
+    let mut get = |name: &str| take(&mut value, T, name);
     Ok(Pssm {
         is_protein: get("isProtein").map(boolean),
         identifier: get("identifier").map(object_id),
         num_rows: get("numRows").map(int4).expect("mandatory"),
         num_columns: get("numColumns").map(int4).expect("mandatory"),
-        row_labels: get("rowLabels").map(|labels| list(labels, string)),
+        row_labels: get("rowLabels").map(|labels| list(labels).into_iter().map(string).collect()),
         by_row: get("byRow").map(boolean),
         query: get("query").map(seq_entry).transpose()?,
         intermediate_data: get("intermediateData").map(intermediate_data),
@@ -177,8 +197,8 @@ fn pssm(value: &Value) -> Result<Pssm, String> {
 }
 
 /// The query's `Seq-entry`: its `seq` variant, a Bioseq.
-fn seq_entry(value: &Value) -> Result<PssmQuery, String> {
-    let (variant, bioseq) = choice(value);
+fn seq_entry(value: Value) -> Result<PssmQuery, String> {
+    let (variant, mut bioseq) = choice(value);
     let name = members(named::SEQ_ENTRY)[variant].name();
     if name != "seq" {
         return Err(format!(
@@ -186,29 +206,36 @@ fn seq_entry(value: &Value) -> Result<PssmQuery, String> {
         ));
     }
     const T: u16 = named::BIOSEQ;
-    let get = |name: &str| member(bioseq, T, name);
+    let mut get = |name: &str| take(&mut bioseq, T, name);
     Ok(PssmQuery {
-        ids: list(get("id").expect("mandatory"), |id| match id {
-            Value::SeqId(id) => id.clone(),
-            other => unreachable!("a Seq-id is read into the Seq-id model, not {other:?}"),
-        }),
-        descr: get("descr").map(|descr| {
-            list(descr, |descriptor| {
-                let (variant, value) = choice(descriptor);
-                match members(named::SEQDESC)[variant].name() {
-                    "title" => Seqdesc::Title(string(value)),
-                    _ => Seqdesc::Other(descriptor.clone()),
-                }
+        ids: list(get("id").expect("mandatory"))
+            .into_iter()
+            .map(|id| match id {
+                Value::SeqId(id) => *id,
+                other => unreachable!("a Seq-id is read into the Seq-id model, not {other:?}"),
             })
+            .collect(),
+        descr: get("descr").map(|descr| {
+            list(descr)
+                .into_iter()
+                .map(|descriptor| match descriptor {
+                    Value::Choice(variant, title)
+                        if members(named::SEQDESC)[usize::from(variant)].name() == "title" =>
+                    {
+                        Seqdesc::Title(string(*title))
+                    }
+                    other => Seqdesc::Other(other),
+                })
+                .collect()
         }),
         inst: seq_inst(get("inst").expect("mandatory"))?,
-        annot: get("annot").map(|annot| list(annot, Value::clone)),
+        annot: get("annot").map(list),
     })
 }
 
-fn seq_inst(value: &Value) -> Result<SeqInst, String> {
+fn seq_inst(mut value: Value) -> Result<SeqInst, String> {
     const T: u16 = named::SEQ_INST;
-    let get = |name: &str| member(value, T, name);
+    let mut get = |name: &str| take(&mut value, T, name);
     let seq_data = match get("seq-data") {
         None => None,
         Some(data) => {
@@ -217,7 +244,7 @@ fn seq_inst(value: &Value) -> Result<SeqInst, String> {
                 "iupacaa" => SeqData::Iupacaa(string(value)),
                 "ncbieaa" => SeqData::Ncbieaa(string(value)),
                 "ncbistdaa" => SeqData::Ncbistdaa(match value {
-                    Value::Octets(codes) => codes.clone(),
+                    Value::Octets(codes) => codes,
                     other => unreachable!("NCBIstdaa is an OCTET STRING, not {other:?}"),
                 }),
                 other => {
@@ -232,40 +259,36 @@ fn seq_inst(value: &Value) -> Result<SeqInst, String> {
         repr: enumerated(get("repr").expect("mandatory"), T, "repr"),
         mol: enumerated(get("mol").expect("mandatory"), T, "mol"),
         length: get("length").map(|length| u32::try_from(int(length)).expect("a Uint4")),
-        fuzz: get("fuzz").cloned(),
+        fuzz: get("fuzz"),
         topology: get("topology").map(enum_number),
         strand: get("strand").map(enum_number),
         seq_data,
-        ext: get("ext").cloned(),
-        hist: get("hist").cloned(),
+        ext: get("ext"),
+        hist: get("hist"),
     })
 }
 
-fn intermediate_data(value: &Value) -> PssmIntermediateData {
+fn intermediate_data(mut value: Value) -> PssmIntermediateData {
     const T: u16 = named::PSSMINTERMEDIATEDATA;
-    let get = |name: &str| member(value, T, name);
-    let ints = |name: &str| get(name).map(|values| list(values, int4));
-    let reals = |name: &str| get(name).map(|values| list(values, real));
+    let mut get = |name: &str| take(&mut value, T, name);
     PssmIntermediateData {
-        res_freqs_per_pos: ints("resFreqsPerPos"),
-        weighted_res_freqs_per_pos: reals("weightedResFreqsPerPos"),
-        freq_ratios: reals("freqRatios").expect("mandatory"),
-        information_content: reals("informationContent"),
-        gapless_column_weights: reals("gaplessColumnWeights"),
-        sigma: reals("sigma"),
-        interval_sizes: ints("intervalSizes"),
-        num_matching_seqs: ints("numMatchingSeqs"),
-        num_indept_obsr: reals("numIndeptObsr"),
+        res_freqs_per_pos: get("resFreqsPerPos").map(int4s),
+        weighted_res_freqs_per_pos: get("weightedResFreqsPerPos").map(reals),
+        freq_ratios: get("freqRatios").map(reals).expect("mandatory"),
+        information_content: get("informationContent").map(reals),
+        gapless_column_weights: get("gaplessColumnWeights").map(reals),
+        sigma: get("sigma").map(reals),
+        interval_sizes: get("intervalSizes").map(int4s),
+        num_matching_seqs: get("numMatchingSeqs").map(int4s),
+        num_indept_obsr: get("numIndeptObsr").map(reals),
     }
 }
 
-fn final_data(value: &Value) -> PssmFinalData {
+fn final_data(mut value: Value) -> PssmFinalData {
     const T: u16 = named::PSSMFINALDATA;
-    let get = |name: &str| member(value, T, name);
+    let mut get = |name: &str| take(&mut value, T, name);
     PssmFinalData {
-        scores: get("scores")
-            .map(|scores| list(scores, int4))
-            .expect("mandatory"),
+        scores: get("scores").map(int4s).expect("mandatory"),
         lambda: get("lambda").map(real).expect("mandatory"),
         kappa: get("kappa").map(real).expect("mandatory"),
         h: get("h").map(real).expect("mandatory"),
@@ -277,23 +300,25 @@ fn final_data(value: &Value) -> PssmFinalData {
     }
 }
 
-fn params(value: &Value) -> PssmParameters {
+fn params(mut value: Value) -> PssmParameters {
     const T: u16 = named::PSSMPARAMETERS;
-    let get = |name: &str| member(value, T, name);
+    let mut get = |name: &str| take(&mut value, T, name);
     PssmParameters {
         pseudocount: get("pseudocount").map(int4),
-        rpsdbparams: get("rpsdbparams").map(|rps| {
+        rpsdbparams: get("rpsdbparams").map(|mut rps| {
             const R: u16 = named::FORMATRPSDBPARAMETERS;
             FormatRpsDbParameters {
-                matrix_name: member(rps, R, "matrixName").map(string).expect("mandatory"),
-                gap_open: member(rps, R, "gapOpen").map(int4),
-                gap_extend: member(rps, R, "gapExtend").map(int4),
+                matrix_name: take(&mut rps, R, "matrixName")
+                    .map(string)
+                    .expect("mandatory"),
+                gap_open: take(&mut rps, R, "gapOpen").map(int4),
+                gap_extend: take(&mut rps, R, "gapExtend").map(int4),
             }
         }),
-        constraints: get("constraints").cloned(),
+        constraints: get("constraints"),
         bit_score_thresh: get("bitScoreThresh").map(real),
         bit_score_reporting_thresh: get("bitScoreReportingThresh").map(real),
-        annotated_sites: get("annotatedSites").cloned(),
+        annotated_sites: get("annotatedSites"),
     }
 }
 

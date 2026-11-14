@@ -126,7 +126,7 @@ fn integers_follow_their_storage() {
         );
     }
     let gi = value(named::SEQ_ID, "Seq-id ::= gi 5000000000");
-    assert_eq!(gi, Value::SeqId(ParsedSeqId::Gi(5000000000)));
+    assert_eq!(gi, Value::SeqId(Box::new(ParsedSeqId::Gi(5000000000))));
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1697-1704 (quoted at `read::integer`):
@@ -138,7 +138,7 @@ fn an_int2_out_of_range_is_a_serial_exception() {
         value(named::SEQTABLE_MULTI_DATA, &table("32767, -32768")),
         Value::Choice(
             member_index(named::SEQTABLE_MULTI_DATA, "int2") as u16,
-            Box::new(Value::List(vec![Value::Int(32767), Value::Int(-32768)]))
+            Box::new(Value::Int4s(vec![32767, -32768]))
         )
     );
     serial(named::SEQTABLE_MULTI_DATA, &table("32768"));
@@ -586,7 +586,8 @@ fn a_seq_id_is_read_into_the_seq_id_model() {
         named::SEQ_ID,
         "Seq-id ::= pdb { mol \"1abc\", chain 32, rel std { year 2000 } }",
     );
-    let Value::SeqId(ParsedSeqId::Pdb(pdb)) = pdb else {
+    let Value::SeqId(pdb) = pdb else { panic!() };
+    let ParsedSeqId::Pdb(pdb) = *pdb else {
         panic!("{pdb:?}")
     };
     assert_eq!(pdb.chain, Some(32));
@@ -594,10 +595,15 @@ fn a_seq_id_is_read_into_the_seq_id_model() {
     let local = value(named::SEQ_ID, "Seq-id ::= local str \"Query_1\"");
     assert_eq!(
         local,
-        Value::SeqId(ParsedSeqId::Local(ObjectId::Str(b"Query_1".to_vec())))
+        Value::SeqId(Box::new(ParsedSeqId::Local(ObjectId::Str(
+            b"Query_1".to_vec()
+        ))))
     );
     let general = value(named::SEQ_ID, "Seq-id ::= general { db \"x\", tag id -3 }");
-    let Value::SeqId(ParsedSeqId::General(dbtag)) = general else {
+    let Value::SeqId(general) = general else {
+        panic!()
+    };
+    let ParsedSeqId::General(dbtag) = *general else {
         panic!()
     };
     assert_eq!(dbtag.tag, ObjectId::Id(-3));
@@ -647,4 +653,15 @@ fn dense_seg_reserve_above_max_size_is_a_length_error() {
         .0,
         Ok(Value::Sequence(_))
     ));
+}
+
+// A `Value` stays small: the PSSM's values are many (Seq-ids are boxed, INTEGER and REAL lists are
+// typed vectors).
+#[test]
+fn a_value_is_small() {
+    assert!(
+        std::mem::size_of::<Value>() <= 32,
+        "{}",
+        std::mem::size_of::<Value>()
+    );
 }

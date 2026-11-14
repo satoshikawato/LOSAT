@@ -252,13 +252,21 @@ pub enum Value {
     Sequence(Vec<(u16, Value)>),
     /// A CHOICE: the variant's position and value.
     Choice(u16, Box<Value>),
-    /// A SEQUENCE OF or SET OF, in the order read.
+    /// A SEQUENCE OF or SET OF, in the order read (of a type other than those below).
     List(Vec<Value>),
+    /// A SEQUENCE OF or SET OF INTEGER of Int2 or Int4 storage, kept as the numbers in NCBI's
+    /// storage (a PSSM's scores: `list<int>`).
+    Int4s(Vec<i32>),
+    /// A SEQUENCE OF or SET OF INTEGER of Uint4 or Int8 storage, kept as the numbers.
+    Ints(Vec<i64>),
+    /// A SEQUENCE OF or SET OF REAL, kept as the numbers (a PSSM's frequency ratios).
+    Reals(Vec<f64>),
     /// A delayed member: the text NCBI's reader keeps, from its first byte that is not white
     /// space to the end of the value (`StartDelayBuffer`, objistrasn.cpp:1648-1652).
     Delayed(Vec<u8>),
-    /// A Seq-id, in the Seq-id model that owns every Seq-id of LOSAT (`seqid::model`).
-    SeqId(crate::seqid::ParsedSeqId),
+    /// A Seq-id, in the Seq-id model that owns every Seq-id of LOSAT (`seqid::model`), boxed so
+    /// that a `Value` stays small (the model's largest alternatives are several strings).
+    SeqId(Box<crate::seqid::ParsedSeqId>),
 }
 
 impl Value {

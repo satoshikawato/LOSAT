@@ -72,6 +72,9 @@ enum PssmFileFormat {
     TextAsn,
     /// A format that the `switch` sends to "Unsupported format for PSSM".
     Unsupported,
+    /// `eBinaryASN` whose first byte is not a SEQUENCE tag: NCBI's binary reader stops at once
+    /// with a `CSerialException`, "Unrecognized format for PSSM" (`binary_not_ber`).
+    BinaryNotBer,
     /// Binary ASN.1 (`eBinaryASN`), XML (`eXml`) or a text that LOSAT does not classify as NCBI
     /// does: refused (binary and XML PSSMs are item PS9's).
     NotText,
@@ -129,6 +132,9 @@ fn guess_format(bytes: &[u8]) -> PssmFileFormat {
     if text_asn(buffer) {
         return PssmFileFormat::TextAsn;
     }
+    if binary_not_ber(buffer) {
+        return PssmFileFormat::BinaryNotBer;
+    }
     let printing = buffer
         .iter()
         .all(|&c| c.is_ascii_graphic() || matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'));
@@ -147,6 +153,76 @@ fn guess_format(bytes: &[u8]) -> PssmFileFormat {
     } else {
         PssmFileFormat::NotText
     }
+}
+
+/// A text that `TestFormatTextAsn` rejects only because the first field of its first line that
+/// is not blank or a comment starts with non-printing bytes before its letter (a UTF-8 byte order
+/// mark before `PssmWithParameters ::= {`): no test of NCBI's order between `eTextASN` and
+/// `eBinaryASN` takes it, nor one before (when no line starts with what their tests look for,
+/// none holds `#NEXUS`, and the lines do not all have the token count of the first), and
+/// `TestFormatBinaryAsn` does (a byte that is neither `isgraph` nor `isspace` and not `\1`). The
+/// binary reader then reads the first byte as the tag of the SEQUENCE `PssmWithParameters`
+/// (`0x30`): any other byte is a `CSerialException` (`fFormatError`), which the `switch`'s caller
+/// reports as "Unrecognized format for PSSM" (NCBI BLAST+ 2.17.0, line RG D3-1 review 1 `a04_bom`).
+///
+/// NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:46-87 (`sm_CheckOrder`: ... eFasta,
+/// eTextASN, eAlignment, eTaxplot, eTable, eBinaryASN, ...; `GuessFormat` takes the first that
+/// holds); the line tests that can hold for such a text: eVcf (a line starting
+/// `##fileformat=VCFv`, :2500), eWiggle (`variableStep`, `fixedStep`, `track`, :1862), eNewick and
+/// eAlignment (`#NEXUS`, :1062, :1317), eSnpMarkers (`rs<n>`, :1728), eBed and eTable (every line
+/// with the same token count, :1748, :1580); the others need a magic prefix, a first line of 8 or
+/// more tokens, a first token `ID`/`LOCUS`/`>`/digits, or ASCII text.
+/// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1029-1042 (`BeginClass`:
+/// `ExpectTag(classType->GetTagClass(), eConstructed, tag)`), :174-180 and :205-216
+/// (`UnexpectedTagClassByte`, `UnexpectedTagValue`: `ThrowError(fFormatError, ...)`).
+fn binary_not_ber(buffer: &[u8]) -> bool {
+    let non_printing = |c: u8| !c.is_ascii_graphic() && !crate::ncbi_str::is_space(c);
+    if buffer.first() == Some(&0x30) || !buffer.iter().any(|&c| non_printing(c) && c != 1) {
+        return false;
+    }
+    let lines: Vec<Vec<&[u8]>> = buffer
+        .split(|&c| c == b'\n' || c == b'\r')
+        .map(|line| {
+            line.split(|&c| c == b' ' || c == b'\t')
+                .filter(|field| !field.is_empty())
+                .collect()
+        })
+        .collect();
+    let Some(first) = lines
+        .iter()
+        .find(|fields| !fields.is_empty() && !fields[0].starts_with(b"--"))
+    else {
+        return false;
+    };
+    let name = first[0];
+    let letter = name.iter().position(|&c| !non_printing(c));
+    let named = matches!(letter, Some(at) if at > 0 && name[at].is_ascii_alphabetic());
+    if first.len() < 2 || first[1] != b"::=" || !named {
+        return false;
+    }
+    // The rest of `TestFormatTextAsn`: its 80 % of the buffer.
+    if !text_asn_counts(buffer) {
+        return false;
+    }
+    let raw_lines = buffer.split(|&c| c == b'\n' || c == b'\r');
+    let line_test = |line: &[u8]| {
+        const STARTS: [&[u8]; 4] = [
+            b"##fileformat=VCFv",
+            b"variableStep",
+            b"fixedStep",
+            b"track",
+        ];
+        STARTS.iter().any(|start| line.starts_with(start))
+            || (line.starts_with(b"rs") && line.get(2).is_some_and(u8::is_ascii_digit))
+            || line.windows(6).any(|window| window == b"#NEXUS")
+    };
+    if raw_lines.clone().any(line_test) {
+        return false;
+    }
+    let count = first.len();
+    lines
+        .iter()
+        .any(|fields| !fields.is_empty() && fields.len() != count)
 }
 
 /// `TestFormatTextAsn`: at least 80 % of the test buffer letters, digits, white space (C's
@@ -213,23 +289,7 @@ fn guess_format(bytes: &[u8]) -> PssmFileFormat {
 ///             }
 /// ```
 fn text_asn(buffer: &[u8]) -> bool {
-    if buffer.is_empty() || buffer[0] == b'>' {
-        return false;
-    }
-    let mut counted = 0usize;
-    for line in buffer.split(|&c| c == b'\n' || c == b'\r') {
-        if line.is_empty() {
-            continue;
-        }
-        counted += line
-            .iter()
-            .filter(|&&c| {
-                c.is_ascii_alphanumeric() || crate::ncbi_str::is_space(c) || c == b'{' || c == b'}'
-            })
-            .count()
-            + 1;
-    }
-    if (counted as f64) / (buffer.len() as f64) < 0.80 {
+    if buffer.is_empty() || buffer[0] == b'>' || !text_asn_counts(buffer) {
         return false;
     }
     for line in buffer.split(|&c| c == b'\n' || c == b'\r') {
@@ -243,6 +303,24 @@ fn text_asn(buffer: &[u8]) -> bool {
         return fields.len() >= 2 && fields[1] == b"::=" && fields[0][0].is_ascii_alphabetic();
     }
     false
+}
+
+/// The 80 % of `TestFormatTextAsn` (`text_asn`).
+fn text_asn_counts(buffer: &[u8]) -> bool {
+    let mut counted = 0usize;
+    for line in buffer.split(|&c| c == b'\n' || c == b'\r') {
+        if line.is_empty() {
+            continue;
+        }
+        counted += line
+            .iter()
+            .filter(|&&c| {
+                c.is_ascii_alphanumeric() || crate::ncbi_str::is_space(c) || c == b'{' || c == b'}'
+            })
+            .count()
+            + 1;
+    }
+    (counted as f64) / (buffer.len() as f64) >= 0.80
 }
 
 /// Who reads `-in_pssm`: the program that LOSAT's refusals name, the options' matrix, with
@@ -340,6 +418,12 @@ pub(crate) fn read_in_pssm(
                 "Unsupported format for PSSM",
             ))
         }
+        PssmFileFormat::BinaryNotBer => {
+            return Err(crate::blastinput::app::options_error(&format!(
+                "Unrecognized format for PSSM in {} (must be PssmWithParameters)",
+                path.display()
+            )))
+        }
         PssmFileFormat::NotText => {
             return Err(reader.refuse(format!(
                 "a PSSM file that is not ASN.1 text (binary ASN.1, XML or another format; {})",
@@ -396,7 +480,9 @@ pub(crate) fn read_in_pssm(
         }
         // The forms NCBI reads that LOSAT's PSSM search does not take (a query Seq-entry set,
         // Seq-data it does not type): LOSAT's refusal, after NCBI's reader read the file.
-        Err(PssmReadError::Refused(what)) => {
+        // (`read_pssm` hands the lexical reader's own limits over as refusals too.)
+        Err(PssmReadError::Refused(what))
+        | Err(PssmReadError::Ncbi(ReadError::Unsupported(what))) => {
             return Err(reader.refuse(format!(
                 "a PSSM that LOSAT's reader does not read ({}: {what})",
                 path.display()
@@ -1431,6 +1517,24 @@ mod tests {
         );
         assert_eq!(
             guess_format(b"\x0b\x0c <!DOCTYPE PssmWithParameters>\n"),
+            PssmFileFormat::NotText
+        );
+        // A UTF-8 byte order mark before the text: NCBI's binary reader, which stops at its
+        // first byte (NCBI 2.17.0, review 1 `a04_bom`: "Unrecognized format for PSSM", rc 1).
+        let text = b"PssmWithParameters ::= {\n  pssm {\n    isProtein TRUE\n  }\n}\n";
+        let bom = [&b"\xef\xbb\xbf"[..], text].concat();
+        assert_eq!(guess_format(text), PssmFileFormat::TextAsn);
+        assert_eq!(guess_format(&bom), PssmFileFormat::BinaryNotBer);
+        // Not when a test of NCBI's before the binary one may take it (a `#NEXUS` line), when
+        // the first byte is the SEQUENCE tag, or when a letter does not follow the bytes.
+        let nexus = [&bom[..], b"-- #NEXUS\n"].concat();
+        assert_eq!(guess_format(&nexus), PssmFileFormat::NotText);
+        assert_eq!(
+            guess_format(&[&b"0\xef"[..], &text[1..]].concat()),
+            PssmFileFormat::NotText
+        );
+        assert_eq!(
+            guess_format(&[&b"\xef\xbb\xbf1"[..], text].concat()),
             PssmFileFormat::NotText
         );
     }

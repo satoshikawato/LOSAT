@@ -28,8 +28,7 @@
 //! LOSAT's PSSM writer does not write yet, items F1b-2 and D3-1) check the refusal. A title or a
 //! name with a byte that NCBI's serial stream replaces is written as NCBI writes it (`#` in the
 //! file, `Bad char` on standard error; the `.title.` and `.order.` rows). blastp's query blocks and
-//! the `0` side of
-//! the default-on switches that the strategy's paths cross write the same files.
+//! the `0` side of the default-on switches that the strategy's paths cross write the same files.
 //!
 //! The cases are the rows of `tests/fixtures/strategy/cases.tsv` (its header says what the
 //! columns mean); the frozen bytes are `tests/fixtures/strategy/<name>.ss`, `.out` and `.err`,

@@ -46,9 +46,12 @@ use crate::seqid::model::{
 // NCBI reference (598d8ae6): c++/include/objects/seqalign/Dense_seg.hpp:181-182 (the hook is global:
 // `NCBISER_HAVE_GLOBAL_READ_MEMBER_HOOK(CDense_seg, "starts,lens,strands", ...)`)
 // `numseg` and `dim` are `int` (Dense_seg_.hpp:92-93), so a negative one is a huge `size_t`, and the
-// product wraps. `reserve` throws `std::length_error("vector::reserve")` above `max_size()`,
-// PTRDIFF_MAX / 4 = 2^61 - 1 for the 4-byte elements of the three vectors (NCBI 2.17.0 probes p5:
-// dim 2^30 x numseg 2^31-1 reads on, dim 2^30+1 stops), which no frame catches (they catch
+// product wraps. `reserve` throws `std::length_error("vector::reserve")` above `max_size()`:
+// PTRDIFF_MAX / 4 = 2^61 - 1 for the 4-byte elements of `starts` and `lens` (NCBI 2.17.0 probes
+// p5: dim 2^30 x numseg 2^31-1 reads on, dim 2^30+1 stops), PTRDIFF_MAX = 2^63 - 1 for the 1-byte
+// `ENa_strand`s of `strands` (Na_strand_.hpp:56, `NCBI_PACKED_ENUM_TYPE(unsigned char)`; the
+// mandatory `starts`, reserved first with the same product, stops a larger one before it), which
+// no frame catches (they catch
 // `CException`s): `CATCH_ALL`'s `std::exception` clause reports it, exit status 255. A smaller
 // request that cannot be allocated is a `bad_alloc`, which the hook ignores, as LOSAT does not
 // allocate. (`OBJECTS_DENSE_SEG_RESERVE` is NCBI's default, true: LOSAT reads no NCBI parameter.)
@@ -73,13 +76,16 @@ pub(super) fn pre_read_member(
     // `GetDim()`: the DEFAULT 2 when the member was not read.
     let dim = get("dim").unwrap_or(2) as i32 as i64 as u64;
     let numseg = get("numseg").unwrap_or(0) as i32 as i64 as u64;
-    const MAX_SIZE: u64 = (i64::MAX as u64) / 4;
-    let size = match super::members(ty)[member].name() {
-        "starts" | "strands" => dim.wrapping_mul(numseg),
-        "lens" => numseg,
+    // `max_size()` of a vector of 4-byte and of 1-byte elements.
+    const MAX_SIZE_4: u64 = (i64::MAX as u64) / 4;
+    const MAX_SIZE_1: u64 = i64::MAX as u64;
+    let (size, max_size) = match super::members(ty)[member].name() {
+        "starts" => (dim.wrapping_mul(numseg), MAX_SIZE_4),
+        "lens" => (numseg, MAX_SIZE_4),
+        "strands" => (dim.wrapping_mul(numseg), MAX_SIZE_1),
         _ => return Ok(()),
     };
-    if size > MAX_SIZE {
+    if size > max_size {
         return Err(ReadError::Std("vector::reserve"));
     }
     Ok(())
@@ -90,7 +96,7 @@ pub(super) fn post_read(ty: u16, value: Value, posts: &mut Vec<Post>) -> Result<
     match ty {
         named::SEQ_DESCR => seq_descr_post_read(value),
         named::VARIATION_REF => Ok(variation_ref_post_read(value, posts)),
-        named::SEQ_ID => Ok(Value::SeqId(seq_id_of(&value))),
+        named::SEQ_ID => Ok(Value::SeqId(Box::new(seq_id_of(&value)))),
         _ => Ok(value),
     }
 }

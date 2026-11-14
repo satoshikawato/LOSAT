@@ -28,7 +28,7 @@ use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::serial::asn_text_reader::{
     real_of_parts, AsnSource, AsnTextError, AsnTextErrorKind, MemberId, Reader, SliceSource,
 };
-use crate::report::serial::encoder::{ReplacedChar, StreamPosition};
+use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep, StreamPosition};
 
 /// A message that NCBI's reader posts while it reads, in the order posted.
 #[derive(Clone, Debug, PartialEq)]
@@ -67,6 +67,9 @@ pub(crate) enum ReadError {
     /// A `std::exception` that leaves the reader (its `what()`): `std::length_error` of a reserve
     /// hook (`hooks::pre_read_member`).
     Std(&'static str),
+    /// A form of the text that LOSAT's lexical reader does not take (`AsnTextErrorKind::Unsupported`,
+    /// LOSAT's own limit, not an NCBI error): the caller refuses the input with this text.
+    Unsupported(String),
 }
 
 /// What the reader read, and the messages it posted before it stopped or finished.
@@ -78,9 +81,8 @@ impl From<AsnTextError> for ReadError {
     fn from(error: AsnTextError) -> Self {
         match error.kind {
             AsnTextErrorKind::Eof => ReadError::Eof,
-            AsnTextErrorKind::Format | AsnTextErrorKind::Unsupported => {
-                ReadError::Serial(error.message)
-            }
+            AsnTextErrorKind::Format => ReadError::Serial(error.message),
+            AsnTextErrorKind::Unsupported => ReadError::Unsupported(error.message),
         }
     }
 }
@@ -312,55 +314,25 @@ impl TypedReader<'_> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:80-118
-    // ```c++
-    // string CObjectStack::GetStackTraceASN(void) const
-    // {
-    //     ...
-    //     string stack = FetchFrameFromBottom(0).HasTypeInfo() ?
-    //         FetchFrameFromBottom(0).m_TypeInfo->GetName() : "?";
-    //     for ( size_t i = 1; i < GetStackDepth(); ++i ) {
-    //         const TFrame& frame = FetchFrameFromBottom(i);
-    //         switch ( frame.m_FrameType ) {
-    //         case TFrame::eFrameClassMember:
-    //         case TFrame::eFrameChoiceVariant:
-    //             {
-    //                 if ( !frame.m_MemberId ) {
-    //                     _ASSERT(i == GetStackDepth() - 1);
-    //                 }
-    //                 else {
-    //                     const CMemberId& id = *frame.m_MemberId;
-    //                     stack += '.';
-    //                     if ( !id.GetName().empty() ) {
-    //                         stack += id.GetName();
-    //                     }
-    //                     ...
-    //         case TFrame::eFrameArrayElement:
-    //             stack += ".E";
-    //             break;
-    // ```
     /// `GetStackTrace()`: the path of the object being read (`PssmWithParameters.pssm.query.seq.
-    /// descr.E.comment`).
+    /// descr.E.comment`), by the one writer of NCBI's object stack path.
     fn stack_trace(&self) -> String {
-        let mut stack = self
-            .frames
-            .first()
-            .and_then(|frame| frame.type_name)
-            .unwrap_or("?")
-            .to_string();
-        for frame in self.frames.iter().skip(1) {
-            match frame.kind {
-                FrameKind::ClassMember | FrameKind::ChoiceVariant => {
-                    if let Some(member) = frame.member {
-                        stack.push('.');
-                        stack.push_str(member);
+        object_stack_trace(
+            self.frames
+                .first()
+                .and_then(|frame| frame.type_name)
+                .unwrap_or("?"),
+            self.frames
+                .iter()
+                .skip(1)
+                .filter_map(|frame| match frame.kind {
+                    FrameKind::ClassMember | FrameKind::ChoiceVariant => {
+                        frame.member.map(StackStep::Member)
                     }
-                }
-                FrameKind::ArrayElement => stack.push_str(".E"),
-                _ => {}
-            }
-        }
-        stack
+                    FrameKind::ArrayElement => Some(StackStep::Element),
+                    _ => None,
+                }),
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:883-900 and 959-969
@@ -701,10 +673,21 @@ impl TypedReader<'_> {
     fn list_in_frame(&mut self, element: u16, skip: bool) -> R<Value> {
         self.r.start_block()?;
         self.push(FrameKind::ArrayElement, None, skip);
-        let result = self.elements(element, skip);
-        let values = self.pop(result)?;
+        let result = match resolved(element).kind {
+            // The elements of an INTEGER or REAL list are read as the numbers themselves (no
+            // `Value` each: a PSSM holds thousands); they have no hook.
+            Kind::Integer(storage @ (Storage::Int2 | Storage::Int4)) => {
+                // `integer` checked the storage's range.
+                self.integers(storage, skip, |value| value as i32)
+                    .map(Value::Int4s)
+            }
+            Kind::Integer(storage) => self.integers(storage, skip, |value| value).map(Value::Ints),
+            Kind::Real => self.reals(skip).map(Value::Reals),
+            _ => self.elements(element, skip).map(Value::List),
+        };
+        let value = self.pop(result)?;
         self.r.end_block()?;
-        Ok(Value::List(values))
+        Ok(value)
     }
 
     fn elements(&mut self, element: u16, skip: bool) -> R<Vec<Value>> {
@@ -713,6 +696,30 @@ impl TypedReader<'_> {
         while self.r.next_element(&mut block_start)? {
             let value = self.value(element, skip)?;
             if !skip {
+                values.push(value);
+            }
+        }
+        Ok(values)
+    }
+
+    /// `elements` of an INTEGER list, each `store`d as the list keeps it.
+    fn integers<T>(&mut self, storage: Storage, skip: bool, store: impl Fn(i64) -> T) -> R<Vec<T>> {
+        let mut values = Vec::new();
+        let mut block_start = true;
+        while self.r.next_element(&mut block_start)? {
+            if let Value::Int(value) = self.integer(storage, skip)? {
+                values.push(store(value));
+            }
+        }
+        Ok(values)
+    }
+
+    /// `elements` of a REAL list.
+    fn reals(&mut self, skip: bool) -> R<Vec<f64>> {
+        let mut values = Vec::new();
+        let mut block_start = true;
+        while self.r.next_element(&mut block_start)? {
+            if let Value::Real(value) = self.real(skip)? {
                 values.push(value);
             }
         }

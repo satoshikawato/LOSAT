@@ -1493,7 +1493,7 @@ fn write_std_segs<E: Encoder>(
 ///     }
 /// ```
 /// (The subject's interval, :1363-1377, is the same with `subject_length`.)
-fn ungapped_interval(offset: i32, end: i32, frame: i8, length: i32) -> (i32, i32) {
+pub(crate) fn ungapped_interval(offset: i32, end: i32, frame: i8, length: i32) -> (i32, i32) {
     let frame = i32::from(frame);
     if frame == 0 {
         (offset, end - 1)
@@ -1578,6 +1578,7 @@ fn write_seq_align_diags<E: Encoder>(
     query: &QueryRecord<'_>,
     subject: &SubjectRecord<'_>,
     hsps: &[HspRecord<'_>],
+    remaps: bool,
     after_each: &mut impl FnMut(&mut E),
 ) {
     enc.element();
@@ -1598,22 +1599,33 @@ fn write_seq_align_diags<E: Encoder>(
             subject.searched_length,
         );
         begin_std_seg(enc, &query.id, &subject.id);
-        enc.element();
-        write_seq_interval(
-            enc,
-            &query.id,
-            q_from + query.offset,
-            q_to + query.offset,
-            Strand::of_frame(hsp.q_frame),
-        );
-        enc.element();
-        write_seq_interval(
-            enc,
-            &subject.id,
-            s_from + subject.offset,
-            s_to + subject.offset,
-            Strand::of_frame(hsp.s_frame),
-        );
+        if hsp.q_end == hsp.q_offset {
+            write_empty_rows(
+                enc,
+                query,
+                subject,
+                hsp,
+                remaps,
+                (q_from + query.offset, s_from + subject.offset),
+            );
+        } else {
+            enc.element();
+            write_seq_interval(
+                enc,
+                &query.id,
+                q_from + query.offset,
+                q_to + query.offset,
+                Strand::of_frame(hsp.q_frame),
+            );
+            enc.element();
+            write_seq_interval(
+                enc,
+                &subject.id,
+                s_from + subject.offset,
+                s_to + subject.offset,
+                Strand::of_frame(hsp.s_frame),
+            );
+        }
         end_std_seg_locs(enc);
         enc.member("scores", 3);
         enc.begin_list(true);
@@ -1629,6 +1641,148 @@ fn write_seq_align_diags<E: Encoder>(
     enc.end_member();
     write_use_this_seqid(enc, subject.use_this_seqid);
     enc.end_sequence();
+}
+
+/// The two Seq-intervals of the Std-seg of an ungapped HSP of length 0 (BLASTX's one-hit word
+/// finder with `-window_size 0`, `algorithm::blastx::empty_rows`), whose rows start at `from`
+/// (query, subject) and end one before (`to = from - 1`, in NCBI's unsigned `TSeqPos`: a row
+/// starting at 0 ends at 4294967295). With `-subject` (`remaps`) NCBI's Seq-loc mapper rewrites
+/// the query row to one nucleotide with a fuzz (`empty_rows::mapped_query_nucleotide`); the
+/// mapper's form of a subject row starting at 0 is refused before (`empty_rows`).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1535-1557
+/// ```c++
+///                         if ( start_frame ) {
+///                             if (start >= start_frame) {
+///                                 // Add 1 or 2 bases to match complete codon.
+///                                 loc->SetInt().SetFuzz_from().SetAlt().push_back(start);
+///                                 start -= start_frame;
+///                             }
+///                             else {
+///                                 // Skip the first incomplete codon.
+///                                 start += 3 - start_frame;
+///                             }
+///                         }
+///                         if ( stop_frame ) {
+///                             loc->SetInt().SetFuzz_to().SetAlt().push_back(stop - 1);
+///                             stop += stop_frame;
+///                         }
+///                     }
+///                 }
+///
+///                 loc->SetInt().SetFrom(start);
+///                 // len may be 0 after dividing by width, check it before
+///                 // decrementing stop.
+///                 loc->SetInt().SetTo(stop > start ? stop - 1 : stop);
+/// ```
+/// Probes (`X/SURVEY_X2g_formats.md` 1): a plus frame gives the query row `(Q, Q)` with
+/// `fuzz-to alt {Q-2}`, a minus frame `(Q-1, Q-1)` with `fuzz-from alt {Q}`; the subject row
+/// stays.
+#[cold]
+#[inline(never)]
+fn write_empty_rows<E: Encoder>(
+    enc: &mut E,
+    query: &QueryRecord<'_>,
+    subject: &SubjectRecord<'_>,
+    hsp: &HspRecord<'_>,
+    remaps: bool,
+    (q_from, s_from): (i32, i32),
+) {
+    let q_strand = Strand::of_frame(hsp.q_frame);
+    let q_from = q_from as u32;
+    enc.element();
+    if remaps && hsp.q_frame > 0 {
+        write_seq_interval_pos(
+            enc,
+            &query.id,
+            (q_from, q_from),
+            q_strand,
+            (None, Some(q_from.wrapping_sub(2))),
+        );
+    } else if remaps {
+        write_seq_interval_pos(
+            enc,
+            &query.id,
+            (q_from - 1, q_from - 1),
+            q_strand,
+            (Some(q_from), None),
+        );
+    } else {
+        write_seq_interval_pos(
+            enc,
+            &query.id,
+            (q_from, q_from.wrapping_sub(1)),
+            q_strand,
+            (None, None),
+        );
+    }
+    let s_from = s_from as u32;
+    enc.element();
+    write_seq_interval_pos(
+        enc,
+        &subject.id,
+        (s_from, s_from.wrapping_sub(1)),
+        Strand::of_frame(hsp.s_frame),
+        (None, None),
+    );
+}
+
+/// A Seq-interval whose `from` and `to` are NCBI's unsigned `TSeqPos`, with the `alt` fuzzes
+/// `fuzz` (`fuzz-from`, `fuzz-to`) of the Seq-loc mapper (`write_empty_rows`).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/general/general.asn:106-120
+/// ```text
+/// Int-fuzz ::= CHOICE {
+///     p-m INTEGER ,                    -- plus or minus fixed amount
+///     ...
+///     alt SET OF INTEGER }             -- set of alternatives for the integer
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:93-99
+/// ```text
+/// Seq-interval ::= SEQUENCE {
+///     from INTEGER ,
+///     to INTEGER ,
+///     strand Na-strand OPTIONAL ,
+///     id Seq-id ,    -- WARNING: this used to be optional
+///     fuzz-from Int-fuzz OPTIONAL ,
+///     fuzz-to Int-fuzz OPTIONAL }
+/// ```
+fn write_seq_interval_pos<E: Encoder>(
+    enc: &mut E,
+    id: &SeqId<'_>,
+    (from, to): (u32, u32),
+    strand: Strand,
+    fuzz: (Option<u32>, Option<u32>),
+) {
+    enc.variant("Seq-loc", "int", 3);
+    enc.begin_sequence("Seq-interval");
+    enc.member("from", 0);
+    enc.big_int(i64::from(from));
+    enc.end_member();
+    enc.member("to", 1);
+    enc.big_int(i64::from(to));
+    enc.end_member();
+    enc.member("strand", 2);
+    enc.begin_named("Na-strand");
+    enc.enumerated(strand.name(), strand.value());
+    enc.end_named();
+    enc.end_member();
+    enc.member("id", 3);
+    id.write(enc);
+    enc.end_member();
+    for (name, tag, alt) in [("fuzz-from", 4, fuzz.0), ("fuzz-to", 5, fuzz.1)] {
+        let Some(alt) = alt else { continue };
+        enc.member(name, tag);
+        enc.variant("Int-fuzz", "alt", 4);
+        enc.begin_list(true);
+        enc.element();
+        enc.big_int(i64::from(alt));
+        enc.end_list();
+        enc.end_variant();
+        enc.end_member();
+    }
+    enc.end_sequence();
+    enc.end_variant();
 }
 
 /// The `ext` of a Seq-align under a positive list (`seqids`, `SubjectRecord::use_this_seqid`):
@@ -1873,6 +2027,7 @@ pub(crate) fn write_seq_aligns<E: Encoder>(
                 query,
                 &subjects[list[0].subject as usize],
                 list,
+                run.remaps_subjects(),
                 &mut after_each,
             );
             after_each(enc);

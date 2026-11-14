@@ -457,6 +457,9 @@ mod archive;
 // The command line's hold and its streams, which the report streams of `cli::NcbiOstream` name.
 pub(crate) use archive::{ArchiveHold, HoldWriter};
 mod blast_xml;
+// The reports of the ungapped HSPs of length 0 that `-window_size 0` finds (NCBI's formatters'
+// exceptions, the Seq-loc mapper's rows of `-subject`).
+mod empty_rows;
 mod seqalign;
 // NCBI c++/src/objtools/align_format/tabular.cpp (CBlastTabularInfo): the tabular reports with a
 // field list or a delimiter, and outfmt 10 and 20, through the shared writer (`report::tabular`).

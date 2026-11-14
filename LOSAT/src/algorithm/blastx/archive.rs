@@ -839,6 +839,11 @@ pub(crate) fn write_blastx_archive(call: &ArchiveCall<'_>, writer: &mut dyn Writ
         },
         gapped: call.batch.options.gapped,
     };
+    // `-subject`'s Seq-loc mapper cuts an HSP of length 0 at its subject's first letter in two,
+    // which LOSAT does not write (`empty_rows::refuse_mapped_at_subject_start`).
+    if run.remaps_subjects() && !run.gapped {
+        super::empty_rows::refuse_mapped_at_subject_start(call.batch.batches, run.gapped)?;
+    }
     with_batch(&call.batch, |batch| {
         let mut aligns = BlastxAligns {
             run,

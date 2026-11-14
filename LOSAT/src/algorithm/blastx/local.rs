@@ -200,13 +200,8 @@ fn search_records(
     // The errors of a `-subject` search (`native::run_inner`).
     let search_error = |error: anyhow::Error| -> anyhow::Error {
         // LOSAT's refusal, not an error of NCBI's engine, and an error that has NCBI's report
-        // already (`native::database_search_error`).
-        if error.is::<super::parameters::SearchSpaceOverflow>()
-            || error.is::<super::split::QuerySplitRefusal>()
-            || error.is::<super::preliminary::OneHitWindowRefusal>()
-            || error.is::<super::results::ZeroLengthHspRefusal>()
-            || error.is::<crate::cli::NativeError>()
-        {
+        // already (`native::search_error_as_is`).
+        if super::native::search_error_as_is(&error) {
             error
         } else {
             engine(error)

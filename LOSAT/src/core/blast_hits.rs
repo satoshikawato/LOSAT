@@ -194,8 +194,9 @@ mod tests {
     #[test]
     fn hsp_test_deletes_a_negative_length_at_the_default_options() {
         // BLASTX's options: percent_identity 0 and min_hit_length 0. A negative length (an
-        // ungapped HSP whose end lies before its start) is deleted, a length of 0 is kept: the
-        // identity test is `0.0 < -0.0` there, false.
+        // ungapped HSP whose end lies before its start) is deleted by the length test (its
+        // identity test is `0.0 < -0.0`, false); a length of 0 is kept: both tests are false
+        // (`0.0 < 0.0`, `0 < 0`).
         for length in [-4, -1] {
             assert!(hsp_test(0, length, 0.0, 0));
         }

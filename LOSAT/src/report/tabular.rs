@@ -527,6 +527,82 @@ impl TabularSpec {
         fields.iter().any(|field| self.has(*field))
     }
 
+    /// Whether NCBI's formatter reads the query's Bioseq for a row, and with it the HSP's query
+    /// coverage (`x_SetQueryCovSeqalign`, which reads the Seq-align's query range where the
+    /// Seq-align has no `hsp_percent_coverage`): one of the query's id fields or `qcovhsp`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:778-800
+    /// ```c++
+    ///     if (x_IsFieldRequested(eQuerySeqId) || x_IsFieldRequested(eQueryGi) ||
+    ///         x_IsFieldRequested(eQueryAccession) ||
+    ///         x_IsFieldRequested(eQueryAccessionVersion) ||
+    ///         x_IsFieldRequested(eQueryCovSeqalign)) {
+    ///         try {
+    ///             ...
+    ///             x_SetQueryCovSeqalign(align, m_QueryLength);
+    ///         } catch (const CException&) {
+    ///             list<CRef<CSeq_id> > query_ids;
+    ///             CRef<CSeq_id> id(new CSeq_id());
+    ///             id->Assign(align.GetSeq_id(0));
+    ///             query_ids.push_back(id);
+    ///             SetQueryId(query_ids);
+    ///             bioseqs_found = false;
+    ///         }
+    ///     }
+    /// ```
+    pub fn reads_query(&self) -> bool {
+        self.has_any(&[
+            QuerySeqId,
+            QueryGi,
+            QueryAccession,
+            QueryAccessionVersion,
+            QueryCovHsp,
+        ])
+    }
+
+    /// Whether NCBI's formatter reads the subject's Bioseq for a row before its alignment block,
+    /// which sets the subject's length (`slen`) there: one of the subject's id, taxonomy, title or
+    /// strand fields. A row that leaves before the alignment block (`bioseqs_found` false) shows
+    /// an `slen` of 0 without one of them.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-842
+    /// ```c++
+    ///     if(setSubjectIds || setSubjectTaxInfo || setSubjectTaxInfoAll || setSubjectTitle ||
+    ///        x_IsFieldRequested(eSubjectStrand) || setSubjectId)
+    ///     {
+    ///         try {
+    ///        		const CBioseq_Handle& subject_bh =
+    ///                 scope.GetBioseqHandle(align.GetSeq_id(1));
+    ///             if(setSubjectId) {
+    ///             	SetSubjectId(subject_bh);
+    ///             }
+    ///             m_SubjectLength = subject_bh.GetBioseqLength();
+    /// ```
+    pub fn reads_subject_bioseq(&self) -> bool {
+        self.has_any(&[
+            SubjectAllSeqIds,
+            SubjectAllGis,
+            SubjectAllAccessions,
+            SubjectTaxId,
+            SubjectSciName,
+            SubjectCommonName,
+            SubjectBlastName,
+            SubjectSuperKingdom,
+            SubjectTaxIds,
+            SubjectSciNames,
+            SubjectCommonNames,
+            SubjectBlastNames,
+            SubjectSuperKingdoms,
+            SubjectTitle,
+            SubjectAllTitles,
+            SubjectStrand,
+            SubjectSeqId,
+            SubjectGi,
+            SubjectAccession,
+            SubjectAccessionVersion,
+        ])
+    }
+
     /// Whether NCBI's formatter opens its alignment block for a row whose Seq-align counts
     /// `num_ident` identities (the engine's count): one of its fields, or `nident` with
     /// identities. Only the block counts the identities on the aligned sequences and sets the

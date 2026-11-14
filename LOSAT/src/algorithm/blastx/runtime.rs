@@ -519,7 +519,6 @@ pub(crate) fn x_search_unit_in_pool<'a>(
         stream: None,
         chunk: None,
         output: Vec::new(),
-        zero_length_hsps: false,
     };
     search_core(records, subjects, options, &mut pipeline, pool, prep)?;
     Ok(pipeline.output)
@@ -570,7 +569,6 @@ pub(crate) fn search_internal_observed<'a>(
         stream: None,
         chunk: None,
         output: Vec::new(),
-        zero_length_hsps: false,
     };
     crate::utils::threading::with_search_pool(options.num_threads as usize, "BLASTX", |pool| {
         search_core(records, subjects, options, &mut pipeline, pool, None)
@@ -593,10 +591,6 @@ struct Runtime<'a> {
     stream: Option<HspStream>,
     chunk: Option<HspStream>,
     output: Vec<BatchResults>,
-    /// No NCBI counterpart: an ungapped HSP of length 0 has left the `-ungapped` subject stage of
-    /// the batch (`subject`), so the batch's end looks for one among the reported HSPs
-    /// (`results::refuse_reported_zero_length`).
-    zero_length_hsps: bool,
 }
 
 impl Runtime<'_> {
@@ -1134,7 +1128,7 @@ impl PreliminarySink for Runtime<'_> {
             //    Blast_HSPListAdjustOddBlastnScores(hsp_list, FALSE, sbp);
             //    return 0;
             // ```
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:774-788
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:776-790
             // ```c++
             //    if (!hsp->gap_info) {
             //       /* Ungapped case. Check that lengths are the same in query and subject,
@@ -1157,7 +1151,7 @@ impl PreliminarySink for Runtime<'_> {
             // ```c++
             //    *options = (BlastHitSavingOptions*) calloc(1, sizeof(BlastHitSavingOptions));
             // ```
-            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:72-73
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:74
             // ```c++
             //     arg.Reset(new CGenericSearchArgs( !kQueryIsProtein ));
             // ```
@@ -1326,13 +1320,7 @@ impl PreliminarySink for Runtime<'_> {
                     payload.evalue = h.evalue;
                     payload
                 })
-                .collect::<Vec<Hsp>>();
-            // No NCBI counterpart: marks the batch whose reports may show an HSP of length 0
-            // (kept by `Blast_HSPTest` above), which LOSAT refuses at the batch's end until it
-            // writes NCBI's reports of one (`results::refuse_reported_zero_length`).
-            if hsps.iter().any(|h| h.hsp.q_end == h.hsp.q_start) {
-                self.zero_length_hsps = true;
-            }
+                .collect();
             self.chunk
                 .as_mut()
                 .expect("chunk stream")
@@ -2566,11 +2554,6 @@ impl PreliminarySink for Runtime<'_> {
         }
         for (q, query) in queries.iter().enumerate() {
             self.observer.targets("OUT", q, &query.lists);
-        }
-        // No NCBI counterpart: the batch's lists are the hits that every report of the batch
-        // shows; LOSAT refuses an ungapped HSP of length 0 among them (marked by `subject`).
-        if std::mem::take(&mut self.zero_length_hsps) {
-            super::results::refuse_reported_zero_length(&queries, self.options)?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-101
         // ```c++

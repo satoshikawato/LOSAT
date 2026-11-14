@@ -176,18 +176,24 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     if error.is::<super::blast_xml::XmlRefusal>()
         || crate::report::pairwise::is_total_score_refusal(&error)
         || error.is::<crate::report::tax_report::TaxReportRefusal>()
+        || error.is::<super::empty_rows::EmptyRowsRefusal>()
     {
         // LOSAT's refusal of a title NCBI's XML cannot write, of a `-sorthits` table whose
         // last total NCBI pads without end (`TotalScoreRefusal`, an `io::Error` of the report's
-        // writes), or of an organism report (outfmt 18, made before its first byte): not an
-        // error of NCBI's engine or of its output stream.
+        // writes), of an organism report (outfmt 18, made before its first byte), or of a
+        // report of an ungapped HSP of length 0 in a form LOSAT does not write
+        // (`empty_rows::EmptyRowsRefusal`): not an error of NCBI's engine or of its output
+        // stream.
         error
     } else if error.downcast_ref::<NativeError>().is_some_and(|e| {
         (e.exit == 1 && e.message.starts_with("Command line argument error"))
             || (e.exit == 6 && e.message == "BLAST failed to write output\n")
+            || e.exit == 255
     }) {
-        // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1), or a
-        // write to one that fails (`framing::side_file_write_error`).
+        // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1), a
+        // write to one that fails (`framing::side_file_write_error`), or an exception of NCBI's
+        // formatters that ends the program through `CATCH_ALL` (`NativeError::exception`: the
+        // reports of an ungapped HSP of length 0, `empty_rows`).
         error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
@@ -1734,6 +1740,17 @@ pub(super) fn reported_batch(
     Ok(reported)
 }
 
+/// Whether an error of a search ends the run as it is: LOSAT's refusal, not an error of NCBI's
+/// engine, or an error that has NCBI's report already (the exception of a query split size that
+/// NCBI cannot convert, `split::split_sizes`). The one list of both callers
+/// (`database_search_error`, `local::search_records`).
+pub(super) fn search_error_as_is(error: &anyhow::Error) -> bool {
+    error.is::<super::parameters::SearchSpaceOverflow>()
+        || error.is::<super::split::QuerySplitRefusal>()
+        || error.is::<super::preliminary::OneHitWindowRefusal>()
+        || error.is::<NativeError>()
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:226-227
 // ```c++
 //             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
@@ -1759,14 +1776,7 @@ pub(super) fn database_search_error(
         }
         Err(error) => error,
     };
-    // LOSAT's refusal, not an error of NCBI's engine, and an error that has NCBI's report
-    // already (the exception of a query split size that NCBI cannot convert, `split::split_sizes`).
-    if error.is::<super::parameters::SearchSpaceOverflow>()
-        || error.is::<super::split::QuerySplitRefusal>()
-        || error.is::<super::preliminary::OneHitWindowRefusal>()
-        || error.is::<super::results::ZeroLengthHspRefusal>()
-        || error.is::<NativeError>()
-    {
+    if search_error_as_is(&error) {
         return error;
     }
     if error.is::<UnreadableSubjects>() {

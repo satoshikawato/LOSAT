@@ -40,12 +40,18 @@ use std::io::Write;
 use anyhow::Result;
 
 use super::args::ResolvedOptions;
+use super::empty_rows::{
+    mapped_query_nucleotide, row_is_empty, rows_empty, std_seg_lengths_not_accurate, AlignQueryIds,
+    SubjectLoc,
+};
 use super::input::FastaRecord;
 use super::report::{
     alignment, has_seqalign, local_id, query_endpoints, query_warning, subject_label,
     tabular_io_error, ShownSubjects, TabularFlushError,
 };
 use super::runtime::BatchResults;
+use crate::cli::NativeError;
+use crate::report::serial::seqalign::ungapped_interval;
 use crate::report::tabular::{
     coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, TabularField,
     TabularHsp, TabularKind, TabularQuery, TabularSpec, TabularSubject, TabularTaxonomy,
@@ -376,6 +382,7 @@ pub(super) fn write_blastx_tabular(
     // Which rows read their subject (`TabularSpec::subject_fetch`).
     let fetch = spec.subject_fetch(crate::blastinput::app::Program::Blastx);
     let no_taxonomy = TabularTaxonomy::default();
+    let loc = SubjectLoc::of(shown);
     let mut query_ranges: Vec<(u64, u64)> = Vec::new();
     let mut next_hsp = first_hsp;
     for batch in batches {
@@ -467,6 +474,31 @@ pub(super) fn write_blastx_tabular(
                 );
                 // Several volumes: the merged lists cut once per query (`ResolvedOptions::shown_lists`).
                 let listed = &lists[..lists.len().min(options.shown_lists())];
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:816-824
+                // ```c++
+                //             	unsigned int scores = CBlastFormatUtil::eNoQuerySubjCov;
+                //             	if(string::npos != m_CustomOutputFormatSpec.find("qcovs"))
+                //             		scores |= CBlastFormatUtil::eQueryCovPerSubj ;
+                //             	...
+                //             	if(scores != CBlastFormatUtil::eNoQuerySubjCov)
+                //             		CBlastFormatUtil::InsertSubjectScores (copy_aln_set, bhandle, m_QueryRange, (CBlastFormatUtil::ESubjectScores) scores);
+                // ```
+                // `qcovs` reads the query range of every HSP of the query before its first row
+                // (`GetMasterCoverage`, quoted below): with `-db` the empty query row of an HSP of
+                // length 0 throws there, after outfmt 7's lines (`empty_rows::row_is_empty`).
+                // `-subject`'s mapped query rows are not empty.
+                if needs.qcovs
+                    && loc == SubjectLoc::Whole
+                    && listed.iter().any(|list| {
+                        list.hsps
+                            .iter()
+                            .any(|hsp| has_seqalign(hsp, options.gapped) && rows_empty(&hsp.hsp))
+                    })
+                {
+                    writer.write_all(&buf)?;
+                    writer.flush()?;
+                    return Err(NativeError::exception(&row_is_empty()).into());
+                }
                 for list in listed {
                     let shown_hsps = || {
                         list.hsps
@@ -504,6 +536,21 @@ pub(super) fn write_blastx_tabular(
                         query_ranges.clear();
                         query_ranges.extend(shown_hsps().map(|hsp| {
                             let raw = &hsp.hsp;
+                            // The one nucleotide of `-subject`'s mapped empty row
+                            // (`empty_rows::mapped_query_nucleotide`); `-db` stopped above.
+                            if rows_empty(raw) {
+                                let at = mapped_query_nucleotide(
+                                    ungapped_interval(
+                                        raw.q_start,
+                                        raw.q_end,
+                                        raw.frame,
+                                        searched_length as i32,
+                                    )
+                                    .0,
+                                    raw.frame,
+                                ) as u64;
+                                return (at, at);
+                            }
                             let (start, end) =
                                 query_endpoints(searched_length, raw.frame, raw.q_start, raw.q_end);
                             (start.min(end) as u64 - 1, start.max(end) as u64 - 1)
@@ -560,37 +607,106 @@ pub(super) fn write_blastx_tabular(
                                 stderr.flush()?;
                             }
                         }
-                        let a = alignment(batch, hsp, subject, query, &code, options.scoring)?;
                         let raw = &hsp.hsp;
-                        // NCBI reads the alignment's rows when a field reads its counts
-                        // (`COUNTS_FIELDS`, or `nident` with the engine's identities above 0;
-                        // BLASTX fetches the sequences, so `nident`, `mismatch` and `pident`
-                        // count the rows' identities); otherwise `nident` is the engine's count.
-                        let rows = (counts_by_fields || hsp.identity > 0)
-                            .then_some((a.qseq.as_bytes(), a.sseq.as_bytes()));
-                        let row = TabularHsp {
-                            q_start: i64::from(a.qstart),
-                            q_end: i64::from(a.qend),
-                            s_start: i64::from(a.sstart),
-                            s_end: i64::from(a.send),
-                            evalue: hsp.evalue,
-                            bit_score: hsp.bit_score,
-                            score: raw.score,
-                            length: a.qseq.len(),
-                            gap_opens: a.gap_opens,
-                            gaps: a.gaps,
-                            num_ident: hsp.identity,
-                            q_frame: i32::from(a.frame),
-                            s_frame: 0,
-                            rows,
-                            qcovhsp: query_coverage_per_hsp(
-                                options.gapped,
-                                shown_count,
-                                raw.q_end - raw.q_start,
-                                (a.qstart - a.qend).abs() + 1,
-                                searched_length,
-                                query_length,
-                            ),
+                        // An HSP of length 0 (`empty_rows`): with `-subject` the alignment block
+                        // throws on the mapped Std-seg after the rows before it; with `-db` a
+                        // subject's only HSP is its Seq-align (`PrepareBlastUngappedSeqalign`
+                        // splits only Seq-aligns of several), which has no
+                        // `hsp_percent_coverage`, so that the query's fields read its empty query
+                        // row and the row leaves before its alignment block.
+                        let empty = rows_empty(raw);
+                        if empty && loc == SubjectLoc::Interval && spec.opens_counts(&hsp.identity)
+                        {
+                            writer.write_all(&buf)?;
+                            writer.flush()?;
+                            return Err(
+                                NativeError::exception(&std_seg_lengths_not_accurate()).into()
+                            );
+                        }
+                        let a;
+                        let catch_ids;
+                        let (row, row_query, row_subject) = if empty
+                            && loc == SubjectLoc::Whole
+                            && shown_count == 1
+                            && spec.reads_query()
+                        {
+                            // The row that leaves at the query's fields (`bioseqs_found` false):
+                            // the query id of the Seq-align, the scores, the subject's ids and
+                            // names, `qcovs`; the other fields keep `x_ResetFields`' values
+                            // (`qcovhsp` `N/A`, `slen` 0 without a subject field that reads its
+                            // Bioseq, `TabularSpec::reads_subject_bioseq`).
+                            let row = TabularHsp {
+                                q_start: 0,
+                                q_end: 0,
+                                s_start: 0,
+                                s_end: 0,
+                                evalue: hsp.evalue,
+                                bit_score: hsp.bit_score,
+                                score: raw.score,
+                                length: 0,
+                                gap_opens: 0,
+                                gaps: 0,
+                                num_ident: 0,
+                                q_frame: 0,
+                                s_frame: 0,
+                                rows: None,
+                                qcovhsp: -1,
+                            };
+                            catch_ids = AlignQueryIds::of(query);
+                            let catch_query = TabularQuery {
+                                id: &catch_ids.ids[0],
+                                accession: &catch_ids.ids[1],
+                                accession_version: &catch_ids.ids[2],
+                                gi: catch_ids.gi,
+                                length: query_length,
+                            };
+                            let catch_subject = TabularSubject {
+                                length: if spec.reads_subject_bioseq() {
+                                    values.length
+                                } else {
+                                    0
+                                },
+                                ..tabular_subject
+                            };
+                            (row, catch_query, catch_subject)
+                        } else {
+                            a = alignment(batch, hsp, subject, query, &code, options.scoring)?;
+                            // NCBI reads the alignment's rows when a field reads its counts
+                            // (`COUNTS_FIELDS`, or `nident` with the engine's identities above 0;
+                            // BLASTX fetches the sequences, so `nident`, `mismatch` and `pident`
+                            // count the rows' identities); otherwise `nident` is the engine's count.
+                            let rows = (counts_by_fields || hsp.identity > 0)
+                                .then_some((a.qseq.as_bytes(), a.sseq.as_bytes()));
+                            let row = TabularHsp {
+                                q_start: i64::from(a.qstart),
+                                q_end: i64::from(a.qend),
+                                s_start: i64::from(a.sstart),
+                                s_end: i64::from(a.send),
+                                evalue: hsp.evalue,
+                                bit_score: hsp.bit_score,
+                                score: raw.score,
+                                length: a.qseq.len(),
+                                gap_opens: a.gap_opens,
+                                gaps: a.gaps,
+                                num_ident: hsp.identity,
+                                q_frame: i32::from(a.frame),
+                                s_frame: 0,
+                                rows,
+                                qcovhsp: query_coverage_per_hsp(
+                                    options.gapped,
+                                    shown_count,
+                                    raw.q_end - raw.q_start,
+                                    // `-subject`'s mapped empty row has one nucleotide.
+                                    if empty {
+                                        1
+                                    } else {
+                                        (a.qstart - a.qend).abs() + 1
+                                    },
+                                    searched_length,
+                                    query_length,
+                                ),
+                            };
+                            (row, tabular_query, tabular_subject)
                         };
                         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1102-1108
                         // ```c++
@@ -609,13 +725,13 @@ pub(super) fn write_blastx_tabular(
                                 buf.clear();
                                 writer.flush()?;
                                 probe.begin(next_hsp);
-                                table.row(&mut buf, &tabular_query, &tabular_subject, &row);
+                                table.row(&mut buf, &row_query, &row_subject, &row);
                                 writer.write_all(&buf)?;
                                 buf.clear();
                                 writer.flush()?;
                                 probe.end(next_hsp);
                             }
-                            None => table.row(&mut buf, &tabular_query, &tabular_subject, &row),
+                            None => table.row(&mut buf, &row_query, &row_subject, &row),
                         }
                         next_hsp += 1;
                     }

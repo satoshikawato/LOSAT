@@ -33,6 +33,8 @@ use crate::{
 //     retval('U', 'C') = retval('C', 'C');
 //     retval('C', 'U') = retval('C', 'C');
 // ```
+use super::empty_rows::{rows_empty, AlignQueryIds, SubjectLoc};
+use crate::cli::NativeError;
 use crate::utils::matrix::protein_display_score;
 use anyhow::{ensure, Result};
 use std::{io::Write, path::Path};
@@ -74,6 +76,26 @@ pub(crate) struct DisplayAlignment {
 }
 
 impl DisplayAlignment {
+    /// The alignment of a tabular row that leaves before NCBI's alignment block (the empty rows of
+    /// an HSP of length 0, `empty_rows`): every count and coordinate at `x_ResetFields`' 0.
+    pub(crate) fn empty() -> Self {
+        DisplayAlignment {
+            qseq: String::new(),
+            sseq: String::new(),
+            masked_qseq: String::new(),
+            identity: 0,
+            positive: 0,
+            gaps: 0,
+            gap_opens: 0,
+            qstart: 0,
+            qend: 0,
+            sstart: 0,
+            send: 0,
+            frame: 0,
+            subject_stored_gaps: Vec::new(),
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:476-480
     // ```c++
     // inline void CBlastTabularInfo::x_PrintMismatches(void)
@@ -594,7 +616,11 @@ pub(crate) fn alignment(
     // frame's context on the row (the TBLASTX display, `tblastx::report::shown_query_masks`).
     // `Map` moves each mask into the record, cut at the interval's end, and drops one that
     // covers the whole interval; here the masks stay in the searched letters' coordinates.
-    let shown_masks: &[(i32, i32)] = if frame == raw.frame {
+    // An ungapped HSP of length 0 (`-window_size 0`, `Blast_HSPTest` keeps it) has no letters to
+    // lower: its rows are empty (`query_columns` too), whatever masks its ends touch.
+    let shown_masks: &[(i32, i32)] = if query_columns.is_empty() {
+        &[]
+    } else if frame == raw.frame {
         &context.dna_masks
     } else {
         batch
@@ -1250,6 +1276,9 @@ pub(super) fn render_queries_with(
         Some(local) => (local.probe, local.first_hsp, local.hits),
         None => (None, 0, None),
     };
+    if !options.gapped && options.outfmt != 18 && SubjectLoc::of(shown) == SubjectLoc::Interval {
+        super::empty_rows::refuse_mapped_at_subject_start(batches, options.gapped)?;
+    }
     if options.outfmt == 0 {
         return write_pairwise(
             writer, stderr, options, queries, subjects, shown, batches, made_hits, probe, first_hsp,
@@ -1511,6 +1540,51 @@ pub(super) fn render_queries_with(
                             read = true;
                             reads.subject_read(0, list.oid as u32, &mut *writer, &mut *stderr)?;
                         }
+                        // An HSP of length 0 (`empty_rows`), as in the tabular reports with a field
+                        // list (`tabular::write_blastx_tabular`): with `-subject` the alignment
+                        // block of the default fields throws on the mapped Std-seg, after the rows
+                        // before it; with `-db` a subject's only HSP leaves at the query's id
+                        // (`AlignQueryIds`), the alignment's fields at 0.
+                        if rows_empty(&hsp.hsp) {
+                            if SubjectLoc::of(shown) == SubjectLoc::Interval {
+                                writer.flush()?;
+                                return Err(NativeError::exception(
+                                    &super::empty_rows::std_seg_lengths_not_accurate(),
+                                )
+                                .into());
+                            }
+                            if list
+                                .hsps
+                                .iter()
+                                .filter(|h| has_seqalign(h, options.gapped))
+                                .count()
+                                == 1
+                            {
+                                let ids = AlignQueryIds::of(query);
+                                let a = DisplayAlignment::empty();
+                                let values: Vec<_> = options
+                                    .fields
+                                    .iter()
+                                    .map(|f| match f.as_str() {
+                                        "qaccver" => {
+                                            String::from_utf8_lossy(&ids.ids[2]).into_owned()
+                                        }
+                                        _ => field_value(f, query, &shown_subject, hsp, &a),
+                                    })
+                                    .collect();
+                                if let Some(probe) = probe.as_deref_mut() {
+                                    writer.flush()?;
+                                    probe.begin(next_hsp);
+                                }
+                                writeln!(writer, "{}", values.join("	"))?;
+                                if let Some(probe) = probe.as_deref_mut() {
+                                    writer.flush()?;
+                                    probe.end(next_hsp);
+                                }
+                                next_hsp += 1;
+                                continue;
+                            }
+                        }
                         let a = alignment(batch, hsp, subject, query, &code, options.scoring)?;
                         let values: Vec<_> = options
                             .fields
@@ -1724,8 +1798,29 @@ fn write_pairwise(
         records_parsed,
         probe,
         first_hsp,
-    )?;
+    )
+    .map_err(empty_rows_stop)?;
     Ok(())
+}
+
+/// The error of outfmt 0's writer: its stop at an HSP of length 0 (`EmptyRowsStop`) is NCBI's
+/// exception, `Row is empty` where the description table reads the HSP (after the query's
+/// `Length=`), `CreateDensegFromStdseg` where `-subject`'s alignment section reaches it (the Seq-loc
+/// mapper's rows); a write error stays.
+fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
+    use crate::report::pairwise::EmptyRowsStop;
+    match error
+        .get_ref()
+        .and_then(|e| e.downcast_ref::<EmptyRowsStop>())
+    {
+        Some(EmptyRowsStop::Descriptions) => {
+            NativeError::exception(&super::empty_rows::row_is_empty()).into()
+        }
+        Some(EmptyRowsStop::Alignments) => {
+            NativeError::exception(&super::empty_rows::std_seg_lengths_not_accurate()).into()
+        }
+        None => error.into(),
+    }
 }
 
 /// The hits of the HSPs that the reports of `batches` show (`has_seqalign`), in the order of the
@@ -2039,12 +2134,12 @@ pub(crate) fn write_epilog(
         //     if (m_FormatType == CFormattingArgs::eXml) {
         //         m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl;
         // ```
-        super::blast_xml::write_xml_epilog(writer, queries, None)?;
+        super::blast_xml::write_xml_epilog(writer, diagnostics, queries, None)?;
     } else if xml2.is_some() {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2219 and
         // :2419-2423, :2440-2445: the report a `-subject` run holds back, then the end of the
         // document.
-        super::blast_xml::write_xml_epilog(writer, queries, xml2)?;
+        super::blast_xml::write_xml_epilog(writer, diagnostics, queries, xml2)?;
     } else if options.outfmt == 7 {
         // The warning of the epilog's formatter, for a field list that shows a plural name of
         // the taxonomy database without `taxdb.bti` (`tabular::write_epilog_warning`).

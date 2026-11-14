@@ -28,8 +28,10 @@ use std::io::{self, Write};
 ///     }
 /// ```
 pub struct QueryWarnings<'a> {
-    /// The warnings to write before the report of each query, by query index.
-    before: Before<'a>,
+    /// The posts to write before the report of each query, by query index (`of_posts`).
+    before: &'a [Posts],
+    /// The BLAST archive's handle, which saves each whole post as one message (`Posts::write`).
+    archive: Option<&'a ArchiveHandle>,
     /// Standard error (the CLI) or the caller's diagnostics.
     pub sink: &'a mut (dyn Write + Send),
     /// The texts of the subjects that the reports read one by one (`with_subject_reads`), and
@@ -391,28 +393,7 @@ impl Drop for QueryWarnings<'_> {
     }
 }
 
-/// What `QueryWarnings` writes before the report of each query, by query index.
-enum Before<'a> {
-    /// Lines that are each a warning (`Posts::of_lines`): what the programs other than BLASTN
-    /// post there.
-    Lines(&'a [Vec<u8>]),
-    /// The posts of each query, written with the BLAST archive's handle (`Posts::write`).
-    Posts {
-        posts: &'a [Posts],
-        archive: Option<&'a ArchiveHandle>,
-    },
-}
-
 impl<'a> QueryWarnings<'a> {
-    /// The warnings `before` (lines, each a warning) of each query, written to `sink`.
-    pub fn new(before: &'a [Vec<u8>], sink: &'a mut (dyn Write + Send)) -> Self {
-        Self {
-            before: Before::Lines(before),
-            sink,
-            reads: None,
-        }
-    }
-
     /// These warnings with the texts of the subjects that the reports read one by one
     /// (`SubjectReads`), which the report's writer places where it reads each subject
     /// (`subject_read`). A text that the writer does not place is written after the query's
@@ -459,10 +440,8 @@ impl<'a> QueryWarnings<'a> {
         sink: &'a mut (dyn Write + Send),
     ) -> Self {
         Self {
-            before: Before::Posts {
-                posts: before,
-                archive,
-            },
+            before,
+            archive,
             sink,
             reads: None,
         }
@@ -493,25 +472,63 @@ impl<'a> QueryWarnings<'a> {
         if let Some(cursor) = self.reads.as_mut() {
             cursor.before_query(index, report, &mut *self.sink)?;
         }
-        match &self.before {
-            Before::Lines(before) => match before.get(index) {
-                Some(warnings) if !warnings.is_empty() => {
-                    report.flush()?;
-                    self.sink.write_all(warnings)?;
-                    self.sink.flush()
-                }
-                _ => Ok(()),
-            },
-            Before::Posts { posts, archive } => match posts.get(index) {
-                Some(posts) if !posts.is_empty() => {
-                    report.flush()?;
-                    posts.write(&mut *self.sink, *archive)?;
-                    self.sink.flush()
-                }
-                _ => Ok(()),
-            },
+        match self.before.get(index) {
+            Some(posts) if !posts.is_empty() => {
+                report.flush()?;
+                posts.write(&mut *self.sink, self.archive)?;
+                self.sink.flush()
+            }
+            _ => Ok(()),
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-262
+// ```c++
+//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+//
+//             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
+// ```
+/// The posts written before each query's report (`QueryWarnings::of_posts`) from the lines of
+/// each query (`lines`, each line a warning) and NCBI's posts of the bytes replaced in the search
+/// strategy requests of the batches (`requests`: each with the batch's first query, numbered as
+/// `lines`, in order; `StrategyExport::take_posts`). NCBI posts them when it writes the request,
+/// after it read the batch and before the batch's search: in the batch's first query, after the
+/// reader's messages of the batch (the first `reader(query)` bytes of its lines) and before the
+/// rest (the messages of the batch's prefetch, the query's own warnings).
+pub fn query_posts(
+    lines: Vec<Vec<u8>>,
+    requests: Vec<(usize, Posts)>,
+    reader: impl Fn(usize) -> usize,
+) -> Vec<Posts> {
+    let mut requests = requests.into_iter().peekable();
+    let mut posts: Vec<Posts> = lines
+        .into_iter()
+        .enumerate()
+        .map(|(query, mut lines)| {
+            let Some((_, request)) = requests.next_if(|&(first, _)| first <= query) else {
+                return Posts::of_lines(lines);
+            };
+            let rest = lines.split_off(reader(query).min(lines.len()));
+            let mut posts = Posts::of_lines(lines);
+            posts.append(&request);
+            while let Some((_, request)) = requests.next_if(|&(first, _)| first <= query) {
+                posts.append(&request);
+            }
+            posts.lines(&rest);
+            posts
+        })
+        .collect();
+    // A request whose batch starts after the last query's lines (none is made) keeps its posts
+    // after them.
+    for (_, request) in requests {
+        match posts.last_mut() {
+            Some(last) => last.append(&request),
+            None => posts.push(request),
+        }
+    }
+    posts
 }
 
 /// The warning for a query whose ungapped Karlin-Altschul parameters cannot be computed.
@@ -963,10 +980,13 @@ mod tests {
             vec![(3, b"D\n".to_vec())],
             vec![(4, b"E\n".to_vec())],
         ];
-        let before = vec![b"W0\n".to_vec(), b"W1\n".to_vec(), b"W2\n".to_vec()];
+        let before: Vec<Posts> = [b"W0\n", b"W1\n", b"W2\n"]
+            .map(|lines| Posts::of_lines(lines.to_vec()))
+            .into();
         let log = Log::default();
         let (mut report, mut sink) = (log.clone(), log.clone());
-        let mut warnings = QueryWarnings::new(&before, &mut sink).with_subject_reads(&reads);
+        let mut warnings =
+            QueryWarnings::of_posts(&before, None, &mut sink).with_subject_reads(&reads);
         assert!(warnings.reads_with_texts(0) && !warnings.reads_with_texts(3));
         warnings.before_query(0, &mut report).unwrap();
         // A subject without a text writes nothing; a read writes the texts up to its own.
@@ -1012,7 +1032,7 @@ mod tests {
         let reads: Vec<QueryReads> = vec![vec![(5, b"A\n".to_vec())]];
         let log = Log::default();
         let (mut report, mut sink) = (log.clone(), log.clone());
-        let mut warnings = QueryWarnings::new(&[], &mut sink).with_subject_reads(&reads);
+        let mut warnings = QueryWarnings::of_posts(&[], None, &mut sink).with_subject_reads(&reads);
         let mut posts = HitPosts::new(warnings.reads_with_texts(0));
         posts.hit(0, 5, |texts| texts.write_all(b"P5\n")).unwrap();
         posts.hit(4, 6, |texts| texts.write_all(b"P6\n")).unwrap();
@@ -1026,11 +1046,53 @@ mod tests {
         assert_eq!(alone, b"<H5><H6>");
     }
 
+    /// NCBI's posts of the bytes replaced in a batch's search strategy request follow the reader's
+    /// messages of the batch in its first query and come before the rest of its lines (NCBI
+    /// 2.17.0, probe RG K/k4b/probe2 `blastp_b3_f6`: the O warning of query 3 after the posts of
+    /// its batch); a batch without posts keeps its lines, and the posts are whole posts.
+    #[test]
+    fn request_posts_follow_the_reader_messages_of_their_batch() {
+        use crate::report::diag_log::ERROR;
+        let lines = vec![
+            b"R0\nW0\n".to_vec(),
+            b"W1\n".to_vec(),
+            b"R2\nT2\nW2\n".to_vec(),
+        ];
+        let post = |text: &[u8]| {
+            let mut posts = Posts::new();
+            posts.post(ERROR, text);
+            posts
+        };
+        let reader = [3, 0, 3];
+        let posts = query_posts(
+            lines,
+            vec![(0, post(b"P0\n")), (2, post(b"P2a\n")), (2, post(b"P2b\n"))],
+            |query| reader[query],
+        );
+        let texts: Vec<Vec<u8>> = posts.iter().map(Posts::text).collect();
+        assert_eq!(
+            texts,
+            [
+                b"R0\nP0\nW0\n".to_vec(),
+                b"W1\n".to_vec(),
+                b"R2\nP2a\nP2b\nT2\nW2\n".to_vec()
+            ]
+        );
+        let mut whole = Posts::of_lines(b"R2\n".to_vec());
+        whole.append(&post(b"P2a\n"));
+        whole.append(&post(b"P2b\n"));
+        whole.lines(b"T2\nW2\n");
+        assert_eq!(posts[2], whole);
+        // A request after the last query's lines keeps its posts after them.
+        let posts = query_posts(vec![b"W0\n".to_vec()], vec![(1, post(b"P1\n"))], |_| 0);
+        assert_eq!(posts[0].text(), b"W0\nP1\n");
+    }
+
     #[test]
     fn a_query_without_texts_reads_nothing() {
         let reads: Vec<QueryReads> = vec![Vec::new(), Vec::new()];
         let mut sink = Vec::new();
-        let warnings = QueryWarnings::new(&[], &mut sink).with_subject_reads(&reads);
+        let warnings = QueryWarnings::of_posts(&[], None, &mut sink).with_subject_reads(&reads);
         assert!(!warnings.reads_with_texts(0));
         assert!(ReadCursor::new(&reads).is_none());
     }

@@ -1,0 +1,3 @@
+Warning: [rpstblastn] Examining 5 or more matches is recommended
+Warning: [rpstblastn] Query_5 w3n nrun: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+Warning: [rpstblastn] Query_27 w24n nrun: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 

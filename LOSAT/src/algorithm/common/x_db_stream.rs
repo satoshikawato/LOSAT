@@ -239,28 +239,28 @@ impl<'a> XDbStream<'a> {
         self.checked.first as usize
     }
 
-    /// The number of bases of sequence `oid`, read where the search reads the sequence: a short
+    /// The number of bases of sequence `ordinal`, read where the search reads the sequence: a short
     /// one's from its block, which this thread keeps for the `with_block` that follows; a long
     /// one's (a block of its own) from the index and its last byte (`read_length`), without its
     /// sequence. A read that fails is an `XReadError` with the error of the sequence's read
     /// (`with_block`, `read`). Only the length is read of the block: no ambiguity data.
-    pub(crate) fn length(&self, oid: usize) -> Result<usize> {
-        self.with_grid_block(oid, |held| match held {
-            None => self.read_length(oid),
+    pub(crate) fn length(&self, ordinal: usize) -> Result<usize> {
+        self.with_grid_block(ordinal, |held| match held {
+            None => self.read_length(ordinal),
             Some((block, i)) => block
                 .nucleotide_len(i)
                 .map_err(|error| XReadError(shared::search_read_error(error, self.program)).into()),
         })
     }
 
-    /// The number of bases of sequence `oid` read from the index and the last byte of its 2-bit
+    /// The number of bases of sequence `ordinal` read from the index and the last byte of its 2-bit
     /// data (`common::database::x_nucleotide_length`, NCBI's `GetSeqLength`), without a block or
     /// the sequence: the length of the sequence's store, for the reports that read no letters.
     /// A read that fails is an `XReadError`.
-    pub(crate) fn read_length(&self, oid: usize) -> Result<usize> {
-        let ordinal = u32::try_from(oid).expect("a database ordinal id fits Uint4");
+    pub(crate) fn read_length(&self, ordinal: usize) -> Result<usize> {
         #[cfg(test)]
-        self.x_failed(oid..oid + 1)?;
+        self.x_failed(ordinal..ordinal + 1)?;
+        let ordinal = u32::try_from(ordinal).expect("a database ordinal id fits Uint4");
         shared::x_nucleotide_length(self.db, ordinal, self.program)
             .map_err(|error| XReadError(error).into())
     }
@@ -318,24 +318,24 @@ impl<'a> XDbStream<'a> {
         cut
     }
 
-    /// Sequence `oid`, packed as the copy of the database packed it, with one read (`XReadError` if it fails).
-    pub(crate) fn read(&self, oid: usize) -> Result<PackedNucleotide> {
-        let ordinal = u32::try_from(oid).expect("a database ordinal id fits Uint4");
+    /// Sequence `ordinal`, packed as the copy of the database packed it, with one read (`XReadError` if it fails).
+    pub(crate) fn read(&self, ordinal: usize) -> Result<PackedNucleotide> {
         #[cfg(test)]
-        self.x_failed(oid..oid + 1)?;
+        self.x_failed(ordinal..ordinal + 1)?;
+        let ordinal = u32::try_from(ordinal).expect("a database ordinal id fits Uint4");
         shared::x_read_nucleotide_store(self.db, ordinal, self.program, self.mapped)
             .map_err(|error| XReadError(error).into())
     }
 
-    /// Sequence `oid` (`read`), shared with whatever holds it already: a stage or a query batch
+    /// Sequence `ordinal` (`read`), shared with whatever holds it already: a stage or a query batch
     /// that runs at the same time reads it once, and a thread that asks for it while another
     /// reads it waits for that read (the threads of a stage that first align the same subject at
     /// once made one copy each). It is read again once nothing holds it.
-    pub(crate) fn read_shared(&self, oid: usize) -> Result<Arc<PackedNucleotide>> {
-        self.stores.read_once(oid, || self.read(oid))
+    pub(crate) fn read_shared(&self, ordinal: usize) -> Result<Arc<PackedNucleotide>> {
+        self.stores.read_once(ordinal, || self.read(ordinal))
     }
 
-    /// `make` of sequence `oid` (`XSequence`), from the bytes of its block (`x_block_grid`), with
+    /// `make` of sequence `ordinal` (`XSequence`), from the bytes of its block (`x_block_grid`), with
     /// the errors of its store but without the store. The thread keeps the last block it used; a
     /// block that another thread holds or reads is shared (`XSharedReads::read_once`). A block of
     /// one sequence (a long one) is read alone and shared (`read_shared`). The thread's block is
@@ -344,13 +344,13 @@ impl<'a> XDbStream<'a> {
     /// (`x_plan_chunk`) lets its block go with the chunk.
     pub(crate) fn with_block<R>(
         &self,
-        oid: usize,
+        ordinal: usize,
         make: impl FnOnce(XSequence<'_>) -> Result<R>,
     ) -> Result<R> {
-        self.with_grid_block(oid, |held| match held {
-            None => make(XSequence::Store(&self.read_shared(oid)?)),
+        self.with_grid_block(ordinal, |held| match held {
+            None => make(XSequence::Store(&self.read_shared(ordinal)?)),
             Some((block, i)) => {
-                let (length, runs) = self.parts_in(block, i, oid)?;
+                let (length, runs) = self.parts_in(block, i, ordinal)?;
                 make(XSequence::Block {
                     block,
                     i,
@@ -361,15 +361,15 @@ impl<'a> XDbStream<'a> {
         })
     }
 
-    /// `f(None)` when sequence `oid` is a block of its own (a long one), else `f` of its block
+    /// `f(None)` when sequence `ordinal` is a block of its own (a long one), else `f` of its block
     /// and its place in the block, with the block kept by this thread as `with_block` keeps it:
     /// out of the thread's cell while `f` runs, and back in it after.
     fn with_grid_block<R>(
         &self,
-        oid: usize,
+        ordinal: usize,
         f: impl FnOnce(Option<(&Arc<SequenceBlock>, usize)>) -> Result<R>,
     ) -> Result<R> {
-        let ordinal = u32::try_from(oid).expect("a database ordinal id fits Uint4");
+        let ordinal = u32::try_from(ordinal).expect("a database ordinal id fits Uint4");
         let mut kept = X_PLAN_BLOCK.with(std::cell::Cell::take);
         let holds = |kept: &Option<XPlanBlock>| {
             kept.as_ref().is_some_and(|kept| {
@@ -413,23 +413,26 @@ impl<'a> XDbStream<'a> {
         self
     }
 
-    /// The stream whose reads of the sequences `oids` fail (a block's read when it holds one of
+    /// The stream whose reads of the sequences `ordinals` fail (a block's read when it holds one of
     /// them) with NCBI's read error, or with LOSAT's refusal: a read that fails after the check,
     /// which the files of a test cannot give (the check keeps their handles and lengths).
     #[cfg(test)]
-    pub(crate) fn x_failing(mut self, oids: &[usize], refusal: bool) -> Self {
-        self.x_failing = (oids.to_vec(), refusal);
+    pub(crate) fn x_failing(mut self, ordinals: &[usize], refusal: bool) -> Self {
+        self.x_failing = (ordinals.to_vec(), refusal);
         self
     }
 
-    /// The error of a read of the sequences `oids` that `x_failing` names one of.
+    /// The error of a read of the sequences `ordinals` that `x_failing` names one of.
     #[cfg(test)]
-    fn x_failed(&self, oids: std::ops::Range<usize>) -> Result<()> {
+    fn x_failed(&self, ordinals: std::ops::Range<usize>) -> Result<()> {
         let (failing, refusal) = &self.x_failing;
-        let error = match failing.iter().find(|oid| oids.contains(oid)) {
+        let error = match failing.iter().find(|ordinal| ordinals.contains(ordinal)) {
             None => return Ok(()),
-            Some(oid) if *refusal => shared::refusal(
-                &format!("the read of database sequence {oid} failed"),
+            Some(&ordinal) if *refusal => shared::refusal(
+                &format!(
+                    "the read of database sequence {} failed",
+                    self.db.oid(ordinal as u32)
+                ),
                 self.program,
             ),
             Some(_) => shared::PreliminaryReadError("Database memory map file error").into(),
@@ -452,15 +455,15 @@ impl<'a> XDbStream<'a> {
             .map_err(|error| XReadError(shared::search_read_error(error, self.program)).into())
     }
 
-    /// The length and the ambiguity runs of sequence `oid`, sequence `i` of `block`, with the
+    /// The length and the ambiguity runs of sequence `ordinal`, sequence `i` of `block`, with the
     /// errors of its store (`XReadError`).
     pub(crate) fn parts_in(
         &self,
         block: &SequenceBlock,
         i: usize,
-        oid: usize,
+        ordinal: usize,
     ) -> Result<(usize, Vec<AmbiguityRun>)> {
-        shared::x_nucleotide_parts_in(block, i, oid as u32, self.program)
+        shared::x_nucleotide_parts_in(block, i, || self.db.oid(ordinal as u32), self.program)
             .map_err(|error| XReadError(error).into())
     }
 }

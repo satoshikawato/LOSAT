@@ -84,7 +84,8 @@ pub(crate) enum TabularSubjects<'a> {
     /// The reported sequences of a database: their tabular ids (`saccver`,
     /// `common::database::tabular_subject_ids`), ordinal ids, records (with
     /// the stored title of a sequence without parsed Seq-ids), parsed Seq-ids (empty when none
-    /// has them), lengths, and taxonomy (empty when no field shows it).
+    /// has them), the names of the sources from which NCBI makes empty stored titles (empty when
+    /// none has one), lengths, and taxonomy (empty when no field shows it).
     Database {
         ids: &'a [Arc<[u8]>],
         ordinals: &'a [u32],
@@ -92,6 +93,7 @@ pub(crate) enum TabularSubjects<'a> {
         oids: crate::seqdb::OidMap<'a>,
         records: &'a [FastaRecord],
         parsed: &'a [Option<Arc<ParsedSubject>>],
+        sources: &'a [crate::report::defline::SourceTaxname],
         lengths: &'a [usize],
         taxonomy: &'a [TabularTaxonomy],
     },
@@ -164,11 +166,15 @@ impl<'a> TabularSubjects<'a> {
                 ordinals,
                 oids,
                 records,
+                sources,
                 taxonomy,
                 ..
             } => TaxPlain::Stored {
                 oid: oids.oid(ordinals.get(s_idx).copied().unwrap_or_default()),
                 title: records.get(s_idx).map_or(&[][..], |record| &record.title),
+                source: sources
+                    .get(s_idx)
+                    .unwrap_or(&crate::report::defline::UNNAMED_SOURCE),
                 taxid: taxonomy.get(s_idx).map_or(0, |taxonomy| taxonomy.taxid),
             },
         }
@@ -249,6 +255,7 @@ impl<'a> TabularSubjects<'a> {
                 oids,
                 records,
                 parsed,
+                sources,
                 lengths,
                 taxonomy,
             } => {
@@ -263,7 +270,7 @@ impl<'a> TabularSubjects<'a> {
                     Some(subject) => {
                         let refused = |problem: &str| {
                             crate::algorithm::common::database::parsed_refusal(
-                                ordinals.get(s_idx).copied().unwrap_or_default(),
+                                oids.oid(ordinals.get(s_idx).copied().unwrap_or_default()),
                                 &format!("has {problem}"),
                                 program,
                             )
@@ -292,10 +299,10 @@ impl<'a> TabularSubjects<'a> {
                             taxonomy,
                         })
                     }
-                    // A sequence without parsed Seq-ids: the first word of its stored title
-                    // (`gnl|BL_ORD_ID|n` replaced, `CShowBlastDefline::GetSeqIdList`) for every
-                    // id, or where it gives none the general id (`TabularSubjectId`), and its one
-                    // definition line's title.
+                    // A sequence without parsed Seq-ids: the first word of its stored title (an
+                    // empty one made from the name of its source; `gnl|BL_ORD_ID|n` replaced,
+                    // `CShowBlastDefline::GetSeqIdList`) for every id, or where it gives none the
+                    // general id (`TabularSubjectId`), and its one definition line's title.
                     None => {
                         let accession: &[u8] =
                             ids.get(s_idx).map_or(&b"unknown"[..], |id| id.as_ref());
@@ -305,7 +312,13 @@ impl<'a> TabularSubjects<'a> {
                         let oid = oids.oid(ordinals.get(s_idx).copied().unwrap_or_default());
                         Ok(SubjectValues {
                             id: crate::algorithm::common::database::tabular_seqid(
-                                accession, oid, title, false,
+                                accession,
+                                oid,
+                                title,
+                                sources
+                                    .get(s_idx)
+                                    .unwrap_or(&crate::report::defline::UNNAMED_SOURCE),
+                                false,
                             ),
                             accession: Cow::Borrowed(accession),
                             accession_version: Cow::Borrowed(accession),
@@ -414,14 +427,12 @@ pub(crate) fn write_tabular_prolog(
 /// `subjects` (`records`: a subject set's records), each query's warnings before its report. The
 /// report is made before the batch's first byte (`tax_report::report_batch`), so that LOSAT's
 /// refusals come before it; `names` carries the run's taxonomy database (`None`: no `taxdb.bti`
-/// on the search path). `protein`: the subjects are proteins; `taxdb_found`: whether `taxdb.bti`
-/// is on the search path.
+/// on the search path). `protein`: the subjects are proteins.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_tax_report(
     subjects: &TabularSubjects<'_>,
     records: &[FastaRecord],
     protein: bool,
-    taxdb_found: bool,
     names: Option<&TabularNames>,
     program: &str,
     queries: &[crate::report::tax_report::TaxQuery<'_>],
@@ -434,7 +445,6 @@ pub(crate) fn write_tax_report(
         subjects.parsed(),
         |s_idx| subjects.tax_plain(s_idx, records),
         protein,
-        taxdb_found,
         names,
         program,
     )?;

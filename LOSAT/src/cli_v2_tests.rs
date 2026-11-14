@@ -716,14 +716,26 @@ fn defaults_and_task_overrides_remain_distinct() {
         );
         crate::algorithm::blastp::blast_engine::check_options(&a).unwrap();
     }
-    // Word size 4 keeps the lookup table, which LOSAT's BLASTP implements at 2 and 3.
-    let Commands::Blastp(a) = parse("blastp", &["-word_size", "4"]).unwrap().command else {
-        panic!()
-    };
-    assert!(crate::algorithm::blastp::blast_engine::check_options(&a)
-        .unwrap_err()
-        .to_string()
-        .contains("-word_size 4 (the lookup table) is not supported by LOSAT's BLASTP"));
+    // Word size 4 keeps the lookup table with each task's threshold, and runs (item SC8b).
+    for (task, threshold) in [
+        ("blastp", 11.0),
+        ("blastp-fast", 20.0),
+        ("blastp-short", 16.0),
+    ] {
+        let Commands::Blastp(a) = parse("blastp", &["-task", task, "-word_size", "4"])
+            .unwrap()
+            .command
+        else {
+            panic!()
+        };
+        let resolved = a.resolve().unwrap();
+        assert_eq!(
+            (resolved.word_size, resolved.threshold),
+            (4, threshold),
+            "{task}"
+        );
+        crate::algorithm::blastp::blast_engine::check_options(&a).unwrap();
+    }
     // TBLASTN takes both of its tasks (tblastn-fast: the compressed lookup table).
     parse("tblastn", &["-task", "tblastn"]).unwrap();
     parse("tblastn", &["-task", "tblastn-fast"]).unwrap();
@@ -1351,11 +1363,16 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "13", None, NcbiLater("Please provide a file name for outfmt 13.")),
         (ALL, "13", Some("-"), NcbiLater("Please provide a file name for outfmt 13.")),
         (ALL, "14", None, NcbiLater("Please provide a file name for outfmt 14.")),
-        // Line OF track T (text formats): not written yet.
-        (ALL, "1", None, UNSUPPORTED),
-        (ALL, "2", None, UNSUPPORTED),
-        (ALL, "3", None, UNSUPPORTED),
-        (ALL, "4", None, UNSUPPORTED),
+        // Line RG T3 (the query-anchored formats): BLASTP writes them (T3a), the others not yet.
+        (&["blastp"], "1", None, Writes(QueryAnchoredIdentities)),
+        (&["blastp"], "2", None, Writes(QueryAnchoredNoIdentities)),
+        (&["blastp"], "3", None, Writes(FlatQueryAnchoredIdentities)),
+        (&["blastp"], "4", None, Writes(FlatQueryAnchoredNoIdentities)),
+        (&["blastp"], "1 qseqid", None, Writes(QueryAnchoredIdentities)),
+        (&["blastn", "blastx", "tblastn", "tblastx"], "1", None, UNSUPPORTED),
+        (&["blastn", "blastx", "tblastn", "tblastx"], "2", None, UNSUPPORTED),
+        (&["blastn", "blastx", "tblastn", "tblastx"], "3", None, UNSUPPORTED),
+        (&["blastn", "blastx", "tblastn", "tblastx"], "4", None, UNSUPPORTED),
         // Line RG T2: the organism report in every program.
         (SHARED, "18", None, Writes(TaxFormat)),
         (SHARED, "18 qseqid", None, Writes(TaxFormat)),

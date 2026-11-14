@@ -178,7 +178,7 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
         .arg(&missing_query)
         .arg("-subject")
         .arg(&missing_subject)
-        .args(["-word_size", "4"])
+        .arg("-use_sw_tback")
         .output()
         .expect("run unsupported blastp");
     assert!(!output.status.success(), "a missing subject should fail");
@@ -188,8 +188,8 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
         "the subject is read before the options are checked: {stderr}"
     );
 
-    let query = temp_path("word4_query", "faa");
-    let subject = temp_path("word4_subject", "faa");
+    let query = temp_path("swtback_query", "faa");
+    let subject = temp_path("swtback_subject", "faa");
     std::fs::write(&query, ">q\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
     std::fs::write(&subject, ">s\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
     let output = clean_losat_command()
@@ -197,7 +197,7 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
         .arg(&query)
         .arg("-subject")
         .arg(&subject)
-        .args(["-word_size", "4"])
+        .arg("-use_sw_tback")
         .output()
         .expect("run unsupported blastp");
     let _ = std::fs::remove_file(&query);
@@ -205,7 +205,9 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
     assert!(!output.status.success(), "unsupported blastp should fail");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("-word_size 4 (the lookup table) is not supported by LOSAT's BLASTP"),
+        stderr.contains(
+            "-use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's BLASTP"
+        ),
         "unsupported error should name program, option, and reason: {stderr}"
     );
     assert!(output.stdout.is_empty(), "nothing is written: {stderr}");
@@ -717,6 +719,50 @@ fn a_reader_error_in_a_later_query_batch_follows_the_earlier_reports() {
         "{report}"
     );
     assert!(first.stdout.is_empty(), "{:?}", first.stdout);
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
+// ```c++
+//     catch (const std::ios::failure&) {                                      \
+//         LOG_POST(Error << "BLAST failed to write output");                  \
+//         exit_code = BLAST_OUTPUT_ERROR;                                     \
+//     }                                                                       \
+// ```
+// BLASTP's pairwise formats, outfmt 0 and the query-anchored 1 to 4, write through one formatter
+// stream, which throws on a failed write: NCBI BLAST+ 2.17.0 (`blastp -query of1/qa.fa -subject
+// of1/sp.fa -num_threads 1`, line RG T3a review 2 D4) exits with status 6 and that message for each
+// of them, to `-out /dev/full` and to a standard output on `/dev/full`.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_failed_write_of_a_blastp_pairwise_format_exits_as_ncbi() {
+    let of1 = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/of1");
+    let (query, subject) = (of1.join("qa.fa"), of1.join("sp.fa"));
+    for outfmt in ["0", "1", "2", "3", "4"] {
+        for to_out in [true, false] {
+            let mut command = clean_losat_command();
+            command.args(["blastp", "-outfmt", outfmt, "-query"]);
+            command.arg(&query).arg("-subject").arg(&subject);
+            if to_out {
+                command.args(["-out", "/dev/full"]);
+            } else {
+                command.stdout(
+                    fs::OpenOptions::new()
+                        .write(true)
+                        .open("/dev/full")
+                        .expect("open /dev/full"),
+                );
+            }
+            let output = command.output().expect("run blastp");
+            assert_eq!(
+                (
+                    output.status.code(),
+                    String::from_utf8_lossy(&output.stderr).into_owned()
+                ),
+                (Some(6), "BLAST failed to write output\n".to_string()),
+                "outfmt {outfmt}, -out {to_out}"
+            );
+        }
+    }
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273

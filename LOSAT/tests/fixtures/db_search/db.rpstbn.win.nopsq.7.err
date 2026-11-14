@@ -1,0 +1,3 @@
+Warning: [rpstblastn] Query_15 w13n nrun: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+Warning: [rpstblastn] Query_28 w26 empty: Sequence contains no data 
+BLAST Database error: Error: File ({db_dir}/rps_mini.psq) not found.

@@ -75,6 +75,7 @@ pub(crate) fn write_psiblast_round_report(
     query_titles: &[Arc<[u8]>],
     subject_titles: &[Arc<[u8]>],
     parsed_subjects: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    subject_sources: &[crate::report::defline::SourceTaxname],
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
     mut probe: Option<&mut FormatProbe<'_>>,
@@ -113,6 +114,7 @@ pub(crate) fn write_psiblast_round_report(
         report,
         database,
         parsed_subjects,
+        subject_sources,
         round,
     };
     let mut warnings = warnings;
@@ -155,6 +157,8 @@ struct RoundSections<'a> {
     report: &'a BlastpPairwiseReport,
     database: Option<&'a PairwiseDatabase>,
     parsed_subjects: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    /// The sources of the others' Bioseqs (`pairwise::stored_source`).
+    subject_sources: &'a [crate::report::defline::SourceTaxname],
     round: ReportRound<'a>,
 }
 
@@ -183,7 +187,12 @@ impl RoundSections<'_> {
             .subject_titles
             .get(&s_idx)
             .map_or(&[][..], Vec::as_slice);
-        database_description_label(title, self.parsed(s_idx), true)
+        database_description_label(
+            title,
+            super::stored_source(self.subject_sources, s_idx),
+            self.parsed(s_idx),
+            true,
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1474-1476
@@ -304,8 +313,10 @@ impl RoundSections<'_> {
     // ```
     /// The two-part table: the Seq-aligns (HSPs) in the report's order, each in the part of its
     /// subject, counted after it is put there, up to `-num_descriptions` (so the bound counts
-    /// HSPs, and `-num_descriptions 0` keeps the first); each part is a table of its own over its
-    /// HSPs (its own column widths), whose rows are its subjects; then the blank line of
+    /// HSPs, and `-num_descriptions 0` keeps the first: `QueryGroup::first_hsps`, which also
+    /// gives the subjects whose description lines the table shows,
+    /// `pairwise::blastp_described_subjects`); each part is a table of its own over its HSPs (its
+    /// own column widths), whose rows are its subjects; then the blank line of
     /// `x_DisplayDeflines`. `x_ConfigCShowBlastDefline` is called without the number of
     /// descriptions, so neither part leaves its header out.
     fn write_two_part_table<W: Write>(
@@ -317,26 +328,19 @@ impl RoundSections<'_> {
     ) -> io::Result<()> {
         let mut repeated: Vec<(u32, Vec<&PairwiseHit>)> = Vec::new();
         let mut new: Vec<(u32, Vec<&PairwiseHit>)> = Vec::new();
-        let mut count = 0usize;
-        'walk: for &shown in &group.subject_order {
-            for &hit in &group.subject_hits[&shown] {
-                let part = if found_before
-                    .get(hit.hit.s_idx as usize)
-                    .copied()
-                    .unwrap_or(false)
-                {
-                    &mut repeated
-                } else {
-                    &mut new
-                };
-                match part.last_mut() {
-                    Some((last, hits)) if *last == shown => hits.push(hit),
-                    _ => part.push((shown, vec![hit])),
-                }
-                count += 1;
-                if count >= self.report.num_descriptions {
-                    break 'walk;
-                }
+        for (shown, hit) in group.first_hsps(self.report.num_descriptions) {
+            let part = if found_before
+                .get(hit.hit.s_idx as usize)
+                .copied()
+                .unwrap_or(false)
+            {
+                &mut repeated
+            } else {
+                &mut new
+            };
+            match part.last_mut() {
+                Some((last, hits)) if *last == shown => hits.push(hit),
+                _ => part.push((shown, vec![hit])),
             }
         }
         self.write_part(writer, group, &repeated, true, &mut *read)?;
@@ -479,7 +483,10 @@ impl RoundSections<'_> {
         if self.database.is_some() || parsed.is_some() {
             let heading = match parsed {
                 Some(subject) => DatabaseHeading::parsed(subject, true, group.own_hsps(s_idx)),
-                None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
+                None => DatabaseHeading::Title(
+                    &group.subject_titles[&s_idx],
+                    super::stored_source(self.subject_sources, s_idx),
+                ),
             };
             return write_database_subject_alignments_part(
                 writer,

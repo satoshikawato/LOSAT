@@ -59,12 +59,12 @@ pub(super) fn search_rounds(
     plan: &PsiRoundPlan,
     query_records: &[FastaRecord],
     searched_queries: &[FastaRecord],
+    query_input: &seq_range::QueryInput,
     batches: QueryBatches,
     subjects: &SubjectSet<'_>,
     subject_source: BlastpSubjectSource<'_>,
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
-    titles_may_refuse: bool,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:191-196 (the
     // chunks of a split query are set up without the PSSM; `in_pssm::check_in_pssm_options`)
@@ -90,8 +90,10 @@ pub(super) fn search_rounds(
     let epilog = batches.stop.is_none();
     // The search strategy's requests (`-export_search_strategy`): one per query, written before
     // its first round (`run_queries`), and the one of the batch that stops the run
-    // (`QueryBatches::stop_batch`). Each query's report comes before the next query's request, so
-    // a title that the requests cannot write is refused before any output.
+    // (`QueryBatches::stop_batch`). NCBI's posts of the bytes replaced in a query's request follow
+    // the reader's messages of its batch: round 1's call places them before the query's report
+    // (`CallRequests::take_posts`), and an error of the batch after those messages
+    // (`write_request_posts`).
     let requests = args.strategy.as_ref().map(|_| {
         crate::algorithm::blastp::archive::requests(
             subject_source
@@ -99,30 +101,21 @@ pub(super) fn search_rounds(
                 .is_none()
                 .then(|| subject_source.fasta_records()),
             args.lcase_masking,
-            args.app.name(),
             args.psi_search.as_ref().and_then(|psi| psi.request_pssm()),
         )
     });
-    // Only requests that are written are looked at: a run that stops before its first batch's
-    // request (the PSSM query's "Remote PSI-BL2SEQ is not supported", `psiblast_stop_at_pssm_query`)
-    // has none, whatever its subjects' titles.
-    if let Some(requests) = requests.as_ref() {
-        if titles_may_refuse && batches.searched_done > 0 {
-            requests.check_titles(&searched_queries[..batches.searched_done])?;
-        }
-        if let Some(span) = batches.stop_batch.clone() {
-            requests.check_titles(&searched_queries[span])?;
-        }
-    }
     let write_stop_request = || -> Result<()> {
         match (
             args.strategy.as_ref(),
             requests.as_ref(),
             batches.stop_batch.clone(),
         ) {
-            (Some(strategy), Some(requests), Some(span)) => {
-                requests.write(strategy, span.start, &searched_queries[span], None)
-            }
+            (Some(strategy), Some(requests), Some(span)) => requests.write(
+                strategy,
+                span.start,
+                &searched_queries[span.clone()],
+                query_input.placements.get(span.start),
+            ),
             _ => Ok(()),
         }
     };
@@ -169,6 +162,7 @@ pub(super) fn search_rounds(
                 plan,
                 query_records,
                 searched_queries,
+                query_input,
                 &batches,
                 subjects,
                 subject_source,
@@ -176,7 +170,6 @@ pub(super) fn search_rounds(
                 outputs,
                 pool,
                 epilog,
-                titles_may_refuse,
                 requests.as_ref(),
             )
         })?;
@@ -184,8 +177,11 @@ pub(super) fn search_rounds(
         // before the search that fails).
         write_stop_request()?;
     }
+    // The stopping batch's reader messages, NCBI's posts of the bytes replaced in its request
+    // (written above, after the rounds of the queries before), its error.
     if let Some((warnings, error)) = batches.stop {
         outputs.diagnostics.write_all(&warnings)?;
+        super::write_request_posts(args, &mut *outputs.diagnostics)?;
         return Err(error);
     }
     Ok(())
@@ -236,6 +232,7 @@ fn run_queries(
     plan: &PsiRoundPlan,
     query_records: &[FastaRecord],
     searched_queries: &[FastaRecord],
+    query_input: &seq_range::QueryInput,
     batches: &QueryBatches,
     subjects: &SubjectSet<'_>,
     subject_source: BlastpSubjectSource<'_>,
@@ -243,8 +240,7 @@ fn run_queries(
     outputs: &mut ReportOutputs<'_>,
     pool: &crate::utils::threading::SearchPool<'_>,
     epilog: bool,
-    titles_may_refuse: bool,
-    requests: Option<&crate::report::archive::requests::RunRequests<'_, FastaRecord>>,
+    requests: Option<&crate::report::archive::requests::RunRequests<'_>>,
 ) -> Result<()> {
     let mut files = RoundFiles::new(
         &plan.request,
@@ -261,14 +257,30 @@ fn run_queries(
     };
     // The rounds formatted so far (`m_QueriesFormatted`: each round's `PrintOneResultSet`).
     let mut calls = 0usize;
-    for &(input_start, query) in &batches.starts {
+    for &(_, query) in &batches.starts {
         let records = std::slice::from_ref(&searched_queries[query]);
-        let query_input = seq_range::QueryInput::whole(records);
+        // The query as round 1 searches it, in every round: with `-query_loc` its range of the
+        // record (`placement`; the PSSM is made of the whole record, `next_pssm`, and searched
+        // at the range's offsets, `PsiSearch::from_engine`). A psiblast batch holds one searched
+        // query, after the records that `-query_loc` skips (a range that starts past the end of
+        // its record; NCBI's batch reader drops them and numbers the query by its place in the
+        // input, `Query_<n>`): the query's record is its input ordinal's, not the batch's first.
+        let ordinal = query_input.ordinal(query);
+        let record = &query_records[ordinal];
+        let placement = query_input.placements.get(query);
+        let query_input = seq_range::QueryInput {
+            placements: seq_range::Placements(placement.into_iter().collect()),
+            ordinals: vec![0],
+            input_lengths: vec![record.seq().len()],
+            skipped: vec![false],
+            range_length: query_input.range_length,
+        };
         let ranges = BlastpRanges {
-            input_records: std::slice::from_ref(&query_records[input_start]),
+            input_records: std::slice::from_ref(record),
             query_input: &query_input,
             subject_placements: &subjects.placements,
-            x_ordinal_base: input_start,
+            x_ordinal_base: ordinal,
+            searched_base: query,
             split_search_spaces: None,
         };
         let mut state = IterationState::new(plan.num_iterations);
@@ -290,11 +302,13 @@ fn run_queries(
         // ```
         // The query's search strategy request, before its first round (also when round 1 fails
         // with a header file NCBI cannot read). Round 1's call notes the query's searched space
-        // (`CallRequests`, which finds the request written); the later rounds' calls find both
-        // done. NCBI's handle keeps the last round's space, which is round 1's: every round's
-        // effective lengths read the same `kbp_gap_std` (blast_setup.c:766-768).
+        // (`CallRequests`, which finds the request written) and writes NCBI's posts of the bytes
+        // replaced in it after the reader's messages of the query's batch, before its report
+        // (`CallRequests::take_posts`); the later rounds' calls find all three done. NCBI's
+        // handle keeps the last round's space, which is round 1's: every round's effective
+        // lengths read the same `kbp_gap_std` (blast_setup.c:766-768).
         if let (Some(strategy), Some(requests)) = (args.strategy.as_ref(), requests) {
-            requests.write(strategy, query, records, None)?;
+            requests.write(strategy, query, records, placement)?;
         }
         while state.go() {
             let round = state.number();
@@ -326,19 +340,26 @@ fn run_queries(
                 } else {
                     pssm_mode
                 };
+                // `PsiBlastSetupScoreBlock`'s warnings look at every column of the PSSM, also
+                // past a range that the search reads (`pssm_setup_messages`).
+                let setup_messages = crate::algorithm::psiblast::in_pssm::pssm_setup_messages(
+                    current
+                        .engine
+                        .diagnostics
+                        .frequency_ratios
+                        .as_deref()
+                        .unwrap_or(&[]),
+                    setup_mode,
+                    &args.matrix_name,
+                );
                 let mut search =
-                    PsiSearch::from_engine(&current.engine, records[0].clone(), Vec::new());
+                    PsiSearch::from_engine(&current.engine, records[0].clone(), setup_messages);
                 // The query source is fixed for the run: a PSSM query's warning label keeps its
                 // title rule in every round (`PsiSearch::warning_title`).
                 search.warning_title = args
                     .psi_search
                     .as_deref()
                     .and_then(|psi| psi.warning_title.clone());
-                search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(
-                    &search,
-                    setup_mode,
-                    &args.matrix_name,
-                );
                 round_args.psi_search = Some(Arc::new(search));
                 round_args.comp_based_stats.mode = pssm_round_mode;
             }
@@ -378,7 +399,6 @@ fn run_queries(
                     last_call: false,
                     psi_round: Some(&io),
                     stopped_pssms: None,
-                    titles_may_refuse,
                     query_scopes: batches
                         .query_scopes
                         .as_ref()
@@ -403,6 +423,9 @@ fn run_queries(
                     }
                     if round == 1 {
                         outputs.diagnostics.write_all(&batches.warnings[query])?;
+                        // NCBI's posts of the bytes replaced in the query's request, which
+                        // round 1's report did not place.
+                        super::write_request_posts(args, &mut *outputs.diagnostics)?;
                     }
                     return Err(failure.error);
                 }

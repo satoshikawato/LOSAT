@@ -63,7 +63,16 @@
 //!   `x_CleanAndCompress` reads past): the blocks are searched only when no
 //!   subject's title is refused (`blast_engine.rs` `x_block_shown_titles_allowed`, with `-db`
 //!   `database::x_titles_allow_blocks`), so that none comes after the reports of the blocks
-//!   before. The other refusals are those of outfmt 6 above.
+//!   before. The other refusals are those of outfmt 6 above. Two refusals of a query's record
+//!   are made per block instead, in the call of the block that holds the query, before that
+//!   block's first byte and after the reports of the blocks before (`run_call`): outfmt 0's
+//!   refusal of the masks of a record that is both a query and a subject under `-parse_deflines`
+//!   (`believed::refuse_shared_masks`), and outfmt 1 to 4's refusal of such a record's section
+//!   that NCBI BLAST+ aborts on (`pairwise::blastp_section_aborts`; what NCBI writes before its
+//!   abort depends on its buffers). The refusals of a database sequence that NCBI shows as a
+//!   query (`ListedTitles::refuse_generated_query_ids`, `refuse_display_ids_of_queries`) sit at
+//!   the same place, but run only in the search of all queries: such a sequence has parsed
+//!   Seq-ids, whose definition lines `database::x_titles_allow_blocks` never takes.
 //! - nothing else is written to standard error while a block is searched (only the debug trace and
 //!   `LOSAT_TIMING`'s lines, which each block prints for itself).
 //!
@@ -206,13 +215,11 @@
 //!   are updated by a document in the order the documents are written, which is the order of the
 //!   blocks, so a block sees what the search of all queries has at that batch. The refusals
 //!   before the first byte are those of outfmt 8 (with `-db` the definition lines,
-//!   `database::x_titles_read_allow_blocks`: the archive reads the same Seq-ids) and the titles
-//!   and `-db` name that the archive cannot write (a byte outside `0x20..=0x7E`, `check_titles`):
-//!   the name before the search starts, the titles where the search of all queries writes the
-//!   archive of the batches NCBI completes (`run_resolved_in_pool`, after their search), so a run
-//!   with such a title takes that search and no block (`x_query_block_plan`). The errors that NCBI
-//!   turns into an error archive (`run`) come after the documents of the batches before, from
-//!   the same handle. In a call of several outputs, hit records or an observer
+//!   `database::x_titles_read_allow_blocks`: the archive reads the same Seq-ids). A string that
+//!   the archive does not write as it is (`report::archive::ArchiveEncoding::writes_text`) is
+//!   written with NCBI's posts where its document is written (`write_archive`), in a block as in
+//!   the search of all queries. The errors that NCBI turns into an error archive (`run`) come
+//!   after the documents of the batches before, from the same handle. In a call of several outputs, hit records or an observer
 //!   the plan is refused for 11 as for 15 and 16: the handle's muting and
 //!   messages with several formats were argued for the CLI's shape.
 //!

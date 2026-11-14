@@ -3,7 +3,6 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c
 
 use super::*;
-use crate::algorithm::blastp::extension::extend_one_hit_for;
 use crate::algorithm::common::translated_chunks::{translated_chunk_scan_ranges, TranslatedChunk};
 use crate::algorithm::common::x_db_stream::XReadError;
 use crate::algorithm::tblastx::database::DatabaseTitles;
@@ -6650,8 +6649,9 @@ fn search_query_batch<S: TbxScore>(
             // the scan of `scan_chunk_plain` without the clamp of a short first range (that loop
             // then never starts: no `scansub` call, no hit), the diagonal `s - q`, no flag, and
             // `last_hit` set after every extension, also one below the cutoff. The extension is
-            // BLASTP's `s_BlastAaExtendOneHit` with the search's matrix (`extend_one_hit_for`),
-            // on the context's letters and the chunk's, as the two-hit extensions read them. The
+            // `s_BlastAaExtendOneHit` with the search's scores (`extension::extend_hit_one_hit`, on
+            // the two-hit extension's walks), on the context's letters and the chunk's, as the
+            // two-hit extensions read them. The
             // unit path and `scan_chunk_bucketed` are two-hit only: a batch of window 0 is a
             // `reference_loop` one for `x_pair_par::decide`, and `scan_chunk` takes this closure
             // for every chunk.
@@ -6700,7 +6700,6 @@ fn search_query_batch<S: TbxScore>(
                     },
                 );
                 let wordsize_usize = wordsize as usize;
-                let matrix = sc.matrix();
                 for (interior_start, interior_end) in scan_interiors.into_iter() {
                     let seq_ranges = match x_soft {
                         Some(ranges) => ranges.to_vec(),
@@ -6763,15 +6762,16 @@ fn search_query_batch<S: TbxScore>(
                             // blast_query_info.c:311-315), as the two-hit extensions read them.
                             let query = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
                             // [C] score = s_BlastAaExtendOneHit(matrix, subject, query, ...);
-                            let Some(result) = extend_one_hit_for(
-                                matrix,
-                                query,
-                                subject,
-                                q_raw,
-                                subject_offset as usize,
-                                x_dropoff_per_context[ctx_idx],
-                                wordsize_usize,
-                            ) else {
+                            let Some(hit) =
+                                crate::algorithm::tblastx::extension::extend_hit_one_hit(
+                                    sc,
+                                    query,
+                                    subject,
+                                    q_raw,
+                                    subject_offset as usize,
+                                    x_dropoff_per_context[ctx_idx],
+                                )
+                            else {
                                 // A word past the letters, which the scan does not give.
                                 x_read_failure.fail(
                                     s_idx,
@@ -6783,7 +6783,6 @@ fn search_query_batch<S: TbxScore>(
                                 );
                                 continue;
                             };
-                            let hit = result.ungapped_data;
                             // [C] if (score >= cutoffs->cutoff_score)
                             // [C]     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
                             // [C]                      query_offset, subject_offset, hsp_len, score);
@@ -6823,8 +6822,7 @@ fn search_query_batch<S: TbxScore>(
                             }
                             // [C] diag_array[diag_coord].last_hit =
                             // [C]     s_last_off - (wordsize - 1) + diag_offset;
-                            diag_entry
-                                .set_last_hit(result.s_last_off - (wordsize - 1) + *diag_offset);
+                            diag_entry.set_last_hit(hit.s_last_off - (wordsize - 1) + *diag_offset);
                         }
                     }
                 }

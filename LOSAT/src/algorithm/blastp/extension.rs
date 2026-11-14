@@ -312,8 +312,8 @@ pub(crate) fn extend_one_hit_blosum62(
 // ```
 /// `s_BlastAaExtendOneHit` with the score matrix `matrix` (not a PSSM), chosen at each call:
 /// BLOSUM62's walks (`extend_one_hit_blosum62`) or the reference walk of another matrix
-/// (`extend_one_hit_of`). The one-hit word finders of TBLASTN and TBLASTX (`-window_size 0`) call
-/// it with their matrix.
+/// (`extend_one_hit_of`). TBLASTN's one-hit word finder (`-window_size 0`) calls it with its matrix
+/// (TBLASTX, below BLASTP in the layering, has its own on its two-hit walks).
 #[inline]
 pub(crate) fn extend_one_hit_for(
     matrix: ScoringMatrix,

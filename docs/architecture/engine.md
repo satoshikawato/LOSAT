@@ -269,8 +269,8 @@ flowchart LR
 | lookup table | `LookupTableWrapInit` (`BlastMBLookupTableNew`, `BlastAaLookupTableNew`, ...) | `build_lookup_tables` (`blastn/coordination.rs`); discontiguous tables in `disc_lookup.rs` | `blastp_aa_lookup` or `blastp_compressed_lookup` (blastp-fast); PSSM and RPS tables through the hooks |
 | scan, ungapped | `BlastNaWordFinder` with `s_BlastNaExtend`, or `s_BlastNaExtendDirect` for a table whose width is the word size (in LOSAT: a small or na table in `na_scan.rs`; megablast-kind and discontiguous tables of that width in `pair_extend.rs`); `BlastAaWordFinder` with `s_BlastAaExtendTwoHit` | `scan_subject_kmers_with_ranges`; for a two-stage table the scan that collects the offset pairs in `two_stage_scan.rs` (`scan_two_stage_lookup`) and their extension in `pair_extend.rs` (`extend_offset_pairs`, with the word extension `word_extend_pair` and the off-diagonal search `off_diagonal_found`), for the other tables the scan with the steps of each seed in `na_scan.rs` (`scan_na_lookup`); and `blastn/extension.rs` | `x_seed_fused` (the scan and the two-hit test in one loop) and `blastp/extension.rs` |
 | gapped (score only) | `BLAST_GetGappedScore`; greedy `BLAST_GreedyGappedAlignment` for megablast | `prelim_hsp_list.rs` (`gapped_hsp_list`, its loop `gapped_score_list`, per subject chunk) with `alignment/gapped.rs` or the greedy aligner | `extend_preliminary_blastp_hit` |
-| purge, reap, collect | `Blast_HSPListPurgeHSPsWithCommonEndpoints`, `s_Blast_HSPListReapByPrelimEvalue`, `s_BlastHSPCollectorRun` | `purge_prelim_hits_with_common_endpoints`, `PrelimHitCollector` | `prepare_preliminary_hits_for_kappa_in_place`, `PrelimCollector` |
-| traceback | `Blast_TracebackFromHSPList`, `BLAST_GappedAlignmentWithTraceback` | `process_subject` (`run.rs`, its second call per subject) calls `traceback_subject_hits` (`traceback_list.rs`): the loop over a list of kept HSPs (`trace_hsp_list`), then the purges and the final list (`traceback_finish.rs`); the steps of one HSP are in `traceback_hsp.rs`, the subject's letters and the `-ungapped` traceback in `traceback_subject.rs` | `traceback::OrdinaryTraceback` |
+| purge, reap, collect | `Blast_HSPListPurgeHSPsWithCommonEndpoints`, `s_Blast_HSPListReapByPrelimEvalue`, `s_BlastHSPCollectorRun` | `purge_prelim_hits_with_common_endpoints`, `reap_prelim_by_evalue` (`prelim_subject.rs`), `PrelimHitCollector` | `prepare_preliminary_hits_for_kappa_in_place`, `PrelimCollector` |
+| traceback | `Blast_TracebackFromHSPList`, `BLAST_GappedAlignmentWithTraceback` | `process_subject` (`run.rs`, its second call per subject) calls `traceback_subject` (`traceback_subject.rs`), which calls `traceback_subject_hits` (`traceback_list.rs`): the loop over a list of kept HSPs (`trace_hsp_list`), then the purges and the final list (`traceback_finish.rs`); the steps of one HSP are in `traceback_hsp.rs`, the subject's letters and the `-ungapped` traceback in `traceback_subject.rs` | `traceback::OrdinaryTraceback` |
 | composition-based statistics | `Blast_RedoAlignmentCore_MT` (`blast_kappa.c`) | none | `kappa::postprocess_preliminary_hits` (default `-comp_based_stats 2`) |
 | filter, sort | `s_FilterBlastResults`, `Blast_HSPResultsSortByEvalue` | `finish_query_hit_list` | `culling::cull_traceback`, `sort_by_evalue` |
 | report | `CBlastFormat::PrintOneResultSet` | `write_reports` → `post_process_hits_and_write` | the `match outfmt` at the end of `run_resolved_in_pool` |
@@ -292,8 +292,9 @@ their stages over files (blastx `preliminary.rs`, `traceback.rs`, `runtime.rs`; 
   `run_in_pool`, which loops
   over the query batches and calls `search_query_batch::<UNGAPPED>` for each. The const generic
   `UNGAPPED` (for `-ungapped`) makes two copies of the function. Its closure `process_subject` runs
-  twice per subject: with `prelim_source` `None` it does the preliminary search (the subject's
-  chunks and the search of each, `prelim_subject.rs`), with `Some` the traceback.
+  twice per subject: with `prelim_source` `None` it does the preliminary search
+  (`prelim_subject.rs`: the subject's chunks, the search of each, then the reap by e-value or the
+  `-ungapped` finish), with `Some` the traceback (`traceback_subject.rs`).
 - **blastp** (`algorithm/blastp/blast_engine.rs`): `run` → `search_cli` → `search` →
   `run_resolved_in_pool`, once for the queries of every batch that NCBI does not split (a blastp
   query's preliminary hit list does not depend on the other queries of its batch), once per query

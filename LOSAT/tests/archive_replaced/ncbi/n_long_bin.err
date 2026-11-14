@@ -1,0 +1,13 @@
+FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+Error: (803.7) [blastn] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at byte 456
+q1 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbécccccccccccccccccccccccccccccc
+Error: (803.7) [blastn] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at byte 457
+q1 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbécccccccccccccccccccccccccccccc
+Error: (803.7) [blastn] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at byte 549
+q1 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbécccccccccccccccccccccccccccccc
+Error: (803.7) [blastn] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at byte 550
+q1 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbécccccccccccccccccccccccccccccc

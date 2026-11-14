@@ -1,0 +1,736 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q1 a"
+                  }
+                }
+              },
+              title "q1 a"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 180,
+              seq-data ncbi2na '3A33EFEB717FDE76CF4BF9D2CEF59600F3DBFC5E930D35
+B77A0AFA0EB6D2FF38CFAE00C5ACEFDB7ABFD603F3EB'H
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s0 plain t"
+                }
+              }
+            },
+            title "s0 plain t"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 180,
+            seq-data ncbi2na '3A33EFEB717FDE76CF4BF9D2CEF59600F3DBFC5E930D35B7
+7A0AFA0EB6D2FF38CFAE00C5ACEFDB7ABFD603F3EB'H
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s1 plain t"
+                }
+              }
+            },
+            title "s1 plain t"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 120,
+            seq-data ncbi2na '97797BD3B869D99A53C2D79DAA50A02C33B976A1B11CBA0F
+AA27194E9ED8'H
+          }
+        },
+        {
+          id {
+            local str "Subject_3"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s2 plain t"
+                }
+              }
+            },
+            title "s2 plain t"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 120,
+            seq-data ncbi2na '3F1127C8A08B960485DA6B7A16ABBC140586ABF5D209C57B
+89A99C0E4C2D'H
+          }
+        },
+        {
+          id {
+            local str "Subject_4"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s3 plain t"
+                }
+              }
+            },
+            title "s3 plain t"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 120,
+            seq-data ncbi2na 'F183304BE9B1490ABFF7ECB4C04C2CDA664BD7FA9CDD8575
+DD814F753038'H
+          }
+        },
+        {
+          id {
+            local str "Subject_5"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s4 plain t"
+                }
+              }
+            },
+            title "s4 plain t"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 120,
+            seq-data ncbi2na '271AA2A3506B0445780C4CDE09AE21F603C2EDDAA9A62F4B
+5980CEE7B2F2'H
+          }
+        },
+        {
+          id {
+            local str "Subject_6"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s5 plain t"
+                }
+              }
+            },
+            title "s5 plain t"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 120,
+            seq-data ncbi2na '41429A6C4496868074AEA8ACC9694804CABA63A58F38D31F
+7E077BEA7A8F'H
+          }
+        },
+        {
+          id {
+            local str "Subject_7"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s6 plain t"
+                }
+              }
+            },
+            title "s6 plain t"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 120,
+            seq-data ncbi2na 'E53FAEFD3233B5C3FB43791F26942A2CD1D6A59B83E1A233
+3488DBB36FF1'H
+          }
+        },
+        {
+          id {
+            local str "Subject_8"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s7 plain t"
+                }
+              }
+            },
+            title "s7 plain t"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 120,
+            seq-data ncbi2na 'D24FD58ADEBCF44BAD612A97ED65D1B83111C98A12B24254
+A74C63203857'H
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 157508
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 180
+          },
+          {
+            id str "blast_score",
+            value int 180
+          },
+          {
+            id str "e_value",
+            value real { 628943767917065, 10, -110 }
+          },
+          {
+            id str "bit_score",
+            value real { 333517231654535, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 180
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_1"
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            180
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 157508",
+      "Effective search space used: 157508",
+      "Length adjustment: 11"
+    }
+  }
+}
+Error: (803.7) [blastn] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x7F] in string at line 23
+q2 b
+Error: (803.7) [blastn] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x7F] in string at line 47
+q3 c
+Error: (803.7) [blastn] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x7F] in string at line 47
+q3 c
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q2 b\177"
+                  }
+                }
+              },
+              title "q2 b#"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 150,
+              seq-data ncbi2na '3A33EFEB717FDE76CF4BF9D2CEF59600F3DBFC5E930D35
+B77A0AFA0EB6D2FF38CFAE00C5ACE0'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q3 c\177\177"
+                  }
+                }
+              },
+              title "q3 c##"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 150,
+              seq-data ncbi2na '6CF4BF9D2CEF59600F3DBFC5E930D35B77A0AFA0EB6D2F
+F38CFAE00C5ACEFDB7ABFD603F3EB0'H
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s0 plain t"
+                }
+              }
+            },
+            title "s0 plain t"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 180,
+            seq-data ncbi2na '3A33EFEB717FDE76CF4BF9D2CEF59600F3DBFC5E930D35B7
+7A0AFA0EB6D2FF38CFAE00C5ACEFDB7ABFD603F3EB'H
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s1 plain t"
+                }
+              }
+            },
+            title "s1 plain t"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 120,
+            seq-data ncbi2na '97797BD3B869D99A53C2D79DAA50A02C33B976A1B11CBA0F
+AA27194E9ED8'H
+          }
+        },
+        {
+          id {
+            local str "Subject_3"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s2 plain t"
+                }
+              }
+            },
+            title "s2 plain t"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 120,
+            seq-data ncbi2na '3F1127C8A08B960485DA6B7A16ABBC140586ABF5D209C57B
+89A99C0E4C2D'H
+          }
+        },
+        {
+          id {
+            local str "Subject_4"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s3 plain t"
+                }
+              }
+            },
+            title "s3 plain t"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 120,
+            seq-data ncbi2na 'F183304BE9B1490ABFF7ECB4C04C2CDA664BD7FA9CDD8575
+DD814F753038'H
+          }
+        },
+        {
+          id {
+            local str "Subject_5"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s4 plain t"
+                }
+              }
+            },
+            title "s4 plain t"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 120,
+            seq-data ncbi2na '271AA2A3506B0445780C4CDE09AE21F603C2EDDAA9A62F4B
+5980CEE7B2F2'H
+          }
+        },
+        {
+          id {
+            local str "Subject_6"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s5 plain t"
+                }
+              }
+            },
+            title "s5 plain t"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 120,
+            seq-data ncbi2na '41429A6C4496868074AEA8ACC9694804CABA63A58F38D31F
+7E077BEA7A8F'H
+          }
+        },
+        {
+          id {
+            local str "Subject_7"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s6 plain t"
+                }
+              }
+            },
+            title "s6 plain t"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 120,
+            seq-data ncbi2na 'E53FAEFD3233B5C3FB43791F26942A2CD1D6A59B83E1A233
+3488DBB36FF1'H
+          }
+        },
+        {
+          id {
+            local str "Subject_8"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s7 plain t"
+                }
+              }
+            },
+            title "s7 plain t"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 120,
+            seq-data ncbi2na 'D24FD58ADEBCF44BAD612A97ED65D1B83111C98A12B24254
+A74C63203857'H
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 131600
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 150
+          },
+          {
+            id str "blast_score",
+            value int 150
+          },
+          {
+            id str "e_value",
+            value real { 249731425125785, 10, -93 }
+          },
+          {
+            id str "bit_score",
+            value real { 278117742084399, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 150
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_2",
+            local str "Subject_1"
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            150
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 150
+          },
+          {
+            id str "blast_score",
+            value int 150
+          },
+          {
+            id str "e_value",
+            value real { 249731425125785, 10, -93 }
+          },
+          {
+            id str "bit_score",
+            value real { 278117742084399, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 150
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_3",
+            local str "Subject_1"
+          },
+          starts {
+            0,
+            30
+          },
+          lens {
+            150
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 131600",
+      "Effective search space used: 131600",
+      "Length adjustment: 10"
+    }
+  }
+}

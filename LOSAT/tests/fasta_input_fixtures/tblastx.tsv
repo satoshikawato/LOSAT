@@ -1,4 +1,4 @@
-# Frozen outputs of blastn: 2.17.0+;  Package: blast 2.17.0, build Aug 11 2025 09:46:06 for FASTA-input cases (comparison oracle only; see fasta_input_fixtures.py).
+# Frozen outputs of blastn: 2.17.0+;  Package: blast 2.17.0, build Jul  1 2025 08:59:18 for FASTA-input cases (comparison oracle only; see fasta_input_fixtures.py).
 # Only what `freeze`/`freeze-rejections` measured is stored; the row definitions (inputs, args, outfmt, threads, stdin, env, kind, tier, note) are in the script's generator.
 # `@S <n> <sha256>` lines are a table of the distinct non-empty stderr hashes. Row lines: row_id, rc, stdout sha256,
 # stderr (`-` = empty stream, else a table index n), combined `2>&1` stream (`=` = same as stdout, `~` = same as stderr, else its sha256).
@@ -95,10 +95,10 @@
 @S	90	11f7cdea997368bd0da6bca34b593177932e72baa52b197e6e94916b5964881c
 @S	91	f932d1141dc96b7f1e27c8e71f2df07fb7cbb8d401bf2650199a7d765175ccb5
 @S	92	b369da4c4551898203e93196e29dd563005141c78d41c456c55c0868b5211b1e
-@S	93	e654dc0b981878c3036536102e0e9b19fdc45935a9693d7b90f21a7e62676511
-@S	94	32948577392c5b3fa1bc12350cf2d5d4465ef78d731f3ddf45f01a32747333d5
-@S	95	c0b3bfd632b0324df435b1e644bff4af6951690b17d2cff31de5b74b715ac47d
-@S	96	826ed14ced5bdb07f8d33f1f2f594b70130ce28893d6b358564cc87b8d9cf1ab
+@S	93	7cbe114c850fc09d3070712574d35dd2b8d298bc4c019150d8e0882dd5c88aae
+@S	94	c7f9e5db4302c2461ccd2e1557674703324eaf745fda85e6d972bf1e4f6e7952
+@S	95	4c301083f9134787ae6cf52d5a0a0092d4ed4f793ff1ec808452332b3fc968cf
+@S	96	cb44b22039624b9d746582c06345e74c3e9b2965f4d64b1439f854ff924db2c5
 @S	97	3ca5de8294cc660cae72b4e50e14adb1b8d3e726504088ca3887ffe195e7af7a
 @S	98	a96e6d16b0782cd0affb126265a6ded0a41594e4bdaf218b8e88cc0dcf5cb714
 @S	99	efa66b0d86a8f558afbb8ab523ae23200884f281c6b50e4e2d9bb58d67b33d97
@@ -749,15 +749,15 @@ tblastx.batch_late_warn_bad.two.o7	1	96f9d6037278e2d76653777aeceb73471074e687055
 tblastx.batch_late_warn_bad.default.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	92	~
 tblastx.batch_late_warn_bad.default.o0	1	81435f378857dd1ac7bea28f714d991258ae37ed125c1b2c71fc71df52dffecd	92	3fc6cff1b2d7b6bfe4fcbc2533c2169260de5c3830ce4108052dbe9e63928737
 tblastx.arch_title_late.two.o11	1	81b3a824052e058cc2d420ac1a5d0cab42219ce9a353acf1661858c3b3cd35a5	87	534c60f505de2e814558093ead04e6e15b49dfb3aaa53945620024a218f75a20
-tblastx.arch_title_late.each.o11	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	93	~
+tblastx.arch_title_late.each.o11	1	02ecb9d1d1f0f9465eebb25b8aab75f2ec2403866e801c81a7067d3d51b1a504	93	b2d158fc1c1f1bc69c38359a4d15fdbf026bead5a4d147d7d50fb3d04dbb8a54
 tblastx.arch_title_late.default.o11	1	9c2154c63556e7ce97b96283dbb1e49cfb6abfce9f48db5f15eb93194da6495b	87	b129c7babd4985d0cdddd517fa8ebaf2059474d4e19e1993aaf21ba946ea4a43
-tblastx.arch_title_first.two.o11	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	94	~
+tblastx.arch_title_first.two.o11	1	ca733d35c8b33055fe0b1f003ad1ffedbd26332d3c4e0ae4da2f4c87a8a2c49d	94	52fa1d6e99d201f12cf337f17508f7730ca2b307a91078bbc279cf0f0387cb25
 tblastx.arch_title_first.default.o11	1	9c2154c63556e7ce97b96283dbb1e49cfb6abfce9f48db5f15eb93194da6495b	87	b129c7babd4985d0cdddd517fa8ebaf2059474d4e19e1993aaf21ba946ea4a43
 tblastx.arch_title_first.zero.o11	3	2c012da815ae88ded87ec0c8a6139554ebc481394496bf7243d1783084ea94db	70	a9fff9a38457529be82f31f1b27eac8688e6fef594f68593b8b82efd663fabbf
 tblastx.arch_title_lastempty.each.o11	3	bfbc571b391f74af4204ebeed78949ff2fb84db197adee04523e42f16219e656	61	16943dd02bb19d705a0f6262597d0ca97dd48945a5895b696b8d8c2c4d1298d4
-tblastx.arch_title_lastempty.default.o11	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	95	~
+tblastx.arch_title_lastempty.default.o11	0	417a172f4ecdfdf36804bf9471d2de55cada96e14f3963c0b528c2ead6d8d618	95	096c947dd4ca9875f0252250f8c17706d32675cfa5350879639b53d2dc90bd32
 tblastx.arch_title_s.after_error.o11	1	9c2154c63556e7ce97b96283dbb1e49cfb6abfce9f48db5f15eb93194da6495b	87	b129c7babd4985d0cdddd517fa8ebaf2059474d4e19e1993aaf21ba946ea4a43
-tblastx.arch_title_s.clean.o11	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	96	~
+tblastx.arch_title_s.clean.o11	0	e98c6dad05aef6b01b40cf8a5579fb9b81130b86bc5b6f5493a29686a0d96d21	96	18a40c1c5e76af8281c1d0739acb488ed04cd89f1a906e3ef49de59daf93dc2e
 tblastx.arch_title_s.zero.o11	3	2c012da815ae88ded87ec0c8a6139554ebc481394496bf7243d1783084ea94db	70	a9fff9a38457529be82f31f1b27eac8688e6fef594f68593b8b82efd663fabbf
 tblastx.xml2_title_late.each.o15	1	217bf6a56fa0a10e6ed0c51bfc2a5ccd23eccfea9a61bdb99c50aefe6c4d1c07	87	970bebc8f09aaed863ea486de5511fb34e7113afbe1e52355194954f29d6935c
 tblastx.xml2_title_late.each.o16	1	a4ab429230f7d25a7a0dcf8e958091386dc3f2bcebd13d114af1164ee34f79c6	87	698aa1dd05517cc42ec36b80ad4b47d68aeea2fe51a3c997353093557b5c2cc2

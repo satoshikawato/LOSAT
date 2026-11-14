@@ -128,7 +128,11 @@ impl Diag<'_> {
 
     /// `err_post` of a message that is not UTF-8.
     pub(crate) fn err_post_bytes(&mut self, message: &[u8]) {
-        self.err_post_code_bytes(None, message);
+        self.write_text(&crate::ncbi_exception::error_post_line(
+            None,
+            self.tool.post_prefix,
+            message,
+        ));
     }
 
     /// The posts of the bytes that NCBI's object stream replaced while it wrote an object
@@ -137,21 +141,8 @@ impl Diag<'_> {
     pub(crate) fn post_replaced(&mut self, replaced: &[ReplacedChar]) {
         for byte in replaced {
             debug_assert!(!byte.trace.is_empty(), "a byte replaced through `Traced`");
-            self.err_post_code_bytes(Some(ReplacedChar::ERR_CODE), &byte.message());
+            self.write_text(&byte.post(self.tool.post_prefix));
         }
-    }
-
-    /// `err_post_bytes` with the error code and subcode of `ERR_POST_X` after the severity.
-    fn err_post_code_bytes(&mut self, code: Option<(u32, u32)>, message: &[u8]) {
-        let mut line = b"Error: ".to_vec();
-        if let Some((code, subcode)) = code {
-            line.extend_from_slice(format!("({code}.{subcode}) ").as_bytes());
-        }
-        if let Some(prefix) = self.tool.post_prefix {
-            line.extend_from_slice(format!("[{prefix}] ").as_bytes());
-        }
-        line.extend_from_slice(message);
-        self.post_bytes(&line);
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:704-710

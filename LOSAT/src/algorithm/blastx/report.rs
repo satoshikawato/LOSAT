@@ -1668,6 +1668,7 @@ fn write_pairwise(
                 Some(subject) => {
                     let label = crate::report::pairwise::database_description_label(
                         b"",
+                        &crate::report::defline::UNNAMED_SOURCE,
                         Some(subject),
                         true,
                     );
@@ -1682,7 +1683,12 @@ fn write_pairwise(
         ShownSubjects::Fasta { .. } => None,
         ShownSubjects::Database {
             pairwise, reported, ..
-        } => Some((*pairwise, reported.stored_titles(), reported.parsed())),
+        } => Some((
+            *pairwise,
+            reported.stored_titles(),
+            reported.parsed(),
+            reported.sources(),
+        )),
     };
     let records_parsed = match shown {
         ShownSubjects::Fasta { parsed, .. } => parsed.subjects.as_slice(),

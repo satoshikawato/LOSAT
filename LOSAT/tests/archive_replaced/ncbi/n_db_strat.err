@@ -1,0 +1,6 @@
+Error: (803.7) [blastn] Blast4-request.body.queue-search.subject.database
+Bad char [0xC3] in string at line 33
+in/dé/ndb
+Error: (803.7) [blastn] Blast4-request.body.queue-search.subject.database
+Bad char [0xA9] in string at line 33
+in/dé/ndb

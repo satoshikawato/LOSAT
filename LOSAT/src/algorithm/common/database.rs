@@ -1947,7 +1947,7 @@ pub(crate) fn refuse_id_of_a_query(
 /// item X7 owns NCBI's behaviour for them in outfmt 0).
 pub(crate) fn refuse_display_id_of_a_query(
     subject: &crate::report::db_subject::ParsedSubject,
-    ordinal: u32,
+    oid: crate::seqdb::Oid,
     queries: &crate::blastinput::query_batch::QueryScope,
     generated: bool,
     program: &str,
@@ -1973,7 +1973,7 @@ pub(crate) fn refuse_display_id_of_a_query(
         )
     };
     Err(parsed_refusal(
-        ordinal,
+        oid,
         &format!(
             "has the display id {} (the id of its description line), the id of a query read \
              {queries} in the query batch that reports it{weak}: NCBI BLAST+ shows that query's \

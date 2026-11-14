@@ -1207,7 +1207,7 @@ impl ListedTitles<'_> {
                 };
                 if scope_of(query).has_key(&subject.query_scope_keys().own) {
                     return Err(shared::parsed_refusal(
-                        self.listed.ordinals[rank],
+                        self.oids.oid(self.listed.ordinals[rank]),
                         &format!(
                             "has the Seq-id {}, the id of a query read without -parse_deflines \
                              in the query batch that reports it: NCBI BLAST+ shows that query in \
@@ -1274,7 +1274,7 @@ impl ListedTitles<'_> {
                 if shown.contains(&(rank as u32)) {
                     shared::refuse_display_id_of_a_query(
                         subject,
-                        self.listed.ordinals[rank],
+                        self.oids.oid(self.listed.ordinals[rank]),
                         scope,
                         generated,
                         self.program,

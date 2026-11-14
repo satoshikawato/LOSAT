@@ -1,0 +1,6 @@
+# RPSBLAST 2.17.0+
+# Query: YP_009220493.1 thymidylate synthetase [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue
+# 1 hits found
+YP_009220493.1	gnl|CDD|101	1.0

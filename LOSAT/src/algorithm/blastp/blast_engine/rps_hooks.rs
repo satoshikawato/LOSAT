@@ -41,12 +41,22 @@ use crate::algorithm::tblastx::lookup::{
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:159-164
+// ```c++
+//     // 2. Take care of any rps information
+//     if (Blast_ProgramIsRpsBlast(options->GetProgramType())) {
+//         ...
+//         retval->m_InternalData->m_RpsData =
+//             CSetupFactory::CreateRpsStructures(rps_dbname, options);
+// ```
 /// The error of the RPS files that NCBI reports itself (`BLAST engine error: <text>`, exit
-/// status 3), after what the first batch's search writes before (`preliminary_search_error`);
-/// the second field is true for the error that NCBI raises in the first batch whatever its
-/// queries' validity (the score block of an `.aux` without a matrix name: review B of PS12a, N4).
+/// status 3): a volume's files that cannot be mapped or read, or the score block of an `.aux`
+/// without a matrix name (review B of PS12a, N4). NCBI sets up every volume's files in the first
+/// batch's set-up (`BlastSetupPreliminarySearchEx`, before `CheckInternalData` looks at the
+/// batch's queries), so the error is the first batch's whatever its queries' validity, after
+/// what that batch writes before (`preliminary_search_error`; series PR, item PS12f, review S1).
 #[derive(Debug)]
-pub(super) struct RpsEngineError(pub(super) String, pub(super) bool);
+pub(super) struct RpsEngineError(pub(super) String);
 
 impl std::fmt::Display for RpsEngineError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -509,13 +519,11 @@ pub(super) fn rps_search(
         let num_seqs = volume.num_oids();
         let files = match setup.open(volume, cbs > 0)? {
             Ok(files) => files,
-            Err(RpsVolumeError::Files(text)) => return Err(RpsEngineError(text, false).into()),
+            Err(RpsVolumeError::Files(text)) => return Err(RpsEngineError(text).into()),
             // N2 of review A (PS12a): the score block of each query of the first batch fails.
             Err(RpsVolumeError::NoMatrix) => {
                 let queries = run.batches.first().map_or(0, |batch| batch.len());
-                return Err(
-                    RpsEngineError("Error: Unknown error code -1 ".repeat(queries), true).into(),
-                );
+                return Err(RpsEngineError("Error: Unknown error code -1 ".repeat(queries)).into());
             }
         };
         let masked: Vec<Option<Vec<u8>>> = run
@@ -704,13 +712,46 @@ pub(super) fn rps_search(
             merge_volume(hit_lists, lists);
         }
     }
-    if let Some((_, error)) = failed {
-        return Err(error);
+    if let Some((batch, error)) = failed {
+        return Err(failed_batch_error(run, batch, error));
     }
     Ok(RpsSearched {
         gapped_k,
         volumes: order.len(),
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:193-213
+// ```c++
+//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+//
+//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+//
+//             SaveSearchStrategy(args, m_CmdLineArgs, queries, opts_hndl);
+//             ...
+//             	CLocalRPSBlast  local_search (query_batch, db_args->GetDatabaseName(), opts_hndl, args[kArgNumThreads].AsInteger() );
+//             	results = local_search.Run();
+// ```
+/// The run's error when the query batch `batch` of `run.batches` fails (`rps_search`). NCBI reads,
+/// writes the search strategy request of, searches and reports one batch before it reads the next,
+/// so an error of its own in a batch's search (a profile volume's sequence file that the batch's
+/// traceback reads, `Consensus`: `BLAST Database error`, exit status 2) ends the run after the
+/// reports of the batches before it (without the epilog) and after that batch's reader messages
+/// and request. That is the error of a header file that a batch reaches (`HeaderReadError`, named
+/// by the batch's first query), whose batches before blastp's driver searches again and reports
+/// alone (`search`). LOSAT's refusals end the run as they are.
+#[cold]
+#[inline(never)]
+fn failed_batch_error(run: &RpsSearchRun<'_>, batch: usize, error: anyhow::Error) -> anyhow::Error {
+    if !error.is::<crate::cli::NativeError>() {
+        return error;
+    }
+    database::HeaderReadError {
+        query: run.batches[batch].start,
+        error,
+    }
+    .into()
 }
 
 /// `MAX_DBSEQ_LEN`: the longest subject (here a user query) that NCBI's engine searches whole.

@@ -8,7 +8,11 @@
 //! `-lcase_masking` (blastn's `LCaseMask` holds the lower-case runs only, not the DUST or
 //! WindowMasker intervals), `-query_loc`, the database lists, `-num_descriptions`, the archive
 //! (outfmt 11) of the same batches, the request of a batch whose search fails (a database without
-//! its sequence or header file, also after a batch with no valid query; blastx's batch of a record
+//! its sequence or header file, also after a batch with no valid query; rpsblast's batch whose
+//! traceback reads a profile volume without its sequence file, also after a batch that is
+//! reported, and rpsblast's first batch whose RPS files cannot be set up, also without a valid
+//! query or with an empty `.aux` (`tests/fasta/strategy/emptyaux/rps_mini.aux`), item PS12f;
+//! blastx's batch of a record
 //! without letters; tblastx `-matrix BLOSUM99`, whose gap costs are 0 and 0), and the order of the
 //! errors (the file is made after the argument parser and before the other options are read: an
 //! error after it leaves the file empty, the parser's errors leave an existing file alone).

@@ -732,8 +732,10 @@ impl std::fmt::Display for PreliminaryReadError {
 impl std::error::Error for PreliminaryReadError {}
 
 /// A reader error of NCBI's own while the definition lines of the final hit lists are
-/// read (`stored_title`): `query` is the query whose hit list reached it. NCBI fails that
-/// query's batch, after the reports of the batches before.
+/// read (`stored_title`), or while rpsblast's traceback of a batch reads a profile volume's
+/// sequence file (`rps_hooks::failed_batch_error`): `query` is the query whose hit list reached
+/// it (rpsblast: the batch's first query). NCBI fails that query's batch, after the reports of
+/// the batches before.
 #[derive(Debug)]
 pub(crate) struct HeaderReadError {
     pub(crate) query: usize,

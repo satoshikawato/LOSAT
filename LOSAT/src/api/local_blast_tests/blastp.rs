@@ -159,9 +159,10 @@ fn unsupported_formats_fail_before_searching() {
     let subjects = subjects(&inputs.subject);
     // NCBI blast_args.cpp:2845-2851 and tabular.cpp:70-99: a custom specification of
     // outfmt 0 and a token that is not a field name are ignored ("0 qseqid", "6 nosuchfield"
-    // run as "0" and "6"); a format that LOSAT's BLASTP does not write is rejected, and a
-    // delimiter that a field uses between its entries is NCBI's error (blast_args.cpp:2753-2792).
-    for outfmt in ["1", "6 delim=; qseqid staxids", "abc"] {
+    // run as "0" and "6"); SAM (17) is NCBI's error for blastp (blast_args.cpp:2876-2879; LOSAT's
+    // BLASTP writes every other format of NCBI's blastp since line RG T3a), and a delimiter that a
+    // field uses between its entries is NCBI's error (blast_args.cpp:2753-2792).
+    for outfmt in ["17", "6 delim=; qseqid staxids", "abc"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![

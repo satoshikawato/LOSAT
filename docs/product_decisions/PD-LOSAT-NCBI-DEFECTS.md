@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.25
+- Version: 1.26
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -47,7 +47,10 @@
   1.24 2026-11-14 (the rule-2 rejection of a query's id widened to the display id and to generated
   ids, line RG item T3a; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07,
   within the class the maintainer accepted with 1.10 on 2026-11-02);
-  1.25 2026-11-14 (exception 12, the `losat rpsbproc` exception: coordinate arithmetic past NCBI's
+  1.25 2026-11-14 (a version 5 database list that mixes databases with and without accession
+  tables is searched; the rejection of 1.9 keeps only a run whose reports look a parsed Seq-id up
+  in a file without the table, rule 3, line DBID item mixdb, Owner-delegated)
+  1.26 2026-11-14 (exception 12, the `losat rpsbproc` exception: coordinate arithmetic past NCBI's
   `int`, protein and nucleotide queries and the XML input alike; line PS item PS16-Q1, the Owner's
   Q1 = B with the Owner-delegated additions of line PS `DECISIONS.md` 58 and 59; `MapSegSet`'s segment
   end reproduced, rule 2)
@@ -402,9 +405,9 @@ asks the maintainer to accept it, as the PRs of versions 1.5 and 1.13 did.
     (`LOSAT/src/rpsbproc/archive_tests.rs`, the archive) and `numbers` (`LOSAT/src/report/serial/xml_reader_tests.rs`,
     the XML input).
 
-## Approved exception (`losat rpsbproc`, coordinate arithmetic past NCBI's `int`, version 1.25)
+## Approved exception (`losat rpsbproc`, coordinate arithmetic past NCBI's `int`, version 1.26)
 
-Version 1.25. The Owner decided on 2026-11-14 (line PS `DECISIONS.md` 57, Q1 = B, words 「Q1=B」)
+Version 1.26. The Owner decided on 2026-11-14 (line PS `DECISIONS.md` 57, Q1 = B, words 「Q1=B」)
 the question of PS16c's PR (#1081) and of PS16d's review: a hit whose coordinate overflows NCBI's
 `int` (`m_iFrom + COORDSBASE` and `m_iTo + COORDSBASE` of the DOMAINS and SUPERFAMILIES lines, with
 `Calculate`'s overlap sets of the hit), for protein and nucleotide queries alike, and the XML input's
@@ -422,7 +425,7 @@ after the delta review), `++alnResIdx` and `ParseAlignStrings`' `++start` of an 
 letters or more (rejected there: refusing such an `Hsp_qseq`, by its length or by the memory rule of
 `DECISIONS.md` 40, which measures what NCBI builds from a number or pattern in the input, not the
 strings the input carries). The PR (PS16-Q1) asks the maintainer to accept version
-1.25 with both parts. It moves the coordinate overflows that versions 1.16 and 1.17 rejected (rule 3)
+1.26 with both parts. It moves the coordinate overflows that versions 1.16 and 1.17 rejected (rule 3)
 here, and names the widening that PS16a made for protein queries.
 
 12. **rpsbproc's `int` coordinate arithmetic past `int`'s range.** rpsbproc 0.5.1 keeps positions in
@@ -459,7 +462,7 @@ here, and names the widening that PS16a made for protein queries.
       `SetData`'s `sorted[i] > seg.to + 1` (`common/impl/segset_impl.hpp:25-55`,
       `rpsbproc::data::site_data_segs`) and `GetMotifResPos`'s `for (SeqPos_t c = v->from; c <= v->to;
       ++c)` (`common/basedata.cpp:622`, `rpsbproc::sites::MotifState::motif_check`), whose `++c` past
-      2^31 - 1 would never end the loop in a wrap; LOSAT computed both in `i64` before version 1.25.
+      2^31 - 1 would never end the loop in a wrap; LOSAT computed both in `i64` before version 1.26.
 
     Evidence: for each kind, an input at the limit run by both 0.5.1 builds (the same bytes in all
     33 jobs) and a nearby input whose coordinates are moved away from the limit by a known shift;
@@ -525,7 +528,7 @@ here, and names the widening that PS16a made for protein queries.
 - `losat rpsbproc`, the end of an aligned segment when a site is mapped (`MapSegSet`'s `SeqPos_t end
   = m_vecSStarts[idx] + m_vecLens[idx] - 1`, `common/basedata.cpp:1180-1250`): an `unsigned int` sum
   stored in an `int`, which wraps for a segment that passes model position 2^31 - 1, so the sites
-  beyond it are not mapped. Version 1.25 (PS16-Q1) reproduces it; PS16a had added it in `i64` and
+  beyond it are not mapped. Version 1.26 (PS16-Q1) reproduces it; PS16a had added it in `i64` and
   printed a SITES line that NCBI does not (the PS16-Q1 review's oracle `mse`: `three.asn` with the
   subject starts of its 199908 hits and that model's site positions moved by K; at K = 2147483586 both
   0.5.1 builds and LOSAT print no SITES line, at K = 2147483576 all print it). Fixture rows
@@ -593,15 +596,22 @@ here, and names the widening that PS16a made for protein queries.
 - A version 5 database list (several names in `-db`, or the `DBLIST` of an alias file) that
   mixes databases with and without the accession table (`acc2oid`) of `makeblastdb
   -parse_seqids`: NCBI searches it, and before it writes a batch's reports (every format but
-  the archive) its BlastDb data loader looks each hit's Seq-id up in every LMDB file of the
-  list (`BlastFormatter_PreFetchSequenceData`, `CSeqDBLMDBSet::AccessionToOids`); a hit with
-  a parsed Seq-id then stops the run with `BLAST Database error: DB contains no accession
-  info.` (exit 2), after the outfmt 0 header and the earlier batches. Without such a hit, and
-  for outfmt 11, NCBI runs to the end; a taxid list stops it up front. LOSAT refuses the list
-  before the search (`the databases mix version 5 files with the accession table of
-  makeblastdb -parse_seqids ... and without it`; version 1.9, line DI-8 `DECISIONS.md` 31,
-  probe DI-8f F42, P14, H09, H15-H19): whether NCBI fails depends on the hits, and
-  reproducing that would need the lookup before every batch's reports in every program.
+  the Seq-annots and the archive) its BlastDb data loader looks each hit's Seq-id up in every
+  LMDB file of the list (`BlastFormatter_PreFetchSequenceData`,
+  `CSeqDBLMDBSet::AccessionToOids`); a hit whose Seq-id it looks up as a string (an accession, a
+  name, a giim; not a gi, not `gnl|BL_ORD_ID|n`) then stops the run with `BLAST Database error:
+  DB contains no accession info.` (exit 2), after the outfmt 0 header and the earlier batches. Where `PRE_FETCH_SEQS_LIMIT` turns the prefetch off, the reports write
+  `Unknown` for such a hit, and then the outfmt 0 alignments stop with that error, the tabular
+  formats crash (`CCoreException`, exit 255) and the JSON and XML2 documents end with its trace.
+  Without such a hit (a `gnl|BL_ORD_ID|n` of a database without parsed Seq-ids, or of one made
+  with `-input_type blastdb`, needs no accession table), and for the Seq-annots and the archive,
+  NCBI runs to the end (the Seq-annots too stop where `PRE_FETCH_SEQS_LIMIT=2147483647` prefetches
+  for them); `-seqidlist` and `-negative_seqidlist` of accessions stop it up front with the same
+  error. LOSAT searches such a list as NCBI does (line DBID item mixdb, probe of 4,080 runs:
+  6 programs, 20 formats, the prefetch on and off, 17 lists and alias files) and refuses a run
+  whose reports or prefetch look a parsed Seq-id up in a file without the table (`... whose
+  lookup in the database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0 stops)`).
+  Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31).
 
 - A negative seqid list that excludes a sequence (every id of its `.nos`/`.pos` record
   listed) of a volume that the database does not hold, while the database holds other
@@ -666,7 +676,7 @@ here, and names the widening that PS16a made for protein queries.
     byte of an empty string, and libstdc++ moves `SIZE_MAX` bytes: oracle `short2`, segmentation
     fault); a site at a residue outside its reading frame's translation other than its end
     (`operator[]` past the string; oracle `natoprot` and the review's `otherstrand`, where the two
-    builds print different bytes). Version 1.25 moved the arithmetic of the coordinates that
+    builds print different bytes). Version 1.26 moved the arithmetic of the coordinates that
     overflows NCBI's `int` (a subject interval's length, `m_iFrom + 1` and `m_iTo + 1` of a hit that
     starts or ends at 2^31 - 1, `pr - 1` of a residue at `INT_MIN`, `xres + 1` of a site's or motif's
     base) to exception 12. Every case is made by hand; none occurs in the rpstblastn archives of
@@ -683,13 +693,13 @@ here, and names the widening that PS16a made for protein queries.
     residues; oracles `n_qlen1`, `n_noqlen` and `p_qlenneg` end with `basic_string::replace` or
     `std::bad_alloc` by the address space), an `Hsp_qseq` of 2^31 letters or more that "see if NA"
     reads past its end (its `t0 = t1 + 1` stores a `size_t` of 2^31 or more in an `int`: a negative
-    index) or over which that loop starts over and never ends (2^32 - 1 letters or more; version 1.25,
+    index) or over which that loop starts over and never ends (2^32 - 1 letters or more; version 1.26,
     which widens the rest of such an `Hsp_qseq`, exception 12). (A REAL of more than 18
     significant digits, refused in 1.17, is read as NCBI reads it since 1.19.) Of NCBI's XML
     reader, LOSAT refuses the constructs that NCBI's BLAST XML writers never produce and that NCBI
     reads with state LOSAT does not port: attributes (skipped, with NCBI's handling of `xmlns` and
     `nil`), namespace prefixes (stripped), control characters in character data (replaced by `#`
-    with a warning that quotes NCBI's stack of the read). Version 1.25 moved the coordinate arithmetic
+    with a warning that quotes NCBI's stack of the read). Version 1.26 moved the coordinate arithmetic
     of an HSP that overflows NCBI's `int` (`- COORDSBASE` of an `Hsp_query-from`, `Hsp_query-to` or
     `Hsp_hit-from` of `-2147483648`; `m_iTo - m_iFrom + 1` of "see if NA"; `++hf` and `--hf` of
     `ParseAlignStrings`) to exception 12. Every case is made by hand; none occurs in the 2,310 jobs
@@ -824,8 +834,8 @@ would port:
 - A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
   each time it reads the definition line.
 - Titles NCBI takes from the tax ids, where a report shows them (outfmt 0, a printed tabular id
-  that replaces `lcl|Subject_N`): an empty title made from the taxonomy database's name of the
-  tax id, and a title whose end `x_AdjustProteinTitleSuffix` rewrites.
+  that replaces `lcl|Subject_N`): a title whose end `x_AdjustProteinTitleSuffix` rewrites (an
+  empty title LOSAT makes from the tax id's name as NCBI does since line RG item T5).
 
 ## Ported (rule 4)
 

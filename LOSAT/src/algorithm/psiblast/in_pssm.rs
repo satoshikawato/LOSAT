@@ -48,14 +48,24 @@ pub(crate) fn setup_messages(
     mode: CompositionMode,
     matrix_name: &str,
 ) -> Vec<String> {
-    let mut messages = Vec::new();
     if search.validation_error.is_some() || search.scores_error.is_some() {
-        return messages;
+        return Vec::new();
     }
+    pssm_setup_messages(&search.freq_ratios, mode, matrix_name)
+}
+
+/// `setup_messages` of a PSSM whose frequency ratios are `freq_ratios`: every column of the
+/// PSSM, also those that the search does not read (a later round of a `-query_loc` range reads
+/// the record's PSSM only up to the range's length, `PsiSearch::from_engine`; NCBI's check loops
+/// over `freq_ratios->GetCols()`, the record's columns).
+pub(crate) fn pssm_setup_messages(
+    freq_ratios: &[[f64; crate::core::blast_util::BLASTAA_SIZE]],
+    mode: CompositionMode,
+    matrix_name: &str,
+) -> Vec<String> {
+    let mut messages = Vec::new();
     if mode != CompositionMode::NoCompositionBasedStats
-        && crate::core::composition_adjustment::compo_scale::freq_ratios_all_zeros(
-            &search.freq_ratios,
-        )
+        && crate::core::composition_adjustment::compo_scale::freq_ratios_all_zeros(freq_ratios)
     {
         messages.push(format!(
             "Frequency ratios for PSSM are all zeros, frequency ratios for {matrix_name} will be used during traceback in composition based statistics"
@@ -94,12 +104,6 @@ pub(crate) fn check_in_pssm_options(args: &ResolvedBlastpArgs, psi: &Arc<PsiSear
         .is_some()
     {
         return Ok(());
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:191-198 (the SEG mask
-    // of the query, then `PsiBlastSetupScoreBlock`)
-    // The query's SEG mask changes the PSSM search's hits (DESIGN_ps4 §1.6).
-    if args.seg.params().is_some() || args.soft_masking {
-        bail!("-seg and -soft_masking true with -in_pssm are not supported by LOSAT's PSIBLAST");
     }
     // The outfmt 0, 6 and 7 reports (the others are item PS15b's).
     let choice = crate::blastinput::app::parse_formatting_string(&args.outfmt)?;

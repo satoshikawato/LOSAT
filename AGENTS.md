@@ -105,7 +105,7 @@ authoritative, current guidance for agent behavior in LOSAT.
      motif positions past its end counts as failed (version 1.14); coordinate
      arithmetic that overflows NCBI's signed `int` (a hit, site or motif at 2^31,
      an XML coordinate of -2^31, protein and nucleotide queries alike) is computed
-     as its mathematical value, NCBI's later conversions kept (version 1.25).
+     as its mathematical value, NCBI's later conversions kept (version 1.26).
      Deterministic NCBI
      results, even wrong-looking ones, are reproduced, not excepted; NCBI failures without a checkable valid result
      are explicit rejections. A sequence that a seqid list keeps without a

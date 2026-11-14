@@ -15,7 +15,10 @@ lines (some records carry a second one) stay as they are, the taxids come from t
 - `p4a` / `p4b`: version 4 protein without `-parse_seqids` (records of pa / pb).
 - `d1/g` and `d2/g`: version 5 `-parse_seqids` nucleotide of the records of na and nb, one base name in two directories.
 - `et`: version 5 `-parse_seqids` nucleotide of the records of na with an empty title.
+- `pgim`: version 5 protein, `-parse_seqids`, records 1-2 of tfp.faa whose only Seq-id is a giim (`gim|70001`, `gim|70002`;
+  line DBID mixdb, review 1 H1: NCBI's prefetch looks a giim up in every LMDB file of a list).
 - `al.nal`: an alias file (TITLE multidb alias of na, DBLIST na).
+- `mix_u.nal`: an alias file of `na nnp` whose FIRST_OID 9 and LAST_OID 17 keep the sequences of nnp alone (line DBID mixdb).
 - `sl.txt`: a seqid list of the first accession of na, nb, pa and pb.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
@@ -72,6 +75,15 @@ def write_set(base, records, taxids):
                         f.write(f"{acc} {taxids[acc]}\n")
 
 
+def make_pgim(binary, tfp):
+    """Writes pgim.fa (records 1-2 of tfp.faa, each under a giim id before its title) and builds pgim."""
+    records = [[f">gim|{70001 + i} " + header[1:].split(" ", 1)[1].split("\x01")[0].rstrip("\n") + "\n", lines]
+               for i, (header, lines) in enumerate(tfp[:2])]
+    write_set("pgim", records, None)
+    makeblastdb(binary, "-in", "pgim.fa", "-dbtype", "prot", "-out", "pgim", "-parse_seqids", "-blastdb_version", "5",
+                "-title", "multidb pgim")
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -95,6 +107,7 @@ def main(binary):
         makeblastdb(binary, "-in", base + ".fa", "-dbtype", kind, "-out", base, "-parse_seqids", "-blastdb_version", "5",
                     "-taxid_map", base + ".map", "-title", "multidb " + base)
     makeblastdb(binary, "-in", "nnp.fa", "-dbtype", "nucl", "-out", "nnp", "-blastdb_version", "5", "-title", "multidb nnp")
+    make_pgim(binary, tfp)
     for base, kind in (("n4a", "nucl"), ("n4b", "nucl"), ("p4a", "prot"), ("p4b", "prot")):
         makeblastdb(binary, "-in", base + ".fa", "-dbtype", kind, "-out", base, "-blastdb_version", "4",
                     "-title", "multidb " + base)
@@ -104,12 +117,14 @@ def main(binary):
     makeblastdb(binary, "-in", "et.fa", "-dbtype", "nucl", "-out", "et", "-parse_seqids", "-blastdb_version", "5",
                 "-title", "")
     for name in ("pa.pjs", "pb.pjs", "p4a.pjs", "p4b.pjs", "na.njs", "nb.njs", "nnp.njs", "n4a.njs", "n4b.njs",
-                 "d1/g.njs", "d2/g.njs", "et.njs"):
+                 "d1/g.njs", "d2/g.njs", "et.njs", "pgim.pjs"):
         path = os.path.join(HERE, name)
         if os.path.exists(path):
             os.remove(path)
     with open(os.path.join(HERE, "al.nal"), "w") as f:
         f.write("TITLE multidb alias of na\nDBLIST na\n")
+    with open(os.path.join(HERE, "mix_u.nal"), "w") as f:
+        f.write("TITLE multidb mix_u: the sequences of nnp in a list with na\nDBLIST na nnp\nFIRST_OID 9\nLAST_OID 17\n")
     firsts = [accessions(sets[b][0][0][0])[0] for b in ("na", "nb", "pa", "pb")]
     with open(os.path.join(HERE, "sl.txt"), "w") as f:
         f.write("".join(acc + "\n" for acc in firsts))

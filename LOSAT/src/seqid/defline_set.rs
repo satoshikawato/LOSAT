@@ -364,16 +364,44 @@ impl DeflineSet {
     /// `x_GetTaxDefline`): the first line that holds `target` (`s_SeqDB_SeqIdIn`, without the
     /// local form that `bioseq_defline` also takes) first, then the others in their stored order;
     /// a taxid of several lines comes once for each (each is a lookup of the volume's cache).
-    pub fn taxonomy_lookups(&self, target: &ParsedSeqId) -> Vec<i32> {
-        let front = self
-            .deflines
-            .iter()
-            .position(|defline| seqid_in(&defline.ids, target));
-        front
-            .into_iter()
-            .chain((0..self.deflines.len()).filter(|&index| Some(index) != front))
-            .filter_map(|index| self.deflines[index].taxid.filter(|&taxid| taxid > 0))
-            .collect()
+    /// Without a target (`GetBioseq(oid)`: blastdbcmd without `-target_only`, the maskers, a
+    /// sequence read by its ordinal id) the stored order.
+    pub fn taxonomy_lookups(&self, target: Option<&ParsedSeqId>) -> Vec<i32> {
+        self.taxonomy_order(target).collect()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1004-1011
+    // ```c++
+    //         case CSeqdesc::e_Source:
+    //             {
+    //             if ((needed_desc_choices & fSource) != 0) {
+    //                 m_Source.Reset(&desc_it->GetSource());
+    //                 // take first, then skip remainder
+    //                 needed_desc_choices &= ~fSource;
+    //             }
+    // ```
+    /// The taxid of the Bioseq's first source, whose name `CDeflineGenerator` makes an empty title
+    /// of (`report::defline::BioseqFacts::taxname`): the first of `taxonomy_lookups(target)`, the
+    /// one owner of that order for every reader (the search's headers, blastdbcmd, the maskers).
+    /// With `-target_only` it is taken from every definition line the filter keeps, not from the
+    /// target's line alone that the Bioseq's ids and title come from.
+    pub fn first_source_taxid(&self, target: Option<&ParsedSeqId>) -> Option<i32> {
+        self.taxonomy_order(target).next()
+    }
+
+    /// `taxonomy_lookups` as an iterator.
+    fn taxonomy_order(&self, target: Option<&ParsedSeqId>) -> TaxonomyOrder<'_> {
+        let front = target.and_then(|target| {
+            self.deflines
+                .iter()
+                .position(|defline| seqid_in(&defline.ids, target))
+        });
+        TaxonomyOrder {
+            deflines: &self.deflines,
+            front,
+            front_given: false,
+            next: 0,
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4741-4785
@@ -1439,6 +1467,46 @@ fn pdb_match(a: &PdbSeqId, b: &PdbSeqId) -> bool {
         }
     }
     a.mol == b.mol
+}
+
+/// The positive taxids of a sequence's definition lines in the order of NCBI's lookups
+/// (`DeflineSet::taxonomy_order`): the line `front` first, then the others in their stored order.
+/// A plain loop over the lines (no iterator adapters: the readers ask its first item of every
+/// sequence they read).
+#[derive(Clone)]
+pub(crate) struct TaxonomyOrder<'a> {
+    deflines: &'a [BlastDefline],
+    front: Option<usize>,
+    front_given: bool,
+    next: usize,
+}
+
+impl Iterator for TaxonomyOrder<'_> {
+    type Item = i32;
+
+    fn next(&mut self) -> Option<i32> {
+        if !self.front_given {
+            self.front_given = true;
+            if let Some(taxid) = self
+                .front
+                .and_then(|index| self.deflines[index].taxid)
+                .filter(|&taxid| taxid > 0)
+            {
+                return Some(taxid);
+            }
+        }
+        while let Some(defline) = self.deflines.get(self.next) {
+            let index = self.next;
+            self.next += 1;
+            if Some(index) == self.front {
+                continue;
+            }
+            if let Some(taxid) = defline.taxid.filter(|&taxid| taxid > 0) {
+                return Some(taxid);
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]

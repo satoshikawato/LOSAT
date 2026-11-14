@@ -385,14 +385,19 @@ fn see_if_na_counts_and_refuses() {
         panic!("refused");
     };
     assert!(message.contains("loop reads past its end"), "{message}");
-    let endless = GappedQuery {
-        len: (1usize << 32) + 3,
-        gaps: vec![(1usize << 32) - 1],
-    };
-    let Err(ProcessError::Unsupported(message)) = see_if_na(&endless, 0) else {
-        panic!("refused");
-    };
-    assert!(message.contains("never ends"), "{message}");
+    // A length of 2^32 letters or more exists only where `usize` has 64 bits (the lib tests are
+    // also built for wasm32, where these constants overflow).
+    #[cfg(target_pointer_width = "64")]
+    {
+        let endless = GappedQuery {
+            len: (1usize << 32) + 3,
+            gaps: vec![(1usize << 32) - 1],
+        };
+        let Err(ProcessError::Unsupported(message)) = see_if_na(&endless, 0) else {
+            panic!("refused");
+        };
+        assert!(message.contains("never ends"), "{message}");
+    }
 }
 
 // `m_dimTranslated[rfidx][qf] = '\0'` at the string's length is the defined write of the

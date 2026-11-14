@@ -1,0 +1,155 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "multidb pa; noacc_v5 (no parsed Seq-ids)",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 733
+        },
+        {
+          id str "blast_score",
+          value int 733
+        },
+        {
+          id str "e_value",
+          value real { 205383209819339, 10, -119 }
+        },
+        {
+          id str "bit_score",
+          value real { 286959521427464, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 142
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 142
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_1",
+          swissprot {
+            accession "P69905",
+            release "reviewed",
+            version 2
+          }
+        },
+        starts {
+          0,
+          0
+        },
+        lens {
+          142
+        },
+        strands {
+          unknown,
+          unknown
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 721
+        },
+        {
+          id str "blast_score",
+          value int 721
+        },
+        {
+          id str "e_value",
+          value real { 11025383206117, 10, -116 }
+        },
+        {
+          id str "bit_score",
+          value real { 282337126516456, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 140
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 141
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 992957746478873, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_1",
+          swissprot {
+            accession "P01923",
+            release "reviewed",
+            version 1
+          }
+        },
+        starts {
+          1,
+          0
+        },
+        lens {
+          141
+        },
+        strands {
+          unknown,
+          unknown
+        }
+      }
+    }
+  }
+}

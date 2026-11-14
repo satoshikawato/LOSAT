@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { toProgramDescription } from 'losat';
 import { CUSTOM_OUTPUT, type ProgramId } from 'losat/domain';
 import {
+  BLASTN_DATABASE_MASK_FLAGS,
   buildArgv,
   commandWords,
   DATABASE_FLAGS,
@@ -111,6 +112,22 @@ describe('buildArgv', () => {
         expect(extra(program.id, [`${flag}=x`]), `${program.id} ${flag}`).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
       }
     }
+  });
+
+  // The BLASTN CLI's database masks: its parser would name -subject, which the browser sets
+  // itself (WA-FM-04); the other modes' engines refuse them by name.
+  it('refuses the database masks of BLASTN, also written -flag=value', () => {
+    for (const flag of BLASTN_DATABASE_MASK_FLAGS) {
+      expect(extra('blastn', [flag, '11']), flag).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
+      expect(extra('blastn', [`${flag}=dust`]), flag).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
+    }
+    expect(extra('blastp', ['-db_soft_mask', '21'])()).toEqual(['blastp', '-query', 'q.fa', '-subject', 's.fa', '-db_soft_mask', '21']);
+  });
+
+  it("lists BLASTN's database masks in its engine's options (describe)", () => {
+    const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
+    const flags = toProgramDescription(described['blastn']).parameters.map((option) => option.flag);
+    expect(flags).toEqual(expect.arrayContaining([...BLASTN_DATABASE_MASK_FLAGS]));
   });
 
   it("lists the database options of every mode's engine (describe)", () => {

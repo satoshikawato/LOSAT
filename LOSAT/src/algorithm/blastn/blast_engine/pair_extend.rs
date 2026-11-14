@@ -1,7 +1,8 @@
 //! The steps of the offset pairs of a blastn subject chunk's two-stage scan, as
-//! `search_query_batch`'s `collect_prelim_hits_for_chunk` runs them for each batch of pairs its
-//! scan collects, in the order of the pairs, on one thread (`extend_offset_pairs`): for each pair
-//! the word extension of the lookup table hit of a two-stage table (`TwoStageLookup`) to
+//! `two_stage_scan::scan_two_stage_lookup` (the two-stage branch of
+//! `prelim_subject::prelim_chunk_hits`) runs them for each batch of pairs its scan collects, in the
+//! order of the pairs, on one thread (`extend_offset_pairs`): for each pair the word extension of
+//! the lookup table hit of a two-stage table (`TwoStageLookup`) to
 //! `word_length` letters (`word_extend_pair`), the diagonal's last hit, the word type, the
 //! off-diagonal search of a single word in two-hit mode (`off_diagonal_found`, which the scan of
 //! the other tables, `na_lookup` and `pv_direct_lookup`, calls too: `na_scan::scan_na_lookup`),
@@ -56,8 +57,8 @@ use crate::algorithm::blastn::lookup::TwoStageLookup;
 /// tables), whether its aligned one-byte form applies, whether the chunk is masked, the word and
 /// lookup word lengths, the packed subject, the query with its sentinels and the switch of the
 /// debug counters; then what the other steps read, in groups below. Built once per chunk by
-/// `collect_prelim_hits_for_chunk` before the scan, with the names there; every field is a shared
-/// reference or a `Copy` value.
+/// `two_stage_scan::scan_two_stage_lookup` before the scan, with the names there; every field is a
+/// shared reference or a `Copy` value.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1052-1060,1064,1081
 /// (`s_BlastNaExtend`) and :651,656,658 (`s_BlastnDiagTableExtendInitialHit`; the hash's
@@ -142,9 +143,9 @@ pub(super) struct PairExtendInputs<'a> {
 /// What the steps write: the chunk's initial hits, the diagonal table (the array's levels and
 /// lengths, or the hash), and the debug counters (the seeds in the debug window, the word
 /// extension's left and right steps, the ungapped extensions, the hits under the cutoff and the
-/// hits saved). Built once per chunk by `collect_prelim_hits_for_chunk` after `PairExtendInputs`,
-/// from its scratch and its counters (references only, the types the steps had as a closure), and
-/// held by the scan's callbacks for the whole scan.
+/// hits saved). Built once per chunk by `two_stage_scan::scan_two_stage_lookup` after
+/// `PairExtendInputs`, from its scratch and its counters (references only, the types the steps had
+/// as a closure), and held by the scan's callbacks for the whole scan.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1058-1059 (`s_BlastNaExtend`),
 /// :641-642 (`s_BlastnDiagTableExtendInitialHit`) and :809 (`s_BlastnDiagHashExtendInitialHit`)
@@ -203,8 +204,9 @@ pub(super) struct PairExtendState<'s> {
 ///     }
 ///     return hits_extended;
 /// ```
-/// No `#[inline]`: as a closure of `collect_prelim_hits_for_chunk` the steps were an out-of-line
-/// function already (the scan calls them from 11 places).
+/// No `#[inline]`: as a closure of `collect_prelim_hits_for_chunk` (now
+/// `prelim_subject::prelim_chunk_hits`) the steps were an out-of-line function already (the scan
+/// calls them from 11 places).
 pub(super) fn extend_offset_pairs(
     x: &PairExtendInputs<'_>,
     state: &mut PairExtendState<'_>,

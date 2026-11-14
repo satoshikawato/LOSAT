@@ -62,7 +62,11 @@
 //! The applications whose search is another program's write their own requests through the same
 //! cursor (`options::RequestKind`): psiblast with a FASTA query one per query (BLASTP's batches
 //! of one query, or `psi_round`'s rounds, before the query's first round), rpsblast BLASTP's,
-//! rpstblastn BLASTX's.
+//! rpstblastn BLASTX's. A PSSM query (psiblast's and tblastn's `-in_pssm`) is one query whose
+//! request holds the PSSM as the application read it (`requests::RunRequests::with_pssm_query`).
+//! NCBI makes that request only with `-db`: with `-subject` its `SaveSearchStrategy` stops the run
+//! with "Remote PSI-BL2SEQ is not supported", which the programs raise where NCBI does, after the
+//! prolog (`blastp::blast_engine::psiblast_stop_at_pssm_query`, `tblastn::tblastn_app`).
 
 use std::io::Write;
 use std::ops::Range;
@@ -349,7 +353,7 @@ impl StrategyExport {
                     &shared.request,
                     request,
                     &sets,
-                    shared.options.database_list(),
+                    &shared.options.strategy_database_params(),
                 );
                 let written = out.finish();
                 // The file is complete after every request: the command line's exit does not run
@@ -462,7 +466,7 @@ mod tests {
         lcase_masks: &'a [MaskEntry],
     ) -> RequestInputs<'a> {
         RequestInputs {
-            queries,
+            queries: crate::report::archive::writer::RequestQueries::Bioseqs(queries),
             subjects: &[],
             required: None,
             lcase_masks,
@@ -675,6 +679,60 @@ mod tests {
             |searched| crate::report::archive::tests::search_space(&handle.request_sets(searched));
         assert_eq!(space(None), None);
         assert_eq!(space(Some(5)), Some(0));
+    }
+
+    /// The request of a PSSM query (`RequestQueries::Pssm`) as NCBI BLAST+ 2.17.0 writes it: the
+    /// `PssmWithParameters` as read, at the depth of `queries pssm` (its strings and octets wrapped
+    /// there), with psiblast's options and `Web_StepNumber` (`psiblast -in_pssm <rnd> -db
+    /// tests/db_search/paja`, fixture row `psiblast.pssm.db.itdef`) and PSI-TBLASTN's (`tblastn
+    /// -in_pssm <rnd> -db tests/db_search/tslice`, row `tblastn.db.in_pssm`).
+    #[test]
+    fn a_pssm_query_is_the_pssm_as_read() {
+        let fixture = |path: &str| {
+            std::fs::read(format!("{}/tests/{path}", env!("CARGO_MANIFEST_DIR"))).unwrap()
+        };
+        let pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(&fixture(
+            "fixtures/db_search/db.ps.asn.rnd.6.asn",
+        ))
+        .unwrap();
+        for (kind, database, frozen) in [
+            (
+                crate::report::archive::options::RequestKind::Psiblast,
+                "tests/db_search/paja",
+                "psiblast.pssm.db.itdef.ss",
+            ),
+            (
+                crate::report::archive::options::RequestKind::PsiTblastn,
+                "tests/db_search/tslice",
+                "tblastn.db.in_pssm.ss",
+            ),
+        ] {
+            let sink = Sink::default();
+            let mut inputs = OptionInputs::new(kind, "blastp");
+            if kind == crate::report::archive::options::RequestKind::Psiblast {
+                inputs.num_iterations = Some(1);
+            }
+            let export = StrategyExport::new(
+                Box::new(sink.clone()),
+                &inputs,
+                Some(database),
+                "TEST",
+                OptionsHandle::default(),
+            )
+            .unwrap();
+            let request = RequestInputs {
+                queries: crate::report::archive::writer::RequestQueries::Pssm(&pssm),
+                subjects: &[],
+                required: None,
+                lcase_masks: &[],
+            };
+            assert!(export.write_request(0..1, &request).unwrap());
+            assert_eq!(
+                sink.text(),
+                String::from_utf8(fixture(&format!("fixtures/strategy/{frozen}"))).unwrap(),
+                "{kind:?}"
+            );
+        }
     }
 
     /// `-` and a file that is also `-out` are refused; a path that cannot be created is NCBI's

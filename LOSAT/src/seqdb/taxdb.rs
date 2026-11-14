@@ -773,7 +773,25 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb")
     }
 
-    fn temp_dir(tag: &str) -> PathBuf {
+    /// A directory made for one test, removed (with what is in it) when it is dropped: a test
+    /// drops it after the `TaxDb` and the `SearchPath` that read it.
+    struct TempDir(PathBuf);
+
+    impl std::ops::Deref for TempDir {
+        type Target = Path;
+
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn temp_dir(tag: &str) -> TempDir {
         static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let dir = std::env::temp_dir().join(format!(
             "losat-taxdb-{tag}-{}-{}",
@@ -781,13 +799,28 @@ mod tests {
             COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        dir
+        TempDir(dir)
+    }
+
+    /// A search path with the empty current directory it was made with, which is removed with it.
+    struct Searching {
+        search: SearchPath,
+        _cwd: TempDir,
+    }
+
+    impl std::ops::Deref for Searching {
+        type Target = SearchPath;
+
+        fn deref(&self) -> &SearchPath {
+            &self.search
+        }
     }
 
     /// A search path whose only useful directory is `dir` (`BLASTDB`), run from an empty current directory.
-    fn path_of(dir: &Path) -> SearchPath {
+    fn path_of(dir: &Path) -> Searching {
         let cwd = temp_dir("cwd");
-        SearchPath::new(&cwd, Some(dir.as_os_str()), None).unwrap()
+        let search = SearchPath::new(&cwd, Some(dir.as_os_str()), None).unwrap();
+        Searching { search, _cwd: cwd }
     }
 
     fn open_fixture(variant: &str) -> Result<TaxDb, SeqDbError> {
@@ -813,11 +846,19 @@ mod tests {
         (index, data)
     }
 
-    fn write_db(index: &[u8], data: &[u8]) -> PathBuf {
+    fn write_db(index: &[u8], data: &[u8]) -> TempDir {
         let dir = temp_dir("db");
         std::fs::write(dir.join("taxdb.bti"), index).unwrap();
         std::fs::write(dir.join("taxdb.btd"), data).unwrap();
         dir
+    }
+
+    /// Writes a taxdb and opens it: the directory is returned first, so that it is dropped after
+    /// the open database.
+    fn open_built(index: &[u8], data: &[u8]) -> (TempDir, TaxDb) {
+        let dir = write_db(index, data);
+        let db = TaxDb::open(&path_of(&dir)).unwrap();
+        (dir, db)
     }
 
     fn names_of(db: &TaxDb, taxid: i32) -> (Option<TaxNames>, Vec<String>) {
@@ -913,7 +954,7 @@ mod tests {
             let borrowed: Vec<(i32, &[u8])> =
                 rows.iter().map(|(t, r)| (*t, r.as_slice())).collect();
             let (index, data) = build(&borrowed);
-            let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+            let (_dir, db) = open_built(&index, &data);
             for i in 0..n {
                 let names = names_of(&db, 10 * i + 5)
                     .0
@@ -1032,7 +1073,7 @@ mod tests {
             (9, b"a\tb\tc\td\0"),
         ];
         let (index, data) = build(&rows);
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         assert_eq!(four(&names_of(&db, 1).0.unwrap()), [b"a", b"b", b"c", b"d"]);
         assert_eq!(names_of(&db, 2).0, None);
         assert_eq!(names_of(&db, 3).0, None);
@@ -1061,7 +1102,7 @@ mod tests {
             (b"", false),
         ] {
             let (index, data) = build(&[(1, b"x\ty\tz\tw"), (2, record)]);
-            let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+            let (_dir, db) = open_built(&index, &data);
             assert_eq!(names_of(&db, 2).0.is_some(), found, "{record:?}");
             assert!(names_of(&db, 1).0.is_some());
         }
@@ -1072,7 +1113,7 @@ mod tests {
         let (mut index, data) = build(&[(1, b"a\tb\tc\td"), (2, b"e\tf\tg\th")]);
         let at = 24 + 8 + 4; // offset of the second entry
         index[at..at + 4].copy_from_slice(&be(data.len() as u32 + 10));
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         let (names, messages) = names_of(&db, 2);
         assert_eq!(names, None);
         assert_eq!(messages, [MSG_OFFSET_ERROR]);
@@ -1080,7 +1121,7 @@ mod tests {
         assert_eq!(names_of(&db, 2).1, [MSG_OFFSET_ERROR]);
         // An offset equal to the size is an empty record: not found, no message.
         index[at..at + 4].copy_from_slice(&be(data.len() as u32));
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         assert_eq!(names_of(&db, 2), (None, vec![]));
     }
 
@@ -1132,7 +1173,7 @@ mod tests {
         let (mut index, data) = build(&rows);
         let at = 24 + 8 * 4 + 4;
         index[at..at + 4].copy_from_slice(&be(data.len() as u32 + 10));
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         assert_eq!(names_of(&db, 50), (None, vec![]));
         assert_eq!(db.offset_error_taxid().unwrap(), None);
         // Sorted, the same entry writes it.
@@ -1140,7 +1181,7 @@ mod tests {
         let (mut index, data) = build(&rows);
         let at = 24 + 8 * 2 + 4;
         index[at..at + 4].copy_from_slice(&be(data.len() as u32 + 1));
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         assert_eq!(db.offset_error_taxid().unwrap(), Some(50));
     }
 
@@ -1153,7 +1194,7 @@ mod tests {
         let off2 = 24 + 8 + 4;
         index[off1..off1 + 4].copy_from_slice(&be(8));
         index[off2..off2 + 4].copy_from_slice(&be(0));
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         assert_eq!(names_of(&db, 1), (None, vec![]));
         // Entry 2 is now [0, 16): both records, the kingdom takes the rest.
         let names = names_of(&db, 2).0.unwrap();
@@ -1174,7 +1215,7 @@ mod tests {
         let off3 = 24 + 16 + 4;
         // Entry 2 ends 10 bytes after the file: zero padding belongs to its kingdom.
         index[off3..off3 + 4].copy_from_slice(&be(data.len() as u32 + 10));
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         let names = names_of(&db, 2).0.unwrap();
         let mut kingdom = b"h".to_vec();
         kingdom.extend(*b"i\tj\tk\tl");
@@ -1184,7 +1225,7 @@ mod tests {
         assert_eq!(names_of(&db, 3), (None, vec![MSG_OFFSET_ERROR.to_string()]));
         // Past the page: refused. Entry 1 is fine.
         index[off3..off3 + 4].copy_from_slice(&be(MAP_PAGE as u32 + 1));
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         let mut messages = Vec::new();
         assert!(matches!(
             db.names(2, &mut messages),
@@ -1205,7 +1246,7 @@ mod tests {
             (60, b"a\tb\tc\td60"),
         ];
         let (index, data) = build(&rows);
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         let found: Vec<i32> = [10, 20, 40, 50, 60]
             .into_iter()
             .filter(|t| names_of(&db, *t).0.is_some())
@@ -1234,7 +1275,8 @@ mod tests {
     #[test]
     fn lazy_handle_opens_once_and_hands_over_the_open_messages_once() {
         let dir = fixture_dir().join("bad_magic");
-        let lazy = LazyTaxDb::new(path_of(&dir));
+        let searching = path_of(&dir);
+        let lazy = LazyTaxDb::new(searching.search.clone());
         assert!(!lazy.is_open());
         let mut messages = Vec::new();
         assert_eq!(lazy.names(9606, &mut messages).unwrap(), None);
@@ -1243,7 +1285,8 @@ mod tests {
         assert_eq!(lazy.names(9606, &mut messages).unwrap(), None);
         assert_eq!(messages, [MSG_WRONG_MAGIC]);
         // A missing database: opened at the first name, silent, finds nothing.
-        let lazy = LazyTaxDb::new(path_of(&fixture_dir().join("nonexistent")));
+        let searching = path_of(&fixture_dir().join("nonexistent"));
+        let lazy = LazyTaxDb::new(searching.search.clone());
         assert!(!lazy.is_open());
         for _ in 0..2 {
             assert_eq!(names_of_lazy(&lazy, 9606), (None, vec![]));
@@ -1440,8 +1483,7 @@ mod tests {
         assert_eq!(open_fixture("bad_magic").unwrap().entry_count(), 0);
         // 70,000 entries (more than one block of the index) and about 20 MiB of records (more
         // than two windows of the data), one with a byte >= 0x80 in its name near the end.
-        let dir = std::env::temp_dir().join(format!("losat_taxdb_walk_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = temp_dir("walk");
         let n = 70_000u32;
         let mut index = Vec::new();
         index.extend(MAGIC.to_be_bytes());
@@ -1465,6 +1507,5 @@ mod tests {
         let unwritable = |name: &[u8]| name.iter().any(|&b| b >= 0x80);
         assert!(db.any_lookup_may_refuse(&unwritable).unwrap());
         assert!(!db.any_lookup_may_refuse(&|_| false).unwrap());
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

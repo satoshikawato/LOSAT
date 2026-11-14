@@ -61,6 +61,18 @@ pub(crate) struct TblastxDatabase {
 }
 
 impl TblastxDatabase {
+    /// LOSAT's refusal of mixed accession tables (`shared::check_accession_tables`), with the
+    /// program's other limits.
+    pub(crate) fn check_accession_tables(&self) -> Result<()> {
+        shared::check_accession_tables(&self.db, PROGRAM)
+    }
+
+    /// The OIDs of the database's ordinal ids, which name the reported sequences without
+    /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
+    pub(crate) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
+        self.db.oid_map()
+    }
+
     /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
     pub(crate) fn showing_gis(mut self, show_gis: bool) -> Self {
         self.db.set_reports_show_gis(show_gis);
@@ -86,7 +98,7 @@ impl TblastxDatabase {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed =
-            shared::restrict_database(&mut db, name, list, diagnostics, settings, PROGRAM)?;
+            shared::restrict_database(&mut db, name, list, None, diagnostics, settings, PROGRAM)?;
         // TBLASTX has no Gumbel block: NCBI's average subject length divides by the statistics'
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;
@@ -629,7 +641,7 @@ pub(crate) fn reported_subjects(
         records.push(FastaRecord {
             // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
             // (line DI-8).
-            local_id: format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
+            local_id: database.db.oid(ordinal).fasta_id(),
             title,
             sequence: Vec::new(),
             warnings: Vec::new(),
@@ -674,13 +686,19 @@ pub(crate) fn reported_subjects(
 }
 
 impl ReportedSubjects {
-    /// The subject ids of the tabular reports, by rank: the first word of the stored title, or
-    /// the id of a sequence with parsed Seq-ids (`common::database::tabular_subject_ids`; an id
-    /// LOSAT cannot write is empty where no tabular report `reads` the subject).
-    pub(crate) fn tabular_subject_ids(&self, reads: bool) -> Result<Vec<Arc<[u8]>>> {
+    /// The subject ids of the tabular reports (`saccver`), by rank: the first word of the stored
+    /// title or the general id's `BL_ORD_ID:n` (`oids`), or the id of a sequence with parsed
+    /// Seq-ids (`common::database::tabular_subject_ids`; an id LOSAT cannot write is empty where no
+    /// tabular report `reads` the subject).
+    pub(crate) fn tabular_subject_ids(
+        &self,
+        oids: crate::seqdb::OidMap<'_>,
+        reads: bool,
+    ) -> Result<Vec<Arc<[u8]>>> {
         shared::tabular_subject_ids(
             &self.records,
             &self.ordinals,
+            oids,
             &self.parsed,
             &self.sources,
             false,

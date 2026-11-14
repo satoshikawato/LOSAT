@@ -674,53 +674,55 @@ fn write_blastx_tax_report(
         })
         .collect();
     // The HSPs of each query that the tabular rows show (`write_blastx_tabular`).
-    let tax_queries: Vec<TaxQuery<'_>> = batches
-        .iter()
-        .flat_map(|batch| {
-            batch
-                .queries
-                .iter()
-                .enumerate()
-                .map(move |(qidx, lists)| (batch.query_ordinal + qidx, lists))
-        })
-        .zip(&titles)
-        .map(|((ordinal, lists), title)| TaxQuery {
-            title: title.as_bytes(),
-            length: queries[ordinal].placement().length,
-            hsps: lists[..lists.len().min(options.shown_lists())]
-                .iter()
-                .flat_map(|list| {
-                    list.hsps
-                        .iter()
-                        .filter(|hsp| has_seqalign(hsp, options.gapped))
-                        .map(move |hsp| TaxHsp {
-                            subject: list.oid,
-                            evalue: hsp.evalue,
-                            bit_score: hsp.bit_score,
-                        })
+    let tax_queries: Vec<TaxQuery<'_>> =
+        batches
+            .iter()
+            .flat_map(|batch| {
+                batch.queries.iter().enumerate().map(move |(qidx, lists)| {
+                    (batch.query_ordinal + qidx, lists, batch.search_skipped)
                 })
-                .collect(),
-        })
-        .collect();
+            })
+            .zip(&titles)
+            .map(|((ordinal, lists, skipped), title)| TaxQuery {
+                title: title.as_bytes(),
+                length: queries[ordinal].placement().length,
+                // A query of a batch that NCBI did not search has no Seq-align-set.
+                hsps: (!skipped).then(|| {
+                    lists[..lists.len().min(options.shown_lists())]
+                        .iter()
+                        .flat_map(|list| {
+                            list.hsps
+                                .iter()
+                                .filter(|hsp| has_seqalign(hsp, options.gapped))
+                                .map(move |hsp| TaxHsp {
+                                    subject: list.oid,
+                                    evalue: hsp.evalue,
+                                    bit_score: hsp.bit_score,
+                                })
+                        })
+                        .collect()
+                }),
+            })
+            .collect();
     let parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>] = match shown {
         ShownSubjects::Fasta { parsed, .. } => &parsed.subjects,
         ShownSubjects::Database { reported, .. } => reported.parsed(),
     };
-    let plain = |oid: usize| match shown {
+    let plain = |s_idx: usize| match shown {
         ShownSubjects::Fasta { .. } => TaxPlain::Record {
-            local_id: subjects[oid].internal_id.as_bytes(),
-            title: subjects[oid].title.as_bytes(),
+            local_id: subjects[s_idx].internal_id.as_bytes(),
+            title: subjects[s_idx].title.as_bytes(),
         },
         ShownSubjects::Database { reported, .. } => TaxPlain::Stored {
-            ordinal: reported.ordinal(oid),
+            oid: reported.oid(s_idx),
             title: reported
                 .stored_titles()
-                .get(oid)
+                .get(s_idx)
                 .map_or(&[][..], |title| title),
-            source: crate::report::pairwise::stored_source(reported.sources(), oid as u32),
+            source: crate::report::pairwise::stored_source(reported.sources(), s_idx as u32),
             taxid: reported
-                .tabular_taxonomy(oid)
-                .map_or_else(|| reported.taxid(oid), |taxonomy| taxonomy.taxid),
+                .tabular_taxonomy(s_idx)
+                .map_or_else(|| reported.taxid(s_idx), |taxonomy| taxonomy.taxid),
         },
     };
     // A `-subject` search's report looks names up in the run's database.

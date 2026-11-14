@@ -14,7 +14,8 @@ use crate::blastinput::app::CompositionMode;
 /// The warnings of `PsiBlastSetupScoreBlock` for a PSSM search in the composition-based mode
 /// `mode` with the matrix `matrix_name` (the frequency ratios all zero when the statistics are on;
 /// modes 2 and 3 reset to 1), which the query's warning line carries. None for a PSSM that
-/// `CPsiBlastValidate::Pssm` stops before.
+/// `CPsiBlastImpl`'s constructor stops before (`CPsiBlastValidate::Pssm`, the PSSM engine's
+/// scores).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:179-207
 /// ```c++
@@ -48,7 +49,7 @@ pub(crate) fn setup_messages(
     matrix_name: &str,
 ) -> Vec<String> {
     let mut messages = Vec::new();
-    if search.validation_error.is_some() {
+    if search.validation_error.is_some() || search.scores_error.is_some() {
         return messages;
     }
     if mode != CompositionMode::NoCompositionBasedStats
@@ -83,7 +84,17 @@ pub(crate) fn position_based_mode(mode: CompositionMode) -> CompositionMode {
 
 /// LOSAT's refusals of a psiblast `-in_pssm` search that the PSSM search does not run yet
 /// (DECISIONS 11 of line PS), checked when the options have been processed, before the search.
+/// A run that NCBI stops before the search (`PsiSearch::stop_before_search`: the search strategy's
+/// "Remote PSI-BL2SEQ" with `-subject`, NCBI's check of the PSSM, the PSSM engine's scores) writes
+/// the prolog and NCBI's error, whatever its format or query (line RG F1b-2, review 4 R5-6): these
+/// refusals of the search's results do not apply to it.
 pub(crate) fn check_in_pssm_options(args: &ResolvedBlastpArgs, psi: &Arc<PsiSearch>) -> Result<()> {
+    if psi
+        .stop_before_search(args.strategy.is_some(), args.db.is_some())
+        .is_some()
+    {
+        return Ok(());
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:191-198 (the SEG mask
     // of the query, then `PsiBlastSetupScoreBlock`)
     // The query's SEG mask changes the PSSM search's hits (DESIGN_ps4 §1.6).
@@ -105,11 +116,13 @@ pub(crate) fn check_in_pssm_options(args: &ResolvedBlastpArgs, psi: &Arc<PsiSear
     // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:191-196 (the
     // chunks of a split query are set up without the PSSM)
-    // A PSSM query that NCBI splits is searched with BLOSUM62 in its preliminary stage.
-    let sizes = crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(
-        args.app.name(),
-        10000,
-    )?;
+    // A PSSM query that NCBI splits is searched with BLOSUM62 in its preliminary stage. Sizes
+    // that NCBI cannot convert split nothing: they stop the search's query splitter, before any
+    // split (`query_batch::read_psiblast_query_batches`).
+    let Ok(sizes) = crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(10000)
+    else {
+        return Ok(());
+    };
     if crate::algorithm::blastp::protein_query_split::split_protein_batch(
         &[psi.query.seq().len()],
         sizes,

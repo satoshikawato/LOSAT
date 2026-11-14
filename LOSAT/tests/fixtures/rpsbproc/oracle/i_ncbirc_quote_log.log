@@ -1,0 +1,3 @@
+Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:
+    T0 "/export/home/tomcat/TeamCity/Agent2/work/b895474bf74772ad/struct_tree/src/corelib/ncbireg.cpp", line 767: Error: (CRegistryException::eValue) ncbi::IRWRegistry::x_Read() - Single(unescaped) '"' in the middle of registry value: 'b=c"d' (m_Pos = 2)
+

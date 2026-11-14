@@ -39,8 +39,9 @@
 //! position of its grid `start + k * scan_step` and derives its state from that position.
 //! This module cuts the grid of each scan range into strips (`plan_strips`). Phase 1, on
 //! any thread: the reference kernel scans one strip with `s_range` of the whole range (the
-//! value `scan_range[2] + lut_word_length` NCBI passes), walks the lookup chains as
-//! `on_word` does, and runs the steps of `pair_extend::extend_offset_pairs` that read nothing
+//! value `scan_range[2] + lut_word_length` NCBI passes), walks the lookup chains as `on_word`
+//! of the reference scan (`two_stage_scan::scan_two_stage_lookup`) does, and runs the steps of
+//! `pair_extend::extend_offset_pairs` that read nothing
 //! but the inputs (the context of the query offset, the bounds test, the word extension of
 //! `s_BlastNaExtend`, which `extend_offset_pairs` calls as `word_extend_pair`); a pair that
 //! passes becomes a `Seed`, in the order of the pairs.
@@ -108,7 +109,7 @@ static X_OWNER_SCAN_NS: AtomicU64 = AtomicU64::new(0);
 static X_WAIT_NS: AtomicU64 = AtomicU64::new(0);
 
 /// The inputs of the seed stage of one subject chunk, borrowed from
-/// `collect_prelim_hits_for_chunk` (the same names as there).
+/// `prelim_subject::prelim_chunk_hits` (the same names as there).
 pub(super) struct Inputs<'a> {
     pub(super) two_stage: &'a TwoStageLookup,
     pub(super) search_seq_packed: &'a [u8],
@@ -136,7 +137,7 @@ pub(super) struct Inputs<'a> {
     pub(super) timing: Option<&'a BlastnTiming>,
 }
 
-/// The diagonal array of `collect_prelim_hits_for_chunk` (a query block of at most 8000
+/// The diagonal array of `prelim_subject::prelim_chunk_hits` (a query block of at most 8000
 /// letters): `hit_level_array`, `hit_len_array`, `diag_table_length` (NCBI's
 /// `diag_array_length`), `diag_table_mask` (`diag_mask`) and `diag_array_size`, the names
 /// there, for the two-hit stage of LOSAT_X_PAIRPARDISCARR (child module `disc`). With the
@@ -172,6 +173,163 @@ struct Seed {
 /// lists of the strip's partitions (`part::PartSink`).
 trait SeedOut {
     fn push(&mut self, seed: Seed);
+
+    /// EXPERIMENT (LOSAT_X_SEEDPIECE): how many more seeds `push` takes (a seed piece's room,
+    /// `x_pair_seed_piece.rs`); unbounded for a strip's list.
+    #[inline(always)]
+    fn room(&self) -> usize {
+        usize::MAX
+    }
+
+    /// EXPERIMENT (LOSAT_X_SEEDPIECE): no room any more (a piece whose scan stopped, so that the
+    /// words the scan still hands out go to `Cut::run_cold`, which leaves at once).
+    #[inline(always)]
+    fn close(&mut self) {}
+}
+
+/// EXPERIMENT (LOSAT_X_SEEDPIECE): where the scan of a strip goes on after a seed piece: the
+/// subject offset of the word (`kmer_start`) of the first pair the piece had no room for, and
+/// where that pair is in the word: for a word whose pairs are a run (a CSR cell, the direct
+/// table's list), how many pairs of the run the scan read before it (every pair the reference
+/// reads, whether `seed_of_pair` keeps it or not); for a word whose pairs are chains, the pair's
+/// element of its chain (`node`, its `q_off`) and whether that is the second template's chain. A
+/// scan started again from that word's offset gives the same words from that one on (NCBI's scan
+/// resumes at `scan_range[0]`), and its first word with pairs is that word.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Resume {
+    pub(super) s: usize,
+    pub(super) skip: u32,
+    pub(super) node: u32,
+    pub(super) second: bool,
+}
+
+impl Resume {
+    /// A strip's scan from its start.
+    pub(super) fn at(s: usize) -> Self {
+        Resume {
+            s,
+            ..Resume::default()
+        }
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_SEEDPIECE): the cut of one piece's scan: where the first word goes on
+/// (`Resume`: the pairs of its run to pass over, or the element of its chains to start from) and
+/// where the scan stopped (`None` while it goes on). Cells, so that the closures of a scan (the
+/// word's, the ring's `emit`) share it.
+#[derive(Default)]
+struct Cut {
+    skip: std::cell::Cell<u32>,
+    node: std::cell::Cell<u32>,
+    second: bool,
+    stop: std::cell::Cell<Option<Resume>>,
+}
+
+impl Cut {
+    fn new(from: &Resume) -> Self {
+        Cut {
+            skip: std::cell::Cell::new(from.skip),
+            node: std::cell::Cell::new(from.node),
+            second: from.second,
+            stop: std::cell::Cell::new(None),
+        }
+    }
+
+    /// Whether the scan goes on (no stop yet).
+    #[inline(always)]
+    fn go(&self) -> bool {
+        self.stop.get().is_none()
+    }
+
+    /// The pairs `run` of a word, after those the pieces before took (the first word passes
+    /// over them): `Ok` with all of them when `out` has room for all (the caller hands each to
+    /// its pair in its own loop, the loop of the strips' scan), else `Err` with the pairs passed
+    /// over and the rest, for `run_cold`.
+    ///
+    /// (The caller's loop is the strips' loop, whose body runs for every pair, so that the
+    /// loads of the inputs `seed_of_pair` reads stay out of the loop: a loop that tests the room
+    /// before each pair, or that calls its pair from a second loop too, kept them in or kept the
+    /// pair a call, about 30 instructions more per seed; results/s14p and s14q of line EB.)
+    #[inline(always)]
+    fn fit<'r, O: SeedOut>(
+        &self,
+        run: &'r [u32],
+        out: &O,
+    ) -> Result<&'r [u32], (usize, &'r [u32])> {
+        // (a skip only at the word a piece starts at, so the store is out of the loop's way)
+        let skip = self.skip.get() as usize;
+        let run = if skip == 0 {
+            run
+        } else {
+            self.skip.set(0);
+            &run[skip..]
+        };
+        if run.len() <= out.room() {
+            Ok(run)
+        } else {
+            Err((skip, run))
+        }
+    }
+
+    /// The pairs `run` (the rest of the run of the word at subject offset `s` after `skip`
+    /// pairs) through `pair`, while `out` has room: those before the first pair it has no room
+    /// for, where the cut stops (and `out` is closed, so the later words leave at the test of
+    /// `go`). `pair` pushes at most one seed.
+    #[cold]
+    #[inline(never)]
+    fn run_cold<O: SeedOut>(
+        &self,
+        s: usize,
+        skip: usize,
+        run: &[u32],
+        out: &mut O,
+        mut pair: impl FnMut(u32, &mut O),
+    ) {
+        if !self.go() {
+            return;
+        }
+        for (j, &q) in run.iter().enumerate() {
+            if out.room() == 0 {
+                self.stop.set(Some(Resume {
+                    skip: (skip + j) as u32,
+                    ..Resume::at(s)
+                }));
+                out.close();
+                return;
+            }
+            pair(q, out);
+        }
+    }
+
+    /// For a word whose pairs are chains: where the first word's walk of its chain starts (the
+    /// element the piece before stopped at, or 0: the head), and whether its first template's
+    /// chain is passed over (the piece before stopped in the second's); 0 and `false` for every
+    /// later word.
+    #[inline(always)]
+    fn chain_start(&self) -> (u32, bool) {
+        let node = self.node.replace(0);
+        (node, node != 0 && self.second)
+    }
+
+    /// For a word whose pairs are chains: whether the pair at element `q_off_1` of the word at
+    /// `s` (of the second template's chain where `second`) goes to `seed_of_pair`. The first pair
+    /// `out` has no room for stops the cut there.
+    #[inline(always)]
+    fn take<O: SeedOut>(&self, s: usize, q_off_1: u32, second: bool, out: &mut O) -> bool {
+        if !self.go() {
+            return false;
+        }
+        if out.room() == 0 {
+            self.stop.set(Some(Resume {
+                node: q_off_1,
+                second,
+                ..Resume::at(s)
+            }));
+            out.close();
+            return false;
+        }
+        true
+    }
 }
 
 impl SeedOut for Vec<Seed> {
@@ -363,16 +521,29 @@ fn plan_strips(
 /// lookup width and step (unmasked subject), from `job.start` to `job.end`; every lookup
 /// chain hit as in `on_word` (the chain order); every pair through `seed_of_pair`.
 fn scan_strip<O: SeedOut>(x: &Inputs<'_>, job: &StripJob, out: &mut O) {
+    scan_strip_from::<O, false>(x, job, Resume::at(job.start), out);
+}
+
+/// `scan_strip` from the word at `from.s` (a word of the strip's scan: `job.start`, or where a
+/// piece stopped), that word from where `from` says (`Resume`). EXPERIMENT (LOSAT_X_SEEDPIECE):
+/// with `PIECE` the scan stops at the first pair `out` has no room for (`Cut`) and returns where
+/// it goes on; `None` when the strip is done.
+fn scan_strip_from<O: SeedOut, const PIECE: bool>(
+    x: &Inputs<'_>,
+    job: &StripJob,
+    from: Resume,
+    out: &mut O,
+) -> Option<Resume> {
     // EXPERIMENT (LOSAT_X_BNCSR): a contiguous table laid out as CSR has no chains.
     // EXPERIMENT (LOSAT_X_BNCSRPACK): the form of its head chosen once, each form's scan its own.
     if let Some(csr) = x.two_stage.x_mb_csr() {
         // EXPERIMENT (LOSAT_X_BNPVONCE): one presence test per word on a head that fits the cache.
         return match csr.x_packed() {
             Some(packed) if super::x_bn_pv_once(&packed) => {
-                scan_strip_csr::<O, _, false>(x, &packed, job, out)
+                scan_strip_csr::<O, _, false, PIECE>(x, &packed, job, from, out)
             }
-            Some(packed) => scan_strip_csr::<O, _, true>(x, &packed, job, out),
-            None => scan_strip_csr::<O, _, true>(x, csr, job, out),
+            Some(packed) => scan_strip_csr::<O, _, true, PIECE>(x, &packed, job, from, out),
+            None => scan_strip_csr::<O, _, true, PIECE>(x, csr, job, from, out),
         };
     }
     let two_stage = x.two_stage;
@@ -381,18 +552,30 @@ fn scan_strip<O: SeedOut>(x: &Inputs<'_>, job: &StripJob, out: &mut O) {
     let subject_len = x.s_len;
     let scan_step = x.scan_step;
     let s_range = job.s_range;
-    let (start, end) = (job.start, job.end);
+    let end = job.end;
+    let cut = Cut::new(&from);
     let mut on_kmer = |kmer_start: usize, current_lut_kmer: u64| {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
         // ```c
         // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
         // offset_pairs[i++].qs_offsets.s_off = s_off;
         // ```
-        two_stage.for_each_hit(current_lut_kmer, |q_off_1| {
+        let mut pair = |q_off_1: u32| {
             if q_off_1 != 0 {
+                if PIECE && !cut.take(kmer_start, q_off_1, false, out) {
+                    return;
+                }
                 seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
             }
-        });
+        };
+        if PIECE {
+            let (node, _) = cut.chain_start();
+            two_stage.for_each_hit_from(current_lut_kmer, node, &mut pair);
+            cut.go()
+        } else {
+            two_stage.for_each_hit(current_lut_kmer, &mut pair);
+            true
+        }
     };
     scan_kernel(
         packed,
@@ -400,10 +583,11 @@ fn scan_strip<O: SeedOut>(x: &Inputs<'_>, job: &StripJob, out: &mut O) {
         lut_word_length,
         scan_step,
         x.subject_masked,
-        start,
+        from.s,
         end,
         &mut on_kmer,
     );
+    cut.stop.get()
 }
 
 /// EXPERIMENT (LOSAT_X_BNCSR): `scan_strip` over a contiguous table laid out as CSR
@@ -417,29 +601,48 @@ fn scan_strip_csr<
     O: SeedOut,
     H: crate::algorithm::blastn::lookup::x_dc_csr::XHead,
     const PV: bool,
+    const PIECE: bool,
 >(
     x: &Inputs<'_>,
     csr: &H,
     job: &StripJob,
+    from: Resume,
     out: &mut O,
-) {
+) -> Option<Resume> {
     use crate::algorithm::blastn::lookup::x_dc_csr::XRing;
     let two_stage = x.two_stage;
     let s_range = job.s_range;
+    let cut = Cut::new(&from);
     let mut emit = |(kmer_start, index): (usize, u64)| {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
         // ```c
         // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
         // offset_pairs[i++].qs_offsets.s_off = s_off;
         // ```
-        for &q_off_1 in csr.run(index as usize) {
+        let mut run = csr.run(index as usize);
+        if PIECE {
+            match cut.fit(run, out) {
+                Ok(fit) => run = fit,
+                Err((skip, rest)) => {
+                    cut.run_cold(kmer_start, skip, rest, out, |q_off_1, out| {
+                        seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out)
+                    });
+                    return;
+                }
+            }
+        }
+        for &q_off_1 in run {
             seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
         }
     };
     let mut ring: H::Ring<'_, (usize, u64)> = csr.ring();
+    // (a cut stops only in `emit`, so only a word that let one out can have stopped it)
     let mut on_kmer = |kmer_start: usize, current_lut_kmer: u64| {
         if !PV || two_stage.has_hits(current_lut_kmer) {
-            ring.push((kmer_start, current_lut_kmer), |w| w.1 as usize, &mut emit);
+            let left = ring.push((kmer_start, current_lut_kmer), |w| w.1 as usize, &mut emit);
+            !PIECE || !left || cut.go()
+        } else {
+            true
         }
     };
     scan_kernel(
@@ -448,18 +651,22 @@ fn scan_strip_csr<
         two_stage.lut_word_length(),
         x.scan_step,
         x.subject_masked,
-        job.start,
+        from.s,
         job.end,
         &mut on_kmer,
     );
-    ring.flush(&mut emit);
+    // (a stopped scan drops the words still in the ring: the next piece scans them again)
+    if !PIECE || cut.go() {
+        ring.flush(&mut emit);
+    }
+    cut.stop.get()
 }
 
 /// The scan kernel `scan_subject_kmers_with_ranges` picks for this lookup width and step,
 /// from `start` to `end` (`scan_strip`, and the child module `na`).
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn scan_kernel<F: FnMut(usize, u64)>(
+fn scan_kernel<F: FnMut(usize, u64) -> bool>(
     packed: &[u8],
     subject_len: usize,
     lut_word_length: usize,
@@ -1440,6 +1647,11 @@ fn seed_stage_of(
             crate::utils::xreach::x_reach!("LOSAT_X_BNSEEDLISTS", true);
             let produce_lists =
                 |i: usize, out: &mut part::PartSink<'_>| scan_strip(x, &jobs[i], out);
+            // EXPERIMENT (LOSAT_X_SEEDPIECE): a piece of strip i, from its start or a stop.
+            let produce_piece = |i: usize, from: Option<Resume>, out: &mut part::PieceSink<'_>| {
+                let job = &jobs[i];
+                scan_strip_from::<_, true>(x, job, from.unwrap_or(Resume::at(job.start)), out)
+            };
             let fold_one = |st: &mut part::PartState, seeds: &[Seed], pos: &[u32]| {
                 let part::PartState {
                     hash,
@@ -1470,6 +1682,7 @@ fn seed_stage_of(
                 fold_part,
                 &produce,
                 &produce_lists,
+                &produce_piece,
                 &fold_one,
                 timed,
             );
@@ -1585,7 +1798,7 @@ fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
 ///                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
 ///     }
 /// ```
-/// Dispatch of `collect_prelim_hits_for_chunk`: the seed stage of this chunk (the loop above
+/// Dispatch of `prelim_subject::prelim_chunk_hits`: the seed stage of this chunk (the loop above
 /// with its one-hit extension) when the chunk is in scope (`chunk_free_scope`, a pool of two
 /// threads or more, an unmasked subject, one subject owner); `true` means it has run and the
 /// reference scan is skipped. `fold_scratch` holds the allocations of
@@ -2243,11 +2456,21 @@ mod tests {
                         .unwrap();
                     pool.install(|| {
                         let mut scratch = part::PartScratch::default();
-                        for lists in [false, true] {
+                        // EXPERIMENT (LOSAT_X_SEEDPIECE): the lists' stage also in pieces of 1
+                        // seed, a few and hundreds (the kernels stop inside words' runs and
+                        // restart at many offsets), on the same scratch
+                        for (lists, pieces) in [
+                            (false, 0usize),
+                            (true, 0),
+                            (true, 1),
+                            (true, 2 + (case + threads) % 9),
+                            (true, 200 + 31 * parts),
+                        ] {
+                            scratch.x_pieces = Some(pieces);
                             let mut hash = new_table();
                             for (chunk, xc) in [&x, &x2].into_iter().enumerate() {
                                 let at = format!(
-                                    "case {case} threads {threads} parts {parts} levels {levels} lists {lists} chunk {chunk}"
+                                    "case {case} threads {threads} parts {parts} levels {levels} lists {lists} pieces {pieces} chunk {chunk}"
                                 );
                                 hash.offset = xc.diag_offset as i32;
                                 let mut hits = Vec::new();

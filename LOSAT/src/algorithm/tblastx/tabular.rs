@@ -212,6 +212,7 @@ pub(super) fn write_tblastx_tabular(
         Some(database) => TabularSubjects::Database {
             ids: tab.subject_ids,
             ordinals: &database.reported.ordinals,
+            oids: database.oids,
             records: &database.reported.records,
             parsed: &database.reported.parsed,
             sources: &database.reported.sources,
@@ -237,17 +238,19 @@ pub(super) fn write_tblastx_tabular(
             .map(|(q_idx, query)| crate::report::tax_report::TaxQuery {
                 title: tab.query_titles[q_idx],
                 length: run.ranges.input.placements.length(q_idx, query.seq().len()),
-                hsps: Vec::new(),
+                // A query of a batch that NCBI did not search has no Seq-align-set.
+                hsps: (!tab.unsearched[q_idx]).then(Vec::new),
             })
             .collect();
+        // The HSPs of each query (a query that NCBI did not search has none).
         for hsp in hits {
-            queries[hsp.hit.q_idx as usize]
-                .hsps
-                .push(crate::report::tax_report::TaxHsp {
+            if let Some(hsps) = &mut queries[hsp.hit.q_idx as usize].hsps {
+                hsps.push(crate::report::tax_report::TaxHsp {
                     subject: hsp.hit.s_idx as usize,
                     evalue: hsp.hit.e_value,
                     bit_score: hsp.hit.bit_score,
                 });
+            }
         }
         return crate::algorithm::common::tabular::write_tax_report(
             &subjects,

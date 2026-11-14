@@ -215,7 +215,7 @@ pub trait RuntimeObserver: super::results::ResultsObserver + Send {
         &mut self,
         _subject_length: i32,
         _db_length: i64,
-        _state: ([i32; 2], f64),
+        _state: crate::core::link_hsps::LinkCutoffs,
         _link: &super::linking::LinkParameters,
     ) {
     }
@@ -576,7 +576,7 @@ pub(crate) fn search_internal_observed<'a>(
     Ok(pipeline.output)
 }
 struct Runtime<'a> {
-    ungapped_link_state: Option<([i32; 2], f64)>,
+    ungapped_link_state: Option<crate::core::link_hsps::LinkCutoffs>,
     observer: &'a mut dyn RuntimeObserver,
     options: &'a ResolvedOptions,
     subjects: Subjects<'a>,
@@ -811,7 +811,7 @@ impl PreliminarySink for Runtime<'_> {
         oid: usize,
         _batch: &PreparedQueryBatch,
         _params: &[ContextParameters],
-        prepared: Option<([i32; 2], f64)>,
+        prepared: Option<crate::core::link_hsps::LinkCutoffs>,
     ) -> Result<()> {
         self.ungapped_link_state = prepared;
         if let Some(prepared) = prepared {

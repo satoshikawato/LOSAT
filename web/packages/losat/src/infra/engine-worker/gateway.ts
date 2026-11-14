@@ -6,13 +6,15 @@
 // snapshot's bytes (R1). Messages of an older generation are dropped. A runtime is also
 // renewed before a search when its instance ran too many searches or its memory grew too
 // much (policy.ts). A preparation hint (prepare) starts the generation, its instance and its
-// thread workers, or that renewal, before the search that would start them. `describe` and
-// `validate` go to the Data worker's serial reactor, which can answer while a search runs
+// thread workers, or that renewal, before the search that would start them. `describe`, `start`
+// and `validate` go to the Data worker's serial reactor, which can answer while a search runs
 // (src/infra/reactor/control.ts).
 import type { CountsFile } from '../../domain/counts.js';
+import type { RegistryFile } from '../../domain/run-files.js';
 import {
   InputMismatchError,
   RunCancelledError,
+  withRunFiles,
   type EngineGateway,
   type EngineInput,
   type EnginePhase,
@@ -20,6 +22,7 @@ import {
   type EngineRunRequest,
   type ProgramDescription,
   type RuntimeInfo,
+  type StartResult,
   type ValidationResult,
 } from '../../ports/engine.js';
 import { engineBuildName, type EngineAssets } from '../reactor/assets.js';
@@ -49,7 +52,7 @@ export type RuntimeEnd = 'at-once' | 'grown';
 
 export interface WasmEngineOptions {
   readonly assets: EngineAssets;
-  /** describe/validate: the Data worker's serial reactor. */
+  /** describe/start/validate: the Data worker's serial reactor. */
   readonly control: EngineControl;
   readonly hardwareConcurrency?: number;
   readonly renewal?: Partial<RenewalLimits>;
@@ -106,8 +109,12 @@ export class WasmEngine implements EngineGateway {
     return this.options.control.describe(program);
   }
 
-  validate(argv: readonly string[]): Promise<ValidationResult> {
-    return this.options.control.validate(argv);
+  start(argv: readonly string[]): Promise<StartResult> {
+    return this.options.control.start(argv);
+  }
+
+  validate(argv: readonly string[], registry?: RegistryFile): Promise<ValidationResult> {
+    return this.options.control.validate(argv, registry);
   }
 
   run(request: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {
@@ -115,7 +122,7 @@ export class WasmEngine implements EngineGateway {
     return new Promise<RuntimeInfo>((resolve, reject) => {
       const active: ActiveRun = { runId: request.runId, onPhase, resolve, reject, generation: undefined, settled: false };
       this.active = active;
-      this.start(active, request, output).catch((error: unknown) => {
+      this.launch(active, request, output).catch((error: unknown) => {
         output.close();
         this.settle(active, error instanceof Error ? error : new Error(String(error)));
       });
@@ -163,7 +170,7 @@ export class WasmEngine implements EngineGateway {
     this.settle(active, new RunCancelledError(runId));
   }
 
-  private async start(active: ActiveRun, request: EngineRunRequest, output: MessagePort): Promise<void> {
+  private async launch(active: ActiveRun, request: EngineRunRequest, output: MessagePort): Promise<void> {
     const threads = chooseThreads(
       request.requestedThreads,
       request.query.bytes.length + request.subject.bytes.length,
@@ -189,6 +196,7 @@ export class WasmEngine implements EngineGateway {
       query: workerInput(program, request.query),
       subject: workerInput(program, request.subject),
       ...(request.windowMasker === undefined ? {} : { windowMasker: workerCounts(request.windowMasker) }),
+      ...(request.conffile === undefined ? {} : { conffile: request.conffile }),
       output,
     };
     generation.worker.postMessage(command, [output]);
@@ -278,6 +286,7 @@ export class WasmEngine implements EngineGateway {
       memory: result.memory,
       subjectRetained: result.subjectRetained,
       ...(result.windowMasker === undefined ? {} : { windowMasker: result.windowMasker }),
+      ...(result.runFiles === undefined ? {} : { runFiles: result.runFiles }),
     });
   }
 
@@ -366,12 +375,15 @@ function workerInput(program: string, input: EngineInput): WorkerInput {
   return { bytes: input.bytes, records: input.records, key: inputKey(program, input) };
 }
 
-/** Rebuilds an error of the worker with its name and message (as web/app/src/infra/data-worker/rpc.ts). */
+/**
+ * Rebuilds an error of the worker with its name and message (as web/app/src/infra/data-worker/rpc.ts),
+ * and the files of a failed run (`runFilesOf`).
+ */
 function toError(error: WorkerError): Error {
   if (error.name === 'InputMismatchError' && error.role !== undefined && error.detail !== undefined) {
     return new InputMismatchError(error.role, error.detail);
   }
   const rebuilt = new Error(error.message);
   rebuilt.name = error.name;
-  return rebuilt;
+  return error.runFiles === undefined ? rebuilt : withRunFiles(rebuilt, error.runFiles);
 }

@@ -443,6 +443,7 @@ export LOSAT_X_QSTREAM=1
 export LOSAT_X_REDOCONTAINIDX=1
 export LOSAT_X_RPTSTREAM=1
 export LOSAT_X_SEEDCOMPACT=1
+export LOSAT_X_SEEDPIECE=1
 export LOSAT_X_SEEDUNMAP=1
 export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_TBNDIAGPACK=1
@@ -4112,6 +4113,72 @@ Scheduling (each value computed by one thread with the original function; order 
   time +0.03-0.05 s (node 0, `perf stat`). One thread (node 0, `perf stat`, outputs the same): instructions of dev,
   the switch and `=0` within 0.01 % (blastn-short of the 236 cDNAs 260.834 / 260.821 / 260.821 G; 1,775 cDNAs
   blastn, megablast and dc-megablast too).
+- `LOSAT_X_SEEDPIECE=1` (BLASTN `-task dc-megablast`, `blastn`, `megablast` and `blastn-short`: the partitioned stages
+  of `LOSAT_X_DCSEEDLEAN` and `LOSAT_X_BNSEEDLISTS` with `LOSAT_X_PAIRPARHOME`, two threads or more, one unmasked
+  subject, a query block above 8,000 letters; memory; in the strict set from the pull request that added it,
+  2026-11-12: `LOSAT_X_SEEDPIECE=0` turns it off; a number from 2 to 131,072 sets the seeds of a piece, any other
+  value or none the built-in 16,384) holds a strip's seeds in pieces of a fixed size instead of in one list per
+  partition and strip (`x_pair_seed_piece.rs`, exactness argument in its module comment). NCBI scans into an offset
+  array of 4,096 + `longest_chain` pairs, stops when it is full and extends those pairs before the scan goes on
+  (`blast_nascan.c` `MB_ACCESS_HITS`, `na_ungapped.c` `BlastNaWordFinder`); the strips stage did not stop, and a
+  strip's lists waited until every partition had folded them, each keeping the largest capacity any strip had needed
+  (on dc-megablast's 5 Mb chunks at 16 threads about 80 MiB, nearly all capacity left by main-diagonal runs). Now:
+  - the scan kernels' callbacks return whether the scan goes on (the reference callers always `true`); a strip's scan
+    (`scan_strip_from`, `scan_strip_disc_from`, `scan_strip_na_from` with `PIECE`) compares each word's run with the
+    piece's room and stops at the first pair it has no room for, inside a run or a chain as well (`Cut`), returning
+    the word's offset and where in the word it stopped (`Resume`: the pairs of a CSR cell's or the direct table's run
+    it read, or the element of the first or second template's chain); the words still in the CSR's prefetch ring are
+    dropped, and the next piece scans again from that word, going on in its run or chain from there
+    (`for_each_hit_from`, `for_each_hit2_from`), so no pair is read twice; a run the piece has room for goes through
+    the strips' own loop (`Cut::fit`), only one that may not fit through the loop that tests the room before each pair
+    (`Cut::run_cold`), so that the loads of the inputs `seed_of_pair` reads stay out of the loop as in the strips' scan
+    (a closure called from both loops stayed a call per pair, and a room test before each pair kept those loads in
+    the loop: about 30 and 17 instructions more per seed, dc-megablast of 31,168 cDNAs x 3 Mb at 4 threads, `perf`);
+  - a piece is an arena of 16,384 / 64 + P blocks of 64 seeds with their positions (20 bytes each; P partitions,
+    rounded up to a multiple of 4), each partition's seeds a chain of blocks in scan order: its first block (block p),
+    then runs of 4 blocks (a page of seeds) taken in order from the front of the arena, and once those are given out
+    single free blocks of other partitions' runs; so a piece touches the pages of its seeds from the front, a slot
+    keeps those of its largest piece, and a partition's seeds after its first block lie in pages of seeds of its own,
+    which the hardware prefetches of the fold do not leave (equal lanes, one per partition, touched a page of every
+    lane a partition had a seed in, whatever its seeds: megablast Sakai x MG1655 `-db` at 16 threads, peak 1.3 MiB
+    over the strips'); the arenas are a pool of 3 T + 2 (T threads), the last two
+    for the strip the slowest partition is in alone, and a piece takes the slot of a piece every partition has folded
+    before a slot no piece has used (as the strips take a new buffer only when none can be given back). The pool's
+    seeds and positions are two buffers kept in the subject scratch, each slot a region of them, each allocated once
+    with a capacity above glibc's ceiling of the mmap threshold (`x_mapped::x_unthresholded_capacity`) and not
+    initialized: glibc maps them, their free leaves the threshold as it is, and only the pages of the blocks pieces
+    wrote are resident (an arena allocated by itself, 266-328 KiB, was mapped and its free raised the threshold to its
+    size, so that later blocks of up to that size came from the heap's arenas and stayed resident: blastn of the
+    cDNAs x 3 Mb at 16 threads, peak 1.13-1.15 of the strips'; the regions of the seeds begin on a page). So the stage
+    holds at most (3 T + 2) x (16,384 + 64 P) x 20 bytes whatever the subject, the query or the density of the seeds:
+    17 MB at 16 threads, 79 MB at 64;
+  - the folds read a piece's slot and arena without a lock: the producer writes the piece's slot in a ring (the strips
+    within reach of the slowest partition x the pool's slots) before the strip's count, and the arena is written only
+    by the participant that took the slot and read once the piece is counted, until every partition has folded it (a
+    lock of the strip's list of slots and of the slot, taken by every partition for every piece, wrote lines the
+    others read: blastn-short of 30,000 short queries x 3 Mb at 16 threads, the participants' loads served from another
+    core's cache x4 those of the strips stage);
+  - a participant makes a strip's pieces one after another while the pool has a slot a piece gave back for the next
+    one, and parks the rest of the strip when it has none (any participant goes on with it), so no helper waits
+    holding a strip half-scanned, the stage's arenas grow only at a turn's first piece, and a thread leaves a strip's
+    scan for its folds only when the pool has no slot for the strip's next piece (one piece per turn cut
+    blastn-short's strips into 2.3 turns on average and its folds took +1.2 % cycles at the same instructions, their
+    loads missing L1 evenly more); a partition folds the pieces of a strip in order, then the next strip, and
+    the positions count on across a strip's pieces, so the keys, the hits' order and the appended cells' numbers are
+    those of the strips.
+  `x_reach!` at each such stage, always the switch's side while it is on. Tests: the part tests of
+  `x_pair_seed_part.rs` (`seed_stage_part_equals_the_reference_fold` in pieces of 1, a few and hundreds to thousands
+  of seeds on 1 to 8 threads and 2 to 17 partitions; the nested parallel call of #218, the stalled stage and the
+  panicking participant in pieces), `seed_stage_on_strips_equals_one_scan` of `x_pair_seed.rs` and
+  `x_pair_seed_na.rs` and `disc_two_hit_stage_on_strips_equals_one_scan` (the real kernels in pieces of 1 seed, a few
+  and hundreds), and `LOSAT/tests/blastn_seed_piece.rs` (dc-megablast, blastn, megablast and blastn-short: the
+  default at 2 and 4 threads and pieces of 3 to 97 seeds at 2 and 3 threads against `=0`, with the sides of
+  `LOSAT_X_REACH`).
+  Evidence (line EB s20, 590657d1 against dev 159c675a, 16 threads, 8 rounds, same output): peak memory blastn-short of
+  30,000 short queries x 3 Mb 0.59 (182 -> 107 MiB), dc-megablast Sakai x EDL933 0.86, dc-megablast and blastn of 31,168
+  cDNAs x 3 Mb 0.88 / 0.96 (`-subject`) and 0.94 / 0.97 (`-db`), megablast within the null arm's range; run time within the
+  null arm's range except blastn-short +0.9-1.1 % (its folds' loads miss L1 evenly more: a fold unit per piece, 2.3 per
+  strip) and blastn cDNA x 3 Mb at 4 threads +0.5 % (the store mapped again in every query batch: +27 % page faults).
 - `LOSAT_X_BNCSR=1` (BLASTN `-task blastn` and every task with word size 9, 10 or 11 that builds the contiguous
   two-stage table of `build_mb_lookup`, `-subject` and `-db`, any thread count, speed; in the strict set from the pull
   request that added it, 2026-10-25 (perf/bn-csr, evidence at the end of this entry): on unless it is `0`) lays out the
@@ -4134,8 +4201,8 @@ Scheduling (each value computed by one thread with the original function; order 
   its arena, once to count and once to place (so the build holds one chunk's words, the fill's arena, not the whole
   query's), each thread owns a contiguous run of cell blocks, and the whole build is one `rayon::broadcast` whose
   threads pass a spin barrier between the reading and the owners' work of each chunk. The scans read a word's run
-  instead of walking its chain: the strip scan of PAIRPAR (`scan_strip_csr`) and the reference scan of
-  `search_query_batch` put the words with hits (after the presence test) through the FIFO of `LOSAT_X_DCCSR`; the
+  instead of walking its chain: the strip scan of PAIRPAR (`scan_strip_csr`) and the reference scan of a
+  two-stage table (`two_stage_scan.rs` `scan_two_stage_lookup`) put the words with hits (after the presence test) through the FIFO of `LOSAT_X_DCCSR`; the
   words, pairs and their order are the chain walk's. `for_each_hit`, `count_hits` and the masked-word test of
   `s_TypeOfWord` (`contains_hit`) read the run where the table has no chains. The `[TIMING] x_mb_lookup_build`
   interval includes the CSR builds (in `loop` or `pool_fill`), and `[TIMING] x_bn_csr: builds= parallel= words=`
@@ -4165,8 +4232,9 @@ Scheduling (each value computed by one thread with the original function; order 
   cDNAs: max RSS 2 MiB above dev at the run's last 1-3 % while the live data was 12 MiB below it, read with the mmap
   threshold pinned in a diagnostic run, s27 w21). The table's form is chosen once per table (`Csr::x_packed`):
   `Csr::run` and `Ring` are the code of a head of one element per cell, used by every discontiguous table and by a
-  contiguous one with the switch off, and the contiguous scans (`scan_strip_csr`, the reference scan of
-  `search_query_batch`) are generic over `x_dc_csr::XHead`, so each form's scan is compiled on its own (the
+  contiguous one with the switch off, and the contiguous scans (`scan_strip_csr`, generic over
+  `x_dc_csr::XHead`, and the reference scan's `x_scan_csr!` in `scan_two_stage_lookup`, a macro expanded once per
+  head form) compile each form's scan on its own (the
   dc-megablast and `=0` scans have dev's instructions). The packed ring (`XRingPacked`) drops a word of an empty cell
   (its run is empty, so the emit would read nothing) and prefetches the rank's two offsets; the one-word answers of
   the lookup (`for_each_hit`, `count_hits`, `contains_hit`) read either form (`Csr::x_run_any`). The build counts each
@@ -5573,10 +5641,15 @@ Scheduling (each value computed by one thread with the original function; order 
   BLOSUM62 word lengths 2 and 3, BLOSUM45 at 2 and 3, PAM30, thresholds 0-1000, masks, the overflow array and a query
   set without words; `tests/tblastn_lut_lean.rs`: the same report as `=0` with BLOSUM62 word size 3 and BLOSUM45 word
   size 2, at one and four threads, every table lean by default and with chains with `=0`, read from
-  `[X_STATS] TBNLUTLEAN lean= chain=` with `LOSAT_X_STATS`). Always: every TBLASTN lookup table (LOSAT's TBLASTN takes
-  word size 3, and 2 with BLOSUM45) outside diagnostics mode, whose prints read the chains; a table of 4 or more
-  letters a word (backbone indexes over 16 bits, which the CLI refuses) would take the chain builder, as the in-place
-  builders decline it.
+  `[X_STATS] TBNLUTLEAN lean= chain=` with `LOSAT_X_STATS`). Always: every TBLASTN lookup table outside diagnostics
+  mode, whose prints read the chains. A table of 4 letters a word (`-word_size 4`: backbone indexes over 16 bits,
+  which the lean build declines) is made by the joint builder of 32-bit indices of BLASTX's tables
+  (`x_pair_lut_wide.rs` `x_build_full_wide`, through `backbone.rs` `x_table_without_chains`, its tasks on the pool's
+  threads when it has two or more; item X2e of line RG, 2026-11-14), counted as `lean`; before, it took the chain
+  builder: `-word_size 4 -threshold 1` (a 329-letter protein against 580 bases, one thread, ws, medians of 3) max RSS
+  274 -> 131 MB (NCBI BLAST+ 2.17.0 244 MB), 1.85 -> 0.69 s; at four threads 274 -> 151 MB, 1.78 -> 0.42 s; unit test
+  `tblastx_and_tblastn_tables_of_other_matrices_and_word_lengths_equal_the_chain_builders` (word lengths 2-4, BLOSUM62,
+  BLOSUM45, PAM30, one thread and pools of 4 and 8), `tests/tblastn_lut_lean.rs` word size 4 at one and four threads.
   Measured 2026-10-30 on the workstation (2x Xeon Gold 6338; base dev a2ee6ff3; every output of a case the same
   bytes in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16
   CPUs for every run, medians in rotating order, NCBI BLAST+ 2.17.0 in the same rounds): the 595 proteins of AP027131
@@ -6216,6 +6289,15 @@ Scheduling (each value computed by one thread with the original function; order 
   grow in step and the dead blocks are never reused. Diagnostics mode keeps the chain builder.
   `LOSAT/tests/tblastx_ref_lut.rs` compares reports with and without the switch (the reach file shows the
   in-place build); a unit test of `x_lut_direct.rs` compares the table with the chain builder's field by field.
+  Another matrix than BLOSUM62 or another word size than 3 (item X2e of line RG, 2026-11-14; before, those tables
+  always took the chain builder): TBLASTN's builders without chains (`backbone.rs` `x_table_without_chains`: the lean
+  build, no neighbour memo kept after it, and for `-word_size 4` the joint builder of 32-bit indices, one task).
+  `-window_size 0 -word_size 4 -threshold 1` on the arch pair (one thread, ws, medians of 3): max RSS 483 -> 210 MB
+  (NCBI BLAST+ 2.17.0 368 MB), 3.95 -> 0.62 s; `-threshold 2` 341 -> 159 MB (NCBI 281); `-word_size 2` and BLOSUM45
+  at `-threshold 1` no more memory and less time (0.26 -> 0.17 s, 0.24 -> 0.20 s). The default paths' instructions
+  x0.99999-x1.00002 of dev (five programs, five runs each). `tests/tblastx_ref_lut.rs`
+  `the_one_hit_loop_reports_the_same_at_other_word_sizes_and_matrices` (word sizes 4 and 2, BLOSUM45, one and four
+  threads) and the unit test `tblastx_and_tblastn_tables_of_other_matrices_and_word_lengths_equal_the_chain_builders`.
   Measured: 3 kb of the option-sweep query against the sweep subjects at `-threshold +inf` with the
   reference loop (then run with `LOSAT_X_PAIRPAR=0`, a variable that no longer exists), one thread: max RSS 1,069 -> 475 MB, 8.20 -> 7.00 s (NCBI
   589 MB, 9.19 s); the whole sweep input 14.2 -> 3.31 GB (NCBI 5.86 GB). On the batches the gate
@@ -7287,7 +7369,10 @@ Scheduling (each value computed by one thread with the original function; order 
   LOSAT Web's ABI v2 yet.)
 - `LOSAT_X_BXUNGAPSENT=1` (BLASTX, speed; in the strict set from the pull request that added it, 2026-10-23;
   `=0` turns it off) the two-hit ungapped extension of BLASTX's seed loops, the fused loop of `LOSAT_X_BXDIAG`
-  and the direct loop (BXSCAN, graduated), for word size 3, with the walks of blastp's `LOSAT_X_BPUNGAPSENT`
+  and the direct loop (BXSCAN, graduated), for word size 2 to 4 (word size 3 until item SC9b-1 of line NP,
+  2026-11-13: the walk is generic over the word length with a const, `two_hit_in::<TAIL, Q, W>`, and the seed
+  loops take the instance of `-word_size` once per subject, never per candidate; the argument for `W` is in
+  `blastx/x_ungap_sent.rs`'s header), with the walks of blastp's `LOSAT_X_BPUNGAPSENT`
   (`blastx/x_ungap_sent.rs`, exactness argument in its header; the extension is
   `blastp/x_ungapped_sent.rs`'s `two_hit_in`): no bound test in the walks, the extension inlined into a
   closure (fused loop) or a loop instance (direct loop) of its own. The six-frame query buffer has a sentinel
@@ -7298,7 +7383,7 @@ Scheduling (each value computed by one thread with the original function; order 
   the same best, length and stop. The checks of BPUNGAP's walks are made once: the word size, the window,
   residue codes below 32 and the sentinels per query batch, codes and sentinels per subject; the X-drop
   (1..=127) per candidate (the X-drops are the contexts' parameters). Off the path (the reference
-  extension): a word size other than 3 (`-word_size 5`), `-window_size 0` (one-hit), a query batch of more
+  extension): a word size above 4 (`-word_size 5`, the compressed table), `-window_size 0` (one-hit), a query batch of more
   than `i32::MAX / 16` letters (another matrix: `i32::MAX / 32`), a candidate whose context's X-drop is
   outside 1..=127, and the searches where `word_finder` runs (the diagnostic stages that trace the seeds).
   Another matrix than BLOSUM62 (item SC6b of line NP, 2026-11-11) takes the same walks with the keys of its
@@ -7306,6 +7391,11 @@ Scheduling (each value computed by one thread with the original function; order 
   sentinel scores -128 against every code and the largest score is at most 31, so the argument holds with a
   query batch of at most `i32::MAX / 32` letters), and its reference is `extend_two_hit` with the matrix; the
   walks' matrix is a type (`XSent<S: BxScoring>`), so BLOSUM62's loops keep their code.
+  The word size 2 and 4 instances add about 0.8 MB of machine code (text 16.27 -> 17.04 MB on dev 159c675a6);
+  word size 3 runs the same instructions as before, but its peak memory can rise by up to about 0.25 MB, the
+  added code's pages mapped with its own (50 cDNAs x yeast proteins, one thread: VmHWM +248 kB, +1.66 %, on dev
+  716faaaaa; +57 to +163 kB on dev 159c675a6). The Owner accepted this as an exception to the rule that the
+  memory may rise by no more than the time falls (2026-11-14).
   Measured 2026-10-23 on the workstation (node 1, CPU 40 with its HT sibling and CPUs 41-47 idle, warmed 3 s
   before every run, arm order reversed every other round, one warm-up round + 5 rounds (4 for the UniRef50
   case, 3 for SwissProt), medians of the per-round ratios against dev cd8e0f89, the binary before the switch;

@@ -81,10 +81,10 @@ impl From<crate::blastinput::value_parsers::SegSpec> for Filter {
     }
 }
 
-/// The filter of a `-seg` value as given (`app::parse_seg_option`; `label` names the program in
-/// its error), `None` for a value the program refuses (no request is written then).
-pub fn seg_filter(value: &str, label: &str) -> Option<Filter> {
-    crate::blastinput::app::parse_seg_option(value, label)
+/// The filter of a `-seg` value as given (`app::parse_seg_option`), `None` for a value that NCBI's
+/// filtering handler refuses (no request is written then).
+pub fn seg_filter(value: &str) -> Option<Filter> {
+    crate::blastinput::app::parse_seg_option(value)
         .ok()
         .map(Filter::from)
 }
@@ -121,10 +121,22 @@ pub fn seg_filter(value: &str, label: &str) -> Option<Filter> {
 //     {
 //         m_Opts->SetRemoteProgramAndService_Blast3("tblastn", "rpsblast");
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:138-145
+// ```c++
+//     if (args.Exist(kArgPSIInputChkPntFile) && args[kArgPSIInputChkPntFile]) {
+//        CPSIBlastOptionsHandle * rv(new CPSIBlastOptionsHandle(locality));
+//        rv->SetPSITblastnDefaults();
+//        if (args[kTask].AsString() == "blastx-fast") {
+//            rv->SetWordSize(6);
+//            rv->SetOptions().SetLookupTableType(eCompressedAaLookupTable);
+//            rv->SetWordThreshold(21.0);
+// ```
 /// The kind of a run's request: its options handle (the `program` and `service` it names, the
 /// setters of its constructor) and the argument classes of its application, in their order. The
 /// five search programs, and the applications whose handle is another one's: psiblast with a
-/// FASTA query (`CPSIBlastOptionsHandle`), rpsblast (`CBlastRPSOptionsHandle`) and rpstblastn
+/// FASTA or a PSSM query (`CPSIBlastOptionsHandle`), tblastn with a PSSM query (PSI-TBLASTN:
+/// `CPSIBlastOptionsHandle` with `SetPSITblastnDefaults`, whatever `-task`: the test names
+/// `blastx-fast`, which is no tblastn task), rpsblast (`CBlastRPSOptionsHandle`) and rpstblastn
 /// (`CRPSTBlastnOptionsHandle`). `Program` stays the reports' name of the search.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RequestKind {
@@ -134,6 +146,7 @@ pub enum RequestKind {
     Tblastn,
     Tblastx,
     Psiblast,
+    PsiTblastn,
     Rpsblast,
     Rpstblastn,
 }
@@ -155,7 +168,10 @@ impl RequestKind {
     pub fn program(self) -> &'static str {
         match self {
             RequestKind::Blastn => "blastn",
-            RequestKind::Blastp | RequestKind::Psiblast | RequestKind::Rpsblast => "blastp",
+            RequestKind::Blastp
+            | RequestKind::Psiblast
+            | RequestKind::PsiTblastn
+            | RequestKind::Rpsblast => "blastp",
             RequestKind::Blastx => "blastx",
             RequestKind::Tblastn | RequestKind::Rpstblastn => "tblastn",
             RequestKind::Tblastx => "tblastx",
@@ -185,13 +201,24 @@ impl RequestKind {
     //     m_Opts->SetInclusionThreshold(PSI_INCLUSION_ETHRESH);
     //     m_Opts->SetPseudoCount(PSI_PSEUDO_COUNT_CONST);
     // }
+    //
+    // void CPSIBlastOptionsHandle::SetPSITblastnDefaults(void)
+    // {
+    //     m_Opts->SetProgram(ePSITblastn);
+    //     m_Opts->SetSmithWatermanMode(false);
+    //     m_Opts->SetDbGeneticCode(BLAST_GENETIC_CODE);
+    //     m_Opts->SetWordThreshold(BLAST_WORD_THRESHOLD_TBLASTN);
+    // }
     // ```
     /// The setters that the handle's constructor calls after defaults mode, after the
     /// `EvalueThreshold` that every handle records: psiblast's PSSM engine defaults
-    /// (`PSI_INCLUSION_ETHRESH` 0.002, `PSI_PSEUDO_COUNT_CONST` 0).
+    /// (`PSI_INCLUSION_ETHRESH` 0.002, `PSI_PSEUDO_COUNT_CONST` 0), and for PSI-TBLASTN then
+    /// `SetPSITblastnDefaults` (`SmithWatermanMode` FALSE, `DbGeneticCode` 1, `WordThreshold`
+    /// `BLAST_WORD_THRESHOLD_TBLASTN` 13; `SetProgram` records nothing; NCBI 2.17.0
+    /// `tbn.pssm.db.ss` of line RG F1d probe 7).
     fn constructor_calls(self) -> Vec<Param> {
-        match self {
-            RequestKind::Psiblast => vec![
+        let psi = || {
+            vec![
                 Param {
                     name: "InclusionThreshold",
                     value: ParamValue::Real(0.002),
@@ -200,7 +227,28 @@ impl RequestKind {
                     name: "PseudoCountWeight",
                     value: ParamValue::Integer(0),
                 },
-            ],
+            ]
+        };
+        match self {
+            RequestKind::Psiblast => psi(),
+            RequestKind::PsiTblastn => {
+                let mut calls = psi();
+                calls.extend([
+                    Param {
+                        name: "SmithWatermanMode",
+                        value: ParamValue::Boolean(false),
+                    },
+                    Param {
+                        name: "DbGeneticCode",
+                        value: ParamValue::Integer(1),
+                    },
+                    Param {
+                        name: "WordThreshold",
+                        value: ParamValue::Integer(13),
+                    },
+                ]);
+                calls
+            }
             _ => Vec::new(),
         }
     }
@@ -516,7 +564,9 @@ fn class_order(kind: RequestKind) -> &'static [Class] {
             Formatting,
             Cbs,
         ],
-        RequestKind::Tblastn => &[
+        // PSI-TBLASTN's classes are tblastn's (`CTblastnAppArgs`, tblastn_args.cpp:44-131;
+        // its `CPsiBlastArgs` of a nucleotide database records nothing).
+        RequestKind::Tblastn | RequestKind::PsiTblastn => &[
             Db,
             Generic,
             DbGeneticCode,
@@ -589,8 +639,11 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
     for param in kind.constructor_calls() {
         list.set(param.name, param.value);
     }
-    for param in task_calls(&inputs.task) {
-        list.set(param.name, param.value);
+    // PSI-TBLASTN's handle is not the task's (`RequestKind`: tblastn_args.cpp:138-149).
+    if kind != RequestKind::PsiTblastn {
+        for param in task_calls(&inputs.task) {
+            list.set(param.name, param.value);
+        }
     }
     let matrix = inputs.matrix.clone().unwrap_or_else(|| {
         if inputs.task == "blastp-short" {
@@ -604,7 +657,11 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
     // rule on, as BLASTP's and TBLASTN's are (probes `opt_ws5` .. `opt_ws7`).
     let protein_query = matches!(
         kind,
-        RequestKind::Blastp | RequestKind::Tblastn | RequestKind::Blastx | RequestKind::Psiblast
+        RequestKind::Blastp
+            | RequestKind::Tblastn
+            | RequestKind::Blastx
+            | RequestKind::Psiblast
+            | RequestKind::PsiTblastn
     );
     let mut threshold_set_by_word_size = false;
     for &class in class_order(kind) {
@@ -795,8 +852,13 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                     };
                     if is_default {
                         let mut value = suggested_threshold(&matrix);
+                        // `BLAST_GetSuggestedThreshold` adds 2 for a translated subject
+                        // (blast_options.c:1202-1205: "Covers tblastn, tblastx, psi-tblastn
+                        // rpstblastn"), 1 for a translated query.
                         value += match kind {
-                            RequestKind::Tblastn | RequestKind::Tblastx => 2,
+                            RequestKind::Tblastn
+                            | RequestKind::Tblastx
+                            | RequestKind::PsiTblastn => 2,
                             RequestKind::Blastx => 1,
                             _ => 0,
                         };
@@ -857,7 +919,19 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
             Class::Gapped => list.set("UngappedMode", Boolean(inputs.ungapped)),
             Class::Intron => list.set("LongestIntronLength", Integer(inputs.max_intron_length)),
             Class::QueryGeneticCode => list.set("QueryGeneticCode", Integer(inputs.query_gencode)),
-            Class::DbGeneticCode => list.set("DbGeneticCode", Integer(inputs.db_gencode)),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1050-1055
+            // ```c++
+            //     if (m_Target == eDatabase && args[kArgDbGeneticCode] &&
+            //         (program == eTblastn || program == eTblastx) ) {
+            //         opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger());
+            //     }
+            // ```
+            // PSI-TBLASTN (`ePSITblastn`) keeps the constructor's code 1 in its place.
+            Class::DbGeneticCode => {
+                if kind != RequestKind::PsiTblastn {
+                    list.set("DbGeneticCode", Integer(inputs.db_gencode));
+                }
+            }
             Class::Formatting => list.set("HitlistSize", Integer(inputs.hitlist_size)),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:879-885
             // ```c++
@@ -869,10 +943,21 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
             //         }
             //         opt.SetSmithWatermanMode(smith_waterman_value);
             // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:866-868
+            // ```c++
+            //         if(program == ePSITblastn) {
+            //             compo_mode = eNoCompositionBasedStats;
+            //         }
+            // ```
             // `UnifiedP` is BLASTP's only (psiblast's handle is `ePSIBlast`); `-use_sw_tback` is
-            // recorded in every mode, 0 included.
+            // recorded in every mode, 0 included; PSI-TBLASTN records mode 0 whatever is given.
             Class::Cbs => {
-                list.set("CompositionBasedStats", Integer(inputs.comp_based_stats));
+                let mode = if kind == RequestKind::PsiTblastn {
+                    0
+                } else {
+                    inputs.comp_based_stats
+                };
+                list.set("CompositionBasedStats", Integer(mode));
                 if kind == RequestKind::Blastp && inputs.unified_p && inputs.comp_based_stats != 0 {
                     list.set("UnifiedP", Integer(1));
                 }
@@ -927,7 +1012,7 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
 pub fn service(kind: impl Into<RequestKind>, task: &str) -> &'static str {
     match kind.into() {
         RequestKind::Blastn if matches!(task, "megablast" | "dc-megablast") => "megablast",
-        RequestKind::Psiblast => "psi",
+        RequestKind::Psiblast | RequestKind::PsiTblastn => "psi",
         RequestKind::Rpsblast | RequestKind::Rpstblastn => "rpsblast",
         _ => "plain",
     }
@@ -1131,8 +1216,39 @@ mod tests {
                 "SmithWatermanMode"
             ]
         );
+        // tblastn `-in_pssm` (`F/f1d/p7ncbi/tbn.pssm.db.ss`): psiblast's constructor, then
+        // `SetPSITblastnDefaults`, then tblastn's classes; mode 0, the code 1 of the constructor.
+        let mut psi_tblastn = OptionInputs::new(RequestKind::PsiTblastn, "tblastn-fast");
+        psi_tblastn.comp_based_stats = 2;
+        psi_tblastn.db_gencode = 4;
+        let params = algorithm_options(&psi_tblastn);
+        let listed: Vec<String> = params
+            .iter()
+            .map(|param| format!("{}={:?}", param.name, param.value))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                "EvalueThreshold=Evalue(10.0)",
+                "InclusionThreshold=Real(0.002)",
+                "PseudoCountWeight=Integer(0)",
+                "SmithWatermanMode=Boolean(false)",
+                "DbGeneticCode=Integer(1)",
+                "WordThreshold=Integer(13)",
+                "UngappedMode=Boolean(false)",
+                "LongestIntronLength=Integer(0)",
+                "MaskAtHash=Boolean(false)",
+                "SegFilteringWindow=Integer(12)",
+                "SegFilteringLocut=Real(2.2)",
+                "SegFilteringHicut=Real(2.5)",
+                "WindowSize=Integer(40)",
+                "HitlistSize=Integer(500)",
+                "CompositionBasedStats=Integer(0)",
+            ]
+        );
         for (kind, program, named) in [
             (RequestKind::Psiblast, "blastp", "psi"),
+            (RequestKind::PsiTblastn, "blastp", "psi"),
             (RequestKind::Rpsblast, "blastp", "rpsblast"),
             (RequestKind::Rpstblastn, "tblastn", "rpsblast"),
             (RequestKind::Blastp, "blastp", "plain"),

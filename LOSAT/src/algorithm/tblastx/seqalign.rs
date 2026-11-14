@@ -71,6 +71,8 @@ pub(crate) enum SeqalignSubjects<'a> {
     },
     Database {
         ordinals: &'a [u32],
+        /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
+        oids: crate::seqdb::OidMap<'a>,
         title: &'a [u8],
         parsed: &'a [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
     },
@@ -107,13 +109,16 @@ pub(crate) fn query_records_of<'a>(
                     use_this_seqid: &[],
                 },
                 SeqalignSubjects::Database {
-                    ordinals, parsed, ..
+                    ordinals,
+                    oids,
+                    parsed,
+                    ..
                 } => {
                     let subject = parsed.get(s_idx).and_then(Option::as_deref);
                     SubjectRecord {
                         id: match subject {
                             Some(subject) => SeqId::Db(subject.alignment_id()),
-                            None => SeqId::BlOrdId(ordinals[s_idx]),
+                            None => SeqId::BlOrdId(oids.oid(ordinals[s_idx])),
                         },
                         searched_length: i32::try_from(subject_letters.length(s_idx))?,
                         offset: 0,

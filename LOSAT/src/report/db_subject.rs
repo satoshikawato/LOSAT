@@ -138,6 +138,11 @@ pub enum FoundInstead {
     /// The lookup fails on a file of the database, with this message: NCBI's formatters, and its
     /// prefetch, stop with the `CSeqDBException`.
     Failed(String),
+    /// LOSAT's own search of the keys that differ from the Seq-align id's in the case of its
+    /// letters fails, with this message (`SeqidLookup::case_variant_oids`: version 5, a name or a
+    /// `pir` or `prf` id), on pages that NCBI's exact lookup need not read: whether another sequence
+    /// holds an id that NCBI's scope takes for it is unknown.
+    CaseUnknown(String),
     /// The lookup throws on the id itself before it reads a file (`SeqidLookup::throws_on_id`: a
     /// `gnl|BL_ORD_ID|0` that makeblastdb stores with a text tag), with this message: NCBI's
     /// formatters stop, its prefetch catches the exception with its warning
@@ -233,7 +238,7 @@ impl ParsedSubject {
     // `found_instead` ports, whatever kind of id it is: in version 5 `bbs|123`, `nat|X.1|` and
     // `lcl|777` by their LMDB keys, in version 4 the ISAM files that makeblastdb writes for neither
     // `bbs|` nor `nat|`, a `gnl|PIG|` id in the PIG files that it fills from no FASTA id, and a
-    // `gnl|BL_ORD_ID|n` as the stored n plus the first ordinal id of its volume
+    // `gnl|BL_ORD_ID|n` as the stored n plus the first OID of its volume
     // (`SeqDb::defline_set`), looked up from the start of each volume, so as its own sequence where
     // the stored n is its own number in its volume, also beside another id (probe of line DBID N2b,
     // `blastdb-ids-20261021/R/unfetch/p1`: 317 cases of NCBI 2.17.0, databases of NCBI's and
@@ -588,6 +593,7 @@ impl ParsedSubject {
         match &self.found_instead {
             Some(
                 found @ (FoundInstead::AlsoHeld(_)
+                | FoundInstead::CaseUnknown(_)
                 | FoundInstead::Failed(_)
                 | FoundInstead::CopyApart(_, CopyApart::TaxonomyTexts)),
             ) => return Err(self.found_reason(found, false).unwrap_or_default()),
@@ -695,6 +701,9 @@ impl ParsedSubject {
             FoundInstead::AlsoHeld(ordinal) => format!(
                 "has the Seq-align id {id}, which database sequence {ordinal} also holds (where both are reported, NCBI BLAST+ 2.17.0 can write that sequence's names and letters for it)"
             ),
+            FoundInstead::CaseUnknown(message) => format!(
+                "has the Seq-align id {id}, for which LOSAT cannot list the sequences that hold it in another letter case ({message}): where such a sequence is also reported, NCBI BLAST+ 2.17.0 can write its names and letters for it"
+            ),
             FoundInstead::Failed(message) | FoundInstead::ThrowsOnId(message) => format!(
                 "has the Seq-align id {id}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0 stops)"
             ),
@@ -770,7 +779,9 @@ impl ParsedSubject {
                 or_itself: true,
                 reason: reason(),
             },
-            Some(FoundInstead::CopyApart(_, CopyApart::TaxonomyTexts)) => Prefetched::Another {
+            Some(
+                FoundInstead::CopyApart(_, CopyApart::TaxonomyTexts) | FoundInstead::CaseUnknown(_),
+            ) => Prefetched::Another {
                 other: None,
                 or_itself: false,
                 reason: reason(),

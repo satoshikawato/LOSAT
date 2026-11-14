@@ -151,12 +151,16 @@ fn search_records(
     if subjects.is_empty() {
         return Err(engine("Empty CBlastQueryVector"));
     }
+    // `-out` (`run_to_file`) is made where the command line opens it (`native::run`).
+    crate::api::local_blast::open_out(&mut outputs.formats)?;
     check_filtering(args)?;
     let query_range = parse_query_range(args)?;
     let mut resolved = check_resolutions(args, &choices, resolutions, &mut **diagnostics)?;
     for options in &mut resolved {
         options.query_range = query_range;
     }
+    // The taxonomy database of the reports, where the command line asks (`native::run`).
+    subject_taxonomy(&mut resolved, args.taxdb_setting.as_ref())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:213-217
     // ```c++
     //         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
@@ -169,7 +173,7 @@ fn search_records(
         return Ok(());
     }
     // The letters of a reader batch (`native::run_inner`).
-    let batch_size = app::query_batch_size("BLASTX", BATCH_SIZE as u32)? as usize;
+    let batch_size = app::query_batch_size(BATCH_SIZE as u32)? as usize;
     let xml_scan = scan_xml_titles(
         &resolved,
         query_records,
@@ -182,7 +186,7 @@ fn search_records(
     write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
     // The environment of a search of subject records, after the subjects' warnings
     // (`native::run_inner`).
-    app::check_search_environment("BLASTX", true, outputs.only_archive())?;
+    app::check_search_environment("BLASTX", true)?;
     let records_parsed = if args.parse_deflines {
         let pairwise = resolved.iter().any(|options| options.outfmt == 0);
         RecordsParsed::of(&subjects, args.show_gis, pairwise)?
@@ -195,9 +199,11 @@ fn search_records(
     };
     // The errors of a `-subject` search (`native::run_inner`).
     let search_error = |error: anyhow::Error| -> anyhow::Error {
-        // LOSAT's refusal, not an error of NCBI's engine.
+        // LOSAT's refusal, not an error of NCBI's engine, and an error that has NCBI's report
+        // already (`native::database_search_error`).
         if error.is::<super::parameters::SearchSpaceOverflow>()
             || error.is::<super::split::QuerySplitRefusal>()
+            || error.is::<crate::cli::NativeError>()
         {
             error
         } else {
@@ -225,6 +231,26 @@ fn search_records(
         },
         outputs,
     )
+}
+
+/// What the reports `resolved` of a `-subject` search ask of the taxonomy database, through
+/// `setting` (`common::database::subject_taxonomy`): asked by the command line (`native::run`)
+/// and by a search of records (`search_records`) at the same point, after the options are
+/// resolved. The reports share the organism report's database, as the other programs' formats.
+pub(super) fn subject_taxonomy(
+    resolved: &mut [ResolvedOptions],
+    setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
+) -> Result<()> {
+    let taxonomy = crate::algorithm::common::database::subject_taxonomy(
+        setting,
+        "BLASTX",
+        resolved.iter().filter_map(|options| options.tabular),
+    )?;
+    for options in resolved {
+        options.taxdb_found = taxonomy.found.unwrap_or(false);
+        options.subject_taxdb = taxonomy.taxdb.clone();
+    }
+    Ok(())
 }
 
 /// A `-db` search's part of `report_batches`.
@@ -395,6 +421,8 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         ref xml_scan,
         ..
     } = run;
+    // Whether every format is the archive, which NCBI writes without the prefetch (`render`).
+    let only_archive = outputs.only_archive();
     let ReportOutputs {
         formats,
         diagnostics,
@@ -408,7 +436,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         .collect();
     let writers = formats
         .iter_mut()
-        .map(|format| format.sink.ostream())
+        .map(|format| crate::cli::NcbiOstream::sink(&mut format.sink))
         .collect::<io::Result<Vec<_>>>()?;
     // The archive (outfmt 11) refuses a title where it writes the batch, after its search
     // (`archive::check_batch_titles`, below): when a batch that the search may write has a query
@@ -428,7 +456,8 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                 deliver,
                 &mut |_| Ok(()),
             )
-        }) || (database.is_none() && archive::check_titles(subjects, "subject").is_err()));
+        }) || (database.is_none()
+            && archive::check_titles(subjects, "subject", resolved[0].program().upper).is_err()));
     // A run in which a `-subject` title (refused with its first hit) or the message of a query
     // (refused where NCBI does not search its batch) could still be refused by those documents
     // holds every format in order, as the archive's titles do and as the command line holds its
@@ -449,13 +478,13 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
             });
     let hold = (titles_may_refuse || xml_may_refuse).then(archive::ArchiveHold::new);
     // The hold comes between a format's stream and the caller's writer, which has no stream of
-    // NCBI's (`cli::NcbiOstream`): it keeps the bytes in order.
+    // NCBI's (`cli::NcbiOstream::held`): it keeps the writes and flushes in order.
     let mut writers: Vec<crate::cli::NcbiOstream<'_>> = match &hold {
         Some(hold) => {
             hold.hold();
             writers
                 .into_iter()
-                .map(|writer| crate::cli::NcbiOstream::new(Box::new(hold.writer(writer))))
+                .map(|writer| crate::cli::NcbiOstream::held(hold.writer(writer)))
                 .collect()
         }
         None => writers,
@@ -485,6 +514,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         &mut documents,
         titles_may_refuse,
         wants_hits,
+        only_archive,
         diagnostics,
         observer,
     );
@@ -494,13 +524,14 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     // `ReportOutputs::finish_archive`) and nothing after LOSAT's refusal (`ArchiveHold::end_with`);
     // when only the documents are, nothing after one of their refusals and the bytes of the
     // batches before after any other error (`ArchiveHold::end_document_with`), as the command line.
+    // A write that fails there is the run's error in place of the run's own, as without the hold.
     // The observer's events of a held run come before its bytes reach their sinks, so a position
     // read from a sink at an event is not that of the event (`FormatObserver`): the same for every
     // hold of this function, a `-subject` run's too.
     match (&hold, &written) {
         (Some(hold), Ok(_)) => hold.release()?,
-        (Some(hold), Err(error)) if titles_may_refuse => hold.end_with(error),
-        (Some(hold), Err(error)) => hold.end_document_with(error),
+        (Some(hold), Err(error)) if titles_may_refuse => hold.end_with(error)?,
+        (Some(hold), Err(error)) => hold.end_document_with(error)?,
         (None, _) => {}
     }
     let (run_hits, run_subjects) = written?;
@@ -516,14 +547,17 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
 /// `report_batches` from the prologs to the epilogs, into `writers` (each format's, behind the
 /// hold of a run that holds its formats) and `documents` (the writer of each XML2 or JSON
 /// document): whatever ends it, `report_batches` then ends the hold. `titles_may_refuse`: a batch
-/// that the search may write has a title the archive cannot write. Returns the run's hit list
-/// (`wants_hits`) and the database sequences it names.
+/// that the search may write has a title the archive cannot write; `only_archive`: every format
+/// is the archive (`ReportOutputs::only_archive`). Returns the run's hit list (`wants_hits`) and
+/// the database sequences it names.
+#[allow(clippy::too_many_arguments)]
 fn write_run(
     run: &RunReports<'_>,
     writers: &mut [crate::cli::NcbiOstream<'_>],
     documents: &mut [Option<super::blast_xml::RunXml2>],
     titles_may_refuse: bool,
     wants_hits: bool,
+    only_archive: bool,
     diagnostics: &mut &mut (dyn Write + Send),
     observer: &mut Option<&mut (dyn crate::api::local_blast::FormatObserver + Send)>,
 ) -> Result<(
@@ -649,11 +683,29 @@ fn write_run(
         }
         // Every format and the hit list read the lists in the order of the reports.
         report::sort_lists(results);
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-288 (quoted at
+        // `native::run_inner`'s batches)
+        // A database: the titles of the batch's reported sequences, read in NCBI's traceback
+        // (`native::batch_titles`). Then the prefetch before the batch's reports reads
+        // `PRE_FETCH_SEQS_LIMIT` (not with the archive alone): a value that NCBI cannot convert
+        // stops the first batch here (`app::check_prefetch_environment`).
+        let titles = match database {
+            Some(run) => super::native::batch_titles(
+                run.database,
+                search_subjects,
+                results,
+                search_options.gapped,
+                asks,
+            )?,
+            None => None,
+        };
+        app::check_prefetch_environment(only_archive)?;
         // A database: the batch's reported sequences, and its hit lists named by their ranks.
         let mut reported = match database {
             Some(run) => Some(reported_batch(
                 run.database,
                 search_subjects,
+                titles,
                 search_options,
                 asks,
                 results,
@@ -675,6 +727,7 @@ fn write_run(
                 queries,
                 database.is_none().then_some(subjects),
                 queries_before == 0,
+                search_options.program().upper,
             )?;
         }
         let hits = match made_hits {
@@ -943,6 +996,8 @@ fn search_database(
     let list = args
         .db_filter
         .resolve(&settings, &mut *outputs.diagnostics)?;
+    // `-out` (`run_to_file`) is made where the command line opens it (`native::run`).
+    outputs.open_out()?;
     check_filtering(args)?;
     let query_range = parse_query_range(args)?;
     let mut resolved = check_resolutions(args, &choices, resolutions, &mut *outputs.diagnostics)?;
@@ -1000,8 +1055,9 @@ fn search_database(
         return Ok(());
     }
     // The letters of a reader batch (`native::run_inner`).
-    let batch_size = app::query_batch_size("BLASTX", BATCH_SIZE as u32)? as usize;
-    app::check_search_environment("BLASTX", false, outputs.only_archive())?;
+    let batch_size = app::query_batch_size(BATCH_SIZE as u32)? as usize;
+    database.check_accession_tables()?;
+    app::check_search_environment("BLASTX", false)?;
     let pairwise = database.pairwise_database();
     let no_reported = ReportedSubjects::default();
     let shown = ShownSubjects::Database {
@@ -1093,7 +1149,7 @@ pub fn check_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<()> {
 /// `-subject_loc`, which the command line reads after it opened the subject file and before it
 /// reads the subjects (`native::run_inner`).
 fn parse_subject_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
-    parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "BLASTX")
+    parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
@@ -1114,21 +1170,18 @@ fn parse_subject_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
 // ```
 /// The filtering handler (`CFilteringArgs`), which comes after the subjects are read and before
 /// the query options and formatting handlers: NCBI's error of `-seg` (`BlastxArgs::seg_spec`;
-/// `resolve_with_format` keeps it with the other deferred errors, LOSAT's refusal of a value that
-/// NCBI reads comes from `resolve_with_format`).
+/// `resolve_with_format` keeps it with the other deferred errors).
 pub(super) fn check_filtering(args: &BlastxArgs) -> Result<()> {
     match args.seg_spec() {
-        Err(app::SegOptionError::Ncbi(message)) => {
-            Err(options_error(SemanticOptionsError::from(message).into()))
-        }
-        Ok(_) | Err(app::SegOptionError::Losat(_)) => Ok(()),
+        Err(message) => Err(options_error(SemanticOptionsError::from(message).into())),
+        Ok(_) => Ok(()),
     }
 }
 
 /// `-query_loc`, which the command line reads after the subjects, with the query options and
 /// before the formatting handler (`native::run_inner`).
 fn parse_query_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
-    parse_optional_range(args.query_loc.as_deref(), RangeRole::Query, "BLASTX")
+    parse_optional_range(args.query_loc.as_deref(), RangeRole::Query)
 }
 
 /// The output formats `outfmts` as `run_local` reads them and the options of each, before the

@@ -28,7 +28,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::masks::{Frame, MaskEntry};
-use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::options::OptionInputs;
 use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
@@ -88,8 +88,7 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
     inputs.seg = args
         .seg
         .as_deref()
-        .and_then(|value| crate::blastinput::app::parse_seg_option(value, "BLASTP").ok())
-        .map(Filter::from);
+        .and_then(crate::report::archive::options::seg_filter);
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
@@ -123,11 +122,13 @@ pub(crate) fn handle_for(
 /// The requests of a run's batches (`RunRequests`): protein queries and subjects (the `-subject`
 /// records `subjects`, `None` for `-db`), and with `-lcase_masking` (`lcase_masking`) one `notset`
 /// mask of each query's lower-case runs (SEG is never one); `label` names the application
-/// (`BlastpApp::name`) in a refusal.
+/// (`BlastpApp::name`) in a refusal; `pssm` is psiblast's `-in_pssm` as read, which every request
+/// holds in place of the queries (`RunRequests::with_pssm_query`, `PsiSearch::request`).
 pub(crate) fn requests<'a>(
     subjects: Option<&'a [FastaRecord]>,
     lcase_masking: bool,
     label: &'static str,
+    pssm: Option<std::sync::Arc<crate::report::serial::pssm::PssmWithParameters>>,
 ) -> RunRequests<'a, FastaRecord> {
     RunRequests::new(
         RequestPolicy {
@@ -138,6 +139,7 @@ pub(crate) fn requests<'a>(
         subjects,
         label,
     )
+    .with_pssm_query(pssm)
 }
 
 /// `report::archive::check_request_titles` for BLASTP's records: the archive's (`archive`) and
@@ -171,6 +173,8 @@ pub(crate) struct CallBatches<'a> {
     pub unsearched: &'a [bool],
     /// The queries of each NCBI batch of the call, in order.
     pub spans: &'a [Range<usize>],
+    /// The application (`BlastpApp::name`), which a refusal of its requests names.
+    pub label: &'static str,
 }
 
 /// What the archive of a call needs: the call's batches (the batches of one block, or of the
@@ -267,7 +271,9 @@ pub(crate) fn for_each_batch(
     } else {
         call.spans
     };
-    let requests = requests(call.subject_records, call.lcase_masking, "BLASTP");
+    // psiblast's `-in_pssm` writes no archive (`in_pssm::check_in_pssm_options`): the requests'
+    // queries are the call's records.
+    let requests = requests(call.subject_records, call.lcase_masking, call.label, None);
     for span in spans.iter().cloned() {
         if span.is_empty() {
             continue;

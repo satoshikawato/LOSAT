@@ -26,6 +26,9 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fasta")
@@ -34,6 +37,8 @@ fn fixture(name: &str) -> PathBuf {
 
 /// What one run printed: the report and standard error.
 struct Run {
+    /// The run\'s worker log, when the test made one: kept until the caller drops the run.
+    _log: Option<TempFile>,
     stdout: Vec<u8>,
     stderr: String,
 }
@@ -102,12 +107,7 @@ fn blastp_fast(subject: &[&OsStr], threads: u32, vars: &[(&str, &str)], outfmt: 
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bplkpflat-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastp_lookup_flat_worker");
     let output = command
         .arg("blastp")
         .args(["-task", "blastp-fast"])
@@ -126,6 +126,7 @@ fn blastp_fast(subject: &[&OsStr], threads: u32, vars: &[(&str, &str)], outfmt: 
         "{vars:?} threads {threads}: {stderr}"
     );
     Run {
+        _log: log,
         stdout: output.stdout,
         stderr,
     }

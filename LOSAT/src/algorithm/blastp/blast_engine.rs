@@ -7798,10 +7798,10 @@ fn x_block_search_refuses_nothing(
 //   letters come near the most, and a block can end one batch earlier; with a lowered threshold a
 //   block holds one batch or a few.
 // The batches are counted one by one, on the pool's threads when it has more than one, with one
-// counter whose kept counts serve them all. The standard table (`AaLookupTable`) has no overflow
-// banks and keeps `blocks`, the blocks of the letters. Each block comes with its words (the sum of
-// its batches'), the most appends of its table's build (`x_query_blocks::x_block_appends`); the
-// standard table's blocks with none.
+// counter whose kept counts serve them all. Each block comes with its words (the sum of its
+// batches'), the most appends of its table's build (`x_query_blocks::x_block_appends`).
+// The standard table (`AaLookupTable`) has no overflow banks; its blocks are closed on their words
+// too (`x_aa_word_blocks`, item SC8b), and come with no words (its builds reserve nothing).
 // No NCBI counterpart: chooses LOSAT's path and blocks; it does not change any value NCBI computes.
 fn x_word_blocks(
     args: &ResolvedBlastpArgs,
@@ -7815,7 +7815,11 @@ fn x_word_blocks(
         CompressedWordCount, COMPRESSED_HITS_PER_BACKBONE_CELL,
     };
     if args.lookup_table_type != BlastpLookupTableType::CompressedAaLookupTable {
-        return Some((blocks.to_vec(), Vec::new()));
+        return Some((
+            x_aa_word_blocks(args, queries, query_input, batch_size, pool)
+                .unwrap_or_else(|| blocks.to_vec()),
+            Vec::new(),
+        ));
     }
     // The threshold as the table is built (`run_resolved_in_pool`), with the words of the search's
     // matrix (`blastp_matrix_compressed_lookup` builds another matrix's table).
@@ -7841,37 +7845,9 @@ fn x_word_blocks(
         counter.batch_words(&mut letters)
     };
     let query_batches = query_input.batches(batch_size);
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let batch_words: Option<Vec<u64>> = if pool.enabled() && pool.threads() > 1 {
-        // The batches on the pool's threads, with the one counter (whose kept counts serve all
-        // batches).
-        pool.install(|| {
-            query_batches
-                .par_iter()
-                .map(|batch| words(&batch.searched))
-                .collect()
-        })
-    } else {
-        query_batches
-            .iter()
-            .map(|batch| words(&batch.searched))
-            .collect()
-    };
-    #[cfg(any(
-        not(feature = "parallel"),
-        all(target_arch = "wasm32", not(feature = "wasm-threads"))
-    ))]
-    let batch_words: Option<Vec<u64>> = {
-        let _ = pool;
-        query_batches
-            .iter()
-            .map(|batch| words(&batch.searched))
-            .collect()
-    };
-    let batch_words = batch_words?;
+    let batch_words: Vec<u64> = x_each_batch_on(&query_batches, pool, &words)
+        .into_iter()
+        .collect::<Option<_>>()?;
     let most = (COMPRESSED_HITS_PER_BACKBONE_CELL as u64)
         .saturating_mul(counter.backbone_cells())
         .saturating_add(batch_words.iter().copied().max().unwrap_or(0));
@@ -7892,6 +7868,107 @@ fn x_word_blocks(
         block_words[block] = block_words[block].saturating_add(words);
     }
     Some((blocks, block_words))
+}
+
+// No NCBI counterpart: where the counts of `x_word_blocks` run; it changes no value NCBI computes.
+/// `each` of every batch's searched queries, in batch order: on the pool's threads when it has
+/// more than one (with one counter, whose kept counts serve all batches), else on this thread.
+fn x_each_batch_on<T: Send>(
+    query_batches: &[seq_range::RangedBatch],
+    pool: &crate::utils::threading::SearchPool<'_>,
+    each: &(dyn Fn(&std::ops::Range<usize>) -> T + Sync),
+) -> Vec<T> {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if pool.enabled() && pool.threads() > 1 {
+        return pool.install(|| {
+            query_batches
+                .par_iter()
+                .map(|batch| each(&batch.searched))
+                .collect()
+        });
+    }
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
+    let _ = pool;
+    query_batches
+        .iter()
+        .map(|batch| each(&batch.searched))
+        .collect()
+}
+
+// No NCBI counterpart: a floor of the most words of a block of the standard table
+// (`x_aa_word_blocks`); it changes no value NCBI computes.
+/// The words a block of the standard table may always hold: 2^22 (16 MiB of `Int4` offsets).
+const X_AA_BLOCK_WORDS_FLOOR: u64 = 1 << 22;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:283-358 (BlastAaLookupFinalize:
+// a cell of at most AA_HITS_PER_CELL offsets keeps them in the backbone, a cell of more puts all of
+// its offsets in the overflow array)
+// ```c
+//         if (lookup->thin_backbone[i][1] <= AA_HITS_PER_CELL) {
+//             /* there are AA_HITS_PER_CELL or fewer hits, so stuff them in the
+//                backbone */
+//             ...
+//         } else {
+//             /* more than AA_HITS_PER_CELL entries; place them in the
+//                overflow array */
+// ```
+// EXPERIMENT (LOSAT_X_BPQBLOCK), item SC8b: the blocks of the standard table (`AaLookupTable`) closed
+// also on their words, as the compressed table's (`x_word_blocks`). A query offset adds the cells
+// T(s) of its word to the table (`XWideWordCount`: about 35 per letter for BLOSUM62's words of 3 at
+// threshold 11, over a thousand for its words of 4), NCBI builds and frees the table of one batch at
+// a time, and its largest table takes its backbone (cells of AA_HITS_PER_CELL offsets) and the
+// overflow of the batch with the most words. A block's table is kept to that: at most
+// AA_HITS_PER_CELL words per backbone cell plus the words of the batch with the most, or
+// `X_AA_BLOCK_WORDS_FLOOR` where that is more, so that a block of `LOSAT_X_BPQBLOCK` letters whose
+// table takes at most 16 MiB of offsets ends on its letters (BLOSUM62's words of 2 and 3 at their
+// default thresholds: below 2 million words in 50,000 letters, 7-9 MiB); a table of 4-letter words
+// takes one batch or a few. `None` where the word size has no counter (none of the standard
+// table's).
+// No NCBI counterpart: chooses LOSAT's blocks; it does not change any value NCBI computes.
+fn x_aa_word_blocks(
+    args: &ResolvedBlastpArgs,
+    queries: &[FastaRecord],
+    query_input: &seq_range::QueryInput,
+    batch_size: u32,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> Option<Vec<std::ops::Range<usize>>> {
+    use crate::algorithm::tblastx::lookup::x_pair_lut::x_pair_lut_wide::XWideWordCount;
+    let counter = XWideWordCount::new(
+        args.scoring.matrix,
+        args.word_size,
+        crate::core::blast_util::ncbi_int4_from_double(args.threshold),
+    )?;
+    // The words of all letters of the queries; SEG and `-lcase_masking` only leave words out
+    // (as the compressed table's count in `x_word_blocks`).
+    let words = |searched: &std::ops::Range<usize>| {
+        let encoded: Vec<EncodedProtein> = queries[searched.clone()]
+            .iter()
+            .map(|record| encode_protein_sequence(record.seq()))
+            .collect();
+        let mut letters = encoded
+            .iter()
+            .map(|query| &query.aa_seq[1..query.aa_seq.len() - 1]);
+        counter.batch_words(&mut letters)
+    };
+    let query_batches = query_input.batches(batch_size);
+    let batch_words = x_each_batch_on(&query_batches, pool, &words);
+    let most = (crate::algorithm::tblastx::lookup::AA_HITS_PER_CELL as u64)
+        .saturating_mul(counter.backbone_cells())
+        .saturating_add(batch_words.iter().copied().max().unwrap_or(0))
+        .max(X_AA_BLOCK_WORDS_FLOOR);
+    let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
+    super::x_query_blocks::x_query_blocks(
+        &query_batches,
+        &lengths,
+        super::x_query_blocks::x_bp_qblock()?,
+        Some((&batch_words, most)),
+    )
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the outfmt 0 report of the search of all queries refuses a

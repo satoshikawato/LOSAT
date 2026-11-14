@@ -893,12 +893,14 @@ fn complement_soft_ranges(masks: &[(u32, u32)], length: usize, ranges: &mut Vec<
 // the last byte's bases in its two low bits; `encode_subject_ncbi2na_packed`).
 /// Sequence `i` of a block as the preliminary stage reads it: its length and its stored
 /// 2-bit data, and the block (`range`), whose masks a search with `-db_soft_mask` reads once for
-/// all its sequences (`BlastnDatabase::soft_ranges_into`).
-fn block_subject(
-    block: &SequenceBlock,
-    range: BlockRange,
+/// all its sequences (`BlastnDatabase::soft_ranges_into`). The block is lent, not copied: every
+/// sequence of every database search carries it, and a copy of its 24 bytes into each sequence's
+/// reference cost megablast's default path 0.3 % of its instructions (ws, SILVA, ad-M4a-5).
+fn block_subject<'a>(
+    block: &'a SequenceBlock,
+    range: &'a BlockRange,
     i: usize,
-) -> Result<BlastnSubjectRef<'_>> {
+) -> Result<BlastnSubjectRef<'a>> {
     let length = block.nucleotide_len(i).map_err(search_read_error)?;
     Ok(BlastnSubjectRef {
         length,
@@ -1059,7 +1061,7 @@ where
                     for i in 0..block.len() {
                         let ordinal = range.first_ordinal + i as u32;
                         if let Some(result) =
-                            search(scratch, ordinal, block_subject(&block, range, i)?)
+                            search(scratch, ordinal, block_subject(&block, &range, i)?)
                         {
                             kept.push((ordinal, result));
                         }
@@ -1148,7 +1150,7 @@ where
         let block = x_read_block(db, range).map_err(search_read_error)?;
         for i in 0..block.len() {
             let ordinal = range.first_ordinal + i as u32;
-            if let Some(result) = search(&mut scratch, ordinal, block_subject(&block, range, i)?) {
+            if let Some(result) = search(&mut scratch, ordinal, block_subject(&block, &range, i)?) {
                 merge(ordinal, result);
             }
         }

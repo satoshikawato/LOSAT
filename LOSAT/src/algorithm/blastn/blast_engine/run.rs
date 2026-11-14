@@ -9496,7 +9496,7 @@ struct BlastnSubjectRef<'a> {
     /// The block of the preliminary stage that a database sequence was read in
     /// (`database::block_subject`), whose masks a search with `-db_soft_mask` reads once for all
     /// its sequences (`database::BlastnDatabase::soft_ranges_into`). `None` otherwise.
-    block: Option<crate::seqdb::BlockRange>,
+    block: Option<&'a crate::seqdb::BlockRange>,
 }
 
 impl<'a> BlastnSubjectRef<'a> {
@@ -12626,7 +12626,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             Some((database, algo_id)) => {
                 let mut ranges = std::mem::take(&mut subject_scratch.db_soft_ranges);
                 let read = match subject.block {
-                    Some(block) => database.soft_ranges_into(
+                    Some(&block) => database.soft_ranges_into(
                         block,
                         s_idx as u32,
                         algo_id,

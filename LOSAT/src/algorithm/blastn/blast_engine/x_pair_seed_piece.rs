@@ -466,7 +466,7 @@ const PAGE: usize = 4096;
 fn page_start<T>(v: &[T]) -> usize {
     let size = size_of::<T>().max(1);
     let skip = (PAGE - v.as_ptr() as usize % PAGE) % PAGE;
-    if skip % size == 0 {
+    if skip.is_multiple_of(size) {
         skip / size
     } else {
         0
@@ -564,15 +564,15 @@ struct StripState {
 }
 
 /// No NCBI counterpart (scheduling only): the slot in the pool of each piece a partition may still
-/// fold, which the participants read without a lock: piece k of strip i at `(i % strips) * row
-/// + k % pieces`, for `strips` the strips handed out past the slowest partition's (`ahead`)
-/// and `pieces` the slots of the pool. Piece k's entry is written by the piece's producer before
-/// the strip's count says it is there (`Release`) and read after the count is read (`Acquire`),
-/// and it is not written again while a partition has piece k to fold or its slot is to go back:
-/// that piece holds its slot until every partition has folded it (`freed`), and so do the later
-/// pieces, so a strip's piece k + `pieces` would need one more slot than the pool has; and strip
-/// i + `strips` is handed out only once every partition has left strip i and its pieces have gone
-/// back (under the schedule's lock, which the producer takes first).
+/// fold, which the participants read without a lock: piece k of strip i at
+/// `(i % strips) * row + k % pieces`, for `strips` the strips handed out past the slowest
+/// partition's (`ahead`) and `pieces` the slots of the pool. Piece k's entry is written by the
+/// piece's producer before the strip's count says it is there (`Release`) and read after the count
+/// is read (`Acquire`), and it is not written again while a partition has piece k to fold or its
+/// slot is to go back: that piece holds its slot until every partition has folded it (`freed`), and
+/// so do the later pieces, so a strip's piece k + `pieces` would need one more slot than the pool
+/// has; and strip i + `strips` is handed out only once every partition has left strip i and its
+/// pieces have gone back (under the schedule's lock, which the producer takes first).
 /// (A lock of the strip's list of slots and a read lock of the slot, taken by every partition for
 /// every piece, wrote the strip's and the slot's lines that the other partitions read: BLASTN-short
 /// of 30,000 short queries x 3 Mb at 16 threads, the participants took x4 the loads served from

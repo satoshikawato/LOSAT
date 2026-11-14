@@ -52,9 +52,10 @@
 //!   searched: with K = 3 instead of 8, all of Trinity x Swiss-Prot at 8 threads holds 72 MiB of
 //!   anonymous memory instead of 134 MiB in 0.99 of the time.
 //! - `LOSAT_X_BXW4CAP[=K]` (built-in K = 1; acts only with the 4-letter lookup table, the standard
-//!   table of `-word_size 4`): `LOSAT_X_BXUNITCAP`'s K is at most this K, or `ceil(threads /
-//!   subjects)` where that is more (the form of `LOSAT_X_BXCLUTCAP`), and a capped unit with this
-//!   table is left `ceil(threads / K)` threads also where its subjects are one task
+//!   table of `-word_size 4`): `LOSAT_X_BXUNITCAP`'s K is at most this K, with few subjects too
+//!   (no `ceil(threads / subjects)` clause as `LOSAT_X_BXCLUTCAP`'s: Owner, 2026-11-14, below), and
+//!   a capped unit with this table is left `ceil(threads / K)` threads also where its subjects are
+//!   one task
 //!   (`ONE_TASK_SHARE` does not bound it, `one_task_bound`): the build of its table in that many
 //!   parts (`LOSAT_X_BXBUILDPAR`) is most of its work. A 10,002-base batch's 4-letter table and
 //!   its search hold about 90 MB (K = 8 less K = 1 over 7 units at 8 and 16 threads), and NCBI
@@ -65,7 +66,12 @@
 //!   and 325 / 421 / 495 MB, K = 8 15.4 / 7.9 / 4.9 s and 1,088 / 1,207 / 1,232 MB, NCBI 48.2 /
 //!   27.8 / 33.8 s and 1,563 / 2,338 / 4,404 MB. A rule the Owner approved as a deadline fallback
 //!   (2026-11-12, `docs/decisions/SWITCH_APPROVALS.md`) and kept at K = 1 (Owner, 2026-11-13),
-//!   until the table's memory is reduced in shape (line NP, SC9b).
+//!   until the table's memory is reduced in shape (line NP, SC9b). With few subjects the clause of
+//!   `LOSAT_X_BXCLUTCAP` had raised K to 2 at 16 threads and 4 at 32 for 8 proteins, and the tables
+//!   held side by side took the memory past NCBI's (ws node 1, 800 cDNAs x 8 yeast proteins
+//!   `-subject`, reports equal: 16 / 32 threads 3.16 / 2.14 s and 486 / 823 MB with it, 4.50 / 3.41
+//!   s and 322 / 319 MB without, NCBI 139.7 s and 386 MB at one thread); the Owner chose K = 1 for
+//!   this table whatever the subjects (2026-11-14, `docs/decisions/OWNER_DECISIONS.md`).
 //! - `LOSAT_X_BXCAPFILL[=f]` (built-in f = 4; acts only where `LOSAT_X_BXUNITCAP` caps): the capped
 //!   units keep the threads busy with few subjects too. A capped unit's subjects run as tasks of
 //!   `capped_subjects_per_task` subjects: f tasks for each of the `ceil(threads / K)` threads a unit
@@ -218,8 +224,9 @@ enum XTableCap {
 /// No NCBI counterpart: the K a search keeps to: `cap_k`, and with the compressed lookup table
 /// (`-word_size` 5 to 7) at most `LOSAT_X_BXCLUTCAP`'s K, with the 4-letter table at most
 /// `LOSAT_X_BXW4CAP`'s (module comment). `subjects` is the number of subjects: K units of few
-/// subjects need K x subjects >= threads to keep every thread busy, so that K rises for them. Also
-/// the second value: the table's rule, and whether its own K holds.
+/// subjects need K x subjects >= threads to keep every thread busy, so that the compressed table's
+/// K rises for them; the 4-letter table's does not (Owner, 2026-11-14). Also the second value: the
+/// table's rule, and whether its own K holds.
 fn search_cap_k(
     threads: usize,
     options: &ResolvedOptions,
@@ -233,9 +240,12 @@ fn search_cap_k(
     } else {
         None
     };
-    Some(table.map_or((k, None), |(table, own)| {
-        let few = threads.div_ceil(subjects.max(1));
-        (k.min(own.max(few)), Some((table, few <= own)))
+    Some(table.map_or((k, None), |(table, own)| match table {
+        XTableCap::Compressed => {
+            let few = threads.div_ceil(subjects.max(1));
+            (k.min(own.max(few)), Some((table, few <= own)))
+        }
+        XTableCap::FourLetter => (k.min(own), Some((table, true))),
     }))
 }
 

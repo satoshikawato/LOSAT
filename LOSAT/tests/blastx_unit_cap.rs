@@ -371,8 +371,9 @@ fn a_split_query_gives_the_report_without_the_switches() {
 /// `blastx/x_bx_mem.rs`): with `-word_size 4` the built-in cap acts at 4 threads (K = 1 below the
 /// threads), each unit's table built in 4 parts, also for a batch of one subject task; the report
 /// equals that of `=0` (K = 8: no cap at 4 threads) and of all the switches off, for several query
-/// batches and for a split query. Many subjects: its own K holds; one subject: K rises to the
-/// threads (`ceil(threads / subjects)`), and nothing is capped at 4 threads.
+/// batches and for a split query. Its own K holds with any number of subjects: one subject at 4
+/// threads and 8 subjects at 16 threads are capped at K = 1 too (no `ceil(threads / subjects)`
+/// clause for this table: Owner, 2026-11-14).
 #[test]
 fn four_letter_tables_give_the_report_without_their_cap() {
     let dir = temp_dir("w4");
@@ -426,21 +427,33 @@ fn four_letter_tables_give_the_report_without_their_cap() {
         blastx(&query, &args, 4, &[]) == blastx(&query, &args, 4, &w4_off),
         "40 proteins: report differs"
     );
-    // One protein: K rises to the 4 threads, so the cap does not act.
-    let (query, one) = inputs(&dir, 8, 4_000, 1);
-    let args = [
-        "-word_size",
-        "4",
-        "-subject",
-        one.to_str().unwrap(),
-        "-outfmt",
-        "6",
-    ];
-    assert_eq!(
-        sides(&dir, &query, &args, 4, &[], "LOSAT_X_BXW4CAP"),
-        (false, true)
-    );
-    assert_eq!(cap_sides(&dir, &query, &args, &[]), (false, true));
+    // One protein at 4 threads and 8 proteins at 16: K stays 1, so the cap acts with few subjects
+    // too.
+    for (proteins, threads) in [(1, 4), (8, 16)] {
+        let (query, few) = inputs(&dir, 8, 4_000, proteins);
+        let args = [
+            "-word_size",
+            "4",
+            "-subject",
+            few.to_str().unwrap(),
+            "-outfmt",
+            "6",
+        ];
+        assert_eq!(
+            sides(&dir, &query, &args, threads, &[], "LOSAT_X_BXW4CAP"),
+            (true, false),
+            "{proteins} proteins at {threads} threads"
+        );
+        assert_eq!(
+            sides(&dir, &query, &args, threads, &[], "LOSAT_X_BXUNITCAP"),
+            (true, false),
+            "{proteins} proteins at {threads} threads"
+        );
+        assert!(
+            blastx(&query, &args, threads, &[]) == blastx(&query, &args, threads, &w4_off),
+            "{proteins} proteins at {threads} threads: report differs"
+        );
+    }
     // A split query: the chunk waves of one chunk at a time, each chunk's subjects as tasks.
     let (query, set) = inputs(&dir, 1, 45_000, 595);
     let args = [

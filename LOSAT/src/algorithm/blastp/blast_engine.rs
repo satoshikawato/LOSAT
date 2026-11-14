@@ -6343,8 +6343,14 @@ struct BlastpRanges<'a> {
     query_input: &'a seq_range::QueryInput,
     subject_placements: &'a seq_range::Placements,
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the input position of the first query of a block (0 for a
-    // search of every query), added to `query_input`'s positions where a query is named.
+    // search of every query), added to `query_input`'s positions where a query is named; and
+    // psiblast's rounds of one query (`psi_round::run_queries`): its input position.
     x_ordinal_base: usize,
+    /// The index among the run's searched queries of the call's first query: where the search
+    /// strategy's requests of the call's batches start (`CallRequests`). It is the input position
+    /// of `x_ordinal_base` unless `-query_loc` skips records before the call's queries (a range
+    /// that starts past the end of its record: psiblast's rounds of a query after such a record).
+    searched_base: usize,
     /// A query chunk's search (`search_split_query_batches`): the effective search space of each
     /// context of the chunk's whole batch, which NCBI sets as the chunk's options
     /// (`SplitQuery_SetEffectiveSearchSpace`); `None` for every other search.
@@ -6863,9 +6869,6 @@ fn search(
             seq_range::QueryInput::whole(query_records),
         ),
     };
-    if let Some(database) = database {
-        database.check_accession_tables()?;
-    }
     check_blastp_environment(args.app, database.is_none())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
     // ```c++
@@ -6973,6 +6976,7 @@ fn search(
             &plan,
             query_records,
             &searched_queries,
+            &query_input,
             batches,
             subjects,
             subject_source,
@@ -7037,6 +7041,7 @@ fn search(
             query_input: &done_input,
             subject_placements: &subjects.placements,
             x_ordinal_base: 0,
+            searched_base: 0,
             split_search_spaces: None,
         };
         let stopped = std::sync::Mutex::new(stopped);
@@ -7462,6 +7467,7 @@ fn search(
                                 query_input: &block_input,
                                 subject_placements: &subjects.placements,
                                 x_ordinal_base: block.start,
+                                searched_base: block.start,
                                 split_search_spaces: None,
                             },
                             &BlastpReports {
@@ -8699,7 +8705,7 @@ impl<'a> CallRequests<'a> {
             ),
             records: query_records,
             placements: &ranges.query_input.placements,
-            base: ranges.x_ordinal_base,
+            base: ranges.searched_base,
             searched: std::sync::Mutex::new(vec![None; spans.len()]),
             spans,
             through: std::sync::Mutex::new(None),
@@ -8885,6 +8891,7 @@ fn unsearched_batches_then_engine_error(
         query_input: &prefix_input,
         subject_placements: ranges.subject_placements,
         x_ordinal_base: ranges.x_ordinal_base,
+        searched_base: ranges.searched_base,
         split_search_spaces: None,
     };
     // The first searched batch's search strategy request follows those of the batches before
@@ -9184,6 +9191,7 @@ fn search_split_query_batches(
                     query_input: &part_input,
                     subject_placements: &seq_range::Placements::default(),
                     x_ordinal_base: 0,
+                    searched_base: 0,
                     split_search_spaces: Some(&batch_search_spaces),
                 },
                 // A chunk's search ends after its preliminary stage, before any report.

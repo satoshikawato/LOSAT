@@ -44,6 +44,9 @@ const BATCH: (&str, &str) = ("BATCH_SIZE", "500");
 /// `LOSAT_X_BPQBLOCK` for blocks of several batches of `queries(4)`: {BDT62581.1 to BDT62583.1}
 /// (1,595 letters) and {BDT62584.1}. `1` makes a block per batch, three.
 const TWO_BLOCKS: &str = "1000";
+/// `TWO_BLOCKS` for `-query_loc 10-300` (291 letters a query, 1,164 in all, one block at 1,000):
+/// {BDT62581.1 to BDT62583.1} (873 letters) and {BDT62584.1}.
+const TWO_BLOCKS_LOC: &str = "500";
 
 /// One run.
 struct Run {
@@ -85,6 +88,11 @@ fn queries_of(tag: &str, text: &str) -> (PathBuf, TempPath) {
 /// A protein database of the subject proteome, made with `losat makeblastdb` in a directory of the
 /// test (`tag` names it); returns the database name and the directory's guard.
 fn subject_database(tag: &str) -> (PathBuf, TempPath) {
+    subject_database_with(tag, &[])
+}
+
+/// `subject_database` made with the further makeblastdb arguments `extra` (`-parse_seqids`).
+fn subject_database_with(tag: &str, extra: &[&str]) -> (PathBuf, TempPath) {
     let dir = TempPath::new(
         std::env::temp_dir().join(format!("losat-bpprelim-db-{tag}-{}", std::process::id())),
     );
@@ -95,6 +103,7 @@ fn subject_database(tag: &str) -> (PathBuf, TempPath) {
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
         .args(["-dbtype", "prot"])
+        .args(extra)
         .arg("-out")
         .arg(&name)
         .output()
@@ -284,6 +293,282 @@ fn the_join_moves_each_list_to_its_query() {
             "{what}: the blocks of the preliminary stage did not run"
         );
     }
+}
+
+/// One case of `cases_with_blocks`: the subject arguments, the threads, the variables beside
+/// `BATCH`, the blocks (`LOSAT_X_BPQBLOCK`) and the arguments.
+type BlockCase<'a> = (
+    &'a [&'a OsStr],
+    u32,
+    &'a [(&'a str, &'a str)],
+    &'a str,
+    &'a [&'a str],
+);
+
+/// Runs each case against one table (`same_as_one_table`, with `BATCH`), and asserts that it ends
+/// with 0, writes rows and runs the preliminary stage of the search of all queries in blocks: both
+/// sides of the switch, the block search's plan refused (its reference side) and the blocks of the
+/// preliminary stage (its new side); a run of the block search records the new side only.
+fn cases_with_blocks(query: &Path, cases: &[BlockCase<'_>]) {
+    for &(subject, threads, vars, letters, extra) in cases {
+        let mut all = vec![BATCH];
+        all.extend_from_slice(vars);
+        let (reach, run) = same_as_one_table(query, subject, threads, &all, Some(letters), extra);
+        let what = format!(
+            "{:?} {extra:?} {vars:?} threads {threads} blocks {letters}",
+            subject[0]
+        );
+        assert_eq!(run.code, Some(0), "{what}: {}", run.stderr);
+        assert!(!run.stdout.is_empty(), "{what}: the fixture pair has rows");
+        let sides = reach.sides("LOSAT_X_BPQBLOCK");
+        assert_eq!(
+            sides,
+            (true, true),
+            "{what}: the blocks of the preliminary stage did not run"
+        );
+    }
+}
+
+// The hit-saving options that act inside a block's call: `-culling_limit` (each block's call has
+// its own culling writer, `culling::PrelimCulling`, which equals one writer of all queries because
+// the culling keeps one tree per query; the limit 1 drops most of the fixture pair's 27 rows) and
+// `-max_target_seqs 1` (the preliminary hit list's size). One thread and four, `-subject` and
+// `-db`, blocks of one batch and of several.
+#[test]
+fn culling_and_hit_list_sizes_with_blocks() {
+    let fasta = fixture("MejoMJNV.faa");
+    let fasta = [OsStr::new("-subject"), fasta.as_os_str()];
+    let (db, _db_dir) = subject_database("cull");
+    let db = [OsStr::new("-db"), db.as_os_str()];
+    let (query, _dir) = queries("cull", 4);
+    let culling: &[&str] = &["-culling_limit", "1", "-outfmt", "10"];
+    let max_targets: &[&str] = &["-max_target_seqs", "1", "-outfmt", "10"];
+    cases_with_blocks(
+        &query,
+        &[
+            (&fasta, 1, &[], TWO_BLOCKS, culling),
+            (&fasta, 4, &[], "1", culling),
+            (&db, 1, &[], "1", culling),
+            (&db, 4, &[], TWO_BLOCKS, culling),
+            (&fasta, 4, &[], TWO_BLOCKS, max_targets),
+            (&db, 1, &[], "1", max_targets),
+        ],
+    );
+}
+
+// Batches that the call of all queries treats as a whole, inside blocks other than the first:
+// - a batch that NCBI splits into query chunks (`CHUNK_SIZE=800`: the batches {BDT62582.1,
+//   BDT62583.1}, 897 letters, and {BDT62584.1}, 944): the block scans the batch, and the call of
+//   all queries searches its chunks after the join (`search_split_query_batches`), whose lists
+//   replace the block's;
+// - a batch of invalid queries only (an all-X record of 600 letters after BDT62581.1), which NCBI
+//   does not search: with blocks of one batch it is a block of its own, of invalid queries only;
+// - an invalid-only first batch with a database whose sequence file cannot be read
+//   (`arch_sprot_nopsq`): the unsearched batch is reported, then the read error of the first block
+//   that searches, made by the call of all queries (`preliminary_search_error`), exit 3.
+#[test]
+fn split_and_unsearched_batches_with_blocks() {
+    let fasta = fixture("MejoMJNV.faa");
+    let fasta = [OsStr::new("-subject"), fasta.as_os_str()];
+    let (db, _db_dir) = subject_database("split");
+    let db = [OsStr::new("-db"), db.as_os_str()];
+    let outfmt: &[&str] = &["-outfmt", "10"];
+    let split: &[(&str, &str)] = &[("CHUNK_SIZE", "800")];
+    let (query, _dir) = queries("split", 4);
+    cases_with_blocks(
+        &query,
+        &[
+            (&fasta, 1, split, TWO_BLOCKS, outfmt),
+            (&fasta, 4, split, "1", outfmt),
+            (&db, 1, split, "1", outfmt),
+            (&db, 4, split, TWO_BLOCKS, outfmt),
+        ],
+    );
+    let real = std::fs::read_to_string(&query).unwrap();
+    let first_end = real[1..].find('>').unwrap() + 1;
+    let all_x = format!(">allx all X\n{}\n", "X".repeat(600));
+    let text = format!("{}{all_x}{}", &real[..first_end], &real[first_end..]);
+    let (mid, _mid_dir) = queries_of("split-mid", &text);
+    cases_with_blocks(
+        &mid,
+        &[
+            (&fasta, 1, &[], "1", outfmt),
+            (&fasta, 4, &[], TWO_BLOCKS, outfmt),
+            (&db, 4, &[], "1", outfmt),
+            (&db, 1, &[], TWO_BLOCKS, outfmt),
+        ],
+    );
+    let (first, _first_dir) = queries_of("split-first", &format!("{all_x}{real}"));
+    let nopsq = [
+        OsStr::new("-db"),
+        OsStr::new("tests/db_search/arch_sprot_nopsq"),
+    ];
+    for threads in [1, 4] {
+        let (_, run) = same_as_one_table(&first, &nopsq, threads, &[BATCH], Some("1"), outfmt);
+        assert_eq!(run.code, Some(3), "threads {threads}: {}", run.stderr);
+        assert!(
+            run.stderr
+                .ends_with("BLAST engine error: Database memory map file error\n"),
+            "threads {threads}: {}",
+            run.stderr
+        );
+    }
+}
+
+/// `text` with the letters at offsets `from..to` of every sequence (each record's letters on one
+/// line) in lower case.
+fn lower_case(text: &str, from: usize, to: usize) -> String {
+    text.lines()
+        .map(|line| {
+            if line.starts_with('>') || line.len() <= from {
+                format!("{line}\n")
+            } else {
+                let to = to.min(line.len());
+                format!(
+                    "{}{}{}\n",
+                    &line[..from],
+                    line[from..to].to_ascii_lowercase(),
+                    &line[to..]
+                )
+            }
+        })
+        .collect()
+}
+
+// `-lcase_masking`, lower-case letters in the queries (offsets 40 to 100) and in the subjects (20 to
+// 60): the queries' masks are in the frames each block takes from the call of all queries, and the
+// subjects' scan ranges are made once by that call for its blocks. Outfmt 10, and 7 and 0 with
+// `-query_loc` (without it the block search writes them); one thread and four.
+#[test]
+fn lcase_masking_with_blocks() {
+    let (query, _dir) = queries("lcase", 4);
+    let text = std::fs::read_to_string(&query).unwrap();
+    let joined: String = text
+        .split('>')
+        .filter(|record| !record.is_empty())
+        .map(|record| {
+            let (title, letters) = record.split_once('\n').unwrap();
+            format!(">{title}\n{}\n", letters.replace('\n', ""))
+        })
+        .collect();
+    let (query, _lc_dir) = queries_of("lcase-q", &lower_case(&joined, 40, 100));
+    let subjects = std::fs::read_to_string(fixture("MejoMJNV.faa")).unwrap();
+    let subjects: String = subjects
+        .split('>')
+        .filter(|record| !record.is_empty())
+        .map(|record| {
+            let (title, letters) = record.split_once('\n').unwrap();
+            format!(">{title}\n{}\n", letters.replace('\n', ""))
+        })
+        .collect();
+    let (subject, _subject_dir) = queries_of("lcase-s", &lower_case(&subjects, 20, 60));
+    let subject = [OsStr::new("-subject"), subject.as_os_str()];
+    cases_with_blocks(
+        &query,
+        &[
+            (
+                &subject,
+                1,
+                &[],
+                TWO_BLOCKS,
+                &["-lcase_masking", "-outfmt", "10"],
+            ),
+            (
+                &subject,
+                4,
+                &[],
+                "1",
+                &["-lcase_masking", "-query_loc", "10-300", "-outfmt", "7"],
+            ),
+            (
+                &subject,
+                4,
+                &[],
+                TWO_BLOCKS_LOC,
+                &["-lcase_masking", "-query_loc", "10-300", "-outfmt", "0"],
+            ),
+        ],
+    );
+}
+
+// `-seqidlist` and `-negative_seqidlist` (a database made with `-parse_seqids`): the call of all
+// queries ranks the listed subjects after the join (`ListedSubjects`); the list keeps subjects with
+// rows of the first block's queries and of the last block's (BDT62772.1, BDT62777.1, BDT62780.1),
+// the negative list the others. One thread and four.
+#[test]
+fn seqidlist_with_blocks() {
+    let (db, db_dir) = subject_database_with("ids", &["-parse_seqids"]);
+    let db = [OsStr::new("-db"), db.as_os_str()];
+    let ids = db_dir.join("ids.txt");
+    std::fs::write(&ids, "BDT62772.1\nBDT62777.1\nBDT62780.1\nBDT62750.1\n").unwrap();
+    let ids = ids.to_str().unwrap();
+    let (query, _dir) = queries("ids", 4);
+    cases_with_blocks(
+        &query,
+        &[
+            (
+                &db,
+                1,
+                &[],
+                TWO_BLOCKS,
+                &["-seqidlist", ids, "-outfmt", "10"],
+            ),
+            (&db, 4, &[], "1", &["-seqidlist", ids, "-outfmt", "10"]),
+            (
+                &db,
+                4,
+                &[],
+                TWO_BLOCKS,
+                &["-negative_seqidlist", ids, "-outfmt", "10"],
+            ),
+        ],
+    );
+}
+
+// The reports that send a `-query_loc` run to the search of all queries (the block search does not
+// take `-query_loc`): outfmt 0, 5 (XML) and 11 (the archive); and the lookup tables of another
+// matrix (PAM70) and of the word sizes 2 (exact blastp's direct table) and 5 (the compressed table
+// of `-task blastp`), outfmt 10. One thread and four, `-subject`.
+#[test]
+fn query_loc_reports_and_other_tables_with_blocks() {
+    let fasta = fixture("MejoMJNV.faa");
+    let fasta = [OsStr::new("-subject"), fasta.as_os_str()];
+    let (query, _dir) = queries("tables", 4);
+    cases_with_blocks(
+        &query,
+        &[
+            (
+                &fasta,
+                1,
+                &[],
+                "1",
+                &["-query_loc", "10-300", "-outfmt", "0"],
+            ),
+            (
+                &fasta,
+                4,
+                &[],
+                TWO_BLOCKS_LOC,
+                &["-query_loc", "10-300", "-outfmt", "5"],
+            ),
+            (
+                &fasta,
+                4,
+                &[],
+                "1",
+                &["-query_loc", "10-300", "-outfmt", "11"],
+            ),
+            (
+                &fasta,
+                1,
+                &[],
+                TWO_BLOCKS,
+                &["-matrix", "PAM70", "-outfmt", "10"],
+            ),
+            (&fasta, 4, &[], "1", &["-word_size", "2", "-outfmt", "10"]),
+            (&fasta, 1, &[], "1", &["-word_size", "5", "-outfmt", "10"]),
+        ],
+    );
 }
 
 // `-db`: each block reads the database (`database::search_blocks`); the lists name the sequences by

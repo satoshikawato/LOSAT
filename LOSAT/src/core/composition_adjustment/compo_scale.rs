@@ -500,9 +500,11 @@ pub(crate) fn pssm_composition_based_stats_sw(
     // The lambda ratio without the composition p-value.
     let correct_ungapped_lambda =
         calc_lambda_of_score_probs(probs, obs_min, obs_max, info.ungapped_lambda);
-    let ratio = (correct_ungapped_lambda / info.ungapped_lambda)
-        .min(1.0)
-        .max(LAMBDA_RATIO_LOWER_BOUND);
+    // `MIN(1, *LambdaRatio)` (no composition p-value), then `MAX(*LambdaRatio,
+    // LambdaRatioLowerBound)`: `min`/`max` as `lambda_ratio`'s (`clamp` differs on NaN).
+    let ratio = correct_ungapped_lambda / info.ungapped_lambda;
+    let ratio = ratio.min(1.0);
+    let ratio = ratio.max(LAMBDA_RATIO_LOWER_BOUND);
     // `s_ScalePSSM` at the scaled Lambda.
     let lambda = info.ungapped_lambda / ratio;
     for ((out, ratios), start) in matrix

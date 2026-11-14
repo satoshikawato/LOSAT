@@ -1278,9 +1278,10 @@ mod tests {
     fn accession_case_variants() {
         let f = File::open(format!("{FX}/p5.pdb")).unwrap();
         let env = Env::open(&f).unwrap();
+        // The second pass reads the prefixes that the first kept.
+        let mut known = rustc_hash::FxHashMap::default();
+        let db = acc2oid(&env).unwrap();
         for _ in 0..2 {
-            let mut known = rustc_hash::FxHashMap::default();
-            let db = acc2oid(&env).unwrap();
             for (acc, from, want) in [
                 (&b"myprot9"[..], 0, vec![4]),
                 (b"MYPROT9", 0, vec![4]),

@@ -165,11 +165,14 @@ put it before A with `-sorthits 3` only.
 
 Text Seq-ids that differ only in the case of their letters in two databases (line DBID pircase), version 5, made from
 the FASTA of the same names: `pcs_pir_y` (Y `pir||PIRNAME`, the best hit of `pcs_q.faa`) and `pcs_pir_a` (A
-`pir||pirname`, B `gb|BBB00001.1|`), `pcs_gb_y` and `pcs_gb_a` (the names alone `gb||locusy` and `gb||LOCUSY`), the
-control `pcs_ctl_y` and `pcs_ctl_a` (`pir||PIRNAME` and `pir||PIRNAMX`), and `pcs_ngb_y` and `pcs_ngb_a` (nucleotide,
-the proteins' back-translations, `gb||locusy` and `gb||LOCUSY`, query `pcs_q.fna`). NCBI's scope takes the two ids of a
-pair for one and writes the names of the one it reads first for both; the keys of a name and of a FASTA text are as
-written. `--pircase-only` builds only these.
+`pir||pirname`, B `gb|BBB00001.1|`), `pcs_prf_y` and `pcs_prf_a` (`prf||PRFNAME` and `prf||prfname`), `pcs_piracc_y`
+and `pcs_piracc_a` (`pir|ACC01.1|PIRNAME` and `pir|acc01.1|pirname`), `pcs_gb_y` and `pcs_gb_a` (the names alone
+`gb||locusy` and `gb||LOCUSY`), the controls `pcs_ctl_y` and `pcs_ctl_a` (`pir||PIRNAME` and `pir||PIRNAMX`),
+`pcs_embgb_y` and `pcs_embgb_a` (`gb||locusy` and `emb||LOCUSY`: another alternative) and `pcs_sptr_y` and
+`pcs_sptr_a` (`sp||NAMEY` and `tr||namey`: another release), and `pcs_ngb_y` and `pcs_ngb_a` (nucleotide, the
+proteins' back-translations, `gb||locusy` and `gb||LOCUSY`, query `pcs_q.fna`). NCBI's scope takes the two ids of a
+pair of one alternative and release for one and writes the names of the one it reads first for both; the keys of a name
+and of a FASTA text are as written. `--pircase-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
 `pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
@@ -372,8 +375,10 @@ def build_taxrow(args: argparse.Namespace) -> None:
 
 
 def build_pircase(args: argparse.Namespace) -> None:
-    for name, extension in (("pcs_pir_y", "faa"), ("pcs_pir_a", "faa"), ("pcs_gb_y", "faa"), ("pcs_gb_a", "faa"),
-                            ("pcs_ctl_y", "faa"), ("pcs_ctl_a", "faa"), ("pcs_ngb_y", "fna"), ("pcs_ngb_a", "fna")):
+    for name, extension in (("pcs_pir_y", "faa"), ("pcs_pir_a", "faa"), ("pcs_prf_y", "faa"), ("pcs_prf_a", "faa"),
+                            ("pcs_piracc_y", "faa"), ("pcs_piracc_a", "faa"), ("pcs_gb_y", "faa"), ("pcs_gb_a", "faa"),
+                            ("pcs_ctl_y", "faa"), ("pcs_ctl_a", "faa"), ("pcs_embgb_y", "faa"), ("pcs_embgb_a", "faa"),
+                            ("pcs_sptr_y", "faa"), ("pcs_sptr_a", "faa"), ("pcs_ngb_y", "fna"), ("pcs_ngb_a", "fna")):
         subprocess.run(
             [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / f"{name}.{extension}"),
              "-dbtype", "nucl" if extension == "fna" else "prot", "-parse_seqids", "-blastdb_version", "5",

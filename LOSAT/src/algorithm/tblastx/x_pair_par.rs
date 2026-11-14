@@ -32,15 +32,17 @@
 //!     if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
 //! ```
 //! NCBI runs the two-hit word finder once per subject frame (and per chunk of a frame longer than
-//! MAX_DBSEQ_LEN), with one scan stream that emits the hits of every query context, on one
-//! diagonal table shared by the frames. This path runs the same per-hit statements
-//! (`x_hit`, a copy of the reference loop body RI:3204-3546 without its trace, debug and
-//! diagnostics branches) on units: for each (frame, chunk), one scan per query context with a
-//! lookup table that holds only that context's entries (`XGroup`), on a fresh diagonal table
-//! without masking. The unit lists are concatenated in context order and then go through the
-//! reference's own steps in the reference's order: the stable init-HSP score sort
-//! (`Blast_InitHitListSortByScore`), `BLAST_GetUngappedHSPList`, the chunk offset adjustment and
-//! merge, and the per-frame append and sort (RI:4556-4581). Only the placement of work changes.
+//! MAX_DBSEQ_LEN), with one scan stream that emits the hits of every query context, on one diagonal
+//! table shared by the frames. This path runs the same two-hit logic (`x_hit`, the unit path's own
+//! form of `word_finder::two_hit_one_hit`: its two-hit statements on the unit's unmasked cell,
+//! without its trace, debug, diagnostics and HSP-saving statistics, which the gates send to the
+//! reference loop; the extension, sink and probe are its own) on units: for each (frame, chunk),
+//! one scan per query context with a lookup table that holds only that context's entries
+//! (`XGroup`), on a fresh diagonal table without masking. The
+//! unit lists are concatenated in context order and then go through the reference's own steps in
+//! the reference's order: the stable init-HSP score sort (`Blast_InitHitListSortByScore`),
+//! `BLAST_GetUngappedHSPList`, the chunk offset adjustment and merge, and the per-frame append and
+//! sort (`frame_chunks::append_frame_hits`). Only the placement of work changes.
 //!
 //! # Why the units give the reference's `combined_ungapped_hits`
 //!
@@ -50,14 +52,14 @@
 //! chunk length. A hit is (q, s); its raw diagonal is d = q - s; the reference cell is
 //! d & (2^k - 1), the unit cell is d itself (offset by the unit's lowest diagonal).
 //!
-//! 1. Cell-local state. The two-hit test of a hit reads and writes only its own cell
-//!    (`last_hit` relative to D, and `flag`); cutoffs, x-drop and D are fixed during a chunk;
-//!    the extension reads only the two sequences (aa_ungapped.c:516-606; RI:3685-3687). So a hit's
-//!    decision depends only on the earlier hits of its cell. All comparisons are of `last_hit - D`
-//!    with `s`, so a unit starting at D = window and the reference at any D agree whenever their
-//!    cells hold the same `last_hit - D` and flag, and `s + D` fits the 31-bit `last_hit` in the
-//!    reference as it does in the unit (`last_hit_fits`; it fails only for a `-window_size` near
-//!    2^29).
+//! 1. Cell-local state. The two-hit test of a hit reads and writes only its own cell (`last_hit`
+//!    relative to D, and `flag`); cutoffs, x-drop and D are fixed during a chunk; the extension
+//!    reads only the two sequences (aa_ungapped.c:516-606; the doc of
+//!    `word_finder::two_hit_one_hit`). So a hit's decision depends only on the earlier hits of its
+//!    cell. All comparisons are of `last_hit - D` with `s`, so a unit starting at D = window and
+//!    the reference at any D agree whenever their cells hold the same `last_hit - D` and flag, and
+//!    `s + D` fits the 31-bit `last_hit` in the reference as it does in the unit (`last_hit_fits`;
+//!    it fails only for a `-window_size` near 2^29).
 //! 2. Same hits per context, same order. A sub-lookup chain is the reference chain filtered to
 //!    one context with the order kept (`build_groups`; NCBI blast_aalookup.c:337-360 layout), so a
 //!    unit's scan emits exactly the reference's hit stream restricted to that context, in the same
@@ -99,11 +101,12 @@
 //! 4. Same list. Within a unit the saved InitHSPs are the reference's saved InitHSPs of that
 //!    context, in the same order. The reference sorts the chunk list with the stable
 //!    `score_compare_match` (score, s_start, length, absolute q_start; blast_extend.c:274-310,
-//!    RI `sort_init_hsps_by_score_ncbi`). Comparator-equal records share s_start and the absolute
-//!    q_start, so they lie on one raw diagonal of one context, in one unit, in reference order.
-//!    A stable sort of the concatenation c = 0..n therefore returns the reference's sorted list
-//!    element for element, and every later step (`get_ungapped_hsp_list`, chunk merge, frame
-//!    append and sort) is the reference's code on the same input.
+//!    `sort_init_hsps_by_score_ncbi` in `word_finder::finish_chunk_scan`). Comparator-equal records
+//!    share s_start and the absolute q_start, so they lie on one raw diagonal of one context, in
+//!    one unit, in reference order. A stable sort of the concatenation c = 0..n therefore returns
+//!    the reference's sorted list element for element, and every later step
+//!    (`get_ungapped_hsp_list`, chunk merge, frame append and sort) is the reference's code on the
+//!    same input.
 //!
 //! Contexts of a multi-query batch are taken in at most `X_MAX_GROUPS` contiguous groups (without
 //! LOSAT_X_TBXFEWGROUPS, one context per group for one query). A group is one unit: inside it the diagonals of its contexts
@@ -1076,7 +1079,8 @@ fn units_gain(g: &XGates<'_>) -> bool {
     2 * longest * g.threads as u128 > 3 * total
 }
 
-/// The inputs of `lut_build`: what the lookup build site of the batch has (RI:2311).
+/// The inputs of `lut_build`: what the lookup build site of the batch has
+/// (`batch_setup::batch_lookup`).
 pub(super) struct XLutEarly<'a, M: TbxScore = Blosum62Score> {
     pub query_frames: &'a [Vec<QueryFrame>],
     /// The lookup threshold (`lookup->threshold`).
@@ -1085,7 +1089,7 @@ pub(super) struct XLutEarly<'a, M: TbxScore = Blosum62Score> {
     pub subjects: crate::algorithm::tblastx::subjects::Subjects<'a>,
     /// As `XBatch::reference_loop`.
     pub reference_loop: bool,
-    /// `requested_parallel` and `use_serial_scan_chunks` of the batch (RI:2130, 2139).
+    /// `requested_parallel` and `use_serial_scan_chunks` of the batch (`batch_setup::batch_flags`).
     pub requested_parallel: bool,
     pub use_serial_scan_chunks: bool,
     pub pool: &'a crate::utils::threading::SearchPool<'a>,
@@ -1129,11 +1133,11 @@ impl XLutBatch {
 //         subject->length = MAX_DBSEQ_LEN;
 //         backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
 // ```
-// `chunk_switches` of the batch before the lookup build: the expression of RI:2385-2394
+// `chunk_switches` of the batch before the lookup build: the expression in `search_query_batch`
 // (`use_parallel_chunks`, which reads the thread request, two switches and the subject lengths
-// only) or'ed with `use_serial_scan_chunks`, as RI:2562 passes it to `prepare`. `prepare` decides
-// again with RI's own value and stops the run if the two decisions differ for a batch with direct
-// groups.
+// only) or'ed with `use_serial_scan_chunks`, as `seed_tables::scan_tables` passes it to `prepare`.
+// `prepare` decides again with `search_query_batch`'s own value and stops the run if the two
+// decisions differ for a batch with direct groups.
 fn early_chunk_switches(
     requested_parallel: bool,
     use_serial_scan_chunks: bool,
@@ -1191,9 +1195,9 @@ pub(super) fn lut_build<M: TbxScore>(e: XLutEarly<'_, M>) -> Option<XLutBatch> {
 //         diag_array_length = diag_array_length << 1;
 // }
 // ```
-// The early decision: the inputs of `decide` from the prepared query, by the expressions RI uses
-// after the lookup build (RI:2502-2510 `query_length`, `check_diag_table_window`,
-// `diag_array_size`), then the groups and the stub.
+// The early decision: the inputs of `decide` from the prepared query, by the expressions
+// `seed_tables::scan_tables` uses after the lookup build (`query_length`,
+// `check_diag_table_window`, `diag_array_size`), then the groups and the stub.
 fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
     // The reference query preparation (contexts, concatenated query, lookup locations), with
     // another matrix's scores or another word length that of `build_ncbi_lookup_for_profile`
@@ -1215,7 +1219,7 @@ fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
         .last()
         .map(|c| c.frame_base + c.aa_len as i32)
         .unwrap_or(0);
-    // RI:2506 reports this error after the reference build.
+    // `seed_tables::scan_tables` reports this error after the reference build.
     if crate::blastinput::app::check_diag_table_window(query_length, e.window, "TBLASTX").is_err() {
         return None;
     }
@@ -2318,7 +2322,8 @@ impl<M: TbxScore> XPairPar<M> {
                 }
             }
             for (k, chunk) in chunks.iter().enumerate() {
-                // The reference finds no hits in a chunk shorter than a word (RI:3070-3080).
+                // The reference finds no hits in a chunk shorter than a word
+                // (`word_finder::begin_chunk_scan`).
                 if chunk.length < inp.wordsize as usize {
                     continue;
                 }
@@ -2394,11 +2399,12 @@ impl<M: TbxScore> XPairPar<M> {
     // Blast_InitHitListSortByScore(init_hitlist);
     // ```
     // The seed stage of one subject, second half: the list the reference builds per chunk in order
-    // (sort, conversion, offset adjustment and chunk merge, RI:3582-3598, 4533-4553) and per frame
-    // in s_f_idx order (append and sort, RI:4556-4581); `merge_subject_listed` runs those
-    // statements, LOSAT_X_TBXKMERGE (x_kmerge.rs) computes the same list without the full sorts.
-    // It has no `self`: it reads the units' own lists and the subject's inputs, never a group
-    // table, so the tables may already be freed when it runs.
+    // (sort, conversion and offset adjustment, `word_finder::finish_chunk_scan`; chunk merge,
+    // `frame_chunks::add_chunk_result`) and per frame in s_f_idx order (append and sort,
+    // `frame_chunks::append_frame_hits`); `merge_subject_listed` runs those statements,
+    // LOSAT_X_TBXKMERGE (x_kmerge.rs) computes the same list without the full sorts. It has no
+    // `self`: it reads the units' own lists and the subject's inputs, never a group table, so the
+    // tables may already be freed when it runs.
     /// `combined_ungapped_hits` of one subject, from its units.
     pub(super) fn merge_subject(x_units: XSubjectUnits, inp: &XSubject<'_>) -> Vec<UngappedHit> {
         // EXPERIMENT (LOSAT_X_TBXKMERGE), dispatch: the same list without the full sorts
@@ -2876,10 +2882,11 @@ impl<M: TbxScore> XPairPar<M> {
         exact
     }
 
-    // The scan loop of the reference (RI:3082-3168) on one unit: the group's sub-lookup, the frame
-    // chunk, a fresh table (RI:2930-2933: `DiagStruct::default()`, diag_offset = window) indexed by
-    // the raw diagonal minus the group's lowest one, without the mask (module doc, item 3). The
-    // body of what was `run_unit`; the list it saves into is the caller's (`XInitSink`).
+    // The scan loop of the reference (`scan_chunk_plain` with `word_finder::scan_next_hits`) on one
+    // unit: the group's sub-lookup, the frame chunk, a fresh table (`DiagStruct::default()`,
+    // diag_offset = window, as `process_subject` resets its table per subject) indexed by the raw
+    // diagonal minus the group's lowest one, without the mask (module doc, item 3). The body of
+    // what was `run_unit`; the list it saves into is the caller's (`XInitSink`).
     // EXPERIMENT (LOSAT_X_TBXPREFETCH, module doc): with `PF`, on x86-64, each hit of a batch
     // first prefetches the cell of the hit X_PREFETCH_AHEAD entries after it; without `PF` the
     // loop is the one before the switch.
@@ -3092,7 +3099,7 @@ impl<M: TbxScore> XPairPar<M> {
                     init_hsps,
                     probe,
                 ) {
-                    // The reference's safety guard (RI:3157-3161).
+                    // The reference's safety guard (`word_finder::scan_next_hits`).
                     break;
                 }
             }
@@ -3317,12 +3324,14 @@ fn x_unit_batch<
 //     }
 // }
 // ```
-// The per-hit body of the reference loop (RI:3204-3546) statement for statement, without its
-// trace, debug and diagnostics branches (the gates send those runs to the reference loop) and with
-// `continue` written as `return`. As in the reference, the cell is updated before the init HSP is
-// saved (both read only local values, so the order is immaterial). The init HSP goes to the
-// caller's sink (today's `Vec<InitHSP>`, or the records of LOSAT_X_SEEDCOMPACT, section above
-// `XUnitHsp`), by the same push statement.
+// The unit path's own form of the per-hit body of the reference loop
+// (`word_finder::two_hit_one_hit`): its two-hit statements on the unit's unmasked cell, without
+// its trace, debug, diagnostics and HSP-saving statistics (the gates send those runs to the
+// reference loop), with `continue` written as `return`; the extension, the sink and the probe are
+// this path's own. As in the reference, the cell is updated before
+// the init HSP is saved (both read only local values, so the order is immaterial). The init HSP
+// goes to the caller's sink (today's `Vec<InitHSP>`, or the records of LOSAT_X_SEEDCOMPACT, section
+// above `XUnitHsp`), by the same push statement.
 /// The two-hit test and extension of one hit on its cell (`SENT`: LOSAT_X_TBXUNGAPSENT, the
 /// sentinel walks of `SENT`-letter words, `TbxScore::sent_two_hit_of`; 0: none).
 #[inline(always)]
@@ -3856,14 +3865,15 @@ mod tests {
         size
     }
 
-    /// The reference two-hit stage of one subject on one masked table shared by the frames
-    /// (RI:3019-3572): the batch lookup, `(q - s) & mask`, the same per-hit body, the diagonal
-    /// offset advanced after every frame (`Blast_ExtendWordExit`). Returns the sorted init-HSP list
-    /// of every frame, how often each branch was taken, and how many hits met a cell whose flag 1
-    /// was written by a right extension on another raw diagonal (the masked-aliasing case of
-    /// module doc item 3). The scores and the word length are those of `sc` (the extensions of
-    /// the reference loop without the sentinel walks: `extend_hit_two_hit_fitting` for BLOSUM62's
-    /// instance, `extend_hit_two_hit_with` for the other).
+    /// The reference two-hit stage of one subject on one masked table shared by the frames (the
+    /// frame loop of `process_subject` with `scan_chunk_plain`): the batch lookup, `(q - s) &
+    /// mask`, the same per-hit body, the diagonal offset advanced after every frame
+    /// (`Blast_ExtendWordExit`). Returns the sorted init-HSP list of every frame, how often each
+    /// branch was taken, and how many hits met a cell whose flag 1 was written by a right extension
+    /// on another raw diagonal (the masked-aliasing case of module doc item 3). The scores and the
+    /// word length are those of `sc` (the extensions of the reference loop without the sentinel
+    /// walks: `extend_hit_two_hit_fitting` for BLOSUM62's instance, `extend_hit_two_hit_with` for
+    /// the other).
     #[allow(clippy::too_many_arguments)]
     fn masked_reference<M: TbxScore>(
         sc: M,

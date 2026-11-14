@@ -1363,11 +1363,16 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "13", None, NcbiLater("Please provide a file name for outfmt 13.")),
         (ALL, "13", Some("-"), NcbiLater("Please provide a file name for outfmt 13.")),
         (ALL, "14", None, NcbiLater("Please provide a file name for outfmt 14.")),
-        // Line OF track T (text formats): not written yet.
-        (ALL, "1", None, UNSUPPORTED),
-        (ALL, "2", None, UNSUPPORTED),
-        (ALL, "3", None, UNSUPPORTED),
-        (ALL, "4", None, UNSUPPORTED),
+        // Line RG T3 (the query-anchored formats): BLASTP writes them (T3a), the others not yet.
+        (&["blastp"], "1", None, Writes(QueryAnchoredIdentities)),
+        (&["blastp"], "2", None, Writes(QueryAnchoredNoIdentities)),
+        (&["blastp"], "3", None, Writes(FlatQueryAnchoredIdentities)),
+        (&["blastp"], "4", None, Writes(FlatQueryAnchoredNoIdentities)),
+        (&["blastp"], "1 qseqid", None, Writes(QueryAnchoredIdentities)),
+        (&["blastn", "blastx", "tblastn", "tblastx"], "1", None, UNSUPPORTED),
+        (&["blastn", "blastx", "tblastn", "tblastx"], "2", None, UNSUPPORTED),
+        (&["blastn", "blastx", "tblastn", "tblastx"], "3", None, UNSUPPORTED),
+        (&["blastn", "blastx", "tblastn", "tblastx"], "4", None, UNSUPPORTED),
         // Line RG T2: the organism report in every program.
         (SHARED, "18", None, Writes(TaxFormat)),
         (SHARED, "18 qseqid", None, Writes(TaxFormat)),
@@ -1602,9 +1607,7 @@ fn show_gis_is_a_flag_of_every_search_program() {
 #[test]
 fn unported_ncbi_options_are_rejected_explicitly() {
     for (program, words) in [
-        ("blastn", &["-db_soft_mask", "11"][..]),
-        ("blastn", &["-db_hard_mask", "11"]),
-        ("tblastn", &["-db_soft_mask", "11"]),
+        ("tblastn", &["-db_soft_mask", "11"][..]),
         ("tblastx", &["-db_soft_mask", "11"]),
         ("blastp", &["-gilist", "ids.gil"]),
         ("blastp", &["-db_soft_mask", "21"]),
@@ -1619,6 +1622,53 @@ fn unported_ncbi_options_are_rejected_explicitly() {
             "{program} {words:?}: {error}"
         );
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2342-2356 (quoted at
+// `blastinput::db_mask::DbMaskArgs`)
+// BLASTN's `-db_soft_mask` and `-db_hard_mask` (series NP, M4a-2): strings, each excluding the
+// other, `-subject` and `-subject_loc` (conflicts of LOSAT's parser, where NCBI prints its usage;
+// probes o04, o05, o06 of the M4a-2 survey); the run refuses a search that `-db_hard_mask` masks
+// (`RUN_REFUSALS`).
+#[test]
+fn blastn_takes_the_database_masks() {
+    let blastn = |words: &[&str]| {
+        let mut argv = vec!["losat", "blastn", "-query", "q.fa"];
+        argv.extend(words);
+        parse_argv(argv)
+    };
+    let Commands::Blastn(args) = blastn(&["-db", "d", "-db_soft_mask", "+11"])
+        .unwrap()
+        .command
+    else {
+        panic!()
+    };
+    assert_eq!(args.db_mask.db_soft_mask.as_deref(), Some("+11"));
+    assert_eq!(args.db_mask.db_hard_mask, None);
+    let Commands::Blastn(args) = blastn(&["-db", "d", "-db_hard_mask", "dust"])
+        .unwrap()
+        .command
+    else {
+        panic!()
+    };
+    assert_eq!(args.db_mask.db_hard_mask.as_deref(), Some("dust"));
+    for words in [
+        &["-db", "d", "-db_soft_mask", "11", "-db_hard_mask", "11"][..],
+        &["-subject", "s.fa", "-db_soft_mask", "11"],
+        &["-subject", "s.fa", "-db_hard_mask", "11"],
+        &["-subject_loc", "1-5", "-db_soft_mask", "11"],
+        &["-subject_loc", "1-5", "-db_hard_mask", "11"],
+    ] {
+        let error = blastn(words).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::ArgumentConflict,
+            "{words:?}"
+        );
+    }
+    assert!(crate::cli::run_refusal("BLASTN", "db_hard_mask").contains(
+        "-db_hard_mask (hard masking of the database sequences) is not supported by LOSAT's BLASTN"
+    ));
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2191-2199

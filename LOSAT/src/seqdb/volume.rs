@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use super::column::{self, Column, MASK_DATA_TITLE};
-use super::file::DbFile;
+use super::file::{DbFile, MAP_PAGE};
 use super::filter::{DeflineList, DeflineRule};
 use super::header::{decode_defline_taxids, decode_deflines_as, decode_full, Defline};
 use super::index::IndexFile;
@@ -91,9 +91,10 @@ impl Volume {
     // strategy (`-import_search_strategy`, blast_app_util.cpp:498-511; blast_formatter.cpp:370
     // likewise); without one `GetFilteringAlgorithm` is -1 (uniform_search.cpp:198, 225,
     // 303-308; seqsrc_seqdb.cpp:318-320, 727-729; seqinfosrc_seqdb.cpp:113-123;
-    // align_format_util.cpp:396-403). LOSAT refuses all three options and has no
-    // blast_formatter, so a search reads no column file, whatever the files hold, and `losat
-    // blastdbcmd` opens them on first use ([`Volume::columns`]).
+    // align_format_util.cpp:396-403). LOSAT has no blast_formatter and refuses the imported
+    // strategy and the database masks but BLASTN's (series NP, M4a-2), so a search without them
+    // reads no column file, whatever the files hold; BLASTN's masked search and `losat blastdbcmd`
+    // open them on first use ([`Volume::columns`]).
     /// `open` with the index read as `mode` says.
     pub(super) fn open_as(
         base: &Path,
@@ -230,6 +231,62 @@ impl Volume {
         offsets[1]
             .checked_sub(offsets[0])
             .and_then(|bytes| bytes.checked_sub(1))
+            .ok_or_else(|| self.index.sequence_changed(oid, 2))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1774-1803 and
+    // c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:700-722,748-752
+    // ```c++
+    // int CSeqDBVol::x_GetSequence(int              oid,
+    //                              const char    ** buffer) const
+    // ...
+    //     m_Idx->GetSeqStartEnd(oid, start_offset, end_offset);
+    // ...
+    //         end_offset --;
+    //
+    //         length = int(end_offset - start_offset);
+    // ...
+    //         *buffer = m_Seq->GetFileDataPtr(start_offset-1) + 1;
+    // ...
+    //                 m_MappedFile = m_Atlas.GetMemoryFile(m_Filename);
+    // ...
+    //             m_DataPtr = (char *)(m_MappedFile->GetPtr());
+    // ...
+    //     const char *GetFileDataPtr(const string   & fname,TIndx offset)
+    //     {
+    //         Init(fname);
+    //
+    //         return(const char *)(m_DataPtr + offset);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:114-127 and
+    // c++/src/corelib/ncbifile.cpp:5636-5638
+    // ```c++
+    // CMemoryFile* CSeqDBAtlas::GetMemoryFile(const string& fileName)
+    // ...
+    //     CAtlasMappedFile* file(new CAtlasMappedFile(fileName));
+    // ...
+    //     m_DataPtrReal = mmap(0, m_LengthReal, attrs.map_protect,
+    //                          attrs.map_access, handle.hMap, m_OffsetReal);
+    // ```
+    /// The bytes that NCBI's mapping of the volume's sequence file holds after the sentinel byte
+    /// of protein `oid` (volume-relative): the volume's next sequences with their sentinels, then
+    /// the rest of the file's last memory page. NCBI's search reads a protein of a database where
+    /// the volume's sequence file is mapped whole from offset 0; the system maps whole pages and
+    /// fills the part of the last page after the end of the file with zeros (POSIX `mmap`,
+    /// Windows `MapViewOfFile`), so those bytes are NCBI's too (`MAP_PAGE`).
+    pub fn protein_mapped_bytes_after(&self, oid: u32) -> Result<u64, SeqDbError> {
+        assert!(
+            self.index.seqtype == SeqType::Protein,
+            "protein bytes of a nucleotide volume"
+        );
+        self.check_range(oid, oid.saturating_add(1))?;
+        let next = self.index.sequence_start(oid + 1)?;
+        let length = self.seq_file()?.len();
+        length
+            .div_ceil(MAP_PAGE)
+            .saturating_mul(MAP_PAGE)
+            .checked_sub(next)
+            .filter(|_| next <= length)
             .ok_or_else(|| self.index.sequence_changed(oid, 2))
     }
 
@@ -389,14 +446,16 @@ impl Volume {
     // The protein range starts one byte early, so every sequence of the block
     // has its sentinel byte on both sides as in NCBI's buffer.
     /// Reads the sequences `first..end` (volume-relative, non-empty) as one
-    /// block. `first_ordinal` is the database ordinal id of `first`.
+    /// block. `first_ordinal` is the database ordinal id of `first`, `first_oid` its OID in the
+    /// database, which the block's messages name (the sequences of a block have consecutive OIDs).
     pub fn read_block(
         &self,
         first: u32,
         end: u32,
         first_ordinal: u32,
+        first_oid: u32,
     ) -> Result<SequenceBlock, SeqDbError> {
-        self.read_block_in(first, end, first_ordinal, BlockBuffer::New)
+        self.read_block_in(first, end, first_ordinal, first_oid, BlockBuffer::New)
     }
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_block` with the bytes in a buffer of
@@ -406,8 +465,9 @@ impl Volume {
         first: u32,
         end: u32,
         first_ordinal: u32,
+        first_oid: u32,
     ) -> Result<SequenceBlock, SeqDbError> {
-        self.read_block_in(first, end, first_ordinal, BlockBuffer::Mapped)
+        self.read_block_in(first, end, first_ordinal, first_oid, BlockBuffer::Mapped)
     }
 
     /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_block` with the bytes in `buf`
@@ -424,9 +484,16 @@ impl Volume {
         first: u32,
         end: u32,
         first_ordinal: u32,
+        first_oid: u32,
         buf: Vec<u8>,
     ) -> Result<SequenceBlock, SeqDbError> {
-        self.read_block_in(first, end, first_ordinal, BlockBuffer::Given(buf))
+        self.read_block_in(
+            first,
+            end,
+            first_ordinal,
+            first_oid,
+            BlockBuffer::Given(buf),
+        )
     }
 
     fn read_block_in(
@@ -434,6 +501,7 @@ impl Volume {
         first: u32,
         end: u32,
         first_ordinal: u32,
+        first_oid: u32,
         buffer: BlockBuffer,
     ) -> Result<SequenceBlock, SeqDbError> {
         self.check_range(first, end)?;
@@ -468,6 +536,7 @@ impl Volume {
         let block = SequenceBlock {
             seqtype,
             first_ordinal,
+            first_oid,
             path: file.path().to_path_buf(),
             data,
             data_start,
@@ -477,7 +546,7 @@ impl Volume {
         Ok(block)
     }
 
-    /// What `read_block(first, end, first_ordinal)` of one
+    /// What `read_block(first, end, first_ordinal, first_oid)` of one
     /// nucleotide (`end == first + 1`) gives `nucleotide_len(0)` and `ambiguity_runs(0)`, without
     /// its 2-bit data: the index reads and checks of `read_block` in its order and the checks of
     /// the file range it reads (`DbFile::x_check_range`), then the last byte of the 2-bit data and
@@ -489,6 +558,7 @@ impl Volume {
         first: u32,
         end: u32,
         first_ordinal: u32,
+        first_oid: u32,
     ) -> Result<(usize, SequenceBlock), SeqDbError> {
         assert!(
             self.index.seqtype == SeqType::Nucleotide && end == first.wrapping_add(1),
@@ -508,6 +578,7 @@ impl Volume {
         let ambiguity = SequenceBlock {
             seqtype: SeqType::Nucleotide,
             first_ordinal,
+            first_oid,
             path: file.path().to_path_buf(),
             data: file.read_range(u64::from(amb_start), u64::from(next))?,
             data_start: u64::from(amb_start),
@@ -703,7 +774,7 @@ impl Volume {
 
     /// The offsets in the sequence file of nucleotide `oid` (volume-relative): `(start of its
     /// packed bases, start of its ambiguity data, start of the next sequence)`.
-    fn part_offsets(&self, oid: u32, ordinal: u32) -> Result<(u32, u32, u32), SeqDbError> {
+    fn part_offsets(&self, oid: u32, named: u32) -> Result<(u32, u32, u32), SeqDbError> {
         self.check_range(oid, oid.saturating_add(1))?;
         let seq = self.index.sequence_offsets(oid, oid + 1)?;
         let amb = self.index.ambiguity_offsets(oid, oid + 1)?;
@@ -711,15 +782,15 @@ impl Volume {
         if !(start < amb_start && amb_start <= next) {
             return Err(SeqDbError::Format {
                 path: self.seq_file()?.path().to_path_buf(),
-                message: format!("sequence {ordinal}: the ambiguity offset lies outside its data"),
+                message: format!("sequence {named}: the ambiguity offset lies outside its data"),
             });
         }
         Ok((start, amb_start, next))
     }
 
-    /// The length in bases of nucleotide `oid` (volume-relative; `ordinal` its database
-    /// ordinal id, for the message), from the last byte of its packed bases only.
-    pub fn nucleotide_length(&self, oid: u32, ordinal: u32) -> Result<usize, SeqDbError> {
+    /// The length in bases of nucleotide `oid` (volume-relative; `named` its OID in the database,
+    /// which the messages name), from the last byte of its packed bases only.
+    pub fn nucleotide_length(&self, oid: u32, named: u32) -> Result<usize, SeqDbError> {
         self.check_range(oid, oid.saturating_add(1))?;
         let amb = self.index.ambiguity_offsets(oid, oid + 1)?;
         let seq = self.index.sequence_offsets(oid, oid + 1)?;
@@ -728,7 +799,7 @@ impl Volume {
         if amb_start <= start {
             return Err(SeqDbError::Format {
                 path: file.path().to_path_buf(),
-                message: format!("sequence {ordinal}: the ambiguity offset lies outside its data"),
+                message: format!("sequence {named}: the ambiguity offset lies outside its data"),
             });
         }
         let last = file.read_range(amb_start - 1, amb_start)?;
@@ -737,37 +808,37 @@ impl Volume {
             return Err(SeqDbError::Format {
                 path: file.path().to_path_buf(),
                 message: format!(
-                    "sequence {ordinal}: the sequence is longer than a signed 32-bit length"
+                    "sequence {named}: the sequence is longer than a signed 32-bit length"
                 ),
             });
         }
         Ok(length as usize)
     }
 
-    /// The IUPAC letters `[from, to)` of nucleotide `oid` (volume-relative), as `ordinal`'s
-    /// stored data give them: the 2-bit bases of the range and the ambiguity runs that overlap
+    /// The IUPAC letters `[from, to)` of nucleotide `oid` (volume-relative; `named` its OID in
+    /// the database, which the messages name), as its stored data give them: the 2-bit bases of the range and the ambiguity runs that overlap
     /// it. Only the bytes of the range and the sequence's ambiguity data are read.
     pub fn nucleotide_iupac_range(
         &self,
         oid: u32,
-        ordinal: u32,
+        named: u32,
         from: usize,
         to: usize,
     ) -> Result<Vec<u8>, SeqDbError> {
-        let ambiguity = self.nucleotide_ambiguity(oid, ordinal)?;
-        self.nucleotide_iupac_range_with(oid, ordinal, from, to, &ambiguity)
+        let ambiguity = self.nucleotide_ambiguity(oid, named)?;
+        self.nucleotide_iupac_range_with(oid, named, from, to, &ambiguity)
     }
 
-    /// The length of nucleotide `oid` (volume-relative; `ordinal` its database ordinal id) and
+    /// The length of nucleotide `oid` (volume-relative; `named` its OID in the database) and
     /// its decoded ambiguity runs, read once for any number of
     /// [`Volume::nucleotide_iupac_range_with`] calls on the same sequence.
     pub fn nucleotide_ambiguity(
         &self,
         oid: u32,
-        ordinal: u32,
+        named: u32,
     ) -> Result<NucleotideAmbiguity, SeqDbError> {
-        let length = self.nucleotide_length(oid, ordinal)?;
-        let (packed_start, amb_start, next) = self.part_offsets(oid, ordinal)?;
+        let length = self.nucleotide_length(oid, named)?;
+        let (packed_start, amb_start, next) = self.part_offsets(oid, named)?;
         let mut runs = Vec::new();
         if u64::from(amb_start) < u64::from(next) {
             let file = self.seq_file()?;
@@ -778,7 +849,7 @@ impl Volume {
                 .collect();
             runs = decode_ambiguity_runs(&words).map_err(|message| SeqDbError::Format {
                 path: file.path().to_path_buf(),
-                message: format!("sequence {ordinal}: {message}"),
+                message: format!("sequence {named}: {message}"),
             })?;
         }
         Ok(NucleotideAmbiguity::new(
@@ -794,7 +865,7 @@ impl Volume {
     pub fn nucleotide_iupac_range_with(
         &self,
         oid: u32,
-        ordinal: u32,
+        named: u32,
         from: usize,
         to: usize,
         ambiguity: &NucleotideAmbiguity,
@@ -802,7 +873,7 @@ impl Volume {
         let length = ambiguity.length;
         if from > to || to > length {
             return Err(SeqDbError::Range(format!(
-                "letters {from}..{to} are outside sequence {ordinal}, which has {length}"
+                "letters {from}..{to} are outside sequence {named}, which has {length}"
             )));
         }
         self.check_range(oid, oid.saturating_add(1))?;
@@ -1068,11 +1139,12 @@ enum BlockBuffer {
 ///
 /// Sequences are addressed by their position `i` in the block
 /// (`0..self.len()`); the database ordinal id of position `i` is
-/// `self.first_ordinal() + i`.
+/// `self.first_ordinal() + i`, its OID `first_oid + i`, by which the messages name it.
 #[derive(Debug, Clone)]
 pub struct SequenceBlock {
     seqtype: SeqType,
     first_ordinal: u32,
+    first_oid: u32,
     path: PathBuf,
     data: Vec<u8>,
     data_start: u64,
@@ -1336,7 +1408,7 @@ impl SequenceBlock {
             path: self.path.clone(),
             message: format!(
                 "sequence {}: {message}",
-                u64::from(self.first_ordinal) + i as u64
+                u64::from(self.first_oid) + i as u64
             ),
         }
     }

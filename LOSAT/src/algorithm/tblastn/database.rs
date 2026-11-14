@@ -56,6 +56,12 @@ pub(super) struct TblastnDatabase {
 }
 
 impl TblastnDatabase {
+    /// LOSAT's refusal of mixed accession tables (`shared::check_accession_tables`), with the
+    /// program's other limits.
+    pub(super) fn check_accession_tables(&self) -> Result<()> {
+        shared::check_accession_tables(&self.db, PROGRAM)
+    }
+
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
     /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
     pub(super) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
@@ -97,7 +103,7 @@ impl TblastnDatabase {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed_seqids =
-            shared::restrict_database(&mut db, name, list, diagnostics, settings, PROGRAM)?;
+            shared::restrict_database(&mut db, name, list, None, diagnostics, settings, PROGRAM)?;
         let total = db.total_length();
         usize::try_from(total)
             .ok()
@@ -576,21 +582,31 @@ pub(super) fn reported_subjects(
     // Seq-ids that outfmt 0 shows.
     let mut taxdb_found: Option<bool> = None;
     for (rank, &ordinal) in ordinals.iter().enumerate() {
-        let header = titles
-            .get(&ordinal)
-            .with_context(|| format!("database sequence {ordinal} has no title read"))?;
+        let header = titles.get(&ordinal).with_context(|| {
+            format!(
+                "database sequence {} has no title read",
+                database.db.oid(ordinal)
+            )
+        })?;
         let title = match header {
             ReportedHeader::Stored(stored) => {
-                shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                shared::check_reported_title(
+                    stored.replaced_bytes,
+                    || database.db.oid(ordinal),
+                    PROGRAM,
+                )?;
                 if shown.pairwise {
-                    shared::check_shown_stored_title(stored.taxonomy_title, ordinal, PROGRAM)?;
+                    shared::check_shown_stored_title(
+                        stored.taxonomy_title,
+                        || database.db.oid(ordinal),
+                        PROGRAM,
+                    )?;
                 }
                 if shown.tabular {
-                    let oid = database.db.oid(ordinal);
                     shared::check_tabular_stored_title(
                         stored.taxonomy_title,
                         shown.words,
-                        oid,
+                        || database.db.oid(ordinal),
                         PROGRAM,
                     )?;
                 }
@@ -630,9 +646,12 @@ pub(super) fn reported_subjects(
             let SubjectLetters::Packed(stores) = stores else {
                 unreachable!("a -db search holds its sequences")
             };
-            stores
-                .get(ordinal as usize)
-                .with_context(|| format!("database sequence {ordinal} was not read"))
+            stores.get(ordinal as usize).with_context(|| {
+                format!(
+                    "database sequence {} was not read",
+                    database.db.oid(ordinal)
+                )
+            })
         };
         lengths.push(if letters {
             let store = match stores {
@@ -661,6 +680,7 @@ pub(super) fn reported_subjects(
                         let rank = usize::try_from(list.oid).ok()?;
                         Some((ordinals[rank], parsed[rank].as_deref()?))
                     }),
+                database.db.oid_map(),
                 PROGRAM,
             )?;
         }
@@ -742,7 +762,7 @@ mod tests {
             db: {
                 let mut db =
                     SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
-                db.read_name_records(path.to_str().unwrap()).unwrap();
+                db.read_name_records(path.to_str().unwrap(), false).unwrap();
                 db
             },
             name: name.to_string(),

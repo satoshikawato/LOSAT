@@ -309,6 +309,7 @@ fn a_damaged_sequence_of_its_own_block_fails_or_reports_the_same_at_every_thread
     assert_eq!(count(&original) as usize, runs);
     let mut long_count = original.clone();
     long_count[ambiguity..ambiguity + 4].copy_from_slice(&(count(&original) + 100).to_be_bytes());
+    let long_count_again = long_count.clone();
     let mut remainder = original.clone();
     remainder[ambiguity - 1] ^= 1;
     let all_x = format!(">xx all X\n{}\n", "X".repeat(32));
@@ -354,5 +355,27 @@ fn a_damaged_sequence_of_its_own_block_fails_or_reports_the_same_at_every_thread
             );
         }
     }
+    // The count past the end through an alias whose range leaves OID 0 out (line DBID ordnum):
+    // the damaged sequence is the fifth searched (rank 4), and both the refusal and the reader's
+    // message in it name its OID 5.
+    std::fs::write(&last, &long_count_again).unwrap();
+    let alias = dir.join("subjects_amb_r.nal");
+    std::fs::write(
+        &alias,
+        "TITLE subjects_amb_r\nDBLIST subjects_amb\nFIRST_OID 2\nLAST_OID 6\n",
+    )
+    .unwrap();
+    let restricted = dir.join("subjects_amb_r").to_str().unwrap().to_string();
+    let refused = tblastn(&query, &restricted, &[], 1, &env);
+    assert_ne!(refused.0, Some(0), "{}", refused.2);
+    assert!(
+        refused
+            .2
+            .contains("the ambiguity data of database sequence 5 cannot be read (")
+            && refused.2.contains(": sequence 5: ")
+            && !refused.2.contains("sequence 4"),
+        "{}",
+        refused.2
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -1,0 +1,93 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/sp.fa).
+           6 sequences; 736 total letters
+
+
+
+Query= XP_000009.1 qa with a gi
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_insinsertions and deletion                                          288     6e-106
+s_ins2insertion at the same place                                     221     6e-80 
+s_multitwo overlapping HSPs                                           190     2e-67 
+s_twicesame range twice                                               115     5e-38 
+s_farweak                                                             100     1e-32 
+
+
+
+7777     1    DIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIGC  60
+s_ins    1    ..........................V........................K........  65
+                                                      \                   
+                                                      |                   
+                                                  WWHHW
+s_ins2   1         .....M...............K........I..........P.......S.....  58
+                                                      \                   
+                                                      |                   
+                                                    KYC
+s_multi  2     ..............D......V......E..............................  105
+                                                                     \    
+                                                                     |    
+                         WMPQIEETGDNSPIDYDCKNLEHYTNGRQFYDIGENRGMFWLGFT
+s_twice  1              ...............N...............G........H.......A.  50
+s_twice  73     L.NSLMDA..G...G...Q..............Y.........Q.......E.A....  130
+s_far    2                         .T..KI...M.....F..MH.P..GESAN....A..WC.  40
+s_far    80            .Y..TN..                                             87
+
+7777     61   FQSTQNPYFMYNYNTHSSFMSETRIRTNKHYWSRYHAPMHQQFTKVNNGAEPGRQEEIRF  120
+s_ins    66   ----........................................................  123
+                                  \                                       
+                                  |                                       
+                                 PG
+s_ins2   59   ...............Q....................F.......................  118
+s_multi  106  .N....................K.................F.......R.            155
+s_twice  51   .DDD..S...IK.D.VYFYT.T----------------LWNSLMDAIQ..QY.PPKQ...  94
+s_twice  131  ..E.......                                                    140
+s_far    41   .GR....ML.I..S.C....F.EP..EL.P.HTMC.SW.RY...NYV.I.....M.R.D.  100
+
+7777     121  THGTYKKRDCALNERMFCFKCESRLSLVWD  150
+s_ins    124  ..............................  153
+s_twice  95   .                               95
+s_far    101  R..RNWH..                       109
+
+
+Lambda      K        H        a         alpha
+   0.325    0.137    0.470    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 71920
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/sp.fa).
+    Posted date:  Unknown
+  Number of letters in database: 736
+  Number of sequences in database:  6
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

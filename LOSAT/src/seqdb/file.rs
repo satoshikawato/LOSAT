@@ -10,6 +10,14 @@ use std::path::{Path, PathBuf};
 
 use super::SeqDbError;
 
+/// The memory page of NCBI's mapping of a database file: 4 KiB, the page of the oracle platform
+/// (Linux x86-64) and the smallest of the systems NCBI BLAST+ runs on. NCBI maps a file whole
+/// from offset 0, and the system fills the part of the last page after the end of the file with
+/// zeros (POSIX `mmap`), so NCBI reads zero bytes there (`taxdb.btd` past its end,
+/// `Volume::protein_mapped_bytes_after`). A larger page only gives NCBI more zeros to read past
+/// the file, where LOSAT then refuses or reads none.
+pub(crate) const MAP_PAGE: u64 = 4096;
+
 /// Where `DbFile::read_range_in` puts the bytes it reads.
 enum RangeBuffer {
     /// A new buffer (`read_range`).

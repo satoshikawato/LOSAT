@@ -1,0 +1,1284 @@
+# RPSTBLASTN 2.17.0+
+# Query: w0 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 3 hits found
+w0	gnl|CDD|101	27	7	-2	0.43	15.0
+w0	gnl|CDD|103	13	36	1	1.2	14.2
+w0	gnl|CDD|103	150	118	-2	3.2	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w1 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 7 hits found
+w1	gnl|CDD|102	43	108	1	0.12	16.9
+w1	gnl|CDD|102	14	46	2	0.12	16.5
+w1	gnl|CDD|102	72	46	-2	0.55	14.6
+w1	gnl|CDD|102	43	66	1	7.8	11.9
+w1	gnl|CDD|103	122	154	2	0.62	14.6
+w1	gnl|CDD|103	124	153	1	6.8	11.9
+w1	gnl|CDD|101	101	154	2	0.89	14.2
+# RPSTBLASTN 2.17.0+
+# Query: w2 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 13 hits found
+w2	gnl|CDD|101	128	169	2	0.056	17.7
+w2	gnl|CDD|101	59	27	-1	0.53	15.0
+w2	gnl|CDD|101	131	81	-1	0.72	14.6
+w2	gnl|CDD|101	140	102	-1	2.5	13.5
+w2	gnl|CDD|101	83	181	2	4.1	12.7
+w2	gnl|CDD|101	104	78	-1	9.2	11.9
+w2	gnl|CDD|102	72	7	-3	0.064	17.7
+w2	gnl|CDD|102	158	120	-1	2.5	13.5
+w2	gnl|CDD|102	95	21	-1	2.9	13.1
+w2	gnl|CDD|102	205	191	-2	3.2	13.1
+w2	gnl|CDD|102	133	156	1	4.9	12.7
+w2	gnl|CDD|102	126	149	3	9.0	11.9
+w2	gnl|CDD|103	96	40	-3	0.31	15.8
+# RPSTBLASTN 2.17.0+
+# Query: w3 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w3	gnl|CDD|102	146	187	2	0.029	18.5
+w3	gnl|CDD|102	109	144	1	0.95	14.6
+w3	gnl|CDD|102	186	151	-2	1.3	14.2
+w3	gnl|CDD|103	3	83	3	3.1	13.1
+w3	gnl|CDD|103	17	55	2	3.9	12.7
+w3	gnl|CDD|103	40	20	-1	6.4	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w4 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 7 hits found
+w4	gnl|CDD|101	45	4	-3	0.16	16.5
+w4	gnl|CDD|103	135	115	-3	2.4	13.5
+w4	gnl|CDD|103	181	195	1	5.1	12.3
+w4	gnl|CDD|102	147	97	-3	3.7	12.7
+w4	gnl|CDD|102	90	137	3	8.1	11.9
+w4	gnl|CDD|102	20	3	-1	8.3	11.9
+w4	gnl|CDD|102	145	128	-2	8.7	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w5 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 9 hits found
+w5	gnl|CDD|103	87	37	-2	0.075	16.9
+w5	gnl|CDD|103	156	82	-2	0.21	15.8
+w5	gnl|CDD|103	99	64	-2	0.43	15.0
+w5	gnl|CDD|103	146	175	2	0.50	15.0
+w5	gnl|CDD|103	166	134	-1	0.71	14.6
+w5	gnl|CDD|103	146	93	-3	1.2	13.9
+w5	gnl|CDD|102	74	118	2	0.91	14.2
+w5	gnl|CDD|102	105	13	-2	6.6	11.9
+w5	gnl|CDD|101	113	145	2	2.5	13.1
+# RPSTBLASTN 2.17.0+
+# Query: w6 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 5 hits found
+w6	gnl|CDD|101	92	121	2	0.51	14.2
+w6	gnl|CDD|101	96	22	-1	5.5	11.9
+w6	gnl|CDD|101	60	74	3	8.3	11.5
+w6	gnl|CDD|102	62	33	-2	1.3	13.5
+w6	gnl|CDD|102	52	90	1	2.5	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w7 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 7 hits found
+w7	gnl|CDD|103	25	90	1	0.031	16.9
+w7	gnl|CDD|103	27	4	-2	0.11	15.4
+w7	gnl|CDD|103	92	72	-3	0.21	14.6
+w7	gnl|CDD|103	34	17	-1	1.0	13.1
+w7	gnl|CDD|101	73	47	-1	0.19	14.6
+w7	gnl|CDD|102	61	47	-1	0.83	13.5
+w7	gnl|CDD|102	73	35	-1	4.5	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w8 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 8 hits found
+w8	gnl|CDD|101	8	91	2	0.18	15.8
+w8	gnl|CDD|101	47	121	2	0.49	14.6
+w8	gnl|CDD|101	36	80	3	2.9	12.7
+w8	gnl|CDD|101	73	99	1	4.0	12.3
+w8	gnl|CDD|101	86	30	-3	6.9	11.5
+w8	gnl|CDD|102	153	103	-2	0.74	14.2
+w8	gnl|CDD|102	88	111	1	3.3	12.7
+w8	gnl|CDD|102	130	113	-1	5.4	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w9 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 7 hits found
+w9	gnl|CDD|102	166	204	1	0.27	16.2
+w9	gnl|CDD|102	87	67	-1	0.54	15.4
+w9	gnl|CDD|102	162	185	3	3.1	13.1
+w9	gnl|CDD|102	83	118	2	3.4	13.1
+w9	gnl|CDD|102	108	64	-1	4.9	12.7
+w9	gnl|CDD|101	82	99	1	1.3	14.2
+w9	gnl|CDD|103	182	153	-2	2.0	13.9
+# RPSTBLASTN 2.17.0+
+# Query: w10 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 3 hits found
+w10	gnl|CDD|103	85	35	-1	1.6	12.7
+w10	gnl|CDD|103	3	29	3	2.3	12.3
+w10	gnl|CDD|102	45	68	3	2.8	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w11 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 8 hits found
+w11	gnl|CDD|101	76	8	-3	0.007	19.6
+w11	gnl|CDD|101	42	68	3	0.85	14.2
+w11	gnl|CDD|101	69	119	3	3.2	12.7
+w11	gnl|CDD|101	22	5	-3	5.5	11.9
+w11	gnl|CDD|103	59	124	2	0.54	14.6
+w11	gnl|CDD|102	100	71	-3	0.90	13.9
+w11	gnl|CDD|102	33	53	3	1.8	13.1
+w11	gnl|CDD|102	142	83	-3	4.1	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w12 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 5 hits found
+w12	gnl|CDD|103	28	48	1	0.31	16.2
+w12	gnl|CDD|103	116	157	2	5.9	12.3
+w12	gnl|CDD|102	168	136	-2	1.2	14.2
+w12	gnl|CDD|102	21	62	3	2.6	13.5
+w12	gnl|CDD|101	72	128	3	2.2	13.5
+# RPSTBLASTN 2.17.0+
+# Query: w13 long
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 5 hits found
+w13	gnl|CDD|101	22	45	1	1.8	14.2
+w13	gnl|CDD|101	172	146	-1	2.1	13.9
+w13	gnl|CDD|101	70	32	-1	5.5	12.7
+w13	gnl|CDD|102	127	141	1	3.7	13.1
+w13	gnl|CDD|102	191	102	-3	5.4	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w13n nrun
+# Database: rps_mini
+# RPSTBLASTN 2.17.0+
+# Query: w14 rnd
+# Database: rps_mini
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w15 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 4 hits found
+w15	gnl|CDD|103	8	49	2	0.021	16.2
+w15	gnl|CDD|103	52	23	-1	1.2	12.7
+w15	gnl|CDD|101	19	54	1	0.038	15.8
+w15	gnl|CDD|101	53	9	-3	3.9	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w16 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 2 hits found
+w16	gnl|CDD|102	6	26	3	0.52	13.9
+w16	gnl|CDD|101	55	78	1	4.9	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w17 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 4 hits found
+w17	gnl|CDD|101	39	101	3	0.022	17.3
+w17	gnl|CDD|101	11	31	2	2.0	12.7
+w17	gnl|CDD|102	83	57	-2	0.087	15.8
+w17	gnl|CDD|103	93	55	-1	1.1	13.1
+# RPSTBLASTN 2.17.0+
+# Query: w18 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w18	gnl|CDD|103	99	113	3	0.49	14.6
+w18	gnl|CDD|101	138	94	-1	1.2	13.5
+w18	gnl|CDD|101	78	101	3	4.2	12.3
+w18	gnl|CDD|102	59	85	2	1.3	13.5
+w18	gnl|CDD|102	91	126	1	2.7	12.7
+w18	gnl|CDD|102	110	87	-2	6.2	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w19 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w19	gnl|CDD|102	118	71	-2	0.16	16.5
+w19	gnl|CDD|102	149	175	2	1.3	13.9
+w19	gnl|CDD|102	121	74	-2	1.8	13.5
+w19	gnl|CDD|103	75	110	3	1.0	14.2
+w19	gnl|CDD|103	26	70	2	2.9	13.1
+w19	gnl|CDD|101	75	98	3	1.4	13.9
+# RPSTBLASTN 2.17.0+
+# Query: w20 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 5 hits found
+w20	gnl|CDD|103	96	64	-1	1.4	13.9
+w20	gnl|CDD|103	125	145	2	3.7	12.7
+w20	gnl|CDD|101	8	58	2	1.5	13.9
+w20	gnl|CDD|101	183	88	-1	3.7	12.7
+w20	gnl|CDD|102	158	187	2	3.0	13.1
+# RPSTBLASTN 2.17.0+
+# Query: w21 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w21	gnl|CDD|102	142	186	1	1.4	13.9
+w21	gnl|CDD|102	3	26	3	2.6	13.1
+w21	gnl|CDD|102	181	149	-1	3.6	12.7
+w21	gnl|CDD|102	40	81	1	3.8	12.7
+w21	gnl|CDD|103	88	102	1	4.7	12.7
+w21	gnl|CDD|101	39	13	-2	4.9	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w22 rnd
+# Database: rps_mini
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w23 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 4 hits found
+w23	gnl|CDD|103	74	91	2	2.4	13.1
+w23	gnl|CDD|103	69	28	-1	2.5	12.7
+w23	gnl|CDD|103	102	152	3	3.4	12.3
+w23	gnl|CDD|102	55	81	1	7.1	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w24 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 5 hits found
+w24	gnl|CDD|103	70	26	-2	0.038	15.8
+w24	gnl|CDD|101	5	28	2	0.081	15.0
+w24	gnl|CDD|101	53	24	-1	0.50	13.5
+w24	gnl|CDD|101	9	56	3	2.0	12.3
+w24	gnl|CDD|102	72	55	-3	1.2	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w25 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 3 hits found
+w25	gnl|CDD|103	54	7	-1	0.59	14.2
+w25	gnl|CDD|102	100	41	-3	6.0	11.5
+w25	gnl|CDD|101	81	40	-1	7.9	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w26 empty
+# Database: rps_mini
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w27 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 5 hits found
+w27	gnl|CDD|103	45	71	3	4.0	11.9
+w27	gnl|CDD|103	58	102	1	6.0	11.5
+w27	gnl|CDD|102	78	55	-3	4.3	11.9
+w27	gnl|CDD|102	105	40	-3	8.3	11.2
+w27	gnl|CDD|101	91	68	-2	9.0	11.2
+# RPSTBLASTN 2.17.0+
+# Query: w28 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 8 hits found
+w28	gnl|CDD|101	38	97	2	0.007	20.0
+w28	gnl|CDD|101	162	118	-1	1.8	13.5
+w28	gnl|CDD|101	34	66	1	2.0	13.5
+w28	gnl|CDD|101	163	198	1	4.0	12.7
+w28	gnl|CDD|102	9	17	3	0.85	14.6
+w28	gnl|CDD|102	58	105	1	1.9	13.9
+w28	gnl|CDD|102	126	100	-1	4.1	12.7
+w28	gnl|CDD|103	110	66	-2	4.7	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w29 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 2 hits found
+w29	gnl|CDD|101	47	15	-1	0.52	14.6
+w29	gnl|CDD|101	154	119	-2	0.71	14.2
+# RPSTBLASTN 2.17.0+
+# Query: w30 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 7 hits found
+w30	gnl|CDD|101	14	94	2	0.60	15.0
+w30	gnl|CDD|102	3	44	3	0.65	15.0
+w30	gnl|CDD|102	97	117	1	0.86	14.6
+w30	gnl|CDD|102	112	186	1	2.8	13.5
+w30	gnl|CDD|102	120	88	-2	5.0	12.3
+w30	gnl|CDD|102	164	144	-3	8.1	11.9
+w30	gnl|CDD|103	75	92	3	5.3	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w31 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 3 hits found
+w31	gnl|CDD|103	57	22	-1	0.10	15.8
+w31	gnl|CDD|101	51	71	3	1.3	13.1
+w31	gnl|CDD|102	110	66	-2	3.2	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w32 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 3 hits found
+w32	gnl|CDD|101	50	6	-1	0.11	14.6
+w32	gnl|CDD|101	30	53	3	0.94	12.7
+w32	gnl|CDD|103	14	52	2	3.9	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w33 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 4 hits found
+w33	gnl|CDD|102	33	92	3	0.89	13.9
+w33	gnl|CDD|102	139	65	-1	5.3	11.9
+w33	gnl|CDD|101	63	16	-2	4.5	12.3
+w33	gnl|CDD|103	61	35	-1	5.8	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w34 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w34	gnl|CDD|101	18	59	3	0.21	15.4
+w34	gnl|CDD|101	125	105	-2	7.3	11.5
+w34	gnl|CDD|103	33	59	3	0.26	15.4
+w34	gnl|CDD|103	52	5	-3	1.0	13.9
+w34	gnl|CDD|103	42	86	3	1.1	13.9
+w34	gnl|CDD|102	89	127	2	4.4	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w35 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 3 hits found
+w35	gnl|CDD|102	13	63	1	0.22	14.6
+w35	gnl|CDD|103	58	38	-2	0.43	13.9
+w35	gnl|CDD|101	62	82	2	2.9	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w36 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 4 hits found
+w36	gnl|CDD|101	34	2	-1	2.3	12.7
+w36	gnl|CDD|101	87	46	-2	4.7	11.9
+w36	gnl|CDD|101	80	121	2	6.1	11.5
+w36	gnl|CDD|102	51	4	-2	5.9	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w37 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 5 hits found
+w37	gnl|CDD|103	149	166	2	3.4	13.1
+w37	gnl|CDD|103	196	204	1	9.5	11.9
+w37	gnl|CDD|102	8	67	2	3.6	13.1
+w37	gnl|CDD|101	40	2	-3	4.2	12.7
+w37	gnl|CDD|101	178	161	-3	5.9	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w38 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w38	gnl|CDD|102	176	208	2	0.83	14.6
+w38	gnl|CDD|102	136	177	1	0.87	15.0
+w38	gnl|CDD|103	100	114	1	3.9	13.1
+w38	gnl|CDD|103	183	85	-2	8.4	11.9
+w38	gnl|CDD|101	11	70	2	4.6	12.7
+w38	gnl|CDD|101	42	65	3	8.6	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w39 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 4 hits found
+w39	gnl|CDD|102	111	134	3	0.12	16.2
+w39	gnl|CDD|101	51	28	-1	0.85	13.9
+w39	gnl|CDD|101	92	145	2	5.3	11.9
+w39	gnl|CDD|103	26	18	-2	8.6	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w40 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 9 hits found
+w40	gnl|CDD|102	152	199	2	2.0	13.9
+w40	gnl|CDD|102	82	59	-1	6.1	12.3
+w40	gnl|CDD|101	15	47	3	2.1	13.9
+w40	gnl|CDD|101	79	38	-1	2.5	13.5
+w40	gnl|CDD|101	186	224	3	2.7	13.5
+w40	gnl|CDD|101	179	126	-3	4.1	13.1
+w40	gnl|CDD|101	197	226	2	5.2	12.7
+w40	gnl|CDD|101	61	8	-1	5.7	12.7
+w40	gnl|CDD|103	224	174	-3	4.2	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w41 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 8 hits found
+w41	gnl|CDD|102	34	11	-1	0.30	15.8
+w41	gnl|CDD|102	107	69	-3	0.53	15.0
+w41	gnl|CDD|102	118	165	1	2.0	13.9
+w41	gnl|CDD|101	106	74	-1	0.36	15.4
+w41	gnl|CDD|101	127	177	1	1.7	13.9
+w41	gnl|CDD|101	143	123	-3	2.5	13.5
+w41	gnl|CDD|103	60	89	3	5.6	12.3
+w41	gnl|CDD|103	133	98	-1	9.8	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w42 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 4 hits found
+w42	gnl|CDD|103	23	43	2	0.40	13.9
+w42	gnl|CDD|103	19	33	1	0.41	14.2
+w42	gnl|CDD|103	10	66	1	1.4	12.7
+w42	gnl|CDD|102	76	62	-1	0.77	13.5
+# RPSTBLASTN 2.17.0+
+# Query: w43 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w43	gnl|CDD|101	115	147	1	0.53	14.6
+w43	gnl|CDD|101	106	144	1	1.0	13.9
+w43	gnl|CDD|102	137	120	-1	1.3	13.5
+w43	gnl|CDD|102	98	121	2	1.4	13.5
+w43	gnl|CDD|102	121	153	1	2.4	13.1
+w43	gnl|CDD|102	74	94	2	3.9	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w44 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 3 hits found
+w44	gnl|CDD|103	29	76	2	0.77	13.5
+w44	gnl|CDD|103	88	59	-3	4.6	11.9
+w44	gnl|CDD|102	62	48	-2	3.5	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w45 hit 0 95-133
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 4 hits found
+w45	gnl|CDD|101	4	120	1	4.47e-24	76.3
+w45	gnl|CDD|101	24	77	3	0.011	18.5
+w45	gnl|CDD|101	24	1	-2	0.74	13.9
+w45	gnl|CDD|103	33	92	3	0.38	14.6
+# RPSTBLASTN 2.17.0+
+# Query: w46 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 9 hits found
+w46	gnl|CDD|103	55	93	1	0.045	18.5
+w46	gnl|CDD|103	15	44	3	1.1	14.2
+w46	gnl|CDD|102	40	72	1	0.73	15.0
+w46	gnl|CDD|102	60	34	-1	2.3	13.5
+w46	gnl|CDD|102	160	189	1	4.0	12.7
+w46	gnl|CDD|101	180	112	-1	2.7	13.1
+w46	gnl|CDD|101	157	107	-3	4.5	12.7
+w46	gnl|CDD|101	160	177	1	5.3	12.7
+w46	gnl|CDD|101	61	78	1	9.2	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w47 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 9 hits found
+w47	gnl|CDD|101	35	3	-2	0.027	18.1
+w47	gnl|CDD|101	86	115	2	0.80	14.2
+w47	gnl|CDD|101	158	42	-2	1.8	13.5
+w47	gnl|CDD|102	81	170	3	0.13	16.5
+w47	gnl|CDD|102	34	54	1	1.7	13.9
+w47	gnl|CDD|102	69	86	3	4.0	12.7
+w47	gnl|CDD|102	7	48	1	4.4	12.7
+w47	gnl|CDD|102	2	82	2	4.8	12.3
+w47	gnl|CDD|103	97	147	1	0.91	14.6
+# RPSTBLASTN 2.17.0+
+# Query: w48 hit 1 97-133
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 7 hits found
+w48	gnl|CDD|102	119	6	-2	1.07e-24	73.9
+w48	gnl|CDD|102	30	41	3	0.17	15.4
+w48	gnl|CDD|102	79	41	-3	3.9	11.9
+w48	gnl|CDD|102	105	113	3	8.4	11.2
+w48	gnl|CDD|101	31	2	-3	0.21	15.0
+w48	gnl|CDD|101	24	4	-1	1.4	13.1
+w48	gnl|CDD|101	49	5	-3	2.6	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w49 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 1 hits found
+w49	gnl|CDD|101	49	60	1	3.6	11.2
+# RPSTBLASTN 2.17.0+
+# Query: w50 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 3 hits found
+w50	gnl|CDD|102	138	34	-2	0.16	15.4
+w50	gnl|CDD|103	120	31	-2	5.1	11.9
+w50	gnl|CDD|103	13	60	1	9.2	11.2
+# RPSTBLASTN 2.17.0+
+# Query: w51 hit 2 114-150
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 5 hits found
+w51	gnl|CDD|103	4	114	1	3.33e-25	79.0
+w51	gnl|CDD|103	60	101	3	0.053	16.5
+w51	gnl|CDD|103	41	12	-2	2.6	12.3
+w51	gnl|CDD|103	66	37	-1	8.8	11.2
+w51	gnl|CDD|101	5	40	2	0.18	15.0
+# RPSTBLASTN 2.17.0+
+# Query: w52 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 8 hits found
+w52	gnl|CDD|103	168	115	-3	0.11	16.9
+w52	gnl|CDD|103	224	156	-1	0.24	16.2
+w52	gnl|CDD|103	134	160	2	4.1	12.7
+w52	gnl|CDD|103	202	179	-2	9.3	11.9
+w52	gnl|CDD|102	134	169	2	0.35	15.8
+w52	gnl|CDD|102	67	111	1	0.56	15.4
+w52	gnl|CDD|102	77	60	-1	3.1	13.1
+w52	gnl|CDD|102	67	114	1	5.0	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w53 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w53	gnl|CDD|102	138	94	-2	0.015	19.6
+w53	gnl|CDD|102	83	54	-3	3.3	13.1
+w53	gnl|CDD|102	41	58	2	7.5	12.3
+w53	gnl|CDD|102	206	226	2	8.4	11.9
+w53	gnl|CDD|101	149	190	2	2.0	13.9
+w53	gnl|CDD|101	84	101	3	6.0	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w54 hit 0 124-169
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w54	gnl|CDD|101	139	2	-1	7.17e-30	87.4
+w54	gnl|CDD|101	116	142	2	2.1	13.1
+w54	gnl|CDD|103	6	56	3	0.30	15.0
+w54	gnl|CDD|103	9	56	3	0.45	14.6
+w54	gnl|CDD|102	31	48	1	2.0	13.1
+w54	gnl|CDD|102	41	6	-3	4.3	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w55 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 1 hits found
+w55	gnl|CDD|102	65	12	-3	0.13	14.6
+# RPSTBLASTN 2.17.0+
+# Query: w56 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 5 hits found
+w56	gnl|CDD|103	20	70	2	0.11	17.3
+w56	gnl|CDD|102	151	213	1	4.0	13.1
+w56	gnl|CDD|102	20	37	2	6.5	12.3
+w56	gnl|CDD|101	41	94	2	4.4	12.7
+w56	gnl|CDD|101	102	140	3	4.9	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w57 hit 1 118-166
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 4 hits found
+w57	gnl|CDD|102	5	151	2	1.87e-34	99.0
+w57	gnl|CDD|102	152	69	-2	0.020	18.1
+w57	gnl|CDD|101	114	91	-1	0.58	14.2
+w57	gnl|CDD|101	65	9	-2	0.76	14.2
+# RPSTBLASTN 2.17.0+
+# Query: w58 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 3 hits found
+w58	gnl|CDD|101	78	13	-3	0.015	18.1
+w58	gnl|CDD|101	112	65	-2	8.1	11.2
+w58	gnl|CDD|103	56	6	-1	0.24	15.0
+# RPSTBLASTN 2.17.0+
+# Query: w59 rnd
+# Database: rps_mini
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w60 hit 2 88-122
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w60	gnl|CDD|103	115	11	-3	1.13e-25	76.3
+w60	gnl|CDD|103	70	96	1	2.2	12.7
+w60	gnl|CDD|101	20	79	2	0.16	15.4
+w60	gnl|CDD|101	21	41	3	0.22	15.0
+w60	gnl|CDD|101	72	104	3	2.5	12.7
+w60	gnl|CDD|102	70	32	-3	1.00	13.5
+# RPSTBLASTN 2.17.0+
+# Query: w61 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 3 hits found
+w61	gnl|CDD|101	135	109	-3	0.66	14.2
+w61	gnl|CDD|102	27	16	-3	0.87	13.9
+w61	gnl|CDD|102	102	155	3	7.4	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w62 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 2 hits found
+w62	gnl|CDD|103	45	16	-3	0.40	13.9
+w62	gnl|CDD|101	17	37	2	1.6	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w63 hit 0 145-188
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 8 hits found
+w63	gnl|CDD|101	3	134	3	4.17e-29	85.5
+w63	gnl|CDD|101	2	100	2	1.5	13.5
+w63	gnl|CDD|101	96	73	-3	9.4	11.2
+w63	gnl|CDD|102	110	133	2	0.52	14.2
+w63	gnl|CDD|102	75	101	3	0.96	13.9
+w63	gnl|CDD|102	77	54	-1	4.6	11.9
+w63	gnl|CDD|102	45	19	-3	4.7	11.9
+w63	gnl|CDD|103	48	86	3	2.1	13.1
+# RPSTBLASTN 2.17.0+
+# Query: w64 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 4 hits found
+w64	gnl|CDD|103	57	119	3	0.018	18.1
+w64	gnl|CDD|103	18	119	3	7.2	11.5
+w64	gnl|CDD|102	25	5	-3	1.3	13.5
+w64	gnl|CDD|102	117	134	3	5.0	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w65 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 7 hits found
+w65	gnl|CDD|102	88	147	1	0.17	16.9
+w65	gnl|CDD|102	78	10	-1	0.34	15.8
+w65	gnl|CDD|102	83	51	-2	4.0	13.1
+w65	gnl|CDD|103	164	96	-2	0.46	15.4
+w65	gnl|CDD|101	190	107	-3	1.1	14.2
+w65	gnl|CDD|101	164	96	-2	5.0	12.7
+w65	gnl|CDD|101	81	19	-1	5.2	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w66 hit 1 74-124
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 4 hits found
+w66	gnl|CDD|102	153	1	-1	2.75e-36	103
+w66	gnl|CDD|102	132	158	3	2.3	13.1
+w66	gnl|CDD|101	73	35	-3	0.54	14.6
+w66	gnl|CDD|103	29	40	2	0.88	13.9
+# RPSTBLASTN 2.17.0+
+# Query: w67 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 2 hits found
+w67	gnl|CDD|102	15	53	3	0.064	15.0
+w67	gnl|CDD|103	6	32	3	0.34	13.9
+# RPSTBLASTN 2.17.0+
+# Query: w68 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 2 hits found
+w68	gnl|CDD|103	41	3	-1	0.43	14.2
+w68	gnl|CDD|102	22	42	1	1.4	13.1
+# RPSTBLASTN 2.17.0+
+# Query: w69 hit 2 65-127
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 10 hits found
+w69	gnl|CDD|103	7	195	1	1.65e-42	124
+w69	gnl|CDD|103	174	160	-3	1.8	13.5
+w69	gnl|CDD|101	161	126	-1	0.10	16.9
+w69	gnl|CDD|101	155	187	2	0.32	15.8
+w69	gnl|CDD|101	191	153	-1	0.37	15.4
+w69	gnl|CDD|101	2	76	2	0.41	15.4
+w69	gnl|CDD|102	121	159	1	2.4	13.5
+w69	gnl|CDD|102	3	50	3	3.4	13.1
+w69	gnl|CDD|102	12	62	3	7.5	11.9
+w69	gnl|CDD|102	181	201	1	7.9	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w70 rnd
+# Database: rps_mini
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w71 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w71	gnl|CDD|103	102	179	3	0.52	15.0
+w71	gnl|CDD|103	11	52	2	0.57	14.6
+w71	gnl|CDD|103	142	171	1	0.76	14.6
+w71	gnl|CDD|103	9	50	3	4.3	12.3
+w71	gnl|CDD|101	42	152	3	1.2	13.9
+w71	gnl|CDD|102	123	170	3	3.7	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w72 hit 0 64-124
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 10 hits found
+w72	gnl|CDD|101	192	10	-2	1.31e-37	108
+w72	gnl|CDD|101	132	149	3	3.1	13.1
+w72	gnl|CDD|101	152	193	2	5.7	12.3
+w72	gnl|CDD|102	3	50	3	0.051	17.7
+w72	gnl|CDD|102	118	77	-1	0.42	15.0
+w72	gnl|CDD|102	123	103	-2	0.83	14.2
+w72	gnl|CDD|102	131	157	2	1.8	13.5
+w72	gnl|CDD|102	97	83	-1	2.7	13.1
+w72	gnl|CDD|102	159	182	3	5.2	12.3
+w72	gnl|CDD|103	83	112	2	1.8	13.5
+# RPSTBLASTN 2.17.0+
+# Query: w73 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w73	gnl|CDD|101	90	137	3	0.11	16.9
+w73	gnl|CDD|101	185	162	-3	0.61	15.0
+w73	gnl|CDD|101	188	135	-3	6.4	12.3
+w73	gnl|CDD|101	53	9	-3	7.7	11.9
+w73	gnl|CDD|102	70	102	1	2.4	13.5
+w73	gnl|CDD|102	179	211	2	9.4	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w74 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 1 hits found
+w74	gnl|CDD|101	112	159	1	4.2	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w75 hit 1 98-133
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 2 hits found
+w75	gnl|CDD|102	8	115	2	2.66e-23	70.1
+w75	gnl|CDD|103	43	29	-2	0.56	13.9
+# RPSTBLASTN 2.17.0+
+# Query: w76 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 2 hits found
+w76	gnl|CDD|102	79	96	1	1.0	14.2
+w76	gnl|CDD|102	13	39	1	7.9	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w77 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 3 hits found
+w77	gnl|CDD|102	52	69	1	1.1	13.9
+w77	gnl|CDD|102	118	98	-3	6.4	11.5
+w77	gnl|CDD|101	37	102	1	7.4	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w78 hit 2 68-134
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 7 hits found
+w78	gnl|CDD|103	201	1	-3	3.83e-48	134
+w78	gnl|CDD|103	118	138	1	3.8	12.7
+w78	gnl|CDD|103	64	90	1	6.1	12.3
+w78	gnl|CDD|101	26	67	2	0.27	15.8
+w78	gnl|CDD|101	1	51	1	1.5	13.9
+w78	gnl|CDD|102	169	140	-2	0.44	15.4
+w78	gnl|CDD|102	96	58	-3	2.2	13.5
+# RPSTBLASTN 2.17.0+
+# Query: w79 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 4 hits found
+w79	gnl|CDD|103	146	123	-3	0.78	14.2
+w79	gnl|CDD|103	102	55	-2	2.9	12.7
+w79	gnl|CDD|101	39	95	3	0.80	14.2
+w79	gnl|CDD|102	102	58	-2	1.9	13.1
+# RPSTBLASTN 2.17.0+
+# Query: w80 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 7 hits found
+w80	gnl|CDD|102	153	79	-1	0.065	17.7
+w80	gnl|CDD|102	110	139	2	1.7	13.9
+w80	gnl|CDD|102	92	118	2	3.7	12.7
+w80	gnl|CDD|102	114	161	3	6.1	12.3
+w80	gnl|CDD|101	156	106	-1	0.100	16.9
+w80	gnl|CDD|103	106	77	-3	1.8	13.9
+w80	gnl|CDD|103	178	137	-3	5.0	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w81 hit 0 75-119
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w81	gnl|CDD|101	10	144	1	3.61e-24	77.0
+w81	gnl|CDD|101	90	140	3	0.80	13.9
+w81	gnl|CDD|101	78	104	3	1.1	13.9
+w81	gnl|CDD|102	46	66	1	0.69	14.2
+w81	gnl|CDD|103	86	57	-2	1.8	13.1
+w81	gnl|CDD|103	88	56	-3	2.1	13.1
+# RPSTBLASTN 2.17.0+
+# Query: w82 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 2 hits found
+w82	gnl|CDD|103	47	130	2	3.3	12.7
+w82	gnl|CDD|103	80	127	2	4.4	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w83 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 2 hits found
+w83	gnl|CDD|101	29	3	-1	0.54	13.9
+w83	gnl|CDD|102	50	91	2	1.6	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w84 hit 1 42-92
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w84	gnl|CDD|102	155	3	-3	7.97e-40	112
+w84	gnl|CDD|102	18	62	3	2.8	12.7
+w84	gnl|CDD|102	90	110	3	4.6	12.3
+w84	gnl|CDD|103	131	90	-3	0.61	14.2
+w84	gnl|CDD|103	98	72	-3	5.3	11.9
+w84	gnl|CDD|103	116	148	2	5.8	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w85 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 1 hits found
+w85	gnl|CDD|101	34	57	1	2.0	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w86 long
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w86	gnl|CDD|102	216	172	-2	1.7	14.2
+w86	gnl|CDD|102	140	163	2	1.8	13.9
+w86	gnl|CDD|102	99	1	-2	4.8	12.7
+w86	gnl|CDD|103	249	202	-2	2.3	13.9
+w86	gnl|CDD|103	198	142	-2	4.2	13.1
+w86	gnl|CDD|101	54	31	-2	9.3	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w86n nrun
+# Database: rps_mini
+# RPSTBLASTN 2.17.0+
+# Query: w87 hit 2 91-129
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 8 hits found
+w87	gnl|CDD|103	11	127	2	4.50e-29	85.1
+w87	gnl|CDD|103	67	47	-1	0.13	15.8
+w87	gnl|CDD|103	42	19	-2	0.29	15.0
+w87	gnl|CDD|101	117	76	-2	0.11	15.8
+w87	gnl|CDD|101	34	5	-1	0.57	14.2
+w87	gnl|CDD|101	81	113	3	6.7	11.5
+w87	gnl|CDD|102	47	85	2	1.2	13.5
+w87	gnl|CDD|102	61	17	-1	1.2	13.5
+# RPSTBLASTN 2.17.0+
+# Query: w88 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 5 hits found
+w88	gnl|CDD|103	68	109	2	0.72	15.0
+w88	gnl|CDD|103	49	78	1	5.2	12.7
+w88	gnl|CDD|101	139	68	-1	1.4	14.2
+w88	gnl|CDD|101	197	171	-3	3.8	13.1
+w88	gnl|CDD|102	104	187	2	1.9	13.9
+# RPSTBLASTN 2.17.0+
+# Query: w89 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 2 hits found
+w89	gnl|CDD|102	60	34	-3	0.006	17.7
+w89	gnl|CDD|102	66	34	-3	1.8	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w90 hit 0 61-111
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 7 hits found
+w90	gnl|CDD|101	159	7	-3	6.74e-30	87.8
+w90	gnl|CDD|101	110	157	2	0.31	15.4
+w90	gnl|CDD|101	37	102	1	3.2	12.7
+w90	gnl|CDD|101	64	90	1	4.2	12.3
+w90	gnl|CDD|103	104	157	2	0.47	14.6
+w90	gnl|CDD|102	81	61	-3	0.64	14.2
+w90	gnl|CDD|102	157	131	-2	8.5	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w91 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 4 hits found
+w91	gnl|CDD|102	179	96	-2	0.21	15.8
+w91	gnl|CDD|101	133	86	-3	0.70	14.6
+w91	gnl|CDD|101	62	85	2	3.0	13.1
+w91	gnl|CDD|103	5	130	2	3.7	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w92 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 3 hits found
+w92	gnl|CDD|101	128	78	-1	0.011	18.9
+w92	gnl|CDD|102	35	61	2	0.83	14.2
+w92	gnl|CDD|103	13	39	1	3.0	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w93 hit 1 8-49
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w93	gnl|CDD|102	2	127	2	1.09e-29	86.7
+w93	gnl|CDD|102	74	109	2	0.36	14.6
+w93	gnl|CDD|102	114	134	3	5.7	11.9
+w93	gnl|CDD|101	134	111	-2	0.089	16.2
+w93	gnl|CDD|101	100	35	-3	0.61	14.2
+w93	gnl|CDD|101	24	4	-1	4.2	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w94 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 9 hits found
+w94	gnl|CDD|102	82	14	-3	0.50	14.6
+w94	gnl|CDD|102	115	80	-3	2.4	12.7
+w94	gnl|CDD|102	74	124	2	2.6	12.7
+w94	gnl|CDD|102	80	57	-2	3.3	12.3
+w94	gnl|CDD|103	134	114	-2	1.1	13.5
+w94	gnl|CDD|103	104	78	-2	1.9	13.1
+w94	gnl|CDD|103	131	90	-2	1.9	13.1
+w94	gnl|CDD|103	104	69	-2	2.0	13.1
+w94	gnl|CDD|103	53	82	2	7.0	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w95 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 1 hits found
+w95	gnl|CDD|101	32	6	-2	0.17	15.0
+# RPSTBLASTN 2.17.0+
+# Query: w96 hit 2 69-122
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 5 hits found
+w96	gnl|CDD|103	163	2	-3	5.80e-38	108
+w96	gnl|CDD|103	66	89	3	0.44	15.0
+w96	gnl|CDD|101	119	133	2	1.4	13.5
+w96	gnl|CDD|101	161	120	-2	4.8	12.3
+w96	gnl|CDD|102	61	23	-3	1.6	13.5
+# RPSTBLASTN 2.17.0+
+# Query: w97 hyphens
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 2 hits found
+w97	gnl|CDD|102	1	27	1	0.044	16.5
+w97	gnl|CDD|102	74	85	2	0.96	13.1
+# RPSTBLASTN 2.17.0+
+# Query: w98 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 3 hits found
+w98	gnl|CDD|103	33	7	-3	2.8	12.3
+w98	gnl|CDD|101	66	74	3	4.9	11.5
+w98	gnl|CDD|101	61	26	-2	5.7	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w99 hit 0 39-83
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 3 hits found
+w99	gnl|CDD|101	4	144	1	1.08e-27	85.9
+w99	gnl|CDD|101	120	55	-3	0.011	18.9
+w99	gnl|CDD|103	104	78	-1	2.5	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w100 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 2 hits found
+w100	gnl|CDD|103	195	218	3	0.027	18.9
+w100	gnl|CDD|102	133	104	-3	5.8	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w101 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 8 hits found
+w101	gnl|CDD|103	130	159	1	0.82	14.6
+w101	gnl|CDD|103	29	55	2	1.4	13.9
+w101	gnl|CDD|103	104	181	2	1.7	13.5
+w101	gnl|CDD|103	120	155	3	5.0	12.3
+w101	gnl|CDD|103	67	132	1	5.5	12.3
+w101	gnl|CDD|102	8	70	2	2.0	13.5
+w101	gnl|CDD|101	152	129	-2	3.5	12.7
+w101	gnl|CDD|101	97	74	-3	9.2	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w102 hit 1 39-105
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 7 hits found
+w102	gnl|CDD|102	210	1	-2	2.91e-51	143
+w102	gnl|CDD|102	164	211	2	0.25	16.2
+w102	gnl|CDD|102	179	220	2	6.2	12.3
+w102	gnl|CDD|103	56	145	2	0.11	16.9
+w102	gnl|CDD|103	73	102	1	0.27	16.2
+w102	gnl|CDD|103	177	136	-2	1.0	14.2
+w102	gnl|CDD|103	144	118	-2	7.8	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w103 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 5 hits found
+w103	gnl|CDD|102	44	94	2	0.54	14.2
+w103	gnl|CDD|101	28	2	-1	0.80	13.9
+w103	gnl|CDD|101	39	25	-2	1.1	13.5
+w103	gnl|CDD|101	86	33	-3	1.2	13.5
+w103	gnl|CDD|101	85	114	1	4.1	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w104 title CGCGCCCTGTGATCCACCGGGTACG
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 11 hits found
+w104	gnl|CDD|101	25	147	1	0.094	17.7
+w104	gnl|CDD|101	7	111	1	1.2	14.6
+w104	gnl|CDD|101	72	22	-2	2.0	13.9
+w104	gnl|CDD|101	68	48	-3	2.4	13.5
+w104	gnl|CDD|101	103	86	-1	4.3	12.7
+w104	gnl|CDD|102	25	168	1	0.91	14.6
+w104	gnl|CDD|102	37	2	-1	1.5	13.9
+w104	gnl|CDD|102	194	141	-3	4.4	12.7
+w104	gnl|CDD|103	213	136	-2	2.3	13.5
+w104	gnl|CDD|103	124	192	1	4.7	12.7
+w104	gnl|CDD|103	67	93	1	5.5	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w105 hit 2 11-54
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 5 hits found
+w105	gnl|CDD|103	2	133	2	3.94e-27	80.1
+w105	gnl|CDD|103	127	101	-1	0.044	16.9
+w105	gnl|CDD|103	1	24	1	0.32	15.0
+w105	gnl|CDD|101	34	11	-1	0.61	14.2
+w105	gnl|CDD|102	50	124	2	2.1	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w106 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 1 hits found
+w106	gnl|CDD|101	43	17	-2	2.0	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w107 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w107	gnl|CDD|102	72	92	3	1.0	13.5
+w107	gnl|CDD|102	45	13	-3	1.0	13.5
+w107	gnl|CDD|102	75	43	-3	2.2	12.7
+w107	gnl|CDD|101	115	98	-2	1.5	13.1
+w107	gnl|CDD|103	72	58	-3	1.6	13.1
+w107	gnl|CDD|103	93	52	-3	1.7	13.1
+# RPSTBLASTN 2.17.0+
+# Query: w108 hit 0 146-186
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 7 hits found
+w108	gnl|CDD|101	133	5	-1	1.55e-27	81.3
+w108	gnl|CDD|101	72	10	-2	0.42	14.6
+w108	gnl|CDD|102	58	32	-1	0.88	13.9
+w108	gnl|CDD|102	35	79	2	1.3	13.5
+w108	gnl|CDD|102	74	112	2	3.6	12.3
+w108	gnl|CDD|103	85	47	-1	1.9	13.1
+w108	gnl|CDD|103	82	111	1	6.8	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w109 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 2 hits found
+w109	gnl|CDD|101	33	53	3	0.50	13.5
+w109	gnl|CDD|103	51	31	-2	1.3	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w110 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 5 hits found
+w110	gnl|CDD|101	47	73	2	0.027	16.2
+w110	gnl|CDD|101	23	70	2	0.12	15.0
+w110	gnl|CDD|102	27	59	3	0.28	14.2
+w110	gnl|CDD|102	55	2	-1	3.7	11.9
+w110	gnl|CDD|103	53	73	2	0.82	13.1
+# RPSTBLASTN 2.17.0+
+# Query: w111 hit 1 39-98
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 12 hits found
+w111	gnl|CDD|102	3	185	3	4.00e-47	132
+w111	gnl|CDD|102	179	159	-3	0.42	15.0
+w111	gnl|CDD|102	52	5	-1	0.68	14.6
+w111	gnl|CDD|102	98	69	-3	2.4	13.1
+w111	gnl|CDD|102	62	27	-3	3.3	12.7
+w111	gnl|CDD|103	39	80	3	0.84	14.2
+w111	gnl|CDD|103	103	35	-1	1.1	14.2
+w111	gnl|CDD|103	53	88	2	6.3	11.9
+w111	gnl|CDD|103	72	98	3	6.6	11.9
+w111	gnl|CDD|101	76	8	-1	1.0	14.2
+w111	gnl|CDD|101	182	150	-3	1.3	13.9
+w111	gnl|CDD|101	139	162	1	4.4	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w112 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w112	gnl|CDD|103	56	9	-1	0.29	15.0
+w112	gnl|CDD|103	58	17	-2	0.31	15.0
+w112	gnl|CDD|103	26	58	2	2.0	13.1
+w112	gnl|CDD|102	95	81	-1	0.40	14.6
+w112	gnl|CDD|101	84	101	3	3.3	12.7
+w112	gnl|CDD|101	23	61	2	7.7	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w113 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 1 hits found
+w113	gnl|CDD|101	30	1	-2	0.21	14.2
+# RPSTBLASTN 2.17.0+
+# Query: w114 hit 2 29-67
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 8 hits found
+w114	gnl|CDD|103	124	2	-1	2.48e-26	78.2
+w114	gnl|CDD|103	96	10	-2	0.006	19.2
+w114	gnl|CDD|103	73	99	1	0.32	15.0
+w114	gnl|CDD|101	60	34	-2	1.0	13.5
+w114	gnl|CDD|101	32	76	2	1.4	13.1
+w114	gnl|CDD|101	113	127	2	2.6	12.7
+w114	gnl|CDD|102	113	84	-3	1.2	13.5
+w114	gnl|CDD|102	85	56	-1	6.7	11.5
+# RPSTBLASTN 2.17.0+
+# Query: w115 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 4 hits found
+w115	gnl|CDD|101	81	98	3	0.65	14.6
+w115	gnl|CDD|101	23	127	2	2.4	13.1
+w115	gnl|CDD|102	59	6	-2	0.98	13.9
+w115	gnl|CDD|102	80	97	2	3.1	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w116 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 2 hits found
+w116	gnl|CDD|102	103	62	-2	0.32	14.6
+w116	gnl|CDD|102	51	65	3	0.52	13.9
+# RPSTBLASTN 2.17.0+
+# Query: w117 hit 0 37-84
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 5 hits found
+w117	gnl|CDD|101	6	149	3	9.40e-31	89.7
+w117	gnl|CDD|101	124	80	-3	0.15	15.8
+w117	gnl|CDD|101	50	15	-2	6.8	11.5
+w117	gnl|CDD|103	83	63	-2	1.1	13.9
+w117	gnl|CDD|102	60	25	-1	3.9	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w118 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 3 hits found
+w118	gnl|CDD|101	8	76	2	1.5	13.5
+w118	gnl|CDD|101	64	44	-3	1.9	13.1
+w118	gnl|CDD|101	47	97	2	3.8	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w119 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 4 hits found
+w119	gnl|CDD|101	205	131	-3	0.21	16.2
+w119	gnl|CDD|101	115	162	1	0.58	15.4
+w119	gnl|CDD|101	78	101	3	1.3	13.9
+w119	gnl|CDD|102	166	195	1	2.1	13.9
+# RPSTBLASTN 2.17.0+
+# Query: w120 hit 1 9-63
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 7 hits found
+w120	gnl|CDD|102	176	3	-3	4.11e-42	119
+w120	gnl|CDD|102	24	59	3	0.33	15.4
+w120	gnl|CDD|102	101	66	-3	0.56	14.6
+w120	gnl|CDD|102	30	92	3	1.1	13.9
+w120	gnl|CDD|103	47	6	-3	0.75	14.2
+w120	gnl|CDD|103	75	161	3	3.0	12.7
+w120	gnl|CDD|103	63	22	-2	5.0	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w121 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 1 hits found
+w121	gnl|CDD|101	60	31	-2	0.64	13.1
+# RPSTBLASTN 2.17.0+
+# Query: w122 rnd
+# Database: rps_mini
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: w123 hit 2 6-62
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 3 hits found
+w123	gnl|CDD|103	3	176	3	8.92e-37	105
+w123	gnl|CDD|102	95	75	-2	2.6	13.1
+w123	gnl|CDD|102	66	140	3	2.9	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w124 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 15 hits found
+w124	gnl|CDD|103	200	99	-2	0.008	20.4
+w124	gnl|CDD|103	122	57	-2	0.093	17.3
+w124	gnl|CDD|103	168	209	3	0.18	16.5
+w124	gnl|CDD|103	216	187	-1	0.20	16.5
+w124	gnl|CDD|103	69	46	-1	1.5	14.2
+w124	gnl|CDD|103	113	90	-2	1.8	13.9
+w124	gnl|CDD|103	49	84	1	2.0	13.9
+w124	gnl|CDD|103	101	57	-2	2.2	13.5
+w124	gnl|CDD|102	166	228	1	0.15	17.3
+w124	gnl|CDD|102	91	111	1	2.6	13.5
+w124	gnl|CDD|102	72	107	3	3.5	13.1
+w124	gnl|CDD|102	198	227	3	3.5	13.1
+w124	gnl|CDD|102	182	117	-2	3.6	13.1
+w124	gnl|CDD|102	235	240	1	8.1	12.3
+w124	gnl|CDD|101	192	221	3	4.0	13.1
+# RPSTBLASTN 2.17.0+
+# Query: w125 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 5 hits found
+w125	gnl|CDD|103	118	141	1	0.60	14.6
+w125	gnl|CDD|101	40	69	1	1.3	13.5
+w125	gnl|CDD|101	141	118	-2	2.3	12.7
+w125	gnl|CDD|101	97	38	-1	6.1	11.9
+w125	gnl|CDD|102	51	28	-2	4.0	12.3
+# RPSTBLASTN 2.17.0+
+# Query: w126 hit 0 70-124
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 4 hits found
+w126	gnl|CDD|101	177	7	-1	7.22e-34	98.2
+w126	gnl|CDD|101	70	111	1	1.2	13.9
+w126	gnl|CDD|102	120	100	-1	0.73	14.2
+w126	gnl|CDD|102	3	50	3	3.1	12.7
+# RPSTBLASTN 2.17.0+
+# Query: w127 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w127	gnl|CDD|101	94	32	-3	0.028	16.5
+w127	gnl|CDD|101	15	38	3	2.2	12.3
+w127	gnl|CDD|102	81	37	-1	0.067	15.8
+w127	gnl|CDD|102	35	6	-2	0.87	13.5
+w127	gnl|CDD|103	49	72	1	0.80	13.5
+w127	gnl|CDD|103	34	8	-3	3.4	11.9
+# RPSTBLASTN 2.17.0+
+# Query: w128 rnd
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w128	gnl|CDD|102	96	31	-2	0.067	16.9
+w128	gnl|CDD|102	31	78	1	3.1	12.7
+w128	gnl|CDD|102	25	75	1	4.7	12.3
+w128	gnl|CDD|103	34	99	1	0.084	16.9
+w128	gnl|CDD|101	135	103	-2	0.41	15.0
+w128	gnl|CDD|101	105	149	3	2.5	13.1
+# RPSTBLASTN 2.17.0+
+# Query: w129 hit 1 58-115
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 6 hits found
+w129	gnl|CDD|102	5	181	2	2.56e-42	119
+w129	gnl|CDD|102	73	29	-3	0.038	17.7
+w129	gnl|CDD|102	72	7	-1	0.55	14.6
+w129	gnl|CDD|103	17	43	2	6.4	11.9
+w129	gnl|CDD|103	120	97	-1	8.5	11.5
+w129	gnl|CDD|101	66	143	3	6.9	11.9
+# BLAST processed 132 queries

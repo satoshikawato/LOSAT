@@ -1,0 +1,7 @@
+#
+# Alias file of line DBID, ordnum
+#
+TITLE refuse_r (OIDs 1 to 5 of refuse_v5)
+DBLIST refuse_v5
+FIRST_OID 2
+LAST_OID 6

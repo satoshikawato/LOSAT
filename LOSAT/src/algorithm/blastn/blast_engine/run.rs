@@ -4507,6 +4507,23 @@ struct SubjectScratch {
     //                                sizeof(SSeqRange));
     // ```
     seq_ranges_scratch: Vec<(i32, i32)>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321,399-405
+    // ```c++
+    //     if (datap->mask_type != eNoSubjMasking) {
+    //         ASSERT(datap->mask_algo_id != -1);
+    //         seqdb.GetMaskData(oid, datap->mask_algo_id, datap->seq_ranges);
+    //     }
+    //     ...
+    //         if (BlastSeqBlkSetSeqRanges(args->seq,
+    //                                 (SSeqRange*) datap->seq_ranges.get_data(),
+    //                                 datap->seq_ranges.size() + 1, false, datap->mask_type) != 0) {
+    // ```
+    // The buffers of a database search with `-db_soft_mask` (decision D4 of M4a-2): the masks of
+    // the block of the database sequence being searched (read once for all the block's
+    // sequences, review 1 F3 of M4a-2a) and its soft ranges, kept from one sequence to the next as
+    // NCBI keeps one `TSequenceRanges` per thread. Empty, and never touched, without the option.
+    db_masks: crate::seqdb::MaskBlock,
+    db_soft_ranges: Vec<(i32, i32)>,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:77-81
     // ```c
     // typedef struct BLAST_DiagTable {
@@ -4625,6 +4642,8 @@ impl SubjectScratch {
             //                                sizeof(SSeqRange));
             // ```
             seq_ranges_scratch: Vec::new(),
+            db_masks: crate::seqdb::MaskBlock::default(),
+            db_soft_ranges: Vec::new(),
             hit_level_array: Vec::new(),
             hit_len_array: Vec::new(),
             diag_hash: DiagHashTable::new(window_size as i32),
@@ -5963,6 +5982,9 @@ struct BlastnReportInputs<'a> {
     /// of the reported sequences from and whose OIDs name the sequences without parsed Seq-ids
     /// (`oid_map`); `None` for a subject set.
     database_reader: Option<&'a database::BlastnDatabase>,
+    /// The algorithm of a database search with `-db_soft_mask` (`ResolvedMask::id`), whose masks
+    /// outfmt 0 shows in lowercase (`database::BlastnDatabase::display_masks`); `None` otherwise.
+    database_mask: Option<i32>,
     /// The reported sequences with parsed Seq-ids of a database search, by rank
     /// (`database::ReportedSubjects::parsed`; empty without them): their ids and titles come from
     /// their definition lines. Of a subject set, the records whose ids `-parse_deflines` read, by
@@ -6691,6 +6713,40 @@ fn post_process_hits_and_write(
             ),
         }
     });
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1580-1584
+    // ```c++
+    //     display.SetSeqLocChar(CDisplaySeqalign::eLowerCase);
+    //     TSeqLocInfoVector subj_masks;
+    //     results.GetSubjectMasks(subj_masks);
+    //     display.SetSubjectMasks(subj_masks);
+    //     display.DisplaySeqalign(m_Outfile);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_db_adapter.cpp:154-157
+    // ```c++
+    //         if (m_DbInfo.NotEmpty()) {
+    //             m_SeqInfoSrc = new CSeqDbSeqInfoSrc(m_DbInfo->GetSeqDb());
+    //             dynamic_cast<CSeqDbSeqInfoSrc *>(&*m_SeqInfoSrc)
+    //                  ->SetFilteringAlgorithmId(m_DbInfo->GetFilteringAlgorithm());
+    // ```
+    // The stored masks of the reported sequences of a masked database search, by rank: the
+    // displayed rows show the letters of those that meet an HSP in lowercase (`pairwise::Rows`).
+    let database_masks = match (
+        wants_rows,
+        report.database_mask,
+        report.database_reader,
+        report.database_ordinals,
+    ) {
+        (true, Some(algo_id), Some(reader), Some(ordinals)) => {
+            let mut masks = crate::seqdb::MaskBlock::default();
+            Some(
+                ordinals
+                    .iter()
+                    .map(|&ordinal| reader.display_masks(ordinal, algo_id, &mut masks))
+                    .collect::<Result<Vec<_>>>()?,
+            )
+        }
+        _ => None,
+    };
     // The shown masks of every query and subject, made once for every window of queries.
     let rows = wants_rows.then(|| {
         PairwiseRows::new(
@@ -6700,6 +6756,7 @@ fn post_process_hits_and_write(
                 query: report.query_masks,
                 query_offsets: &report.ranges.queries.placements,
                 subject: subject_masks.as_deref(),
+                database: database_masks.as_deref(),
             },
         )
     });
@@ -8023,6 +8080,7 @@ fn open_search_database(
                 name,
                 settings,
                 list,
+                args.db_mask.option().as_ref(),
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis);
@@ -8886,7 +8944,7 @@ fn megablast_index(
 }
 
 fn search(
-    args: BlastnArgs,
+    mut args: BlastnArgs,
     queries: SearchQueries<'_>,
     reading: QueryReading,
     ranges: Ranges<'_>,
@@ -8918,6 +8976,29 @@ fn search(
         Subjects::Database(database) => megablast_index(&args, database, outputs.diagnostics)?,
         Subjects::Records(_) => MegablastIndex::NotAsked,
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (quoted at
+    // `blastinput::db_mask::DbMaskOption::resolve`)
+    // The formatter resolves the database masking (`-db_soft_mask`, `-db_hard_mask`): its warning
+    // (one diagnostic, which the archive saves as one message) or its database error, before its
+    // other work; the archive and the search strategy write the result's program options.
+    if let (Subjects::Database(database), Some(option)) = (subjects, args.db_mask.option()) {
+        let archive = args.archive.clone();
+        let diagnostics = &mut *outputs.diagnostics;
+        let resolved = database.resolve_mask_option(&option, &mut |text| match &archive {
+            Some(handle) => handle.write_warning(diagnostics, text),
+            None => diagnostics.write_all(text),
+        })?;
+        crate::algorithm::common::database::note_archive_database_masking(
+            args.archive.as_ref(),
+            args.strategy.as_ref(),
+            resolved
+                .as_ref()
+                .map(crate::blastinput::db_mask::ResolvedMask::archive_params)
+                .unwrap_or_default(),
+            option.strategy_params(resolved.as_ref()),
+        )?;
+        args.db_mask_resolved = resolved;
+    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:129-136
     // ```c
     //     if(m_IsDbScan) {
@@ -8973,9 +9054,16 @@ fn search(
     // crashes when it writes the title of such a subject with hits); LOSAT stops at the end
     // of the title (`report/defline.rs`, approved exception 2 of PD-LOSAT-NCBI-DEFECTS).
     // LOSAT's limits come where NCBI starts the search, after its checks and its
-    // `Query is Empty!` success.
+    // `Query is Empty!` success (the database's mixed accession tables after the formatter's
+    // errors of a database mask too).
+    if let Subjects::Database(database) = subjects {
+        database.check_accession_tables()?;
+    }
     check_losat_limits(&args)?;
     megablast_index.check()?;
+    if let (Subjects::Database(database), Some(mask)) = (subjects, args.db_mask_resolved.as_ref()) {
+        database.check_mask_limits(mask)?;
+    }
     app::check_search_environment("BLASTN", !matches!(subjects, Subjects::Database(_)))?;
     // The variables' error stops the run after the outfmt 0 prolog (`run_in_pool`).
     let batching = query_batching_from_environment(
@@ -9544,7 +9632,7 @@ impl ShownSubjects {
                 name: database.name().to_string(),
                 num_seqs: metadata.db_num_seqs,
                 total_letters: metadata.db_len_total,
-                database: Some(database.pairwise_database()),
+                database: Some(database.pairwise_database_masked(args.db_mask_resolved.as_ref())),
                 tabular_taxdb_found: args.tabular_taxdb.unwrap_or(false),
             },
         }
@@ -9589,6 +9677,10 @@ struct BlastnSubjectRef<'a> {
     /// traceback alignment met a fence (`alignment::x_fence`): the traceback stops, and
     /// `database::traceback_listed` traces the sequence again whole. `None` otherwise.
     x_fenced: Option<&'a std::sync::atomic::AtomicBool>,
+    /// The block of the preliminary stage that a database sequence was read in
+    /// (`database::block_subject`), whose masks a search with `-db_soft_mask` reads once for all
+    /// its sequences (`database::BlastnDatabase::soft_ranges_into`). `None` otherwise.
+    block: Option<&'a crate::seqdb::BlockRange>,
 }
 
 impl<'a> BlastnSubjectRef<'a> {
@@ -9601,6 +9693,7 @@ impl<'a> BlastnSubjectRef<'a> {
             blastna: None,
             store: None,
             x_fenced: None,
+            block: None,
         }
     }
 
@@ -9614,6 +9707,7 @@ impl<'a> BlastnSubjectRef<'a> {
             blastna: None,
             store: Some(store),
             x_fenced: None,
+            block: None,
         }
     }
 }
@@ -10641,7 +10735,7 @@ fn run_in_pool(
         // LOSAT's refusal of a reported sequence with the id of a query of its scope, after
         // NCBI's own errors of the batch (the prefetch's above): the warnings of the batches read
         // so far, as for a refusal of a title (above).
-        if let (SubjectSource::Database(_), Some(scopes)) = (source, query_scopes.as_ref()) {
+        if let (SubjectSource::Database(database), Some(scopes)) = (source, query_scopes.as_ref()) {
             let refused = crate::algorithm::common::database::refuse_reported_ids_of_queries(
                 &titles,
                 batch_hit_lists
@@ -10655,6 +10749,7 @@ fn run_in_pool(
                                 .map(move |hsp_list| (start + query, hsp_list.oid))
                         })
                     }),
+                database.oid_map(),
                 scopes,
                 "BLASTN",
             );
@@ -11562,6 +11657,7 @@ fn write_reports_untimed(
         query_masks: results.query_masks,
         archive_dust: &archive_dust,
         lcase_masking: args.lcase_masking,
+        database_mask: args.db_mask_resolved.as_ref().map(|mask| mask.id),
         query_eff_searchsp: results.query_eff_searchsp,
         first_context: QueryStrand::from_option(&args.strand).first_context(),
         megablast,
@@ -11779,6 +11875,56 @@ fn check_batch_window(args: &BlastnArgs, records: &[FastaRecord]) -> Result<()> 
         i32::try_from(window).unwrap_or(i32::MAX),
         "BLASTN",
     )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321 (quoted at
+// `SubjectScratch::db_masks`)
+/// The soft ranges of database sequence `s_idx` (length `s_len_full`) of a search with
+/// `-db_soft_mask` (the algorithm `algo_id`): the complement of its stored masks, read with the
+/// masks of its block (`BlastnDatabase::soft_ranges_into`) into the worker's buffer, which the
+/// caller gives back after the sequence's chunks. A read error goes to `error_cell` (the first by
+/// ordinal id, which the batch returns after the preliminary stage), and `None` ends the
+/// sequence's search. Out of line and cold: the per-sequence path of a search without the option
+/// only tests the option.
+#[cold]
+#[inline(never)]
+fn read_db_soft_ranges(
+    database: &database::BlastnDatabase,
+    algo_id: i32,
+    block: Option<&crate::seqdb::BlockRange>,
+    s_idx: usize,
+    s_len_full: usize,
+    subject_scratch: &mut SubjectScratch,
+    error_cell: &std::sync::Mutex<Option<(u32, anyhow::Error)>>,
+) -> Option<Vec<(i32, i32)>> {
+    let mut ranges = std::mem::take(&mut subject_scratch.db_soft_ranges);
+    let read = match block {
+        Some(&block) => database.soft_ranges_into(
+            block,
+            s_idx as u32,
+            algo_id,
+            s_len_full,
+            &mut subject_scratch.db_masks,
+            &mut ranges,
+        ),
+        None => Err(anyhow::anyhow!(
+            "LOSAT internal error: database sequence {s_idx} was searched without its block"
+        )),
+    };
+    match read {
+        Ok(()) => Some(ranges),
+        Err(error) => {
+            let mut first = error_cell.lock().expect("the error cell is not poisoned");
+            if first
+                .as_ref()
+                .is_none_or(|(smallest, _)| (s_idx as u32) < *smallest)
+            {
+                *first = Some((s_idx as u32, error));
+            }
+            subject_scratch.db_soft_ranges = ranges;
+            None
+        }
+    }
 }
 
 /// Searches one query batch against the subjects, with the query block, lookup table and
@@ -12558,6 +12704,23 @@ fn search_query_batch<const UNGAPPED: bool>(
     // The initial hits that the word finder saved in every subject chunk of the batch; they
     // size the next batch.
     let good_init_extends = std::sync::atomic::AtomicU64::new(0);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321 (quoted at
+    // `SubjectScratch::db_masks`)
+    // A database search with `-db_soft_mask` (the formatter's `ResolvedMask`; `-db_hard_mask` was
+    // refused before the search): the database and the algorithm whose masks every database
+    // sequence's preliminary search reads (`BlastnDatabase::soft_ranges_into`), and the first
+    // error of those reads by ordinal id, which the batch returns after the preliminary stage
+    // (`process_subject` returns nothing).
+    let db_soft_mask: Option<(&database::BlastnDatabase, i32)> =
+        match (subjects, args.db_mask_resolved.as_ref()) {
+            (SubjectSource::Database(database), Some(mask))
+                if mask.kind == crate::blastinput::db_mask::MaskKind::Soft =>
+            {
+                Some((database, mask.id))
+            }
+            _ => None,
+        };
+    let db_mask_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> = std::sync::Mutex::new(None);
     // What the preliminary search of a subject's chunks reads that is the same for every subject of
     // the batch (`prelim_subject::PrelimBatch`), built once.
     let prelim_batch = prelim_subject::PrelimBatch {
@@ -12742,23 +12905,51 @@ fn search_query_batch<const UNGAPPED: bool>(
         //                                        use_lcase_masks, subjects, m_IsMapper);
         // ```
         // The lowercase masks of the subjects are those of the FASTA records of
-        // `-subject`; a database sequence has none (its masks would come from
-        // `-db_soft_mask`, which LOSAT does not implement).
+        // `-subject`; a database sequence has none.
         let subject_masks = match (subject.letters, subject.store) {
             (Some(letters), _) if lcase_masking => collect_lowercase_masks(letters),
             (None, Some(store)) if lcase_masking => store.lowercase().to_vec(),
             _ => Vec::new(),
         };
-        let subject_masked = !subject_masks.is_empty();
         // Unmasked, every chunk carries its range inline (`SeqRanges::Inline`) and no one reads
         // the soft ranges, so none are made (NCBI points them at `full_range`).
-        let soft_ranges = if subject_masked {
+        let mut subject_masked = !subject_masks.is_empty();
+        let mut soft_ranges = if subject_masked {
             build_subject_seq_ranges_from_masks(subject_masks.as_slice(), s_len_full)
         } else {
             Vec::new()
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:399-405 (quoted at
+        // `SubjectScratch::db_masks`)
+        // With `-db_soft_mask` every database sequence is a masked subject (its mask type is set
+        // whether or not it has masks; decision D3 of M4a-2): its soft ranges are the complement
+        // of its stored masks (`BlastnDatabase::soft_ranges_into`), read by the preliminary stage
+        // only (the traceback scans nothing).
+        // The read is out of line (`read_db_soft_ranges`, cold): a search without the option
+        // pays one test of `db_soft_mask` per sequence and keeps its registers.
+        let db_masked = db_soft_mask.is_some() && prelim_source.is_none();
+        if let (true, Some((database, algo_id))) = (db_masked, db_soft_mask) {
+            match read_db_soft_ranges(
+                database,
+                algo_id,
+                subject.block,
+                s_idx,
+                s_len_full,
+                subject_scratch,
+                &db_mask_error,
+            ) {
+                Some(ranges) => {
+                    soft_ranges = ranges;
+                    subject_masked = true;
+                }
+                None => return,
+            }
+        }
 
         if s_len_full < effective_word_size {
+            if db_masked {
+                subject_scratch.db_soft_ranges = soft_ranges;
+            }
             return;
         }
 
@@ -12884,6 +13075,10 @@ fn search_query_batch<const UNGAPPED: bool>(
                 gap_scratch,
                 subject_scratch,
             );
+            // The soft ranges' buffer goes back to the scratch for the next database sequence.
+            if db_masked {
+                subject_scratch.db_soft_ranges = std::mem::take(&mut split_state.soft_ranges);
+            }
 
             if !UNGAPPED && !combined_prelim_hits.is_empty() {
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:885-899
@@ -13673,6 +13868,21 @@ fn search_query_batch<const UNGAPPED: bool>(
             }
         },
     };
+    // The first error of the database masks' reads (`db_mask_error`), as the preliminary stage's
+    // read errors are reported (`database_search_error`).
+    let db_mask_error = db_mask_error
+        .lock()
+        .expect("the error cell is not poisoned")
+        .take();
+    if let Some((_, error)) = db_mask_error {
+        return Err(database_search_error(
+            error,
+            first_batch,
+            reborrow_outputs(&mut outputs),
+            megablast,
+            &shown,
+        ));
+    }
     if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
@@ -14175,6 +14385,59 @@ fn merge_prelim_hit_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1647-1668 (quoted at
+    // `scan_subject_kmers_with_ranges`); SURVEY §10 of M4a-2, review 1 T3 of M4a-2a. With
+    // `-db_soft_mask` every database sequence is a masked subject, those without masks too
+    // (decision D3: `subject_masked` is the option, seqsrc_seqdb.cpp:399-405): its one range
+    // `[0, length)` is scanned from `word_length - lut_word_length` with the scanner of any
+    // stride, where an unmasked subject is scanned from 0 with the scanner of the lookup width
+    // and stride (the aligned one of a stride of four bases). Both visit every `scan_step`-th
+    // offset to `length - lut_word_length`.
+    #[test]
+    fn a_masked_subject_without_masks_starts_its_scan_after_the_word_s_head() {
+        let letters: Vec<u8> = (0..403u32)
+            .map(|i| b"ACGT"[((i * 7 + i / 3 + i / 11) % 4) as usize])
+            .collect();
+        let packed = crate::core::blast_encoding::encode_subject_ncbi2na_packed(&letters);
+        let length = letters.len();
+        let whole = [(0i32, length as i32)];
+        // (word_length, lut_word_length, scan_step): megablast with lookup widths 11 and 12,
+        // blastn (8-base lookup, aligned scan), blastn-short (7 and 7).
+        for (word_length, lut_word_length, scan_step) in
+            [(28, 11, 18), (28, 12, 17), (11, 8, 4), (7, 7, 1)]
+        {
+            let starts = |masked: bool| {
+                let mut starts = Vec::new();
+                scan_subject_kmers_with_ranges(
+                    &packed,
+                    length,
+                    word_length,
+                    lut_word_length,
+                    scan_step,
+                    &whole,
+                    masked,
+                    select_mb_scan_kind(lut_word_length, scan_step, masked),
+                    |start, _, _| starts.push(start),
+                );
+                starts
+            };
+            let last = length - lut_word_length;
+            let case = (word_length, lut_word_length, scan_step);
+            assert_eq!(
+                starts(false),
+                (0..=last).step_by(scan_step).collect::<Vec<_>>(),
+                "unmasked {case:?}"
+            );
+            assert_eq!(
+                starts(true),
+                (word_length - lut_word_length..=last)
+                    .step_by(scan_step)
+                    .collect::<Vec<_>>(),
+                "masked {case:?}"
+            );
+        }
+    }
 
     // `-soft_masking false`: each context's masks become Ns in the buffer (the minus context's
     // are its own, already reversed), the returned copy keeps the letters, and the contexts no

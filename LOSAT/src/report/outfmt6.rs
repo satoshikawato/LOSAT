@@ -19,18 +19,24 @@ pub enum OutputFormat {
 }
 
 impl OutputFormat {
+    /// The number of a format value and the custom field specifications after it, if any (the
+    /// value trimmed, cut at its first whitespace).
+    pub fn split_fields(s: &str) -> (&str, Option<&str>) {
+        let s = s.trim();
+        match s.find(char::is_whitespace) {
+            Some(idx) => {
+                let (f, rest) = s.split_at(idx);
+                (f.trim(), Some(rest.trim()))
+            }
+            None => (s, None),
+        }
+    }
+
     /// Parse output format from string (e.g., "0", "6", "7")
     /// Returns the format and any custom field specifications
     pub fn parse(s: &str) -> Result<(Self, Option<String>), String> {
-        let s = s.trim();
-
-        // Check if there are custom field specifications
-        let (fmt_str, fields) = if let Some(idx) = s.find(char::is_whitespace) {
-            let (f, rest) = s.split_at(idx);
-            (f.trim(), Some(rest.trim().to_string()))
-        } else {
-            (s, None)
-        };
+        let (fmt_str, fields) = Self::split_fields(s);
+        let fields = fields.map(str::to_string);
 
         let format = match fmt_str {
             "0" => OutputFormat::Pairwise,

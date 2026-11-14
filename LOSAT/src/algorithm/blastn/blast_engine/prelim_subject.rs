@@ -5,8 +5,9 @@
 //! ungapped extensions, by `two_stage_scan::scan_two_stage_lookup` or `na_scan::scan_na_lookup`
 //! unless a strips dispatch of `x_pair_seed.rs` takes the chunk, then its HSP list,
 //! `prelim_hsp_list.rs`) on this thread, or, with a pool of two threads or more, in batches of
-//! chunks on the pool (a scratch per worker), and each chunk's list merged into the subject's in
-//! chunk order (`merge_prelim_hit_lists`), then the subject best-hit filter.
+//! chunks (a batch of one chunk, or LOSAT_X_BNFEWSUBJ's serial chunks, on this thread; else the
+//! batch's chunks on the pool, a scratch per worker), and each chunk's list merged into the
+//! subject's in chunk order (`merge_prelim_hit_lists`), then the subject best-hit filter.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-599 (the chunk loop of
 //! `s_BlastSearchEngineOneContext`, :422-602)
@@ -171,7 +172,7 @@ pub(super) struct PrelimBatch<'a> {
 /// the names there (references and `Copy` values only, `Sync` as `PrelimBatch`); its borrows end
 /// with the call.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:424,460-469,475
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:425,461-469,476
 /// (`s_BlastSearchEngineOneContext`: the subject, its chunks' overlap and the backup of the subject
 /// that its chunks are cut from)
 /// ```c
@@ -230,7 +231,7 @@ pub(super) struct PrelimSubject<'a> {
 /// the subject's coordinates. `reuse_prelim_hits` is set for the owner's serial calls (not a chunk
 /// of a batch on the pool); the scratches are the subject's, or the pool worker's.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:487-500,522-526,555,560-563
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:487-500,522-527,555,560-563
 /// (one turn of the chunk loop of `s_BlastSearchEngineOneContext`)
 /// ```c
 ///         /* Delete if not done in last loop iteration to prevent memory leak. */

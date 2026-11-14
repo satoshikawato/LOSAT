@@ -9,7 +9,7 @@
 //! the loop. An ungapped search (`ungapped_hsp_list`) makes the list from the sorted hits.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:503-578 (the chunk loop of
-//! `s_BlastSearchEngineCore` after the word finder: `GetGappedScore`, which is
+//! `s_BlastSearchEngineOneContext` after the word finder: `GetGappedScore`, which is
 //! `BLAST_GetGappedScore`, c++/src/algo/blast/core/blast_gapalign.c:3664-4114, with its loop on
 //! the initial hits at :3850; the purge and the sort; or `BLAST_GetUngappedHSPList`,
 //! blast_gapalign.c:4719-4775; the offsets)

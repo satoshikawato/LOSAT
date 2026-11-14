@@ -46,13 +46,12 @@
 //! pool searches subjects in parallel it is already busy):
 //! - Preliminary stage (`prelim_hsp_list::gapped_hsp_list`, which
 //!   `prelim_subject::prelim_chunk_hits` calls for one chunk at a time on the owner): the chunk's
-//!   ungapped hits are split by query in
-//!   the order the seed stage saved them, each query's hits are sorted with the batch's comparator
-//!   (stable, so in the batch's relative order), looped and purged; the purged lists are
-//!   concatenated in query order. The serial purge's output is ordered by context first, so this
-//!   concatenation is the serial purge's output itself, and the stable score sort after it
-//!   (unchanged) gives the serial `chunk_prelim_hits` element for element: the merge of a
-//!   subject's chunks and `-subject_besthit` see the same list.
+//!   ungapped hits are split by query in the order the seed stage saved them, each query's hits are
+//!   sorted with the batch's comparator (stable, so in the batch's relative order), looped and
+//!   purged; the purged lists are concatenated in query order. The serial purge's output is ordered
+//!   by context first, so this concatenation is the serial purge's output itself, and the stable
+//!   score sort after it (unchanged) gives the serial `chunk_prelim_hits` element for element: the
+//!   merge of a subject's chunks and `-subject_besthit` see the same list.
 //! - Traceback (`traceback_list::traceback_subject_hits`, which `process_subject` calls with the
 //!   kept HSPs): the kept HSPs are the hit lists of the queries one after another
 //!   (`prelim_hits_by_subject`), so each query's HSPs are one slice. Each slice runs the traceback

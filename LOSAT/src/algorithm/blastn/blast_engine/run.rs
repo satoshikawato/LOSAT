@@ -247,14 +247,14 @@ mod two_stage_scan;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:422-602
 // (`s_BlastSearchEngineOneContext`: the chunk loop, :478-593, and one chunk's word finder and
-// HSP list, :487-560).
+// HSP list, :487-563).
 // The preliminary search of one subject's chunks: the chunk loop with its merge, and the search of
 // one chunk (a child module, so that it uses the private types of this file).
 #[path = "prelim_subject.rs"]
 mod prelim_subject;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:503-578 (the chunk loop of
-// `s_BlastSearchEngineCore` after the word finder),
+// `s_BlastSearchEngineOneContext` after the word finder),
 // c++/src/algo/blast/core/blast_gapalign.c:3664-4114 (`BLAST_GetGappedScore`; :3850 is the loop
 // on the initial hits) and :4719-4775 (`BLAST_GetUngappedHSPList`).
 // The preliminary HSP list of one subject chunk from its initial hits: the gapped search's loop,

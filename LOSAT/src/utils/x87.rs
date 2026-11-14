@@ -25,7 +25,7 @@
 //! digits on every platform, including those whose `long double` is the 64-bit double (MSVC,
 //! wasm32) or a 128-bit quad (aarch64 Linux), so the operations are modelled here with integers.
 //!
-//! Only the operations that the two ports perform exist. `DoubleToString_Ecvt`: exact conversion
+//! Only the operations that the three ports perform exist. `DoubleToString_Ecvt`: exact conversion
 //! from `f64` (`fld` of a double) and from `u32` (`t1 = first`), multiplication rounded to 64 bits
 //! (`value *= ...`, `value * mult`, `(t1-first) * 1e8`), the exact subtraction `t1 - first`,
 //! comparisons and the truncating conversion to `unsigned int`. All its operands are finite and
@@ -36,6 +36,12 @@
 //! (`fstpl`), which rounds the 64-bit product a second time, to 53 bits. Its operands are finite
 //! and nonnegative (LOSAT's double-double stand-in for `expl` is zero where it underflows; NCBI's
 //! 80-bit `expl` is still normal there), and the store can give a subnormal double or zero.
+//! `NStr::StringToDoublePosix` (`ncbi_str::double`): exact conversion from `u64` and `f64`, the
+//! multiplication and the addition of nonnegative values rounded to 64 bits (`second_mul *= 10`,
+//! `third * 10 + c`, `... * second_mul + third`, `ret *= mul1[...]`), comparison, the change of
+//! sign and the store to a double. Its products stay above 10^-640, but a mantissa of thousands of
+//! digits passes the largest 80-bit value, which the x87 unit turns into its infinity
+//! (`checked_mul`, `checked_add`).
 
 use std::cmp::Ordering;
 
@@ -163,6 +169,32 @@ impl X87 {
     /// `fmul` with precision control 64 bits and round to nearest, ties to even: the exact
     /// 128-bit product of the significands rounded once to 64 bits.
     pub(crate) fn mul(self, rhs: X87) -> X87 {
+        let product = self.mul_unbounded(rhs);
+        debug_assert!((-16382..=16383).contains(&product.exponent));
+        product
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1056-1057, 1159-1161, 1206-1207
+    // ```c++
+    //                 second_mul *= NCBI_CONST_LONGDOUBLE(10.);
+    //                 third = third * NCBI_CONST_LONGDOUBLE(10.) + c;
+    //     ...
+    //         ret = ((long double)first * first_mul + second)* second_mul + third;
+    //     ...
+    //                     for ( exponent >>= 4; exponent; --exponent ) {
+    //                         ret *= NCBI_CONST_LONGDOUBLE(1e256);
+    // ```
+    // No NCBI counterpart: the `fmul` of `StringToDoublePosix`, whose product passes the largest
+    // 80-bit value for a mantissa of some 4,900 digits and more (`ncbi_str::double`).
+    /// `mul`, or `None` where the x87 unit gives the infinity of an overflow: the product rounded
+    /// to 64 bits is 2^16384 or more (round to nearest overflows after the rounding).
+    pub(crate) fn checked_mul(self, rhs: X87) -> Option<X87> {
+        let product = self.mul_unbounded(rhs);
+        (product.exponent <= 16383).then_some(product)
+    }
+
+    /// `mul` without the range of the 80-bit format: the exponent of the rounded product.
+    fn mul_unbounded(self, rhs: X87) -> X87 {
         let negative = self.negative != rhs.negative;
         if self.significand == 0 || rhs.significand == 0 {
             return X87 {
@@ -191,12 +223,74 @@ impl X87 {
                 exponent += 1;
             }
         }
-        debug_assert!((-16382..=16383).contains(&exponent));
         X87 {
             negative,
             exponent,
             significand,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1057, 1159-1161
+    // ```c++
+    //                 third = third * NCBI_CONST_LONGDOUBLE(10.) + c;
+    //     ...
+    //         ret = ((long double)first * first_mul + second)* second_mul + third;
+    // ```
+    // No NCBI counterpart: the `fadd` of `StringToDoublePosix`'s mantissa of more than 18 digits
+    // (`ncbi_str::double`), whose operands are nonnegative.
+    /// `fadd` of two nonnegative values with precision control 64 bits and round to nearest, ties
+    /// to even: the exact sum rounded once to 64 bits; `None` where the rounded sum is 2^16384 or
+    /// more (the x87 infinity of an overflow).
+    pub(crate) fn checked_add(self, rhs: X87) -> Option<X87> {
+        debug_assert!(!self.negative || self.significand == 0);
+        debug_assert!(!rhs.negative || rhs.significand == 0);
+        if rhs.significand == 0 {
+            return Some(X87 {
+                negative: false,
+                ..self
+            });
+        }
+        if self.significand == 0 {
+            return Some(X87 {
+                negative: false,
+                ..rhs
+            });
+        }
+        let (high, low) = if (self.exponent, self.significand) >= (rhs.exponent, rhs.significand) {
+            (self, rhs)
+        } else {
+            (rhs, self)
+        };
+        // In units of 2^(high.exponent - 126): high is in [2^126, 2^127), low is shifted down by
+        // the difference of the exponents, its dropped bits kept as `sticky`. The sum stays
+        // below 2^128.
+        let shift = (high.exponent - low.exponent) as u32;
+        let low_bits = (low.significand as u128) << 63;
+        let (low_part, sticky) = if shift >= 128 {
+            (0, true)
+        } else {
+            let part = low_bits >> shift;
+            (part, part << shift != low_bits)
+        };
+        let sum = ((high.significand as u128) << 63) + low_part;
+        let (exponent, significand, rest, half) = if (sum >> 127) != 0 {
+            (
+                high.exponent + 1,
+                (sum >> 64) as u64,
+                sum & ((1u128 << 64) - 1),
+                1u128 << 63,
+            )
+        } else {
+            (
+                high.exponent,
+                (sum >> 63) as u64,
+                sum & ((1u128 << 63) - 1),
+                1u128 << 62,
+            )
+        };
+        let up = rest > half || (rest == half && (sticky || (significand & 1) != 0));
+        let sum = X87::round_up_if(false, exponent, significand, up);
+        (sum.exponent <= 16383).then_some(sum)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
@@ -474,6 +568,51 @@ mod tests {
                 .mul(ld(0, 0x8000_0000_0000_0001))
                 .parts(),
             (false, 1, 0x8000_0000_0000_0000)
+        );
+    }
+
+    // gcc `long double` on x86-64 (swebok-improve-20261105/sw8/nfix/probe/x87add/add.c): `fadd`
+    // of nonnegative values with ties to even, a carry, bits far below the last place, and the
+    // infinity of an overflow (`None`); `StringToDoublePosix`'s `third * 10 + c`.
+    #[test]
+    fn checked_add_and_mul_round_as_fadd_and_fmul_and_overflow() {
+        let add = |a: X87, b: X87| a.checked_add(b).map(X87::parts);
+        let one = ld(0, 0x8000_0000_0000_0000);
+        assert_eq!(
+            add(X87::from_u64(u64::MAX), X87::from_u32(1)),
+            Some((false, 64, 0x8000_0000_0000_0000))
+        );
+        assert_eq!(
+            add(one, ld(-64, 0x8000_0000_0000_0000)),
+            Some((false, 0, 0x8000_0000_0000_0000))
+        );
+        assert_eq!(
+            add(ld(0, 0x8000_0000_0000_0001), ld(-64, 0x8000_0000_0000_0000)),
+            Some((false, 0, 0x8000_0000_0000_0002))
+        );
+        assert_eq!(
+            add(one, ld(-64, 0x8000_0000_0800_0000)),
+            Some((false, 0, 0x8000_0000_0000_0001))
+        );
+        assert_eq!(
+            add(one, ld(-200, 0x8000_0000_0000_0000)),
+            Some((false, 0, 0x8000_0000_0000_0000))
+        );
+        assert_eq!(add(X87::ZERO, one), Some(one.parts()));
+        let max = ld(16383, u64::MAX);
+        assert_eq!(add(max, max), None);
+        assert!(max.checked_mul(X87::from_u32(2)).is_none());
+        assert_eq!(
+            max.checked_mul(one).map(X87::parts),
+            Some((false, 16383, u64::MAX))
+        );
+        let ten = X87::from_u32(10);
+        let step = |t: X87, c: u32| t.checked_mul(ten).unwrap().checked_add(X87::from_u32(c));
+        let t = step(X87::from_u64(1_234_567_890_123_456_789), 7).unwrap();
+        assert_eq!(t.parts(), (false, 63, 0xab54_a98c_eb1f_0ad9));
+        assert_eq!(
+            step(t, 3).map(X87::parts),
+            Some((false, 66, 0xd629_d3f0_25e6_cd8f))
         );
     }
 

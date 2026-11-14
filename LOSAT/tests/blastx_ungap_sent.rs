@@ -306,6 +306,71 @@ fn reports_do_not_depend_on_the_sentinel_extension() {
     }
 }
 
+/// Word sizes 2 and 4 (item SC9b-1 of line NP) take the path as word size 3 does: the same report
+/// as `=0`, in the fused and the direct loop, BLOSUM62 and another matrix, `blastx-fast`
+/// and `-ungapped`; the shadow compares extensions and records the switch's new side.
+#[test]
+fn word_sizes_2_and_4_take_the_path() {
+    let inputs = Inputs::new();
+    let query = inputs.query.to_str().unwrap();
+    let subject = inputs.subject.to_str().unwrap();
+    let fused_shadow = [SHADOW, FUSED[0], FUSED[1]];
+    for word in ["2", "4"] {
+        for extra in [
+            &[][..],
+            &["-matrix", "PAM30"][..],
+            &["-task", "blastx-fast"][..],
+            &["-ungapped", "-comp_based_stats", "0"][..],
+        ] {
+            let mut args = vec![
+                "-query",
+                query,
+                "-subject",
+                subject,
+                "-query_gencode",
+                "4",
+                "-outfmt",
+                "6",
+                "-evalue",
+                "10",
+                "-word_size",
+                word,
+            ];
+            args.extend_from_slice(extra);
+            let off = blastx(&args, &[OFF]);
+            assert_eq!(off.code, Some(0), "w{word} {extra:?}: {}", off.stderr);
+            assert!(!off.stdout.is_empty(), "w{word} {extra:?}: no hits");
+            let arms: [(&str, &[(&str, &str)]); 3] = [
+                ("default", &[]),
+                ("shadow", &[SHADOW]),
+                ("shadow fused", &fused_shadow),
+            ];
+            for (label, env) in arms {
+                let (run, reach) = blastx_reach(&args, env);
+                let run_name = format!("w{word} {extra:?} {label}");
+                assert_eq!(run.code, Some(0), "{run_name}: {}", run.stderr);
+                assert!(
+                    run.stdout == off.stdout,
+                    "{run_name}: report differs from =0"
+                );
+                assert_eq!(run.messages(), off.messages(), "{run_name}");
+                assert_eq!(
+                    reached(&reach, "LOSAT_X_BXUNGAPSENT"),
+                    (true, false),
+                    "{run_name}"
+                );
+                if label != "default" {
+                    assert!(
+                        run.shadow("compared").expect("shadow line") > 0,
+                        "{run_name}"
+                    );
+                }
+                let _ = std::fs::remove_dir_all(&reach);
+            }
+        }
+    }
+}
+
 /// Word size 5 (the compressed table) and the one-hit extension (`-window_size 0`) stay off the
 /// path: the same report, no shadow line, the switch's reference side recorded.
 #[test]

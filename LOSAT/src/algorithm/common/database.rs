@@ -3627,10 +3627,52 @@ pub(crate) fn read_reported_taxonomy(
     Ok((taxids, taxonomy, parsed_taxonomy, notes))
 }
 
-/// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search (`x_CheckTaxDB`'s
-/// `SeqDB_ResolveDbPath("taxdb.bti")`: the current directory, `BLASTDB` and the registry's
-/// `[BLAST] BLASTDB`, as a database is looked for, `seqdb::SearchPath`). A registry value that
-/// LOSAT does not read as NCBI is its refusal, as for `-db`; `program` names it.
+/// The `[BLAST] BLASTDB` value of a run's application settings (`ApplicationSettings::blastdb`):
+/// the registry's part of the search path through which a `-subject` search's reports look for the
+/// taxonomy database (`subject_taxonomy`). The command line takes it from its settings; the library
+/// API gives it to a search of records whose reports look every taxid up (`api::run`, with the
+/// call's start); LOSAT Web gives none (it has no files: the database is not found).
+#[derive(Clone, Debug)]
+pub struct TaxdbSetting(Result<Option<String>, String>);
+
+impl TaxdbSetting {
+    /// The value of `settings`.
+    pub(crate) fn of(settings: &ApplicationSettings) -> Self {
+        TaxdbSetting(settings.blastdb.clone())
+    }
+}
+
+/// What the tabular reports of a `-subject` search know of the taxonomy database
+/// (`subject_taxonomy`).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SubjectTaxonomy {
+    /// The organism report's database (outfmt 18, `SubjectTaxdb`), when `taxdb.bti` is on the
+    /// search path.
+    pub(crate) taxdb: Option<SubjectTaxdb>,
+    /// Whether `taxdb.bti` is on the search path; `None` when no report looks every taxid up.
+    pub(crate) found: Option<bool>,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:582-603
+// ```c++
+// void CBlastTabularInfo::x_SetTaxInfo(const CBioseq_Handle & handle, const CRef<CBlast_def_line_set> & bdlRef)
+// {
+//     m_SubjectTaxId = ZERO_TAX_ID;
+//     ...
+//     if(m_SubjectTaxId == ZERO_TAX_ID)
+//             return;
+// ```
+/// What the tabular reports `specs` of a `-subject` search of `program` (upper case) ask of the
+/// taxonomy database where NCBI makes their formatters: whether `taxdb.bti` is on the search path
+/// of `setting` (`x_CheckTaxDB`'s `SeqDB_ResolveDbPath("taxdb.bti")`: the current directory,
+/// `BLASTDB` and the registry's `[BLAST] BLASTDB`, as a database is looked for, `seqdb::SearchPath`)
+/// for the plural names, which warn without it, and the organism report, whose lookups open it
+/// (`SubjectTaxdb`). A report of singular names reads nothing: NCBI looks a singular name up by
+/// the subject's taxid, and the records of `-subject` have none. A registry value that LOSAT does
+/// not read as NCBI is its refusal, as for `-db`. `setting` is `None` in LOSAT Web: not found.
+///
+/// The command line and the library's searches of records call it at the same point, after the
+/// options are processed (each program's `open_search_database`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
 /// ```c++
@@ -3641,15 +3683,42 @@ pub(crate) fn read_reported_taxonomy(
 ///    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
 ///    		if(resolved.empty())
 /// ```
-pub(crate) fn subject_taxdb_found(settings: &ApplicationSettings, program: &str) -> Result<bool> {
-    Ok(subject_search_path(settings, program)?
-        .resolve_file("taxdb.bti")
-        .is_some())
+pub(crate) fn subject_taxonomy<'s>(
+    setting: Option<&TaxdbSetting>,
+    program: &str,
+    specs: impl IntoIterator<Item = &'s crate::report::tabular::TabularSpec>,
+) -> Result<SubjectTaxonomy> {
+    let (mut looks_up, mut tax_report) = (false, false);
+    for spec in specs {
+        looks_up |= spec.looks_up_every_taxid();
+        tax_report |= spec.kind == crate::report::tabular::TabularKind::TaxReport;
+    }
+    if !looks_up {
+        return Ok(SubjectTaxonomy::default());
+    }
+    let Some(setting) = setting else {
+        return Ok(SubjectTaxonomy {
+            taxdb: None,
+            found: Some(false),
+        });
+    };
+    let path = subject_search_path(setting, program)?;
+    let found = path.resolve_file("taxdb.bti").is_some();
+    // The organism report's lookups open the run's own database.
+    let taxdb = (tax_report && found).then(|| {
+        SubjectTaxdb(std::sync::Arc::new(crate::seqdb::taxdb::LazyTaxDb::new(
+            path,
+        )))
+    });
+    Ok(SubjectTaxonomy {
+        taxdb,
+        found: Some(found),
+    })
 }
 
-/// The search path of NCBI's databases of a `-subject` search (`subject_taxdb_found`).
-fn subject_search_path(settings: &ApplicationSettings, program: &str) -> Result<SearchPath> {
-    let registry = match &settings.blastdb {
+/// The search path of NCBI's databases of a `-subject` search (`subject_taxonomy`).
+fn subject_search_path(setting: &TaxdbSetting, program: &str) -> Result<SearchPath> {
+    let registry = match &setting.0 {
         Ok(value) => value.as_deref(),
         Err(reason) => bail!("{reason}; this is not supported by LOSAT's {program}"),
     };
@@ -3665,25 +3734,12 @@ fn subject_search_path(settings: &ApplicationSettings, program: &str) -> Result<
 // ```
 /// The taxonomy database of a `-subject` search's organism report (outfmt 18): NCBI's
 /// `GetTaxNames` opens its static `CTaxDBFileInfo` through the search path of NCBI's databases at
-/// the report's first lookup. One per run, as a `-db` search's (`TaxdbRun`), made by the command
-/// line with `subject_taxdb_found` (`run_local`'s callers give no search path: none, DECISIONS 7
-/// of line CLI C2, every lookup fails).
+/// the report's first lookup. One per run, as a `-db` search's (`TaxdbRun`), made by
+/// `subject_taxonomy` (LOSAT Web gives no search path: none, every lookup fails).
 #[derive(Clone, Debug)]
 pub struct SubjectTaxdb(std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>);
 
 impl SubjectTaxdb {
-    /// The run's database where `taxdb.bti` is on the search path of `settings` (else `None`),
-    /// not opened before the report's first lookup. A registry value that LOSAT does not read as
-    /// NCBI is its refusal (`subject_taxdb_found`); `program` names it.
-    pub(crate) fn of(settings: &ApplicationSettings, program: &str) -> Result<Option<Self>> {
-        let path = subject_search_path(settings, program)?;
-        Ok(path.resolve_file("taxdb.bti").is_some().then(|| {
-            SubjectTaxdb(std::sync::Arc::new(crate::seqdb::taxdb::LazyTaxDb::new(
-                path,
-            )))
-        }))
-    }
-
     /// The names that the organism report of a query batch asks for in it
     /// (`TabularNames::for_report`); a database that LOSAT cannot read as NCBI does is refused as
     /// in [`tabular_names`].

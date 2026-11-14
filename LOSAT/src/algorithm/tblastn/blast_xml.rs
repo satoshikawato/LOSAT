@@ -204,7 +204,7 @@ pub(super) fn prepare(
     query_batch_skipped: &[bool],
     scoring: LocalStageDScoring,
     matrix_name: &str,
-    seg: Option<&SegParams>,
+    seg_filter: Option<(i32, f64, f64)>,
     ranges: &ReportRanges<'_>,
     xml2: bool,
     only_xml2: bool,
@@ -329,12 +329,20 @@ pub(super) fn prepare(
     Ok(PreparedXml {
         values,
         positives,
-        filter: filter::filter_string(
-            None,
-            seg.map(|seg| (seg.window as i32, seg.locut, seg.hicut)),
-            None,
-            values.soft_masking,
-        ),
+        // NCBI prints the filtering options (`BlastFilteringOptionsToString` of `SSegOptions`), as
+        // blastp, blastx and tblastx do, not the parameters `SegParametersNewAa` makes of them.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1146-1154
+        // ```c
+        //         sparamsp = SegParametersNewAa();
+        //         sparamsp->overlaps = TRUE;
+        //         if (seg_options->window > 0)
+        //             sparamsp->window = seg_options->window;
+        //         if (seg_options->locut > 0.0)
+        //             sparamsp->locut = seg_options->locut;
+        //         if (seg_options->hicut > 0.0)
+        //             sparamsp->hicut = seg_options->hicut;
+        // ```
+        filter: filter::filter_string(None, seg_filter, None, values.soft_masking),
         matrix_name: matrix_name.to_string(),
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,

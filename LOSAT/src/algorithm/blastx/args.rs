@@ -469,11 +469,13 @@ pub struct BlastxArgs {
     /// `None` in every BLASTX run.
     #[arg(skip)]
     pub(crate) request_inputs: Option<Box<crate::report::archive::options::OptionInputs>>,
-    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), which a
-    /// library call (`api::run`) reads from the application settings, as the command line
-    /// does (`common::database::SubjectTaxdb`); `None` elsewhere. Not a public option.
+    /// The `[BLAST] BLASTDB` setting through which a `-subject` search's tabular reports look for
+    /// the taxonomy database (`common::database::subject_taxonomy`), which a search of records of
+    /// the library (`api::run`) reads from the call's application settings when a report looks
+    /// every taxid up; `None` elsewhere (the command line passes its settings, LOSAT Web has no
+    /// files). Not a public option.
     #[arg(skip)]
-    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
+    pub taxdb_setting: Option<crate::algorithm::common::database::TaxdbSetting>,
     /// The settings by which a search of the library looks up the file of an unknown matrix
     /// (`ResolvedOptions::find_matrix_file`), from its application start: set by `api::run` for an
     /// ungapped search whose `-matrix` NCBI's tables do not have (`unknown_matrix_name`) and by
@@ -855,9 +857,10 @@ pub struct ResolvedOptions {
     /// default outfmt 6 and 7 and the other formats.
     pub tabular: Option<&'static crate::report::tabular::TabularSpec>,
     /// Whether `taxdb.bti` is on NCBI's search path, for a `tabular` field list that shows a
-    /// plural name of the taxonomy database (its formatters warn without it); set by
-    /// `native::run` (`-db`: the database's search path, `-subject`: NCBI's). False otherwise,
-    /// as Web reads it (DECISIONS 7 of line CLI C2).
+    /// plural name of the taxonomy database (its formatters warn without it) or the organism
+    /// report; set where the command line asks (`native::run`; `-db`: the database's search
+    /// path, `-subject`: NCBI's, `common::database::subject_taxonomy`), by the library's searches
+    /// too. False otherwise, and in LOSAT Web, which has no files.
     pub taxdb_found: bool,
     /// The taxonomy database of a `-subject` search's organism report (outfmt 18), set with
     /// `taxdb_found` (`common::database::SubjectTaxdb`); `None` otherwise.
@@ -1053,16 +1056,10 @@ impl BlastxArgs {
         //         }
         // ```
         // The filtering handler (`CFilteringArgs`, before the composition handler,
-        // blastx_args.cpp:44-82): NCBI's error of `-seg` here, LOSAT's refusal of a value that
-        // NCBI reads (a locut or hicut that is not finite) after NCBI's checks.
-        let (seg, seg_refusal) = match self.seg_spec() {
-            Ok(seg) => (seg, None),
-            Err(crate::blastinput::app::SegOptionError::Ncbi(message)) => {
-                return Err(SemanticOptionsError::from(message).into())
-            }
-            Err(crate::blastinput::app::SegOptionError::Losat(refusal)) => {
-                (SegSpec::No, Some(refusal))
-            }
+        // blastx_args.cpp:44-82): NCBI's error of `-seg` here.
+        let seg = match self.seg_spec() {
+            Ok(seg) => seg,
+            Err(message) => return Err(SemanticOptionsError::from(message).into()),
         };
         let composition = composition_mode(&self.comp_based_stats);
         if self.ungapped && composition != 0 {
@@ -1243,9 +1240,6 @@ impl BlastxArgs {
                 "expect value or cutoff score must be greater than zero",
             )
             .into());
-        }
-        if let Some(refusal) = seg_refusal {
-            return Err(refusal);
         }
         // LOSAT's limit, for values that NCBI's checks above accept: an e-value that is not
         // finite (`+inf`, `1e999`, `-nan`; NCBI's argument reads `inf` and `nan` without a sign as
@@ -1522,8 +1516,8 @@ impl BlastxArgs {
             outfmt,
             fields,
             tabular,
-            taxdb_found: self.subject_taxdb.is_some(),
-            subject_taxdb: self.subject_taxdb.clone(),
+            taxdb_found: false,
+            subject_taxdb: None,
             filtered_empty: false,
             num_threads: self.num_threads,
             query_range: None,
@@ -1595,10 +1589,8 @@ impl BlastxArgs {
     }
 
     /// `-seg` as NCBI's filtering handler reads it (`app::read_seg_option`).
-    pub(crate) fn seg_spec(
-        &self,
-    ) -> std::result::Result<SegSpec, crate::blastinput::app::SegOptionError> {
-        crate::blastinput::app::read_seg_option(&self.seg, self.program().upper)
+    pub(crate) fn seg_spec(&self) -> std::result::Result<SegSpec, &'static str> {
+        crate::blastinput::app::read_seg_option(&self.seg)
     }
 
     /// The `-db` value as NCBI keeps it (`seqdb::db_argument_name`), when given.

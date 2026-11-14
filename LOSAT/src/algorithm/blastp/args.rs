@@ -1365,7 +1365,7 @@ impl BlastpArgs {
             .and_then(crate::algorithm::psiblast::pssm::PsiblastPssmOptions::request);
         let psi_rounds = match self.psiblast_pssm.as_ref() {
             Some(options) => {
-                crate::algorithm::psiblast::rounds::PsiRoundPlan::of(options, in_pssm_file)?
+                crate::algorithm::psiblast::rounds::PsiRoundPlan::of(options, in_pssm_file)
                     .map(std::sync::Arc::new)
             }
             None => None,

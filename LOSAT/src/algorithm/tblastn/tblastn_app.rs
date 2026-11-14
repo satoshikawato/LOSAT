@@ -1586,20 +1586,23 @@ fn search(
         // average subject length is too short`, exit status 3.
         let (database_stores, mut stores_error) = match database {
             Some(database) => {
-                let read = if database.first_oid_read_fails() {
-                    Err(PreliminaryReadError("Database memory map file error").into())
-                } else if !subject_set.old_fsc && database.numbers().min_length as u32 / 3 == 0 {
-                    Err(PreliminaryReadError("The average subject length is too short").into())
-                } else if let Some(error) = resolved
+                // `-in_pssm` (PSI-TBLASTN): `CPsiBlast` reads the database without `CLocalBlast`'s
+                // catch, so its first read gives SeqDB's own error (`OID not found`, a sequence file
+                // not found; `shared::PsiSearchReadFailure`, psiblast's rule), where a FASTA query
+                // gets `Database memory map file error`.
+                let pssm_failure = resolved
                     .pssm
                     .as_ref()
-                    .and_then(|_| database.pssm_search_read_error())
-                {
-                    // `-in_pssm` (PSI-TBLASTN): `CPsiBlast` reads the sequence file without
-                    // `CLocalBlast`'s catch, so a file it cannot open is SeqDB's own error
-                    // (`shared::unopenable_sequence_file`), where a FASTA query gets `Database
-                    // memory map file error`.
-                    Err(error)
+                    .and_then(|_| database.pssm_search_read_failure());
+                let read = if database.first_oid_read_fails() {
+                    Err(match pssm_failure {
+                        Some(failure) => failure.error("TBLASTN"),
+                        None => PreliminaryReadError("Database memory map file error").into(),
+                    })
+                } else if !subject_set.old_fsc && database.numbers().min_length as u32 / 3 == 0 {
+                    Err(PreliminaryReadError("The average subject length is too short").into())
+                } else if let Some(failure) = pssm_failure {
+                    Err(failure.error("TBLASTN"))
                 } else {
                     database.x_stream(resolved.num_threads).map(|stream| {
                         x_stream = Some(stream);
@@ -1834,7 +1837,7 @@ fn search(
             };
             // `-db`: the first batch with a valid context reads the sequences (above); a
             // reader error of NCBI's own fails it (the preliminary search's text, or with
-            // `-in_pssm` SeqDB's own error, `TblastnDatabase::pssm_search_read_error`), LOSAT's
+            // `-in_pssm` SeqDB's own error, `TblastnDatabase::pssm_search_read_failure`), LOSAT's
             // refusal stops the run.
             if batch_validity.iter().any(|&valid| valid) {
                 if let Some(error) = stores_error.take() {

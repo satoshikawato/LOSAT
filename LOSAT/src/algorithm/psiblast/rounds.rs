@@ -78,30 +78,23 @@ pub struct PsiRoundPlan {
 
 impl PsiRoundPlan {
     /// The plan of psiblast's options with rounds (`PsiblastPssmOptions::rounds`; `None`
-    /// without), with the PSSM file of `-in_pssm` (`file`), or LOSAT's refusal of a file it cannot
-    /// write back as NCBI does (`in_pssm_files::rounds_input`).
-    pub(crate) fn of(
-        options: &PsiblastPssmOptions,
-        file: Option<InPssmFile>,
-    ) -> Result<Option<Self>> {
-        let Some(num_iterations) = options.rounds else {
-            return Ok(None);
-        };
+    /// without), with the PSSM file of `-in_pssm` (`file`) and LOSAT's refusal of a file it cannot
+    /// write back as NCBI does, made once the database is opened (`in_pssm_files::rounds_input`).
+    pub(crate) fn of(options: &PsiblastPssmOptions, file: Option<InPssmFile>) -> Option<Self> {
+        let num_iterations = options.rounds?;
         let request = PssmRequest {
             asn_path: options.out_pssm.clone(),
             ascii_path: options.out_ascii_pssm.clone(),
             save_each: options.save_each_pssm,
             pseudocount: options.pseudocount,
         };
-        let input = file
-            .map(|file| super::in_pssm_files::rounds_input(file, &request))
-            .transpose()?;
-        Ok(Some(Self {
+        let input = file.map(|file| super::in_pssm_files::rounds_input(file, &request));
+        Some(Self {
             num_iterations,
             request,
             save_last: options.save_pssm_after_last_round,
             input,
-        }))
+        })
     }
 
     /// The PSSM files of the run, for the checks before the search (`check_pssm_titles`,

@@ -289,10 +289,61 @@ pub(crate) fn note_archive_database_filter(
 /// quoted at `seqdb::SeqDbError`): the reader's own text reaches the application
 /// (`database_error`: `BLAST Database error: Error: File (<path>) not found.`, exit status 2; NCBI
 /// 2.17.0, probe `y.g.ps.tk.nopsq.0` of line PS PS5c, and review 4 of line RG F1b-2 for tblastn).
-pub(crate) fn unopenable_sequence_file(db: &SeqDb) -> Option<SeqDbError> {
+fn unopenable_sequence_file(db: &SeqDb) -> Option<SeqDbError> {
     db.volumes()
         .iter()
         .find_map(|volume| volume.open_sequence_file().err())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:425
+// ```c++
+//     NCBI_THROW(CSeqDBException, eArgErr, CSeqDB::kOidNotFound);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:241-251 (the catch that a PSSM
+// search's preliminary stage has not)
+// ```c++
+// 	catch (CSeqDBException & e) {
+// 		if (e.GetErrCode() == CSeqDBException::eTooManyOpenFiles) {
+// 	...
+// 		else {
+//             _TRACE(e.GetMsg());
+// 			string err_msg = BlastErrorCode2String(BLASTERR_DB_MEMORY_MAP);
+// 			NCBI_THROW(CBlastException, eCoreBlastError, err_msg);
+// ```
+/// What the first read of the database of a search without `CLocalBlast` meets (psiblast, whose
+/// `CPsiBlast` searches FASTA queries too, and PSI-TBLASTN), in NCBI's order: no OID to read
+/// (`SeqDb::first_oid_read_fails`: the setup's `GetSeqLength(0)`, SeqDB's `OID not found`), else
+/// a sequence file that cannot be opened (`unopenable_sequence_file`). SeqDB's own exception
+/// reaches the application (`error`), where `CLocalBlast` gives a FASTA query of the other programs
+/// `Database memory map file error` (`PreliminaryReadError`).
+#[derive(Debug)]
+pub(crate) enum PsiSearchReadFailure {
+    EmptyDatabase,
+    Unopenable(SeqDbError),
+}
+
+impl PsiSearchReadFailure {
+    /// The failure of the first read of `db`, if any.
+    pub(crate) fn of(db: &SeqDb) -> Option<Self> {
+        if db.first_oid_read_fails() {
+            Some(PsiSearchReadFailure::EmptyDatabase)
+        } else {
+            unopenable_sequence_file(db).map(PsiSearchReadFailure::Unopenable)
+        }
+    }
+
+    /// NCBI's error (`BLAST Database error: ...`, exit status 2; `program` names LOSAT's program in
+    /// a refusal of an error that is not NCBI's, `database_error`).
+    pub(crate) fn error(self, program: &str) -> anyhow::Error {
+        match self {
+            PsiSearchReadFailure::EmptyDatabase => NativeError {
+                exit: 2,
+                message: "BLAST Database error: OID not found\n".to_string(),
+            }
+            .into(),
+            PsiSearchReadFailure::Unopenable(error) => database_error(error, program),
+        }
+    }
 }
 
 /// A reader error outside the preliminary search (when the database is opened, and when

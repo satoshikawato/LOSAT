@@ -5701,9 +5701,24 @@ fn search_cli(
     // NCBI reads no query input (psiblast_app.cpp:452-471). LOSAT's limits of the PSSM search
     // come when the options are processed and the subjects set up.
     if let Some(psi) = resolved.psi_search.clone() {
-        // A request whose PSSM file has members that the reader skipped: refused once the database
-        // is opened (NCBI's error of a database it cannot open comes first), before any output.
+        // A request whose PSSM file has members that the reader skipped, and the input PSSM's files
+        // that NCBI would write back in a way LOSAT does not (`-out_pssm`, `-out_ascii_pssm`, written
+        // in round 1, which a run stopped before its search never reaches): refused once the
+        // database is opened (NCBI's error of a database it cannot open comes first), before any
+        // output.
         psi.refuse_request_members(args.app.name())?;
+        if psi
+            .stop_before_search(resolved.strategy.is_some(), database.is_some())
+            .is_none()
+        {
+            if let Some(input) = resolved
+                .psi_rounds
+                .as_deref()
+                .and_then(|plan| plan.input.as_ref())
+            {
+                input.refuse_written_back()?;
+            }
+        }
         crate::algorithm::psiblast::in_pssm::check_in_pssm_options(&resolved, &psi)?;
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:482-484 (the formatter's
         // `believe_query` is `-parse_deflines`, with `-in_pssm` too)
@@ -6428,22 +6443,22 @@ fn psiblast_stop_at_invalid_query(
             .as_deref()
             .is_none_or(|psi| psi.ungapped_karlin_valid(&context.karlin_params))
     };
+    // The first read of the database (`PsiSearchReadFailure`, PSI-TBLASTN's too): no OID, or a
+    // sequence file that cannot be opened.
+    use crate::algorithm::common::database::PsiSearchReadFailure;
+    let read_failure = database.and_then(|database| PsiSearchReadFailure::of(database.seqdb()));
     // The PSSM query whose letters give no Karlin-Altschul parameters crashes NCBI before (below).
-    let empty_database = database.is_some_and(|database| database.first_oid_read_fails())
+    let empty_database = matches!(read_failure, Some(PsiSearchReadFailure::EmptyDatabase))
         && contexts
             .first()
             .is_some_and(|context| args.psi_search.is_none() || context.is_valid);
     // A sequence file that cannot be opened stops the first batch when its query is valid (the
     // first read of the preliminary search; volumes in the order NCBI reads them).
-    let unreadable = match (database, contexts.first()) {
-        (Some(database), Some(context))
-            if !empty_database && context.is_valid && kbp_psi_valid(context) =>
-        {
-            crate::algorithm::common::database::unopenable_sequence_file(database.seqdb())
-        }
-        _ => None,
-    };
-    let first_stop = if empty_database || unreadable.is_some() {
+    let unreadable = matches!(read_failure, Some(PsiSearchReadFailure::Unopenable(_)))
+        && contexts
+            .first()
+            .is_some_and(|context| context.is_valid && kbp_psi_valid(context));
+    let first_stop = if empty_database || unreadable {
         Some(0)
     } else {
         contexts
@@ -6457,15 +6472,9 @@ fn psiblast_stop_at_invalid_query(
     let span = batches.searched_span(searched_start);
     let query_length = searched_queries[searched_start].seq().len();
     let error = match protein_query_split_sizes(args.app.name(), 10000) {
-        _ if empty_database => crate::cli::NativeError {
-            exit: 2,
-            message: "BLAST Database error: OID not found\n".to_string(),
-        }
-        .into(),
-        _ if unreadable.is_some() => crate::algorithm::common::database::database_error(
-            unreadable.expect("the sequence file's error"),
-            args.app.name(),
-        ),
+        _ if empty_database || unreadable => read_failure
+            .expect("the first read's failure")
+            .error(args.app.name()),
         // A PSSM query (`-in_pssm`, never split: `check_in_pssm_options`) whose letters give no
         // Karlin-Altschul parameters: NCBI's psiblast crashes (2.17.0, exit 139) where
         // `PsiBlastSetupScoreBlock` reads the `kbp_psi` block that `Blast_ScoreBlkKbpUngappedCalc`

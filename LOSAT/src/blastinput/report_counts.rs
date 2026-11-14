@@ -104,8 +104,9 @@ impl FormattingArgs {
     /// `-sorthits` and `-sorthsps` as one of the five search programs' pairwise reports reads
     /// them (blastp_app.cpp:246-248, blastx_app.cpp:247-249, tblastn_app.cpp:263-265 and
     /// tblastx_app.cpp:166-168 hand them over as blastn_app.cpp does). `m_HitsSortOption` is read
-    /// for the output formats up to 4 and `m_HspsSortOption` for format 0 only; only format 0
-    /// sorts (`ReportCounts::warnings_with` warns about the others).
+    /// for the output formats up to 4 and `m_HspsSortOption` for format 0 only: formats 0 to 4 sort
+    /// the hits, format 0 alone the HSPs (`PairwiseView::report_sort`; `ReportCounts::warnings_with`
+    /// warns about the others).
     pub fn report_sort(&self) -> crate::report::hit_sort::ReportSort {
         crate::report::hit_sort::ReportSort {
             hits: self.sort_hits,

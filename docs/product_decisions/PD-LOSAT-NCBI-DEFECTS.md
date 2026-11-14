@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.23
+- Version: 1.25
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -41,7 +41,13 @@
   X2b);
   1.22 2026-11-14 (the explicit rejections of BLASTX's one-hit gapped start past NCBI's buffers,
   rule 3, line RG item X2f);
-  1.23 2026-11-14 (a version 5 database list that mixes databases with and without accession
+  1.23 2026-11-14 (the explicit rejection of BLASTP's query-anchored section that NCBI's merge
+  aborts on, rule 3, line RG item T3a; Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07);
+  1.24 2026-11-14 (the rule-2 rejection of a query's id widened to the display id and to generated
+  ids, line RG item T3a; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07,
+  within the class the maintainer accepted with 1.10 on 2026-11-02);
+  1.25 2026-11-14 (a version 5 database list that mixes databases with and without accession
   tables is searched; the rejection of 1.9 keeps only a run whose reports look a parsed Seq-id up
   in a file without the table, rule 3, line DBID item mixdb, Owner-delegated)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
@@ -473,7 +479,7 @@ asks the maintainer to accept it, as the PRs of versions 1.5 and 1.13 did.
   6 programs, 20 formats, the prefetch on and off, 17 lists and alias files) and refuses a run
   whose reports or prefetch look a parsed Seq-id up in a file without the table (`... whose
   lookup in the database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0 stops)`).
-  Versions 1.9 to 1.22 refused every such list before the search (line DI-8 `DECISIONS.md` 31).
+  Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31).
 
 - A negative seqid list that excludes a sequence (every id of its `.nos`/`.pos` record
   listed) of a volume that the database does not hold, while the database holds other
@@ -650,6 +656,24 @@ asks the maintainer to accept it, as the PRs of versions 1.5 and 1.13 did.
   lengths, a density that may be negative or raised by a negative length, an HSP of length 0
   that absorbs another and becomes positive).
 
+- BLASTP `-outfmt 1` to `4` (the query-anchored views; version 1.23, 2026-11-14, line RG item T3a,
+  Owner-delegated): a query read with `-parse_deflines` that is also a subject (one record, the
+  same definition line and letters) is the query's own Bioseq for NCBI's `CAlnMix`, whose `Add`
+  presets that subject's row to the HSP added first (`alnseq.cpp:165-186`). The first match that
+  `x_Merge` places on the query (the longest aligned segment) sets that row to its own HSP
+  (`alnmerger.cpp:499-501`) and goes to an extra row; when that HSP has no other segment, the
+  row keeps no start, `BuildRows` leaves it and its extra rows out (`alnseq.cpp:266-283`), and
+  `FillUnalignedRegions` indexes its vectors with their row index of -1 (`alnsegments.cpp:286-338`):
+  NCBI writes before the vectors' buffers and aborts (`double free or corruption (out)`, exit 134;
+  review probes `selfseg3`, a record whose SEG mask splits its self diagonal, and `self2`). LOSAT
+  runs the same merge and refuses (exit 1) where it reaches that row, before the first byte of
+  the reports of the search that holds the query: the report's first byte, or in the block
+  search of many queries the first byte of the query's block, after the reports of the blocks
+  before (as outfmt 0's refusal of such a record's masks). NCBI's output before the abort is what
+  its stream had flushed, which depends on its buffer (to a file or a pipe, the version line of
+  the prolog), so no prefix of it is NCBI's. The other sections of such a record are NCBI's
+  (fixture rows `db.of1.bp.self1.*`).
+
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 
 On a database with parsed Seq-ids NCBI gives these results without failing, and they look wrong
@@ -668,8 +692,11 @@ would port:
   LOSAT shows in one hit as NCBI does): NCBI shows them as one hit, writes their tabular `qcovs`
   and `qcovus` as one subject's, and PSIBLAST's cut to `-max_target_seqs` counts them as one
   subject.
-- A reported sequence with the id of a query read with `-parse_deflines` in the query batch that
-  reports it (with outfmt 5, in any batch): NCBI shows the query's title and letters for it.
+- A reported sequence with the id, or the display id of its description line (outfmt 0 to 4 of
+  BLASTP, PSIBLAST and RPSBLAST), of a query read with `-parse_deflines` in the query batch that
+  reports it (with outfmt 5, in any batch), and in outfmt 1 to 4 of BLASTP with the id or display
+  id `lcl|Query_N` of a query read without it: NCBI shows the query's title and letters for the
+  id (its second lookup, by the display id, the query's title in that line).
 - A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
   each time it reads the definition line.
 - Titles NCBI takes from the tax ids, where a report shows them (outfmt 0, a printed tabular id

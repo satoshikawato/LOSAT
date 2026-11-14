@@ -50,7 +50,8 @@ stderr and exit status with the frozen files (and checks that each frozen file's
 manifest's), prints one line per row (`same`, `rejection`, or `differs` with the first differing
 line), writes the same lines to --out, and exits 0 only when every row is `same` or `rejection`.
 With `--library` BIN is `examples/library_command_line`, the same search through the library API: a
-failure's exit status counts as any other failure's, a row whose query the reader refuses is
+failure's exit status counts as any other failure's, a rejection row writes nothing to stdout there
+too (the library holds its output where the command line holds it), a row whose query the reader refuses is
 `library-input-error` when the message is the command line's (the library reads the whole query
 before it searches, so the reports of the batches before the error do not exist; so is a rejection
 row whose query has a reader error after the batch that the command line refuses), and the rows that
@@ -445,8 +446,10 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         problems = []
         if status_differs(run.returncode, int(row["rc"]), library):
             problems.append(f"exit {run.returncode}, expected {row['rc']}")
-        # The library writes as the search goes (`api::run`): nothing holds the bytes before a
-        # refusal, as the command line holds them.
+        # A refusal follows no byte in either path (the library holds its output where the command
+        # line holds it, BLASTX's XML documents through `blast_xml::documents_may_refuse`); the rows
+        # whose refusal comes after NCBI's reports are psiblast's PSSM file rows, which the library
+        # skips.
         if row["stdout_bytes"]:
             out_path = FROZEN / f"{row['row_id']}.out"
             out = out_path.read_bytes() if out_path.exists() else b""
@@ -454,7 +457,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
                 problems.append("frozen .out does not match the manifest")
             if run.stdout != out:
                 problems.append("stdout " + first_difference(out, run.stdout))
-        elif run.stdout and not library:
+        elif run.stdout:
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
         if expected_text(row).encode() not in run.stderr:
             problems.append(f"stderr lacks {expected_text(row)!r}: {run.stderr.decode(errors='replace').strip()[:150]!r}")

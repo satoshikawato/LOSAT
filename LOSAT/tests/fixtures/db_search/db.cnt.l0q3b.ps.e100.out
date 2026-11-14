@@ -1,0 +1,462 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: t
+           8 sequences; 0 total letters
+
+Results from round 1
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+split2 linked-set test subject                                        284     1e-119
+split2_close linked-set test subject                                  332     3e-95 
+overlap linked-set test subject                                       249     1e-70 
+reversed2 linked-set test subject                                     227     6e-64 
+split3 linked-set test subject                                        122     3e-58 
+tandem linked-set test subject                                        129     2e-34 
+weak2 linked-set test subject                                         129     3e-34 
+single linked-set test subject                                        93.6    1e-23 
+
+
+>split2 linked-set test subject
+Length=548
+
+ Score = 284 bits (727),  Expect(2) = 1e-119, Method: Compositional matrix adjust.
+ Identities = 159/265 (60%), Positives = 176/265 (66%), Gaps = 0/265 (0%)
+
+Query  134  IHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRDCYK  193
+            IH LLP  NSIV+L S C+ C + TKE P  VR G   DNN+I V GAE++ A CR+ YK
+Sbjct  254  IHPLLPGRNSIVQLGSVCIRCNVPTKETPGPVRNGGKPDNNLIEVIGAEIFQATCRNHYK  313
+
+Query  194  KINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPDRSSHTGKLINDYL  253
+            KINKKK  GKLVVLEG DR  KSTQAKLL T KNSP YGG+YMCFPDRSS TG L NDY 
+Sbjct  314  KINKKKALGKLVVLEGNDRRLKSTQAKLLWTRKNSPQYGGQYMCFPDRSSATGFLRNDYS  373
+
+Query  254  TKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYYYSGIVFSLARGVDTVEWC  313
+            TK I   DHAA LLF AN+WE   KIK L DDG  V+MDR   S +VF   RGV  +EWC
+Sbjct  374  TKYIANHDHAALLLFFANQWEYWEKIKWLQDDGRRVMMDRPNCSQLVFREFRGVQMIEWC  433
+
+Query  314  SASDEGLPQPDLVLLMLLDVEKCSNRDTFGVERFETNSIQERARALFLDLANKDEKNVWI  373
+            + S   L QPDLV L L+  E  S RD FG+ERFET SI E  RAL   L   D KN  +
+Sbjct  434  AESKLVLNQPDLVELYLIMAEWPSPRDWFGIERFETVSIHEGIRALGGQLLFMDPKNDRM  493
+
+Query  374  KVDARGTIEEVQTKIINIVYNIVEE  398
+              DARGT   VQ+KI    YNIVEE
+Sbjct  494  HADARGTKWYVQSKIFPDPYNIVEE  518
+
+
+ Score = 154 bits (390),  Expect(2) = 1e-119, Method: Compositional matrix adjust.
+ Identities = 84/129 (65%), Positives = 93/129 (72%), Gaps = 0/129 (0%)
+
+Query  9    LTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGE  68
+            LTM  RV LVTGP FA  STYL+NIYQ+  G NKHCL V+HSL TR  C TGT   H+  
+Sbjct  39   LTMFRRVFLVTGPFFATSSTYLRNIYQRHPGQNKHCLEVRHSLTTRKKCCTGTCFKHSLL  98
+
+Query  69   VIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQ  128
+             IE   TVSSI  LISVLP  V+VIL DEGQF TDL LV RLADKGK I IAALDG SDQ
+Sbjct  99   DIECVATVSSIIPLISVLPCWVNVILYDEGQFRTDLELVWRLADKGKHIEIAALDGDSDQ  158
+
+Query  129  QMFSPIHKL  137
+            +M SP++ +
+Sbjct  159  KMRSPLYSV  167
+
+
+ Score = 13.5 bits (23),  Expect = 17, Method: Compositional matrix adjust.
+ Identities = 4/8 (50%), Positives = 5/8 (63%), Gaps = 0/8 (0%)
+
+Query  228  SPLYGGEY  235
+            SPLY   +
+Sbjct  162  SPLYSVRF  169
+
+
+>split2_close linked-set test subject
+Length=453
+
+ Score = 332 bits (850),  Expect = 3e-95, Method: Compositional matrix adjust.
+ Identities = 213/413 (52%), Positives = 235/413 (57%), Gaps = 15/413 (4%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+            MQLIL+ HL MA RV L+TG  +A KS YL NI QQ+ G   H  F KH     +GC T 
+Sbjct  21   MQLILTKHLYMADRVALITGKDYATKSMYLDNIGQQDEGCEAHSTFAKHPERVFWGCVTT  80
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+             IVT    VIE   T + I    SVL  VV++IL  EGQFFT   LVNR  D   RI   
+Sbjct  81   NIVTPHSLVIERLITYTHIGITASVLRHVVNMILPYEGQFFTANRLVNRAYDCMGRIFDM  140
+
+Query  121  ALDGTSDQQMFS-----PIHK--LLPYTN--------SIVKLASKCMICKIDTKEAPFTV  165
+            AL  TS Q +FS     P H   LL Y +          VK+ASK MI K D+KEAPF V
+Sbjct  141  ALIMTSQQLLFSGAEIVPYHPENLLKYPDWHKTQMHCPNVKMASKTMILKYDSKEAPFYV  200
+
+Query  166  RFGNDNDNNVICVGGAEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTN  225
+            RF ND DNNV CV G  MY+AAC    KK  KKK K K+ VLE  D  G+    KL   N
+Sbjct  201  RFKNDFDNNVRCVWGHWMYSAACICRMKKFVKKKYKYKIKVLENVDTVGEHAPFKLAPMN  260
+
+Query  226  KNSPLYGGEYMCFPDRSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDD  285
+             N P YG  +MCF  +  HT KLI  + TKKIELDDH  H L  A  WEV  K KQL  D
+Sbjct  261  LNWPQYGVHFMCFYRKVPHTSKLILQWATKKIELDDHWYHWLLDATVWEVSFKTKQLEYD  320
+
+Query  286  GIHVVMDRYYYSGIVFSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRDTFGVE  345
+            GIH  MD  YY GI FS+A G D VE  S    G+ +PDLV  MLL V K  NR  FGV+
+Sbjct  321  GIHTAMDSQYYPGIFFSMAMGEDEVEPHSPQQNGMGRPDLVDCMLLCVGKSRNRQWFGVK  380
+
+Query  346  RFETNSIQERARALFLDLANKDEKNVWIKVDARGTIEEVQTKIINIVYNIVEE  398
+            RF  NSIQE   A FLDLANK E  VW KVD R T   VQ   IN VYN  EE
+Sbjct  381  RFTCNSIQEFPPAHFLDLANKSEIWVWFKVDTRRTQNPVQMAYINTVYNKSEE  433
+
+
+>overlap linked-set test subject
+Length=591
+
+ Score = 249 bits (637),  Expect = 1e-70, Method: Compositional matrix adjust.
+ Identities = 151/265 (57%), Positives = 158/265 (60%), Gaps = 0/265 (0%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+            MQ   +H L    R EL TGP F GKSTY+ NI  Q NGG K C   KHS ET  GC   
+Sbjct  1    MQAPSNHILRTVHREELTTGPQFVGKSTYVSNIPCQNNGGTKLCCATKHSTETAGGCPFQ  60
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+            T V HAGEVI  CTT  S + LIS LP  VD ILI  G+F TDL   NRLAD GKRIVIA
+Sbjct  61   TGVEHAGEVIISCTTGHSHQMLISDLPPFVDKILIWRGEFVTDLCEQNRLADVGKRIVIA  120
+
+Query  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+            ALDG SDQQ  SP HK L  TNS V LASK M+ KIDTK   F VRF  +NDNN  C G 
+Sbjct  121  ALDGMSDQQRVSPTHKQLAGTNSDVHLASKKMMTKIDTKSMGFAVRFSINNDNNHQCSGP  180
+
+Query  181  AEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPD  240
+            A +Y   CRD  K   K KN G L  LEGG RC K  QAK  L NK    Y G  M FPD
+Sbjct  181  AMVYHMTCRDVLKMKCKHKNYGWLHHLEGGRRCIKPQQAKQHLPNKIQTHYPGVPMIFPD  240
+
+Query  241  RSSHTGKLINDYLTKKIELDDHAAH  265
+            RSS T K I   L   I LDD AAH
+Sbjct  241  RSSVTEKPIKWRLYGPISLDDRAAH  265
+
+
+ Score = 197 bits (501),  Expect = 8e-55, Method: Compositional matrix adjust.
+ Identities = 127/266 (48%), Positives = 142/266 (53%), Gaps = 0/266 (0%)
+
+Query  133  PIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRDCY  192
+            P  KL P T S+VKLA +CM+CK D  EA FTVRF N    NV CV G  M AAAC  CY
+Sbjct  326  PNFKLCPQTASMVKLAPECMMCKNDHMEATFTVRFRNWLMMNVFCVCGVCMEAAACTACY  385
+
+Query  193  KKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPDRSSHTGKLINDY  252
+             K N   NK K    E     G S Q K L TNK  PL+  EY CFP RS H GKL + Y
+Sbjct  386  IKKNYVSNKLKSFCWEFPMTSGASCQEKRLFTNKAGPLFMVEYECFPYRSDHVGKLYDMY  445
+
+Query  253  LTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYYYSGIVFSLARGVDTVEW  312
+             TKK E D H   L  SAN WEVCSKI  +L  G HV +  Y        L  G D VE 
+Sbjct  446  TTKKQETDFHKGGLHCSANYWEVCSKIAGMLCMGGHVYVRNYTPHWDRRFLKMGRDVVEM  505
+
+Query  313  CSASDEGLPQPDLVLLMLLDVEKCSNRDTFGVERFETNSIQERARALFLDLANKDEKNVW  372
+              A+ EGL Q +   L+ L  E   +     VE FETNSI   ARA+    ANKD K  W
+Sbjct  506  LYATKEGLIQCEESTLLFLKNEGRQSIYGGNVENFETNSIYYHARAVHPKTANKDTKGPW  565
+
+Query  373  IKVDARGTIEEVQTKIINIVYNIVEE  398
+             K+DA G + EV T  I+ VY I  E
+Sbjct  566  AKLDAAGDVMEVSTHFISEVYCIGAE  591
+
+
+>reversed2 linked-set test subject
+Length=548
+
+ Score = 227 bits (579),  Expect = 6e-64, Method: Compositional matrix adjust.
+ Identities = 148/269 (55%), Positives = 173/269 (64%), Gaps = 0/269 (0%)
+
+Query  130  MFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACR  189
+             + P  +++  T  I+KL + C+IC IDT    FTVRFG DN+NNV+    A  Y AAC 
+Sbjct  28   FYKPPVQMMETTWKIMKLTANCIICLIDTVRQMFTVRFGFDNNNNVVWNAWAPQYHAACF  87
+
+Query  190  DCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPDRSSHTGKLI  249
+            D  K INKKKNKGK  V++ G RC  S  A L +TNK  PLYGG++M  PDR SH GKL 
+Sbjct  88   DKQKGINKKKNKGKRFVIKNGCRCAVSNAASLSITNKMLPLYGGDHMLRPDRRSHMGKLT  147
+
+Query  250  NDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYYYSGIVFSLARGVDT  309
+               L+K IELDD+AA  LFSA+RWEVCS I Q+L DG H VMDRY+Y+GI  SLA GV T
+Sbjct  148  EPMLSKGIELDDNAAMELFSAHRWEVCSDIWQMLLDGYHHVMDRYWYAGIYASLACGVCT  207
+
+Query  310  VEWCSASDEGLPQPDLVLLMLLDVEKCSNRDTFGVERFETNSIQERARALFLDLANKDEK  369
+             + CSASDE LP  DL+LL    VE  SN DT GV+RFE  S  E ARA F    N DEK
+Sbjct  208  RQRCSASDECLPDSDLMLLKQKIVEVGSNMDTMGVDRFEHGSSNEGARAGFYRSHNPDEK  267
+
+Query  370  NVWIKVDARGTIEEVQTKIINIVYNIVEE  398
+             VW + DA  TI E + K I  VYN V E
+Sbjct  268  AVWGQEDAGVTIVEHKEKQIPRVYNCVPE  296
+
+
+ Score = 136 bits (342),  Expect = 2e-36, Method: Compositional matrix adjust.
+ Identities = 75/132 (57%), Positives = 87/132 (66%), Gaps = 0/132 (0%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+            +QL   H LT AG VE+  GPMFAGK+TYLKNI++ ENGGN +   V   LE   G   G
+Sbjct  387  IQLESWHRLTRAGTVEVWRGPMFAGKATYLKNIHEMENGGNINSTSVTRPLELHCGLTVG  446
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+            TI+THA EV    T VSS +E IS  PEV  VIL DEGQF TD+ L   +++KGKRIV A
+Sbjct  447  TILTHASEVFSMTTWVSSSEERISTWPEVYIVILGDEGQFMTDVRLYIDMSEKGKRIVPA  506
+
+Query  121  ALDGTSDQQMFS  132
+            ALD T   QMFS
+Sbjct  507  ALDKTGTDQMFS  518
+
+
+>split3 linked-set test subject
+Length=548
+
+ Score = 122 bits (305),  Expect(2) = 3e-58, Method: Compositional matrix adjust.
+ Identities = 78/164 (48%), Positives = 95/164 (58%), Gaps = 7/164 (4%)
+
+Query  235  YMCFPDRSSHTGKLINDYLTKKIELDDHAAHLLFSA--NRWEVCSKIKQLLDDGIHVVMD  292
+            Y+ FP  S H     +D+L +   +     +   +   N   V SKI+ + D GIHV+MD
+Sbjct  388  YLTFPLWSKH-----DDHLRENSPIIQQWFYHAVAGEQNTLVVVSKIQDVYDCGIHVMMD  442
+
+Query  293  RYYYSGIVFSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRDTFGVERFETNSI  352
+            R  Y   V S+AR V+T E C+A DEG    D VLLM LDV K S   TFGV RF TNS+
+Sbjct  443  RGDYHPRVKSIARSVETCEMCNAKDEGESYTDAVLLMSLDVLKASGFPTFGVTRFATNSV  502
+
+Query  353  QERARALFLDLANKDEKNVWIKVDARGTIEEVQTKIINIVYNIV  396
+            Q RARA+ LDLA K E+ VWI  D R TIE  Q K+I I Y IV
+Sbjct  503  QYRARAVSLDLAFKQEQEVWILCDWRKTIEGYQKKLIGIWYGIV  546
+
+
+ Score = 112 bits (280),  Expect(2) = 3e-58, Method: Compositional matrix adjust.
+ Identities = 61/130 (47%), Positives = 72/130 (55%), Gaps = 0/130 (0%)
+
+Query  3    LILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTI  62
+            L L HH  M   V LV GP+F G+  Y + IY+QENGG +HCL   H   T    G GTI
+Sbjct  13   LDLVHHGRMPWAVGLVIGPLFNGEQKYYRYIYKQENGGKRHCLVAPHIRVTAERRGMGTI  72
+
+Query  63   VTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAAL  122
+            +TH  EVI  C T S    +I V P VVD  +I+    F++L   NR  D  KR V  AL
+Sbjct  73   ITHRMEVIVQCETTSFYVNMIQVTPTVVDCPVIEWFSIFSELSSYNRTEDYEKRWVKGAL  132
+
+Query  123  DGTSDQQMFS  132
+            DG   QQMFS
+Sbjct  133  DGQEAQQMFS  142
+
+
+ Score = 19.6 bits (39),  Expect = 0.25, Method: Compositional matrix adjust.
+ Identities = 8/15 (53%), Positives = 11/15 (73%), Gaps = 0/15 (0%)
+
+Query  96   DEGQFFTDLVLVNRL  110
+            DEG+ +TD VL+  L
+Sbjct  467  DEGESYTDAVLLMSL  481
+
+
+ Score = 19.6 bits (39),  Expect(2) = 5.7, Method: Compositional matrix adjust.
+ Identities = 12/29 (41%), Positives = 16/29 (55%), Gaps = 3/29 (10%)
+
+Query  259  LDDHAAHLLFSANRWEVCSK--IKQLLDD  285
+            LD   A  +FS N W+ C K  +KQ + D
+Sbjct  132  LDGQEAQQMFSCN-WKECLKLDVKQDMGD  159
+
+
+ Score = 15.0 bits (27),  Expect(2) = 5.7, Method: Compositional matrix adjust.
+ Identities = 4/6 (67%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+
+Query  229  PLYGGE  234
+            PL+ GE
+Sbjct  31   PLFNGE  36
+
+
+ Score = 15.0 bits (27),  Expect = 6.1, Method: Compositional matrix adjust.
+ Identities = 5/10 (50%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+
+Query  96   DEGQFFTDLV  105
+            D   FF DL+
+Sbjct  320  DRDIFFPDLI  329
+
+
+>tandem linked-set test subject
+Length=476
+
+ Score = 129 bits (325),  Expect = 2e-34, Method: Compositional matrix adjust.
+ Identities = 79/132 (60%), Positives = 84/132 (64%), Gaps = 0/132 (0%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+            MQLILS     A RVE  T PM  G   Y K  YQQE+G NK C FVKHSLET   C TG
+Sbjct  173  MQLILSGCSPWATRVEPFTWPMSTGHGRYTKRNYQQEHGVNKWCPFVKHSLETCLDCVTG  232
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+            TI T A EV EGCTTVSSIK  IS  P VV V L+DE QF  D VLVN +  K K I IA
+Sbjct  233  TIYTIAVEVSEGCTTVSSIKFYISHEPMVVIVPLLDEPQFHCDSVLVNMICSKMKSIGIA  292
+
+Query  121  ALDGTSDQQMFS  132
+            AL GTS+Q + S
+Sbjct  293  ALYGTSNQHIKS  304
+
+
+ Score = 122 bits (305),  Expect = 4e-32, Method: Compositional matrix adjust.
+ Identities = 74/132 (56%), Positives = 84/132 (64%), Gaps = 0/132 (0%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+            MQL   +H TMAG VEL T P    KSTYL NI QQ  GGN HCLF  H  E RYG  TG
+Sbjct  345  MQLEGDNHCTMAGAVELHTVPGCNAKSTYLLNIIQQFQGGNVHCLFPWHFYEKRYGSTTG  404
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+              V  +GE I+ CT +SSIKEL SVL EVV V+LIDE QF   LV    + DK KRIVIA
+Sbjct  405  YGVLVSGEAIQWCTLMSSIKELASVLWEVVFVVLIDEQQFTGFLVKHVLVKDKCKRIVIA  464
+
+Query  121  ALDGTSDQQMFS  132
+             L  TS + +++
+Sbjct  465  RLSQTSSEIVWN  476
+
+
+ Score = 114 bits (286),  Expect(2) = 5e-27, Method: Compositional matrix adjust.
+ Identities = 71/131 (54%), Positives = 79/131 (60%), Gaps = 2/131 (2%)
+
+Query  2    QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT  61
+            Q IL HH T A  V LVTGPMFA KSTYL   Y+QE GG    LF+KHSL     CGTG 
+Sbjct  2    QGILDHHYTGARHVFLVTGPMFALKSTYLTLWYKQECGGRWLELFMKHSLMLYQWCGTGN  61
+
+Query  62   I-VTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+              +T   E+   CT + SIK++ +V P  VDVIL D G  F   VLVNRL DKG R  IA
+Sbjct  62   YAMTKYQEITAACTWL-SIKDVGTVEPRAVDVILPDIGIRFVHWVLVNRLPDKGLRTYIA  120
+
+Query  121  ALDGTSDQQMF  131
+            ALDG   Q  F
+Sbjct  121  ALDGYWIQSKF  131
+
+
+ Score = 15.0 bits (27),  Expect(2) = 5e-27, Method: Compositional matrix adjust.
+ Identities = 4/8 (50%), Positives = 7/8 (88%), Gaps = 0/8 (0%)
+
+Query  275  VCSKIKQL  282
+            +CSK+K +
+Sbjct  282  ICSKMKSI  289
+
+
+ Score = 14.2 bits (25),  Expect = 9.7, Method: Compositional matrix adjust.
+ Identities = 8/30 (27%), Positives = 13/30 (43%), Gaps = 2/30 (7%)
+
+Query  195  INKKKNKGKLVVLEGGDRCGKSTQAKLLLT  224
+            +N+  +KG    +   D  G   Q+K   T
+Sbjct  107  VNRLPDKGLRTYIAALD--GYWIQSKFWYT  134
+
+
+ Score = 11.9 bits (19),  Expect = 49, Method: Compositional matrix adjust.
+ Identities = 3/13 (23%), Positives = 9/13 (69%), Gaps = 1/13 (8%)
+
+Query  285  DGIHVVMDRYYYS  297
+            DG + +  +++Y+
+Sbjct  123  DG-YWIQSKFWYT  134
+
+
+>weak2 linked-set test subject
+Length=445
+
+ Score = 129 bits (323),  Expect = 3e-34, Method: Compositional matrix adjust.
+ Identities = 120/394 (30%), Positives = 162/394 (41%), Gaps = 43/394 (11%)
+
+Query  2    QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT  61
+            +L  S HL   GR E+ +     GK +YL N       G+KHC  + H   T+Y    G 
+Sbjct  42   ELCNSPHLGTNGREEICSVVRMRGKVSYLYNYMCWSGQGSKHCWTMAHVCNTQYDAAYGE  101
+
+Query  62   IVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAA  121
+            I T  GE+I G   +   K  IS+ PEV+ V   DEGQ  TD+ +VNR  DKG RIVI  
+Sbjct  102  IPTIGGEMIWGYGIIHIRKAPISLGPEVLSVDFDDEGQCMTDVRVVNRSEDKGVRIVIGE  161
+
+Query  122  LDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDN-----DNNVI  176
+               + D+Q  SP    L +T        +C+    D  + P  + +   N       +V 
+Sbjct  162  ERISVDEQWESPGAAQLHHTYGTWDKVEQCL---TDHHQKPTKIYYRWSNTARLCPEHVW  218
+
+Query  177  CVGGAEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYM  236
+                AE   A  R+   +     N G  + +              ++   +S  Y   Y 
+Sbjct  219  TDSRAEQMGAPTRERQAERGSDGNHGAHMSV-------------WMVVASDSTDYDPIY-  264
+
+Query  237  CFPDRSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYYY  296
+                                 +  +    LL S  RW VC  IK+LL+ G  VV D    
+Sbjct  265  ---------------------QWGNWQVFLLCSGWRWMVCRPIKELLEPGWQVVPDGEGL  303
+
+Query  297  SGIVFSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRDTFGVERFETNSIQERA  356
+             GIVFSL RG  +V  C+ + E LP       ML DV   S  DT  V  F T ++ E  
+Sbjct  304  GGIVFSLGRGSHSVVQCNGAFEELPLHLHSEQMLGDVIPSSLNDTDRVHNFATVTMLECW  363
+
+Query  357  RALFLDLANKDEKNVWIKVDARGTIEEVQTKIIN  390
+            R   +DL  K E  +  KV A G+I+    K  N
+Sbjct  364  RLHNMDLKKKFETKLKAKVLAVGSIQSAVIKEQN  397
+
+
+>single linked-set test subject
+Length=233
+
+ Score = 93.6 bits (231),  Expect = 1e-23, Method: Compositional matrix adjust.
+ Identities = 64/149 (43%), Positives = 80/149 (54%), Gaps = 2/149 (1%)
+
+Query  127  DQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAA  186
+            D     P+H + PY  +IV +AS CM   IDT E    V F N+N  NVICV GAE Y  
+Sbjct  45   DTIFHGPVHHVSPYAAAIVDIASSCMTSYIDTDEMDNHVCFWNNNALNVICVLGAEKYQY  104
+
+Query  187  ACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPDRSSHTG  246
+              RD YKKI+KKK K K+ VLEGG +  KS Q+ L  T ++S      Y CFP    H G
+Sbjct  105  WERDHYKKISKKKVKIKMCVLEGGVKYRKSVQSCLPSTQRDSGYCHEAYCCFPGHMCHPG  164
+
+Query  247  KLINDYLTKKIEL--DDHAAHLLFSANRW  273
+             +I  Y+ KK  L  +D     L+  + W
+Sbjct  165  NMIWQYVAKKTHLWSEDAPKEYLYCGDYW  193
+
+
+ Score = 11.9 bits (19),  Expect = 56, Method: Compositional matrix adjust.
+ Identities = 4/9 (44%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+
+Query  196  NKKKNKGKL  204
+            +KK  +GK 
+Sbjct  7    SKKTVEGKF  15
+
+
+ Score = 11.9 bits (19),  Expect = 61, Method: Compositional matrix adjust.
+ Identities = 6/34 (18%), Positives = 18/34 (53%), Gaps = 0/34 (0%)
+
+Query  343  GVERFETNSIQERARALFLDLANKDEKNVWIKVD  376
+            G++  +T   + ++  ++ +  N  +KN ++  D
+Sbjct  4    GIQSKKTVEGKFQSVRIWGEYLNWLDKNQYLDYD  37
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.137    0.406    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 187975
+
+
+  Database: t
+    Posted date:  Nov 14, 2026  12:46 AM
+  Number of letters in database: 0
+  Number of sequences in database:  8
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

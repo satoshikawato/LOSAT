@@ -1296,7 +1296,12 @@ Karlin-Altschul setup fails on it, "Could not calculate ungapped Karlin-Altschul
 random protein (`random.Random(1002)` choices of `ACDEFGHIKLMNPQRSTVWY`), for the split-query rows
 `db.cnt.*.bp_c0.split.fsc.inv`: with `CHUNK_SIZE=80` a chunk's first context is a part of the random query while the
 batch's first query is the invalid one (review 2 R2-M1 of D1a-3). Frozen with the local NCBI BLAST+ 2.17.0 release build
-(2026-11-14).
+(2026-11-14). `l0q3b.pal` is `LENGTH 0` over `../q3b_chains` (`DBLIST ../q3b_chains`; rows `db.cnt.l0q3b.*`: psiblast
+`-sum_stats true` with the statistics of each subject, whose HSPs with `tests/fasta/psiblast/tk.faa` form linked sets: each
+subject's hit-saving cutoff is lowered at its own length and its linking reads its own small-gap cutoff; review 3 R3-M1 of
+D1a-3). Frozen with the local NCBI BLAST+ 2.17.0 release build (2026-11-14). `l2p63b.pal` is `LENGTH
+9223372036854775808` over `../bslice` (row `db.cnt.l2p63b.bx_c0.16`: a database without parsed Seq-ids or taxonomy, so that
+only the report sums can make BLASTX's library hold its XML2 start before the refusal; review 3 R3-S1 of D1a-3).
 
 ## psiblast's id options (line RG, series Q, Q1)
 

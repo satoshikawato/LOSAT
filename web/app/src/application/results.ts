@@ -680,12 +680,16 @@ export class ResultsBrowser {
 }
 
 /** Why the selected query shows no HSP, in the order of the notices of the results (ResultNotices). */
-export type NoHspReason = 'empty-query' | 'no-tabular-hits' | 'no-queries' | 'no-hits' | 'filtered-out';
+export type NoHspReason = 'dry-run' | 'empty-query' | 'no-tabular-hits' | 'no-queries' | 'no-hits' | 'filtered-out';
 
-/** Why the loaded run's selected query shows no HSP; undefined while it shows some, or nothing is loaded. */
+/**
+ * Why the loaded run's selected query shows no HSP; undefined while it shows some, or nothing is
+ * loaded. A dry run (-dryrun; line RG E1w-3b) searched nothing.
+ */
 export function noHspReason(state: ResultsState): NoHspReason | undefined {
   const loaded = state.loaded;
   if (loaded === undefined) return undefined;
+  if (loaded.run.snapshot.dryRun === true) return 'dry-run';
   if (loaded.run.snapshot.query.records.length === 0) return 'empty-query';
   if (loaded.limits.maxTargetSeqs === 0) return 'no-tabular-hits';
   if (state.queries.length === 0) return 'no-queries';
@@ -715,14 +719,21 @@ export function unreadableResults(run: RunView, error: unknown): string {
   return `The results of run ${run.snapshot.number} could not be read: ${errorMessage(error)}`;
 }
 
-/** Why a run that has not completed has no results: the results page's sentence, also told to a screen reader as the run ends. */
+/**
+ * Why a run that has not completed has no results: the results page's sentence, also told to a
+ * screen reader as the run ends. A failed run that made the file of its `-logfile` keeps it (line RG
+ * E1w-3b), and the page shows it under the sentence (RunFiles).
+ */
 export function unavailableMessage(run: RunView): string {
   const n = run.snapshot.number;
   switch (run.status) {
     case 'cancelled':
       return `Run ${n} was cancelled. A cancelled run keeps no results.`;
-    case 'failed':
-      return `Run ${n} failed: ${endSentence(run.record.error?.trim() ? run.record.error : 'no reason was recorded')} A failed run keeps no results.`;
+    case 'failed': {
+      const files = run.record.runFiles ?? [];
+      const kept = files.length === 0 ? '' : ` It keeps the file of its -logfile, ${files.map((file) => file.name).join(', ')}.`;
+      return `Run ${n} failed: ${endSentence(run.record.error?.trim() ? run.record.error : 'no reason was recorded')} A failed run keeps no results.${kept}`;
+    }
     case 'completed':
       return '';
     default:

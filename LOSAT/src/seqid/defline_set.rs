@@ -390,19 +390,18 @@ impl DeflineSet {
     }
 
     /// `taxonomy_lookups` as an iterator.
-    fn taxonomy_order<'a>(
-        &'a self,
-        target: Option<&ParsedSeqId>,
-    ) -> impl Iterator<Item = i32> + 'a {
+    fn taxonomy_order(&self, target: Option<&ParsedSeqId>) -> TaxonomyOrder<'_> {
         let front = target.and_then(|target| {
             self.deflines
                 .iter()
                 .position(|defline| seqid_in(&defline.ids, target))
         });
-        front
-            .into_iter()
-            .chain((0..self.deflines.len()).filter(move |&index| Some(index) != front))
-            .filter_map(|index| self.deflines[index].taxid.filter(|&taxid| taxid > 0))
+        TaxonomyOrder {
+            deflines: &self.deflines,
+            front,
+            front_given: false,
+            next: 0,
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4741-4785
@@ -1413,22 +1412,27 @@ fn object_id_match(a: &ObjectId, b: &ObjectId) -> bool {
 }
 
 /// The value of an Object-id that `GetIdType` reads as an integer: an `id`, or a `str` that
-/// is a whole decimal `Int8` without a `+` or leading zeros (`NStr::StringToInt8` with the
-/// default flags takes no spaces).
+/// `NStr::StringToInt8(str, fConvErr_NoThrow | fConvErr_NoErrMessage)` reads
+/// (`ncbi_str::string_to_int8` with no flags: no spaces, and the string ends at a 0 byte;
+/// `NoThrow` gives 0 with `errno` set for an error, which is `e_Str`), without a `+` or leading
+/// zeros; a 0 only as the whole string.
 fn object_id_number(tag: &ObjectId) -> Option<i64> {
     match tag {
         ObjectId::Id(id) => Some(i64::from(*id)),
         ObjectId::Str(text) => {
-            let text = std::str::from_utf8(text).ok()?;
-            let digits = text.strip_prefix('-').unwrap_or(text);
-            if digits.is_empty()
-                || !digits.bytes().all(|c| c.is_ascii_digit())
-                || (digits.len() > 1 && digits.starts_with('0'))
-                || (digits == "0" && text.len() != 1)
+            // `StringToInt8` with no flags fails at a first byte other than a digit or a sign
+            // (no spaces): such a text is `e_Str` without the conversion and its exception.
+            if !text
+                .first()
+                .is_some_and(|&c| c.is_ascii_digit() || c == b'+' || c == b'-')
             {
                 return None;
             }
-            text.parse::<i64>().ok()
+            match crate::ncbi_str::string_to_int8(text, 0).ok()? {
+                0 => (text.len() == 1).then_some(0),
+                value if value > 0 => (!matches!(text[0], b'0' | b'+')).then_some(value),
+                value => (text[1] != b'0').then_some(value),
+            }
         }
     }
 }
@@ -1463,4 +1467,89 @@ fn pdb_match(a: &PdbSeqId, b: &PdbSeqId) -> bool {
         }
     }
     a.mol == b.mol
+}
+
+/// The positive taxids of a sequence's definition lines in the order of NCBI's lookups
+/// (`DeflineSet::taxonomy_order`): the line `front` first, then the others in their stored order.
+/// A plain loop over the lines (no iterator adapters: the readers ask its first item of every
+/// sequence they read).
+#[derive(Clone)]
+pub(crate) struct TaxonomyOrder<'a> {
+    deflines: &'a [BlastDefline],
+    front: Option<usize>,
+    front_given: bool,
+    next: usize,
+}
+
+impl Iterator for TaxonomyOrder<'_> {
+    type Item = i32;
+
+    fn next(&mut self) -> Option<i32> {
+        if !self.front_given {
+            self.front_given = true;
+            if let Some(taxid) = self
+                .front
+                .and_then(|index| self.deflines[index].taxid)
+                .filter(|&taxid| taxid > 0)
+            {
+                return Some(taxid);
+            }
+        }
+        while let Some(defline) = self.deflines.get(self.next) {
+            let index = self.next;
+            self.next += 1;
+            if Some(index) == self.front {
+                continue;
+            }
+            if let Some(taxid) = defline.taxid.filter(|&taxid| taxid > 0) {
+                return Some(taxid);
+            }
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // `CObject_id::GetIdType` (Object_id.cpp:93-161): the strings that are integers, and those
+    // that stay strings (an error of `StringToInt8`, a `+`, leading zeros, `-0`). The conversion
+    // ends at a 0 byte, so `5\0x` is the integer 5 (the string's size is still 3).
+    #[test]
+    fn object_id_strings_are_typed_as_ncbis_get_id_type() {
+        let number = |text: &[u8]| object_id_number(&ObjectId::Str(text.to_vec()));
+        let integers: [(&[u8], i64); 7] = [
+            (b"5", 5),
+            (b"0", 0),
+            (b"-12", -12),
+            (b"9223372036854775807", i64::MAX),
+            (b"-9223372036854775808", i64::MIN),
+            (b"5\x00x", 5),
+            (b"-7\x00", -7),
+        ];
+        for (text, value) in integers {
+            assert_eq!(number(text), Some(value), "{text:?}");
+        }
+        let strings: [&[u8]; 14] = [
+            b"",
+            b"-",
+            b"+5",
+            b"05",
+            b"-05",
+            b"-0",
+            b"00",
+            b"0\x00",
+            b" 5",
+            b"5 ",
+            b"5x",
+            b"9223372036854775808",
+            b"abc",
+            b"\xff5",
+        ];
+        for text in strings {
+            assert_eq!(number(text), None, "{text:?}");
+        }
+        assert_eq!(object_id_number(&ObjectId::Id(-3)), Some(-3));
+    }
 }

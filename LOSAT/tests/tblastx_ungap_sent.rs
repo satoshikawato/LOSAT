@@ -26,6 +26,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod temp_support;
+use temp_support::TempPath;
+
 const SWITCH: &str = "LOSAT_X_TBXUNGAPSENT";
 const OFF: (&str, &str) = ("LOSAT_X_TBXUNGAPSENT", "0");
 const REFERENCE_LOOP: (&str, &str) = ("LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS", "1");
@@ -90,7 +93,7 @@ impl Drop for Inputs {
 /// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
 /// soon as a search has more than one thread, and it selects nothing. `LOSAT_X_PAIRPARGATE=0`
 /// comes first (as in `tblastx_kmerge.rs`).
-fn losat(env: &[(&str, &str)]) -> Command {
+fn losat(env: &[(&str, &str)]) -> (Command, TempPath) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -103,11 +106,12 @@ fn losat(env: &[(&str, &str)]) -> Command {
             command.env_remove(name);
         }
     }
+    let log = TempPath::keep_on_failure(temp_path("worker.log"));
     command
-        .env("LOSAT_BLASTX_WORKER_LOG", temp_path("worker.log"))
+        .env("LOSAT_BLASTX_WORKER_LOG", &log)
         .env("LOSAT_X_PAIRPARGATE", "0")
         .envs(env.iter().copied());
-    command
+    (command, log)
 }
 
 /// The sides of `switch` that a run with `LOSAT_X_REACH=dir` recorded: (new, ref).
@@ -126,23 +130,24 @@ fn reached(dir: &Path, switch: &str) -> (bool, bool) {
     (new, reference)
 }
 
+/// A run's report, the sides of `SWITCH` it recorded, whether the units of the branch-free hit
+/// loops ran, and its worker log. The log goes with the result: the caller drops it after its
+/// assertions, and it is kept when the test panics.
+type Run = (Vec<u8>, (bool, bool), bool, TempPath);
+
 /// `tblastx` of the inputs at `threads` with `env` and `LOSAT_X_REACH` set to a directory of its
 /// own: the report, the sides of `SWITCH` recorded, and whether the units of the branch-free hit
 /// loops ran (the new side of `LOSAT_X_TBXHITBF`, recorded only by the unit path).
-fn tblastx(inputs: &Inputs, threads: u32, env: &[(&str, &str)]) -> (Vec<u8>, (bool, bool), bool) {
+fn tblastx(inputs: &Inputs, threads: u32, env: &[(&str, &str)]) -> Run {
     tblastx_args(inputs, threads, env, &[])
 }
 
 /// `tblastx` with the further options `args`.
-fn tblastx_args(
-    inputs: &Inputs,
-    threads: u32,
-    env: &[(&str, &str)],
-    args: &[&str],
-) -> (Vec<u8>, (bool, bool), bool) {
-    let dir = temp_path("reach");
+fn tblastx_args(inputs: &Inputs, threads: u32, env: &[(&str, &str)], args: &[&str]) -> Run {
+    let dir = TempPath::keep_on_failure(temp_path("reach"));
     std::fs::create_dir_all(&dir).unwrap();
-    let output = losat(env)
+    let (mut command, log) = losat(env);
+    let output = command
         .env("LOSAT_X_REACH", &dir)
         .arg("tblastx")
         .arg("-query")
@@ -161,8 +166,7 @@ fn tblastx_args(
     );
     let sides = reached(&dir, SWITCH);
     let unit_path = reached(&dir, "LOSAT_X_TBXHITBF").0;
-    let _ = std::fs::remove_dir_all(&dir);
-    (output.stdout, sides, unit_path)
+    (output.stdout, sides, unit_path, log)
 }
 
 /// The default (the unit path at 1 and 4 threads, the reference frame loop) gives the report of
@@ -170,7 +174,7 @@ fn tblastx_args(
 #[test]
 fn reports_do_not_depend_on_the_sentinel_walks() {
     let inputs = Inputs::new();
-    let (expected, sides, _) = tblastx(&inputs, 1, &[OFF]);
+    let (expected, sides, _, _log) = tblastx(&inputs, 1, &[OFF]);
     assert!(!expected.is_empty(), "no hits");
     assert_eq!(sides, (false, false), "=0 records nothing");
     for (name, threads, env, unit) in [
@@ -178,12 +182,12 @@ fn reports_do_not_depend_on_the_sentinel_walks() {
         ("unit path, 4 threads", 4, &[][..], true),
         ("reference frame loop", 1, &[REFERENCE_LOOP][..], false),
     ] {
-        let (report, sides, unit_path) = tblastx(&inputs, threads, env);
+        let (report, sides, unit_path, _log) = tblastx(&inputs, threads, env);
         assert_eq!(report, expected, "{name}");
         assert_eq!(sides, (true, false), "{name}: the sentinel walks ran");
         assert_eq!(unit_path, unit, "{name}: the path that ran");
     }
-    let (report, _, _) = tblastx(&inputs, 1, &[OFF, REFERENCE_LOOP]);
+    let (report, _, _, _log) = tblastx(&inputs, 1, &[OFF, REFERENCE_LOOP]);
     assert_eq!(report, expected, "reference frame loop, =0");
 }
 
@@ -196,14 +200,14 @@ fn another_matrix_takes_the_sentinel_walks_with_the_same_report() {
         "BLOSUM45", "BLOSUM50", "BLOSUM80", "BLOSUM90", "PAM30", "PAM70", "PAM250", "IDENTITY",
     ] {
         let args = ["-matrix", matrix];
-        let (expected, _, _) = tblastx_args(&inputs, 1, &[OFF], &args);
+        let (expected, _, _, _log) = tblastx_args(&inputs, 1, &[OFF], &args);
         assert!(!expected.is_empty(), "{matrix}: no hits");
         for (name, threads, env, unit) in [
             ("unit path, 1 thread", 1, &[][..], true),
             ("unit path, 4 threads", 4, &[][..], true),
             ("reference frame loop", 1, &[REFERENCE_LOOP][..], false),
         ] {
-            let (report, sides, unit_path) = tblastx_args(&inputs, threads, env, &args);
+            let (report, sides, unit_path, _log) = tblastx_args(&inputs, threads, env, &args);
             assert_eq!(report, expected, "{matrix}, {name}");
             assert_eq!(sides, (true, false), "{matrix}, {name}: the walks that ran");
             assert_eq!(unit_path, unit, "{matrix}, {name}: the path that ran");
@@ -219,7 +223,7 @@ fn another_matrix_takes_the_sentinel_walks_with_the_same_report() {
 fn chunks_of_a_frame_stay_off_the_path() {
     let inputs = Inputs::new();
     let chunks = ("LOSAT_TBLASTX_TEST_CHUNK_SIZE", "1500");
-    let (expected, _, _) = tblastx(&inputs, 1, &[chunks, OFF]);
+    let (expected, _, _, _log) = tblastx(&inputs, 1, &[chunks, OFF]);
     assert!(!expected.is_empty(), "no hits with chunks");
     for (name, threads, env, unit) in [
         ("unit path, 1 thread", 1, &[chunks][..], true),
@@ -231,7 +235,7 @@ fn chunks_of_a_frame_stay_off_the_path() {
             false,
         ),
     ] {
-        let (report, sides, unit_path) = tblastx(&inputs, threads, env);
+        let (report, sides, unit_path, _log) = tblastx(&inputs, threads, env);
         assert_eq!(report, expected, "{name}");
         assert_eq!(unit_path, unit, "{name}: the path that ran");
         assert_eq!(
@@ -256,21 +260,22 @@ fn chunks_of_a_frame_stay_off_the_path() {
 fn chunks_of_a_frame_at_word_size_2_give_the_report_of_the_reference_loop() {
     let inputs = Inputs::new();
     let args = ["-word_size", "2"];
-    let (unchunked, sides, unit_path) = tblastx_args(&inputs, 1, &[], &args);
+    let (unchunked, sides, unit_path, _log) = tblastx_args(&inputs, 1, &[], &args);
     assert!(!unchunked.is_empty(), "no hits at word size 2");
     assert!(unit_path, "unchunked: the unit path");
     assert_eq!(sides, (true, false), "unchunked: the sentinel walks ran");
-    let (report, _, unit_path) = tblastx_args(&inputs, 1, &[REFERENCE_LOOP], &args);
+    let (report, _, unit_path, _log) = tblastx_args(&inputs, 1, &[REFERENCE_LOOP], &args);
     assert_eq!(report, unchunked, "reference frame loop, unchunked");
     assert!(!unit_path, "reference frame loop: not the unit path");
     let mut reports = Vec::new();
     for size in ["103", "700", "1500"] {
         let chunks = ("LOSAT_TBLASTX_TEST_CHUNK_SIZE", size);
-        let (expected, _, unit_path) = tblastx_args(&inputs, 1, &[chunks, REFERENCE_LOOP], &args);
+        let (expected, _, unit_path, _log) =
+            tblastx_args(&inputs, 1, &[chunks, REFERENCE_LOOP], &args);
         assert!(!unit_path, "chunks of {size}: reference frame loop");
         assert!(!expected.is_empty(), "chunks of {size}: no hits");
         for threads in [1, 4, 8] {
-            let (report, sides, unit_path) = tblastx_args(&inputs, threads, &[chunks], &args);
+            let (report, sides, unit_path, _log) = tblastx_args(&inputs, threads, &[chunks], &args);
             assert_eq!(
                 report, expected,
                 "unit path, chunks of {size}, {threads} threads"

@@ -1,0 +1,125 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: database sequences whose display id is a query id
+           4 sequences; 600 total letters
+
+
+
+Query= first query
+
+Length=150
+
+
+
+Query_1  1    MGGSYVTIRKHFRLPSIAPLSKEHMLFSHKVIKHMLVIGYDVSQDYDKPGVITQLYTISW  60
+abc      1    ...VWT.QD.W.......F..........C..........L..........D........  60
+Query_1  1    ...VWT.QD.W.......F..........C..........L..........D........  60
+dbo1     2     .Q..L..........N.....A...T..Y.G....T.PE......E.............  60
+
+Query_1  61   HLLMLGIDCKMEWECNPADQVDRNPYMHFPHLYNMVDVITVLWRTDHCGWSDWNWWQLVK  120
+abc      61   ...........R....................F.....Q.....................  120
+Query_1  61   ...........R....................F.....Q.....................  120
+dbo1     61   ...A.L....Q......M..............E..R..........W.I.N.........  120
+
+Query_1  121  CYEYSVVRVMNKMAKVYHPEFTNHFETRLN  150
+abc      121  ......H..........E............  150
+Query_1  121  ......H..........E............  150
+dbo1     121  .H.D..N.....D.............VV.   149
+dbo2     48   ..N.K.                          53
+
+
+Lambda      K        H        a         alpha
+   0.326    0.139    0.483    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 62500
+
+
+Query= second query
+
+Length=150
+
+
+
+Query_2  42   LDDGCNEFTVFWSTYHKMWGLLPTTIRVK----NCHFLMNMWSMTQQVAWAHHCECGVVG  97
+abc      100          ..L.R.D.CG.SDWNWWQL..CYEYSV.RV..KMAKVYEPEFTN.F.       146
+abc      5               .T.QD.-.FR..SIAFLS----KE.M.FS                      28
+Query_1  100          ..L.R.D.CG.SDWNWWQL..CYEYSV.RV..KMAKVYEPEFTN.F.       146
+Query_1  5               .T.QD.-.FR..SIAFLS----KE.M.FS                      28
+dbo2     23                                                         A....E  28
+dbo1     92   .ENMRDVI..L.R.                                                105
+
+Query_2  98   TMAGTLM  104
+dbo2     29   NGQW.V.  35
+
+
+Lambda      K        H        a         alpha
+   0.324    0.136    0.483    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 62500
+
+
+Query= third query
+
+Length=150
+
+
+
+Query_3  1    WARAEMSFTPQEILDCSWTCPWACGYVENSQWLVMFMRYTAHGANGDCYNYKVNQQPQPV  60
+dbo2     1    ..A.Y..W.................V...G..T.........ES............S...  60
+abc      121                                                 ..E.S.HR       128
+Query_1  121                                                 ..E.S.HR       128
+
+Query_3  61   FQYQLRDTNQHVCREADYFEYSTDCNQTEVQIMKILINVGCKPRHGSSQNNNIPEQGYSI  120
+dbo2     61   ..................TAR.....S....H.....Y.........F....M....R.Y  120
+abc      45                   ..DKPGV.TQLYTISWHLLMLGID..M.                  72
+Query_1  45                   ..DKPGV.TQLYTISWHLLMLGID..M.                  72
+
+Query_3  121  NTCWGIFQGIRHSGKATAFHASRHVRGFES  150
+dbo2     121  ....Y...WGC............V......  150
+
+
+Lambda      K        H        a         alpha
+   0.322    0.133    0.456    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 62500
+
+
+  Database: database sequences whose display id is a query id
+    Posted date:  Nov 14, 2026  8:41 PM
+  Number of letters in database: 600
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

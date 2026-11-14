@@ -128,6 +128,60 @@ pub struct UngappedHit {
     pub num: i32,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:170-173 (in `Blast_HSPInit`,
+// called by `BLAST_GetUngappedHSPList`, blast_gapalign.c:4760-4767)
+// ```c
+//    new_hsp->query.offset = query_start;
+//    new_hsp->subject.offset = subject_start;
+//    new_hsp->query.end = query_end;
+//    new_hsp->subject.end = subject_end;
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1054,1083 (in
+// `s_BlastAaExtendOneHit`)
+// ```c
+//     init_hit_width = q_right_off - q_left_off + 1;
+// ...
+//     *hsp_len = left_disp + right_disp + init_hit_width;
+// ```
+// No NCBI counterpart: where LOSAT keeps the `Int4` ends of an HSP whose length is 0 or negative.
+// The one-hit word finder of TBLASTX (`-window_size 0`) can save such an HSP (a word whose
+// running sum is reset after its best part), and NCBI's `end = offset + length` is then at or
+// before the offset, and below 0 near a frame's start. The fields `q_aa_end` and `s_aa_end` hold
+// that `Int4` in two's complement; a positive length leaves every end non-negative, where the
+// `Int4` and the `u32` are the same number. These methods are the one reader and writer of the
+// `Int4` ends: the one-hit path (`blast_gapalign::get_ungapped_hsp_list_int4`, the chunk offsets
+// and merge of `blast_engine/run_impl.rs`, the first linking call of `subject_link.rs`) uses them
+// from the conversion of such an HSP until the HSPs of length 0 or less are dropped right after
+// that linking call, where NCBI's re-evaluation deletes them (a length of 0 or less scores 0,
+// below every cutoff: blast_hits.c:687-699, 449-453). Nothing after that sees such an HSP.
+impl UngappedHit {
+    /// NCBI's `query.end` (`Int4`).
+    #[inline]
+    pub(crate) fn q_end_int4(&self) -> i32 {
+        self.q_aa_end as i32
+    }
+
+    /// NCBI's `subject.end` (`Int4`).
+    #[inline]
+    pub(crate) fn s_end_int4(&self) -> i32 {
+        self.s_aa_end as i32
+    }
+
+    /// Sets NCBI's `query.end` and `subject.end` (`Int4`).
+    #[inline]
+    pub(crate) fn set_int4_ends(&mut self, q_end: i32, s_end: i32) {
+        self.q_aa_end = q_end as u32;
+        self.s_aa_end = s_end as u32;
+    }
+
+    /// Whether the HSP's length (`query.end - query.offset`, the subject's being the same) is 0
+    /// or less.
+    #[inline]
+    pub(crate) fn is_int4_inverted(&self) -> bool {
+        self.q_end_int4() <= self.q_aa_start as i32
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::UngappedHit;

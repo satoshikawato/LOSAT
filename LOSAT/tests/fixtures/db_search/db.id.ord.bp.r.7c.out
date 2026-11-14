@@ -1,0 +1,9 @@
+# BLASTP 2.17.0+
+# Query: P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan troglodytes]
+# Database: tests/db_search/taxfilter/tfe_pr
+# Fields: query id, subject id, subject acc., evalue
+# 3 hits found
+P69905.2	unnamed	unnamed	1.90e-64
+P69905.2	gnl|BL_ORD_ID|1	BL_ORD_ID:1	3.56e-62
+P69905.2	gnl|BL_ORD_ID|2	BL_ORD_ID:2	3.10e-54
+# BLAST processed 1 queries

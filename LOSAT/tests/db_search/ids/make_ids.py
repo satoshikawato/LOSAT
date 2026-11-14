@@ -68,6 +68,12 @@ Sequences whose only Seq-id is `gnl|BL_ORD_ID|n` (line DBID N2a; the FASTA comes
 `pord_v5.*` and `pord_v4.*` from `pord.faa`, `pord_x.*` (version 5) from `pord_x.faa`, read after `pord_v5` through
 the alias `pord_vx.pal` (which lists `pord_x` first: NCBI orders the volumes of an alias by their base names), and `nord_v5.*` and `nord_v4.*` from `nord.fna`.
 
+Aliases that restrict a database with parsed Seq-ids by `FIRST_OID` and `LAST_OID` (line DBID ordnum):
+`pfound_r.pal` (OIDs 1 to 9 of `pfound_v5`), `refuse_r.pal` (OIDs 1 to 5 of `refuse_v5`) and `njoined_r.nal`
+(`nfound_v4`, `njoined_a` and `njoined_b`, OIDs 2 and 3 only: the pair of `njoined`), and the list `pfound_nsl.txt`
+(AAA00001.1, OID 0 of `pfound_v5`, for `-negative_seqidlist`). The rank of a searched sequence is its OID less the
+OIDs left out before it; LOSAT's refusals name the OID.
+
 Seq-align ids that NCBI's formatters look up like any other (line DBID N2b; the FASTA comes from `make_look_fasta.py`):
 `plook_v5.*` and `plook_v4.*` from `plook.faa`, `plook_z.*` (version 5) from `plook_z.faa`, read after `plook_v5`
 through the alias `plook_vz.pal`, and `nlook_v5.*` and `nlook_v4.*` from `nlook.fna`. A Seq-align id that another
@@ -163,6 +169,17 @@ whose lookup writes the offset error of `tests/seqdb/taxdb/offset_last_past_end`
 `gb|FFF00001.1|` taxid 99990 (`txr_s.map`), the first 45 letters of `txr_q.faa` (135 of `txr_q.fna`), whose identities
 put it before A with `-sorthits 3` only.
 `--taxrow-only` builds only these.
+
+Text Seq-ids that differ only in the case of their letters in two databases (line DBID pircase), version 5, made from
+the FASTA of the same names: `pcs_pir_y` (Y `pir||PIRNAME`, the best hit of `pcs_q.faa`) and `pcs_pir_a` (A
+`pir||pirname`, B `gb|BBB00001.1|`), `pcs_prf_y` and `pcs_prf_a` (`prf||PRFNAME` and `prf||prfname`), `pcs_piracc_y`
+and `pcs_piracc_a` (`pir|ACC01.1|PIRNAME` and `pir|acc01.1|pirname`), `pcs_gb_y` and `pcs_gb_a` (the names alone
+`gb||locusy` and `gb||LOCUSY`), the controls `pcs_ctl_y` and `pcs_ctl_a` (`pir||PIRNAME` and `pir||PIRNAMX`),
+`pcs_embgb_y` and `pcs_embgb_a` (`gb||locusy` and `emb||LOCUSY`: another alternative) and `pcs_sptr_y` and
+`pcs_sptr_a` (`sp||NAMEY` and `tr||namey`: another release), and `pcs_ngb_y` and `pcs_ngb_a` (nucleotide, the
+proteins' back-translations, `gb||locusy` and `gb||LOCUSY`, query `pcs_q.fna`). NCBI's scope takes the two ids of a
+pair of one alternative and release for one and writes the names of the one it reads first for both; the keys of a name
+and of a FASTA text are as written. `--pircase-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
 `pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
@@ -364,6 +381,18 @@ def build_taxrow(args: argparse.Namespace) -> None:
             check=True, stdout=subprocess.DEVNULL)
 
 
+def build_pircase(args: argparse.Namespace) -> None:
+    for name, extension in (("pcs_pir_y", "faa"), ("pcs_pir_a", "faa"), ("pcs_prf_y", "faa"), ("pcs_prf_a", "faa"),
+                            ("pcs_piracc_y", "faa"), ("pcs_piracc_a", "faa"), ("pcs_gb_y", "faa"), ("pcs_gb_a", "faa"),
+                            ("pcs_ctl_y", "faa"), ("pcs_ctl_a", "faa"), ("pcs_embgb_y", "faa"), ("pcs_embgb_a", "faa"),
+                            ("pcs_sptr_y", "faa"), ("pcs_sptr_a", "faa"), ("pcs_ngb_y", "fna"), ("pcs_ngb_a", "fna")):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / f"{name}.{extension}"),
+             "-dbtype", "nucl" if extension == "fna" else "prot", "-parse_seqids", "-blastdb_version", "5",
+             "-title", f"{name} (parsed Seq-ids)", "-out", str(args.out / name)],
+            check=True, stdout=subprocess.DEVNULL)
+
+
 def build_join(args: argparse.Namespace) -> None:
     for name, fasta, dbtype, taxid in (("pjoin_a", "pjoin_a.faa", "prot", None), ("pjoin_b", "pjoin_b.faa", "prot", None),
                                        ("pjoin_c", "pjoin_c.faa", "prot", None), ("pjoin_bt", "pjoin_b.faa", "prot", "9606"),
@@ -404,6 +433,7 @@ def main() -> int:
     ap.add_argument("--pssmrows-only", action="store_true", help="build only the databases of line DBID pssmrows")
     ap.add_argument("--pssmread-only", action="store_true", help="build only the databases of line DBID pssmread")
     ap.add_argument("--taxrow-only", action="store_true", help="build only the databases of line DBID taxrow")
+    ap.add_argument("--pircase-only", action="store_true", help="build only the databases of line DBID pircase")
     args = ap.parse_args()
     if args.weak_only:
         build_weak(args)
@@ -440,6 +470,9 @@ def main() -> int:
         return 0
     if args.taxrow_only:
         build_taxrow(args)
+        return 0
+    if args.pircase_only:
+        build_pircase(args)
         return 0
     variants = [r for r in records(SEQID / "variants.fa") if r[1:].split()[0] not in DROPPED_VARIANTS]
     all_records = (records(SEQID / "prot_ids.fa") + records(SEQID / "prot_extra.fa") + variants
@@ -550,6 +583,17 @@ def main() -> int:
     (args.out / "njoined.nal").write_text(
         "#\n# Alias file of line DBID, ID2b\n#\nTITLE njoined (two volumes, parsed Seq-ids)\n"
         "DBLIST njoined_a njoined_b\n")
+    # Line DBID ordnum: aliases whose FIRST_OID leaves the first sequences out, so that the
+    # rank of a searched sequence is not its OID (LOSAT's refusals name the OID).
+    for alias, ext, title, names, first, last in (
+        ("pfound_r", "pal", "OIDs 1 to 9 of pfound_v5", "pfound_v5", 2, 10),
+        ("refuse_r", "pal", "OIDs 1 to 5 of refuse_v5", "refuse_v5", 2, 6),
+        ("njoined_r", "nal", "njoined after nfound_v4, without it", "nfound_v4 njoined_a njoined_b", 3, 4),
+    ):
+        (args.out / f"{alias}.{ext}").write_text(
+            f"#\n# Alias file of line DBID, ordnum\n#\nTITLE {alias} ({title})\n"
+            f"DBLIST {names}\nFIRST_OID {first}\nLAST_OID {last}\n")
+    (args.out / "pfound_nsl.txt").write_text("AAA00001.1\n")
     build_weak(args)
     build_copytaxid(args)
     build_join(args)

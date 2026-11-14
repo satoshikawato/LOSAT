@@ -250,16 +250,21 @@ BLAST+.
   Since version 1.11 `-logfile` and `-conffile` are no longer refused on the command line of
   BLASTN, BLASTP, BLASTX, TBLASTN, TBLASTX, PSIBLAST and RPSBLAST (and `-conffile` of
   makeblastdb and blastdbcmd): they run as in NCBI (`README.md`, NCBI C++ Toolkit options).
-  The library API (until version 1.21) and the Web engine still refuse them, and BLASTX refuses
-  the other words by name, as the other programs do. Since version 1.12 `-dryrun` is no longer refused on
+  The library API (until version 1.21) and the Web engine (until line RG item E1w-3a) refused them.
+  BLASTX refuses the other words by name, as the other programs do. Since version 1.12 `-dryrun` is no longer refused on
   the command line of those seven programs, makeblastdb and blastdbcmd: the arguments are read
   and checked, then nothing runs, exit status 0, as NCBI's default `DryRun`
   (`ncbiapp.cpp:705-707`, 292-296). An argument error is reported as without `-dryrun`
   (exception 1), and the parser's refusals of an NCBI option that LOSAT does not run, or of a
   value form it does not read, stay (LOSAT has no definition to check them as NCBI does; line RG
   DECISIONS E1b-2), as do the refusals of registry and environment settings (some, such as
-  `DIAG_POST_LEVEL`, make NCBI write `DryRun`'s message; DECISIONS E1b-6). The Web engine refuses
-  it, and so did the library API until version 1.21. Since version 1.21 the library API (and
+  `DIAG_POST_LEVEL`, make NCBI write `DryRun`'s message; DECISIONS E1b-6). The library API
+  refused it until version 1.21, and the Web engine until line RG item E1w-3a. Since line RG item
+  E1w-3a the Web engine (ABI v2: BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX) runs `-logfile`,
+  `-conffile` and `-dryrun` as the command line does: every `validate` and `run` makes NCBI's
+  application start, the file of `-conffile` is a file that the page gives the engine, the `-logfile`
+  file comes back as a file of the run, and a `-dryrun` run reads no record and writes no output (a
+  `-logfile` name with a directory is refused, the browser has no directories). Since version 1.21 the library API (and
   pylosat) runs `-logfile`, `-conffile` and `-dryrun` as the command line does (line RG item
   E1w-2): a call whose arguments have one of them, or that reads NCBI's settings, runs the
   application start; the `-logfile` file gets what the command line writes there, the registry

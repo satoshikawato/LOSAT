@@ -24,6 +24,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::TempFile;
+
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fasta")
@@ -35,12 +38,10 @@ const BLOCKS_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCK", "0");
 const BATCH: (&str, &str) = ("BATCH_SIZE", "500");
 
 /// Three records of the fixture's query proteome (`MeenMJNV.faa`) from BDT62583.1 on, written to a
-/// directory of the test `tag`: BDT62583.1 (629 letters), which has preliminary matches but none
-/// within the E-value after the redo (no hits), then BDT62584.1 (944) and BDT62585.1 (918), which
-/// have hits.
-fn queries(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("losat-bppfree-{tag}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+/// directory of the test `tag` (removed with the file when the value is dropped): BDT62583.1 (629
+/// letters), which has preliminary matches but none within the E-value after the redo (no hits),
+/// then BDT62584.1 (944) and BDT62585.1 (918), which have hits.
+fn queries(tag: &str) -> TempFile {
     let text = std::fs::read_to_string(fixture("MeenMJNV.faa")).unwrap();
     let start = text
         .find(">BDT62583.1 ")
@@ -51,7 +52,7 @@ fn queries(tag: &str) -> PathBuf {
             .find("\n>")
             .map_or(text.len(), |at| end + 1 + at + 1);
     }
-    let path = dir.join("queries.faa");
+    let path = TempFile::new(&format!("losat-bppfree-{tag}"), "queries.faa");
     std::fs::write(&path, &text[start..end]).unwrap();
     path
 }
@@ -69,7 +70,7 @@ fn blastp(
     threads: u32,
     vars: &[(&str, &str)],
     extra: &[&str],
-) -> (Vec<u8>, Vec<usize>) {
+) -> (Vec<u8>, Vec<usize>, Option<TempFile>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -81,12 +82,15 @@ fn blastp(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bppfree-worker.log"),
-        );
-    }
+    // A worker log of this run when the environment names none: returned with the result, removed
+    // when the caller drops it, and kept when the test panics.
+    let log = std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+        .is_none()
+        .then(|| {
+            let log = TempFile::keep_on_failure("losat-bppfree-worker", "worker.log");
+            command.env("LOSAT_BLASTX_WORKER_LOG", &log);
+            log
+        });
     let output = command
         .arg("blastp")
         .arg("-query")
@@ -110,18 +114,18 @@ fn blastp(
         .filter_map(|line| line.strip_prefix("[TIMING] x_bppfree: freed_lists="))
         .map(|count| count.parse().expect("a count of lists"))
         .collect();
-    (output.stdout, freed)
+    (output.stdout, freed, log)
 }
 
 #[test]
 fn freed_lists_give_the_reports_of_the_one_thread_search() {
     let query = queries("reports");
     for outfmt in ["6", "0"] {
-        let (reference, _) = blastp(&query, 1, &[BATCH, BLOCKS_OFF], &["-outfmt", outfmt]);
+        let (reference, _, _log) = blastp(&query, 1, &[BATCH, BLOCKS_OFF], &["-outfmt", outfmt]);
         assert!(!reference.is_empty(), "the queries have a report");
         for threads in [1, 4, 8, 16] {
             let vars = &[BATCH, BLOCKS_OFF][..];
-            let (report, freed) = blastp(&query, threads, vars, &["-outfmt", outfmt]);
+            let (report, freed, _log) = blastp(&query, threads, vars, &["-outfmt", outfmt]);
             assert!(
                 report == reference,
                 "{vars:?} outfmt {outfmt} threads {threads}: the report differs"
@@ -144,7 +148,7 @@ fn freed_lists_give_the_reports_of_the_one_thread_search() {
 #[test]
 fn freed_lists_in_query_blocks_give_the_rows_of_the_search_of_all_queries() {
     let query = queries("blocks");
-    let (reference, _) = blastp(&query, 1, &[BATCH, BLOCKS_OFF], &["-outfmt", "6"]);
+    let (reference, _, _log) = blastp(&query, 1, &[BATCH, BLOCKS_OFF], &["-outfmt", "6"]);
     for threads in [1, 4, 8, 16] {
         // Blocks of 1,500 letters (BDT62583.1 and BDT62584.1, two batches, then BDT62585.1), as the
         // default blocks of 50,000 letters hold several batches; and one batch per block.
@@ -152,7 +156,7 @@ fn freed_lists_in_query_blocks_give_the_rows_of_the_search_of_all_queries() {
             (&[BATCH, ("LOSAT_X_BPQBLOCK", "1500")][..], 2),
             (&[BATCH, ("LOSAT_X_BPQBLOCK", "1")][..], 3),
         ] {
-            let (rows, freed) = blastp(&query, threads, vars, &["-outfmt", "6"]);
+            let (rows, freed, _log) = blastp(&query, threads, vars, &["-outfmt", "6"]);
             assert!(rows == reference, "threads {threads} {vars:?}: rows differ");
             assert_eq!(
                 freed.len(),

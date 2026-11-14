@@ -246,7 +246,7 @@ fn query_messages(query: &FastaRecord, search_skipped: bool, filtered_empty: boo
 fn subject_names(
     shown: &ShownSubjects<'_>,
     subject: &FastaRecord,
-    oid: usize,
+    s_idx: usize,
 ) -> Result<SubjectNames> {
     match shown {
         ShownSubjects::Fasta { .. } => match subject.believed() {
@@ -258,14 +258,14 @@ fn subject_names(
             ),
         }
         .map_err(|refusal| refuse(refusal, "a subject title")),
-        ShownSubjects::Database { reported, .. } => match reported.parsed_subject(oid) {
-            Some(parsed) => SubjectNames::of_parsed(parsed, reported.parsed_taxonomy(oid)),
+        ShownSubjects::Database { reported, .. } => match reported.parsed_subject(s_idx) {
+            Some(parsed) => SubjectNames::of_parsed(parsed, reported.parsed_taxonomy(s_idx)),
             None => SubjectNames::of_database_sequence(
-                reported.ordinal(oid),
-                &reported.stored_titles()[oid],
+                reported.oid(s_idx),
+                &reported.stored_titles()[s_idx],
                 // XML2 and JSON alone show the taxid (`ReportedSubjects` reads it for them only).
-                reported.taxid(oid),
-                reported.taxonomy(oid),
+                reported.taxid(s_idx),
+                reported.taxonomy(s_idx),
             ),
         }
         .map_err(|refusal| refuse(refusal, "a database title")),

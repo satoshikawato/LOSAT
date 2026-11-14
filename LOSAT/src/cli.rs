@@ -250,10 +250,10 @@ pub enum Commands {
 // Translate registered canonical keys only. Consume each value once so a path
 // or a quoted filtering specification can never be interpreted as another key.
 /// Parses `argv` (`losat <program> <words>`) for a caller that runs no NCBI application start
-/// (the Web engine): the toolkit's words that the start reads (`-logfile`, `-conffile`,
-/// `-dryrun`) are refused (`toolkit_file_word_error`; makeblastdb keeps its own `-logfile`
-/// argument), and so are the versions (`version_word_error`) and `-xmlhelp`
-/// (`xml_help_refusal`).
+/// (LOSAT Web's ABI v1, and the engine's own parses of an argv): the toolkit's words that the
+/// start reads (`-logfile`, `-conffile`, `-dryrun`) are refused (`toolkit_file_word_error`;
+/// makeblastdb keeps its own `-logfile` argument), and so are the versions (`version_word_error`)
+/// and `-xmlhelp` (`xml_help_refusal`).
 pub fn try_parse_from<T, I, S>(argv: I) -> Result<T, clap::Error>
 where
     T: Parser + CommandFactory,
@@ -263,17 +263,17 @@ where
     try_parse_from_command(T::command(), argv)
 }
 
-/// `try_parse_from` for the library API, whose calls run an NCBI application start of their own
-/// (`api::start`): `-logfile`, `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp`,
-/// whose texts only the command line writes, are refused (`version_word_error`,
-/// `xml_help_refusal`).
-pub(crate) fn try_parse_from_library<T, I, S>(argv: I) -> Result<T, clap::Error>
+/// `try_parse_from` for a caller whose calls run an NCBI application start of their own: the
+/// library API (`api::start`) and LOSAT Web's ABI v2 (`web_adapter::start_run`). `-logfile`,
+/// `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp`, whose texts only the command
+/// line writes, are refused (`version_word_error`, `xml_help_refusal`).
+pub(crate) fn try_parse_with_own_start<T, I, S>(argv: I) -> Result<T, clap::Error>
 where
     T: Parser + CommandFactory,
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    parse_command(T::command(), argv, Reader::Library)
+    parse_command(T::command(), argv, Reader::OwnStart)
 }
 
 /// `try_parse_from` after the command line's application start `start` of the program that
@@ -310,18 +310,19 @@ where
 /// Who reads an argv (`parse_command`), which decides what NCBI's toolkit words do there.
 #[derive(Clone, Copy)]
 enum Reader<'a> {
-    /// A caller that runs no NCBI application start (the Web engine): the toolkit's words, the
-    /// versions and `-xmlhelp` are refused.
+    /// A caller that runs no NCBI application start (LOSAT Web's ABI v1): the toolkit's words,
+    /// the versions and `-xmlhelp` are refused.
     NoStart,
-    /// The library API, whose calls run a start of their own (`api::start`): `-logfile`,
-    /// `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp` are refused.
-    Library,
+    /// The library API and LOSAT Web's ABI v2, whose calls run a start of their own
+    /// (`api::start`, `web_adapter::start_run`): `-logfile`, `-conffile` and `-dryrun` are taken;
+    /// the versions and `-xmlhelp` are refused.
+    OwnStart,
     /// The command line's entry with its application start: `-xmlhelp` is the request whose XML
     /// the entry prints.
     CommandLine(&'a crate::blastinput::ncbi_environment::ApplicationStart),
 }
 
-/// The reader of `try_parse_from`, `try_parse_from_library`, `try_parse_from_start` and
+/// The reader of `try_parse_from`, `try_parse_with_own_start`, `try_parse_from_start` and
 /// `try_parse_from_command`.
 fn parse_command<T, I, S>(
     command: clap::Command,
@@ -601,7 +602,7 @@ where
             let program = xml_help.unwrap_or_default();
             return Err(match reader {
                 Reader::CommandLine(_) => xml_help_request(program),
-                Reader::NoStart | Reader::Library => clap::Error::raw(
+                Reader::NoStart | Reader::OwnStart => clap::Error::raw(
                     ErrorKind::InvalidValue,
                     xml_help_refusal(&refusal_program_name(&program)),
                 ),
@@ -789,12 +790,11 @@ fn render_rpsbproc_text(text: &str) -> String {
 // The options of NCBI blastn 2.17.0+ (-help) that LOSAT's BLASTN does not implement
 // (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
 // (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range`, `-no_greedy`
-// (DI-6) and `-min_raw_gapped_score` (DI-6b); the database masks are not.
+// (DI-6), `-min_raw_gapped_score` (DI-6b) and the database masks (`blastinput::db_mask`, series
+// NP M4a-2; a search that `-db_hard_mask` masks is refused where it starts, `RUN_REFUSALS`).
 const UNPORTED_BLASTN_ARGS: &[&str] = &[
     "best_hit_overhang",
     "best_hit_score_edge",
-    "db_hard_mask",
-    "db_soft_mask",
     "entrez_query",
     "filtering_db",
     "gilist",
@@ -859,8 +859,8 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 /// ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
 /// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), and the arguments that blastp's engine does
 /// not run either (`is_unported_blastp_arg`; psiblast has no database masks and no `-mt_mode`).
-/// The search strategy file of a FASTA query is written (item F1b-1 of line RG; with `-in_pssm`
-/// it is refused, `PsiblastArgs::into_blastp_args`).
+/// The search strategy file is written, of a FASTA query and of `-in_pssm` (items F1b-1 and F1b-2
+/// of line RG).
 const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
     "ignore_msa_master",
     "in_msa",
@@ -937,6 +937,15 @@ fn refuses_option(scope: &clap::Command, name: &str) -> bool {
 /// what the refusal says the argument is (`run_refusal`). `-xmlhelp` leaves them out of NCBI's XML
 /// as it leaves the parser's refusals (`refuses_option`).
 pub(crate) const RUN_REFUSALS: &[(&str, &str, &str)] = &[
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2350-2354 (quoted at
+    // `blastinput::db_mask::DbMaskArgs`): its errors and warning are NCBI's
+    // (`DbMaskOption::validate_at_open`, `resolve`); a search that it masks is refused (series
+    // NP, M4a-2b).
+    (
+        "blastn",
+        "db_hard_mask",
+        "hard masking of the database sequences",
+    ),
     ("blastp", "ungapped", "an ungapped search"),
     ("blastp", "use_sw_tback", "the Smith-Waterman traceback"),
     ("psiblast", "use_sw_tback", "the Smith-Waterman traceback"),
@@ -1169,11 +1178,12 @@ fn toolkit_word_as_written<'a>(tokens: &'a [OsString], name: &str) -> Option<&'a
 }
 
 // No NCBI counterpart: NCBI has no library API or Web engine. The application start of the
-// command line (`cli::main_entry`, `ncbi_environment::ApplicationStart`) and of each library
-// call (`api::start`) reads `-logfile` and `-conffile` before the arguments, and both end a
-// `-dryrun` after them; the Web engine runs none, so it does not take them (line RG item E1w).
+// command line (`cli::main_entry`, `ncbi_environment::ApplicationStart`), of each library call
+// (`api::start`) and of each run of LOSAT Web's ABI v2 (`web_adapter::start_run`) reads `-logfile`
+// and `-conffile` before the arguments, and each ends a `-dryrun` after them; ABI v1 runs none, so
+// it does not take them (line RG items E1w, E1w-3a).
 /// LOSAT's refusal of the toolkit option `word` (`-logfile`, `-conffile`, `-dryrun`) in
-/// `program` when the parser's caller runs no application start: the Web engine.
+/// `program` when the parser's caller runs no application start: LOSAT Web's ABI v1.
 fn toolkit_file_word_error(program: &str, word: &str) -> clap::Error {
     clap::Error::raw(
         ErrorKind::InvalidValue,
@@ -1186,13 +1196,20 @@ pub(crate) fn toolkit_file_word_refusal(program: &str, word: &str) -> String {
     let name = toolkit_option_name(word);
     let shown = refusal_program_name(program);
     let places = match library_part(program) {
+        LibraryPart::Search if WEB_V2_PROGRAMS.contains(&program) => {
+            "the command line, in the library API and in the Web engine's ABI v2"
+        }
         LibraryPart::Search | LibraryPart::Tool => "the command line and in the library API",
         LibraryPart::Absent => "the command line",
     };
     format!(
-        "the NCBI C++ Toolkit option -{name} runs on {places} of LOSAT's {shown} only: the Web engine runs no NCBI application start, which reads it"
+        "the NCBI C++ Toolkit option -{name} runs on {places} of LOSAT's {shown} only: the Web engine's ABI v1 runs no NCBI application start, which reads it"
     )
 }
+
+/// The programs that LOSAT Web's ABI v2 runs (`web/adapter/src/run.rs` `Program`, whose tests
+/// check this list), whose runs take the toolkit's words (`toolkit_file_word_refusal`).
+pub const WEB_V2_PROGRAMS: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
 
 /// What LOSAT's library API runs of the command line's `program`.
 enum LibraryPart {
@@ -1534,6 +1551,26 @@ impl fmt::Display for NativeError {
 // ```
 impl std::error::Error for NativeError {}
 
+impl NativeError {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+    // ```c++
+    //     catch (const CException& e) {                                           \
+    //         LOG_POST(Error << "Error: " << e.what());                           \
+    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+    //     }                                                                       \
+    // ```
+    /// `CATCH_ALL`'s report of an exception of NCBI's C++ Toolkit (`CException`) that ends a
+    /// BLAST program: `Error: `, the exception's `what()` (which ends with a line feed) and the
+    /// post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`). The one producer of this
+    /// report: an exception of NCBI's that LOSAT raises where NCBI throws it becomes this error.
+    pub(crate) fn exception(e: &crate::ncbi_exception::NcbiException) -> NativeError {
+        NativeError {
+            exit: 255,
+            message: format!("Error: {}\n", e.what()),
+        }
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:118-119
 // ```c
 // {
@@ -1674,9 +1711,9 @@ impl NcbiBuffer {
         self.held
     }
 
-    /// An insertion of `n` bytes (`sputn`: a string or a number), the last bytes of `stream`: the
-    /// stream's bytes up to the insertion's end, at least the last `NCBI_BUFSIZ` of them or all
-    /// since the buffer last wrote (what a line-buffered `cout` holds is read for newlines).
+    /// An insertion of `n` bytes (`sputn`: a string or a number), the last `n` bytes of `stream`
+    /// (the stream's bytes up to the insertion's end; a line-buffered `cout` reads the insertion's
+    /// newlines).
     // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_xsputn`
     // ```c
     //   /* First figure out how much space is available in the buffer. */
@@ -1715,12 +1752,16 @@ impl NcbiBuffer {
     // 				       __n);
     // ```
     // A line-buffered `stdout` (a terminal, `_IO_LINE_BUF` from `_IO_file_doallocate`): the same
-    // function's branch for it writes, of an insertion that fits, up to its last newline, and the
-    // rest of one that does not fit is put byte by byte (`_IO_default_xsputn`), where
-    // `_IO_new_file_overflow` writes at each newline; so the buffer keeps what follows the last
-    // newline of what it would keep (glibc 2.39, `T/t2/fix3/glibc_tty_lines.c` on a pty of
-    // `st_blksize` 1024: 100 then 50 ending in a newline write 150; 1000 then 30 with a newline at
-    // 27 write 1,028; 500 then 2,000 with newlines at 100 and 1,900 write 2,401).
+    // function's branch for it copies, of an insertion that fits, up to its last newline and then
+    // writes the buffer (`must_flush`); what follows is written with it where the buffer is under
+    // 128 bytes (`do_write` is all of it), else put byte by byte (`_IO_default_xsputn`), where
+    // `_IO_new_file_overflow` writes at each newline, as the rest of an insertion that does not
+    // fit; so the buffer keeps what follows the last newline of what it keeps (glibc 2.39,
+    // `T/t2/fix3/glibc_tty_lines.c` on a pty of `st_blksize` 1024: 100 then 50 ending in a newline
+    // write 150; 1000 then 30 with a newline at 27 write 1,028; 500 then 2,000 with newlines at 100
+    // and 1,900 write 2,401; line RG T2 review 5's `T/t2/review5/glibc/line_small.c`, three
+    // `fwrite`s of `xxxxx\nyyy` with a line buffer of 64 bytes write 9, 18 and 27 bytes, of 1,024
+    // bytes 6, 15 and 24).
     // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_xsputn`
     // ```c
     //   if ((f->_flags & _IO_LINE_BUF) && (f->_flags & _IO_CURRENTLY_PUTTING))
@@ -1740,6 +1781,22 @@ impl NcbiBuffer {
     //             }
     //         }
     //     }
+    //   ...
+    //   /* Then fill the buffer. */
+    //   if (count > 0)
+    //     {
+    //       if (count > to_do)
+    // 	count = to_do;
+    //       f->_IO_write_ptr = __mempcpy (f->_IO_write_ptr, s, count);
+    //       s += count;
+    //       to_do -= count;
+    //     }
+    //   ...
+    //       /* Now write out the remainder.  Normally, this will fit in the
+    // 	 buffer, but it's somewhat messier for line-buffered files,
+    // 	 so we let _IO_default_xsputn handle the general case. */
+    //       if (to_do)
+    // 	to_do -= _IO_default_xsputn (f, s+do_write, to_do);
     // ```
     // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_overflow`
     // ```c
@@ -1754,22 +1811,37 @@ impl NcbiBuffer {
         }
         self.held = match self.stream {
             NcbiStdio::Cout { block, lines } => {
+                let insertion = &stream[stream.len() - n..];
+                // `count`: the bytes of the insertion copied into the buffer, up to its last
+                // newline where a line-buffered stream's insertion fits (`must_flush`).
                 let room = if self.allocated { block - self.held } else { 0 };
-                let held = if n <= room {
-                    self.held + n
-                } else if block >= 128 {
-                    (self.held + n) % block
-                } else {
-                    // `do_write` is the whole rest; the buffer keeps nothing.
-                    0
+                // glibc looks for the newline only in its line-buffered branch, when the
+                // insertion fits; a fully buffered stream never scans the bytes.
+                let last_newline = || insertion.iter().rposition(|&byte| byte == b'\n');
+                let (count, must_flush) = match (lines && n <= room).then(last_newline).flatten() {
+                    Some(at) => (at + 1, true),
+                    None => (n.min(room), false),
                 };
-                if lines {
-                    let kept = &stream[stream.len() - held..];
-                    kept.iter()
-                        .rposition(|&byte| byte == b'\n')
-                        .map_or(held, |at| held - at - 1)
+                let to_do = n - count;
+                if to_do == 0 && !must_flush {
+                    self.held + n
                 } else {
-                    held
+                    // The buffer is written (`_IO_OVERFLOW`, which makes it before the first
+                    // insertion), then `do_write` bytes of the rest; the buffer keeps the others,
+                    // a line-buffered one what follows their last newline.
+                    let do_write = if block >= 128 {
+                        to_do - to_do % block
+                    } else {
+                        to_do
+                    };
+                    let kept = &insertion[n - (to_do - do_write)..];
+                    match lines
+                        .then(|| kept.iter().rposition(|&byte| byte == b'\n'))
+                        .flatten()
+                    {
+                        Some(at) => kept.len() - at - 1,
+                        None => kept.len(),
+                    }
                 }
             }
             NcbiStdio::File => {
@@ -1889,7 +1961,8 @@ impl NcbiBuffer {
 /// (`tie_standard_output`, `CliStderr`), where NCBI aborts if that write fails (LOSAT: its error,
 /// non-zero exit). LOSAT's flushes of the report hold. Each `write` is one insertion of NCBI's
 /// (`insert`, `insert_streamed`: the writer of the report makes NCBI's insertions, into the
-/// `NcbiOstream` that the run opened, with nothing between).
+/// `NcbiOstream` that the run opened, `sink`'s, `standard_output`'s or `file`'s, with nothing
+/// between).
 pub struct NcbiReportBuffer(std::sync::Arc<std::sync::Mutex<HeldReport>>);
 
 /// What `NcbiReportBuffer` holds.
@@ -2078,20 +2151,84 @@ impl<W: std::io::Write + ?Sized> Insertion<'_, W> {
 // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
 //     : m_FormatType(format_type), ..., m_Outfile(outfile),
 // ```
-/// The stream of a report as NCBI's formatter writes to it (`CBlastFormat::m_Outfile`): the writer
-/// where the run's report goes, as the run opened it (a format's sink, `OutputSink::ostream`: the
-/// command line's `ReportStream`, whose organism report is NCBI's buffer, `report_destination`, or
-/// a library caller's writer, which has no stream of NCBI's; blastx's command-line destination),
-/// with nothing of a program's before it. Each write is one insertion of NCBI's (`out << value`,
-/// `insert`, `insert_streamed`), passed on as one write. The organism report (`tax_report`) writes
-/// only to this type, so no buffer or hold of a program's can come between its insertions and
-/// NCBI's buffer (`NcbiReportBuffer`), which counts each write as one insertion.
+/// The stream of a report as NCBI's formatter writes to it (`CBlastFormat::m_Outfile`), with
+/// nothing of a program's before it: each write is one insertion of NCBI's (`out << value`,
+/// `insert`, `insert_streamed`), passed on as one write. The organism report (`tax_report`)
+/// writes only to this type, and a writer becomes one only through the constructors below, one per
+/// destination, each saying what comes after it: they are the only places where a buffer or hold
+/// could come between the report's insertions and NCBI's buffer (`NcbiReportBuffer`, which counts
+/// each write as one insertion). A format's sink (`sink`: the command line's `ReportStream` of
+/// blastn, blastp, tblastn and tblastx, the library's and LOSAT Web's writers), blastx's command
+/// line (`standard_output` and `file` for the organism report, `buffered` for every other format),
+/// and the hold of a library call (`held`).
 pub struct NcbiOstream<'a>(Box<dyn std::io::Write + 'a>);
 
+/// The hold of blastx's command line (`archive::ArchiveHold`), whose streams are the process's
+/// standard output and error or the `-out` file.
+type CliHold = crate::algorithm::blastx::ArchiveHold<Box<dyn std::io::Write + Send>>;
+
 impl<'a> NcbiOstream<'a> {
-    /// The stream `stream` where the run's report goes, as the run opened it.
-    pub fn new(stream: Box<dyn std::io::Write + 'a>) -> Self {
+    fn new(stream: Box<dyn std::io::Write + 'a>) -> Self {
         NcbiOstream(stream)
+    }
+
+    /// A format's sink opened as its report's stream (`OutputSink::open`): the caller's writer as
+    /// it is, which the command line of blastn, blastp, tblastn and tblastx makes its
+    /// `ReportStream` (the organism report's is NCBI's buffer, `report_destination`) and which a
+    /// library caller or LOSAT Web gives (no stream of NCBI's to model); or, for a library call's
+    /// `Stdout` and `File` sinks, LOSAT's buffered standard output or file (no stream of NCBI's
+    /// either: the report's bytes are NCBI's, the times at which they reach the device are not).
+    pub(crate) fn sink(
+        sink: &'a mut crate::api::local_blast::OutputSink<'_>,
+    ) -> std::io::Result<Self> {
+        sink.open().map(Self::new)
+    }
+
+    /// The organism report's standard output on blastx's command line: NCBI's buffer of `cout`
+    /// (`NcbiReportBuffer::standard_output`), whose writes go through the run's hold, where the run
+    /// holds its output (`hold`), to the process's standard output (`report_standard_output`).
+    /// Nothing comes before the buffer; the hold keeps what the buffer writes and releases it in
+    /// the order and with the flushes of the run without it (`ArchiveHold::release`).
+    pub(crate) fn standard_output(hold: Option<&CliHold>) -> Self {
+        Self::new(report_destination_through(None, true, through(hold)))
+    }
+
+    /// The organism report's `-out` file `file` on blastx's command line: NCBI's `basic_filebuf`
+    /// (`NcbiReportBuffer::file`), whose writes go through the run's hold (`hold`) to the file, as
+    /// `standard_output`'s.
+    pub(crate) fn file(file: std::fs::File, hold: Option<&CliHold>) -> Self {
+        Self::new(report_destination_through(
+            Some(Box::new(file)),
+            true,
+            through(hold),
+        ))
+    }
+
+    /// The stream of a format other than the organism report on blastx's command line
+    /// (`native::run_inner`): LOSAT's buffer of 8 KiB (`BufWriter`) before `destination` (the file
+    /// or standard output, behind the hold and the held document). NCBI's buffers of these formats
+    /// are not modelled (the order of their texts against the report is item T8 of line RG); the
+    /// organism report never gets this stream (`run_inner` chooses by the format).
+    pub(crate) fn buffered(destination: Box<dyn std::io::Write + 'a>) -> Self {
+        Self::new(Box::new(std::io::BufWriter::new(destination)))
+    }
+
+    /// A format's stream (`sink`'s) behind the hold of a library call (`local::report_batches`,
+    /// `archive::ArchiveHold`), which passes the writes and flushes on in their order (at the
+    /// release, while it holds). The caller's writer has no stream of NCBI's (`sink`), so no buffer
+    /// of NCBI's comes after the hold.
+    pub(crate) fn held(stream: crate::algorithm::blastx::HoldWriter<NcbiOstream<'a>>) -> Self {
+        Self::new(Box::new(stream))
+    }
+}
+
+/// What puts a device behind blastx's command-line hold `hold` (the device itself without one).
+fn through(
+    hold: Option<&CliHold>,
+) -> impl FnOnce(Box<dyn std::io::Write + Send>) -> Box<dyn std::io::Write + Send> + '_ {
+    move |device| match hold {
+        Some(hold) => Box::new(hold.writer(device)),
+        None => device,
     }
 }
 
@@ -2183,9 +2320,10 @@ pub fn report_destination(
 }
 
 /// `report_destination` with the file or standard output behind `through` (blastx's hold of a run
-/// whose later batch may be refused, `archive::ArchiveHold`): NCBI's buffer comes before it, so
-/// that what it holds is what the buffer writes, where the buffer writes it.
-pub fn report_destination_through(
+/// whose later batch may be refused, `archive::ArchiveHold`, `NcbiOstream::standard_output` and
+/// `file`): NCBI's buffer comes before it, so that what it holds is what the buffer writes, where
+/// the buffer writes it.
+fn report_destination_through(
     file: Option<Box<dyn std::io::Write + Send>>,
     tax_report: bool,
     through: impl FnOnce(Box<dyn std::io::Write + Send>) -> Box<dyn std::io::Write + Send>,
@@ -2242,6 +2380,28 @@ pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
         ),
     }
     .into()
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
+// ```c
+// else {
+//     m_OutputStream = &args[kArgOutput].AsOutputFile();
+// }
+// ```
+/// The `-out` file `path` of a search, created where NCBI's argument handling opens it (after the
+/// subjects are read and the query is opened, before the options are processed): `inaccessible`
+/// when it cannot be made. `program` names the program whose file names must be UTF-8
+/// (`input_files::check_utf8_file_name`); `None` for BLASTX, which has no such check. The command
+/// line's programs (`open_out_file`) and the library's `run_to_file` (`api::local_blast::OutFile`)
+/// make the file here.
+pub(crate) fn create_out_file(
+    path: &std::path::Path,
+    program: Option<&str>,
+) -> anyhow::Result<std::fs::File> {
+    if let Some(program) = program {
+        crate::blastinput::input_files::check_utf8_file_name(path, "out", program)?;
+    }
+    std::fs::File::create(path).map_err(|_| inaccessible("out", path))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
@@ -2507,18 +2667,21 @@ mod tests {
 
     #[test]
     fn a_char_on_standard_output_is_kept_as_glibcs_putc_keeps_it() {
-        // glibc 2.39 (`T/t2/fix4/glibc_putc.log`): `stdout` with a buffer of `block` bytes
-        // (`setvbuf`, full or line buffering) on a file; `cN` is N `putc` of 'x', `n` a `putc` of a
-        // newline, `wN` an `fwrite` of N bytes, `W` an `fwrite` of a newline; the file's size
-        // after each step. `putc` keeps its byte after a full or unallocated buffer, where an
-        // `fwrite` of one byte into a buffer under 128 bytes keeps none.
+        // glibc 2.39 (`T/t2/fix4/glibc_putc.log`, and line RG T2 review 5's
+        // `T/t2/review5/glibc/line_small.log`): `stdout` with a buffer of `block` bytes (`setvbuf`,
+        // full or line buffering) on a file; `cN` is N `putc` of 'x', `n` a `putc` of a newline,
+        // `wN` an `fwrite` of N bytes (`wN:K`: with a newline at K), `W` an `fwrite` of a newline;
+        // the file's size after each step. `putc` keeps its byte after a full or unallocated
+        // buffer, where an `fwrite` of one byte into a buffer under 128 bytes keeps none; a line
+        // buffer under 128 bytes keeps none of an `fwrite` that fits with a newline either.
         let run = |lines: bool, block: usize, steps: &str| -> Vec<usize> {
             let mut buffer = NcbiBuffer::new(NcbiStdio::Cout { block, lines });
             let mut stream = Vec::new();
             steps
                 .split(' ')
                 .map(|step| {
-                    let count = step[1..].parse::<usize>().unwrap_or(1);
+                    let mut numbers = step[1..].split(':').map(|n| n.parse::<usize>());
+                    let count = numbers.next().and_then(Result::ok).unwrap_or(1);
                     match step.as_bytes()[0] {
                         b'c' => (0..count).for_each(|_| {
                             stream.push(b'x');
@@ -2529,7 +2692,9 @@ mod tests {
                             buffer.sputc(&stream);
                         }
                         b'w' => {
-                            stream.resize(stream.len() + count, b'x');
+                            let start = stream.len();
+                            stream.resize(start + count, b'x');
+                            numbers.for_each(|at| stream[start + at.unwrap()] = b'\n');
                             buffer.sputn(count, &stream);
                         }
                         _ => {
@@ -2548,6 +2713,7 @@ mod tests {
         assert_eq!(run(false, 64, "w64 c1"), [64, 64]);
         assert_eq!(run(false, 64, "w64 w1"), [64, 64]);
         assert_eq!(run(false, 4096, "w4096 c1"), [4096, 4096]);
+        assert_eq!(run(false, 4096, "w4096 w1"), [4096, 4096]);
         assert_eq!(run(false, 4096, "w4095 c1 c1"), [0, 0, 4096]);
         assert_eq!(run(false, 4096, "w4095 w1 w1"), [0, 0, 4096]);
         assert_eq!(run(true, 64, "c1"), [0]);
@@ -2560,6 +2726,8 @@ mod tests {
         assert_eq!(run(true, 64, "c63 n"), [0, 64]);
         assert_eq!(run(true, 64, "c64 n"), [0, 65]);
         assert_eq!(run(true, 1024, "c100 n c5"), [0, 101, 101]);
+        assert_eq!(run(true, 64, "w9:5 w9:5 w9:5"), [9, 18, 27]);
+        assert_eq!(run(true, 1024, "w9:5 w9:5 w9:5"), [6, 15, 24]);
     }
 
     #[test]

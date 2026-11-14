@@ -71,11 +71,11 @@ fn rethrown(e: NcbiException) -> NcbiException {
 }
 
 impl WinMaskError {
-    /// The report (`what()`) of the exception of `DiscoverStatType` when it cannot open the
-    /// file; `None` for the other errors (which `DiscoverStatType` does not throw).
-    pub fn discover_report(&self) -> Option<String> {
+    /// The exception of `DiscoverStatType` when it cannot open the file; `None` for the other
+    /// errors (which `DiscoverStatType` does not throw).
+    pub(crate) fn discover_exception(&self) -> Option<NcbiException> {
         match self {
-            Self::Open { name } => Some(open_exception(name).what()),
+            Self::Open { name } => Some(open_exception(name)),
             _ => None,
         }
     }
@@ -150,7 +150,7 @@ mod tests {
     fn the_reports_are_ncbis() {
         let root = NCBI_BUILD_ROOT;
         assert_eq!(
-            WinMaskError::Open { name: "nosuch.obinary".into() }.discover_report().unwrap(),
+            WinMaskError::Open { name: "nosuch.obinary".into() }.discover_exception().unwrap().what(),
             format!("NCBI C++ Exception:\n    T0 \"{root}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open nosuch.obinary\n")
         );
         let factory = format!("    T0 \"{root}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n");

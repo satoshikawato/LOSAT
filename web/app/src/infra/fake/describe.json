@@ -63,6 +63,16 @@
     ]
    },
    {
+    "flag": "-db_soft_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as soft masking",
+    "takes_value": true
+   },
+   {
+    "flag": "-db_hard_mask",
+    "help": "Filtering algorithm ID to apply to the BLAST database as hard masking",
+    "takes_value": true
+   },
+   {
     "flag": "-dbsize",
     "help": "Effective length of the database",
     "takes_value": true

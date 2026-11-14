@@ -5,3 +5,4 @@ export * from './options.js';
 export * from './output-format.js';
 export * from './parameters.js';
 export * from './programs.js';
+export * from './run-files.js';

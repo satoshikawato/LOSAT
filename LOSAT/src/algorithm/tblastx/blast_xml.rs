@@ -294,6 +294,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     let subjects = match &run.database {
         Some(database) => XmlSubjects::Database {
             ordinals: &database.reported.ordinals,
+            oids: database.oids,
             titles: crate::report::blast_xml::XmlTitles::Records(run.subjects),
             // Only XML2 shows the taxid (`taxa` is empty for outfmt 5).
             taxids: &taxa.taxids,

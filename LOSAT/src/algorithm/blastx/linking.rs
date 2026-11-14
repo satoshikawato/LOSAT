@@ -1,8 +1,14 @@
-//! BLASTX uneven-gap linking in internal context coordinates.
+//! BLASTX's linking with sum statistics in internal context coordinates: the uneven-gap linking
+//! (`link_uneven`) and the even-gap linking of the ungapped search (`link_even`, `core::link_hsps`).
 use super::{
     args::ResolvedOptions,
     parameters::ContextParameters,
     preliminary::{compare_score, PreliminaryHsp},
+    query_setup::PreparedQueryBatch,
+};
+use crate::core::link_hsps::{
+    calculate_link_hsp_cutoffs, even_gap_link_hsps, EvenGapLinkParams, LinkContext, LinkCutoffs,
+    LinkHsp,
 };
 use crate::stats::{
     spouge::{blast_spouge_stoe, BlastGumbelBlk},
@@ -99,8 +105,28 @@ pub fn link_parameters(options: &ResolvedOptions) -> Option<LinkParameters> {
         gap_size: 40,
         overlap_size: 9,
         longest_intron: intron,
-        gap_decay_rate: if options.gapped { 0.1 } else { 0.5 },
+        gap_decay_rate: if options.gapped {
+            crate::core::link_hsps::BLAST_GAP_DECAY_RATE_GAPPED
+        } else {
+            crate::core::link_hsps::BLAST_GAP_DECAY_RATE
+        },
     })
+}
+
+/// Whether the search computes the linking cutoffs of each subject (`CalculateLinkHSPCutoffs`,
+/// `link_cutoffs`): an ungapped search that links. With `-ungapped`, a search links
+/// exactly when `-sum_stats` is on (`link_parameters`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
+/// ```c
+///       if (hit_params->link_hsp_params && !kNucleotide &&
+///           !gapped_calculation) {
+///           CalculateLinkHSPCutoffs(program_number, query_info, sbp,
+///             hit_params->link_hsp_params, word_params, db_length,
+///             seq_arg.seq->length);
+/// ```
+pub(crate) fn computes_link_cutoffs(options: &ResolvedOptions) -> bool {
+    !options.gapped && link_parameters(options).is_some()
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1765-1789
 // ```c++
@@ -944,4 +970,192 @@ pub fn link_uneven(
         .reduce(f64::min)
         .unwrap_or(f64::MAX);
     Ok(LinkedHspList { hsps, best_evalue })
+}
+
+/// The even-gap linking of BLASTX's ungapped search (`BLAST_LinkHsps` with `longest_intron <= 0`,
+/// `core::link_hsps`): the query is translated, so the three frames of a strand link together,
+/// and every context reads its ungapped Karlin block (`sbp->kbp`, `gapped_calculation` false).
+/// The list is then sorted by score (`Blast_HSPListSortByScore`) and its best e-value is the
+/// smallest of its e-values (link_hsps.c:1801-1811).
+pub(crate) fn link_even(
+    input: &[PreliminaryHsp],
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    subject_length: i32,
+    params: &EvenGapLinkParams,
+) -> LinkedHspList {
+    let hsps: Vec<LinkHsp> = input
+        .iter()
+        .map(|h| LinkHsp {
+            context: h.context,
+            query_offset: h.q_start,
+            query_end: h.q_end,
+            subject_offset: h.s_start,
+            subject_end: h.s_end,
+            score: h.score,
+        })
+        .collect();
+    let mut linked: Vec<LinkedHsp> = Vec::with_capacity(input.len());
+    even_gap_link_hsps(
+        &hsps,
+        &|context| {
+            let p = &parameters[context];
+            LinkContext {
+                lambda: p.ungapped.lambda,
+                log_k: p.ungapped.k.ln(),
+                query_length: batch.contexts[context].length as i32,
+                length_adjustment: p.length_adjustment,
+                eff_searchsp: p.search_space,
+            }
+        },
+        subject_length,
+        params,
+        &mut |l| {
+            linked.push(LinkedHsp {
+                hsp: input[l.index].clone(),
+                num: l.num,
+                evalue: l.evalue,
+                source_index: l.index,
+            })
+        },
+    );
+    let mut hsps = linked;
+    hsps.sort_by(|a, b| compare_score(&a.hsp, &b.hsp));
+    // `best_evalue` from the first HSP, lowered by each smaller one (the empty list keeps 0).
+    let best_evalue = hsps.split_first().map_or(0.0, |(first, rest)| {
+        rest.iter().fold(
+            first.evalue,
+            |best, h| {
+                if h.evalue < best {
+                    h.evalue
+                } else {
+                    best
+                }
+            },
+        )
+    });
+    LinkedHspList { hsps, best_evalue }
+}
+
+/// The linking cutoffs of BLASTX's ungapped search with one subject
+/// (`CalculateLinkHSPCutoffs`, `core::link_hsps::calculate_link_hsp_cutoffs`): the smallest Lambda, the average
+/// query length and `cutoff_score_min` are those of the query batch, the reader batch's when the
+/// unit is a part of one (`reader_batch.rs`). The subject is a protein, so its lengths are not
+/// divided by 3.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:101-112
+/// ```c
+///     for (i=query_info->first_context; i<=query_info->last_context; i++) {
+///         ASSERT(s_BlastKarlinBlkIsValid(kbp_in[i]) ==
+///                query_info->contexts[i].is_valid);
+///         if (s_BlastKarlinBlkIsValid(kbp_in[i])) {
+///             if (min_lambda > kbp_in[i]->Lambda)
+///             {
+///                 min_lambda = kbp_in[i]->Lambda;
+///                 if (kbp_out)
+///                   *kbp_out = kbp_in[i];
+///             }
+///         }
+///     }
+/// ```
+pub(crate) fn link_cutoffs(
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    subject_length: i32,
+    db_length: i64,
+) -> LinkCutoffs {
+    let shape = batch.reader_shape.as_deref();
+    let kbp = match shape.and_then(|shape| shape.smallest_lambda) {
+        Some(smallest) => smallest,
+        None => {
+            params
+                .iter()
+                .filter(|p| p.valid && p.ungapped.lambda > 0.0)
+                .min_by(|a, b| a.ungapped.lambda.partial_cmp(&b.ungapped.lambda).unwrap())
+                .expect("valid context")
+                .ungapped
+        }
+    };
+    let avg_query_length =
+        (batch.batch_concatenated_length() as i32 - 1) / batch.batch_context_count() as i32;
+    let cutoff_score_min = || match shape.and_then(|shape| shape.word_cutoff_min) {
+        Some(batch_min) => batch_min,
+        None => params
+            .iter()
+            .filter(|p| p.valid)
+            .map(|p| p.word_cutoff)
+            .min()
+            .expect("valid context"),
+    };
+    calculate_link_hsp_cutoffs(
+        &kbp,
+        avg_query_length,
+        subject_length as i64,
+        db_length,
+        false,
+        cutoff_score_min,
+    )
+}
+
+#[cfg(test)]
+mod link_cutoffs_tests {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1450-1458
+    // ```c++
+    //          searches. */
+    //       if (hit_params->link_hsp_params && !kNucleotide &&
+    //           !gapped_calculation) {
+    //           CalculateLinkHSPCutoffs(program_number, query_info, sbp,
+    //             hit_params->link_hsp_params, word_params, db_length,
+    //             seq_arg.seq->length);
+    //       }
+    //
+    //       if (Blast_SubjectIsTranslated(program_number)) {
+    // ```
+    #[test]
+    fn pinned_official_subject_aa_cutoff_boundaries() {
+        let golden = include_str!("../../../tests/unit/blastx_even_gap_cutoffs_expected.tsv");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../docs/evidence/losatx_stage_a/inputs/generated");
+        let mut options = super::super::stage_c_tests::options();
+        options.gapped = false;
+        for line in golden.lines() {
+            let f: Vec<_> = line.split('\t').collect();
+            let gap = f[0];
+            assert_eq!(f[1], "B_LINK_SETUP");
+            let records = super::super::input::read_fasta(
+                &root.join(format!("S08_gap{gap}.fna")),
+                false,
+                false,
+            )
+            .unwrap();
+            let batch = super::super::query_setup::prepare_queries(&records, &options).unwrap();
+            let mut parameters = super::super::parameters::score_block(&batch);
+            let length: i32 = f[2].parse().unwrap();
+            let db: i64 = f[3].parse().unwrap();
+            super::super::parameters::subject_parameters(
+                &batch,
+                &mut parameters,
+                &options,
+                super::super::parameters::SubjectNumbers {
+                    total: db,
+                    count: 1,
+                    shortest: (length as usize).max(10),
+                    average: db as i32,
+                },
+                None,
+            )
+            .unwrap();
+            let link = super::link_cutoffs(&batch, &parameters, length, db);
+            assert_eq!(
+                [link.cutoff_small_gap, link.cutoff_big_gap],
+                [f[4].parse().unwrap(), f[5].parse().unwrap()],
+                "{line}"
+            );
+            assert_eq!(
+                link.gap_prob.to_bits(),
+                u64::from_str_radix(f[6], 16).unwrap(),
+                "{line}"
+            );
+        }
+    }
 }

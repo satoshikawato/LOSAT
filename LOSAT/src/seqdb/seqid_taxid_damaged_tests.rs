@@ -500,7 +500,7 @@ fn read_seqid_lists(name: &str, seqtype: SeqType, ids: &[Vec<u8>], trace: &mut T
         trace.read(db.restrict(&list, &mut warnings));
         trace.note(&warnings);
         let ordinals = db.num_seqs().min(MAX_OIDS as u32);
-        let oids: Vec<u32> = (0..ordinals).map(|ordinal| db.oid(ordinal)).collect();
+        let oids: Vec<u32> = (0..ordinals).map(|ordinal| db.oid(ordinal).get()).collect();
         trace.note(&oids);
     }
 }
@@ -688,7 +688,7 @@ fn read_tx(dir: &Path, trace: &mut Trace) {
             };
             trace.read(db.restrict_taxids(&list));
             let ordinals = db.num_seqs().min(MAX_OIDS as u32);
-            let oids: Vec<u32> = (0..ordinals).map(|ordinal| db.oid(ordinal)).collect();
+            let oids: Vec<u32> = (0..ordinals).map(|ordinal| db.oid(ordinal).get()).collect();
             trace.note(&oids);
         }
     }

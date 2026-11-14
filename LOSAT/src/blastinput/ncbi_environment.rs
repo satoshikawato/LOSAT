@@ -340,6 +340,44 @@ struct ProcessFacts<'a> {
     /// The program's directories, in order, before or after the program's arguments are set
     /// (`program_directories`), or why LOSAT cannot tell them.
     program_dirs: &'a dyn Fn(bool) -> Result<Vec<PathBuf>, String>,
+    /// The files that the registry reads look at.
+    files: &'a dyn RegistryFiles,
+}
+
+/// The files that NCBI's registry reads look at (`find_registry`, `conf_file_path`,
+/// `read_registry_file`): the file system of the process (`FileSystem`), or the files that LOSAT
+/// Web's host registered (`ApplicationStart::with_files`). No NCBI counterpart: NCBI reads its file
+/// system.
+pub trait RegistryFiles {
+    /// Whether `path` is a file (`CFile::Exists`: a file, links followed).
+    fn is_file(&self, path: &Path) -> bool;
+    /// Whether the file at `path` can be opened for reading.
+    fn opens(&self, path: &Path) -> bool {
+        self.read(path).is_some()
+    }
+    /// The bytes of the file at `path`: `None` when it cannot be opened, `Some(Err)` when it was
+    /// opened and its read failed.
+    fn read(&self, path: &Path) -> Option<std::io::Result<Vec<u8>>>;
+}
+
+/// The file system of this process, which the command line and the library read
+/// (`ApplicationStart::of_process`).
+pub struct FileSystem;
+
+impl RegistryFiles for FileSystem {
+    fn is_file(&self, path: &Path) -> bool {
+        path.is_file()
+    }
+
+    fn opens(&self, path: &Path) -> bool {
+        std::fs::File::open(path).is_ok()
+    }
+
+    fn read(&self, path: &Path) -> Option<std::io::Result<Vec<u8>>> {
+        let mut file = std::fs::File::open(path).ok()?;
+        let mut bytes = Vec::new();
+        Some(std::io::Read::read_to_end(&mut file, &mut bytes).map(|_| bytes))
+    }
 }
 
 impl ProcessFacts<'static> {
@@ -350,6 +388,7 @@ impl ProcessFacts<'static> {
             // `getpwuid_r(getuid())`; it is asked only when `HOME` is not set (`ncbi_home`).
             home_by_uid: &|| std::env::home_dir().map(PathBuf::into_os_string),
             program_dirs: &program_directories,
+            files: &FileSystem,
         }
     }
 }
@@ -904,11 +943,15 @@ pub(crate) fn normalize_path(
 ///             }
 ///         }
 /// ```
-fn find_registry(search_path: &[PathBuf], file_name: &str) -> Option<PathBuf> {
+fn find_registry(
+    search_path: &[PathBuf],
+    file_name: &str,
+    files: &dyn RegistryFiles,
+) -> Option<PathBuf> {
     search_path
         .iter()
         .map(|dir| dir.join(file_name))
-        .find(|path| path.is_file())
+        .find(|path| files.is_file(path))
 }
 
 /// Why the file of `-conffile` is not loaded (`conf_file_path`).
@@ -967,7 +1010,11 @@ enum ConfFile {
 /// `NCBI_DONT_USE_LOCAL_CONFIG` the current directory is not in it, and NCBI loads no file (NCBI
 /// BLAST+ 2.17.0, probe `conf_nolocal`, line RG `E/SURVEY_E1.md`); a name with one (`./c.ini`) is
 /// that file.
-fn conf_file_path(name: &OsStr, search_path: &[PathBuf]) -> Result<Option<PathBuf>, ConfFile> {
+fn conf_file_path(
+    name: &OsStr,
+    search_path: &[PathBuf],
+    files: &dyn RegistryFiles,
+) -> Result<Option<PathBuf>, ConfFile> {
     let Some(text) = name.to_str() else {
         return Err(ConfFile::Refused(format!(
             "the -conffile name {:?} is not UTF-8; NCBI BLAST+ reads its bytes, which is not supported by LOSAT",
@@ -975,7 +1022,7 @@ fn conf_file_path(name: &OsStr, search_path: &[PathBuf]) -> Result<Option<PathBu
         )));
     };
     let path = Path::new(name);
-    if !path.is_file() {
+    if !files.is_file(path) {
         return Err(ConfFile::NotFound(format!(
             "Critical: (106.23) Registry file \"{text}\" not found, aborting.\n"
         )));
@@ -1002,7 +1049,7 @@ fn conf_file_path(name: &OsStr, search_path: &[PathBuf]) -> Result<Option<PathBu
         // ```
         // NCBI BLAST+ 2.17.0 (probes `conf_unread_dot`, `conf_unread_bare`, mode 000): `./c.ini`
         // ends the program with this report (exit status 2), `c.ini` loads no file.
-        if std::fs::File::open(path).is_err() {
+        if !files.opens(path) {
             let message = format!("Registry file \"{text}\" cannot be opened");
             return Err(ConfFile::CannotOpen(format!(
                 "Error: (CAppException::eNoRegistry) {message}\nError: (106.15) Application's initialization failed (CAppException::eNoRegistry) {message}\n"
@@ -1010,7 +1057,7 @@ fn conf_file_path(name: &OsStr, search_path: &[PathBuf]) -> Result<Option<PathBu
         }
         return Ok(Some(path.to_path_buf()));
     }
-    Ok(find_registry(search_path, text))
+    Ok(find_registry(search_path, text, files))
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/metareg.hpp:64-69
@@ -1067,12 +1114,15 @@ const SYSTEM_WIDE_REGISTRY: &str = if cfg!(windows) { "ncbi.ini" } else { ".ncbi
 /// cannot open (mode 000) is not reported, and a `.ncbirc` in the home directory is then not
 /// read either; a `blastn.ini` that it cannot open is no file. The file is opened in binary mode:
 /// the line ends are `NcbiGetlineEOL`'s alone.
-fn read_registry_file(path: &Path, layer: Layer) -> Result<Option<RegistryRead>, String> {
-    let Ok(mut file) = std::fs::File::open(path) else {
+fn read_registry_file(
+    path: &Path,
+    layer: Layer,
+    files: &dyn RegistryFiles,
+) -> Result<Option<RegistryRead>, String> {
+    let Some(read) = files.read(path) else {
         return Ok(None);
     };
-    let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut file, &mut bytes).map_err(|error| {
+    let bytes = read.map_err(|error| {
         format!(
             "NCBI BLAST+ would read the registry file {} ({error}), which LOSAT cannot read; this is not supported by LOSAT",
             path.display()
@@ -1777,20 +1827,33 @@ pub enum DiagTarget {
     File(std::fs::File),
     /// Nowhere: `-logfile ""` and `-logfile /dev/null` (a stream handler without a stream).
     Discard,
+    /// The file of `-logfile` of a run whose files LOSAT Web gives its host
+    /// (`report::run_files::RunFiles::Receiver`): its bytes, kept until the run ends.
+    Memory(Vec<u8>),
 }
 
 impl DiagTarget {
     /// Writes `text` where the diagnostics go (`stderr` for `cerr`).
     pub fn write_text(&mut self, text: &[u8], stderr: &mut dyn Write) {
         match self {
-            DiagTarget::File(file) => {
-                let _ = file.write_all(text);
-            }
+            DiagTarget::File(_) | DiagTarget::Memory(_) => self.write_to_file(text),
             DiagTarget::Stderr => {
                 let _ = stderr.write_all(text);
                 let _ = stderr.flush();
             }
             DiagTarget::Discard => {}
+        }
+    }
+
+    /// Writes `text` to the file of `-logfile` (on disk or in memory); nothing for `cerr` and for
+    /// no output.
+    pub fn write_to_file(&mut self, text: &[u8]) {
+        match self {
+            DiagTarget::File(file) => {
+                let _ = file.write_all(text);
+            }
+            DiagTarget::Memory(bytes) => bytes.extend_from_slice(text),
+            DiagTarget::Stderr | DiagTarget::Discard => {}
         }
     }
 }
@@ -1847,6 +1910,9 @@ impl DiagTarget {
                     .write(true)
                     .open(null)
                     .map_err(|error| refusal(format!("{null}: {error}")))?
+            }
+            DiagTarget::Memory(_) => {
+                return Err(refusal("the file is kept in memory".to_string()));
             }
         };
         replace_standard_error(file).map_err(refusal)
@@ -1957,11 +2023,10 @@ impl Write for DiagStream<'_> {
 /// `-version` (NCBI BLAST+ 2.17.0 makeblastdb and blastdbcmd `-version -logfile F` make `F`:
 /// g_reg probes `ver_log_ok`, `ver_log_ok2`).
 pub fn diag_target(name: Option<&OsStr>) -> DiagTarget {
-    match name {
-        None => DiagTarget::Stderr,
-        Some(name) if name == "-" => DiagTarget::Stderr,
-        Some(name) if name.is_empty() || name == "/dev/null" => DiagTarget::Discard,
-        Some(name) => match std::fs::OpenOptions::new()
+    match (special_log_target(name), name) {
+        (Some(target), _) => target,
+        (None, None) => DiagTarget::Stderr,
+        (None, Some(name)) => match std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(name)
@@ -1969,6 +2034,19 @@ pub fn diag_target(name: Option<&OsStr>) -> DiagTarget {
             Ok(file) => DiagTarget::File(file),
             Err(_) => DiagTarget::Stderr,
         },
+    }
+}
+
+/// The target of NCBI's special `-logfile` names (quoted at `diag_target`): `cerr` without a name
+/// and for `-`, no output for `""` and `/dev/null`; `None` for the name of a file. The one reading
+/// of these names: `diag_target` (the file system) and `report::run_files::RunFiles::log_target`
+/// (LOSAT Web).
+pub fn special_log_target(name: Option<&OsStr>) -> Option<DiagTarget> {
+    match name {
+        None => Some(DiagTarget::Stderr),
+        Some(name) if name == "-" => Some(DiagTarget::Stderr),
+        Some(name) if name.is_empty() || name == "/dev/null" => Some(DiagTarget::Discard),
+        Some(_) => None,
     }
 }
 
@@ -2163,6 +2241,14 @@ pub fn preparse<S: AsRef<OsStr> + Clone>(words: &[S]) -> Preparsed<S> {
     }
 }
 
+/// The file of the last `-conffile` of `words` (`preparse`): none before a version word.
+fn conffile_of<S: AsRef<OsStr> + Clone>(words: &[S]) -> Option<OsString> {
+    match preparse(words) {
+        Preparsed::Words { conffile, .. } => conffile,
+        Preparsed::Version(_) => None,
+    }
+}
+
 /// What NCBI's application start writes about the registry files, and the settings it leaves
 /// (`ApplicationStart::of_process`). NCBI reads the system-wide file (`.ncbirc`) twice: when the
 /// program's usage report is made (`CBlastUsageReport`, a member of every BLAST+ application,
@@ -2258,16 +2344,45 @@ impl ApplicationStart {
     /// `words` are the arguments after the program's name: the file of their last `-conffile`
     /// (`preparse`) is loaded in place of `<program>.ini`.
     pub fn of_process<S: AsRef<OsStr> + Clone>(program: &str, words: &[S]) -> ApplicationStart {
-        let conffile = match preparse(words) {
-            Preparsed::Words { conffile, .. } => conffile,
-            Preparsed::Version(_) => None,
-        };
         application_start(
             program,
-            conffile.as_deref(),
+            conffile_of(words).as_deref(),
             std::env::vars_os(),
             &|name: &str| std::env::var_os(name),
             &ProcessFacts::of_this_process(),
+        )
+    }
+
+    /// The application start of `program` in an environment of its own: the variables
+    /// `variables` and no other, no home directory, no directory of the program, and the registry
+    /// files of `files` (LOSAT Web, whose module has neither an environment nor a file system: its
+    /// host registers the files, `web/adapter/src/files.rs`). Otherwise as `of_process`.
+    pub fn with_files<S: AsRef<OsStr> + Clone>(
+        program: &str,
+        words: &[S],
+        variables: &[(&str, &str)],
+        files: &dyn RegistryFiles,
+    ) -> ApplicationStart {
+        let env = |name: &str| {
+            variables
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| OsString::from(value))
+        };
+        application_start(
+            program,
+            conffile_of(words).as_deref(),
+            variables
+                .iter()
+                .map(|(name, value)| (OsString::from(name), OsString::from(value))),
+            &env,
+            &ProcessFacts {
+                // An empty home, which the search path leaves out (`registry_search_path`), as a
+                // target without a user database has (`ncbi_home`).
+                home_by_uid: &|| Some(OsString::new()),
+                program_dirs: &|_| Ok(Vec::new()),
+                files,
+            },
         )
     }
 
@@ -2294,8 +2409,8 @@ impl ApplicationStart {
     /// so far, the usage report's (`CDiagContext::SetupDiag` with `eDCM_NoChange` flushes them
     /// to a new log; ncbiapp.cpp:868-871, ncbidiag.cpp:3863-3874).
     pub fn write_log_setup(&self, target: &mut DiagTarget) {
-        if let (DiagTarget::File(file), Ok(text)) = (target, &self.usage_report) {
-            let _ = file.write_all(text.as_bytes());
+        if let Ok(text) = &self.usage_report {
+            target.write_to_file(text.as_bytes());
         }
     }
 
@@ -2458,29 +2573,6 @@ fn has_usage_report(program: &str) -> bool {
     !matches!(program, "rpsbproc" | "dustmasker" | "segmasker")
 }
 
-/// Whether NCBI's `program` is built apart from BLAST+ 2.17.0 (rpsbproc), so that the posts of
-/// its system-wide file name its own toolkit build (`rpsbproc_registry_refusal`).
-fn has_own_build(program: &str) -> bool {
-    program == "rpsbproc"
-}
-
-/// LOSAT's refusal of a system-wide file (`.ncbirc`) whose syntax error NCBI's rpsbproc reports
-/// when it loads its configuration (`application_start`): the post quotes the exception's
-/// `what()`, whose place is a source file of the toolkit build of that rpsbproc (`T0 "/opt/conda/conda-bld/
-/// rpsbproc_<n>/work/ncbi_cxx/c++/src/corelib/ncbireg.cpp", line 722` in bioconda's 0.5.1, the
-/// package of 2025-05-13 another), which LOSAT does not write. The reports of its `rpsbproc.ini`
-/// and of the file of `-conffile` name no place (`NcbiException::report_default_ex`), nor does
-/// the post of a `.ncbirc` whose stream fails (`ncbi_registry::error_reading_post`): they are
-/// NCBI's bytes, as in the BLAST programs (NCBI rpsbproc 0.5.1, both builds, line RG
-/// `E/SURVEY_E1c.md`: probes `c_ini_bad`, `c_conf_bad`, `c_conf_bad_log`, `c_conf_unread_dot`,
-/// and of its review 1, `r_ncbirc_bom1`; line RG DECISIONS E1c-3).
-fn rpsbproc_registry_refusal(path: &Path) -> String {
-    format!(
-        "the registry file {} has an error that NCBI's rpsbproc reports when it starts; this is not supported by LOSAT's rpsbproc",
-        path.display()
-    )
-}
-
 /// `BLAST_USAGE_REPORT` as `NStr::StringToBool` reads it (`usage_report_reads_ncbirc`): `None`
 /// when it is not set, `Some(None)` for a value that is not a Boolean (NCBI aborts).
 fn usage_report_variable(env: &dyn Fn(&str) -> Option<OsString>) -> Option<Option<bool>> {
@@ -2495,15 +2587,15 @@ fn ncbirc_turned_off(env: &dyn Fn(&str) -> Option<OsString>) -> bool {
     env("NCBI_DONT_USE_NCBIRC").is_some() || env("NCBI_CONFIG__NCBI__DONT_USE_NCBIRC").is_some()
 }
 
-/// The messages of one read of the system-wide file (`ncbi_registry::syntax_error_notice`,
+/// The messages of `program`'s read of the system-wide file (`ncbi_registry::syntax_error_notice`,
 /// `ncbi_registry::error_reading_post`).
-fn system_wide_posts(read: &RegistryRead) -> String {
+fn system_wide_posts(read: &RegistryRead, program: &str) -> String {
     let mut posts = String::new();
     if read.stream_failed {
         posts.push_str(error_reading_post());
     }
     if let Some(error) = &read.error {
-        posts.push_str(&syntax_error_notice(error));
+        posts.push_str(&syntax_error_notice(error, program));
     }
     posts
 }
@@ -2671,7 +2763,7 @@ fn application_start(
             // NCBI's check of the `-conffile` file comes before its load and needs no search
             // path (`conf_file_path`).
             if let Some(Err(ConfFile::NotFound(post))) =
-                conffile.map(|name| conf_file_path(name, &[]))
+                conffile.map(|name| conf_file_path(name, &[], process.files))
             {
                 start.config = Ok(ConfigLoad::NotFound(post));
             }
@@ -2682,8 +2774,12 @@ fn application_start(
     let ncbirc = if dont_use_ncbirc {
         None
     } else {
-        find_registry(&search_path, SYSTEM_WIDE_REGISTRY)
-            .map(|path| (read_registry_file(&path, Layer::SystemWide), path))
+        find_registry(&search_path, SYSTEM_WIDE_REGISTRY, process.files).map(|path| {
+            (
+                read_registry_file(&path, Layer::SystemWide, process.files),
+                path,
+            )
+        })
     };
     // The usage report.
     let usage_report_reads = usage_report_reads_ncbirc(program, env);
@@ -2705,15 +2801,15 @@ fn application_start(
         }
     }
     if let Some((read, _)) = usage_read {
-        start.usage_report = unless_refused(system_wide_posts(read));
+        start.usage_report = unless_refused(system_wide_posts(read, program));
         if start.usage_report.is_err() {
             return ended(start);
         }
     }
     // The configuration: `<program>.ini` (or the file of `-conffile`), then `.ncbirc`.
     let ini_path = match conffile {
-        None => find_registry(&search_path, &format!("{program}.ini")),
-        Some(name) => match conf_file_path(name, &search_path) {
+        None => find_registry(&search_path, &format!("{program}.ini"), process.files),
+        Some(name) => match conf_file_path(name, &search_path, process.files) {
             Ok(path) => path,
             Err(ConfFile::NotFound(post)) => {
                 start.config = Ok(ConfigLoad::NotFound(post));
@@ -2734,7 +2830,7 @@ fn application_start(
     };
     let ini = match ini_path {
         None => None,
-        Some(path) => match read_registry_file(&path, Layer::Application) {
+        Some(path) => match read_registry_file(&path, Layer::Application, process.files) {
             Err(reason) => {
                 start.config = Err(reason);
                 return ended(start);
@@ -2770,11 +2866,7 @@ fn application_start(
             Some((Ok(Some(read)), path)) => {
                 let kept = usage_report_reads && read.error.is_none() && ini.is_none();
                 if !kept {
-                    posts.push_str(&system_wide_posts(read));
-                }
-                if has_own_build(program) && read.error.is_some() {
-                    start.config = Err(rpsbproc_registry_refusal(path));
-                    return ended(start);
+                    posts.push_str(&system_wide_posts(read, program));
                 }
                 ncbirc_entries = Some((path.as_path(), read.entries.as_slice()));
             }
@@ -3043,6 +3135,7 @@ mod tests {
     const NO_PROCESS: ProcessFacts<'static> = ProcessFacts {
         home_by_uid: &no_home,
         program_dirs: &no_dirs,
+        files: &FileSystem,
     };
 
     // NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:54-56 (`kConfigPathDelim` is ";" on
@@ -3070,6 +3163,7 @@ mod tests {
         let process = ProcessFacts {
             home_by_uid: &no_home,
             program_dirs: &dirs,
+            files: &FileSystem,
         };
         let search = |pairs| registry_search_path("blastn", &env(pairs), &process).unwrap();
         let only = search(&[("NCBI_CONFIG_PATH", "/a;/b")]);
@@ -3171,6 +3265,7 @@ mod tests {
         let process = ProcessFacts {
             home_by_uid: &|| Some(OsString::new()),
             program_dirs: &no_dirs,
+            files: &FileSystem,
         };
         let path = registry_search_path("blastn", &env(&[]), &process).unwrap();
         assert_eq!(path[0], PathBuf::from("."));
@@ -4174,9 +4269,11 @@ mod tests {
 
     // NCBI's rpsbproc 0.5.1 (the 2025-05-13 package and bioconda's, env parity probe of
     // 2026-11-12 on ws; quoted at `has_usage_report`): no usage report, so neither its read of
-    // `.ncbirc` nor its `BLAST_USAGE_REPORT`; a `.ncbirc` that rpsbproc reports is LOSAT's
-    // refusal (`rpsbproc_registry_refusal`), a malformed `rpsbproc.ini` or `-conffile` file is
-    // NCBI's report, exit status 2 (line RG probes `c_ini_bad`, `c_conf_bad`).
+    // `.ncbirc` nor its `BLAST_USAGE_REPORT`; a `.ncbirc` that rpsbproc reports is posted once, at
+    // the configuration load, naming the 2025-05-13 package's build tree, and the entries before
+    // the bad line are kept (env parity probe I of 2026-11-14, `i_probe/`); a malformed
+    // `rpsbproc.ini` or `-conffile` file is NCBI's report, exit status 2 (line RG probes
+    // `c_ini_bad`, `c_conf_bad`).
     #[test]
     fn rpsbproc_starts_without_the_usage_report() {
         let dir = std::env::temp_dir().join(format!(
@@ -4211,8 +4308,12 @@ mod tests {
         std::fs::write(&ncbirc, "[BLAST]\nBLASTDB=/db\ngarbage\n").unwrap();
         let malformed = start(&[]);
         assert_eq!(malformed.usage_report, Ok(String::new()));
-        assert!(malformed.config.unwrap_err().contains("LOSAT's rpsbproc"));
-        assert!(malformed.settings.unwrap_err().contains("LOSAT's rpsbproc"));
+        let post = "Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:\n    T0 \"/export/home/tomcat/TeamCity/Agent2/work/b895474bf74772ad/struct_tree/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'garbage' (m_Pos = 3)\n\n";
+        assert_eq!(malformed.config, Ok(ConfigLoad::Loaded(post.to_string())));
+        assert_eq!(
+            malformed.settings.unwrap().blastdb,
+            Ok(Some("/db".to_string()))
+        );
         std::fs::remove_file(&ncbirc).unwrap();
         std::fs::write(dir.join("rpsbproc.ini"), "garbage\n").unwrap();
         let report = "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n";
@@ -4448,13 +4549,13 @@ mod tests {
         let search = [dir.join("in_path")];
         // A name with a directory is that file; the search path is not read.
         assert_eq!(
-            conf_file_path(named.as_os_str(), &search),
+            conf_file_path(named.as_os_str(), &search, &FileSystem),
             Ok(Some(named.clone()))
         );
         // A directory, a missing file and an empty name are NCBI's post.
         for name in [dir.as_os_str(), OsStr::new(""), OsStr::new("no/such.ini")] {
             assert_eq!(
-                conf_file_path(name, &search),
+                conf_file_path(name, &search, &FileSystem),
                 Err(ConfFile::NotFound(format!(
                     "Critical: (106.23) Registry file \"{}\" not found, aborting.\n",
                     name.to_string_lossy()

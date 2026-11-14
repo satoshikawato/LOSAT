@@ -263,10 +263,25 @@ impl ArchiveRequest {
 #[derive(Clone, Debug, Default)]
 pub struct OptionsHandle(Arc<HandleSets>);
 
+/// What `OptionsHandle` holds: the database list's parameter, set where the database is opened;
+/// the application's search parameters (`set_search_sets`); and the database masking's, set where
+/// the formatter resolves it (after `Query is Empty!`).
 #[derive(Debug, Default)]
 struct HandleSets {
     filter: OnceLock<DatabaseFilter>,
     search: OnceLock<SearchSets>,
+    /// `DbFilteringAlgorithmId` or `DbFilteringAlgorithmKey`, then `SubjectMaskingType`: the
+    /// archive's (`blastinput::db_mask::ResolvedMask::archive_params`) and the search strategy's
+    /// (`DbMaskOption::strategy_params`).
+    masking: OnceLock<DatabaseMasking>,
+}
+
+/// The database masking's program options of the archive and of the search strategy, which
+/// differ after the formatter's warning (`DbMaskOption::strategy_params`).
+#[derive(Debug)]
+struct DatabaseMasking {
+    archive: Vec<options::Param>,
+    strategy: Vec<options::Param>,
 }
 
 #[derive(Debug)]
@@ -331,9 +346,31 @@ impl OptionsHandle {
         Ok(())
     }
 
-    /// The `TaxidList` or `NegativeTaxidList` program option (`set_database_filter`).
-    pub fn database_list(&self) -> Option<&options::Param> {
-        self.0.filter.get().and_then(|filter| filter.list.as_ref())
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-503
+    // ```c++
+    //     // Set the filtering algorithms
+    //     string algo_key = db->GetFilteringAlgorithmKey();
+    //     if (algo_key != kEmptyStr)
+    //     {
+    //     	int mask_type = (int) db->GetMaskType();
+    // ```
+    /// The database masking's program options of the archive (`ResolvedMask::archive_params`)
+    /// and of the search strategy (`DbMaskOption::strategy_params`), which follow the list's: set
+    /// once per run, where the formatter resolves the masking; a second setting is LOSAT's
+    /// internal error.
+    pub fn set_database_masking(
+        &self,
+        archive: Vec<options::Param>,
+        strategy: Vec<options::Param>,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.0
+                .masking
+                .set(DatabaseMasking { archive, strategy })
+                .is_ok(),
+            "LOSAT internal error: the database masking is set twice in one run"
+        );
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:257-269
@@ -372,6 +409,38 @@ impl OptionsHandle {
             "LOSAT internal error: the search's options are set twice in one run"
         );
         Ok(())
+    }
+
+    /// The archive's program options of the database: the `TaxidList` or `NegativeTaxidList`
+    /// option (`set_database_filter`), then the masking's (`set_database_masking`).
+    pub fn database_params(&self) -> Vec<options::Param> {
+        self.params_with(|masking| &masking.archive)
+    }
+
+    /// `database_params` of the search strategy, whose masking options are its own.
+    pub fn strategy_database_params(&self) -> Vec<options::Param> {
+        self.params_with(|masking| &masking.strategy)
+    }
+
+    fn params_with(
+        &self,
+        masking: impl Fn(&DatabaseMasking) -> &Vec<options::Param>,
+    ) -> Vec<options::Param> {
+        self.0
+            .filter
+            .get()
+            .and_then(|filter| filter.list.clone())
+            .into_iter()
+            .chain(
+                self.0
+                    .masking
+                    .get()
+                    .map(masking)
+                    .into_iter()
+                    .flatten()
+                    .cloned(),
+            )
+            .collect()
     }
 
     /// What a request holds of the handle beyond the command line's options, after the batches
@@ -751,10 +820,23 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // ```
     // `Error: NCBI C++ Exception:` is that report of an exception of NCBI's C++ Toolkit
     // (BLASTN's `-window_masker_db` file that cannot be opened).
-    const PREFIXES: [&str; 5] = [
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-220
+    // ```c++
+    //     catch (const blast::CBlastException& e) {                               \
+    //         const string& msg = e.GetMsg();                                     \
+    //         if (e.GetErrCode() == CBlastException::eInvalidOptions) {           \
+    //             LOG_POST(Error << "BLAST options error: " << e.GetMsg());       \
+    //             exit_code = BLAST_INPUT_ERROR;                                  \
+    // ```
+    // `BLAST options error:` is that report of an options error that the search raises inside
+    // `Run`: BLASTN's database mask that the database lacks (`DbMaskOption::validate_at_open`,
+    // review 1 F1 of M4a-2a) and PSIBLAST's PSSM options (`IPssmInputData`; LOSAT's PSIBLAST
+    // refuses `-outfmt 11`).
+    const PREFIXES: [&str; 6] = [
         "BLAST query error:",
         "BLAST Database error:",
         "BLAST engine error:",
+        "BLAST options error:",
         "BLAST query/options error:",
         "Error: NCBI C++ Exception:",
     ];

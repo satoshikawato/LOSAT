@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use super::file::DbFile;
 use super::isam;
-use super::lmdb_read::Env;
+use super::lmdb_read::{Db, Env};
 use super::seqidlist::{self, SeqidListFile};
 use super::{tax_files, SeqDb, SeqDbError, SeqType};
 use crate::seqid::model::ObjectId;
@@ -1394,6 +1394,37 @@ impl LmdbEntry {
         tax_files::acc_oids(env, acc).map_err(|message| self.lookup_error(message))
     }
 
+    /// The `acc2oid` database of the LMDB file opened as `env` (`tax_files::acc2oid`), for
+    /// `oids_of` and `case_variant_oids_in`.
+    pub(super) fn acc2oid_in(&self, env: &Env<DbFile>) -> Result<Db, SeqDbError> {
+        tax_files::acc2oid(env).map_err(|message| self.lookup_error(message))
+    }
+
+    /// `oids_in` in the `acc2oid` database `db` of `env` (`acc2oid_in`).
+    pub(super) fn oids_of(
+        &self,
+        env: &Env<DbFile>,
+        db: &Db,
+        acc: &[u8],
+    ) -> Result<Vec<u32>, SeqDbError> {
+        tax_files::acc_oids_of(env, db, acc).map_err(|message| self.lookup_error(message))
+    }
+
+    /// The OIDs of the other keys that differ from `acc` only in the case of letters at or after
+    /// byte `from` (`tax_files::acc_case_variant_oids`, the prefixes found kept in `prefixes`), in
+    /// the `acc2oid` database `db` of the LMDB file opened as `env`.
+    pub(super) fn case_variant_oids_in(
+        &self,
+        env: &Env<DbFile>,
+        db: &Db,
+        acc: &[u8],
+        from: usize,
+        prefixes: &mut rustc_hash::FxHashMap<Vec<u8>, bool>,
+    ) -> Result<Vec<u32>, SeqDbError> {
+        tax_files::acc_case_variant_oids(env, db, acc, from, prefixes)
+            .map_err(|message| self.lookup_error(message))
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:153-157
     // ```c++
     // void CSeqDBLMDBEntry::AccessionsToOids(const vector<string>& accs, vector<TOid>& oids) const
@@ -2024,18 +2055,129 @@ impl TaxIdLookup<'_> {
 /// The OIDs of the sequences `first..end` of a volume read per window of the index.
 const SCAN_WINDOW: u32 = 1 << 16;
 
-impl SeqDb {
-    /// The OID of ordinal id `ordinal`: `ordinal` itself unless the database is restricted
-    /// ([`SeqDb::restrict`]). NCBI prints it as `n` of `gnl|BL_ORD_ID|n`.
-    pub fn oid(&self, ordinal: u32) -> u32 {
-        match &self.filter {
+/// The OID of a database sequence: `n` of the `gnl|BL_ORD_ID|n` (`BL_ORD_ID:n` in SAM, the tag
+/// of a Seq-align's general id) that NCBI prints for a sequence without parsed Seq-ids. A
+/// database restricted by a list or by its alias files' range numbers the sequences that it
+/// searches by ordinal ids, their rank in the list; only [`SeqDb::oid`] and [`OidMap::oid`] make
+/// an OID of one, so that no report prints a rank as an OID.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Oid(u32);
+
+impl Oid {
+    /// The OID as a number.
+    pub(crate) fn get(self) -> u32 {
+        self.0
+    }
+
+    /// `gnl|BL_ORD_ID|n`, how NCBI's reports and the FASTA ids of LOSAT's database records name
+    /// the sequence.
+    pub(crate) fn fasta_id(self) -> String {
+        format!("gnl|BL_ORD_ID|{}", self.0)
+    }
+
+    /// `BL_ORD_ID:n`, the content label of the general id `gnl|BL_ORD_ID|n`
+    /// (`CSeq_id::GetLabel(eContent)`, `GetSeqIdString(true)`): the accession that the tabular
+    /// formats print for it (`sacc`, `saccver`) and the name that SAM gives it.
+    pub(crate) fn content_label(self) -> String {
+        format!("BL_ORD_ID:{}", self.0)
+    }
+
+    /// The OID `oid` of a test's database that is not restricted.
+    #[cfg(test)]
+    pub(crate) fn of_unrestricted(oid: u32) -> Self {
+        Oid(oid)
+    }
+}
+
+/// The OID, by which LOSAT's refusals name a database sequence ("database sequence n", as
+/// `blastdbcmd -outfmt %o` prints it), not by its rank in a list or an alias range
+/// that restricts the search: each takes an `Oid`, a [`DbSequence`], or a closure that gives
+/// one where it refuses.
+impl std::fmt::Display for Oid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// The OID of each ordinal id of a database ([`SeqDb::oid`]), for the reports, which hold the
+/// ordinal ids of their sequences but not the database.
+#[derive(Clone, Copy, Debug)]
+pub struct OidMap<'a>(Option<&'a OidFilter>);
+
+impl OidMap<'_> {
+    /// The OIDs of a test's database that is not restricted: each ordinal id's own.
+    #[cfg(test)]
+    pub(crate) fn unrestricted() -> Self {
+        OidMap(None)
+    }
+
+    /// The OID of ordinal id `ordinal`.
+    pub(crate) fn oid(self, ordinal: u32) -> Oid {
+        Oid(match self.0 {
             Some(filter) => filter.select(ordinal),
             None => ordinal,
+        })
+    }
+}
+
+/// A database sequence that the report of another names (one that the lookup of the other's
+/// Seq-align id gives, that also holds it, or that is a copy of its record): its ordinal id, by
+/// which LOSAT reads it, and its OID, by which LOSAT's refusals name it (its `Display`). Only
+/// [`SeqDb::sequence`] makes one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DbSequence {
+    /// The ordinal id.
+    ordinal: u32,
+    /// The OID ([`SeqDb::oid`] of `ordinal`).
+    oid: Oid,
+}
+
+impl DbSequence {
+    /// The ordinal id, by which LOSAT reads the sequence.
+    pub(crate) fn ordinal(self) -> u32 {
+        self.ordinal
+    }
+
+    /// The sequence `ordinal` of a test's database that is not restricted.
+    #[cfg(test)]
+    pub(crate) fn of_unrestricted(ordinal: u32) -> Self {
+        DbSequence {
+            ordinal,
+            oid: Oid(ordinal),
+        }
+    }
+}
+
+/// The OID, as LOSAT's refusals name the sequence.
+impl std::fmt::Display for DbSequence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.oid.fmt(f)
+    }
+}
+
+impl SeqDb {
+    /// The sequence of ordinal id `ordinal` with its OID ([`SeqDb::oid`]).
+    pub(crate) fn sequence(&self, ordinal: u32) -> DbSequence {
+        DbSequence {
+            ordinal,
+            oid: self.oid(ordinal),
         }
     }
 
-    /// The ordinal id of the OID `oid`, one the database's list includes (`oid` itself unless
-    /// the database is restricted): the inverse of [`SeqDb::oid`].
+    /// The OID of ordinal id `ordinal`: `ordinal` itself unless a list restricts the database
+    /// ([`SeqDb::restrict`]) or its alias files' range starts past OID 0. NCBI prints it as `n`
+    /// of `gnl|BL_ORD_ID|n`.
+    pub(crate) fn oid(&self, ordinal: u32) -> Oid {
+        self.oid_map().oid(ordinal)
+    }
+
+    /// The OIDs of the database's ordinal ids ([`SeqDb::oid`]).
+    pub(crate) fn oid_map(&self) -> OidMap<'_> {
+        OidMap(self.filter.as_deref())
+    }
+
+    /// The ordinal id of the OID `oid`, one the database's list includes (`oid` itself unless a
+    /// list or an alias range restricts the database): the inverse of [`SeqDb::oid`].
     pub fn ordinal_of(&self, oid: u32) -> u32 {
         match &self.filter {
             Some(filter) => filter.rank(oid),
@@ -2131,83 +2273,6 @@ impl SeqDb {
             .into_iter()
             .flat_map(|(walk, filter)| walk.oids(filter));
         all.into_iter().flatten().chain(listed)
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:275-286
-    // ```c++
-    // void CSeqDBLMDBSet::AccessionToOids(const string & acc, vector<TOid>  & oids)const
-    // {
-    // 	m_LMDBEntrySet[0]->AccessionToOids(acc, oids);
-    // 	vector <TOid> tmp;
-    // 	for(unsigned int i=1; i < m_LMDBEntrySet.size(); i++) {
-    // 		m_LMDBEntrySet[i]->AccessionToOids(acc, tmp);
-    // ```
-    // Called from c++/src/app/blast/blast_app_util.cpp:756 `BlastFormatter_PreFetchSequenceData`
-    // (through `CBlastDbDataLoader::GetBlobId`, `CSeqDB::SeqidToOid`): before NCBI
-    // writes a batch's reports (all formats but the archive), its BlastDb data loader looks
-    // each reported Seq-id up in every LMDB file of the database; a file made without
-    // `-parse_seqids` has no `acc2oid` table, and the lookup of a parsed Seq-id stops the run
-    // with "DB contains no accession info." (probe DI-8f F42, P14, H19; H15-H18 run: no hit
-    // with a parsed Seq-id, or `-outfmt 11`). A taxid list stops at the lookup up front (H09).
-    /// Refuses, for a search, a version 5 database whose LMDB files mix files with and without
-    /// the accession table (`-db "parsed unparsed"`, or an alias file of such databases):
-    /// NCBI BLAST+ searches it and then fails at its reports whenever a hit has a parsed
-    /// Seq-id. A database of one LMDB file, or of files that all have the table or all lack
-    /// it, passes.
-    pub fn check_accession_tables(&self) -> Result<(), SeqDbError> {
-        if !self.is_version5() {
-            return Ok(());
-        }
-        // One LMDB file (one database, or an alias of the volumes of one): nothing to mix, and
-        // nothing opened.
-        let lmdb_path = |volume: &super::volume::Volume| {
-            let name = volume.index().lmdb_file.as_deref().unwrap_or_default();
-            volume
-                .base()
-                .with_file_name(String::from_utf8_lossy(name).as_ref())
-        };
-        let first = lmdb_path(&self.volumes[0]);
-        if self.volumes[1..]
-            .iter()
-            .all(|volume| lmdb_path(volume) == first)
-        {
-            return Ok(());
-        }
-        // A volume list that the LMDB files do not describe is refused by the lookups.
-        let Ok(entries) = self.lmdb_entries() else {
-            return Ok(());
-        };
-        let mut with_table = None;
-        let mut without_table = None;
-        for entry in &entries {
-            let file = DbFile::open(&entry.lmdb).map_err(lmdb_file_error)?;
-            let env = Env::open(&file).map_err(|message| lmdb_open_error(&file, message))?;
-            let has_table = env
-                .open_db(b"acc2oid")
-                .map_err(|message| SeqDbError::Format {
-                    path: entry.lmdb.clone(),
-                    message,
-                })?
-                .is_some();
-            let slot = if has_table {
-                &mut with_table
-            } else {
-                &mut without_table
-            };
-            slot.get_or_insert_with(|| entry.lmdb.clone());
-        }
-        match (with_table, without_table) {
-            (Some(parsed), Some(unparsed)) => Err(SeqDbError::Unsupported {
-                path: unparsed,
-                message: format!(
-                    "the databases mix version 5 files with the accession table of \
-                     makeblastdb -parse_seqids ({}) and without it; NCBI BLAST+ stops with \
-                     \"DB contains no accession info.\" when it reports a hit of the parsed ones",
-                    parsed.display()
-                ),
-            }),
-            _ => Ok(()),
-        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:216-262
@@ -2649,7 +2714,7 @@ impl SeqDb {
     /// of `s_CompareIdList`, which the read of the line refuses in the same words.
     fn check_lines_kept(&self) -> Result<(), SeqDbError> {
         for ordinal in 0..self.num_seqs {
-            let at = self.locate_oid(self.oid(ordinal))?;
+            let at = self.locate_oid(self.oid(ordinal).get())?;
             self.volumes[at.volume].defline_set(at.vol_oid)?;
         }
         Ok(())
@@ -3393,7 +3458,9 @@ mod tests {
             }
             let warning = result.unwrap_or_else(|error| panic!("{line}: {error}"));
             let want: Vec<u32> = rest.iter().map(|oid| oid.parse().unwrap()).collect();
-            let got: Vec<u32> = (0..db.num_seqs()).map(|ordinal| db.oid(ordinal)).collect();
+            let got: Vec<u32> = (0..db.num_seqs())
+                .map(|ordinal| db.oid(ordinal).get())
+                .collect();
             assert_eq!(got, want, "{line}");
             assert_eq!(
                 (db.printed_num_seqs(), db.printed_total_length()),
@@ -3470,7 +3537,7 @@ mod tests {
     fn kept_ids(db: &SeqDb) -> Vec<Vec<String>> {
         (0..db.num_seqs())
             .map(|ordinal| {
-                let at = db.locate_oid(db.oid(ordinal)).unwrap();
+                let at = db.locate_oid(db.oid(ordinal).get()).unwrap();
                 let set = db.volumes[at.volume].defline_set(at.vol_oid).unwrap();
                 set.deflines
                     .iter()
@@ -3521,7 +3588,7 @@ mod tests {
             &mut Vec::new(),
         )
         .unwrap();
-        assert_eq!((db.oid(0), db.ordinal_of(1)), (1, 0));
+        assert_eq!((db.oid(0).get(), db.ordinal_of(1)), (1, 0));
         let lookup = db.seqid_lookup().unwrap();
         let set = db.defline_set(0).unwrap();
         assert_eq!(
@@ -3612,7 +3679,7 @@ mod tests {
             .collect();
         assert!(!gi_only.is_empty());
         for ordinal in 0..db.num_seqs() {
-            let oid = db.oid(ordinal);
+            let oid = db.oid(ordinal).get();
             let at = db.locate_oid(oid).unwrap();
             match db.volumes[at.volume].defline_set(at.vol_oid) {
                 Ok(set) => {

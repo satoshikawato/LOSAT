@@ -288,6 +288,9 @@ fn parse_blastn_args(
         db: None,
         // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
         db_filter: Default::default(),
+        // ... and no database masks (series NP, M4a-2).
+        db_mask: Default::default(),
+        db_mask_resolved: None,
         formatting: Default::default(),
         dbsize: None,
         show_gis: false,
@@ -333,6 +336,7 @@ fn parse_blastn_args(
         // ABI v1 writes no tabular field list.
         tabular_taxdb: None,
         subject_taxdb: None,
+        taxdb_setting: None,
         strand: "both".to_string(),
         // The frozen web ABI v1 (plan TD-1) has no ranges.
         query_loc: None,
@@ -489,6 +493,7 @@ fn parse_tblastx_args(
         strategy: None,
         tabular_taxdb: None,
         subject_taxdb: None,
+        taxdb_setting: None,
         first_query_ordinal: 0,
         matrix_file: None,
     };
@@ -669,7 +674,7 @@ fn parse_blastp_args(
         strategy: None,
         request_inputs: None,
         app: blastp::args::BlastpApp::Blastp,
-        subject_taxdb: None,
+        taxdb_setting: None,
         inclusion_ethresh: None,
         gap_trigger: None,
         sum_stats: false,

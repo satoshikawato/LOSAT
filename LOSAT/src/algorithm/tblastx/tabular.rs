@@ -147,8 +147,6 @@ pub(super) struct TblastxTabular<'a, 'r> {
     /// The default report's tabular subject ids (`sseqid`, `sacc`, `saccver`), by subject index
     /// or rank (`tabular_subject_ids`, `ReportedSubjects::tabular_subject_ids`).
     pub subject_ids: &'a [Arc<[u8]>],
-    /// `sseqid` where it is not `subject_ids` (`common::database::ReportedTabularIds::seq_ids`).
-    pub subject_seq_ids: &'a [Option<Arc<[u8]>>],
     /// By query: whether NCBI did not search its batch (outfmt 7's lines without a count).
     pub unsearched: &'a [bool],
 }
@@ -213,8 +211,8 @@ pub(super) fn write_tblastx_tabular(
         },
         Some(database) => TabularSubjects::Database {
             ids: tab.subject_ids,
-            seq_ids: tab.subject_seq_ids,
             ordinals: &database.reported.ordinals,
+            oids: database.oids,
             records: &database.reported.records,
             parsed: &database.reported.parsed,
             sources: &database.reported.sources,
@@ -240,17 +238,19 @@ pub(super) fn write_tblastx_tabular(
             .map(|(q_idx, query)| crate::report::tax_report::TaxQuery {
                 title: tab.query_titles[q_idx],
                 length: run.ranges.input.placements.length(q_idx, query.seq().len()),
-                hsps: Vec::new(),
+                // A query of a batch that NCBI did not search has no Seq-align-set.
+                hsps: (!tab.unsearched[q_idx]).then(Vec::new),
             })
             .collect();
+        // The HSPs of each query (a query that NCBI did not search has none).
         for hsp in hits {
-            queries[hsp.hit.q_idx as usize]
-                .hsps
-                .push(crate::report::tax_report::TaxHsp {
+            if let Some(hsps) = &mut queries[hsp.hit.q_idx as usize].hsps {
+                hsps.push(crate::report::tax_report::TaxHsp {
                     subject: hsp.hit.s_idx as usize,
                     evalue: hsp.hit.e_value,
                     bit_score: hsp.hit.bit_score,
                 });
+            }
         }
         return crate::algorithm::common::tabular::write_tax_report(
             &subjects,

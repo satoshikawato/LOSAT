@@ -81,11 +81,14 @@ pub(crate) fn add_blastn_sam(
                 // A sequence with parsed Seq-ids is named by an id of its Bioseq
                 // (`ParsedSubject::sam_id`).
                 SubjectNames::Database {
-                    ordinals, parsed, ..
+                    ordinals,
+                    oids,
+                    parsed,
+                    ..
                 } => (
                     match parsed.get(s_idx).and_then(Option::as_deref) {
                         Some(subject) => SeqId::Db(subject.sam_id()),
-                        None => SeqId::BlOrdId(ordinals[s_idx]),
+                        None => SeqId::BlOrdId(oids.oid(ordinals[s_idx])),
                     },
                     0,
                     u64::from(ordinals[s_idx]),

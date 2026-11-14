@@ -35,7 +35,8 @@ pub(crate) struct BdbRecord {
     /// writer prints.
     pub taxname: Option<std::sync::Arc<[u8]>>,
     /// Whether the Bioseq has a source: a definition line with a positive taxid
-    /// (`report::defline::BioseqFacts::has_source`); asked only where the writer prints the title.
+    /// (`report::defline::BioseqFacts::has_source`); asked only for a title as `taxname` (else
+    /// `false`, which writes the same title).
     pub has_source: bool,
     /// IUPACna letters of a nucleotide, NCBIstdaa codes of a protein.
     pub residues: Vec<u8>,
@@ -166,13 +167,14 @@ impl MaskBdbReader {
         // `report::defline::adjust_protein_title_suffix`, which runs for any source: probe of
         // line RG T5c, `T/t5c/out/seg`, `>alpha [Bacillus sp.]` of `alpha, partial [Bacillus
         // sp.]`, `>a` of `a, [ ]` without a name).
-        let has_source = self.title_printed && set.first_source_taxid(None).is_some();
-        let taxname = if self.title_printed
-            && has_source
-            && (bioseq_title_from_source(&title, &bioseq_facts(&ids))
+        // The title is asked first: a printed title that NCBI neither makes from the source nor
+        // rewrites the end of (the reader's usual one) asks nothing of the source.
+        let source_shown = self.title_printed
+            && (bioseq_title_from_source(&title, || bioseq_facts(&ids))
                 || (self.molecule == SeqType::Protein
-                    && crate::report::defline::protein_title_suffix_adjustable(&title)))
-        {
+                    && crate::report::defline::protein_title_suffix_adjustable(&title)));
+        let has_source = source_shown && set.first_source_taxid(None).is_some();
+        let taxname = if has_source {
             self.source_taxname(oid, &set)?
         } else {
             None

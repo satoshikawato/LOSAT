@@ -565,7 +565,8 @@ impl<M: TbxScore> XPairPar<M> {
     //     hits = scansub(lookup_wrap, subject,
     //                               offset_pairs, array_size, scan_range);
     // ```
-    // The scan loop of `scan_unit` (RI:3082-3168 on one unit) once per slice with the slice's table,
+    // The scan loop of `scan_unit` (the reference's, `scan_chunk_plain` with
+    // `word_finder::scan_next_hits`, on one unit) once per slice with the slice's table,
     // in slice order, on the unit's one table (module doc, items 1-3), with `x_hit`, or with
     // `x_hit_batched` of LOSAT_X_TBXEXTBATCH (`B`; the batch flushed at the end of the unit), and
     // LOSAT_X_TBXPREFETCH's hint (`PF`) as in `scan_unit`.
@@ -697,7 +698,7 @@ impl<M: TbxScore> XPairPar<M> {
                         &mut scan_range,
                     );
                     if hits == 0 && scan_range[1] == prev_scan_left {
-                        // The reference's safety guard (RI:3157-3161).
+                        // The reference's safety guard (`word_finder::scan_next_hits`).
                         break;
                     }
                     let diag_ptr = scratch.diag.as_mut_ptr();

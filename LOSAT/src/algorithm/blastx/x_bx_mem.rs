@@ -111,13 +111,18 @@
 //!   alone: with K units at a time the builds were the part of the unit no other thread could
 //!   take (2.7 ms of a 3.6 ms batch at 32 threads, 800 cDNAs x 8 yeast proteins). Build alone (ws,
 //!   a 10,002-base batch's six frames): 7.8 ms on one thread, 1.8 ms in 4 parts on 4 threads.
-//!   The compressed lookup table (`-word_size` 6 and 7, and any table the bucket fill declines;
-//!   line NP, SC9b (2)) is built the same way by the parallel flat builder
-//!   (`tblastx/lookup/x_clut_par.rs`, which gives the argument that the table is the one-thread
-//!   build's), with K the one the search keeps to (`LOSAT_X_BXCLUTCAP`): the build was nearly all
+//!   The compressed lookup table (`-word_size` 5 to 7; line NP, SC9b (2), SC9d, SC9e) is built the
+//!   same way, with K the one the search keeps to (`LOSAT_X_BXCLUTCAP`): the build was nearly all
 //!   of such a unit's work (131 of 138 thread-seconds, 800 cDNAs x scer_pep, word 6, 8 threads).
-//!   Word 5's bucket fill stays on the unit's thread: in parts it took x0.61 of the time and +62 %
-//!   of the maximum RSS.
+//!   Word size 5's by the bucket fill in parts (`tblastx/lookup/x_clut_direct.rs`
+//!   `x_bx_buckets_with`: the query offsets cut into runs, each run's appends in chunks of its
+//!   own, the buckets laid out and filled by ranges), word sizes 6 and 7 by the parallel flat
+//!   builder (`tblastx/lookup/x_clut_par.rs`); each gives the argument that the table is the
+//!   one-thread build's. The parallel flat builder's appends and stripes passes touch each append
+//!   about twice as often as the bucket fill: in their place for word size 5, at 4 threads (3
+//!   units on 4 threads, little idle) its builds took 6 % more instructions than the bucket fill
+//!   on one thread and the run 2-4 % more time. The vectors are a set the pool of BLASTX's tables
+//!   lends (`LOSAT_X_BXCLUTPOOL`), the stripes writing the `u16` offsets.
 //!
 //! Exactness. A subject's computation depends on the subject and the query chunk alone, not on the
 //! diagonal table it runs on, while no diagonal offset passes 2^30 (`x_subject_flow.rs`, module

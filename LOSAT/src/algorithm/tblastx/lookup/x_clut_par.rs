@@ -105,14 +105,6 @@
 //!   cleared and zero-filled. The hits are of the table's offset type `H` (`u16` for BLASTX's query
 //!   batches of at most `X_U16_LETTERS` letters, whose offsets are below 2^16): each stripe writes
 //!   `H::from_offset` of the offset it wrote as `i32`, the same number.
-//! - mapped scratch (line NP, SC9d; memory placement only): a task's targets in the appends pass and
-//!   its copy in the stripe fill have a capacity above glibc's largest mmap threshold
-//!   (`x_mapped_record_entries`, as the bucket fill's record), so that they are mappings of their own,
-//!   their untouched pages not resident and the touched ones returned when the task ends, whichever
-//!   thread ran it. Freed into the pool threads' arenas (glibc raises its mmap threshold to each
-//!   mapped block freed), BLASTX's builds of a table per query batch in parts left each pool thread
-//!   about 2 MiB (word size 5 at 8 threads: +15-20 MB of maximum RSS over the bucket fill on the
-//!   unit's thread; with `MALLOC_ARENA_MAX=1` or a fixed `MALLOC_MMAP_THRESHOLD_`, none).
 //! - kept segments (item SC2d-2, `XSegmentPool`, the block search's): the appends pass takes a kept
 //!   segment before it makes a new one, and the stripes pass keeps at most as many segments as threads
 //!   for the next build, in place of what the pool still holds. A segment's values are not read: each piece writes every entry of its range
@@ -193,10 +185,9 @@ const X_MAX_GUIDED_OFFSETS: usize = 4 * X_MIN_CHUNK_OFFSETS;
 /// the appends of the offset that passes it (512 KiB of targets, in a vector of 1 MiB once an offset
 /// passes it) whatever a chunk's offsets add (about 380 appends per offset with BLOSUM45 and
 /// blastp-fast's threshold, 12,800 at word size 7).
-/// A task's scratch stayed in its pool thread's malloc arena after the pass, so that the threads kept
+/// A task's scratch stays in its pool thread's malloc arena after the pass, so that the threads keep
 /// a piece each between builds: 2^20 appends (4 MiB) per thread raised the peak RSS of BLOSUM45
-/// blastp-fast at 8 threads by about 10 % (SC2d-2). Since SC9d of line NP the targets and the stripe
-/// fill's copy are mapped (module header): their pages go back when the task ends.
+/// blastp-fast at 8 threads by about 10 % (SC2d-2).
 const X_PIECE_APPENDS: usize = 1 << 17;
 /// The most (chunk, stripe) parts the stripe count allows: a stripe reads its part of every piece of
 /// every chunk, so the (piece, stripe) parts are this many times the pieces per chunk (one for
@@ -338,9 +329,7 @@ impl<'r> XAppendsScratch<'r> {
         pool: Option<&'r XSegmentPool>,
     ) -> Self {
         Self {
-            // Line NP, SC9d: mapped (`x_mapped_record_entries`), so that the pages a task writes go
-            // back when it ends (module header).
-            targets: Vec::with_capacity(x_mapped_record_entries()),
+            targets: Vec::new(),
             per_offset: Vec::new(),
             out: XSegmentOut::new(registry, segment, pool),
         }
@@ -495,8 +484,8 @@ pub(super) fn x_try_build_flat_in_pool_of(
 // NCBI builds a query chunk's table on one thread before the search threads start
 // (c++/src/algo/blast/api/prelim_stage.cpp:145-188 starts them for the search); here a BLASTX unit
 // builds it on the threads the unit cap leaves it, the same table (module header).
-/// Item SC9b (2) of line NP: BLASTX's flat table of a query batch with the words of `matrix` (SC9d:
-/// at every word size, `x_clut_direct.rs` `x_flat_in_parts`), built by `parts` tasks of the pool
+/// Item SC9b (2) of line NP: BLASTX's flat table of a query batch with the words of `matrix`, where
+/// the bucket fill declines (`x_clut_direct.rs` `x_flat_in_parts`), built by `parts` tasks of the pool
 /// the build runs on (`LOSAT_X_BXBUILDPAR`, `blastx/x_bx_mem.rs`): the one-latch passes
 /// (`x_one_latch_pass`, the stripes by `x_stripe_fill` as LOSAT_X_BPSTRIPEFILL chooses), without
 /// spare vectors, kept segments or extra tasks, the table's vectors `lent` by BLASTX's pool
@@ -780,6 +769,19 @@ fn x_one_latch_pass<S, R: Send + Sync>(
         .into_iter()
         .map(|result| result.into_inner().expect("every item taken"))
         .collect()
+}
+
+// No NCBI counterpart: scheduling only (line NP, SC9e).
+/// `items` on `threads` tasks of the current pool (the one-latch pass), each task with its own
+/// scratch from `init`: the passes of BLASTX's bucket fill in parts (`x_clut_direct.rs`
+/// `x_bx_buckets_with`). The results in item order.
+pub(super) fn x_items_in_parts<S, R: Send + Sync>(
+    threads: usize,
+    items: usize,
+    init: impl Fn() -> S + Sync,
+    item: impl Fn(&mut S, usize) -> R + Sync,
+) -> Vec<R> {
+    x_one_latch_pass(threads, items, 0, init, item, |_| {})
 }
 
 /// The parameters of `x_try_build_flat_parallel_with` that the module header's argument leaves free
@@ -1181,16 +1183,6 @@ fn x_stripe_build<H: XQueryOffset>(
 /// LOSAT_X_BPSTRIPEFILL: a thread's scratch for `x_stripe_fill`: the copy of the stripe's parts,
 /// the cells' counts (then cursors), the cells of more than 5 offsets.
 type XFillScratch = (Vec<u32>, Vec<u32>, Vec<u32>);
-
-// No NCBI counterpart: memory placement only (line NP, SC9d; module header).
-/// A task's `XFillScratch`, its copy mapped (`x_mapped_record_entries`).
-fn x_fill_scratch() -> XFillScratch {
-    (
-        Vec::with_capacity(x_mapped_record_entries()),
-        Vec::new(),
-        Vec::new(),
-    )
-}
 
 // NCBI reference (598d8ae6): as `x_stripe_build` (blast_aalookup.c:787-849, :1197-1235)
 // ```c
@@ -1742,7 +1734,7 @@ fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
                 threads,
                 parts.len(),
                 0,
-                x_fill_scratch,
+                XFillScratch::default,
                 |scratch, stripe| {
                     let part = parts[stripe]
                         .lock()

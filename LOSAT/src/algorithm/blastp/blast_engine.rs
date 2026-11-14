@@ -10139,9 +10139,9 @@ fn run_call(
     let (lookup, mut contexts) = match args.lookup_table_type {
         // rpsblast: the queries' contexts; the search scans with the database's prebuilt table
         // (`rps_hooks::rps_contexts`).
-        _ if args.rps_search.is_some() => rps_hooks::rps_contexts(&args, &query_frames),
+        _ if args.rps_search.is_some() => rps_hooks::rps_contexts(&args, query_frames),
         // psiblast `-in_pssm`: the lookup table of the PSSM (`pssm_hooks::pssm_lookup`).
-        _ if args.psi_search.is_some() => pssm_hooks::pssm_lookup(&args, &query_frames),
+        _ if args.psi_search.is_some() => pssm_hooks::pssm_lookup(&args, query_frames),
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the preliminary stage in blocks (`x_blocks`): each block
         // builds its own table; this call has the contexts of all queries (`x_blocks_contexts`).
         _ if x_blocks.is_some() => x_blocks_contexts(&args, query_frames, blastp_parallel_pool),
@@ -10155,12 +10155,12 @@ fn run_call(
             None => match super::x_query_blocks::x_bp_aa_block_spare(blastp_parallel_pool) {
                 Some(spare) => blastp_aa_lookup_on_block_spare(
                     &args,
-                    &query_frames,
+                    query_frames,
                     spare,
                     query_chunk,
                     blastp_parallel_pool,
                 ),
-                None => blastp_aa_lookup(&args, &query_frames, query_chunk, blastp_parallel_pool),
+                None => blastp_aa_lookup(&args, query_frames, query_chunk, blastp_parallel_pool),
             },
         },
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
@@ -10175,7 +10175,7 @@ fn run_call(
             Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(prebuilt),
             None => blastp_compressed_lookup(
                 &args,
-                &query_frames,
+                query_frames,
                 &query_batches,
                 &query_lengths,
                 blastp_parallel_pool,
@@ -14757,7 +14757,7 @@ fn run_call(
             .iter()
             .any(|outfmt| matches!(outfmt, BlastpReport::Text(OutputFormat::Pairwise)))
     {
-        let masks = query_record_masks(&query_frames, &ranges.query_input.placements);
+        let masks = query_record_masks(query_frames, &ranges.query_input.placements);
         crate::blastinput::fasta_reader::believed::refuse_shared_masks(
             query_records,
             |query| masks.get(query).is_some_and(|m| !m.is_empty()),
@@ -15077,7 +15077,7 @@ fn run_call(
                     }
                     _ => crate::report::record::SubjectNames::Records(subject_records),
                 };
-                let masks = query_record_masks(&query_frames, &ranges.query_input.placements);
+                let masks = query_record_masks(query_frames, &ranges.query_input.placements);
                 let spans = batch_spans();
                 let call = super::archive::ArchiveCall {
                     handle,
@@ -15185,7 +15185,7 @@ fn run_call(
                     })
                     .collect();
                 let xml_masks: Vec<Vec<crate::report::blast_xml::QueryMask>> =
-                    query_record_masks(&query_frames, &ranges.query_input.placements)
+                    query_record_masks(query_frames, &ranges.query_input.placements)
                         .into_iter()
                         .map(|masks| {
                             masks
@@ -15513,7 +15513,7 @@ fn run_call(
                 let query_masks = match args.app {
                     BlastpApp::Blastp | BlastpApp::Rpsblast => {
                         let masks =
-                            query_record_masks(&query_frames, &ranges.query_input.placements);
+                            query_record_masks(query_frames, &ranges.query_input.placements);
                         (!masks.iter().all(Vec::is_empty)).then_some(masks)
                     }
                     BlastpApp::Psiblast => None,

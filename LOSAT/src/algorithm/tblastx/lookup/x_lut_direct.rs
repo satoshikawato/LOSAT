@@ -1934,8 +1934,8 @@ fn x_laid_out<C: XVec>(
 // identity argument), so the table is the reference table.
 /// The table `build_lookup_from_prepared` returns, built without chains and without a neighbour
 /// memo, every temporary freed by the build (TBLASTN). `Err(prepared)` where `x_build_direct`
-/// declines (diagnostics mode, whose prints read the chains, or a backbone index wider than 16 bits,
-/// which no table of LOSAT's TBLASTN has: word size 3, or 2 with BLOSUM45).
+/// declines (diagnostics mode, whose prints read the chains, or a backbone index wider than 16 bits:
+/// TBLASTN's `-word_size 4`, whose table the joint builder makes, `x_full_wide_table`).
 #[cfg(test)]
 #[inline(never)]
 pub(super) fn x_build_lean(
@@ -2864,7 +2864,15 @@ pub(super) fn x_bp_build_lookup(
     threshold: i32,
     check_ideal: bool,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
-    x_build_direct_or_reference(queries, threshold, check_ideal, |_| {}, x_bp_build_direct)
+    x_build_direct_or_reference(
+        queries,
+        threshold,
+        check_ideal,
+        |_| {},
+        x_bp_build_direct,
+        ScoringMatrix::Blosum62,
+        LOOKUP_WORD_LENGTH,
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
@@ -2967,7 +2975,7 @@ pub(crate) fn x_bp_build_wide_lookup(
 }
 
 /// EXPERIMENT (LOSAT_X_TBXLUT): `true` = TBLASTX's full table built in place by
-/// [`x_tbx_build_direct`], `false` = off (`build_ncbi_lookup`, the chain builder).
+/// [`x_tbx_build_direct`], `false` = off (`build_ncbi_lookup_for_profile`, the chain builder).
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result. A strict-set
 // switch (on unless it is `0`; `utils/xswitch.rs`).
 pub(super) fn x_tbxlut_on() -> bool {
@@ -2985,14 +2993,16 @@ pub(crate) fn x_tbxlut_reach_stub() {
     }
 }
 
-/// EXPERIMENT (LOSAT_X_TBXLUT): `build_ncbi_lookup` for the full table of
-/// a TBLASTX query batch (the table of the reference frame loop), with TBLASTX's switch; the same
-/// builder as BLASTP's [`x_bp_build_lookup`].
+/// EXPERIMENT (LOSAT_X_TBXLUT): `build_ncbi_lookup_for_profile(.., matrix, word_length)` for the
+/// full table of a TBLASTX query batch (the table of the reference frame loop), with TBLASTX's
+/// switch; the same builder as BLASTP's [`x_bp_build_lookup`].
 pub(super) fn x_tbx_build_lookup(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     karlin_params: &KarlinParams,
     check_ideal: bool,
+    matrix: ScoringMatrix,
+    word_length: usize,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
     x_build_ncbi_lookup_with(
         x_tbxlut_on(),
@@ -3002,17 +3012,26 @@ pub(super) fn x_tbx_build_lookup(
         check_ideal,
         |direct| crate::utils::xreach::x_reach!("LOSAT_X_TBXLUT", direct),
         x_tbx_build_direct,
+        matrix,
+        word_length,
     )
 }
 
 /// [`x_build_direct_in`] on a memo of TBLASTX's builds (`x_with_tbx_memo`) instead of the thread's,
 /// so that a run whose batches take the unit path and the full table keeps one memo, as before.
+/// Another matrix than BLOSUM62 or another word length than 3 (item X2e of line RG): TBLASTN's
+/// builders without chains (`x_table_without_chains`: the lean build, 4-letter words the joint
+/// builder), which keep no neighbour memo after the build (a memo of their lists, which the unit
+/// path does not share, raised `-window_size 0 -matrix BLOSUM45 -threshold 1` by 4.5 MB).
 fn x_tbx_build_direct(
     prepared: PreparedLookupQuery,
     threshold: i32,
     matrix: ScoringMatrix,
     word_length: usize,
 ) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
+    if matrix != ScoringMatrix::Blosum62 || word_length != LOOKUP_WORD_LENGTH {
+        return x_table_without_chains(prepared, threshold, matrix, word_length, None);
+    }
     x_with_tbx_memo(|memo| {
         x_build_direct_in::<BackboneCell>(
             prepared,
@@ -3065,9 +3084,11 @@ type XBuildDirect = fn(
     usize,
 ) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery>;
 
-/// The body of [`x_tbx_build_lookup`]: with `direct` false it calls `build_ncbi_lookup`; with
-/// `direct` true it is [`x_build_direct_or_reference`] with `build_direct`. `reach` is called with
-/// `direct` true with whether the direct builder built the table (`LOSAT_X_REACH`).
+/// The body of [`x_tbx_build_lookup`]: with `direct` false it calls
+/// `build_ncbi_lookup_for_profile`; with `direct` true it is [`x_build_direct_or_reference`] with
+/// `build_direct`. `reach` is called with `direct` true with whether the table was built without
+/// the chains (`LOSAT_X_REACH`).
+#[allow(clippy::too_many_arguments)]
 fn x_build_ncbi_lookup_with(
     direct: bool,
     queries: &[Vec<QueryFrame>],
@@ -3076,37 +3097,55 @@ fn x_build_ncbi_lookup_with(
     check_ideal: bool,
     reach: fn(bool),
     build_direct: XBuildDirect,
+    matrix: ScoringMatrix,
+    word_length: usize,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
     if !direct {
-        return build_ncbi_lookup(queries, threshold, karlin_params, check_ideal);
+        return build_ncbi_lookup_for_profile(
+            queries,
+            threshold,
+            karlin_params,
+            check_ideal,
+            matrix,
+            word_length,
+        );
     }
-    x_build_direct_or_reference(queries, threshold, check_ideal, reach, build_direct)
+    x_build_direct_or_reference(
+        queries,
+        threshold,
+        check_ideal,
+        reach,
+        build_direct,
+        matrix,
+        word_length,
+    )
 }
 
 /// The table of [`x_bp_build_lookup`] and of [`x_build_ncbi_lookup_with`] with `direct` true: the
-/// query is prepared as `build_ncbi_lookup_for_profile(.., Blosum62, LOOKUP_WORD_LENGTH)` prepares
-/// it and the table is built with `build_direct` ([`x_tbx_build_direct`] for TBLASTX,
+/// query is prepared as `build_ncbi_lookup_for_profile(.., matrix, word_length)` prepares it and
+/// the table is built with `build_direct` ([`x_tbx_build_direct`] for TBLASTX,
 /// [`x_bp_build_direct`] for BLASTP), falling back to the reference builder where that declines.
-/// `reach` is called with whether the direct builder built the table.
+/// `reach` is called with whether the table was built without the chains.
 fn x_build_direct_or_reference(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     check_ideal: bool,
     reach: fn(bool),
     build_direct: XBuildDirect,
+    matrix: ScoringMatrix,
+    word_length: usize,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
-    let matrix = ScoringMatrix::Blosum62;
-    let prepared = x_bp_prepared_query(queries, check_ideal, matrix, LOOKUP_WORD_LENGTH);
+    let prepared = x_bp_prepared_query(queries, check_ideal, matrix, word_length);
     // build_lookup_from_prepared returns the prepared contexts unchanged.
     let contexts = prepared.contexts.clone();
-    match build_direct(prepared, threshold, matrix, LOOKUP_WORD_LENGTH) {
+    match build_direct(prepared, threshold, matrix, word_length) {
         Ok(table) => {
             reach(true);
             (table, contexts)
         }
         Err(prepared) => {
             reach(false);
-            build_lookup_from_prepared(prepared, threshold, matrix, LOOKUP_WORD_LENGTH)
+            build_lookup_from_prepared(prepared, threshold, matrix, word_length)
         }
     }
 }
@@ -3313,7 +3352,7 @@ mod tests {
     // threshold, mask and matrix at word lengths 2 and 3 (LOSAT's TBLASTN: BLOSUM62 word size 3
     // threshold 13, BLOSUM45 word size 2 threshold 16), with the overflow array reached at each
     // setting, and for a query set without any word; it declines word length 4 (20-bit backbone
-    // indexes), where the reference builder runs.
+    // indexes), whose table the joint builder makes (`x_full_wide_table`; the test after this one).
     #[test]
     fn lean_table_equals_reference_for_thresholds_masks_matrices_and_word_lengths() {
         let mut seed = 11u64;
@@ -3428,6 +3467,97 @@ mod tests {
             4
         )
         .is_err());
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 (module comment:
+    // `s_AddWordHits` for every word of the exact backbone, then `BlastAaLookupFinalize`)
+    // ```c
+    //     for (i = 0; i < lookup->backbone_size; i++) {
+    //         if (exact_backbone[i] != NULL) {
+    //             s_AddWordHits(lookup, matrix, query->sequence,
+    //                           exact_backbone[i], query_bias, row_max);
+    // ```
+    // Item X2e of line RG: the tables TBLASTX's full-table build (`x_tbx_build_lookup`: the direct
+    // builder, 4-letter words the joint builder) and TBLASTN's (`x_lookup_table_for_profile_in`: the
+    // lean builder, 4-letter words the joint builder, also on a pool of 4 and 8 threads) give for
+    // another matrix than BLOSUM62 and every word length are the chain builder's, and TBLASTX's
+    // contexts too.
+    #[test]
+    fn tblastx_and_tblastn_tables_of_other_matrices_and_word_lengths_equal_the_chain_builders() {
+        let mut seed = 41u64;
+        let queries = vec![
+            vec![
+                frame(residues(&mut seed, 330), vec![(10, 40)], 1),
+                frame(residues(&mut seed, 329), vec![], 2),
+                frame(Vec::new(), vec![], 3),
+                frame(residues(&mut seed, 330), vec![(0, 0)], -1),
+            ],
+            vec![frame(residues(&mut seed, 250), vec![], 1)],
+        ];
+        for matrix in [
+            ScoringMatrix::Blosum62,
+            ScoringMatrix::Blosum45,
+            ScoringMatrix::Pam30,
+        ] {
+            let params = crate::stats::lookup_protein_params_ungapped(matrix);
+            for word_length in [2, 3, 4] {
+                for threshold in [0, 7, 11, 13] {
+                    let label =
+                        format!("{matrix:?} word length {word_length} threshold {threshold}");
+                    let (reference, ref_contexts) = build_ncbi_lookup_for_profile(
+                        &queries,
+                        threshold,
+                        &params,
+                        true,
+                        matrix,
+                        word_length,
+                    );
+                    let (got, contexts) =
+                        x_tbx_build_lookup(&queries, threshold, &params, true, matrix, word_length);
+                    x_assert_same_table_as(&format!("TBLASTX {label}:"), &got, &reference);
+                    x_assert_same_contexts(&contexts, &ref_contexts);
+                    let reference = build_ncbi_lookup_for_profile(
+                        &queries,
+                        threshold,
+                        &params,
+                        false,
+                        matrix,
+                        word_length,
+                    )
+                    .0;
+                    let got = x_lookup_table_for_profile_in(
+                        &queries,
+                        threshold,
+                        matrix,
+                        word_length,
+                        None,
+                    );
+                    x_assert_same_table_as(&format!("TBLASTN {label}:"), &got, &reference);
+                    #[cfg(all(
+                        feature = "parallel",
+                        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                    ))]
+                    for threads in [4, 8] {
+                        let pooled =
+                            crate::utils::threading::with_search_pool(threads, "tblastn", |pool| {
+                                Ok(x_lookup_table_for_profile_in(
+                                    &queries,
+                                    threshold,
+                                    matrix,
+                                    word_length,
+                                    Some(pool),
+                                ))
+                            })
+                            .unwrap();
+                        x_assert_same_table_as(
+                            &format!("TBLASTN {label}, {threads} threads:"),
+                            &pooled,
+                            &reference,
+                        );
+                    }
+                }
+            }
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:338-343
@@ -3634,8 +3764,14 @@ mod tests {
         let (reference, ref_contexts) = build_ncbi_lookup(queries, threshold, &params, check_ideal);
         let (got, contexts) = x_bp_build_lookup(queries, threshold, check_ideal);
         x_assert_same_table(&got, &reference);
+        x_assert_same_contexts(&contexts, &ref_contexts);
+        reference.overflow.len()
+    }
+
+    /// Every field of every context the same, the Karlin blocks by their printed values.
+    fn x_assert_same_contexts(contexts: &[QueryContext], ref_contexts: &[QueryContext]) {
         assert_eq!(contexts.len(), ref_contexts.len());
-        for (a, b) in contexts.iter().zip(&ref_contexts) {
+        for (a, b) in contexts.iter().zip(ref_contexts) {
             assert!(
                 a.q_idx == b.q_idx
                     && a.frame == b.frame
@@ -3650,7 +3786,6 @@ mod tests {
                 a.q_idx
             );
         }
-        reference.overflow.len()
     }
 
     /// One BLASTP query: a single frame (as blastp builds them), optionally masked.

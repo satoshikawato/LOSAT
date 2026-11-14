@@ -168,6 +168,12 @@ impl TblastnDatabase {
         self.db.first_oid_read_fails()
     }
 
+    /// What a PSSM search's first read of the database meets (`shared::PsiSearchReadFailure`:
+    /// NCBI's `CPsiBlast` gives SeqDB's own error).
+    pub(super) fn pssm_search_read_failure(&self) -> Option<shared::PsiSearchReadFailure> {
+        shared::PsiSearchReadFailure::of(&self.db)
+    }
+
     /// LOSAT's refusal of statistics of 0 sequences for a search without the Gumbel block
     /// (`shared::check_statistics_count`).
     pub(super) fn check_statistics_count(&self) -> Result<()> {

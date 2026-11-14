@@ -5722,6 +5722,24 @@ fn search_cli(
     // NCBI reads no query input (psiblast_app.cpp:452-471). LOSAT's limits of the PSSM search
     // come when the options are processed and the subjects set up.
     if let Some(psi) = resolved.psi_search.clone() {
+        // A request whose PSSM file has members that the reader skipped, and the input PSSM's files
+        // that NCBI would write back in a way LOSAT does not (`-out_pssm`, `-out_ascii_pssm`, written
+        // in round 1, which a run stopped before its search never reaches): refused once the
+        // database is opened (NCBI's error of a database it cannot open comes first), before any
+        // output.
+        psi.refuse_request_members(args.app.name())?;
+        if psi
+            .stop_before_search(resolved.strategy.is_some(), database.is_some())
+            .is_none()
+        {
+            if let Some(input) = resolved
+                .psi_rounds
+                .as_deref()
+                .and_then(|plan| plan.input.as_ref())
+            {
+                input.refuse_written_back()?;
+            }
+        }
         crate::algorithm::psiblast::in_pssm::check_in_pssm_options(&resolved, &psi)?;
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:482-484 (the formatter's
         // `believe_query` is `-parse_deflines`, with `-in_pssm` too)
@@ -6496,26 +6514,23 @@ fn psiblast_stop_at_invalid_query(
             .as_deref()
             .is_none_or(|psi| psi.ungapped_karlin_valid(&context.karlin_params))
     };
-    // The PSSM query whose letters give no Karlin-Altschul parameters crashes NCBI before (below).
-    let empty_database = database.is_some_and(|database| database.first_oid_read_fails())
-        && contexts
-            .first()
-            .is_some_and(|context| args.psi_search.is_none() || context.is_valid);
-    // A sequence file that cannot be opened stops the first batch when its query is valid (the
-    // first read of the preliminary search; volumes in the order NCBI reads them).
-    let unreadable = match (database, contexts.first()) {
-        (Some(database), Some(context))
-            if !empty_database && context.is_valid && kbp_psi_valid(context) =>
-        {
-            database
-                .seqdb()
-                .volumes()
-                .iter()
-                .find_map(|volume| volume.open_sequence_file().err())
+    // The first read of the database (`PsiSearchReadFailure`, PSI-TBLASTN's too): no OID, or a
+    // sequence file that cannot be opened.
+    use crate::algorithm::common::database::PsiSearchReadFailure;
+    let read_failure = database.and_then(|database| PsiSearchReadFailure::of(database.seqdb()));
+    // NCBI's order (`PsiSearchReadFailure::precedes_setup_checks`): the empty database before the
+    // PSSM's Karlin-Altschul check, for a query with a valid context (the PSSM query whose letters
+    // give no Karlin-Altschul parameters crashes NCBI before, below); a sequence file that cannot
+    // be opened stops the first batch when its query and `kbp_psi` are valid (the first read of the
+    // preliminary search; volumes in the order NCBI reads them).
+    let read_stop = match (&read_failure, contexts.first()) {
+        (Some(failure), Some(context)) if failure.precedes_setup_checks() => {
+            args.psi_search.is_none() || context.is_valid
         }
-        _ => None,
+        (Some(_), Some(context)) => context.is_valid && kbp_psi_valid(context),
+        _ => false,
     };
-    let first_stop = if empty_database || unreadable.is_some() {
+    let first_stop = if read_stop {
         Some(0)
     } else {
         contexts
@@ -6529,15 +6544,9 @@ fn psiblast_stop_at_invalid_query(
     let span = batches.searched_span(searched_start);
     let query_length = searched_queries[searched_start].seq().len();
     let error = match protein_query_split_sizes(10000) {
-        _ if empty_database => crate::cli::NativeError {
-            exit: 2,
-            message: "BLAST Database error: OID not found\n".to_string(),
-        }
-        .into(),
-        _ if unreadable.is_some() => crate::algorithm::common::database::database_error(
-            unreadable.expect("the sequence file's error"),
-            args.app.name(),
-        ),
+        _ if read_stop => read_failure
+            .expect("the first read's failure")
+            .error(args.app.name()),
         // A PSSM query (`-in_pssm`, never split: `check_in_pssm_options`) whose letters give no
         // Karlin-Altschul parameters: NCBI's psiblast crashes (2.17.0, exit 139) where
         // `PsiBlastSetupScoreBlock` reads the `kbp_psi` block that `Blast_ScoreBlkKbpUngappedCalc`
@@ -6628,36 +6637,38 @@ fn psiblast_check_subject_letters(subjects: &[FastaRecord]) -> Result<()> {
     Ok(())
 }
 
-/// psiblast `-in_pssm`: a PSSM that NCBI's `CPsiBlastValidate::Pssm` refuses stops the run at its
-/// one query batch, after the outfmt 0 prolog, with NCBI's engine error (the PSSM is checked
-/// before the query's Karlin-Altschul parameters, `psiblast_stop_at_invalid_query`).
+/// psiblast `-in_pssm`: what stops the run at its one query batch before the PSSM's search, after
+/// the outfmt 0 prolog, with NCBI's error (`PsiSearch::stop_before_search`, the rule tblastn's
+/// `-in_pssm` shares): with `-export_search_strategy` and `-subject` (no database, `database`) the
+/// search strategy's "Remote PSI-BL2SEQ is not supported" (the options error, exit status 1; without
+/// the strategy NCBI runs the search), else a PSSM that NCBI's `CPsiBlastValidate::Pssm` refuses
+/// (the engine error; the PSSM is checked before the query's Karlin-Altschul parameters,
+/// `psiblast_stop_at_invalid_query`), else the PSSM engine's error for the scores of a PSSM of
+/// frequency ratios only. The first two write no request (`QueryBatches::stop_batch` cleared); the
+/// last stops after the request (`stop_batch`: the PSSM query's batch), as NCBI's
+/// `SaveSearchStrategy` comes before `CPsiBlast` (psiblast_app.cpp:340; the local rounds make
+/// `CPsiBlast` later, psiblast_app.cpp:239).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:58-67
-/// ```c++
-/// CPsiBlastImpl::CPsiBlastImpl(CRef<objects::CPssmWithParameters> pssm,
-///                              CRef<CLocalDbAdapter> subject,
-///                              CConstRef<CPSIBlastOptionsHandle> options)
-/// : m_Pssm(pssm), m_Query(0), m_Subject(subject), m_OptsHandle(options),
-///     m_ResultType(eDatabaseSearch)
-/// {
-///     x_Validate();
-///     x_ExtractQueryFromPssm();
-///     x_CreatePssmScoresFromFrequencyRatios();
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:58-67 (quoted at
+/// `PsiSearch::stop_before_search`)
 #[cold]
 #[inline(never)]
-fn psiblast_stop_at_invalid_pssm(
+fn psiblast_stop_at_pssm_query(
     args: &ResolvedBlastpArgs,
+    database: Option<&database::BlastpDatabase>,
     mut batches: crate::blastinput::query_batch::QueryBatches,
 ) -> crate::blastinput::query_batch::QueryBatches {
-    let Some(message) = args
+    let Some(stop) = args
         .psi_search
         .as_deref()
-        .and_then(|psi| psi.validation_error.as_deref())
+        .and_then(|psi| psi.stop_before_search(args.strategy.is_some(), database.is_some()))
     else {
         return batches;
     };
+    let request = stop
+        .after_request()
+        .then(|| batches.first_request_end().map(|end| 0..end))
+        .flatten();
     let warnings = batches
         .warnings
         .first_mut()
@@ -6666,7 +6677,8 @@ fn psiblast_stop_at_invalid_pssm(
     batches.starts.clear();
     batches.input_done = 0;
     batches.searched_done = 0;
-    batches.stop = Some((warnings, crate::blastinput::app::engine_error(message)));
+    batches.stop = Some((warnings, stop.error()));
+    batches.stop_batch = request;
     batches
 }
 
@@ -6862,9 +6874,9 @@ fn search(
     if let Some(refusal) = batches.query_refusal.take() {
         return Err(refusal);
     }
-    // psiblast `-in_pssm`: NCBI's check of the PSSM stops the run at its query
-    // (`psiblast_stop_at_invalid_pssm`).
-    let batches = psiblast_stop_at_invalid_pssm(&args, batches);
+    // psiblast `-in_pssm`: NCBI's check of the PSSM, or the search strategy's request without a
+    // database, stops the run at its query (`psiblast_stop_at_pssm_query`).
+    let batches = psiblast_stop_at_pssm_query(&args, database, batches);
     // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch: a run
     // that stops at its first batch (`batches.starts` empty) gives NCBI's error.
     if !batches.starts.is_empty() {
@@ -7456,6 +7468,7 @@ fn search(
                     .then(|| subject_source.fasta_records()),
                 args.lcase_masking,
                 args.app.name(),
+                args.psi_search.as_ref().and_then(|psi| psi.request_pssm()),
             )
             .write(
                 strategy,
@@ -8597,6 +8610,7 @@ impl<'a> CallRequests<'a> {
                     .then(|| subject_source.fasta_records()),
                 args.lcase_masking,
                 args.app.name(),
+                args.psi_search.as_ref().and_then(|psi| psi.request_pssm()),
             ),
             records: query_records,
             placements: &ranges.query_input.placements,
@@ -14676,6 +14690,7 @@ fn run_call(
         lcase_masking: args.lcase_masking,
         unsearched: &query_batch_skipped,
         spans: &[],
+        label: args.app.name(),
     };
     // The search strategy's requests of the call's batches (`-export_search_strategy`): NCBI has
     // written every one of them before it formats them (`CallRequests`, released where the call

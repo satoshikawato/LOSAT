@@ -3866,7 +3866,8 @@ mod tests {
     }
 
     /// The reference two-hit stage of one subject on one masked table shared by the frames (the
-    /// frame loop of `process_subject` with `scan_chunk_plain`): the batch lookup, `(q - s) &
+    /// frame loop, `frame_chunks::search_subject_frames`, with `scan_chunk_plain`): the batch
+    /// lookup, `(q - s) &
     /// mask`, the same per-hit body, the diagonal offset advanced after every frame
     /// (`Blast_ExtendWordExit`). Returns the sorted init-HSP list of every frame, how often each
     /// branch was taken, and how many hits met a cell whose flag 1 was written by a right extension

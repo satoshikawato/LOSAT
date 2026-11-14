@@ -5811,7 +5811,7 @@ Scheduling (each value computed by one thread with the original function; order 
   16 batches at 8 threads 0.99-1.00.
 - `LOSAT_X_TBXSCANBF=1` TBLASTX (speed; in the strict set since 2026-10-17, on by default; `=0` turns
   it off; `tblastx/x_scan_bf.rs`): the lookup scans of the unit path
-  (`x_pair_par.rs`) and of the reference frame loop (`blast_engine/run_impl.rs`) walk the subject
+  (`x_pair_par.rs`) and of the reference frame loop (`blast_engine/word_finder.rs`) walk the subject
   ranges as NCBI's `s_BlastAaScanSubject` (`blast_aascan.c:48-131`) does and scan each range with
   the branch-free loop of tblastn (TBNSCANBF, graduated; `tblastx/x_aascan_bf.rs` `x_scan_one_range_bf`), passing
   on the room the earlier ranges of the call left, so every call returns NCBI's pairs and scan range

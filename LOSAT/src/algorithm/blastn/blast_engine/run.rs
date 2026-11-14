@@ -9647,8 +9647,8 @@ struct BlastnSubjectRef<'a> {
     x_fenced: Option<&'a std::sync::atomic::AtomicBool>,
     /// The block of the preliminary stage that a database sequence was read in
     /// (`database::block_subject`), whose masks a search with `-db_soft_mask` reads once for all
-    /// its sequences (`database::BlastnDatabase::soft_ranges_into`). `None` otherwise.
-    block: Option<crate::seqdb::BlockRange>,
+    /// its sequences (`database::BlastnDatabase::seq_ranges_into`). `None` otherwise.
+    block: Option<&'a crate::seqdb::BlockRange>,
 }
 
 impl<'a> BlastnSubjectRef<'a> {
@@ -11839,6 +11839,78 @@ fn check_batch_window(args: &BlastnArgs, records: &[FastaRecord]) -> Result<()> 
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321 (quoted at
+// `SubjectScratch::db_masks`)
+/// The ranges of database sequence `s_idx` (length `s_len_full`) of a search with `-db_soft_mask`
+/// or `-db_hard_mask` (the algorithm `algo_id`, the kind `kind`): the complement of its stored
+/// masks, read with the masks of its block (`BlastnDatabase::seq_ranges_into`) into the worker's
+/// buffer, as its soft ranges (`-db_soft_mask`), or as its hard ranges with the full range as its
+/// soft ranges (`-db_hard_mask`, blast_engine.c:162-176), which the caller gives back after the
+/// sequence's chunks. A read error goes to `error_cell` (the first by ordinal id, which the batch
+/// returns after the preliminary stage), and `None` ends the sequence's search. Out of line and
+/// cold: the per-sequence path of a search without the options only tests them.
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn read_db_seq_ranges(
+    database: &database::BlastnDatabase,
+    algo_id: i32,
+    kind: crate::blastinput::db_mask::MaskKind,
+    block: Option<&crate::seqdb::BlockRange>,
+    s_idx: usize,
+    s_len_full: usize,
+    subject_scratch: &mut SubjectScratch,
+    error_cell: &std::sync::Mutex<Option<(u32, anyhow::Error)>>,
+) -> Option<(Vec<(i32, i32)>, Option<Vec<(i32, i32)>>)> {
+    let hard = kind == crate::blastinput::db_mask::MaskKind::Hard;
+    let mut ranges = std::mem::take(if hard {
+        &mut subject_scratch.db_hard_ranges
+    } else {
+        &mut subject_scratch.db_soft_ranges
+    });
+    let read = match block {
+        Some(&block) => database.seq_ranges_into(
+            block,
+            s_idx as u32,
+            algo_id,
+            s_len_full,
+            &mut subject_scratch.db_masks,
+            &mut ranges,
+        ),
+        None => Err(anyhow::anyhow!(
+            "LOSAT internal error: database sequence {s_idx} was searched without its block"
+        )),
+    };
+    if let Err(error) = read {
+        let mut first = error_cell.lock().expect("the error cell is not poisoned");
+        if first
+            .as_ref()
+            .is_none_or(|(smallest, _)| (s_idx as u32) < *smallest)
+        {
+            *first = Some((s_idx as u32, error));
+        }
+        if hard {
+            subject_scratch.db_hard_ranges = ranges;
+        } else {
+            subject_scratch.db_soft_ranges = ranges;
+        }
+        return None;
+    }
+    if !hard {
+        return Some((ranges, None));
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:162-164
+    // ```c
+    //     backup->soft_ranges = &(backup->full_range);
+    //     backup->num_soft_ranges = 1;
+    //     backup->sm_index = 0;
+    // ```
+    let mut full = std::mem::take(&mut subject_scratch.db_soft_ranges);
+    full.clear();
+    full.push((0, s_len_full as i32));
+    Some((full, Some(ranges)))
+}
+
 /// Searches one query batch against the subjects, with the query block, lookup table and
 /// diagonal table of the batch, as NCBI's `CLocalBlast` does for each batch that
 /// `run_in_pool` reads. `x_keep`: the batch loop's keep of LOSAT_X_MBLUTKEEP, which the batch's
@@ -12617,7 +12689,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     // size the next batch.
     let good_init_extends = std::sync::atomic::AtomicU64::new(0);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321 (quoted at
-    // `SubjectScratch::db_mask_read`)
+    // `SubjectScratch::db_masks`)
     // A database search with `-db_soft_mask` or `-db_hard_mask` (the formatter's `ResolvedMask`):
     // the database, the algorithm whose masks every database sequence's preliminary search reads
     // (`BlastnDatabase::seq_ranges_into`) and the kind, and the first error of those reads by
@@ -12772,81 +12844,44 @@ fn search_query_batch<const UNGAPPED: bool>(
             (None, Some(store)) if lcase_masking => store.lowercase().to_vec(),
             _ => Vec::new(),
         };
+        // Unmasked, every chunk carries its range inline (`SeqRanges::Inline`) and no one reads
+        // the soft ranges, so none are made (NCBI points them at `full_range`).
+        let mut subject_masked = !subject_masks.is_empty();
+        let mut soft_ranges = if subject_masked {
+            build_subject_seq_ranges_from_masks(subject_masks.as_slice(), s_len_full)
+        } else {
+            Vec::new()
+        };
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:399-405 (quoted at
-        // `SubjectScratch::db_mask_read`)
+        // `SubjectScratch::db_masks`)
         // With `-db_soft_mask` or `-db_hard_mask` every database sequence is a masked subject
         // (its mask type is set whether or not it has masks; decision D3 of M4a-2): the
         // complement of its stored masks (`BlastnDatabase::seq_ranges_into`), read by the
         // preliminary stage only (the traceback scans nothing), is its soft ranges or, with
         // `-db_hard_mask`, its hard ranges (series NP, M4a-2b decision H1).
+        // The read is out of line (`read_db_seq_ranges`, cold): a search without the options
+        // pays one test of `db_mask` per sequence and keeps its registers.
+        let db_masked = db_mask.is_some() && prelim_source.is_none();
         let mut db_hard_ranges: Option<Vec<(i32, i32)>> = None;
-        let db_soft_ranges = match db_mask.filter(|_| prelim_source.is_none()) {
-            Some((database, algo_id, kind)) => {
-                let hard = kind == crate::blastinput::db_mask::MaskKind::Hard;
-                let mut ranges = std::mem::take(if hard {
-                    &mut subject_scratch.db_hard_ranges
-                } else {
-                    &mut subject_scratch.db_soft_ranges
-                });
-                let read = match subject.block {
-                    Some(block) => database.seq_ranges_into(
-                        block,
-                        s_idx as u32,
-                        algo_id,
-                        s_len_full,
-                        &mut subject_scratch.db_masks,
-                        &mut ranges,
-                    ),
-                    None => Err(anyhow::anyhow!(
-                        "LOSAT internal error: database sequence {s_idx} was searched without its block"
-                    )),
-                };
-                if let Err(error) = read {
-                    let mut first = db_mask_error
-                        .lock()
-                        .expect("the error cell is not poisoned");
-                    if first
-                        .as_ref()
-                        .is_none_or(|(smallest, _)| (s_idx as u32) < *smallest)
-                    {
-                        *first = Some((s_idx as u32, error));
-                    }
-                    if hard {
-                        subject_scratch.db_hard_ranges = ranges;
-                    } else {
-                        subject_scratch.db_soft_ranges = ranges;
-                    }
-                    return;
+        if let (true, Some((database, algo_id, kind))) = (db_masked, db_mask) {
+            match read_db_seq_ranges(
+                database,
+                algo_id,
+                kind,
+                subject.block,
+                s_idx,
+                s_len_full,
+                subject_scratch,
+                &db_mask_error,
+            ) {
+                Some((ranges, hard)) => {
+                    soft_ranges = ranges;
+                    db_hard_ranges = hard;
+                    subject_masked = true;
                 }
-                if hard {
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:162-164
-                    // ```c
-                    //     backup->soft_ranges = &(backup->full_range);
-                    //     backup->num_soft_ranges = 1;
-                    //     backup->sm_index = 0;
-                    // ```
-                    let mut full = std::mem::take(&mut subject_scratch.db_soft_ranges);
-                    full.clear();
-                    full.push((0, s_len_full as i32));
-                    db_hard_ranges = Some(ranges);
-                    Some(full)
-                } else {
-                    Some(ranges)
-                }
+                None => return,
             }
-            None => None,
-        };
-        let db_masked = db_soft_ranges.is_some();
-        let subject_masked = db_masked || !subject_masks.is_empty();
-        // Unmasked, every chunk carries its range inline (`SeqRanges::Inline`) and no one reads
-        // the soft ranges, so none are made (NCBI points them at `full_range`).
-        let soft_ranges = match db_soft_ranges {
-            Some(ranges) => ranges,
-            None if subject_masked => {
-                build_subject_seq_ranges_from_masks(subject_masks.as_slice(), s_len_full)
-            }
-            None => Vec::new(),
-        };
+        }
 
         if s_len_full < effective_word_size {
             if db_masked {

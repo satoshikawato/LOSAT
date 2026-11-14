@@ -67,8 +67,8 @@ pub const USAGE: &str = include_str!("usage.txt");
 // rpsblast's copied, not flattened: a flattened group would change the order of the options).
 // The search runs with BLASTX's driver and the RPS engine (`into_blastx_args`). Composition-based
 // statistics 1 to 3 (the default 1), `-searchsp`, `-dbsize` and `OLD_FSC` are refused until the
-// later items of series PR run them (PS12b, PS12a phase B); `-html`, the remote and the search
-// strategy options by the parser (`cli.rs` `is_unported_rpstblastn_arg`).
+// later items of series PR run them (PS12b, PS12a phase B); `-html`, the remote options and
+// `-import_search_strategy` by the parser (`cli.rs` `is_unported_rpstblastn_arg`).
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct RpstblastnArgs {
@@ -86,6 +86,11 @@ pub struct RpstblastnArgs {
     pub db: Option<String>,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
+    /// The search strategy file (`-export_search_strategy`, quoted at
+    /// `BlastpArgs::export_search_strategy`), created by the search's `run` before the other options
+    /// are read.
+    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     #[arg(long, value_parser = rpstblastn_real)]
     pub evalue: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
@@ -225,6 +230,7 @@ impl RpstblastnArgs {
             use_sw_tback: self.use_sw_tback,
             comp_based_stats: self.comp_based_stats.clone(),
             several_volumes: false,
+            costs: None,
         })
     }
 
@@ -233,6 +239,10 @@ impl RpstblastnArgs {
     pub fn into_blastx_args(self) -> Result<BlastxArgs> {
         let search = self.rps_search()?;
         let requested_cbs = search.search.requested_cbs;
+        let request_inputs = self
+            .export_search_strategy
+            .is_some()
+            .then(|| Box::new(self.option_inputs()));
         Ok(BlastxArgs {
             query: self.query,
             subject: None,
@@ -253,8 +263,7 @@ impl RpstblastnArgs {
             xdrop_gap: None,
             xdrop_gap_final: None,
             out: self.out,
-            // rpstblastn refuses the search strategy options (`cli::is_unported_rpstblastn_arg`).
-            export_search_strategy: None,
+            export_search_strategy: self.export_search_strategy,
             task: "blastx".to_string(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:60-67
             // ```c++
@@ -325,8 +334,41 @@ impl RpstblastnArgs {
             // search with composition-based statistics is BLASTX's (`resolve`).
             comp_based_stats: requested_cbs.to_string(),
             rpstblastn: Some(Arc::new(search)),
+            request_inputs,
             subject_taxdb: None,
+            matrix_search: None,
         })
+    }
+
+    /// The options that rpstblastn's search strategy requests record
+    /// (`options::algorithm_options` of `RequestKind::Rpstblastn`: NCBI's argument classes of
+    /// `rpstblastn_args.cpp`), from the arguments as given (`-strand` is never recorded).
+    /// `HitlistSize` is the request's (`StrategyExport::for_run`).
+    pub(crate) fn option_inputs(&self) -> crate::report::archive::options::OptionInputs {
+        use crate::report::archive::options::{seg_filter, OptionInputs, RequestKind};
+        let mut inputs = OptionInputs::new(RequestKind::Rpstblastn, "rpstblastn");
+        inputs.dbsize = self.dbsize;
+        inputs.searchsp = self.searchsp;
+        inputs.evalue = self.evalue;
+        // `-xdrop_ungap` is never recorded (`SetXDropoff` has no remote option).
+        inputs.xdrop_gap = self.xdrop_gap;
+        inputs.xdrop_gap_final = self.xdrop_gap_final;
+        inputs.qcov_hsp_perc = self.qcov_hsp_perc;
+        inputs.max_hsps = self.max_hsps_per_subject.map(|count| count as i32);
+        inputs.sum_stats = self.sum_stats;
+        inputs.query_gencode = i32::from(self.query_gencode);
+        inputs.window_size = self.window_size;
+        inputs.soft_masking = self.soft_masking;
+        inputs.seg = self
+            .seg
+            .as_deref()
+            .and_then(|value| seg_filter(value, "RPSTBLASTN"));
+        inputs.ungapped = self.ungapped;
+        inputs.comp_based_stats = i32::from(
+            crate::algorithm::rpsblast::args::rps_composition_mode(&self.comp_based_stats),
+        );
+        inputs.use_sw_tback = self.use_sw_tback;
+        inputs
     }
 }
 

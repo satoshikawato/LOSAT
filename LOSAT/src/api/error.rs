@@ -3,7 +3,7 @@
 //! NCBI reports the three kinds of failure of a search separately: the arguments
 //! (`CArgException`, `CInputException`), the input sequences (`CObjReaderParseException`) and
 //! the search itself (`CBlastException`). The message of each kind is the command line's
-//! (`LOSAT::cli::render_message` for the parser, the error and its causes joined by `: ` for the
+//! (`losat::cli::render_message` for the parser, the error and its causes joined by `: ` for the
 //! others, as LOSAT Web ABI v2 reports them; docs/web/abi_v2.md §4).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184

@@ -159,6 +159,15 @@ jobs:
         run: cd LOSAT && cargo doc --locked --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
+      # No NCBI counterpart: the rustdoc of the crate's private items builds without a warning too
+      # (line LIB, P-V5b: 49 had gathered in the modules that were `#[doc(hidden)] pub` before
+      # P-V5). A step of its own: with `--document-private-items` rustdoc no longer checks the
+      # public docs' links to private items (`rustdoc::private_intra_doc_links`), which the step
+      # above does.
+      - name: rustdoc of private items (no warnings)
+        run: cd LOSAT && cargo doc --locked --no-deps --all-features --document-private-items
+        env:
+          RUSTDOCFLAGS: -D warnings
       # No NCBI counterpart: supply-chain checks of the dependencies (SWEBOK 2026-11-04 audit,
       # KA13/KA15). The licenses, sources and bans of deny.toml over the three lock files, whose
       # result changes only with the lock files. Not --locked: whether python/Cargo.lock is current
@@ -305,7 +314,7 @@ jobs:
           LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
 
   # No NCBI counterpart: the library's own surface (docs/losat_library_surface_plan.md §14). The
-  # public API of `LOSAT::api`, as cargo-public-api lists it, must equal LOSAT/tests/public_api.txt,
+  # public API of `losat::api`, as cargo-public-api lists it, must equal LOSAT/tests/public_api.txt,
   # so that a change of the surface is a reviewed line of the pull request's diff. cargo-public-api
   # builds rustdoc JSON with a nightly toolchain and reads rustdoc JSON format 57; the tool and the
   # toolchain are pinned here and in the script (test_check_public_api.py checks that they agree).
@@ -331,7 +340,7 @@ jobs:
       # rust-cache keeps ~/.cargo/bin, so a cached run finds it installed.
       - name: cargo-public-api
         run: cargo install --locked cargo-public-api@0.52.0
-      - name: Public API of LOSAT::api
+      - name: Public API of losat::api
         run: python3 LOSAT/tests/check_public_api.py check --out "$RUNNER_TEMP/public_api.txt"
       # The listing to commit when the change is deliberate (or run the script's `update`).
       - name: Upload the current listing
@@ -342,7 +351,7 @@ jobs:
           path: ${{ runner.temp }}/public_api.txt
 
   # No NCBI counterpart. A report, not a gate, until the crate is first published: semver breaks of
-  # `LOSAT::api` against the pull request's base commit (cargo-semver-checks; same nightly as
+  # `losat::api` against the pull request's base commit (cargo-semver-checks; same nightly as
   # `public-api`, rustdoc JSON format 57) go to the job summary and a warning. After the first
   # publication the baseline becomes the published version (docs/losat_library_surface_plan.md §14).
   semver-checks:
@@ -367,7 +376,7 @@ jobs:
       - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
         with:
           tool: cargo-semver-checks@0.51.0
-      - name: Semver checks of LOSAT::api against the base
+      - name: Semver checks of losat::api against the base
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |

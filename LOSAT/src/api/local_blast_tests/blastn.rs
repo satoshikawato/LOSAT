@@ -1,6 +1,6 @@
 //! The shared BLASTN entry `run_local` in process: what the entry itself does, not what the
 //! command line writes. The tests that compare the entry's reports with the `losat` binary go
-//! through `LOSAT::api` (`LOSAT/tests/run_local_blastn.rs`).
+//! through `losat::api` (`LOSAT/tests/run_local_blastn.rs`).
 
 use super::support::{
     assert_observer_ranges, fixture_sequence, reader_records, run_formats, Run, TempFasta,

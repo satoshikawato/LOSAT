@@ -16,7 +16,7 @@ def toml(path: Path) -> dict:
 
 def test_the_engine_is_reached_through_the_api_only():
     for path in (PYTHON / "src").glob("*.rs"):
-        assert set(re.findall(r"\bLOSAT::(\w+)", path.read_text())) <= {"api"}, path
+        assert set(re.findall(r"\blosat::(\w+)", path.read_text())) <= {"api"}, path
 
 
 def test_the_process_stays_the_hosts():

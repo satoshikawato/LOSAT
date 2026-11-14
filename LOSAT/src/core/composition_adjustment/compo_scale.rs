@@ -439,6 +439,9 @@ pub(crate) fn scale_pssm(
 /// `Blast_CompositionBasedStats` for a PSSM (`positionBased`, no composition p-value): `matrix`
 /// becomes the PSSM of `info` scaled for a subject of the letter probabilities `subject_prob`;
 /// returns the lambda ratio (`LambdaRatio`).
+// Inlined into each of its callers (the X-drop redo and the Smith-Waterman redo of PS11c-3), as into
+// the X-drop redo when it was the only one: psiblast's redo keeps its machine code.
+#[inline(always)]
 pub(crate) fn pssm_composition_based_stats(
     matrix: &mut [[i32; BLASTAA_SIZE]],
     info: &PosMatrixInfo,

@@ -115,6 +115,9 @@ impl RedoMatch<'_> {
     ///         }
     ///     }
     /// ```
+    // One function for the window loop and the steps after it, called by RPS-BLAST's traceback
+    // per profile where `-use_sw_tback` asks for it (its X-drop redo keeps its own code).
+    #[inline(never)]
     pub(crate) fn redo_match_smith_waterman(
         &self,
         run: &mut RedoRun<'_>,

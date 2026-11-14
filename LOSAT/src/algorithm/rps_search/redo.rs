@@ -250,15 +250,16 @@ impl RpsTraceback<'_> {
                 let heap = sw_heap.get_or_insert_with(|| {
                     BlastCompoHeap::new(self.hitlist_size, PSI_INCLUSION_ETHRESH)
                 });
-                redo_match
-                    .redo_match_smith_waterman(&mut run, &mut scratch.sw, heap, list.oid, &hsps, query)
-                    .map_err(|SwEndless| {
-                        anyhow::anyhow!(
-                            "a profile whose Smith-Waterman redo (-use_sw_tback) finds an alignment of score 0 below the E-value threshold, which NCBI BLAST+ 2.17.0 repeats without end, is not supported by LOSAT's RPSBLAST"
-                        )
-                    })?
+                redo_match.redo_match_smith_waterman(
+                    &mut run,
+                    &mut scratch.sw,
+                    heap,
+                    list.oid,
+                    &hsps,
+                    query,
+                )
             } else {
-                redo_match.redo_match(&mut run, list.oid, &hsps, query)
+                Ok(redo_match.redo_match(&mut run, list.oid, &hsps, query))
             };
             let exceeded = run.bound_exceeded();
             let (matrix, gap) = run.into_buffers();
@@ -268,6 +269,11 @@ impl RpsTraceback<'_> {
                     "a profile whose composition-adjusted scores can add up to {bound} (above 2147483647, where NCBI BLAST+'s 32-bit scores overflow) is not supported by LOSAT's RPSBLAST"
                 );
             }
+            let redone = redone.map_err(|SwEndless| {
+                anyhow::anyhow!(
+                    "a profile whose Smith-Waterman redo (-use_sw_tback) finds an alignment of score 0 below the E-value threshold after an earlier alignment, which NCBI BLAST+ 2.17.0 makes again and again without end, is not supported by LOSAT's RPSBLAST"
+                )
+            })?;
             scratch.pssm.rows = matrix.rows;
             scratch.gap = gap;
             // The list's HSPs are switched back and sorted even if none is left, and a list

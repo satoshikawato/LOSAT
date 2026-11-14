@@ -38,17 +38,26 @@ use std::process::{Command, Stdio};
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 
 /// The taxonomy database's text of B's lookup (`offset_last_past_end`).
+#[cfg(target_os = "linux")]
 const OFFSET_ERROR: &str = "Error: [blastp] Error: Offset error at end of taxdb file.\n";
 
 /// A case: its name, whether the second query (else the first) has the title, the title's
-/// length, and the `-out` file's room, exit status and standard error under `prlimit --fsize`.
+/// length, and (Linux, `prlimit`) its `-out` file under `prlimit --fsize`.
 struct Case {
     name: &'static str,
     second_titled: bool,
     title: usize,
+    #[cfg(target_os = "linux")]
+    fsize: Fsize,
+}
+
+/// The `-out` file of a case under `prlimit --fsize`: its room, and the run's exit status and
+/// standard error.
+#[cfg(target_os = "linux")]
+struct Fsize {
     room: u64,
-    fsize_exit: i32,
-    fsize_stderr: &'static [&'static str],
+    exit: i32,
+    stderr: &'static [&'static str],
 }
 
 const CASES: &[Case] = &[
@@ -56,17 +65,23 @@ const CASES: &[Case] = &[
         name: "length",
         second_titled: true,
         title: 7441,
-        room: 8195,
-        fsize_exit: 6,
-        fsize_stderr: &[OFFSET_ERROR, OFFSET_ERROR, "BLAST failed to write output\n"],
+        #[cfg(target_os = "linux")]
+        fsize: Fsize {
+            room: 8195,
+            exit: 6,
+            stderr: &[OFFSET_ERROR, OFFSET_ERROR, "BLAST failed to write output\n"],
+        },
     },
     Case {
         name: "query",
         second_titled: false,
         title: 7447,
-        room: 8192,
-        fsize_exit: 0,
-        fsize_stderr: &[OFFSET_ERROR, OFFSET_ERROR, OFFSET_ERROR],
+        #[cfg(target_os = "linux")]
+        fsize: Fsize {
+            room: 8192,
+            exit: 0,
+            stderr: &[OFFSET_ERROR, OFFSET_ERROR, OFFSET_ERROR],
+        },
     },
 ];
 
@@ -269,7 +284,7 @@ fn a_full_out_file_fails_where_ncbis_buffer_writes() {
         let dir = scratch(&format!("{}-fsize", case.name));
         let out = dir.join("report.out");
         let report = command(case, &dir, "1", &["-out", out.to_str().unwrap()]);
-        let output = under_fsize(&report, case.room, Stdio::null());
+        let output = under_fsize(&report, case.fsize.room, Stdio::null());
         let written = std::fs::read(&out).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(
@@ -277,7 +292,7 @@ fn a_full_out_file_fails_where_ncbis_buffer_writes() {
                 output.status.code(),
                 String::from_utf8_lossy(&output.stderr)
             ),
-            (Some(case.fsize_exit), case.fsize_stderr.concat().into()),
+            (Some(case.fsize.exit), case.fsize.stderr.concat().into()),
             "{}",
             case.name
         );
@@ -287,7 +302,7 @@ fn a_full_out_file_fails_where_ncbis_buffer_writes() {
             .unwrap()
             .replace(OFFSET_ERROR, "");
         assert!(
-            written == report.as_bytes()[..case.room as usize],
+            written == report.as_bytes()[..case.fsize.room as usize],
             "{}",
             case.name
         );
@@ -368,6 +383,7 @@ fn a_held_blastx_report_is_written_where_ncbis_buffer_writes_it() {
 /// A (the first volume of `vol2_nophr`), q2 encodes B (the second volume, whose header file is
 /// missing) and has a hyphen, q3's title is `q3 café` (`held`), which the search strategy cannot
 /// write, so the run holds its output from the start, or `q3 cafe`; written into `dir`.
+#[cfg(unix)]
 fn hold_error_query(dir: &Path, held: bool) -> PathBuf {
     let query = String::from_utf8(fixture("blastx_hold_error.fna")).unwrap();
     let path = dir.join("query.fna");
@@ -384,6 +400,7 @@ fn hold_error_query(dir: &Path, held: bool) -> PathBuf {
 
 /// Review 5's probe: blastx `-outfmt 18 -max_target_seqs 1 -export_search_strategy` of
 /// `hold_error_query` against `vol2_nophr` with `BATCH_SIZE=1`, in `dir`, at `threads` threads.
+#[cfg(unix)]
 fn hold_error_run(dir: &Path, threads: &str, held: bool) -> Command {
     let query = hold_error_query(dir, held);
     let mut run = losat("blastx", dir, threads);
@@ -471,6 +488,7 @@ fn a_held_blastx_run_on_a_full_standard_output_reports_the_failed_write() {
 }
 
 /// LOSAT's refusal of a query whose batch is not searched (`TaxReport::write_query`) in `program`.
+#[cfg(unix)]
 fn unsearched_refusal(program: &str) -> String {
     format!(
         "Error: the organism report (outfmt 18) of a query that is not searched (no query of its batch has a valid context: \"Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options\"), where NCBI BLAST+ stops with a null pointer exception; this is not supported by LOSAT's {program}\n"

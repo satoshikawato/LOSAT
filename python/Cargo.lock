@@ -3,22 +3,6 @@
 version = 4
 
 [[package]]
-name = "LOSAT"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "bzip2",
- "clap",
- "flate2",
- "indicatif",
- "rayon",
- "rustc-hash",
- "rustix",
- "ruzstd",
- "windows-sys",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -578,6 +562,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
+name = "losat"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "bzip2",
+ "clap",
+ "flate2",
+ "indicatif",
+ "rayon",
+ "rustc-hash",
+ "rustix",
+ "ruzstd",
+ "windows-sys",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -652,10 +652,10 @@ dependencies = [
 name = "pylosat"
 version = "0.1.0"
 dependencies = [
- "LOSAT",
  "arrow-array",
  "arrow-ipc",
  "arrow-schema",
+ "losat",
  "pyo3",
  "self_cell",
 ]

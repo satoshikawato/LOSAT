@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "pcs_prf_y",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pcs_prf_y (parsed Seq-ids)",
+  "number-of-letters": 250,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-14T09:13:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49674,
+  "bytes-to-cache": 372,
+  "files": [
+    "pcs_prf_y.pdb",
+    "pcs_prf_y.phr",
+    "pcs_prf_y.pin",
+    "pcs_prf_y.pog",
+    "pcs_prf_y.pos",
+    "pcs_prf_y.pot",
+    "pcs_prf_y.psq",
+    "pcs_prf_y.ptf",
+    "pcs_prf_y.pto"
+  ]
+}

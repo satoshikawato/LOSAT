@@ -62,9 +62,13 @@ fn run_words(words: &[String], date: &str, dirs: &[&Path]) -> Output {
     );
     let cut = |bytes: Vec<u8>| {
         let mut bytes = bytes;
+        // A file named by `Path::join` is `<dir>\<name>` on Windows, one built by `format!` is
+        // `<dir>/<name>`: both prefixes go.
         for dir in dirs {
-            let prefix = format!("{}/", dir.display());
-            bytes = replace_bytes(&bytes, prefix.as_bytes(), b"");
+            for separator in ['/', std::path::MAIN_SEPARATOR] {
+                let prefix = format!("{}{separator}", dir.display());
+                bytes = replace_bytes(&bytes, prefix.as_bytes(), b"");
+            }
         }
         bytes
     };

@@ -26,7 +26,6 @@ use super::seqalign::{query_records, EngineCounts};
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
-use crate::blastinput::value_parsers::SegSpec;
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
@@ -41,8 +40,12 @@ use crate::stats::tables::KarlinParams;
 
 /// The recorded options of a BLASTP run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
-/// always sets it (`S/DESIGN_OF8.md` 2.2).
+/// always sets it (`S/DESIGN_OF8.md` 2.2). An application whose search is BLASTP's (psiblast,
+/// rpsblast) gives its own (`BlastpArgs::request_inputs`), made from these and its arguments.
 pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
+    if let Some(inputs) = &args.request_inputs {
+        return OptionInputs::clone(inputs);
+    }
     let mut inputs = OptionInputs::new(Program::Blastp, &args.task);
     inputs.dbsize = args.dbsize;
     inputs.searchsp = args.searchsp;
@@ -86,19 +89,7 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
         .seg
         .as_deref()
         .and_then(|value| crate::blastinput::app::parse_seg_option(value, "BLASTP").ok())
-        .map(|spec| match spec {
-            SegSpec::No => Filter::No,
-            SegSpec::Yes => Filter::Yes,
-            SegSpec::WindowLocutHicut {
-                window,
-                locut,
-                hicut,
-            } => Filter::Seg {
-                window,
-                locut,
-                hicut,
-            },
-        });
+        .map(Filter::from);
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
@@ -126,16 +117,18 @@ pub(crate) fn handle_for(
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
     let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
-    ArchiveHandle::for_program(&option_inputs(args), database, "BLASTP", options).map(Some)
+    ArchiveHandle::for_program(&option_inputs(args), database, args.app.name(), options).map(Some)
 }
 
 /// The requests of a run's batches (`RunRequests`): protein queries and subjects (the `-subject`
 /// records `subjects`, `None` for `-db`), and with `-lcase_masking` (`lcase_masking`) one `notset`
-/// mask of each query's lower-case runs (SEG is never one).
-pub(crate) fn requests(
-    subjects: Option<&[FastaRecord]>,
+/// mask of each query's lower-case runs (SEG is never one); `label` names the application
+/// (`BlastpApp::name`) in a refusal.
+pub(crate) fn requests<'a>(
+    subjects: Option<&'a [FastaRecord]>,
     lcase_masking: bool,
-) -> RunRequests<'_, FastaRecord> {
+    label: &'static str,
+) -> RunRequests<'a, FastaRecord> {
     RunRequests::new(
         RequestPolicy {
             query_protein: true,
@@ -143,19 +136,20 @@ pub(crate) fn requests(
             lcase: lcase_masking.then_some(LcaseFrames::NotSet),
         },
         subjects,
-        "BLASTP",
+        label,
     )
 }
 
 /// `report::archive::check_request_titles` for BLASTP's records: the archive's (`archive`) and
-/// the search strategy's (`strategy`).
+/// the search strategy's (`strategy`); `label` names the application (`BlastpApp::name`).
 pub(crate) fn check_request_titles(
     records: &[FastaRecord],
     role: &str,
+    label: &str,
     archive: bool,
     strategy: bool,
 ) -> Result<()> {
-    crate::report::archive::check_request_titles(records, role, "BLASTP", archive, strategy)
+    crate::report::archive::check_request_titles(records, role, label, archive, strategy)
 }
 
 pub(crate) use crate::report::archive::error_lines;
@@ -273,7 +267,7 @@ pub(crate) fn for_each_batch(
     } else {
         call.spans
     };
-    let requests = requests(call.subject_records, call.lcase_masking);
+    let requests = requests(call.subject_records, call.lcase_masking, "BLASTP");
     for span in spans.iter().cloned() {
         if span.is_empty() {
             continue;

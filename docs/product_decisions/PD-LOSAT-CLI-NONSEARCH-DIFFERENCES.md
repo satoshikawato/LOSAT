@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.20
+- Version: 1.21
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -35,7 +35,9 @@
   closed pipe there; line RG item E3, RG DECISIONS E3-1 to E3-4, Owner-delegated, the same
   standing instruction); 1.20 2026-11-14 (`-xmlhelp` runs on the command line of every program:
   NCBI's XML without the arguments that LOSAT refuses by name, exception 1; line RG item E2x,
-  the Owner's choice of 2026-11-13, RG DECISIONS E2x-1)
+  the Owner's choice of 2026-11-13, RG DECISIONS E2x-1); 1.21 2026-11-14 (the library API runs
+  `-logfile`, `-conffile` and `-dryrun` as the command line does; line RG item E1w-2, RG DECISIONS
+  E1w2-1 to E1w2-11, Owner-delegated, the same standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -248,16 +250,22 @@ BLAST+.
   Since version 1.11 `-logfile` and `-conffile` are no longer refused on the command line of
   BLASTN, BLASTP, BLASTX, TBLASTN, TBLASTX, PSIBLAST and RPSBLAST (and `-conffile` of
   makeblastdb and blastdbcmd): they run as in NCBI (`README.md`, NCBI C++ Toolkit options).
-  The library API and the Web engine still refuse them, and BLASTX refuses the other
-  words by name, as the other programs do. Since version 1.12 `-dryrun` is no longer refused on
+  The library API (until version 1.21) and the Web engine still refuse them, and BLASTX refuses
+  the other words by name, as the other programs do. Since version 1.12 `-dryrun` is no longer refused on
   the command line of those seven programs, makeblastdb and blastdbcmd: the arguments are read
   and checked, then nothing runs, exit status 0, as NCBI's default `DryRun`
   (`ncbiapp.cpp:705-707`, 292-296). An argument error is reported as without `-dryrun`
   (exception 1), and the parser's refusals of an NCBI option that LOSAT does not run, or of a
   value form it does not read, stay (LOSAT has no definition to check them as NCBI does; line RG
   DECISIONS E1b-2), as do the refusals of registry and environment settings (some, such as
-  `DIAG_POST_LEVEL`, make NCBI write `DryRun`'s message; DECISIONS E1b-6). The library API and
-  the Web engine refuse it. Since version 1.15 `losat rpsbproc` runs the three on the command
+  `DIAG_POST_LEVEL`, make NCBI write `DryRun`'s message; DECISIONS E1b-6). The Web engine refuses
+  it, and so did the library API until version 1.21. Since version 1.21 the library API (and
+  pylosat) runs `-logfile`, `-conffile` and `-dryrun` as the command line does (line RG item
+  E1w-2): a call whose arguments have one of them, or that reads NCBI's settings, runs the
+  application start; the `-logfile` file gets what the command line writes there, the registry
+  and environment settings that the command line refuses are the call's error, and a `-dryrun`
+  call reads no record and searches nothing (an empty report per format, no `-out` file). The
+  library's tools print the versions to their output. Since version 1.15 `losat rpsbproc` runs the three on the command
   line too: `-logfile` takes rpsbproc's diagnostics (its `LOG_POST_X` messages and the reports
   of an exception; its own `cerr` lines stay on the standard error), `-conffile` is loaded in
   place of `rpsbproc.ini`, and `-dryrun` runs rpsbproc's own `DryRun` after its `Init`
@@ -286,9 +294,10 @@ BLAST+.
   (`Package-Config`'s configure line, `Build-Signature`, the build dates and revisions,
   `Stable-Components-Version`, `Production-Version`, `Built-As`, rpsbproc's toolkit component)
   are not written; the keys NCBI writes whenever there is a package stay, empty (line RG
-  DECISIONS E3-1). The library API and the Web engine refuse the versions, `-version` too, as
-  they refuse `-logfile`, `-conffile` and `-dryrun`, but in blastdbcmd, dustmasker, segmasker and
-  convert2blastmask, whose library runs print them as their `-version` (E3-2). A failed write of a program's
+  DECISIONS E3-1). The library API and the Web engine refuse the versions, `-version` too, but
+  in blastdbcmd, dustmasker, segmasker and convert2blastmask, whose library runs print them as
+  their `-version` (E3-2), and, since version 1.21, makeblastdb, whose library run prints them
+  to its output (line RG DECISIONS E1w2-6). A failed write of a program's
   version, help or argument error (`-version > /dev/full`) is dropped, as NCBI's `cout` drops it
   (exit status 0 for a version or a help), where LOSAT's earlier write panicked (exit status
   134); a closed pipe there is exception 10; rpsbproc keeps exception 9 (E3-3).

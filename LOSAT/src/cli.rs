@@ -250,9 +250,10 @@ pub enum Commands {
 // Translate registered canonical keys only. Consume each value once so a path
 // or a quoted filtering specification can never be interpreted as another key.
 /// Parses `argv` (`losat <program> <words>`) for a caller that runs no NCBI application start
-/// (the library API, the Web engine): the toolkit's words that the start reads (`-logfile`,
-/// `-conffile`, `-dryrun`, the versions) are refused (`toolkit_file_word_error`; makeblastdb
-/// keeps its own `-logfile` argument), and so is `-xmlhelp` (`xml_help_refusal`).
+/// (the Web engine): the toolkit's words that the start reads (`-logfile`, `-conffile`,
+/// `-dryrun`) are refused (`toolkit_file_word_error`; makeblastdb keeps its own `-logfile`
+/// argument), and so are the versions (`version_word_error`) and `-xmlhelp`
+/// (`xml_help_refusal`).
 pub fn try_parse_from<T, I, S>(argv: I) -> Result<T, clap::Error>
 where
     T: Parser + CommandFactory,
@@ -260,6 +261,19 @@ where
     S: Into<OsString>,
 {
     try_parse_from_command(T::command(), argv)
+}
+
+/// `try_parse_from` for the library API, whose calls run an NCBI application start of their own
+/// (`api::start`): `-logfile`, `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp`,
+/// whose texts only the command line writes, are refused (`version_word_error`,
+/// `xml_help_refusal`).
+pub(crate) fn try_parse_from_library<T, I, S>(argv: I) -> Result<T, clap::Error>
+where
+    T: Parser + CommandFactory,
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    parse_command(T::command(), argv, Reader::Library)
 }
 
 /// `try_parse_from` after the command line's application start `start` of the program that
@@ -275,7 +289,7 @@ where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    parse_command(T::command(), argv, Some(start))
+    parse_command(T::command(), argv, Reader::CommandLine(start))
 }
 
 /// `try_parse_from` with `command`, one of `T`'s commands whose arguments a caller changed
@@ -290,15 +304,29 @@ where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    parse_command(command, argv, None)
+    parse_command(command, argv, Reader::NoStart)
 }
 
-/// The reader of `try_parse_from`, `try_parse_from_start` and `try_parse_from_command`: `start` is
-/// the command line's application start, `None` for a caller that runs none.
+/// Who reads an argv (`parse_command`), which decides what NCBI's toolkit words do there.
+#[derive(Clone, Copy)]
+enum Reader<'a> {
+    /// A caller that runs no NCBI application start (the Web engine): the toolkit's words, the
+    /// versions and `-xmlhelp` are refused.
+    NoStart,
+    /// The library API, whose calls run a start of their own (`api::start`): `-logfile`,
+    /// `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp` are refused.
+    Library,
+    /// The command line's entry with its application start: `-xmlhelp` is the request whose XML
+    /// the entry prints.
+    CommandLine(&'a crate::blastinput::ncbi_environment::ApplicationStart),
+}
+
+/// The reader of `try_parse_from`, `try_parse_from_library`, `try_parse_from_start` and
+/// `try_parse_from_command`.
 fn parse_command<T, I, S>(
     command: clap::Command,
     argv: I,
-    start: Option<&crate::blastinput::ncbi_environment::ApplicationStart>,
+    reader: Reader<'_>,
 ) -> Result<T, clap::Error>
 where
     T: clap::FromArgMatches,
@@ -306,7 +334,7 @@ where
     S: Into<OsString>,
 {
     let mut tokens: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-    if let Some(start) = start {
+    if let Reader::CommandLine(start) = reader {
         debug_assert_eq!(
             tokens.get(1).and_then(|token| token.to_str()),
             Some(start.program()),
@@ -323,9 +351,9 @@ where
         .filter(|program| TOOLKIT_PROGRAMS.contains(&program.get_name()))
     {
         if let Some(word) = ncbi_version_word(&tokens[2..]) {
-            return Err(toolkit_file_word_error(program.get_name(), word));
+            return Err(version_word_error(program.get_name(), word));
         }
-        if start.is_none() {
+        if matches!(reader, Reader::NoStart) {
             if let Some(word) = toolkit_file_word(&tokens[2..]) {
                 return Err(toolkit_file_word_error(program.get_name(), word));
             }
@@ -338,12 +366,13 @@ where
     } else if tokens.get(1).is_some_and(|token| token == "makeblastdb") {
         // makeblastdb's application reads the same words (its own refusals of the others come
         // with its arguments): a last `-logfile` or `-conffile` without a value is dropped,
-        // `-dryrun` goes to the entry (`main_entry`), and the library API refuses `-conffile`
-        // and `-dryrun` (NCBI BLAST+ 2.17.0, probes `makeblastdb.log_noval`,
+        // `-dryrun` goes to the entry (`main_entry`) or the library's call
+        // (`api::run_makeblastdb`), and a caller without a start refuses `-conffile` and
+        // `-dryrun` (NCBI BLAST+ 2.17.0, probes `makeblastdb.log_noval`,
         // `makeblastdb.conf_noval`: rc 0).
         use crate::blastinput::ncbi_environment::{preparse, Preparsed};
         if let Some(word) = ncbi_version_word(&tokens[2..]) {
-            return Err(toolkit_file_word_error("makeblastdb", word));
+            return Err(version_word_error("makeblastdb", word));
         }
         if let Preparsed::Words {
             words,
@@ -351,9 +380,9 @@ where
             dryrun,
         } = preparse(&tokens[2..])
         {
-            if start.is_none() && (conffile.is_some() || dryrun) {
-                // The library's makeblastdb takes `-logfile` (its own argument): the word named is
-                // the one refused.
+            if matches!(reader, Reader::NoStart) && (conffile.is_some() || dryrun) {
+                // makeblastdb takes `-logfile` (its own argument): the word named is the one
+                // refused.
                 let name = if conffile.is_some() {
                     "-conffile"
                 } else {
@@ -570,9 +599,9 @@ where
         // The words before `-xmlhelp` read, as before `-help`: the entry prints the XML.
         Err(error) if error.kind() == ErrorKind::DisplayHelp && xml_help.is_some() => {
             let program = xml_help.unwrap_or_default();
-            return Err(match start {
-                Some(_) => xml_help_request(program),
-                None => clap::Error::raw(
+            return Err(match reader {
+                Reader::CommandLine(_) => xml_help_request(program),
+                Reader::NoStart | Reader::Library => clap::Error::raw(
                     ErrorKind::InvalidValue,
                     xml_help_refusal(&refusal_program_name(&program)),
                 ),
@@ -828,12 +857,11 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 // ```
 /// psiblast's NCBI arguments that LOSAT does not run: the MSA inputs (series PS6; the ASCII and
 /// ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
-/// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), the search strategy file (item F1b of line
-/// RG), and the arguments that blastp's engine does not run either (`is_unported_blastp_arg`;
-/// psiblast has no database masks and no `-mt_mode`).
+/// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), and the arguments that blastp's engine does
+/// not run either (`is_unported_blastp_arg`; psiblast has no database masks and no `-mt_mode`).
+/// The search strategy file of a FASTA query is written (item F1b-1 of line RG; with `-in_pssm`
+/// it is refused, `PsiblastArgs::into_blastp_args`).
 const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
-    // Line RG-F1 ported it to BLASTP's search, not to PSIBLAST's (item F1b).
-    "export_search_strategy",
     "ignore_msa_master",
     "in_msa",
     "msa_master_idx",
@@ -848,10 +876,10 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (quoted at
 // `algorithm::rpsblast::args`)
 /// rpsblast's NCBI arguments that LOSAT does not run: `-use_sw_tback` (the Smith-Waterman
-/// redo, PS11c-3), `-html` (PS15a) and the remote and search strategy options of every program.
+/// redo, PS11c-3), `-html` (PS15a) and the remote options and `-import_search_strategy` of every
+/// program.
 const UNPORTED_RPSBLAST_ARGS: &[&str] = &[
     "entrez_query",
-    "export_search_strategy",
     "html",
     "import_search_strategy",
     "remote",
@@ -864,13 +892,13 @@ fn is_unported_rpsblast_arg(name: &str) -> bool {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:44-110 (quoted at
 // `algorithm::rpstblastn::args`)
-/// rpstblastn's NCBI arguments that LOSAT does not run: `-html` (PS15a) and the remote and search
-/// strategy options of every program. The composition-based statistics of a later item are
-/// refused once per run (`rpstblastn::search::TranslatedRpsSearch::check_options`).
+/// rpstblastn's NCBI arguments that LOSAT does not run: `-html` (PS15a) and the remote options
+/// and `-import_search_strategy` of every program. The composition-based statistics of a later
+/// item are refused once per run (`rpstblastn::search::TranslatedRpsSearch::check_options`).
 fn is_unported_rpstblastn_arg(name: &str) -> bool {
     matches!(
         name,
-        "entrez_query" | "export_search_strategy" | "html" | "import_search_strategy" | "remote"
+        "entrez_query" | "html" | "import_search_strategy" | "remote"
     )
 }
 
@@ -1095,9 +1123,9 @@ const TOOLKIT_PROGRAMS: &[&str] = &[
 // value of `-logfile` or `-conffile`)
 /// The version word (`-version` or a full version) that NCBI's application prints for `tokens`
 /// (`ncbi_environment::preparse`), in an option's value too. The command line never brings one
-/// here: `main` prints the version before parsing (`ncbi_version_request`). The library API and
-/// the Web engine, which parse their options here and run no application start, refuse it
-/// (`toolkit_file_word_error`).
+/// here: `main` prints the version before parsing (`ncbi_version_request`). The library API of
+/// the search programs and the Web engine, which parse their options here, refuse it
+/// (`version_word_error`).
 fn ncbi_version_word(tokens: &[OsString]) -> Option<&'static str> {
     use crate::blastinput::ncbi_environment::{preparse, Preparsed};
     match preparse(tokens) {
@@ -1140,14 +1168,12 @@ fn toolkit_word_as_written<'a>(tokens: &'a [OsString], name: &str) -> Option<&'a
         })
 }
 
-// No NCBI counterpart: NCBI has no library API. The application start of the command line
-// (`cli::main_entry`, `ncbi_environment::ApplicationStart`) reads `-logfile` and `-conffile`
-// before the arguments and prints the versions, and the entry ends a `-dryrun` after them;
-// LOSAT's library and the Web engine run none, so they do not take them (as the library takes
-// no PSSM file, `api::search`).
-/// LOSAT's refusal of the toolkit option `word` (`-logfile`, `-conffile`, `-dryrun`, `-version`
-/// or a full version) in `program` when the parser's caller ran no application start: the
-/// library API and the Web engine.
+// No NCBI counterpart: NCBI has no library API or Web engine. The application start of the
+// command line (`cli::main_entry`, `ncbi_environment::ApplicationStart`) and of each library
+// call (`api::start`) reads `-logfile` and `-conffile` before the arguments, and both end a
+// `-dryrun` after them; the Web engine runs none, so it does not take them (line RG item E1w).
+/// LOSAT's refusal of the toolkit option `word` (`-logfile`, `-conffile`, `-dryrun`) in
+/// `program` when the parser's caller runs no application start: the Web engine.
 fn toolkit_file_word_error(program: &str, word: &str) -> clap::Error {
     clap::Error::raw(
         ErrorKind::InvalidValue,
@@ -1155,13 +1181,73 @@ fn toolkit_file_word_error(program: &str, word: &str) -> clap::Error {
     )
 }
 
-/// The text of `toolkit_file_word_error`, which blastdbcmd's library run writes too.
+/// The text of `toolkit_file_word_error`.
 pub(crate) fn toolkit_file_word_refusal(program: &str, word: &str) -> String {
-    let name = word.trim_start_matches('-');
-    let name = name.split_once('=').map_or(name, |(key, _)| key);
+    let name = toolkit_option_name(word);
     let shown = refusal_program_name(program);
+    let places = match library_part(program) {
+        LibraryPart::Search | LibraryPart::Tool => "the command line and in the library API",
+        LibraryPart::Absent => "the command line",
+    };
     format!(
-        "the NCBI C++ Toolkit option -{name} runs on the command line of LOSAT's {shown} only: the library API and the Web engine run no NCBI application start, which reads it"
+        "the NCBI C++ Toolkit option -{name} runs on {places} of LOSAT's {shown} only: the Web engine runs no NCBI application start, which reads it"
+    )
+}
+
+/// What LOSAT's library API runs of the command line's `program`.
+enum LibraryPart {
+    /// A search (`api::Program`), whose results are reports: it prints no version.
+    Search,
+    /// A tool (`api::run_makeblastdb`), which prints the versions to its output.
+    Tool,
+    /// Nothing: rpsblast, rpstblastn and rpsbproc.
+    Absent,
+}
+
+/// The part of the library API that runs `program` (`LibraryPart`). The other tools of the
+/// library (`api::run_blastdbcmd` and the maskers) have a parser of their own (`ncbi_app`).
+fn library_part(program: &str) -> LibraryPart {
+    if program == "makeblastdb" {
+        LibraryPart::Tool
+    } else if crate::api::Program::parse(program).is_ok() {
+        LibraryPart::Search
+    } else {
+        LibraryPart::Absent
+    }
+}
+
+/// The name of the toolkit option `word` (`-conffile=FILE` is `conffile`).
+fn toolkit_option_name(word: &str) -> &str {
+    let name = word.trim_start_matches('-');
+    name.split_once('=').map_or(name, |(key, _)| key)
+}
+
+// No NCBI counterpart: NCBI's application prints the versions before its arguments
+// (ncbiapp.cpp:926-1001, quoted at `ncbi_environment::preparse`). The library API of the search
+// programs returns reports, and the Web engine shows them: neither has a place for the text
+// (line RG DECISIONS E3-2; the library's tools print it to their output, `ncbi_app::run_with`,
+// `api::run_makeblastdb`, so their refusal names the Web engine alone).
+/// LOSAT's refusal of the version word `word` (`-version` or a full version) in `program` where
+/// the parser's caller prints no version: the library API of the search programs and the Web
+/// engine.
+fn version_word_error(program: &str, word: &str) -> clap::Error {
+    clap::Error::raw(ErrorKind::InvalidValue, version_word_refusal(program, word))
+}
+
+/// The text of `version_word_error`.
+pub(crate) fn version_word_refusal(program: &str, word: &str) -> String {
+    let name = toolkit_option_name(word);
+    let shown = refusal_program_name(program);
+    let (places, refusers) = match library_part(program) {
+        LibraryPart::Search => ("the command line", "the library API and the Web engine do"),
+        LibraryPart::Tool => (
+            "the command line and in the library API",
+            "the Web engine does",
+        ),
+        LibraryPart::Absent => ("the command line", "the Web engine does"),
+    };
+    format!(
+        "the NCBI C++ Toolkit option -{name} runs on {places} of LOSAT's {shown} only: {refusers} not write NCBI's version text"
     )
 }
 
@@ -1448,6 +1534,26 @@ impl fmt::Display for NativeError {
 // ```
 impl std::error::Error for NativeError {}
 
+impl NativeError {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+    // ```c++
+    //     catch (const CException& e) {                                           \
+    //         LOG_POST(Error << "Error: " << e.what());                           \
+    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+    //     }                                                                       \
+    // ```
+    /// `CATCH_ALL`'s report of an exception of NCBI's C++ Toolkit (`CException`) that ends a
+    /// BLAST program: `Error: `, the exception's `what()` (which ends with a line feed) and the
+    /// post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`). The one producer of this
+    /// report: an exception of NCBI's that LOSAT raises where NCBI throws it becomes this error.
+    pub(crate) fn exception(e: &crate::ncbi_exception::NcbiException) -> NativeError {
+        NativeError {
+            exit: 255,
+            message: format!("Error: {}\n", e.what()),
+        }
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:118-119
 // ```c
 // {
@@ -1699,10 +1805,12 @@ impl NcbiBuffer {
 
     /// An insertion of one `char` (`put`, `sputc`), the last byte of `stream` (as `sputn`'s): the
     /// buffer takes it while it has room; a full buffer is written with it
-    /// (`basic_filebuf::overflow`). On `cout`, glibc's `putc` gives what an `fwrite` of one byte
-    /// gives. NCBI rpsbproc 0.5.1, both builds, with 8,190 bytes held
+    /// (`basic_filebuf::overflow`). NCBI rpsbproc 0.5.1, both builds, with 8,190 bytes held
     /// before a tab of the `SESSION` line (line RG E1c review 2, `s_same_mat8165`,
-    /// `s_same_ev8156`).
+    /// `s_same_ev8156`). On `cout` the `char` is glibc's `putc` (`stdio_sync_filebuf::overflow`),
+    /// which a full or unallocated buffer passes to `__overflow`: the buffer is made or written,
+    /// then it keeps the byte (an `fwrite` of one byte keeps none where the buffer is under 128
+    /// bytes, `sputn`), and a line-buffered `stdout` writes it with what it holds at a newline.
     // NCBI reference (GCC 13 libstdc++): include/c++/13/ostream:570-576 (a `char` is put, not
     // written with `sputn`)
     // ```c++
@@ -1716,9 +1824,61 @@ impl NcbiBuffer {
     //       return __out;
     //     }
     // ```
+    // NCBI reference (GCC 13 libstdc++): include/ext/stdio_sync_filebuf.h `overflow`
+    // ```c++
+    //       virtual int_type
+    //       overflow(int_type __c = traits_type::eof())
+    //       {
+    // 	int_type __ret;
+    // 	if (traits_type::eq_int_type(__c, traits_type::eof()))
+    // 	  {
+    // 	    if (std::fflush(_M_file))
+    // 	      __ret = traits_type::eof();
+    // 	    else
+    // 	      __ret = traits_type::not_eof(__c);
+    // 	  }
+    // 	else
+    // 	  __ret = std::putc(__c, _M_file);
+    // 	return __ret;
+    //       }
+    // ```
+    // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_overflow` (`putc` calls it
+    // when `_IO_write_ptr >= _IO_write_end`: a full or unallocated buffer, and every `char` of a
+    // line-buffered stream, whose `_IO_write_end` stays at `_IO_write_base`)
+    // ```c
+    //   if ((f->_flags & _IO_CURRENTLY_PUTTING) == 0 || f->_IO_write_base == NULL)
+    //     {
+    //       /* Allocate a buffer if needed. */
+    //       if (f->_IO_write_base == NULL)
+    // 	{
+    // 	  _IO_doallocbuf (f);
+    //     ...
+    //       if (f->_mode <= 0 && f->_flags & (_IO_LINE_BUF | _IO_UNBUFFERED))
+    // 	f->_IO_write_end = f->_IO_write_ptr;
+    //     }
+    //   ...
+    //   if (f->_IO_write_ptr == f->_IO_buf_end ) /* Buffer is really full */
+    //     if (_IO_do_flush (f) == EOF)
+    //       return EOF;
+    //   *f->_IO_write_ptr++ = ch;
+    //   if ((f->_flags & _IO_UNBUFFERED)
+    //       || ((f->_flags & _IO_LINE_BUF) && ch == '\n'))
+    //     if (_IO_do_write (f, f->_IO_write_base,
+    // 		      f->_IO_write_ptr - f->_IO_write_base) == EOF)
+    //       return EOF;
+    // ```
     pub fn sputc(&mut self, stream: &[u8]) {
         match self.stream {
-            NcbiStdio::Cout { .. } => self.sputn(1, stream),
+            NcbiStdio::Cout { block, lines } => {
+                self.held = if lines && stream.last() == Some(&b'\n') {
+                    0
+                } else if !self.allocated || self.held == block {
+                    1
+                } else {
+                    self.held + 1
+                };
+                self.allocated = true;
+            }
             NcbiStdio::File => {
                 self.held = if self.held < NCBI_BUFSIZ - 1 {
                     self.held + 1
@@ -1748,7 +1908,8 @@ impl NcbiBuffer {
 /// and `cerr` is tied to `cout`: a write to standard error writes what standard output holds first
 /// (`tie_standard_output`, `CliStderr`), where NCBI aborts if that write fails (LOSAT: its error,
 /// non-zero exit). LOSAT's flushes of the report hold. Each `write` is one insertion of NCBI's
-/// (`insert`, `insert_streamed`: the writer of the report makes NCBI's insertions).
+/// (`insert`, `insert_streamed`: the writer of the report makes NCBI's insertions, into the
+/// `NcbiOstream` that the run opened, with nothing between).
 pub struct NcbiReportBuffer(std::sync::Arc<std::sync::Mutex<HeldReport>>);
 
 /// What `NcbiReportBuffer` holds.
@@ -1815,47 +1976,31 @@ impl NcbiReportBuffer {
     }
 
     /// Standard output, glibc's buffer (`NcbiStdio::cout`, line-buffered on a terminal), tied to
-    /// standard error (`tie_standard_output`).
-    pub fn standard_output() -> Self {
+    /// standard error (`tie_standard_output`), writing to `inner` (the process's standard output,
+    /// or a hold of it, `report_destination_through`).
+    pub fn standard_output(inner: Box<dyn std::io::Write + Send>) -> Self {
         // NCBI's Windows (MSVC) and macOS (libc++, BSD stdio) builds buffer otherwise: there
         // the exit status of a failing write is unverified (this model is their Linux builds').
-        let report = Self::new(
-            Box::new(std::io::BufWriter::new(std::io::stdout())),
-            NcbiBuffer::new(NcbiStdio::cout()),
-        );
+        let report = Self::new(inner, NcbiBuffer::new(NcbiStdio::cout()));
         *lock(&TIED_STANDARD_OUTPUT) = Some(std::sync::Arc::downgrade(&report.0));
         report
     }
 }
 
 impl std::io::Write for NcbiReportBuffer {
-    /// One insertion of NCBI's (`NcbiBuffer::sputn`): what NCBI's buffer writes of the bytes held
-    /// and `buf` is written, the first of them (all that it held, or none).
+    /// One insertion of NCBI's (`NcbiBuffer::sputn`), whose stream is the bytes held and `buf`:
+    /// what NCBI's buffer writes of them is written, the first of them (all that it held, or
+    /// none), and it holds the rest.
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let mut report = lock(&self.0);
         let report = &mut *report;
-        let before = report.held.len();
-        if buf.len() >= NCBI_BUFSIZ {
-            report.buffer.sputn(buf.len(), buf);
-        } else {
-            report
-                .buffer
-                .sputn(buf.len(), &[&report.held[..], buf].concat());
-        }
-        let written = before + buf.len() - report.buffer.held();
-        if written == 0 {
-            report.held.extend_from_slice(buf);
-        } else {
-            let (out, kept) = buf.split_at(written - before);
-            if report.held.is_empty() {
-                report.inner.write_all(out)?;
-            } else {
-                report.held.extend_from_slice(out);
-                report.inner.write_all(&report.held)?;
-            }
+        report.held.extend_from_slice(buf);
+        report.buffer.sputn(buf.len(), &report.held);
+        let written = report.held.len() - report.buffer.held();
+        if written > 0 {
+            report.inner.write_all(&report.held[..written])?;
             report.inner.flush()?;
-            report.held.clear();
-            report.held.extend_from_slice(kept);
+            report.held.drain(..written);
         }
         Ok(buf.len())
     }
@@ -1948,6 +2093,44 @@ impl<W: std::io::Write + ?Sized> Insertion<'_, W> {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
+// ```c
+// CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
+//     : m_FormatType(format_type), ..., m_Outfile(outfile),
+// ```
+/// The stream of a report as NCBI's formatter writes to it (`CBlastFormat::m_Outfile`): the writer
+/// where the run's report goes, as the run opened it (a format's sink, `OutputSink::ostream`: the
+/// command line's `ReportStream`, whose organism report is NCBI's buffer, `report_destination`, or
+/// a library caller's writer, which has no stream of NCBI's; blastx's command-line destination),
+/// with nothing of a program's before it. Each write is one insertion of NCBI's (`out << value`,
+/// `insert`, `insert_streamed`), passed on as one write. The organism report (`tax_report`) writes
+/// only to this type, so no buffer or hold of a program's can come between its insertions and
+/// NCBI's buffer (`NcbiReportBuffer`), which counts each write as one insertion.
+pub struct NcbiOstream<'a>(Box<dyn std::io::Write + 'a>);
+
+impl<'a> NcbiOstream<'a> {
+    /// The stream `stream` where the run's report goes, as the run opened it.
+    pub fn new(stream: Box<dyn std::io::Write + 'a>) -> Self {
+        NcbiOstream(stream)
+    }
+}
+
+impl std::io::Write for NcbiOstream<'_> {
+    /// One insertion, written with one write of the stream.
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.write_all(buf)?;
+        Ok(buf.len())
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        self.0.write_all(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
 /// `cerr.tie()`: before a write to standard error, the organism report's standard output writes
 /// what it holds (`NcbiReportBuffer::standard_output`); nothing for every other report.
 pub fn tie_standard_output() -> std::io::Result<()> {
@@ -1961,19 +2144,36 @@ pub fn tie_standard_output() -> std::io::Result<()> {
 }
 
 /// The command line's standard error, tied to the organism report's standard output
-/// (`tie_standard_output`). A whole message is written under one lock of standard error, as
-/// `std::io::Stderr` writes it, so that no other thread's message comes inside it. An empty write
-/// is no write of NCBI's to `cerr` (a query without warnings, whose `ERR_POST` NCBI does not
-/// make): it writes nothing of the report.
-pub struct CliStderr;
+/// (`tie_standard_output`): the process's (`process`), or a stream of the run's standard error
+/// (`through`: blastx's hold of a run whose later batch may be refused, `archive::ArchiveHold`),
+/// so that what standard output writes before a text is written before it where the text is
+/// made. A whole message is written with one `write_all` of the stream, which `std::io::Stderr`
+/// writes under one lock of standard error, so that no other thread's message comes inside it.
+/// An empty write is no write of NCBI's to `cerr` (a query without warnings, whose `ERR_POST`
+/// NCBI does not make): it writes nothing of the report.
+pub struct CliStderr<W: std::io::Write = std::io::Stderr>(W);
 
-impl std::io::Write for CliStderr {
+impl CliStderr {
+    /// The process's standard error.
+    pub fn process() -> Self {
+        CliStderr(std::io::stderr())
+    }
+}
+
+impl<W: std::io::Write> CliStderr<W> {
+    /// The run's standard error `stream`.
+    pub fn through(stream: W) -> Self {
+        CliStderr(stream)
+    }
+}
+
+impl<W: std::io::Write> std::io::Write for CliStderr<W> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if buf.is_empty() {
             return Ok(0);
         }
         tie_standard_output()?;
-        std::io::stderr().write(buf)
+        self.0.write(buf)
     }
 
     fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
@@ -1981,7 +2181,7 @@ impl std::io::Write for CliStderr {
             return Ok(());
         }
         tie_standard_output()?;
-        std::io::stderr().lock().write_all(buf)
+        self.0.write_all(buf)
     }
 
     fn write_fmt(&mut self, args: std::fmt::Arguments<'_>) -> std::io::Result<()> {
@@ -1989,7 +2189,7 @@ impl std::io::Write for CliStderr {
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        std::io::stderr().flush()
+        self.0.flush()
     }
 }
 
@@ -1999,11 +2199,24 @@ pub fn report_destination(
     file: Option<Box<dyn std::io::Write + Send>>,
     tax_report: bool,
 ) -> Box<dyn std::io::Write + Send> {
+    report_destination_through(file, tax_report, |device| device)
+}
+
+/// `report_destination` with the file or standard output behind `through` (blastx's hold of a run
+/// whose later batch may be refused, `archive::ArchiveHold`): NCBI's buffer comes before it, so
+/// that what it holds is what the buffer writes, where the buffer writes it.
+pub fn report_destination_through(
+    file: Option<Box<dyn std::io::Write + Send>>,
+    tax_report: bool,
+    through: impl FnOnce(Box<dyn std::io::Write + Send>) -> Box<dyn std::io::Write + Send>,
+) -> Box<dyn std::io::Write + Send> {
     match (file, tax_report) {
-        (Some(file), true) => Box::new(NcbiReportBuffer::file(file)),
-        (Some(file), false) => file,
-        (None, true) => Box::new(NcbiReportBuffer::standard_output()),
-        (None, false) => report_standard_output(),
+        (Some(file), true) => Box::new(NcbiReportBuffer::file(through(file))),
+        (Some(file), false) => through(file),
+        (None, true) => Box::new(NcbiReportBuffer::standard_output(through(
+            report_standard_output(),
+        ))),
+        (None, false) => through(report_standard_output()),
     }
 }
 
@@ -2310,6 +2523,63 @@ mod tests {
         assert_eq!(run("500 2000:100"), [0, 2048]);
         assert_eq!(run("500 2000:100:1900"), [0, 2401]);
         assert_eq!(run("f 100 f 50"), [0, 0, 100, 100]);
+    }
+
+    #[test]
+    fn a_char_on_standard_output_is_kept_as_glibcs_putc_keeps_it() {
+        // glibc 2.39 (`T/t2/fix4/glibc_putc.log`): `stdout` with a buffer of `block` bytes
+        // (`setvbuf`, full or line buffering) on a file; `cN` is N `putc` of 'x', `n` a `putc` of a
+        // newline, `wN` an `fwrite` of N bytes, `W` an `fwrite` of a newline; the file's size
+        // after each step. `putc` keeps its byte after a full or unallocated buffer, where an
+        // `fwrite` of one byte into a buffer under 128 bytes keeps none.
+        let run = |lines: bool, block: usize, steps: &str| -> Vec<usize> {
+            let mut buffer = NcbiBuffer::new(NcbiStdio::Cout { block, lines });
+            let mut stream = Vec::new();
+            steps
+                .split(' ')
+                .map(|step| {
+                    let count = step[1..].parse::<usize>().unwrap_or(1);
+                    match step.as_bytes()[0] {
+                        b'c' => (0..count).for_each(|_| {
+                            stream.push(b'x');
+                            buffer.sputc(&stream);
+                        }),
+                        b'n' => {
+                            stream.push(b'\n');
+                            buffer.sputc(&stream);
+                        }
+                        b'w' => {
+                            stream.resize(stream.len() + count, b'x');
+                            buffer.sputn(count, &stream);
+                        }
+                        _ => {
+                            stream.push(b'\n');
+                            buffer.sputn(1, &stream);
+                        }
+                    }
+                    stream.len() - buffer.held()
+                })
+                .collect()
+        };
+        assert_eq!(run(false, 64, "c1"), [0]);
+        assert_eq!(run(false, 64, "w1"), [1]);
+        assert_eq!(run(false, 64, "w63 c64 c1 w1"), [63, 63, 127, 127]);
+        assert_eq!(run(false, 64, "w63 c64 w1"), [63, 63, 128]);
+        assert_eq!(run(false, 64, "w64 c1"), [64, 64]);
+        assert_eq!(run(false, 64, "w64 w1"), [64, 64]);
+        assert_eq!(run(false, 4096, "w4096 c1"), [4096, 4096]);
+        assert_eq!(run(false, 4096, "w4095 c1 c1"), [0, 0, 4096]);
+        assert_eq!(run(false, 4096, "w4095 w1 w1"), [0, 0, 4096]);
+        assert_eq!(run(true, 64, "c1"), [0]);
+        assert_eq!(run(true, 64, "n"), [1]);
+        assert_eq!(run(true, 64, "W"), [1]);
+        assert_eq!(run(true, 64, "c10 n"), [0, 11]);
+        assert_eq!(run(true, 64, "w63 c1 c1"), [63, 63, 63]);
+        assert_eq!(run(true, 64, "w63 w1 w1"), [63, 63, 63]);
+        assert_eq!(run(true, 64, "c64 c1"), [0, 64]);
+        assert_eq!(run(true, 64, "c63 n"), [0, 64]);
+        assert_eq!(run(true, 64, "c64 n"), [0, 65]);
+        assert_eq!(run(true, 1024, "c100 n c5"), [0, 101, 101]);
     }
 
     #[test]

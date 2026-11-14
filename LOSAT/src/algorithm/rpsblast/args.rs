@@ -72,6 +72,11 @@ pub struct RpsblastArgs {
     pub db: Option<String>,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
+    /// The search strategy file (`-export_search_strategy`, quoted at
+    /// `BlastpArgs::export_search_strategy`), created by the search's `run` before the other options
+    /// are read.
+    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     #[arg(long, value_parser = rpsblast_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2036-2042
@@ -315,6 +320,10 @@ impl RpsblastArgs {
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
         Self::check_outfmt(&self.outfmt)?;
         let requested_cbs = rps_composition_mode(&self.comp_based_stats);
+        let request_inputs = self
+            .export_search_strategy
+            .is_some()
+            .then(|| Box::new(self.option_inputs()));
         Ok(BlastpArgs {
             query: self.query,
             subject: None,
@@ -386,8 +395,9 @@ impl RpsblastArgs {
             subject_loc: None,
             outfmt: self.outfmt,
             archive: None,
-            export_search_strategy: None,
+            export_search_strategy: self.export_search_strategy,
             strategy: None,
+            request_inputs,
             app: BlastpApp::Rpsblast,
             subject_taxdb: None,
             inclusion_ethresh: None,
@@ -407,6 +417,31 @@ impl RpsblastArgs {
                 sum_stats: self.sum_stats == Some(true),
             }),
         })
+    }
+
+    /// The options that rpsblast's search strategy requests record (`options::algorithm_options`
+    /// of `RequestKind::Rpsblast`: NCBI's argument classes of `rpsblast_args.cpp`), from the
+    /// arguments as given. `HitlistSize` is the request's (`StrategyExport::for_run`).
+    pub(crate) fn option_inputs(&self) -> crate::report::archive::options::OptionInputs {
+        use crate::report::archive::options::{seg_filter, OptionInputs, RequestKind};
+        let mut inputs = OptionInputs::new(RequestKind::Rpsblast, "blastp");
+        inputs.dbsize = self.dbsize;
+        inputs.searchsp = self.searchsp;
+        inputs.evalue = self.evalue;
+        // `-xdrop_ungap` is never recorded (`SetXDropoff` has no remote option).
+        inputs.xdrop_gap = self.xdrop_gap;
+        inputs.xdrop_gap_final = self.xdrop_gap_final;
+        inputs.qcov_hsp_perc = self.qcov_hsp_perc;
+        inputs.max_hsps = self.max_hsps_per_subject.map(|count| count as i32);
+        inputs.sum_stats = self.sum_stats;
+        inputs.window_size = self.window_size;
+        inputs.soft_masking = self.soft_masking;
+        inputs.seg = self
+            .seg
+            .as_deref()
+            .and_then(|value| seg_filter(value, "RPSBLAST"));
+        inputs.comp_based_stats = i32::from(rps_composition_mode(&self.comp_based_stats));
+        inputs
     }
 
     /// NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`, its

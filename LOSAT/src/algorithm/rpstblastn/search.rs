@@ -70,6 +70,9 @@ pub(crate) struct TranslatedRpsSearch {
     /// Whether the database has several volumes, whose results NCBI merges
     /// (`RpsTblastnSearch::merges_volumes`); set by `for_database`.
     pub(crate) several_volumes: bool,
+    /// The volumes' matrix and gap costs as their set-up read them (`RpsVolumeSetup::costs`), for
+    /// the search strategy's requests (`handle_sets`); set by `for_database`.
+    pub(crate) costs: Option<(String, i32, i32)>,
 }
 
 impl RpsTblastnSearch for TranslatedRpsSearch {
@@ -81,16 +84,6 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         let Some(database) = database else {
             bail!("a search without -db is not supported by LOSAT's {PROGRAM}");
         };
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:59-61
-        // ```c++
-        //     char* chunk_sz_str = getenv("CHUNK_SIZE");
-        //     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
-        //         retval = NStr::StringToInt(chunk_sz_str);
-        // ```
-        // NCBI reads it in the set-up of every query batch (`CQuerySplitter`), before its RPS
-        // structures; RPSTBLASTN never splits a query (`split_query_aux_priv.cpp:88`), so a value
-        // it reads changes nothing, and one it cannot convert stops it (`CStringException`).
-        crate::blastinput::app::read_query_split_variable(PROGRAM, "CHUNK_SIZE")?;
         // LOSAT's refusals of the volumes' files come before the first byte, as rpsblast's do;
         // NCBI's own errors of the files stay where NCBI's search of a batch raises them
         // (`search_batch`), and the options' refusals below wait for the files to open.
@@ -107,6 +100,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         }
         Ok(Arc::new(Self {
             several_volumes: volumes.order.len() > 1,
+            costs: setup.costs(volumes.first()),
             ..self.clone()
         }))
     }
@@ -119,6 +113,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         diagnostics: &mut dyn Write,
         search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
         render: &mut BatchRender<'_>,
+        take: &mut dyn FnMut(&[FastaRecord], usize) -> Result<()>,
     ) -> Result<usize> {
         let Some(database) = database else {
             bail!("a search without -db is not supported by LOSAT's {PROGRAM}");
@@ -149,6 +144,9 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
                     if queries.is_empty() {
                         return Err(engine("Empty CBlastQueryVector"));
                     }
+                    // The batch's search strategy request (`SaveSearchStrategy`, quoted in the
+                    // module's header), before its search.
+                    take(queries, processed)?;
                     let mut results = vec![self
                         .search_batch(
                             queries,
@@ -182,6 +180,22 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
 
     fn merges_volumes(&self) -> bool {
         self.several_volumes
+    }
+
+    fn handle_sets(
+        &self,
+        database: Option<&BlastxDatabase>,
+        searchsp: Option<i64>,
+        dbsize: Option<i64>,
+    ) -> Vec<crate::report::archive::options::Param> {
+        database.map_or_else(Vec::new, |database| {
+            crate::algorithm::rps_search::volumes::search_sets(
+                database.x_seqdb(),
+                self.costs.clone(),
+                searchsp,
+                dbsize,
+            )
+        })
     }
 }
 
@@ -251,6 +265,20 @@ impl TranslatedRpsSearch {
         (db_length, db_count): (i64, i64),
         pool: &crate::utils::threading::SearchPool<'_>,
     ) -> Result<BatchResults> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:59-61
+        // ```c++
+        //     char* chunk_sz_str = getenv("CHUNK_SIZE");
+        //     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
+        //         retval = NStr::StringToInt(chunk_sz_str);
+        // ```
+        // NCBI reads it in the set-up of every query batch (`CQuerySplitter`), before its RPS
+        // structures; RPSTBLASTN never splits a query (`split_query_aux_priv.cpp:88`), so a value
+        // it reads changes nothing, and one it cannot convert is its `CStringException`
+        // (`app::read_query_split_variable`), which the batch's error frame passes on as it is
+        // (`native::database_search_error`): the first batch stops here, after the outfmt 0
+        // prolog and the messages of its records.
+        crate::blastinput::app::read_query_split_variable("CHUNK_SIZE")
+            .map_err(RpsBatchError::Setup)?;
         let prepared =
             prepare_unit_queries(queries, None, options).map_err(RpsBatchError::Setup)?;
         // BLOSUM62 (the `.aux`'s matrix, `RpsVolumeSetup::check`): BLASTX's ideal block, which
@@ -856,6 +884,7 @@ mod tests {
             use_sw_tback: false,
             comp_based_stats: "0".to_string(),
             several_volumes: false,
+            costs: None,
         };
         assert!(search.check_options().is_ok());
         search.search.sum_stats = true;

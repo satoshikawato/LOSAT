@@ -1,5 +1,5 @@
 //! The harness shared by the `run_local` tests of every program that compare a search with the
-//! `losat` binary: the temporary FASTA files, and a search of files through `LOSAT::api` (the
+//! `losat` binary: the temporary FASTA files, and a search of files through `losat::api` (the
 //! library's entry, which calls the same `run_local_*` functions as the command line), with the
 //! reports, the warnings and the error that the command line gives. The tests of the entry's own
 //! contract (its sinks, its observer, its refusals of hand-set arguments) are in the crate
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use LOSAT::api::{
+use losat::api::{
     read_fasta, read_input_file, read_inputs, run, run_collect, run_to_file, validate, Error,
     FastaRecord, Inputs, Outcome, Program, Role,
 };
@@ -162,7 +162,7 @@ impl<'a> Files<'a> {
     fn with_records<T>(
         &self,
         options: &[&str],
-        with: impl FnOnce(&LOSAT::api::Search, Inputs<'_>) -> Result<T, Error>,
+        with: impl FnOnce(&losat::api::Search, Inputs<'_>) -> Result<T, Error>,
     ) -> Result<T, Error> {
         let search = validate(self.program, options)?;
         let (query, subject) = read_inputs(
@@ -474,4 +474,24 @@ fn alignment_span(section: &str, label: &str) -> (usize, usize) {
         .and_then(|line| line.last())
         .expect("last coordinate");
     (first, last)
+}
+
+/// The build tree that NCBI's reports name: that of the official Linux x64 release of BLAST+
+/// 2.17.0 (`ncbi_exception::NCBI_BUILD_ROOT` in the crate).
+pub const NCBI_BUILD_ROOT: &str = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
+
+/// NCBI's report of the `CStringException` that `NStr::StringToInt` (flags 0) throws for `value`
+/// at `line` of ncbistr.cpp and position `pos`, as `CATCH_ALL` writes it (`Error: ` and `what()`,
+/// exit status 255; blast_app_util.hpp:248-251): line 640 is the `int` range check of
+/// `StringToInt`, 852 the overflow of `StringToInt8`, 861 no digit and 870 a byte after the
+/// digits.
+pub fn string_to_int_exception(value: &str, line: u32, pos: usize) -> String {
+    let (function, kind) = match line {
+        640 => ("StringToInt", "int, overflow"),
+        852 => ("StringToInt8", "Int8, overflow"),
+        _ => ("StringToInt8", "Int8"),
+    };
+    format!(
+        "Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/corelib/ncbistr.cpp\", line {line}: Error: (CStringException::eConvert) ncbi::NStr::{function}() - Cannot convert string '{value}' to {kind} (m_Pos = {pos})\n\n"
+    )
 }

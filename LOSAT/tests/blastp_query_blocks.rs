@@ -38,6 +38,9 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fasta")
@@ -90,7 +93,12 @@ fn blocks(letters: &str) -> usize {
 /// One blastp run of `query` against the subject proteome (the fixture pair is two related
 /// nimavirus proteomes) with the given variables as its only `LOSAT_*` variables that choose a code
 /// path, and `extra` arguments.
-fn blastp(query: &Path, threads: u32, vars: &[(&str, &str)], extra: &[&str]) -> (Vec<u8>, usize) {
+fn blastp(
+    query: &Path,
+    threads: u32,
+    vars: &[(&str, &str)],
+    extra: &[&str],
+) -> (Vec<u8>, usize, Option<TempFile>) {
     let subject = fixture("MejoMJNV.faa");
     blastp_against(
         query,
@@ -113,7 +121,7 @@ fn blastp_against(
     threads: u32,
     vars: &[(&str, &str)],
     extra: &[&str],
-) -> (Vec<u8>, usize) {
+) -> (Vec<u8>, usize, Option<TempFile>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -125,12 +133,7 @@ fn blastp_against(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bpqblock-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastp_query_blocks_worker");
     let output = command
         .arg("blastp")
         .arg("-query")
@@ -152,7 +155,7 @@ fn blastp_against(
         .lines()
         .filter(|line| line.starts_with("[TIMING] blastp_total:"))
         .count();
-    (output.stdout, searches)
+    (output.stdout, searches, log)
 }
 
 /// Each case (the task's arguments, the threads, the block letters): its rows in blocks of
@@ -164,11 +167,11 @@ fn assert_block_rows(query: &Path, subject: &[&OsStr], cases: &[(&[&str], u32, &
             "{:?} {task:?} threads {threads} blocks of {letters}",
             subject[0]
         );
-        let (reference, reference_searches) =
+        let (reference, reference_searches, _log) =
             blastp_against(query, subject, threads, &[BATCH, SWITCH_OFF], task);
         assert!(!reference.is_empty(), "the fixture pair has rows");
         assert_eq!(reference_searches, 1, "{what}: the reference");
-        let (rows, searches) = blastp_against(
+        let (rows, searches, _log) = blastp_against(
             query,
             subject,
             threads,
@@ -222,11 +225,11 @@ fn blastp_fast_blocks_close_on_the_words_of_a_lowered_threshold() {
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     let query = queries("words");
     let task: &[&str] = &["-task", "blastp-fast", "-threshold", "7", "-outfmt", "6"];
-    let (reference, reference_searches) =
+    let (reference, reference_searches, _log) =
         blastp_against(&query, &subject, 4, &[BATCH, SWITCH_OFF], task);
     assert!(!reference.is_empty(), "the fixture pair has rows");
     assert_eq!(reference_searches, 1, "the reference");
-    let (rows, searches) = blastp_against(
+    let (rows, searches, _log) = blastp_against(
         &query,
         &subject,
         4,
@@ -246,8 +249,8 @@ fn blocks_write_the_rows_to_one_output_file() {
     let path_text = path.to_str().unwrap();
     let custom = "6 qseqid sseqid pident length evalue bitscore qlen slen";
     let query = queries("out");
-    let (reference, _) = blastp(&query, 1, &[BATCH, SWITCH_OFF], &["-outfmt", custom]);
-    let (stdout, searches) = blastp(
+    let (reference, _, _log) = blastp(&query, 1, &[BATCH, SWITCH_OFF], &["-outfmt", custom]);
+    let (stdout, searches, _log) = blastp(
         &query,
         1,
         &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
@@ -269,9 +272,9 @@ fn blocks_write_the_rows_to_one_output_file() {
 fn one_block_takes_the_search_of_all_queries() {
     let query = queries("other");
     for (letters, outfmt) in [("100000000", "6"), ("100000000", "7")] {
-        let (reference, reference_searches) =
+        let (reference, reference_searches, _log) =
             blastp(&query, 1, &[BATCH, SWITCH_OFF], &["-outfmt", outfmt]);
-        let (report, searches) = blastp(
+        let (report, searches, _log) = blastp(
             &query,
             1,
             &[BATCH, ("LOSAT_X_BPQBLOCK", letters)],
@@ -300,9 +303,9 @@ fn the_default_searches_in_blocks_of_50000_letters() {
     let threads = 4;
     let all = fixture("MeenMJNV.faa");
     let batch = ("BATCH_SIZE", "3000");
-    let (reference, reference_searches) = blastp(&all, threads, &[batch, SWITCH_OFF], EXACT);
+    let (reference, reference_searches, _log) = blastp(&all, threads, &[batch, SWITCH_OFF], EXACT);
     assert!(!reference.is_empty(), "the fixture pair has rows");
-    let (rows, searches) = blastp(&all, threads, &[batch], EXACT);
+    let (rows, searches, _log) = blastp(&all, threads, &[batch], EXACT);
     assert!(rows == reference, "the default: rows differ");
     assert_eq!(
         searches,
@@ -390,14 +393,14 @@ fn database_search_with_the_exact_blastp_experiments() {
     ];
     for (threads, runs) in &cases {
         let threads = *threads;
-        let (reference, reference_searches) =
+        let (reference, reference_searches, _log) =
             blastp_against(&query, &subject, threads, &EXACT_OFF, EXACT);
         assert_eq!(
             reference_searches, 1,
             "-db threads {threads}: the reference"
         );
         for (vars, expected) in runs {
-            let (rows, searches) = blastp_against(&query, &subject, threads, vars, EXACT);
+            let (rows, searches, _log) = blastp_against(&query, &subject, threads, vars, EXACT);
             assert!(
                 rows == reference,
                 "-db threads {threads} {vars:?}: rows differ"

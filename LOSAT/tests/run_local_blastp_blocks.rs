@@ -5,7 +5,7 @@
 //! The switch is read once per process, so every search runs in a child process: this test
 //! binary again, running only `child_search` with the variables of its arm (`BATCH_SIZE` makes
 //! small batches and `LOSAT_X_BPQBLOCK=1` closes a block at every batch end, so the fixture pair has
-//! three blocks or more). The child searches through `LOSAT::api` (`run_collect`: the hit records
+//! three blocks or more). The child searches through `losat::api` (`run_collect`: the hit records
 //! and the observer, which the API gives `run_local`; `run`: neither) and writes what the call
 //! wrote (each output, the warnings, the hit records as `Debug` text and the ranges of the rows
 //! and sections) to files, after checking the ranges against the outputs and the records (each
@@ -31,8 +31,11 @@ mod run_local_support;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use losat::api::{read_fasta, Program, Role};
 use run_local_support::{assert_observer_ranges, field, temp_path, Files};
-use LOSAT::api::{read_fasta, Program, Role};
+
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
 
 const CUSTOM: &str =
     "6 qseqid sseqid pident length qstart qend sstart send evalue bitscore qseq sseq btop";
@@ -93,7 +96,7 @@ impl Drop for Inputs {
 
 /// What the call gives the caller besides the outputs: `run` (no hit records, no observer) or
 /// `run_collect` (the hit records and the observer). The calls that `run_local` takes with the
-/// observer alone or with `OutputSink::File` sinks cannot be made through `LOSAT::api`.
+/// observer alone or with `OutputSink::File` sinks cannot be made through `losat::api`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Observe {
     /// No hit records, no observer.
@@ -142,7 +145,7 @@ impl Drop for Child {
 /// batch size of the test's environment, `LOSAT_BLASTX_WORKER_LOG` kept or set (a binary built with
 /// the `blastx-worker-probe` feature, `cargo test --all-features` as in CI, needs it at 2 or more
 /// threads; it selects nothing), then `vars`.
-fn clean_env(command: &mut Command, vars: &[(&str, &str)]) {
+fn clean_env(command: &mut Command, vars: &[(&str, &str)]) -> Option<TempFile> {
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -154,13 +157,9 @@ fn clean_env(command: &mut Command, vars: &[(&str, &str)]) {
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join(format!("losat-qblockweb-worker-{}.log", std::process::id())),
-        );
-    }
+    let log = worker_log_if_unset(command, "run_local_blastp_blocks_worker");
     command.envs(vars.iter().copied());
+    log
 }
 
 /// Runs `child_search` in a child process with `vars` (and `LOSAT_TIMING`).
@@ -187,7 +186,7 @@ fn child(
     .collect::<Vec<_>>()
     .join("\n");
     let mut command = Command::new(std::env::current_exe().expect("test binary"));
-    clean_env(&mut command, vars);
+    let _log = clean_env(&mut command, vars);
     let output = command
         .args([
             child_test_name().as_str(),
@@ -224,7 +223,7 @@ fn child(
 fn cli(inputs: &Inputs, outfmt: &str, threads: u32, vars: &[(&str, &str)]) -> (Vec<u8>, Vec<u8>) {
     let out = temp_path(&format!("qblockweb_cli_{}_{threads}.out", outfmt.len()));
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
-    clean_env(&mut command, vars);
+    let _log = clean_env(&mut command, vars);
     let output = command
         .arg("blastp")
         .arg("-query")
@@ -425,7 +424,7 @@ fn calls_the_block_search_takes_and_does_not() {
     // An output the block search does not write (outfmt 15 and 16); the block search off (with one
     // outfmt 6 output with the records and the observer, and with three outputs). (The calls with
     // the observer alone and with outputs that are not the caller's writers cannot be made through
-    // `LOSAT::api`: `run_collect` gives the records with the observer, `run` neither.)
+    // `losat::api`: `run_collect` gives the records with the observer, `run` neither.)
     for (formats, observe, extra) in [
         (&["0", "6", "7", "15", "16"][..], Observe::Both, None),
         (&WEB[1..2], Observe::Both, Some(BLOCK_OFF)),

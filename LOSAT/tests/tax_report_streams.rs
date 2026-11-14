@@ -34,6 +34,7 @@ use std::process::{Command, Stdio};
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 
 /// The taxonomy database's text of B's lookup (`offset_last_past_end`).
+#[cfg(target_os = "linux")]
 const OFFSET_ERROR: &str = "Error: [blastp] Error: Offset error at end of taxdb file.\n";
 
 /// A case: its name, whether the second query (else the first) has the title, the title's
@@ -42,8 +43,11 @@ struct Case {
     name: &'static str,
     second_titled: bool,
     title: usize,
+    #[cfg(target_os = "linux")]
     room: u64,
+    #[cfg(target_os = "linux")]
     fsize_exit: i32,
+    #[cfg(target_os = "linux")]
     fsize_stderr: &'static [&'static str],
 }
 
@@ -52,16 +56,22 @@ const CASES: &[Case] = &[
         name: "length",
         second_titled: true,
         title: 7441,
+        #[cfg(target_os = "linux")]
         room: 8195,
+        #[cfg(target_os = "linux")]
         fsize_exit: 6,
+        #[cfg(target_os = "linux")]
         fsize_stderr: &[OFFSET_ERROR, OFFSET_ERROR, "BLAST failed to write output\n"],
     },
     Case {
         name: "query",
         second_titled: false,
         title: 7447,
+        #[cfg(target_os = "linux")]
         room: 8192,
+        #[cfg(target_os = "linux")]
         fsize_exit: 0,
+        #[cfg(target_os = "linux")]
         fsize_stderr: &[OFFSET_ERROR, OFFSET_ERROR, OFFSET_ERROR],
     },
 ];
@@ -135,11 +145,11 @@ fn search(
             command.env_remove(variable);
         }
     }
-    // The probe of an `--all-features` binary goes to a file of the case: `prlimit --fsize`
-    // limits every file the run writes, and the caller's log may already be past the room.
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_some() {
-        command.env("LOSAT_BLASTX_WORKER_LOG", dir.join("worker.log"));
-    }
+    // The probe of an `--all-features` binary goes to a file of the case (set whether or not the
+    // caller's environment names one: the probe needs a name at 2 threads and more):
+    // `prlimit --fsize` limits every file the run writes, and the caller's log may already be
+    // past the room.
+    command.env("LOSAT_BLASTX_WORKER_LOG", dir.join("worker.log"));
     command
         .env("BLASTDB", format!("../seqdb/taxdb/{taxdb}"))
         .env("HOME", dir)

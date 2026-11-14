@@ -17,6 +17,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A file or a directory (with what is in it) that is removed when the guard is dropped.
+#[derive(Debug)]
 pub struct TempPath {
     path: PathBuf,
     keep_on_failure: bool,
@@ -119,6 +120,7 @@ fn new_dir(label: &str, keep_on_failure: bool) -> TempPath {
 
 /// A file named `name` in a new directory of its own (`unique_dir(label)`): the directory, with
 /// the file, is removed when the value is dropped. The file is not made: the test writes it.
+#[derive(Debug)]
 pub struct TempFile {
     path: PathBuf,
     _dir: TempPath,
@@ -208,4 +210,19 @@ impl<T, F> Deref for Finished<T, F> {
     fn deref(&self) -> &T {
         &self.value
     }
+}
+
+/// When the test's environment names no `LOSAT_BLASTX_WORKER_LOG`, a worker log of this run alone
+/// (a binary built with the `blastx-worker-probe` feature needs that file name as soon as a search
+/// has more than one thread, and it selects nothing), set on `command`: the caller keeps the
+/// returned guard until its assertions on the run are done; the log is removed when it is dropped
+/// and kept when the test panics.
+pub fn worker_log_if_unset(command: &mut Command, label: &str) -> Option<TempFile> {
+    std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+        .is_none()
+        .then(|| {
+            let log = TempFile::keep_on_failure(label, "worker.log");
+            command.env("LOSAT_BLASTX_WORKER_LOG", &log);
+            log
+        })
 }

@@ -23,6 +23,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 /// Every file is cut, whatever its size (tuning).
 const ANY_SIZE: (&str, &str) = ("LOSAT_X_QSCANPARMIN", "0");
 
@@ -114,7 +117,7 @@ fn search(
     task: &str,
     threads: u32,
     vars: &[(&str, &str)],
-) -> (Option<i32>, Vec<u8>, Vec<u8>) {
+) -> (Option<i32>, Vec<u8>, Vec<u8>, Option<TempFile>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -124,12 +127,7 @@ fn search(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join(format!("losat_qscan_{}_worker.log", std::process::id())),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastn_query_scan_par_worker");
     let output = command
         .arg("blastn")
         .args(["-task", task])
@@ -143,7 +141,7 @@ fn search(
         .envs(vars.iter().copied())
         .output()
         .expect("run LOSAT");
-    (output.status.code(), output.stdout, output.stderr)
+    (output.status.code(), output.stdout, output.stderr, log)
 }
 
 /// The value of `field` (`scan_par=`) in the one `[X_STATS] QSTREAM` line of `stderr`, and
@@ -269,5 +267,9 @@ fn a_file_with_cr_a_gap_line_or_a_reader_error_keeps_the_one_thread_reading() {
         "the error file: {}",
         String::from_utf8_lossy(&expected.2)
     );
-    assert_eq!(search(&query, target, "dc-megablast", 4, &[]), expected);
+    let again = search(&query, target, "dc-megablast", 4, &[]);
+    assert_eq!(
+        (again.0, again.1, again.2),
+        (expected.0, expected.1, expected.2)
+    );
 }

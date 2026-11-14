@@ -262,11 +262,18 @@ fn megablast_runs_the_prefault_round_on_fresh_tables_only() {
 }
 
 /// The same report with the switch off and on, and the keep's counts (`kept=`, `fresh=`) as
-/// given.
-fn check_counts(task: &str, query: &Path, env: &[(&str, &str)], kept: u64, fresh: u64) -> String {
-    let (reference, _, _log) = blastn(task, query, 4, &[env, &[OFF]].concat());
+/// given. Returns the standard error of the run with the switch on and the worker logs of both
+/// runs, which live until the caller's own assertions are done.
+fn check_counts(
+    task: &str,
+    query: &Path,
+    env: &[(&str, &str)],
+    kept: u64,
+    fresh: u64,
+) -> (String, (WorkerLog, WorkerLog)) {
+    let (reference, _, log_off) = blastn(task, query, 4, &[env, &[OFF]].concat());
     assert!(!reference.is_empty(), "{task}: no hits");
-    let (report, stderr, _log) = blastn(task, query, 4, &[env, &[TIMING, STATS]].concat());
+    let (report, stderr, log_on) = blastn(task, query, 4, &[env, &[TIMING, STATS]].concat());
     assert!(report == reference, "{task} {env:?}: the report differs");
     assert_eq!(
         field(&stderr, KEEP, "kept="),
@@ -278,7 +285,7 @@ fn check_counts(task: &str, query: &Path, env: &[(&str, &str)], kept: u64, fresh
         fresh,
         "{task} {env:?}:\n{stderr}"
     );
-    stderr
+    (stderr, (log_off, log_on))
 }
 
 // Megablast of LC738868 (a table of 4^12 cells) and then four 100 kb pieces of LC738869 (4^11
@@ -325,7 +332,7 @@ fn packed_tables_share_the_kept_table_with_chains() {
             records.push(genome.clone());
         }
         let query = query_file(name, &records);
-        let stderr = check_counts("megablast", &query, &[BATCH, PACK_ON], 0, fresh);
+        let (stderr, _logs) = check_counts("megablast", &query, &[BATCH, PACK_ON], 0, fresh);
         assert_eq!(field(&stderr, KEEP, "csr="), csr, "{name}:\n{stderr}");
         assert_eq!(
             field(&stderr, CSR_BUILDS, "builds="),
@@ -360,7 +367,7 @@ fn csr_and_chain_builds_share_the_kept_table() {
     ];
     let query = query_file("csr_chains", &records);
     for task in ["dc-megablast", "blastn"] {
-        let stderr = check_counts(task, &query, &[BATCH], 2, 1);
+        let (stderr, _logs) = check_counts(task, &query, &[BATCH], 2, 1);
         assert_eq!(field(&stderr, KEEP, "csr="), 1, "{task}:\n{stderr}");
     }
 }

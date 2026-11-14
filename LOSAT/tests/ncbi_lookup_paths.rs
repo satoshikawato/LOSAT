@@ -12,6 +12,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+mod temp_support;
+use temp_support::TempFile;
+
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 const INPUTS: &str = "tests/fasta/outfmt11";
 
@@ -50,13 +53,13 @@ fn run_in(
     }
     let home = dir.join("home");
     fs::create_dir_all(&home).unwrap();
+    // The worker log of this run (one thread: the probe writes none): removed with the run, kept
+    // when the test panics.
+    let log = TempFile::keep_on_failure("losat_ncbi_lookup_paths_worker", "worker.log");
     command
         .env("HOME", &home)
         .env("APPDATA", &home)
-        .env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat_ncbi_lookup_paths_worker.log"),
-        )
+        .env("LOSAT_BLASTX_WORKER_LOG", &log)
         .envs(envs.iter().copied())
         .current_dir(dir)
         .args(args)

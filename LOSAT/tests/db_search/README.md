@@ -1248,10 +1248,15 @@ most 9 in BLOSUM62).
   volume (the merge, the per-volume hit list size, outfmt 7's `# N hits found` before the cut, volume 0's K). A row
   `rps-gz:rps_mini3v!01.freq` leaves one volume's `.freq` out (`!00.freq`: the first, which NCBI answers with its
   warning and mode 0).
-- `db_search_fixtures.py` runs a row whose `db` cell is `rps-gz:NAME[+NAME2][!EXT][!EXT=FILE]` with the files
+- `db_search_fixtures.py` runs a row whose `db` cell is `rps-gz:NAME[+NAME2][!EXT][!EXT=FILE][@ALIAS]` with the files
   `rps/NAME.*.gz` inflated into a fresh directory (without `NAME.EXT`, or with `rps/FILE` in its place), `BLASTDB` set
-  to that directory and `-db "NAME NAME2"`; a row whose `covers` cell has `path: {db_dir}` keeps that directory as
+  to that directory and `-db "NAME NAME2"`; with `@ALIAS` the alias file `rps/ALIAS.pal` is copied beside them and the
+  run searches `-db ALIAS`. A row whose `covers` cell has `path: {db_dir}` keeps that directory as
   `{db_dir}` in the frozen bytes (NCBI's RPS errors print the volume's canonical path).
+- Alias files (line RG, D1a-3 review 7 S1, rows `db.rps.rej.l0`, `db.rps.rej.l2p63p1`, `db.rpstbn.rej.l0`,
+  `db.rpstbn.rej.l2p63p1`), written by hand: `rps/l0rps.pal` (`TITLE t`, `DBLIST rps_mini`, `LENGTH 0`) and
+  `rps/l2p63p1rps3v.pal` (`TITLE t`, `DBLIST rps_mini3v`, `LENGTH 9223372036854775809`, 2^63 + 1: negative as NCBI's
+  `Int8`), whose total lengths of 0 or less LOSAT's RPSBLAST and RPSTBLASTN refuse until item D1a-4.
 - Queries: `tests/fasta/WSSV.faa` (177 records, 10 query batches; its long records share diagonals of the 1,024-entry
   table of these databases), `tests/fasta/rps/q40.faa` (33 WSSV records, 11,434 letters, two query batches: the outfmt
   0 K of each batch's first query), `tests/fasta/rps/xoj.faa` (a record of X only, the TK-TMK record with an O at 30

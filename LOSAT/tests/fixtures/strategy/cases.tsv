@@ -232,7 +232,7 @@ blastn.db.dbmask.soft11	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/
 blastn.db.dbmask.key	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/k5 -db_soft_mask mydust -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.db.dbmask.name	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/a5 -db_soft_mask dust -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.db.dbmask.f11	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/a5 -db_soft_mask +11 -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
-blastn.db.dbmask.hard	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/k5 -db_hard_mask mydust -outfmt 6 -export_search_strategy {ss}	refuse	1	-	-db_hard_mask (hard masking of the database sequences) is not supported by LOSAT's BLASTN
+blastn.db.dbmask.hard	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/zh_k5 -db_hard_mask mydust -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.sub.lcase.qloc.minus	blastn	-	-query tests/fasta/outfmt11/arch_lcout.fna -subject tests/fasta/outfmt11/arch_s.fna -lcase_masking -query_loc 10-100 -strand minus -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.sub.lcase.sloc	blastn	-	-query tests/fasta/outfmt11/arch_lcout.fna -subject tests/fasta/outfmt11/arch_s.fna -lcase_masking -subject_loc 10-140 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.sub.lcase.qloc.sloc	blastn	-	-query tests/fasta/outfmt11/arch_lcout.fna -subject tests/fasta/outfmt11/arch_s.fna -lcase_masking -query_loc 10-100 -subject_loc 10-140 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-

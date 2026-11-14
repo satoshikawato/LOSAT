@@ -1386,3 +1386,15 @@ of data`); NCBI's search reports both as `BLAST engine error: Database memory ma
 files `zr_t2.nal`, `zr_p5.nal` and `zr_t1.nal` give `DBLIST p5 zz5` with the OID ranges 7-7 (`t2` alone, no mask
 data), 3-5 (`s3`-`s5`) and 1-6 (`s1`-`s5` and `t1`, which has mask data that `zz5`'s volume reads without the
 algorithm 11 of the list): NCBI reads masks of `zz5` only in the last.
+
+M4a-2b (`-db_hard_mask`, line NP) added `edge3` (s5's one-letter mask 1001, `edge_short.asnt`: a last mask shorter
+than the two letters before its end that the last chunk starts with, which LOSAT refuses) and four alias files that
+leave out the sequences whose mask runs to their end (`a5`'s and `k5`'s `s4`, `mask_nucl_mv`'s `m04`, OID 3): `zh_a5.nal`
+and `zh_k5.nal` (OIDs 1-3, `s1`-`s3`), `zh_mv_a.nal` (`../../seqdb/db/mask_nucl_mv`, OIDs 1-3: `m01`-`m03`) and
+`zh_mv_b.nal` (OIDs 5-8: `m05`-`m08`, the second volume):
+
+```
+makeblastdb -in subj.fna -dbtype nucl -out edge3 -title "edge masks 3" -blastdb_version 4 -mask_data edge_short.asnt
+```
+
+`edge_short.asnt` is `edge_tail.asnt` with `algo-options "edge short"` and `from 1001, to 1001`.

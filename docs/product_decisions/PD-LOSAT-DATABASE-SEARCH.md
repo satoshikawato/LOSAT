@@ -216,7 +216,7 @@ is an explicit error of `LOSAT/src/seqdb`:
 | Alias keys `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`; `NSEQ` or `LENGTH` whose value is not the number of sequences or the total length of the alias file's databases | read since line RG D1a (2026-11-12) as NCBI's walks; the values listed above as refused until D1a-3 and D1a-4 |
 | A name that lists several databases | one database per search (P4); searched since version 1.2 |
 | A volume listed more than once, a group alias file (`index.alx`) in a directory, two volumes of one name in different directories | NCBI derives counts or the volume order from them in ways the reader does not reproduce; since version 1.2 two volumes of one name in different directories are read (NCBI orders them by base name, then path); since line RG D1a a volume listed more than once is read once and counted per alias node, as NCBI does |
-| Column files of a volume (mask data of `makeblastdb -mask_data`) | not read; searched since 2026-11-11 (line SW, SW8 follow-up 2): NCBI's searches open no column file without a database mask named by `-db_soft_mask`, `-db_hard_mask` or an imported search strategy (`-import_search_strategy`), so LOSAT searches the volume without reading them, whatever they hold; since 2026-11-14 BLASTN reads the mask column for `-db_soft_mask` (line NP, M4a-2a; LOSAT refuses the other two) |
+| Column files of a volume (mask data of `makeblastdb -mask_data`) | not read; searched since 2026-11-11 (line SW, SW8 follow-up 2): NCBI's searches open no column file without a database mask named by `-db_soft_mask`, `-db_hard_mask` or an imported search strategy (`-import_search_strategy`), so LOSAT searches the volume without reading them, whatever they hold; since 2026-11-14 BLASTN reads the mask column for `-db_soft_mask` and `-db_hard_mask` (line NP, M4a-2a and M4a-2b; LOSAT refuses the third) |
 
 Two errors are NCBI's own and are reproduced: volumes of version 4 and of version 5 in one
 database, and a version 5 volume whose LMDB file is missing.
@@ -225,7 +225,7 @@ Left unread without an error: the id and taxonomy files of a version 5 database,
 lookups by id or taxonomy only, the LMDB file's volume list, which NCBI compares with the
 volumes, and (since 2026-11-11) the column files of a volume, which NCBI's searches read only for
 a database mask named by `-db_soft_mask`, `-db_hard_mask` or an imported search strategy (since
-2026-11-14 BLASTN reads the mask column for `-db_soft_mask`; LOSAT refuses the other two). The LMDB file is opened when the
+2026-11-14 BLASTN reads the mask column for `-db_soft_mask` and `-db_hard_mask`; LOSAT refuses the third). The LMDB file is opened when the
 database is opened. Since version 1.3 a search looks
 the Seq-align id of a reported sequence with parsed Seq-ids up in the LMDB file or the ISAM
 files, as NCBI's formatters do. Since stage DB-3 a `-db`
@@ -598,7 +598,7 @@ title rules are those of BLASTP's `-db`.
   needs and refetches the whole sequence when an alignment leaves them, with the same result),
   and outfmt 0 holds the letters of the reported sequences until the reports are written. On
   2026-11-14 line NP M4a-2a searched BLASTN with `-db_soft_mask` (section "BLASTN database masks")
-  and read `-db_hard_mask` up to the search, which it refuses.
+  and read `-db_hard_mask` up to the search, which M4a-2b searches the same day.
 - Reports: the `Database:` lines of outfmt 0 (title, counts, `Posted date`), `>` and the stored
   title, subject ids made from the title as for BLASTP, `# Database:` of outfmt 7 with the `-db`
   value as given. A title of punctuation that NCBI's cleaner reads past (`, ,`; NCBI BLAST+
@@ -614,7 +614,7 @@ Rejected explicitly, besides what BLASTP `-db` and the reader reject (the same r
 
 | Rejected | Why |
 | --- | --- |
-| `-searchsp`, `-db_soft_mask`, `-db_hard_mask` | a stage of its own; masks are not read (P4). Since 2026-11-14 `-db_soft_mask` is searched and `-db_hard_mask` is refused where it would mask the search (line NP, M4a-2a; section "BLASTN database masks") |
+| `-searchsp`, `-db_soft_mask`, `-db_hard_mask` | a stage of its own; masks are not read (P4). Since 2026-11-14 `-db_soft_mask` and `-db_hard_mask` are searched (line NP, M4a-2a and M4a-2b; section "BLASTN database masks") |
 | A reported subject whose title gives no subject id: a title of spaces, or an empty title (NCBI writes `gnl|BL_ORD_ID|n` and `BL_ORD_ID:n`; for a protein an empty title gives `unnamed`, which BLASTP writes) | as BLASTP: ids of the general form are not written |
 | `-dbsize` whose effective search space overflows NCBI's `Int8` | NCBI's arithmetic overflows |
 | A database of more letters than the target's `usize` (32-bit targets) | |
@@ -664,7 +664,7 @@ opener, the reader's error texts and the title rules are those of BLASTP's and B
 Rejected explicitly, besides what BLASTN `-db` and the reader reject (the same rules apply):
 `-searchsp`, `-db_soft_mask`, `-db_hard_mask`, and the options TBLASTN rejects with `-subject`.
 
-## BLASTN database masks (line NP, M4a-2a, 2026-11-14)
+## BLASTN database masks (line NP, M4a-2a and M4a-2b, 2026-11-14)
 
 `losat blastn -db NAME -db_soft_mask ID` searches with the masks of the filtering algorithm `ID`
 that `makeblastdb -mask_data` stored in the database, as NCBI BLAST+ 2.17.0 does, byte for byte:
@@ -685,8 +685,31 @@ that `makeblastdb -mask_data` stored in the database, as NCBI BLAST+ 2.17.0 does
   `DbFilteringAlgorithmKey` for a name or `DbFilteringAlgorithmId`, then `SubjectMaskingType`.
   The other formats change only through the results.
 
-Refused: `-db_hard_mask` where it would mask the search (its errors and its warning are NCBI's;
-line NP, M4a-2b), a search that reads the masks of a volume that has masks but not the algorithm
+`losat blastn -db NAME -db_hard_mask ID` (M4a-2b) reads the option the same way and searches
+with the masked letters cut out, as NCBI BLAST+ 2.17.0 does, byte for byte:
+
+- The preliminary search takes each database sequence in chunks, one per stretch between its
+  masks (in the order the masks are stored; a stretch longer than 5,000,000 letters in NCBI's
+  overlapping chunks), each starting up to three masked letters early (at a multiple of four),
+  so no word inside a mask starts a hit and no preliminary extension crosses a mask.
+- The traceback (and `-ungapped`'s re-evaluation) reads the masked letters as `B`, so an
+  alignment may still cross a mask at the cost of its mismatches.
+- The identities that the reports count from the rows they show (outfmt 0, 5, 13 to 16, tabular
+  rows with `qseq`, `sseq`, `positive`, `ppos` or `btop`) count the stored letters; the
+  Seq-align's (outfmt 8, 9, 11, 12, the standard tabular columns, SAM's `PI`, `-sorthits` and
+  "Max ident") count the masked letters as mismatches: 594 and 570 of 600 for an HSP across 24
+  masked letters. Outfmt 0 shows the masks in lower case as with `-db_soft_mask`.
+- Before anything is written, the masks of the searched sequences (after `-seqidlist`,
+  `-taxids`, alias ranges and the like) are read once, and the search is refused at the first
+  sequence whose masks NCBI's chunks do not handle; the error names it by its OID and volume:
+  a sequence of a word or more whose first mask runs to its end (all masked, or one masked tail
+  such as a poly-A tail), where NCBI scans the masked letters past the chunk before the mask
+  (a normal-looking result, or a corrupt heap and a crash; question Q1 of line NP to the Owner);
+  masks stored out of order or overlapping (hand-made mask data), whose result NCBI ties to the
+  slices of its partial fetch; and a last mask shorter than the 1 to 3 letters before its end
+  that the last chunk starts with, after which NCBI reads that chunk's overlap past its list.
+
+Refused: a search that reads the masks of a volume that has masks but not the algorithm
 (NCBI reads the masks of another volume's algorithm through a cache, or an unset value; M/DECISIONS
 9 of line NP) or of a volume whose mask column has its big-endian file alone (NCBI reads its
 numbers reversed). Such a volume is searched when no sequence that the search reads from it

@@ -1,0 +1,13 @@
+Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:
+    T0 "/export/home/tomcat/TeamCity/Agent2/work/b895474bf74772ad/struct_tree/src/corelib/ncbireg.cpp", line 698: Error: (CRegistryException::eSection) ncbi::IRWRegistry::x_Read() - Invalid registry section (']' is missing): `[sec' (m_Pos = 1)
+
+Post-RPSBLAST Processing Utility v0.5.1
+-------------------------------------------------------
+Download:
+	ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/
+
+Blast applications download:
+	ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
+
+For more information please refer to the README file
+Dryrun passed, all resources are present and loaded successfully.

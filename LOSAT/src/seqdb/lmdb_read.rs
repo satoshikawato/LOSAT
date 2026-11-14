@@ -956,6 +956,17 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
     // ```
     /// Leaf page whose key range covers `key` (`None` for an empty tree).
     fn leaf_for(&self, db: &Db, key: &[u8]) -> Result<Option<Page>, String> {
+        self.descend(db, key, |_, _| {})
+    }
+
+    /// `leaf_for`, handing each branch page on the way down to `on_branch` with the index of
+    /// the child taken (the cursor's stack, `mc_pg` and `mc_ki`).
+    fn descend(
+        &self,
+        db: &Db,
+        key: &[u8],
+        mut on_branch: impl FnMut(Page, usize),
+    ) -> Result<Option<Page>, String> {
         if db.root == P_INVALID {
             return Ok(None);
         }
@@ -978,6 +989,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
                     i -= 1;
                 }
                 let child = page.node(i)?.child;
+                on_branch(page, i);
                 page = self.page(child)?;
             } else if page.flags & P_LEAF != 0 && page.flags & P_LEAF2 == 0 {
                 return Ok(Some(page));
@@ -1033,6 +1045,91 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         }
         let node = leaf.node(i)?;
         Ok(Some((leaf, node)))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:6148-6160
+    // ```c++
+    // set2:
+    //     leaf = mdb_node_search(mc, key, exactp);
+    //     if (exactp != NULL && !*exactp) {
+    //         /* MDB_SET specified and not an exact match. */
+    //         return MDB_NOTFOUND;
+    //     }
+    //
+    //     if (leaf == NULL) {
+    //         DPUTS("===> inexact leaf not found, goto sibling");
+    //         if ((rc = mdb_cursor_sibling(mc, 1)) != MDB_SUCCESS) {
+    //             mc->mc_flags |= C_EOF;
+    //             return rc;		/* no entries matched */
+    //         }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:5821-5845
+    // ```c++
+    //     mdb_cursor_pop(mc);
+    //     ...
+    //     if (move_right ? (mc->mc_ki[mc->mc_top] + 1u >= NUMKEYS(mc->mc_pg[mc->mc_top]))
+    //                : (mc->mc_ki[mc->mc_top] == 0)) {
+    //         ...
+    //         if ((rc = mdb_cursor_sibling(mc, move_right)) != MDB_SUCCESS) {
+    //     ...
+    //     } else {
+    //         if (move_right)
+    //             mc->mc_ki[mc->mc_top]++;
+    //     ...
+    //     indx = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
+    //     if ((rc = mdb_page_get(mc, NODEPGNO(indx), &mp, NULL)) != 0) {
+    // ```
+    /// `mdb_cursor_set(MDB_SET_RANGE)`: the first key of `db` that is not before `key` in its
+    /// order (`None`: every key is before it). Past the last node of the leaf that covers `key`,
+    /// the first key of the next leaf (`mdb_cursor_sibling`: the deepest branch with a node to the
+    /// right of the one taken, then the first node of each page down).
+    pub fn first_key_at_least(&self, db: &Db, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
+        if key.is_empty() {
+            return Err(bad_valsize());
+        }
+        let mut path = Vec::new();
+        let Some(leaf) = self.descend(db, key, |page, i| path.push((page, i)))? else {
+            return Ok(None);
+        };
+        let (i, _) = leaf.node_search(key, db.flags)?;
+        if i < leaf.n {
+            return Ok(Some(leaf.key(&leaf.node(i)?).to_vec()));
+        }
+        while let Some((branch, i)) = path.pop() {
+            if i + 1 >= branch.n {
+                continue;
+            }
+            let mut page = self.page(branch.node(i + 1)?.child)?;
+            for _ in path.len()..=MAX_DEPTH {
+                if page.flags & P_BRANCH != 0 {
+                    if page.n == 0 {
+                        return Err("LMDB: empty branch page (MDB_CORRUPTED)".to_string());
+                    }
+                    page = self.page(page.node(0)?.child)?;
+                } else if page.flags & P_LEAF != 0 && page.flags & P_LEAF2 == 0 {
+                    if page.n == 0 {
+                        return Err(
+                            "LMDB: empty leaf page past the root (MDB_CORRUPTED)".to_string()
+                        );
+                    }
+                    return Ok(Some(page.key(&page.node(0)?).to_vec()));
+                } else {
+                    return Err(format!(
+                        "LMDB: index points to a page with flags {:#x}, expected branch or leaf (MDB_CORRUPTED)",
+                        page.flags
+                    ));
+                }
+            }
+            return Err("LMDB: tree is deeper than 32 levels (MDB_CORRUPTED)".to_string());
+        }
+        Ok(None)
+    }
+
+    /// Whether `db` has a key that starts with `prefix` (`MDB_SET_RANGE` at `prefix`).
+    pub fn has_key_starting_with(&self, db: &Db, prefix: &[u8]) -> Result<bool, String> {
+        Ok(self
+            .first_key_at_least(db, prefix)?
+            .is_some_and(|key| key.starts_with(prefix)))
     }
 
     // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:9784-9799
@@ -1808,6 +1905,49 @@ mod tests {
             }
             assert_eq!(seen.len(), n);
         }
+    }
+
+    /// `first_key_at_least` (`MDB_SET_RANGE`) against the dump of a depth-two `acc2oid` (2,400
+    /// keys over several leaves): each key finds itself, a key just after it finds the next key
+    /// (the first of the next leaf after a leaf's last), and past the last key nothing.
+    #[test]
+    fn first_key_at_least_follows_the_key_order_across_leaves() {
+        let f = File::open(format!("{FX}/mvbig.pdb")).unwrap();
+        let env = Env::open(&f).unwrap();
+        let acc = env.open_db(b"acc2oid").unwrap().unwrap();
+        assert_eq!(acc.depth, 2);
+        let exp = load_expected("mvbig.pdb");
+        let keys: Vec<&Vec<u8>> = exp
+            .iter()
+            .find(|db| db.name == "acc2oid")
+            .unwrap()
+            .keys
+            .iter()
+            .map(|(key, _)| key)
+            .collect();
+        assert_eq!(keys.len(), 2400);
+        assert_eq!(
+            env.first_key_at_least(&acc, b"\x01").unwrap().as_ref(),
+            Some(keys[0])
+        );
+        for (at, key) in keys.iter().enumerate() {
+            assert_eq!(
+                env.first_key_at_least(&acc, key).unwrap().as_ref(),
+                Some(*key)
+            );
+            let after = [key.as_slice(), b"\0"].concat();
+            assert_eq!(
+                env.first_key_at_least(&acc, &after).unwrap().as_ref(),
+                keys.get(at + 1).copied(),
+                "after {}",
+                String::from_utf8_lossy(key)
+            );
+            assert!(env.has_key_starting_with(&acc, &key[..3]).unwrap());
+        }
+        assert!(!env.has_key_starting_with(&acc, b"BIG00000.10").unwrap());
+        assert!(!env.has_key_starting_with(&acc, b"big").unwrap());
+        assert_eq!(env.first_key_at_least(&acc, b"\xff").unwrap(), None);
+        assert!(env.first_key_at_least(&acc, b"").is_err());
     }
 
     #[test]

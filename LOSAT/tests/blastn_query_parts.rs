@@ -22,6 +22,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fasta")
@@ -108,7 +111,7 @@ fn search(
     args: &[&str],
     threads: u32,
     vars: &[(&str, &str)],
-) -> (Option<i32>, Vec<u8>, Vec<u8>) {
+) -> (Option<i32>, Vec<u8>, Vec<u8>, Option<TempFile>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -118,12 +121,7 @@ fn search(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join(format!("losat_qparts_{}_worker.log", std::process::id())),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastn_query_parts_worker");
     let output = command
         .arg("blastn")
         .args(["-task", "megablast"])
@@ -138,7 +136,7 @@ fn search(
         .envs(vars.iter().copied())
         .output()
         .expect("run LOSAT");
-    (output.status.code(), output.stdout, output.stderr)
+    (output.status.code(), output.stdout, output.stderr, log)
 }
 
 /// The `[X_STATS] BNQPARTS` line of `stderr` (its `records=`, `parts=` and `in_parts=`), and

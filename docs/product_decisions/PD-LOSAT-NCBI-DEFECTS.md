@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.18
+- Version: 1.21
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -31,7 +31,14 @@
   1.17 2026-11-13 (the explicit rejections of `losat rpsbproc` in the XML input, rule 3, line PS
   item PS16d);
   1.18 2026-11-14 (the explicit rejections of TBLASTN's one-hit gapped start past NCBI's buffers
-  and of the endless split it can cause, rule 3, line RG item X2)
+  and of the endless split it can cause, rule 3, line RG item X2);
+  1.19 2026-11-14 (exception 11, a REAL whose exponent overflows NCBI's `int`; the XML input of
+  `losat rpsbproc` reads a REAL of more than 18 significant digits as NCBI does, which 1.17
+  refused; line SW item SW8 B28);
+  1.20 2026-11-14 (the explicit rejections of `-outfmt 18`, rule 3, line RG items T2 and T2c);
+  1.21 2026-11-14 (TBLASTX's one-hit HSPs of length 0 or less ported, rule 4, and the explicit
+  rejection of their merge across subject chunks with a sum of lengths of 0, rule 3, line RG item
+  X2b)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -359,6 +366,30 @@ of exception 9 (PS16a) did.
     (`LOSAT/src/rpsbproc/sites.rs`); unit test `a_minimal_map_longer_than_the_stored_positions_fails_the_check`.
     The PR gives the number of occurrences on E. coli K-12 MG1655 x CDD v3.22.
 
+## Approved exception (a REAL whose exponent overflows NCBI's `int`, version 1.19)
+
+Version 1.19, decided under the maintainer's standing delegation on 2026-11-14 (line SW item
+SW8 B28, `sw8/DECISIONS.md` 58), under the rule of 2026-10-10 that LOSAT does not reproduce a
+signed `Int4` overflow (undefined behaviour in C++), as exceptions 4 and 9 widen theirs; its PR
+asks the maintainer to accept it, as the PRs of versions 1.5 and 1.13 did.
+
+11. **A REAL whose exponent overflows `int` in `NStr::StringToDoublePosix`.** NCBI's own decimal
+    reader (`corelib/ncbistr.cpp:985-1278`), which reads a REAL of the ASN.1 text form (a PSSM of
+    `-in_pssm` in psiblast and tblastn, an archive of rpsbproc) and of the XML form (rpsbproc's
+    BlastOutput input), keeps the position of the point and the exponent in `int`
+    (`dot_position - digits`, `exponent - expvalue` and `exponent + expvalue`, `:1113` and
+    `:1155`); a text whose exponent passes `int`'s range, such as `1.55e-2147483647`, overflows
+    it. NCBI's corelib wraps it (to 2147483647 there) and gives the infinity, `DBL_MAX` with
+    `fDecimalPosixFinite`, the flag of the word form `1.55e-2147483647` of both readers. LOSAT
+    computes the exponent in 64 bits (`ncbi_str::double::string_to_double_posix`), so the
+    number is read with its exact exponent: `DBL_MIN` with `fDecimalPosixFinite`, 0 without.
+    Every exponent that `int` holds gives NCBI's result: of 900,184 texts (184 edge cases,
+    mantissas of up to 5,700 bytes, 900,000 random) read by NCBI's corelib (598d8ae6) and by
+    LOSAT, only this one differs (`sw8/nfix/probe/x87`). NCBI's writers print an exponent of a
+    few hundred at most. Unit tests `refusals_wait_for_the_whole_object`
+    (`LOSAT/src/rpsbproc/archive_tests.rs`, the archive) and `numbers` (`LOSAT/src/report/serial/xml_reader_tests.rs`,
+    the XML input).
+
 ## Reproduced as NCBI (rule 2)
 
 - A text seqid list whose ids all go in NCBI's rewriting for a version 5 database (gi ids
@@ -447,6 +478,16 @@ of exception 9 (PS16a) did.
   description id of 65 bytes or more) or crashes (a protein title of punctuation): version 1.10,
   the table in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md).
 
+- `-outfmt 18`, the organism report (version 1.20, 2026-11-14, line RG item T2c; all five
+  programs): a query batch that NCBI does not search (no query of it has a valid context, "Could
+  not calculate ungapped Karlin-Altschul parameters"): NCBI leaves the Seq-align-set of each of its
+  queries null (`local_blast.cpp:204-205`), and `x_PrintTaxReport` reads the query's one
+  (`blast_format.cpp:893`, `:898-899`) and stops with a null pointer
+  exception and a stack trace of its build, exit status 255; LOSAT writes NCBI's bytes up to the
+  query's `Length=` line and then the error. Also (line RG item T2, 2026-11-13): a taxonomy name
+  with `<@bl_taxid@>` (NCBI prints the uninitialised `STaxInfo::blNameTaxid`, `taxFormat.hpp:142`)
+  and a `./.ncbirc` with a syntax error (NCBI's report stops at it with exit status 255).
+
 - `losat rpsbproc` (version 1.15, 2026-11-12, line PS items PS16a and PS16b, line PS
   `DECISIONS.md` 37 and 40, Owner-delegated): where NCBI's rpsbproc 0.5.1 reads memory outside
   its strings or its result depends on the host's memory, LOSAT refuses (exit 1) and names the
@@ -504,8 +545,8 @@ of exception 9 (PS16a) did.
     `std::bad_alloc` by the address space), the coordinate arithmetic of an HSP that overflows
     NCBI's `int` (`- COORDSBASE` of an `Hsp_query-from`, `Hsp_query-to` or `Hsp_hit-from` of
     `-2147483648`; `m_iTo - m_iFrom + 1` of "see if NA"; `++hf` and `--hf` of `ParseAlignStrings`
-    at `int`'s limits; an `Hsp_qseq` of 2^31 letters or more), and a REAL of more than 18
-    significant digits (the conversion LOSAT shares with its ASN.1 text readers). Of NCBI's XML
+    at `int`'s limits; an `Hsp_qseq` of 2^31 letters or more). (A REAL of more than 18
+    significant digits, refused in 1.17, is read as NCBI reads it since 1.19.) Of NCBI's XML
     reader, LOSAT refuses the constructs that NCBI's BLAST XML writers never produce and that NCBI
     reads with state LOSAT does not port: attributes (skipped, with NCBI's handling of `xmlns` and
     `nil`), namespace prefixes (stripped), control characters in character data (replaced by `#`
@@ -552,6 +593,20 @@ of exception 9 (PS16a) did.
   BLASTP's approved exception 3 (version 1.3), which reads such letters as the sentinel, is not
   extended to TBLASTN.
 
+- TBLASTX with `-window_size 0` (version 1.21, 2026-11-14, line RG item X2b, Owner-delegated): with
+  a low `-threshold`, NCBI's one-hit word finder saves ungapped HSPs of length 0 or less
+  (`aa_ungapped.c:1054,1083`), whose `Int4` ends lie at or before their starts. A subject frame
+  of more than 5,000,000 letters is searched in chunks that overlap, and `Blast_HSPListsMerge`
+  merges an HSP of the later chunk into one of the earlier chunk that contains its start or end
+  (`s_BlastMergeTwoHSPs`, `blast_hits.c:1488-1531`) with the density `(score1 + score2) /
+  (length1 + length2)`. With such an HSP the lengths can add up to 0 (an HSP of length 0 that
+  both chunks find, or HSPs of lengths 2 and -2 or 1 and -1): the density is `+inf`, and the
+  conversion `(int)` of its product, which sets the merged score, is undefined (C11 6.3.1.4;
+  x86-64 gives `INT_MIN`, which the `MAX` with the old score then ignores). LOSAT refuses the
+  search (exit 1) where that merge would happen. Every other merge of such HSPs is NCBI's (`Int4`
+  lengths, a density that may be negative or raised by a negative length, an HSP of length 0
+  that absorbs another and becomes positive).
+
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 
 On a database with parsed Seq-ids NCBI gives these results without failing, and they look wrong
@@ -580,6 +635,14 @@ would port:
 
 ## Ported (rule 4)
 
+- TBLASTX `-window_size 0` with a low `-threshold` (version 1.21, 2026-11-14, line RG item X2b):
+  the one-hit word finder's ungapped HSPs of length 0 or less (`aa_ungapped.c:1054,1083`). NCBI
+  keeps their `Int4` ends, sorts them by score, links them with the other HSPs in the first
+  `BLAST_LinkHsps` (where one whose score is above the large-gap cutoff, or with small gaps on
+  above the small-gap cutoff, can join a chain and so change the chain's E-value and the list's
+  order) and deletes them in its re-evaluation (a
+  length of 0 or less scores 0, below every cutoff), so they are never reported. The X2 build
+  refused these searches; LOSAT now gives NCBI's output (the rule-3 merge case above aside).
 - `-evalue` with a signed infinity or NaN (`+inf`, `-nan`, `+nan(1)`, `1e999`): NCBI's
   `CArg_Double` reads them with `strtod` and its option check (`<= 0`) lets them pass;
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT

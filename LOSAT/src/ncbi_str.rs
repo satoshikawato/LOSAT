@@ -5,9 +5,10 @@
 //! passes, and the `CStringException` each throws, with the place it is thrown from
 //! ([`ThrowSite`]); with them `NStr::PrintableString`, which their messages quote the string
 //! with, `NStr::StringToUInt8_DataSize` (`-max_file_sz`, module `data_size`) and
-//! `NStr::StringToDouble` with glibc's `strtod` (rpsbproc's bit score thresholds, the
-//! constraints of the integer arguments and the test of the SEG locut and hicut, module
-//! `double`). Also the string functions that more than one port calls: `NStr::ParseEscapes`
+//! `NStr::StringToDouble` with glibc's `strtod` and NCBI's own `NStr::StringToDoublePosix`
+//! (module `double`: the real arguments, the SEG locut and hicut, rpsbproc's bit score
+//! thresholds, the constraints of the arguments and the REAL values of the ASN.1 text and XML
+//! readers). Also the string functions that more than one port calls: `NStr::ParseEscapes`
 //! (makeblastdb's titles and the registry reader), `NStr::TruncateSpaces` (each `ETrunc`: the
 //! FASTA readers, the argument readers, the format guess), `NStr::IsBlank`, `NStr::StringToBool`
 //! and C's `isspace`.
@@ -19,22 +20,16 @@
 //! `fAllowCommas`, `fAllowLeadingSymbols` beyond its spaces).
 //! Also here: `NStr::StringToNonNegativeInt`.
 //!
-//! Conversions of their own remain where calling these would change what LOSAT does, each left
-//! for a fix of its own: `CArg_Double`'s `NStr::StringToDouble(value, fDecimalPosixOrLocal)`
-//! (`blastinput::value_parsers::ncbi_string_to_double`, which refuses the hexadecimal forms and
-//! an exponent mark without digits) and the SEG locut and hicut read with it
-//! (`blastinput::app::read_seg_option`), the `TruncateSpacesInPlace(input, eTrunc_Begin)` of the
-//! PSSM format guess (`algorithm::pssm_search::in_pssm`, `trim_ascii_start`, which keeps a
-//! vertical tab), the full `NStr::StringToDoublePosix` of the ASN.1 text reader
-//! (`report::serial::asn_text_reader`, beside the subset in `double`), and the
-//! `NStr::StringToInt8` of an object id (`seqid::defline_set::object_id_number`, different only
-//! for an embedded NUL). The parsers of the frozen web ABI v1 keep theirs.
+//! The parsers of the frozen web ABI v1 (`blastinput::value_parsers::parse_seg_filtering` and
+//! `tblastx_v1_outfmt`, `web_api`) keep conversions of their own.
 
 mod data_size;
 mod double;
 
 pub use data_size::string_to_uint8_data_size;
-pub(crate) use double::{string_to_double, string_to_double_posix_or_local, PosixOrLocalError};
+pub(crate) use double::{
+    string_to_double, string_to_double_posix, string_to_double_posix_or_local, NCBI_NAN,
+};
 
 use std::borrow::Cow;
 

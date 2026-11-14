@@ -4136,8 +4136,8 @@ Scheduling (each value computed by one thread with the original function; order 
   its arena, once to count and once to place (so the build holds one chunk's words, the fill's arena, not the whole
   query's), each thread owns a contiguous run of cell blocks, and the whole build is one `rayon::broadcast` whose
   threads pass a spin barrier between the reading and the owners' work of each chunk. The scans read a word's run
-  instead of walking its chain: the strip scan of PAIRPAR (`scan_strip_csr`) and the reference scan of
-  `search_query_batch` put the words with hits (after the presence test) through the FIFO of `LOSAT_X_DCCSR`; the
+  instead of walking its chain: the strip scan of PAIRPAR (`scan_strip_csr`) and the reference scan of a
+  two-stage table (`two_stage_scan.rs` `scan_two_stage_lookup`) put the words with hits (after the presence test) through the FIFO of `LOSAT_X_DCCSR`; the
   words, pairs and their order are the chain walk's. `for_each_hit`, `count_hits` and the masked-word test of
   `s_TypeOfWord` (`contains_hit`) read the run where the table has no chains. The `[TIMING] x_mb_lookup_build`
   interval includes the CSR builds (in `loop` or `pool_fill`), and `[TIMING] x_bn_csr: builds= parallel= words=`
@@ -4167,8 +4167,9 @@ Scheduling (each value computed by one thread with the original function; order 
   cDNAs: max RSS 2 MiB above dev at the run's last 1-3 % while the live data was 12 MiB below it, read with the mmap
   threshold pinned in a diagnostic run, s27 w21). The table's form is chosen once per table (`Csr::x_packed`):
   `Csr::run` and `Ring` are the code of a head of one element per cell, used by every discontiguous table and by a
-  contiguous one with the switch off, and the contiguous scans (`scan_strip_csr`, the reference scan of
-  `search_query_batch`) are generic over `x_dc_csr::XHead`, so each form's scan is compiled on its own (the
+  contiguous one with the switch off, and the contiguous scans (`scan_strip_csr`, generic over
+  `x_dc_csr::XHead`, and the reference scan's `x_scan_csr!` in `scan_two_stage_lookup`, a macro expanded once per
+  head form) compile each form's scan on its own (the
   dc-megablast and `=0` scans have dev's instructions). The packed ring (`XRingPacked`) drops a word of an empty cell
   (its run is empty, so the emit would read nothing) and prefetches the rank's two offsets; the one-word answers of
   the lookup (`for_each_hit`, `count_hits`, `contains_hit`) read either form (`Csr::x_run_any`). The build counts each
@@ -7289,7 +7290,10 @@ Scheduling (each value computed by one thread with the original function; order 
   LOSAT Web's ABI v2 yet.)
 - `LOSAT_X_BXUNGAPSENT=1` (BLASTX, speed; in the strict set from the pull request that added it, 2026-10-23;
   `=0` turns it off) the two-hit ungapped extension of BLASTX's seed loops, the fused loop of `LOSAT_X_BXDIAG`
-  and the direct loop (BXSCAN, graduated), for word size 3, with the walks of blastp's `LOSAT_X_BPUNGAPSENT`
+  and the direct loop (BXSCAN, graduated), for word size 2 to 4 (word size 3 until item SC9b-1 of line NP,
+  2026-11-13: the walk is generic over the word length with a const, `two_hit_in::<TAIL, Q, W>`, and the seed
+  loops take the instance of `-word_size` once per subject, never per candidate; the argument for `W` is in
+  `blastx/x_ungap_sent.rs`'s header), with the walks of blastp's `LOSAT_X_BPUNGAPSENT`
   (`blastx/x_ungap_sent.rs`, exactness argument in its header; the extension is
   `blastp/x_ungapped_sent.rs`'s `two_hit_in`): no bound test in the walks, the extension inlined into a
   closure (fused loop) or a loop instance (direct loop) of its own. The six-frame query buffer has a sentinel
@@ -7300,7 +7304,7 @@ Scheduling (each value computed by one thread with the original function; order 
   the same best, length and stop. The checks of BPUNGAP's walks are made once: the word size, the window,
   residue codes below 32 and the sentinels per query batch, codes and sentinels per subject; the X-drop
   (1..=127) per candidate (the X-drops are the contexts' parameters). Off the path (the reference
-  extension): a word size other than 3 (`-word_size 5`), `-window_size 0` (one-hit), a query batch of more
+  extension): a word size above 4 (`-word_size 5`, the compressed table), `-window_size 0` (one-hit), a query batch of more
   than `i32::MAX / 16` letters (another matrix: `i32::MAX / 32`), a candidate whose context's X-drop is
   outside 1..=127, and the searches where `word_finder` runs (the diagnostic stages that trace the seeds).
   Another matrix than BLOSUM62 (item SC6b of line NP, 2026-11-11) takes the same walks with the keys of its
@@ -7308,6 +7312,11 @@ Scheduling (each value computed by one thread with the original function; order 
   sentinel scores -128 against every code and the largest score is at most 31, so the argument holds with a
   query batch of at most `i32::MAX / 32` letters), and its reference is `extend_two_hit` with the matrix; the
   walks' matrix is a type (`XSent<S: BxScoring>`), so BLOSUM62's loops keep their code.
+  The word size 2 and 4 instances add about 0.8 MB of machine code (text 16.27 -> 17.04 MB on dev 159c675a6);
+  word size 3 runs the same instructions as before, but its peak memory can rise by up to about 0.25 MB, the
+  added code's pages mapped with its own (50 cDNAs x yeast proteins, one thread: VmHWM +248 kB, +1.66 %, on dev
+  716faaaaa; +57 to +163 kB on dev 159c675a6). The Owner accepted this as an exception to the rule that the
+  memory may rise by no more than the time falls (2026-11-14).
   Measured 2026-10-23 on the workstation (node 1, CPU 40 with its HT sibling and CPUs 41-47 idle, warmed 3 s
   before every run, arm order reversed every other round, one warm-up round + 5 rounds (4 for the UniRef50
   case, 3 for SwissProt), medians of the per-round ratios against dev cd8e0f89, the binary before the switch;

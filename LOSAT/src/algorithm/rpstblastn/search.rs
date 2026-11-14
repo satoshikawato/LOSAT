@@ -84,16 +84,6 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         let Some(database) = database else {
             bail!("a search without -db is not supported by LOSAT's {PROGRAM}");
         };
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:59-61
-        // ```c++
-        //     char* chunk_sz_str = getenv("CHUNK_SIZE");
-        //     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
-        //         retval = NStr::StringToInt(chunk_sz_str);
-        // ```
-        // NCBI reads it in the set-up of every query batch (`CQuerySplitter`), before its RPS
-        // structures; RPSTBLASTN never splits a query (`split_query_aux_priv.cpp:88`), so a value
-        // it reads changes nothing, and one it cannot convert stops it (`CStringException`).
-        crate::blastinput::app::read_query_split_variable(PROGRAM, "CHUNK_SIZE")?;
         // LOSAT's refusals of the volumes' files come before the first byte, as rpsblast's do;
         // NCBI's own errors of the files stay where NCBI's search of a batch raises them
         // (`search_batch`), and the options' refusals below wait for the files to open.
@@ -275,6 +265,20 @@ impl TranslatedRpsSearch {
         (db_length, db_count): (i64, i64),
         pool: &crate::utils::threading::SearchPool<'_>,
     ) -> Result<BatchResults> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:59-61
+        // ```c++
+        //     char* chunk_sz_str = getenv("CHUNK_SIZE");
+        //     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
+        //         retval = NStr::StringToInt(chunk_sz_str);
+        // ```
+        // NCBI reads it in the set-up of every query batch (`CQuerySplitter`), before its RPS
+        // structures; RPSTBLASTN never splits a query (`split_query_aux_priv.cpp:88`), so a value
+        // it reads changes nothing, and one it cannot convert is its `CStringException`
+        // (`app::read_query_split_variable`), which the batch's error frame passes on as it is
+        // (`native::database_search_error`): the first batch stops here, after the outfmt 0
+        // prolog and the messages of its records.
+        crate::blastinput::app::read_query_split_variable("CHUNK_SIZE")
+            .map_err(RpsBatchError::Setup)?;
         let prepared =
             prepare_unit_queries(queries, None, options).map_err(RpsBatchError::Setup)?;
         // BLOSUM62 (the `.aux`'s matrix, `RpsVolumeSetup::check`): BLASTX's ideal block, which

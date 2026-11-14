@@ -68,6 +68,23 @@
 /// and print the same text around it (line NP, M/DECISIONS.md 14).
 pub const NCBI_BUILD_ROOT: &str = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
 
+/// The build tree that NCBI rpsbproc 0.5.1's reports name: that of its Linux x64 binary of the
+/// 2025-05-13 package (the oracle of `tests/fixtures/rpsbproc`), built apart from BLAST+ on its own
+/// toolkit. Its `ncbireg.cpp` throws at the lines of BLAST+ 2.17.0's (env parity probe I of
+/// 2026-11-14 on ws: the seven throws of `IRWRegistry::x_Read`); bioconda's rpsbproc 0.5.1 names
+/// another tree (`/opt/conda/conda-bld/rpsbproc_<n>/work/ncbi_cxx/c++`).
+pub const RPSBPROC_BUILD_ROOT: &str =
+    "/export/home/tomcat/TeamCity/Agent2/work/b895474bf74772ad/struct_tree";
+
+/// The build tree that the reports of NCBI's `program` name: rpsbproc's own
+/// ([`RPSBPROC_BUILD_ROOT`]), else BLAST+ 2.17.0's ([`NCBI_BUILD_ROOT`]).
+pub fn build_root(program: &str) -> &'static str {
+    match program {
+        "rpsbproc" => RPSBPROC_BUILD_ROOT,
+        _ => NCBI_BUILD_ROOT,
+    }
+}
+
 /// Where NCBI throws an exception (`NCBI_THROW`, `NCBI_THROW2`, `NCBI_RETHROW`): what its
 /// report prints of the place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -177,8 +194,9 @@ impl NcbiException {
         &self.message
     }
 
-    /// `ReportThis()`: the line of this exception, without its predecessors.
-    fn report_this(&self, out: &mut String) {
+    /// `ReportThis()`: the line of this exception, without its predecessors, with the build tree
+    /// `root`.
+    fn report_this(&self, out: &mut String, root: &str) {
         let ThrowSite {
             file,
             line,
@@ -186,7 +204,7 @@ impl NcbiException {
             function,
         } = self.site;
         out.push_str(&format!(
-            "T0 \"{NCBI_BUILD_ROOT}/{file}\", line {line}: Error: ({kind}) "
+            "T0 \"{root}/{file}\", line {line}: Error: ({kind}) "
         ));
         if let Some(function) = function {
             out.push_str(function);
@@ -207,12 +225,17 @@ impl NcbiException {
     }
 
     /// `CException::what()` (`ReportAll`): the report of the chain, oldest exception first,
-    /// ending with a line feed.
+    /// ending with a line feed, in BLAST+ 2.17.0's build ([`NCBI_BUILD_ROOT`]).
     pub fn what(&self) -> String {
+        self.what_in(NCBI_BUILD_ROOT)
+    }
+
+    /// [`NcbiException::what`] of the build whose tree is `root` ([`build_root`]).
+    pub fn what_in(&self, root: &str) -> String {
         let mut os = String::from("NCBI C++ Exception:\n");
         for e in self.chain().iter().rev() {
             os.push_str("    ");
-            e.report_this(&mut os);
+            e.report_this(&mut os, root);
             os.push('\n');
         }
         os

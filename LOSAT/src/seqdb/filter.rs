@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use super::file::DbFile;
 use super::isam;
-use super::lmdb_read::Env;
+use super::lmdb_read::{Db, Env};
 use super::seqidlist::{self, SeqidListFile};
 use super::{tax_files, SeqDb, SeqDbError, SeqType};
 use crate::seqid::model::ObjectId;
@@ -1394,6 +1394,37 @@ impl LmdbEntry {
         tax_files::acc_oids(env, acc).map_err(|message| self.lookup_error(message))
     }
 
+    /// The `acc2oid` database of the LMDB file opened as `env` (`tax_files::acc2oid`), for
+    /// `oids_of` and `case_variant_oids_in`.
+    pub(super) fn acc2oid_in(&self, env: &Env<DbFile>) -> Result<Db, SeqDbError> {
+        tax_files::acc2oid(env).map_err(|message| self.lookup_error(message))
+    }
+
+    /// `oids_in` in the `acc2oid` database `db` of `env` (`acc2oid_in`).
+    pub(super) fn oids_of(
+        &self,
+        env: &Env<DbFile>,
+        db: &Db,
+        acc: &[u8],
+    ) -> Result<Vec<u32>, SeqDbError> {
+        tax_files::acc_oids_of(env, db, acc).map_err(|message| self.lookup_error(message))
+    }
+
+    /// The OIDs of the other keys that differ from `acc` only in the case of letters at or after
+    /// byte `from` (`tax_files::acc_case_variant_oids`, the prefixes found kept in `prefixes`), in
+    /// the `acc2oid` database `db` of the LMDB file opened as `env`.
+    pub(super) fn case_variant_oids_in(
+        &self,
+        env: &Env<DbFile>,
+        db: &Db,
+        acc: &[u8],
+        from: usize,
+        prefixes: &mut rustc_hash::FxHashMap<Vec<u8>, bool>,
+    ) -> Result<Vec<u32>, SeqDbError> {
+        tax_files::acc_case_variant_oids(env, db, acc, from, prefixes)
+            .map_err(|message| self.lookup_error(message))
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:153-157
     // ```c++
     // void CSeqDBLMDBEntry::AccessionsToOids(const vector<string>& accs, vector<TOid>& oids) const
@@ -2024,18 +2055,63 @@ impl TaxIdLookup<'_> {
 /// The OIDs of the sequences `first..end` of a volume read per window of the index.
 const SCAN_WINDOW: u32 = 1 << 16;
 
-impl SeqDb {
-    /// The OID of ordinal id `ordinal`: `ordinal` itself unless the database is restricted
-    /// ([`SeqDb::restrict`]). NCBI prints it as `n` of `gnl|BL_ORD_ID|n`.
-    pub fn oid(&self, ordinal: u32) -> u32 {
-        match &self.filter {
-            Some(filter) => filter.select(ordinal),
-            None => ordinal,
-        }
+/// The OID of a database sequence: `n` of the `gnl|BL_ORD_ID|n` (`BL_ORD_ID:n` in SAM, the tag
+/// of a Seq-align's general id) that NCBI prints for a sequence without parsed Seq-ids. A
+/// database restricted by a list or by its alias files' range numbers the sequences that it
+/// searches by ordinal ids, their rank in the list; only [`SeqDb::oid`] and [`OidMap::oid`] make
+/// an OID of one, so that no report prints a rank as an OID.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Oid(u32);
+
+impl Oid {
+    /// The OID as a number.
+    pub(crate) fn get(self) -> u32 {
+        self.0
     }
 
-    /// The ordinal id of the OID `oid`, one the database's list includes (`oid` itself unless
-    /// the database is restricted): the inverse of [`SeqDb::oid`].
+    /// `gnl|BL_ORD_ID|n`, how NCBI's reports and the FASTA ids of LOSAT's database records name
+    /// the sequence.
+    pub(crate) fn fasta_id(self) -> String {
+        format!("gnl|BL_ORD_ID|{}", self.0)
+    }
+
+    /// The OID `oid` of a test's database that is not restricted.
+    #[cfg(test)]
+    pub(crate) fn of_unrestricted(oid: u32) -> Self {
+        Oid(oid)
+    }
+}
+
+/// The OID of each ordinal id of a database ([`SeqDb::oid`]), for the reports, which hold the
+/// ordinal ids of their sequences but not the database.
+#[derive(Clone, Copy, Debug)]
+pub struct OidMap<'a>(Option<&'a OidFilter>);
+
+impl OidMap<'_> {
+    /// The OID of ordinal id `ordinal`.
+    pub(crate) fn oid(self, ordinal: u32) -> Oid {
+        Oid(match self.0 {
+            Some(filter) => filter.select(ordinal),
+            None => ordinal,
+        })
+    }
+}
+
+impl SeqDb {
+    /// The OID of ordinal id `ordinal`: `ordinal` itself unless a list restricts the database
+    /// ([`SeqDb::restrict`]) or its alias files' range starts past OID 0. NCBI prints it as `n`
+    /// of `gnl|BL_ORD_ID|n`.
+    pub(crate) fn oid(&self, ordinal: u32) -> Oid {
+        self.oid_map().oid(ordinal)
+    }
+
+    /// The OIDs of the database's ordinal ids ([`SeqDb::oid`]).
+    pub(crate) fn oid_map(&self) -> OidMap<'_> {
+        OidMap(self.filter.as_deref())
+    }
+
+    /// The ordinal id of the OID `oid`, one the database's list includes (`oid` itself unless a
+    /// list or an alias range restricts the database): the inverse of [`SeqDb::oid`].
     pub fn ordinal_of(&self, oid: u32) -> u32 {
         match &self.filter {
             Some(filter) => filter.rank(oid),
@@ -2649,7 +2725,7 @@ impl SeqDb {
     /// of `s_CompareIdList`, which the read of the line refuses in the same words.
     fn check_lines_kept(&self) -> Result<(), SeqDbError> {
         for ordinal in 0..self.num_seqs {
-            let at = self.locate_oid(self.oid(ordinal))?;
+            let at = self.locate_oid(self.oid(ordinal).get())?;
             self.volumes[at.volume].defline_set(at.vol_oid)?;
         }
         Ok(())
@@ -3393,7 +3469,9 @@ mod tests {
             }
             let warning = result.unwrap_or_else(|error| panic!("{line}: {error}"));
             let want: Vec<u32> = rest.iter().map(|oid| oid.parse().unwrap()).collect();
-            let got: Vec<u32> = (0..db.num_seqs()).map(|ordinal| db.oid(ordinal)).collect();
+            let got: Vec<u32> = (0..db.num_seqs())
+                .map(|ordinal| db.oid(ordinal).get())
+                .collect();
             assert_eq!(got, want, "{line}");
             assert_eq!(
                 (db.printed_num_seqs(), db.printed_total_length()),
@@ -3470,7 +3548,7 @@ mod tests {
     fn kept_ids(db: &SeqDb) -> Vec<Vec<String>> {
         (0..db.num_seqs())
             .map(|ordinal| {
-                let at = db.locate_oid(db.oid(ordinal)).unwrap();
+                let at = db.locate_oid(db.oid(ordinal).get()).unwrap();
                 let set = db.volumes[at.volume].defline_set(at.vol_oid).unwrap();
                 set.deflines
                     .iter()
@@ -3521,7 +3599,7 @@ mod tests {
             &mut Vec::new(),
         )
         .unwrap();
-        assert_eq!((db.oid(0), db.ordinal_of(1)), (1, 0));
+        assert_eq!((db.oid(0).get(), db.ordinal_of(1)), (1, 0));
         let lookup = db.seqid_lookup().unwrap();
         let set = db.defline_set(0).unwrap();
         assert_eq!(
@@ -3612,7 +3690,7 @@ mod tests {
             .collect();
         assert!(!gi_only.is_empty());
         for ordinal in 0..db.num_seqs() {
-            let oid = db.oid(ordinal);
+            let oid = db.oid(ordinal).get();
             let at = db.locate_oid(oid).unwrap();
             match db.volumes[at.volume].defline_set(at.vol_oid) {
                 Ok(set) => {

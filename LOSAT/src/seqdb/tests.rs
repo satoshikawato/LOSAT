@@ -888,7 +888,7 @@ fn alias_oid_ranges_select_ncbis_oids() {
     let open = |name: &str| SeqDb::open(dir.join(name).to_str().unwrap(), SeqType::Protein);
     let oids = |db: &SeqDb| {
         (0..db.num_seqs())
-            .map(|at| db.oid(at))
+            .map(|at| db.oid(at).get())
             .collect::<Vec<u32>>()
     };
     // FIRST_OID and LAST_OID are 1-based and inclusive; the walks are not the range's.

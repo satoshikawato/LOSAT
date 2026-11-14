@@ -958,15 +958,16 @@ fn numeric_values_are_validated_before_io() {
     // NCBI blast_args.cpp:168-170: the argument is 4 or more; blast_options.c:1326-1333:
     // an option check rejects more than 100, with NCBI's message.
     assert!(parse("blastn", &["-outfmt", "6", "-word_size", "3"]).is_err());
-    // Forms that NCBI reads (strtod) and LOSAT does not: rejected explicitly.
-    for evalue in ["0x10", "0x1p-3", "1e"] {
-        let error = parse("blastn", &["-outfmt", "6", "-evalue", evalue])
-            .unwrap_err()
-            .to_string();
-        assert!(
-            error.contains("not supported by LOSAT's BLASTN"),
-            "-evalue {evalue}: {error}"
-        );
+    // NCBI's `CArg_Double` reads glibc's hexadecimal numbers and a final `e`
+    // (`StringToDoublePosix`); NCBI 2.17.0 searches with each (line SW, SW8).
+    for (evalue, read) in [("0x10", 16.0), ("0x1p-3", 0.125), ("1e", 1.0)] {
+        let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-evalue", evalue])
+            .unwrap()
+            .command
+        else {
+            unreachable!("blastn")
+        };
+        assert_eq!(args.evalue, Some(read), "-evalue {evalue}");
     }
     // NCBI's option check rejects 0 or less and accepts infinity and NaN (E2g: NCBI
     // searches with them, as LOSAT does).
@@ -1214,14 +1215,11 @@ fn numeric_values_are_validated_before_io() {
         let error = args.resolve().map(|_| ()).unwrap_err().to_string();
         assert!(error.contains(message), "{words:?}: {error}");
     }
-    for evalue in ["0x10", "0x1p-3", "1e"] {
-        let error = parse("blastp", &["-evalue", evalue])
-            .unwrap_err()
-            .to_string();
-        assert!(
-            error.contains("not supported by LOSAT's BLASTP"),
-            "{evalue}: {error}"
-        );
+    for (evalue, read) in [("0x10", 16.0), ("0x1p-3", 0.125), ("1e", 1.0)] {
+        let Commands::Blastp(args) = parse("blastp", &["-evalue", evalue]).unwrap().command else {
+            unreachable!("blastp")
+        };
+        assert_eq!(args.evalue, Some(read), "{evalue}");
     }
     for value in ["0", "7", "8", "32", "255"] {
         assert!(parse("tblastx", &["-outfmt", "6", "-db_gencode", value]).is_err());

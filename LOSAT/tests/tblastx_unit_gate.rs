@@ -23,6 +23,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::TempPath;
+
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fasta")
@@ -46,13 +49,14 @@ fn losat(switches: &[(&str, &str)]) -> Command {
     command
 }
 
-fn temp_dir(tag: &str) -> PathBuf {
+/// A directory of the test's own, removed with what is in it when the value is dropped.
+fn temp_dir(tag: &str) -> TempPath {
     let dir = std::env::temp_dir().join(format!(
         "losat-tblastx-unit-gate-{tag}-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    TempPath::new(dir)
 }
 
 fn letters(name: &str) -> Vec<u8> {

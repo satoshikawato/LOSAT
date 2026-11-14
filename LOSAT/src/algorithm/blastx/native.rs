@@ -2782,13 +2782,16 @@ impl XUnit {
         match (taken, &prep.layout) {
             (Some(unit), _) => Ok(Some(unit)),
             (None, Some(layout)) => {
-                // Phase 1 failed: the unit is prepared alone, without the bytes of the later
-                // units after its buffer (`reader_buffer_after` 0). A one-hit window of
-                // `-window_size 0` at its end that NCBI reads in the next unit's letters is then
-                // refused here (`preliminary::refuse_window_past_buffers`) before a later unit's
-                // error; both end the search with a refusal.
+                // Phase 1 failed: a unit's preparation fails the reader batch, as NCBI's set-up
+                // fails it before any search (and as with one thread), so nothing of this unit's
+                // search is written. Its one-hit windows of `-window_size 0` are then not refused
+                // at the buffer's end (`preliminary::refuse_window_past_buffers`), whose bytes
+                // after this unit are not known here: a refusal must not take the batch's error's
+                // place.
                 super::split::split_sizes(layout.query_count)?;
-                prepare_unit(self.queries(), layout, options, subjects).map(Some)
+                let mut unit = prepare_unit(self.queries(), layout, options, subjects)?;
+                unit.prepared.reader_buffer_after = usize::MAX;
+                Ok(Some(unit))
             }
             (None, None) => Ok(None),
         }

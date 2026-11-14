@@ -76,7 +76,8 @@ impl PreparedQueryBatch {
     /// context: `query->sequence` (from the unit's first context) is inside NCBI's buffer below
     /// it.
     pub(crate) fn batch_buffer_length(&self) -> usize {
-        self.unit_buffer_length() + self.reader_buffer_after
+        self.unit_buffer_length()
+            .saturating_add(self.reader_buffer_after)
     }
 
     /// `QueryInfo_GetSeqBufLen` of this unit's contexts alone.

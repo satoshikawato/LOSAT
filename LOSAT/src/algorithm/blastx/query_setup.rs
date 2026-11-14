@@ -66,8 +66,9 @@ pub struct PreparedQueryBatch {
     pub(crate) reader_shape: Option<std::sync::Arc<super::reader_batch::ReaderBatchShape>>,
     /// The bytes of NCBI's query buffer after this unit's own when the unit is a part of a reader
     /// batch: the letters and NULLBs of the contexts of the units after it
-    /// (`reader_batch::attach`, `batch_buffer_length`); 0 when the unit is the whole batch, and
-    /// for a unit prepared again after phase 1 failed (`native::XUnit::take_prep`).
+    /// (`reader_batch::attach`, `batch_buffer_length`); 0 when the unit is the whole batch;
+    /// `usize::MAX` for a unit prepared again after phase 1 failed, whose batch fails at a unit's
+    /// set-up (`native::XUnit::take_prep`).
     pub(crate) reader_buffer_after: usize,
     /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): whether `sequence_start` is on the path of the seed
     /// loops' sentinel walks (`blastx/x_ungap_sent.rs`, `query_fits`, another matrix than BLOSUM62

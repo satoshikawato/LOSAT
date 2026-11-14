@@ -115,7 +115,7 @@ describe('outputFileName', () => {
 
 describe('FORMAT_NAMES', () => {
   it("has BLAST+'s name of every format that a run writes", () => {
-    for (const number of [0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20]) expect(FORMAT_NAMES[number]).toBeTruthy();
+    for (const number of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20]) expect(FORMAT_NAMES[number]).toBeTruthy();
     expect(FORMAT_NAMES[20]).toBe('Comma-separated values with header lines');
   });
 });

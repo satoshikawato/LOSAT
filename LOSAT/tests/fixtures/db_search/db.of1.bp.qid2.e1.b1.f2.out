@@ -1,0 +1,83 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: a database sequence under the id of a query
+           3 sequences; 418 total letters
+
+
+
+Query= qa query protein alpha
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+query_2 qa under the id of a second query in lower case               320     5e-119
+
+
+
+Query_1  1    DIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIGC  60
+query_2  1    DIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIGC  60
+
+Query_1  61   FQSTQNPYFMYNYNTHSSFMSETRIRTNKHYWSRYHAPMHQQFTKVNNGAEPGRQEEIRF  120
+query_2  61   FQSTQNPYFMYNYNTHSSFMSETRIRTNKHYWSRYHAPMHQQFTKVNNGAEPGRQEEIRF  120
+
+Query_1  121  THGTYKKRDCALNERMFCFKCESRLSLVWD  150
+query_2  121  THGTYKKRDCALNERMFCFKCESRLSLVWD  150
+
+
+Lambda      K        H        a         alpha
+   0.325    0.137    0.470    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 44323
+
+
+Query= qnone no hits
+
+Length=40
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.315    0.135    0.456    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 10696
+
+
+  Database: a database sequence under the id of a query
+    Posted date:  Nov 14, 2026  6:00 PM
+  Number of letters in database: 418
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

@@ -1,0 +1,150 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/sp.fa).
+           6 sequences; 736 total letters
+
+
+
+Query= qa query protein alpha
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_ins insertions and deletion                                         288     6e-106
+s_ins2 insertion at the same place                                    221     6e-80 
+s_multi two overlapping HSPs                                          190     2e-67 
+s_twice same range twice                                              115     5e-38 
+s_far weak                                                            100     1e-32 
+
+
+
+Query_1    1    DIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIGC  60
+Subject_2  1    DIVWSTFSARIQFAQYVPPKIIRFTWVNHPSLEGWNGRQFYDIGENTGMFRKGFPKFIGC  65
+                                                        \                   
+                                                        |                   
+                                                    WWHHW
+Subject_3  1         TFSARMQFAQYVPPKIIRFTWKNHPSLEGWIGRQFYDIGENPGMFRLGFSKFIGC  58
+                                                        \                   
+                                                        |                   
+                                                      KYC
+Subject_1  2     IVWSTFSARIQFAQDVPPKIIVFTWHNHESLEGWNGRQFYDIGENTGMFRLGFPKFIGC  105
+                                                                       \    
+                                                                       |    
+                           WMPQIEETGDNSPIDYDCKNLEHYTNGRQFYDIGENRGMFWLGFT
+Subject_4  1              IQFAQYVPPKIIRFTNHNHPSLEGWNGRQFYGIGENTGMFHLGFPKFIAC  50
+Subject_4  73     LWNSLMDAIQGAQYGPPKQIRFTWHNHPSLEGWYGRQFYDIGEQTGMFRLGEPAFIGC  130
+Subject_5  2                         ITFTKINHPMLEGWNFRQMHDPGEGESANRLGFAKFWCC  40
+Subject_5  80            RYQFTNYV                                             87
+
+Query_1    61   FQSTQNPYFMYNYNTHSSFMSETRIRTNKHYWSRYHAPMHQQFTKVNNGAEPGRQEEIRF  120
+Subject_2  66   ----QNPYFMYNYNTHSSFMSETRIRTNKHYWSRYHAPMHQQFTKVNNGAEPGRQEEIRF  123
+                                    \                                       
+                                    |                                       
+                                   PG
+Subject_3  59   FQSTQNPYFMYNYNTQSSFMSETRIRTNKHYWSRYHFPMHQQFTKVNNGAEPGRQEEIRF  118
+Subject_1  106  FNSTQNPYFMYNYNTHSSFMSEKRIRTNKHYWSRYHAPMHFQFTKVNNRA            155
+Subject_4  51   FDDDQNSYFMIKYDTVYFYTST----------------LWNSLMDAIQGAQYGPPKQIRF  94
+Subject_4  131  FQETQNPYFM                                                    140
+Subject_5  41   FGRTQNPMLMINYSTCSSFMFEEPIRELKPYHTMCHSWMRYQFTNYVNIAEPGRMERIDF  100
+
+Query_1    121  THGTYKKRDCALNERMFCFKCESRLSLVWD  150
+Subject_2  124  THGTYKKRDCALNERMFCFKCESRLSLVWD  153
+Subject_4  95   T                               95
+Subject_5  101  RHGRNWHRD                       109
+
+
+Lambda      K        H        a         alpha
+   0.325    0.137    0.470    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 71920
+
+
+Query= qnone no hits
+
+Length=40
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_ins2 insertion at the same place                                    11.9    5.3  
+s_ins insertions and deletion                                         11.9    5.6  
+
+
+
+Query_2    12   WDRIRDYMHNAI  23
+Subject_3  90   WSRYHFPMH     98
+Subject_2  95   WSRYHAPMHQQF  106
+
+
+Lambda      K        H        a         alpha
+   0.315    0.135    0.456    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 18592
+
+
+Query= qc query protein c
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_c for qc                                                            113     1e-39
+s_twice same range twice                                              15.4    0.57 
+s_ins insertions and deletion                                         13.9    1.9  
+s_multi two overlapping HSPs                                          12.7    5.7  
+
+
+
+Query_3    1    QHNLNCLVAWTKLGGGPGYKIEPAAWKHLCKKQTCGWCNNQKLKPWYPNGLSTTRPWGR  59
+Subject_6  1    QHNLNCLVAWTKLSGGPVYKIEPAAWKHLCKKQTCGWCNNQKLKPWYPNGLSTTGPWKR  59
+Subject_4  90                                 KQIRFTWHNHPSLEGWY              106
+Subject_2  112               GAEPGRQEEIRFTHGTYKKRDCA                         134
+Subject_1  105                                       CFNSTQNPYFMYNYNT        120
+Subject_1  27    HNHESLEGW                                                   35
+
+
+Lambda      K        H        a         alpha
+   0.319    0.138    0.531    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25502
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/sp.fa).
+    Posted date:  Unknown
+  Number of letters in database: 736
+  Number of sequences in database:  6
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

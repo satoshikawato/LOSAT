@@ -1,0 +1,1373 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/sp.fa).
+           6 sequences; 736 total letters
+
+
+
+Query= qa query protein alpha
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_ins insertions and deletion                                         288     6e-106
+s_ins2 insertion at the same place                                    221     6e-80 
+s_multi two overlapping HSPs                                          190     2e-67 
+s_twice same range twice                                              115     5e-38 
+s_far weak                                                            100     1e-32 
+
+
+
+Query_1         D  
+Subject_2       .  
+
+Query_1    2    I  2
+Subject_2  2    .  2
+Subject_1  2    .  2
+
+Query_1    3    V  3
+Subject_2  3    .  3
+Subject_1  3    .  3
+Subject_4  73   L  73
+
+Query_1    4    W  4
+Subject_2  4    .  4
+Subject_1  4    .  4
+Subject_4  74   .  74
+
+Query_1    5    S  5
+Subject_2  5    .  5
+Subject_1  5    .  5
+Subject_4  75   N  75
+
+Query_1    6    T  6
+Subject_2  6    .  6
+Subject_3  1    .  1
+Subject_1  6    .  6
+Subject_4  76   S  76
+
+Query_1    7    F  7
+Subject_2  7    .  7
+Subject_3  2    .  2
+Subject_1  7    .  7
+Subject_4  77   L  77
+
+Query_1    8    S  8
+Subject_2  8    .  8
+Subject_3  3    .  3
+Subject_1  8    .  8
+Subject_4  78   M  78
+
+Query_1    9    A  9
+Subject_2  9    .  9
+Subject_3  4    .  4
+Subject_1  9    .  9
+Subject_4  79   D  79
+
+Query_1    10   R  10
+Subject_2  10   .  10
+Subject_3  5    .  5
+Subject_1  10   .  10
+Subject_4  80   A  80
+Subject_5  80   .  80
+
+Query_1    11   I  11
+Subject_2  11   .  11
+Subject_3  6    M  6
+Subject_1  11   .  11
+Subject_4  1    .  1
+Subject_4  81   .  81
+Subject_5  81   Y  81
+
+Query_1    12   Q  12
+Subject_2  12   .  12
+Subject_3  7    .  7
+Subject_1  12   .  12
+Subject_4  2    .  2
+Subject_4  82   .  82
+Subject_5  82   .  82
+
+Query_1    13   F  13
+Subject_2  13   .  13
+Subject_3  8    .  8
+Subject_1  13   .  13
+Subject_4  3    .  3
+Subject_4  83   G  83
+Subject_5  83   .  83
+
+Query_1    14   A  14
+Subject_2  14   .  14
+Subject_3  9    .  9
+Subject_1  14   .  14
+Subject_4  4    .  4
+Subject_4  84   .  84
+Subject_5  84   T  84
+
+Query_1    15   Q  15
+Subject_2  15   .  15
+Subject_3  10   .  10
+Subject_1  15   .  15
+Subject_4  5    .  5
+Subject_4  85   .  85
+Subject_5  85   N  85
+
+Query_1    16   Y  16
+Subject_2  16   .  16
+Subject_3  11   .  11
+Subject_1  16   D  16
+Subject_4  6    .  6
+Subject_4  86   .  86
+Subject_5  86   .  86
+
+Query_1    17   V  17
+Subject_2  17   .  17
+Subject_3  12   .  12
+Subject_1  17   .  17
+Subject_4  7    .  7
+Subject_4  87   G  87
+Subject_5  87   .  87
+
+Query_1    18   P  18
+Subject_2  18   .  18
+Subject_3  13   .  13
+Subject_1  18   .  18
+Subject_4  8    .  8
+Subject_4  88   .  88
+
+Query_1    19   P  19
+Subject_2  19   .  19
+Subject_3  14   .  14
+Subject_1  19   .  19
+Subject_4  9    .  9
+Subject_4  89   .  89
+
+Query_1    20   K  20
+Subject_2  20   .  20
+Subject_3  15   .  15
+Subject_1  20   .  20
+Subject_4  10   .  10
+Subject_4  90   .  90
+
+Query_1    21   I  21
+Subject_2  21   .  21
+Subject_3  16   .  16
+Subject_1  21   .  21
+Subject_4  11   .  11
+Subject_4  91   Q  91
+
+Query_1    22   I  22
+Subject_2  22   .  22
+Subject_3  17   .  17
+Subject_1  22   .  22
+Subject_4  12   .  12
+Subject_4  92   .  92
+Subject_5  2    .  2
+
+Query_1    23   R  23
+Subject_2  23   .  23
+Subject_3  18   .  18
+Subject_1  23   V  23
+Subject_4  13   .  13
+Subject_4  93   .  93
+Subject_5  3    T  3
+
+Query_1    24   F  24
+Subject_2  24   .  24
+Subject_3  19   .  19
+Subject_1  24   .  24
+Subject_4  14   .  14
+Subject_4  94   .  94
+Subject_5  4    .  4
+
+Query_1    25   T  25
+Subject_2  25   .  25
+Subject_3  20   .  20
+Subject_1  25   .  25
+Subject_4  15   .  15
+Subject_4  95   .  95
+Subject_5  5    .  5
+
+Query_1    26   W  26
+Subject_2  26   .  26
+Subject_3  21   .  21
+Subject_1  26   .  26
+Subject_4  16   N  16
+Subject_4  96   .  96
+Subject_5  6    K  6
+
+Query_1    27   H  27
+Subject_2  27   V  27
+Subject_3  22   K  22
+Subject_1  27   .  27
+Subject_4  17   .  17
+Subject_4  97   .  97
+Subject_5  7    I  7
+
+Query_1    28   N  28
+Subject_2  28   .  28
+Subject_3  23   .  23
+Subject_1  28   .  28
+Subject_4  18   .  18
+Subject_4  98   .  98
+Subject_5  8    .  8
+
+Query_1    29   H  29
+Subject_2  29   .  29
+Subject_3  24   .  24
+Subject_1  29   .  29
+Subject_4  19   .  19
+Subject_4  99   .  99
+Subject_5  9    .  9
+
+Query_1    30   P  30
+Subject_2  30   .  30
+Subject_3  25   .  25
+Subject_1  30   E  30
+Subject_4  20   .  20
+Subject_4  100  .  100
+Subject_5  10   .  10
+
+Query_1    31   S  31
+Subject_2  31   .  31
+Subject_3  26   .  26
+Subject_1  31   .  31
+Subject_4  21   .  21
+Subject_4  101  .  101
+Subject_5  11   M  11
+
+Query_1    32   L  32
+Subject_2  32   .  32
+Subject_3  27   .  27
+Subject_1  32   .  32
+Subject_4  22   .  22
+Subject_4  102  .  102
+Subject_5  12   .  12
+
+Query_1    33   E  33
+Subject_2  33   .  33
+Subject_3  28   .  28
+Subject_1  33   .  33
+Subject_4  23   .  23
+Subject_4  103  .  103
+Subject_5  13   .  13
+
+Query_1    34   G  34
+Subject_2  34   .  34
+Subject_3  29   .  29
+Subject_1  34   .  34
+Subject_4  24   .  24
+Subject_4  104  .  104
+Subject_5  14   .  14
+
+Query_1    35   W  35
+Subject_2  35   .  35
+Subject_3  30   .  30
+Subject_1  35   .  35
+Subject_4  25   .  25
+Subject_4  105  .  105
+Subject_5  15   .  15
+
+Query_1    36   N  36
+Subject_2  36   .  36
+Subject_3  31   I  31
+Subject_1  36   .  36
+Subject_4  26   .  26
+Subject_4  106  Y  106
+Subject_5  16   .  16
+
+Query_1    37   G  37
+Subject_2  37   .  37
+Subject_3  32   .  32
+Subject_1  37   .  37
+Subject_4  27   .  27
+Subject_4  107  .  107
+Subject_5  17   F  17
+
+Query_1    38   R  38
+Subject_2  38   .  38
+Subject_3  33   .  33
+Subject_1  38   .  38
+Subject_4  28   .  28
+Subject_4  108  .  108
+Subject_5  18   .  18
+
+Query_1    39   Q  39
+Subject_2  39   .  39
+Subject_3  34   .  34
+Subject_1  39   .  39
+Subject_4  29   .  29
+Subject_4  109  .  109
+Subject_5  19   .  19
+
+Query_1    40   F  40
+Subject_2  40   .  40
+Subject_3  35   .  35
+Subject_1  40   .  40
+Subject_4  30   .  30
+Subject_4  110  .  110
+Subject_5  20   M  20
+
+Query_1    41   Y  41
+Subject_2  46   .  46
+                \
+                |
+                WWHHW
+Subject_3  39   .  39
+                \
+                |
+                KYC
+Subject_1  41   .  41
+Subject_4  31   .  31
+Subject_4  111  .  111
+Subject_5  21   H  21
+
+Query_1    42   D  42
+Subject_2  47   .  47
+Subject_3  40   .  40
+Subject_1  42   .  42
+Subject_4  32   G  32
+Subject_4  112  .  112
+Subject_5  22   .  22
+
+Query_1    43   I  43
+Subject_2  48   .  48
+Subject_3  41   .  41
+Subject_1  43   .  43
+Subject_4  33   .  33
+Subject_4  113  .  113
+Subject_5  23   P  23
+
+Query_1    44   G  44
+Subject_2  49   .  49
+Subject_3  42   .  42
+Subject_1  44   .  44
+Subject_4  34   .  34
+Subject_4  114  .  114
+Subject_5  24   .  24
+
+Query_1    45   E  45
+Subject_2  50   .  50
+Subject_3  43   .  43
+Subject_1  45   .  45
+Subject_4  35   .  35
+Subject_4  115  .  115
+Subject_5  25   .  25
+
+Query_1    46   N  46
+Subject_2  51   .  51
+Subject_3  44   .  44
+Subject_1  46   .  46
+Subject_4  36   .  36
+Subject_4  116  Q  116
+Subject_5  26   G  26
+
+Query_1    47   T  47
+Subject_2  52   .  52
+Subject_3  45   P  45
+Subject_1  47   .  47
+Subject_4  37   .  37
+Subject_4  117  .  117
+Subject_5  27   E  27
+
+Query_1    48   G  48
+Subject_2  53   .  53
+Subject_3  46   .  46
+Subject_1  48   .  48
+Subject_4  38   .  38
+Subject_4  118  .  118
+Subject_5  28   S  28
+
+Query_1    49   M  49
+Subject_2  54   .  54
+Subject_3  47   .  47
+Subject_1  49   .  49
+Subject_4  39   .  39
+Subject_4  119  .  119
+Subject_5  29   A  29
+
+Query_1    50   F  50
+Subject_2  55   .  55
+Subject_3  48   .  48
+Subject_1  50   .  50
+Subject_4  40   .  40
+Subject_4  120  .  120
+Subject_5  30   N  30
+
+Query_1    51   R  51
+Subject_2  56   .  56
+Subject_3  49   .  49
+Subject_1  51   .  51
+Subject_4  41   H  41
+Subject_4  121  .  121
+Subject_5  31   .  31
+
+Query_1    52   L  52
+Subject_2  57   K  57
+Subject_3  50   .  50
+Subject_1  52   .  52
+Subject_4  42   .  42
+Subject_4  122  .  122
+Subject_5  32   .  32
+
+Query_1    53   G  53
+Subject_2  58   .  58
+Subject_3  51   .  51
+Subject_1  53   .  53
+Subject_4  43   .  43
+Subject_4  123  .  123
+Subject_5  33   .  33
+
+Query_1    54   F  54
+Subject_2  59   .  59
+Subject_3  52   .  52
+Subject_1  54   .  54
+Subject_4  44   .  44
+Subject_4  124  E  124
+Subject_5  34   .  34
+
+Query_1    55   P  55
+Subject_2  60   .  60
+Subject_3  53   S  53
+Subject_1  55   .  55
+Subject_4  45   .  45
+Subject_4  125  .  125
+Subject_5  35   A  35
+
+Query_1    56   K  56
+Subject_2  61   .  61
+Subject_3  54   .  54
+Subject_1  101  .  101
+                \
+                |
+                WMPQIEETGDNSPIDYDCKNLEHYTNGRQFYDIGENRGMFWLGFT
+Subject_4  46   .  46
+Subject_4  126  A  126
+Subject_5  36   .  36
+
+Query_1    57   F  57
+Subject_2  62   .  62
+Subject_3  55   .  55
+Subject_1  102  .  102
+Subject_4  47   .  47
+Subject_4  127  .  127
+Subject_5  37   .  37
+
+Query_1    58   I  58
+Subject_2  63   .  63
+Subject_3  56   .  56
+Subject_1  103  .  103
+Subject_4  48   .  48
+Subject_4  128  .  128
+Subject_5  38   W  38
+
+Query_1    59   G  59
+Subject_2  64   .  64
+Subject_3  57   .  57
+Subject_1  104  .  104
+Subject_4  49   A  49
+Subject_4  129  .  129
+Subject_5  39   C  39
+
+Query_1    60   C  60
+Subject_2  65   .  65
+Subject_3  58   .  58
+Subject_1  105  .  105
+Subject_4  50   .  50
+Subject_4  130  .  130
+Subject_5  40   .  40
+
+Query_1    61   F  61
+Subject_2       -  
+Subject_3  59   .  59
+Subject_1  106  .  106
+Subject_4  51   .  51
+Subject_4  131  .  131
+Subject_5  41   .  41
+
+Query_1    62   Q  62
+Subject_2       -  
+Subject_3  60   .  60
+Subject_1  107  N  107
+Subject_4  52   D  52
+Subject_4  132  .  132
+Subject_5  42   G  42
+
+Query_1    63   S  63
+Subject_2       -  
+Subject_3  61   .  61
+Subject_1  108  .  108
+Subject_4  53   D  53
+Subject_4  133  E  133
+Subject_5  43   R  43
+
+Query_1    64   T  64
+Subject_2       -  
+Subject_3  62   .  62
+Subject_1  109  .  109
+Subject_4  54   D  54
+Subject_4  134  .  134
+Subject_5  44   .  44
+
+Query_1    65   Q  65
+Subject_2  66   .  66
+Subject_3  63   .  63
+Subject_1  110  .  110
+Subject_4  55   .  55
+Subject_4  135  .  135
+Subject_5  45   .  45
+
+Query_1    66   N  66
+Subject_2  67   .  67
+Subject_3  64   .  64
+Subject_1  111  .  111
+Subject_4  56   .  56
+Subject_4  136  .  136
+Subject_5  46   .  46
+
+Query_1    67   P  67
+Subject_2  68   .  68
+Subject_3  65   .  65
+Subject_1  112  .  112
+Subject_4  57   S  57
+Subject_4  137  .  137
+Subject_5  47   .  47
+
+Query_1    68   Y  68
+Subject_2  69   .  69
+Subject_3  66   .  66
+Subject_1  113  .  113
+Subject_4  58   .  58
+Subject_4  138  .  138
+Subject_5  48   M  48
+
+Query_1    69   F  69
+Subject_2  70   .  70
+Subject_3  67   .  67
+Subject_1  114  .  114
+Subject_4  59   .  59
+Subject_4  139  .  139
+Subject_5  49   L  49
+
+Query_1    70   M  70
+Subject_2  71   .  71
+Subject_3  68   .  68
+Subject_1  115  .  115
+Subject_4  60   .  60
+Subject_4  140  .  140
+Subject_5  50   .  50
+
+Query_1    71   Y  71
+Subject_2  72   .  72
+Subject_3  69   .  69
+Subject_1  116  .  116
+Subject_4  61   I  61
+Subject_5  51   I  51
+
+Query_1    72   N  72
+Subject_2  73   .  73
+Subject_3  70   .  70
+Subject_1  117  .  117
+Subject_4  62   K  62
+Subject_5  52   .  52
+
+Query_1    73   Y  73
+Subject_2  74   .  74
+Subject_3  71   .  71
+Subject_1  118  .  118
+Subject_4  63   .  63
+Subject_5  53   .  53
+
+Query_1    74   N  74
+Subject_2  75   .  75
+Subject_3  72   .  72
+Subject_1  119  .  119
+Subject_4  64   D  64
+Subject_5  54   S  54
+
+Query_1    75   T  75
+Subject_2  76   .  76
+Subject_3  73   .  73
+Subject_1  120  .  120
+Subject_4  65   .  65
+Subject_5  55   .  55
+
+Query_1    76   H  76
+Subject_2  77   .  77
+Subject_3  74   Q  74
+Subject_1  121  .  121
+Subject_4  66   V  66
+Subject_5  56   C  56
+
+Query_1    77   S  77
+Subject_2  78   .  78
+Subject_3  75   .  75
+Subject_1  122  .  122
+Subject_4  67   Y  67
+Subject_5  57   .  57
+
+Query_1    78   S  78
+Subject_2  79   .  79
+Subject_3  76   .  76
+Subject_1  123  .  123
+Subject_4  68   F  68
+Subject_5  58   .  58
+
+Query_1    79   F  79
+Subject_2  80   .  80
+Subject_3  77   .  77
+Subject_1  124  .  124
+Subject_4  69   Y  69
+Subject_5  59   .  59
+
+Query_1    80   M  80
+Subject_2  81   .  81
+Subject_3  78   .  78
+Subject_1  125  .  125
+Subject_4  70   T  70
+Subject_5  60   .  60
+
+Query_1    81   S  81
+Subject_2  84   .  84
+                \
+                |
+                PG
+Subject_3  79   .  79
+Subject_1  126  .  126
+Subject_4  71   .  71
+Subject_5  61   F  61
+
+Query_1    82   E  82
+Subject_2  85   .  85
+Subject_3  80   .  80
+Subject_1  127  .  127
+Subject_4  72   T  72
+Subject_5  62   .  62
+
+Query_1    83   T  83
+Subject_2  86   .  86
+Subject_3  81   .  81
+Subject_1  128  K  128
+Subject_4       -  
+Subject_5  63   E  63
+
+Query_1    84   R  84
+Subject_2  87   .  87
+Subject_3  82   .  82
+Subject_1  129  .  129
+Subject_4       -  
+Subject_5  64   P  64
+
+Query_1    85   I  85
+Subject_2  88   .  88
+Subject_3  83   .  83
+Subject_1  130  .  130
+Subject_4       -  
+Subject_5  65   .  65
+
+Query_1    86   R  86
+Subject_2  89   .  89
+Subject_3  84   .  84
+Subject_1  131  .  131
+Subject_4       -  
+Subject_5  66   .  66
+
+Query_1    87   T  87
+Subject_2  90   .  90
+Subject_3  85   .  85
+Subject_1  132  .  132
+Subject_4       -  
+Subject_5  67   E  67
+
+Query_1    88   N  88
+Subject_2  91   .  91
+Subject_3  86   .  86
+Subject_1  133  .  133
+Subject_4       -  
+Subject_5  68   L  68
+
+Query_1    89   K  89
+Subject_2  92   .  92
+Subject_3  87   .  87
+Subject_1  134  .  134
+Subject_4       -  
+Subject_5  69   .  69
+
+Query_1    90   H  90
+Subject_2  93   .  93
+Subject_3  88   .  88
+Subject_1  135  .  135
+Subject_4       -  
+Subject_5  70   P  70
+
+Query_1    91   Y  91
+Subject_2  94   .  94
+Subject_3  89   .  89
+Subject_1  136  .  136
+Subject_4       -  
+Subject_5  71   .  71
+
+Query_1    92   W  92
+Subject_2  95   .  95
+Subject_3  90   .  90
+Subject_1  137  .  137
+Subject_4       -  
+Subject_5  72   H  72
+
+Query_1    93   S  93
+Subject_2  96   .  96
+Subject_3  91   .  91
+Subject_1  138  .  138
+Subject_4       -  
+Subject_5  73   T  73
+
+Query_1    94   R  94
+Subject_2  97   .  97
+Subject_3  92   .  92
+Subject_1  139  .  139
+Subject_4       -  
+Subject_5  74   M  74
+
+Query_1    95   Y  95
+Subject_2  98   .  98
+Subject_3  93   .  93
+Subject_1  140  .  140
+Subject_4       -  
+Subject_5  75   C  75
+
+Query_1    96   H  96
+Subject_2  99   .  99
+Subject_3  94   .  94
+Subject_1  141  .  141
+Subject_4       -  
+Subject_5  76   .  76
+
+Query_1    97   A  97
+Subject_2  100  .  100
+Subject_3  95   F  95
+Subject_1  142  .  142
+Subject_4       -  
+Subject_5  77   S  77
+
+Query_1    98   P  98
+Subject_2  101  .  101
+Subject_3  96   .  96
+Subject_1  143  .  143
+Subject_4       -  
+Subject_5  78   W  78
+
+Query_1    99   M  99
+Subject_2  102  .  102
+Subject_3  97   .  97
+Subject_1  144  .  144
+Subject_4  73   L  73
+Subject_5  79   .  79
+
+Query_1    100  H  100
+Subject_2  103  .  103
+Subject_3  98   .  98
+Subject_1  145  .  145
+Subject_4  74   W  74
+Subject_5  80   R  80
+
+Query_1    101  Q  101
+Subject_2  104  .  104
+Subject_3  99   .  99
+Subject_1  146  F  146
+Subject_4  75   N  75
+Subject_5  81   Y  81
+
+Query_1    102  Q  102
+Subject_2  105  .  105
+Subject_3  100  .  100
+Subject_1  147  .  147
+Subject_4  76   S  76
+Subject_5  82   .  82
+
+Query_1    103  F  103
+Subject_2  106  .  106
+Subject_3  101  .  101
+Subject_1  148  .  148
+Subject_4  77   L  77
+Subject_5  83   .  83
+
+Query_1    104  T  104
+Subject_2  107  .  107
+Subject_3  102  .  102
+Subject_1  149  .  149
+Subject_4  78   M  78
+Subject_5  84   .  84
+
+Query_1    105  K  105
+Subject_2  108  .  108
+Subject_3  103  .  103
+Subject_1  150  .  150
+Subject_4  79   D  79
+Subject_5  85   N  85
+
+Query_1    106  V  106
+Subject_2  109  .  109
+Subject_3  104  .  104
+Subject_1  151  .  151
+Subject_4  80   A  80
+Subject_5  86   Y  86
+
+Query_1    107  N  107
+Subject_2  110  .  110
+Subject_3  105  .  105
+Subject_1  152  .  152
+Subject_4  81   I  81
+Subject_5  87   V  87
+
+Query_1    108  N  108
+Subject_2  111  .  111
+Subject_3  106  .  106
+Subject_1  153  .  153
+Subject_4  82   Q  82
+Subject_5  88   .  88
+
+Query_1    109  G  109
+Subject_2  112  .  112
+Subject_3  107  .  107
+Subject_1  154  R  154
+Subject_4  83   .  83
+Subject_5  89   I  89
+
+Query_1    110  A  110
+Subject_2  113  .  113
+Subject_3  108  .  108
+Subject_1  155  .  155
+Subject_4  84   .  84
+Subject_5  90   .  90
+
+Query_1    111  E  111
+Subject_2  114  .  114
+Subject_3  109  .  109
+Subject_4  85   Q  85
+Subject_5  91   .  91
+
+Query_1    112  P  112
+Subject_2  115  .  115
+Subject_3  110  .  110
+Subject_4  86   Y  86
+Subject_5  92   .  92
+
+Query_1    113  G  113
+Subject_2  116  .  116
+Subject_3  111  .  111
+Subject_4  87   .  87
+Subject_5  93   .  93
+
+Query_1    114  R  114
+Subject_2  117  .  117
+Subject_3  112  .  112
+Subject_4  88   P  88
+Subject_5  94   .  94
+
+Query_1    115  Q  115
+Subject_2  118  .  118
+Subject_3  113  .  113
+Subject_4  89   P  89
+Subject_5  95   M  95
+
+Query_1    116  E  116
+Subject_2  119  .  119
+Subject_3  114  .  114
+Subject_4  90   K  90
+Subject_5  96   .  96
+
+Query_1    117  E  117
+Subject_2  120  .  120
+Subject_3  115  .  115
+Subject_4  91   Q  91
+Subject_5  97   R  97
+
+Query_1    118  I  118
+Subject_2  121  .  121
+Subject_3  116  .  116
+Subject_4  92   .  92
+Subject_5  98   .  98
+
+Query_1    119  R  119
+Subject_2  122  .  122
+Subject_3  117  .  117
+Subject_4  93   .  93
+Subject_5  99   D  99
+
+Query_1    120  F  120
+Subject_2  123  .  123
+Subject_3  118  .  118
+Subject_4  94   .  94
+Subject_5  100  .  100
+
+Query_1    121  T  121
+Subject_2  124  .  124
+Subject_4  95   .  95
+Subject_5  101  R  101
+
+Query_1    122  H  122
+Subject_2  125  .  125
+Subject_5  102  .  102
+
+Query_1    123  G  123
+Subject_2  126  .  126
+Subject_5  103  .  103
+
+Query_1    124  T  124
+Subject_2  127  .  127
+Subject_5  104  R  104
+
+Query_1    125  Y  125
+Subject_2  128  .  128
+Subject_5  105  N  105
+
+Query_1    126  K  126
+Subject_2  129  .  129
+Subject_5  106  W  106
+
+Query_1    127  K  127
+Subject_2  130  .  130
+Subject_5  107  H  107
+
+Query_1    128  R  128
+Subject_2  131  .  131
+Subject_5  108  .  108
+
+Query_1    129  D  129
+Subject_2  132  .  132
+Subject_5  109  .  109
+
+Query_1    130  C  130
+Subject_2  133  .  133
+
+Query_1    131  A  131
+Subject_2  134  .  134
+
+Query_1    132  L  132
+Subject_2  135  .  135
+
+Query_1    133  N  133
+Subject_2  136  .  136
+
+Query_1    134  E  134
+Subject_2  137  .  137
+
+Query_1    135  R  135
+Subject_2  138  .  138
+
+Query_1    136  M  136
+Subject_2  139  .  139
+
+Query_1    137  F  137
+Subject_2  140  .  140
+
+Query_1    138  C  138
+Subject_2  141  .  141
+
+Query_1    139  F  139
+Subject_2  142  .  142
+
+Query_1    140  K  140
+Subject_2  143  .  143
+
+Query_1    141  C  141
+Subject_2  144  .  144
+
+Query_1    142  E  142
+Subject_2  145  .  145
+
+Query_1    143  S  143
+Subject_2  146  .  146
+
+Query_1    144  R  144
+Subject_2  147  .  147
+
+Query_1    145  L  145
+Subject_2  148  .  148
+
+Query_1    146  S  146
+Subject_2  149  .  149
+
+Query_1    147  L  147
+Subject_2  150  .  150
+
+Query_1    148  V  148
+Subject_2  151  .  151
+
+Query_1    149  W  149
+Subject_2  152  .  152
+
+Query_1    150  D  150
+Subject_2  153  .  153
+
+
+Lambda      K        H        a         alpha
+   0.325    0.137    0.470    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 71920
+
+
+Query= qnone no hits
+
+Length=40
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_ins2 insertion at the same place                                    11.9    5.3  
+s_ins insertions and deletion                                         11.9    5.6  
+
+
+
+Query_2    12   W  12
+Subject_3  90   .  90
+Subject_2  95   .  95
+
+Query_2    13   D  13
+Subject_3  91   S  91
+Subject_2  96   S  96
+
+Query_2    14   R  14
+Subject_3  92   .  92
+Subject_2  97   .  97
+
+Query_2    15   I  15
+Subject_3  93   Y  93
+Subject_2  98   Y  98
+
+Query_2    16   R  16
+Subject_3  94   H  94
+Subject_2  99   H  99
+
+Query_2    17   D  17
+Subject_3  95   F  95
+Subject_2  100  A  100
+
+Query_2    18   Y  18
+Subject_3  96   P  96
+Subject_2  101  P  101
+
+Query_2    19   M  19
+Subject_3  97   .  97
+Subject_2  102  .  102
+
+Query_2    20   H  20
+Subject_3  98   .  98
+Subject_2  103  .  103
+
+Query_2    21   N  21
+Subject_2  104  Q  104
+
+Query_2    22   A  22
+Subject_2  105  Q  105
+
+Query_2    23   I  23
+Subject_2  106  F  106
+
+
+Lambda      K        H        a         alpha
+   0.315    0.135    0.456    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 18592
+
+
+Query= qc query protein c
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_c for qc                                                            113     1e-39
+s_twice same range twice                                              15.4    0.57 
+s_ins insertions and deletion                                         13.9    1.9  
+s_multi two overlapping HSPs                                          12.7    5.7  
+
+
+
+Query_3         Q  
+Subject_6       .  
+
+Query_3    2    H  2
+Subject_6  2    .  2
+Subject_1  27   .  27
+
+Query_3    3    N  3
+Subject_6  3    .  3
+Subject_1  28   .  28
+
+Query_3    4    L  4
+Subject_6  4    .  4
+Subject_1  29   H  29
+
+Query_3    5    N  5
+Subject_6  5    .  5
+Subject_1  30   E  30
+
+Query_3    6    C  6
+Subject_6  6    .  6
+Subject_1  31   S  31
+
+Query_3    7    L  7
+Subject_6  7    .  7
+Subject_1  32   .  32
+
+Query_3    8    V  8
+Subject_6  8    .  8
+Subject_1  33   E  33
+
+Query_3    9    A  9
+Subject_6  9    .  9
+Subject_1  34   G  34
+
+Query_3    10   W  10
+Subject_6  10   .  10
+Subject_1  35   .  35
+
+Query_3    11   T  11
+Subject_6  11   .  11
+
+Query_3    12   K  12
+Subject_6  12   .  12
+
+Query_3    13   L  13
+Subject_6  13   .  13
+
+Query_3    14   G  14
+Subject_6  14   S  14
+Subject_2  112  .  112
+
+Query_3    15   G  15
+Subject_6  15   .  15
+Subject_2  113  A  113
+
+Query_3    16   G  16
+Subject_6  16   .  16
+Subject_2  114  E  114
+
+Query_3    17   P  17
+Subject_6  17   .  17
+Subject_2  115  .  115
+
+Query_3    18   G  18
+Subject_6  18   V  18
+Subject_2  116  .  116
+
+Query_3    19   Y  19
+Subject_6  19   .  19
+Subject_2  117  R  117
+
+Query_3    20   K  20
+Subject_6  20   .  20
+Subject_2  118  Q  118
+
+Query_3    21   I  21
+Subject_6  21   .  21
+Subject_2  119  E  119
+
+Query_3    22   E  22
+Subject_6  22   .  22
+Subject_2  120  .  120
+
+Query_3    23   P  23
+Subject_6  23   .  23
+Subject_2  121  I  121
+
+Query_3    24   A  24
+Subject_6  24   .  24
+Subject_2  122  R  122
+
+Query_3    25   A  25
+Subject_6  25   .  25
+Subject_2  123  F  123
+
+Query_3    26   W  26
+Subject_6  26   .  26
+Subject_2  124  T  124
+
+Query_3    27   K  27
+Subject_6  27   .  27
+Subject_2  125  H  125
+
+Query_3    28   H  28
+Subject_6  28   .  28
+Subject_2  126  G  126
+
+Query_3    29   L  29
+Subject_6  29   .  29
+Subject_2  127  T  127
+
+Query_3    30   C  30
+Subject_6  30   .  30
+Subject_2  128  Y  128
+
+Query_3    31   K  31
+Subject_6  31   .  31
+Subject_4  90   .  90
+Subject_2  129  .  129
+
+Query_3    32   K  32
+Subject_6  32   .  32
+Subject_4  91   Q  91
+Subject_2  130  .  130
+
+Query_3    33   Q  33
+Subject_6  33   .  33
+Subject_4  92   I  92
+Subject_2  131  R  131
+
+Query_3    34   T  34
+Subject_6  34   .  34
+Subject_4  93   R  93
+Subject_2  132  D  132
+
+Query_3    35   C  35
+Subject_6  35   .  35
+Subject_4  94   F  94
+Subject_2  133  .  133
+
+Query_3    36   G  36
+Subject_6  36   .  36
+Subject_4  95   T  95
+Subject_2  134  A  134
+
+Query_3    37   W  37
+Subject_6  37   .  37
+Subject_4  96   .  96
+
+Query_3    38   C  38
+Subject_6  38   .  38
+Subject_4  97   H  97
+Subject_1  105  .  105
+
+Query_3    39   N  39
+Subject_6  39   .  39
+Subject_4  98   .  98
+Subject_1  106  F  106
+
+Query_3    40   N  40
+Subject_6  40   .  40
+Subject_4  99   H  99
+Subject_1  107  .  107
+
+Query_3    41   Q  41
+Subject_6  41   .  41
+Subject_4  100  P  100
+Subject_1  108  S  108
+
+Query_3    42   K  42
+Subject_6  42   .  42
+Subject_4  101  S  101
+Subject_1  109  T  109
+
+Query_3    43   L  43
+Subject_6  43   .  43
+Subject_4  102  .  102
+Subject_1  110  Q  110
+
+Query_3    44   K  44
+Subject_6  44   .  44
+Subject_4  103  E  103
+Subject_1  111  N  111
+
+Query_3    45   P  45
+Subject_6  45   .  45
+Subject_4  104  G  104
+Subject_1  112  .  112
+
+Query_3    46   W  46
+Subject_6  46   .  46
+Subject_4  105  .  105
+Subject_1  113  Y  113
+
+Query_3    47   Y  47
+Subject_6  47   .  47
+Subject_4  106  .  106
+Subject_1  114  F  114
+
+Query_3    48   P  48
+Subject_6  48   .  48
+Subject_1  115  M  115
+
+Query_3    49   N  49
+Subject_6  49   .  49
+Subject_1  116  Y  116
+
+Query_3    50   G  50
+Subject_6  50   .  50
+Subject_1  117  N  117
+
+Query_3    51   L  51
+Subject_6  51   .  51
+Subject_1  118  Y  118
+
+Query_3    52   S  52
+Subject_6  52   .  52
+Subject_1  119  N  119
+
+Query_3    53   T  53
+Subject_6  53   .  53
+Subject_1  120  .  120
+
+Query_3    54   T  54
+Subject_6  54   .  54
+
+Query_3    55   R  55
+Subject_6  55   G  55
+
+Query_3    56   P  56
+Subject_6  56   .  56
+
+Query_3    57   W  57
+Subject_6  57   .  57
+
+Query_3    58   G  58
+Subject_6  58   K  58
+
+Query_3    59   R  59
+Subject_6  59   .  59
+
+
+Lambda      K        H        a         alpha
+   0.319    0.138    0.531    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25502
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/sp.fa).
+    Posted date:  Unknown
+  Number of letters in database: 736
+  Number of sequences in database:  6
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

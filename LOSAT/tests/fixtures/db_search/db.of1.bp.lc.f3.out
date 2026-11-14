@@ -1,0 +1,65 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/db_search/of1/s_twice_lc.fa).
+           1 sequences; 140 total letters
+
+
+
+Query= qa query protein alpha
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_twice_lc same range twice, two lower-case runs                      115     1e-38
+
+
+
+Query_1    3    VWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIGCFQ  62
+Subject_1  1            ...............N...............G........h.......A..D  52
+Subject_1  73   L.NSLMDA..G...G...Q..............Y.........Q.......e.A......  132
+
+Query_1    63   STQNPYFMYNYNTHSSFMSETRIRTNKHYWSRYHAPMHQQFTKVNNGAEPGRQEEIRFT  121
+Subject_1  53   DD..S...IK.D.VYFYT.T----------------LWNSLMDAIQ..qy.ppkq....  95
+Subject_1  133  E.......                                                     140
+
+
+Lambda      K        H        a         alpha
+   0.325    0.137    0.470    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 16616
+
+
+  Database: User specified sequence set (Input:
+tests/db_search/of1/s_twice_lc.fa).
+    Posted date:  Unknown
+  Number of letters in database: 140
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

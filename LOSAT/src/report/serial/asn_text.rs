@@ -86,6 +86,7 @@ impl<'b> AsnTextEncoder<'b> {
             byte,
             position: StreamPosition::Line(line),
             with_string: true,
+            at: self.out.len() - self.start,
         });
     }
 
@@ -330,6 +331,8 @@ impl<'b> AsnTextEncoder<'b> {
 }
 
 impl Encoder for AsnTextEncoder<'_> {
+    const STREAM: Option<super::encoder::Stream> = Some(super::encoder::Stream::AsnText);
+
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:105-111
     /// ```c++
     /// void CObjectOStreamAsn::WriteFileHeader(TTypeInfo type)
@@ -695,6 +698,19 @@ impl Encoder for AsnTextEncoder<'_> {
         }
         sink.write_all(&self.out[self.start..keep_from])?;
         self.out.drain(self.start..keep_from);
+        // `line` counts again from the bytes held (`encoder::Traced` adds those handed on).
+        (self.lines_to, self.lines) = (self.start, 0);
+        Ok(())
+    }
+
+    fn held(&self) -> &[u8] {
+        &self.out[self.start..]
+    }
+
+    fn hand_on(&mut self, sink: &mut dyn std::io::Write, count: usize) -> std::io::Result<()> {
+        let end = self.start + count;
+        sink.write_all(&self.out[self.start..end])?;
+        self.out.drain(self.start..end);
         // `line` counts again from the bytes held (`encoder::Traced` adds those handed on).
         (self.lines_to, self.lines) = (self.start, 0);
         Ok(())

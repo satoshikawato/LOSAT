@@ -14,6 +14,16 @@
 //! control byte's directory only on Unix). Every row without `-logfile` and
 //! `-export_search_strategy` runs through the library API too (`examples/library_command_line`),
 //! with the same bytes.
+//!
+//! NCBI posts each byte when it writes it, and its `cerr` is tied to `cout`: in one file (`2>&1`)
+//! a post follows the bytes of the archive that NCBI's serial buffer (`COStreamBuffer`, 4096 bytes
+//! that keep the last 80 in ASN.1 text, 1 in XML, none in binary) had written by then. The rows
+//! `o_*` write the archive to the standard output, with the byte after one or more flushes (three
+//! in text and binary; a title of 1500 bytes, whose runs go through `COStreamBuffer::Write` in
+//! binary; XML; three query batches; a `-parse_deflines` id in the Seq-aligns): for them the
+//! table gives NCBI's merged stream (`<name>.merged`, NCBI run with `2>&1`) and standard error
+//! (`<name>.err`, a run of its own), and the test compares both runs of LOSAT (the merged stream
+//! holds the standard output; RG K4m, 2026-11-14).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -118,7 +128,8 @@ fn run_directory(tag: &str) -> PathBuf {
 }
 
 /// What a row gives: the files of `-out`, `-export_search_strategy` and `-logfile`, the
-/// standard output and error, and the exit status.
+/// standard output and error, the exit status, and for the rows with a merged stream the
+/// standard output and error of a second run in one file.
 #[derive(Debug, PartialEq, Eq)]
 struct Streams {
     out: Vec<u8>,
@@ -126,10 +137,31 @@ struct Streams {
     log: Vec<u8>,
     stdout: Vec<u8>,
     stderr: Vec<u8>,
+    merged: Option<Vec<u8>>,
     status: i32,
 }
 
-fn run(binary: &Path, case: &Case, dir: &Path) -> Streams {
+/// `case` run by `binary` in `dir`, and with `merged` once more with the standard output and
+/// error in one file (`2>&1`).
+fn run(binary: &Path, case: &Case, dir: &Path, merged: bool) -> Streams {
+    let file = |ext: &str| format!("files/{}.{ext}", case.name);
+    let mut streams = run_once(binary, case, dir, None);
+    if merged {
+        let path = dir.join(file("merged"));
+        let one = fs::File::create(&path).unwrap();
+        let again = run_once(binary, case, dir, Some(one));
+        assert_eq!(
+            again.status, streams.status,
+            "{}: the exit status of the second run",
+            case.name
+        );
+        streams.merged = Some(fs::read(&path).unwrap());
+    }
+    streams
+}
+
+/// One run of `case`; with `one`, its standard output and error go to that file.
+fn run_once(binary: &Path, case: &Case, dir: &Path, one: Option<fs::File>) -> Streams {
     let file = |ext: &str| format!("files/{}.{ext}", case.name);
     for ext in ["out", "strat", "log"] {
         let _ = fs::remove_file(dir.join(file(ext)));
@@ -158,12 +190,11 @@ fn run(binary: &Path, case: &Case, dir: &Path) -> Streams {
         "{log}" => file("log"),
         _ => word.clone(),
     });
-    let output = command
-        .current_dir(dir)
-        .arg(&case.program)
-        .args(words)
-        .output()
-        .unwrap();
+    command.current_dir(dir).arg(&case.program).args(words);
+    if let Some(one) = one {
+        command.stdout(one.try_clone().unwrap()).stderr(one);
+    }
+    let output = command.output().unwrap();
     let read = |ext: &str| fs::read(dir.join(file(ext))).unwrap_or_default();
     Streams {
         out: read("out"),
@@ -171,6 +202,7 @@ fn run(binary: &Path, case: &Case, dir: &Path) -> Streams {
         log: read("log"),
         stdout: output.stdout,
         stderr: output.stderr,
+        merged: None,
         status: output.status.code().unwrap(),
     }
 }
@@ -179,12 +211,16 @@ fn expected(case: &Case) -> Streams {
     let read = |ext: &str| {
         fs::read(fixtures().join("ncbi").join(format!("{}.{ext}", case.name))).unwrap_or_default()
     };
+    let merged = fixtures()
+        .join("ncbi")
+        .join(format!("{}.merged", case.name));
     Streams {
         out: read("out"),
         strat: read("strat"),
         log: read("log"),
         stdout: read("stdout"),
         stderr: read("err"),
+        merged: fs::read(merged).ok(),
         status: 0,
     }
 }
@@ -205,15 +241,25 @@ fn rows_that_differ(binary: &Path, tag: &str, library: bool) -> Vec<String> {
             continue;
         }
         ran += 1;
-        let got = run(binary, &case, &dir);
-        let want = expected(&case);
+        let mut want = expected(&case);
+        let got = run(binary, &case, &dir, want.merged.is_some());
+        if want.merged.is_some() {
+            // The merged stream holds the standard output, which the table does not repeat.
+            want.stdout = got.stdout.clone();
+        }
         if got != want {
+            let none = Vec::new();
             let first = [
                 ("out", &got.out, &want.out),
                 ("strat", &got.strat, &want.strat),
                 ("log", &got.log, &want.log),
                 ("stdout", &got.stdout, &want.stdout),
                 ("stderr", &got.stderr, &want.stderr),
+                (
+                    "merged stream",
+                    got.merged.as_ref().unwrap_or(&none),
+                    want.merged.as_ref().unwrap_or(&none),
+                ),
             ]
             .into_iter()
             .find(|(_, got, want)| got != want);

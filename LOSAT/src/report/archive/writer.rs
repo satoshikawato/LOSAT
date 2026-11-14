@@ -162,9 +162,10 @@ impl<'s, E: Encoder> ArchiveOut<'s, E> {
 }
 
 impl<E: Encoder> ArchiveOut<'_, Traced<E>> {
-    /// `finish` of a document written through `Traced`, after `post` of the bytes that its
-    /// stream replaced: NCBI posts while it writes the document, its `cerr` tied to the output
-    /// (what was handed to the sink goes first). Another error of the encoder posts nothing.
+    /// `finish` of a document written through `Traced` without a post function (the search
+    /// strategy's, whose file is apart from the output), after `post` of all the bytes that its
+    /// stream replaced (what was handed to the sink goes first). Another error of the encoder
+    /// posts nothing.
     fn finish_posting(
         mut self,
         post: impl FnOnce(&[ReplacedChar]) -> std::io::Result<()>,
@@ -617,7 +618,9 @@ fn write_error_document<E: Encoder>(out: &mut ArchiveOut<'_, E>, messages: &[Mes
 /// previous archive. `ARCHIVE_FORMAT` values that NCBI does not write leave the sink
 /// untouched. A document with a string that the encoding does not write as it is
 /// (`ArchiveRequest::written_as_is`, `RequestInputs::written_as_is`) is written through `Traced`,
-/// and NCBI's posts of the bytes that its stream replaced go to `diagnostics` (`post_replaced`).
+/// and NCBI's posts of the bytes that its stream replaced go to `diagnostics` (`post_replaced`)
+/// as NCBI writes them: each after the bytes of the document that NCBI's buffer had written to
+/// the output by then (`Traced::posting`; NCBI's `cerr` is tied to `cout`).
 pub fn write_archive<A: AlignSource>(
     handle: &ArchiveHandle,
     batch: &BatchArchive<'_>,
@@ -631,8 +634,15 @@ pub fn write_archive<A: AlignSource>(
     let request = handle.request();
     let encoding = handle.encoding();
     let as_is = request.written_as_is(encoding) && batch.request.written_as_is(encoding);
-    let post = |replaced: &[ReplacedChar]| {
-        super::post_replaced(diagnostics, Some(handle), false, request.program, replaced)
+    let post = |replaced: &ReplacedChar| {
+        super::post_replaced(
+            diagnostics,
+            Some(handle),
+            false,
+            request.program,
+            std::slice::from_ref(replaced),
+        )?;
+        diagnostics.flush()
     };
     let mut buf = Vec::new();
     let write = SearchArchive {
@@ -648,24 +658,32 @@ pub fn write_archive<A: AlignSource>(
             .to(XmlEncoder::archive(&mut buf), sink, aligns)?
             .finish(),
         (ArchiveEncoding::Xml, false) => write
-            .to(Traced::xml(XmlEncoder::archive(&mut buf), 0), sink, aligns)?
-            .finish_posting(post),
+            .to(
+                Traced::xml(XmlEncoder::archive(&mut buf), 0).posting(post),
+                sink,
+                aligns,
+            )?
+            .finish(),
         (ArchiveEncoding::Text, true) => write
             .to(AsnTextEncoder::new(&mut buf), sink, aligns)?
             .finish(),
         (ArchiveEncoding::Text, false) => write
-            .to(Traced::new(AsnTextEncoder::new(&mut buf), 0), sink, aligns)?
-            .finish_posting(post),
+            .to(
+                Traced::new(AsnTextEncoder::new(&mut buf), 0).posting(post),
+                sink,
+                aligns,
+            )?
+            .finish(),
         (ArchiveEncoding::Binary, true) => write
             .to(AsnBinaryEncoder::new(&mut buf), sink, aligns)?
             .finish(),
         (ArchiveEncoding::Binary, false) => write
             .to(
-                Traced::new(AsnBinaryEncoder::new(&mut buf), 0),
+                Traced::new(AsnBinaryEncoder::new(&mut buf), 0).posting(post),
                 sink,
                 aligns,
             )?
-            .finish_posting(post),
+            .finish(),
     }
 }
 

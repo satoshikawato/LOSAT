@@ -256,6 +256,7 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
             byte,
             position: StreamPosition::Line(1 + self.lines),
             with_string: false,
+            at: self.out.len() - self.start,
         });
     }
 
@@ -421,6 +422,8 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
 }
 
 impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
+    const STREAM: Option<super::encoder::Stream> = Some(super::encoder::Stream::Xml);
+
     /// `WriteFileHeader`: the declaration and the DOCTYPE of a document.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:232-276
@@ -812,6 +815,19 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
             // `replace` counts again from the bytes held (`encoder::Traced` adds those handed on).
             (self.lines_to, self.lines) = (self.start, 0);
         }
+        Ok(())
+    }
+
+    fn held(&self) -> &[u8] {
+        &self.out[self.start..]
+    }
+
+    fn hand_on(&mut self, sink: &mut dyn std::io::Write, count: usize) -> std::io::Result<()> {
+        let end = self.start + count;
+        sink.write_all(&self.out[self.start..end])?;
+        self.out.drain(self.start..end);
+        // `replace` counts again from the bytes held (`encoder::Traced` adds those handed on).
+        (self.lines_to, self.lines) = (self.start, 0);
         Ok(())
     }
 

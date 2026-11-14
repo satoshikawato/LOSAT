@@ -6,7 +6,10 @@ use super::{
     preliminary::{compare_score, PreliminaryHsp},
     query_setup::PreparedQueryBatch,
 };
-use crate::core::link_hsps::{even_gap_link_hsps, EvenGapLinkParams, LinkContext, LinkHsp};
+use crate::core::link_hsps::{
+    calculate_link_hsp_cutoffs, even_gap_link_hsps, EvenGapLinkParams, LinkContext, LinkCutoffs,
+    LinkHsp,
+};
 use crate::stats::{
     spouge::{blast_spouge_stoe, BlastGumbelBlk},
     sum_statistics::{gap_decay_divisor, uneven_gap_sum_e},
@@ -111,7 +114,7 @@ pub fn link_parameters(options: &ResolvedOptions) -> Option<LinkParameters> {
 }
 
 /// Whether the search computes the linking cutoffs of each subject (`CalculateLinkHSPCutoffs`,
-/// `ungapped_link_params`): an ungapped search that links. With `-ungapped`, a search links
+/// `link_cutoffs`): an ungapped search that links. With `-ungapped`, a search links
 /// exactly when `-sum_stats` is on (`link_parameters`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
@@ -122,7 +125,7 @@ pub fn link_parameters(options: &ResolvedOptions) -> Option<LinkParameters> {
 ///             hit_params->link_hsp_params, word_params, db_length,
 ///             seq_arg.seq->length);
 /// ```
-pub(crate) fn ungapped_link_cutoffs(options: &ResolvedOptions) -> bool {
+pub(crate) fn computes_link_cutoffs(options: &ResolvedOptions) -> bool {
     !options.gapped && link_parameters(options).is_some()
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1765-1789
@@ -992,7 +995,8 @@ pub(crate) fn link_even(
             score: h.score,
         })
         .collect();
-    let linked = even_gap_link_hsps(
+    let mut linked: Vec<LinkedHsp> = Vec::with_capacity(input.len());
+    even_gap_link_hsps(
         &hsps,
         &|context| {
             let p = &parameters[context];
@@ -1006,16 +1010,16 @@ pub(crate) fn link_even(
         },
         subject_length,
         params,
+        &mut |l| {
+            linked.push(LinkedHsp {
+                hsp: input[l.index].clone(),
+                num: l.num,
+                evalue: l.evalue,
+                source_index: l.index,
+            })
+        },
     );
-    let mut hsps: Vec<LinkedHsp> = linked
-        .into_iter()
-        .map(|linked| LinkedHsp {
-            hsp: input[linked.index].clone(),
-            num: linked.num,
-            evalue: linked.evalue,
-            source_index: linked.index,
-        })
-        .collect();
+    let mut hsps = linked;
     hsps.sort_by(|a, b| compare_score(&a.hsp, &b.hsp));
     // `best_evalue` from the first HSP, lowered by each smaller one (the empty list keeps 0).
     let best_evalue = hsps.split_first().map_or(0.0, |(first, rest)| {
@@ -1033,8 +1037,8 @@ pub(crate) fn link_even(
     LinkedHspList { hsps, best_evalue }
 }
 
-/// The linking parameters of BLASTX's ungapped search with one subject
-/// (`CalculateLinkHSPCutoffs`, `EvenGapLinkParams::ungapped`): the smallest Lambda, the average
+/// The linking cutoffs of BLASTX's ungapped search with one subject
+/// (`CalculateLinkHSPCutoffs`, `core::link_hsps::calculate_link_hsp_cutoffs`): the smallest Lambda, the average
 /// query length and `cutoff_score_min` are those of the query batch, the reader batch's when the
 /// unit is a part of one (`reader_batch.rs`). The subject is a protein, so its lengths are not
 /// divided by 3.
@@ -1054,12 +1058,12 @@ pub(crate) fn link_even(
 ///         }
 ///     }
 /// ```
-pub(crate) fn ungapped_link_params(
+pub(crate) fn link_cutoffs(
     batch: &PreparedQueryBatch,
     params: &[ContextParameters],
     subject_length: i32,
     db_length: i64,
-) -> EvenGapLinkParams {
+) -> LinkCutoffs {
     let shape = batch.reader_shape.as_deref();
     let kbp = match shape.and_then(|shape| shape.smallest_lambda) {
         Some(smallest) => smallest,
@@ -1074,7 +1078,7 @@ pub(crate) fn ungapped_link_params(
     };
     let avg_query_length =
         (batch.batch_concatenated_length() as i32 - 1) / batch.batch_context_count() as i32;
-    let cutoff_score_min = match shape.and_then(|shape| shape.word_cutoff_min) {
+    let cutoff_score_min = || match shape.and_then(|shape| shape.word_cutoff_min) {
         Some(batch_min) => batch_min,
         None => params
             .iter()
@@ -1083,19 +1087,18 @@ pub(crate) fn ungapped_link_params(
             .min()
             .expect("valid context"),
     };
-    EvenGapLinkParams::ungapped(
+    calculate_link_hsp_cutoffs(
         &kbp,
         avg_query_length,
         subject_length as i64,
         db_length,
         false,
         cutoff_score_min,
-        true,
     )
 }
 
 #[cfg(test)]
-mod ungapped_link_params_tests {
+mod link_cutoffs_tests {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1450-1458
     // ```c++
     //          searches. */
@@ -1142,7 +1145,7 @@ mod ungapped_link_params_tests {
                 None,
             )
             .unwrap();
-            let link = super::ungapped_link_params(&batch, &parameters, length, db);
+            let link = super::link_cutoffs(&batch, &parameters, length, db);
             assert_eq!(
                 [link.cutoff_small_gap, link.cutoff_big_gap],
                 [f[4].parse().unwrap(), f[5].parse().unwrap()],
@@ -1153,8 +1156,6 @@ mod ungapped_link_params_tests {
                 u64::from_str_radix(f[6], 16).unwrap(),
                 "{line}"
             );
-            assert_eq!(link.gap_decay_rate, 0.5);
-            assert!(link.query_translated);
         }
     }
 }

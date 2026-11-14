@@ -6,7 +6,7 @@ use super::{
     preliminary::PreliminaryHsp,
     query_setup::PreparedQueryBatch,
 };
-use crate::core::link_hsps::EvenGapLinkParams;
+use crate::core::link_hsps::{EvenGapLinkParams, LinkCutoffs};
 use crate::{
     config::{ProteinScoringSpec, ScoringMatrix},
     stats::{lookup_protein_params, spouge::blast_spouge_stoe},
@@ -489,7 +489,7 @@ pub(crate) fn evaluate_ungapped(
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject_length: i32,
-    prepared: Option<EvenGapLinkParams>,
+    prepared: Option<LinkCutoffs>,
 ) -> Result<LinkedHspList> {
     if let Some(link) = link_parameters(options) {
         if link.longest_intron <= 0 {
@@ -498,7 +498,7 @@ pub(crate) fn evaluate_ungapped(
                 batch,
                 parameters,
                 subject_length,
-                &prepared.expect("per-subject even-gap cutoffs"),
+                &EvenGapLinkParams::ungapped(prepared.expect("per-subject even-gap cutoffs"), true),
             ));
         }
         let lengths: Vec<_> = batch.contexts.iter().map(|c| c.length as i32).collect();

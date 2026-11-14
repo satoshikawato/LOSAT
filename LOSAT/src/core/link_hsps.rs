@@ -132,141 +132,16 @@ impl EvenGapLinkParams {
         }
     }
 
-    /// The parameters of an ungapped search's linking with one subject: `CalculateLinkHSPCutoffs`
-    /// on the parameters of `BlastLinkHSPParametersNew` for an ungapped search (`gap_prob`
-    /// `BLAST_GAP_PROB`, `gap_decay_rate` `BLAST_GAP_DECAY_RATE`, blast_parameters.c:609-617).
-    /// `kbp` is the Karlin block of the context with the smallest positive Lambda
-    /// (`s_BlastFindSmallestLambda` on `sbp->kbp`); `avg_query_length` NCBI's average of the
-    /// contexts' lengths, `(contexts[last].query_offset + contexts[last].query_length - 1) /
-    /// (last_context + 1)`; `subject_length` the subject's length as the search gives it
-    /// (`seq_arg.seq->length`, in nucleotides for a translated subject); `db_length`
-    /// `BlastSeqSrcGetTotLen`; `subject_translated` `Blast_SubjectIsTranslated` (or RPS-TBLASTN);
-    /// `cutoff_score_min` `word_params->cutoff_score_min`. NCBI then multiplies both cutoffs by
-    /// `(Int4)sbp->scale_factor`, which is 1 in the searches that call this (BLASTX and TBLASTX;
-    /// only an RPS search scales its matrix), so the factor is left out.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:1011-1081
-    /// ```c
-    ///     /* Get KarlinBlk for context with smallest lambda (still greater than zero) */
-    ///     s_BlastFindSmallestLambda(sbp->kbp, query_info, &kbp);
-    ///     if (!kbp)
-    ///         return;
-    ///
-    ///     window_size
-    ///         = link_hsp_params->gap_size + link_hsp_params->overlap_size + 1;
-    ///     gap_prob = link_hsp_params->gap_prob = BLAST_GAP_PROB;
-    ///     gap_decay_rate = link_hsp_params->gap_decay_rate;
-    ///     /* Use average query length */
-    ///
-    ///     query_length =
-    ///         (query_info->contexts[query_info->last_context].query_offset +
-    ///         query_info->contexts[query_info->last_context].query_length - 1)
-    ///         / (query_info->last_context + 1);
-    ///
-    ///     if (Blast_SubjectIsTranslated(program) || program == eBlastTypeRpsTblastn) {
-    ///         /* Lengths in subsequent calculations should be on the protein scale */
-    ///         subject_length /= CODON_LENGTH;
-    ///         db_length /= CODON_LENGTH;
-    ///     }
-    ///
-    ///
-    ///     /* Subtract off the expected score. */
-    ///    expected_length = (Int4)BLAST_Nint(log(kbp->K*((double) query_length)*
-    ///                                     ((double) subject_length))/(kbp->H));
-    ///    query_length = query_length - expected_length;
-    ///
-    ///    subject_length = subject_length - expected_length;
-    ///    query_length = MAX(query_length, 1);
-    ///    subject_length = MAX(subject_length, 1);
-    ///
-    ///    /* If this is a database search, use database length, else the single
-    ///       subject sequence length */
-    ///    if (db_length > subject_length) {
-    ///       y_variable = log((double) (db_length)/(double) subject_length)*(kbp->K)/
-    ///          (gap_decay_rate);
-    ///    } else {
-    ///       y_variable = log((double) (subject_length + expected_length)/
-    ///                        (double) subject_length)*(kbp->K)/(gap_decay_rate);
-    ///    }
-    ///
-    ///    search_sp = ((Int8) query_length)* ((Int8) subject_length);
-    ///    x_variable = 0.25*y_variable*((double) search_sp);
-    ///
-    ///    /* To use "small" gaps the query and subject must be "large" compared to
-    ///       the gap size. If small gaps may be used, then the cutoff values must be
-    ///       adjusted for the "bayesian" possibility that both large and small gaps
-    ///       are being checked for. */
-    ///
-    ///    if (search_sp > 8*window_size*window_size) {
-    ///       x_variable /= (1.0 - gap_prob + kEpsilon);
-    ///       link_hsp_params->cutoff_big_gap =
-    ///          (Int4) floor((log(x_variable)/kbp->Lambda)) + 1;
-    ///       x_variable = y_variable*(window_size*window_size);
-    ///       x_variable /= (gap_prob + kEpsilon);
-    ///       link_hsp_params->cutoff_small_gap =
-    ///          MAX(word_params->cutoff_score_min,
-    ///              (Int4) floor((log(x_variable)/kbp->Lambda)) + 1);
-    ///    } else {
-    ///       link_hsp_params->cutoff_big_gap =
-    ///          (Int4) floor((log(x_variable)/kbp->Lambda)) + 1;
-    ///       /* The following is equivalent to forcing small gap rule to be ignored
-    ///          when linking HSPs. */
-    ///       link_hsp_params->gap_prob = 0;
-    ///       link_hsp_params->cutoff_small_gap = 0;
-    ///    }
-    ///
-    ///    link_hsp_params->cutoff_big_gap *= (Int4)sbp->scale_factor;
-    ///    link_hsp_params->cutoff_small_gap *= (Int4)sbp->scale_factor;
-    /// ```
-    pub(crate) fn ungapped(
-        kbp: &KarlinParams,
-        avg_query_length: i32,
-        subject_length: i64,
-        db_length: i64,
-        subject_translated: bool,
-        cutoff_score_min: i32,
-        query_translated: bool,
-    ) -> Self {
-        const K_EPSILON: f64 = 1.0e-9;
-        let window_size = (GAP_SIZE + OVERLAP_SIZE + 1) as i64;
-        let gap_prob = BLAST_GAP_PROB;
-        let gap_decay_rate = BLAST_GAP_DECAY_RATE;
-        let mut query_length = avg_query_length;
-        let (mut subject_length, db_length) = if subject_translated {
-            ((subject_length / 3) as i32, db_length / 3)
-        } else {
-            (subject_length as i32, db_length)
-        };
-        // `BLAST_Nint`: rounds half away from zero.
-        let expected = (kbp.k * query_length as f64 * subject_length as f64).ln() / kbp.h;
-        let expected_length = (expected + if expected >= 0.0 { 0.5 } else { -0.5 }) as i32;
-        query_length = (query_length - expected_length).max(1);
-        subject_length = (subject_length - expected_length).max(1);
-        let y_variable = if db_length > subject_length as i64 {
-            (db_length as f64 / subject_length as f64).ln() * kbp.k / gap_decay_rate
-        } else {
-            ((subject_length + expected_length) as f64 / subject_length as f64).ln() * kbp.k
-                / gap_decay_rate
-        };
-        let search_sp = query_length as i64 * subject_length as i64;
-        let mut x_variable = 0.25 * y_variable * search_sp as f64;
-        let cutoff = |x: f64| (x.ln() / kbp.lambda).floor() as i32 + 1;
-        let (gap_prob, cutoff_small_gap, cutoff_big_gap) =
-            if search_sp > 8 * window_size * window_size {
-                x_variable /= 1.0 - gap_prob + K_EPSILON;
-                let cutoff_big_gap = cutoff(x_variable);
-                x_variable = y_variable * (window_size * window_size) as f64;
-                x_variable /= gap_prob + K_EPSILON;
-                let cutoff_small_gap = cutoff_score_min.max(cutoff(x_variable));
-                (gap_prob, cutoff_small_gap, cutoff_big_gap)
-            } else {
-                (0.0, 0, cutoff(x_variable))
-            };
+    /// The parameters of an ungapped search's linking with one subject: the cutoffs and the gap
+    /// probability `CalculateLinkHSPCutoffs` sets (`calculate_link_hsp_cutoffs`) on the parameters
+    /// of `BlastLinkHSPParametersNew` for an ungapped search (`gap_decay_rate`
+    /// `BLAST_GAP_DECAY_RATE`, blast_parameters.c:609-617).
+    pub(crate) fn ungapped(cutoffs: LinkCutoffs, query_translated: bool) -> Self {
         Self {
-            gap_prob,
-            gap_decay_rate,
-            cutoff_small_gap,
-            cutoff_big_gap,
+            gap_prob: cutoffs.gap_prob,
+            gap_decay_rate: BLAST_GAP_DECAY_RATE,
+            cutoff_small_gap: cutoffs.cutoff_small_gap,
+            cutoff_big_gap: cutoffs.cutoff_big_gap,
             query_translated,
         }
     }
@@ -280,6 +155,153 @@ impl EvenGapLinkParams {
         } else {
             context
         }
+    }
+}
+
+/// What `CalculateLinkHSPCutoffs` sets for one subject of an ungapped search:
+/// `link_hsp_params->cutoff_small_gap`, `cutoff_big_gap` and `gap_prob` (0 and no small gaps in a
+/// search space of at most 8 windows).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LinkCutoffs {
+    pub(crate) cutoff_small_gap: i32,
+    pub(crate) cutoff_big_gap: i32,
+    pub(crate) gap_prob: f64,
+}
+
+/// `CalculateLinkHSPCutoffs` of an ungapped search with one subject, on the parameters of
+/// `BlastLinkHSPParametersNew` for an ungapped search (`gap_prob` `BLAST_GAP_PROB`,
+/// `gap_decay_rate` `BLAST_GAP_DECAY_RATE`, blast_parameters.c:609-617).
+/// `kbp` is the Karlin block of the context with the smallest positive Lambda
+/// (`s_BlastFindSmallestLambda` on `sbp->kbp`); `avg_query_length` NCBI's average of the
+/// contexts' lengths, `(contexts[last].query_offset + contexts[last].query_length - 1) /
+/// (last_context + 1)`; `subject_length` the subject's length as the search gives it
+/// (`seq_arg.seq->length`, in nucleotides for a translated subject); `db_length`
+/// `BlastSeqSrcGetTotLen`; `subject_translated` `Blast_SubjectIsTranslated` (or RPS-TBLASTN);
+/// `cutoff_score_min` gives `word_params->cutoff_score_min`, which NCBI reads only for a search
+/// space of more than 8 windows. NCBI then multiplies both cutoffs by
+/// `(Int4)sbp->scale_factor`, which is 1 in the searches that call this (BLASTX and TBLASTX;
+/// only an RPS search scales its matrix), so the factor is left out.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:1011-1081
+/// ```c
+///     /* Get KarlinBlk for context with smallest lambda (still greater than zero) */
+///     s_BlastFindSmallestLambda(sbp->kbp, query_info, &kbp);
+///     if (!kbp)
+///         return;
+///
+///     window_size
+///         = link_hsp_params->gap_size + link_hsp_params->overlap_size + 1;
+///     gap_prob = link_hsp_params->gap_prob = BLAST_GAP_PROB;
+///     gap_decay_rate = link_hsp_params->gap_decay_rate;
+///     /* Use average query length */
+///
+///     query_length =
+///         (query_info->contexts[query_info->last_context].query_offset +
+///         query_info->contexts[query_info->last_context].query_length - 1)
+///         / (query_info->last_context + 1);
+///
+///     if (Blast_SubjectIsTranslated(program) || program == eBlastTypeRpsTblastn) {
+///         /* Lengths in subsequent calculations should be on the protein scale */
+///         subject_length /= CODON_LENGTH;
+///         db_length /= CODON_LENGTH;
+///     }
+///
+///
+///     /* Subtract off the expected score. */
+///    expected_length = (Int4)BLAST_Nint(log(kbp->K*((double) query_length)*
+///                                     ((double) subject_length))/(kbp->H));
+///    query_length = query_length - expected_length;
+///
+///    subject_length = subject_length - expected_length;
+///    query_length = MAX(query_length, 1);
+///    subject_length = MAX(subject_length, 1);
+///
+///    /* If this is a database search, use database length, else the single
+///       subject sequence length */
+///    if (db_length > subject_length) {
+///       y_variable = log((double) (db_length)/(double) subject_length)*(kbp->K)/
+///          (gap_decay_rate);
+///    } else {
+///       y_variable = log((double) (subject_length + expected_length)/
+///                        (double) subject_length)*(kbp->K)/(gap_decay_rate);
+///    }
+///
+///    search_sp = ((Int8) query_length)* ((Int8) subject_length);
+///    x_variable = 0.25*y_variable*((double) search_sp);
+///
+///    /* To use "small" gaps the query and subject must be "large" compared to
+///       the gap size. If small gaps may be used, then the cutoff values must be
+///       adjusted for the "bayesian" possibility that both large and small gaps
+///       are being checked for. */
+///
+///    if (search_sp > 8*window_size*window_size) {
+///       x_variable /= (1.0 - gap_prob + kEpsilon);
+///       link_hsp_params->cutoff_big_gap =
+///          (Int4) floor((log(x_variable)/kbp->Lambda)) + 1;
+///       x_variable = y_variable*(window_size*window_size);
+///       x_variable /= (gap_prob + kEpsilon);
+///       link_hsp_params->cutoff_small_gap =
+///          MAX(word_params->cutoff_score_min,
+///              (Int4) floor((log(x_variable)/kbp->Lambda)) + 1);
+///    } else {
+///       link_hsp_params->cutoff_big_gap =
+///          (Int4) floor((log(x_variable)/kbp->Lambda)) + 1;
+///       /* The following is equivalent to forcing small gap rule to be ignored
+///          when linking HSPs. */
+///       link_hsp_params->gap_prob = 0;
+///       link_hsp_params->cutoff_small_gap = 0;
+///    }
+///
+///    link_hsp_params->cutoff_big_gap *= (Int4)sbp->scale_factor;
+///    link_hsp_params->cutoff_small_gap *= (Int4)sbp->scale_factor;
+/// ```
+pub(crate) fn calculate_link_hsp_cutoffs(
+    kbp: &KarlinParams,
+    avg_query_length: i32,
+    subject_length: i64,
+    db_length: i64,
+    subject_translated: bool,
+    cutoff_score_min: impl FnOnce() -> i32,
+) -> LinkCutoffs {
+    const K_EPSILON: f64 = 1.0e-9;
+    let window_size = (GAP_SIZE + OVERLAP_SIZE + 1) as i64;
+    let gap_prob = BLAST_GAP_PROB;
+    let gap_decay_rate = BLAST_GAP_DECAY_RATE;
+    let mut query_length = avg_query_length;
+    let (mut subject_length, db_length) = if subject_translated {
+        ((subject_length / 3) as i32, db_length / 3)
+    } else {
+        (subject_length as i32, db_length)
+    };
+    // `BLAST_Nint`: rounds half away from zero.
+    let expected = (kbp.k * query_length as f64 * subject_length as f64).ln() / kbp.h;
+    let expected_length = (expected + if expected >= 0.0 { 0.5 } else { -0.5 }) as i32;
+    query_length = (query_length - expected_length).max(1);
+    subject_length = (subject_length - expected_length).max(1);
+    let y_variable = if db_length > subject_length as i64 {
+        (db_length as f64 / subject_length as f64).ln() * kbp.k / gap_decay_rate
+    } else {
+        ((subject_length + expected_length) as f64 / subject_length as f64).ln() * kbp.k
+            / gap_decay_rate
+    };
+    let search_sp = query_length as i64 * subject_length as i64;
+    let mut x_variable = 0.25 * y_variable * search_sp as f64;
+    let cutoff = |x: f64| (x.ln() / kbp.lambda).floor() as i32 + 1;
+    let (gap_prob, cutoff_small_gap, cutoff_big_gap) = if search_sp > 8 * window_size * window_size
+    {
+        x_variable /= 1.0 - gap_prob + K_EPSILON;
+        let cutoff_big_gap = cutoff(x_variable);
+        x_variable = y_variable * (window_size * window_size) as f64;
+        x_variable /= gap_prob + K_EPSILON;
+        let cutoff_small_gap = cutoff_score_min().max(cutoff(x_variable));
+        (gap_prob, cutoff_small_gap, cutoff_big_gap)
+    } else {
+        (0.0, 0, cutoff(x_variable))
+    };
+    LinkCutoffs {
+        cutoff_small_gap,
+        cutoff_big_gap,
+        gap_prob,
     }
 }
 
@@ -355,7 +377,7 @@ const LARGE: usize = 1;
 /// then give a set of a count below 1 the E-value 0 (`s_BlastSumP` returns 0 for `r < 1`).
 #[derive(Debug, Clone, Default)]
 struct Node {
-    link: [Option<usize>; 2],
+    link: [Link; 2],
     num: [i16; 2],
     sum: [i64; 2],
     xsum: [f64; 2],
@@ -367,10 +389,39 @@ struct Node {
     q_end_trim: i32,
     s_offset_trim: i32,
     s_end_trim: i32,
-    ordering_method: usize,
+    ordering_method: u8,
     evalue: f64,
-    prev: Option<usize>,
-    next: Option<usize>,
+    prev: Link,
+    next: Link,
+}
+
+/// A slot of `LinkState::nodes` or none (NCBI's `LinkHSPStruct*` or `NULL`), in 4 bytes: a list
+/// holds far fewer than `u32::MAX` HSPs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Link(u32);
+
+impl Link {
+    const NONE: Link = Link(u32::MAX);
+
+    fn some(slot: usize) -> Link {
+        Link(slot as u32)
+    }
+
+    fn get(self) -> Option<usize> {
+        (self != Link::NONE).then_some(self.0 as usize)
+    }
+}
+
+impl Default for Link {
+    fn default() -> Link {
+        Link::NONE
+    }
+}
+
+impl From<Option<usize>> for Link {
+    fn from(slot: Option<usize>) -> Link {
+        slot.map_or(Link::NONE, Link::some)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:100-109
@@ -516,23 +567,20 @@ pub(crate) fn link_in_place<T>(
     take: impl Fn(&mut T, &LinkedHsp),
 ) {
     let hsps: Vec<LinkHsp> = items.iter().map(hsp).collect();
-    let linked = even_gap_link_hsps(&hsps, &contexts, subject_length, params);
     let mut slots: Vec<Option<T>> = std::mem::take(items).into_iter().map(Some).collect();
-    *items = linked
-        .into_iter()
-        .map(|linked| {
-            let mut item = slots[linked.index]
-                .take()
-                .expect("the linking lists every HSP once");
-            take(&mut item, &linked);
-            item
-        })
-        .collect();
+    items.reserve(slots.len());
+    even_gap_link_hsps(&hsps, &contexts, subject_length, params, &mut |linked| {
+        let mut item = slots[linked.index]
+            .take()
+            .expect("the linking lists every HSP once");
+        take(&mut item, &linked);
+        items.push(item);
+    });
 }
 
 /// Links the HSPs of one subject (`s_BlastEvenGapLinkHSPs` for an untranslated subject) and
-/// returns the list NCBI builds, in its order: every HSP once, with its linked set's e-value and
-/// size. `contexts` gives the values of a context (`LinkHsp::context`); `subject_length` is the
+/// gives `emit` the list NCBI builds, in its order: every HSP once, with its linked set's e-value
+/// and size. `contexts` gives the values of a context (`LinkHsp::context`); `subject_length` is the
 /// subject's length in letters. `contexts` is a trait object so that one copy of the linking serves
 /// every caller (a generic one was copied into each, which made the binary 35 KB larger and moved
 /// the default searches' code pages).
@@ -544,10 +592,11 @@ pub(crate) fn even_gap_link_hsps(
     contexts: &dyn Fn(usize) -> LinkContext,
     subject_length: i32,
     params: &EvenGapLinkParams,
-) -> Vec<LinkedHsp> {
+    emit: &mut dyn FnMut(LinkedHsp),
+) {
     let total_number_of_hsps = hsps.len();
     if total_number_of_hsps == 0 {
-        return Vec::new();
+        return;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:468-493
     // ```c
@@ -580,9 +629,12 @@ pub(crate) fn even_gap_link_hsps(
     let cutoff = [params.cutoff_small_gap as i64, params.cutoff_big_gap as i64];
     let ignore_small_gaps = params.cutoff_small_gap == 0;
     // `link_hsp_array`: the input positions in the order of `s_RevCompareHSPsTbn` (`Tbx`).
-    let frames_of: Vec<usize> = hsps.iter().map(|h| params.query_frame(h.context)).collect();
+    let frame = |h: &LinkHsp| params.query_frame(h.context);
     let mut order: Vec<usize> = (0..total_number_of_hsps).collect();
-    order.sort_by(|&a, &b| rev_compare_tbn(&hsps[a], frames_of[a], &hsps[b], frames_of[b]));
+    order.sort_by(|&a, &b| {
+        let (h1, h2) = (&hsps[a], &hsps[b]);
+        rev_compare_tbn(h1, frame(h1), h2, frame(h2))
+    });
     // Slot 0 is `hp_start`; the HSP at sorted position `i` is slot `i + 1`, read from a copy in that
     // order (one load where `hsps[order[i]]` takes two).
     let sorted: Vec<SortedHsp> = order
@@ -592,7 +644,7 @@ pub(crate) fn even_gap_link_hsps(
             let c = contexts(hsp.context);
             SortedHsp {
                 hsp,
-                frame: frames_of[i],
+                frame: frame(&hsp),
                 score_lambda: hsp.score as f64 * c.lambda,
                 log_k: c.log_k,
             }
@@ -637,13 +689,13 @@ pub(crate) fn even_gap_link_hsps(
         let slot = index + 1;
         nodes[slot].start_of_chain = false;
         frames.last_mut().expect("one frame").1 += 1;
-        nodes[slot].prev = (index > 0).then_some(slot - 1);
-        nodes[slot].next = (index + 1 < total_number_of_hsps).then_some(slot + 1);
+        nodes[slot].prev = Link::from((index > 0).then_some(slot - 1));
+        nodes[slot].next = Link::from((index + 1 < total_number_of_hsps).then_some(slot + 1));
         if index > 0 && sorted[index].frame != sorted[index - 1].frame {
             frames.last_mut().expect("one frame").1 -= 1;
             frames.push((slot, 1));
-            nodes[slot - 1].next = None;
-            nodes[slot].prev = None;
+            nodes[slot - 1].next = Link::NONE;
+            nodes[slot].prev = Link::NONE;
         }
     }
 
@@ -759,15 +811,14 @@ pub(crate) fn even_gap_link_hsps(
     // ```
     // The list NCBI builds visits, in the array's order, each HSP that is not inside a chain,
     // and after a chain's head the rest of its chain.
-    let mut out: Vec<LinkedHsp> = Vec::with_capacity(total_number_of_hsps);
     for &slot in &array {
         let head = &nodes[slot];
         if head.linked_set && !head.start_of_chain {
             continue;
         }
-        let method = head.ordering_method;
-        if head.link[method].is_none() {
-            out.push(LinkedHsp {
+        let method = usize::from(head.ordering_method);
+        if head.link[method].get().is_none() {
+            emit(LinkedHsp {
                 index: order[slot - 1],
                 evalue: head.evalue,
                 num: 1,
@@ -777,16 +828,14 @@ pub(crate) fn even_gap_link_hsps(
         let num_links = i32::from(head.num[method]);
         let mut current = Some(slot);
         while let Some(h) = current {
-            out.push(LinkedHsp {
+            emit(LinkedHsp {
                 index: order[h - 1],
                 evalue: nodes[h].evalue,
                 num: num_links,
             });
-            current = nodes[h].link[method];
+            current = nodes[h].link[method].get();
         }
     }
-    debug_assert_eq!(out.len(), total_number_of_hsps);
-    out
 }
 
 /// The values of `s_BlastEvenGapLinkHSPs` that every query frame reads.
@@ -848,8 +897,8 @@ fn link_frame(
     // ```
     const HP_START: usize = 0;
     nodes[HP_START] = Node::default();
-    nodes[HP_START].next = Some(frame_start);
-    nodes[frame_start].prev = Some(HP_START);
+    nodes[HP_START].next = Link::some(frame_start);
+    nodes[frame_start].prev = Link::some(HP_START);
     let mut number_of_hsps = frame_count;
     // The lengths and the search space of the frame's first HSP's context, for every HSP of a
     // frame of a translated query too (NCBI's `query_context`).
@@ -867,10 +916,10 @@ fn link_frame(
 
     let mut first_pass = true;
     let mut path_changed = true;
-    let mut h = nodes[HP_START].next;
+    let mut h = nodes[HP_START].next.get();
     while let Some(slot) = h {
         nodes[slot].changed = true;
-        h = nodes[slot].next;
+        h = nodes[slot].next.get();
     }
 
     let score_of = |slot: usize| hsp_of(slot).score as i64;
@@ -941,7 +990,7 @@ fn link_frame(
             if !ignore_small_gaps {
                 let mut max0 = -cutoff[SMALL];
                 let mut max1 = -cutoff[LARGE];
-                let mut h = nodes[HP_START].next;
+                let mut h = nodes[HP_START].next.get();
                 while let Some(slot) = h {
                     let sum0 = nodes[slot].sum[SMALL];
                     let sum1 = nodes[slot].sum[LARGE];
@@ -953,18 +1002,18 @@ fn link_frame(
                         max1 = sum1;
                         best[LARGE] = Some(slot);
                     }
-                    h = nodes[slot].next;
+                    h = nodes[slot].next.get();
                 }
             } else {
                 let mut maxscore = -cutoff[LARGE];
-                let mut h = nodes[HP_START].next;
+                let mut h = nodes[HP_START].next.get();
                 while let Some(slot) = h {
                     let sum = nodes[slot].sum[LARGE];
                     if sum >= maxscore {
                         maxscore = sum;
                         best[LARGE] = Some(slot);
                     }
-                    h = nodes[slot].next;
+                    h = nodes[slot].next.get();
                 }
             }
             use_current_max = true;
@@ -975,7 +1024,7 @@ fn link_frame(
                         if nodes[slot].linked_to == -1000 {
                             return true;
                         }
-                        h = nodes[slot].link[method];
+                        h = nodes[slot].link[method].get();
                     }
                     false
                 };
@@ -1026,7 +1075,7 @@ fn link_frame(
                 lh_helper[h_index].sum = node.sum;
                 lh_helper[h_index].next_larger = next_larger(lh_helper, h_index);
                 node.linked_to = 0;
-                h = node.next;
+                h = node.next.get();
                 h_index += 1;
             }
 
@@ -1100,7 +1149,7 @@ fn link_frame(
                 let index = SMALL;
                 let mut maxscore = -cutoff[index];
                 let mut h_index = 2usize;
-                let mut h = nodes[HP_START].next;
+                let mut h = nodes[HP_START].next.get();
                 while let Some(slot) = h {
                     let mut h_hsp_num = 0i16;
                     let mut h_hsp_sum = 0i64;
@@ -1139,14 +1188,14 @@ fn link_frame(
                     let node = &mut nodes[slot];
                     node.sum[index] = new_sum;
                     node.num[index] = (i32::from(h_hsp_num) + 1) as i16;
-                    node.link[index] = h_hsp_link;
+                    node.link[index] = Link::from(h_hsp_link);
                     lh_helper[h_index].sum[index] = new_sum;
                     if new_sum >= maxscore {
                         maxscore = new_sum;
                         best[index] = Some(slot);
                     }
                     node.xsum[index] = new_xsum;
-                    let next = node.next;
+                    let next = node.next.get();
                     if let Some(link) = h_hsp_link {
                         nodes[link].linked_to += 1;
                     }
@@ -1252,14 +1301,14 @@ fn link_frame(
             let index = LARGE;
             let mut maxscore = -cutoff[index];
             let mut h_index = 2usize;
-            let mut h = nodes[HP_START].next;
+            let mut h = nodes[HP_START].next.get();
             while let Some(slot) = h {
                 let mut h_hsp_num = 0i16;
                 let mut h_hsp_sum = 0i64;
                 let mut h_hsp_xsum = 0.0f64;
                 let mut h_hsp_link: Option<usize> = None;
                 nodes[slot].changed = true;
-                let h2 = nodes[slot].link[index];
+                let h2 = nodes[slot].link[index].get();
                 if !first_pass && h2.is_none_or(|h2| !nodes[h2].changed) {
                     if let Some(h2) = h2 {
                         h_hsp_num = nodes[h2].num[index];
@@ -1301,7 +1350,7 @@ fn link_frame(
                 let node = &mut nodes[slot];
                 node.sum[index] = new_sum;
                 node.num[index] = (i32::from(h_hsp_num) + 1) as i16;
-                node.link[index] = h_hsp_link;
+                node.link[index] = Link::from(h_hsp_link);
                 lh_helper[h_index].sum[index] = new_sum;
                 lh_helper[h_index].next_larger = next_larger(lh_helper, h_index);
                 if new_sum >= maxscore {
@@ -1309,7 +1358,7 @@ fn link_frame(
                     best[index] = Some(slot);
                 }
                 node.xsum[index] = new_xsum;
-                let next = node.next;
+                let next = node.next.get();
                 if let Some(link) = h_hsp_link {
                     nodes[link].linked_to += 1;
                 }
@@ -1460,7 +1509,7 @@ fn link_frame(
         let chosen = best[ordering_method].expect("the chosen ordering has a best set");
         nodes[chosen].start_of_chain = true;
         nodes[chosen].evalue = prob[ordering_method];
-        let linked_set = nodes[chosen].link[ordering_method].is_some();
+        let linked_set = nodes[chosen].link[ordering_method].get().is_some();
         if nodes[chosen].linked_to > 0 {
             path_changed = true;
         }
@@ -1473,17 +1522,17 @@ fn link_frame(
             node.linked_to = -1000;
             node.changed = true;
             node.linked_set = linked_set;
-            node.ordering_method = ordering_method;
+            node.ordering_method = ordering_method as u8;
             node.evalue = prob[ordering_method];
             let (prev, next) = (node.prev, node.next);
-            if let Some(next) = next {
-                nodes[next].prev = prev;
+            if let Some(n) = next.get() {
+                nodes[n].prev = prev;
             }
-            if let Some(prev) = prev {
-                nodes[prev].next = next;
+            if let Some(p) = prev.get() {
+                nodes[p].next = next;
             }
             number_of_hsps -= 1;
-            h = nodes[slot].link[ordering_method];
+            h = nodes[slot].link[ordering_method].get();
         }
     }
 }
@@ -1530,6 +1579,18 @@ mod tests {
         }
     }
 
+    /// The list `even_gap_link_hsps` gives for HSPs of one context.
+    fn linked(
+        hsps: &[LinkHsp],
+        ctx: LinkContext,
+        subject_length: i32,
+        params: &EvenGapLinkParams,
+    ) -> Vec<LinkedHsp> {
+        let mut out = Vec::new();
+        even_gap_link_hsps(hsps, &|_| ctx, subject_length, params, &mut |l| out.push(l));
+        out
+    }
+
     fn hsp(q: (i32, i32), s: (i32, i32), score: i32) -> LinkHsp {
         LinkHsp {
             context: 0,
@@ -1545,7 +1606,7 @@ mod tests {
     fn a_lone_hsp_gets_the_e_value_of_one_segment() {
         let hsps = [hsp((10, 60), (20, 70), 80)];
         let ctx = context();
-        let out = even_gap_link_hsps(&hsps, &|_| ctx, 1000, &EvenGapLinkParams::traceback());
+        let out = linked(&hsps, ctx, 1000, &EvenGapLinkParams::traceback());
         assert_eq!(out.len(), 1);
         assert_eq!((out[0].index, out[0].num), (0, 1));
         let xsum = 80.0 * ctx.lambda - ctx.log_k;
@@ -1557,7 +1618,7 @@ mod tests {
     fn two_hsps_in_order_on_both_sequences_link_into_one_set() {
         // The first HSP ends before the second starts on the query and on the subject.
         let hsps = [hsp((200, 260), (500, 560), 60), hsp((10, 60), (20, 70), 80)];
-        let out = even_gap_link_hsps(&hsps, &|_| context(), 1000, &EvenGapLinkParams::traceback());
+        let out = linked(&hsps, context(), 1000, &EvenGapLinkParams::traceback());
         // The chain starts at the upstream HSP (the head) and follows its link downstream.
         assert_eq!(out.iter().map(|l| l.index).collect::<Vec<_>>(), vec![1, 0]);
         assert!(out.iter().all(|l| l.num == 2));
@@ -1567,7 +1628,7 @@ mod tests {
     #[test]
     fn hsps_in_opposite_orders_on_the_sequences_stay_apart() {
         let hsps = [hsp((200, 260), (20, 70), 60), hsp((10, 60), (500, 560), 80)];
-        let out = even_gap_link_hsps(&hsps, &|_| context(), 1000, &EvenGapLinkParams::traceback());
+        let out = linked(&hsps, context(), 1000, &EvenGapLinkParams::traceback());
         assert!(out.iter().all(|l| l.num == 1));
         // The list is in the forward order of the query starts.
         assert_eq!(out.iter().map(|l| l.index).collect::<Vec<_>>(), vec![1, 0]);
@@ -1578,12 +1639,7 @@ mod tests {
         // Close HSPs (a gap of 10 letters on both sequences) with scores at the small-gap cutoff:
         // NCBI walks for a predecessor only for a score above the cutoff.
         let hsps = [hsp((70, 120), (80, 130), 41), hsp((10, 60), (20, 70), 41)];
-        let out = even_gap_link_hsps(
-            &hsps,
-            &|_| context(),
-            1000,
-            &EvenGapLinkParams::preliminary(41),
-        );
+        let out = linked(&hsps, context(), 1000, &EvenGapLinkParams::preliminary(41));
         assert!(out.iter().all(|l| l.num == 1), "{out:?}");
     }
 
@@ -1612,12 +1668,12 @@ mod tests {
             cutoff_big_gap: 1,
             query_translated: false,
         };
-        let out = even_gap_link_hsps(&hsps, &|_| ctx, 100 * n + 100, &params);
+        let out = linked(&hsps, ctx, 100 * n + 100, &params);
         assert_eq!(out.len(), n as usize);
         assert!(out.iter().all(|l| l.num == -32766), "{:?}", &out[..2]);
         assert!(out.iter().all(|l| l.evalue == 0.0), "{:?}", &out[..2]);
         // One HSP fewer than the wrap keeps its count.
-        let out = even_gap_link_hsps(&hsps[..32_767], &|_| ctx, 100 * n + 100, &params);
+        let out = linked(&hsps[..32_767], ctx, 100 * n + 100, &params);
         assert!(out.iter().all(|l| l.num == 32_767), "{:?}", &out[..2]);
     }
 }

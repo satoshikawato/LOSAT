@@ -150,7 +150,7 @@ pub(crate) trait PreliminarySink {
         _oid: usize,
         _batch: &PreparedQueryBatch,
         _params: &[ContextParameters],
-        _prepared_link: Option<crate::core::link_hsps::EvenGapLinkParams>,
+        _prepared_link: Option<crate::core::link_hsps::LinkCutoffs>,
     ) -> Result<()> {
         Ok(())
     }
@@ -1275,7 +1275,7 @@ struct SubjectComputation {
     raw: Vec<PreliminaryHsp>,
     purged: Vec<PreliminaryHsp>,
     containment: Vec<(PreliminaryHsp, bool)>,
-    prepared_link: Option<crate::core::link_hsps::EvenGapLinkParams>,
+    prepared_link: Option<crate::core::link_hsps::LinkCutoffs>,
 }
 
 #[cfg(feature = "parallel")]
@@ -1453,8 +1453,8 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     // adoption/observer notification is replayed on the serial OID collector.
     // `db_length` is `BlastSeqSrcGetTotLen` (blast_engine.c:1407), not the statistics' total:
     // `Subjects::total_length`.
-    let prepared_link = if super::linking::ungapped_link_cutoffs(options) {
-        Some(super::linking::ungapped_link_params(
+    let prepared_link = if super::linking::computes_link_cutoffs(options) {
+        Some(super::linking::link_cutoffs(
             batch,
             params,
             subject_length as i32,

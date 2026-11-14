@@ -1,15 +1,15 @@
 //! Cutoff calculations for HSP linking: TBLASTX's view of `CalculateLinkHSPCutoffs`, whose one
-//! port is `core::link_hsps::EvenGapLinkParams::ungapped` (BLASTX's ungapped search uses it too).
+//! port is `core::link_hsps::calculate_link_hsp_cutoffs` (BLASTX's ungapped search uses it too).
 //!
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c
 
-use crate::core::link_hsps::EvenGapLinkParams;
+use crate::core::link_hsps::calculate_link_hsp_cutoffs;
 use crate::stats::KarlinParams;
 
 use super::params::LinkHspCutoffs;
 
-/// `CalculateLinkHSPCutoffs` of a TBLASTX search with one subject (`EvenGapLinkParams::ungapped`
-/// with a translated query and subject: the subject's and the database's lengths in nucleotides
+/// `CalculateLinkHSPCutoffs` of a TBLASTX search with one subject (`calculate_link_hsp_cutoffs`
+/// with a translated subject: the subject's and the database's lengths in nucleotides
 /// are divided by 3). `ignore_small_gaps` is the branch of a search space of at most 8 windows,
 /// the one that sets `gap_prob` to 0.
 ///
@@ -28,14 +28,13 @@ pub fn calculate_link_hsp_cutoffs_ncbi(
     cutoff_score_min: i32,
     params: &KarlinParams,
 ) -> LinkHspCutoffs {
-    let link = EvenGapLinkParams::ungapped(
+    let link = calculate_link_hsp_cutoffs(
         params,
         avg_query_length,
         subject_len_nucl,
         db_length,
         true,
-        cutoff_score_min,
-        true,
+        || cutoff_score_min,
     );
     let cutoffs = LinkHspCutoffs {
         cutoff_small_gap: link.cutoff_small_gap,

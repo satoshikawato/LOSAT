@@ -177,6 +177,40 @@ impl NcbiException {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:749-752
+    // ```c++
+    // #define NCBI_RETHROW_SAME(prev_exception, message)                \
+    //     do { prev_exception.AddBacklog(DIAG_COMPILE_INFO, message,    \
+    //                                    prev_exception.GetSeverity()); \
+    //     throw; }  while (0)
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:274-285 (`AddBacklog`, quoted at
+    // `ncbi_app::Diag::run_arg_exception`: the predecessor is a clone of the exception, which then
+    // takes the new place and message and keeps its class, code and extra text)
+    /// `NCBI_RETHROW_SAME(self, message)` in `function` at `file`:`line`: the exception of the same
+    /// class and code (and extra text, such as a `CStringException`'s position) with `self` as its
+    /// predecessor; NCBI's serial object stack adds one for each frame it leaves
+    /// (`report::serial::asn_types::read`).
+    pub fn rethrow_same(
+        self,
+        file: &'static str,
+        line: u32,
+        function: &'static str,
+        message: impl Into<String>,
+    ) -> Self {
+        NcbiException {
+            site: ThrowSite {
+                file,
+                line,
+                kind: self.site.kind,
+                function: Some(function),
+            },
+            message: message.into(),
+            extra: self.extra.clone(),
+            predecessor: Some(Box::new(self)),
+        }
+    }
+
     /// Where the exception was thrown (for the tests; the report reads the field in `report_this`).
     #[cfg(test)]
     pub fn site(&self) -> ThrowSite {

@@ -21,11 +21,14 @@
 //!
 //! A member is written when it is set: an OPTIONAL member that is `None` is not, and neither is a
 //! member with a DEFAULT that was not set (`is_protein` and `by_row` hold whether and how they were
-//! set). The members that LOSAT neither writes nor reads (`constraints` and `annotatedSites` of
-//! the parameters, the descriptors of the query other than its titles, the members of the query's
-//! `Seq-inst` after `seq-data` and before it other than `repr`, `mol` and `length`) are not kept:
-//! the reader skips them.
+//! set). The reader keeps every member NCBI's object keeps (`blastinput::pssm_text`, line RG item
+//! D3-1): the members that this writer does not write yet (the descriptors of the query other than
+//! its titles, its `annot`, the members of its `Seq-inst` other than `repr`, `mol`, `length` and
+//! `seq-data`, and the `constraints` and `annotatedSites` of the parameters, held as values of the
+//! generic reader, `report::serial::asn_types::Value`) are named by
+//! `PssmWithParameters::unwritten_members`, which every writer of a PSSM that was read refuses.
 
+use super::asn_types::Value;
 use super::encoder::Encoder;
 
 /// `PssmWithParameters`.
@@ -85,8 +88,8 @@ pub struct Pssm {
 /// `Object-id`: the Seq-id model's (`seqid::model`), which the PSSM's identifier shares.
 pub use crate::seqid::model::ObjectId;
 
-/// The PSSM's query: the `Seq-entry` `seq` variant, a Bioseq with its ids, the titles among its
-/// descriptors (`None`: no `descr` member, or one without a title) and its `Seq-inst`.
+/// The PSSM's query: the `Seq-entry` `seq` variant, a Bioseq with its ids, its descriptors, its
+/// `Seq-inst` and its `annot`.
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:36-40
 // ```asn
 // Bioseq ::= SEQUENCE {
@@ -100,11 +103,68 @@ pub struct PssmQuery {
     /// The ids, read and written as every Seq-id of NCBI's ASN.1 text (`seqid::asn_text`,
     /// `report::seqid::SeqId::Db`).
     pub ids: Vec<crate::seqid::ParsedSeqId>,
-    pub titles: Option<Vec<Vec<u8>>>,
+    /// `descr` (`Seq-descr ::= SET OF Seqdesc`) in the order read; `None` without the member.
+    pub descr: Option<Vec<Seqdesc>>,
     pub inst: SeqInst,
+    /// `annot SET OF Seq-annot`, each a value of the generic reader.
+    pub annot: Option<Vec<Value>>,
 }
 
-/// `Seq-inst` without the members LOSAT does not keep.
+/// One `Seqdesc` of the query: a `title`, or another variant as the generic reader read it (the
+/// `Seqdesc` CHOICE value).
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:73-79
+// ```asn
+// Seqdesc ::= CHOICE {
+//     mol-type GIBB-mol ,           -- type of molecule
+//     modif SET OF GIBB-mod ,       -- modifiers
+//     method GIBB-method ,          -- sequencing method
+//     name VisibleString ,          -- a name for this sequence
+//     title VisibleString ,         -- a title for this sequence
+// ```
+#[derive(Debug, Clone, PartialEq)]
+pub enum Seqdesc {
+    Title(Vec<u8>),
+    Other(Value),
+}
+
+impl Seqdesc {
+    /// The name of the descriptor's variant (`title`, `molinfo`, ...).
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            Seqdesc::Title(_) => "title",
+            Seqdesc::Other(Value::Choice(index, _)) => {
+                super::asn_types::members(super::asn_types::table::named::SEQDESC)
+                    [usize::from(*index)]
+                .name
+            }
+            Seqdesc::Other(_) => unreachable!("a Seqdesc is a CHOICE"),
+        }
+    }
+}
+
+impl PssmQuery {
+    /// The titles among the descriptors, in order.
+    pub fn titles(&self) -> Vec<&[u8]> {
+        self.descr
+            .iter()
+            .flatten()
+            .filter_map(|descriptor| match descriptor {
+                Seqdesc::Title(title) => Some(title.as_slice()),
+                Seqdesc::Other(_) => None,
+            })
+            .collect()
+    }
+
+    /// Whether a descriptor is a `molinfo`.
+    pub fn has_molinfo(&self) -> bool {
+        self.descr
+            .iter()
+            .flatten()
+            .any(|descriptor| descriptor.variant_name() == "molinfo")
+    }
+}
+
+/// `Seq-inst`.
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:262-297
 // ```asn
 // Seq-inst ::= SEQUENCE {            -- the sequence data itself
@@ -124,14 +184,44 @@ pub struct PssmQuery {
 //     ext Seq-ext OPTIONAL ,         -- extensions for special types
 //     hist Seq-hist OPTIONAL }       -- sequence history
 // ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SeqInst {
     /// `repr`: the value's name and number (`raw`, 2).
     pub repr: (&'static str, i32),
     /// `mol`: the value's name and number (`aa`, 3).
     pub mol: (&'static str, i32),
-    pub length: Option<i32>,
+    /// `length` (`TSeqPos`, seq.def: read as Uint4).
+    pub length: Option<u32>,
+    pub fuzz: Option<Value>,
+    /// `topology` (DEFAULT linear): the value's number when set.
+    pub topology: Option<i32>,
+    /// `strand`: the value's number.
+    pub strand: Option<i32>,
     pub seq_data: Option<SeqData>,
+    pub ext: Option<Value>,
+    pub hist: Option<Value>,
+}
+
+impl SeqInst {
+    /// A `Seq-inst` of `repr`, `mol`, `length` and `seq_data` only.
+    pub fn new(
+        repr: (&'static str, i32),
+        mol: (&'static str, i32),
+        length: Option<u32>,
+        seq_data: Option<SeqData>,
+    ) -> Self {
+        SeqInst {
+            repr,
+            mol,
+            length,
+            fuzz: None,
+            topology: None,
+            strand: None,
+            seq_data,
+            ext: None,
+            hist: None,
+        }
+    }
 }
 
 /// The values of `Seq-inst.repr`.
@@ -256,7 +346,7 @@ pub struct PssmFinalData {
     pub word_score_threshold: Option<f64>,
 }
 
-/// `PssmParameters`, without `constraints` and `annotatedSites`.
+/// `PssmParameters`.
 // NCBI reference (598d8ae6): c++/src/objects/scoremat/scoremat.asn:319-341
 // ```asn
 // PssmParameters ::= SEQUENCE {
@@ -278,8 +368,54 @@ pub struct PssmFinalData {
 pub struct PssmParameters {
     pub pseudocount: Option<i32>,
     pub rpsdbparams: Option<FormatRpsDbParameters>,
+    /// `constraints CoreDef`, a value of the generic reader.
+    pub constraints: Option<Value>,
     pub bit_score_thresh: Option<f64>,
     pub bit_score_reporting_thresh: Option<f64>,
+    /// `annotatedSites Site-annot-set`, a value of the generic reader.
+    pub annotated_sites: Option<Value>,
+}
+
+impl PssmWithParameters {
+    /// The members that the writer of a PSSM does not write yet (the D3 refusals of `-out_pssm`
+    /// and of the search strategy's request, which line RG item D3-2 lifts): `"molinfo"` for a
+    /// `molinfo` descriptor of the query and `"Seqdesc"` for another descriptor other than a
+    /// title, then `fuzz`, `topology`, `strand`, `ext`, `hist` of its `Seq-inst`, `annot`,
+    /// `constraints` and `annotatedSites`, in the order of the document.
+    pub fn unwritten_members(&self) -> Vec<&'static str> {
+        let mut names = Vec::new();
+        if let Some(query) = &self.pssm.query {
+            for descriptor in query.descr.iter().flatten() {
+                match descriptor.variant_name() {
+                    "title" => {}
+                    "molinfo" => names.push("molinfo"),
+                    _ => names.push("Seqdesc"),
+                }
+            }
+            let inst = &query.inst;
+            for (name, set) in [
+                ("fuzz", inst.fuzz.is_some()),
+                ("topology", inst.topology.is_some()),
+                ("strand", inst.strand.is_some()),
+                ("ext", inst.ext.is_some()),
+                ("hist", inst.hist.is_some()),
+                ("annot", query.annot.is_some()),
+            ] {
+                if set {
+                    names.push(name);
+                }
+            }
+        }
+        if let Some(params) = &self.params {
+            if params.constraints.is_some() {
+                names.push("constraints");
+            }
+            if params.annotated_sites.is_some() {
+                names.push("annotatedSites");
+            }
+        }
+        names
+    }
 }
 
 /// `FormatRpsDbParameters`.
@@ -465,11 +601,13 @@ fn write_query<E: Encoder>(enc: &mut E, query: &PssmQuery) {
     }
     enc.end_list();
     enc.end_member();
-    if let Some(titles) = &query.titles {
+    // The descriptors other than titles are not written yet (`unwritten_members`, refused by
+    // every writer of a PSSM that was read).
+    if query.descr.is_some() {
         enc.member("descr", 1);
         enc.begin_named("Seq-descr");
         enc.begin_list(true);
-        for title in titles {
+        for title in query.titles() {
             enc.element();
             enc.variant("Seqdesc", "title", 4);
             enc.visible_str(title);
@@ -489,7 +627,11 @@ fn write_query<E: Encoder>(enc: &mut E, query: &PssmQuery) {
     enc.end_member();
     if let Some(length) = query.inst.length {
         enc.member("length", 2);
-        enc.int(length);
+        // `WriteUint4`: the decimal digits (and in BER the INTEGER of the value).
+        match i32::try_from(length) {
+            Ok(length) => enc.int(length),
+            Err(_) => enc.big_int(i64::from(length)),
+        }
         enc.end_member();
     }
     if let Some(data) = &query.inst.seq_data {

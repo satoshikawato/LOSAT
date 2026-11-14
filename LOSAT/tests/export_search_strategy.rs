@@ -21,8 +21,8 @@
 //! PSSM engine's error after the request), with `-subject` NCBI's "Remote PSI-BL2SEQ is not
 //! supported" after the prolog writes none (also with a subject title the requests could not
 //! hold, and before NCBI's check of the PSSM). The rows that LOSAT refuses (DECISIONS 15, 21 and 26
-//! of line RG; the PSSM members that LOSAT's reader skips, item F1b-2) check the refusal. blastp's
-//! query blocks and the `0` side of
+//! of line RG; the PSSM members that LOSAT's PSSM writer does not write yet, items F1b-2 and
+//! D3-1) check the refusal. blastp's query blocks and the `0` side of
 //! the default-on switches that the strategy's paths cross write the same files.
 //!
 //! The cases are the rows of `tests/fixtures/strategy/cases.tsv` (its header says what the

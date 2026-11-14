@@ -783,6 +783,7 @@ impl TblastnArgs {
                 &matrix_name,
                 self.export_search_strategy.is_some(),
                 self.db.is_some(),
+                diagnostics,
             )?)),
             None => None,
         };

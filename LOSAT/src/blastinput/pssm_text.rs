@@ -14,372 +14,285 @@
 //!                 in >> MSerial_AsnBinary >> *m_Pssm;
 //! ```
 //!
-//! The values are read as NCBI's stream reads them: white space is spaces, tabs and ends of line
-//! (`\n`, `\r`, `\r\n` or `\n\r`, each one line), and a comment runs from `--` to the next `--` or
-//! the end of the line; the members of a SEQUENCE come in the order of the module; a REAL is
-//! `{ mantissa, base, exponent }` or a word (`ReadDouble`, `read_real`); a VisibleString joins its
-//! lines (an end of line inside it is dropped) and `""` is one quote; an OCTET STRING is hex digits
-//! across lines. The members and variants that LOSAT does not keep are skipped as values
-//! (`skip_value`): the descriptors of the query other than its titles, its `annot`, the members
-//! of its `Seq-inst` other than `repr`, `mol`, `length` and `seq-data`, and the `constraints` and
-//! `annotatedSites` of the parameters; `read_pssm_with_parameters_and_skips` names them, since NCBI
-//! writes them back where it writes the PSSM it read (psiblast `-in_pssm` with `-out_pssm`, item
-//! PS5b). An empty `descr` is NCBI's error (`CSeq_descr::PostRead`). A string keeps its bytes as
-//! read (NCBI replaces a byte outside the visible range by `#` with an error message; a PSSM that
-//! LOSAT writes has none, `algorithm::psiblast::pssm`). LOSAT reads the forms below and refuses the others with an error
-//! naming its line: a query `Seq-entry` that is a `set`, `Seq-data` other than `iupacaa`, `ncbieaa`
-//! and `ncbistdaa`. The query's Seq-ids, of every
-//! alternative, are read by the shared Seq-id reader (`seqid::asn_text`).
+//! The whole document is read by the generic reader of NCBI's type information
+//! (`report::serial::asn_types`, line RG item D3-1): every member of every type it reaches, with
+//! NCBI's grammar, ranges, replacements and messages (`Post`) and NCBI's errors (`ReadError`). The
+//! typed model is then made of the value (`pssm_of`): the members LOSAT's search reads, typed, and
+//! the others kept as the generic reader's values. LOSAT refuses at that boundary, after NCBI's
+//! reader has read everything, what its PSSM search does not take (`PssmReadError::Refused`): a
+//! query `Seq-entry` that is a `set`, `Seq-data` other than `iupacaa`, `ncbieaa` and `ncbistdaa`.
 
-use crate::report::serial::asn_text_reader::{is_first_id_char, Reader, SliceSource};
+use crate::report::serial::asn_types::table::named;
+use crate::report::serial::asn_types::{
+    member_index, members, read_document, resolved, Kind, Post, ReadError, Value,
+};
 use crate::report::serial::pssm::{
-    FormatRpsDbParameters, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters, PssmQuery,
-    PssmWithParameters, SeqData, SeqInst, SEQ_INST_MOL, SEQ_INST_REPR,
+    FormatRpsDbParameters, ObjectId, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters,
+    PssmQuery, PssmWithParameters, SeqData, SeqInst, Seqdesc,
 };
 
-/// A PSSM that the reader cannot read: the line (from 1) where it stopped and why (the error of
-/// the shared ASN.1 text reader, `report::serial::asn_text_reader`).
-pub type PssmTextError = crate::report::serial::asn_text_reader::AsnTextError;
+/// Why a PSSM file is not read.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum PssmReadError {
+    /// NCBI's reader stops (`ReadError`).
+    Ncbi(ReadError),
+    /// NCBI reads the PSSM and LOSAT refuses it (what it is, for the refusal's text).
+    Refused(String),
+}
 
-type Result<T> = std::result::Result<T, PssmTextError>;
+/// What the reader made of a PSSM file, and the messages NCBI's reader posts while it reads it
+/// (before its error, when it stops).
+pub(crate) struct PssmRead {
+    pub(crate) result: Result<PssmWithParameters, PssmReadError>,
+    pub(crate) posts: Vec<Post>,
+}
 
 /// Reads the `PssmWithParameters` document at the start of `text` (what follows it is not read,
 /// as `stream >> object` reads one object).
-// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:709-721
-// ```c++
-// string CObjectIStreamAsn::ReadFileHeader()
-// {
-//     CTempString id = ReadTypeId(SkipWhiteSpace());
-//     string s(id);
-//     if ( SkipWhiteSpace() == ':' &&
-//          m_Input.PeekCharNoEOF(1) == ':' &&
-//          m_Input.PeekCharNoEOF(2) == '=' ) {
-//         m_Input.SkipChars(3);
-//     }
-//     else
-//         ThrowError(fFormatError, "'::=' expected");
-//     return s;
-// }
-// ```
+pub(crate) fn read_pssm(text: &[u8]) -> PssmRead {
+    let (value, posts) = read_document(text, named::PSSMWITHPARAMETERS);
+    PssmRead {
+        result: value
+            .map_err(PssmReadError::Ncbi)
+            .and_then(|value| pssm_of(&value).map_err(PssmReadError::Refused)),
+        posts,
+    }
+}
+
+/// `read_pssm`'s PSSM, for the tests: an error names NCBI's class or LOSAT's refusal.
 #[cfg(test)]
-pub fn read_pssm_with_parameters(text: &[u8]) -> Result<PssmWithParameters> {
-    read_pssm_with_parameters_and_skips(text).map(|(pssm, _)| pssm)
+pub(crate) fn read_pssm_with_parameters(text: &[u8]) -> Result<PssmWithParameters, PssmReadError> {
+    read_pssm(text).result
 }
 
-/// `read_pssm_with_parameters`, with the names of the members that the reader skipped (in the
-/// order read; `"molinfo"` for a `molinfo` descriptor of the query, `"Seqdesc"` for another
-/// descriptor other than a title), which NCBI's object keeps and writes back.
-pub fn read_pssm_with_parameters_and_skips(
-    text: &[u8],
-) -> Result<(PssmWithParameters, Vec<&'static str>)> {
-    let mut reader = Reader::new(SliceSource::new(text), "PSSM", "PSSM reader");
-    let c = reader.skip_white_space()?;
-    let id = reader.scan_end_of_id(is_first_id_char(c))?;
-    let id = reader.src.text(id);
-    if id != b"PssmWithParameters" {
-        return Err(reader.error(format!(
-            "the document is a {}, not a PssmWithParameters",
-            String::from_utf8_lossy(id)
-        )));
-    }
-    if reader.skip_white_space()? != b':' || reader.peek_at(1) != b':' || reader.peek_at(2) != b'='
-    {
-        return Err(reader.error("'::=' expected"));
-    }
-    reader.pos += 3;
-    let pssm = reader.pssm_with_parameters()?;
-    Ok((pssm, reader.skipped))
+// The typed boundary: the model of the value read. The value has the table's shape (the reader
+// read it under the table), so a mandatory member is there and each member has its type's form.
+
+fn member<'v>(value: &'v Value, ty: u16, name: &str) -> Option<&'v Value> {
+    value.member(member_index(ty, name))
 }
 
-// The grammar of `PssmWithParameters` and of the types it holds, over the shared lexical layer.
-impl<'a> Reader<SliceSource<'a>> {
-    /// `ReadMemberId(SkipWhiteSpace())` (objistrasn.cpp:343-364): a member or variant name.
-    fn member_id(&mut self) -> Result<&'a [u8]> {
-        let id = self.member_id_range()?;
-        Ok(self.src.text(id))
+fn int(value: &Value) -> i64 {
+    match value {
+        Value::Int(n) => *n,
+        other => unreachable!("an INTEGER of the table, not {other:?}"),
     }
+}
 
-    fn pssm_with_parameters(&mut self) -> Result<PssmWithParameters> {
-        let mut members = self.begin_members()?;
-        let mut pssm = None;
-        let mut params = None;
-        while let Some(index) = self.next_member(&mut members, &["pssm", "params"])? {
-            match index {
-                0 => pssm = Some(self.pssm()?),
-                _ => params = Some(self.params()?),
-            }
-        }
-        Ok(PssmWithParameters {
-            pssm: pssm.ok_or_else(|| self.error("member pssm missing"))?,
-            params,
-        })
+/// An INTEGER of Int4 storage.
+fn int4(value: &Value) -> i32 {
+    i32::try_from(int(value)).expect("an Int4 of the table")
+}
+
+fn boolean(value: &Value) -> bool {
+    match value {
+        Value::Bool(value) => *value,
+        other => unreachable!("a BOOLEAN of the table, not {other:?}"),
     }
+}
 
-    fn pssm(&mut self) -> Result<Pssm> {
-        const NAMES: [&str; 9] = [
-            "isProtein",
-            "identifier",
-            "numRows",
-            "numColumns",
-            "rowLabels",
-            "byRow",
-            "query",
-            "intermediateData",
-            "finalData",
-        ];
-        let mut members = self.begin_members()?;
-        let mut pssm = Pssm {
-            is_protein: None,
-            identifier: None,
-            num_rows: 0,
-            num_columns: 0,
-            row_labels: None,
-            by_row: None,
-            query: None,
-            intermediate_data: None,
-            final_data: None,
-        };
-        let (mut rows, mut columns) = (None, None);
-        while let Some(index) = self.next_member(&mut members, &NAMES)? {
-            match index {
-                0 => pssm.is_protein = Some(self.boolean()?),
-                1 => pssm.identifier = Some(self.object_id()?),
-                2 => rows = Some(self.int4()?),
-                3 => columns = Some(self.int4()?),
-                4 => pssm.row_labels = Some(self.list(Self::string)?),
-                5 => pssm.by_row = Some(self.boolean()?),
-                6 => pssm.query = Some(self.seq_entry()?),
-                7 => pssm.intermediate_data = Some(self.intermediate_data()?),
-                _ => pssm.final_data = Some(self.final_data()?),
-            }
-        }
-        pssm.num_rows = rows.ok_or_else(|| self.error("member numRows missing"))?;
-        pssm.num_columns = columns.ok_or_else(|| self.error("member numColumns missing"))?;
-        Ok(pssm)
+fn real(value: &Value) -> f64 {
+    match value {
+        Value::Real(value) => *value,
+        other => unreachable!("a REAL of the table, not {other:?}"),
     }
+}
 
-    /// The query's `Seq-entry`: its `seq` variant, a Bioseq.
-    fn seq_entry(&mut self) -> Result<PssmQuery> {
-        let variant = self.member_id()?;
-        if variant != b"seq" {
-            return Err(self.error(format!(
-                "a query Seq-entry {} is not supported by LOSAT's PSSM reader",
-                String::from_utf8_lossy(variant)
-            )));
-        }
-        let mut members = self.begin_members()?;
-        let (mut ids, mut titles, mut inst) = (None, None, None);
-        while let Some(index) = self.next_member(&mut members, &["id", "descr", "inst", "annot"])? {
-            match index {
-                0 => ids = Some(self.list(Self::seq_id)?),
-                1 => {
-                    // NCBI reference (598d8ae6): c++/src/objects/seq/Seq_descr.cpp:62-68
-                    // ```c++
-                    // void CSeq_descr::PostRead(void) const
-                    // {
-                    //     if ( !s_SeqDescrAllowEmpty->Get() && Get().empty() ) {
-                    //         NCBI_THROW(CSerialException, eInvalidData,
-                    //                    "empty Seq-descr is not allowed");
-                    // ```
-                    // (`OBJECTS_SEQ_DESCR_ALLOW_EMPTY` is false unless set in NCBI's environment or
-                    // configuration file, which LOSAT does not read.)
-                    let mut descriptors = 0usize;
-                    let found: Vec<Vec<u8>> = self
-                        .list(|reader| {
-                            descriptors += 1;
-                            reader.seqdesc_title()
-                        })?
-                        .into_iter()
-                        .flatten()
-                        .collect();
-                    if descriptors == 0 {
-                        return Err(self.error("empty Seq-descr is not allowed"));
-                    }
-                    titles = (!found.is_empty()).then_some(found);
+fn string(value: &Value) -> Vec<u8> {
+    match value {
+        Value::Str(text) => text.clone(),
+        other => unreachable!("a string of the table, not {other:?}"),
+    }
+}
+
+fn list<T>(value: &Value, each: impl Fn(&Value) -> T) -> Vec<T> {
+    match value {
+        Value::List(items) => items.iter().map(each).collect(),
+        other => unreachable!("a SEQUENCE OF of the table, not {other:?}"),
+    }
+}
+
+fn choice(value: &Value) -> (usize, &Value) {
+    match value {
+        Value::Choice(index, value) => (usize::from(*index), value),
+        other => unreachable!("a CHOICE of the table, not {other:?}"),
+    }
+}
+
+/// An ENUMERATED value: its name in the list of the member's type, and its number.
+fn enumerated(value: &Value, ty: u16, name: &str) -> (&'static str, i32) {
+    let Value::Enum(number) = value else {
+        unreachable!("an ENUMERATED of the table, not {value:?}")
+    };
+    let member_ty = members(ty)[member_index(ty, name)].ty;
+    let Kind::Enumerated { values, .. } = resolved(member_ty).kind else {
+        unreachable!("{name} is an ENUMERATED")
+    };
+    let name = values
+        .iter()
+        .find(|(_, value)| value == number)
+        .map(|(name, _)| *name)
+        .expect("an ENUMERATED number has a name");
+    (name, *number)
+}
+
+fn enum_number(value: &Value) -> i32 {
+    match value {
+        Value::Enum(number) => *number,
+        other => unreachable!("an ENUMERATED of the table, not {other:?}"),
+    }
+}
+
+fn object_id(value: &Value) -> ObjectId {
+    match choice(value) {
+        (0, value) => ObjectId::Id(int4(value)),
+        (_, value) => ObjectId::Str(string(value)),
+    }
+}
+
+/// The model of a `PssmWithParameters` value, or LOSAT's refusal.
+fn pssm_of(value: &Value) -> Result<PssmWithParameters, String> {
+    const T: u16 = named::PSSMWITHPARAMETERS;
+    Ok(PssmWithParameters {
+        pssm: pssm(member(value, T, "pssm").expect("mandatory"))?,
+        params: member(value, T, "params").map(params),
+    })
+}
+
+fn pssm(value: &Value) -> Result<Pssm, String> {
+    const T: u16 = named::PSSM;
+    let get = |name: &str| member(value, T, name);
+    Ok(Pssm {
+        is_protein: get("isProtein").map(boolean),
+        identifier: get("identifier").map(object_id),
+        num_rows: get("numRows").map(int4).expect("mandatory"),
+        num_columns: get("numColumns").map(int4).expect("mandatory"),
+        row_labels: get("rowLabels").map(|labels| list(labels, string)),
+        by_row: get("byRow").map(boolean),
+        query: get("query").map(seq_entry).transpose()?,
+        intermediate_data: get("intermediateData").map(intermediate_data),
+        final_data: get("finalData").map(final_data),
+    })
+}
+
+/// The query's `Seq-entry`: its `seq` variant, a Bioseq.
+fn seq_entry(value: &Value) -> Result<PssmQuery, String> {
+    let (variant, bioseq) = choice(value);
+    let name = members(named::SEQ_ENTRY)[variant].name;
+    if name != "seq" {
+        return Err(format!(
+            "a query Seq-entry {name} is not supported by LOSAT's PSSM reader"
+        ));
+    }
+    const T: u16 = named::BIOSEQ;
+    let get = |name: &str| member(bioseq, T, name);
+    Ok(PssmQuery {
+        ids: list(get("id").expect("mandatory"), |id| match id {
+            Value::SeqId(id) => id.clone(),
+            other => unreachable!("a Seq-id is read into the Seq-id model, not {other:?}"),
+        }),
+        descr: get("descr").map(|descr| {
+            list(descr, |descriptor| {
+                let (variant, value) = choice(descriptor);
+                match members(named::SEQDESC)[variant].name {
+                    "title" => Seqdesc::Title(string(value)),
+                    _ => Seqdesc::Other(descriptor.clone()),
                 }
-                2 => inst = Some(self.seq_inst()?),
-                _ => self.skip_member("annot")?,
+            })
+        }),
+        inst: seq_inst(get("inst").expect("mandatory"))?,
+        annot: get("annot").map(|annot| list(annot, Value::clone)),
+    })
+}
+
+fn seq_inst(value: &Value) -> Result<SeqInst, String> {
+    const T: u16 = named::SEQ_INST;
+    let get = |name: &str| member(value, T, name);
+    let seq_data = match get("seq-data") {
+        None => None,
+        Some(data) => {
+            let (variant, value) = choice(data);
+            Some(match members(named::SEQ_DATA)[variant].name {
+                "iupacaa" => SeqData::Iupacaa(string(value)),
+                "ncbieaa" => SeqData::Ncbieaa(string(value)),
+                "ncbistdaa" => SeqData::Ncbistdaa(match value {
+                    Value::Octets(codes) => codes.clone(),
+                    other => unreachable!("NCBIstdaa is an OCTET STRING, not {other:?}"),
+                }),
+                other => {
+                    return Err(format!(
+                        "query Seq-data {other} is not supported by LOSAT's PSSM reader"
+                    ))
+                }
+            })
+        }
+    };
+    Ok(SeqInst {
+        repr: enumerated(get("repr").expect("mandatory"), T, "repr"),
+        mol: enumerated(get("mol").expect("mandatory"), T, "mol"),
+        length: get("length").map(|length| u32::try_from(int(length)).expect("a Uint4")),
+        fuzz: get("fuzz").cloned(),
+        topology: get("topology").map(enum_number),
+        strand: get("strand").map(enum_number),
+        seq_data,
+        ext: get("ext").cloned(),
+        hist: get("hist").cloned(),
+    })
+}
+
+fn intermediate_data(value: &Value) -> PssmIntermediateData {
+    const T: u16 = named::PSSMINTERMEDIATEDATA;
+    let get = |name: &str| member(value, T, name);
+    let ints = |name: &str| get(name).map(|values| list(values, int4));
+    let reals = |name: &str| get(name).map(|values| list(values, real));
+    PssmIntermediateData {
+        res_freqs_per_pos: ints("resFreqsPerPos"),
+        weighted_res_freqs_per_pos: reals("weightedResFreqsPerPos"),
+        freq_ratios: reals("freqRatios").expect("mandatory"),
+        information_content: reals("informationContent"),
+        gapless_column_weights: reals("gaplessColumnWeights"),
+        sigma: reals("sigma"),
+        interval_sizes: ints("intervalSizes"),
+        num_matching_seqs: ints("numMatchingSeqs"),
+        num_indept_obsr: reals("numIndeptObsr"),
+    }
+}
+
+fn final_data(value: &Value) -> PssmFinalData {
+    const T: u16 = named::PSSMFINALDATA;
+    let get = |name: &str| member(value, T, name);
+    PssmFinalData {
+        scores: get("scores")
+            .map(|scores| list(scores, int4))
+            .expect("mandatory"),
+        lambda: get("lambda").map(real).expect("mandatory"),
+        kappa: get("kappa").map(real).expect("mandatory"),
+        h: get("h").map(real).expect("mandatory"),
+        scaling_factor: get("scalingFactor").map(int4),
+        lambda_ungapped: get("lambdaUngapped").map(real),
+        kappa_ungapped: get("kappaUngapped").map(real),
+        h_ungapped: get("hUngapped").map(real),
+        word_score_threshold: get("wordScoreThreshold").map(real),
+    }
+}
+
+fn params(value: &Value) -> PssmParameters {
+    const T: u16 = named::PSSMPARAMETERS;
+    let get = |name: &str| member(value, T, name);
+    PssmParameters {
+        pseudocount: get("pseudocount").map(int4),
+        rpsdbparams: get("rpsdbparams").map(|rps| {
+            const R: u16 = named::FORMATRPSDBPARAMETERS;
+            FormatRpsDbParameters {
+                matrix_name: member(rps, R, "matrixName").map(string).expect("mandatory"),
+                gap_open: member(rps, R, "gapOpen").map(int4),
+                gap_extend: member(rps, R, "gapExtend").map(int4),
             }
-        }
-        Ok(PssmQuery {
-            ids: ids.ok_or_else(|| self.error("member id missing"))?,
-            titles,
-            inst: inst.ok_or_else(|| self.error("member inst missing"))?,
-        })
-    }
-
-    /// One `Seqdesc`: its text when it is a `title`; another variant is skipped.
-    fn seqdesc_title(&mut self) -> Result<Option<Vec<u8>>> {
-        let variant = self.member_id()?;
-        if variant.is_empty() {
-            return Err(self.error("choice variant id expected"));
-        }
-        if variant == b"title" {
-            return Ok(Some(self.string()?));
-        }
-        // A `molinfo` descriptor takes the title out of the query's warning label
-        // (`CBlastQuerySourceBioseqSet::GetTitle`, quoted at `algorithm::psiblast::in_pssm`).
-        self.skip_member(if variant == b"molinfo" {
-            "molinfo"
-        } else {
-            "Seqdesc"
-        })?;
-        Ok(None)
-    }
-
-    fn seq_inst(&mut self) -> Result<SeqInst> {
-        const NAMES: [&str; 9] = [
-            "repr", "mol", "length", "fuzz", "topology", "strand", "seq-data", "ext", "hist",
-        ];
-        let mut members = self.begin_members()?;
-        let (mut repr, mut mol, mut length, mut seq_data) = (None, None, None, None);
-        while let Some(index) = self.next_member(&mut members, &NAMES)? {
-            match index {
-                0 => repr = Some(self.enumerated(&SEQ_INST_REPR)?),
-                1 => mol = Some(self.enumerated(&SEQ_INST_MOL)?),
-                2 => length = Some(self.int4()?),
-                6 => seq_data = Some(self.seq_data()?),
-                other => self.skip_member(NAMES[other])?,
-            }
-        }
-        Ok(SeqInst {
-            repr: repr.ok_or_else(|| self.error("member repr missing"))?,
-            mol: mol.ok_or_else(|| self.error("member mol missing"))?,
-            length,
-            seq_data,
-        })
-    }
-
-    fn seq_data(&mut self) -> Result<SeqData> {
-        let variant = self.member_id()?;
-        match variant {
-            b"iupacaa" => Ok(SeqData::Iupacaa(self.string()?)),
-            b"ncbieaa" => Ok(SeqData::Ncbieaa(self.string()?)),
-            b"ncbistdaa" => Ok(SeqData::Ncbistdaa(self.octets()?)),
-            _ => Err(self.error(format!(
-                "query Seq-data {} is not supported by LOSAT's PSSM reader",
-                String::from_utf8_lossy(variant)
-            ))),
-        }
-    }
-
-    fn intermediate_data(&mut self) -> Result<PssmIntermediateData> {
-        const NAMES: [&str; 9] = [
-            "resFreqsPerPos",
-            "weightedResFreqsPerPos",
-            "freqRatios",
-            "informationContent",
-            "gaplessColumnWeights",
-            "sigma",
-            "intervalSizes",
-            "numMatchingSeqs",
-            "numIndeptObsr",
-        ];
-        let mut members = self.begin_members()?;
-        let mut data = PssmIntermediateData::default();
-        let mut freq_ratios = None;
-        while let Some(index) = self.next_member(&mut members, &NAMES)? {
-            match index {
-                0 => data.res_freqs_per_pos = Some(self.list(Self::int4)?),
-                1 => data.weighted_res_freqs_per_pos = Some(self.list(Self::real)?),
-                2 => freq_ratios = Some(self.list(Self::real)?),
-                3 => data.information_content = Some(self.list(Self::real)?),
-                4 => data.gapless_column_weights = Some(self.list(Self::real)?),
-                5 => data.sigma = Some(self.list(Self::real)?),
-                6 => data.interval_sizes = Some(self.list(Self::int4)?),
-                7 => data.num_matching_seqs = Some(self.list(Self::int4)?),
-                _ => data.num_indept_obsr = Some(self.list(Self::real)?),
-            }
-        }
-        data.freq_ratios = freq_ratios.ok_or_else(|| self.error("member freqRatios missing"))?;
-        Ok(data)
-    }
-
-    fn final_data(&mut self) -> Result<PssmFinalData> {
-        const NAMES: [&str; 9] = [
-            "scores",
-            "lambda",
-            "kappa",
-            "h",
-            "scalingFactor",
-            "lambdaUngapped",
-            "kappaUngapped",
-            "hUngapped",
-            "wordScoreThreshold",
-        ];
-        let mut members = self.begin_members()?;
-        let (mut scores, mut lambda, mut kappa, mut h) = (None, None, None, None);
-        let mut data = PssmFinalData {
-            scores: Vec::new(),
-            lambda: 0.0,
-            kappa: 0.0,
-            h: 0.0,
-            scaling_factor: None,
-            lambda_ungapped: None,
-            kappa_ungapped: None,
-            h_ungapped: None,
-            word_score_threshold: None,
-        };
-        while let Some(index) = self.next_member(&mut members, &NAMES)? {
-            match index {
-                0 => scores = Some(self.list(Self::int4)?),
-                1 => lambda = Some(self.real()?),
-                2 => kappa = Some(self.real()?),
-                3 => h = Some(self.real()?),
-                4 => data.scaling_factor = Some(self.int4()?),
-                5 => data.lambda_ungapped = Some(self.real()?),
-                6 => data.kappa_ungapped = Some(self.real()?),
-                7 => data.h_ungapped = Some(self.real()?),
-                _ => data.word_score_threshold = Some(self.real()?),
-            }
-        }
-        data.scores = scores.ok_or_else(|| self.error("member scores missing"))?;
-        data.lambda = lambda.ok_or_else(|| self.error("member lambda missing"))?;
-        data.kappa = kappa.ok_or_else(|| self.error("member kappa missing"))?;
-        data.h = h.ok_or_else(|| self.error("member h missing"))?;
-        Ok(data)
-    }
-
-    fn params(&mut self) -> Result<PssmParameters> {
-        const NAMES: [&str; 6] = [
-            "pseudocount",
-            "rpsdbparams",
-            "constraints",
-            "bitScoreThresh",
-            "bitScoreReportingThresh",
-            "annotatedSites",
-        ];
-        let mut members = self.begin_members()?;
-        let mut params = PssmParameters::default();
-        while let Some(index) = self.next_member(&mut members, &NAMES)? {
-            match index {
-                0 => params.pseudocount = Some(self.int4()?),
-                1 => params.rpsdbparams = Some(self.rpsdbparams()?),
-                3 => params.bit_score_thresh = Some(self.real()?),
-                4 => params.bit_score_reporting_thresh = Some(self.real()?),
-                other => self.skip_member(NAMES[other])?,
-            }
-        }
-        Ok(params)
-    }
-
-    fn rpsdbparams(&mut self) -> Result<FormatRpsDbParameters> {
-        let mut members = self.begin_members()?;
-        let (mut matrix_name, mut gap_open, mut gap_extend) = (None, None, None);
-        while let Some(index) =
-            self.next_member(&mut members, &["matrixName", "gapOpen", "gapExtend"])?
-        {
-            match index {
-                0 => matrix_name = Some(self.string()?),
-                1 => gap_open = Some(self.int4()?),
-                _ => gap_extend = Some(self.int4()?),
-            }
-        }
-        Ok(FormatRpsDbParameters {
-            matrix_name: matrix_name.ok_or_else(|| self.error("member matrixName missing"))?,
-            gap_open,
-            gap_extend,
-        })
+        }),
+        constraints: get("constraints").cloned(),
+        bit_score_thresh: get("bitScoreThresh").map(real),
+        bit_score_reporting_thresh: get("bitScoreReportingThresh").map(real),
+        annotated_sites: get("annotatedSites").cloned(),
     }
 }
 

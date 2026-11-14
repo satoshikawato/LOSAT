@@ -1,0 +1,52 @@
+PssmWithParameters ::= {
+  pssm {
+    isProtein TRUE,
+    numRows 28,
+    numColumns 30,
+    byRow FALSE,
+    query seq {
+      id {
+        local str "Query_1"
+      },
+      descr {
+        title "rnd random",
+        molinfo {
+          Biomol peptide
+        }
+      },
+      inst {
+        repr raw,
+        mol aa,
+        length 30,
+        seq-data ncbistdaa '0C1414080E0A0F031610140D0C0806140F030E16100714120C
+080A14160F'H
+      }
+    },
+    intermediateData {
+      freqRatios {
+        { 0, 10, 0 },
+        { 0, 10, 0 }
+      }
+    },
+    finalData {
+      scores {
+        -32768,
+        -1
+      },
+      lambda { 267, 10, -3 },
+      kappa { 459597639216676, 10, -16 },
+      h { 14, 10, -2 },
+      lambdaUngapped { 324159163235737, 10, -15 },
+      kappaUngapped { 150160799427986, 10, -15 },
+      hUngapped { 765945647632464, 10, -15 }
+    }
+  },
+  params {
+    pseudocount 0,
+    rpsdbparams {
+      matrixName "BLOSUM62",
+      gapOpen 11,
+      gapExtend 1
+    }
+  }
+}

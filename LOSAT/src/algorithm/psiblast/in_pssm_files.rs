@@ -5,8 +5,8 @@
 //! again after a round 1 without alignments with `-save_pssm_after_last_round`; the ASCII PSSM of a
 //! file PSSM (`ExtractPssmAncillaryData`: the PSI blocks only, the short form or, with
 //! `informationContent`, the long one); the Seq-id that the PSSMs of the later rounds keep; and
-//! LOSAT's refusals of what NCBI would write back that LOSAT's reader does not keep, or that NCBI
-//! cannot write.
+//! LOSAT's refusals of what NCBI would write back that LOSAT's PSSM writer does not write yet, or
+//! that NCBI cannot write.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-408
 //! ```c++
@@ -51,7 +51,7 @@ use crate::report::serial::pssm::{PssmWithParameters, SeqData};
 use super::pssm::{AsciiPssmDiagnostics, PssmRequest};
 #[cfg(test)]
 use crate::algorithm::pssm_search::in_pssm::with_computed_scores;
-use crate::algorithm::pssm_search::in_pssm::{refuse_skipped_members, InPssmFile};
+use crate::algorithm::pssm_search::in_pssm::{refuse_unwritten_members, InPssmFile};
 
 /// The query PSSM of psiblast's rounds with `-in_pssm` (`rounds::PsiRoundPlan::input`): when a
 /// PSSM file is written, the object that `SavePssmToFile` writes. (The Seq-id that the PSSM of
@@ -69,7 +69,8 @@ pub(crate) struct InPssmRounds {
 /// run makes once the database is opened, before any output (`InPssmRounds::refuse_written_back`:
 /// NCBI's error of a database it cannot open comes first, and so do the errors that stop NCBI
 /// before round 1, `PsiSearch::stop_before_search`):
-/// - with `-out_pssm`, a member that the reader skipped (NCBI's object keeps it and writes it:
+/// - with `-out_pssm`, a member that the PSSM writer does not write yet (NCBI's object keeps it
+///   and writes it:
 ///   the descriptors of the query other than titles, its `annot`, the members of its `Seq-inst`
 ///   other than `repr`, `mol`, `length` and `seq-data`, the `constraints` and `annotatedSites` of
 ///   the parameters; NCBI 2.17.0 probes of PS5b), and a PSSM of frequency ratios only without
@@ -102,7 +103,7 @@ pub(crate) fn rounds_input(file: InPssmFile, request: &PssmRequest) -> InPssmRou
 /// The refusals of `rounds_input`.
 fn written_back_refusal(file: &InPssmFile, request: &PssmRequest) -> Result<()> {
     if request.asn_path.is_some() {
-        refuse_skipped_members(&file.skipped, "-out_pssm", "PSIBLAST")?;
+        refuse_unwritten_members(&file.object, "-out_pssm", "PSIBLAST")?;
         let rpsdbparams = file
             .object
             .params
@@ -411,9 +412,10 @@ fn ascii_pssm(object: &PssmWithParameters) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::report::serial::asn_types::Value;
     use crate::report::serial::pssm::{
         FormatRpsDbParameters, ObjectId, Pssm, PssmIntermediateData, PssmParameters, PssmQuery,
-        SeqInst,
+        SeqInst, Seqdesc,
     };
     use crate::seqid::ParsedSeqId;
 
@@ -429,13 +431,14 @@ mod tests {
                 by_row: Some(false),
                 query: Some(PssmQuery {
                     ids: vec![ParsedSeqId::Local(id)],
-                    titles: None,
-                    inst: SeqInst {
-                        repr: ("raw", 2),
-                        mol: ("aa", 3),
-                        length: Some(columns as i32),
-                        seq_data: Some(SeqData::Ncbistdaa(vec![12; columns])),
-                    },
+                    descr: None,
+                    inst: SeqInst::new(
+                        ("raw", 2),
+                        ("aa", 3),
+                        Some(columns as u32),
+                        Some(SeqData::Ncbistdaa(vec![12; columns])),
+                    ),
+                    annot: None,
                 }),
                 intermediate_data: Some(PssmIntermediateData {
                     freq_ratios: (0..columns * rows).map(|i| i as f64).collect(),
@@ -450,8 +453,7 @@ mod tests {
                     gap_open: None,
                     gap_extend: None,
                 }),
-                bit_score_thresh: None,
-                bit_score_reporting_thresh: None,
+                ..PssmParameters::default()
             }),
         }
     }
@@ -498,14 +500,33 @@ mod tests {
     // one), the object only when a file is written.
     #[test]
     fn rounds_input_keeps_the_id_and_refuses_what_ncbi_writes_otherwise() {
-        let file = |skipped: Vec<&'static str>, computed: bool, params: bool| {
+        // A file whose PSSM holds the members `unwritten` that the PSSM writer does not write yet
+        // (`PssmWithParameters::unwritten_members`).
+        let file = |unwritten: Vec<&'static str>, computed: bool, params: bool| {
             let mut object = pssm(ObjectId::Id(7), 2, 28);
             if !params {
                 object.params = None;
             }
+            let query = object.pssm.query.as_mut().unwrap();
+            for name in unwritten {
+                match name {
+                    "Seqdesc" => {
+                        let comment = crate::report::serial::asn_types::member_index(
+                            crate::report::serial::asn_types::table::named::SEQDESC,
+                            "comment",
+                        );
+                        query.descr = Some(vec![Seqdesc::Other(Value::Choice(
+                            comment as u16,
+                            Box::new(Value::Str(b"x".to_vec())),
+                        ))]);
+                    }
+                    "topology" => query.inst.topology = Some(2),
+                    "annot" => query.annot = Some(Vec::new()),
+                    other => unreachable!("{other}"),
+                }
+            }
             InPssmFile {
                 object,
-                skipped,
                 computed,
                 valid: true,
             }
@@ -530,7 +551,7 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(error.contains("(Seqdesc, topology)"), "{error}");
-        // Without -out_pssm the skipped members are never written.
+        // Without -out_pssm the members the writer does not write are never written.
         refusal(rounds_input(
             file(vec!["annot"], false, true),
             &request(false, true),

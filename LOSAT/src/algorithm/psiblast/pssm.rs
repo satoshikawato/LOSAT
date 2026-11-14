@@ -19,7 +19,7 @@ use crate::core::psi::{
 };
 use crate::report::serial::pssm::{
     FormatRpsDbParameters, ObjectId, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters,
-    PssmQuery, PssmWithParameters, SeqData, SeqInst,
+    PssmQuery, PssmWithParameters, SeqData, SeqInst, Seqdesc,
 };
 use crate::seqid::ParsedSeqId;
 use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa, BLASTAA_SIZE, BLAST_SCORE_MIN};
@@ -607,13 +607,14 @@ fn pssm_with_parameters(
             by_row: Some(false),
             query: Some(PssmQuery {
                 ids: vec![query.id.clone()],
-                titles: Some(vec![query.title.to_vec()]),
-                inst: SeqInst {
-                    repr: ("raw", 2),
-                    mol: ("aa", 3),
-                    length: Some(letters.len() as i32),
-                    seq_data: Some(SeqData::Ncbistdaa(letters.to_vec())),
-                },
+                descr: Some(vec![Seqdesc::Title(query.title.to_vec())]),
+                inst: SeqInst::new(
+                    ("raw", 2),
+                    ("aa", 3),
+                    Some(letters.len() as u32),
+                    Some(SeqData::Ncbistdaa(letters.to_vec())),
+                ),
+                annot: None,
             }),
             intermediate_data: Some(intermediate_data),
             final_data: Some(PssmFinalData {
@@ -635,8 +636,7 @@ fn pssm_with_parameters(
                 gap_open: Some(scoring.gap_open),
                 gap_extend: Some(scoring.gap_extend),
             }),
-            bit_score_thresh: None,
-            bit_score_reporting_thresh: None,
+            ..PssmParameters::default()
         }),
     }
 }

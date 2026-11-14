@@ -1,7 +1,8 @@
 //! The lexical layer of NCBI's ASN.1 text object stream (`CObjectIStreamAsn` over
-//! `CIStreamBuffer`), shared by LOSAT's readers of ASN.1 text: the PSSM reader
-//! (`blastinput::pssm_text`, `PssmWithParameters` from a byte slice) and the Blast4-archive reader
-//! of `losat rpsbproc` (`rpsbproc::archive`, objects one after another from a stream). The
+//! `CIStreamBuffer`), shared by LOSAT's readers of ASN.1 text: the generic reader of NCBI's type
+//! information (`report::serial::asn_types`, which reads the PSSM files of `-in_pssm` from a byte
+//! slice) and the Blast4-archive reader of `losat rpsbproc` (`rpsbproc::archive`, objects one after
+//! another from a stream). The
 //! grammar of each type stays with its reader; this module reads what every type is made of:
 //! white space and comments, identifiers and `::=`, blocks and their elements, the members of a
 //! SEQUENCE in the order of the module, INTEGER, BOOLEAN, ENUMERATED, VisibleString, OCTET
@@ -78,11 +79,6 @@ pub(crate) struct SliceSource<'a> {
 impl<'a> SliceSource<'a> {
     pub(crate) fn new(text: &'a [u8]) -> Self {
         SliceSource { text }
-    }
-
-    /// The bytes `range` with the text's lifetime.
-    pub(crate) fn text(&self, range: Range<usize>) -> &'a [u8] {
-        &self.text[range]
     }
 }
 
@@ -225,8 +221,6 @@ pub(crate) struct Reader<S: AsnSource> {
     pub(crate) pos: usize,
     /// `CIStreamBuffer::m_Line`.
     pub(crate) line: usize,
-    /// The members skipped as values (`skip_member`), by name.
-    pub(crate) skipped: Vec<&'static str>,
     /// What the text is, for the error at its end ("unexpected end of the PSSM").
     document: &'static str,
     /// The reader, for the refusals ("... is not supported by LOSAT's PSSM reader").
@@ -265,7 +259,6 @@ impl<S: AsnSource> Reader<S> {
             src,
             pos: 0,
             line: 1,
-            skipped: Vec::new(),
             document,
             reader,
             visible_only: false,
@@ -361,7 +354,7 @@ impl<S: AsnSource> Reader<S> {
     //     if ( (lastChar + nextChar) == ('\r' + '\n') )
     //         SkipChar();
     // ```
-    fn skip_end_of_line(&mut self, c: u8) {
+    pub(crate) fn skip_end_of_line(&mut self, c: u8) {
         self.line += 1;
         if c as u32 + self.peek_at(0) as u32 == b'\r' as u32 + b'\n' as u32 {
             self.pos += 1;
@@ -777,19 +770,6 @@ impl<S: AsnSource> Reader<S> {
         }
         members.last = Some(index);
         Ok(Some(index))
-    }
-
-    /// The elements of a SEQUENCE OF or SET OF, each read by `element`.
-    pub(crate) fn list<T>(
-        &mut self,
-        mut element: impl FnMut(&mut Self) -> Result<T>,
-    ) -> Result<Vec<T>> {
-        let mut out = Vec::new();
-        self.each(|reader| {
-            out.push(element(reader)?);
-            Ok(())
-        })?;
-        Ok(out)
     }
 
     /// The elements of a SEQUENCE OF or SET OF, each read by `element` and kept by it.
@@ -1371,20 +1351,42 @@ impl<S: AsnSource> Reader<S> {
     //     return is_negative ? -result : result;
     // ```
     pub(crate) fn real(&mut self) -> Result<f64> {
-        if self.skip_white_space()? != b'{' {
-            let start = self.pos;
-            let word = self.scan_end_of_id(true)?;
-            if self.starts_with_ignore_case(start, b"PLUS-INFINITY") {
-                return Ok(f64::INFINITY);
-            }
-            if self.starts_with_ignore_case(start, b"MINUS-INFINITY") {
-                return Ok(f64::NEG_INFINITY);
-            }
-            if self.starts_with_ignore_case(start, b"NOT-A-NUMBER") {
-                return Ok(NCBI_NAN);
-            }
-            return Ok(string_to_double_posix(self.bytes(word), true).value);
+        if let Some(word) = self.real_word()? {
+            return Ok(word);
         }
+        let (mantissa, is_negative) = self.real_mantissa()?;
+        self.expect(b',')?;
+        let base = self.uint4()?;
+        self.expect(b',')?;
+        let exp = self.int4()?;
+        self.expect(b'}')?;
+        real_of_parts(mantissa, is_negative, base, exp)
+            .ok_or_else(|| self.error("illegal REAL base (must be 2 or 10)"))
+    }
+
+    /// The word form of `ReadDouble` (`PLUS-INFINITY`, `MINUS-INFINITY`, `NOT-A-NUMBER` or a
+    /// decimal number), or `None` at a `{` (not taken).
+    pub(crate) fn real_word(&mut self) -> Result<Option<f64>> {
+        if self.skip_white_space()? == b'{' {
+            return Ok(None);
+        }
+        let start = self.pos;
+        let word = self.scan_end_of_id(true)?;
+        if self.starts_with_ignore_case(start, b"PLUS-INFINITY") {
+            return Ok(Some(f64::INFINITY));
+        }
+        if self.starts_with_ignore_case(start, b"MINUS-INFINITY") {
+            return Ok(Some(f64::NEG_INFINITY));
+        }
+        if self.starts_with_ignore_case(start, b"NOT-A-NUMBER") {
+            return Ok(Some(NCBI_NAN));
+        }
+        Ok(Some(string_to_double_posix(self.bytes(word), true).value))
+    }
+
+    /// The `{` (at the reader's position) and the mantissa of `ReadDouble`: its value and whether
+    /// it starts with `-`.
+    pub(crate) fn real_mantissa(&mut self) -> Result<(f64, bool)> {
         self.pos += 1;
         let is_negative = self.skip_white_space()? == b'-';
         let mantissa_range = self.number()?;
@@ -1393,41 +1395,10 @@ impl<S: AsnSource> Reader<S> {
         }
         let mantissa_length = mantissa_range.len();
         let read = string_to_double_posix(self.bytes(mantissa_range), false);
-        let (mut mantissa, used) = (read.value, read.end);
-        if used != mantissa_length {
+        if read.end != mantissa_length {
             return Err(self.error(format!("bad double in line {}", self.line)));
         }
-        self.expect(b',')?;
-        let base = self.uint4()?;
-        self.expect(b',')?;
-        let exp = self.int4()?;
-        self.expect(b'}')?;
-        if base != 2 && base != 10 {
-            return Err(self.error("illegal REAL base (must be 2 or 10)"));
-        }
-        if mantissa == 0.0 {
-            return Ok(mantissa);
-        }
-        if is_negative {
-            mantissa = -mantissa;
-        }
-        let mut result = if base == 10 {
-            mantissa * libm_pow10(exp)
-        } else {
-            ldexp(mantissa, exp)
-        };
-        if (0.0..=f64::MIN_POSITIVE).contains(&result) {
-            result = f64::MIN_POSITIVE;
-        } else if !result.is_finite() {
-            result = f64::MAX;
-        }
-        Ok(if is_negative { -result } else { result })
-    }
-
-    /// `skip_value` of the member `name`, noted in `skipped`.
-    pub(crate) fn skip_member(&mut self, name: &'static str) -> Result<()> {
-        self.skipped.push(name);
-        self.skip_value()
+        Ok((read.value, is_negative))
     }
 
     /// Skips one value of any type: a block with what it holds, a string, an OCTET STRING or
@@ -1479,6 +1450,37 @@ impl<S: AsnSource> Reader<S> {
             any = true;
         }
     }
+}
+
+/// The end of `ReadDouble` (quoted at `Reader::real`): the value of the mantissa `mantissa` (read
+/// with its sign; `is_negative` whether it had a `-`), `base` and `exp`; `None` for a base other
+/// than 2 and 10 ("illegal REAL base").
+pub(crate) fn real_of_parts(
+    mut mantissa: f64,
+    is_negative: bool,
+    base: u32,
+    exp: i32,
+) -> Option<f64> {
+    if base != 2 && base != 10 {
+        return None;
+    }
+    if mantissa == 0.0 {
+        return Some(mantissa);
+    }
+    if is_negative {
+        mantissa = -mantissa;
+    }
+    let mut result = if base == 10 {
+        mantissa * libm_pow10(exp)
+    } else {
+        ldexp(mantissa, exp)
+    };
+    if (0.0..=f64::MIN_POSITIVE).contains(&result) {
+        result = f64::MIN_POSITIVE;
+    } else if !result.is_finite() {
+        result = f64::MAX;
+    }
+    Some(if is_negative { -result } else { result })
 }
 
 /// glibc's `pow(10.0, exp)` (the C library NCBI 2.17.0 for x86-64 Linux runs with, version 2.28

@@ -22,6 +22,7 @@
 pub mod asn_ber;
 pub mod asn_text;
 pub(crate) mod asn_text_reader;
+pub(crate) mod asn_types;
 pub mod encoder;
 pub mod json;
 pub mod pssm;

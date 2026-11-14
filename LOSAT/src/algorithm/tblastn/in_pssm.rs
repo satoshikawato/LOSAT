@@ -42,7 +42,7 @@ pub(super) const PROGRAM: &str = "PSITBLASTN";
 /// for both programs), whose refusals name LOSAT's TBLASTN and whose scores of a PSSM of
 /// frequency ratios only are made with the options' matrix (`matrix_name`); `strategy` and
 /// `database` are whether the run writes a search strategy and searches `-db`
-/// (`PssmReader::strategy`).
+/// (`PssmReader::strategy`); the messages of NCBI's reader go to `diagnostics`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:128-130
 /// ```c++
@@ -55,6 +55,7 @@ pub(super) fn read(
     matrix_name: &str,
     strategy: bool,
     database: bool,
+    diagnostics: &mut dyn std::io::Write,
 ) -> Result<PsiSearch> {
     let (search, _file) = read_in_pssm(
         path,
@@ -64,6 +65,7 @@ pub(super) fn read(
             strategy,
             database,
         },
+        diagnostics,
     )?;
     Ok(search)
 }

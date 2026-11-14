@@ -146,13 +146,14 @@ fn small_pssm(title: &[u8]) -> PssmWithParameters {
                 ids: vec![crate::seqid::ParsedSeqId::Local(ObjectId::Str(
                     b"Query_7".to_vec(),
                 ))],
-                titles: Some(vec![title.to_vec()]),
-                inst: SeqInst {
-                    repr: ("raw", 2),
-                    mol: ("aa", 3),
-                    length: Some(1),
-                    seq_data: Some(SeqData::Ncbistdaa(vec![12])),
-                },
+                descr: Some(vec![Seqdesc::Title(title.to_vec())]),
+                inst: SeqInst::new(
+                    ("raw", 2),
+                    ("aa", 3),
+                    Some(1),
+                    Some(SeqData::Ncbistdaa(vec![12])),
+                ),
+                annot: None,
             }),
             intermediate_data: Some(PssmIntermediateData {
                 weighted_res_freqs_per_pos: Some(vec![0.0, 0.25]),
@@ -183,8 +184,7 @@ fn small_pssm(title: &[u8]) -> PssmWithParameters {
                 gap_open: Some(11),
                 gap_extend: Some(1),
             }),
-            bit_score_thresh: None,
-            bit_score_reporting_thresh: None,
+            ..PssmParameters::default()
         }),
     }
 }
@@ -297,40 +297,54 @@ fn strings_octets_and_comments_are_read_as_ncbi_reads_them() {
     );
 }
 
-// The reader's errors name the line where it stopped.
+// The reader's errors are NCBI's `CSerialException` for the grammar (an unknown type, a bad value,
+// a text cut short, members out of order), and LOSAT's refusal of what NCBI reads and the PSSM
+// search does not take, made after NCBI's reader read the whole document (a query Seq-entry set).
 #[test]
-fn errors_name_their_line() {
-    let error = read_pssm_with_parameters(b"Seq-entry ::= { }").unwrap_err();
-    assert_eq!(error.line, 1);
-    let bad = SMALL_PSSM.replace("byRow FALSE", "byRow MAYBE");
-    let error = read_pssm_with_parameters(bad.as_bytes()).unwrap_err();
-    assert_eq!(error.line, 6, "{error}");
-    let truncated = &SMALL_PSSM[..SMALL_PSSM.len() / 2];
-    assert!(read_pssm_with_parameters(truncated.as_bytes()).is_err());
-    let out_of_order = SMALL_PSSM.replace(
+fn errors_are_ncbis_classes_and_losats_refusals() {
+    let serial = |text: &str| {
+        matches!(
+            read_pssm_with_parameters(text.as_bytes()),
+            Err(PssmReadError::Ncbi(ReadError::Serial(_)))
+        )
+    };
+    assert!(serial("Seq-entry ::= { }"));
+    assert!(serial(&SMALL_PSSM.replace("byRow FALSE", "byRow MAYBE")));
+    assert!(serial(&SMALL_PSSM[..SMALL_PSSM.len() / 2]));
+    assert!(serial(&SMALL_PSSM.replace(
         "    numRows 2,\n    numColumns 1,",
         "    numColumns 1,\n    numRows 2,",
+    )));
+    // `set` read as a Bioseq-set: the Bioseq's members are not its members.
+    assert!(serial(&SMALL_PSSM.replace("query seq {", "query set {")));
+    let set = SMALL_PSSM.replace(
+        &SMALL_PSSM[SMALL_PSSM.find("    query seq {").unwrap()
+            ..SMALL_PSSM.find("    intermediateData").unwrap()],
+        "    query set {\n      seq-set {\n      }\n    },\n",
     );
-    let error = read_pssm_with_parameters(out_of_order.as_bytes()).unwrap_err();
-    assert_eq!(error.line, 5, "{error}");
-    let set = SMALL_PSSM.replace("query seq {", "query set {");
-    assert!(read_pssm_with_parameters(set.as_bytes())
-        .unwrap_err()
-        .message
-        .contains("not supported by LOSAT's PSSM reader"));
+    match read_pssm_with_parameters(set.as_bytes()) {
+        Err(PssmReadError::Refused(what)) => {
+            assert!(
+                what.contains("not supported by LOSAT's PSSM reader"),
+                "{what}"
+            )
+        }
+        other => panic!("{other:?}"),
+    }
 }
 
-// The members the reader skips are named (NCBI's object keeps them and writes them back: psiblast
-// `-in_pssm` with `-out_pssm`, NCBI 2.17.0 probes of PS5b), and an empty `descr` is NCBI's error
-// (`CSeq_descr::PostRead`, quoted at `Reader::seq_entry`; NCBI: "Unrecognized format for PSSM").
+// The members the PSSM writer does not write yet are kept and named (NCBI's object keeps them and
+// writes them back: psiblast `-in_pssm` with `-out_pssm`, NCBI 2.17.0 probes of PS5b), and an
+// empty `descr` is NCBI's error (`CSeq_descr::PostRead`, `asn_types::hooks`; NCBI: "Unrecognized
+// format for PSSM").
 #[test]
-fn skipped_members_are_named_and_an_empty_descr_is_an_error() {
-    let skips = |text: &str| {
-        read_pssm_with_parameters_and_skips(text.as_bytes())
+fn kept_members_are_named_and_an_empty_descr_is_an_error() {
+    let unwritten = |text: &str| {
+        read_pssm_with_parameters(text.as_bytes())
             .unwrap()
-            .1
+            .unwritten_members()
     };
-    assert!(skips(SMALL_PSSM).is_empty());
+    assert!(unwritten(SMALL_PSSM).is_empty());
     let edited = SMALL_PSSM
         .replace(
             "title \"a \"\"quoted\"\" title\"",
@@ -341,22 +355,35 @@ fn skipped_members_are_named_and_an_empty_descr_is_an_error() {
             "      gapExtend 1\n    }\n  }",
             "      gapExtend 1\n    },\n    constraints {\n      nblocks 0,\n      blocks {\n      },\n      loops {\n      }\n    }\n  }",
         );
-    let (value, skipped) = read_pssm_with_parameters_and_skips(edited.as_bytes()).unwrap();
-    assert_eq!(skipped, ["Seqdesc", "topology", "constraints"]);
-    assert_eq!(value, small_pssm(b"a \"quoted\" title"));
+    let value = read_pssm_with_parameters(edited.as_bytes()).unwrap();
+    assert_eq!(
+        value.unwritten_members(),
+        ["Seqdesc", "topology", "constraints"]
+    );
+    let query = value.pssm.query.as_ref().unwrap();
+    assert_eq!(query.titles(), [&b"a \"quoted\" title"[..]]);
+    assert_eq!(query.inst.topology, Some(1));
     let annot = SMALL_PSSM.replace(
         "        seq-data ncbistdaa '0C'H\n      }\n",
         "        seq-data ncbistdaa '0C'H\n      },\n      annot {\n        {\n          data ftable {\n          }\n        }\n      }\n",
     );
-    assert_eq!(skips(&annot), ["annot"]);
+    assert_eq!(unwritten(&annot), ["annot"]);
     let molinfo = SMALL_PSSM.replace(
         "title \"a \"\"quoted\"\" title\"",
         "molinfo {\n          biomol peptide\n        },\n        title \"a \"\"quoted\"\" title\"",
     );
-    assert_eq!(skips(&molinfo), ["molinfo"]);
+    assert_eq!(unwritten(&molinfo), ["molinfo"]);
+    assert!(read_pssm_with_parameters(molinfo.as_bytes())
+        .unwrap()
+        .pssm
+        .query
+        .unwrap()
+        .has_molinfo());
     let empty = SMALL_PSSM.replace("        title \"a \"\"quoted\"\" title\"\n", "");
-    let error = read_pssm_with_parameters(empty.as_bytes()).unwrap_err();
-    assert_eq!(error.message, "empty Seq-descr is not allowed");
+    assert_eq!(
+        read_pssm_with_parameters(empty.as_bytes()).unwrap_err(),
+        PssmReadError::Ncbi(ReadError::Serial("empty Seq-descr is not allowed".into()))
+    );
 }
 
 // NCBI's unit-test data c++/src/algo/blast/unit_tests/api/data/pssm_freq_ratios.asn (read by
@@ -383,10 +410,7 @@ fn ncbis_pssm_with_frequency_ratios_is_read() {
             }),
         ]
     );
-    assert_eq!(
-        query.titles,
-        Some(vec![b"Gene X protein (Ovalbumin-related)".to_vec()])
-    );
+    assert_eq!(query.titles(), [&b"Gene X protein (Ovalbumin-related)"[..]]);
     assert_eq!(query.inst.repr, ("raw", 2));
     assert_eq!(query.inst.mol, ("aa", 3));
     assert_eq!(query.inst.length, Some(232));
@@ -499,7 +523,7 @@ fn pssm_files_of_a_directory_read_and_write_back() {
                     failures.push(format!("{}: written back differently", path.display()));
                 }
             }
-            Err(error) => failures.push(format!("{}: {error}", path.display())),
+            Err(error) => failures.push(format!("{}: {error:?}", path.display())),
         }
         eprintln!("read {}", path.display());
     }

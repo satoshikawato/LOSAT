@@ -1329,8 +1329,9 @@ survey's probes (`T/t3/scripts/gen.py`, a seeded generator, and three hand-made 
   ```
 - `qseg.fa`, `sseg.fa`: `qa` with a run of 20 Q at 76-95, which `-seg yes` masks; `sseg` is the same with every
   11th letter changed, and `s_ins`.
-- `sp_dupid.fa` (two subjects `lcl|dup1`) and `s_sameid.fa` (a subject `lcl|q100`, the id of `q100.fa`): the
-  `-parse_deflines` refusals (`db.of1.bp.dupid.reject`, `db.of1.bp.self.reject`).
+- `sp_dupid.fa` (two subjects `lcl|dup1`): the `-parse_deflines` refusal `db.of1.bp.dupid.reject`. A query with a
+  subject's id is refused in the query's batch, after the prolog as in outfmt 0, which a rejection row cannot
+  hold: `tests/parse_deflines_subject.rs` checks it in formats 0 to 4.
 - `self1.fa` and `selfseg3.fa` (the T3a review's probes, `T/t3/review_t3a/in/`), each searched against itself
   with `-parse_deflines`, so that the subject is the query's own Bioseq. `self1` is a record A, a spacer, A with
   GG inserted, a spacer, A with a quarter of its letters changed and PW inserted before its last 10, and a

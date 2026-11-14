@@ -184,6 +184,41 @@ fn a_query_and_a_subject_with_one_id_are_refused() {
     );
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253
+// ```c++
+//         formatter.PrintProlog();
+// ```
+// BLASTP's query-anchored formats 1 to 4 read the queries as outfmt 0 does: the refusal of a query
+// with a subject's id comes with the query's batch, after the prolog that NCBI's application writes
+// before its first batch, the same bytes as outfmt 0's (line RG T3a review D3).
+#[test]
+fn blastp_formats_1_to_4_refuse_a_query_with_a_subject_s_id_after_outfmt_0_s_prolog() {
+    let refuse = |outfmt: &str| {
+        run(
+            &format!("anchored{outfmt}"),
+            "blastp",
+            PROTEIN,
+            PROTEIN,
+            &["same1 a"],
+            &["same1 b"],
+            outfmt,
+        )
+    };
+    let (status, prolog, stderr) = refuse("0");
+    assert_eq!(status, 1, "{stderr}");
+    assert!(prolog.starts_with(b"BLASTP 2.17.0+\n"));
+    assert!(!prolog.windows(6).any(|window| window == b"Query="));
+    for outfmt in ["1", "2", "3", "4"] {
+        let (status, stdout, stderr) = refuse(outfmt);
+        assert_eq!(status, 1, "outfmt {outfmt}: {stderr}");
+        assert_eq!(stdout, prolog, "outfmt {outfmt}");
+        assert!(
+            stderr.contains("a query and a subject record have the Seq-id lcl|same1"),
+            "outfmt {outfmt}: {stderr}"
+        );
+    }
+}
+
 #[test]
 fn a_query_and_a_subject_with_one_accession_with_and_without_a_version_are_refused() {
     refused(

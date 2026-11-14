@@ -14317,7 +14317,7 @@ fn run_call(
     });
     if let (Some(view), true, None) = (anchored_view, args.parse_deflines, database) {
         for (q_idx, record) in query_records.iter().enumerate() {
-            if !record.believed().is_some_and(|ids| ids.shared.is_some()) {
+            if record.believed().is_none_or(|ids| ids.shared.is_none()) {
                 continue;
             }
             let rows: std::borrow::Cow<'_, [PairwiseHit]> = match pairwise_hits.as_deref() {

@@ -76,6 +76,15 @@ FASTA files:
   pseudo-random generator) with `LOSAT/tests/fasta/psiblast/tk.faa` planted at 500, 9,800, 14,000 and 20,500 (cut at the
   end), a query that NCBI splits into chunks of 10,000 that overlap by 100.
 
+- `x2f_c0384_q.fna` / `x2f_c0384_s.faa`, `x2f_c0326_q.fna` / `x2f_c0326_s.faa`: two random pairs of the line RG
+  X2f survey (cases c0384 and c0326), rows `db.x2f.*`: with `-window_size 0` and a low `-threshold`, BLASTX's
+  one-hit HSPs of negative length whose gapped start's window passes the end of the subject `s1` (18 letters)
+  or of the query batch. `x2f_in.faa` is `s1` (as `x2f_s1`) followed by a filler protein `x2f_f1`, and
+  `x2f_last.faa` the same two in the other order, for the databases `x2f_in` and `x2f_last`.
+  `x2f_page.faa` is `x2f_f1` repeated to 4,075 letters, then `x2f_s1`, for the database `x2f_page`, whose
+  `.psq` file is exactly 4,096 bytes (1 + 4,076 + 19): a window past `s1`'s NULLB leaves the file's last
+  memory page.
+
 Databases (all `-blastdb_version 4`, no `-parse_seqids`; only `.pin .psq .phr` are kept, the `.pjs` file
 makeblastdb also writes was deleted). Run from `LOSAT/`:
 
@@ -96,6 +105,12 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "proteins planted in bxchunk_q.fna" -blastdb_version 4
     makeblastdb -in tests/db_search/q3b_chains.faa -dbtype prot -out tests/db_search/q3b_chains \
         -title "subjects whose HSPs with tests/fasta/psiblast/tk.faa form linked sets" -blastdb_version 4
+    makeblastdb -in tests/db_search/x2f_in.faa -dbtype prot -out tests/db_search/x2f_in \
+        -title "x2f_s1, then a filler" -blastdb_version 4
+    makeblastdb -in tests/db_search/x2f_last.faa -dbtype prot -out tests/db_search/x2f_last \
+        -title "a filler, then x2f_s1" -blastdb_version 4
+    makeblastdb -in tests/db_search/x2f_page.faa -dbtype prot -out tests/db_search/x2f_page \
+        -title "a filler of 4,075 letters, then x2f_s1" -blastdb_version 4
 
 `wm_s60k` (rows `db.wm.*`, line NP M2: `-window_masker_db`) is the subject `s60k.fa` of
 `LOSAT/tests/blastn_regression_fixtures.py`, with only `.nin .nsq .nhr` kept:
@@ -1367,7 +1382,7 @@ survey's probes (`T/t3/scripts/gen.py`, a seeded generator, and three hand-made 
   and takes the subject's first row from the HSP with the second copy, which NCBI then shows below it
   (`db.of1.bp.self1.*`, `alnmerger.cpp:499-501`). `selfseg3` is 30 letters, 80 Q and 40 letters: `-seg yes`
   splits its self diagonal into two ungapped HSPs, the second the longer, where NCBI aborts
-  (`db.of1.bp.selfseg3.reject`, PD-LOSAT-NCBI-DEFECTS 1.22).
+  (`db.of1.bp.selfseg3.reject`, PD-LOSAT-NCBI-DEFECTS 1.23).
 - `deflineonly.fa` (a record without letters) and `allx_q3.fa` (an all-X query, then a query): runs that stop
   at their first query batch, which write outfmt 0's prolog (`db.of1.bp.defl.*`, `db.of1.bp.emptydb.*`, the
   empty database `tests/seqdb/db/empty`).

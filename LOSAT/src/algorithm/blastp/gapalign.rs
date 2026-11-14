@@ -757,6 +757,90 @@ fn blastp_get_start_for_gapped_alignment_impl<const BLOSUM62: bool>(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign_priv.h:120
+// ```c
+// #define HSP_MAX_WINDOW 11
+// ```
+/// `HSP_MAX_WINDOW`, the letters of a window of `BlastGetStartForGappedAlignment`.
+pub(crate) const GAPPED_START_WINDOW: usize = 11;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3405-3413
+// ```c
+//     hsp_end = q_start + HSP_MAX_WINDOW;
+//     query_var = query + q_start;
+//     subject_var = subject + s_start;
+//     score=0;
+//     for (index1=q_start; index1<hsp_end; index1++) {
+//         if (!(positionBased))
+//             score += sbp->matrix->data[*query_var][*subject_var];
+// ```
+/// The `HSP_MAX_WINDOW` letters of `sequence` from `start` that the first window of
+/// `BlastGetStartForGappedAlignment` reads, a letter past the end of `sequence` read as the
+/// sentinel byte (NULLB, 0). NCBI's buffers hold a NULLB right after each context of the query and
+/// after the subject, whose score is `BLAST_SCORE_MIN` (blast_stat.c:1559-1579): once a window holds
+/// it, its sum is below 0 whatever letters follow, as it is when they read as NULLBs.
+#[inline]
+pub(crate) fn gapped_start_window(sequence: &[u8], start: usize) -> [u8; GAPPED_START_WINDOW] {
+    let mut window = [0u8; GAPPED_START_WINDOW];
+    for (index, letter) in window.iter_mut().enumerate() {
+        *letter = sequence
+            .get(start.saturating_add(index))
+            .copied()
+            .unwrap_or(0);
+    }
+    window
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1054,1083 and
+// c++/src/algo/blast/core/blast_gapalign.c:3394,3401,3405-3413,3418-3420,3434-3437
+// ```c
+//     init_hit_width = q_right_off - q_left_off + 1;
+//     *hsp_len = left_disp + right_disp + init_hit_width;
+// ...
+//    const BlastScoreBlk* sbp, Uint4 q_start, Uint4 q_length,
+//     if (q_length <= HSP_MAX_WINDOW) {
+//     hsp_end = q_start + HSP_MAX_WINDOW;
+// ...
+//             score += sbp->matrix->data[*query_var][*subject_var];
+// ...
+//     max_offset = hsp_end - 1;
+//     hsp_end = q_start + MIN(q_length, s_length);
+//     for (index1=q_start + HSP_MAX_WINDOW; index1<hsp_end; index1++) {
+// ...
+//     if (max_score > 0)
+//        max_offset -= HSP_MAX_WINDOW/2;
+//     else
+//        max_offset = q_start;
+// ```
+/// `BlastGetStartForGappedAlignment` of a one-hit HSP of negative `Int4` length (`-window_size 0`
+/// with a low `-threshold`: the one-hit extension's best part ends before the last reset of its
+/// running sum), from the bytes of its first window (`query_window`, `subject_window`). NCBI reads
+/// the length as `Uint4`, above `HSP_MAX_WINDOW`, and `q_start + MIN(q_length, s_length)` wraps
+/// back to `q_start + length`, so only the first window is scored: the gapped start is
+/// `q_start + 5` when its sum is above 0, else `q_start`. TBLASTN and BLASTX take it from here;
+/// BLASTP keeps its own copy inline in its gapped stage
+/// (`blastp::blast_engine::blastp_get_start_for_gapped_alignment_int4_length`, out of line it
+/// cost BLASTP's default search 0.6 %).
+#[cold]
+#[inline(never)]
+pub(crate) fn gapped_start_int4(
+    query_window: &[u8; GAPPED_START_WINDOW],
+    subject_window: &[u8; GAPPED_START_WINDOW],
+    q_start: usize,
+    matrix: ScoringMatrix,
+) -> usize {
+    let score: i32 = query_window
+        .iter()
+        .zip(subject_window)
+        .map(|(&q, &s)| standard_score(matrix, q, s))
+        .sum();
+    if score > 0 {
+        q_start + GAPPED_START_WINDOW - 1 - GAPPED_START_WINDOW / 2
+    } else {
+        q_start
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:340-377
 // ```c
 // void AdjustSubjectRange(Int4* subject_offset_ptr, Int4* subject_length_ptr,

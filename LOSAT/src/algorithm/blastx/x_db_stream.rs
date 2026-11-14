@@ -239,6 +239,18 @@ impl<'a> XStreamDb<'a> {
         self.longest
     }
 
+    /// The bytes that NCBI's mapping of its volume's sequence file holds after the sentinel byte
+    /// of sequence `oid` (`SeqDb::protein_mapped_bytes_after`: the next sequences, then the rest
+    /// of the file's last memory page), from the index and the file's length; an error is the
+    /// reader's.
+    pub(crate) fn bytes_after(&self, oid: usize) -> Result<usize> {
+        let after = self
+            .db
+            .protein_mapped_bytes_after(u32::try_from(oid)?)
+            .map_err(read_error)?;
+        Ok(usize::try_from(after)?)
+    }
+
     /// Whether the reads have checked every sequence (`x_check`).
     pub(crate) fn x_checked(&self) -> bool {
         self.x_checked.load(std::sync::atomic::Ordering::Acquire)

@@ -85,6 +85,7 @@ impl<'b> AsnBinaryEncoder<'b> {
             byte,
             position: StreamPosition::Byte(self.out.len() as u64),
             with_string: true,
+            at: self.out.len(),
         });
     }
 
@@ -242,6 +243,8 @@ impl<'b> AsnBinaryEncoder<'b> {
 }
 
 impl Encoder for AsnBinaryEncoder<'_> {
+    const STREAM: Option<super::encoder::Stream> = Some(super::encoder::Stream::AsnBinary);
+
     /// `WriteFileHeader` writes nothing in the binary stream (the type name `Seq-annot ::=`
     /// belongs to the text stream).
     fn begin_document(&mut self, _type_name: &str) {}
@@ -419,6 +422,17 @@ impl Encoder for AsnBinaryEncoder<'_> {
         self.length(digits.len() + 1);
         self.out.push(REAL_DECIMAL);
         self.out.extend_from_slice(&digits);
+    }
+
+    /// The whole buffer (`flush_to` hands it all on, with what preceded the document).
+    fn held(&self) -> &[u8] {
+        self.out
+    }
+
+    fn hand_on(&mut self, sink: &mut dyn std::io::Write, count: usize) -> std::io::Result<()> {
+        sink.write_all(&self.out[..count])?;
+        self.out.drain(..count);
+        Ok(())
     }
 
     fn error(&self) -> Option<SerialError> {

@@ -95,6 +95,12 @@ fn run(program: &str, case: &Case) -> Streams {
 
 /// `run` of `binary <program>` (the command line, or the library's example).
 fn run_binary(binary: &Path, program: &str, case: &Case) -> Streams {
+    let output = command(binary, program, case).output().unwrap();
+    (output.stdout, output.stderr, output.status.code().unwrap())
+}
+
+/// The command of `run_binary`.
+fn command(binary: &Path, program: &str, case: &Case) -> Command {
     let dir = fixtures(program);
     let mut command = Command::new(binary);
     for (name, _) in std::env::vars_os() {
@@ -107,15 +113,13 @@ fn run_binary(binary: &Path, program: &str, case: &Case) -> Streams {
         Some(file) => Stdio::from(fs::File::open(dir.join(file)).unwrap()),
         None => Stdio::null(),
     };
-    let output = command
+    command
         .env("NCBI_CONFIG_PATH", &dir)
         .current_dir(&dir)
         .arg(program)
         .args(&case.words)
-        .stdin(stdin)
-        .output()
-        .unwrap();
-    (output.stdout, output.stderr, output.status.code().unwrap())
+        .stdin(stdin);
+    command
 }
 
 /// NCBI's stdout, stderr and exit status for `case` of `program`. NCBI's bytes come from Linux.
@@ -384,6 +388,62 @@ fn convert2blastmask_through_the_library_gives_the_command_line_s_bytes() {
         differ.is_empty(),
         "rows that differ through the library: {differ:?}"
     );
+}
+
+/// NCBI posts a byte that its serial stream replaces when it writes it, its `cerr` tied to
+/// `cout`: with the standard output and error in one file (`2>&1`) the post follows the bytes of
+/// the document that NCBI's serial buffer (`COStreamBuffer`) had written by then. The rows of
+/// `program` with `ncbi/<name>.merged` (NCBI's `2>&1` stream of a run of its own) whose run
+/// through `binary` into one file differs, and the number of such rows.
+fn merged_rows_that_differ(binary: &Path, program: &str) -> (usize, Vec<String>) {
+    let ncbi = fixtures(program).join("ncbi");
+    let mut ran = 0;
+    let mut differ = Vec::new();
+    for case in cases_here(program) {
+        let Ok(want) = fs::read(ncbi.join(format!("{}.merged", case.name))) else {
+            continue;
+        };
+        ran += 1;
+        let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+            "masker-merged-{program}-{}-{}",
+            case.name,
+            std::process::id()
+        ));
+        let one = fs::File::create(&path).unwrap();
+        let status = command(binary, program, &case)
+            .stdout(one.try_clone().unwrap())
+            .stderr(one)
+            .status()
+            .unwrap();
+        let got = fs::read(&path).unwrap();
+        let _ = fs::remove_file(&path);
+        if got != want || status.code() != Some(0) {
+            eprintln!(
+                "--- {}: status {status}\nLOSAT: {:?}\nNCBI:  {:?}",
+                case.name,
+                String::from_utf8_lossy(&got),
+                String::from_utf8_lossy(&want)
+            );
+            differ.push(case.name.clone());
+        }
+    }
+    (ran, differ)
+}
+
+#[test]
+fn convert2blastmask_posts_where_ncbi_does_in_one_file() {
+    for binary in [
+        PathBuf::from(env!("CARGO_BIN_EXE_losat")),
+        example_binary("library_command_line"),
+    ] {
+        let (ran, differ) = merged_rows_that_differ(&binary, "convert2blastmask");
+        assert!(ran >= 3, "{ran} rows with a merged stream");
+        assert!(
+            differ.is_empty(),
+            "{}: rows whose merged stream differs from NCBI's: {differ:?}",
+            binary.display()
+        );
+    }
 }
 
 // The rows that Windows answers as a missing file (`expected`) are the ones whose `-in` NCBI

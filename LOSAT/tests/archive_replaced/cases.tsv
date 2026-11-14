@@ -51,3 +51,12 @@ n_wmctrl_txt	blastn	-	-query	in/n_plain.fa	-subject	in/s_n.fa	-window_masker_db	
 n_wmctrl_xml	blastn	ARCHIVE_FORMAT=xml	-query	in/n_plain.fa	-subject	in/s_n.fa	-window_masker_db	in/w%01/counts.obinary	-outfmt	11	-out	{out}
 n_e_stdout	blastn	-	-query	in/n_e.fa	-subject	in/s_n.fa	-outfmt	11
 n_e_log	blastn	-	-query	in/n_e.fa	-subject	in/s_n.fa	-outfmt	11	-logfile	{log}	-out	{out}
+# o_*: the archive on the standard output, NCBI's merged 2>&1 stream in ncbi/<name>.merged and its standard error of a run of its own in ncbi/<name>.err (RG K4m 2026-11-14, the local official release)
+o_txt_flush3	blastn	-	-query	in/n_plain.fa	-subject	in/s_m24.fa	-outfmt	11
+o_bin_flush3	blastn	ARCHIVE_FORMAT=bin	-query	in/n_plain.fa	-subject	in/s_m24.fa	-outfmt	11
+o_txt_long	blastn	-	-query	in/n_plain.fa	-subject	in/s_mlong.fa	-outfmt	11
+o_bin_long	blastn	ARCHIVE_FORMAT=bin	-query	in/n_plain.fa	-subject	in/s_mlong.fa	-outfmt	11
+o_xml	blastn	ARCHIVE_FORMAT=xml	-query	in/n_plain.fa	-subject	in/s_mx.fa	-outfmt	11	-parse_deflines
+o_batch_txt	blastn	BATCH_SIZE=160	-query	in/n_m3.fa	-subject	in/s_m8.fa	-outfmt	11
+o_rep_txt	blastn	-	-query	in/n_plain.fa	-subject	in/s_rep.fa	-outfmt	11	-parse_deflines
+o_rep_bin	blastn	ARCHIVE_FORMAT=bin	-query	in/n_plain.fa	-subject	in/s_rep.fa	-outfmt	11	-parse_deflines

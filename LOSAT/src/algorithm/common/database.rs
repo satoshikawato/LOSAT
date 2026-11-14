@@ -187,6 +187,15 @@ fn apply_list(
             crate::seqdb::ListWarning::Log(text) => text,
             crate::seqdb::ListWarning::Posted(text) => format!("Warning: [{prefix}] {text}"),
             crate::seqdb::ListWarning::Error(text) => format!("Error: [{prefix}] {text}"),
+            crate::seqdb::ListWarning::SeqId(warning) => {
+                let mut line = Vec::new();
+                crate::writedb::fasta_source::defline_ids::post_seq_id_warning_of(
+                    &prefix,
+                    warning,
+                    &mut |text| line.extend_from_slice(text),
+                );
+                String::from_utf8_lossy(&line).into_owned()
+            }
         };
         diagnostics.write_all(line.as_bytes())?;
         diagnostics.write_all(b"\n")?;

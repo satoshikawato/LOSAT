@@ -36,6 +36,8 @@ TEXT = {
     # general id, a bare RefSeq, a versionless DDBJ, a gi (dropped), a versionless gb of a second definition line
     "sl_nucl.txt": "NM_000001\nAF000002.3 mynuc6\nmydb:nuc7\nNM_000008.2\nAB000009\ngi|1111\nSubject_30\nAF000020\n",
     "sl_gi.txt": "gi|654321\ngi|1111\n",
+    # a gi id of several parts (line DBID gisl): dropped as a gi, with NCBI's two warnings "Ignoring extra parts"
+    "sl_gifull.txt": "gi|1111|ref|NP_1.1|\n",
     "sl_comment.txt": "# a comment only\n\n",
     "sl_none.txt": "UNKNOWN1\nUNKNOWN2\n",
     "sl_empty.txt": "",

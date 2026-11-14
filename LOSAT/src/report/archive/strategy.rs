@@ -468,7 +468,8 @@ impl StrategyExport {
     // ```
     /// NCBI stops the run when it formats the batch whose queries end at `queries_end`, after
     /// that batch's request (the BLAST XML report data of a matrix name it does not know,
-    /// `blast_xml::matrix::xml_formatting_fails`): no request of a later batch is written.
+    /// `blast_xml::matrix::XmlMatrixFailure`, `QueryBatches::xml_matrix_request_end`): no request
+    /// of a later batch is written.
     pub fn stop_after(&self, queries_end: usize) {
         self.with_state(|state| state.stop = state.stop.min(queries_end));
     }

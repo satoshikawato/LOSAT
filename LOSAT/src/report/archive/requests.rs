@@ -19,15 +19,17 @@
 //! `-lcase_masking`), with the `-subject` sequences (`x_Process_SearchDb`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use anyhow::Result;
 
 use super::bioseq::BioseqInput;
 use super::masks::{Frame, MaskEntry};
 use super::strategy::StrategyExport;
-use super::writer::RequestInputs;
+use super::writer::{RequestInputs, RequestQueries};
 use super::ArchiveEncoding;
 use crate::blastinput::seq_range::RecordPlacement;
+use crate::report::serial::pssm::PssmWithParameters;
 
 /// What a request reads of a query or subject record. No NCBI counterpart: LOSAT has two record
 /// types (`blastinput::fasta_reader::FastaRecord`, BLASTX's `blastx::input::FastaRecord`).
@@ -182,7 +184,8 @@ pub(crate) struct RequestPolicy {
 
 /// The requests of a run's query batches (or of the batches of one call that writes their
 /// archives): the policy, the `-subject` records as the Bioseqs that every request holds (made
-/// once; `None` for `-db`) and the program's name in a refusal.
+/// once; `None` for `-db`), the PSSM of a PSSM query (`with_pssm_query`) and the program's name in
+/// a refusal.
 pub(crate) struct RunRequests<'a, R> {
     policy: RequestPolicy,
     label: &'static str,
@@ -190,6 +193,8 @@ pub(crate) struct RunRequests<'a, R> {
     subjects: Vec<BioseqInput<'a>>,
     /// Whether the search strategy's first request checked the subjects' titles (`write`).
     subjects_checked: AtomicBool,
+    /// The PSSM that every request holds in place of the batch's queries (`with_pssm_query`).
+    pssm: Option<Arc<PssmWithParameters>>,
 }
 
 impl<'a, R: RequestRecord> RunRequests<'a, R> {
@@ -213,7 +218,37 @@ impl<'a, R: RequestRecord> RunRequests<'a, R> {
                 })
                 .collect(),
             subjects_checked: AtomicBool::new(false),
+            pssm: None,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:338-340
+    // ```c++
+    //     CRef<IQueryFactory> query_factory(s_MakeQueryFactory(pssm, query));
+    //
+    //     SaveSearchStrategy(args, m_CmdLineArgs, query_factory, opts_hndl, pssm, kNumIterations);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:307
+    // ```c++
+    //             SaveSearchStrategy(args, m_CmdLineArgs, query_factory, m_OptsHndl, pssm);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:281-287
+    // ```c++
+    //         if (pssm.NotEmpty())
+    //         {
+    //             _ASSERT(queries.Empty());
+    //             if(num_iters != 0)
+    //             	retval.Reset(new blast::CExportStrategy(pssm, opts_hndl, search_db, client_id, num_iters));
+    //             else
+    //             	retval.Reset(new blast::CExportStrategy(pssm, opts_hndl, search_db, client_id));
+    // ```
+    /// The requests of a run whose query is a PSSM (psiblast's and tblastn's `-in_pssm`, `pssm`:
+    /// the object as the application read it, `PsiSearch::request`): each request's queries are
+    /// the PSSM (`queries pssm`), with no `-query_loc` range (the option excludes `-in_pssm`) and no
+    /// `LCaseMask` (`x_Process_Pssm` takes no query masks). `None` keeps the batches' queries.
+    pub(crate) fn with_pssm_query(mut self, pssm: Option<Arc<PssmWithParameters>>) -> Self {
+        self.pssm = pssm;
+        self
     }
 
     /// Calls `each` with the request of the batch of `queries` (each cut to its `-query_loc`;
@@ -225,6 +260,14 @@ impl<'a, R: RequestRecord> RunRequests<'a, R> {
         first_placement: Option<RecordPlacement>,
         each: impl FnOnce(&RequestInputs<'_>) -> T,
     ) -> T {
+        if let Some(pssm) = self.pssm.as_deref() {
+            return each(&RequestInputs {
+                queries: RequestQueries::Pssm(pssm),
+                subjects: &self.subjects,
+                required: None,
+                lcase_masks: &[],
+            });
+        }
         let query_inputs: Vec<BioseqInput<'_>> = queries
             .iter()
             .map(|record| record.bioseq(self.policy.query_protein))
@@ -260,7 +303,7 @@ impl<'a, R: RequestRecord> RunRequests<'a, R> {
             .lcase
             .map_or_else(Vec::new, |frames| frames.masks(queries));
         each(&RequestInputs {
-            queries: &query_inputs,
+            queries: RequestQueries::Bioseqs(&query_inputs),
             subjects: &self.subjects,
             required,
             lcase_masks: &lcase_masks,
@@ -417,6 +460,39 @@ mod tests {
                 (Frame::Minus1, vec![(4, 5)]),
             ]
         );
+    }
+
+    /// A PSSM query's request holds the PSSM in place of the batch's queries, without a range or
+    /// `LCaseMask` parameters (`x_Process_Pssm`), whatever the policy and the records.
+    #[test]
+    fn a_pssm_query_replaces_the_queries_without_range_or_masks() {
+        let pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(
+            &std::fs::read(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/db_search/db.ps.asn.rnd.6.asn"
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let requests = RunRequests::<FastaRecord>::new(
+            RequestPolicy {
+                lcase: Some(LcaseFrames::NotSet),
+                ..PROTEIN
+            },
+            None,
+            "PSIBLAST",
+        )
+        .with_pssm_query(Some(std::sync::Arc::new(pssm.clone())));
+        let queries = [FastaRecord::new("Query_1", b"q", b"mkvMKV")];
+        let cut = RecordPlacement {
+            offset: 4,
+            length: 10,
+        };
+        requests.with_batch(&queries, Some(cut), |request| {
+            assert!(matches!(request.queries, RequestQueries::Pssm(held) if *held == pssm));
+            assert_eq!(request.required, None);
+            assert!(request.lcase_masks.is_empty());
+        });
     }
 
     #[test]

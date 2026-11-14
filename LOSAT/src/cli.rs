@@ -858,8 +858,8 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 /// ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
 /// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), and the arguments that blastp's engine does
 /// not run either (`is_unported_blastp_arg`; psiblast has no database masks and no `-mt_mode`).
-/// The search strategy file of a FASTA query is written (item F1b-1 of line RG; with `-in_pssm`
-/// it is refused, `PsiblastArgs::into_blastp_args`).
+/// The search strategy file is written, of a FASTA query and of `-in_pssm` (items F1b-1 and F1b-2
+/// of line RG).
 const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
     "ignore_msa_master",
     "in_msa",

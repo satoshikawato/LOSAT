@@ -11422,14 +11422,19 @@ fn write_reports_untimed(
     ) {
         observer.database_subjects(reported.library_subjects(database)?);
     }
-    let database_subject_ids = match &reported {
-        Some(reported) if output_formats.iter().any(|format| format.is_tabular()) => Some(
-            reported.tabular_subject_ids(
-                output_formats
-                    .iter()
-                    .any(|format| format.tabular_reads_subject()),
-            )?,
-        ),
+    let database_subject_ids = match (&reported, subjects.source) {
+        (Some(reported), SubjectSource::Database(database))
+            if output_formats.iter().any(|format| format.is_tabular()) =>
+        {
+            Some(
+                reported.tabular_subject_ids(
+                    database.oid_map(),
+                    output_formats
+                        .iter()
+                        .any(|format| format.tabular_reads_subject()),
+                )?,
+            )
+        }
         _ => None,
     };
     let subject_letters = match (&reported, subjects.source) {

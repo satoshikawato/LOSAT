@@ -965,19 +965,25 @@ fn run_inner(
         if !query_is_regular {
             archive::refuse_irregular_query(archived, program.upper)?;
         }
-        let refusable =
-            archive::prescan_query_titles(
-                query_prescan
-                    .as_ref()
-                    .expect("the second handle of a regular query"),
-                &query_settings,
-                args.lcase_masking,
-                &options,
-                batch_size,
-                query_range.as_ref(),
-                archived,
-                strategic,
-            )? || archive::check_request_titles(&subjects, "subject", archived, strategic).is_err();
+        let refusable = archive::prescan_query_titles(
+            query_prescan
+                .as_ref()
+                .expect("the second handle of a regular query"),
+            &query_settings,
+            args.lcase_masking,
+            &options,
+            batch_size,
+            query_range.as_ref(),
+            archived,
+            strategic,
+        )? || archive::check_request_titles(
+            &subjects,
+            "subject",
+            program.upper,
+            archived,
+            strategic,
+        )
+        .is_err();
         if let (true, Some(hold)) = (refusable, &hold) {
             hold.hold();
         }
@@ -1027,7 +1033,7 @@ fn run_inner(
     // of the reports, as rpsblast refuses them (`args::RpsTblastnSearch::for_database`, once per
     // run).
     if let Some(search) = options.rpstblastn.clone() {
-        let search = search.for_database(&options, database.as_ref())?;
+        let search = search.for_database(&options, database.as_ref(), strategy.is_some())?;
         // What each batch's RPS set-up writes into the options handle, which the search strategy's
         // later requests hold (`OptionsHandle::pass`): the search for the database knows its
         // volumes' costs.
@@ -1229,7 +1235,12 @@ fn run_inner(
             // is dropped, `run`); only a run whose read before the search found such a title can
             // refuse (`titles_may_refuse`).
             if titles_may_refuse {
-                archive::check_batch_titles(queries, subject_records, queries_before == 0)?;
+                archive::check_batch_titles(
+                    queries,
+                    subject_records,
+                    queries_before == 0,
+                    program.upper,
+                )?;
             }
             return archive::write_blastx_archive(
                 &archive::ArchiveCall {

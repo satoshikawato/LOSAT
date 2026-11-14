@@ -311,15 +311,16 @@ pub(super) fn render(
     let subject_ids = if outputs.formats.iter().any(shows_ids) {
         match shown {
             ShownSubjects::Fasta { .. } => tabular_subject_ids(hitlists, subject_records)?,
-            ShownSubjects::Database { reported, .. } => {
-                reported.tabular_subject_ids(outputs.formats.iter().any(|format| {
+            ShownSubjects::Database { reported, oids, .. } => reported.tabular_subject_ids(
+                *oids,
+                outputs.formats.iter().any(|format| {
                     shows_ids(format)
                         && crate::report::tabular::reads_subject(
                             super::tabular::tabular_spec(format.outfmt).as_ref(),
                             crate::blastinput::app::Program::Tblastn,
                         )
-                }))?
-            }
+                }),
+            )?,
         }
     } else {
         Vec::new()

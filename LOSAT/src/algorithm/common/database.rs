@@ -323,6 +323,101 @@ pub(crate) fn note_archive_database_masking(
 // ```c++
 // #define BLAST_DATABASE_ERROR                    2
 // ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:123-129
+// ```c++
+//     if (! m_File.Open(CSeqDB_Path(m_FileName))) {
+//         //m_Atlas.Unlock(locked);
+//
+//         string msg = string("Error: File (") + m_FileName + ") not found.";
+//
+//         NCBI_THROW(CSeqDBException, eFileErr, msg);
+//     }
+// ```
+/// The error of the first volume of `db` (in the order NCBI reads them) whose sequence file
+/// cannot be opened, as NCBI's first read of a sequence meets it. A PSSM search (psiblast's and
+/// tblastn's `-in_pssm`, `CPsiBlast`) runs its preliminary stage without `CLocalBlast`, whose catch
+/// makes such an error `Database memory map file error` for a FASTA query (local_blast.cpp:229-252,
+/// quoted at `seqdb::SeqDbError`): the reader's own text reaches the application
+/// (`database_error`: `BLAST Database error: Error: File (<path>) not found.`, exit status 2; NCBI
+/// 2.17.0, probe `y.g.ps.tk.nopsq.0` of line PS PS5c, and review 4 of line RG F1b-2 for tblastn).
+fn unopenable_sequence_file(db: &SeqDb) -> Option<SeqDbError> {
+    db.volumes()
+        .iter()
+        .find_map(|volume| volume.open_sequence_file().err())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:425
+// ```c++
+//     NCBI_THROW(CSeqDBException, eArgErr, CSeqDB::kOidNotFound);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:241-251 (the catch that a PSSM
+// search's preliminary stage has not)
+// ```c++
+// 	catch (CSeqDBException & e) {
+// 		if (e.GetErrCode() == CSeqDBException::eTooManyOpenFiles) {
+// 	...
+// 		else {
+//             _TRACE(e.GetMsg());
+// 			string err_msg = BlastErrorCode2String(BLASTERR_DB_MEMORY_MAP);
+// 			NCBI_THROW(CBlastException, eCoreBlastError, err_msg);
+// ```
+/// What the first read of the database of a search without `CLocalBlast` meets (psiblast, whose
+/// `CPsiBlast` searches FASTA queries too, and PSI-TBLASTN), in NCBI's order: no OID to read
+/// (`SeqDb::first_oid_read_fails`: the setup's `GetSeqLength(0)`, SeqDB's `OID not found`), else
+/// a sequence file that cannot be opened (`unopenable_sequence_file`). SeqDB's own exception
+/// reaches the application (`error`), where `CLocalBlast` gives a FASTA query of the other programs
+/// `Database memory map file error` (`PreliminaryReadError`).
+#[derive(Debug)]
+pub(crate) enum PsiSearchReadFailure {
+    EmptyDatabase,
+    Unopenable(SeqDbError),
+}
+
+impl PsiSearchReadFailure {
+    /// The failure of the first read of `db`, if any.
+    pub(crate) fn of(db: &SeqDb) -> Option<Self> {
+        if db.first_oid_read_fails() {
+            Some(PsiSearchReadFailure::EmptyDatabase)
+        } else {
+            unopenable_sequence_file(db).map(PsiSearchReadFailure::Unopenable)
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:930-934,960-961
+    // ```c
+    //           Int4 oid = 0;  /* Get length of first sequence. */
+    //           if ( (total_length = BlastSeqSrcGetSeqLen(seq_src, (void*) &oid)) < 0) {
+    //               total_length = -1;
+    //               num_seqs = -1;
+    //           }
+    // ...
+    //    if((status=BlastExtensionParametersNew(program_number, ext_options, sbp,
+    //                                query_info, ext_params)) != 0)
+    // ```
+    /// Whether NCBI meets this failure before the query batch's setup checks (`BLAST_GapAlignSetUp`:
+    /// `BlastExtensionParametersNew`'s valid Karlin-Altschul block, which a PSSM query whose file's
+    /// ungapped values are invalid fails, then the average subject length): the empty database in
+    /// the setup's read of OID 0, before them; an unopenable sequence file in the search's first
+    /// read, after them. The one order of psiblast (`psiblast_stop_at_invalid_query`) and PSI-TBLASTN
+    /// (`tblastn_app`; review 4 R7-1 of line RG F1b-2).
+    pub(crate) fn precedes_setup_checks(&self) -> bool {
+        matches!(self, PsiSearchReadFailure::EmptyDatabase)
+    }
+
+    /// NCBI's error (`BLAST Database error: ...`, exit status 2; `program` names LOSAT's program in
+    /// a refusal of an error that is not NCBI's, `database_error`).
+    pub(crate) fn error(self, program: &str) -> anyhow::Error {
+        match self {
+            PsiSearchReadFailure::EmptyDatabase => NativeError {
+                exit: 2,
+                message: "BLAST Database error: OID not found\n".to_string(),
+            }
+            .into(),
+            PsiSearchReadFailure::Unopenable(error) => database_error(error, program),
+        }
+    }
+}
+
 /// A reader error outside the preliminary search (when the database is opened, and when
 /// the sequences and titles of the hit lists are read) as the command line reports it:
 /// NCBI's own errors (`SeqDbError::ncbi_message`: a database that is not found, a file
@@ -2187,16 +2282,18 @@ pub(crate) fn check_reported_parsed(
 //     "evalue bitscore";
 // ```
 /// The subject id of the default tabular fields (`saccver`) of each reported database sequence by
-/// rank, for the programs that write no custom fields (BLASTN, TBLASTN, TBLASTX): the first word
-/// of the stored title (`tabular_subject_id`, the same for `sseqid`, `sacc` and `saccver`), or for
-/// a sequence with parsed Seq-ids (`parsed[rank]`) its `saccver` (`ParsedSubject::tabular_ids`).
-/// `records[rank]` holds the stored title, `ordinals[rank]` the ordinal id; `protein` for a
-/// protein database. An id that LOSAT cannot write as NCBI is its refusal where a tabular report
-/// `reads` the subject (`report::tabular::reads_subject`), else empty: a table of fields that
-/// read nothing of the subject prints none of its ids.
+/// rank, for BLASTN, TBLASTN and TBLASTX: the `saccver` of a sequence without parsed Seq-ids
+/// (`TabularSubjectId::accession`: the first word of the stored title, or `BL_ORD_ID:n`), or of
+/// a sequence with parsed Seq-ids (`parsed[rank]`, `ParsedSubject::tabular_ids`). The custom
+/// fields ask `sseqid` of it (`tabular_seqid`). `records[rank]` holds the stored title,
+/// `ordinals[rank]` the ordinal id, `oids` the database's OIDs; `protein` for a protein
+/// database. An id that LOSAT cannot write as NCBI is its refusal where a tabular report `reads`
+/// the subject (`report::tabular::reads_subject`), else empty: a table of fields that read
+/// nothing of the subject prints none of its ids.
 pub(crate) fn tabular_subject_ids(
     records: &[crate::blastinput::fasta_reader::FastaRecord],
     ordinals: &[u32],
+    oids: crate::seqdb::OidMap<'_>,
     parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
     protein: bool,
     reads: bool,
@@ -2211,8 +2308,8 @@ pub(crate) fn tabular_subject_ids(
                 Some(subject) => subject
                     .tabular_saccver(protein)
                     .map_err(|problem| parsed_refusal(ordinal, &format!("has {problem}"), program)),
-                None => tabular_subject_id(&record.title, ordinal, protein, program)
-                    .map(std::sync::Arc::from),
+                None => tabular_subject_id(&record.title, oids.oid(ordinal), protein, program)
+                    .map(|id| std::sync::Arc::from(id.accession())),
             };
             match id {
                 Err(_) if !reads => Ok(std::sync::Arc::from(&b""[..])),
@@ -2241,7 +2338,9 @@ pub(crate) fn tabular_subject_ids(
 /// the id of the default tabular report (`tabular_subject_ids`) of the sequence `ordinal` with the
 /// stored title `title` (with parsed Seq-ids: `parsed`), and `length` letters. A sequence whose
 /// tabular id LOSAT refuses shows the first word of its title: only a tabular report refuses
-/// that id, not the search.
+/// that id, not the search. A nucleotide's empty title whose taxid the taxonomy database names
+/// (`check_tabular_stored_title`, which the hits alone do not ask) shows the general id's
+/// `BL_ORD_ID:n`, which NCBI prints where the database does not name it.
 pub(crate) fn library_subject(
     db: &SeqDb,
     title: &[u8],
@@ -2253,7 +2352,9 @@ pub(crate) fn library_subject(
 ) -> crate::api::local_blast::ReportedSubject {
     let id = match parsed {
         Some(subject) => subject.tabular_saccver(protein).ok().map(|id| id.to_vec()),
-        None => tabular_subject_id(title, ordinal, protein, program).ok(),
+        None => tabular_subject_id(title, db.oid(ordinal), protein, program)
+            .ok()
+            .map(|id| id.accession().into_owned()),
     }
     .unwrap_or_else(|| {
         title
@@ -2377,8 +2478,18 @@ pub(crate) fn reports_may_refuse(
                 check_reported_title(stored.replaced_bytes, ordinal, program)
                     .map_err(|_| ReportRefusal::Headers)?;
                 if shown.tabular {
-                    tabular_subject_id(&stored.title, ordinal, protein, program)
+                    tabular_subject_id(&stored.title, db.oid(ordinal), protein, program)
                         .map_err(|_| ReportRefusal::Headers)?;
+                    if !protein {
+                        let oid = db.oid(ordinal);
+                        check_tabular_stored_title(
+                            stored.taxonomy_title,
+                            shown.words,
+                            oid,
+                            program,
+                        )
+                        .map_err(|_| ReportRefusal::Headers)?;
+                    }
                 }
                 if shown.pairwise {
                     check_shown_stored_title(stored.taxonomy_title, ordinal, program)
@@ -2588,21 +2699,116 @@ pub(crate) fn check_shown_stored_title(
     Ok(())
 }
 
+/// LOSAT's refusal of the tabular subject id of a nucleotide database sequence `oid` without
+/// parsed Seq-ids whose empty title NCBI makes from its taxid and the taxonomy database
+/// (`StoredTitle::taxonomy_title`), where a tabular report prints a subject id (`printed`:
+/// `sseqid`, `sacc`, `saccver`, `sallseqid`, `sallacc`): NCBI prints the first word of the
+/// organism's name (`Homo` for taxid 9606, `Uncultured` for `uncultured bacterium`) in the place
+/// of the id, as for a sequence with parsed Seq-ids (`ParsedSubject::check_printed_word`); the
+/// other fields show the stored title (`N/A`) and the taxonomy as without it. LOSAT does not make
+/// titles from the taxonomy database, as in outfmt 0 (`check_shown_stored_title`). A protein's
+/// empty title gives `unnamed` with or without a source, which LOSAT writes.
+pub(crate) fn check_tabular_stored_title(
+    taxonomy_title: bool,
+    printed: crate::report::tabular::PrintedIds,
+    oid: crate::seqdb::Oid,
+    program: &str,
+) -> Result<()> {
+    if taxonomy_title && (printed.subject || printed.all) {
+        bail!(
+            "database sequence {oid} has an empty title that NCBI BLAST+ 2.17.0 makes from its taxid with the taxonomy database (which names that taxid, or whose lookup of it fails), whose first word is the subject id of the tabular formats; this is not supported by LOSAT's {program}"
+        );
+    }
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:169-182 (the ids of a
+// subject's list; for a sequence without parsed Seq-ids, the local id of the title's first word
+// that `GetSeqIdList` makes, or its general id, showdefline.cpp:218-242 at
+// `report::defline::database_subject_id`)
+// ```c++
+//     switch (id_type) {
+//     case CBlastTabularInfo::eFullId:
+//         id_str = CShowBlastDefline::GetSeqIdListString(id, true);
+//         break;
+//     case CBlastTabularInfo::eAccession:
+//     {
+//         CConstRef<CSeq_id> accid = FindBestChoice(id, CSeq_id::Score);
+//         accid->GetLabel(&id_str, CSeq_id::eContent, 0);
+//         break;
+//     }
+// ```
+/// The subject id of the tabular formats of a database sequence without parsed Seq-ids
+/// (`tabular_subject_id`): the first word of the title that NCBI makes of its stored title,
+/// which `GetSeqIdList` puts in the place of its id, or where that word is empty its general id
+/// `gnl|BL_ORD_ID|n`, n its OID (`seqdb::Oid`; NCBI BLAST+ 2.17.0, line DBID ordname,
+/// `blastdb-ids-20261021/R/ordname`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TabularSubjectId {
+    Word(Vec<u8>),
+    General(crate::seqdb::Oid),
+}
+
+impl TabularSubjectId {
+    /// `sseqid`, and `sallseqid` of the one definition line: the word (a local id prints its
+    /// label), or `gnl|BL_ORD_ID|n`.
+    pub(crate) fn id(&self) -> std::borrow::Cow<'_, [u8]> {
+        match self {
+            TabularSubjectId::Word(word) => std::borrow::Cow::Borrowed(word),
+            TabularSubjectId::General(oid) => std::borrow::Cow::Owned(oid.fasta_id().into_bytes()),
+        }
+    }
+
+    /// `sacc` and `saccver`, and `sallacc`: the word, or the general id's content label
+    /// `BL_ORD_ID:n`.
+    pub(crate) fn accession(&self) -> std::borrow::Cow<'_, [u8]> {
+        match self {
+            TabularSubjectId::Word(word) => std::borrow::Cow::Borrowed(word),
+            TabularSubjectId::General(oid) => {
+                std::borrow::Cow::Owned(oid.content_label().into_bytes())
+            }
+        }
+    }
+}
+
 /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of the database
-/// sequence `ordinal` with the stored title `title` (`report::defline::database_subject_id`;
+/// sequence `oid` with the stored title `title` (`report::defline::database_subject_id`;
 /// `protein` for a protein database). A title whose id LOSAT cannot write as NCBI is
-/// LOSAT's refusal (`program` names the program).
+/// LOSAT's refusal (`program` names the program); a nucleotide's empty title that NCBI makes
+/// from the taxonomy database is refused before (`check_tabular_stored_title`).
 pub(crate) fn tabular_subject_id(
     title: &[u8],
-    ordinal: u32,
+    oid: crate::seqdb::Oid,
     protein: bool,
     program: &str,
-) -> Result<Vec<u8>> {
-    crate::report::defline::database_subject_id(title, protein).map_err(|problem| {
-        anyhow::anyhow!(
-            "database sequence {ordinal} has a title {problem}, which is not supported by LOSAT's {program}"
-        )
-    })
+) -> Result<TabularSubjectId> {
+    match crate::report::defline::database_subject_id(title, protein) {
+        Ok(Some(word)) => Ok(TabularSubjectId::Word(word)),
+        Ok(None) => Ok(TabularSubjectId::General(oid)),
+        Err(problem) => bail!(
+            "database sequence {oid} has a title {problem}, which is not supported by LOSAT's {program}"
+        ),
+    }
+}
+
+/// `sseqid` of the database sequence `oid` without parsed Seq-ids with the stored title `title`,
+/// whose `saccver` is `accession` (`tabular_subject_ids`): the accession, unless it is the
+/// general id's (`BL_ORD_ID:n`, `TabularSubjectId::General`), where the title decides whether
+/// it is (an id of that form asks it again; a title whose first word is `BL_ORD_ID:n` prints
+/// that word).
+pub(crate) fn tabular_seqid<'a>(
+    accession: &'a [u8],
+    oid: crate::seqdb::Oid,
+    title: &[u8],
+    protein: bool,
+) -> std::borrow::Cow<'a, [u8]> {
+    if accession.starts_with(b"BL_ORD_ID:")
+        && accession == oid.content_label().as_bytes()
+        && crate::report::defline::database_subject_id(title, protein) == Ok(None)
+    {
+        return std::borrow::Cow::Owned(oid.fasta_id().into_bytes());
+    }
+    std::borrow::Cow::Borrowed(accession)
 }
 
 /// LOSAT's rejection of the outfmt 0 title `title` of the protein database sequence
@@ -2712,6 +2918,59 @@ pub(crate) fn x_check_protein_stores(
 
 #[cfg(test)]
 mod tests {
+
+    // NCBI BLAST+ 2.17.0 (review 1 of line DBID ordname, `R/ordname/review1`): a title of a
+    // space at OID 1 prints `gnl|BL_ORD_ID|1` for sseqid and `BL_ORD_ID:1` for sacc; the title
+    // `BL_ORD_ID:1 own` at OID 1 prints its first word `BL_ORD_ID:1` for both.
+    #[test]
+    fn the_general_id_has_two_forms_and_a_word_of_that_form_stays_a_word() {
+        let oid = crate::seqdb::Oid::of_unrestricted(1);
+        let general = tabular_subject_id(b" ", oid, false, "BLASTN").unwrap();
+        assert_eq!(general, TabularSubjectId::General(oid));
+        assert_eq!(&*general.id(), b"gnl|BL_ORD_ID|1");
+        assert_eq!(&*general.accession(), b"BL_ORD_ID:1");
+        assert_eq!(
+            &*tabular_seqid(&general.accession(), oid, b" ", false),
+            b"gnl|BL_ORD_ID|1"
+        );
+        let word = tabular_subject_id(b"BL_ORD_ID:1 own", oid, false, "BLASTN").unwrap();
+        assert_eq!(word, TabularSubjectId::Word(b"BL_ORD_ID:1".to_vec()));
+        assert_eq!(
+            &*tabular_seqid(&word.accession(), oid, b"BL_ORD_ID:1 own", false),
+            b"BL_ORD_ID:1"
+        );
+        // Another sequence's accession of that form is a word of its title.
+        let other = crate::seqdb::Oid::of_unrestricted(2);
+        assert_eq!(
+            &*tabular_seqid(b"BL_ORD_ID:1", other, b"BL_ORD_ID:1", false),
+            b"BL_ORD_ID:1"
+        );
+        assert!(tabular_subject_id(b", ,", oid, true, "BLASTP")
+            .unwrap_err()
+            .to_string()
+            .starts_with("database sequence 1 has a title"));
+    }
+
+    #[test]
+    fn the_tabular_taxonomy_refusal_needs_a_printed_subject_id() {
+        use crate::report::tabular::PrintedIds;
+        let oid = crate::seqdb::Oid::of_unrestricted(3);
+        let ids = PrintedIds {
+            subject: true,
+            all: false,
+        };
+        let all = PrintedIds {
+            subject: false,
+            all: true,
+        };
+        assert!(check_tabular_stored_title(true, ids, oid, "BLASTN")
+            .unwrap_err()
+            .to_string()
+            .starts_with("database sequence 3 has an empty title"));
+        assert!(check_tabular_stored_title(true, all, oid, "BLASTN").is_err());
+        assert!(check_tabular_stored_title(true, PrintedIds::default(), oid, "BLASTN").is_ok());
+        assert!(check_tabular_stored_title(false, ids, oid, "BLASTN").is_ok());
+    }
     use super::*;
     use crate::utils::matrix::BLASTAA_SIZE;
 

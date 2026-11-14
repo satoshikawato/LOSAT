@@ -81,8 +81,10 @@ pub enum BlastpCompositionMode {
 // ```
 /// The NCBI application whose search the blastp engine runs: blastp, the first round of
 /// psiblast (`algorithm/psiblast`), whose program is `ePSIBlast` (`eBlastTypePsiBlast` in the
-/// core) with the same search as blastp until a PSSM exists, or rpsblast (`algorithm/rpsblast`),
-/// whose search blastp's driver hands to the RPS engine (`algorithm::rps_search`).
+/// core) with blastp's search until a PSSM exists except blastp's restricted gapped alignment
+/// (blast_parameters.c:852-855, `blast_engine::blastp_restricted_align_enabled`), or rpsblast
+/// (`algorithm/rpsblast`), whose search blastp's driver hands to the RPS engine
+/// (`algorithm::rps_search`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BlastpApp {
     #[default]
@@ -1261,7 +1263,7 @@ impl BlastpArgs {
         // ```
         // psiblast's `-in_pssm` is read by the same handler, after the checks of its PSSM
         // files (`algorithm::psiblast::in_pssm`); the file as read goes to the rounds' plan
-        // (`in_pssm_files`).
+        // (`in_pssm_files`), and to the search strategy's request with `-db` (`PssmReader::strategy`).
         let mut in_pssm_file = None;
         let psi_search = match self
             .psiblast_pssm
@@ -1271,7 +1273,11 @@ impl BlastpArgs {
             Some(path) => {
                 let (mut search, file) = crate::algorithm::pssm_search::in_pssm::read_in_pssm(
                     path,
-                    crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST,
+                    crate::algorithm::pssm_search::in_pssm::PssmReader {
+                        strategy: self.export_search_strategy.is_some(),
+                        database: self.db.is_some(),
+                        ..crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST
+                    },
                 )?;
                 in_pssm_file = Some(file);
                 search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(
@@ -1363,7 +1369,7 @@ impl BlastpArgs {
             .and_then(crate::algorithm::psiblast::pssm::PsiblastPssmOptions::request);
         let psi_rounds = match self.psiblast_pssm.as_ref() {
             Some(options) => {
-                crate::algorithm::psiblast::rounds::PsiRoundPlan::of(options, in_pssm_file)?
+                crate::algorithm::psiblast::rounds::PsiRoundPlan::of(options, in_pssm_file)
                     .map(std::sync::Arc::new)
             }
             None => None,

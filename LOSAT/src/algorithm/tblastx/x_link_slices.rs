@@ -467,6 +467,20 @@ fn x_link_board(
 //    hp_frame_number[++cur_frame]++;
 //    hp_frame_start[cur_frame] = H;
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419
+// ```c
+// s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
+// ```
+// No NCBI counterpart for the two switches: LOSAT_LINKING_LEGACY links every group with the literal
+// port, LOSAT_LINK_FAST_SHADOW also runs it and compares (`link_hsp_group_incremental`). They do
+// not change any value NCBI computes.
+/// `link_groups_as`'s `use_legacy` and `fast_shadow` from the environment: the group step of
+/// `x_hsp_inplace::link_in_place` for every list but a one-hit list with an HSP of length 0 or
+/// less.
+pub(super) fn link_modes() -> (bool, bool) {
+    (legacy_linking_requested(), link_shadow_enabled())
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
 // ```c
 // for (frame_index=0; frame_index<num_query_frames; frame_index++)
@@ -476,21 +490,21 @@ fn x_link_board(
 //    hp_frame_start[frame_index]->prev = hp_start;
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
-// The group step of `link_in_place` on the sorted list (module doc). Returns
-// the list and its number of groups.
+// The group step of `x_hsp_inplace::link_in_place` on the sorted list (module doc), with the two
+// variables of `link_groups_as` that `link_modes` gives (`link_modes` itself for the default list).
+// Returns the list and its number of groups.
 /// The sorted list with every group linked in place (the reference's list after its concatenation).
-pub(super) fn link_groups(
+pub(super) fn link_groups<M>(
     hits: Vec<UngappedHit>,
     call: &Call<'_>,
     lap: &mut LinkLap,
-) -> (Vec<UngappedHit>, usize) {
-    link_groups_as(
-        hits,
-        call,
-        lap,
-        legacy_linking_requested(),
-        link_shadow_enabled(),
-    )
+    link_modes: M,
+) -> (Vec<UngappedHit>, usize)
+where
+    M: FnOnce() -> (bool, bool),
+{
+    let (use_legacy, fast_shadow) = link_modes();
+    link_groups_as(hits, call, lap, use_legacy, fast_shadow)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
@@ -503,9 +517,10 @@ pub(super) fn link_groups(
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
 // `link_groups` with the two variables that choose the literal port and size the scratch given
-// (the tests run both ways). The statements of the reference's group step in their order, with the
+// (`link_modes`; the tests run both ways, and a one-hit list with an HSP of length 0 or less asks
+// for the literal port). The statements of the reference's group step in their order, with the
 // cut replaced by the slices and the assembly by nothing.
-/// `link_groups` with `legacy_linking_requested()` and `link_shadow_enabled()` given.
+/// `link_groups` with `use_legacy` and `fast_shadow` given.
 fn link_groups_as(
     mut hits: Vec<UngappedHit>,
     call: &Call<'_>,

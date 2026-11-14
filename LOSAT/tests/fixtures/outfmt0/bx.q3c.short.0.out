@@ -1,0 +1,103 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/q3c_p60.faa).
+           1 sequences; 60 total letters
+
+
+
+Query= short_ch two frames
+
+Length=207
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+p60 q3c short linking subject                                         70.7    2e-29  2
+
+
+> p60 q3c short linking subject
+Length=60
+
+ Score = 70.7 bits (148),  Expect(2) = 2e-29
+ Identities = 26/29 (90%), Positives = 28/29 (97%), Gaps = 0/29 (0%)
+ Frame = +2
+
+Query  119  DSFIDYDCKNLEHYTMQCGAYFPMVQLQI  205
+            +S IDYDCKNLEHYTMQCGAYFPMVQLQ+
+Sbjct  32   NSPIDYDCKNLEHYTMQCGAYFPMVQLQV  60
+
+
+ Score = 53.8 bits (111),  Expect(2) = 2e-29
+ Identities = 20/24 (83%), Positives = 20/24 (83%), Gaps = 0/24 (0%)
+ Frame = +1
+
+Query  10  RNWMIRFYNYGVIGCSMRLLIWMP  81
+           RNWMI FYNYGVI   MRLLIWMP
+Sbjct  1   RNWMISFYNYGVITMRMRLLIWMP  24
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 2842
+
+
+Query= short_one one frame
+
+Length=206
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+p60 q3c short linking subject                                         52.4    4e-22  2
+
+
+> p60 q3c short linking subject
+Length=60
+
+ Score = 52.4 bits (108),  Expect(2) = 4e-22
+ Identities = 20/24 (83%), Positives = 20/24 (83%), Gaps = 0/24 (0%)
+ Frame = +1
+
+Query  127  IDYDCKNLEFQTMQCVAYFPMCQL  198
+            IDYDCKNLE  TMQC AYFPM QL
+Sbjct  35   IDYDCKNLEHYTMQCGAYFPMVQL  58
+
+
+ Score = 47.3 bits (97),  Expect(2) = 4e-22
+ Identities = 20/24 (83%), Positives = 20/24 (83%), Gaps = 0/24 (0%)
+ Frame = +1
+
+Query  10  RNMMCSVYNYGVITMRMRLLIKMP  81
+           RN M S YNYGVITMRMRLLI MP
+Sbjct  1   RNWMISFYNYGVITMRMRLLIWMP  24
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 2793
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/q3c_p60.faa).
+    Posted date:  Unknown
+  Number of letters in database: 60
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 12
+Window for multiple hits: 40

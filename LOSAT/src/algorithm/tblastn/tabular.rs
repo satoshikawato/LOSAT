@@ -239,9 +239,10 @@ pub(super) fn write_tblastn_tabular(
             length: &record_length,
             parsed,
         },
-        ShownSubjects::Database { reported, .. } => TabularSubjects::Database {
+        ShownSubjects::Database { reported, oids, .. } => TabularSubjects::Database {
             ids: tab.subject_ids,
             ordinals: &reported.ordinals,
+            oids: *oids,
             records: &reported.records,
             parsed: &reported.parsed,
             lengths: &lengths,
@@ -262,19 +263,22 @@ pub(super) fn write_tblastn_tabular(
                 |(q_idx, (query, hitlist))| crate::report::tax_report::TaxQuery {
                     title: &titles[q_idx],
                     length: tab.ranges.queries.length(q_idx, query.seq().len()),
-                    hsps: hitlist
-                        .lists()
-                        .iter()
-                        .flat_map(|list| {
-                            list.hsps.hsps.iter().zip(&list.payloads).map(
-                                move |(linked, payload)| crate::report::tax_report::TaxHsp {
-                                    subject: list.oid as usize,
-                                    evalue: linked.evalue,
-                                    bit_score: payload.bit_score,
-                                },
-                            )
-                        })
-                        .collect(),
+                    // A query of a batch that NCBI did not search has no Seq-align-set.
+                    hsps: (!tab.query_batch_skipped[q_idx]).then(|| {
+                        hitlist
+                            .lists()
+                            .iter()
+                            .flat_map(|list| {
+                                list.hsps.hsps.iter().zip(&list.payloads).map(
+                                    move |(linked, payload)| crate::report::tax_report::TaxHsp {
+                                        subject: list.oid as usize,
+                                        evalue: linked.evalue,
+                                        bit_score: payload.bit_score,
+                                    },
+                                )
+                            })
+                            .collect()
+                    }),
                 },
             )
             .collect();

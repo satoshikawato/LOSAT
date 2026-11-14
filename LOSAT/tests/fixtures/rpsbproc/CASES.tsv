@@ -378,3 +378,6 @@ x.h_ntbitnan.both	compare	-	data-with:nt	-i arch/x_h_n_bitnan.xml -d nt -t both 
 nan_threshold	compare	-	-	-i arch/bad/a_nan.asn -d data -t doms -m std
 nan_hit	compare	-	-	-i arch/bad/a_nanhit.asn -d data -t both
 refuse_xcoordmin	refuse	-	-	-i arch/x_h_p_coordmin.xml -d data -t doms
+i_ncbirc_garbage	compare	-	ncbirc:garbage.ini	-i arch/one.asn -d data
+i_ncbirc_sec_dry	compare	-	ncbirc:sec.ini	-i arch/one.asn -d data -dryrun
+i_ncbirc_quote_log	compare	-	ncbirc:quote.ini	-i arch/one.asn -d data -logfile log.txt

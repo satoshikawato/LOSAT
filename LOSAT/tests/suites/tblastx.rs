@@ -9,6 +9,8 @@ mod run_local_tblastx;
 mod tblastx_band;
 #[path = "../tblastx_batch_pipe.rs"]
 mod tblastx_batch_pipe;
+#[path = "../tblastx_chunk_merge.rs"]
+mod tblastx_chunk_merge;
 #[path = "../tblastx_db_search.rs"]
 mod tblastx_db_search;
 #[path = "../tblastx_db_stream.rs"]

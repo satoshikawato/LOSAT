@@ -81,8 +81,9 @@
 //!   `.ncbirc`) and the query batch and archive settings (`BATCH_SIZE`, `ARCHIVE_FORMAT`, ...);
 //!   a search of records reads no NCBI setting, unless its argv has one of the NCBI C++ Toolkit's
 //!   words below, but where NCBI's library looks one up itself: blastn's `-window_masker_taxid`,
-//!   the organism report of outfmt 18 and the file of a `-matrix` that NCBI's tables do not have
-//!   (tblastx, blastx `-ungapped`).
+//!   the taxonomy database of the organism report of outfmt 18 and of the plural taxonomy names
+//!   (`sscinames`, `scomnames`, `sblastnames`, `sskingdoms`), and the file of a `-matrix` that
+//!   NCBI's tables do not have (tblastx, blastx `-ungapped`).
 //! - `-logfile`, `-conffile` and `-dryrun` work as on the command line: a call whose argv has one
 //!   runs NCBI's application start first (as does a call that reads NCBI's settings, when it
 //!   first reads them). The start's messages about the registry files go where the command line
@@ -101,13 +102,15 @@
 //!   before its arguments are read (a missing `-conffile` file) and that the parser refuses too
 //!   (two `-conffile`) gets the parser's error there. As any error of [`run_collect`] and
 //!   [`run_batches`], one of the start carries its message alone: the start's messages before it
-//!   (a usage report's) were in the call's diagnostics, which an error does not return; [`run`]
+//!   (a usage report's) were in the call's diagnostics, which an error does not return; [`run()`]
 //!   has written them to its writer.
 //! - [`run_batches`] searches one of NCBI's query batches at a time: the host reports progress
 //!   between batches and stops the search by not asking for the next one. Inside a batch only
 //!   the host can stop it, by ending the thread or the process.
 //! - The records are read before the search, so a reader error is an [`Error::Input`] before
-//!   any report, where the command line has reported the batches before the error.
+//!   any report, where the command line has reported the batches before the error (and, with
+//!   `-out`, made the file: [`run_to_file`] makes it where the command line makes `-out`, after
+//!   the subjects are read, so an error of the query records leaves no file there).
 //! - Outfmt 13 and 14 write side files next to their report, so they come through
 //!   [`run_to_file`] only; a report in memory has no place for them (the in-memory search under
 //!   the API, `local_blast`, takes a receiver of them, `OutputSink::Files`, which LOSAT Web gives).

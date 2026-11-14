@@ -379,6 +379,40 @@ impl QueryInput {
         first..last
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-146
+    // ```c++
+    //     TSeqPos size_read = 0;
+    //
+    //     while (size_read < GetBatchSize()) {
+    //
+    //         if (End())
+    //             break;
+    // ```
+    // No NCBI counterpart for the slice itself: a batch is counted from its first record alone, so
+    // the input records from the start of a batch have the batches of the whole input from there.
+    /// The input records `input` as an input of their own: their lengths and skips, and the
+    /// searched queries among them (`searched_in`) with their placements, numbered from
+    /// `input.start`. EXPERIMENT (LOSAT_X_BPQBLOCK): a block of whole query batches of the search
+    /// of all queries (`blast_engine.rs` `x_prelim_blocks`), whose `batches` are the whole input's
+    /// batches of those records.
+    pub fn slice(&self, input: std::ops::Range<usize>) -> Self {
+        let searched = self.searched_in(input.clone());
+        Self {
+            placements: Placements(if self.placements.0.is_empty() {
+                Vec::new()
+            } else {
+                self.placements.0[searched.clone()].to_vec()
+            }),
+            ordinals: self.ordinals[searched]
+                .iter()
+                .map(|&ordinal| ordinal - input.start)
+                .collect(),
+            input_lengths: self.input_lengths[input.clone()].to_vec(),
+            skipped: self.skipped[input].to_vec(),
+            range_length: self.range_length,
+        }
+    }
+
     /// The query batches of the input with a fixed batch size: NCBI reads batches while
     /// records remain (`!input.End()`), so a batch can hold only skipped records (NCBI then
     /// stops with `Empty CBlastQueryVector`, and no batch follows). A batch size of 0
@@ -772,6 +806,67 @@ mod tests {
                 }
             ]
         );
+    }
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): the input records from the start of a batch to the end of a
+    // later one have the whole input's batches of those records (each moved by the slice's first
+    // record and first searched query), with their placements and positions; with `-query_loc`
+    // (skipped records inside a batch) and without it.
+    #[test]
+    fn a_slice_of_whole_batches_has_the_batches_of_the_input() {
+        let lengths = [
+            8000usize, 400, 3000, 200, 7000, 50, 9000, 600, 600, 1200, 300,
+        ];
+        let records: Vec<crate::blastinput::fasta_reader::FastaRecord> = lengths
+            .iter()
+            .enumerate()
+            .map(|(index, &length)| {
+                crate::blastinput::fasta_reader::FastaRecord::new(
+                    format!("Query_{}", index + 1),
+                    format!("q{index}").as_bytes(),
+                    &vec![b'A'; length],
+                )
+            })
+            .collect();
+        let ranged = cut_queries(&records, &SequenceRange { from: 500, to: 999 });
+        assert!(ranged.input.skipped.iter().any(|&skipped| skipped));
+        for input in [QueryInput::whole(&records), ranged.input] {
+            for batch_size in [1u32, 700, 3000, 5000, 10000] {
+                let batches = input.batches(batch_size);
+                for first in 0..batches.len() {
+                    for last in first..batches.len() {
+                        let records = batches[first].input.start..batches[last].input.end;
+                        let searched = batches[first].searched.start..batches[last].searched.end;
+                        let slice = input.slice(records.clone());
+                        let expected: Vec<RangedBatch> = batches[first..=last]
+                            .iter()
+                            .map(|batch| RangedBatch {
+                                input: batch.input.start - records.start
+                                    ..batch.input.end - records.start,
+                                searched: batch.searched.start - searched.start
+                                    ..batch.searched.end - searched.start,
+                            })
+                            .collect();
+                        let what = format!("batch size {batch_size}, records {records:?}");
+                        assert_eq!(slice.batches(batch_size), expected, "{what}");
+                        assert_eq!(slice.ordinals.len(), searched.len(), "{what}");
+                        for (index, query) in searched.clone().enumerate() {
+                            assert_eq!(
+                                slice.ordinal(index) + records.start,
+                                input.ordinal(query),
+                                "{what}"
+                            );
+                            assert_eq!(
+                                slice.placements.get(index),
+                                input.placements.get(query),
+                                "{what}"
+                            );
+                        }
+                        assert_eq!(slice.range_length, input.range_length);
+                    }
+                }
+            }
+        }
     }
 
     #[test]

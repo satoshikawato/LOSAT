@@ -7621,7 +7621,7 @@ fn x_query_block_plan(
     Vec<std::ops::Range<usize>>,
 )> {
     use super::x_query_blocks::XBlockReport;
-    let block_letters = super::x_query_blocks::x_bp_qblock()?;
+    super::x_query_blocks::x_bp_qblock()?;
     // psiblast's PSSMs (`psiblast_ascii_pssms`) are written by the search of all queries.
     if args.query_range.is_some()
         || args.psi_pssm.is_some()
@@ -7745,13 +7745,30 @@ fn x_query_block_plan(
         }
     }
     let query_batches = query_input.batches(batch_size);
+    let blocks = x_batch_blocks(args, queries, &query_batches)?;
+    x_block_search_refuses_nothing(args, queries, &query_batches, &lengths)
+        .then_some((kinds, blocks))
+}
+
+// No NCBI counterpart: chooses LOSAT's blocks; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): the blocks of whole batches of `queries` (the searched queries of
+/// `query_batches`, which are batches of the whole input) closed on their letters
+/// (`x_query_blocks::x_query_blocks` with `x_bp_qblock`), where there is more than one, or one
+/// block of letters whose standard table's words pass the most of a block (`x_aa_one_block_splits`;
+/// the blocks are then closed on their words on the search's pool, `x_word_blocks`); `None`
+/// otherwise (the switch off, a batch the blocks cannot take). The blocks of the block search
+/// (`x_query_block_plan`, with the checks of its reports) and of the preliminary stage of the
+/// search of all queries (`x_prelim_block_plan`).
+fn x_batch_blocks(
+    args: &ResolvedBlastpArgs,
+    queries: &[FastaRecord],
+    query_batches: &[seq_range::RangedBatch],
+) -> Option<Vec<std::ops::Range<usize>>> {
+    let block_letters = super::x_query_blocks::x_bp_qblock()?;
+    let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
     let blocks =
-        super::x_query_blocks::x_query_blocks(&query_batches, &lengths, block_letters, None)?;
-    // One block of letters goes on where its standard table's words pass the most of a block
-    // (`x_aa_one_block_splits`; the blocks are then closed on their words, `x_word_blocks`).
-    ((blocks.len() > 1 || x_aa_one_block_splits(args, queries, &query_batches))
-        && x_block_search_refuses_nothing(args, queries, &query_batches, &lengths))
-    .then_some((kinds, blocks))
+        super::x_query_blocks::x_query_blocks(query_batches, &lengths, block_letters, None)?;
+    (blocks.len() > 1 || x_aa_one_block_splits(args, queries, query_batches)).then_some(blocks)
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): whether the search of all queries passes the checks that refuse

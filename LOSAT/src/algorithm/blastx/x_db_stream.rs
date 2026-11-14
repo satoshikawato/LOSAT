@@ -280,17 +280,17 @@ impl<'a> XStreamDb<'a> {
         self.db.min_length()
     }
 
-    /// The block of a pass that starts at `oid`: as many sequences as fit `block_bytes`
+    /// The block of a pass that starts at `ordinal`: as many sequences as fit `block_bytes`
     /// (`SeqDb::next_block`, at least one).
-    fn read_from(&self, oid: usize) -> Result<XBlock> {
-        let range = u32::try_from(oid)
+    fn read_from(&self, ordinal: usize) -> Result<XBlock> {
+        let range = u32::try_from(ordinal)
             .ok()
             .and_then(|first| self.db.next_block(first, self.block_bytes))
-            .ok_or_else(|| anyhow!("BLASTX database ordinal id {oid} is past the database"))?;
+            .ok_or_else(|| anyhow!("BLASTX database ordinal id {ordinal} is past the database"))?;
         let part = self.db.read_block(range).map_err(read_error)?;
         self.x_check(&part)?;
         Ok(XBlock {
-            first: oid,
+            first: ordinal,
             end: range.end_ordinal() as usize,
             parts: vec![part],
         })

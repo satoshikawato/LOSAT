@@ -1517,7 +1517,7 @@ impl<'a> HeaderReader<'a> {
     // `blastdb-ids-20261021/R/weak/REVIEW_weak_1.md` H1). A version 4 database's ISAM keys are in
     // lower case without the alternative.
     /// For `found_instead` where NCBI's formatters may read the reported sequences one by one:
-    /// another sequence of the database, by ordinal id, that holds an id the Seq-align id `id` of
+    /// another sequence of the database (`DbSequence`) that holds an id the Seq-align id `id` of
     /// the sequence `ordinal` matches weakly (`seqid::id_scope::weak_keys`), found among the
     /// sequences that NCBI's lookup gives for `id` (`oids`: in both versions an accession without a
     /// version gives its versions, in version 4 a name its holders) and for its name alone. In
@@ -4631,7 +4631,7 @@ pub(crate) fn prefetch_reads(
             reason,
         } => (other, or_itself, reason),
     };
-    let other = other.ordinal;
+    let other = other.ordinal();
     let set = db
         .defline_set(other)
         .map_err(|error| database_error(error, program))?;
@@ -4914,9 +4914,9 @@ pub(crate) fn scope_bioseq(
     match subject.found() {
         Some(FoundInstead::Sequence(other)) => {
             let set = db
-                .defline_set(other.ordinal)
+                .defline_set(other.ordinal())
                 .map_err(|error| database_error(error, program))?;
-            Ok(other_bioseq(&set, other.ordinal, subject).unwrap_or(none))
+            Ok(other_bioseq(&set, other.ordinal(), subject).unwrap_or(none))
         }
         Some(FoundInstead::Nothing | FoundInstead::ThrowsOnId(_) | FoundInstead::Failed(_)) => {
             Ok(none)

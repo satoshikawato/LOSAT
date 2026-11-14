@@ -69,8 +69,9 @@ the alias `pord_vx.pal` (which lists `pord_x` first: NCBI orders the volumes of 
 
 Aliases that restrict a database with parsed Seq-ids by `FIRST_OID` and `LAST_OID` (line DBID ordnum):
 `pfound_r.pal` (OIDs 1 to 9 of `pfound_v5`), `refuse_r.pal` (OIDs 1 to 5 of `refuse_v5`) and `njoined_r.nal`
-(`nfound_v4`, `njoined_a` and `njoined_b`, OIDs 2 and 3 only: the pair of `njoined`). The rank of a searched sequence
-is one less than its OID; LOSAT's refusals name the OID.
+(`nfound_v4`, `njoined_a` and `njoined_b`, OIDs 2 and 3 only: the pair of `njoined`), and the list `pfound_nsl.txt`
+(AAA00001.1, OID 0 of `pfound_v5`, for `-negative_seqidlist`). The rank of a searched sequence is its OID less the
+OIDs left out before it; LOSAT's refusals name the OID.
 
 Seq-align ids that NCBI's formatters look up like any other (line DBID N2b; the FASTA comes from `make_look_fasta.py`):
 `plook_v5.*` and `plook_v4.*` from `plook.faa`, `plook_z.*` (version 5) from `plook_z.faa`, read after `plook_v5`
@@ -591,6 +592,7 @@ def main() -> int:
         (args.out / f"{alias}.{ext}").write_text(
             f"#\n# Alias file of line DBID, ordnum\n#\nTITLE {alias} ({title})\n"
             f"DBLIST {names}\nFIRST_OID {first}\nLAST_OID {last}\n")
+    (args.out / "pfound_nsl.txt").write_text("AAA00001.1\n")
     build_weak(args)
     build_copytaxid(args)
     build_join(args)

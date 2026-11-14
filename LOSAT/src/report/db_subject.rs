@@ -638,8 +638,8 @@ impl ParsedSubject {
         let id = || String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
         match self.weak_match.as_ref().filter(|_| one_by_one) {
             None => Ok(()),
-            Some(WeakMatch::Held(ordinal)) => Err(format!(
-                "has the Seq-align id {}, which can match an id of database sequence {ordinal} weakly (an accession with a version for one without, a name with or without an accession, a pir or prf accession as a name): in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one and that sequence first, it can write that sequence's names and letters for it",
+            Some(WeakMatch::Held(other)) => Err(format!(
+                "has the Seq-align id {}, which can match an id of database sequence {other} weakly (an accession with a version for one without, a name with or without an accession, a pir or prf accession as a name): in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one and that sequence first, it can write that sequence's names and letters for it",
                 id()
             )),
             Some(WeakMatch::Unlisted) => Err(format!(
@@ -679,17 +679,17 @@ impl ParsedSubject {
             {
                 return None
             }
-            FoundInstead::OtherTaxids(ordinal) | FoundInstead::CopyApart(ordinal, CopyApart::Title) => format!(
-                "has the Seq-align id {id}, which database sequence {ordinal} also holds with the same definition lines and letters but other taxids (NCBI BLAST+ 2.17.0 can write that sequence's taxids and their names for it)"
+            FoundInstead::OtherTaxids(other) | FoundInstead::CopyApart(other, CopyApart::Title) => format!(
+                "has the Seq-align id {id}, which database sequence {other} also holds with the same definition lines and letters but other taxids (NCBI BLAST+ 2.17.0 can write that sequence's taxids and their names for it)"
             ),
-            FoundInstead::CopyApart(ordinal, CopyApart::TaxonomyTexts) => format!(
-                "has the Seq-align id {id}, which database sequence {ordinal} also holds with the same definition lines and letters: where NCBI BLAST+ 2.17.0 shows that sequence for it, the volume of that sequence looks its taxids up, and the taxonomy database writes a text at such a lookup"
+            FoundInstead::CopyApart(other, CopyApart::TaxonomyTexts) => format!(
+                "has the Seq-align id {id}, which database sequence {other} also holds with the same definition lines and letters: where NCBI BLAST+ 2.17.0 shows that sequence for it, the volume of that sequence looks its taxids up, and the taxonomy database writes a text at such a lookup"
             ),
-            FoundInstead::Sequence(ordinal) => format!(
-                "has the Seq-align id {id}, by which NCBI BLAST+'s lookup gives database sequence {ordinal} first (NCBI BLAST+ 2.17.0 writes that sequence's names and letters, or stops)"
+            FoundInstead::Sequence(other) => format!(
+                "has the Seq-align id {id}, by which NCBI BLAST+'s lookup gives database sequence {other} first (NCBI BLAST+ 2.17.0 writes that sequence's names and letters, or stops)"
             ),
-            FoundInstead::AlsoHeld(ordinal) => format!(
-                "has the Seq-align id {id}, which database sequence {ordinal} also holds (where both are reported, NCBI BLAST+ 2.17.0 can write that sequence's names and letters for it)"
+            FoundInstead::AlsoHeld(other) => format!(
+                "has the Seq-align id {id}, which database sequence {other} also holds (where both are reported, NCBI BLAST+ 2.17.0 can write that sequence's names and letters for it)"
             ),
             FoundInstead::CaseUnknown(message) => format!(
                 "has the Seq-align id {id}, for which LOSAT cannot list the sequences that hold it in another letter case ({message}): where such a sequence is also reported, NCBI BLAST+ 2.17.0 can write its names and letters for it"
@@ -812,8 +812,8 @@ impl ParsedSubject {
     /// word of a nucleotide or of a protein title ending in `]`).
     pub fn generated_title_fetched(&self) -> Result<(), String> {
         match &self.found_instead {
-            Some(FoundInstead::CopyApart(ordinal, CopyApart::Title)) => Err(format!(
-                "has the Seq-align id {}, which database sequence {ordinal} also holds with the same definition lines and letters but other taxids, from which NCBI BLAST+ 2.17.0 can make that sequence's title for it (a title made from the taxids with the taxonomy database, or the end of a protein title rewritten)",
+            Some(FoundInstead::CopyApart(other, CopyApart::Title)) => Err(format!(
+                "has the Seq-align id {}, which database sequence {other} also holds with the same definition lines and letters but other taxids, from which NCBI BLAST+ 2.17.0 can make that sequence's title for it (a title made from the taxids with the taxonomy database, or the end of a protein title rewritten)",
                 String::from_utf8_lossy(&self.alignment_fasta())
             )),
             _ => Ok(()),
@@ -2384,18 +2384,18 @@ mod tests {
         assert!(matches!(
             prefetched(Some(FoundInstead::Sequence(DbSequence::of_unrestricted(4)))),
             Prefetched::Another {
-                other: Some(DbSequence { ordinal: 4, .. }),
+                other: Some(other),
                 or_itself: false,
                 ..
-            }
+            } if other == DbSequence::of_unrestricted(4)
         ));
         assert!(matches!(
             prefetched(Some(FoundInstead::AlsoHeld(DbSequence::of_unrestricted(4)))),
             Prefetched::Another {
-                other: Some(DbSequence { ordinal: 4, .. }),
+                other: Some(other),
                 or_itself: true,
                 ..
-            }
+            } if other == DbSequence::of_unrestricted(4)
         ));
         assert!(matches!(
             prefetched(Some(FoundInstead::CopyApart(
@@ -2413,8 +2413,8 @@ mod tests {
         assert_eq!(shown.prefetched(), Prefetched::Itself);
         assert!(matches!(
             shown.clone().found_instead(Some(FoundInstead::Sequence(DbSequence::of_unrestricted(3)))).prefetched(),
-            Prefetched::Another { other: Some(DbSequence { ordinal: 3, .. }), or_itself: false, reason }
-                if reason.contains("gives database sequence 3 first")
+            Prefetched::Another { other: Some(other), or_itself: false, reason }
+                if other == DbSequence::of_unrestricted(3) && reason.contains("gives database sequence 3 first")
         ));
         assert_eq!(
             shown

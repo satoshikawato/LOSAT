@@ -2090,7 +2090,7 @@ impl Oid {
 }
 
 /// The OID, by which LOSAT's refusals name a database sequence ("database sequence n", as
-/// `blastdbcmd -entry 'gnl|BL_ORD_ID|n'` reads it), not by its rank in a list or an alias range
+/// `blastdbcmd -outfmt %o` prints it), not by its rank in a list or an alias range
 /// that restricts the search: each takes an `Oid`, a [`DbSequence`], or a closure that gives
 /// one where it refuses.
 impl std::fmt::Display for Oid {
@@ -2127,12 +2127,17 @@ impl OidMap<'_> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DbSequence {
     /// The ordinal id.
-    pub(crate) ordinal: u32,
+    ordinal: u32,
     /// The OID ([`SeqDb::oid`] of `ordinal`).
-    pub(crate) oid: Oid,
+    oid: Oid,
 }
 
 impl DbSequence {
+    /// The ordinal id, by which LOSAT reads the sequence.
+    pub(crate) fn ordinal(self) -> u32 {
+        self.ordinal
+    }
+
     /// The sequence `ordinal` of a test's database that is not restricted.
     #[cfg(test)]
     pub(crate) fn of_unrestricted(ordinal: u32) -> Self {

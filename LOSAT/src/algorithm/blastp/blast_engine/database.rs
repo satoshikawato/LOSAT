@@ -2698,6 +2698,42 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_rejected_search_block_of_a_restricted_database_names_the_oid() {
+        // prot_v4 through an alias whose range keeps OIDs 2 to 9 (line DBID ordnum): the block's
+        // sequence 7 (rank 7) is OID 9.
+        let dir = std::env::temp_dir().join(format!("losat_bp_ordnum_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let alias = dir.join("prot_v4_r.pal");
+        std::fs::write(
+            &alias,
+            format!(
+                "TITLE prot_v4_r\nDBLIST {}\nFIRST_OID 3\nLAST_OID 10\n",
+                fixture("prot_v4")
+            ),
+        )
+        .unwrap();
+        let database = BlastpDatabase::open(
+            dir.join("prot_v4_r").to_str().unwrap(),
+            &ApplicationSettings::default(),
+            "BLASTP",
+        )
+        .unwrap();
+        let range = database.db.next_block(0, u64::MAX).unwrap();
+        assert_eq!((range.first_ordinal, range.len()), (0, 8));
+        let mut block = database.db.read_block(range).unwrap();
+        let position = (0..7).map(|j| block.protein(j).len() + 1).sum::<usize>() + 1;
+        block.protein_bytes_mut()[position] = 28;
+        let error = prepare_search_block(&mut block, database.db.oid_map(), "BLASTP").unwrap_err();
+        assert!(
+            format!("{error:#}").starts_with(
+                "database sequence 9 holds a byte that is no NCBIstdaa residue at position 1,"
+            ),
+            "{error:#}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// A kernel that records what it is given and "finds" every third sequence.
     fn recording_kernel(
         window: i32,

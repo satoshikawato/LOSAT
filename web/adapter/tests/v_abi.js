@@ -467,6 +467,21 @@ function checkSurface(reactor, native) {
   }
   // validate: accepted argv, and CLI errors with the CLI's words.
   assert.equal(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s"].join("\0")).status, 0);
+  // NCBI's application start (abi_v2.md §4 `losat_web2_start`, line RG E1w-3a): the *start* JSON, the
+  // file of -conffile as a registry file (kind 2), and -dryrun.
+  const started = reactor.call("losat_web2_start", ["tblastx", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-logfile", "run.log", "-dryrun"].join("\0"));
+  assert.equal(started.status, 0, started.error);
+  assert.deepEqual(JSON.parse(started.streams.get(2).toString()), { conffile: "e1w3a.ini", log_file: "run.log", dry_run: true });
+  const conffile = ["blastp", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-outfmt", "x", "-dryrun"].join("\0");
+  assert.equal(reactor.call("losat_web2_validate", conffile).error, 'Critical: (106.23) Registry file "e1w3a.ini" not found, aborting.');
+  const registry = Buffer.from("[BLAST]\n");
+  const begunRegistry = reactor.call("losat_web2_file_begin", 2, "e1w3a.ini", registry.length);
+  assert.ok(begunRegistry.status > 0, begunRegistry.error);
+  assert.equal(reactor.call("losat_web2_file_chunk", begunRegistry.status, registry).status, 0);
+  const endedRegistry = reactor.call("losat_web2_file_end", begunRegistry.status);
+  assert.equal(JSON.parse(endedRegistry.streams.get(2).toString()).kind, "registry");
+  assert.equal(reactor.call("losat_web2_validate", conffile).status, 0, "a dry run reads no -outfmt");
+  assert.equal(reactor.call("losat_web2_file_release", begunRegistry.status).status, 0);
   for (const argv of [["blastp", "-query", "q", "-subject", "s", "-evalue", "abc"],
                       ["tblastn", "-query", "q", "-subject", "s", "-db_gencode", "7"],
                       ["blastn", "-query", "q", "-subject", "s", "-nosuchoption", "1"],

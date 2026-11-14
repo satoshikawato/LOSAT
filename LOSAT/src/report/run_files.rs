@@ -8,7 +8,7 @@ use std::ffi::OsStr;
 use std::io;
 use std::sync::Arc;
 
-use crate::blastinput::ncbi_environment::{diag_target, DiagTarget};
+use crate::blastinput::ncbi_environment::{diag_target, special_log_target, DiagTarget};
 
 /// The receiver of the files of a run that a caller without files takes in place of the files
 /// (LOSAT Web's host): the side files of outfmt 13 and 14 (`report::blast_xml2::SideFileSink`) and
@@ -33,22 +33,24 @@ impl RunFiles {
     // `ncbi_environment::diag_target`): no file for `""` and `/dev/null`, `cerr` for `-`, else the
     // file, or `cerr` when its directory does not exist.
     /// The target of the `-logfile` value `name` (`None` without one). On `Disk` the file
-    /// system's (`diag_target`). For a `Receiver`: `cerr` without a name and for `-`, no output for
-    /// `""` and `/dev/null`, and a file in memory for any other name without a directory, which
-    /// `deliver_log` hands over; a name with a directory is LOSAT Web's refusal (its host has no
-    /// directories, where NCBI would write the messages to `cerr` instead).
+    /// system's (`diag_target`). For a `Receiver`: NCBI's special names as there
+    /// (`special_log_target`), `cerr` for `.` and `..` (directories, which NCBI cannot open), and a
+    /// file in memory for any other name without a directory, which `deliver_log` hands over; a
+    /// name with a directory is LOSAT Web's refusal (its host has no directories, where NCBI would
+    /// write the messages to `cerr` instead).
     pub fn log_target(&self, name: Option<&OsStr>) -> Result<DiagTarget, String> {
         match self {
             RunFiles::Disk => Ok(diag_target(name)),
-            RunFiles::Receiver(_) => match name {
-                None => Ok(DiagTarget::Stderr),
-                Some(name) if name == "-" => Ok(DiagTarget::Stderr),
-                Some(name) if name.is_empty() || name == "/dev/null" => Ok(DiagTarget::Discard),
-                Some(name) if name.as_encoded_bytes().contains(&b'/') => Err(format!(
+            RunFiles::Receiver(_) => match (special_log_target(name), name) {
+                (Some(target), _) => Ok(target),
+                (None, None) => Ok(DiagTarget::Stderr),
+                // The working directory and its parent, which NCBI cannot open as a file: `cerr`.
+                (None, Some(name)) if name == "." || name == ".." => Ok(DiagTarget::Stderr),
+                (None, Some(name)) if name.as_encoded_bytes().contains(&b'/') => Err(format!(
                     "the -logfile name {} has a directory, which LOSAT Web does not have: give a file name without one",
                     name.to_string_lossy()
                 )),
-                Some(_) => Ok(DiagTarget::Memory(Vec::new())),
+                (None, Some(_)) => Ok(DiagTarget::Memory(Vec::new())),
             },
         }
     }
@@ -91,6 +93,8 @@ mod tests {
         assert!(matches!(target(Some("-")), Ok(DiagTarget::Stderr)));
         assert!(matches!(target(Some("")), Ok(DiagTarget::Discard)));
         assert!(matches!(target(Some("/dev/null")), Ok(DiagTarget::Discard)));
+        assert!(matches!(target(Some(".")), Ok(DiagTarget::Stderr)));
+        assert!(matches!(target(Some("..")), Ok(DiagTarget::Stderr)));
         for name in ["d/run.log", "./run.log", "/tmp/run.log"] {
             assert_eq!(
                 target(Some(name)).err().as_deref(),

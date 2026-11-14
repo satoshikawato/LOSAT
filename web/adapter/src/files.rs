@@ -356,31 +356,38 @@ pub fn source() -> Arc<dyn CountsSource> {
 
 /// The registry files of a run (kind 2), by name: the files that its application start reads
 /// instead of the file system (`losat::web_adapter::start_run`). A registered file is the file of
-/// its name in the command line's working directory: the start finds it by that name (a
-/// `-conffile` value) and by that name after `./`, the working directory on NCBI's registry search
-/// path; nothing else is a file. The table is copied when the run starts.
+/// its name in the command line's working directory, so a leading `./` (the working directory on
+/// NCBI's registry search path, or written in the name) names the same file (`working_name`);
+/// nothing else is a file. The table is copied when the run starts.
 pub struct RegisteredRegistry {
     files: HashMap<String, Arc<RegistryFile>>,
 }
 
+/// The name of `path` in the working directory: without its leading `.` components (`./c.ini` and
+/// `c.ini` are one file); `None` for a path that is not UTF-8 or names the directory itself.
+fn working_name(path: &std::path::Path) -> Option<String> {
+    let rest: std::path::PathBuf = path
+        .components()
+        .skip_while(|part| matches!(part, std::path::Component::CurDir))
+        .collect();
+    let name = rest.to_str()?;
+    (!name.is_empty()).then(|| name.to_string())
+}
+
 impl RegisteredRegistry {
     fn file(&self, path: &std::path::Path) -> Option<&RegistryFile> {
-        let by_name = |path: &std::path::Path| {
-            path.to_str()
-                .and_then(|name| self.files.get(name))
-                .map(|file| &**file)
-        };
-        by_name(path).or_else(|| {
-            path.strip_prefix(".")
-                .ok()
-                .filter(|rest| !rest.as_os_str().is_empty())
-                .and_then(by_name)
-        })
+        working_name(path)
+            .and_then(|name| self.files.get(&name))
+            .map(|file| &**file)
     }
 }
 
 impl losat::web_adapter::RegistryFiles for RegisteredRegistry {
     fn is_file(&self, path: &std::path::Path) -> bool {
+        self.file(path).is_some()
+    }
+
+    fn opens(&self, path: &std::path::Path) -> bool {
         self.file(path).is_some()
     }
 
@@ -396,7 +403,9 @@ pub fn registry_files() -> RegisteredRegistry {
         files: files
             .registry
             .values()
-            .map(|file| (file.name.clone(), file.clone()))
+            .filter_map(|file| {
+                working_name(std::path::Path::new(&file.name)).map(|name| (name, file.clone()))
+            })
             .collect(),
     }
 }

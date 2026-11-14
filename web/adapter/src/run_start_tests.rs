@@ -296,3 +296,98 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
         "psiblast is not available in the browser (ABI v2)"
     );
 }
+
+// NCBI BLAST+ 2.17.0 (probes `log_warn`, `log_engine_err` of line RG `E/SURVEY_E1.md`): TBLASTX
+// writes the messages of its run, and the error that ends it, to the `-logfile` file. In LOSAT Web
+// the file of a run that failed comes on stream 8 too, and a run of two searches (here the tabular
+// formats' hit list size of 0, which fails them alone) writes into it what stream 3 has without
+// `-logfile`. The command line's file of the failed run (ws, the gate's build of this branch, NCBI's
+// text): `BLAST query/options error: expect value ...`.
+#[test]
+fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
+    let failed = argv("tblastx", &["-evalue", "0", "-logfile", "run.log"]);
+    let (result, streams) = run_of(&failed);
+    assert!(result.is_err());
+    assert_eq!(
+        run_files(&streams),
+        Some(vec![(
+            "run.log".to_string(),
+            "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the BLAST+ user manual.\n".to_string()
+        )])
+    );
+    for program in ["tblastx", "blastn"] {
+        let plain_words = argv(program, &["-num_alignments", "0"]);
+        let (result, plain) = run_of(&plain_words);
+        result.unwrap();
+        let stderr = stream_text(&plain, STREAM_DIAGNOSTICS);
+        assert!(
+            stderr.contains("No hits are being saved"),
+            "{program}: {stderr}"
+        );
+        let mut words = plain_words.clone();
+        words.extend(["-logfile", "run.log"]);
+        let (result, logged) = run_of(&words);
+        result.unwrap();
+        assert_eq!(logged.get(&0), plain.get(&0), "{program}");
+        let expected = match program {
+            "tblastx" => (String::new(), stderr),
+            _ => (stderr, String::new()),
+        };
+        assert_eq!(
+            (stream_text(&logged, STREAM_DIAGNOSTICS), run_files(&logged)),
+            (expected.0, Some(vec![("run.log".to_string(), expected.1)])),
+            "{program}"
+        );
+    }
+}
+
+// NCBI reads `-outfmt` in `Run`, after a dry run ends (line RG `E/SURVEY_E1b.md`): a value that a run
+// rejects passes a dry run, as on the command line.
+#[test]
+fn a_dry_run_does_not_read_the_outfmt() {
+    for outfmt in ["x", "99", "17"] {
+        let words = argv("tblastx", &["-outfmt", outfmt, "-dryrun"]);
+        validate(&words).unwrap();
+        let (result, streams) = run_of(&words);
+        result.unwrap();
+        assert!(streams.is_empty(), "{outfmt}");
+        let words = argv("tblastx", &["-outfmt", outfmt]);
+        assert!(validate(&words).is_err(), "{outfmt}");
+    }
+}
+
+// A registered registry file is the file of its name in the working directory: `./NAME` and `NAME`
+// are one file, whichever the host registered or the argv wrote.
+#[test]
+fn a_leading_dot_slash_names_the_same_registry_file() {
+    let _registered = Registered::new("./e1w3a_dot.ini", b"[x\n");
+    let report = SECTION_REPORT.repeat(2).trim_end().to_string();
+    for name in ["e1w3a_dot.ini", "./e1w3a_dot.ini", "././e1w3a_dot.ini"] {
+        let words = argv("blastp", &["-conffile", name]);
+        assert_eq!(validate(&words).unwrap_err(), report, "{name}");
+    }
+}
+
+// The engine's list of the programs whose ABI v2 runs take the toolkit's words names the programs
+// that the adapter runs (`Program::parse`).
+#[test]
+fn the_engines_list_of_web_programs_is_the_adapters() {
+    for name in [
+        "blastn",
+        "blastp",
+        "blastx",
+        "tblastn",
+        "tblastx",
+        "psiblast",
+        "rpsblast",
+        "rpstblastn",
+        "makeblastdb",
+        "rpsbproc",
+    ] {
+        assert_eq!(
+            Program::parse(name).is_ok(),
+            losat::web_adapter::WEB_V2_PROGRAMS.contains(&name),
+            "{name}"
+        );
+    }
+}

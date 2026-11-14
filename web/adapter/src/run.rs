@@ -156,6 +156,14 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
 /// as they do without `-outfmt`, but for an `-outfmt` whose custom delimiter the CLI rejects
 /// (`validate`).
 pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), String> {
+    let (program, command) = parse_words(words)?;
+    read_outfmt(words, program, command)
+}
+
+/// The first part of `parse_run`: the adapter's own rules and the engine's CLI parser, without the
+/// reading of `-outfmt`, which NCBI makes in `Run`, after the settings and a dry run's end
+/// (`started_command`).
+fn parse_words(words: &[&str]) -> Result<(Program, Commands), String> {
     for word in words.iter().skip(1) {
         let key = word.split('=').next().unwrap_or("");
         if matches!(key, "-out" | "--out") {
@@ -177,7 +185,15 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
     let cli: Cli = losat::web_adapter::try_parse_cli(argv)
         .map_err(|error| losat::web_adapter::render_message(&error))?;
     let program = Program::parse(words.first().copied().unwrap_or(""))?;
-    let mut command = cli.command;
+    Ok((program, cli.command))
+}
+
+/// The second part of `parse_run`: the argv's `-outfmt`, read as the CLI reads it.
+fn read_outfmt(
+    words: &[&str],
+    program: Program,
+    mut command: Commands,
+) -> Result<(Program, Commands, Option<String>), String> {
     let outfmt = std::mem::replace(outfmt_of(&mut command), "0".to_string());
     let choice = losat::web_adapter::parse_formatting_string(&outfmt)
         .map_err(|error| format!("{error:#}"))?;
@@ -276,13 +292,20 @@ fn start(
     }
 }
 
-/// Whether the argv `words` (program name first) has `-dryrun` (`losat::web_adapter::preparse`):
-/// the command line ends then after its start, the arguments and the settings, with exit status 0.
-fn dry_run(words: &[&str]) -> bool {
-    matches!(
-        losat::web_adapter::preparse(words.get(1..).unwrap_or(&[])),
-        losat::web_adapter::Preparsed::Words { dryrun: true, .. }
-    )
+/// The argv `words` after the run's start `started`, in the command line's order (`cli::main_entry`):
+/// the arguments parsed (`parse_words`), the settings that LOSAT refuses (`start.settings()?`), the
+/// end of a dry run (`None`: rc 0), then `-outfmt`, which NCBI reads in `Run` (`read_outfmt`: a dry
+/// run does not read it). `validate` and `run` take the argv here.
+fn started_command(
+    words: &[&str],
+    started: &CallerStart,
+) -> Result<Option<(Program, Commands, Option<String>)>, String> {
+    let (program, command) = parse_words(words)?;
+    started.settings()?;
+    if started.dry_run() {
+        return Ok(None);
+    }
+    read_outfmt(words, program, command).map(Some)
 }
 
 /// A receiver of the files of a run that keeps none (`validate`, which emits nothing).
@@ -353,6 +376,10 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
         &mut std::io::sink(),
     )
     .map_err(|(message, _)| message)?;
+    let Some((program, command, custom)) = started_command(words, &started)? else {
+        return Ok(());
+    };
+    let settings = started.settings()?;
     // The ranges' syntax, in NCBI's order: the subject range where the subjects are read
     // (before the other option handlers), the query range with the query options (the
     // engine's option checks read it). Whether a range fits the records is checked by
@@ -360,11 +387,6 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
     let subject_range = |subject_loc: Option<&str>| {
         parse_optional_range(subject_loc, RangeRole::Subject).map(|_| ())
     };
-    let (program, command, custom) = parse_run(words)?;
-    let settings = started.settings()?;
-    if dry_run(words) {
-        return Ok(());
-    }
     let groups = search_groups(&outputs(program, custom.as_deref()), &command);
     let custom_check = || custom_handler_check(program, custom.as_deref());
     // A custom delimiter that a field uses makes the CLI reject the argv, whatever the hit list
@@ -1175,70 +1197,50 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
     let files = Arc::new(RunFileArchive::default());
     let run_files = RunFiles::Receiver(files.clone());
     let mut diagnostics = StreamWriter::new(STREAM_DIAGNOSTICS);
-    let arguments = words.get(1..).unwrap_or(&[]);
-    let result = match start(words, &run_files, &mut diagnostics) {
-        Ok(mut started) => {
-            let result = run_started(words, query, subject, &mut started, &mut diagnostics);
-            files.keep(started.finish(arguments, &run_files));
-            result
-        }
-        Err((message, started)) => {
-            if let Some(started) = started {
-                files.keep(started.finish(arguments, &run_files));
-            }
-            Err(message)
-        }
+    let (result, started) = match start(words, &run_files, &mut diagnostics) {
+        Ok(mut started) => (
+            run_started(words, query, subject, &mut started, &mut diagnostics),
+            Some(started),
+        ),
+        Err((message, started)) => (Err(message), started),
     };
-    files.emit();
-    result
+    // The run's files (the file of `-logfile`), after the run, whether it failed or not.
+    let handed = started.map_or(Ok(()), CallerStart::finish);
+    let emitted = handed.and_then(|()| files.emit());
+    result.and(emitted.map_err(|error| format!("the files of the run: {error}")))
 }
 
 /// The files of a run besides its outputs (the file of `-logfile`), which the engine hands over
 /// when the run ends (`RunFiles::Receiver`), emitted as a ZIP archive on `STREAM_RUN_FILES` after
 /// the run, whether it succeeded or failed (docs/web/abi_v2.md §5), and only when there are any.
 #[derive(Default)]
-struct RunFileArchive {
-    files: std::sync::Mutex<Vec<(Vec<u8>, Vec<u8>)>>,
-    /// The first error of handing a file over.
-    error: std::sync::Mutex<Option<String>>,
-}
+struct RunFileArchive(std::sync::Mutex<Vec<(Vec<u8>, Vec<u8>)>>);
 
 impl RunFileArchive {
-    /// Keeps the error of a hand-over (`CallerStart::finish`).
-    fn keep(&self, handed: std::io::Result<()>) {
-        if let Err(error) = handed {
-            self.error
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .get_or_insert(error.to_string());
-        }
-    }
-
-    /// Emits the archive of the files (stored entries, as stream 4's, `zip::ZipStream`).
-    fn emit(&self) {
+    /// Emits the archive of the files (stored entries, as stream 4's, `zip::ZipStream`). `Err` when
+    /// the archive cannot hold a file (a name of 65,536 bytes or more).
+    fn emit(&self) -> std::io::Result<()> {
         let files = std::mem::take(
             &mut *self
-                .files
+                .0
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()),
         );
         if files.is_empty() {
-            return;
+            return Ok(());
         }
         let mut zip = crate::zip::ZipStream::new(StreamWriter::new(STREAM_RUN_FILES));
-        let finished = files
-            .iter()
-            .try_for_each(|(name, bytes)| zip.add(name, bytes))
-            .and_then(|()| zip.finish());
-        if let Ok(mut stream) = finished {
-            stream.finish();
+        for (name, bytes) in &files {
+            zip.add(name, bytes)?;
         }
+        zip.finish()?.finish();
+        Ok(())
     }
 }
 
 impl losat::web_adapter::FileReceiver for RunFileArchive {
     fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
-        self.files
+        self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .push((name.to_vec(), bytes.to_vec()));
@@ -1246,11 +1248,11 @@ impl losat::web_adapter::FileReceiver for RunFileArchive {
     }
 }
 
-/// `run` after the application start `started`: the argv parsed, the settings that LOSAT refuses,
-/// a dry run's end, then the searches. The messages that the command line writes to its standard
-/// error during the run go where the run's messages go (`CallerStart::route`: the file of
-/// `-logfile` in TBLASTX, else stream 3), and the error that ends the run with an NCBI message is
-/// posted there too (`CallerStart::post`), as on the command line.
+/// `run` after the application start `started` (`started_command`: the argv, the settings that
+/// LOSAT refuses, a dry run's end), then the searches. The messages that the command line writes
+/// to its standard error during the run go where the run's messages go, as they come
+/// (`CallerStart::sink`: the file of `-logfile` in TBLASTX, else stream 3), and the error that ends
+/// the run with an NCBI message is posted there too (`CallerStart::post`), as on the command line.
 fn run_started(
     words: &[&str],
     query: &[FastaRecord],
@@ -1258,25 +1260,24 @@ fn run_started(
     started: &mut CallerStart,
     diagnostics: &mut StreamWriter,
 ) -> Result<(), String> {
-    use std::io::Write as _;
-    let (program, command, custom) = parse_run(words)?;
-    let settings = started.settings()?.clone();
-    if dry_run(words) {
+    let Some(parsed) = started_command(words, started)? else {
         diagnostics.finish();
         return Ok(());
-    }
-    let mut messages = Vec::new();
+    };
+    let settings = started.settings()?.clone();
     let mut posted = None;
-    let searched = search_all(
-        (program, command, custom),
-        words,
-        query,
-        subject,
-        &settings,
-        &mut messages,
-        &mut posted,
-    );
-    let rest = started.route(messages);
+    let searched = {
+        let mut sink = started.sink(diagnostics);
+        search_all(
+            parsed,
+            words,
+            query,
+            subject,
+            &settings,
+            &mut sink,
+            &mut posted,
+        )
+    };
     let Done {
         mut writers,
         records,
@@ -1292,7 +1293,6 @@ fn run_started(
     for writer in &mut writers {
         writer.finish();
     }
-    let _ = diagnostics.write_all(&rest);
     diagnostics.finish();
     if let Some((hits, recorder, ordinals)) = records {
         emit_hit_records(&hits, &recorder, ordinals.as_deref());
@@ -1308,7 +1308,7 @@ struct Done {
 }
 
 /// The searches of a run of the parsed argv `parsed` (`run`): the messages that the command line
-/// writes to its standard error go to `messages`; for an error that ends the run, `posted` gets
+/// writes to its standard error go to `diagnostics`; for an error that ends the run, `posted` gets
 /// the NCBI message that the command line writes for it (`Failed::native`).
 fn search_all(
     parsed: (Program, Commands, Option<String>),
@@ -1316,10 +1316,9 @@ fn search_all(
     query: &[FastaRecord],
     subject: &[FastaRecord],
     settings: &ApplicationSettings,
-    diagnostics: &mut Vec<u8>,
+    diagnostics: &mut (dyn std::io::Write + Send),
     posted: &mut Option<Vec<u8>>,
 ) -> Result<Done, String> {
-    use std::io::Write as _;
     let (program, command, custom) = parsed;
     let groups = search_groups(&outputs(program, custom.as_deref()), &command);
     let custom_accepted = custom_handler_check(program, custom.as_deref()).is_ok();

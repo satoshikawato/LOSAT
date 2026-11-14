@@ -2023,11 +2023,10 @@ impl Write for DiagStream<'_> {
 /// `-version` (NCBI BLAST+ 2.17.0 makeblastdb and blastdbcmd `-version -logfile F` make `F`:
 /// g_reg probes `ver_log_ok`, `ver_log_ok2`).
 pub fn diag_target(name: Option<&OsStr>) -> DiagTarget {
-    match name {
-        None => DiagTarget::Stderr,
-        Some(name) if name == "-" => DiagTarget::Stderr,
-        Some(name) if name.is_empty() || name == "/dev/null" => DiagTarget::Discard,
-        Some(name) => match std::fs::OpenOptions::new()
+    match (special_log_target(name), name) {
+        (Some(target), _) => target,
+        (None, None) => DiagTarget::Stderr,
+        (None, Some(name)) => match std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(name)
@@ -2035,6 +2034,19 @@ pub fn diag_target(name: Option<&OsStr>) -> DiagTarget {
             Ok(file) => DiagTarget::File(file),
             Err(_) => DiagTarget::Stderr,
         },
+    }
+}
+
+/// The target of NCBI's special `-logfile` names (quoted at `diag_target`): `cerr` without a name
+/// and for `-`, no output for `""` and `/dev/null`; `None` for the name of a file. The one reading
+/// of these names: `diag_target` (the file system) and `report::run_files::RunFiles::log_target`
+/// (LOSAT Web).
+pub fn special_log_target(name: Option<&OsStr>) -> Option<DiagTarget> {
+    match name {
+        None => Some(DiagTarget::Stderr),
+        Some(name) if name == "-" => Some(DiagTarget::Stderr),
+        Some(name) if name.is_empty() || name == "/dev/null" => Some(DiagTarget::Discard),
+        Some(_) => None,
     }
 }
 

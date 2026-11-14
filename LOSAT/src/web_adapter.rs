@@ -21,7 +21,7 @@ use std::ffi::OsString;
 
 // The command line's arguments (`cli.rs`): the clap types of every program, the parser's
 // messages, and the command line's own errors.
-pub use crate::cli::{render_message, Cli, Commands, NativeError};
+pub use crate::cli::{render_message, Cli, Commands, NativeError, WEB_V2_PROGRAMS};
 
 /// `cli::try_parse_with_own_start` for the command line's own arguments (`Cli`): the argv read as
 /// the command line reads it after its application start, NCBI's single-dash options included. A

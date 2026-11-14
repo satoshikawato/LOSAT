@@ -310,7 +310,7 @@ impl Write for RunSink<'_> {
 
 /// The application start of a run that its caller makes (LOSAT Web's adapter, which runs the start
 /// of every run, as the command line does: `web_adapter::start_run`), with the files of the run
-/// going to `files`: what `begin_with` left.
+/// going to the caller's `RunFiles`: what `begin_with` left.
 pub struct CallerStart {
     /// The error that ends the run at the configuration load (NCBI's report when the program's
     /// `.ini` or the file of `-conffile` ends it, LOSAT's refusal of the load), as `begin`'s.
@@ -318,10 +318,15 @@ pub struct CallerStart {
     /// The settings, or LOSAT's refusal of them, which the caller reports after it parsed the
     /// arguments (`ApplicationStart::settings`).
     settings: Result<ApplicationSettings, String>,
+    /// Whether the arguments have `-dryrun` (`preparse`).
+    dry_run: bool,
     /// The `-logfile` target when the run's messages go there (`run_messages_follow_log`).
     log: RunLog,
     /// The `-logfile` target otherwise.
     target: Option<DiagTarget>,
+    /// The file of `-logfile` (`log_file`) and where it goes, for `finish`.
+    log_name: Option<std::ffi::OsString>,
+    files: RunFiles,
 }
 
 /// The start `start`, made from the arguments `words` (after the program's name) by the caller,
@@ -336,6 +341,7 @@ pub fn begin_with<S: AsRef<OsStr> + Clone>(
     files: &RunFiles,
     diagnostics: &mut dyn Write,
 ) -> Result<CallerStart, String> {
+    use crate::blastinput::ncbi_environment::{preparse, Preparsed};
     let follows = run_messages_follow_log(start.program());
     let mut opened =
         open_with(start, words, files, diagnostics).map_err(|error| error.message().to_string())?;
@@ -350,8 +356,11 @@ pub fn begin_with<S: AsRef<OsStr> + Clone>(
     Ok(CallerStart {
         ended,
         settings: opened.start.settings(),
+        dry_run: matches!(preparse(words), Preparsed::Words { dryrun: true, .. }),
         log,
         target,
+        log_name: log_file(words).map(OsStr::to_os_string),
+        files: files.clone(),
     })
 }
 
@@ -367,10 +376,19 @@ impl CallerStart {
         self.settings.as_ref().map_err(String::as_str)
     }
 
-    /// Writes `messages`, which the run wrote for `cerr`, where the run's messages go
-    /// (`RunLog::route`), and gives back what goes to `cerr`.
-    pub fn route(&mut self, messages: Vec<u8>) -> Vec<u8> {
-        self.log.route(messages)
+    /// Whether the run is a dry run, which ends after its arguments and settings.
+    pub fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+
+    /// The writer of the messages that the run writes for `cerr`: they go where the run's
+    /// messages go (`RunLog::sink`: the file of `-logfile` in TBLASTX, else `diagnostics`), as
+    /// they come.
+    pub fn sink<'a>(
+        &'a mut self,
+        diagnostics: &'a mut (dyn Write + Send),
+    ) -> impl Write + Send + 'a {
+        self.log.sink(diagnostics, true)
     }
 
     /// Writes `text`, the message of a `NativeError` that ended the run, to the `-logfile` file
@@ -379,11 +397,11 @@ impl CallerStart {
         self.log.post_text(text);
     }
 
-    /// Hands the file of `-logfile` to `files` (`RunFiles::deliver_log`) at the end of the run;
-    /// `words` are the start's.
-    pub fn finish<S: AsRef<OsStr>>(self, words: &[S], files: &RunFiles) -> std::io::Result<()> {
+    /// Hands the file of `-logfile` to the run's files (`RunFiles::deliver_log`) at the end of the
+    /// run.
+    pub fn finish(self) -> std::io::Result<()> {
         match self.log.0.or(self.target) {
-            Some(target) => files.deliver_log(log_file(words), target),
+            Some(target) => self.files.deliver_log(self.log_name.as_deref(), target),
             None => Ok(()),
         }
     }

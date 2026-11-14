@@ -502,7 +502,7 @@ pub(crate) fn link_in_place<T>(
     take: impl Fn(&mut T, &LinkedHsp),
 ) {
     let hsps: Vec<LinkHsp> = items.iter().map(hsp).collect();
-    let linked = even_gap_link_hsps(&hsps, contexts, subject_length, params);
+    let linked = even_gap_link_hsps(&hsps, &contexts, subject_length, params);
     let mut slots: Vec<Option<T>> = std::mem::take(items).into_iter().map(Some).collect();
     *items = linked
         .into_iter()
@@ -519,13 +519,15 @@ pub(crate) fn link_in_place<T>(
 /// Links the HSPs of one subject (`s_BlastEvenGapLinkHSPs` for an untranslated subject) and
 /// returns the list NCBI builds, in its order: every HSP once, with its linked set's e-value and
 /// size. `contexts` gives the values of a context (`LinkHsp::context`); `subject_length` is the
-/// subject's length in letters.
+/// subject's length in letters. `contexts` is a trait object so that one copy of the linking serves
+/// every caller (a generic one was copied into each, which made the binary 35 KB larger and moved
+/// the default searches' code pages).
 ///
 /// NCBI's `qsort` calls are stable sorts here (the comparators are partial: HSPs with the same
 /// start keep the order of the previous sort), as TBLASTX's port sorts them.
 pub(crate) fn even_gap_link_hsps(
     hsps: &[LinkHsp],
-    contexts: impl Fn(usize) -> LinkContext,
+    contexts: &dyn Fn(usize) -> LinkContext,
     subject_length: i32,
     params: &EvenGapLinkParams,
 ) -> Vec<LinkedHsp> {
@@ -663,7 +665,7 @@ pub(crate) fn even_gap_link_hsps(
             frame_start,
             frame_count,
             &hsp_of,
-            &contexts,
+            contexts,
             subject_length,
             LinkConstants {
                 window_size,
@@ -783,7 +785,7 @@ fn link_frame<'a>(
     frame_start: usize,
     frame_count: usize,
     hsp_of: &impl Fn(usize) -> &'a LinkHsp,
-    contexts: &impl Fn(usize) -> LinkContext,
+    contexts: &dyn Fn(usize) -> LinkContext,
     subject_length_orig: i32,
     k: LinkConstants,
 ) {
@@ -1520,7 +1522,7 @@ mod tests {
     fn a_lone_hsp_gets_the_e_value_of_one_segment() {
         let hsps = [hsp((10, 60), (20, 70), 80)];
         let ctx = context();
-        let out = even_gap_link_hsps(&hsps, |_| ctx, 1000, &EvenGapLinkParams::traceback());
+        let out = even_gap_link_hsps(&hsps, &|_| ctx, 1000, &EvenGapLinkParams::traceback());
         assert_eq!(out.len(), 1);
         assert_eq!((out[0].index, out[0].num), (0, 1));
         let xsum = 80.0 * ctx.lambda - ctx.log_k;
@@ -1532,7 +1534,7 @@ mod tests {
     fn two_hsps_in_order_on_both_sequences_link_into_one_set() {
         // The first HSP ends before the second starts on the query and on the subject.
         let hsps = [hsp((200, 260), (500, 560), 60), hsp((10, 60), (20, 70), 80)];
-        let out = even_gap_link_hsps(&hsps, |_| context(), 1000, &EvenGapLinkParams::traceback());
+        let out = even_gap_link_hsps(&hsps, &|_| context(), 1000, &EvenGapLinkParams::traceback());
         // The chain starts at the upstream HSP (the head) and follows its link downstream.
         assert_eq!(out.iter().map(|l| l.index).collect::<Vec<_>>(), vec![1, 0]);
         assert!(out.iter().all(|l| l.num == 2));
@@ -1542,7 +1544,7 @@ mod tests {
     #[test]
     fn hsps_in_opposite_orders_on_the_sequences_stay_apart() {
         let hsps = [hsp((200, 260), (20, 70), 60), hsp((10, 60), (500, 560), 80)];
-        let out = even_gap_link_hsps(&hsps, |_| context(), 1000, &EvenGapLinkParams::traceback());
+        let out = even_gap_link_hsps(&hsps, &|_| context(), 1000, &EvenGapLinkParams::traceback());
         assert!(out.iter().all(|l| l.num == 1));
         // The list is in the forward order of the query starts.
         assert_eq!(out.iter().map(|l| l.index).collect::<Vec<_>>(), vec![1, 0]);
@@ -1555,7 +1557,7 @@ mod tests {
         let hsps = [hsp((70, 120), (80, 130), 41), hsp((10, 60), (20, 70), 41)];
         let out = even_gap_link_hsps(
             &hsps,
-            |_| context(),
+            &|_| context(),
             1000,
             &EvenGapLinkParams::preliminary(41),
         );
@@ -1587,12 +1589,12 @@ mod tests {
             cutoff_big_gap: 1,
             query_translated: false,
         };
-        let out = even_gap_link_hsps(&hsps, |_| ctx, 100 * n + 100, &params);
+        let out = even_gap_link_hsps(&hsps, &|_| ctx, 100 * n + 100, &params);
         assert_eq!(out.len(), n as usize);
         assert!(out.iter().all(|l| l.num == -32766), "{:?}", &out[..2]);
         assert!(out.iter().all(|l| l.evalue == 0.0), "{:?}", &out[..2]);
         // One HSP fewer than the wrap keeps its count.
-        let out = even_gap_link_hsps(&hsps[..32_767], |_| ctx, 100 * n + 100, &params);
+        let out = even_gap_link_hsps(&hsps[..32_767], &|_| ctx, 100 * n + 100, &params);
         assert!(out.iter().all(|l| l.num == 32_767), "{:?}", &out[..2]);
     }
 }

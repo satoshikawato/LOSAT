@@ -994,7 +994,7 @@ pub(crate) fn link_even(
         .collect();
     let linked = even_gap_link_hsps(
         &hsps,
-        |context| {
+        &|context| {
             let p = &parameters[context];
             LinkContext {
                 lambda: p.ungapped.lambda,

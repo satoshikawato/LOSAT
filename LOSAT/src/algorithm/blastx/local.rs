@@ -431,7 +431,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         .collect();
     let writers = formats
         .iter_mut()
-        .map(|format| format.sink.ostream())
+        .map(|format| crate::cli::NcbiOstream::sink(&mut format.sink))
         .collect::<io::Result<Vec<_>>>()?;
     // A run in which a `-subject` title (refused with its first hit) or the message of a query
     // (refused where NCBI does not search its batch) could still be refused by the BLAST XML,
@@ -453,13 +453,13 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
             });
     let hold = xml_may_refuse.then(super::blast_xml::HeldFormats::new);
     // The hold comes between a format's stream and the caller's writer, which has no stream of
-    // NCBI's (`cli::NcbiOstream`): it keeps the bytes in order.
+    // NCBI's (`cli::NcbiOstream::held`): it keeps the writes and flushes in order.
     let mut writers: Vec<crate::cli::NcbiOstream<'_>> = match &hold {
         Some(hold) => {
             hold.hold();
             writers
                 .into_iter()
-                .map(|writer| crate::cli::NcbiOstream::new(Box::new(hold.writer(writer))))
+                .map(|writer| crate::cli::NcbiOstream::held(hold.writer(writer)))
                 .collect()
         }
         None => writers,
@@ -494,13 +494,14 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     );
     // What the hold kept. A run that ends: every format, in order. A run that stops with an
     // error: nothing after one of the documents' refusals and the bytes of the batches before
-    // after any other error (`HeldFormats::end_document_with`), as the command line.
+    // after any other error (`HeldFormats::end_document_with`), as the command line. A write that
+    // fails there is the run's error in place of the run's own, as without the hold.
     // The observer's events of a held run come before its bytes reach their sinks, so a position
     // read from a sink at an event is not that of the event (`FormatObserver`): the same for every
     // hold of this function, a `-subject` run's too.
     match (&hold, &written) {
         (Some(hold), Ok(_)) => hold.release()?,
-        (Some(hold), Err(error)) => hold.end_document_with(error),
+        (Some(hold), Err(error)) => hold.end_document_with(error)?,
         (None, _) => {}
     }
     let (run_hits, run_subjects) = written?;

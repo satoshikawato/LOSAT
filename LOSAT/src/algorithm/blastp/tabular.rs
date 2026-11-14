@@ -487,16 +487,19 @@ pub(super) fn write_blastp_tax_report(
                 .get(q_idx)
                 .map_or(&b""[..], |title| title.as_ref()),
             length: record_lengths.get(q_idx).copied().unwrap_or_default(),
-            hsps: hit_list
-                .iter()
-                .flat_map(reported)
-                .flat_map(|hsp_list| &hsp_list.hsps)
-                .map(|hsp| TaxHsp {
-                    subject: hsp.s_idx as usize,
-                    evalue: hsp.e_value,
-                    bit_score: hsp.bit_score,
-                })
-                .collect(),
+            // A query of a batch that NCBI did not search has no Seq-align-set.
+            hsps: (!tab.unsearched.get(q_idx).copied().unwrap_or(false)).then(|| {
+                hit_list
+                    .iter()
+                    .flat_map(reported)
+                    .flat_map(|hsp_list| &hsp_list.hsps)
+                    .map(|hsp| TaxHsp {
+                        subject: hsp.s_idx as usize,
+                        evalue: hsp.e_value,
+                        bit_score: hsp.bit_score,
+                    })
+                    .collect()
+            }),
         })
         .collect();
     let plain = |s_idx: usize| match &tab.subjects {

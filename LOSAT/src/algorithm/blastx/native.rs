@@ -44,7 +44,7 @@ use std::{
     //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
     // }
     // ```
-    io::{self, BufWriter, Seek, SeekFrom, Write},
+    io::{self, Seek, SeekFrom, Write},
     path::Path,
 };
 
@@ -562,20 +562,6 @@ fn run_inner(
     let query_file =
         crate::blastinput::input_files::open_input(&args.query, "query", program.upper)
             .map_err(early_archive_error)?;
-    let destination: Box<dyn Write> = match args.out.as_deref().filter(|p| *p != Path::new("-")) {
-        // The organism report's file or standard output as NCBI's buffer writes it
-        // (`cli::report_destination`).
-        path if tax_report => crate::cli::report_destination(
-            path.map(|path| {
-                crate::cli::create_out_file(path, None)
-                    .map(|file| Box::new(file) as Box<dyn Write + Send>)
-            })
-            .transpose()?,
-            true,
-        ),
-        None => Box::new(io::stdout().lock()),
-        Some(path) => Box::new(crate::cli::create_out_file(path, None)?),
-    };
     // BLAST XML (outfmt 5) and the XML2 and JSON documents (outfmt 13 to 16): the output can
     // hold the whole document in memory (`blast_xml::HeldOutput`), decided below before the
     // search.
@@ -593,11 +579,31 @@ fn run_inner(
         kind.is_files()
             .then(|| super::blast_xml::HeldSideFiles::new(Box::new(FsSideFiles::new(out, kind))))
     });
-    let (destination, held) = if structured_xml {
-        let held = super::blast_xml::HeldOutput::new(destination, side_files.clone());
-        (Box::new(held.clone()) as Box<dyn Write>, Some(held))
-    } else {
-        (destination, None)
+    // The `-out` file, where NCBI opens it (`cli::create_out_file`, one owner with the library).
+    let create = |path: &Path| crate::cli::create_out_file(path, None);
+    let mut held = None;
+    // The report's stream (`cli::NcbiOstream`). The organism report's: NCBI's buffer of the file or
+    // of standard output. Every other format's: LOSAT's buffer before the file or standard output,
+    // behind the held document.
+    let stream = match out_file {
+        Some(path) if tax_report => crate::cli::NcbiOstream::file(create(path)?),
+        None if tax_report => crate::cli::NcbiOstream::standard_output(),
+        out_file => {
+            let destination: Box<dyn Write> = match out_file {
+                None => Box::new(io::stdout().lock()),
+                Some(path) => Box::new(create(path)?),
+            };
+            crate::cli::NcbiOstream::buffered(match structured_xml {
+                true => Box::new(
+                    held.insert(super::blast_xml::HeldOutput::new(
+                        destination,
+                        side_files.clone(),
+                    ))
+                    .clone(),
+                ),
+                false => destination,
+            })
+        }
     };
     // The run's standard error goes through the held output (`HeldOutput::stderr`): a held
     // document gets the texts written in the meantime where NCBI writes them. The structured
@@ -608,13 +614,7 @@ fn run_inner(
     }
     // The run keeps its output in the caller's slot: an error of NCBI's own is followed by the
     // error archive in the same output (`run`).
-    // The organism report's stream is NCBI's buffer (`cli::report_destination`), which
-    // takes each write as one of NCBI's insertions (`cli::NcbiOstream`): no buffer of LOSAT's
-    // comes before it.
-    let writer = output.insert(crate::cli::NcbiOstream::new(match tax_report {
-        true => destination,
-        false => Box::new(BufWriter::new(destination)),
-    }));
+    let writer = output.insert(stream);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
     // ```c++
     //     if(hitlist_size < 5){

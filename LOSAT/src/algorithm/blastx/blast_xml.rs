@@ -680,24 +680,35 @@ impl SideFiles for HeldSideFiles {
 
 /// No NCBI counterpart: the output streams of a library call in which a later batch may still be
 /// refused by a BLAST XML, XML2 or JSON document (`local::report_batches`), held in the order in
-/// which they are written: each write keeps its bytes with the index of its stream (`writer`), so
-/// that `release` writes them in that order (the reports of every format, as a stream that they
-/// all go to reads them from NCBI) and `discard` drops them. Outside `hold` the bytes pass
-/// through. The side files of an outfmt 13 or 14 document of the run follow it (`side_files`):
-/// held, written before the streams and dropped as they are.
+/// which they are written: each write and each flush keeps its stream's index (`writer`,
+/// `HeldWrite`), so that `release` makes them in that order, as the run would have made them
+/// without the hold (the reports of every format, as a stream that they all go to reads them from
+/// NCBI; a buffered stream's bytes reach their device before the text written after them on
+/// another stream), and `discard` drops them. Outside `hold` the writes pass through. The side
+/// files of an outfmt 13 or 14 document of the run follow it (`side_files`): held, written before
+/// the streams and dropped as they are.
 pub(super) struct HeldFormats<S: Write>(std::sync::Arc<std::sync::Mutex<FormatsState<S>>>);
 
 struct FormatsState<S> {
     holding: bool,
     discarded: bool,
     sinks: Vec<S>,
-    held: Vec<(usize, Vec<u8>)>,
+    held: Vec<HeldWrite>,
     /// The side files of the run's outfmt 13 and 14 documents.
     sides: Vec<HeldSideFiles>,
 }
 
+/// What one stream of a `HeldFormats` was given while held, between the writes of the others:
+/// `bytes`, then a flush where `flushed` (the writes of one stream with no flush between them
+/// are one `HeldWrite`).
+struct HeldWrite {
+    sink: usize,
+    bytes: Vec<u8>,
+    flushed: bool,
+}
+
 /// A stream of a `HeldFormats`.
-pub(super) struct HeldFormatWriter<S: Write> {
+pub(crate) struct HeldFormatWriter<S: Write> {
     hold: HeldFormats<S>,
     sink: usize,
 }
@@ -762,11 +773,13 @@ impl<S: Write> HeldFormats<S> {
         }
     }
 
-    /// Writes what is held and passes the bytes on again: the side files first (in order), then
-    /// the streams in the order of their writes. A side file that cannot be opened stops the run
-    /// there, as NCBI's does (`Cannot open output file`, exit status 1): the side files before it
-    /// stay, and the streams and the side files of the later documents get nothing of what was
-    /// held.
+    /// Writes what is held and passes the writes on again: the side files first (in order), then
+    /// the streams' writes and flushes in their order, as the run without the hold made them. A
+    /// side file that cannot be opened stops the run there, as NCBI's does (`Cannot open output
+    /// file`, exit status 1): the side files before it stay, and the streams and the side files of
+    /// the later documents get nothing of what was held. A write or flush of a stream that fails
+    /// stops the release there with its error (as the run would have stopped at it), and nothing
+    /// held after it is written then or later.
     pub(crate) fn release(&self) -> Result<()> {
         let mut state = self.state();
         state.holding = false;
@@ -785,13 +798,20 @@ impl<S: Write> HeldFormats<S> {
                 return Err(error);
             }
         }
-        for (sink, bytes) in held {
-            state.sinks[sink]
-                .write_all(&bytes)
-                .map_err(super::native::output_error)?;
-        }
-        for sink in &mut state.sinks {
-            sink.flush().map_err(super::native::output_error)?;
+        for HeldWrite {
+            sink,
+            bytes,
+            flushed,
+        } in held
+        {
+            let sink = &mut state.sinks[sink];
+            let written =
+                sink.write_all(&bytes)
+                    .and_then(|()| if flushed { sink.flush() } else { Ok(()) });
+            if let Err(error) = written {
+                state.discarded = true;
+                return Err(super::native::output_error(error));
+            }
         }
         Ok(())
     }
@@ -809,13 +829,15 @@ impl<S: Write> HeldFormats<S> {
     /// The end of a run that stopped with `error` and held its output for its BLAST XML, XML2 or
     /// JSON documents: dropped after one of the refusals that such a hold is for
     /// (`blast_xml::drops_held_document`), written after any other error (the bytes of the batches
-    /// before it, as the run without a hold writes them), as the command line's document
-    /// (`blast_xml::HeldOutput`).
-    pub(crate) fn end_document_with(&self, error: &anyhow::Error) {
+    /// before it, as the run without a hold writes them, a write that fails then being the run's
+    /// error in place of `error`: the run without the hold stopped there, before it), as the
+    /// command line's document (`blast_xml::HeldOutput`).
+    pub(crate) fn end_document_with(&self, error: &anyhow::Error) -> Result<()> {
         if drops_held_document(error) {
             self.discard();
+            Ok(())
         } else {
-            let _ = self.release();
+            self.release()
         }
     }
 }
@@ -828,8 +850,14 @@ impl<S: Write> Write for HeldFormatWriter<S> {
         }
         if state.holding {
             match state.held.last_mut() {
-                Some((sink, held)) if *sink == self.sink => held.extend_from_slice(bytes),
-                _ => state.held.push((self.sink, bytes.to_vec())),
+                Some(held) if held.sink == self.sink && !held.flushed => {
+                    held.bytes.extend_from_slice(bytes)
+                }
+                _ => state.held.push(HeldWrite {
+                    sink: self.sink,
+                    bytes: bytes.to_vec(),
+                    flushed: false,
+                }),
             }
             return Ok(bytes.len());
         }
@@ -838,7 +866,18 @@ impl<S: Write> Write for HeldFormatWriter<S> {
 
     fn flush(&mut self) -> std::io::Result<()> {
         let mut state = self.hold.state();
-        if state.discarded || state.holding {
+        if state.discarded {
+            return Ok(());
+        }
+        if state.holding {
+            match state.held.last_mut() {
+                Some(held) if held.sink == self.sink => held.flushed = true,
+                _ => state.held.push(HeldWrite {
+                    sink: self.sink,
+                    bytes: Vec::new(),
+                    flushed: true,
+                }),
+            }
             return Ok(());
         }
         state.sinks[self.sink].flush()
@@ -1846,7 +1885,7 @@ mod held_formats_tests {
     #[test]
     fn the_documents_hold_drops_after_their_refusal_and_writes_after_any_other_error() {
         let (hold, streams) = held_run();
-        hold.end_document_with(&document_refusal());
+        hold.end_document_with(&document_refusal()).unwrap();
         assert_eq!(written(&streams), NOTHING);
         // The taxonomy database's refusal of the prefetch (outfmt 5) is one of them.
         let (hold, streams) = held_run();
@@ -1855,7 +1894,7 @@ mod held_formats_tests {
                 path: "taxdb.btd".into(),
                 message: "the taxonomy record of taxid 9606 reaches past the mapped end".into(),
             });
-        hold.end_document_with(&prefetch);
+        hold.end_document_with(&prefetch).unwrap();
         assert_eq!(written(&streams), NOTHING);
         for other in [
             ncbis_error(),
@@ -1863,7 +1902,7 @@ mod held_formats_tests {
             anyhow::anyhow!("taxdb.btd: Input/output error; this database is not supported"),
         ] {
             let (hold, streams) = held_run();
-            hold.end_document_with(&other);
+            hold.end_document_with(&other).unwrap();
             assert_eq!(written(&streams), ALL, "{other}");
         }
     }
@@ -1905,6 +1944,84 @@ mod held_formats_tests {
         );
         drop((first, blocked, last, stream, hold));
         assert_eq!([a.text(), files.text()], ["", "1:one;"].map(String::from));
+    }
+
+    /// A stream that fails every write (a full device).
+    struct Full;
+
+    impl Write for Full {
+        fn write(&mut self, _bytes: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("no space left"))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Two formats' streams, one behind a buffer (`std::io::BufWriter`) and one unbuffered, both
+    /// read from one pipe (`log`), given `report 1` and a flush, the text `text 1`, `report 2`
+    /// without a flush and `text 2`, through a hold that holds (`held`) or not: the pipe after the
+    /// last text and at the end.
+    fn through_one_pipe(held: bool) -> [String; 2] {
+        let log = Shared::default();
+        let hold: HeldFormats<Box<dyn Write + Send>> = HeldFormats::new();
+        let mut buffered = hold.writer(Box::new(std::io::BufWriter::new(log.clone())));
+        let mut unbuffered = hold.writer(Box::new(log.clone()));
+        if held {
+            hold.hold();
+        }
+        buffered.write_all(b"report 1 ").unwrap();
+        buffered.flush().unwrap();
+        unbuffered.write_all(b"text 1 ").unwrap();
+        buffered.write_all(b"report 2 ").unwrap();
+        unbuffered.write_all(b"text 2 ").unwrap();
+        if held {
+            hold.release().unwrap();
+        }
+        let after_texts = log.text();
+        drop((buffered, unbuffered, hold));
+        [after_texts, log.text()]
+    }
+
+    /// The release makes the writes and flushes of the run in their order (line RG T2 review 5
+    /// D1): a buffered stream's bytes flushed before a text on another stream reach the pipe
+    /// before it, those not flushed stay in its buffer, as without the hold.
+    #[test]
+    fn a_release_writes_and_flushes_as_the_run_without_the_hold() {
+        let unheld = through_one_pipe(false);
+        assert_eq!(
+            unheld,
+            [
+                "report 1 text 1 text 2 ",
+                "report 1 text 1 text 2 report 2 "
+            ]
+        );
+        assert_eq!(through_one_pipe(true), unheld);
+    }
+
+    /// A write of the release that fails stops it there: nothing held after it is written, then
+    /// or later, and the run ends with it in place of its own error (`end_document_with`: "BLAST
+    /// failed to write output", exit status 6).
+    #[test]
+    fn a_failing_write_of_the_release_ends_the_run() {
+        let log = Shared::default();
+        let hold: HeldFormats<Box<dyn Write + Send>> = HeldFormats::new();
+        let mut full = hold.writer(Box::new(Full));
+        let mut other = hold.writer(Box::new(log.clone()));
+        hold.hold();
+        other.write_all(b"text 0 ").unwrap();
+        full.write_all(b"report 1 ").unwrap();
+        full.flush().unwrap();
+        other.write_all(b"text 1 ").unwrap();
+        let error = hold.end_document_with(&ncbis_error()).unwrap_err();
+        let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
+        assert_eq!(
+            (native.exit, native.message.as_str()),
+            (6, "BLAST failed to write output\n")
+        );
+        other.write_all(b"text 2 ").unwrap();
+        assert_eq!(log.text(), "text 0 ");
     }
 
     #[test]

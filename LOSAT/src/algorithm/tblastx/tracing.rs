@@ -10,7 +10,6 @@
 use std::sync::OnceLock;
 
 use super::chaining::UngappedHit;
-use super::extension::convert_coords;
 use crate::common::Hit;
 
 // ---------------------------------------------------------------------------
@@ -76,27 +75,54 @@ pub fn trace_match_target(
         && s_end as i32 == target.s_end
 }
 
-/// Trace an UngappedHit if it matches the trace target.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1095-1101
+// (`s_BlastSegGetTranslatedOffsets`, `Int4` arithmetic)
+// ```c
+//    if (segment->frame < 0)	{
+//       *start = seq_length - CODON_LENGTH*segment->offset + segment->frame;
+//       *end = seq_length - CODON_LENGTH*segment->end + segment->frame + 1;
+//    } else if (segment->frame > 0)	{
+//       *start = CODON_LENGTH*(segment->offset) + segment->frame - 1;
+//       *end = CODON_LENGTH*segment->end + segment->frame - 2;
+// ```
+// Diagnostics: the 1-based nucleotide coordinates that `convert_coords`
+// (extension/mod.rs) gives the reports for an HSP, with its ends read as NCBI's `Int4`
+// (`UngappedHit::q_end_int4`) and computed in `i64`: an HSP of the one-hit word finder of length 0
+// or less ends at or before its start, below 0 near a frame's start, which the `usize` form does
+// not take. On an HSP of positive length the values are `convert_coords`'s.
+/// `(q_start, q_end, s_start, s_end)` of `convert_coords` for `h`, its ends as `Int4`.
+pub(crate) fn int4_nucleotide_coords(h: &UngappedHit) -> (i64, i64, i64, i64) {
+    fn convert(aa_start: u32, aa_end: i32, frame: i8, dna_len: u32) -> (i64, i64) {
+        let (start, end, len) = (i64::from(aa_start), i64::from(aa_end), i64::from(dna_len));
+        let shift = i64::from(frame.unsigned_abs()) - 1;
+        if frame > 0 {
+            (start * 3 + shift + 1, end * 3 + shift)
+        } else {
+            (len - start * 3 - shift, len - end * 3 - shift + 1)
+        }
+    }
+    let (q_start, q_end) = convert(h.q_aa_start, h.q_end_int4(), h.q_frame, h.q_orig_len);
+    let (s_start, s_end) = convert(h.s_aa_start, h.s_end_int4(), h.s_frame, h.s_orig_len);
+    (q_start, q_end, s_start, s_end)
+}
+
+/// Trace an UngappedHit if it matches the trace target (its ends read as `Int4`:
+/// `int4_nucleotide_coords`).
 #[inline]
 pub fn trace_ungapped_hit_if_match(stage: &str, h: &UngappedHit) {
     let Some(target) = trace_hsp_target() else {
         return;
     };
 
-    let (q_start, q_end) = convert_coords(
-        h.q_aa_start as usize,
-        h.q_aa_end as usize,
-        h.q_frame,
-        h.q_orig_len as usize,
-    );
-    let (s_start, s_end) = convert_coords(
-        h.s_aa_start as usize,
-        h.s_aa_end as usize,
-        h.s_frame,
-        h.s_orig_len as usize,
-    );
-
-    if trace_match_target(target, q_start, q_end, s_start, s_end) {
+    let (q_start, q_end, s_start, s_end) = int4_nucleotide_coords(h);
+    if (q_start, q_end, s_start, s_end)
+        == (
+            i64::from(target.q_start),
+            i64::from(target.q_end),
+            i64::from(target.s_start),
+            i64::from(target.s_end),
+        )
+    {
         eprintln!(
             "[TRACE_HSP] stage={} raw_score={} e={} ctx_idx={} s_f_idx={} q_frame={} s_frame={} linked_set={} start_of_chain={} q={}-{} s={}-{}",
             stage,

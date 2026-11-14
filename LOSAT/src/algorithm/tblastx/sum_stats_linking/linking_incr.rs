@@ -1007,7 +1007,7 @@ fn link_group<'g, K: LinkKey>(
 
     let c = [cutoffs.cutoff_small_gap, cutoffs.cutoff_big_gap];
     let gap_prob = cutoffs.gap_prob;
-    let ignore_small_gaps = cutoffs.ignore_small_gaps;
+    let ignore_small_gaps = cutoffs.ignore_small_gaps();
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:545-550
     // ```c
@@ -1862,11 +1862,15 @@ impl<K: LinkKey> LinkRounds<'_, K> {
             if let Some(bi) = best[0] {
                 addback(tree, 0, bi, stats);
                 addback_hsps.push(bi as u32);
-                let k = num[0][bi] as usize;
-                let divisor = gap_decay_divisor(gap_decay_rate, k);
+                // NCBI's Int2 count: a wrapped (negative) count is not "> 1" (link_hsps.c:918).
+                // BLAST_GapDecayDivisor takes it as an unsigned and raises the rate to the Int4
+                // `nsegs - 1`; `as usize` sign-extends and gap_decay_divisor truncates
+                // `num_segments - 1` to the same i32.
+                let k = num[0][bi];
+                let divisor = gap_decay_divisor(gap_decay_rate, k as usize);
                 prob[0] = small_gap_sum_e(
                     WINDOW_SIZE,
-                    k as i16,
+                    k,
                     xsum[0][bi],
                     eff_query_len as i32,
                     eff_subject_len as i32,
@@ -1882,10 +1886,10 @@ impl<K: LinkKey> LinkRounds<'_, K> {
                 }
             }
             if let Some(bi) = best[1] {
-                let k = num[1][bi] as usize;
-                let divisor = gap_decay_divisor(gap_decay_rate, k);
+                let k = num[1][bi];
+                let divisor = gap_decay_divisor(gap_decay_rate, k as usize);
                 prob[1] = ncbi_large_gap_sum_e(
-                    k as i16,
+                    k,
                     xsum[1][bi],
                     eff_query_len as i32,
                     eff_subject_len as i32,
@@ -1912,27 +1916,20 @@ impl<K: LinkKey> LinkRounds<'_, K> {
             // ...
             // ordering_method = eLinkLargeGaps;
             // ```
-            // Only large gaps are considered when cutoff[0] == 0.
+            // Only large gaps are considered when cutoff[0] == 0, and their E-value is not
+            // divided by `1 - gap_prob`.
             addback(tree, 1, bi, stats);
             addback_hsps.push(bi as u32);
-            let k = num[1][bi] as usize;
-            let divisor = gap_decay_divisor(gap_decay_rate, k);
+            let k = num[1][bi];
+            let divisor = gap_decay_divisor(gap_decay_rate, k as usize);
             prob[1] = ncbi_large_gap_sum_e(
-                k as i16,
+                k,
                 xsum[1][bi],
                 eff_query_len as i32,
                 eff_subject_len as i32,
                 eff_search_space,
                 divisor,
             );
-            if k > 1 {
-                let denom = 1.0 - gap_prob;
-                if denom == 0.0 || (prob[1] / denom) > int4_max {
-                    prob[1] = int4_max;
-                } else {
-                    prob[1] /= denom;
-                }
-            }
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:936-937

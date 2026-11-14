@@ -132,9 +132,9 @@ pub(crate) fn open_database(
 /// alias files' counts (`SeqDb::check_alias_values`), the id of a database mask (`mask`, BLASTN's
 /// `-db_soft_mask` / `-db_hard_mask`: `DbMaskOption::validate_at_open`), the formatter's
 /// reopening of each name (`SeqDb::read_name_records`), then the first headers (`check_seqids`,
-/// whose answer it returns: whether the database has parsed Seq-ids). LOSAT's refusal of mixed
-/// accession tables, which NCBI meets only at its reports, comes later
-/// (`check_accession_tables`).
+/// whose answer it returns: whether the database has parsed Seq-ids). A version 5 list that mixes
+/// files with and without the accession table opens as in NCBI: the lookup of a parsed Seq-id
+/// fails only where a report or the prefetch looks it up (`FoundInstead::Failed`).
 pub(crate) fn restrict_database(
     db: &mut SeqDb,
     name: &str,
@@ -185,24 +185,6 @@ pub(crate) fn restrict_database(
     // A database with parsed Seq-ids is read (line DBID), unless a variable changes NCBI's choice
     // of its Seq-ids.
     check_seqids(db, settings, program)
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:208-211
-// ```c++
-//         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())) {
-//            	ERR_POST(Warning << "Query is Empty!");
-//            	return BLAST_EXIT_SUCCESS;
-//         }
-// ```
-/// LOSAT's refusal of a search database whose version 5 files mix files with and without the
-/// accession table (`SeqDb::check_accession_tables`): NCBI searches it and fails at the reports
-/// of a hit with a parsed Seq-id, so a program refuses it with its other limits, where NCBI
-/// starts the search: after `Query is Empty!` (NCBI then ends with exit status 0) and the
-/// formatter's errors (BLASTN's `-db_soft_mask` id that a name of the list lacks; review 2 F2 of
-/// series NP, M4a-2a).
-pub(crate) fn check_accession_tables(db: &SeqDb, program: &str) -> Result<()> {
-    db.check_accession_tables()
-        .map_err(|error| database_error(error, program))
 }
 
 /// `restrict_database` with a list.
@@ -1425,7 +1407,10 @@ impl<'a> HeaderReader<'a> {
     /// (the third value: another sequence that holds a scope key of the Seq-align id, which
     /// psiblast's PSSM read refuses, `ParsedSubject::pssm_read`). A subject whose Bioseq NCBI's
     /// formatters do not find (`unfetchable`) is looked up too, for that read (its reports refuse
-    /// it whatever the lookup gives); a giim id never (NCBI's handles never take it again).
+    /// it whatever the lookup gives). A giim id of a version 5 database is looked up only for a
+    /// lookup that fails: NCBI's handles never take another sequence for it, but its prefetch looks
+    /// it up as a string id in every LMDB file of the list, which stops at a file without the
+    /// accession table (review 1 of line DBID mixdb, H1); of a version 4 database never.
     fn found_instead(
         &self,
         subject: &crate::report::db_subject::ParsedSubject,
@@ -1436,7 +1421,8 @@ impl<'a> HeaderReader<'a> {
         Option<crate::seqdb::DbSequence>,
     ) {
         use crate::report::db_subject::FoundInstead;
-        if matches!(subject.alignment_id(), crate::seqid::ParsedSeqId::Giim(_)) {
+        let giim = matches!(subject.alignment_id(), crate::seqid::ParsedSeqId::Giim(_));
+        if giim && !self.db.is_version5() {
             return (None, None, None);
         }
         let failed = |error: SeqDbError| {
@@ -1460,6 +1446,7 @@ impl<'a> HeaderReader<'a> {
         };
         let id = subject.alignment_id();
         let oids = match lookup.seqid_to_oids(id, true) {
+            Ok(_) if giim => return (None, None, None),
             Ok(oids) => oids,
             Err(error) => {
                 return match lookup.throws_on_id(id) {

@@ -2014,6 +2014,12 @@ pub(crate) fn refuse_id_of_a_query(
     Ok(())
 }
 
+/// What the refusals of the query-anchored formats (`refuse_generated_query_id`,
+/// `refuse_display_id_of_a_query`) call the id of a query that NCBI's scope finds: the local id
+/// that LOSAT generates for a FASTA query read without `-parse_deflines` (`Query_N`), or the id of
+/// the PSSM query of `-in_pssm` that a report shows as a local id (`lcl|myprot`).
+const GENERATED_QUERY_ID: &str = "the id of a query (generated, or the PSSM's)";
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1588-1589, 432-433, 497-498
 // ```c++
 //         const CBioseq_Handle& handle = m_ScopeRef->GetBioseqHandle(*id);
@@ -2049,13 +2055,13 @@ pub(crate) fn refuse_display_id_of_a_query(
     }
     let (queries, weak, formats) = if generated {
         (
-            "without -parse_deflines",
+            GENERATED_QUERY_ID,
             "",
             "the query-anchored formats, outfmt 1 to 4",
         )
     } else {
         (
-            "with -parse_deflines (or of the PSSM query of -in_pssm)",
+            "the id of a query read with -parse_deflines (or of the PSSM query of -in_pssm)",
             ", or an id that NCBI BLAST+'s scope matches weakly to it",
             "outfmt 0 to 4",
         )
@@ -2063,9 +2069,9 @@ pub(crate) fn refuse_display_id_of_a_query(
     Err(parsed_refusal(
         oid,
         &format!(
-            "has the display id {} (the id of its description line), the id of a query read \
-             {queries} in the query batch that reports it{weak}: NCBI BLAST+ shows that query's \
-             title in its description line ({formats})",
+            "has the display id {} (the id of its description line), {queries} in the query \
+             batch that reports it{weak}: NCBI BLAST+ shows that query's title in its \
+             description line ({formats})",
             String::from_utf8_lossy(&display)
         ),
         program,
@@ -2092,9 +2098,8 @@ pub(crate) fn refuse_generated_query_id(
     Err(parsed_refusal(
         oid,
         &format!(
-            "has the Seq-id {}, the id of a query read without -parse_deflines in the query batch \
-             that reports it: NCBI BLAST+ shows that query in its place in the query-anchored \
-             formats (outfmt 1 to 4)",
+            "has the Seq-id {}, {GENERATED_QUERY_ID} in the query batch that reports it: NCBI \
+             BLAST+ shows that query in its place in the query-anchored formats (outfmt 1 to 4)",
             String::from_utf8_lossy(&subject.alignment_fasta())
         ),
         program,

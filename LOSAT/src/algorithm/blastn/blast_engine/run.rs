@@ -6935,32 +6935,14 @@ fn post_process_hits_and_write(
             }
         }
         if let (Some(ordinals), Some(reader)) = (report.database_ordinals, report.database_reader) {
-            let generated = report
-                .queries
-                .first()
-                .is_none_or(|query| query.believed().is_none());
-            let whole = [0..report.queries.len()];
-            let spans: &[std::ops::Range<usize>] = if report.batch_spans.is_empty() {
-                &whole
-            } else {
-                report.batch_spans
-            };
-            let scopes: Vec<crate::blastinput::query_batch::QueryScope> = spans
-                .iter()
-                .map(|span| {
-                    let records = &report.queries[span.clone()];
-                    if generated {
-                        crate::blastinput::query_batch::QueryScope::of_generated_ids(
-                            records.iter().map(|record| record.local_id.as_str()),
-                        )
-                    } else {
-                        let mut scope = crate::blastinput::query_batch::QueryScope::default();
-                        scope.add_ids_of(records.iter().filter_map(FastaRecord::believed));
-                        scope
-                    }
-                })
-                .collect();
-            let none = crate::blastinput::query_batch::QueryScope::default();
+            let batches = crate::blastinput::query_batch::AnchoredBatchScopes::new(
+                report.queries,
+                if report.batch_spans.is_empty() {
+                    vec![0..report.queries.len()]
+                } else {
+                    report.batch_spans.to_vec()
+                },
+            );
             let oids = reader.oid_map();
             crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
                 hit_lists.len(),
@@ -6990,13 +6972,8 @@ fn post_process_hits_and_write(
                 },
                 report.database_parsed,
                 |rank| oids.oid(ordinals[rank as usize]),
-                |q_idx| {
-                    spans
-                        .iter()
-                        .position(|span| span.contains(&q_idx))
-                        .map_or(&none, |batch| &scopes[batch])
-                },
-                generated,
+                |q_idx| batches.of_query(q_idx),
+                batches.generated(),
                 "BLASTN",
             )?;
         }

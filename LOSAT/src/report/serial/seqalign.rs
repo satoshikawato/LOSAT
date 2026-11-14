@@ -291,6 +291,64 @@ pub(crate) fn protein_row_segments(hit: &crate::common::Hit, segments: &mut Segm
 /// record's (`s_RemapToSubjectLoc` adds the `-subject_loc` start). The query-anchored reports read
 /// them (`report::query_anchored`).
 pub(crate) fn nucleotide_row_segments(hit: &crate::common::Hit, segments: &mut Segments) -> bool {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:114-140
+    // ```c++
+    // static TSeqPos
+    // s_GetAlignmentStart(int& curr_pos, int num,
+    //         ENa_strand strand, bool translate, int length, int original_length,
+    //         short frame)
+    // {
+    //     TSeqPos retval;
+    //
+    //     if (strand == eNa_strand_minus) {
+    //
+    //         if (translate)
+    //             retval = original_length -
+    //                 CODON_LENGTH*(s_GetCurrPos(curr_pos, num) + num)
+    //                 + frame + 1;
+    //         else
+    //             retval = length - s_GetCurrPos(curr_pos, num) - num;
+    //
+    //     } else {
+    //
+    //         if (translate)
+    //             retval = frame - 1 + CODON_LENGTH*s_GetCurrPos(curr_pos, num);
+    //         else
+    //             retval = s_GetCurrPos(curr_pos, num);
+    //
+    //     }
+    //
+    //     return retval;
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1520-1534
+    // ```c++
+    // void RemapToQueryLoc(CRef<CSeq_align> sar, const CSeq_loc & query)
+    // {
+    //     _ASSERT(sar);
+    //     const int query_row = 0;
+    //
+    //     TSeqPos q_shift = 0;
+    //
+    //     if (query.IsInt()) {
+    //         q_shift = query.GetInt().GetFrom();
+    //     }
+    //
+    //     if (q_shift > 0) {
+    //         sar->OffsetRow(query_row, q_shift);
+    //     }
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1541-1547
+    // ```c++
+    // static void
+    // s_RemapToSubjectLoc(CRef<CSeq_align> & subj_aligns, const CSeq_loc& subj_loc)
+    // {
+    //     const int kSubjDimension = 1;
+    //     _ASSERT(subj_loc.IsInt() || subj_loc.IsWhole());
+    //     subj_aligns.Reset(RemapAlignToLoc(*subj_aligns, kSubjDimension, subj_loc));
+    // }
+    // ```
     let minus = hit.query_frame < 0;
     let (q_offset, q_end, query_length) = if minus {
         (0, (hit.q_end + 1 - hit.q_start) as i32, hit.q_end as i32)
@@ -335,6 +393,64 @@ pub(crate) fn translated_subject_row_segments(
     subject_length: usize,
     segments: &mut Segments,
 ) -> bool {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:114-140
+    // ```c++
+    // static TSeqPos
+    // s_GetAlignmentStart(int& curr_pos, int num,
+    //         ENa_strand strand, bool translate, int length, int original_length,
+    //         short frame)
+    // {
+    //     TSeqPos retval;
+    //
+    //     if (strand == eNa_strand_minus) {
+    //
+    //         if (translate)
+    //             retval = original_length -
+    //                 CODON_LENGTH*(s_GetCurrPos(curr_pos, num) + num)
+    //                 + frame + 1;
+    //         else
+    //             retval = length - s_GetCurrPos(curr_pos, num) - num;
+    //
+    //     } else {
+    //
+    //         if (translate)
+    //             retval = frame - 1 + CODON_LENGTH*s_GetCurrPos(curr_pos, num);
+    //         else
+    //             retval = s_GetCurrPos(curr_pos, num);
+    //
+    //     }
+    //
+    //     return retval;
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1520-1534
+    // ```c++
+    // void RemapToQueryLoc(CRef<CSeq_align> sar, const CSeq_loc & query)
+    // {
+    //     _ASSERT(sar);
+    //     const int query_row = 0;
+    //
+    //     TSeqPos q_shift = 0;
+    //
+    //     if (query.IsInt()) {
+    //         q_shift = query.GetInt().GetFrom();
+    //     }
+    //
+    //     if (q_shift > 0) {
+    //         sar->OffsetRow(query_row, q_shift);
+    //     }
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1541-1547
+    // ```c++
+    // static void
+    // s_RemapToSubjectLoc(CRef<CSeq_align> & subj_aligns, const CSeq_loc& subj_loc)
+    // {
+    //     const int kSubjDimension = 1;
+    //     _ASSERT(subj_loc.IsInt() || subj_loc.IsWhole());
+    //     subj_aligns.Reset(RemapAlignToLoc(*subj_aligns, kSubjDimension, subj_loc));
+    // }
+    // ```
     let frame = i32::from(subject_frame);
     let length = subject_length as i32;
     let (s_low, s_high) = (

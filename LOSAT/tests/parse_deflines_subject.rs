@@ -885,8 +885,8 @@ fn blastn_query_anchored_refuses_a_database_sequence_named_as_a_query() {
     for (db, refusal) in [
         (
             "bnqid",
-            "database sequence 0 has the Seq-id lcl|Query_1, the id of a query read without \
-             -parse_deflines in the query batch that reports it",
+            "database sequence 0 has the Seq-id lcl|Query_1, the id of a query (generated, or the \
+             PSSM's) in the query batch that reports it",
         ),
         (
             "bnqgi",

@@ -352,6 +352,12 @@ pub(super) fn render(
     // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
     // The alignments are rendered once from the final result, for outfmt 0 and for
     // the caller's hit records, in the order of the tabular rows.
+    let anchored_formats = outputs
+        .formats
+        .iter()
+        .any(|format| (1..=4).contains(&format_number(format.outfmt)));
+    // The masks of the rows, kept for the sections of outfmt 1 to 4 only (`pairwise_hits`).
+    let mut section_masks: Vec<Vec<(usize, usize)>> = Vec::new();
     let pairwise_hits = if outputs.hits.is_some()
         || outputs
             .formats
@@ -369,6 +375,7 @@ pub(super) fn render(
             mask_lowercase,
             ranges,
             pssm.is_none(),
+            anchored_formats.then_some(&mut section_masks),
         )?))
     } else {
         None
@@ -389,41 +396,10 @@ pub(super) fn render(
     });
     if let (Some(view), Some(rows)) = (anchored_view, pairwise_hits.as_deref()) {
         if matches!(shown, ShownSubjects::Database { .. }) {
-            let generated = query_records
-                .first()
-                .is_none_or(|query| query.believed().is_none());
-            let mut starts: Vec<usize> = batch_starts.to_vec();
-            if starts.first() != Some(&0) {
-                starts.insert(0, 0);
-            }
-            let spans: Vec<std::ops::Range<usize>> = starts
-                .iter()
-                .enumerate()
-                .map(|(index, &start)| {
-                    start
-                        ..starts
-                            .get(index + 1)
-                            .copied()
-                            .unwrap_or(query_records.len())
-                })
-                .collect();
-            let scopes: Vec<crate::blastinput::query_batch::QueryScope> = spans
-                .iter()
-                .map(|span| {
-                    let records = &query_records
-                        [span.start.min(query_records.len())..span.end.min(query_records.len())];
-                    if generated {
-                        crate::blastinput::query_batch::QueryScope::of_generated_ids(
-                            records.iter().map(|record| record.local_id.as_str()),
-                        )
-                    } else {
-                        let mut scope = crate::blastinput::query_batch::QueryScope::default();
-                        scope.add_ids_of(records.iter().filter_map(FastaRecord::believed));
-                        scope
-                    }
-                })
-                .collect();
-            let none = crate::blastinput::query_batch::QueryScope::default();
+            let batches = crate::blastinput::query_batch::AnchoredBatchScopes::of_starts(
+                query_records,
+                batch_starts,
+            );
             let parsed = shown.parsed_subjects();
             crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
                 query_records.len(),
@@ -457,23 +433,14 @@ pub(super) fn render(
                         .oid(rank as usize)
                         .expect("a database search names its sequences by OID")
                 },
-                |q_idx| {
-                    spans
-                        .iter()
-                        .position(|span| span.contains(&q_idx))
-                        .map_or(&none, |batch| &scopes[batch])
-                },
-                generated,
+                |q_idx| batches.of_query(q_idx),
+                batches.generated(),
                 program,
             )?;
         }
     }
     // The sequences of the query-anchored sections of outfmt 1 to 4 (line RG T3b), made once.
-    let anchored = if outputs
-        .formats
-        .iter()
-        .any(|format| (1..=4).contains(&format_number(format.outfmt)))
-    {
+    let anchored = if anchored_formats {
         let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
         Some(super::anchored::AnchoredSequences {
             queries: query_records,
@@ -484,19 +451,16 @@ pub(super) fn render(
             shown,
             show_gis,
             // The masks of outfmt 0's rows (`pairwise_hits`), half-open in the searched letters.
-            query_masks: query_records
-                .iter()
-                .enumerate()
-                .map(|(q_idx, query)| {
-                    if pssm.is_some() {
-                        return Vec::new();
-                    }
+            query_masks: (0..query_records.len())
+                .map(|q_idx| {
                     let offset = ranges.queries.offset(q_idx) as u32;
-                    encode_tblastn_lookup_query(query.seq(), seg, mask_lowercase)
-                        .seg_masks
-                        .into_iter()
-                        .filter(|&(left, right)| left < right)
-                        .map(|(left, right)| (left as u32 + offset, right as u32 - 1 + offset))
+                    section_masks
+                        .get(q_idx)
+                        .map(Vec::as_slice)
+                        .unwrap_or_default()
+                        .iter()
+                        .filter(|&&(left, right)| left < right)
+                        .map(|&(left, right)| (left as u32 + offset, right as u32 - 1 + offset))
                         .collect()
                 })
                 .collect(),
@@ -1109,6 +1073,10 @@ fn pairwise_hits(
     ranges: &ReportRanges<'_>,
     // Whether the alignments show the query's masks (not a PSSM query's).
     query_masks: bool,
+    // With `Some`, the masks of each query's rows (half-open, in the searched letters; none for a
+    // PSSM query) are pushed in query order, for the query-anchored sections of outfmt 1 to 4,
+    // which show the same masks (`render`: SEG runs once per query).
+    mut masks_out: Option<&mut Vec<Vec<(usize, usize)>>>,
 ) -> Result<Vec<PairwiseHit>> {
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
     let mut hits = Vec::new();
@@ -1320,6 +1288,9 @@ fn pairwise_hits(
                     "TBLASTN hsp_scores differs from its row"
                 );
             }
+        }
+        if let Some(masks_out) = masks_out.as_deref_mut() {
+            masks_out.push(report_masks);
         }
     }
     Ok(hits)

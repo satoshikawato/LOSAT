@@ -266,6 +266,80 @@ impl QueryScope {
     }
 }
 
+/// The scopes of the query batches of one report, for the refusals of the query-anchored formats
+/// (outfmt 1 to 4; `common::database::refuse_query_ids_of_anchored_reports`), one owner for
+/// BLASTN's and TBLASTN's reports: the scope of each batch (`spans`: the query records, by index,
+/// that NCBI's formatter adds to its scope for the batch's reports) holds the generated local
+/// ids (`QueryScope::of_generated_ids`) of queries read without `-parse_deflines` (`generated`:
+/// the first query has no `believed` ids), or the ids of the queries that the reports show
+/// (`QueryScope::add_ids_of`: `-parse_deflines`, a PSSM query shown with its ids).
+pub(crate) struct AnchoredBatchScopes {
+    generated: bool,
+    spans: Vec<std::ops::Range<usize>>,
+    scopes: Vec<QueryScope>,
+    none: QueryScope,
+}
+
+impl AnchoredBatchScopes {
+    /// The scopes of the batches `spans` of the query records `records` (a span past the records
+    /// is cut to them).
+    pub(crate) fn new(records: &[FastaRecord], spans: Vec<std::ops::Range<usize>>) -> Self {
+        let generated = records
+            .first()
+            .is_none_or(|query| query.believed().is_none());
+        let scopes = spans
+            .iter()
+            .map(|span| {
+                let records = &records[span.start.min(records.len())..span.end.min(records.len())];
+                if generated {
+                    QueryScope::of_generated_ids(
+                        records.iter().map(|record| record.local_id.as_str()),
+                    )
+                } else {
+                    let mut scope = QueryScope::default();
+                    scope.add_ids_of(records.iter().filter_map(FastaRecord::believed));
+                    scope
+                }
+            })
+            .collect();
+        Self {
+            generated,
+            spans,
+            scopes,
+            none: QueryScope::default(),
+        }
+    }
+
+    /// The scopes of the batches that start at the query records `starts` (the first batch at 0
+    /// whether or not `starts` lists it; each batch ends where the next starts, the last at the
+    /// end of `records`).
+    pub(crate) fn of_starts(records: &[FastaRecord], starts: &[usize]) -> Self {
+        let mut starts: Vec<usize> = starts.to_vec();
+        if starts.first() != Some(&0) {
+            starts.insert(0, 0);
+        }
+        let spans = starts
+            .iter()
+            .enumerate()
+            .map(|(index, &start)| start..starts.get(index + 1).copied().unwrap_or(records.len()))
+            .collect();
+        Self::new(records, spans)
+    }
+
+    /// Whether the queries were read without `-parse_deflines` (their generated ids).
+    pub(crate) fn generated(&self) -> bool {
+        self.generated
+    }
+
+    /// The scope of the batch that holds the query record `query` (empty past the batches).
+    pub(crate) fn of_query(&self, query: usize) -> &QueryScope {
+        self.spans
+            .iter()
+            .position(|span| span.contains(&query))
+            .map_or(&self.none, |batch| &self.scopes[batch])
+    }
+}
+
 /// Whether the reports of a search show the ids of its query records `records`: under
 /// `-parse_deflines` (`parse_deflines`), and with `-in_pssm` (`pssm_query`) when the PSSM's query is
 /// shown with its ids (`pssm_search::PsiSearch::query_record`: an id that is not one local id).

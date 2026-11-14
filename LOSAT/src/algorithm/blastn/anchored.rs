@@ -19,7 +19,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::query_anchored::{
-    database_label, record_label, subject_is_query_record, ReportSequences,
+    database_label, query_record_letters, record_label, subject_is_query_record, ReportSequences,
 };
 
 /// What the sections of a BLASTN report read (module doc).
@@ -67,14 +67,13 @@ impl ReportSequences for AnchoredSequences<'_> {
     }
 
     fn query_letters(&self, q_idx: usize, from: u32, to: u32, out: &mut Vec<u8>) {
-        let shift = self.query_placements.offset(q_idx);
-        let letters = self.queries[q_idx].seq();
-        for position in from as usize - shift..=to as usize - shift {
-            let Some(&letter) = letters.get(position) else {
-                break;
-            };
-            out.push(letter.to_ascii_uppercase());
-        }
+        query_record_letters(
+            &self.queries[q_idx],
+            self.query_placements.offset(q_idx),
+            from,
+            to,
+            out,
+        );
     }
 
     fn subject_letters(&self, s_idx: u32, from: u32, to: u32, out: &mut Vec<u8>) {

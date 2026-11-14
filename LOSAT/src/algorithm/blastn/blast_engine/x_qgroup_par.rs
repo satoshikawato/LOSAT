@@ -44,8 +44,9 @@
 //! With the switch on, a search pool of two or more threads and one subject at a time on the owner
 //! thread (`!use_parallel`: one subject, or several one at a time under LOSAT_X_BNFEWSUBJ; when the
 //! pool searches subjects in parallel it is already busy):
-//! - Preliminary stage (`prelim_hsp_list::gapped_hsp_list`, which `collect_prelim_hits_for_chunk`
-//!   calls for one chunk at a time on the owner): the chunk's ungapped hits are split by query in
+//! - Preliminary stage (`prelim_hsp_list::gapped_hsp_list`, which
+//!   `prelim_subject::prelim_chunk_hits` calls for one chunk at a time on the owner): the chunk's
+//!   ungapped hits are split by query in
 //!   the order the seed stage saved them, each query's hits are sorted with the batch's comparator
 //!   (stable, so in the batch's relative order), looped and purged; the purged lists are
 //!   concatenated in query order. The serial purge's output is ordered by context first, so this

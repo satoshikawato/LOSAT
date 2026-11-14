@@ -109,7 +109,7 @@ static X_OWNER_SCAN_NS: AtomicU64 = AtomicU64::new(0);
 static X_WAIT_NS: AtomicU64 = AtomicU64::new(0);
 
 /// The inputs of the seed stage of one subject chunk, borrowed from
-/// `collect_prelim_hits_for_chunk` (the same names as there).
+/// `prelim_subject::prelim_chunk_hits` (the same names as there).
 pub(super) struct Inputs<'a> {
     pub(super) two_stage: &'a TwoStageLookup,
     pub(super) search_seq_packed: &'a [u8],
@@ -137,7 +137,7 @@ pub(super) struct Inputs<'a> {
     pub(super) timing: Option<&'a BlastnTiming>,
 }
 
-/// The diagonal array of `collect_prelim_hits_for_chunk` (a query block of at most 8000
+/// The diagonal array of `prelim_subject::prelim_chunk_hits` (a query block of at most 8000
 /// letters): `hit_level_array`, `hit_len_array`, `diag_table_length` (NCBI's
 /// `diag_array_length`), `diag_table_mask` (`diag_mask`) and `diag_array_size`, the names
 /// there, for the two-hit stage of LOSAT_X_PAIRPARDISCARR (child module `disc`). With the
@@ -1586,7 +1586,7 @@ fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
 ///                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
 ///     }
 /// ```
-/// Dispatch of `collect_prelim_hits_for_chunk`: the seed stage of this chunk (the loop above
+/// Dispatch of `prelim_subject::prelim_chunk_hits`: the seed stage of this chunk (the loop above
 /// with its one-hit extension) when the chunk is in scope (`chunk_free_scope`, a pool of two
 /// threads or more, an unmasked subject, one subject owner); `true` means it has run and the
 /// reference scan is skipped. `fold_scratch` holds the allocations of

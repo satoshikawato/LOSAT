@@ -69,9 +69,10 @@
 //!   until the table's memory is reduced in shape (line NP, SC9b). With few subjects the clause of
 //!   `LOSAT_X_BXCLUTCAP` had raised K to 2 at 16 threads and 4 at 32 for 8 proteins, and the tables
 //!   held side by side took the memory past NCBI's (ws node 1, 800 cDNAs x 8 yeast proteins
-//!   `-subject`, reports equal: 16 / 32 threads 3.16 / 2.14 s and 486 / 823 MB with it, 4.50 / 3.41
-//!   s and 322 / 319 MB without, NCBI 139.7 s and 386 MB at one thread); the Owner chose K = 1 for
-//!   this table whatever the subjects (2026-11-14, `docs/decisions/OWNER_DECISIONS.md`).
+//!   `-subject`, 2 rounds, reports equal: 16 / 32 threads 3.16 / 2.25 s and 520 / 795 MB with it,
+//!   4.47 / 3.38 s and 309 / 316 MB without, NCBI 140.7 s and 386 MB at one thread; 50 proteins
+//!   unchanged); the Owner chose K = 1 for this table whatever the subjects (2026-11-14,
+//!   `docs/decisions/OWNER_DECISIONS.md`).
 //! - `LOSAT_X_BXCAPFILL[=f]` (built-in f = 4; acts only where `LOSAT_X_BXUNITCAP` caps): the capped
 //!   units keep the threads busy with few subjects too. A capped unit's subjects run as tasks of
 //!   `capped_subjects_per_task` subjects: f tasks for each of the `ceil(threads / K)` threads a unit

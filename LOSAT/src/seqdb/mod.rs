@@ -56,7 +56,7 @@ pub mod taxdb;
 pub mod volume;
 
 pub use filter::{DbList, ListWarning, SeqidList, TaxidList};
-pub(crate) use filter::{Oid, OidMap};
+pub(crate) use filter::{DbSequence, Oid, OidMap};
 
 #[cfg(test)]
 mod damaged_files_tests;
@@ -2186,7 +2186,7 @@ impl SeqDb {
         let at = self.find_volume(ordinal)?;
         self.ordinal_deflines(
             at.volume,
-            ordinal,
+            self.volume_starts[at.volume] + at.vol_oid,
             self.volumes[at.volume].deflines(at.vol_oid),
         )
     }
@@ -2220,24 +2220,25 @@ impl SeqDb {
         let at = self.find_volume(ordinal)?;
         self.sequence_header(
             at.volume,
-            ordinal,
+            self.volume_starts[at.volume] + at.vol_oid,
             self.volumes[at.volume].header(at.vol_oid),
         )
     }
 
-    /// The `SequenceHeader` of the header `header` of the sequence `ordinal` in `volume`.
+    /// The `SequenceHeader` of the header `header` of the sequence `oid` (its OID, which the
+    /// messages name) in `volume`.
     fn sequence_header(
         &self,
         volume: usize,
-        ordinal: u32,
+        oid: u32,
         header: Result<VolumeHeader, SeqDbError>,
     ) -> Result<SequenceHeader, SeqDbError> {
         match header? {
             VolumeHeader::Ordinal(deflines) => self
-                .ordinal_deflines(volume, ordinal, Ok(deflines))
+                .ordinal_deflines(volume, oid, Ok(deflines))
                 .map(SequenceHeader::Ordinal),
             VolumeHeader::Parsed(set) => self
-                .ordinal_set(volume, ordinal, set)
+                .ordinal_set(volume, oid, set)
                 .map(SequenceHeader::Parsed),
         }
     }
@@ -2253,16 +2254,16 @@ impl SeqDb {
     /// [`SeqDb::defline_set`] of the sequence at `at`.
     pub fn defline_set_at(&self, at: SeqLocation) -> Result<DeflineSet, SeqDbError> {
         let set = self.volumes[at.volume].defline_set(at.vol_oid)?;
-        self.ordinal_set(at.volume, at.id, set)
+        self.ordinal_set(at.volume, self.volume_starts[at.volume] + at.vol_oid, set)
     }
 
-    /// `set`, the definition lines of the sequence `ordinal` (the id its messages name) in
+    /// `set`, the definition lines of the sequence `oid` (its OID, which the messages name) in
     /// `volume`, with the tag of a `general` id `BL_ORD_ID` made its OID in the database
     /// (`defline_set`).
     fn ordinal_set(
         &self,
         volume: usize,
-        ordinal: u32,
+        oid: u32,
         mut set: DeflineSet,
     ) -> Result<DeflineSet, SeqDbError> {
         let volume_start = self.volume_starts[volume];
@@ -2287,12 +2288,12 @@ impl SeqDb {
             // `GetId` of a string tag throws in NCBI (an invalid CHOICE selection).
             let ObjectId::Id(tag) = dbtag.tag else {
                 return Err(format(format!(
-                    "BL_ORD_ID of sequence {ordinal} has a string tag"
+                    "BL_ORD_ID of sequence {oid} has a string tag"
                 )));
             };
             let Ok(adjusted) = i32::try_from(i64::from(volume_start) + i64::from(tag)) else {
                 return Err(format(format!(
-                    "BL_ORD_ID of sequence {ordinal} passes a signed 32-bit id"
+                    "BL_ORD_ID of sequence {oid} passes a signed 32-bit id"
                 )));
             };
             dbtag.tag = ObjectId::Id(adjusted);
@@ -2308,11 +2309,12 @@ impl SeqDb {
         self.volumes[at.volume].defline_taxids(at.vol_oid)
     }
 
-    /// The definition lines of a volume's sequence as `deflines` gives them for `ordinal`.
+    /// The definition lines of a volume's sequence as `deflines` gives them for the sequence
+    /// `oid` (its OID, which the messages name).
     fn ordinal_deflines(
         &self,
         volume: usize,
-        ordinal: u32,
+        oid: u32,
         deflines: Result<Vec<Defline>, SeqDbError>,
     ) -> Result<Vec<OrdinalDefline>, SeqDbError> {
         let volume_start = self.volume_starts[volume];
@@ -2324,9 +2326,7 @@ impl SeqDb {
                 if bl_ord_id > i32::MAX as u64 {
                     return Err(SeqDbError::Format {
                         path: vol.base().to_path_buf(),
-                        message: format!(
-                            "BL_ORD_ID of sequence {ordinal} passes a signed 32-bit id"
-                        ),
+                        message: format!("BL_ORD_ID of sequence {oid} passes a signed 32-bit id"),
                     });
                 }
                 Ok(OrdinalDefline {
@@ -2477,7 +2477,11 @@ impl SeqDb {
                 let Some(ordinal) = self.range_ordinal(range, oid) else {
                     return true;
                 };
-                let deflines = self.ordinal_deflines(range.volume, ordinal, deflines);
+                let deflines = self.ordinal_deflines(
+                    range.volume,
+                    self.volume_starts[range.volume] + oid,
+                    deflines,
+                );
                 visit(ordinal, deflines)
             },
         )
@@ -2568,7 +2572,8 @@ impl SeqDb {
             header_piece_bytes(),
             &mut |oid, header| match self.range_ordinal(range, oid) {
                 Some(ordinal) => {
-                    visit(ordinal, self.sequence_header(range.volume, ordinal, header))
+                    let oid = self.volume_starts[range.volume] + oid;
+                    visit(ordinal, self.sequence_header(range.volume, oid, header))
                 }
                 None => true,
             },

@@ -406,8 +406,12 @@ pub(super) fn blastp_database_search_space(
 // and is rejected.
 /// Prepares the block `block` (the sequences from the ordinal id `range.first_ordinal`)
 /// for the search: O is read as X, and a sequence that LOSAT cannot search as NCBI does
-/// is an error that names its ordinal id (and `program`).
-fn prepare_search_block(block: &mut SequenceBlock, program: &str) -> Result<()> {
+/// is an error that names its OID (`oids`, the database's) and `program`.
+fn prepare_search_block(
+    block: &mut SequenceBlock,
+    oids: crate::seqdb::OidMap<'_>,
+    program: &str,
+) -> Result<()> {
     let sequences = block.len();
     let invalid = read_o_as_x(block.protein_bytes_mut());
     // A well-formed block holds one sentinel byte before its first sequence and one
@@ -421,8 +425,12 @@ fn prepare_search_block(block: &mut SequenceBlock, program: &str) -> Result<()> 
         return Ok(());
     }
     for i in 0..sequences {
-        let ordinal = u64::from(block.first_ordinal()) + i as u64;
-        shared::check_protein_sequence(block.protein_with_sentinels(i), ordinal, program)?;
+        let ordinal = block.first_ordinal() + i as u32;
+        shared::check_protein_sequence(
+            block.protein_with_sentinels(i),
+            || oids.oid(ordinal),
+            program,
+        )?;
     }
     bail!("a database block is not well-formed, which is not supported by LOSAT's {program}")
 }
@@ -456,7 +464,7 @@ fn read_search_block(db: &SeqDb, range: BlockRange, program: &str) -> Result<Seq
     let mut block = db
         .read_block(range)
         .map_err(|error| shared::search_read_error(error, program))?;
-    prepare_search_block(&mut block, program)?;
+    prepare_search_block(&mut block, db.oid_map(), program)?;
     Ok(block)
 }
 
@@ -931,11 +939,11 @@ impl ListedSubjects {
     /// after the redo and before anything is dropped from them), in NCBI's order. A reader
     /// error of NCBI's own is a `HeaderReadError` that names the query whose hit list
     /// reached it; LOSAT's refusals are errors of their own.
-    pub(super) fn read_titles(
-        &self,
-        database: &BlastpDatabase,
+    pub(super) fn read_titles<'a>(
+        &'a self,
+        database: &'a BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
-    ) -> Result<ListedTitles<'_>> {
+    ) -> Result<ListedTitles<'a>> {
         let mut titles: Vec<Option<shared::StoredTitle>> = vec![None; self.ordinals.len()];
         let mut parsed = ParsedSubjects::default();
         let headers = shared::HeaderReader::new(&database.db);
@@ -983,6 +991,7 @@ impl ListedSubjects {
         }
         Ok(ListedTitles {
             listed: self,
+            oids: database.oid_map(),
             shown: ListedShown::Records(records),
             replaced_title_bytes,
             taxonomy_titles,
@@ -1060,6 +1069,8 @@ fn rename_to_ranks(
 /// (`ListedSubjects::read_titles`).
 pub(super) struct ListedTitles<'a> {
     listed: &'a ListedSubjects,
+    /// The OIDs of the database (`SeqDb::oid_map`), by which LOSAT's refusals name the subjects.
+    oids: crate::seqdb::OidMap<'a>,
     /// The titles (and letters) as the reports read them, by rank.
     pub(super) shown: ListedShown,
     /// Whether the stored title of a subject holds a byte outside ' ' ..= '~' (read as
@@ -1146,7 +1157,7 @@ impl ListedTitles<'_> {
                 if let Some(subject) = &self.parsed[rank] {
                     shared::refuse_id_of_a_query(
                         subject,
-                        self.listed.ordinals[rank],
+                        || self.oids.oid(self.listed.ordinals[rank]),
                         scopes.of_query(query),
                         self.program,
                     )?;
@@ -1182,7 +1193,7 @@ impl ListedTitles<'_> {
         for rank in Self::reported(hit_lists) {
             shared::check_reported_title(
                 self.replaced_title_bytes[rank],
-                self.listed.ordinals[rank],
+                || self.oids.oid(self.listed.ordinals[rank]),
                 self.program,
             )?;
         }
@@ -1337,7 +1348,7 @@ impl ListedTitles<'_> {
                 Ok(None) => {}
                 Err(reason) => {
                     return Err(shared::parsed_refusal(
-                        self.listed.ordinals[rank],
+                        self.oids.oid(self.listed.ordinals[rank]),
                         &format!(
                             "{reason}, and is in psiblast's traceback hit list, which NCBI BLAST+ 2.17.0 prefetches (also beyond -max_target_seqs, where no report shows it)"
                         ),
@@ -1439,7 +1450,9 @@ impl ListedTitles<'_> {
                 // Also another holder of the id whose Bioseq the scope gets where it read it
                 // before (`shared::ScopeBioseq::instead`).
                 if let Err(reason) = subject.pssm_read(batch_reads.one_by_one(rank as u32)) {
-                    reads.refused.get_or_insert((ordinal, reason, self.program));
+                    reads
+                        .refused
+                        .get_or_insert((self.oids.oid(ordinal), reason, self.program));
                     if any_loads {
                         reads.other_blobs.insert(rank, None);
                     }
@@ -1642,14 +1655,13 @@ impl ListedTitles<'_> {
     }
 
     /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of every
-    /// listed subject, by rank (`shared::tabular_subject_id`, `oids` the database's OIDs); a
+    /// listed subject, by rank (`shared::tabular_subject_id`); a
     /// subject without rows gets an empty id. A subject with rows whose id LOSAT cannot write
     /// as NCBI is an error before any format is written where a tabular report `reads` the
     /// subject (`report::tabular::reads_subject`), else its ids are empty: a table of fields
     /// that read nothing of the subject prints none of them.
     pub(super) fn tabular_subject_ids(
         &self,
-        oids: crate::seqdb::OidMap<'_>,
         hit_lists: &[Option<BlastpHitList>],
         reads: bool,
     ) -> Result<(Vec<Arc<[u8]>>, Vec<Option<[Arc<[u8]>; 2]>>)> {
@@ -1676,7 +1688,7 @@ impl ListedTitles<'_> {
                     Err(_) if !reads => Default::default(),
                     Err(problem) => {
                         return Err(shared::parsed_refusal(
-                            ordinal,
+                            self.oids.oid(ordinal),
                             &format!("has {problem}"),
                             self.program,
                         ))
@@ -1691,7 +1703,7 @@ impl ListedTitles<'_> {
             }
             let id = match shared::tabular_subject_id(
                 self.title(rank),
-                oids.oid(ordinal),
+                self.oids.oid(ordinal),
                 true,
                 self.program,
             ) {
@@ -1814,14 +1826,14 @@ impl ListedTitles<'_> {
                         .fetched(taxonomy, reads.one_by_one(rank as u32))
                         .map_err(|reason| {
                             shared::parsed_refusal(
-                                self.listed.ordinals[rank],
+                                self.oids.oid(self.listed.ordinals[rank]),
                                 &reason,
                                 self.program,
                             )
                         })?;
                     subject.check_printed_word(true, words).map_err(|problem| {
                         shared::parsed_refusal(
-                            self.listed.ordinals[rank],
+                            self.oids.oid(self.listed.ordinals[rank]),
                             &format!("has {problem}"),
                             self.program,
                         )
@@ -1842,6 +1854,7 @@ impl ListedTitles<'_> {
                         self.parsed_subject(rank)
                             .map(|subject| (self.listed.ordinals[rank], subject))
                     }),
+                    self.oids,
                     self.program,
                 )?;
             }
@@ -1878,6 +1891,7 @@ impl ListedTitles<'_> {
                         self.parsed_subject(rank)
                             .map(|subject| (self.listed.ordinals[rank], subject))
                     }),
+                    self.oids,
                     self.program,
                 )
             })
@@ -1914,14 +1928,18 @@ impl ListedTitles<'_> {
                     subject,
                     true,
                     database.db.taxdb_found(),
-                    ordinal,
+                    || self.oids.oid(ordinal),
                     self.program,
                 )?,
                 None => {
-                    shared::check_shown_protein_title(self.title(rank), ordinal, self.program)?;
+                    shared::check_shown_protein_title(
+                        self.title(rank),
+                        || self.oids.oid(ordinal),
+                        self.program,
+                    )?;
                     shared::check_shown_stored_title(
                         self.taxonomy_titles[rank],
-                        ordinal,
+                        || self.oids.oid(ordinal),
                         self.program,
                     )?;
                 }
@@ -2011,7 +2029,7 @@ pub(super) fn x_titles_allow_blocks(
                             &Default::default(),
                         ) && shared::check_shown_protein_title(
                             &deflines[0].title,
-                            ordinal,
+                            || database.db.oid(ordinal),
                             database.program,
                         )
                         .is_ok()
@@ -2646,14 +2664,14 @@ mod tests {
         let fifth = offset_of(&block, 5);
         let fifth_len = block.protein(5).len();
         block.protein_bytes_mut()[fifth..fifth + fifth_len].fill(0);
-        prepare_search_block(&mut block, "BLASTP").unwrap();
+        prepare_search_block(&mut block, database.db.oid_map(), "BLASTP").unwrap();
         assert_eq!(block.protein(3)[2], 0);
         assert!(block.protein(5).iter().all(|&residue| residue == 0));
         // A byte that is no NCBIstdaa residue in sequence 9.
         let mut block = database.db.read_block(range).unwrap();
         let position = offset_of(&block, 9);
         block.protein_bytes_mut()[position] = 28;
-        let error = prepare_search_block(&mut block, "BLASTP").unwrap_err();
+        let error = prepare_search_block(&mut block, database.db.oid_map(), "BLASTP").unwrap_err();
         assert!(
             format!("{error:#}").starts_with(
                 "database sequence 9 holds a byte that is no NCBIstdaa residue at position 1,"
@@ -2670,7 +2688,8 @@ mod tests {
                 let inside = offset_of(&block, 9) + 5;
                 block.protein_bytes_mut()[inside] = 0;
             }
-            let error = prepare_search_block(&mut block, "BLASTP").unwrap_err();
+            let error =
+                prepare_search_block(&mut block, database.db.oid_map(), "BLASTP").unwrap_err();
             assert!(
                 format!("{error:#}")
                     .starts_with("database sequence 0 is not between two NUL bytes"),
@@ -3613,9 +3632,7 @@ mod tests {
         );
         assert_eq!(listed.encoded[3].aa_len, 300);
         // The tabular ids of the subjects with rows, the stored titles for `stitle`.
-        let (ids, accessions) = titles
-            .tabular_subject_ids(database.oid_map(), &hit_lists, true)
-            .unwrap();
+        let (ids, accessions) = titles.tabular_subject_ids(&hit_lists, true).unwrap();
         assert!(accessions.is_empty());
         assert_eq!(
             ids.iter().map(|id| id.as_ref()).collect::<Vec<_>>(),
@@ -3678,11 +3695,8 @@ mod tests {
         assert!(lean.title(2).is_empty() && lean.title(3).is_empty());
         assert!(Arc::ptr_eq(&lean_titles[2], &lean_titles[3]));
         assert_eq!(
-            lean.tabular_subject_ids(database.oid_map(), &hit_lists, true)
-                .unwrap(),
-            records
-                .tabular_subject_ids(database.oid_map(), &hit_lists, true)
-                .unwrap()
+            lean.tabular_subject_ids(&hit_lists, true).unwrap(),
+            records.tabular_subject_ids(&hit_lists, true).unwrap()
         );
         lean.check_shown_titles(&database, &[0usize, 1].into_iter().collect())
             .unwrap();
@@ -4171,8 +4185,8 @@ mod tests {
 #[derive(Default)]
 pub(super) struct PssmReads {
     read: std::collections::BTreeMap<usize, Option<Vec<u8>>>,
-    /// The ordinal id, the reason and the program of the refusal.
-    refused: Option<(u32, String, &'static str)>,
+    /// The OID, the reason and the program of the refusal.
+    refused: Option<(crate::seqdb::Oid, String, &'static str)>,
     loads: Vec<Option<QueryLoads>>,
     other_blobs: std::collections::BTreeMap<usize, Option<u32>>,
 }
@@ -4203,8 +4217,8 @@ impl PssmReads {
     /// a round that makes the next round's PSSM).
     pub(super) fn check(&self) -> Result<()> {
         match &self.refused {
-            Some((ordinal, reason, program)) => Err(shared::parsed_refusal(
-                *ordinal,
+            Some((oid, reason, program)) => Err(shared::parsed_refusal(
+                *oid,
                 &format!("{reason}, and is in psiblast's PSSM, whose letters NCBI BLAST+ 2.17.0 reads by that id (also beyond -max_target_seqs)"),
                 program,
             )),

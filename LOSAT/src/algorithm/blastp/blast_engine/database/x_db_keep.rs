@@ -150,7 +150,7 @@ fn x_read_search_block_into(
     let mut block = db
         .x_read_block_into(range, buf)
         .map_err(|error| crate::algorithm::common::database::search_read_error(error, program))?;
-    prepare_search_block(&mut block, program)?;
+    prepare_search_block(&mut block, db.oid_map(), program)?;
     Ok(block)
 }
 

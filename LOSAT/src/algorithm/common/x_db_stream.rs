@@ -428,8 +428,11 @@ impl<'a> XDbStream<'a> {
         let (failing, refusal) = &self.x_failing;
         let error = match failing.iter().find(|oid| oids.contains(oid)) {
             None => return Ok(()),
-            Some(oid) if *refusal => shared::refusal(
-                &format!("the read of database sequence {oid} failed"),
+            Some(&ordinal) if *refusal => shared::refusal(
+                &format!(
+                    "the read of database sequence {} failed",
+                    self.db.oid(ordinal as u32)
+                ),
                 self.program,
             ),
             Some(_) => shared::PreliminaryReadError("Database memory map file error").into(),
@@ -460,7 +463,7 @@ impl<'a> XDbStream<'a> {
         i: usize,
         oid: usize,
     ) -> Result<(usize, Vec<AmbiguityRun>)> {
-        shared::x_nucleotide_parts_in(block, i, oid as u32, self.program)
+        shared::x_nucleotide_parts_in(block, i, || self.db.oid(oid as u32), self.program)
             .map_err(|error| XReadError(error).into())
     }
 }

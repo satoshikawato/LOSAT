@@ -268,16 +268,16 @@ fn x_check_whole_named(db: &SeqDb, program: &str) -> Result<usize> {
     // same limit stops `-subject` in `search::search_core`); the refusal belongs to the
     // first batch with a valid context, as the reader's errors.
     if let Some((ordinal, length)) = first_too_long {
-        return Err(too_long(ordinal as usize, length));
+        return Err(too_long(db.oid(ordinal), length));
     }
     Ok(longest)
 }
 
-/// LOSAT's refusal of database sequence `ordinal` of `length` residues, longer than
+/// LOSAT's refusal of database sequence `oid` of `length` residues, longer than
 /// `MAX_DBSEQ_LEN`.
-pub(super) fn too_long(ordinal: usize, length: usize) -> anyhow::Error {
+pub(super) fn too_long(oid: crate::seqdb::Oid, length: usize) -> anyhow::Error {
     anyhow::anyhow!(
-        "database sequence {ordinal} has {length} residues; a subject longer than {MAX_DBSEQ_LEN} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX"
+        "database sequence {oid} has {length} residues; a subject longer than {MAX_DBSEQ_LEN} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX"
     )
 }
 
@@ -402,13 +402,13 @@ impl ReportedSubjects {
                         shared::ReportedHeader::Stored(stored) => {
                             shared::check_reported_title(
                                 stored.replaced_bytes,
-                                ordinal,
+                                || database.db.oid(ordinal),
                                 database.program,
                             )?;
                             if pairwise {
                                 shared::check_shown_stored_title(
                                     stored.taxonomy_title,
-                                    ordinal,
+                                    || database.db.oid(ordinal),
                                     database.program,
                                 )?;
                             }
@@ -483,6 +483,7 @@ impl ReportedSubjects {
                                 let ordinal = u32::try_from(list.oid).ok()?;
                                 Some((ordinal, parsed.get(&list.oid)?.as_ref()))
                             }),
+                        database.db.oid_map(),
                         database.program,
                     )?;
                 }
@@ -495,14 +496,18 @@ impl ReportedSubjects {
             let shown = title.is_some();
             let title = title.clone().unwrap_or_else(|| Arc::from(&b""[..]));
             if pairwise && shown && !parsed.contains_key(&oid) {
-                shared::check_shown_protein_title(&title, ordinal, database.program)?;
+                shared::check_shown_protein_title(
+                    &title,
+                    || database.db.oid(ordinal),
+                    database.program,
+                )?;
             }
             if let Some(subject) = parsed.get(&oid) {
                 // The formats that read the subject's Bioseq; the Seq-annots and the archive
                 // write its Seq-align id alone.
                 if tabular_reads || pairwise || structured || taxids || taxonomy {
                     subject.fetched(taxonomy, one_by_one).map_err(|reason| {
-                        shared::parsed_refusal(ordinal, &reason, database.program)
+                        shared::parsed_refusal(database.db.oid(ordinal), &reason, database.program)
                     })?;
                 } else if prefetched {
                     shared::check_prefetched_parsed(
@@ -517,7 +522,7 @@ impl ReportedSubjects {
                         subject,
                         true,
                         taxdb_found,
-                        ordinal,
+                        || database.db.oid(ordinal),
                         database.program,
                     )?;
                 }
@@ -531,7 +536,7 @@ impl ReportedSubjects {
                         Err(_) if !tabular_reads => Default::default(),
                         Err(problem) => {
                             return Err(shared::parsed_refusal(
-                                ordinal,
+                                database.db.oid(ordinal),
                                 &format!("has {problem}"),
                                 database.program,
                             ))
@@ -847,7 +852,11 @@ impl ReportedSubjects {
             let parsed = self.parsed.get(rank).and_then(Option::as_deref);
             if let (true, Some(subject)) = (needs.all_deflines, parsed) {
                 self.tabular.all_ids[rank] = subject.all_tabular_ids(true).map_err(|problem| {
-                    shared::parsed_refusal(ordinal, &format!("has {problem}"), database.program)
+                    shared::parsed_refusal(
+                        self.oids[rank],
+                        &format!("has {problem}"),
+                        database.program,
+                    )
                 })?;
             }
             if needs.taxonomy {
@@ -969,7 +978,7 @@ impl ReportedSubjects {
                     if let Some(subject) = self.parsed_subject(list.oid) {
                         shared::refuse_id_of_a_query(
                             subject,
-                            self.ordinals[list.oid],
+                            || self.oids[list.oid],
                             scopes.of_query(batch.query_ordinal + qidx),
                             PROGRAM,
                         )?;

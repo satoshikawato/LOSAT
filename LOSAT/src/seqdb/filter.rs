@@ -2089,8 +2089,10 @@ impl Oid {
     }
 }
 
-/// The OID as LOSAT's refusals that take an `Oid` name the sequence ("database sequence n"),
-/// not by its rank in a list that restricts the search.
+/// The OID, by which LOSAT's refusals name a database sequence ("database sequence n", as
+/// `blastdbcmd -entry 'gnl|BL_ORD_ID|n'` reads it), not by its rank in a list or an alias range
+/// that restricts the search: each takes an `Oid`, a [`DbSequence`], or a closure that gives
+/// one where it refuses.
 impl std::fmt::Display for Oid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
@@ -2103,6 +2105,12 @@ impl std::fmt::Display for Oid {
 pub struct OidMap<'a>(Option<&'a OidFilter>);
 
 impl OidMap<'_> {
+    /// The OIDs of a test's database that is not restricted: each ordinal id's own.
+    #[cfg(test)]
+    pub(crate) fn unrestricted() -> Self {
+        OidMap(None)
+    }
+
     /// The OID of ordinal id `ordinal`.
     pub(crate) fn oid(self, ordinal: u32) -> Oid {
         Oid(match self.0 {
@@ -2112,7 +2120,45 @@ impl OidMap<'_> {
     }
 }
 
+/// A database sequence that the report of another names (one that the lookup of the other's
+/// Seq-align id gives, that also holds it, or that is a copy of its record): its ordinal id, by
+/// which LOSAT reads it, and its OID, by which LOSAT's refusals name it (its `Display`). Only
+/// [`SeqDb::sequence`] makes one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DbSequence {
+    /// The ordinal id.
+    pub(crate) ordinal: u32,
+    /// The OID ([`SeqDb::oid`] of `ordinal`).
+    pub(crate) oid: Oid,
+}
+
+impl DbSequence {
+    /// The sequence `ordinal` of a test's database that is not restricted.
+    #[cfg(test)]
+    pub(crate) fn of_unrestricted(ordinal: u32) -> Self {
+        DbSequence {
+            ordinal,
+            oid: Oid(ordinal),
+        }
+    }
+}
+
+/// The OID, as LOSAT's refusals name the sequence.
+impl std::fmt::Display for DbSequence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.oid.fmt(f)
+    }
+}
+
 impl SeqDb {
+    /// The sequence of ordinal id `ordinal` with its OID ([`SeqDb::oid`]).
+    pub(crate) fn sequence(&self, ordinal: u32) -> DbSequence {
+        DbSequence {
+            ordinal,
+            oid: self.oid(ordinal),
+        }
+    }
+
     /// The OID of ordinal id `ordinal`: `ordinal` itself unless a list restricts the database
     /// ([`SeqDb::restrict`]) or its alias files' range starts past OID 0. NCBI prints it as `n`
     /// of `gnl|BL_ORD_ID|n`.

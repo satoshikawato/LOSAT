@@ -168,17 +168,18 @@ impl<'a> XStreamDb<'a> {
         if self.x_checked.load(std::sync::atomic::Ordering::Acquire) {
             return Ok(());
         }
-        let first = part.first_ordinal() as usize;
+        let first = part.first_ordinal();
         for i in 0..part.len() {
             let with_sentinels = part.protein_with_sentinels(i);
-            let ordinal = first + i;
-            check_protein_sequence(with_sentinels, ordinal as u64, PROGRAM).map_err(XReadError)?;
+            let ordinal = first + i as u32;
+            check_protein_sequence(with_sentinels, || self.db.oid(ordinal), PROGRAM)
+                .map_err(XReadError)?;
             let length = with_sentinels.len() - 2;
             if length > MAX_DBSEQ_LEN {
-                return Err(XReadError(too_long(ordinal, length)).into());
+                return Err(XReadError(too_long(self.db.oid(ordinal), length)).into());
             }
         }
-        self.x_cover(first, first + part.len());
+        self.x_cover(first as usize, first as usize + part.len());
         Ok(())
     }
 

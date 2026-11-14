@@ -487,8 +487,8 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
             (lookup, contexts)
         }
         None => {
-            // The table of the search's matrix and word size (`sc`), built without chains as
-            // BLASTX's (4-letter words: the joint builder; item X2e of line RG).
+            // The table of the search's matrix and word size (`sc`), built without chains (another
+            // matrix or word size than BLOSUM62's 3 letters: TBLASTN's builders; item X2e of line RG).
             let (lookup, mut contexts) = crate::algorithm::tblastx::lookup::x_tbx_build_ncbi_lookup(
                 query_frames,
                 crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),

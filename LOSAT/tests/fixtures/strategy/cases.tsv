@@ -361,3 +361,4 @@ psiblast.pssm.sub.2titles	psiblast	-	-in_pssm tests/fasta/strategy/pssm_2titles.
 tblastn.db.in_pssm.nonsq	tblastn	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/arch_tbn_snucl_nonsq -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
 tblastn.db.in_pssm.empty	tblastn	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/aliaskeys/e_nF -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
 psiblast.pssm.outpssm.comment.nodb	psiblast	-	-in_pssm tests/fasta/strategy/pssm_comment.asn -db tests/db_search/none -out_pssm {ss}.pssm -outfmt 6	ncbi	2	-	-
+tblastn.db.in_pssm.empty.kungneg	tblastn	-	-in_pssm tests/fasta/strategy/pssm_kungneg.asn -db tests/db_search/aliaskeys/e_nF -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-

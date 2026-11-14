@@ -1584,6 +1584,9 @@ fn search(
         // context fails after the database's first OID is found and before any sequence is read.
         // NCBI 2.17.0 (probe of line RG D1a, `db.ak.tbn.min1.6`): `BLAST engine error: The
         // average subject length is too short`, exit status 3.
+        // With `-in_pssm`, whether the read's failure comes before the batch's setup checks
+        // (`PsiSearchReadFailure::precedes_setup_checks`: the empty database).
+        let mut read_before_setup = false;
         let (database_stores, mut stores_error) = match database {
             Some(database) => {
                 // `-in_pssm` (PSI-TBLASTN): `CPsiBlast` reads the database without `CLocalBlast`'s
@@ -1594,6 +1597,9 @@ fn search(
                     .pssm
                     .as_ref()
                     .and_then(|_| database.pssm_search_read_failure());
+                read_before_setup = pssm_failure
+                    .as_ref()
+                    .is_some_and(|failure| failure.precedes_setup_checks());
                 let read = if database.first_oid_read_fails() {
                     Err(match pssm_failure {
                         Some(failure) => failure.error("TBLASTN"),
@@ -1825,6 +1831,24 @@ fn search(
                             )?;
                         }
                         report
+                    }
+                    // NCBI's setup reads OID 0 before its checks (`BLAST_GapAlignSetUp`, quoted
+                    // at `PsiSearchReadFailure::precedes_setup_checks`): with `-in_pssm` an empty
+                    // database fails the batch before the PSSM's Karlin-Altschul check or the
+                    // average subject length would, as psiblast's
+                    // (`psiblast_stop_at_invalid_query`).
+                    Err(error)
+                        if read_before_setup
+                            && stores_error.is_some()
+                            && error.is::<super::stage_d_pipeline::SetupEngineError>() =>
+                    {
+                        failed = Some((
+                            range,
+                            stores_error
+                                .take()
+                                .expect("the database's read failure before the setup"),
+                        ));
+                        break;
                     }
                     Err(error) => match batch_failure(error) {
                         Ok(failure) => {

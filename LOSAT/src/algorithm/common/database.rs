@@ -332,6 +332,27 @@ impl PsiSearchReadFailure {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:930-934,960-961
+    // ```c
+    //           Int4 oid = 0;  /* Get length of first sequence. */
+    //           if ( (total_length = BlastSeqSrcGetSeqLen(seq_src, (void*) &oid)) < 0) {
+    //               total_length = -1;
+    //               num_seqs = -1;
+    //           }
+    // ...
+    //    if((status=BlastExtensionParametersNew(program_number, ext_options, sbp,
+    //                                query_info, ext_params)) != 0)
+    // ```
+    /// Whether NCBI meets this failure before the query batch's setup checks (`BLAST_GapAlignSetUp`:
+    /// `BlastExtensionParametersNew`'s valid Karlin-Altschul block, which a PSSM query whose file's
+    /// ungapped values are invalid fails, then the average subject length): the empty database in
+    /// the setup's read of OID 0, before them; an unopenable sequence file in the search's first
+    /// read, after them. The one order of psiblast (`psiblast_stop_at_invalid_query`) and PSI-TBLASTN
+    /// (`tblastn_app`; review 4 R7-1 of line RG F1b-2).
+    pub(crate) fn precedes_setup_checks(&self) -> bool {
+        matches!(self, PsiSearchReadFailure::EmptyDatabase)
+    }
+
     /// NCBI's error (`BLAST Database error: ...`, exit status 2; `program` names LOSAT's program in
     /// a refusal of an error that is not NCBI's, `database_error`).
     pub(crate) fn error(self, program: &str) -> anyhow::Error {

@@ -6447,18 +6447,19 @@ fn psiblast_stop_at_invalid_query(
     // sequence file that cannot be opened.
     use crate::algorithm::common::database::PsiSearchReadFailure;
     let read_failure = database.and_then(|database| PsiSearchReadFailure::of(database.seqdb()));
-    // The PSSM query whose letters give no Karlin-Altschul parameters crashes NCBI before (below).
-    let empty_database = matches!(read_failure, Some(PsiSearchReadFailure::EmptyDatabase))
-        && contexts
-            .first()
-            .is_some_and(|context| args.psi_search.is_none() || context.is_valid);
-    // A sequence file that cannot be opened stops the first batch when its query is valid (the
-    // first read of the preliminary search; volumes in the order NCBI reads them).
-    let unreadable = matches!(read_failure, Some(PsiSearchReadFailure::Unopenable(_)))
-        && contexts
-            .first()
-            .is_some_and(|context| context.is_valid && kbp_psi_valid(context));
-    let first_stop = if empty_database || unreadable {
+    // NCBI's order (`PsiSearchReadFailure::precedes_setup_checks`): the empty database before the
+    // PSSM's Karlin-Altschul check, for a query with a valid context (the PSSM query whose letters
+    // give no Karlin-Altschul parameters crashes NCBI before, below); a sequence file that cannot
+    // be opened stops the first batch when its query and `kbp_psi` are valid (the first read of the
+    // preliminary search; volumes in the order NCBI reads them).
+    let read_stop = match (&read_failure, contexts.first()) {
+        (Some(failure), Some(context)) if failure.precedes_setup_checks() => {
+            args.psi_search.is_none() || context.is_valid
+        }
+        (Some(_), Some(context)) => context.is_valid && kbp_psi_valid(context),
+        _ => false,
+    };
+    let first_stop = if read_stop {
         Some(0)
     } else {
         contexts
@@ -6472,7 +6473,7 @@ fn psiblast_stop_at_invalid_query(
     let span = batches.searched_span(searched_start);
     let query_length = searched_queries[searched_start].seq().len();
     let error = match protein_query_split_sizes(args.app.name(), 10000) {
-        _ if empty_database || unreadable => read_failure
+        _ if read_stop => read_failure
             .expect("the first read's failure")
             .error(args.app.name()),
         // A PSSM query (`-in_pssm`, never split: `check_in_pssm_options`) whose letters give no

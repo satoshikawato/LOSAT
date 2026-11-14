@@ -121,8 +121,6 @@ pub struct QueryRecord<'a> {
     pub offset: i32,
 }
 
-/// A subject with HSPs, as the Seq-aligns name and measure it.
-#[derive(Clone, Copy, Debug)]
 impl HspRecord<'_> {
     /// Whether the HSP's Std-seg rows are empty (an ungapped HSP of length 0,
     /// `serial::seqalign::ungapped_rows_empty`).
@@ -134,6 +132,8 @@ impl HspRecord<'_> {
     }
 }
 
+/// A subject with HSPs, as the Seq-aligns name and measure it.
+#[derive(Clone, Copy, Debug)]
 pub struct SubjectRecord<'a> {
     /// `local str "Subject_N"` (`-subject`) or `general { db "BL_ORD_ID", tag id <oid> }`
     /// (`-db`).

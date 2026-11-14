@@ -377,45 +377,63 @@ fn switches_off_write_the_same_strategy_files() {
     }
 }
 
-/// blastx refuses a query that is not a regular file (a pipe) with the strategy, as with outfmt 11
-/// (DECISIONS 26 of line RG): the titles of the whole input are read before the first batch.
+/// blastx and rpstblastn (BLASTX's driver) refuse a query that is not a regular file (a pipe) with
+/// the strategy, as with outfmt 11 (DECISIONS 26 of line RG): the titles of the whole input are
+/// read before the first batch. The refusal names the program (review 3 of F1b-1, R3-4).
 #[test]
-fn blastx_refuses_a_piped_query() {
+fn a_piped_query_is_refused() {
     use std::io::Write;
     let dir = std::env::temp_dir().join(format!("losat_strategy_pipe_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let ss = dir.join("s.ss");
-    let query = std::fs::read(engine().join("tests/fasta/outfmt11/arch_bx_q.fna")).unwrap();
-    let mut child = Command::new(BIN)
-        .current_dir(engine())
-        .args([
+    let rps = rps_databases("rps_mini", &dir);
+    let runs: [(&str, &str, &[&str], Option<&Path>); 2] = [
+        (
             "blastx",
-            "-query",
-            "-",
-            "-subject",
-            "tests/fasta/outfmt11/arch_bx_s.faa",
-        ])
-        .args([
-            "-outfmt",
-            "6",
-            "-export_search_strategy",
-            ss.to_str().unwrap(),
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("run losat");
-    // The refusal may come before the whole input is read.
-    let _ = child.stdin.take().unwrap().write_all(&query);
-    let output = child.wait_with_output().unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(1), "{stderr}");
-    assert!(output.stdout.is_empty());
-    assert!(
-        stderr.contains("unsupported BLASTX query input for -export_search_strategy"),
-        "{stderr}"
-    );
+            "tests/fasta/outfmt11/arch_bx_q.fna",
+            &["-subject", "tests/fasta/outfmt11/arch_bx_s.faa"],
+            None,
+        ),
+        (
+            "rpstblastn",
+            "tests/fasta/rps/nq4.fna",
+            &["-db", "rps_mini", "-comp_based_stats", "0"],
+            Some(&rps),
+        ),
+    ];
+    for (program, query, target, blastdb) in runs {
+        let query = std::fs::read(engine().join(query)).unwrap();
+        let mut command = Command::new(BIN);
+        command
+            .current_dir(engine())
+            .args([program, "-query", "-"])
+            .args(target)
+            .args([
+                "-outfmt",
+                "6",
+                "-export_search_strategy",
+                ss.to_str().unwrap(),
+            ])
+            .env_remove("BLASTDB")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(blastdb) = blastdb {
+            command.env("BLASTDB", blastdb);
+        }
+        let mut child = command.spawn().expect("run losat");
+        // The refusal may come before the whole input is read.
+        let _ = child.stdin.take().unwrap().write_all(&query);
+        let output = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{program}: {stderr}");
+        assert!(output.stdout.is_empty(), "{program}");
+        let expected = format!(
+            "unsupported {} query input for -export_search_strategy",
+            program.to_uppercase()
+        );
+        assert!(stderr.contains(&expected), "{program}: {stderr}");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

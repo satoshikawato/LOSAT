@@ -974,7 +974,8 @@ of a row is one argument, so a cell with spaces is a list of names). `multidb/` 
   `ENSTTEST0001.1`, a copy of record 1's sequence (taxid 9606). `n4a` / `n4b`: version 4 without `-parse_seqids`; `nnp`:
   the records of `nb` as version 5 without `-parse_seqids`.
 - `d1/g` and `d2/g`: the records of `na` and `nb` under one base name in two directories. `et`: the records of `na` with an
-  empty title. `al.nal`: an alias file (`TITLE multidb alias of na`, `DBLIST na`). `sl.txt`: a seqid list of the first
+  empty title. `al.nal`: an alias file (`TITLE multidb alias of na`, `DBLIST na`). `mix_u.nal` (line DBID mixdb, written by hand): an
+  alias file of `na nnp` whose `FIRST_OID 9`, `LAST_OID 17` keep the sequences of `nnp` (without the accession table) alone. `sl.txt`: a seqid list of the first
   accession of `na`, `nb`, `pa` and `pb`.
 
 The ncbi rows search `taxfilter/q.fna` (BLASTN, BLASTX, TBLASTX) or `taxfilter/q.faa` (BLASTP, TBLASTN, PSIBLAST) and cover:
@@ -1339,7 +1340,7 @@ query's warning where `GetNumSeqs` is 0 (B, C, D); BLASTN and TBLASTX divide B's
 workstation's probes p4c_dp, p4c_dn).
 
 Rows `db.ak.*.ord.*` (D1a-2): the order of a search database's errors, NCBI's (probes p4c_e*, p4c_f2): the list, the alias
-files' counts, the formatter's reopening of each name, then the headers and the accession tables. `o_mix` and `o_mixs` are
+files' counts, the formatter's reopening of each name, then the headers (before line DBID mixdb also the accession tables). `o_mix` and `o_mixs` are
 `multidb/na` (with the accession table) and `multidb/nnp` (without) under `NSEQ abc` / `STATS_NSEQ abc`, with `-seqidlist`
 (the list's `DB contains no accession info.` first) and `-taxids` (the alias file's error); `o_np` is `nnp` alone, `o_v4`
 the version 4 `multidb/n4a` (`Taxonomy filtering is not supported in v4 BLAST dbs` first); `o_dh` and `o_dhs` are over

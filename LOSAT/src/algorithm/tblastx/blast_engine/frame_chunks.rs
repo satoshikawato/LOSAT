@@ -14,11 +14,10 @@
 //! diagonal table, and what the chunks' results are added to.
 
 use super::{
-    merge_one_hit_subject_chunk_hits, merge_tblastx_subject_chunk_hits,
-    sort_ungapped_hits_by_score_ncbi, tblastx_scan_chunk_size_for_run,
-    ungapped_hits_is_sorted_by_score_ncbi, DiagStruct, OffsetPair, OneHitChunkMerge, SubjectChunk,
-    SubjectChunkStatus, SubjectSplitState, TblastxChunkScanResult, TbxScore, UngappedHit,
-    DBSEQ_CHUNK_OVERLAP,
+    merge_tblastx_subject_chunk_hits, sort_ungapped_hits_by_score_ncbi,
+    tblastx_scan_chunk_size_for_run, ungapped_hits_is_sorted_by_score_ncbi, DiagStruct, OffsetPair,
+    OneHitChunkMerge, SubjectChunk, SubjectChunkStatus, SubjectSplitState, TblastxChunkScanResult,
+    TbxScore, UngappedHit, DBSEQ_CHUNK_OVERLAP, TWO_HIT_CHUNK_MERGE_IS_DEFINED,
 };
 // The parallel chunks (builds with threads only).
 #[cfg(all(
@@ -59,7 +58,7 @@ pub(super) struct ChunkDrive {
 
 /// What each chunk's result is added to: the frame's HSP list and the subject's HSP-saving
 /// statistics (`process_subject`'s locals of the same names), and for the one-hit word finder
-/// (`-window_size 0`, `one_hit`) where its chunk merge reports a refusal.
+/// (`-window_size 0`, `one_hit`) where a chunk merge NCBI leaves undefined is refused.
 pub(super) struct ChunkSums<'s> {
     pub(super) frame_ungapped_hits: &'s mut Vec<UngappedHit>,
     pub(super) stats_hsp_saved: &'s mut usize,
@@ -306,23 +305,16 @@ fn add_chunk_result(sums: &mut ChunkSums<'_>, result: TblastxChunkScanResult) {
     sums.stats_score_distribution
         .extend(result.stats.score_distribution);
     if !result.hits.is_empty() {
-        // The lists of the one-hit word finder hold NCBI's `Int4` ends
-        // (`merge_one_hit_subject_chunk_hits`).
-        if let Some(one_hit) = sums.one_hit {
-            merge_one_hit_subject_chunk_hits(
-                sums.frame_ungapped_hits,
-                result.hits,
-                result.chunk.offset,
-                result.chunk.overlap,
-                one_hit,
-            );
-        } else {
-            merge_tblastx_subject_chunk_hits(
-                sums.frame_ungapped_hits,
-                result.hits,
-                result.chunk.offset,
-                result.chunk.overlap,
-            );
+        if let Err(undefined) = merge_tblastx_subject_chunk_hits(
+            sums.frame_ungapped_hits,
+            result.hits,
+            result.chunk.offset,
+            result.chunk.overlap,
+        ) {
+            // Only an HSP of the one-hit word finder of length 0 or less makes a merge undefined.
+            sums.one_hit
+                .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED)
+                .refuse(undefined);
         }
     }
 }

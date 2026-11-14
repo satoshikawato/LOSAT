@@ -2456,7 +2456,8 @@ impl<M: TbxScore> XPairPar<M> {
                         hits,
                         chunk.offset,
                         chunk.overlap,
-                    );
+                    )
+                    .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED);
                 }
             }
             if !frame_ungapped_hits.is_empty() {
@@ -2544,7 +2545,8 @@ impl<M: TbxScore> XPairPar<M> {
                         hits,
                         chunk.offset,
                         chunk.overlap,
-                    );
+                    )
+                    .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED);
                 }
             }
             if !frame_ungapped_hits.is_empty() {

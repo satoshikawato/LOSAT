@@ -600,8 +600,9 @@ would port:
 - TBLASTX `-window_size 0` with a low `-threshold` (version 1.19, 2026-11-14, line RG item X2b):
   the one-hit word finder's ungapped HSPs of length 0 or less (`aa_ungapped.c:1054,1083`). NCBI
   keeps their `Int4` ends, sorts them by score, links them with the other HSPs in the first
-  `BLAST_LinkHsps` (where one whose score is above the large-gap cutoff can join a chain and so
-  change the chain's E-value and the list's order) and deletes them in its re-evaluation (a
+  `BLAST_LinkHsps` (where one whose score is above the large-gap cutoff, or with small gaps on
+  above the small-gap cutoff, can join a chain and so change the chain's E-value and the list's
+  order) and deletes them in its re-evaluation (a
   length of 0 or less scores 0, below every cutoff), so they are never reported. The X2 build
   refused these searches; LOSAT now gives NCBI's output (the rule-3 merge case above aside).
 - `-evalue` with a signed infinity or NaN (`+inf`, `-nan`, `+nan(1)`, `1e999`): NCBI's

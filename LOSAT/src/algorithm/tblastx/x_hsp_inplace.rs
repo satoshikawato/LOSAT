@@ -644,10 +644,15 @@ fn replay_in_place_counted(
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
 // The steps of `apply_sum_stats_even_gap_linking_with_parallel` in its order, each with the
-// reference's functions and values, on one list (module doc, items 1-5).
+// reference's functions and values, on one list (module doc, items 1-5). `compare` is the
+// comparator of the sort (`rev_compare_hsps_tbx`; `rev_compare_hsps_tbx_int4` for a list of the
+// one-hit word finder that holds an HSP of length 0 or less, `link_in_place_int4`), and
+// `link_modes` gives the group step's `use_legacy` and `fast_shadow` (`x_link_slices::link_modes`
+// reads them from the environment; the one-hit form asks for the literal port). Each caller's
+// instance is its own, so the default one is the code of this function with those two fixed.
 /// The result of `apply_sum_stats_even_gap_linking_with_parallel` without a second whole list.
 #[allow(clippy::too_many_arguments)]
-fn link_in_place(
+fn link_in_place<C, M>(
     mut hits: Vec<UngappedHit>,
     params: &KarlinParams,
     linking_params: &LinkingParams,
@@ -656,7 +661,13 @@ fn link_in_place(
     length_adj_per_context: &[i64],
     eff_searchsp_per_context: &[i64],
     allow_parallel: bool,
-) -> Vec<UngappedHit> {
+    compare: C,
+    link_modes: M,
+) -> Vec<UngappedHit>
+where
+    C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
+    M: FnOnce() -> (bool, bool),
+{
     // No NCBI counterpart: the clock of this call for LOSAT_TIMING. The first local, so that it
     // is dropped last.
     let mut lap = LinkLap::start();
@@ -706,11 +717,7 @@ fn link_in_place(
     // The reference's `sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx)`.
     // `allow_parallel` goes to the sort (tblastx/x_link_sort.rs).
     lap.lap(LinkStage::Reset);
-    sort_in_place(
-        &mut hits,
-        rev_compare_hsps_tbx,
-        x_link_sort::Site::First(allow_parallel),
-    );
+    sort_in_place(&mut hits, compare, x_link_sort::Site::First(allow_parallel));
     lap.lap(LinkStage::Sort);
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:522-531
@@ -739,7 +746,8 @@ fn link_in_place(
     //    number_of_hsps = hp_frame_number[frame_index];
     // ```
     // NCBI links its groups as sublists of the one sorted array.
-    let (results, groups) = x_link_slices::link_groups(
+    let (use_legacy, fast_shadow) = link_modes();
+    let (results, groups) = x_link_slices::link_groups_as(
         hits,
         &x_link_slices::Call {
             params,
@@ -753,6 +761,8 @@ fn link_in_place(
             allow_parallel,
         },
         &mut lap,
+        use_legacy,
+        fast_shadow,
     );
     GROUPS.fetch_add(groups as u64, AtomicOrdering::Relaxed);
 
@@ -786,18 +796,18 @@ fn link_in_place(
 //        H->q_end_trim = hsp->query.end - MIN(q_length, trim_size);
 // ```
 // `link_in_place` for a list of the one-hit word finder that holds an HSP of length 0 or less
-// (`linking.rs`, `link_one_hit_with_int4_ends`): the same reset, sort, groups and replay, with
-// the sort's comparator reading the ends as NCBI's `Int4` (`rev_compare_hsps_tbx_int4`) and the
-// literal port `link_hsp_group_ncbi` for every group, which reads the four coordinates as `i32`
-// (`frame_relative_coords`) and so computes NCBI's trims, windows and sums on them. The replay's
-// comparators read the starts only. The incremental kernel is not used: it visits the HSPs by
-// decreasing end and assumes every end is after its start (`linking_incr.rs`). The reference
-// body of LOSAT_DEBUG_CUTOFFS and LOSAT_DIAGNOSTICS is not used either (`gate`): it may take that
-// kernel, and its prints are not values of the search.
+// (`linking.rs`, `link_one_hit_with_int4_ends`): the sort's comparator reads the ends as NCBI's
+// `Int4` (`rev_compare_hsps_tbx_int4`), and every group goes to the literal port
+// `link_hsp_group_ncbi`, which reads the four coordinates as `Int4` (`frame_relative_coords`) and
+// so computes NCBI's trims, windows and sums on them. The replay's comparators read the starts
+// only. The incremental kernel is not used: it visits the HSPs by decreasing end and assumes every
+// end is after its start (`linking_incr.rs`). The reference body of LOSAT_DEBUG_CUTOFFS and
+// LOSAT_DIAGNOSTICS is not used either (`gate`): it may take that kernel, and its prints are not
+// values of the search. The LOSAT_X_STATS counters count the call as `linking_dispatch` does.
 /// `link_in_place` with `Int4` ends and the literal port, for a one-hit list.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn link_in_place_int4(
-    mut hits: Vec<UngappedHit>,
+    hits: Vec<UngappedHit>,
     params: &KarlinParams,
     linking_params: &LinkingParams,
     query_contexts: &[QueryContext],
@@ -806,56 +816,20 @@ pub(super) fn link_in_place_int4(
     eff_searchsp_per_context: &[i64],
     allow_parallel: bool,
 ) -> Vec<UngappedHit> {
-    let mut lap = LinkLap::start();
-    if hits.is_empty() {
-        return hits;
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1773-1776
-    // ```c
-    //     for (index = 0; index < hsp_list->hspcnt; ++index)
-    //         hsp_list->hsp_array[index]->num = 1;
-    // ```
-    for (link_id, hit) in hits.iter_mut().enumerate() {
-        hit.link_id = u32::try_from(link_id)
-            .expect("link_id: a position in the linking list fits u32 (NCBI's hspcnt is Int4)");
-        hit.chain_next_link_id = None;
-        hit.num = 1;
-    }
-    let cutoffs = linking_params.cutoffs;
-    let log_k_by_ctx: Vec<f64> = query_contexts
-        .iter()
-        .map(|ctx| ctx.karlin_params.k.ln())
-        .collect();
-    lap.lap(LinkStage::Reset);
-    sort_in_place(
-        &mut hits,
-        rev_compare_hsps_tbx_int4,
-        x_link_sort::Site::First(allow_parallel),
-    );
-    lap.lap(LinkStage::Sort);
-    let (results, _groups) = x_link_slices::link_groups_as(
+    LINKINGS.fetch_add(1, AtomicOrdering::Relaxed);
+    HITS.fetch_add(hits.len() as u64, AtomicOrdering::Relaxed);
+    link_in_place(
         hits,
-        &x_link_slices::Call {
-            params,
-            cutoffs: &cutoffs,
-            linking_params,
-            query_contexts,
-            subject_frame_bases,
-            length_adj_per_context,
-            eff_searchsp_per_context,
-            log_k_by_ctx: &log_k_by_ctx,
-            allow_parallel,
-        },
-        &mut lap,
-        true,
-        false,
-    );
-    if results.len() <= 1 {
-        return results;
-    }
-    let replayed = replay_in_place(results, &mut lap, allow_parallel);
-    lap.lap(LinkStage::Replay);
-    replayed
+        params,
+        linking_params,
+        query_contexts,
+        subject_frame_bases,
+        length_adj_per_context,
+        eff_searchsp_per_context,
+        allow_parallel,
+        rev_compare_hsps_tbx_int4,
+        || (true, false),
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1773-1776
@@ -900,6 +874,8 @@ pub(super) fn linking_dispatch(
         length_adj_per_context,
         eff_searchsp_per_context,
         allow_parallel,
+        rev_compare_hsps_tbx,
+        x_link_slices::link_modes,
     ))
 }
 
@@ -1348,6 +1324,8 @@ mod tests {
                     &[49; 12],
                     &[9_372_428_362; 12],
                     allow_parallel,
+                    rev_compare_hsps_tbx,
+                    x_link_slices::link_modes,
                 );
                 assert_same_list(&label, &actual, &expected);
                 assert_eq!(actual.len(), n, "{label}: every HSP is in the result");
@@ -1429,6 +1407,8 @@ mod tests {
             &[49; 12],
             &[9_372_428_362; 12],
             parallel,
+            rev_compare_hsps_tbx,
+            x_link_slices::link_modes,
         )
     }
 

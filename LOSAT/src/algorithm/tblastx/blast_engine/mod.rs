@@ -340,13 +340,13 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
     let mut kept_hits = Vec::new();
 
     for mut hit in ungapped_hits {
-        // No HSP of negative length arrives (its end, an `Int4` below its start, would read here
-        // as a large `u32`): the one-hit word finder's path drops the HSPs of length 0 or less
-        // after its first linking call, where NCBI's re-evaluation (this function) deletes them
+        // No HSP of length 0 or less arrives (its end, an `Int4` at or below its start, would read
+        // here as a `u32`): the one-hit word finder's path drops those HSPs after its first linking
+        // call, where NCBI's re-evaluation (this function) deletes them
         // (`link_one_hit_with_int4_ends`).
         debug_assert!(
-            hit.q_end_int4() >= hit.q_aa_start as i32,
-            "an HSP of negative length reached the re-evaluation"
+            !hit.is_int4_inverted(),
+            "an HSP of length 0 or less reached the re-evaluation"
         );
         let ctx = &contexts[hit.ctx_idx as usize];
         let s_frame_scoring = &s_frames_scoring[usize::from(hit.s_f_idx)];

@@ -254,7 +254,7 @@ pub fn get_ungapped_hsp_list_into(
     ungapped_hits: Vec<UngappedHit>,
 ) -> Vec<UngappedHit> {
     let mut ungapped_hits =
-        convert_init_hsps_unsorted(init_hsps, contexts, s_frames, ungapped_hits);
+        convert_init_hsps_unsorted::<false>(init_hsps, contexts, s_frames, ungapped_hits);
     sort_converted_hsps_by_score_ncbi(&mut ungapped_hits);
     ungapped_hits
 }
@@ -262,9 +262,12 @@ pub fn get_ungapped_hsp_list_into(
 // The loop of `get_ungapped_hsp_list_into` before its final sort, a function of its own so that
 // EXPERIMENT (LOSAT_X_TBXKMERGE, x_kmerge.rs) can convert with the same statements and replace only
 // the sort; `get_ungapped_hsp_list_into` is this function followed by
-// `sort_converted_hsps_by_score_ncbi`.
+// `sort_converted_hsps_by_score_ncbi`. `INT4_ENDS` is true for the one-hit word finder
+// (`get_ungapped_hsp_list_int4`), whose HSPs may have a length of 0 or less: their ends are stored
+// as NCBI's `Int4` (`UngappedHit::set_int4_ends`) and the checks of a positive span are left out;
+// with `INT4_ENDS` false (the two-hit word finder) every statement is the conversion's.
 /// The HSPs of `init_hsps` in their order, pushed onto `ungapped_hits`, which must be empty.
-pub(crate) fn convert_init_hsps_unsorted(
+pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
     init_hsps: Vec<InitHSP>,
     contexts: &[QueryContext],
     s_frames: &[QueryFrame],
@@ -309,10 +312,12 @@ pub(crate) fn convert_init_hsps_unsorted(
         //               init_hsp->offsets.qs_offsets.q_off,
         //               init_hsp->offsets.qs_offsets.s_off, ...);
         // ```
-        assert!(
-            q_end_relative > q_start_relative,
-            "NCBI BLAST requires positive ungapped query span"
-        );
+        if !INT4_ENDS {
+            assert!(
+                q_end_relative > q_start_relative,
+                "NCBI BLAST requires positive ungapped query span"
+            );
+        }
         assert!(
             q_seed_relative >= 0,
             "NCBI BLAST requires non-negative ungapped query seed offset"
@@ -321,10 +326,12 @@ pub(crate) fn convert_init_hsps_unsorted(
             init_hsp.s_start >= 0,
             "NCBI BLAST requires non-negative ungapped subject start"
         );
-        assert!(
-            init_hsp.s_end > init_hsp.s_start,
-            "NCBI BLAST requires positive ungapped subject span"
-        );
+        if !INT4_ENDS {
+            assert!(
+                init_hsp.s_end > init_hsp.s_start,
+                "NCBI BLAST requires positive ungapped subject span"
+            );
+        }
         assert!(
             init_hsp.s_seed >= 0,
             "NCBI BLAST requires non-negative ungapped subject seed offset"
@@ -339,12 +346,21 @@ pub(crate) fn convert_init_hsps_unsorted(
         // (`UngappedHit`'s field widths); a non-negative `i32` always fits.
         let qs = u32::try_from(q_start_relative)
             .expect("NCBI BLAST requires non-negative ungapped query start");
-        let qe = u32::try_from(q_end_relative)
-            .expect("NCBI BLAST requires non-negative ungapped query end");
+        // `INT4_ENDS`: the ends are written below (`set_int4_ends`).
+        let qe = if INT4_ENDS {
+            0
+        } else {
+            u32::try_from(q_end_relative)
+                .expect("NCBI BLAST requires non-negative ungapped query end")
+        };
         let ss = u32::try_from(init_hsp.s_start)
             .expect("NCBI BLAST requires non-negative ungapped subject start");
-        let se = u32::try_from(init_hsp.s_end)
-            .expect("NCBI BLAST requires non-negative ungapped subject end");
+        let se = if INT4_ENDS {
+            0
+        } else {
+            u32::try_from(init_hsp.s_end)
+                .expect("NCBI BLAST requires non-negative ungapped subject end")
+        };
         let q_seed = u32::try_from(q_seed_relative)
             .expect("NCBI BLAST requires non-negative ungapped query seed");
         let s_seed = u32::try_from(init_hsp.s_seed)
@@ -359,7 +375,7 @@ pub(crate) fn convert_init_hsps_unsorted(
         // NCBI: Blast_HSPInit creates HSP with original extension score
         let hsp_list_order = u32::try_from(ungapped_hits.len())
             .expect("hsp_list_order: an HSP list position fits u32 (NCBI's hspcnt is Int4)");
-        let uh = UngappedHit {
+        let mut uh = UngappedHit {
             q_idx: init_hsp.q_idx,
             s_idx: init_hsp.s_idx,
             ctx_idx: u32::try_from(init_hsp.ctx_idx).expect(
@@ -421,6 +437,17 @@ pub(crate) fn convert_init_hsps_unsorted(
             // ```
             num: 0,
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:170-173 (in
+        // `Blast_HSPInit`)
+        // ```c
+        //    new_hsp->query.end = query_end;
+        //    new_hsp->subject.end = subject_end;
+        // ```
+        // The one-hit word finder's ends, `start + length` as NCBI stores them (at or before the
+        // start for an HSP of length 0 or less).
+        if INT4_ENDS {
+            uh.set_int4_ends(q_end_relative, init_hsp.s_end);
+        }
         trace_ungapped_hit_if_match("after_get_ungapped_hsp_list", &uh);
         ungapped_hits.push(uh);
     }
@@ -489,6 +516,31 @@ pub(crate) fn score_compare_ungapped_hits_ncbi(a: &UngappedHit, b: &UngappedHit)
 //       ScoreCompareHSPs);
 // ```
 pub(crate) fn sort_ungapped_hits_by_score_ncbi(hits: &mut [UngappedHit]) {
+    sort_ungapped_hits_by_score_with(hits, score_compare_ungapped_hits_ncbi);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1383
+// ```c
+// void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
+// {
+//     if (!hsp_list || hsp_list->hspcnt <= 1)
+//         return;
+//
+//     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
+//         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+//               ScoreCompareHSPs);
+//     }
+// }
+// ```
+// The sort of `sort_ungapped_hits_by_score_ncbi` (the `u32` ends of the two-hit word finder's
+// HSPs) and `sort_ungapped_hits_by_score_int4` (the one-hit word finder's `Int4` ends), with the
+// comparator given: the is-sorted check, then the stable index-replay sort (glibc's qsort is a
+// stable merge sort, `x_link_sort.rs`).
+/// `Blast_HSPListSortByScore` with `compare` as `ScoreCompareHSPs`.
+fn sort_ungapped_hits_by_score_with<C>(hits: &mut [UngappedHit], compare: C)
+where
+    C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync + Copy,
+{
     if hits.len() <= 1 {
         return;
     }
@@ -500,7 +552,7 @@ pub(crate) fn sort_ungapped_hits_by_score_ncbi(hits: &mut [UngappedHit]) {
     //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
     //               ScoreCompareHSPs);
     // ```
-    if ungapped_hits_is_sorted_by_score_ncbi(hits) {
+    if ungapped_hits_is_sorted_by_score_with(hits, compare) {
         return;
     }
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
@@ -511,7 +563,7 @@ pub(crate) fn sort_ungapped_hits_by_score_ncbi(hits: &mut [UngappedHit]) {
     // `ScoreCompareHSPs` is a partial comparator for TBLASTX HSPs. Do not add
     // frame or per-frame insertion-order keys when it returns equality; NCBI
     // delegates comparator-equal rows to the platform qsort implementation.
-    sort_ungapped_hits_by_index_replay(hits, score_compare_ungapped_hits_ncbi);
+    sort_ungapped_hits_by_index_replay(hits, compare);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1353
@@ -525,8 +577,8 @@ pub(crate) fn sort_ungapped_hits_by_score_ncbi(hits: &mut [UngappedHit]) {
 // ```
 // `ScoreCompareHSPs` with the ends read as NCBI's `Int4` (`UngappedHit::q_end_int4`): the
 // comparator of the one-hit word finder's lists, whose HSPs of length 0 or less may end below 0
-// (`chaining.rs`, the impl of `UngappedHit`). On ends of 0 or more it is
-// `score_compare_ungapped_hits_ncbi`.
+// (`chaining.rs`, the impl of `UngappedHit`), and of the chunk merge of every list. On ends of 0
+// or more it is `score_compare_ungapped_hits_ncbi`.
 pub(crate) fn score_compare_ungapped_hits_int4(a: &UngappedHit, b: &UngappedHit) -> Ordering {
     b.raw_score
         .cmp(&a.raw_score)
@@ -549,20 +601,10 @@ pub(crate) fn score_compare_ungapped_hits_int4(a: &UngappedHit, b: &UngappedHit)
 //     }
 // }
 // ```
-// `sort_ungapped_hits_by_score_ncbi` with `score_compare_ungapped_hits_int4`, the same stable
-// index-replay sort (glibc's qsort is a stable merge sort, `x_link_sort.rs`).
-/// Sorts a list of the one-hit word finder by score, its ends read as `Int4`.
+// `sort_ungapped_hits_by_score_ncbi` with `score_compare_ungapped_hits_int4`.
+/// Sorts a list by score, its ends read as `Int4`.
 pub(crate) fn sort_ungapped_hits_by_score_int4(hits: &mut [UngappedHit]) {
-    if hits.len() <= 1 {
-        return;
-    }
-    if hits
-        .windows(2)
-        .all(|pair| score_compare_ungapped_hits_int4(&pair[0], &pair[1]) != Ordering::Greater)
-    {
-        return;
-    }
-    sort_ungapped_hits_by_index_replay(hits, score_compare_ungapped_hits_int4);
+    sort_ungapped_hits_by_score_with(hits, score_compare_ungapped_hits_int4);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4760-4772
@@ -583,40 +625,16 @@ pub(crate) fn sort_ungapped_hits_by_score_int4(hits: &mut [UngappedHit]) {
 // ```
 // `get_ungapped_hsp_list` for the one-hit word finder (`-window_size 0`), whose initial HSPs may
 // have a length of 0 or less (aa_ungapped.c:1054,1083): `Blast_HSPInit` stores their ends,
-// `start + length`, as they are. The conversion is `convert_init_hsps_unsorted`, given a length
-// of 1 for those HSPs (its checks of a positive span hold for every other HSP and are kept for
-// them); the ends NCBI stores are then written with `UngappedHit::set_int4_ends`, and the list is
+// `start + length`, as they are (`convert_init_hsps_unsorted` with `INT4_ENDS`), and the list is
 // sorted with the `Int4` comparator. On a list without such an HSP the result is
 // `get_ungapped_hsp_list`'s.
 /// The one-hit word finder's `get_ungapped_hsp_list`, which keeps NCBI's `Int4` ends.
 pub(crate) fn get_ungapped_hsp_list_int4(
-    mut init_hsps: Vec<InitHSP>,
+    init_hsps: Vec<InitHSP>,
     contexts: &[QueryContext],
     s_frames: &[QueryFrame],
 ) -> Vec<UngappedHit> {
-    // NCBI: query.end = length + q_start (q_start context-relative, s_AdjustInitialHSPOffsets),
-    // subject.end = length + s_start.
-    let ends: Vec<(i32, i32)> = init_hsps
-        .iter()
-        .map(|init_hsp| {
-            let frame_base = contexts[init_hsp.ctx_idx].frame_base;
-            (
-                adjust_initial_hsp_offsets(init_hsp.q_end_absolute, frame_base),
-                init_hsp.s_end,
-            )
-        })
-        .collect();
-    for init_hsp in init_hsps.iter_mut() {
-        if init_hsp.q_end_absolute <= init_hsp.q_start_absolute {
-            init_hsp.q_end_absolute = init_hsp.q_start_absolute + 1;
-            init_hsp.s_end = init_hsp.s_start + 1;
-        }
-    }
-    let mut hits = convert_init_hsps_unsorted(init_hsps, contexts, s_frames, Vec::new());
-    // One HSP per initial HSP, in their order.
-    for (hit, (q_end, s_end)) in hits.iter_mut().zip(ends) {
-        hit.set_int4_ends(q_end, s_end);
-    }
+    let mut hits = convert_init_hsps_unsorted::<true>(init_hsps, contexts, s_frames, Vec::new());
     sort_ungapped_hits_by_score_int4(&mut hits);
     hits
 }
@@ -633,12 +651,38 @@ pub(crate) fn get_ungapped_hsp_list_int4(
 // }
 // ```
 pub(crate) fn ungapped_hits_is_sorted_by_score_ncbi(hits: &[UngappedHit]) -> bool {
+    ungapped_hits_is_sorted_by_score_with(hits, score_compare_ungapped_hits_ncbi)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1355-1369
+// ```c
+// Boolean Blast_HSPListIsSortedByScore(const BlastHSPList* hsp_list)
+// {
+//     Int4 index;
+//
+//     if (!hsp_list || hsp_list->hspcnt <= 1)
+//         return TRUE;
+//
+//     for (index = 0; index < hsp_list->hspcnt - 1; ++index) {
+//         if (ScoreCompareHSPs(&hsp_list->hsp_array[index],
+//                              &hsp_list->hsp_array[index+1]) > 0) {
+//             return FALSE;
+//         }
+//     }
+//     return TRUE;
+// }
+// ```
+/// `Blast_HSPListIsSortedByScore` with `compare` as `ScoreCompareHSPs`.
+fn ungapped_hits_is_sorted_by_score_with<C>(hits: &[UngappedHit], compare: C) -> bool
+where
+    C: Fn(&UngappedHit, &UngappedHit) -> Ordering,
+{
     if hits.len() <= 1 {
         return true;
     }
 
     for index in 0..hits.len() - 1 {
-        if score_compare_ungapped_hits_ncbi(&hits[index], &hits[index + 1]) == Ordering::Greater {
+        if compare(&hits[index], &hits[index + 1]) == Ordering::Greater {
             return false;
         }
     }

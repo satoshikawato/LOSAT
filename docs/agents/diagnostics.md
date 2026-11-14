@@ -6757,6 +6757,11 @@ Scheduling (each value computed by one thread with the original function; order 
   default path and blastp-fast / tblastn-fast at 1 and 8 threads: instructions x1.0000-1.0005, cycles within the
   null arm). The table equals `x_buckets_on`'s with its offsets narrowed (unit tests
   `pooled_flat_tables_equal_the_unpooled_ones_on_kept_vectors`, `blastx_tables_take_u16_offsets_up_to_their_letters`).
+  Since line NP SC9d (2026-11-14) the tables built in parts (`LOSAT_X_BXBUILDPAR`, every word size) take their
+  vectors from the same pool, and the pool keeps only vectors that a pool thread's arena would keep: on Linux with
+  glibc a vector of more than its largest mmap threshold (32 MiB) is left to its table and returned to the system
+  when the table is dropped (word size 7's tables, 40 MB of starts each, had stayed resident between builds: 800
+  cDNAs x scer_pep at 8 threads 1.41-1.46 GB of maximum RSS with them in the pool, 1.06-1.15 GB without the pool).
 - `LOSAT_X_BXENDMEM=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-11-01: on unless
   `=0` or `LOSAT_X_DEFAULT=0`): at the end of a query batch, no table of word hashes per context for the
   near-identical test of composition-based statistics (8 bytes per letter of six frames: 84 MiB for a 5.6 Mb query)
@@ -6839,8 +6844,15 @@ Scheduling (each value computed by one thread with the original function; order 
   the same table slot for slot, `blastx_tables_built_in_parts_are_the_one_part_tables`). Its build was 131 of 138
   thread-seconds of 800 cDNAs x scer_pep at word size 6 and 8 threads. Workstation node 1 against dev 51f974c26:
   word size 6 at 8 / 16 / 32 threads x0.41 / x0.29 / x0.21 of the time with 78 / 82 / 74 % of the memory, word
-  size 7 x0.36 / x0.25 / x0.18, BLOSUM45 word size 6 at 8 threads x0.34. Word 5's bucket fill (pooled `u16`
-  vectors) stays on the unit's thread: built in parts it took x0.61 of the time but +62 % of the maximum RSS.
+  size 7 x0.36 / x0.25 / x0.18, BLOSUM45 word size 6 at 8 threads x0.34. Word 5's table too since line NP SC9d
+  (2026-11-14; the bucket fill builds it at one part): built in parts on fresh `i32` vectors narrowed to `u16`, it
+  had taken x0.61 of the time but +62 % of the maximum RSS, the vectors freed on the pool's threads staying in their
+  glibc arenas (with `MALLOC_MMAP_THRESHOLD_=131072` or `MALLOC_ARENA_MAX=1`, below the bucket fill's). Now the
+  stripes write the table's `u16` offsets into a set of vectors that `LOSAT_X_BXCLUTPOOL`'s pool lends, the tasks'
+  scratch (the appends pass's targets, the stripe fill's copy) is mapped (a capacity above glibc's largest mmap
+  threshold, as the bucket fill's record), and the pool keeps only vectors an arena would keep (a vector above that
+  threshold is returned to the system when its table is dropped: kept, word size 7's 40 MB of starts per table
+  stayed resident between builds).
 - `LOSAT_X_BXCTXONCE=1` (BLASTX, speed and memory; in the strict set from the pull request that added it: on unless
   `=0` or `LOSAT_X_DEFAULT=0`; acts where the `LOSAT_X_BXDIAG` fused loop runs): the fused loop's context table of a
   query batch (`XContextTable`, the binary search's index at every query offset) is made once per lookup table and

@@ -1,0 +1,77 @@
+PSITBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: translated subjects of the query-anchored rows
+           6 sequences; 2,345 total letters
+
+
+
+Query= tnq protein query
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t_mins minus insertion                                                204     2e-73
+t_ins plus insertion                                                  188     4e-67
+t_mdel minus deletion                                                 186     4e-66
+t_fr two frames                                                       152     1e-52
+t_pm both strands                                                     149     5e-51
+t_code alt codons                                                     143     2e-49
+
+
+
+Query_1  1    AYTHGMRFCPKVKQQCTFYCMEQDNVTQVMVCSFKTEDFS----THGTIWKHCMWKCWDT  56
+3        369                      ...........D........----..........G.....  262
+2        1    ...V................A...................WWHW...........N....  180
+4        342  ...................................V....----......W...------  193
+1        161                                                 GT...........  199
+1        1    .........F........M....M.........D......----...............   165
+0        1    ...........................E...RP.......----....F...........  168
+5        1              ....I..........*.I..R........Y----......R.I...R..R  138
+
+Query_1  57   SFPTS---KSHCVTCTSQQQQQQQQQQQQQQQQEQFSANDWFCRWRFCFKGWLINPDVPC  113
+3        261  ....KPRH.........FKTLPGDHIHL.RIAV...........................  82
+2        181  .....---...I.....SKTLPGDHIHL.RIAV........................     342
+4        192  .....---..P......SKTLPGDHIHL.RIAV.......Q..Q..........P.....  22
+1        200  ...Y.---.........SKTLPGDHIHL.RIAV............D..............  370
+0        541      .---..R......SKTLPGDHHHL.RIAV.............G.............  383
+0        169  ..K..---.........SKT                                          219
+5        139  .....---.R.......SKSLPGDHIHL.RIAV.....T.TR..*.R.T.*........R  309
+
+Query_1  114  PTKVRVDTYLNCGCCEVWDKEITESDAQNYIHEANAE  150
+3        81   ...G..Y....................            1
+4        21   .......                                1
+1        371  ......N..........                      421
+0        382  R.......................V............  272
+5        310  .*.....                                330
+
+
+Lambda      K        H        a         alpha
+   0.326    0.135    0.513    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0391    0.140     1.90     42.6     43.6 
+
+Effective search space used: 76137
+
+
+  Database: translated subjects of the query-anchored rows
+    Posted date:  Nov 15, 2026  2:47 AM
+  Number of letters in database: 2,345
+  Number of sequences in database:  6
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

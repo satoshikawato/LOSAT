@@ -1,0 +1,133 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: translated subjects of the query-anchored rows
+           6 sequences; 2,345 total letters
+
+
+
+Query= tnq protein query
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t_mins minus insertion                                                189     4e-67
+t_mdel minus deletion                                                 175     8e-62
+t_ins plus insertion                                                  173     4e-61
+t_pm both strands                                                     138     2e-46
+t_fr two frames                                                       133     7e-45
+t_code alt codons                                                     128     2e-43
+
+
+
+Query_1  1    AYTHGMRFCPKVKQQCTFYCMEQDNVTQVMVCSFKTEDFSTHGTIWKHCMWKCWDTSFPT  60
+3        369                      ...........D..................G.........  250
+4        342  ...................................V..........W...------....  181
+2        1    ...V................A..............................N........  192
+                                                      \                   
+                                                      |                   
+                                                   WWHW
+0        1    ...........................E...RP...........F.............K.  180
+1        167                                               ..............Y  211
+1        1    .........F........M....M.........D.....................       165
+1        241                                    RRARYTVRLAV..R.VPALPH.V..   167
+5        1              ....I..........*.I..R........Y......R.I...R..R....  150
+
+Query_1  61   SKSHCVTCTSqqqqqqqqqqqqqqqqeqFSANDWFCRWRFCFKGWLINPDVPCPTKVRVD  120
+3        249  K.........FKTLPGDHIHL.RIAV..............................G..Y  61
+               \                                                          
+               |                                                          
+              PRH
+4        180  ...P......SKTLPGDHIHL.RIAV.......Q..Q..........P............  1
+2        193  ....I.....SKTLPGDHIHL.RIAV........................            342
+0        541  ...R......SKTLPGDHHHL.RIAV.............G.............R......  362
+0        181  ..........                                                    210
+1        212  ..........SKTLPGDHIHL.RIAV............D....................N  391
+5        151  ..R.......SKSLPGDHIHL.RIAV.....T.TR..*.R.T.*........R.*.....  330
+
+Query_1  121  TYLNCGCCEVWDKEITESDAQNYIHEANAE  150
+3        60   ....................            1
+0        361  .................V............  272
+1        392  ..........                      421
+
+
+Lambda      K        H        a         alpha
+   0.326    0.135    0.513    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 76137
+
+
+Query= tnq2 second
+
+Length=110
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t_mins minus insertion                                                170     2e-60
+t_fr two frames                                                       150     3e-52
+t_ins plus insertion                                                  131     3e-45
+t_mdel minus deletion                                                 126     3e-43
+t_pm both strands                                                     120     5e-40
+t_code alt codons                                                     114     1e-38
+
+
+
+Query_2  1    VCSFKTEDFSTFGTIWKHCMWKCWDTSFDTSKSHCATCTSEKTLYGDHIILQRIAVSVFS  60
+3        339  .D.........H........G.......P.K....V....F...P....H......EQ..  151
+                                             \                            
+                                             |                            
+                                           PRH
+1        167                 .............PY.....V....S...P....H......EQ..  301
+1        91   ...D.......H.............                                     165
+1        241      RRARYTVRLAV..R.V                                          194
+2        91   ...........H.........N......P.....IV....S...P....H......EQ..  282
+                        \                                                 
+                        |                                                 
+                     WWHW
+4        252  .....V.....H....W...------..P....P.V....S...P....H......EQ..  91
+0        541                                ...R.V....S...P...HH......EQ..  452
+0        91   .RP........H..F.............K......V....S...P....             237
+5        64    ........Y.H....R.I...R..R..P...R..V....S.S.P....H......EQ..  240
+
+Query_2  61   ANDWRCRWRFCFKSWLINPYVPCPTKVRVDTYLNCGCCEVTGKVITESKA  110
+3        150  ....F........G.....D......G..Y..........WD.E....D.  1
+1        302  ....F...D....G.....D.........N..........            421
+2        283  ....F........G.....                                 339
+4        90   ...QF.Q......G...P.D..........                      1
+0        451  ....F....G...G.....D...R................WD.E...VD.  302
+5        241  .T.T...*.R.T.*.....D..R.*.....                      330
+
+
+Lambda      K        H        a         alpha
+   0.327    0.135    0.505    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 54782
+
+
+  Database: translated subjects of the query-anchored rows
+    Posted date:  Nov 15, 2026  2:47 AM
+  Number of letters in database: 2,345
+  Number of sequences in database:  6
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

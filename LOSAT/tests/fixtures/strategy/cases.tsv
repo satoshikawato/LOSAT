@@ -358,3 +358,4 @@ tblastn.db.in_pssm.ratio30.m45.f11	tblastn	-	-in_pssm tests/fasta/strategy/pssm_
 psiblast.pssm.comment.nodb	psiblast	-	-in_pssm tests/fasta/strategy/pssm_comment.asn -db tests/db_search/none -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
 tblastn.db.in_pssm.comment.nodb	tblastn	-	-in_pssm tests/fasta/strategy/pssm_comment.asn -db tests/db_search/none -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
 psiblast.pssm.sub.2titles	psiblast	-	-in_pssm tests/fasta/strategy/pssm_2titles.asn -subject tests/fasta/outfmt11/arch_bp_s.faa -export_search_strategy {ss}	ncbi	1	-	-
+tblastn.db.in_pssm.nonsq	tblastn	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/arch_tbn_snucl_nonsq -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-

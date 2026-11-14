@@ -162,6 +162,13 @@ impl TblastnDatabase {
         self.db.first_oid_read_fails()
     }
 
+    /// The error of a PSSM search's first read of a sequence file that cannot be opened
+    /// (`shared::unopenable_sequence_file`: NCBI's `CPsiBlast` gives the reader's own text).
+    pub(super) fn pssm_search_read_error(&self) -> Option<anyhow::Error> {
+        shared::unopenable_sequence_file(&self.db)
+            .map(|error| shared::database_error(error, PROGRAM))
+    }
+
     /// LOSAT's refusal of statistics of 0 sequences for a search without the Gumbel block
     /// (`shared::check_statistics_count`).
     pub(super) fn check_statistics_count(&self) -> Result<()> {

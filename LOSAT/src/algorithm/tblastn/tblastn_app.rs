@@ -1590,6 +1590,16 @@ fn search(
                     Err(PreliminaryReadError("Database memory map file error").into())
                 } else if !subject_set.old_fsc && database.numbers().min_length as u32 / 3 == 0 {
                     Err(PreliminaryReadError("The average subject length is too short").into())
+                } else if let Some(error) = resolved
+                    .pssm
+                    .as_ref()
+                    .and_then(|_| database.pssm_search_read_error())
+                {
+                    // `-in_pssm` (PSI-TBLASTN): `CPsiBlast` reads the sequence file without
+                    // `CLocalBlast`'s catch, so a file it cannot open is SeqDB's own error
+                    // (`shared::unopenable_sequence_file`), where a FASTA query gets `Database
+                    // memory map file error`.
+                    Err(error)
                 } else {
                     database.x_stream(resolved.num_threads).map(|stream| {
                         x_stream = Some(stream);
@@ -1823,16 +1833,18 @@ fn search(
                 }
             };
             // `-db`: the first batch with a valid context reads the sequences (above); a
-            // reader error of NCBI's own fails it, LOSAT's refusal stops the run.
+            // reader error of NCBI's own fails it (the preliminary search's text, or with
+            // `-in_pssm` SeqDB's own error, `TblastnDatabase::pssm_search_read_error`), LOSAT's
+            // refusal stops the run.
             if batch_validity.iter().any(|&valid| valid) {
                 if let Some(error) = stores_error.take() {
-                    match error.downcast::<PreliminaryReadError>() {
-                        Ok(read_error) => {
-                            failed = Some((range, app::engine_error(read_error.0)));
-                            break;
-                        }
+                    let error = match error.downcast::<PreliminaryReadError>() {
+                        Ok(read_error) => app::engine_error(read_error.0),
+                        Err(error) if error.is::<crate::cli::NativeError>() => error,
                         Err(error) => return Err(error),
-                    }
+                    };
+                    failed = Some((range, error));
+                    break;
                 }
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293

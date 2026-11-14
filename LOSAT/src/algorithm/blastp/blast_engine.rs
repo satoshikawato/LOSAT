@@ -6439,11 +6439,7 @@ fn psiblast_stop_at_invalid_query(
         (Some(database), Some(context))
             if !empty_database && context.is_valid && kbp_psi_valid(context) =>
         {
-            database
-                .seqdb()
-                .volumes()
-                .iter()
-                .find_map(|volume| volume.open_sequence_file().err())
+            crate::algorithm::common::database::unopenable_sequence_file(database.seqdb())
         }
         _ => None,
     };

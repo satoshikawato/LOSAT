@@ -175,6 +175,88 @@ pub(super) fn check_limits(
     Ok(())
 }
 
+/// The lookup segments of a query of `length` letters whose filtering locations are `masks`
+/// (half-open, sorted, not overlapping): NCBI's complement for one valid protein context at offset
+/// 0, as inclusive ranges (`left > right` when a mask reaches the end).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1044-1110
+/// ```c
+///       start_offset = query_info->contexts[context].query_offset;
+///       end_offset = query_info->contexts[context].query_length
+///           + start_offset - 1;
+///       ...
+///       if (mask_loc == NULL || mask_loc->seqloc_array[context] == NULL) {
+///          tail = BlastSeqLocNew(tail ? &tail : complement_mask,
+///                                start_offset, end_offset);
+///          continue;
+///       }
+///       ...
+///          if (first) {
+///             last_interval_open = TRUE;
+///             first = FALSE;
+///
+///             if (filter_start > start_offset) {
+///                /* beginning of sequence not filtered */
+///                left = start_offset;
+///             } else {
+///                /* beginning of sequence filtered */
+///                left = filter_end + 1;
+///                continue;
+///             }
+///          }
+///
+///          right = filter_start - 1;
+///
+///          tail = BlastSeqLocNew((tail ? &tail : complement_mask), left, right);
+///          if (filter_end >= end_offset) {
+///             /* last masked region at end of sequence */
+///             last_interval_open = FALSE;
+///             break;
+///          } else {
+///             left = filter_end + 1;
+///          }
+///       }
+///
+///       if (last_interval_open) {
+///          /* Need to finish SSeqRange* for last interval. */
+///          right = end_offset;
+///          tail = BlastSeqLocNew((tail ? &tail : complement_mask), left, right);
+///       }
+/// ```
+fn lookup_segments(length: usize, masks: &[(usize, usize)]) -> Vec<(i64, i64)> {
+    let end_offset = length as i64 - 1;
+    if masks.is_empty() {
+        return vec![(0, end_offset)];
+    }
+    let mut segments = Vec::new();
+    let mut first = true;
+    let mut last_interval_open = true;
+    let mut left = 0i64;
+    for &(start, end) in masks {
+        let (filter_start, filter_end) = (start as i64, end as i64 - 1);
+        if first {
+            last_interval_open = true;
+            first = false;
+            if filter_start > 0 {
+                left = 0;
+            } else {
+                left = filter_end + 1;
+                continue;
+            }
+        }
+        segments.push((left, filter_start - 1));
+        if filter_end >= end_offset {
+            last_interval_open = false;
+            break;
+        }
+        left = filter_end + 1;
+    }
+    if last_interval_open {
+        segments.push((left, end_offset));
+    }
+    segments
+}
+
 /// The lookup table of a PSSM query: the neighbouring words of the PSSM's rows over the lookup
 /// segments, the complement of the query's filtering locations (`-seg`'s masks, also with
 /// `-soft_masking true`, which keeps them out of the table only). `query` is the query record's
@@ -203,11 +285,7 @@ pub(super) fn lookup_table(
 ) -> BlastAaLookupTable {
     let masks =
         super::search_seed::encode_tblastn_lookup_query(query, seg, mask_lowercase).seg_masks;
-    let segments = crate::algorithm::tblastx::lookup::build_lookup_segments_for_context(
-        0,
-        query.len(),
-        &masks,
-    );
+    let segments = lookup_segments(query.len(), &masks);
     crate::algorithm::pssm_search::lookup::build_pssm_lookup_in(
         rows,
         word_length,
@@ -219,6 +297,21 @@ pub(super) fn lookup_table(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI blast_filter.c:1044-1110: the complement of the masks of one context.
+    #[test]
+    fn lookup_segments_are_the_complement_of_the_masks() {
+        assert_eq!(lookup_segments(10, &[]), vec![(0, 9)]);
+        assert_eq!(lookup_segments(10, &[(2, 4)]), vec![(0, 1), (4, 9)]);
+        assert_eq!(lookup_segments(10, &[(0, 3)]), vec![(3, 9)]);
+        assert_eq!(lookup_segments(10, &[(6, 10)]), vec![(0, 5)]);
+        assert_eq!(
+            lookup_segments(12, &[(0, 2), (5, 7), (9, 12)]),
+            vec![(2, 4), (7, 8)]
+        );
+        // A mask of the whole query leaves the inverted interval NCBI makes (no word in it).
+        assert_eq!(lookup_segments(5, &[(0, 5)]), vec![(5, 4)]);
+    }
 
     // NCBI blast_args.cpp:1011-1015: the code 32 is not NCBI's.
     #[test]

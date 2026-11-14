@@ -167,10 +167,7 @@ pub struct QueryContext {
 //        will need real offsets into the query sequence */
 //
 // ```
-pub(crate) use backbone::{
-    build_lookup_segments_for_context, build_ncbi_lookup_from_prepared,
-    build_ncbi_lookup_from_prepared_of,
-};
+pub(crate) use backbone::{build_ncbi_lookup_from_prepared, build_ncbi_lookup_from_prepared_of};
 // BLASTP's table built in place (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export
 // itself.
 pub(crate) use backbone::{

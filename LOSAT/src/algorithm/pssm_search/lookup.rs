@@ -77,21 +77,20 @@ pub(crate) fn build_pssm_lookup<R: PssmRows>(
     word_length: usize,
     threshold: i32,
 ) -> BlastAaLookupTable<BackboneCell> {
-    build_pssm_lookup_in(rows, word_length, threshold, &[(0, rows.len() as i32 - 1)])
+    build_pssm_lookup_in(rows, word_length, threshold, &[(0, rows.len() as i64 - 1)])
 }
 
 /// `build_pssm_lookup` over the lookup segments `locations` (NCBI's `lookup_segments`, inclusive
 /// `[left, right]` ranges of query offsets; one with `left > right` adds no word): the
-/// complement of the query's filtering locations
-/// (`tblastx::lookup::build_lookup_segments_for_context`), whose masks (`-seg`,
-/// `-lcase_masking`, also with `-soft_masking true`) keep words out of the table: psiblast's
-/// PSSM searches (`blastp::blast_engine::pssm_hooks::pssm_lookup`) and tblastn `-in_pssm`
-/// (`algorithm::tblastn::in_pssm`).
+/// complement of the query's filtering locations, whose masks (`-seg`, `-lcase_masking`, also
+/// with `-soft_masking true`) keep words out of the table: psiblast's PSSM searches
+/// (`blastp::blast_engine::pssm_hooks::pssm_lookup`, blastp's lookup segments) and tblastn
+/// `-in_pssm` (`algorithm::tblastn::in_pssm`).
 pub(crate) fn build_pssm_lookup_in<R: PssmRows>(
     rows: &R,
     word_length: usize,
     threshold: i32,
-    locations: &[(i32, i32)],
+    locations: &[(i64, i64)],
 ) -> BlastAaLookupTable<BackboneCell> {
     // ilog2(28) + 1
     let charsize = 5usize;
@@ -157,7 +156,7 @@ fn add_pssm_neighboring_words<R: PssmRows>(
     wordsize: usize,
     charsize: usize,
     threshold: i32,
-    locations: &[(i32, i32)],
+    locations: &[(i64, i64)],
 ) {
     let row_max_of = |pos: usize| -> i32 {
         let row = rows.row(pos);
@@ -169,7 +168,7 @@ fn add_pssm_neighboring_words<R: PssmRows>(
     };
     let mut row_max = vec![0i32; wordsize];
     for &(from, right) in locations {
-        let (from, to) = (i64::from(from), i64::from(right) - wordsize as i64 + 1);
+        let to = right - wordsize as i64 + 1;
         if to < from {
             continue;
         }

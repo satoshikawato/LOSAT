@@ -102,6 +102,10 @@ pub(super) fn pssm_lookup(
         .as_deref()
         .expect("the lookup table of a PSSM search");
     let (lookup_segments, contexts) = psi_query(args, query_frames);
+    let lookup_segments: Vec<(i64, i64)> = lookup_segments
+        .iter()
+        .map(|&(left, right)| (i64::from(left), i64::from(right)))
+        .collect();
     let table = build_pssm_lookup_in(
         &psi.pssm,
         args.word_size,

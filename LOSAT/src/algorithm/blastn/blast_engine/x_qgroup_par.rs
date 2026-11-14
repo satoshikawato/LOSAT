@@ -52,9 +52,10 @@
 //!   by context first, so this concatenation is the serial purge's output itself, and the stable
 //!   score sort after it (unchanged) gives the serial `chunk_prelim_hits` element for element: the
 //!   merge of a subject's chunks and `-subject_besthit` see the same list.
-//! - Traceback (`traceback_list::traceback_subject_hits`, which `process_subject` calls with the
-//!   kept HSPs): the kept HSPs are the hit lists of the queries one after another
-//!   (`prelim_hits_by_subject`), so each query's HSPs are one slice. Each slice runs the traceback
+//! - Traceback (`traceback_list::traceback_subject_hits`, which
+//!   `traceback_subject::traceback_subject` calls with the kept HSPs): the kept HSPs are the hit
+//!   lists of the queries one after another (`prelim_hits_by_subject`), so each query's HSPs are
+//!   one slice. Each slice runs the traceback
 //!   loop, the first purge (trimmed HSPs at its end), the re-evaluation of the trimmed HSPs, the
 //!   second purge, the score sort, the final tree and the e-values; the final lists are
 //!   concatenated in query order and sorted by score with the same stable sort. The first purge

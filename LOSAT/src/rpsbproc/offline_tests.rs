@@ -324,7 +324,7 @@ fn string_reads_at_int_positions() {
     assert_eq!(string_at(text, 4), None);
     assert_eq!(string_at(text, -1), None);
     assert_eq!(string_at(text, i64::from(i32::MAX) + 1), None);
-    let Err(ProcessError::Unsupported(message)) = qseq_at(text, -2_147_483_648) else {
+    let Err(ProcessError::Unsupported(message)) = qseq_at(&text[..], -2_147_483_648) else {
         panic!("refused");
     };
     assert_eq!(
@@ -337,6 +337,62 @@ fn string_reads_at_int_positions() {
         -2_147_483_648
     );
     assert_eq!(i64::from((u64::from(u32::MAX) + 1) as u32 as i32), 0);
+}
+
+/// An `Hsp_qseq` described by its length and its gaps (letters elsewhere), for "see if NA" on
+/// strings of 2^31 letters and more without holding them.
+struct GappedQuery {
+    len: usize,
+    gaps: Vec<usize>,
+}
+
+impl AlignedQuery for GappedQuery {
+    fn size(&self) -> usize {
+        self.len
+    }
+    fn byte(&self, i: usize) -> u8 {
+        if self.gaps.binary_search(&i).is_ok() {
+            b'-'
+        } else {
+            b'A'
+        }
+    }
+    fn find_gap(&self, from: usize) -> Option<usize> {
+        let k = self.gaps.partition_point(|&g| g < from);
+        self.gaps.get(k).copied()
+    }
+}
+
+// "see if NA": the PS16-Q1 delta-2 review oracle `sna` (K letters, one `-`, 8 letters; both NCBI
+// 0.5.1 builds): K = 2^31 - 2 keeps `t0` positive and leaves the loop (NCBI's result is defined);
+// K = 2^31 makes `t0` `INT_MIN + 1`, whose `qseq[t0]` NCBI reads 2 GiB before the string (refused);
+// a gap at 2^32 - 1 makes `t0` 0, from which NCBI's loop never ends (refused).
+#[test]
+fn see_if_na_counts_and_refuses() {
+    let small = b"--AB-CD-".as_slice();
+    assert_eq!(see_if_na(small, 2).ok(), Some(4));
+    let two31 = 1usize << 31;
+    let control = GappedQuery {
+        len: two31 - 2 + 9,
+        gaps: vec![two31 - 2],
+    };
+    assert_eq!(see_if_na(&control, 0).ok(), Some((two31 - 2 + 8) as u32));
+    let past = GappedQuery {
+        len: two31 + 9,
+        gaps: vec![two31],
+    };
+    let Err(ProcessError::Unsupported(message)) = see_if_na(&past, 0) else {
+        panic!("refused");
+    };
+    assert!(message.contains("loop reads past its end"), "{message}");
+    let endless = GappedQuery {
+        len: (1usize << 32) + 3,
+        gaps: vec![(1usize << 32) - 1],
+    };
+    let Err(ProcessError::Unsupported(message)) = see_if_na(&endless, 0) else {
+        panic!("refused");
+    };
+    assert!(message.contains("never ends"), "{message}");
 }
 
 // `m_dimTranslated[rfidx][qf] = '\0'` at the string's length is the defined write of the

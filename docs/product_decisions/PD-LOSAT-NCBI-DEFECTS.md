@@ -471,14 +471,15 @@ here, and names the widening that PS16a made for protein queries.
     `a_minus_strand_hit_that_ends_at_int_max`, `ends_that_overflow_int`, `frames_tests.rs`
     `frame_conversions`, `nucleotide_tests.rs` `codons_and_their_overflow`,
     `motif_ends_and_their_overflow`, `offline_tests.rs` `coordinates_of_int_min`,
-    `span_that_overflows_int`, `domain_positions_that_overflow_int`, `string_reads_at_int_positions`.
+    `span_that_overflows_int`, `domain_positions_that_overflow_int`, `string_reads_at_int_positions`,
+    `see_if_na_counts_and_refuses`.
     An `Hsp_qseq` of 2^31 letters or more (PS16-Q1 fix round 2 oracle `q31`, ws): the fixture's `x_one.xml`
     with L leading query gaps in `Hsp_qseq` and L letters in `Hsp_hseq` before the HSP's 70 columns, which
     `++alnResIdx` trims, so the HSP's segments and residues are those of the 70 columns whatever L is. For
     L = 2^31 - 128 (the nearby input, no overflow), LOSAT's stdout, stderr and exit code equal both NCBI 0.5.1
     builds'. For L = 2^31 + 8 (the limit), LOSAT, in a build with overflow checks, prints the same bytes
-    except the line that echoes the input file's name. NCBI's binary prints the same there, because its
-    wrapped index is not visible in this output.
+    except the line that echoes the input file's name. NCBI's binary prints the same there: its compiled
+    loop shows no wrap in this output, which the undefined behaviour allows.
 
 ## Reproduced as NCBI (rule 2)
 

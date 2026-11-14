@@ -428,31 +428,7 @@ impl OfflineQuery {
             aln_res_idx += 1;
         }
         if self.translated[0].is_empty() {
-            let mut aa_res: u32 = 0;
-            let mut t0 = aln_res_idx;
-            while (t0 as u32) < aln_len {
-                if qseq_at(qseq, t0)? == b'-' {
-                    t0 += 1;
-                } else {
-                    let start = t0 as usize;
-                    let t1 = qseq[start..]
-                        .iter()
-                        .position(|&c| c == b'-')
-                        .map_or(aln_len as usize, |gap| start + gap);
-                    aa_res = aa_res.wrapping_add((t1 - start) as u32);
-                    // `t0 = t1 + 1` stores a `size_t` in the `int` (modulo 2^32, C++20): from 2^31
-                    // on a negative `t0`, whose `qseq[t0]` NCBI reads far past the string
-                    // (`qseq_at` refuses it), and at 2^32 a `t0` of 0, from which NCBI's loop
-                    // starts over and never ends (refused).
-                    let next = i64::from((t1 as u64 + 1) as u32 as i32);
-                    if (0..=t0).contains(&next) {
-                        return Err(unsupported(
-                            "an Hsp_qseq of 2^32 - 1 letters or more over which NCBI's \"see if NA\" loop starts over and never ends",
-                        ));
-                    }
-                    t0 = next;
-                }
-            }
+            let aa_res = see_if_na(qseq, aln_res_idx)?;
             let span = (to - from + 1) as u32;
             if aa_res == span {
                 self.pr_commit()?;
@@ -777,11 +753,86 @@ fn hseq_at(hseq: &[u8], i: i64) -> Result<u8, ProcessError> {
     })
 }
 
-/// `qseq[t0]` of "see if NA" (quoted at `OfflineQuery::parse_hsp`): a `t0` that NCBI's `size_t`
-/// to `int` conversion made negative reads far past the string (undefined, refused).
-fn qseq_at(qseq: &[u8], i: i64) -> Result<u8, ProcessError> {
-    string_at(qseq, i)
-        .ok_or_else(|| unsupported("an Hsp_qseq that NCBI's \"see if NA\" loop reads past its end"))
+/// The `Hsp_qseq` as "see if NA" reads it: its `size()`, `qseq[i]` within it and `qseq.find('-', i)`.
+/// The XML input's string is the one implementation; the unit tests describe strings of 2^31
+/// letters and more by their gaps, without holding them.
+trait AlignedQuery {
+    fn size(&self) -> usize;
+    fn byte(&self, i: usize) -> u8;
+    fn find_gap(&self, from: usize) -> Option<usize>;
+}
+
+impl AlignedQuery for [u8] {
+    fn size(&self) -> usize {
+        self.len()
+    }
+    fn byte(&self, i: usize) -> u8 {
+        self[i]
+    }
+    fn find_gap(&self, from: usize) -> Option<usize> {
+        self[from..]
+            .iter()
+            .position(|&c| c == b'-')
+            .map(|gap| from + gap)
+    }
+}
+
+/// "see if NA" of `ParseBlastOutput` (quoted at `OfflineQuery::parse_hsp`): `aaRes`, the letters of
+/// `qseq` from `alnResIdx` on, which `parse_hsp` compares with the hit's span.
+// 						SeqLen_t aaRes = 0;
+// 						SeqPos_t t0 = alnResIdx;
+// 						while (t0 < alnLen)
+// 						{
+// 							if ('-' == qseq[t0])
+// 								++t0;
+// 							else
+// 							{
+// 								size_t t1 = qseq.find('-', t0);
+// 								if (string::npos == t1)	//
+// 									t1 = alnLen;
+// 								aaRes += t1 - t0;
+// 								t0 = t1 + 1;
+// 							}
+// 						}
+// (`offl_cd_align_proc.cpp`, `ParseBlastOutput`.) `t0 < alnLen` compares as `unsigned int` (`alnLen`
+// is the length modulo 2^32); `++t0` is computed as its value (exception 11, `DECISIONS.md` 59);
+// `aaRes += t1 - t0` adds modulo 2^32. `t0 = t1 + 1` stores a `size_t` in the `int` (modulo 2^32,
+// C++20): from 2^31 on a negative `t0`, whose `qseq[t0]` NCBI reads far past the string
+// (`qseq_at` refuses it), and at 2^32 a `t0` of 0 or another position the loop has passed, from
+// which NCBI's loop starts over and never ends (refused).
+fn see_if_na<Q: AlignedQuery + ?Sized>(qseq: &Q, aln_res_idx: i64) -> Result<u32, ProcessError> {
+    let aln_len = qseq.size() as u32;
+    let mut aa_res: u32 = 0;
+    let mut t0 = aln_res_idx;
+    while (t0 as u32) < aln_len {
+        if qseq_at(qseq, t0)? == b'-' {
+            t0 += 1;
+        } else {
+            let start = t0 as usize;
+            let t1 = qseq.find_gap(start).unwrap_or(aln_len as usize);
+            aa_res = aa_res.wrapping_add((t1 - start) as u32);
+            let next = i64::from((t1 as u64 + 1) as u32 as i32);
+            if (0..=t0).contains(&next) {
+                return Err(unsupported(
+                    "an Hsp_qseq of 2^32 - 1 letters or more over which NCBI's \"see if NA\" loop starts over and never ends",
+                ));
+            }
+            t0 = next;
+        }
+    }
+    Ok(aa_res)
+}
+
+/// `qseq[t0]` of "see if NA": a `t0` that NCBI's `size_t` to `int` conversion made negative reads
+/// far past the string (undefined, refused); at its length the terminating 0.
+fn qseq_at<Q: AlignedQuery + ?Sized>(qseq: &Q, i: i64) -> Result<u8, ProcessError> {
+    let refused = || unsupported("an Hsp_qseq that NCBI's \"see if NA\" loop reads past its end");
+    let i = usize::try_from(i).map_err(|_| refused())?;
+    match i.cmp(&qseq.size()) {
+        std::cmp::Ordering::Less => Ok(qseq.byte(i)),
+        std::cmp::Ordering::Equal => Ok(0),
+        std::cmp::Ordering::Greater => Err(refused()),
+    }
 }
 
 /// `s[i]` of a `const std::string` (`i` an `int`, converted to `size_t`: a negative one is past any

@@ -718,7 +718,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                         (s_off, s_range, index),
                         |w| w.2 as usize,
                         &mut x_on_word_csr,
-                    )
+                    );
                 },
             );
             ring.flush(&mut x_on_word_csr);

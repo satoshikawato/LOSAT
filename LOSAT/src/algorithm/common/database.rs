@@ -3000,7 +3000,7 @@ mod tests {
 /// them for both; the ABI callers that ask for both do not see them twice.
 #[derive(Default)]
 pub(crate) struct TaxdbRun {
-    lazy: std::sync::Mutex<Option<std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>>>,
+    lazy: std::sync::OnceLock<std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>>,
     volume_lookups: std::sync::Mutex<VolumeLookups>,
     found: std::sync::OnceLock<bool>,
     /// What the lookups of the run can write ([`TaxdbRun::prefetch_texts`]).
@@ -3011,28 +3011,6 @@ pub(crate) struct TaxdbRun {
     /// The texts of opening the database when the rows of a tabular report opened it, kept for
     /// those rows ([`TaxdbRun::open_for_rows`], [`tabular_names`]).
     rows_open: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
-    /// Of a sequential run, set at its first load: what the later loads make ([`LaterLoads`]).
-    later: std::sync::OnceLock<LaterLoads>,
-    /// Of a sequential run whose later loads look up only the taxids it has not looked up
-    /// ([`LaterLoads::NewTaxids`]): the taxids it has looked up.
-    looked_up: std::sync::Mutex<std::collections::HashSet<i32>>,
-}
-
-/// What the loads of a sequential run after its first make ([`TaxdbRun::bioseq_texts`]), as the
-/// first decides from the taxonomy database (no pass over its files: NCBI makes no lookup of a
-/// taxid the run does not read).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LaterLoads {
-    /// Nothing: no `taxdb.bti` on the search path, or a database that NCBI treats as missing
-    /// (whose texts of opening came with the first load): no lookup writes a text or fails.
-    Nothing,
-    /// The lookup of each taxid that the run has not looked up, which fails where NCBI's crashes
-    /// (a record past the mapped end of `taxdb.btd`): the database writes no text after its
-    /// opening (no offset error of a positive taxid).
-    NewTaxids,
-    /// Every load, following the volumes' caches ([`TaxdbRun::volume_load`]): the database has
-    /// the offset error of a positive taxid.
-    Every,
 }
 
 /// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_texts`]).
@@ -3056,7 +3034,7 @@ fn tax_cache_slot(taxid: i32) -> i32 {
 #[derive(Default)]
 struct VolumeLookups {
     /// Each (volume, taxid) looked up: NCBI asks the taxonomy database at the first.
-    asked: std::collections::HashSet<(usize, i32)>,
+    asked: rustc_hash::FxHashSet<(usize, i32)>,
     /// By volume, what the slot of the offset error's taxid holds ([`OffsetSlot`]); only where
     /// the taxonomy database has that error.
     offset_slots: std::collections::HashMap<usize, OffsetSlot>,
@@ -3413,10 +3391,17 @@ impl TaxdbRun {
         &self,
         search_path: &crate::seqdb::SearchPath,
     ) -> std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb> {
-        let mut lazy = self.lazy.lock().expect("the taxonomy database");
-        std::sync::Arc::clone(lazy.get_or_insert_with(|| {
+        std::sync::Arc::clone(self.lazy_taxdb(search_path))
+    }
+
+    /// [`TaxdbRun::taxdb`], borrowed.
+    fn lazy_taxdb(
+        &self,
+        search_path: &crate::seqdb::SearchPath,
+    ) -> &std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb> {
+        self.lazy.get_or_init(|| {
             std::sync::Arc::new(crate::seqdb::taxdb::LazyTaxDb::new(search_path.clone()))
-        }))
+        })
     }
 
     /// NCBI's lookups of the volume's taxonomy cache where it loads the sequence `ordinal` of `db`:
@@ -3442,43 +3427,58 @@ impl TaxdbRun {
         let volume = db
             .volume_index(ordinal)
             .map_err(|error| database_error(error, program))?;
-        self.volume_load(db, taxdb, volume, ordinal, lookups)
-            .map_err(|error| match error {
-                LoadError::Slot { last, cause } => {
-                    taxdb_error(slot_uncertain_error(db, volume, last, cause), program)
-                }
-                LoadError::Taxdb(error) => taxdb_error(error, program),
-            })
+        let last = self.prefetch_texts(db).offset_error_taxid;
+        let mut answers = Vec::new();
+        self.volume_load(
+            taxdb,
+            volume,
+            ordinal,
+            last,
+            lookups.iter().copied(),
+            &mut |taxid, messages| answers.push((taxid, messages)),
+        )
+        .map_err(|error| match error {
+            LoadError::Slot { last, cause } => {
+                taxdb_error(slot_uncertain_error(db, volume, last, cause), program)
+            }
+            LoadError::Taxdb(error) => taxdb_error(error, program),
+        })?;
+        Ok(answers)
     }
 
-    /// [`TaxdbRun::load`] of the sequence `ordinal` in the volume `volume` of `db`.
+    /// [`TaxdbRun::load`] of the sequence `ordinal` in the volume `volume`, the lookups `lookups`
+    /// (a list of the taxids only where the slot of the offset error's taxid `last` is followed:
+    /// no allocation per load otherwise), each ask of the taxonomy database `taxdb` given to
+    /// `answer` with its texts.
     fn volume_load(
         &self,
-        db: &SeqDb,
         taxdb: &crate::seqdb::taxdb::LazyTaxDb,
         volume: usize,
         ordinal: u32,
-        lookups: &[i32],
-    ) -> std::result::Result<Vec<(i32, Vec<String>)>, LoadError> {
-        let last = self.prefetch_texts(db).offset_error_taxid;
+        last: Option<i32>,
+        lookups: impl Iterator<Item = i32> + Clone,
+        answer: &mut dyn FnMut(i32, Vec<String>),
+    ) -> std::result::Result<(), LoadError> {
         let mut record = self.volume_lookups.lock().expect("the volume lookups");
         let misses = match last {
-            Some(last) => record
-                .offset_slot(volume, ordinal, lookups, last)
-                .map_err(|cause| LoadError::Slot { last, cause })?,
-            None => vec![false; lookups.len()],
+            Some(last) => Some(
+                record
+                    .offset_slot(volume, ordinal, &lookups.clone().collect::<Vec<_>>(), last)
+                    .map_err(|cause| LoadError::Slot { last, cause })?,
+            ),
+            None => None,
         };
-        let mut answers = Vec::new();
-        for (&taxid, miss) in lookups.iter().zip(misses) {
+        for (index, taxid) in lookups.enumerate() {
+            let miss = misses.as_ref().is_some_and(|misses| misses[index]);
             if record.asked.insert((volume, taxid)) || miss {
                 let mut messages = Vec::new();
                 taxdb
                     .names(taxid, &mut messages)
                     .map_err(LoadError::Taxdb)?;
-                answers.push((taxid, messages));
+                answer(taxid, messages);
             }
         }
-        Ok(answers)
+        Ok(())
     }
 
     /// The run of a program that reads sequences without NCBI's object manager: dustmasker's and
@@ -3511,9 +3511,13 @@ impl TaxdbRun {
     /// taxonomy database at the run's first lookup, and the offset error where a lookup of its
     /// taxid misses the volume's cache ([`VolumeLookups::offset_slot`]). Err: a lookup that reads
     /// past the mapped end of `taxdb.btd` (NCBI crashes) or a taxonomy database that does not
-    /// open or read: LOSAT's refusal. The run's first load decides what the later ones make
-    /// ([`LaterLoads`]): with a good taxonomy database, a lookup of each taxid the run has not
-    /// looked up (NCBI's own search at that taxid's first lookup), without an allocation.
+    /// open or read: LOSAT's refusal. One path for every load, the search's
+    /// ([`TaxdbRun::volume_load`]): the taxonomy database is asked for a (volume, taxid) not
+    /// looked up before and where the slot of the offset error's taxid misses; a load without a
+    /// new (volume, taxid) and without that error allocates nothing. Inlined up to its first
+    /// test: a sequence without a positive taxid, or a run without `taxdb.bti` on the search
+    /// path once a load found none, asks nothing (the readers ask it of every sequence).
+    #[inline]
     pub(crate) fn bioseq_texts(
         &self,
         db: &SeqDb,
@@ -3521,64 +3525,57 @@ impl TaxdbRun {
         set: &crate::seqid::DeflineSet,
         target: Option<&crate::seqid::ParsedSeqId>,
     ) -> std::result::Result<Vec<String>, SeqDbError> {
-        let mut taxids = set.taxonomy_order(target).peekable();
-        if taxids.peek().is_none() {
+        if self.found.get() == Some(&false) {
             return Ok(Vec::new());
         }
-        match self.later.get() {
-            Some(LaterLoads::Nothing) => return Ok(Vec::new()),
-            Some(LaterLoads::NewTaxids) => {
-                let Some(search_path) = db.search_path() else {
+        let taxids = set.taxonomy_order(target);
+        if taxids.clone().next().is_none() {
+            return Ok(Vec::new());
+        }
+        self.bioseq_loads(db, oid, taxids)
+    }
+
+    /// [`TaxdbRun::bioseq_texts`] of a sequence with the positive taxids `taxids` (out of line:
+    /// the readers' own code holds the tests before it).
+    #[inline(never)]
+    fn bioseq_loads(
+        &self,
+        db: &SeqDb,
+        oid: u32,
+        taxids: crate::seqid::defline_set::TaxonomyOrder<'_>,
+    ) -> std::result::Result<Vec<String>, SeqDbError> {
+        let mut texts = Vec::new();
+        let (taxdb, last) = match (self.lazy.get(), self.texts.get()) {
+            (Some(taxdb), Some(prefetch)) => (taxdb, prefetch.offset_error_taxid),
+            _ => {
+                let Some(search_path) = db.search_path().filter(|_| self.found(db)) else {
                     return Ok(Vec::new());
                 };
-                let taxdb = self.taxdb(search_path);
-                let mut looked_up = self.looked_up.lock().expect("the taxids looked up");
-                for taxid in taxids {
-                    if looked_up.insert(taxid) {
-                        // No text: the database has none after its opening (`LaterLoads`).
-                        taxdb.names(taxid, &mut Vec::new())?;
-                    }
-                }
-                return Ok(Vec::new());
+                // The run's first lookup opens the database (its texts of opening come first);
+                // the offset error's taxid is the same database's (no second open, as the
+                // search's prefetch makes before its first lookup).
+                let taxdb = self.lazy_taxdb(search_path);
+                texts = taxdb.open()?;
+                let last = taxdb
+                    .offset_error_taxid()
+                    .ok()
+                    .flatten()
+                    .filter(|&taxid| taxid > 0);
+                let _ = self.texts.set(PrefetchTexts {
+                    offset_error_taxid: last,
+                });
+                (taxdb, last)
             }
-            Some(LaterLoads::Every) | None => {}
-        }
-        let Some(search_path) = db.search_path().filter(|_| self.found(db)) else {
-            let _ = self.later.set(LaterLoads::Nothing);
-            return Ok(Vec::new());
         };
-        let lookups: Vec<i32> = taxids.collect();
-        let taxdb = self.taxdb(search_path);
         let volume = db.oid_volume(oid)?;
-        let answers = self
-            .volume_load(db, &taxdb, volume, oid, &lookups)
-            .map_err(|error| match error {
-                LoadError::Slot { last, cause } => slot_uncertain_error(db, volume, last, cause),
-                LoadError::Taxdb(error) => error,
-            })?;
-        if self.later.get().is_none() {
-            // The first load asked the taxonomy database (it opened there or before), so its
-            // texts of opening are written: a later lookup writes the offset error of a positive
-            // taxid alone, and fails where it reads a record past the mapped end of `taxdb.btd`.
-            // A check that fails leaves every load to be made, each failure where it comes.
-            let offset_error = taxdb
-                .offset_error_taxid()
-                .map(|taxid| taxid.filter(|&taxid| taxid > 0));
-            let later = match (taxdb.entry_count(), offset_error) {
-                (Ok(0), _) => LaterLoads::Nothing,
-                (Ok(_), Ok(None)) => LaterLoads::NewTaxids,
-                _ => LaterLoads::Every,
-            };
-            self.looked_up
-                .lock()
-                .expect("the taxids looked up")
-                .extend(&lookups);
-            let _ = self.later.set(later);
-        }
-        Ok(answers
-            .into_iter()
-            .flat_map(|(_, messages)| messages)
-            .collect())
+        self.volume_load(taxdb, volume, oid, last, taxids, &mut |_, messages| {
+            texts.extend(messages)
+        })
+        .map_err(|error| match error {
+            LoadError::Slot { last, cause } => slot_uncertain_error(db, volume, last, cause),
+            LoadError::Taxdb(error) => error,
+        })?;
+        Ok(texts)
     }
 
     /// `CSeqDBTaxInfo::GetTaxNames(taxid)` through the run's taxonomy database (`GetTaxInfo`, the
@@ -3593,7 +3590,7 @@ impl TaxdbRun {
         messages: &mut Vec<String>,
     ) -> std::result::Result<crate::seqdb::taxdb::TaxLookup, SeqDbError> {
         match db.search_path() {
-            Some(search_path) => self.taxdb(search_path).lookup(taxid, messages),
+            Some(search_path) => self.lazy_taxdb(search_path).lookup(taxid, messages),
             None => Ok(crate::seqdb::taxdb::TaxLookup::NotInIndex),
         }
     }
@@ -6015,7 +6012,7 @@ mod taxdb_prepass_tests {
                     }
                 }
             }
-            Ok::<_, SeqDbError>((texts, run.later.get().copied()))
+            Ok::<_, SeqDbError>((texts, run.texts.get().map(|texts| texts.offset_error_taxid)))
         };
         let at = |oids: &[u32], text: &str| -> Vec<(u32, String)> {
             oids.iter().map(|&oid| (oid, text.to_string())).collect()
@@ -6023,11 +6020,11 @@ mod taxdb_prepass_tests {
         let offset = variant("offset_last_past_end");
         assert_eq!(
             reads(Some(&offset), 1).unwrap(),
-            (at(&[4, 6, 9], MSG_OFFSET_ERROR), Some(LaterLoads::Every))
+            (at(&[4, 6, 9], MSG_OFFSET_ERROR), Some(Some(99990)))
         );
         assert_eq!(
             reads(Some(&offset), 2).unwrap(),
-            (at(&[4, 6, 7, 9], MSG_OFFSET_ERROR), Some(LaterLoads::Every))
+            (at(&[4, 6, 7, 9], MSG_OFFSET_ERROR), Some(Some(99990)))
         );
         // The texts of opening at the first lookup (OID 2), then nothing to look up.
         for (name, text) in [
@@ -6040,18 +6037,15 @@ mod taxdb_prepass_tests {
         ] {
             assert_eq!(
                 reads(Some(&variant(name)), 2).unwrap(),
-                (at(&[2], &text), Some(LaterLoads::Nothing))
+                (at(&[2], &text), Some(None))
             );
         }
-        // A good taxonomy database: the taxids not looked up yet; none on the path: nothing.
+        // A good taxonomy database: no text; none on the path: nothing opened.
         assert_eq!(
             reads(Some(&variant("good")), 2).unwrap(),
-            (Vec::new(), Some(LaterLoads::NewTaxids))
+            (Vec::new(), Some(None))
         );
-        assert_eq!(
-            reads(None, 2).unwrap(),
-            (Vec::new(), Some(LaterLoads::Nothing))
-        );
+        assert_eq!(reads(None, 2).unwrap(), (Vec::new(), None));
         // An empty taxdb.btd: the first lookup, of 9606 (OID 2), reads past its mapped end.
         assert!(matches!(
             reads(Some(&variant("btd_empty")), 1),
@@ -6059,7 +6053,7 @@ mod taxdb_prepass_tests {
         ));
         // A database without the offset error whose record of 99990 (OIDs 4, 6, 7, 9) reaches
         // past the mapped end of taxdb.btd (to the next entry's offset, 5000): the first load
-        // (9606) leaves the new taxids to be looked up, and the one of 99990 fails.
+        // (9606) opens it without the offset error, and the first lookup of 99990 fails.
         let built = cwd.join("taxdb_99990_past_page");
         std::fs::create_dir_all(&built).unwrap();
         let mut index = Vec::new();
@@ -6081,7 +6075,10 @@ mod taxdb_prepass_tests {
                 Vec::<String>::new()
             );
         }
-        assert_eq!(run.later.get(), Some(&LaterLoads::NewTaxids));
+        assert_eq!(
+            run.texts.get().map(|texts| texts.offset_error_taxid),
+            Some(None)
+        );
         let set = db.defline_set(4).unwrap();
         assert!(matches!(
             run.bioseq_texts(&db, 4, &set, None),
@@ -6171,7 +6168,7 @@ mod taxdb_prepass_tests {
             assert!(text.contains("LOSAT's BLASTP"), "{text}");
         }
         // Nothing was looked up: the run's own handle is not open.
-        assert!(run.lazy.lock().unwrap().is_none());
+        assert!(run.lazy.get().is_none());
         for taxdb in ["good", "bad_magic", "high_bytes_utf8"] {
             let db = db_search("tm_cache150", Some(&variant(taxdb)), &cwd);
             let run = TaxdbRun::default();
@@ -6219,7 +6216,7 @@ mod taxdb_prepass_tests {
             assert!(text.contains("256-slot taxonomy cache"), "{text}");
             assert!(text.contains("LOSAT's BLASTN"), "{text}");
             // Refused before any lookup: the run's own handle is not open.
-            assert!(run.lazy.lock().unwrap().is_none());
+            assert!(run.lazy.get().is_none());
         }
         // Nothing reported, d1 (no taxid), e1 (taxid -5: a volume looks a positive taxid up only).
         for ranks in [&[][..], &[3], &[4], &[3, 4]] {

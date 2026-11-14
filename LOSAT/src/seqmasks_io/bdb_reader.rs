@@ -172,10 +172,10 @@ impl MaskBdbReader {
                 .to_vec(),
         };
         // `GetBioseq` gives no Bioseq for a sequence without letters, before its lookups
-        // (seqdbvol.cpp:1380-1386), and the writer prints none.
-        let has_source = !residues.is_empty() && set.first_source_taxid(None).is_some();
+        // (seqdbvol.cpp:1380-1386), and the writer prints none. A sequence without a positive
+        // taxid has no lookup (`TaxdbRun::bioseq_texts`).
         let mut texts = Vec::new();
-        if has_source {
+        if !residues.is_empty() {
             texts = self
                 .taxdb
                 .bioseq_texts(&self.db, oid, &set, None)
@@ -184,8 +184,9 @@ impl MaskBdbReader {
         // NCBI makes the title of a sequence without one from its BioSource (the taxonomy
         // names of a definition line with a taxid; seqdbvol.cpp:1100-1188).
         let taxname = if self.title_printed
-            && has_source
+            && !residues.is_empty()
             && bioseq_title_from_source(&title, || bioseq_facts(&ids))
+            && set.first_source_taxid(None).is_some()
         {
             self.source_taxname(oid, &set)?
         } else {

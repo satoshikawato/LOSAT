@@ -302,6 +302,12 @@ impl Write for Output<'_, '_> {
         self.out.write(buf)
     }
 
+    // The output's own `write_all` (a `BufWriter`'s copies the record whole), not the trait's
+    // loop over `write`: the formatters' path of every record stays the one dev wrote.
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        self.out.write_all(buf)
+    }
+
     fn flush(&mut self) -> std::io::Result<()> {
         self.out.flush()
     }

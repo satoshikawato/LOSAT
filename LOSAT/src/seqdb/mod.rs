@@ -598,7 +598,7 @@ pub struct DbStatistics {
     pub engine_db_length: i64,
     /// The number of sequences of the requests' effective search space (`STATS_NSEQ`, else
     /// `GetNumSeqs`, without the setup's fallback to 1; split_query_aux_priv.cpp:164-173, quoted
-    /// at `ArchiveHandle::set_database_filter`).
+    /// at `OptionsHandle::set_database_filter`).
     pub request_count: i32,
     /// `GetMinLength` (`SeqDb::min_length`).
     pub min_length: i32,

@@ -839,6 +839,51 @@ pub(super) fn scan_queries(
     }
 }
 
+/// Whether the XML documents of a run (BLAST XML, outfmt 5; the XML2 and JSON documents, 13 to
+/// 16; `outfmts` are the run's format numbers) may refuse after their first byte, the decision of
+/// both the command line (`native::run_inner`, `HeldOutput::hold`) and the library
+/// (`local::write_run`, `archive::ArchiveHold`), which then hold their output so that the refusal
+/// follows no byte: the message of a query that NCBI does not search (`messages_may_be_refused`,
+/// from the read before the search), with `-db` a later batch's taxonomy database or subject with
+/// parsed Seq-ids (`BlastxDatabase::later_batch_may_refuse`; the scientific names are those of the
+/// XML2 and JSON documents) or the database counts the reports would print where NCBI's sums
+/// overflow (`common::database::report_sum_refusal`, refused at the first report:
+/// `StructuredXml::start` in `write_blastx_xml`), and without it a `-subject` title
+/// (`subjects_may_be_refused`).
+pub(super) fn documents_may_refuse(
+    outfmts: &[i32],
+    messages_may_be_refused: bool,
+    database: Option<&super::database::BlastxDatabase>,
+    subjects: &[FastaRecord],
+) -> bool {
+    let documents = || {
+        outfmts
+            .iter()
+            .filter(|&&outfmt| matches!(outfmt, 5 | 13..=16))
+    };
+    if documents().next().is_none() {
+        return false;
+    }
+    messages_may_be_refused
+        || match database {
+            Some(database) => {
+                let writes_names = documents().any(|&outfmt| outfmt != 5);
+                let pairwise = database.pairwise_database();
+                database.later_batch_may_refuse(writes_names)
+                    || documents().any(|&outfmt| {
+                        crate::algorithm::common::database::report_sum_refusal(
+                            pairwise.num_sequences,
+                            pairwise.total_letters,
+                            pairwise.total_letters_overflow,
+                            outfmt,
+                        )
+                        .is_some()
+                    })
+            }
+            None => subjects_may_be_refused(subjects),
+        }
+}
+
 /// Whether the title of some `-subject` would be refused if the subject had a hit.
 pub(super) fn subjects_may_be_refused(subjects: &[FastaRecord]) -> bool {
     subjects.iter().any(|subject| {

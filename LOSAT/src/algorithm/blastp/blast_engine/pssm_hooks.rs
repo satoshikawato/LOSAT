@@ -258,6 +258,46 @@ fn psi_link_context(
     super::blastp_link_context(&karlin.gapped, context.aa_len, search_space)
 }
 
+/// The cutoffs of a PSSM search's preliminary stage at one subject length: the setup's
+/// (`cutoff_subject_length`, the preliminary e-value, the setup's search space) or, with the
+/// statistics of each subject, the subject's own (`BLAST_OneSubjectUpdateParameters`: its
+/// length, `-evalue` unstretched, its search space). The initial words' cutoff is the gap trigger
+/// (`kbp_std`) at most `cutoff_score_max` (`BlastInitialWordParametersUpdate`), the hit-saving
+/// cutoff is `psi_hit_cutoffs`' `cutoff_score`, and with psiblast's `-sum_stats true` the
+/// linking reads the words' cutoff as its small-gap cutoff (`BlastLinkHSPParametersUpdate`, one
+/// context: `EvenGapLinkParams::preliminary`) and the context at `search_space`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:625-646
+/// ```c
+///    if (gapped_calculation) {
+///       /* FIXME, is this correct?? */
+///       hit_params->link_hsp_params->cutoff_small_gap =
+///                                 word_params->cutoff_score_min;
+/// ```
+#[allow(clippy::too_many_arguments)]
+fn psi_prelim_cutoffs(
+    args: &ResolvedBlastpArgs,
+    contexts: &[QueryContext],
+    karlin: &PsiKarlin,
+    stats: &EvalueStats<'_>,
+    subject_length: i32,
+    evalue: f64,
+    search_space: &SearchSpace,
+) -> (i32, i32, Option<(EvenGapLinkParams, LinkContext)>) {
+    let ctx = &contexts[0];
+    let (cutoff_score_max, hit_cutoff) =
+        psi_hit_cutoffs(args, contexts, karlin, stats, subject_length, evalue);
+    let word_cutoff =
+        gap_trigger_raw_score(args.gap_trigger_bits, &ctx.karlin_params).min(cutoff_score_max);
+    let link = args.sum_stats.then(|| {
+        (
+            EvenGapLinkParams::preliminary(word_cutoff),
+            psi_link_context(karlin, ctx, search_space),
+        )
+    });
+    (word_cutoff, hit_cutoff, link)
+}
+
 /// The preliminary search of a PSSM query over the database `database` or the subject set
 /// `subjects`, its HSP lists collected into `x_compact_hit_lists` as blastp's are.
 ///
@@ -358,25 +398,17 @@ pub(super) fn pssm_prelim(
     let stats = psi_stats(run.gumbel, run.exact_search_spaces);
     // `run.prelim_evalue` is `-evalue` without the Gumbel block (`run_resolved_in_pool`,
     // blast_parameters.c:931-939).
-    let (cutoff_score_max, hit_cutoff) = psi_hit_cutoffs(
+    // psiblast's `-sum_stats true`: the preliminary stage links each subject's HSPs
+    // (`psi_prelim_cutoffs`).
+    let (word_cutoff, hit_cutoff, link) = psi_prelim_cutoffs(
         args,
         run.contexts,
         &karlin,
         &stats,
         run.cutoff_subject_length,
         run.prelim_evalue,
+        &run.search_spaces[0],
     );
-    let word_cutoff =
-        gap_trigger_raw_score(args.gap_trigger_bits, &ctx.karlin_params).min(cutoff_score_max);
-    // psiblast's `-sum_stats true`: the preliminary stage links each subject's HSPs, with the
-    // small gaps' cutoff of the initial words' smallest cutoff (`word_params->cutoff_score_min`,
-    // one context: `EvenGapLinkParams::preliminary`).
-    let link = args.sum_stats.then(|| {
-        (
-            EvenGapLinkParams::preliminary(word_cutoff),
-            psi_link_context(&karlin, ctx, &run.search_spaces[0]),
-        )
-    });
     let window = run.window;
     let prelim = PssmPrelim {
         rows: &psi.pssm,
@@ -409,7 +441,9 @@ pub(super) fn pssm_prelim(
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 and
         // c++/src/algo/blast/core/blast_setup.c:1010-1024 (quoted at `run_resolved_in_pool`'s
         // `subject_parameters`): the statistics of each subject, with the subject's length in the
-        // hit-saving cutoff (no stretch of the e-value) and in the effective lengths.
+        // hit-saving cutoff (no stretch of the e-value; with psiblast's `-sum_stats true` lowered
+        // at the subject's length) and in the effective lengths, which the linking reads with the
+        // subject's small-gap cutoff (`psi_prelim_cutoffs`).
         let subject_prelim;
         let prelim = match run.per_subject {
             None => &prelim,
@@ -434,18 +468,24 @@ pub(super) fn pssm_prelim(
                     Some(gumbel) => EvalueStats::spouge(gumbel),
                     None => EvalueStats::new(None, lengths.eff_searchsp),
                 };
-                let hit_cutoff = stats.hit_cutoff(
-                    args.evalue,
-                    &karlin.gapped,
-                    ctx.aa_len as i32,
+                let (word_cutoff, hit_cutoff, link) = psi_prelim_cutoffs(
+                    args,
+                    run.contexts,
+                    &karlin,
+                    &stats,
                     subject.aa_len as i32,
+                    args.evalue,
+                    &SearchSpace {
+                        effective_space: lengths.eff_searchsp as f64,
+                        length_adjustment: i64::from(lengths.length_adjustment),
+                    },
                 );
                 subject_prelim = PssmPrelim {
-                    word_cutoff: gap_trigger_raw_score(args.gap_trigger_bits, &ctx.karlin_params)
-                        .min(hit_cutoff),
+                    word_cutoff,
                     hit_cutoff,
                     stats,
                     prelim_evalue: args.evalue,
+                    link,
                     ..prelim
                 };
                 &subject_prelim

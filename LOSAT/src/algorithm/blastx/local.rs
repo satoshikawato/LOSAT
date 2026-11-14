@@ -429,24 +429,22 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                 &mut |_| Ok(()),
             )
         }) || (database.is_none() && archive::check_titles(subjects, "subject").is_err()));
-    // A run in which a `-subject` title (refused with its first hit) or the message of a query
-    // (refused where NCBI does not search its batch) could still be refused by those documents
-    // holds every format in order, as the archive's titles do and as the command line holds its
-    // document (`blast_xml::HeldOutput`), so that the refusal follows no byte. So does a `-db` run
-    // in which a later batch could still refuse the taxonomy database or a subject with parsed
-    // Seq-ids (`BlastxDatabase::later_batch_may_refuse`; the scientific names are those of the
-    // XML2 and JSON documents).
-    let writes_names = resolved
+    // A run whose XML documents could still refuse after their first byte (a `-subject` title, the
+    // message of a query that NCBI does not search, a later batch's taxonomy database or subject
+    // with parsed Seq-ids, the database counts of the reports: `blast_xml::documents_may_refuse`,
+    // the command line's decision too) holds every format in order, as the archive's titles do
+    // and as the command line holds its document (`blast_xml::HeldOutput`), so that the refusal
+    // follows no byte.
+    let outfmts: Vec<i32> = resolved
         .iter()
-        .any(|options| matches!(options.outfmt, 13..=16));
-    let xml_may_refuse = resolved
-        .iter()
-        .any(|options| matches!(options.outfmt, 5 | 13..=16))
-        && (xml_scan.messages_may_be_refused
-            || match database {
-                Some(run) => run.database.later_batch_may_refuse(writes_names),
-                None => super::blast_xml::subjects_may_be_refused(subjects),
-            });
+        .map(|options| i32::from(options.outfmt))
+        .collect();
+    let xml_may_refuse = super::blast_xml::documents_may_refuse(
+        &outfmts,
+        xml_scan.messages_may_be_refused,
+        database.as_ref().map(|run| run.database),
+        subjects,
+    );
     let hold = (titles_may_refuse || xml_may_refuse).then(archive::ArchiveHold::new);
     // The hold comes between a format's stream and the caller's writer, which has no stream of
     // NCBI's (`cli::NcbiOstream`): it keeps the bytes in order.

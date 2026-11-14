@@ -1818,11 +1818,8 @@ fn search(
                                 super::archive::batch_searched_space(
                                     validity.iter().any(|&valid| valid),
                                     &lengths.lengths[0],
-                                    if validity[0] {
-                                        queries[range.start].seq().len() as i64
-                                    } else {
-                                        0
-                                    },
+                                    &queries[range.start],
+                                    validity[0],
                                 ),
                             )?;
                         }

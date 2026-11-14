@@ -887,32 +887,18 @@ fn run_inner(
             .seek(SeekFrom::Start(start))
             .map_err(|_| inaccessible("query", &args.query))?;
         // A `-db` search in which a later batch can still refuse the taxonomy database or a
-        // subject with parsed Seq-ids (`BlastxDatabase::later_batch_may_refuse`; outfmt 5 looks
-        // the batch's subjects up in its prefetch, `ReportedSubjects::batch_prefetch`, DBID item
-        // T, and asks no scientific name) holds its document too.
-        let prefetch = prefetches_subjects(Some(choice.number));
-        let database_may_refuse = database
-            .as_ref()
-            .is_some_and(|database| database.later_batch_may_refuse(!prefetch));
-        // The database counts that the reports would print where NCBI's sums overflow are refused
-        // at the first report (`write_blastx_xml`), after NCBI's own errors of the search, which
-        // stop the run after the document's start (written with the prolog below): the run holds
-        // the start until then.
-        let sums_refused = database.as_ref().is_some_and(|database| {
-            let pairwise = database.pairwise_database();
-            crate::algorithm::common::database::report_sum_refusal(
-                pairwise.num_sequences,
-                pairwise.total_letters,
-                pairwise.total_letters_overflow,
-                choice.number,
-            )
-            .is_some()
-        });
-        if scan.messages_may_be_refused
-            || database_may_refuse
-            || sums_refused
-            || super::blast_xml::subjects_may_be_refused(&subjects)
-        {
+        // subject with parsed Seq-ids (outfmt 5 looks the batch's subjects up in its prefetch,
+        // `ReportedSubjects::batch_prefetch`, DBID item T, and asks no scientific name), or whose
+        // database counts the reports would refuse at the first report (`write_blastx_xml`,
+        // after NCBI's own errors of the search, which stop the run after the document's start,
+        // written with the prolog below), holds its document too, as does a `-subject` title
+        // (`blast_xml::documents_may_refuse`, the library's decision too).
+        if super::blast_xml::documents_may_refuse(
+            &[choice.number],
+            scan.messages_may_be_refused,
+            database.as_ref(),
+            &subjects,
+        ) {
             held.hold();
         }
     }

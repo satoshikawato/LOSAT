@@ -252,11 +252,14 @@ impl BlastpSubjectResult {
 // ```
 /// The statistics of one subject that NCBI's preliminary search computes for a database length of
 /// 0 (`BLAST_OneSubjectUpdateParameters`, `run_resolved_in_pool`): each context's search space
-/// (the preliminary e-values without the Gumbel block), hit-saving cutoff and word cutoff.
+/// (the preliminary e-values without the Gumbel block and the linking), hit-saving cutoff and word
+/// cutoff, and with psiblast's `-sum_stats true` the subject's sum statistics (`BlastpSumStats` at
+/// the subject's length: the lowered hit-saving cutoffs and the linking's small-gap cutoff).
 struct BlastpSubjectParameters {
     search_spaces: Vec<SearchSpace>,
     hit_cutoff_scores: Vec<i32>,
     word_cutoff_scores: Vec<i32>,
+    sum_stats: Option<BlastpSumStats>,
 }
 
 struct BlastpSubjectScratch {
@@ -10441,10 +10444,15 @@ fn run_call(
     // with the subject's length and a composition-based statistics of 0 (no stretch of the
     // e-value: `params->prelim_evalue = evalue`, blast_parameters.c:868, 937-938), and the
     // word cutoffs of `BlastInitialWordParametersUpdate` (gapped: the gap trigger, at most the
-    // hit-saving cutoff; the X-drops keep their initial values, `x_dropoff_init` is not 0).
-    // BLASTP links no HSPs. The traceback reads the setup's values (blast_traceback.c:1598-1650:
-    // the traceback of a list reads only the hit-saving cutoff of the complexity adjustment,
-    // which BLASTP does not run).
+    // hit-saving cutoff before the sum statistics lower it, `cutoff_score_max`; the X-drops keep
+    // their initial values, `x_dropoff_init` is not 0). With psiblast's `-sum_stats true` the
+    // subject's sum statistics (`BlastpSumStats` at the subject's length, blast_parameters.c:949-976)
+    // lower its hit-saving cutoffs, and the preliminary linking reads the subject's small-gap
+    // cutoff (`BlastLinkHSPParametersUpdate`, blast_parameters.c:625-646) and search spaces. The
+    // traceback reads the setup's values (blast_traceback.c:1598-1650: it updates its own copy of
+    // the query information, which the traceback of a list does not read, and its hit-saving
+    // cutoffs, which only the complexity adjustment reads, and links with the traceback's
+    // parameters, which no word parameters update).
     let subject_space_overflow = crate::stats::setup::SubjectSpaceOverflow::default();
     let subject_parameters = |subject_length: usize| -> Result<
         BlastpSubjectParameters,
@@ -10493,17 +10501,30 @@ fn run_call(
                 )
             })
             .collect();
-        let word_cutoff_scores = hit_cutoff_scores
+        let word_cutoff_scores: Vec<i32> = hit_cutoff_scores
             .iter()
             .zip(contexts.iter())
             .map(|(&hit_cutoff_score, ctx)| {
                 blastp_word_cutoff_score_for_context(hit_cutoff_score, ctx, args.gap_trigger_bits)
             })
             .collect();
+        let sum_stats = args.sum_stats.then(|| {
+            BlastpSumStats::new(
+                &contexts,
+                subject_length as i32,
+                &gapped_params,
+                &word_cutoff_scores,
+            )
+        });
+        let hit_cutoff_scores = match &sum_stats {
+            Some(sum_stats) => sum_stats.lower_hit_cutoffs(&contexts, hit_cutoff_scores),
+            None => hit_cutoff_scores,
+        };
         Ok(BlastpSubjectParameters {
             search_spaces,
             hit_cutoff_scores,
             word_cutoff_scores,
+            sum_stats,
         })
     };
     // `x_prelim_free.rs`.
@@ -10630,28 +10651,31 @@ fn run_call(
         // Once per subject, before its scan: the values the rest of this kernel reads are the
         // subject's own (`subject_parameters`) or the setup's.
         let x_subject_parameters;
-        let (word_cutoff_scores, hit_cutoff_scores, search_spaces, prelim_evalue) = if per_subject {
-            x_subject_parameters = match subject_parameters(subject.aa_len) {
-                Ok(parameters) => parameters,
-                Err(overflow) => {
-                    subject_space_overflow.note(overflow);
-                    return;
-                }
+        let (word_cutoff_scores, hit_cutoff_scores, search_spaces, prelim_evalue, sum_stats) =
+            if per_subject {
+                x_subject_parameters = match subject_parameters(subject.aa_len) {
+                    Ok(parameters) => parameters,
+                    Err(overflow) => {
+                        subject_space_overflow.note(overflow);
+                        return;
+                    }
+                };
+                (
+                    &x_subject_parameters.word_cutoff_scores,
+                    &x_subject_parameters.hit_cutoff_scores,
+                    &x_subject_parameters.search_spaces,
+                    args.evalue,
+                    &x_subject_parameters.sum_stats,
+                )
+            } else {
+                (
+                    &word_cutoff_scores,
+                    &hit_cutoff_scores,
+                    preliminary_search_spaces,
+                    prelim_evalue,
+                    &sum_stats,
+                )
             };
-            (
-                &x_subject_parameters.word_cutoff_scores,
-                &x_subject_parameters.hit_cutoff_scores,
-                &x_subject_parameters.search_spaces,
-                args.evalue,
-            )
-        } else {
-            (
-                &word_cutoff_scores,
-                &hit_cutoff_scores,
-                preliminary_search_spaces,
-                prelim_evalue,
-            )
-        };
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:112-121
         // ```c
         // (*seq_blk)->sequence_start = (Uint1 *) buffer;

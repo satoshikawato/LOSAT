@@ -177,16 +177,17 @@ pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
 /// The `EffectiveSearchSpace` option of a batch (`BatchArchive::searched_space`,
 /// `StrategyExport::note_searched`): the search space of its first query's context, `first`
 /// (`-searchsp` in an invalid context too), when NCBI searched the batch (`searched`: a query of
-/// it has a valid context) and that context's query length, `query_length` (0 for an invalid
-/// one; `archive::RequestLength::space`).
+/// it has a valid context), and that context's query length (`archive::RequestLength::space`):
+/// the letters of the first query, `record`, or 0 where its context is not valid (`valid`).
 pub(super) fn batch_searched_space(
     searched: bool,
     first: &super::stage_d_stats::LocalContextLength,
-    query_length: i64,
+    record: &FastaRecord,
+    valid: bool,
 ) -> Option<crate::report::archive::SearchedContext0> {
-    searched.then_some(crate::report::archive::SearchedContext0 {
+    searched.then(|| crate::report::archive::SearchedContext0 {
         space: first.eff_searchsp,
-        query_length,
+        query_length: if valid { record.seq().len() as i64 } else { 0 },
     })
 }
 
@@ -395,11 +396,8 @@ fn for_each_batch(
                 searched_space: batch_searched_space(
                     searched,
                     length,
-                    if data.query_validity[first] {
-                        data.queries[first].seq().len() as i64
-                    } else {
-                        0
-                    },
+                    &data.queries[first],
+                    data.query_validity[first],
                 ),
             };
             each(span, &batch)

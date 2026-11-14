@@ -321,6 +321,13 @@ impl StructuredXml for BlastXmlWriter {
         }
     }
 
+    /// The report-sum refusal of outfmt 5 (`XmlRun::check_sums`); BLAST XML writes nothing before
+    /// its first query.
+    fn start(&mut self, reported: Option<&XmlRun<'_>>, out: &mut Vec<u8>) -> Result<()> {
+        let _ = out;
+        reported.map_or(Ok(()), |run| run.check_sums(5))
+    }
+
     /// Appends the end of the document if any query was formatted:
     /// `\n</BlastOutput_iterations>\n</BlastOutput>\n` and the epilog's end of line. With no
     /// query formatted the end of the document is empty and only the epilog's end of line
@@ -332,11 +339,6 @@ impl StructuredXml for BlastXmlWriter {
     ///         m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl;
     /// ```
     /// (`m_SerialXmlEnd` is set by the first formatted query, blastxml_format.cpp:755-763.)
-    fn start(&mut self, reported: Option<&XmlRun<'_>>, out: &mut Vec<u8>) -> Result<()> {
-        let _ = out;
-        reported.map_or(Ok(()), |run| run.check_sums(5))
-    }
-
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()> {
         if self.iterations > 0 {
             out.extend_from_slice(b"\n</BlastOutput_iterations>\n</BlastOutput>\n\n");

@@ -18387,10 +18387,14 @@ mod tests {
 
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the contexts of the search of all queries whose preliminary
     // stage runs in blocks (`x_blocks_contexts`, no table) are those of each table's builder, every
-    // field and the Karlin blocks bit for bit: exact blastp's words of 2, 3 (BLOSUM62, BLOSUM45,
-    // PAM30) and 4, and blastp-fast's compressed table (BLOSUM62, BLOSUM80), with SEG on, on one
-    // thread and on three; queries without letters, of X only, of one letter repeated, of every
-    // letter.
+    // field and the Karlin blocks bit for bit. The builders make their contexts in the pass that
+    // makes their lookup query (`x_prepare_lookup_query`, with `x_context_karlin` inline, on the
+    // pool, or as tasks of the build), and the table-less contexts come from another entry to the
+    // same two functions (`prepare_matrix_lookup_query_for_word_size`); this test ties them: every
+    // matrix (`ScoringMatrix::ALL`) at every word size of `-task blastp` (2 to 4: exact blastp's
+    // table; 5 to 7: the compressed table, none of IDENTITY's) and with `-task blastp-fast`, at the
+    // default thresholds, with SEG and `-lcase_masking` on, on one thread and on three; queries
+    // without letters, of X only, of one letter repeated, of every letter, with lower-case letters.
     #[test]
     fn x_blocks_contexts_are_the_builders_contexts() {
         let mut records = x_block_test_records(&[300, 0, 1200, 45, 700]);
@@ -18399,6 +18403,7 @@ mod tests {
             b"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
             b"ACDEFGHIKLMNPQRSTVWYBZUOJ*",
             b"MKVLAAGIVALLLAAGCSSSKEETPAWTQEQQQALTEAIRWYEGDTL",
+            b"MKVLAAGIVAllaagcssskeetpAWTQEQQQALTEAIRWYEGDTLmkvlaagivalllaagcSSSKEETPAW",
         ]
         .into_iter()
         .enumerate()
@@ -18411,21 +18416,29 @@ mod tests {
         }
         let lengths: Vec<usize> = records.iter().map(|record| record.seq().len()).collect();
         let batches = seq_range::QueryInput::whole(&records).batches(10000);
-        for (task, matrix, word_size) in [
-            ("blastp", None, None),
-            ("blastp", None, Some(2)),
-            ("blastp", None, Some(4)),
-            ("blastp", Some("BLOSUM45"), None),
-            ("blastp", Some("PAM30"), None),
-            ("blastp-fast", None, None),
-            ("blastp-fast", Some("BLOSUM80"), None),
-        ] {
+        let mut compared = 0;
+        let mut refused: Vec<String> = Vec::new();
+        let configs = ScoringMatrix::ALL.into_iter().flat_map(|matrix| {
+            (2..=7)
+                .map(|word_size| ("blastp", Some(word_size)))
+                .chain([("blastp-fast", None)])
+                .map(move |(task, word_size)| (task, matrix, word_size))
+        });
+        for (task, matrix, word_size) in configs {
             let mut args = make_blastp_args();
             args.task = task.to_string();
             args.seg = Some("yes".to_string());
-            args.matrix = matrix.map(str::to_string);
+            args.lcase_masking = true;
+            args.matrix = Some(matrix.ncbi_name().to_string());
             args.word_size = word_size;
-            let resolved = args.resolve().expect("resolved blastp args");
+            let resolved = match args.resolve() {
+                Ok(resolved) => resolved,
+                Err(error) => {
+                    refused.push(format!("{task} {matrix:?} {word_size:?}: {error:#}"));
+                    continue;
+                }
+            };
+            assert_eq!(resolved.scoring.matrix, matrix);
             let frames = blastp_query_frames(&resolved, &records);
             for threads in [1, 3] {
                 crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
@@ -18433,20 +18446,30 @@ mod tests {
                         BlastpLookupTableType::AaLookupTable => {
                             blastp_aa_lookup(&resolved, &frames, false, pool)
                         }
-                        BlastpLookupTableType::CompressedAaLookupTable => blastp_compressed_lookup(
-                            &resolved,
-                            &frames,
-                            &batches,
-                            &lengths,
-                            pool,
-                            super::super::x_query_blocks::XLookupFor::Search,
-                            0,
-                        )
-                        .expect("the compressed table"),
+                        BlastpLookupTableType::CompressedAaLookupTable => {
+                            match blastp_compressed_lookup(
+                                &resolved,
+                                &frames,
+                                &batches,
+                                &lengths,
+                                pool,
+                                super::super::x_query_blocks::XLookupFor::Search,
+                                0,
+                            ) {
+                                Ok(built) => built,
+                                Err(error) => {
+                                    refused.push(format!(
+                                        "{task} {matrix:?} {word_size:?} threads {threads}: {error:#}"
+                                    ));
+                                    return Ok(());
+                                }
+                            }
+                        }
                     };
                     let (lookup, contexts) = x_blocks_contexts(&resolved, &frames, pool);
                     assert_eq!(lookup.longest_chain(), 0);
                     let what = format!("{task} {matrix:?} {word_size:?} threads {threads}");
+                    compared += 1;
                     assert_eq!(contexts.len(), built.len(), "{what}");
                     let mut valid = 0;
                     for (a, b) in contexts.iter().zip(&built) {
@@ -18484,6 +18507,28 @@ mod tests {
                 .expect("pool");
             }
         }
+        // IDENTITY's compressed table is built by no search: the options refuse word sizes above 5,
+        // and `search` refuses word size 5 (blastp-fast's too) before any table (NCBI's blastp
+        // crashes), as its builder does here; every other configuration is compared.
+        let identity_compressed = [
+            "blastp Identity Some(5) ",
+            "blastp Identity Some(6): ",
+            "blastp Identity Some(7): ",
+            "blastp-fast Identity None ",
+        ];
+        assert!(
+            refused.len() == 6
+                && refused.iter().all(|refusal| {
+                    identity_compressed
+                        .iter()
+                        .any(|prefix| refusal.starts_with(prefix))
+                }),
+            "{compared} compared; refused:\n{}",
+            refused.join("\n")
+        );
+        // (9 matrices x (6 word sizes + blastp-fast) - IDENTITY's 3 compressed tables) x 2 thread
+        // counts.
+        assert_eq!(compared, 118);
     }
 
     // EXPERIMENT (LOSAT_X_BPQBLOCK): with the compressed lookup table the blocks also close on

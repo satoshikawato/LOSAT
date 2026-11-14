@@ -15,8 +15,9 @@
 //! protein programs' in-place builder, every temporary freed by the build; the table is the chain
 //! builder's (the unit test `lean_table_equals_reference_for_thresholds_masks_matrices_and_word_lengths`
 //! compares them cell by cell), so a search with it gives the report of the chain builder
-//! (`LOSAT_X_TBNLUTLEAN=0`). These tests compare the reports at the two word-finder settings
-//! LOSAT's TBLASTN takes (BLOSUM62 word size 3 threshold 13; BLOSUM45 word size 2 threshold 16) and
+//! (`LOSAT_X_TBNLUTLEAN=0`). These tests compare the reports at the word-finder settings
+//! LOSAT's TBLASTN takes (BLOSUM62 word size 3 threshold 13; BLOSUM45 word size 2 threshold 16;
+//! BLOSUM62 word size 4 threshold 11, whose table the joint builder of 32-bit indices makes) and
 //! read the `[X_STATS] TBNLUTLEAN lean= chain=` line (`LOSAT_X_STATS=1`): every table lean by
 //! default, every table with chains with `=0`.
 //!
@@ -123,7 +124,17 @@ fn the_lean_tables_give_the_chain_builders_report() {
         "-comp_based_stats",
         "0",
     ];
-    for (query, options) in [(all, &[][..]), (one, &[][..]), (all, blosum45)] {
+    // Words of 4 letters, whose backbone index is wider than the lean builder's 16 bits: the joint
+    // builder (item X2e of line RG; before, the chain builder, 1.12x NCBI's memory at
+    // `-threshold 1`), on the pool at four threads.
+    let word4: &[&str] = &["-word_size", "4", "-threshold", "11"];
+    for (query, options) in [
+        (all, &[][..]),
+        (one, &[][..]),
+        (all, blosum45),
+        (one, word4),
+        (all, word4),
+    ] {
         for threads in [1, 4] {
             let (lean, lean_err) = tblastn(query, options, threads, &[]);
             let (chain, chain_err) =

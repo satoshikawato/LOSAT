@@ -5078,7 +5078,8 @@ fn search_query_batch<S: TbxScore>(
         }
     };
 
-    // What the word finder of the frame loop reads of this batch (`word_finder::WordFinderCx`).
+    // What the word finder of the frame loop reads of this batch (`word_finder::WordFinderCx`);
+    // `process_subject` gives it the subject's `cutoff_scores`.
     let word_finder_cx = word_finder::WordFinderCx {
         window,
         wordsize,
@@ -5227,6 +5228,14 @@ fn search_query_batch<S: TbxScore>(
                     &eff_searchsp_per_context,
                 ),
             };
+        // The frame loop's word finder saves an extension against the subject's cutoffs
+        // (`s_BlastAaWordFinder_TwoHit` reads `word_params->cutoffs`, which
+        // `BLAST_OneSubjectUpdateParameters` updated above): the batch's where they are the
+        // batch's, the subject's own with the statistics of each subject.
+        let word_finder_cx = word_finder::WordFinderCx {
+            cutoff_scores,
+            ..word_finder_cx
+        };
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:772-775
         // ```c
         //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,

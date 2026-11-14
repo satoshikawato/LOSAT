@@ -132,6 +132,15 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
     makeblastdb -in tests/fixtures/blastn_regression/inputs/s60k.fa -dbtype nucl -out tests/db_search/wm_s60k \
         -title "s60k Sakai 2000001-2060000 mutated" -blastdb_version 4
 
+`txrand.fna` (rows `db.cnt.l0txr.*` through `dbcounts/l0txr.nal`, review 6 R6-M1 of D1a-3): two subjects of 12,000 random
+nucleotides each, with two to five pieces of `tests/db_search/taxfilter/q.fna` (60-250 letters, 20-35 % of them changed,
+half reverse-complemented) written over them (records `g2_3_12000` and `g5_2_12000` of review 6's generator; a fixed
+pseudo-random generator: `remaining-gaps-20261112/D/fixtures/make_txrand.py`, Python 3 only), with only
+`.nin .nsq .nhr` kept:
+
+    makeblastdb -in tests/db_search/txrand.fna -dbtype nucl -out tests/db_search/txrand \
+        -title "random subjects with mutated pieces of tests/db_search/taxfilter/q.fna" -blastdb_version 4
+
 `nophr.pin` and `nophr.psq` are copies of `LOSAT/tests/seqdb/db/prot_v4.pin` and `.psq`: the database without
 its header file. `vol2_nophr` (one sequence per volume, `vol2_nophr.pal`) lacks the header file of its second
 volume. NCBI opens a volume's header file when it first reads a header of it, after the search and for the
@@ -1378,7 +1387,10 @@ one lowered at the setup's subject length, which a build that lowers at that len
 (with the matrix) and `gap7p` (with the PSSM), whose two stretches score below the gap trigger, are never extended, as the
 initial words' cutoff reads the hit-saving cutoff before the lowering: a build whose words read the lowered cutoff prints
 them; `-xdrop_gap_final 15` keeps the traceback from joining the parts). Frozen with the local NCBI BLAST+ 2.17.0 release
-build (2026-11-14 and 2026-11-15). `l2p63b.pal` is `LENGTH
+build (2026-11-14 and 2026-11-15). `l0txr.nal` is `LENGTH 0` over `../txrand` (rows `db.cnt.l0txr.*`: tblastx at
+`-num_threads 1`, whose frame loop saves the two-hit extensions against each subject's word cutoffs, not the setup's, which
+are 1 for a database length of 0; review 6 R6-M1 of D1a-3). Frozen with the local NCBI BLAST+ 2.17.0 release build
+(2026-11-15). `l2p63b.pal` is `LENGTH
 9223372036854775808` over `../bslice` (row `db.cnt.l2p63b.bx_c0.16`: a database without parsed Seq-ids or taxonomy, so that
 only the report sums can make BLASTX's library hold its XML2 start before the refusal; review 3 R3-S1 of D1a-3).
 

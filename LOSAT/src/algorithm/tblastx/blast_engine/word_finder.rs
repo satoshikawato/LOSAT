@@ -26,13 +26,15 @@ use super::{
 };
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 
-/// The batch's values the word finder reads, made once per batch by `search_query_batch` under the
-/// names the frame loop read them by: the diagonal table's window and the word size, the table's
-/// mask and size, the diagnostics (`diag_enabled`, `diagnostics`), LOSAT_TIMING (`timing_enabled`
-/// and the clocks of the scan and the extension), LOSAT_DEBUG_EXTENSION
-/// (`extension_debug_enabled`), the query contexts with their cutoffs and X-drops, the scan's
-/// LOSAT_X_TBXSCANBF (`x_scan_bf`) and offset-array size, and LOSAT_X_TBXUNGAPSENT (`tbx_sent`).
-/// `Sync`: every worker's `process_subject` reads it.
+/// The values the word finder reads, made once per batch by `search_query_batch` under the names
+/// the frame loop read them by: the diagonal table's window and the word size, the table's mask
+/// and size, the diagnostics (`diag_enabled`, `diagnostics`), LOSAT_TIMING (`timing_enabled` and
+/// the clocks of the scan and the extension), LOSAT_DEBUG_EXTENSION (`extension_debug_enabled`),
+/// the query contexts with their cutoffs and X-drops, the scan's LOSAT_X_TBXSCANBF (`x_scan_bf`)
+/// and offset-array size, and LOSAT_X_TBXUNGAPSENT (`tbx_sent`). `Sync`: every worker's
+/// `process_subject` reads it, and copies it once per subject with that subject's
+/// `cutoff_scores` (the batch's, or the subject's own with the statistics of each subject:
+/// `context_cutoffs::subject_cutoffs`), which the frame loop's extensions are saved against.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:473-493 (what
 /// `s_BlastAaWordFinder_TwoHit` reads of the diagonal table and the lookup table) and :575 (the

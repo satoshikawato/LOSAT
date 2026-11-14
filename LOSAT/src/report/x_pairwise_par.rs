@@ -24,7 +24,8 @@
 //! bytes (`query_estimate`) reach `WINDOW_BYTES_PER_THREAD` per thread (at least one query), and
 //! the pool groups each window's hits. The window's pieces (a query's head, runs of its
 //! alignments of about `PIECE_BYTES` estimated bytes, cut between HSPs, also within one
-//! subject's, and its footer) are formatted by the pool into one buffer each, in chunks of at
+//! subject's, or the one section of a query-anchored report, `QuerySections::alignments`, and its
+//! footer) are formatted by the pool into one buffer each, in chunks of at
 //! most the same estimated bytes (at least one piece); the calling thread writes a chunk's
 //! buffers in order, each query's warnings before its head, before the next chunk is formatted.
 //! BLASTN's rows: each subject's HSP list of each query on the pool, collected in the list order
@@ -173,10 +174,29 @@ impl<'h> QueryGroup<'h> {
         subject_titles: &[Arc<[u8]>],
         sections: &S,
     ) -> Option<Self> {
-        let mut group = Self::new(query_hits, subject_titles, |previous, s_idx| {
-            sections.joins(previous, s_idx)
-        })?;
         let (sort, tblastx) = sections.sort();
+        Self::sorted(
+            query_hits,
+            subject_titles,
+            |previous, s_idx| sections.joins(previous, s_idx),
+            sort,
+            tblastx,
+        )
+    }
+
+    /// The group of `query_hits` grouped by `joins` (`new`) and sorted by `sort` (`sort`): the
+    /// one place where the writer's grouping and order of one query's subjects are built, for
+    /// the report itself (`for_sections`) and for what is decided before it is written (the
+    /// described subjects of BLASTP's refusals, `pairwise::blastp_report_group`), so that the
+    /// refusal model cannot drift from the report.
+    pub(crate) fn sorted(
+        query_hits: &[(HspIndex, &'h PairwiseHit)],
+        subject_titles: &[Arc<[u8]>],
+        joins: impl Fn(u32, u32) -> bool,
+        sort: super::hit_sort::ReportSort,
+        tblastx: bool,
+    ) -> Option<Self> {
+        let mut group = Self::new(query_hits, subject_titles, joins)?;
         group.sort(sort, tblastx);
         Some(group)
     }
@@ -248,6 +268,35 @@ impl<'h> QueryGroup<'h> {
     /// The subjects of the description table (the first `num_descriptions`).
     pub(crate) fn described(&self, num_descriptions: usize) -> &[u32] {
         &self.subject_order[..self.subject_order.len().min(num_descriptions)]
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:541-554
+    // ```c++
+    //     unsigned int count = 0;
+    //     ITERATE(CSeq_align_set::Tdata, alignment, full_alignment->Get()) {
+    //         ...
+    //             new_seqs.Set().push_back(*alignment);
+    //         }
+    //         count++;
+    //         if(count >= (unsigned int)m_NumSummary)
+    //         	break;
+    //     }
+    // ```
+    /// The HSPs of psiblast's two-part description table (`x_SplitSeqAlign`), each with the
+    /// subject whose hit shows it: the first `num_descriptions` in the group's order, and the first
+    /// alone for 0 (the count is checked after an HSP is put in its part).
+    pub(crate) fn first_hsps(
+        &self,
+        num_descriptions: usize,
+    ) -> impl Iterator<Item = (u32, &'h PairwiseHit)> + '_ {
+        self.subject_order
+            .iter()
+            .flat_map(move |&shown| {
+                self.subject_hits[&shown]
+                    .iter()
+                    .map(move |&hit| (shown, hit))
+            })
+            .take(num_descriptions.max(1))
     }
 
     /// The subjects with alignments (the first `num_alignments`).
@@ -407,6 +456,25 @@ pub(crate) trait QuerySections: Sync {
         part: std::ops::Range<usize>,
     ) -> io::Result<()>;
 
+    /// Whether the query's alignments are one section (`alignments`) in place of each subject's
+    /// (`subject`): the query-anchored reports, outfmt 1 to 4 (`report::query_anchored`).
+    fn merges_alignments(&self) -> bool {
+        false
+    }
+
+    /// The one section of the alignments of the query's aligned subjects (`group`), where
+    /// `merges_alignments`.
+    fn alignments<W: Write>(
+        &self,
+        _writer: &mut W,
+        _q_idx: usize,
+        _group: &QueryGroup<'_>,
+    ) -> io::Result<()> {
+        Err(io::Error::other(
+            "LOSAT internal error: this report has no query-anchored section",
+        ))
+    }
+
     /// The footer of a query with hits.
     fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()>;
 }
@@ -481,10 +549,32 @@ fn write_serial<S: QuerySections, W: Write>(
         };
         sections.head(writer, q_idx, group.as_ref(), &mut read)?;
         if let Some(group) = &group {
-            for &s_idx in group.aligned(sections.num_alignments()) {
-                read(s_idx, &mut *writer)?;
-                let hsps = group.subject_hits[&s_idx].len();
-                sections.subject(writer, probe.as_deref_mut(), group, s_idx, 0..hsps)?;
+            if sections.merges_alignments() {
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1998-2003
+                // ```c++
+                //         for (CSeq_align_set::Tdata::const_iterator
+                //                  alnIter = actual_aln_list.Get().begin();
+                //              alnIter != actual_aln_list.Get().end()
+                //                  && num_align<m_NumAlignToShow; alnIter ++, num_align++) {
+                //
+                //             const CBioseq_Handle& subj_handle =
+                //                 m_Scope.GetBioseqHandle((*alnIter)->GetSeq_id(1));
+                // ```
+                // The merge loads every aligned subject before the section's first byte; without
+                // one (`-num_alignments 0`) there is no section (`DisplaySeqalign` returns at once).
+                let aligned = group.aligned(sections.num_alignments());
+                if !aligned.is_empty() {
+                    for &s_idx in aligned {
+                        read(s_idx, &mut *writer)?;
+                    }
+                    sections.alignments(writer, q_idx, group)?;
+                }
+            } else {
+                for &s_idx in group.aligned(sections.num_alignments()) {
+                    read(s_idx, &mut *writer)?;
+                    let hsps = group.subject_hits[&s_idx].len();
+                    sections.subject(writer, probe.as_deref_mut(), group, s_idx, 0..hsps)?;
+                }
             }
             sections.foot(writer, q_idx)?;
         }
@@ -554,6 +644,8 @@ enum Part {
     /// The alignments from (position in the aligned subjects, HSP of that subject) up to the
     /// second, exclusive: a run of whole subjects, or part of one subject's HSPs.
     Alignments((usize, usize), (usize, usize)),
+    /// The one section of a query-anchored report (`QuerySections::alignments`).
+    Section,
     Foot,
 }
 
@@ -590,6 +682,25 @@ fn pieces<S: QuerySections>(
             estimate: QUERY_BYTES + DESCRIPTION_BYTES * group.subject_order.len(),
         });
         let aligned = group.aligned(sections.num_alignments());
+        if sections.merges_alignments() {
+            if !aligned.is_empty() {
+                pieces.push(Piece {
+                    query,
+                    part: Part::Section,
+                    estimate: aligned
+                        .iter()
+                        .flat_map(|s_idx| &group.subject_hits[s_idx])
+                        .map(|hit| estimate(hit))
+                        .sum(),
+                });
+            }
+            pieces.push(Piece {
+                query,
+                part: Part::Foot,
+                estimate: QUERY_BYTES,
+            });
+            continue;
+        }
         let (mut start, mut bytes, mut end) = ((0, 0), 0, (0, 0));
         for (position, s_idx) in aligned.iter().enumerate() {
             for (hsp, hit) in group.subject_hits[s_idx].iter().enumerate() {
@@ -659,6 +770,13 @@ fn format_piece<S: QuerySections>(
                 }
             }
             Ok(())
+        }
+        Part::Section => {
+            let group = group.expect("a query with a section has hits");
+            for &s_idx in group.aligned(sections.num_alignments()) {
+                mark(s_idx, &mut buffer)?;
+            }
+            sections.alignments(&mut buffer, piece.query, group)
         }
         Part::Foot => sections.foot(&mut buffer, piece.query),
     })();
@@ -840,6 +958,8 @@ mod tests {
         fail_at: Option<usize>,
         /// The subjects `(previous, s_idx)` whose hits are shown as one (`joins`).
         joined: Option<(u32, u32)>,
+        /// The alignments are one section (`merges_alignments`, the query-anchored reports).
+        merged: bool,
     }
 
     impl QuerySections for Marks {
@@ -890,6 +1010,25 @@ mod tests {
             Ok(())
         }
 
+        fn merges_alignments(&self) -> bool {
+            self.merged
+        }
+
+        fn alignments<W: Write>(
+            &self,
+            writer: &mut W,
+            q_idx: usize,
+            group: &QueryGroup<'_>,
+        ) -> io::Result<()> {
+            writeln!(writer, "section {q_idx}")?;
+            for &s_idx in group.aligned(self.num_alignments) {
+                for hit in &group.subject_hits[&s_idx] {
+                    writeln!(writer, "  row {s_idx} length {}", hit.hit.length)?;
+                }
+            }
+            Ok(())
+        }
+
         fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
             writeln!(writer, "foot {q_idx}")
         }
@@ -933,6 +1072,7 @@ mod tests {
                 num_alignments,
                 fail_at: None,
                 joined: None,
+                merged: false,
             };
             let mut serial = Vec::new();
             write_serial(&mut serial, &marks, 0, &by_query, &titles, None, None).unwrap();
@@ -995,6 +1135,7 @@ mod tests {
                 num_alignments: 10,
                 fail_at: None,
                 joined,
+                merged: false,
             };
             let mut serial = Vec::new();
             write_serial(&mut serial, &marks, 0, &by_query, &titles, None, None).unwrap();
@@ -1034,6 +1175,7 @@ mod tests {
             num_alignments: 10,
             fail_at: None,
             joined: None,
+            merged: false,
         };
         // Query 0 shows subjects 5, 2 and 7, query 2 subjects 1 and 5; subject 6's text is not
         // placed (no line reads it) and comes after query 2's report.
@@ -1093,6 +1235,30 @@ mod tests {
         assert!(serial.ends_with("T6\n"), "{serial}");
         for chunks in [(1, 1), (1_000, 500), (usize::MAX, 2_000)] {
             assert_eq!(run(Some(chunks)), serial, "{chunks:?}");
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1998-2003 (quoted at
+    // `write_serial`): the query-anchored reports load every aligned subject before the section.
+    #[test]
+    fn a_merged_section_is_one_piece_after_the_reads_of_its_subjects() {
+        let hits = report_hits();
+        let by_query = by_query(&hits);
+        let titles = titles();
+        for num_alignments in [0, 2, 10] {
+            let marks = Marks {
+                num_alignments,
+                fail_at: None,
+                joined: None,
+                merged: true,
+            };
+            let mut serial = Vec::new();
+            write_serial(&mut serial, &marks, 0, &by_query, &titles, None, None).unwrap();
+            let text = String::from_utf8(serial.clone()).unwrap();
+            assert!(!text.contains("subject "), "{text}");
+            assert_eq!(text.contains("section 0"), num_alignments > 0, "{text}");
+            assert!(text.contains("foot 0") && text.contains("foot 2"), "{text}");
+            parallel_reports_equal(&marks, &by_query, &titles, &serial);
         }
     }
 
@@ -1163,6 +1329,55 @@ mod tests {
         assert_eq!((group.subject_hits[&5].len(), group.own_hsps(5)), (8, 3));
     }
 
+    // Review 3 of line RG T3a, D1: the subjects whose description lines a report shows, each of
+    // which NCBI looks up again by its display id (`pairwise::blastp_described_subjects`): the
+    // first `-num_descriptions` subjects of the group, or in psiblast's two-part table the
+    // subjects of its first `-num_descriptions` HSPs, at least the first (`first_hsps`,
+    // blast_format.cpp:541-554); a subject shown in another's hit is that one's.
+    #[test]
+    fn the_described_subjects_are_the_first_subjects_or_those_of_the_first_hsps() {
+        let hits = report_hits();
+        let by_query = by_query(&hits);
+        let titles = titles();
+        let group = QueryGroup::new(&by_query[0], &titles, |_, _| false).unwrap();
+        let first = |count| -> Vec<u32> {
+            group
+                .first_hsps(count)
+                .map(|(shown, hit)| {
+                    assert_eq!(shown, hit.hit.s_idx);
+                    shown
+                })
+                .collect()
+        };
+        assert_eq!(first(0), [5]);
+        assert_eq!(first(1), [5]);
+        assert_eq!(first(4), [5, 5, 5, 2]);
+        assert_eq!(first(100).len(), 8);
+        let described = |q_idx, two_part, count, joins: fn(u32, u32) -> bool| {
+            crate::report::pairwise::blastp_described_subjects(
+                Default::default(),
+                two_part,
+                count,
+                q_idx,
+                &hits,
+                joins,
+            )
+        };
+        let none: fn(u32, u32) -> bool = |_, _| false;
+        assert!(described(0, false, 0, none).is_empty());
+        assert_eq!(described(0, false, 2, none), [5, 2]);
+        assert_eq!(described(0, false, 500, none), [5, 2, 7]);
+        assert_eq!(described(0, true, 0, none), [5]);
+        assert_eq!(described(0, true, 4, none), [5, 2]);
+        assert_eq!(described(0, true, 5, none), [5, 2, 7]);
+        assert_eq!(
+            described(0, false, 2, |previous, s_idx| (previous, s_idx) == (5, 2)),
+            [5, 7]
+        );
+        assert!(described(1, false, 500, none).is_empty());
+        assert_eq!(described(2, true, 6, none), [1]);
+    }
+
     #[test]
     fn windows_of_queries_written_in_turn_write_the_whole_report() {
         let hits = report_hits();
@@ -1172,6 +1387,7 @@ mod tests {
             num_alignments: 10,
             fail_at: None,
             joined: None,
+            merged: false,
         };
         let mut serial = Vec::new();
         write_serial(&mut serial, &marks, 0, &by_query, &titles, None, None).unwrap();
@@ -1257,6 +1473,7 @@ mod tests {
             num_alignments: 10,
             fail_at: Some(185),
             joined: None,
+            merged: false,
         };
         let mut serial = Vec::new();
         assert!(write_serial(&mut serial, &marks, 0, &by_query, &titles, None, None).is_err());

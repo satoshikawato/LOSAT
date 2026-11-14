@@ -172,15 +172,10 @@ fn run_masks(
     diag: &mut Diag,
 ) -> Result<(), Failure> {
     let value = |name| args.value(name).expect("a key with a default");
-    // `CSegMasker masker(args["window"].AsInteger(), args["locut"].AsDouble(), ...)`: a value
-    // that NCBI computes in extended precision is refused here (`Args::double`).
-    let double = |name| {
-        args.double(name)
-            .expect("an eDouble key with a default")
-            .map_err(|what| Failure::Refused(unsupported(&what)))
-    };
+    // `CSegMasker masker(args["window"].AsInteger(), args["locut"].AsDouble(), ...)`.
+    let double = |name| args.double(name).expect("an eDouble key with a default");
     let window = args.integer("window").expect("-window has a default");
-    let (locut, hicut) = (double("locut")?, double("hicut")?);
+    let (locut, hicut) = (double("locut"), double("hicut"));
     let outfmt = value("outfmt");
     let parse_seqids = args.flag("parse_seqids");
     let masker = seg_masker(window, locut, hicut);

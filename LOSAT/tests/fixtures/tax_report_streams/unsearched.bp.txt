@@ -1,0 +1,7 @@
+Warning: [blastp] Query_1 xp all X: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+
+                                          Tax BLAST report                                          
+
+Query= xp all X
+
+Length=60

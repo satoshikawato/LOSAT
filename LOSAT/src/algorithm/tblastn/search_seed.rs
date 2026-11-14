@@ -286,6 +286,7 @@ fn x_build_compressed(
             &query,
             &locations,
             &tables,
+            1,
         )
     };
     built

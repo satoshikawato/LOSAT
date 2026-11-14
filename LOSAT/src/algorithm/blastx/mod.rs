@@ -427,7 +427,6 @@ mod culling;
 //         /* The HSP's may be in a different order than they were before,
 //            but hsp contains the first one. */
 // ```
-mod even_gap;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:279-297
 // ```c++
@@ -455,6 +454,8 @@ pub mod report;
 // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
 // Seq-aligns of each query's final hit list (outfmt 8, 12).
 mod archive;
+// The command line's hold and its streams, which the report streams of `cli::NcbiOstream` name.
+pub(crate) use archive::{ArchiveHold, HoldWriter};
 mod blast_xml;
 mod seqalign;
 // NCBI c++/src/objtools/align_format/tabular.cpp (CBlastTabularInfo): the tabular reports with a

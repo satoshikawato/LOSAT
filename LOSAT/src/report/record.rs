@@ -186,6 +186,8 @@ pub enum SubjectNames<'a> {
     Records(&'a [FastaRecord]),
     Database {
         ordinals: &'a [u32],
+        /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
+        oids: crate::seqdb::OidMap<'a>,
         title: &'a [u8],
         /// The subjects with parsed Seq-ids by rank (empty without them): their Seq-align id
         /// (`report::db_subject::ParsedSubject::alignment_id`).
@@ -216,13 +218,16 @@ impl<'a> SubjectNames<'a> {
                 use_this_seqid: &[],
             },
             SubjectNames::Database {
-                ordinals, parsed, ..
+                ordinals,
+                oids,
+                parsed,
+                ..
             } => {
                 let subject = parsed.get(index).and_then(Option::as_deref);
                 SubjectRecord {
                     id: match subject {
                         Some(subject) => SeqId::Db(subject.alignment_id()),
-                        None => SeqId::BlOrdId(ordinals[index]),
+                        None => SeqId::BlOrdId(oids.oid(ordinals[index])),
                     },
                     searched_length: database_length,
                     offset: 0,

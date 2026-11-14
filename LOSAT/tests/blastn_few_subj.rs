@@ -22,7 +22,9 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
+
+mod temp_support;
+use temp_support::TempFile;
 
 const OFF: (&str, &str) = ("LOSAT_X_BNFEWSUBJ", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
@@ -42,16 +44,10 @@ fn letters(name: &str) -> String {
         .collect()
 }
 
-/// A FASTA file of `records` (name, letters) in a directory of this process, with a name of its
-/// own per call (tests of this binary run in parallel).
-fn subject_file(records: &[(&str, String)]) -> PathBuf {
-    static CALLS: AtomicUsize = AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!("losat-blastn-few-subj-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join(format!(
-        "subject-{}.fasta",
-        CALLS.fetch_add(1, Ordering::Relaxed)
-    ));
+/// A FASTA file of `records` (name, letters) in a directory of its own (tests of this binary run in
+/// parallel), removed with the file when the value is dropped (kept when the test panics).
+fn subject_file(records: &[(&str, String)]) -> TempFile {
+    let path = TempFile::keep_on_failure("losat-blastn-few-subj", "subject.fasta");
     let mut text = String::new();
     for (name, letters) in records {
         text.push('>');
@@ -67,7 +63,7 @@ fn subject_file(records: &[(&str, String)]) -> PathBuf {
 }
 
 /// LC738868 and LC738869, two records of one 5 Mb unit each.
-fn two_subjects() -> PathBuf {
+fn two_subjects() -> TempFile {
     subject_file(&[
         ("LC738868", letters("LC738868.fasta")),
         ("LC738869", letters("LC738869.fasta")),
@@ -76,7 +72,7 @@ fn two_subjects() -> PathBuf {
 
 /// One record of 5,200,000 letters (two chunks): LC738868, pseudo-random bases, LC738869,
 /// pseudo-random bases.
-fn long_subject() -> PathBuf {
+fn long_subject() -> TempFile {
     let (first, second) = (letters("LC738868.fasta"), letters("LC738869.fasta"));
     let filler = 5_200_000 - first.len() - second.len();
     let mut state: u32 = 12345;

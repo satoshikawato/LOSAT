@@ -78,30 +78,23 @@ pub struct PsiRoundPlan {
 
 impl PsiRoundPlan {
     /// The plan of psiblast's options with rounds (`PsiblastPssmOptions::rounds`; `None`
-    /// without), with the PSSM file of `-in_pssm` (`file`), or LOSAT's refusal of a file it cannot
-    /// write back as NCBI does (`in_pssm_files::rounds_input`).
-    pub(crate) fn of(
-        options: &PsiblastPssmOptions,
-        file: Option<InPssmFile>,
-    ) -> Result<Option<Self>> {
-        let Some(num_iterations) = options.rounds else {
-            return Ok(None);
-        };
+    /// without), with the PSSM file of `-in_pssm` (`file`) and LOSAT's refusal of a file it cannot
+    /// write back as NCBI does, made once the database is opened (`in_pssm_files::rounds_input`).
+    pub(crate) fn of(options: &PsiblastPssmOptions, file: Option<InPssmFile>) -> Option<Self> {
+        let num_iterations = options.rounds?;
         let request = PssmRequest {
             asn_path: options.out_pssm.clone(),
             ascii_path: options.out_ascii_pssm.clone(),
             save_each: options.save_each_pssm,
             pseudocount: options.pseudocount,
         };
-        let input = file
-            .map(|file| super::in_pssm_files::rounds_input(file, &request))
-            .transpose()?;
-        Ok(Some(Self {
+        let input = file.map(|file| super::in_pssm_files::rounds_input(file, &request));
+        Some(Self {
             num_iterations,
             request,
             save_last: options.save_pssm_after_last_round,
             input,
-        }))
+        })
     }
 
     /// The PSSM files of the run, for the checks before the search (`check_pssm_titles`,
@@ -114,8 +107,8 @@ impl PsiRoundPlan {
 
 /// The key of a subject in the inclusion sets and the rows of the PSSM's multiple alignment
 /// (`CSeq_id_Handle` of its Seq-align id, DESIGN_ps5 §2): the index of a `-subject` record
-/// (`lcl|Subject_N`), the ordinal id of a database sequence without parsed Seq-ids
-/// (`gnl|BL_ORD_ID|oid`), or a parsed Seq-align id (copies of one record share it). Two parsed ids
+/// (`lcl|Subject_N`), the OID of a database sequence without parsed Seq-ids
+/// (`gnl|BL_ORD_ID|oid`, `seqdb::Oid`; not its rank in a restricted search), or a parsed Seq-align id (copies of one record share it). Two parsed ids
 /// are one key where they are equal; others that NCBI's handles can take for one are refused
 /// (`check_handles`), so the keys are the handles of the runs LOSAT accepts.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -125,7 +118,7 @@ pub(crate) enum SetKey {
 }
 
 impl SetKey {
-    /// The Seq-align id of an ordinal key (`gnl|BL_ORD_ID|oid`, as NCBI names a database sequence
+    /// The Seq-align id of an index key (`gnl|BL_ORD_ID|oid`, as NCBI names a database sequence
     /// without parsed Seq-ids; a `-subject` record's key is never compared with a parsed id: the
     /// keys of `-subject` records are their indices, with `-parse_deflines` too, whose reader
     /// refuses the ids that NCBI's handles would take for one; RG DECISIONS 27).

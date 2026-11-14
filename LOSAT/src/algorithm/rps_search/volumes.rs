@@ -59,6 +59,91 @@ impl<'a> RpsVolumeSet<'a> {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:349-371,374-379
+// ```c++
+// void CLocalRPSBlast::x_AdjustDbSize(void)
+// {
+// 	if(m_opt_handle->GetOptions().GetEffectiveSearchSpace()!= 0)
+// 		return;
+//
+// 	if(m_opt_handle->GetOptions().GetDbLength()!= 0)
+// 		return;
+//
+// 	CSeqDB db(m_db_name, CSeqDB::eProtein);
+//
+// 	Uint8 db_size = db.GetTotalLengthStats();
+// 	...
+// 	if(0 == db_size)
+// 	    db_size = db.GetTotalLength();
+// 	...
+// 	m_opt_handle->SetOptions().SetDbLength(db_size);
+// 	m_opt_handle->SetOptions().SetDbSeqNum(num_seq);
+// ...
+// CRef<CSearchResultSet> CLocalRPSBlast::Run(void)
+// {
+// 	if(1 != m_num_of_dbs)
+// 	{
+// 		x_AdjustDbSize();
+// 	}
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:73-83
+// ```c++
+// CSetupFactory::CreateRpsStructures(const string& rps_dbname,
+//                                    CRef<CBlastOptions> options)
+// {
+//     ...
+//     CRef<CBlastRPSInfo> retval(new CBlastRPSInfo(rps_dbname, mode));
+//     options->SetMatrixName(retval->GetMatrixName());
+//     options->SetGapOpeningCost(retval->GetGapOpeningCost());
+//     options->SetGapExtensionCost(retval->GetGapExtensionCost());
+//     return retval;
+// }
+// ```
+/// What the set-up of each query batch of an RPS search (rpsblast, rpstblastn) writes into NCBI's
+/// options handle, in its order, which the search strategy's requests after the first hold
+/// (`report::archive::OptionsHandle::pass`; NCBI BLAST+ 2.17.0 `p9.rps.q40.f6`,
+/// `p9.rps.3v.q40.n1.f6`, `p9.rtn.c0.bound1.f6`): a database of several volumes (names) without
+/// `-searchsp` or `-dbsize` gets its length (`x_AdjustDbSize`, before the volumes; `DbSeqNum` is no
+/// remote option), then each volume's set-up the matrix and the gap costs of its `.aux`
+/// (`CreateRpsStructures`; the volumes' are the same, `RpsVolumeSetup`), also in a batch without a
+/// valid query. `costs` are the volumes' matrix and gap costs as their files' set-up read them
+/// (`RpsVolumeSetup::costs`), `None` when the files do not open: the batch's search fails there with
+/// NCBI's error and no request follows. NCBI's threads over the volumes set them up on clones
+/// (`RunThreadedSearch`), whose search spaces never reach the handle; LOSAT writes the requests of
+/// NCBI's `-num_threads 1` at every thread count (DECISIONS F1b-2 of line RG).
+pub(crate) fn search_sets(
+    db: &SeqDb,
+    costs: Option<(String, i32, i32)>,
+    searchsp: Option<i64>,
+    dbsize: Option<i64>,
+) -> Vec<crate::report::archive::options::Param> {
+    use crate::report::archive::options::{Param, ParamValue};
+    let volumes = RpsVolumeSet::of(db);
+    let mut sets = Vec::new();
+    if volumes.order.len() > 1 && searchsp.unwrap_or(0) == 0 && dbsize.unwrap_or(0) == 0 {
+        // `check_alias_keys` refuses `STATS_TOTLEN`, so the length is `GetTotalLength`.
+        sets.push(Param {
+            name: "DbLength",
+            value: ParamValue::BigInteger(i64::try_from(db.total_length()).unwrap_or(i64::MAX)),
+        });
+    }
+    if let Some((matrix, gap_open, gap_extend)) = costs {
+        sets.push(Param {
+            name: "MatrixName",
+            value: ParamValue::Str(matrix),
+        });
+        sets.push(Param {
+            name: "GapOpeningCost",
+            value: ParamValue::Integer(gap_open),
+        });
+        sets.push(Param {
+            name: "GapExtensionCost",
+            value: ParamValue::Integer(gap_extend),
+        });
+    }
+    sets
+}
+
 /// Whether the volumes of an RPS search have their own effective search spaces: `-dbsize`
 /// (`dbsize` above 0) with several volumes and no `-searchsp` above 0 (`x_AdjustDbSize` returns
 /// early, so each volume's statistics read the given length and the volume's own sequence count).
@@ -133,12 +218,29 @@ impl RpsVolumeSetup {
         volume: &Volume,
         cbs: bool,
     ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
-        let files = match self.files(volume, cbs)? {
+        let files = match self.files(volume, cbs, true)? {
             Ok(files) => files,
             Err(error) => return Ok(Err(error)),
         };
         self.check_files(volume, &files)?;
         Ok(Ok(files))
+    }
+
+    /// The matrix and gap costs of the volumes' `.aux` (`search_sets`): those of the first volume
+    /// that `check` or `open` set up, else `volume`'s as its files read them
+    /// (`RpsVolumeFiles::open_for`, without LOSAT's checks); `None` when its files do not open.
+    pub(crate) fn costs(&self, volume: &Volume) -> Option<(String, i32, i32)> {
+        if let Some(costs) = &self.first_costs {
+            return Some(costs.clone());
+        }
+        match self.files(volume, false, true) {
+            Ok(Ok(files)) => Some((
+                files.aux.matrix.clone(),
+                files.aux.gap_open,
+                files.aux.gap_extend,
+            )),
+            _ => None,
+        }
     }
 
     /// LOSAT's checks of `volume` alone, once per run before the first byte of output
@@ -148,7 +250,7 @@ impl RpsVolumeSetup {
         volume: &Volume,
         cbs: bool,
     ) -> Result<std::result::Result<(), RpsVolumeError>> {
-        let files = match self.files(volume, cbs)? {
+        let files = match self.files(volume, cbs, true)? {
             Ok(files) => files,
             Err(error) => return Ok(Err(error)),
         };
@@ -157,20 +259,24 @@ impl RpsVolumeSetup {
     }
 
     /// The files of `volume`, which `check` has checked in this run, opened again for a search
-    /// (the consensus letters: `Consensus`).
+    /// (the consensus letters: `Consensus`) without LOSAT's checks of `check` (series PR, item
+    /// PS12s, D6: `RpsVolumeFiles::open_checked`); NCBI's own errors of the files come where its
+    /// search of a batch meets them.
     pub(crate) fn reopen(
         &self,
         volume: &Volume,
         cbs: bool,
     ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
-        self.files(volume, cbs)
+        self.files(volume, cbs, false)
     }
 
-    /// The volume's files (and frequency ratios when `cbs`).
+    /// The volume's files (and frequency ratios when `cbs`), the table's hits checked when
+    /// `check_hits` (`RpsVolumeFiles::open_for`, `open_checked`).
     fn files(
         &self,
         volume: &Volume,
         cbs: bool,
+        check_hits: bool,
     ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
         let num_seqs = volume.num_oids();
         let lengths = (0..num_seqs)
@@ -179,7 +285,12 @@ impl RpsVolumeSetup {
             .map_err(|error| {
                 crate::algorithm::common::database::database_error(error, self.program)
             })?;
-        let mut files = match RpsVolumeFiles::open_for(volume.base(), &lengths, self.program) {
+        let opened = if check_hits {
+            RpsVolumeFiles::open_for(volume.base(), &lengths, self.program)
+        } else {
+            RpsVolumeFiles::open_checked(volume.base(), &lengths, self.program)
+        };
+        let mut files = match opened {
             Ok(files) => files,
             Err(RpsVolumeFault::Files(RpsOpenError::Refused(text))) => bail!(text),
             Err(RpsVolumeFault::Files(RpsOpenError::Ncbi(text))) => {
@@ -278,7 +389,7 @@ impl RpsVolumeSetup {
         let offsets = files.offsets();
         let mut consensus = vec![0u8; concat];
         if num_seqs > 0 {
-            let block = volume.read_block(0, num_seqs, 0).map_err(|error| {
+            let block = volume.read_block(0, num_seqs, 0, 0).map_err(|error| {
                 crate::algorithm::common::database::database_error(error, self.program)
             })?;
             for oid in 0..num_seqs as usize {

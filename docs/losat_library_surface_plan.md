@@ -459,7 +459,7 @@ BLASTX の `-parse_deflines` は `-subject` でも使えるようにした（`bl
 
 | 項目 | 実装 |
 |---|---|
-| outfmt 13、14 | `run_to_file(search, inputs, outfmt, path, diagnostics)`：CLI の `-out path` と同じで、side file は `path` の隣に書く。メモリ上の報告には置き場が無いので、`run` と `run_collect` は NCBI の `Please provide a file name` のままにする。engine は `args.out` を見る（CLI と同じ経路）。BLASTX は `report_batches` が `FsSideFiles` を使う |
+| outfmt 13、14 | `run_to_file(search, inputs, outfmt, path, diagnostics)`：CLI の `-out path` と同じで、side file は `path` の隣に書く。メモリ上の報告には置き場が無いので、`run` と `run_collect` は NCBI の `Please provide a file name` のままにする。engine は `args.out` を見る（CLI と同じ経路。`path` は parser に `-out` として渡すので、名の長さの検査も CLI と同じ: `Search::writing_to`）。file は CLI が `-out` を開く所（subject を読んだ後、options の処理の前）で `ReportOutputs::open_out` が作る（線 RG E1w-2b）。BLASTX は `report_batches` が `FsSideFiles` を使う |
 | BLASTN の `-window_masker_db` | API の `run_local` が `FileCounts` を渡す。ブラウザはホストの counts のまま |
 | BLASTX の `-subject` で outfmt 11 | `report_batches` の archive の枝を `-subject` でも使う |
 | error archive | `-subject` でも `finish_archive`（4 program の `run_local`）。CLI が書く error archive が欠けていた（`kaempty.gaps_fmt11`） |

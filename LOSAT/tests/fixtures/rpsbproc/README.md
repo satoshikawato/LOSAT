@@ -163,6 +163,13 @@ spaces). PS16a's cases of `-t feats`, `-t both` and the default `-t` (named `ref
   that is not an entry (NCBI's report, exit 2); `bom2.ini` a UTF-8 byte order mark and one byte more (NCBI's
   `Error: (110.4) Error reading the registry after line 1: `, the run goes on); `bom1.ini` the first byte of one (as a
   `.ncbirc`: the same post; as a `.ini` NCBI posts nothing).
+- The rows `i_ncbirc_*` (env parity item I, 2026-11-14): a `.ncbirc` with a syntax error (`ncbirc:garbage.ini`,
+  `sec.ini`, `quote.ini`; not `cont.ini`, whose entry before the bad line LOSAT refuses as an entry it does not
+  know). NCBI posts it once, at its configuration load (`Critical: (110.6) CNcbiRegistry:
+  Syntax error in system-wide configuration file: ` and the exception, whose place names the build tree), then runs;
+  with `-logfile` the post goes to the file. `oracle/i_ncbirc_*` is the binary of the 2025-05-13 package (its tree
+  `/export/home/tomcat/TeamCity/Agent2/work/b895474bf74772ad/struct_tree`); bioconda's build names its own tree and
+  is otherwise the same.
 - `arch/bad/subj_sequences.asn`, `matrix_integer.asn`, `evalue_rawscore.asn` (the review of item E1c): `arch/one.asn`
   edited by hand: `subject sequences { }`, `MatrixName` `value integer 5`, `EvalueThreshold` `value cutoff raw-score
   5`. NCBI writes the `SESSION` line's tab before each getter throws; with `-o log.txt -logfile log.txt` its stream

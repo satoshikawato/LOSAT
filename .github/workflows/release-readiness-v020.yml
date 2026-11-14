@@ -218,7 +218,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 
       - name: Build exact native release artifact
-        run: cd LOSAT && cargo build --release --locked
+        run: cd LOSAT && cargo build --release --bin losat --locked
 
       # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
       # result *= expl(-z * z) / z;

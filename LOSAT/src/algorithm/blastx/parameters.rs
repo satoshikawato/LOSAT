@@ -746,22 +746,10 @@ pub(crate) fn subject_update(
 }
 
 /// The gap decay rate of the hit-saving and word cutoffs (`BlastLinkHSPParametersNew`, quoted at
-/// `even_gap`), 0 without linking: no sum statistics, or a gapped search whose intron length links
-/// nothing (blast_parameters.c:793-805).
+/// `linking::link_parameters`, the one rule of whether BLASTX links), 0 without linking: no sum
+/// statistics, or a gapped search whose intron length links nothing (blast_parameters.c:793-805).
 fn gap_decay_rate(options: &ResolvedOptions) -> f64 {
-    if options.sum_stats
-        && (!options.gapped
-            || options.max_intron_length == 0
-            || (options.max_intron_length - 2) / 3 > 0)
-    {
-        if options.gapped {
-            0.1
-        } else {
-            0.5
-        }
-    } else {
-        0.0
-    }
+    super::linking::link_parameters(options).map_or(0.0, |link| link.gap_decay_rate)
 }
 
 /// The word cutoff of a valid context of `length` residues (`BlastInitialWordParametersUpdate`,
@@ -798,7 +786,7 @@ fn word_cutoff(
 //    parameters->cutoff_score_min = cutoff_min;
 // ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1448-1455 (quoted at
-// `search::compute_subject_with`): the link cutoffs read it (`even_gap::cutoffs`).
+// `search::compute_subject_with`): the link cutoffs read it (`linking::link_cutoffs`).
 // NCBI's query batch is the reader batch (`reader_batch.rs`): the statistics of each subject update
 // the word cutoffs of all its contexts, also those of the units LOSAT searches apart.
 /// The smallest word cutoff over the contexts `contexts` of a reader batch (`ReaderBatchShape::

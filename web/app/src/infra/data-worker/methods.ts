@@ -1,6 +1,6 @@
 // The methods that the Data worker serves: the DataGateway, the saved Example sets
 // (ports/example.ts), the saved WindowMasker counts (ports/counts.ts), the inflation of a downloaded Example set (losat/ports: inflate.ts), and
-// `describe` / `validate` of the engine, which its serial reactor answers
+// `describe` / `start` / `validate` of the engine, which its serial reactor answers
 // (web/packages/losat/src/infra/reactor/control.ts). The compile-time checks below keep the lists complete.
 import type { EngineControl } from 'losat';
 import type { WholeFileInflater } from 'losat/ports';
@@ -42,7 +42,7 @@ export const COUNTS_STORE_METHODS = [
 
 export const INFLATE_METHODS = ['inflateFile'] as const satisfies readonly (keyof WholeFileInflater)[];
 
-export const ENGINE_CONTROL_METHODS = ['describe', 'validate'] as const satisfies readonly (keyof EngineControl)[];
+export const ENGINE_CONTROL_METHODS = ['describe', 'start', 'validate'] as const satisfies readonly (keyof EngineControl)[];
 
 /** Everything the Data worker serves. */
 export type DataWorkerApi = DataGateway & ExampleStore & CountsStore & WholeFileInflater & EngineControl;

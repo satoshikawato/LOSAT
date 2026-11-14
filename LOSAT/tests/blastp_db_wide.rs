@@ -21,6 +21,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 mod reach_support;
 
 const WIDE_OFF: (&str, &str) = ("LOSAT_X_BPDBWIDE", "0");
@@ -33,6 +36,8 @@ fn fixture(name: &str) -> PathBuf {
 
 /// What one run printed: the report and standard error.
 struct Run {
+    /// The run\'s worker log, when the test made one: kept until the caller drops the run.
+    _log: Option<TempFile>,
     code: Option<i32>,
     stdout: Vec<u8>,
     stderr: String,
@@ -98,12 +103,7 @@ fn blastp(task: &str, db: &Path, threads: u32, vars: &[(&str, &str)]) -> Run {
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bpdbwide-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastp_db_wide_worker");
     let output = command
         .arg("blastp")
         .args(["-task", task])
@@ -117,6 +117,7 @@ fn blastp(task: &str, db: &Path, threads: u32, vars: &[(&str, &str)]) -> Run {
         .output()
         .expect("run LOSAT");
     let run = Run {
+        _log: log,
         code: output.status.code(),
         stdout: output.stdout,
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),

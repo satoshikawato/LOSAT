@@ -1,0 +1,18 @@
+Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:
+    T0 "/export/home/tomcat/TeamCity/Agent2/work/b895474bf74772ad/struct_tree/src/corelib/ncbireg.cpp", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'garbage' (m_Pos = 1)
+
+Post-RPSBLAST Processing Utility v0.5.1
+-------------------------------------------------------
+Download:
+	ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/
+
+Blast applications download:
+	ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
+
+For more information please refer to the README file
+RPSBlast session 0 start...
+Calculating....
+End processing Query NP_414783.1 protein YkfF [Escherichia coli str. K-12 substr. MG1655]
+RPSBlast session 1 done...
+All done, 1 queries processed
+

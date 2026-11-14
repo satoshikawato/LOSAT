@@ -142,7 +142,7 @@ pub(super) fn query_records<'a>(
                 SeqalignSubjects::Records => subject.seq_id(),
                 SeqalignSubjects::Database { reported, .. } => match parsed {
                     Some(subject) => SeqId::Db(subject.alignment_id()),
-                    None => SeqId::BlOrdId(reported.ordinal(list.oid)),
+                    None => SeqId::BlOrdId(reported.oid(list.oid)),
                 },
             },
             searched_length: i32::try_from(subject.sequence.len())?,

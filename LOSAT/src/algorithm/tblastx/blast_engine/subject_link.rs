@@ -22,11 +22,11 @@ use super::x_batch_pipe::XSeedGuard;
 use super::x_search_timing::XLap;
 use super::x_seed_release::{self, XSeedStage};
 use super::{
-    apply_sum_stats_even_gap_linking_with_parallel, reevaluate_ungapped_hsp_list,
-    sort_ungapped_hits_by_score_ncbi, stage_dump, trace_hsp_target, trace_ungapped_hit_if_match,
-    ungapped_hits_is_sorted_by_score_ncbi, AtomicOrdering, AtomicU64, DiagStruct,
-    DiagnosticCounters, Instant, KarlinParams, LinkCall, LinkingParams, QueryContext, QueryFrame,
-    TbxScore, UngappedHit, XStage,
+    apply_sum_stats_even_gap_linking_with_parallel, link_one_hit_with_int4_ends,
+    reevaluate_ungapped_hsp_list, sort_ungapped_hits_by_score_ncbi, stage_dump, trace_hsp_target,
+    trace_ungapped_hit_if_match, ungapped_hits_is_sorted_by_score_ncbi, AtomicOrdering, AtomicU64,
+    DiagStruct, DiagnosticCounters, Instant, KarlinParams, LinkCall, LinkingParams, QueryContext,
+    QueryFrame, TbxScore, UngappedHit, XStage,
 };
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 use crate::algorithm::tblastx::sum_stats_linking::XHelped;
@@ -141,6 +141,49 @@ pub(super) fn link_subject_hits(
         x_link_on_pool,
     } = link;
     apply_sum_stats_even_gap_linking_with_parallel(
+        hits,
+        linking_params_for_cutoff,
+        linking_params,
+        contexts_ref,
+        subject_frame_bases,
+        length_adj_per_context,
+        eff_searchsp_per_context,
+        x_link_on_pool,
+    )
+}
+
+// No NCBI counterpart: which form of the first linking call a subject of the one-hit word finder
+// (`-window_size 0`) takes. NCBI links every list the same way; LOSAT's default kernel takes HSPs
+// whose end is after their start (`link_one_hit_with_int4_ends` in `linking.rs`).
+/// Whether the subject's list (of the one-hit word finder) holds an HSP of length 0 or less.
+#[inline(never)]
+pub(super) fn holds_int4_inverted(hits: &[UngappedHit]) -> bool {
+    hits.iter().any(UngappedHit::is_int4_inverted)
+}
+
+/// The first linking call of a subject of the one-hit word finder whose list holds an HSP of
+/// length 0 or less (`holds_int4_inverted`), with NCBI's `Int4` ends; those HSPs are dropped after
+/// it, where NCBI's re-evaluation deletes them (`link_one_hit_with_int4_ends`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873 (the first
+/// `BLAST_LinkHsps`) and c++/src/algo/blast/core/blast_hits.c:2703-2731
+/// (`Blast_HSPListReevaluateUngapped`, called at blast_engine.c:1492-1497).
+#[cold]
+#[inline(never)]
+pub(super) fn link_subject_hits_int4(
+    link: &SubjectLinkArgs<'_>,
+    hits: Vec<UngappedHit>,
+) -> Vec<UngappedHit> {
+    let &SubjectLinkArgs {
+        linking_params_for_cutoff,
+        linking_params,
+        contexts_ref,
+        subject_frame_bases,
+        length_adj_per_context,
+        eff_searchsp_per_context,
+        x_link_on_pool,
+    } = link;
+    link_one_hit_with_int4_ends(
         hits,
         linking_params_for_cutoff,
         linking_params,

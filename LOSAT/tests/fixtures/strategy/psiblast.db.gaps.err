@@ -1,0 +1,16 @@
+BLAST query/options error: Gap existence and extension values of 99 and 99 not supported for BLOSUM62
+supported values are:
+32767, 32767
+11, 2
+10, 2
+9, 2
+8, 2
+7, 2
+6, 2
+13, 1
+12, 1
+11, 1
+10, 1
+9, 1
+
+Please refer to the BLAST+ user manual.

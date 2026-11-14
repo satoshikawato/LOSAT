@@ -1,0 +1,2 @@
+CFastaReader: Hyphens are invalid and will be ignored around line 367
+FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?

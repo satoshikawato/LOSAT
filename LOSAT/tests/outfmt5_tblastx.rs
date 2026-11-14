@@ -19,6 +19,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod temp_support;
+use temp_support::{Finished, TempFile};
+
 fn temp_dir(stem: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -33,7 +36,7 @@ fn temp_dir(stem: &str) -> PathBuf {
     dir
 }
 
-fn run_str(args: &[&str]) -> Output {
+fn run_str(args: &[&str]) -> Finished<Output, TempFile> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") {
@@ -41,11 +44,10 @@ fn run_str(args: &[&str]) -> Output {
         }
     }
     // An --all-features binary at 2+ threads keeps this variable (see the other tests).
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_outfmt5_worker.log"),
-    );
-    command.args(args).output().expect("run LOSAT")
+    let log = TempFile::keep_on_failure("losat_outfmt5_worker", "worker.log");
+    command.env("LOSAT_BLASTX_WORKER_LOG", &log);
+    let output = command.args(args).output().expect("run LOSAT");
+    Finished::new(output, log)
 }
 
 const PROTEIN: &str = "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG";
@@ -293,7 +295,7 @@ fn several_batches_make_one_document_with_global_iteration_numbers() {
         ]);
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(0), "{stderr}");
-        let text = String::from_utf8(output.stdout).expect("ASCII");
+        let text = String::from_utf8(output.stdout.clone()).expect("ASCII");
         assert_eq!(text.matches("<?xml").count(), 1);
         assert_eq!(text.matches("<BlastOutput_program>").count(), 1);
         assert_eq!(text.matches("<Iteration>").count(), 120);
@@ -354,10 +356,8 @@ fn an_empty_seekable_query_input_writes_nothing() {
                 command.env_remove(name);
             }
         }
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat_outfmt5_worker.log"),
-        );
+        let log = TempFile::keep_on_failure("losat_outfmt5_worker", "worker.log");
+        command.env("LOSAT_BLASTX_WORKER_LOG", &log);
         let output = command
             .args([
                 "tblastx",
@@ -397,6 +397,8 @@ fn a_failing_batch_ends_the_run_after_the_earlier_iterations_without_the_trailer
     let good = text.clone();
     text.extend_from_slice(b">q3\nACGT%%%%\n");
     for threads in ["1", "4", "8", "16"] {
+        // The worker log of this iteration's runs: removed after them, kept when the test panics.
+        let log = TempFile::keep_on_failure("losat_outfmt5_worker", "worker.log");
         let run = |text: &[u8]| {
             fs::write(&query, text).expect("write query");
             let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
@@ -405,10 +407,7 @@ fn a_failing_batch_ends_the_run_after_the_earlier_iterations_without_the_trailer
                     command.env_remove(name);
                 }
             }
-            command.env(
-                "LOSAT_BLASTX_WORKER_LOG",
-                std::env::temp_dir().join("losat_outfmt5_worker.log"),
-            );
+            command.env("LOSAT_BLASTX_WORKER_LOG", &log);
             command
                 .env("BATCH_SIZE", "500")
                 .args([
@@ -449,10 +448,8 @@ fn a_failing_batch_ends_the_run_after_the_earlier_iterations_without_the_trailer
                 command.env_remove(name);
             }
         }
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat_outfmt5_worker.log"),
-        );
+        let log = TempFile::keep_on_failure("losat_outfmt5_worker", "worker.log");
+        command.env("LOSAT_BLASTX_WORKER_LOG", &log);
         let first = command
             .env("BATCH_SIZE", "5000")
             .args([

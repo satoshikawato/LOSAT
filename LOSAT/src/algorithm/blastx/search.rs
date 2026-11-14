@@ -150,7 +150,7 @@ pub(crate) trait PreliminarySink {
         _oid: usize,
         _batch: &PreparedQueryBatch,
         _params: &[ContextParameters],
-        _prepared_link: Option<([i32; 2], f64)>,
+        _prepared_link: Option<crate::core::link_hsps::LinkCutoffs>,
     ) -> Result<()> {
         Ok(())
     }
@@ -1303,7 +1303,7 @@ struct SubjectComputation {
     raw: Vec<PreliminaryHsp>,
     purged: Vec<PreliminaryHsp>,
     containment: Vec<(PreliminaryHsp, bool)>,
-    prepared_link: Option<([i32; 2], f64)>,
+    prepared_link: Option<crate::core::link_hsps::LinkCutoffs>,
     /// The parameters of the subject's own statistics (`compute_subject_any`), which the sink
     /// reads in place of the chunk's; `None` for the chunk's.
     subject_parameters: Option<Vec<ContextParameters>>,
@@ -1430,7 +1430,7 @@ fn compute_subject_any(
             // word parameters is the minimum over the batch's contexts (blast_parameters.c:401-416,
             // `parameters::subject_word_cutoff_min`), which the link cutoffs read.
             let word_cutoff_min = match batch.reader_shape.as_deref() {
-                Some(shape) if !options.gapped && options.sum_stats => {
+                Some(shape) if super::linking::computes_link_cutoffs(options) => {
                     super::parameters::subject_word_cutoff_min(
                         &shape.batch_contexts,
                         options,
@@ -1531,8 +1531,8 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     // adoption/observer notification is replayed on the serial OID collector.
     // `db_length` is `BlastSeqSrcGetTotLen` (blast_engine.c:1407), not the statistics' total:
     // `Subjects::total_length`.
-    let prepared_link = if !options.gapped && options.sum_stats {
-        Some(super::even_gap::cutoffs(
+    let prepared_link = if super::linking::computes_link_cutoffs(options) {
+        Some(super::linking::link_cutoffs(
             batch,
             params,
             subject_length as i32,
@@ -1634,12 +1634,16 @@ fn compute_subject_with<S: super::seed::BxScoring>(
                 containment.push((h.clone(), contained))
             }
         };
+        // What NCBI's buffer of the subject holds after its sentinel, read only for a one-hit
+        // gapped start whose window passes the sentinel (`preliminary::gapped_start_negative`).
+        let subject_after = || subjects.buffer_after(oid);
         if S::BLOSUM62 {
             super::preliminary::gapped_observed(
                 batch,
                 params,
                 options,
                 encoded,
+                &subject_after,
                 &initial,
                 xdrop,
                 &mut observe,
@@ -1651,6 +1655,7 @@ fn compute_subject_with<S: super::seed::BxScoring>(
                 params,
                 options,
                 encoded,
+                &subject_after,
                 &initial,
                 xdrop,
                 &mut observe,

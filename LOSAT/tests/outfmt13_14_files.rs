@@ -18,6 +18,7 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2316-2353, :2425-2457.
 
 mod run_local_support;
+mod temp_support;
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -26,6 +27,7 @@ use std::process::{Command, Output, Stdio};
 
 use losat::api::Program;
 use run_local_support::Files;
+use temp_support::{home_and_worker_log, Finished, RunFiles};
 
 fn engine() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
@@ -57,7 +59,9 @@ fn temp_dir(stem: &str) -> PathBuf {
     dir
 }
 
-fn command(env: &[(&str, &str)]) -> Command {
+/// LOSAT with an empty home, a worker log and `env`: the home and the log are removed when the
+/// returned files are dropped (the log is kept when the test panics).
+fn command(env: &[(&str, &str)]) -> (Command, RunFiles) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let name_text = name.to_string_lossy();
@@ -68,28 +72,25 @@ fn command(env: &[(&str, &str)]) -> Command {
     for name in ["BATCH_SIZE", "CHUNK_SIZE", "BLASTDB"] {
         command.env_remove(name);
     }
-    let home = std::env::temp_dir().join("losat_outfmt1314_home");
-    fs::create_dir_all(&home).expect("empty home");
-    command.env("HOME", &home).env("USERPROFILE", &home);
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_outfmt1314_worker.log"),
-    );
+    let files = home_and_worker_log(&mut command, "losat_outfmt1314");
     command.envs(env.iter().copied());
-    command
+    (command, files)
 }
 
-fn run_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
-    command(env)
+fn run_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Finished<Output> {
+    let (mut command, files) = command(env);
+    let output = command
         .current_dir(dir)
         .args(args)
         .output()
-        .expect("run LOSAT")
+        .expect("run LOSAT");
+    Finished::new(output, files)
 }
 
-fn run_with_stdin(dir: &Path, args: &[&str], stdin: &[u8]) -> Output {
+fn run_with_stdin(dir: &Path, args: &[&str], stdin: &[u8]) -> Finished<Output> {
     use std::io::Write;
-    let mut child = command(&[])
+    let (mut command, files) = command(&[]);
+    let mut child = command
         .current_dir(dir)
         .args(args)
         .stdin(Stdio::piped())
@@ -98,7 +99,7 @@ fn run_with_stdin(dir: &Path, args: &[&str], stdin: &[u8]) -> Output {
         .spawn()
         .expect("run LOSAT");
     child.stdin.take().unwrap().write_all(stdin).unwrap();
-    child.wait_with_output().expect("wait for LOSAT")
+    Finished::new(child.wait_with_output().expect("wait for LOSAT"), files)
 }
 
 /// The names of the entries of a directory, sorted.
@@ -1063,7 +1064,8 @@ fn a_blastx_query_that_is_not_a_regular_file_is_refused_in_13_and_14() {
     let text = b">q1 plain\nATGGATTTCGAACAGCGGCATGAACCGTAA\n".to_vec();
     for format in ["13", "14"] {
         let out = work.join(format!("o{format}.out"));
-        let mut child = command(&[])
+        let (mut command, _files) = command(&[]);
+        let mut child = command
             .args([
                 "blastx",
                 "-query",

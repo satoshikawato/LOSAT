@@ -57,11 +57,11 @@ impl ListedSubjects {
     /// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): `read_titles` without the records: the definition lines
     /// of the subjects of the final hit lists (`hit_lists`), read in the same order with the same
     /// errors, one `Arc` each; the other subjects share one empty title.
-    pub(in crate::algorithm::blastp::blast_engine) fn x_read_titles_lean(
-        &self,
-        database: &BlastpDatabase,
+    pub(in crate::algorithm::blastp::blast_engine) fn x_read_titles_lean<'a>(
+        &'a self,
+        database: &'a BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
-    ) -> Result<ListedTitles<'_>> {
+    ) -> Result<ListedTitles<'a>> {
         let ranks = self.ordinals.len();
         let mut titles: Vec<Arc<[u8]>> = vec![Arc::from(&b""[..]); ranks];
         let mut replaced_title_bytes = vec![false; ranks];
@@ -88,6 +88,7 @@ impl ListedSubjects {
         }
         Ok(ListedTitles {
             listed: self,
+            oids: database.oid_map(),
             shown: ListedShown::Lean(titles),
             replaced_title_bytes,
             taxonomy_titles,

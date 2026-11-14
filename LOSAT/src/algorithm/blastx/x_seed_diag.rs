@@ -117,7 +117,7 @@
 //! never inlined; the other statements unchanged), so the loop without it keeps its code.
 
 use super::x_seed_scan::XKeptPresence;
-use super::x_ungap_sent::XSent;
+use super::x_ungap_sent::{by_word_size, XSent};
 use super::*;
 use crate::algorithm::blastp::x_seed_fused::{
     x_cell_test, x_scan_two_hit_with, XCellTest, XContextTable,
@@ -661,8 +661,12 @@ fn x_word_finder_fused_or_sent<K: XCell, S: BxScoring>(
     sent: Option<XSent<'_, S>>,
 ) -> Result<(Vec<InitHsp>, [u64; 4])> {
     match sent {
-        Some(sent) => x_word_finder_fused_sent(
-            mode, batch, parameters, options, subject, table, kept, diagonals, sent,
+        // The instance of the word size, chosen once for the subject (item SC9b-1).
+        Some(sent) => by_word_size!(
+            options.word_size,
+            W => x_word_finder_fused_sent::<K, S, W>(
+                mode, batch, parameters, options, subject, table, kept, diagonals, sent,
+            )
         ),
         None => x_word_finder_fused(
             scoring, mode, batch, parameters, options, subject, table, kept, diagonals,
@@ -836,12 +840,14 @@ fn x_word_finder_fused<K: XCell, S: BxScoring>(
 
 /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): [`x_word_finder_fused`] with the two-hit extension of `sent`
 /// (`x_ungap_sent.rs`), in a function of its own so that the loop without it keeps its code. The
-/// closure's other statements are those of `x_word_finder_fused`'s, in the same order.
+/// closure's other statements are those of `x_word_finder_fused`'s, in the same order. `W` is
+/// `options.word_size` as a const (2 to 4), the walks' instance: the caller chooses it once per
+/// subject (`by_word_size!`), and the closure still reads the word size from `options`.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-606 (as in
 // `x_word_finder_fused`).
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn x_word_finder_fused_sent<K: XCell, S: BxScoring>(
+fn x_word_finder_fused_sent<K: XCell, S: BxScoring, const W: usize>(
     mode: XCellTest,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
@@ -888,7 +894,7 @@ fn x_word_finder_fused_sent<K: XCell, S: BxScoring>(
                         let p = &parameters[context];
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-582
                         // (`x_ungap_sent.rs`)
-                        let Some(result) = sent.two_hit::<$shadow>(
+                        let Some(result) = sent.two_hit::<$shadow, W>(
                             (previous + word) as usize,
                             s as usize,
                             q as usize,
@@ -1161,14 +1167,20 @@ mod tests {
             for (table_sent, shadow) in sent.iter_mut().zip([false, true]) {
                 let (got, c2) = if matrix == ScoringMatrix::Blosum62 {
                     let x = XSent::for_test(Blosum62Bx, &batch.sequence_start, &lead, shadow);
-                    x_word_finder_fused_sent(
-                        mode, batch, params, options, subject, table, kept, table_sent, x,
+                    by_word_size!(
+                        options.word_size,
+                        W => x_word_finder_fused_sent::<_, _, W>(
+                            mode, batch, params, options, subject, table, kept, table_sent, x,
+                        )
                     )
                 } else {
                     let x =
                         XSent::for_test(MatrixBx::of(matrix), &batch.sequence_start, &lead, shadow);
-                    x_word_finder_fused_sent(
-                        mode, batch, params, options, subject, table, kept, table_sent, x,
+                    by_word_size!(
+                        options.word_size,
+                        W => x_word_finder_fused_sent::<_, _, W>(
+                            mode, batch, params, options, subject, table, kept, table_sent, x,
+                        )
                     )
                 }
                 .unwrap();
@@ -1567,7 +1579,10 @@ mod tests {
     // scans the tables the search builds (`Lookup::x_new_for` with `x_narrow_cutoff`: for 2 and 4
     // the lookup table, of 16-bit hits where the fused loop takes it, and for 6 and 7 the
     // compressed table), with BLOSUM62 and another matrix, two-hit and one-hit, to the reference's
-    // hits and diagonal table.
+    // hits and diagonal table. Item SC9b-1: the word sizes 2 to 4 of a two-hit search also take the
+    // sentinel walks (`query_fits` takes them, `XSent` with the instance of the word size, chosen
+    // by the loops once per subject), without and with the shadow's comparison, to the same hits
+    // and table.
     #[test]
     fn every_word_size_s_seed_stage_gives_the_reference_hits() {
         fn seed_stage<S: BxScoring>(
@@ -1581,6 +1596,14 @@ mod tests {
             let length = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
             let mut reference = Diagonals::new(length, options.window_size).unwrap();
             let mut scanned = Diagonals::new(length, options.window_size).unwrap();
+            // The sentinel walks (`query_fits`: word size 2 to 4, a two-hit window), each on its
+            // own table.
+            let with_sent = (2..=4).contains(&options.word_size) && options.window_size > 0;
+            let mut sent_tables = [
+                Diagonals::new(length, options.window_size).unwrap(),
+                Diagonals::new(length, options.window_size).unwrap(),
+            ];
+            let mut sent_runs = 0;
             let mut hits = 0;
             for subject in subjects {
                 let expected = word_finder_bx_of(
@@ -1610,8 +1633,32 @@ mod tests {
                     scanned.offset == reference.offset && scanned.entries == reference.entries,
                     "{run}"
                 );
+                if with_sent {
+                    let lead: Vec<u8> = std::iter::once(0).chain(subject.iter().copied()).collect();
+                    for (d, shadow) in sent_tables.iter_mut().zip([false, true]) {
+                        let sent = XSent::for_test(scoring, &batch.sequence_start, &lead, shadow);
+                        let got = crate::algorithm::blastx::seed::x_seed_scan::x_word_finder_scan(
+                            scoring,
+                            batch,
+                            params,
+                            options,
+                            subject,
+                            lookup,
+                            d,
+                            Some(sent),
+                        )
+                        .unwrap();
+                        assert_eq!(got, expected, "{run} sent shadow={shadow}");
+                        assert!(
+                            d.offset == reference.offset && d.entries == reference.entries,
+                            "{run} sent shadow={shadow}"
+                        );
+                        sent_runs += 1;
+                    }
+                }
                 hits += actual.len();
             }
+            assert_eq!(sent_runs > 0, with_sent, "{run}");
             hits
         }
         let (query, subjects, mean) = other_matrix_inputs();

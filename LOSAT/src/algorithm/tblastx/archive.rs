@@ -39,7 +39,6 @@ use super::TblastxArgs;
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
-use crate::blastinput::value_parsers::SegSpec;
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
@@ -89,19 +88,7 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     // `MaskAtHash` is recorded with the value given (the class always sets it: false when absent).
     inputs.soft_masking = args.soft_masking;
     inputs.window_size = args.window_size;
-    inputs.seg = args.seg_spec().ok().map(|spec| match spec {
-        SegSpec::No => Filter::No,
-        SegSpec::Yes => Filter::Yes,
-        SegSpec::WindowLocutHicut {
-            window,
-            locut,
-            hicut,
-        } => Filter::Seg {
-            window,
-            locut,
-            hicut,
-        },
-    });
+    inputs.seg = args.seg_spec().ok().map(Filter::from);
     inputs.culling_limit = args.culling_limit;
     inputs.query_gencode = i32::from(args.query_gencode);
     inputs.db_gencode = i32::from(args.db_gencode);

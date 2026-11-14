@@ -1298,18 +1298,53 @@ impl<'a> HeaderReader<'a> {
             Ok(oids) => oids,
             Err(error) => return failed(error),
         };
+        // LOSAT's own search of the keys in another letter case (version 5, a name or a `pir` or
+        // `prf` id): where it fails, NCBI's exact lookup may still succeed, so the holders are
+        // unknown (review 1 of line DBID pircase, L1).
+        let variants = match lookup.case_variant_oids(id) {
+            Ok(oids) => oids,
+            Err(error) => {
+                return (
+                    Some(FoundInstead::CaseUnknown(
+                        error.ncbi_message().unwrap_or_else(|| error.to_string()),
+                    )),
+                    None,
+                    None,
+                )
+            }
+        };
         let mut keys = Vec::new();
         crate::report::db_subject::scope_keys(subject, &mut keys);
+        // A sequence found under a key in another letter case holds such an id where it holds one
+        // of the Seq-align id's own handle: the key of a name is the same in every alternative and
+        // release, which the handles keep apart (`gb||locusy` and `emb||LOCUSY`, `sp||NAMEY` and
+        // `tr||namey`: review 1 of line DBID pircase, H1).
+        let handle = (!variants.is_empty())
+            .then(|| {
+                crate::seqid::mask_handle::mask_handle_key(id)
+                    .ok()
+                    .flatten()
+            })
+            .flatten();
         // The first was compared above. Besides a sequence given instead, any other holder
         // (also a copy of the subject's record) is one the scope can read for it.
         let mut also_held = None;
-        for other in oids
+        for (other, variant) in oids
             .iter()
             .chain(&folded)
-            .filter(|&&oid| oid != own && Some(oid) != first)
-            .map(|&oid| self.db.ordinal_of(oid))
+            .map(|oid| (oid, false))
+            .chain(variants.iter().map(|oid| (oid, true)))
+            .filter(|&(&oid, _)| oid != own && Some(oid) != first)
+            .map(|(&oid, variant)| (self.db.ordinal_of(oid), variant))
         {
-            if !self.holds_key(other, &keys, crate::seqid::defline_set::scope_keys) {
+            let held = if variant {
+                handle
+                    .as_deref()
+                    .is_some_and(|handle| self.holds_handle(other, handle))
+            } else {
+                self.holds_key(other, &keys, crate::seqid::defline_set::scope_keys)
+            };
+            if !held {
                 continue;
             }
             if given.is_some() {
@@ -1421,6 +1456,21 @@ impl<'a> HeaderReader<'a> {
                     && self.copy_of(subject, ordinal, other) == RecordCopy::Differs
             })
             .map(WeakMatch::Held))
+    }
+
+    /// Whether a Seq-id of the sequence `ordinal` is one `CSeq_id_Handle` with the key `handle`
+    /// (`seqid::mask_handle::mask_handle_key`).
+    fn holds_handle(&self, ordinal: u32, handle: &[u8]) -> bool {
+        let Ok(crate::seqdb::SequenceHeader::Parsed(set)) = self.db.read_header(ordinal) else {
+            return false;
+        };
+        set.deflines
+            .iter()
+            .flat_map(|defline| &defline.ids)
+            .any(|id| {
+                crate::seqid::mask_handle::mask_handle_key(id)
+                    .is_ok_and(|key| key.as_deref() == Some(handle))
+            })
     }
 
     /// Whether a Seq-id of the sequence `ordinal` has one of the keys `keys` that `key_of` gives
@@ -4441,7 +4491,10 @@ pub(crate) fn scope_bioseq(
         }
         None
         | Some(
-            FoundInstead::AlsoHeld(_) | FoundInstead::OtherTaxids(_) | FoundInstead::CopyApart(..),
+            FoundInstead::AlsoHeld(_)
+            | FoundInstead::CaseUnknown(_)
+            | FoundInstead::OtherTaxids(_)
+            | FoundInstead::CopyApart(..),
         ) => Ok(ScopeBioseq {
             blob: Some(ordinal),
             bioseq: subject.bioseq_holds_alignment_id(),

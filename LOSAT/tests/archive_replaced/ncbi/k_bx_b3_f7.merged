@@ -1,0 +1,35 @@
+Error: (803.7) [blastx] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 21
+q1 oneé
+Error: (803.7) [blastx] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 21
+q1 oneé
+# BLASTX 2.17.0+
+# Query: q1 oneé
+# Database: User specified sequence set (Input: in/s_p.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q1	s1	100.000	60	0	0	1	180	1	60	3.29e-46	127
+FASTA-Reader: Ignoring invalid residues at position(s): On line 4: 31
+# BLASTX 2.17.0+
+# Query: q2 two
+# Database: User specified sequence set (Input: in/s_p.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+q2	s1	96.078	51	2	0	27	179	10	60	7.22e-38	106
+q2	s1	100.000	10	0	0	1	30	1	10	2.62e-05	24.3
+FASTA-Reader: Ignoring invalid residues at position(s): On line 6: 31
+Error: (803.7) [blastx] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 21
+q3 thrée
+Error: (803.7) [blastx] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 21
+q3 thrée
+# BLASTX 2.17.0+
+# Query: q3 thrée
+# Database: User specified sequence set (Input: in/s_p.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+q3	s1	96.078	51	2	0	27	179	10	60	7.22e-38	106
+q3	s1	100.000	10	0	0	1	30	1	10	2.62e-05	24.3
+# BLAST processed 3 queries

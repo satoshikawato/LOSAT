@@ -7,7 +7,7 @@
 //! `tests/archive_replaced/cases.tsv` gives NCBI BLAST+ 2.17.0's output file, standard output,
 //! standard error, strategy file and log file, frozen in `tests/archive_replaced/ncbi/<name>.*`
 //! (probe of line RG, item K4b, 2026-11-14, the local official release; an absent file is
-//! empty), exit status 0. NCBI is not run here. The titles (`é`, DEL, 0xFF), a `-parse_deflines`
+//! empty), and its exit status (`<name>.rc`, 0 when absent). NCBI is not run here. The titles (`é`, DEL, 0xFF), a `-parse_deflines`
 //! local id with DEL, the `-db` name `in/dé/ndb` and the `-window_masker_db` paths `in/wé/...`
 //! and `in/w\x01/...` come from `in/` and from the database and counts files that the test puts
 //! under those names in a directory of its own (the repository holds no such names; the
@@ -23,7 +23,12 @@
 //! binary; XML; three query batches; a `-parse_deflines` id in the Seq-aligns): for them the
 //! table gives NCBI's merged stream (`<name>.merged`, NCBI run with `2>&1`) and standard error
 //! (`<name>.err`, a run of its own), and the test compares both runs of LOSAT (the merged stream
-//! holds the standard output; RG K4m, 2026-11-14).
+//! holds the standard output; RG K4m, 2026-11-14). The rows `o_bp_*`, `o_bx_*`, `o_tbn_*` and
+//! `o_tbx_*` do the same for the archives of blastp, blastx, tblastn and tblastx, and the rows
+//! `k_*` for the search strategy's posts, which NCBI writes at each query batch's start after the
+//! batch's reader messages, before its report (DECISIONS K4b-2), with the reports on the standard
+//! output; `k_*_pf` stop the first batch with NCBI's exception after its posts, whose exit
+//! status `<name>.rc` gives (the status is 0 without the file; RG K4b review L7, 2026-11-14).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -174,7 +179,12 @@ fn run_once(binary: &Path, case: &Case, dir: &Path, one: Option<fs::File>) -> St
             || text.starts_with("BLAST")
             || matches!(
                 text.as_ref(),
-                "ARCHIVE_FORMAT" | "BATCH_SIZE" | "DIAG_POST_LEVEL"
+                "ARCHIVE_FORMAT"
+                    | "BATCH_SIZE"
+                    | "DIAG_POST_LEVEL"
+                    | "PRE_FETCH_SEQS_LIMIT"
+                    | "CHUNK_SIZE"
+                    | "OVERLAP_CHUNK_SIZE"
             )
         {
             command.env_remove(&name);
@@ -214,6 +224,7 @@ fn expected(case: &Case) -> Streams {
     let merged = fixtures()
         .join("ncbi")
         .join(format!("{}.merged", case.name));
+    let status = String::from_utf8(read("rc")).unwrap();
     Streams {
         out: read("out"),
         strat: read("strat"),
@@ -221,7 +232,10 @@ fn expected(case: &Case) -> Streams {
         stdout: read("stdout"),
         stderr: read("err"),
         merged: fs::read(merged).ok(),
-        status: 0,
+        status: match status.trim() {
+            "" => 0,
+            text => text.parse().unwrap(),
+        },
     }
 }
 

@@ -60,3 +60,28 @@ o_xml	blastn	ARCHIVE_FORMAT=xml	-query	in/n_plain.fa	-subject	in/s_mx.fa	-outfmt
 o_batch_txt	blastn	BATCH_SIZE=160	-query	in/n_m3.fa	-subject	in/s_m8.fa	-outfmt	11
 o_rep_txt	blastn	-	-query	in/n_plain.fa	-subject	in/s_rep.fa	-outfmt	11	-parse_deflines
 o_rep_bin	blastn	ARCHIVE_FORMAT=bin	-query	in/n_plain.fa	-subject	in/s_rep.fa	-outfmt	11	-parse_deflines
+# o_bp_*, o_bx_*, o_tbn_*, o_tbx_*: the same for the archives of blastp, blastx, tblastn and tblastx (the subjects' titles in the request: in/s_pm24.fa, in/s_pmx.fa; o_bp_batch_txt: three query batches; RG K4b review L7, agent6 2026-11-14).
+o_bp_txt	blastp	-	-query	in/p_plain.fa	-subject	in/s_pm24.fa	-outfmt	11
+o_bp_bin	blastp	ARCHIVE_FORMAT=bin	-query	in/p_plain.fa	-subject	in/s_pm24.fa	-outfmt	11
+o_bp_batch_txt	blastp	BATCH_SIZE=1	-query	in/k_pb3.fa	-subject	in/s_p.fa	-outfmt	11
+o_bx_txt	blastx	-	-query	in/n_plain.fa	-subject	in/s_pm24.fa	-outfmt	11
+o_bx_xml	blastx	ARCHIVE_FORMAT=xml	-query	in/n_plain.fa	-subject	in/s_pmx.fa	-outfmt	11	-parse_deflines
+o_tbn_txt	tblastn	-	-query	in/p_plain.fa	-subject	in/s_m24.fa	-outfmt	11
+o_tbn_bin	tblastn	ARCHIVE_FORMAT=bin	-query	in/p_plain.fa	-subject	in/s_mlong.fa	-outfmt	11
+o_tbx_txt	tblastx	-	-query	in/n_plain.fa	-subject	in/s_m24.fa	-outfmt	11
+o_tbx_xml	tblastx	ARCHIVE_FORMAT=xml	-query	in/n_plain.fa	-subject	in/s_mx.fa	-outfmt	11	-parse_deflines
+# k_*: the search strategy's posts at each batch's start (DECISIONS K4b-2), with the reports on the standard output (in/k_*.fa: K4b probe 2's queries, `é` in the titles of q1 and q3, a reader warning in q2 and q3); NCBI's merged stream in ncbi/<name>.merged, its standard error and strategy file of a run of its own. k_*_pf: PRE_FETCH_SEQS_LIMIT=abc stops the first batch after its reader messages and posts with NCBI's exception (exit status in ncbi/<name>.rc).
+k_bn_b3_f7	blastn	BATCH_SIZE=100	-query	in/k_nb3.fa	-subject	in/s_n.fa	-outfmt	7	-export_search_strategy	{ss}
+k_bp_b3_f7	blastp	BATCH_SIZE=1	-query	in/k_pb3.fa	-subject	in/s_p.fa	-outfmt	7	-export_search_strategy	{ss}
+k_bp_b3_f0	blastp	BATCH_SIZE=1	-query	in/k_pb3.fa	-subject	in/s_p.fa	-outfmt	0	-export_search_strategy	{ss}
+k_bp_b3_f11	blastp	BATCH_SIZE=1	-query	in/k_pb3.fa	-subject	in/s_p.fa	-outfmt	11	-export_search_strategy	{ss}
+k_bx_b3_f7	blastx	BATCH_SIZE=1	-query	in/k_nb3.fa	-subject	in/s_p.fa	-outfmt	7	-export_search_strategy	{ss}
+k_tbn_b3_f7	tblastn	BATCH_SIZE=1	-query	in/k_pb3.fa	-subject	in/s_n.fa	-outfmt	7	-export_search_strategy	{ss}
+k_tbx_b3_f7	tblastx	BATCH_SIZE=1	-query	in/k_nb3.fa	-subject	in/s_n.fa	-outfmt	7	-export_search_strategy	{ss}
+k_bp_allx_f6	blastp	BATCH_SIZE=1	-query	in/k_pallx.fa	-subject	in/s_p.fa	-outfmt	6	-export_search_strategy	{ss}
+k_tbn_allx_f6	tblastn	BATCH_SIZE=1	-query	in/k_pallx.fa	-subject	in/s_n.fa	-outfmt	6	-export_search_strategy	{ss}
+k_bn_pf_f7	blastn	BATCH_SIZE=100;PRE_FETCH_SEQS_LIMIT=abc	-query	in/k_nb3.fa	-subject	in/s_n.fa	-outfmt	7	-export_search_strategy	{ss}
+k_bp_pf_f7	blastp	BATCH_SIZE=1;PRE_FETCH_SEQS_LIMIT=abc	-query	in/k_pb3.fa	-subject	in/s_p.fa	-outfmt	7	-export_search_strategy	{ss}
+k_bx_pf_f7	blastx	BATCH_SIZE=1;PRE_FETCH_SEQS_LIMIT=abc	-query	in/k_nb3.fa	-subject	in/s_p.fa	-outfmt	7	-export_search_strategy	{ss}
+k_tbn_pf_f7	tblastn	BATCH_SIZE=1;PRE_FETCH_SEQS_LIMIT=abc	-query	in/k_pb3.fa	-subject	in/s_n.fa	-outfmt	7	-export_search_strategy	{ss}
+k_tbx_pf_f7	tblastx	BATCH_SIZE=1;PRE_FETCH_SEQS_LIMIT=abc	-query	in/k_nb3.fa	-subject	in/s_n.fa	-outfmt	7	-export_search_strategy	{ss}

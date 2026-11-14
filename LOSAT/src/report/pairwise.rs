@@ -324,7 +324,8 @@ impl From<Hit> for PairwiseHit {
 /// ```
 #[derive(Debug, Clone)]
 pub struct BlastpPairwiseQuery {
-    pub query_name: String,
+    /// BLASTX's `Query=` text (the others read their queries' title bytes by query index).
+    pub query_name: Vec<u8>,
     pub query_length: usize,
     pub ungapped_karlin: KarlinParams,
     pub effective_search_space: i64,
@@ -1614,13 +1615,15 @@ fn ncbi_k_bits_for(ctoolkit_compatible: bool) -> &'static str {
     }
 }
 
+/// BLASTX's description table: `subject_labels` holds each subject's line (`database_description_label`
+/// of a database sequence or a `-subject` record).
 #[allow(clippy::too_many_arguments)]
 fn write_subject_summary_table_with_sum_n<W: Write>(
     writer: &mut W,
     subject_order: &[u32],
     last_row_counted: bool,
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
-    subject_ids: &[Arc<str>],
+    subject_labels: &[Arc<[u8]>],
     show_sum_n: bool,
     columns: Option<SortColumns>,
     read: super::query_warnings::SubjectReadHook<'_, W>,
@@ -1633,20 +1636,10 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
         show_sum_n,
         columns,
         |s_idx| {
-            let subject_id = subject_ids
+            subject_labels
                 .get(s_idx as usize)
-                .map(|id| id.as_ref())
-                .unwrap_or("unknown");
-            let mut label = subject_id.as_bytes().to_vec();
-            let title = subject_hits
-                .get(&s_idx)
-                .and_then(|hits| hits.first())
-                .and_then(|hit| hit.subject_title.as_deref());
-            if let Some(title) = title {
-                label.push(b' ');
-                label.extend_from_slice(title.as_bytes());
-            }
-            label
+                .map_or(&b"unknown"[..], |label| label)
+                .to_vec()
         },
         read,
     )
@@ -6507,7 +6500,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
     queries: &[BlastpPairwiseQuery],
     query_validity: &[bool],
     skipped: &[bool],
-    subject_ids: &[Arc<str>],
+    subject_labels: &[Arc<[u8]>],
     report: &BlastpPairwiseReport,
     options: &BlastxPairwiseOptions,
     database: Option<(
@@ -6517,6 +6510,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
         &[super::defline::SourceTaxname],
     )>,
     records_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    record_titles: &[&[u8]],
     mut probe: Option<&mut FormatProbe<'_>>,
     first_hsp: HspIndex,
 ) -> io::Result<()> {
@@ -6549,7 +6543,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
         // ```
         writeln!(writer)?;
         writeln!(writer)?;
-        write_blastp_query_header(&mut writer, query.query_name.as_bytes(), query.query_length)?;
+        write_blastp_query_header(&mut writer, &query.query_name, query.query_length)?;
         let query_hits = &by_query[qidx];
         if query_hits.is_empty() {
             write_no_hits_found(&mut writer)?;
@@ -6596,7 +6590,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
                 descriptions,
                 order.len() <= options.num_descriptions,
                 grouped,
-                subject_ids,
+                subject_labels,
                 !options.gapped && options.sum_stats,
                 config.sort_columns(query.query_length),
                 &mut |s_idx, writer: &mut io::BufWriter<&mut W>| match reads.as_mut() {
@@ -6645,14 +6639,32 @@ pub fn write_blastx_pairwise_report<W: Write>(
                         true,
                         first.subject_length,
                     )?,
+                    // A `-subject` record's heading: the title that `GenerateDefline` makes (flags
+                    // 0), as the other programs' (`write_record_alignments`); NCBI's line in place
+                    // of each alignment where it throws.
+                    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273
+                    // ```c++
+                    // 	alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
+                    // ```
                     None => {
-                        write_subject_header(
-                            &mut writer,
-                            subject_ids[*oid as usize].as_bytes(),
-                            first.subject_title.as_deref().map(str::as_bytes),
-                            first.subject_length,
-                        )?;
-                        None
+                        let title = record_titles
+                            .get(*oid as usize)
+                            .copied()
+                            .unwrap_or_default();
+                        match super::defline::generate_defline(title, true, false) {
+                            Ok(heading) => {
+                                write_subject_header(
+                                    &mut writer,
+                                    &heading.text,
+                                    None,
+                                    first.subject_length,
+                                )?;
+                                None
+                            }
+                            Err(super::defline::UnknownEncoding) => {
+                                Some(format!("Subject_{}", u64::from(*oid) + 1).into_bytes())
+                            }
+                        }
                     }
                 };
                 if let Some(probe) = probe.as_deref_mut() {
@@ -7622,7 +7634,7 @@ mod tblastx_tests {
         }
         let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
             [(0, vec![&first, &best, &tie])].into_iter().collect();
-        let ids = [Arc::<str>::from("YOL075C")];
+        let ids = [Arc::<[u8]>::from(&b"YOL075C pep YOL075C"[..])];
         for (show_sum_n, end) in [(false, ""), (true, "  2")] {
             let mut out = Vec::new();
             write_subject_summary_table_with_sum_n(
@@ -7819,7 +7831,7 @@ mod tblastx_tests {
             ..KarlinParams::default()
         };
         let query = |length: usize| BlastpPairwiseQuery {
-            query_name: String::new(),
+            query_name: Vec::new(),
             query_length: length,
             ungapped_karlin: karlin,
             effective_search_space: 1_000_000,

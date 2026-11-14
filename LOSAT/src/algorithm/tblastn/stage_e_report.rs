@@ -328,7 +328,7 @@ pub(super) fn render(
     };
     let subject_ids = if outputs.formats.iter().any(shows_ids) {
         match shown {
-            ShownSubjects::Fasta { .. } => tabular_subject_ids(hitlists, subject_records)?,
+            ShownSubjects::Fasta { .. } => tabular_subject_ids(subject_records),
             ShownSubjects::Database { reported, oids, .. } => reported.tabular_subject_ids(
                 *oids,
                 outputs.formats.iter().any(|format| {
@@ -343,6 +343,37 @@ pub(super) fn render(
     } else {
         Vec::new()
     };
+    // The rows of subjects whose lookup fails (an empty id) where NCBI has no result
+    // (`report::tabular::check_failed_lookups`), before any format is written.
+    if subject_ids.iter().any(|id| id.is_empty()) {
+        for format in outputs.formats.iter().filter(|format| shows_ids(format)) {
+            let spec = super::tabular::tabular_spec(format.outfmt);
+            crate::report::tabular::check_failed_lookups(
+                spec.as_ref(),
+                matches!(shown, ShownSubjects::Database { .. }),
+                hitlists.iter().map(|hitlist| {
+                    hitlist
+                        .lists()
+                        .iter()
+                        .filter(|list| !list.hsps.hsps.is_empty())
+                        .map(|list| list.oid as usize)
+                }),
+                |s_idx| subject_ids.get(s_idx).is_some_and(|id| id.is_empty()),
+                |s_idx| match shown {
+                    ShownSubjects::Database { reported, oids, .. } => {
+                        crate::report::tabular::failed_database_title(
+                            oids.oid(reported.ordinals[s_idx]),
+                        )
+                    }
+                    ShownSubjects::Fasta { .. } => crate::report::tabular::failed_record_title(
+                        s_idx,
+                        subject_records[s_idx].shown_id(),
+                    ),
+                },
+                "TBLASTN",
+            )?;
+        }
+    }
     // NCBI c++/src/algo/blast/format/blast_format.cpp:1411:
     // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
     // The alignments are rendered once from the final result, for outfmt 0 and for
@@ -858,7 +889,9 @@ pub(super) fn record_coordinates(
 
 /// The subject ID of the tabular formats of every subject, by subject index
 /// (`report::defline::tabular_subject_id`: the title's first word, or the local ID, and
-/// for `lcl|Subject_...` the first word of `GenerateDefline`), as BLASTN's and TBLASTX's.
+/// for `lcl|Subject_...` the first word of `GenerateDefline`), as BLASTN's and TBLASTX's; empty
+/// where `GenerateDefline` throws, whose rows NCBI writes with its catch's values
+/// (`report::tabular::SubjectLookup::Failed`) or stops at (`check_failed_lookups`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
 /// ```c++
@@ -871,37 +904,15 @@ pub(super) fn record_coordinates(
 ///             bioseqs_found = false;
 ///         }
 /// ```
-/// A subject with a row whose `GenerateDefline` throws (a `Subject_` first word and a title
-/// in no encoding that `CUtf8::GuessEncoding` recognises) makes NCBI 2.17.0 write part of the
-/// row and stop with a `CCoreException` that names its build's source files (exit 255;
-/// `AUTHORITY.md` §J-6, §K-1, RP-20). No result can be defined for it, so LOSAT rejects such
-/// a subject explicitly before it writes any format; a subject without rows is never
-/// named.
-fn tabular_subject_ids(
-    hitlists: &[KappaResultHitList],
-    subjects: &[FastaRecord],
-) -> Result<Vec<Arc<[u8]>>> {
-    let ids: Vec<Option<Arc<[u8]>>> = subjects
+fn tabular_subject_ids(subjects: &[FastaRecord]) -> Vec<Arc<[u8]>> {
+    subjects
         .iter()
-        .map(|subject| subject.subject_tabular_id(false).ok().map(Arc::from))
-        .collect();
-    for list in hitlists.iter().flat_map(KappaResultHitList::lists) {
-        if list.hsps.hsps.is_empty() {
-            continue;
-        }
-        let s_idx = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
-        if ids.get(s_idx).is_some_and(Option::is_none) {
-            bail!(
-                "subject record {} ({}) has a title whose first word starts with 'Subject_' and whose non-UTF-8 bytes are in no encoding that NCBI BLAST+ recognises; NCBI BLAST+ writes part of a tabular row for such a subject and stops with an exception that names its build's source files (exit 255), which is not supported by LOSAT's TBLASTN",
-                s_idx + 1,
-                String::from_utf8_lossy(subjects[s_idx].shown_id())
-            );
-        }
-    }
-    Ok(ids
-        .into_iter()
-        .map(|id| id.unwrap_or_else(|| Arc::from(&b""[..])))
-        .collect())
+        .map(|subject| {
+            subject
+                .subject_tabular_id(false)
+                .map_or_else(|_| Arc::from(&b""[..]), Arc::from)
+        })
+        .collect()
 }
 
 // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105: the nucleotide coordinates of a
@@ -1285,7 +1296,7 @@ fn write_pairwise(
             valid: true,
             batch_skipped: false,
             // TBLASTN's report reads the query's title bytes by query index (`query_titles`).
-            query_name: String::new(),
+            query_name: Vec::new(),
             // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:742-744
             // ```c++
             //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){

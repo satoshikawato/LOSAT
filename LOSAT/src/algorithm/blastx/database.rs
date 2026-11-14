@@ -608,7 +608,7 @@ impl ReportedSubjects {
             let db_oid = database.db.oid(ordinal);
             reported.records.push(FastaRecord {
                 internal_id: db_oid.fasta_id(),
-                title: String::from_utf8_lossy(&title).into_owned(),
+                title: title.to_vec(),
                 sequence: encoded
                     .iter()
                     .map(|&residue| NCBISTDAA_TO_AMINOACID[usize::from(residue)])
@@ -1037,7 +1037,7 @@ impl ReportedSubjects {
 
     /// The description-table labels by rank: the title as NCBI's defline generator makes it
     /// for the description table (as BLASTP's, BLASTN's and TBLASTN's `-db` reports).
-    pub(crate) fn descriptions(&self) -> Vec<Arc<str>> {
+    pub(crate) fn descriptions(&self) -> Vec<Arc<[u8]>> {
         self.titles
             .iter()
             .enumerate()
@@ -1048,7 +1048,7 @@ impl ReportedSubjects {
                     self.parsed_subject(rank),
                     true,
                 );
-                Arc::from(String::from_utf8_lossy(&label).as_ref())
+                Arc::from(label)
             })
             .collect()
     }
@@ -1105,7 +1105,7 @@ mod tests {
             .collect();
         let record = FastaRecord {
             internal_id: "gnl|BL_ORD_ID|0".into(),
-            title: String::new(),
+            title: Vec::new(),
             sequence: bytes
                 .iter()
                 .map(|&residue| NCBISTDAA_TO_AMINOACID[usize::from(residue)])
@@ -1143,7 +1143,7 @@ mod tests {
         use super::super::results::{Hsp, HspList};
         let query = FastaRecord {
             internal_id: "Query_1".into(),
-            title: String::new(),
+            title: Vec::new(),
             sequence: b"ACGTACGTACGTACGTACGTACGTACGTAC".to_vec(),
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),

@@ -894,7 +894,7 @@ mod tests {
     fn ncbi_batch_crossing_record_is_retained() {
         let record = |n| FastaRecord {
             internal_id: String::new(),
-            title: String::new(),
+            title: Vec::new(),
             sequence: vec![b'A'; n],
             lowercase_masks: vec![],
             warnings: vec![],
@@ -920,7 +920,7 @@ mod tests {
     fn the_batch_size_is_the_limit_of_a_batch() {
         let record = |n| FastaRecord {
             internal_id: String::new(),
-            title: String::new(),
+            title: Vec::new(),
             sequence: vec![b'A'; n],
             lowercase_masks: vec![],
             warnings: vec![],

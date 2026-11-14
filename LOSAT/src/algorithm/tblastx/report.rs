@@ -1623,12 +1623,19 @@ impl TblastxOutputFormat {
     /// formatter finds by a subject's Seq-align id (`report::tabular::reads_subject`: the default
     /// fields do).
     pub(crate) fn tabular_reads_subject(self) -> bool {
-        let spec = match self {
+        self.is_tabular()
+            && crate::report::tabular::reads_subject(
+                self.tabular_spec(),
+                crate::blastinput::app::Program::Tblastx,
+            )
+    }
+
+    /// The field list of the custom tabular report (`CustomTabular`).
+    pub(crate) fn tabular_spec(self) -> Option<&'static crate::report::tabular::TabularSpec> {
+        match self {
             Self::CustomTabular(spec) => Some(spec),
             _ => None,
-        };
-        self.is_tabular()
-            && crate::report::tabular::reads_subject(spec, crate::blastinput::app::Program::Tblastx)
+        }
     }
 
     /// Whether the format writes the displayed identity counts of the rows

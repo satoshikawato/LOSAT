@@ -287,6 +287,7 @@ fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
         nucleotide: !protein,
         qcovs: -1,
         qcovus: -1,
+        lookup: crate::report::tabular::SubjectLookup::Found,
     };
     let hsp = TabularHsp {
         q_start: 1,
@@ -311,7 +312,13 @@ fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
         program_version: "BLASTP 2.17.0+",
         matrix: None,
     }
-    .row(&mut out, &TabularQuery::local(b"q", 1), &shown, &hsp);
+    .row(
+        &mut out,
+        &mut crate::report::tabular::TabularRows::default(),
+        &TabularQuery::local(b"q", 1),
+        &shown,
+        &hsp,
+    );
     let row = text(out.strip_suffix(b"\n").expect("one row"));
     Some(row.split('\t').map(str::to_string).collect())
 }

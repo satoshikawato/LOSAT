@@ -42,14 +42,14 @@ use anyhow::Result;
 use super::args::ResolvedOptions;
 use super::input::FastaRecord;
 use super::report::{
-    alignment, has_seqalign, local_id, query_endpoints, query_warning, subject_label,
+    alignment, has_seqalign, local_id, query_endpoints, query_warning, subject_tabular_id,
     tabular_io_error, ShownSubjects, TabularFlushError,
 };
 use super::runtime::BatchResults;
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, TabularField,
-    TabularHsp, TabularKind, TabularQuery, TabularSpec, TabularSubject, TabularTaxonomy,
-    TabularWriter,
+    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, FailedLookup,
+    SubjectLookup, TabularField, TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec,
+    TabularSubject, TabularTaxonomy, TabularWriter,
 };
 
 /// outfmt 7's `# BLASTX 2.17.0+` line.
@@ -200,7 +200,7 @@ const COUNTS_FIELDS: [TabularField; 16] = [
 
 /// The values of one subject that its rows show (`TabularSubject` without the coverages).
 struct SubjectValues<'a> {
-    id: &'a [u8],
+    id: std::borrow::Cow<'a, [u8]>,
     accession: &'a [u8],
     accession_version: &'a [u8],
     gi: i64,
@@ -208,6 +208,23 @@ struct SubjectValues<'a> {
     titles: Option<Vec<&'a [u8]>>,
     length: usize,
     taxonomy: &'a TabularTaxonomy,
+    /// The Seq-align id (`FailedLookup::full`, `accession`) of a subject whose lookup fails, and
+    /// whether `x_SetSubjectIds` fails too (a database sequence).
+    failed: Option<([std::borrow::Cow<'a, [u8]>; 2], bool)>,
+}
+
+impl SubjectValues<'_> {
+    /// The lookup of the subject's ids (`report::tabular::SubjectLookup`).
+    fn lookup(&self) -> SubjectLookup<'_> {
+        match &self.failed {
+            Some(([full, accession], all_ids)) => SubjectLookup::Failed(FailedLookup {
+                full,
+                accession,
+                all_ids: *all_ids,
+            }),
+            None => SubjectLookup::Found,
+        }
+    }
 }
 
 /// The values of the subject `subject` (rank or index `oid`) of a report of `shown`; `slen` is the
@@ -235,7 +252,7 @@ fn subject_values<'a>(
         {
             let ids = parsed.tabular[oid].as_ref().expect("the guard");
             SubjectValues {
-                id: ids.ids[0].as_bytes(),
+                id: std::borrow::Cow::Borrowed(ids.ids[0].as_bytes()),
                 accession: ids.ids[1].as_bytes(),
                 accession_version: ids.ids[2].as_bytes(),
                 gi: parsed.subjects[oid]
@@ -245,29 +262,29 @@ fn subject_values<'a>(
                 titles: None,
                 length: subject.placement().length,
                 taxonomy: no_taxonomy,
+                failed: None,
             }
         }
-        // A record without a title: its `sseqid` is the first word of its generated title
-        // (`report::subject_label`), its `sall*` its local id (`s_ReplaceLocalId`).
+        // A record without parsed ids: its `sseqid` is the first word of its title, or of the
+        // title that `GenerateDefline` makes of it for a `Subject_` word
+        // (`report::subject_tabular_id`), empty where that throws; its `sall*` the first word of
+        // its title (`s_ReplaceLocalId`, `DeflineIds::of_record`).
         ShownSubjects::Fasta { .. } => {
-            let id = subject_label(subject).0.as_bytes();
+            let tabular = subject_tabular_id(subject);
+            let id = tabular.unwrap_or_default();
             SubjectValues {
-                id,
-                accession: id,
-                accession_version: id,
+                accession: &[],
+                accession_version: &[],
                 gi: 0,
-                all_ids: if subject.title.is_empty() {
-                    std::borrow::Cow::Owned(vec![DeflineIds {
-                        id: subject.internal_id.as_bytes().to_vec(),
-                        gi: 0,
-                        accession: subject.internal_id.as_bytes().to_vec(),
-                    }])
-                } else {
-                    std::borrow::Cow::Borrowed(&[])
-                },
+                all_ids: std::borrow::Cow::Owned(DeflineIds::of_record(local_id(subject))),
                 titles: None,
                 length: subject.placement().length,
                 taxonomy: no_taxonomy,
+                failed: id.is_empty().then(|| {
+                    let local = std::borrow::Cow::Borrowed(subject.internal_id.as_bytes());
+                    ([local.clone(), local], false)
+                }),
+                id,
             }
         }
         // A database sequence: the default report's ids (`ReportedSubjects::tabular_ids`), with
@@ -276,7 +293,7 @@ fn subject_values<'a>(
             let [id, accession, accession_version] = reported.tabular_ids(oid);
             let parsed = reported.parsed_subject(oid);
             SubjectValues {
-                id: id.as_bytes(),
+                id: std::borrow::Cow::Borrowed(id.as_bytes()),
                 accession: accession.as_bytes(),
                 accession_version: accession_version.as_bytes(),
                 gi: parsed.map_or(0, |subject| subject.tabular_gi()),
@@ -294,6 +311,21 @@ fn subject_values<'a>(
                 }),
                 length: subject.placement().length,
                 taxonomy: reported.tabular_taxonomy(oid).unwrap_or(no_taxonomy),
+                // An empty id: `GetSeqIdList` throws for the general id
+                // (`TabularSubjectId::Unknown`), in `SetSubjectId` and `x_SetSubjectIds`.
+                failed: (parsed.is_none() && id.is_empty()).then(|| {
+                    let [full, accession] =
+                        crate::algorithm::common::database::failed_general_lookup(
+                            reported.oid(oid),
+                        );
+                    (
+                        [
+                            std::borrow::Cow::Owned(full),
+                            std::borrow::Cow::Owned(accession),
+                        ],
+                        true,
+                    )
+                }),
             }
         }
     }
@@ -431,7 +463,7 @@ pub(super) fn write_blastx_tabular(
                 let mut buf: Vec<u8> = Vec::new();
                 table.query_header(
                     &mut buf,
-                    query.query_line().as_bytes(),
+                    &query.query_line(),
                     &database,
                     // A merged result has an alignment set (`ResolvedOptions::merged_volumes`).
                     (!batch.search_skipped || options.merged_volumes()).then_some(count),
@@ -460,13 +492,12 @@ pub(super) fn write_blastx_tabular(
                 let query_length = options
                     .query_range
                     .map_or(searched_length, |range| range.length());
-                let tabular_query = TabularQuery::of_ids(
-                    query.believed(),
-                    local_id(query).as_bytes(),
-                    query_length,
-                );
+                let tabular_query =
+                    TabularQuery::of_ids(query.believed(), local_id(query), query_length);
                 // Several volumes: the merged lists cut once per query (`ResolvedOptions::shown_lists`).
                 let listed = &lists[..lists.len().min(options.shown_lists())];
+                // The query's formatter (`TabularRows`).
+                let mut table_rows = TabularRows::default();
                 for list in listed {
                     let shown_hsps = || {
                         list.hsps
@@ -513,9 +544,17 @@ pub(super) fn write_blastx_tabular(
                         -1
                     };
                     let tabular_subject = TabularSubject {
-                        id: values.id,
-                        accession: values.accession,
-                        accession_version: values.accession_version,
+                        id: &values.id,
+                        accession: if values.accession.is_empty() {
+                            &values.id
+                        } else {
+                            values.accession
+                        },
+                        accession_version: if values.accession_version.is_empty() {
+                            &values.id
+                        } else {
+                            values.accession_version
+                        },
                         gi: values.gi,
                         all_ids: &values.all_ids,
                         length: values.length,
@@ -525,6 +564,7 @@ pub(super) fn write_blastx_tabular(
                         nucleotide: false,
                         qcovs,
                         qcovus: -1,
+                        lookup: values.lookup(),
                     };
                     for hsp in shown_hsps() {
                         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
@@ -550,7 +590,7 @@ pub(super) fn write_blastx_tabular(
                         }
                         // The texts of the row's lookups of the taxonomy database
                         // (`x_SetTaxInfoAll`, `x_SetTaxInfo`) follow the rows before it.
-                        if let Some(names) = names {
+                        if let (Some(names), true) = (names, table.sets_subject(&tabular_subject)) {
                             let text = names.row_messages(spec, values.taxonomy);
                             if !text.is_empty() {
                                 writer.write_all(&buf)?;
@@ -609,13 +649,25 @@ pub(super) fn write_blastx_tabular(
                                 buf.clear();
                                 writer.flush()?;
                                 probe.begin(next_hsp);
-                                table.row(&mut buf, &tabular_query, &tabular_subject, &row);
+                                table.row(
+                                    &mut buf,
+                                    &mut table_rows,
+                                    &tabular_query,
+                                    &tabular_subject,
+                                    &row,
+                                );
                                 writer.write_all(&buf)?;
                                 buf.clear();
                                 writer.flush()?;
                                 probe.end(next_hsp);
                             }
-                            None => table.row(&mut buf, &tabular_query, &tabular_subject, &row),
+                            None => table.row(
+                                &mut buf,
+                                &mut table_rows,
+                                &tabular_query,
+                                &tabular_subject,
+                                &row,
+                            ),
                         }
                         next_hsp += 1;
                     }
@@ -663,7 +715,7 @@ fn write_blastx_tax_report(
 ) -> Result<()> {
     use crate::report::tax_report::{report_batch, TaxHsp, TaxPlain, TaxQuery};
     let program = options.program().upper;
-    let titles: Vec<String> = batches
+    let titles: Vec<Vec<u8>> = batches
         .iter()
         .flat_map(|batch| {
             (0..batch.queries.len()).map(|qidx| {
@@ -684,7 +736,7 @@ fn write_blastx_tax_report(
             })
             .zip(&titles)
             .map(|((ordinal, lists, skipped), title)| TaxQuery {
-                title: title.as_bytes(),
+                title,
                 length: queries[ordinal].placement().length,
                 // A query of a batch that NCBI did not search has no Seq-align-set.
                 hsps: (!skipped).then(|| {
@@ -711,7 +763,7 @@ fn write_blastx_tax_report(
     let plain = |s_idx: usize| match shown {
         ShownSubjects::Fasta { .. } => TaxPlain::Record {
             local_id: subjects[s_idx].internal_id.as_bytes(),
-            title: subjects[s_idx].title.as_bytes(),
+            title: &subjects[s_idx].title,
         },
         ShownSubjects::Database { reported, .. } => TaxPlain::Stored {
             oid: reported.oid(s_idx),

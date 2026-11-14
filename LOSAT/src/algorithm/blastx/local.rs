@@ -25,7 +25,7 @@ use crate::blastinput::fasta_reader;
 use crate::blastinput::seq_range::{
     parse_optional_range, record_cut, record_interval, RangeRole, RecordInterval, SequenceRange,
 };
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{bail, ensure, Result};
 use std::io::{self, Write};
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467
@@ -1267,10 +1267,10 @@ fn check_resolutions(
 /// A record of NCBI's reader (`fasta_reader`, the records that LOSAT Web registers) as BLASTX's
 /// reader (`input.rs`) reads the same input: the residues in upper case and, with
 /// `-lcase_masking` (`lowercase`), the lowercase mask's intervals, which `fasta_reader` keeps as
-/// the case of the residues (a `>?` gap inside a masked interval, too); a title that is not UTF-8
-/// is BLASTX's reader's error. The reader's messages stay with the caller's record.
+/// the case of the residues (a `>?` gap inside a masked interval, too), and the title's bytes.
+/// The reader's messages stay with the caller's record.
 fn blastx_record(record: &fasta_reader::FastaRecord, lowercase: bool) -> Result<FastaRecord> {
-    let title = String::from_utf8(record.title.clone()).context("invalid UTF-8 FASTA title")?;
+    let title = record.title.clone();
     if record.sequence.len() > i32::MAX as usize {
         bail!("BLASTX sequence exceeds Int4 length");
     }

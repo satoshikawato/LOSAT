@@ -1773,10 +1773,11 @@ impl ListedTitles<'_> {
 
     /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of every
     /// listed subject, by rank (`shared::tabular_subject_id`); a
-    /// subject without rows gets an empty id. A subject with rows whose id LOSAT cannot write
-    /// as NCBI is an error before any format is written where a tabular report `reads` the
-    /// subject (`report::tabular::reads_subject`), else its ids are empty: a table of fields
-    /// that read nothing of the subject prints none of them.
+    /// subject without rows gets an empty id, and so does one whose lookup fails
+    /// (`TabularSubjectId::Unknown`, `report::tabular::check_failed_lookups`). A subject with rows
+    /// whose id LOSAT cannot write as NCBI is an error before any format is written where a
+    /// tabular report `reads` the subject (`report::tabular::reads_subject`), else its ids are
+    /// empty: a table of fields that read nothing of the subject prints none of them.
     pub(super) fn tabular_subject_ids(
         &self,
         hit_lists: &[Option<BlastpHitList>],
@@ -1911,6 +1912,11 @@ impl ListedTitles<'_> {
     /// The subject of rank `rank` when it has parsed Seq-ids.
     pub(super) fn parsed_subject(&self, rank: usize) -> Option<&ParsedSubject> {
         self.parsed.get(rank).and_then(Option::as_deref)
+    }
+
+    /// The OID of the subject of rank `rank`.
+    pub(super) fn oid(&self, rank: usize) -> crate::seqdb::Oid {
+        self.oids.oid(self.listed.ordinals[rank])
     }
 
     /// The source from which NCBI makes the empty stored title of the subject of rank `rank`
@@ -2162,12 +2168,17 @@ pub(super) fn x_titles_allow_blocks(
                         .is_ok()
                     } else {
                         // A protein's word is `unnamed`, with or without the name of its source.
-                        crate::report::defline::database_subject_id(
-                            &deflines[0].title,
-                            &Default::default(),
-                            true,
+                        // A failed lookup (`SubjectWord::Unknown`) is refused by some field
+                        // lists (`report::tabular::failed_lookup_stop`): not allowed.
+                        matches!(
+                            crate::report::defline::database_subject_id(
+                                &deflines[0].title,
+                                &Default::default(),
+                                true,
+                            ),
+                            Ok(crate::report::defline::SubjectWord::Word(_)
+                                | crate::report::defline::SubjectWord::General)
                         )
-                        .is_ok()
                     }
             }
             Err(_) => false,

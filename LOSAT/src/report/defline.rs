@@ -658,15 +658,16 @@ pub(crate) use punctuation_title;
 /// title `title`: the first word of the title that `GenerateDefline` makes of it
 /// (flags 0), which `GetSeqIdList` puts in the place of the id.
 ///
-/// `None` for a title whose generated first word is empty (a title of spaces; a nucleotide's
-/// empty title whose source has no name): NCBI keeps the general id and writes it in two forms,
-/// `gnl|BL_ORD_ID|n` for `sseqid` and `BL_ORD_ID:n` for `sacc` and `saccver`, n the sequence's
-/// OID (`algorithm::common::database::TabularSubjectId`). Where the taxonomy database names the
-/// taxid of an empty title, NCBI makes the title from the name (`bioseq_title_from_source`,
-/// `ids`), whose first word is the id (`Homo` for taxid 9606).
+/// `SubjectWord::General` for a title whose generated first word is empty (a title of spaces; a
+/// nucleotide's empty title whose source has no name): NCBI keeps the general id and writes it in
+/// two forms, `gnl|BL_ORD_ID|n` for `sseqid` and `BL_ORD_ID:n` for `sacc` and `saccver`, n the
+/// sequence's OID (`algorithm::common::database::TabularSubjectId`). Where the taxonomy database
+/// names the taxid of an empty title, NCBI makes the title from the name
+/// (`bioseq_title_from_source`, `ids`), whose first word is the id (`Homo` for taxid 9606).
+/// `SubjectWord::Unknown` for a title (or name) whose encoding NCBI cannot guess:
+/// `GenerateDefline` throws and `GetSeqIdList` makes no id (`report::tabular::SubjectLookup`).
 ///
-/// `Err` names what LOSAT does not write as NCBI: a title whose encoding NCBI cannot
-/// guess (`GenerateDefline` throws), and a title of punctuation that NCBI's
+/// `Err` names what LOSAT does not write as NCBI: a title of punctuation that NCBI's
 /// `x_CleanAndCompress` reads past the end of (NCBI crashes).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:218-242
@@ -719,14 +720,31 @@ pub fn database_subject_id(
     title: &[u8],
     ids: &BioseqFacts,
     protein: bool,
-) -> Result<Option<Vec<u8>>, &'static str> {
-    let defline = generate_bioseq_defline(title, protein, false, ids)
-        .map_err(|UnknownEncoding| "in no encoding that NCBI BLAST+ recognises")?;
+) -> Result<SubjectWord, &'static str> {
+    let Ok(defline) = generate_bioseq_defline(title, protein, false, ids) else {
+        return Ok(SubjectWord::Unknown);
+    };
     if defline.reads_past_end {
         return Err(punctuation_title!());
     }
     let token = first_word(&defline.text);
-    Ok((!token.is_empty()).then(|| token.to_vec()))
+    Ok(if token.is_empty() {
+        SubjectWord::General
+    } else {
+        SubjectWord::Word(token.to_vec())
+    })
+}
+
+/// What `GetSeqIdList` puts in the place of a database sequence's general id
+/// (`database_subject_id`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SubjectWord {
+    /// The first word of the generated title.
+    Word(Vec<u8>),
+    /// The general id itself: the generated title's first word is empty.
+    General,
+    /// No id: `GenerateDefline` throws (a title in no encoding that NCBI guesses).
+    Unknown,
 }
 
 /// `NStr::Split(text, " ", tokens)[0]`: the bytes before the first space.
@@ -1743,7 +1761,7 @@ mod tests {
         ] {
             assert_eq!(
                 database_subject_id(title.as_bytes(), &BioseqFacts::default(), true),
-                Ok(Some(id.as_bytes().to_vec())),
+                Ok(SubjectWord::Word(id.as_bytes().to_vec())),
                 "{title:?}"
             );
         }
@@ -1772,7 +1790,7 @@ mod tests {
         ] {
             assert_eq!(
                 database_subject_id(title.as_bytes(), &BioseqFacts::default(), protein),
-                Ok(None),
+                Ok(SubjectWord::General),
                 "{title:?}"
             );
         }
@@ -1784,10 +1802,9 @@ mod tests {
                 "{title:?}"
             );
         }
-        assert!(
-            database_subject_id(b"caf\x81", &BioseqFacts::default(), true)
-                .unwrap_err()
-                .contains("in no encoding")
+        assert_eq!(
+            database_subject_id(b"caf\x81", &BioseqFacts::default(), true),
+            Ok(SubjectWord::Unknown)
         );
     }
 

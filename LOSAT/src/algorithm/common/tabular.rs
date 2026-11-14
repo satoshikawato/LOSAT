@@ -80,6 +80,9 @@ pub(crate) enum TabularSubjects<'a> {
         ids: &'a [Arc<[u8]>],
         length: &'a dyn Fn(usize) -> usize,
         parsed: &'a [Option<Arc<ParsedSubject>>],
+        /// The records, by subject index: the Seq-align id (`FastaRecord::local_id`) of one whose
+        /// lookup fails (an empty id in `ids`) and the first word of the title that `sall*` print.
+        records: &'a [FastaRecord],
     },
     /// The reported sequences of a database: their tabular ids (`saccver`,
     /// `common::database::tabular_subject_ids`), ordinal ids, records (with
@@ -109,6 +112,9 @@ pub(crate) struct SubjectValues<'a> {
     titles: Option<Vec<&'a [u8]>>,
     length: usize,
     taxonomy: Cow<'a, TabularTaxonomy>,
+    /// The Seq-align id (`FailedLookup::full`, `accession`) of a subject whose lookup fails, and
+    /// whether `x_SetSubjectIds` fails too.
+    failed: Option<([Cow<'a, [u8]>; 2], bool)>,
 }
 
 impl SubjectValues<'_> {
@@ -134,6 +140,18 @@ impl SubjectValues<'_> {
             nucleotide: true,
             qcovs,
             qcovus,
+            lookup: match &self.failed {
+                Some(([full, accession], all_ids)) => {
+                    crate::report::tabular::SubjectLookup::Failed(
+                        crate::report::tabular::FailedLookup {
+                            full,
+                            accession,
+                            all_ids: *all_ids,
+                        },
+                    )
+                }
+                None => crate::report::tabular::SubjectLookup::Found,
+            },
         }
     }
 }
@@ -199,12 +217,14 @@ impl<'a> TabularSubjects<'a> {
             //         }
             //         m_SubjectIds.push_back(subject_id_list);
             // ```
-            // A FASTA subject has no definition lines: its `sall*` are its own ids, its title
-            // and taxonomy are empty (`N/A`).
+            // A FASTA subject has no definition lines: its `sall*` are its own ids after
+            // `s_ReplaceLocalId` (the title's first word, `FastaRecord::shown_id`, not the word of
+            // `GetSeqIdList`), its title and taxonomy are empty (`N/A`).
             TabularSubjects::Records {
                 ids,
                 length,
                 parsed,
+                records,
             } => {
                 let length = if spec.has(TabularField::SubjectLength) {
                     length(s_idx)
@@ -235,18 +255,35 @@ impl<'a> TabularSubjects<'a> {
                         titles: None,
                         length,
                         taxonomy: Cow::Owned(TabularTaxonomy::default()),
+                        failed: None,
                     });
                 }
                 let id: &[u8] = ids.get(s_idx).map_or(&b"unknown"[..], |id| id.as_ref());
+                let record = records.get(s_idx);
+                let all_ids = match record {
+                    Some(record) if needs.all_deflines => {
+                        crate::report::tabular::DeflineIds::of_record(record.shown_id())
+                    }
+                    _ => Vec::new(),
+                };
+                // An empty id: `GetSeqIdList` throws (`FastaRecord::subject_tabular_id`).
+                let failed = match record {
+                    Some(record) if id.is_empty() => {
+                        let local = Cow::Borrowed(record.local_id.as_bytes());
+                        Some(([local.clone(), local], false))
+                    }
+                    _ => None,
+                };
                 Ok(SubjectValues {
                     id: Cow::Borrowed(id),
                     accession: Cow::Borrowed(id),
                     accession_version: Cow::Borrowed(id),
                     gi: 0,
-                    all_ids: Vec::new(),
+                    all_ids,
                     titles: None,
                     length,
                     taxonomy: Cow::Owned(TabularTaxonomy::default()),
+                    failed,
                 })
             }
             TabularSubjects::Database {
@@ -297,6 +334,7 @@ impl<'a> TabularSubjects<'a> {
                             ),
                             length,
                             taxonomy,
+                            failed: None,
                         })
                     }
                     // A sequence without parsed Seq-ids: the first word of its stored title (an
@@ -310,6 +348,13 @@ impl<'a> TabularSubjects<'a> {
                             .get(s_idx)
                             .map_or(&[][..], |record| record.title.as_slice());
                         let oid = oids.oid(ordinals.get(s_idx).copied().unwrap_or_default());
+                        // An empty id: `GetSeqIdList` throws for the general id
+                        // (`TabularSubjectId::Unknown`), in `SetSubjectId` and `x_SetSubjectIds`.
+                        let failed = accession.is_empty().then(|| {
+                            let [full, accession] =
+                                crate::algorithm::common::database::failed_general_lookup(oid);
+                            ([Cow::Owned(full), Cow::Owned(accession)], true)
+                        });
                         Ok(SubjectValues {
                             id: crate::algorithm::common::database::tabular_seqid(
                                 accession,
@@ -327,6 +372,7 @@ impl<'a> TabularSubjects<'a> {
                             titles: Some(vec![title]),
                             length,
                             taxonomy,
+                            failed,
                         })
                     }
                 }

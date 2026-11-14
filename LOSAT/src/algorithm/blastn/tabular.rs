@@ -52,7 +52,7 @@ use crate::common::GapEditOp;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
     coverage_percent, hsp_coverage, taxdb_warning_line, union_length, TabularHsp, TabularKind,
-    TabularNames, TabularQuery, TabularSpec, TabularWriter,
+    TabularNames, TabularQuery, TabularRows, TabularSpec, TabularWriter,
 };
 
 const PROGRAM: &str = "BLASTN";
@@ -230,6 +230,8 @@ pub(crate) fn write_blastn_tabular(
             writer.write_all(&buf)?;
             continue;
         };
+        // The query's formatter (`TabularRows`).
+        let mut rows = TabularRows::default();
         for hsp_list in &hit_list.hsplist_array {
             let Some(first) = hsp_list.hsps.first() else {
                 continue;
@@ -290,7 +292,11 @@ pub(crate) fn write_blastn_tabular(
             for hsp in &hsp_list.hsps {
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.
-                if let (Some(names), Some(warnings)) = (tab.names, warnings.as_deref_mut()) {
+                if let (Some(names), Some(warnings), true) = (
+                    tab.names,
+                    warnings.as_deref_mut(),
+                    table.sets_subject(&subject),
+                ) {
                     let text = names.row_messages(spec, subject.taxonomy);
                     if !text.is_empty() {
                         writer.write_all(&buf)?;
@@ -321,7 +327,7 @@ pub(crate) fn write_blastn_tabular(
                     // One printed row is one HSP; the probe marks it without changing it.
                     Some(probe) => {
                         buf.clear();
-                        table.row(&mut buf, &query, &subject, &row);
+                        table.row(&mut buf, &mut rows, &query, &subject, &row);
                         writer.flush()?;
                         probe.begin(hsp_index);
                         writer.write_all(&buf)?;
@@ -329,7 +335,7 @@ pub(crate) fn write_blastn_tabular(
                         probe.end(hsp_index);
                         buf.clear();
                     }
-                    None => table.row(&mut buf, &query, &subject, &row),
+                    None => table.row(&mut buf, &mut rows, &query, &subject, &row),
                 }
                 hsp_index += 1;
             }

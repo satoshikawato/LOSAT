@@ -49,9 +49,9 @@ use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, TabularField,
-    TabularHsp, TabularKind, TabularNames, TabularQuery, TabularSpec, TabularSubject,
-    TabularTaxonomy, TabularWriter,
+    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, FailedLookup,
+    SubjectLookup, TabularField, TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows,
+    TabularSpec, TabularSubject, TabularTaxonomy, TabularWriter,
 };
 
 /// What the report needs besides the final hit lists.
@@ -135,6 +135,23 @@ struct SubjectValues<'a> {
     titles: Option<Vec<&'a [u8]>>,
     length: usize,
     taxonomy: Cow<'a, TabularTaxonomy>,
+    /// The Seq-align id (`FailedLookup::full`, `accession`) of a subject whose lookup fails (an
+    /// empty id), and whether `x_SetSubjectIds` fails too (a database sequence).
+    failed: Option<([Cow<'a, [u8]>; 2], bool)>,
+}
+
+impl SubjectValues<'_> {
+    /// The lookup of the subject's ids (`report::tabular::SubjectLookup`).
+    fn lookup(&self) -> SubjectLookup<'_> {
+        match &self.failed {
+            Some(([full, accession], all_ids)) => SubjectLookup::Failed(FailedLookup {
+                full,
+                accession,
+                all_ids: *all_ids,
+            }),
+            None => SubjectLookup::Found,
+        }
+    }
 }
 
 impl<'a> TabularSubjects<'a> {
@@ -157,8 +174,9 @@ impl<'a> TabularSubjects<'a> {
             //         }
             //         m_SubjectIds.push_back(subject_id_list);
             // ```
-            // A FASTA subject has no definition lines: its `sall*` are its own ids, its title
-            // and taxonomy are empty (`N/A`).
+            // A FASTA subject has no definition lines: its `sall*` are its own ids after
+            // `s_ReplaceLocalId` (the title's first word, `FastaRecord::shown_id`, not the word of
+            // `GetSeqIdList`), its title and taxonomy are empty (`N/A`).
             TabularSubjects::Records {
                 records,
                 ids,
@@ -194,20 +212,23 @@ impl<'a> TabularSubjects<'a> {
                         titles: None,
                         length: if shows_length { length(s_idx) } else { 0 },
                         taxonomy: Cow::Owned(TabularTaxonomy::default()),
+                        failed: None,
                     });
                 }
                 // A record without a title: its `sseqid` is the first word of its generated title
-                // (`unnamed`, `report::defline::tabular_subject_id`), its `sall*` its local id
-                // (`s_ReplaceLocalId`).
-                let all_ids = match records.get(s_idx) {
-                    Some(record) if needs.all_deflines && record.title.is_empty() => {
-                        vec![DeflineIds {
-                            id: record.local_id.as_bytes().to_vec(),
-                            gi: 0,
-                            accession: record.local_id.as_bytes().to_vec(),
-                        }]
-                    }
+                // (`unnamed`, `report::defline::tabular_subject_id`), its `sall*` its local id.
+                let record = records.get(s_idx);
+                let all_ids = match record {
+                    Some(record) if needs.all_deflines => DeflineIds::of_record(record.shown_id()),
                     _ => Vec::new(),
+                };
+                // An empty id: `GetSeqIdList` throws (`FastaRecord::subject_tabular_id`).
+                let failed = match record {
+                    Some(record) if id.is_empty() => {
+                        let local = Cow::Borrowed(record.local_id.as_bytes());
+                        Some(([local.clone(), local], false))
+                    }
+                    _ => None,
                 };
                 Ok(SubjectValues {
                     id,
@@ -218,6 +239,7 @@ impl<'a> TabularSubjects<'a> {
                     titles: None,
                     length: if shows_length { length(s_idx) } else { 0 },
                     taxonomy: Cow::Owned(TabularTaxonomy::default()),
+                    failed,
                 })
             }
             TabularSubjects::Database {
@@ -272,9 +294,12 @@ impl<'a> TabularSubjects<'a> {
                             ),
                             length,
                             taxonomy,
+                            failed: None,
                         })
                     }
-                    // A sequence without parsed Seq-ids: its one definition line's title.
+                    // A sequence without parsed Seq-ids: its one definition line's title; an empty
+                    // id, where `GetSeqIdList` throws for the general id
+                    // (`TabularSubjectId::Unknown`), in `SetSubjectId` and `x_SetSubjectIds`.
                     None => Ok(SubjectValues {
                         id,
                         accession,
@@ -284,6 +309,13 @@ impl<'a> TabularSubjects<'a> {
                         titles: Some(vec![titles.get(s_idx).map_or(&[][..], |title| title)]),
                         length,
                         taxonomy,
+                        failed: id.is_empty().then(|| {
+                            let [full, accession] =
+                                crate::algorithm::common::database::failed_general_lookup(
+                                    oids.oid(ordinals.get(s_idx).copied().unwrap_or_default()),
+                                );
+                            ([Cow::Owned(full), Cow::Owned(accession)], true)
+                        }),
                     }),
                 }
             }
@@ -697,6 +729,8 @@ fn write_tabular_rows<const RPS: bool>(
             _ => None,
         };
         let mut row_index = 0usize;
+        // The query's (or round's) formatter (`TabularRows`).
+        let mut table_rows = TabularRows::default();
         for hsp_list in reported(hit_list) {
             let Some(first) = hsp_list.hsps.first() else {
                 continue;
@@ -742,6 +776,7 @@ fn write_tabular_rows<const RPS: bool>(
                 nucleotide: false,
                 qcovs,
                 qcovus: -1,
+                lookup: values.lookup(),
             };
             for hsp in &hsp_list.hsps {
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
@@ -761,7 +796,11 @@ fn write_tabular_rows<const RPS: bool>(
                 }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.
-                if let (Some(names), Some(warnings)) = (tab.names, warnings.as_deref_mut()) {
+                if let (Some(names), Some(warnings), true) = (
+                    tab.names,
+                    warnings.as_deref_mut(),
+                    table.sets_subject(&subject),
+                ) {
                     let text = names.row_messages(spec, &values.taxonomy);
                     if !text.is_empty() {
                         writer.write_all(&buf)?;
@@ -784,7 +823,7 @@ fn write_tabular_rows<const RPS: bool>(
                     // One printed row is one HSP; the probe marks it without changing it.
                     Some(probe) => {
                         buf.clear();
-                        table.row(&mut buf, &query, &subject, &row);
+                        table.row(&mut buf, &mut table_rows, &query, &subject, &row);
                         writer.flush()?;
                         probe.begin(hsp_index);
                         writer.write_all(&buf)?;
@@ -792,7 +831,7 @@ fn write_tabular_rows<const RPS: bool>(
                         probe.end(hsp_index);
                         buf.clear();
                     }
-                    None => table.row(&mut buf, &query, &subject, &row),
+                    None => table.row(&mut buf, &mut table_rows, &query, &subject, &row),
                 }
                 hsp_index += 1;
             }

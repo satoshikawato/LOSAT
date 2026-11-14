@@ -2544,11 +2544,37 @@ fn write_tblastx_outputs(
                     .iter()
                     .any(|format| format.tabular_reads_subject()),
             )?,
-            None => tabular_subject_ids(&hits, run.subjects)?,
+            None => tabular_subject_ids(run.subjects),
         }
     } else {
         Vec::new()
     };
+    // The rows of subjects whose lookup fails (an empty id) where NCBI has no result
+    // (`report::tabular::check_failed_lookups`), before any format is written.
+    if subject_ids.iter().any(|id| id.is_empty()) {
+        for format in output_formats.iter().filter(|format| format.is_tabular()) {
+            crate::report::tabular::check_failed_lookups(
+                format.tabular_spec(),
+                run.database.is_some(),
+                (0..run.queries.len()).map(|q_idx| {
+                    hits.iter()
+                        .filter(move |hsp| hsp.hit.q_idx as usize == q_idx)
+                        .map(|hsp| hsp.hit.s_idx as usize)
+                }),
+                |s_idx| subject_ids.get(s_idx).is_some_and(|id| id.is_empty()),
+                |s_idx| match &run.database {
+                    Some(database) => crate::report::tabular::failed_database_title(
+                        database.oids.oid(database.reported.ordinals[s_idx]),
+                    ),
+                    None => crate::report::tabular::failed_record_title(
+                        s_idx,
+                        run.subjects[s_idx].shown_id(),
+                    ),
+                },
+                "TBLASTX",
+            )?;
+        }
+    }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
     // ```c++
     //     //get defline
@@ -3139,14 +3165,16 @@ fn report_counts<S: TbxScore>(
 }
 
 /// The subject ID of the tabular formats of the subject record `subject`, `None` where
-/// `tabular_subject_ids` refuses it.
+/// `GenerateDefline` throws (`tabular_subject_ids`).
 fn subject_tabular_id(subject: &FastaRecord) -> Option<Arc<[u8]>> {
     subject.subject_tabular_id(false).ok().map(Arc::from)
 }
 
 /// The subject ID of the tabular formats of every subject, by subject index
 /// (`report::defline::tabular_subject_id`: the title's first word, or the local ID, and
-/// for `lcl|Subject_...` the first word of `GenerateDefline`), as BLASTN's.
+/// for `lcl|Subject_...` the first word of `GenerateDefline`), as BLASTN's; empty where
+/// `GenerateDefline` throws, whose rows NCBI writes with its catch's values
+/// (`report::tabular::SubjectLookup::Failed`) or stops at (`check_failed_lookups`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
 /// ```c++
@@ -3159,28 +3187,11 @@ fn subject_tabular_id(subject: &FastaRecord) -> Option<Arc<[u8]>> {
 ///             bioseqs_found = false;
 ///         }
 /// ```
-/// A subject with a row whose `GenerateDefline` throws (a `Subject_` first word and a title
-/// in no encoding that `CUtf8::GuessEncoding` recognises) makes NCBI 2.17.0 write part of the
-/// row and stop with a `CCoreException` that names its build's source files (exit 255;
-/// `AUTHORITY.md` §J-6, §K-1, RP-20). No result can be defined for it, so LOSAT rejects such
-/// a subject explicitly before it writes any format; a subject without rows is never
-/// named.
-fn tabular_subject_ids(hits: &[TblastxHsp], subjects: &[FastaRecord]) -> Result<Vec<Arc<[u8]>>> {
-    let ids: Vec<Option<Arc<[u8]>>> = subjects.iter().map(subject_tabular_id).collect();
-    for hsp in hits {
-        let s_idx = hsp.hit.s_idx as usize;
-        if ids.get(s_idx).is_some_and(Option::is_none) {
-            anyhow::bail!(
-                "subject record {} ({}) has a title whose first word starts with 'Subject_' and whose non-UTF-8 bytes are in no encoding that NCBI BLAST+ recognises; NCBI BLAST+ writes part of a tabular row for such a subject and stops with an exception that names its build's source files (exit 255), which is not supported by LOSAT's TBLASTX",
-                s_idx + 1,
-                String::from_utf8_lossy(subjects[s_idx].shown_id())
-            );
-        }
-    }
-    Ok(ids
-        .into_iter()
-        .map(|id| id.unwrap_or_else(|| Arc::from(&b""[..])))
-        .collect())
+fn tabular_subject_ids(subjects: &[FastaRecord]) -> Vec<Arc<[u8]>> {
+    subjects
+        .iter()
+        .map(|subject| subject_tabular_id(subject).unwrap_or_else(|| Arc::from(&b""[..])))
+        .collect()
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:85-91

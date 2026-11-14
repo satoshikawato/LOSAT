@@ -6318,7 +6318,10 @@ fn shift_to_records(hit_lists: &mut [Option<BlastnHitList>], ranges: &ReportRang
 
 /// The subject ID of the tabular formats (`sseqid`, `sacc`, `saccver`) of every subject, by
 /// subject index (`report::defline::tabular_subject_id`: the title's first word, or the
-/// local ID, and for `lcl|Subject_...` the first word of `GenerateDefline`).
+/// local ID, and for `lcl|Subject_...` the first word of `GenerateDefline`); empty where
+/// `GenerateDefline` throws (a `Subject_` first word and a title in no encoding that
+/// `CUtf8::GuessEncoding` recognises), whose rows NCBI writes with its catch's values
+/// (`report::tabular::SubjectLookup::Failed`) or stops at (`check_failed_lookups`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-841
 /// ```c++
@@ -6337,50 +6340,15 @@ fn shift_to_records(hit_lists: &mut [Option<BlastnHitList>], ranges: &ReportRang
 ///             	SetSubjectId(subject_bh);
 ///             }
 /// ```
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:862-869
-/// ```c++
-///         } catch (const CException&) {
-///             list<CRef<CSeq_id> > subject_ids;
-///             CRef<CSeq_id> id(new CSeq_id());
-///             id->Assign(align.GetSeq_id(1));
-///             subject_ids.push_back(id);
-///             SetSubjectId(subject_ids);
-///             bioseqs_found = false;
-///         }
-/// ```
-/// A subject with a row whose `GenerateDefline` throws (a `Subject_` first word and a title
-/// in no encoding that `CUtf8::GuessEncoding` recognises) makes NCBI 2.17.0 write part of the
-/// row and stop with a `CCoreException` that names its build's source files (exit 255;
-/// `AUTHORITY.md` §J-6, §K-1, RP-20). No result can be defined for it, so LOSAT rejects such
-/// a subject explicitly before it writes any format, pending the PD-LOSAT-NCBI-DEFECTS
-/// question; a subject without rows is never named.
-fn tabular_subject_ids(
-    hit_lists: &[Option<BlastnHitList>],
-    subjects: &[FastaRecord],
-) -> Result<Vec<Arc<[u8]>>> {
-    let ids: Vec<Option<Arc<[u8]>>> = subjects
+fn tabular_subject_ids(subjects: &[FastaRecord]) -> Vec<Arc<[u8]>> {
+    subjects
         .iter()
-        .map(|subject| subject.subject_tabular_id(false).ok().map(Arc::from))
-        .collect();
-    for hit_list in hit_lists.iter().flatten() {
-        for hsp_list in &hit_list.hsplist_array {
-            let Some(hsp) = hsp_list.hsps.first() else {
-                continue;
-            };
-            let s_idx = hsp.s_idx as usize;
-            if ids.get(s_idx).is_some_and(Option::is_none) {
-                anyhow::bail!(
-                    "subject record {} ({}) has a title whose first word starts with 'Subject_' and whose non-UTF-8 bytes are in no encoding that NCBI BLAST+ recognises; NCBI BLAST+ writes part of a tabular row for such a subject and stops with an exception that names its build's source files (exit 255), which is not supported by LOSAT's BLASTN",
-                    s_idx + 1,
-                    String::from_utf8_lossy(subjects[s_idx].shown_id())
-                );
-            }
-        }
-    }
-    Ok(ids
-        .into_iter()
-        .map(|id| id.unwrap_or_else(|| Arc::from(&b""[..])))
-        .collect())
+        .map(|subject| {
+            subject
+                .subject_tabular_id(false)
+                .map_or_else(|_| Arc::from(&b""[..]), Arc::from)
+        })
+        .collect()
 }
 
 /// The end of the traceback for the final hit list of one query (`hit_list`, of a query of
@@ -6827,22 +6795,50 @@ fn post_process_hits_and_write(
     };
     // EXPERIMENT (LOSAT_X_RPTSTREAM): a subject set's ids made once for every batch where LOSAT
     // refuses none of them (`x_rpt_stream::SubjectCache`), so they are the ids made here.
-    let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> =
-        if output_formats.iter().any(|format| format.is_tabular()) {
-            match (
-                report.database_subject_ids,
-                report.subject_cache.and_then(|cache| cache.ids.as_deref()),
-            ) {
-                (Some(ids), _) => std::borrow::Cow::Borrowed(ids),
-                (None, Some(ids)) => std::borrow::Cow::Borrowed(ids),
-                (None, None) => std::borrow::Cow::Owned(tabular_subject_ids(
-                    &hit_lists,
-                    report.subjects.records(),
-                )?),
-            }
-        } else {
-            std::borrow::Cow::Owned(Vec::new())
-        };
+    let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> = if output_formats
+        .iter()
+        .any(|format| format.is_tabular())
+    {
+        match (
+            report.database_subject_ids,
+            report.subject_cache.and_then(|cache| cache.ids.as_deref()),
+        ) {
+            (Some(ids), _) => std::borrow::Cow::Borrowed(ids),
+            (None, Some(ids)) => std::borrow::Cow::Borrowed(ids),
+            (None, None) => std::borrow::Cow::Owned(tabular_subject_ids(report.subjects.records())),
+        }
+    } else {
+        std::borrow::Cow::Owned(Vec::new())
+    };
+    // The rows of subjects whose lookup fails (an empty id) where NCBI has no result
+    // (`report::tabular::check_failed_lookups`), before any format is written.
+    if subject_ids.iter().any(|id| id.is_empty()) {
+        let database = report.database_ordinals.zip(report.database_reader);
+        for format in output_formats.iter().filter(|format| format.is_tabular()) {
+            crate::report::tabular::check_failed_lookups(
+                format.tabular_spec(),
+                database.is_some(),
+                hit_lists.iter().flatten().map(|hit_list| {
+                    hit_list
+                        .hsplist_array
+                        .iter()
+                        .filter_map(|hsp_list| hsp_list.hsps.first())
+                        .map(|hsp| hsp.s_idx as usize)
+                }),
+                |s_idx| subject_ids.get(s_idx).is_some_and(|id| id.is_empty()),
+                |s_idx| match database {
+                    Some((ordinals, reader)) => crate::report::tabular::failed_database_title(
+                        reader.oid_map().oid(ordinals[s_idx]),
+                    ),
+                    None => crate::report::tabular::failed_record_title(
+                        s_idx,
+                        report.subjects.records()[s_idx].shown_id(),
+                    ),
+                },
+                "BLASTN",
+            )?;
+        }
+    }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
     // ```c++
     //     //get defline
@@ -7533,6 +7529,7 @@ fn write_custom_tabular(
             ids: subject_ids,
             length: &record_length,
             parsed: report.database_parsed,
+            records: report.subjects.records(),
         },
     };
     // Outfmt 18, the organism report: the `Query=` block shows the query record's length, also

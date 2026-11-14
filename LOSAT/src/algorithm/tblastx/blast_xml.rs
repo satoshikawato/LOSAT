@@ -359,7 +359,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
             );
         }
         let xml_query = XmlQuery {
-            id: query.local_id.as_bytes(),
+            id: text.id.as_deref().unwrap_or(query.local_id.as_bytes()),
             title: &text.title,
             len: i32::try_from(searched_length)?,
             stats: query_stats(&run.query_stats[q_idx], run.numbers),

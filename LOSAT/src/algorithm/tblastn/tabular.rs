@@ -58,7 +58,8 @@ use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
     coverage_percent, hsp_coverage, taxdb_warning_line, union_length, TabularField, TabularHsp,
-    TabularKind, TabularNames, TabularQuery, TabularSpec, TabularTaxonomy, TabularWriter,
+    TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec, TabularTaxonomy,
+    TabularWriter,
 };
 use crate::utils::genetic_code::GeneticCode;
 
@@ -238,6 +239,7 @@ pub(super) fn write_tblastn_tabular(
             ids: tab.subject_ids,
             length: &record_length,
             parsed,
+            records: tab.subject_records,
         },
         ShownSubjects::Database { reported, oids, .. } => TabularSubjects::Database {
             ids: tab.subject_ids,
@@ -379,6 +381,8 @@ pub(super) fn write_tblastn_tabular(
             writer.write_all(&buf)?;
             buf.clear();
         }
+        // The query's formatter (`TabularRows`).
+        let mut rows = TabularRows::default();
         for list in hitlist.lists() {
             if list.hsps.hsps.is_empty() {
                 continue;
@@ -444,7 +448,9 @@ pub(super) fn write_tblastn_tabular(
                 }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.
-                if let (Some(names), Some(warnings)) = (names, warnings.as_deref_mut()) {
+                if let (Some(names), Some(warnings), true) =
+                    (names, warnings.as_deref_mut(), table.sets_subject(&subject))
+                {
                     let text = names.row_messages(spec, subject.taxonomy);
                     if !text.is_empty() {
                         writer.write_all(&buf)?;
@@ -561,7 +567,7 @@ pub(super) fn write_tblastn_tabular(
                     // One printed row is one HSP; the probe marks it without changing it.
                     Some(probe) => {
                         buf.clear();
-                        table.row(&mut buf, &tabular_query, &subject, &row);
+                        table.row(&mut buf, &mut rows, &tabular_query, &subject, &row);
                         writer.flush()?;
                         probe.begin(hsp_index);
                         writer.write_all(&buf)?;
@@ -569,7 +575,7 @@ pub(super) fn write_tblastn_tabular(
                         probe.end(hsp_index);
                         buf.clear();
                     }
-                    None => table.row(&mut buf, &tabular_query, &subject, &row),
+                    None => table.row(&mut buf, &mut rows, &tabular_query, &subject, &row),
                 }
                 hsp_index += 1;
             }

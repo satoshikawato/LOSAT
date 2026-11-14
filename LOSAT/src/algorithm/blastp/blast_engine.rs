@@ -2720,6 +2720,14 @@ impl BlastpReport {
         }
     }
 
+    /// The field list of a custom tabular report (`None`: the default fields, or no table).
+    fn tabular_spec(self) -> Option<&'static crate::report::tabular::TabularSpec> {
+        match self {
+            BlastpReport::CustomTabular(spec) => Some(spec),
+            _ => None,
+        }
+    }
+
     /// The subject ids that the report prints (`PrintedIds`): none but in a table.
     fn printed_ids(self) -> crate::report::tabular::PrintedIds {
         match self {
@@ -2893,7 +2901,9 @@ fn write_blastp_outfmt7_header<W: Write>(
 /// The subject ID of the tabular formats of every subject, by subject index
 /// (`report::defline::tabular_subject_id`: the title's first word, or the local ID, and
 /// for `lcl|Subject_...` the first word of `GenerateDefline`, which is `unnamed` for a
-/// protein without a title), as the other programs'.
+/// protein without a title), as the other programs'; empty where `GenerateDefline` throws, whose
+/// rows NCBI writes with its catch's values (`report::tabular::SubjectLookup::Failed`) or stops at
+/// (`report::tabular::check_failed_lookups`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
 /// ```c++
@@ -2906,34 +2916,22 @@ fn write_blastp_outfmt7_header<W: Write>(
 ///             bioseqs_found = false;
 ///         }
 /// ```
-/// A subject with a row whose `GenerateDefline` throws (a `Subject_` first word and a title
-/// in no encoding that `CUtf8::GuessEncoding` recognises) makes NCBI 2.17.0 write part of the
-/// row and stop with a `CCoreException` that names its build's source files (exit 255;
-/// `AUTHORITY.md` §J-6, §K-1, RP-20). No result can be defined for it, so LOSAT rejects such
-/// a subject explicitly before it writes any format; a subject without rows is never
-/// named.
-fn tabular_subject_ids(
-    hit_lists: &[Option<BlastpHitList>],
-    subjects: &[FastaRecord],
-) -> Result<Vec<Arc<[u8]>>> {
-    let ids = tabular_subject_id_results(subjects);
-    check_tabular_subject_ids(hit_lists, subjects, &ids)?;
-    Ok(ids
+fn tabular_subject_ids(subjects: &[FastaRecord]) -> Vec<Arc<[u8]>> {
+    tabular_subject_id_results(subjects)
         .into_iter()
         .map(|id| id.unwrap_or_else(|| Arc::from(&b""[..])))
-        .collect())
+        .collect()
 }
 
 /// The tabular subject ids of a subject set under `-parse_deflines`: `tabular_subject_ids`, with
 /// `sseqid`, `sacc` and `saccver` of the records in `parsed` (`ParsedSubject::tabular_ids`).
 #[allow(clippy::type_complexity)]
 fn record_tabular_ids(
-    hit_lists: &[Option<BlastpHitList>],
     subjects: &[FastaRecord],
     parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     program: &str,
 ) -> Result<(Vec<Arc<[u8]>>, Vec<Option<[Arc<[u8]>; 2]>>)> {
-    let mut ids = tabular_subject_ids(hit_lists, subjects)?;
+    let mut ids = tabular_subject_ids(subjects);
     let mut accessions = vec![None; ids.len()];
     for (index, subject) in parsed.iter().enumerate() {
         let Some(subject) = subject else {
@@ -2962,66 +2960,12 @@ fn record_tabular_ids(
 //             }
 // ```
 /// `report::defline::tabular_subject_id` of every subject, by subject index
-/// (`tabular_subject_ids`): `None` for a subject whose ID cannot be written.
+/// (`tabular_subject_ids`): `None` for a subject whose `GenerateDefline` throws.
 fn tabular_subject_id_results(subjects: &[FastaRecord]) -> Vec<Option<Arc<[u8]>>> {
     subjects
         .iter()
         .map(|subject| subject.subject_tabular_id(true).ok().map(Arc::from))
         .collect()
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
-// ```c++
-//         } catch (const CException&) {
-//             list<CRef<CSeq_id> > subject_ids;
-//             CRef<CSeq_id> id(new CSeq_id());
-//             id->Assign(align.GetSeq_id(1));
-//             subject_ids.push_back(id);
-//             SetSubjectId(subject_ids);
-//             bioseqs_found = false;
-//         }
-// ```
-/// The check of `tabular_subject_ids`: the first subject, in the order of the hit lists' HSPs,
-/// whose ID in `ids` (`tabular_subject_id_results`) cannot be written is the error.
-fn check_tabular_subject_ids(
-    hit_lists: &[Option<BlastpHitList>],
-    subjects: &[FastaRecord],
-    ids: &[Option<Arc<[u8]>>],
-) -> Result<()> {
-    for hit_list in hit_lists.iter().flatten() {
-        let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-        for hsp in hit_list.hsplist_array[..count]
-            .iter()
-            .flat_map(|hsp_list| hsp_list.hsps.iter())
-        {
-            let s_idx = hsp.s_idx as usize;
-            if ids.get(s_idx).is_some_and(Option::is_none) {
-                bail!(
-                    "subject record {} ({}) has a title whose first word starts with 'Subject_' and whose non-UTF-8 bytes are in no encoding that NCBI BLAST+ recognises; NCBI BLAST+ writes part of a tabular row for such a subject and stops with an exception that names its build's source files (exit 255), which is not supported by LOSAT's BLASTP",
-                    s_idx + 1,
-                    String::from_utf8_lossy(subjects[s_idx].shown_id())
-                );
-            }
-        }
-    }
-    Ok(())
-}
-
-// No NCBI counterpart: values NCBI makes per row (tabular.cpp above), made once for all blocks;
-// reuse only.
-/// EXPERIMENT (LOSAT_X_BPQBLOCK): `tabular_subject_ids` of a block of the block search with the
-/// subjects' ID results made once for all blocks (`blast_engine/x_subject_meta.rs`): the same
-/// check over the block's hit lists, with the stored results, and the shown IDs borrowed.
-/// The stored results are `tabular_subject_id_results` of the same records, a function of each
-/// record only (`tabular_subject_id(local_id, title, true)`), so the check fails for the same block
-/// and names the same record as `tabular_subject_ids`, and otherwise the shown IDs are its IDs.
-/// No floating-point operation is involved.
-fn x_tabular_subject_ids_cached<'m>(
-    hit_lists: &[Option<BlastpHitList>],
-    subjects: &[FastaRecord],
-    meta: &'m x_subject_meta::XSubjectMeta,
-) -> Result<&'m [Arc<[u8]>]> {
-    check_tabular_subject_ids(hit_lists, subjects, meta.ids()).map(|()| meta.shown())
 }
 
 /// The tabular subject id field of one subject that the default fields print: `saccver`. It is
@@ -14745,7 +14689,7 @@ fn run_call(
     }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block
-    // search's IDs made once for all blocks, with the same check (`x_tabular_subject_ids_cached`).
+    // search's IDs made once for all blocks (`x_subject_meta`).
     // `sacc` and `saccver` of the database sequences with parsed Seq-ids, by rank (empty
     // without them: the others' are their `sseqid`).
     let mut subject_accessions: Vec<Option<[Arc<[u8]>; 2]>> = Vec::new();
@@ -14769,12 +14713,8 @@ fn run_call(
         if format_plans.iter().any(|outfmt| outfmt.is_tabular()) {
             match (listed_titles.as_ref(), x_meta) {
                 (None, _) if !records_parsed.is_empty() => {
-                    let (ids, accessions) = record_tabular_ids(
-                        &hit_lists,
-                        subject_records,
-                        &records_parsed,
-                        args.app.name(),
-                    )?;
+                    let (ids, accessions) =
+                        record_tabular_ids(subject_records, &records_parsed, args.app.name())?;
                     subject_accessions = accessions;
                     ids.into()
                 }
@@ -14788,14 +14728,42 @@ fn run_call(
                     subject_accessions = accessions;
                     ids.into()
                 }
-                (None, Some(meta)) => {
-                    x_tabular_subject_ids_cached(&hit_lists, subject_records, meta)?.into()
-                }
-                (None, None) => tabular_subject_ids(&hit_lists, subject_records)?.into(),
+                // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search's ids made once for all
+                // blocks (`x_subject_meta`), `tabular_subject_ids` of the same records.
+                (None, Some(meta)) => meta.shown().into(),
+                (None, None) => tabular_subject_ids(subject_records).into(),
             }
         } else {
             Vec::new().into()
         };
+    // The rows of subjects whose lookup fails (an empty id) where NCBI has no result
+    // (`report::tabular::check_failed_lookups`), before any format is written.
+    if subject_ids.iter().any(|id| id.is_empty()) {
+        for outfmt in format_plans.iter().filter(|outfmt| outfmt.is_tabular()) {
+            crate::report::tabular::check_failed_lookups(
+                outfmt.tabular_spec(),
+                listed_titles.is_some(),
+                hit_lists.iter().flatten().map(|hit_list| {
+                    let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                    hit_list.hsplist_array[..count]
+                        .iter()
+                        .filter_map(|hsp_list| hsp_list.hsps.first())
+                        .map(|hsp| hsp.s_idx as usize)
+                }),
+                |s_idx| subject_ids.get(s_idx).is_some_and(|id| id.is_empty()),
+                |s_idx| match listed_titles.as_ref() {
+                    Some(titles) => {
+                        crate::report::tabular::failed_database_title(titles.oid(s_idx))
+                    }
+                    None => crate::report::tabular::failed_record_title(
+                        s_idx,
+                        subject_records[s_idx].shown_id(),
+                    ),
+                },
+                args.app.name(),
+            )?;
+        }
+    }
     // The `stitle` text of the custom tabular reports by subject: the stored titles of a
     // database (the first definition line's of a sequence with parsed Seq-ids); none for the
     // records of a subject set, which have no BLAST definition line (`N/A`).
@@ -15450,7 +15418,7 @@ fn run_call(
                     .iter()
                     .enumerate()
                     .map(|(q_idx, &query_length)| BlastpPairwiseQuery {
-                        query_name: String::new(),
+                        query_name: Vec::new(),
                         // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:742-744
                         // ```c++
                         //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){

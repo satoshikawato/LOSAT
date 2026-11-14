@@ -792,35 +792,36 @@ pub(crate) fn hsp_scores(
 //
 //     return id_string;
 // ```
-pub(super) fn local_id(record: &FastaRecord) -> &str {
+pub(super) fn local_id(record: &FastaRecord) -> &[u8] {
     if let Some(ids) = record.believed() {
-        return std::str::from_utf8(&ids.tabular[2]).unwrap_or_default();
+        return &ids.tabular[2];
     }
     record
         .title
-        .split(' ')
+        .split(|&byte| byte == b' ')
         .next()
-        .filter(|s| !s.is_empty())
-        .unwrap_or(&record.internal_id)
+        .filter(|word| !word.is_empty())
+        .unwrap_or(record.internal_id.as_bytes())
 }
-// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3884-3889 (`x_SetTitleFromProtein`
-// without a protein feature; `GenerateDefline` of a protein Bioseq without a title)
-// ```c++
-//     if (m_MainTitle.empty() && m_IsAA) {
-//         m_MainTitle = "unnamed protein product";
-// ```
-/// The id and the rest of the title that BLASTX's reports show for a `-subject` record read as one
-/// without `-parse_deflines` (outfmt 0, and the tabular `sseqid`, `report::defline::
-/// tabular_subject_id`): the first word of its title and what follows it, or for a record without
-/// a title those of the title that `GenerateDefline` makes of none.
-pub(super) fn subject_label(record: &FastaRecord) -> (&str, Option<&str>) {
-    if record.title.is_empty() {
-        return ("unnamed", Some("protein product"));
-    }
-    match record.title.split_once(' ') {
-        Some((id, rest)) => (id, Some(rest)),
-        None => (&record.title, None),
-    }
+/// The tabular subject id (`sseqid`, `sacc`, `saccver`) of a `-subject` record read as one
+/// without `-parse_deflines`: the first word of its title, or for a `Subject_` word the first
+/// word of the title that `GenerateDefline` makes (`report::defline::tabular_subject_id`, as the
+/// other programs'); `None` where `GenerateDefline` throws (`report::tabular::SubjectLookup`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:225-231
+/// ```c++
+/// 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
+///             vector<string> title_tokens;
+///             string defline = sequence::CDeflineGenerator().GenerateDefline(bh);
+///             if (defline != NcbiEmptyString) {
+///                 id_token =
+///                     NStr::Split(defline, " ", title_tokens)[0];
+///             }
+/// ```
+pub(super) fn subject_tabular_id(record: &FastaRecord) -> Option<std::borrow::Cow<'_, [u8]>> {
+    crate::report::defline::tabular_subject_id(record.internal_id.as_bytes(), &record.title, true)
+        .ok()
+        .map(std::borrow::Cow::Owned)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:169-191
@@ -849,11 +850,11 @@ pub(super) fn subject_label(record: &FastaRecord) -> (&str, Option<&str>) {
 //     default: break;
 //     }
 // ```
-fn id_field(record: &FastaRecord, field: &str) -> String {
+fn id_field(record: &FastaRecord, field: &str) -> Vec<u8> {
     // Local FASTA uses generated local Seq-ids, replaced by title tokens. The default report's
     // query field is `qaccver` (its other identifier fields are the shared writer's, `tabular`).
     match field {
-        "qaccver" => local_id(record).to_owned(),
+        "qaccver" => local_id(record).to_vec(),
         _ => unreachable!("a std identifier field"),
     }
 }
@@ -965,10 +966,9 @@ fn field_name(field: &str) -> &str {
 //     m_Ostream << num_mismatches;
 // ```
 /// A subject as the default tabular report shows it: its `saccver`
-/// (`ShownSubjects::subject_ids`).
+/// (`ShownSubjects::subject_saccver`).
 struct ShownSubject<'a> {
-    /// `sseqid`, `sacc` and `saccver` (`ShownSubjects::subject_ids`).
-    ids: [&'a str; 3],
+    saccver: std::borrow::Cow<'a, [u8]>,
 }
 
 /// The value of a `std` field of the default report (outfmt 6 and 7 without a field list or
@@ -979,20 +979,20 @@ fn field_value(
     subject: &ShownSubject<'_>,
     hsp: &Hsp,
     a: &DisplayAlignment,
-) -> String {
+) -> Vec<u8> {
     match field {
         "qaccver" => id_field(query, field),
-        "saccver" => subject.ids[2].to_owned(),
-        "qstart" => a.qstart.to_string(),
-        "qend" => a.qend.to_string(),
-        "sstart" => a.sstart.to_string(),
-        "send" => a.send.to_string(),
-        "evalue" => format_evalue_ncbi_tabular(hsp.evalue),
-        "bitscore" => format_bitscore_ncbi(hsp.bit_score),
-        "length" => a.qseq.len().to_string(),
-        "pident" => format_percent_identity_ncbi(a.identity, a.qseq.len(), 3),
-        "mismatch" => a.mismatches().to_string(),
-        "gapopen" => a.gap_opens.to_string(),
+        "saccver" => subject.saccver.to_vec(),
+        "qstart" => a.qstart.to_string().into_bytes(),
+        "qend" => a.qend.to_string().into_bytes(),
+        "sstart" => a.sstart.to_string().into_bytes(),
+        "send" => a.send.to_string().into_bytes(),
+        "evalue" => format_evalue_ncbi_tabular(hsp.evalue).into_bytes(),
+        "bitscore" => format_bitscore_ncbi(hsp.bit_score).into_bytes(),
+        "length" => a.qseq.len().to_string().into_bytes(),
+        "pident" => format_percent_identity_ncbi(a.identity, a.qseq.len(), 3).into_bytes(),
+        "mismatch" => a.mismatches().to_string().into_bytes(),
+        "gapopen" => a.gap_opens.to_string().into_bytes(),
         _ => unreachable!("a std field"),
     }
 }
@@ -1100,7 +1100,7 @@ impl RecordsParsed {
         let subjects = crate::report::db_subject::parsed_records(
             records
                 .iter()
-                .map(|record| (record.believed(), record.title.as_bytes())),
+                .map(|record| (record.believed(), record.title.as_slice())),
             show_gis,
             true,
             pairwise,
@@ -1135,19 +1135,39 @@ impl RecordsParsed {
 }
 
 impl ShownSubjects<'_> {
-    /// The tabular subject ids of subject `oid` (`sseqid`, `sacc`, `saccver`): the first
-    /// word of a record's title, or a database sequence's id made from its stored title, the
-    /// same for the three; a database sequence with parsed Seq-ids has its own three
-    /// (`ParsedSubject::tabular_ids`).
-    fn subject_ids<'s>(&'s self, subject: &'s FastaRecord, oid: usize) -> [&'s str; 3] {
+    /// The `saccver` of subject `oid` (the same as `sseqid` and `sacc` but for a sequence with
+    /// parsed Seq-ids, `ParsedSubject::tabular_ids`): a record's `subject_tabular_id`, or a
+    /// database sequence's id made from its stored title; empty where the lookup fails.
+    fn subject_saccver<'s>(
+        &'s self,
+        subject: &'s FastaRecord,
+        oid: usize,
+    ) -> std::borrow::Cow<'s, [u8]> {
         match self {
             ShownSubjects::Fasta { parsed, .. } => {
                 match parsed.tabular.get(oid).and_then(Option::as_ref) {
-                    Some(ids) => [&ids.ids[0], &ids.ids[1], &ids.ids[2]],
-                    None => [subject_label(subject).0; 3],
+                    Some(ids) => std::borrow::Cow::Borrowed(ids.ids[2].as_bytes()),
+                    None => subject_tabular_id(subject).unwrap_or_default(),
                 }
             }
-            ShownSubjects::Database { reported, .. } => reported.tabular_ids(oid),
+            ShownSubjects::Database { reported, .. } => {
+                std::borrow::Cow::Borrowed(reported.tabular_ids(oid)[2].as_bytes())
+            }
+        }
+    }
+
+    /// Whether the lookup of subject `oid`'s tabular ids fails (`report::tabular::SubjectLookup`):
+    /// a record's `subject_tabular_id`, or a database sequence without parsed Seq-ids whose id is
+    /// empty (`TabularSubjectId::Unknown`).
+    pub(super) fn lookup_fails(&self, subject: &FastaRecord, oid: usize) -> bool {
+        match self {
+            ShownSubjects::Fasta { parsed, .. } => {
+                parsed.tabular.get(oid).is_none_or(Option::is_none)
+                    && subject_tabular_id(subject).is_none()
+            }
+            ShownSubjects::Database { reported, .. } => {
+                reported.parsed_subject(oid).is_none() && reported.tabular_ids(oid)[0].is_empty()
+            }
         }
     }
 
@@ -1228,6 +1248,44 @@ pub(super) fn reported_hsps(batches: &[BatchResults], gapped: bool) -> usize {
         .flat_map(|batch| batch.queries.iter().flatten())
         .map(|list| list.hsps.iter().filter(|h| has_seqalign(h, gapped)).count())
         .sum()
+}
+
+/// LOSAT's refusals of the tabular report (`options.tabular`, `None`: the default fields) of the
+/// batches' rows whose subject lookup fails where NCBI has no result
+/// (`report::tabular::check_failed_lookups`; each query of a batch is a result set).
+fn check_failed_lookups(
+    options: &ResolvedOptions,
+    subjects: &[FastaRecord],
+    shown: &ShownSubjects<'_>,
+    batches: &[BatchResults],
+) -> Result<()> {
+    for batch in batches {
+        crate::report::tabular::check_failed_lookups(
+            options.tabular,
+            matches!(shown, ShownSubjects::Database { .. }),
+            batch.queries.iter().map(|lists| {
+                lists[..lists.len().min(options.shown_lists())]
+                    .iter()
+                    .filter(|list| {
+                        list.hsps
+                            .iter()
+                            .any(|hsp| has_seqalign(hsp, options.gapped))
+                    })
+                    .map(|list| list.oid)
+            }),
+            |oid| shown.lookup_fails(&subjects[oid], oid),
+            |oid| match shown {
+                ShownSubjects::Database { reported, .. } => {
+                    crate::report::tabular::failed_database_title(reported.oid(oid))
+                }
+                ShownSubjects::Fasta { .. } => {
+                    crate::report::tabular::failed_record_title(oid, local_id(&subjects[oid]))
+                }
+            },
+            options.program().upper,
+        )?;
+    }
+    Ok(())
 }
 
 /// `render_queries`, with what `run_local` adds (`local`).
@@ -1325,6 +1383,14 @@ pub(super) fn render_queries_with(
             &names,
             batches,
         );
+    }
+    // The rows of subjects whose lookup fails where NCBI has no result
+    // (`report::tabular::check_failed_lookups`), before the batch's tabular report.
+    if options
+        .tabular
+        .map_or(matches!(options.outfmt, 6 | 7), |spec| spec.writes_rows())
+    {
+        check_failed_lookups(options, subjects, shown, batches)?;
     }
     // The tabular reports with a field list or a delimiter, and outfmt 10 and 20: the shared
     // writer (`tabular`, NCBI's `CBlastTabularInfo`); the default outfmt 6 and 7 below.
@@ -1434,9 +1500,8 @@ pub(super) fn render_queries_with(
                         options.program().upper,
                         crate::NCBI_BLAST_VERSION
                     )?;
-                    writeln!(
-                        writer,
-                        "# Query: {}",
+                    write!(writer, "# Query: ")?;
+                    writer.write_all(
                         // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:630-637
                         // ```c++
                         // CAlignFormatUtil::GetSeqIdString(const list<CRef<CSeq_id> > & ids, bool believe_local_id)
@@ -1459,8 +1524,9 @@ pub(super) fn render_queries_with(
                         //     if (tabular) {
                         //         out << all_id_str;
                         // ```
-                        query.query_line()
+                        &query.query_line(),
                     )?;
+                    writeln!(writer)?;
                     match shown {
                         ShownSubjects::Fasta { path, .. } => writeln!(
                             writer,
@@ -1493,7 +1559,7 @@ pub(super) fn render_queries_with(
                 for list in listed {
                     let subject = &subjects[list.oid];
                     let shown_subject = ShownSubject {
-                        ids: shown.subject_ids(subject, list.oid),
+                        saccver: shown.subject_saccver(subject, list.oid),
                     };
                     let mut read = false;
                     for hsp in &list.hsps {
@@ -1521,7 +1587,9 @@ pub(super) fn render_queries_with(
                             writer.flush()?;
                             probe.begin(next_hsp);
                         }
-                        writeln!(writer, "{}", values.join("	"))?;
+                        let mut line = values.join(&b'\t');
+                        line.push(b'\n');
+                        writer.write_all(&line)?;
                         if let Some(probe) = probe.as_deref_mut() {
                             writer.flush()?;
                             probe.end(next_hsp);
@@ -1660,24 +1728,41 @@ fn write_pairwise(
         }
     };
     let report = pairwise_metadata(options, subjects, shown);
-    let ids: Vec<std::sync::Arc<str>> = match shown {
-        ShownSubjects::Fasta { parsed, .. } => subjects
-            .iter()
-            .enumerate()
-            .map(|(index, s)| match parsed.shown(index) {
-                Some(subject) => {
-                    let label = crate::report::pairwise::database_description_label(
-                        b"",
-                        &crate::report::defline::UNNAMED_SOURCE,
-                        Some(subject),
-                        true,
-                    );
-                    std::sync::Arc::from(String::from_utf8_lossy(&label).as_ref())
+    // The description line of each subject with hits: the title that `GenerateDefline` makes
+    // (`Unknown` where it throws), or a sequence's with parsed Seq-ids
+    // (`database_description_label`), as the other programs' (D2 of line RG T7: no longer the
+    // record's first word and rest); the others are not shown.
+    let ids: Vec<std::sync::Arc<[u8]>> = match shown {
+        ShownSubjects::Fasta { parsed, .. } => {
+            let mut reported = vec![false; subjects.len()];
+            for hit in hits {
+                if let Some(seen) = reported.get_mut(hit.hit.s_idx as usize) {
+                    *seen = true;
                 }
-                None => std::sync::Arc::from(subject_label(s).0),
-            })
-            .collect(),
+            }
+            let none: std::sync::Arc<[u8]> = std::sync::Arc::from(&b""[..]);
+            subjects
+                .iter()
+                .enumerate()
+                .map(|(index, s)| {
+                    if !reported[index] {
+                        return std::sync::Arc::clone(&none);
+                    }
+                    std::sync::Arc::from(crate::report::pairwise::database_description_label(
+                        &s.title,
+                        &crate::report::defline::UNNAMED_SOURCE,
+                        parsed.shown(index),
+                        true,
+                    ))
+                })
+                .collect()
+        }
         ShownSubjects::Database { reported, .. } => reported.descriptions(),
+    };
+    // The titles of a subject set's records, whose alignment headings `GenerateDefline` makes.
+    let record_titles: Vec<&[u8]> = match shown {
+        ShownSubjects::Fasta { .. } => subjects.iter().map(|s| s.title.as_slice()).collect(),
+        ShownSubjects::Database { .. } => Vec::new(),
     };
     let database = match shown {
         ShownSubjects::Fasta { .. } => None,
@@ -1728,6 +1813,7 @@ fn write_pairwise(
         },
         database,
         records_parsed,
+        &record_titles,
         probe,
         first_hsp,
     )?;
@@ -1811,9 +1897,19 @@ pub(super) fn pairwise_hits(
                             {
                                 None
                             }
-                            ShownSubjects::Fasta { .. } => {
-                                subject_label(subject).1.map(str::to_owned)
+                            // The library's `Hit::subject_title` (no report reads it): the title
+                            // after its first word, `protein product` of an empty one.
+                            ShownSubjects::Fasta { .. } if subject.title.is_empty() => {
+                                Some("protein product".to_owned())
                             }
+                            ShownSubjects::Fasta { .. } => subject
+                                .title
+                                .iter()
+                                .position(|&byte| byte == b' ')
+                                .map(|space| {
+                                    String::from_utf8_lossy(&subject.title[space + 1..])
+                                        .into_owned()
+                                }),
                             ShownSubjects::Database { .. } => None,
                         },
                         comp_adjust_method: Some(u8::try_from(hsp.composition_method)?),
@@ -2197,7 +2293,7 @@ pub(super) fn query_warning(
     let mut id = query.warning_id().to_vec();
     if !query.title.is_empty() {
         id.push(b' ');
-        id.extend_from_slice(query.title.as_bytes());
+        id.extend_from_slice(&query.title);
     }
     if id.len() > 35 {
         id.truncate(25);

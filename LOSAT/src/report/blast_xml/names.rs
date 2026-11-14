@@ -13,7 +13,10 @@ pub enum Refusal {
     /// with an error message.
     Control,
     /// `GenerateDefline` throws: `NStr::HtmlDecode` cannot guess the title's encoding
-    /// (the title has a byte >= 0x80).
+    /// (the title has a byte >= 0x80). The catches of NCBI's XML writers write the Seq-id instead
+    /// (`QueryText::id`, `SubjectNames::unknown`); LOSAT refuses it only for a record whose ids
+    /// `-parse_deflines` read and that is not shown as a local record (a query's, or a
+    /// subject's whose Seq-align id is not local).
     UnknownEncoding,
     /// `x_CleanAndCompress` reads past the end of the title (NCBI crashes there).
     ReadsPastEnd,
@@ -181,9 +184,56 @@ pub fn xml_message(query_id: &[u8], warnings: &[String], has_hits: bool) -> Opti
 
 /// The title and message of a query, made and checked before the document is written.
 pub struct QueryText {
-    /// The generated title (`xml_query_title`).
+    /// The generated title (`xml_query_title`); empty where `GenerateDefline` throws.
     pub title: Vec<u8>,
     pub message: Option<Vec<u8>>,
+    /// The query id of the writers' catch where `GenerateDefline` throws: the Seq-loc's id as
+    /// `AsFastaString` writes it (`lcl|Query_1`); `None`: the writer's own id (`Query_1`).
+    pub id: Option<Vec<u8>>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:552-565
+// ```c++
+//     const CSeq_id& kSeqId = sequence::GetId(seqloc, scope);
+//     try {
+//         CBioseq_Handle bh = scope->GetBioseqHandle(kSeqId);
+//         // Get the full query Seq-id string.
+//         const CBioseq& kQueryBioseq = *bh.GetBioseqCore();
+//         one_query_iter->SetQuery_ID(
+//             CBlastFormatUtil::GetSeqIdString(kQueryBioseq));
+//         query_def = sequence::CDeflineGenerator().GenerateDefline(bh);
+//     } catch (const CException&) {
+//         one_query_iter->SetQuery_ID(kSeqId.AsFastaString());
+//     };
+//
+//     if (query_def == NcbiEmptyString)
+//         query_def = "No definition line";
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:584-596
+// ```c++
+// 	 try {
+// 	        CBioseq_Handle bh = scope->GetBioseqHandle(*q_id);
+// 	        // Get the full query Seq-id string.
+// 	        const CBioseq& q_bioseq = *bh.GetBioseqCore();
+// 	        search.SetQuery_id(CBlastFormatUtil::GetSeqIdString(q_bioseq));
+// 	        string q_title = sequence::CDeflineGenerator().GenerateDefline(bh);
+// 	        if(q_title != kEmptyStr)
+// 	        	search.SetQuery_title(q_title);
+// 	    } catch (const CException&) {
+// 	        search.SetQuery_id(q_id->AsFastaString());
+// 	 }
+// ```
+/// The `QueryText` of a query whose `GenerateDefline` throws: the local Seq-id `lcl|` and
+/// `warning_id` (`Query_N`) and no title (`No definition line` in outfmt 5, no `query-title`
+/// in XML2 and JSON).
+fn unknown_query_text(warning_id: &[u8]) -> QueryText {
+    let mut id = b"lcl|".to_vec();
+    id.extend_from_slice(warning_id);
+    QueryText {
+        title: Vec::new(),
+        message: None,
+        id: Some(id),
+    }
 }
 
 /// The `QueryText` of one query (`program` names the program in a refusal): its record's
@@ -198,20 +248,28 @@ pub fn query_text(
     warnings: &[String],
     has_hits: bool,
 ) -> anyhow::Result<QueryText> {
-    let generated = match believed {
-        Some(ids) => believed_query_title(title, protein, ids),
-        None => xml_query_title(title, protein),
+    let mut text = match believed {
+        Some(ids) => believed_query_title(title, protein, ids).map(|title| QueryText {
+            title,
+            message: None,
+            id: None,
+        }),
+        None => match xml_query_title(title, protein) {
+            Err(Refusal::UnknownEncoding) => Ok(unknown_query_text(warning_id)),
+            generated => generated.map(|title| QueryText {
+                title,
+                message: None,
+                id: None,
+            }),
+        },
     }
     .map_err(|refusal| refusal.error(program, "a query title"))?;
     let id = crate::report::query_warnings::warning_query_id(warning_id, title);
-    let message = xml_message(&id, warnings, has_hits);
-    if let Some(message) = &message {
+    text.message = xml_message(&id, warnings, has_hits);
+    if let Some(message) = &text.message {
         check_text(message).map_err(|refusal| refusal.error(program, "a query title"))?;
     }
-    Ok(QueryText {
-        title: generated,
-        message,
-    })
+    Ok(text)
 }
 
 /// The `QueryText` of every query of `records` (`program` names the program in a refusal):

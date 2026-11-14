@@ -927,7 +927,7 @@ mod x_chunk_record_tests {
     fn whole() -> FastaRecord {
         FastaRecord {
             internal_id: "Query_1".to_string(),
-            title: "long query".to_string(),
+            title: b"long query".to_vec(),
             sequence: (0..30_000u32)
                 .map(|k| b"ACGT"[(k.wrapping_mul(2_654_435_761) >> 30) as usize])
                 .collect(),

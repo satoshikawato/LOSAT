@@ -30,6 +30,7 @@ import QueryPicker from './QueryPicker.vue';
 import ResultFilters from './ResultFilters.vue';
 import ResultNotices from './ResultNotices.vue';
 import RunDetails from './RunDetails.vue';
+import RunFiles from './RunFiles.vue';
 import RunStatus from './RunStatus.vue';
 import SubjectTable from './SubjectTable.vue';
 import TabList from './TabList.vue';
@@ -67,13 +68,19 @@ const emptyPlot = computed(() => (state.value.hsps.length > 0 ? undefined : noHs
 
 /**
  * "Download All" lists the outputs of the run, as NCBI's lists its formats, by BLAST+'s names of
- * them (its -outfmt help), the output of the run's own -outfmt with its value (W10, W11); the one
+ * them (its -outfmt help), the output of the run's own -outfmt with its value (W10, W11), then the
+ * files that the run made besides its outputs (the file of -logfile; line RG E1w-3b); the one
  * chosen is saved as one file (WA-RS-05). The list opens in the page's flow, under the run's line,
  * so that it fits a phone's width; an output that is not saved says why there, until the next
  * download or another run (WA2-BR-01).
  */
+type DownloadItem = { readonly key: string; readonly label: string; readonly testid: string } & (
+  | { readonly format: RunOutput }
+  | { readonly runFile: number }
+);
 const downloads = computed(() => {
-  const items: { readonly format: RunOutput; readonly label: string; readonly testid: string }[] = ([0, 6, 7] as const).map((format) => ({
+  const items: DownloadItem[] = ([0, 6, 7] as const).map((format) => ({
+    key: `format-${format}`,
     format,
     label: `${FORMAT_NAMES[format]} (outfmt ${format})`,
     testid: `results-download-${format}`,
@@ -81,8 +88,11 @@ const downloads = computed(() => {
   const custom = customOutfmt(loaded.value?.run.snapshot.argv ?? []);
   if (custom !== undefined) {
     const name = FORMAT_NAMES[formatNumber(custom) ?? 0];
-    items.push({ format: CUSTOM_OUTPUT, label: `${name} (outfmt ${custom})`, testid: 'results-download-custom' });
+    items.push({ key: 'format-custom', format: CUSTOM_OUTPUT, label: `${name} (outfmt ${custom})`, testid: 'results-download-custom' });
   }
+  (loaded.value?.run.record.runFiles ?? []).forEach((file, index) =>
+    items.push({ key: `file-${index}`, runFile: index, label: `${file.name} (-logfile)`, testid: `results-download-run-file-${index}` }),
+  );
   return items;
 });
 const downloadsOpen = ref(false);
@@ -92,12 +102,14 @@ const downloadsList = ref<HTMLElement>();
 const saver = new OutputSaver(props.coordinator);
 const downloadProblem = useStore(saver.problem);
 
-function download(format: RunOutput): void {
+function download(item: DownloadItem): void {
   downloadsOpen.value = false;
   // The chosen item leaves the page with the list; the focus stays on "Download All".
   downloadsButton.value?.focus();
   const run = loaded.value?.run;
-  if (run !== undefined) void saver.save(run, format);
+  if (run === undefined) return;
+  if ('format' in item) void saver.save(run, item.format);
+  else void saver.saveRunFile(run, item.runFile);
 }
 
 /** Escape closes the list, and the focus goes back to its button (Safari does not focus a clicked button). */
@@ -240,8 +252,8 @@ async function toAlignments(id: HspId): Promise<void> {
               Download All
             </button>
             <ul v-if="state.phase === 'ready' && downloadsOpen" :id="downloadsId" ref="downloadsList" class="download-list" data-testid="results-download-menu">
-              <li v-for="item in downloads" :key="item.format">
-                <button type="button" :data-testid="item.testid" @click="download(item.format)">{{ item.label }}</button>
+              <li v-for="item in downloads" :key="item.key">
+                <button type="button" :data-testid="item.testid" @click="download(item)">{{ item.label }}</button>
               </li>
             </ul>
             <p v-if="state.phase === 'ready' && downloadProblem" class="results-message error" role="alert" data-testid="results-download-problem">
@@ -303,9 +315,17 @@ async function toAlignments(id: HspId): Promise<void> {
       >
         {{ state.message }}
       </p>
+      <!-- A failed run keeps the file of its -logfile (TBLASTX's holds NCBI's error; line RG E1w-3b). -->
+      <RunFiles
+        v-if="state.phase === 'unavailable' && selected?.status === 'failed' && (selected.record.runFiles?.length ?? 0) > 0"
+        :key="selected.snapshot.runId"
+        :coordinator="coordinator"
+        :run="selected"
+      />
 
       <template v-if="state.phase === 'ready' && loaded">
-        <QueryPicker v-if="multiQuery" :results="results" :state="state" />
+        <!-- A dry run (-dryrun) searched no query: its notice says so. -->
+        <QueryPicker v-if="multiQuery && !loaded.run.snapshot.dryRun" :results="results" :state="state" />
         <ResultNotices :state="state" @clear="results.setFilters({ queriesWithHitsOnly: state.filters.queriesWithHitsOnly ?? false })" />
 
         <TabList v-model="view" class="results-tabs" label="Results view" :tabs="TABS" />

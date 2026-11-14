@@ -81,7 +81,8 @@ pub(crate) enum TabularSubjects<'a> {
         length: &'a dyn Fn(usize) -> usize,
         parsed: &'a [Option<Arc<ParsedSubject>>],
     },
-    /// The reported sequences of a database: their tabular ids, ordinal ids, records (with
+    /// The reported sequences of a database: their tabular ids (`saccver`,
+    /// `common::database::tabular_subject_ids`), ordinal ids, records (with
     /// the stored title of a sequence without parsed Seq-ids), parsed Seq-ids (empty when none
     /// has them), lengths, and taxonomy (empty when no field shows it).
     Database {
@@ -245,7 +246,7 @@ impl<'a> TabularSubjects<'a> {
             TabularSubjects::Database {
                 ids,
                 ordinals,
-                oids: _,
+                oids,
                 records,
                 parsed,
                 lengths,
@@ -293,16 +294,21 @@ impl<'a> TabularSubjects<'a> {
                     }
                     // A sequence without parsed Seq-ids: the first word of its stored title
                     // (`gnl|BL_ORD_ID|n` replaced, `CShowBlastDefline::GetSeqIdList`) for every
-                    // id, and its one definition line's title.
+                    // id, or where it gives none the general id (`TabularSubjectId`), and its one
+                    // definition line's title.
                     None => {
-                        let id: &[u8] = ids.get(s_idx).map_or(&b"unknown"[..], |id| id.as_ref());
+                        let accession: &[u8] =
+                            ids.get(s_idx).map_or(&b"unknown"[..], |id| id.as_ref());
                         let title = records
                             .get(s_idx)
                             .map_or(&[][..], |record| record.title.as_slice());
+                        let oid = oids.oid(ordinals.get(s_idx).copied().unwrap_or_default());
                         Ok(SubjectValues {
-                            id: Cow::Borrowed(id),
-                            accession: Cow::Borrowed(id),
-                            accession_version: Cow::Borrowed(id),
+                            id: crate::algorithm::common::database::tabular_seqid(
+                                accession, oid, title, false,
+                            ),
+                            accession: Cow::Borrowed(accession),
+                            accession_version: Cow::Borrowed(accession),
                             gi: 0,
                             all_ids: Vec::new(),
                             titles: Some(vec![title]),

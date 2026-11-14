@@ -1,6 +1,6 @@
 //! The steps of the offset pairs of a blastn subject chunk's two-stage scan, as
 //! `two_stage_scan::scan_two_stage_lookup` (the two-stage branch of
-//! `collect_prelim_hits_for_chunk`) runs them for each batch of pairs its scan collects, in the
+//! `prelim_subject::prelim_chunk_hits`) runs them for each batch of pairs its scan collects, in the
 //! order of the pairs, on one thread (`extend_offset_pairs`): for each pair the word extension of
 //! the lookup table hit of a two-stage table (`TwoStageLookup`) to
 //! `word_length` letters (`word_extend_pair`), the diagonal's last hit, the word type, the
@@ -204,8 +204,9 @@ pub(super) struct PairExtendState<'s> {
 ///     }
 ///     return hits_extended;
 /// ```
-/// No `#[inline]`: as a closure of `collect_prelim_hits_for_chunk` the steps were an out-of-line
-/// function already (the scan calls them from 11 places).
+/// No `#[inline]`: as a closure of `collect_prelim_hits_for_chunk` (now
+/// `prelim_subject::prelim_chunk_hits`) the steps were an out-of-line function already (the scan
+/// calls them from 11 places).
 pub(super) fn extend_offset_pairs(
     x: &PairExtendInputs<'_>,
     state: &mut PairExtendState<'_>,

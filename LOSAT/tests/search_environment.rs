@@ -14,7 +14,6 @@ mod run_local_support;
 
 use std::process::{Command, Output};
 
-use crate::ncbi_windows_paths::ncbi_paths_on_windows;
 use run_local_support::string_to_int_exception;
 
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
@@ -291,16 +290,15 @@ fn a_header_file_that_ncbi_cannot_read_comes_before_the_prefetch() {
                 &[],
             )
         };
-        // The path as NCBI writes it on the platform of the run (`SeqDB_ConvertOSPath`: `\` on
-        // Windows, `ncbi_windows_paths::ncbi_paths_on_windows`).
+        // The path as LOSAT prints it on this platform (Windows: `\` throughout).
         let error = format!(
-            "BLAST Database error: Error: File ({{M}}/tests/db_search/{db}.{header}) not found.\n"
+            "BLAST Database error: Error: File ({}) not found.\n",
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join("db_search")
+                .join(format!("{db}.{header}"))
+                .display()
         );
-        let error = match cfg!(windows) {
-            true => ncbi_paths_on_windows(&error, &["{M}"]),
-            false => error,
-        }
-        .replace("{M}", env!("CARGO_MANIFEST_DIR"));
         for outfmt in ["0", "6", "7"] {
             let what = format!("{program} -db {db} -outfmt {outfmt}");
             let plain = run(outfmt, None);

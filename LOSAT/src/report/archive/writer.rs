@@ -27,6 +27,7 @@ use crate::report::diag_log::Message;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::encoder::{Encoder, ReplacedChar, Traced};
+use crate::report::serial::pssm::PssmWithParameters;
 use crate::report::serial::xml::XmlEncoder;
 
 /// The bytes that an encoder holds before its buffer is handed to the sink.
@@ -54,13 +55,23 @@ impl KaBlock {
     }
 }
 
+/// The queries of a request (`Blast4-queries`): the batch's Bioseqs (a FASTA query's), or the
+/// PSSM of a PSSM query (`-in_pssm`) as NCBI's application read it.
+#[derive(Clone, Copy)]
+pub enum RequestQueries<'a> {
+    /// The batch's queries, in order.
+    Bioseqs(&'a [BioseqInput<'a>]),
+    /// The `PssmWithParameters` of psiblast's or tblastn's `-in_pssm`.
+    Pssm(&'a PssmWithParameters),
+}
+
 /// What the request of one query batch reads besides the run's options (`ArchiveRequest`): the
 /// archive's and the search strategy's (`requests::RunRequests` makes it from the batch's
 /// records).
 #[derive(Clone, Copy)]
 pub struct RequestInputs<'a> {
-    /// The batch's queries, in order.
-    pub queries: &'a [BioseqInput<'a>],
+    /// The batch's queries.
+    pub queries: RequestQueries<'a>,
     /// `-subject`: every subject (the request's `database` is `None` then).
     pub subjects: &'a [BioseqInput<'a>],
     /// `RequiredStart` and `RequiredEnd` (0-based) of a `-query_loc` that is not the first
@@ -74,9 +85,16 @@ impl RequestInputs<'_> {
     /// Whether `encoding` writes the strings of the request's Bioseqs and Seq-locs as they are
     /// (`BioseqInput::written_as_is`); the `LCaseMask` parameters, the masks and the Seq-aligns
     /// of the archive hold the same Seq-ids (the subjects of `-db` have the database's, which
-    /// its reader refuses or replaces where NCBI would post).
+    /// its reader refuses or replaces where NCBI would post). A PSSM query's strings are visible
+    /// ASCII, written as they are: NCBI's reader of `-in_pssm` replaces any other byte by `#`, with
+    /// its own error message, before the request is made (`CObjectIStreamAsn`), and LOSAT refuses
+    /// such a PSSM where it reads it (`pssm_search::in_pssm::psi_search_and_object`).
     pub fn written_as_is(&self, encoding: ArchiveEncoding) -> bool {
-        self.queries
+        let queries = match self.queries {
+            RequestQueries::Bioseqs(queries) => queries,
+            RequestQueries::Pssm(_) => &[],
+        };
+        queries
             .iter()
             .chain(self.subjects)
             .all(|bioseq| bioseq.written_as_is(encoding))
@@ -301,7 +319,7 @@ fn write_request_body<E: Encoder>(
     request: &super::ArchiveRequest,
     batch: &RequestInputs<'_>,
     sets: &[Param],
-    database_list: Option<&Param>,
+    database_params: &[Param],
 ) {
     out.enc.member("body", 1);
     out.enc.variant("Blast4-request-body", "queue-search", 8);
@@ -314,56 +332,24 @@ fn write_request_body<E: Encoder>(
     out.enc.end_member();
 
     out.enc.member("queries", 2);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:609-617,648-655
-    // ```c++
-    //         ITERATE(IRemoteQueryData::TSeqLocs, itr, seqloc_list)
-    //         {
-    //             if (IsLocalId((*itr)->GetId()))
-    //             {
-    //                 has_local_ids = true;
-    //                 break;
-    //             }
-    //         }
-    //     ...
-    //     if (has_local_ids)
-    //     {
-    //         Q->SetBioseq_set(*bioseq_set);
-    //     }
-    //     else
-    //     {
-    //     	Q->SetSeq_loc_list() = seqloc_list;
-    //     }
-    // ```
-    if batch.queries.iter().all(|query| query.seq_loc.is_some()) {
-        out.enc.variant("Blast4-queries", "seq-loc-list", 1);
-        out.enc.begin_list(false);
-        for loc in batch
-            .queries
-            .iter()
-            .filter_map(|query| query.seq_loc.as_ref())
-        {
-            out.enc.element();
-            write_seq_loc(&mut out.enc, loc);
-            out.flush_if_large();
-        }
-        out.enc.end_list();
-        out.enc.end_variant();
-    } else {
-        out.enc.variant("Blast4-queries", "bioseq-set", 2);
-        out.enc.begin_sequence("Bioseq-set");
-        out.enc.member("seq-set", 7);
-        out.enc.begin_list(false);
-        for query in batch.queries {
-            out.enc.element();
-            out.enc.variant("Seq-entry", "seq", 0);
-            write_bioseq(&mut out.enc, query);
+    match batch.queries {
+        RequestQueries::Bioseqs(queries) => write_bioseq_queries(out, queries),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:555-559
+        // ```c++
+        //     CRef<CBlast4_queries> queries_p(new CBlast4_queries);
+        //     queries_p->SetPssm(*pssm);
+        //
+        //     m_QueueSearchRequest->SetQueries(*queries_p);
+        //     m_QueueSearchRequest->SetService(new_service);
+        // ```
+        // The object that the application read (`x_Process_Pssm` takes the application's `CRef`,
+        // serialized at once), written with the request's encoder.
+        RequestQueries::Pssm(pssm) => {
+            out.enc.variant("Blast4-queries", "pssm", 0);
+            crate::report::serial::pssm::write_value(&mut out.enc, pssm);
             out.enc.end_variant();
             out.flush_if_large();
         }
-        out.enc.end_list();
-        out.enc.end_member();
-        out.enc.end_sequence();
-        out.enc.end_variant();
     }
     out.enc.end_member();
 
@@ -387,6 +373,73 @@ fn write_request_body<E: Encoder>(
     out.enc.end_variant();
     out.enc.end_member();
 
+    write_request_options(out, request, batch, sets, database_params);
+    out.enc.end_sequence();
+    out.enc.end_variant();
+    out.enc.end_member();
+}
+
+/// The `queries` of a request of FASTA queries: the batch's Seq-locs, or its Bioseqs.
+fn write_bioseq_queries<E: Encoder>(out: &mut ArchiveOut<'_, E>, queries: &[BioseqInput<'_>]) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:609-617,648-655
+    // ```c++
+    //         ITERATE(IRemoteQueryData::TSeqLocs, itr, seqloc_list)
+    //         {
+    //             if (IsLocalId((*itr)->GetId()))
+    //             {
+    //                 has_local_ids = true;
+    //                 break;
+    //             }
+    //         }
+    //     ...
+    //     if (has_local_ids)
+    //     {
+    //         Q->SetBioseq_set(*bioseq_set);
+    //     }
+    //     else
+    //     {
+    //     	Q->SetSeq_loc_list() = seqloc_list;
+    //     }
+    // ```
+    if queries.iter().all(|query| query.seq_loc.is_some()) {
+        out.enc.variant("Blast4-queries", "seq-loc-list", 1);
+        out.enc.begin_list(false);
+        for loc in queries.iter().filter_map(|query| query.seq_loc.as_ref()) {
+            out.enc.element();
+            write_seq_loc(&mut out.enc, loc);
+            out.flush_if_large();
+        }
+        out.enc.end_list();
+        out.enc.end_variant();
+    } else {
+        out.enc.variant("Blast4-queries", "bioseq-set", 2);
+        out.enc.begin_sequence("Bioseq-set");
+        out.enc.member("seq-set", 7);
+        out.enc.begin_list(false);
+        for query in queries {
+            out.enc.element();
+            out.enc.variant("Seq-entry", "seq", 0);
+            write_bioseq(&mut out.enc, query);
+            out.enc.end_variant();
+            out.flush_if_large();
+        }
+        out.enc.end_list();
+        out.enc.end_member();
+        out.enc.end_sequence();
+        out.enc.end_variant();
+    }
+}
+
+/// The options of a request: `algorithm-options` (the command line's with what the handle holds,
+/// `sets`), `program-options` (the query's range and masks, the database's list and masking,
+/// `database_params`) and `format-options` (psiblast's `Web_StepNumber`).
+fn write_request_options<E: Encoder>(
+    out: &mut ArchiveOut<'_, E>,
+    request: &super::ArchiveRequest,
+    batch: &RequestInputs<'_>,
+    sets: &[Param],
+    database_params: &[Param],
+) {
     out.enc.member("algorithm-options", 5);
     out.enc.begin_named("Blast4-parameters");
     out.enc.begin_list(false);
@@ -406,7 +459,7 @@ fn write_request_body<E: Encoder>(
     out.enc.end_named();
     out.enc.end_member();
 
-    if batch.required.is_some() || !batch.lcase_masks.is_empty() || database_list.is_some() {
+    if batch.required.is_some() || !batch.lcase_masks.is_empty() || !database_params.is_empty() {
         out.enc.member("program-options", 6);
         out.enc.begin_named("Blast4-parameters");
         out.enc.begin_list(false);
@@ -440,8 +493,10 @@ fn write_request_body<E: Encoder>(
         //     x_Process_Query(query);
         //     x_Process_SearchDb(db);
         // ```
-        // The database's list comes after the parameters of the query.
-        if let Some(param) = database_list {
+        // The database's list and masking come after the parameters of the query
+        // (search_strategy.cpp:480-516: `TaxidList` or `NegativeTaxidList`, then
+        // `DbFilteringAlgorithmKey` or `DbFilteringAlgorithmId`, then `SubjectMaskingType`).
+        for param in database_params {
             write_param(&mut out.enc, param);
         }
         out.enc.end_list();
@@ -477,9 +532,6 @@ fn write_request_body<E: Encoder>(
         out.enc.end_named();
         out.enc.end_member();
     }
-    out.enc.end_sequence();
-    out.enc.end_variant();
-    out.enc.end_member();
 }
 
 fn write_search_archive<E: Encoder, A: AlignSource>(
@@ -487,7 +539,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     request: &super::ArchiveRequest,
     batch: &BatchArchive<'_>,
     sets: &[Param],
-    database_list: Option<&Param>,
+    database_params: &[Param],
     messages: &[Message],
     aligns: &mut A,
 ) -> Result<()> {
@@ -499,7 +551,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     // The request's `ident` is `CBlastVersion::Print()` (`crate::NCBI_BLAST_VERSION`).
     out.enc.visible_str(crate::NCBI_BLAST_VERSION.as_bytes());
     out.enc.end_member();
-    write_request_body(out, request, &batch.request, sets, database_list);
+    write_request_body(out, request, &batch.request, sets, database_params);
     out.enc.end_sequence();
     out.enc.end_member();
 
@@ -561,11 +613,11 @@ fn write_strategy_document<E: Encoder>(
     request: &super::ArchiveRequest,
     batch: &RequestInputs<'_>,
     sets: &[Param],
-    database_list: Option<&Param>,
+    database_params: &[Param],
 ) {
     out.enc.begin_document("Blast4-request");
     out.enc.begin_sequence("Blast4-request");
-    write_request_body(out, request, batch, sets, database_list);
+    write_request_body(out, request, batch, sets, database_params);
     out.enc.end_sequence();
     out.enc.end_document();
 }
@@ -579,18 +631,18 @@ pub(super) fn write_strategy_request(
     request: &super::ArchiveRequest,
     batch: &RequestInputs<'_>,
     sets: &[Param],
-    database_list: Option<&Param>,
+    database_params: &[Param],
     collect: impl FnOnce(&[ReplacedChar]) -> std::io::Result<()>,
 ) -> Result<()> {
     let mut buf = Vec::new();
     let encoding = ArchiveEncoding::Text;
     if request.written_as_is(encoding) && batch.written_as_is(encoding) {
         let mut out = ArchiveOut::new(AsnTextEncoder::new(&mut buf), sink);
-        write_strategy_document(&mut out, request, batch, sets, database_list);
+        write_strategy_document(&mut out, request, batch, sets, database_params);
         out.finish()
     } else {
         let mut out = ArchiveOut::new(Traced::new(AsnTextEncoder::new(&mut buf), 0), sink);
-        write_strategy_document(&mut out, request, batch, sets, database_list);
+        write_strategy_document(&mut out, request, batch, sets, database_params);
         out.finish_collecting(collect)
     }
 }
@@ -639,7 +691,7 @@ pub fn write_archive<A: AlignSource>(
 ) -> Result<()> {
     let messages = handle.take_messages();
     let sets = handle.request_sets(batch.searched_space);
-    let list = handle.options().database_list();
+    let params = handle.options().database_params();
     let request = handle.request();
     let encoding = handle.encoding();
     let as_is = request.written_as_is(encoding) && batch.request.written_as_is(encoding);
@@ -657,7 +709,7 @@ pub fn write_archive<A: AlignSource>(
         request,
         batch,
         sets: &sets,
-        database_list: list,
+        database_params: &params,
         messages: &messages,
     };
     match (encoding, as_is) {
@@ -700,7 +752,7 @@ struct SearchArchive<'a> {
     request: &'a super::ArchiveRequest,
     batch: &'a BatchArchive<'a>,
     sets: &'a [Param],
-    database_list: Option<&'a Param>,
+    database_params: &'a [Param],
     messages: &'a [Message],
 }
 
@@ -718,7 +770,7 @@ impl SearchArchive<'_> {
             self.request,
             self.batch,
             self.sets,
-            self.database_list,
+            self.database_params,
             self.messages,
             aligns,
         )?;

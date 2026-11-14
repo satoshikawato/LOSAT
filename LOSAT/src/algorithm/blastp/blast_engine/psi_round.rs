@@ -100,6 +100,7 @@ pub(super) fn search_rounds(
                 .is_none()
                 .then(|| subject_source.fasta_records()),
             args.lcase_masking,
+            args.psi_search.as_ref().and_then(|psi| psi.request_pssm()),
         )
     });
     let write_stop_request = || -> Result<()> {
@@ -127,12 +128,18 @@ pub(super) fn search_rounds(
             // `kbp_psi` that is not valid, a database without sequences or whose sequence file
             // cannot be opened, `psiblast_stop_at_invalid_query`) comes after round 1 has written
             // the input PSSM's files; NCBI's check of the PSSM (`validation_error`) stops before
-            // (NCBI 2.17.0, probes `y.*`, `y2.*` of the PS5c review; line PS DECISIONS 31).
+            // (NCBI 2.17.0, probes `y.*`, `y2.*` of the PS5c review; line PS DECISIONS 31), and so
+            // do the search strategy's request without a database and the PSSM engine's scores
+            // (`PsiSearch::stop_before_search`: `SaveSearchStrategy` and `CPsiBlast` before the
+            // rounds).
             let search_error = error.downcast_ref::<crate::cli::NativeError>().is_some()
-                && args
-                    .psi_search
-                    .as_deref()
-                    .is_some_and(|psi| psi.validation_error.is_none());
+                && args.psi_search.as_deref().is_some_and(|psi| {
+                    psi.stop_before_search(
+                        args.strategy.is_some(),
+                        subject_source.database().is_some(),
+                    )
+                    .is_none()
+                });
             if let Some(input) = plan.input.as_ref().filter(|_| search_error) {
                 let (asn, ascii) = input.files(&plan.request)?;
                 RoundFiles::new(

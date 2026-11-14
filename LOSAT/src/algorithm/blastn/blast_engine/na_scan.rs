@@ -1,8 +1,8 @@
 //! The scan of a blastn subject chunk with a lookup table that is not two-stage (the direct
 //! table `PvDirectLookup`, or the na table `NaLookupTable`), whose lookup width is the word size
-//! (word sizes 4 to 8, `coordination.rs` `choose_na_lookup_table`), as `search_query_batch`'s
-//! `collect_prelim_hits_for_chunk` runs it when LOSAT_X_PAIRPARNA (`x_pair_seed_na.rs`) does not
-//! take the chunk, on one thread (`scan_na_lookup`): the subject's words in scan order
+//! (word sizes 4 to 8, `coordination.rs` `choose_na_lookup_table`), as
+//! `prelim_subject::prelim_chunk_hits` runs it when LOSAT_X_PAIRPARNA (`x_pair_seed_na.rs`) does
+//! not take the chunk, on one thread (`scan_na_lookup`): the subject's words in scan order
 //! (`scan_subject_kmers_with_ranges`), and for each lookup hit of a word, in the table's order,
 //! the seed's context, its diagonal and the `last_hit` test, the word type, in two-hit mode the
 //! off-diagonal search of a single word (`pair_extend::off_diagonal_found`, which the steps of
@@ -34,7 +34,7 @@
 //! `SubjectChunk`, `QueryContext`, `QueryContextIndex`, `UngappedHit` and `BlastnTiming`;
 //! `scan_subject_kmers_with_ranges`, `select_mb_scan_kind`, `diag_hash_insert_window`,
 //! `x_push_ungapped`, `mask_lookup_index` and `packed_kmer_at_seed_mask`). Its function is the
-//! statements of the branch of `collect_prelim_hits_for_chunk` that were there, in their order;
+//! statements of the branch of `prelim_chunk_hits` that were there, in their order;
 //! the fold of LOSAT_X_PAIRPARNA (`x_pair_seed_na.rs` `fold_na_t`) copies those of one-hit mode
 //! with the diagonal hash one by one, so their order is kept here. What the scan reads that is
 //! the same for every seed of a chunk is `NaScanInputs`, and what it writes is `NaScanState`,
@@ -53,7 +53,7 @@ use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::algorithm::blastn::lookup::{NaLookupTable, PvDirectLookup};
 
 /// What the scan of one subject chunk with a table that is not two-stage reads that is the same
-/// for every seed, in groups below. Built once per chunk by `collect_prelim_hits_for_chunk`, after
+/// for every seed, in groups below. Built once per chunk by `prelim_chunk_hits`, after
 /// LOSAT_X_PAIRPARNA declines the chunk, with the names there; every field is a shared reference
 /// or a `Copy` value.
 ///
@@ -140,8 +140,8 @@ pub(super) struct NaScanInputs<'a> {
 /// What the scan writes: the chunk's initial hits, the diagonal table (the array's levels and
 /// lengths, or the hash), and the debug counters (the subject positions scanned, the lookup hits,
 /// the seeds in the debug window, the hits under the cutoff and the hits saved). Built once per
-/// chunk by `collect_prelim_hits_for_chunk` with `NaScanInputs`, from its scratch and its counters
-/// (references only, the types the scan had as a branch of that closure); its borrows end with
+/// chunk by `prelim_chunk_hits` with `NaScanInputs`, from its scratch and its counters
+/// (references only, the types the scan had as a branch of that fn); its borrows end with
 /// the call.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:970-971
@@ -206,7 +206,7 @@ pub(super) struct NaScanState<'s> {
 ///         }
 ///     }
 /// ```
-/// No `#[inline]`: one call site, the branch of `collect_prelim_hits_for_chunk` it was. Called out
+/// No `#[inline]`: one call site, the branch of `prelim_chunk_hits` it was. Called out
 /// of line, it moves the instructions of no measured case by 0.1 % (callgrind, n1; SW7 bn-10, whose
 /// move of the two-stage scan ended the register spill this was `#[inline(always)]` for). The
 /// scan's callback stays a function of its own, as it was.

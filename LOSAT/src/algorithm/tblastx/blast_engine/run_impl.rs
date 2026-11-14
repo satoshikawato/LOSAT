@@ -2086,6 +2086,9 @@ fn search(
     // (`check_report_formats`: `xinclude_check`), as the other format checks of each
     // requested format.
     check_report_formats(outputs, args.out.as_deref())?;
+    if let SubjectSource::Database(database) = &source {
+        database.check_accession_tables()?;
+    }
     crate::blastinput::app::check_search_environment(
         "TBLASTX",
         !matches!(source, SubjectSource::Database(_)),
@@ -2539,6 +2542,7 @@ fn write_tblastx_outputs(
     let subject_ids = if output_formats.iter().any(|format| format.is_tabular()) {
         match &run.database {
             Some(database) => database.reported.tabular_subject_ids(
+                database.oids,
                 output_formats
                     .iter()
                     .any(|format| format.tabular_reads_subject()),

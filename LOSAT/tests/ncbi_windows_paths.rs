@@ -1,6 +1,5 @@
 //! The paths in NCBI's messages as NCBI's code writes them on Windows, for the tests that compare
-//! LOSAT with NCBI's bytes frozen on Linux (`blastdbcmd_info.rs`, `masker_fixtures.rs`,
-//! `search_environment.rs`).
+//! LOSAT with NCBI's bytes frozen on Linux (`blastdbcmd_info.rs`, `masker_fixtures.rs`).
 
 /// `text`, NCBI's bytes from Linux with the placeholders `roots` for the directories a test
 /// places there, as NCBI's code writes it on Windows, where the paths of its database messages

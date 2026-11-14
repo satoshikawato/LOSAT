@@ -133,6 +133,8 @@ watch(
 function restoreDefaults(): void {
   props.draft.resetFields(placementFlags(program.value, 'algorithm'));
   props.draft.setExtra('');
+  // The file of a -conffile that Additional options gave goes with them (line RG E1w-3b).
+  props.draft.setConffile(undefined);
 }
 
 function onThreads(event: Event): void {

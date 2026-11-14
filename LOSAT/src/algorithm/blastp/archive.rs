@@ -125,8 +125,14 @@ pub(crate) fn handle_for(
 
 /// The requests of a run's batches (`RunRequests`): protein queries and subjects (the `-subject`
 /// records `subjects`, `None` for `-db`), and with `-lcase_masking` (`lcase_masking`) one `notset`
-/// mask of each query's lower-case runs (SEG is never one).
-pub(crate) fn requests(subjects: Option<&[FastaRecord]>, lcase_masking: bool) -> RunRequests<'_> {
+/// mask of each query's lower-case runs (SEG is never one); `pssm` is psiblast's `-in_pssm` as
+/// read, which every request holds in place of the queries (`RunRequests::with_pssm_query`,
+/// `PsiSearch::request`).
+pub(crate) fn requests(
+    subjects: Option<&[FastaRecord]>,
+    lcase_masking: bool,
+    pssm: Option<std::sync::Arc<crate::report::serial::pssm::PssmWithParameters>>,
+) -> RunRequests<'_> {
     RunRequests::new(
         RequestPolicy {
             query_protein: true,
@@ -135,6 +141,7 @@ pub(crate) fn requests(subjects: Option<&[FastaRecord]>, lcase_masking: bool) ->
         },
         subjects,
     )
+    .with_pssm_query(pssm)
 }
 
 pub(crate) use crate::report::archive::error_lines;
@@ -252,7 +259,9 @@ pub(crate) fn for_each_batch(
     } else {
         call.spans
     };
-    let requests = requests(call.subject_records, call.lcase_masking);
+    // psiblast's `-in_pssm` writes no archive (`in_pssm::check_in_pssm_options`): the requests'
+    // queries are the call's records.
+    let requests = requests(call.subject_records, call.lcase_masking, None);
     for span in spans.iter().cloned() {
         if span.is_empty() {
             continue;

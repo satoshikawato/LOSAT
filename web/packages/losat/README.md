@@ -63,8 +63,9 @@ when the page is isolated and the search asks for more than one thread:
 import { WasmEngine, instantiateSerial, loadReactor, reactorControl } from 'losat';
 import { ENGINE_ASSETS } from 'losat/reactors';
 
-// describe and validate run on a serial instance in the page.
-const control = reactorControl(async () => (await instantiateSerial((await loadReactor(ENGINE_ASSETS.serial)).module)).abi);
+// describe and validate run on a serial instance in the page (here a new one for each call).
+const open = async () => (await instantiateSerial((await loadReactor(ENGINE_ASSETS.serial)).module)).abi;
+const control = reactorControl(open, open);
 const engine = new WasmEngine({ assets: ENGINE_ASSETS, control });
 ```
 
@@ -74,6 +75,13 @@ port, onPhase)` runs one search. The outputs arrive on the `MessagePort` as chun
 stream; `RunOutputReceiver` reads them on the other end of a `MessageChannel`. `EngineInput.records`
 holds the ID and length of every record of the input. `ReactorScanner` produces them, and the
 engine checks them before it searches.
+
+`engine.start(argv)` reads what the command line reads before its arguments: the file that
+`-conffile` names, the file that `-logfile` names, and whether the argv has `-dryrun`. Give the
+file of `-conffile` under that name to `engine.validate(argv, registry)` and as
+`EngineRunRequest.conffile`; `reactorControl` validates it on an instance of its own, opened with its
+second argument. A run returns the `-logfile` file in `RuntimeInfo.runFiles`. When a
+run fails, `runFilesOf(error)` returns it.
 
 In a worker or in Node, the serial module can also be called directly:
 

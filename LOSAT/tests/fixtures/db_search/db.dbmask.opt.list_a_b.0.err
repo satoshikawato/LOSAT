@@ -1,0 +1,7 @@
+BLAST Database error: Filtering algorithm ID 12 is not supported.
+
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+11           dust                                    window=32; level=40; linker=1           
+

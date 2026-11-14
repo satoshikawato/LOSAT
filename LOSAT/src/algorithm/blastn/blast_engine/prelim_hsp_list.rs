@@ -9,7 +9,7 @@
 //! the loop. An ungapped search (`ungapped_hsp_list`) makes the list from the sorted hits.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:503-578 (the chunk loop of
-//! `s_BlastSearchEngineCore` after the word finder: `GetGappedScore`, which is
+//! `s_BlastSearchEngineOneContext` after the word finder: `GetGappedScore`, which is
 //! `BLAST_GetGappedScore`, c++/src/algo/blast/core/blast_gapalign.c:3664-4114, with its loop on
 //! the initial hits at :3850; the purge and the sort; or `BLAST_GetUngappedHSPList`,
 //! blast_gapalign.c:4719-4775; the offsets)
@@ -31,7 +31,7 @@
 //!
 //! This module is a child of `run` for the types it keeps private (`UngappedHit`, `PrelimHit`,
 //! `SubjectChunk`, `QueryContext`, `XAheadScratch`, `BlastnTiming`, the sorts). Its functions are
-//! the code of `search_query_batch`'s `collect_prelim_hits_for_chunk` after the scan loop:
+//! the code of `prelim_subject::prelim_chunk_hits` after the scan loop:
 //! `gapped_score_list` and `x_prelim_extend` the bodies of what were the closures `x_prelim_list`
 //! and `x_prelim_extend`, and `ungapped_hsp_list`, `sort_ungapped_hits_for_gapped` and
 //! `gapped_hsp_list` the code around them. The values they read are the fields of `GappedPrelim`
@@ -246,9 +246,9 @@ pub(super) fn sort_ungapped_hits_for_gapped(
 /// trace id, its letters for the greedy aligner), the chunk (its offset, packed letters and
 /// length), the queries' contexts, the scoring, whether the chunk is the owner's serial call (not
 /// one of a chunk batch on the pool) and the chunk's number of initial hits, and the look-ahead's schedule. Built once per chunk by
-/// `collect_prelim_hits_for_chunk`, where the closures were; every field is a shared reference or
-/// a `Copy` value, so the struct is `Sync` for the query group tasks and the look-ahead helpers on
-/// the pool.
+/// `prelim_subject::prelim_chunk_hits`, where the closures were; every field is a shared reference
+/// or a `Copy` value, so the struct is `Sync` for the query group tasks and the look-ahead helpers
+/// on the pool.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3664-3675
 /// ```c
@@ -309,8 +309,8 @@ pub(super) struct GappedPrelim<'a> {
 /// scratch of its score-only calls, the scratch list of the look-ahead helpers (`None` for a query
 /// group task, which runs without helpers) and the list that the hits it keeps go to. The owner's
 /// tree, greedy scratch, helper list and hit list come from the subject's scratch
-/// (`SubjectScratch`), its gap scratch from `collect_prelim_hits_for_chunk`; a query group task's
-/// tree and scratch come from its state, its list from the task.
+/// (`SubjectScratch`), its gap scratch from `prelim_subject::prelim_chunk_hits`; a query group
+/// task's tree and scratch come from its state, its list from the task.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831,4084-4088
 /// ```c

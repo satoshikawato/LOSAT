@@ -223,7 +223,8 @@ pub(crate) trait XHead {
 
 /// EXPERIMENT (LOSAT_X_BNCSRPACK): `Ring`'s `push` and `flush`, for a scan generic over `XHead`.
 pub(crate) trait XRing<T> {
-    fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T));
+    /// `Ring::push`: whether a word left through `emit`.
+    fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T)) -> bool;
     fn flush(&mut self, emit: &mut impl FnMut(T));
 }
 
@@ -860,9 +861,14 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
 
     /// The word `w` enters (its `offsets` element prefetched; the word `RING / 2` places back
     /// gets the first and the last line of its run prefetched), and the word `RING` places back
-    /// leaves through `emit`.
+    /// leaves through `emit`; whether one left (none while fewer than `RING` words came before).
     #[inline(always)]
-    pub(crate) fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T)) {
+    pub(crate) fn push(
+        &mut self,
+        w: T,
+        cell: impl Fn(&T) -> usize,
+        emit: &mut impl FnMut(T),
+    ) -> bool {
         const MASK: usize = RING - 1;
         let offsets = self.offsets;
         prefetch(offsets.as_ptr().wrapping_add(cell(&w)));
@@ -880,11 +886,13 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
             }
         }
         let slot = self.n & MASK;
-        if self.n >= RING {
+        let leaves = self.n >= RING;
+        if leaves {
             emit(self.buf[slot]);
         }
         self.buf[slot] = w;
         self.n += 1;
+        leaves
     }
 
     /// The words still in the FIFO leave through `emit`, in order.
@@ -898,7 +906,7 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
 
 impl<T: Copy + Default> XRing<T> for Ring<'_, T> {
     #[inline(always)]
-    fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T)) {
+    fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T)) -> bool {
         Ring::push(self, w, cell, emit)
     }
 
@@ -923,10 +931,10 @@ impl<T: Copy + Default> XRing<T> for XRingPacked<'_, T> {
     /// their run prefetched, and the word `RING / 2` places back gets the first and the last line
     /// of its run prefetched, as on a head of one element per cell.
     #[inline(always)]
-    fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T)) {
+    fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T)) -> bool {
         const MASK: usize = RING - 1;
         let Some(r) = x_rank(self.head.bits, cell(&w)) else {
-            return;
+            return false;
         };
         let offsets = self.head.offsets;
         prefetch(offsets.as_ptr().wrapping_add(r));
@@ -942,12 +950,14 @@ impl<T: Copy + Default> XRing<T> for XRingPacked<'_, T> {
             }
         }
         let slot = self.n & MASK;
-        if self.n >= RING {
+        let leaves = self.n >= RING;
+        if leaves {
             emit(self.buf[slot]);
         }
         self.buf[slot] = w;
         self.ranks[slot] = r as u32;
         self.n += 1;
+        leaves
     }
 
     /// `Ring::flush`.

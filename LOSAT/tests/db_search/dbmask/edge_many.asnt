@@ -1,0 +1,137 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "edge many",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 150,
+          to 154,
+          id local id 5
+        },
+        {
+          from 187,
+          to 191,
+          id local id 5
+        },
+        {
+          from 224,
+          to 228,
+          id local id 5
+        },
+        {
+          from 261,
+          to 265,
+          id local id 5
+        },
+        {
+          from 298,
+          to 302,
+          id local id 5
+        },
+        {
+          from 335,
+          to 339,
+          id local id 5
+        },
+        {
+          from 372,
+          to 376,
+          id local id 5
+        },
+        {
+          from 409,
+          to 413,
+          id local id 5
+        },
+        {
+          from 446,
+          to 450,
+          id local id 5
+        },
+        {
+          from 483,
+          to 487,
+          id local id 5
+        },
+        {
+          from 520,
+          to 524,
+          id local id 5
+        },
+        {
+          from 557,
+          to 561,
+          id local id 5
+        },
+        {
+          from 594,
+          to 598,
+          id local id 5
+        },
+        {
+          from 631,
+          to 635,
+          id local id 5
+        },
+        {
+          from 668,
+          to 672,
+          id local id 5
+        },
+        {
+          from 705,
+          to 709,
+          id local id 5
+        },
+        {
+          from 742,
+          to 746,
+          id local id 5
+        },
+        {
+          from 779,
+          to 783,
+          id local id 5
+        },
+        {
+          from 816,
+          to 820,
+          id local id 5
+        },
+        {
+          from 853,
+          to 857,
+          id local id 5
+        },
+        {
+          from 890,
+          to 894,
+          id local id 5
+        },
+        {
+          from 927,
+          to 931,
+          id local id 5
+        },
+        {
+          from 964,
+          to 968,
+          id local id 5
+        },
+        {
+          from 1001,
+          to 1005,
+          id local id 5
+        },
+        {
+          from 1038,
+          to 1042,
+          id local id 5
+        }
+      }
+    },
+    more FALSE
+  }
+}

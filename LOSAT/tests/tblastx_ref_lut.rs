@@ -90,6 +90,21 @@ fn tblastx(
     threads: u32,
     switches: &[(&str, &str)],
 ) -> (Vec<u8>, String) {
+    let options: &[&str] = match threshold {
+        Some(threshold) => &["-threshold", threshold],
+        None => &[],
+    };
+    tblastx_with(query, subject, options, threads, switches)
+}
+
+/// [`tblastx`] with the search options `options`.
+fn tblastx_with(
+    query: &Path,
+    subject: &Path,
+    options: &[&str],
+    threads: u32,
+    switches: &[(&str, &str)],
+) -> (Vec<u8>, String) {
     let mut command = losat(switches);
     command
         .arg("tblastx")
@@ -97,16 +112,14 @@ fn tblastx(
         .arg(query)
         .arg("-subject")
         .arg(subject)
-        .args(["-outfmt", "6", "-num_threads", &threads.to_string()]);
-    if let Some(threshold) = threshold {
-        command.args(["-threshold", threshold]);
-    }
+        .args(["-outfmt", "6", "-num_threads", &threads.to_string()])
+        .args(options);
     command.env("LOSAT_X_STATS", "1");
     let output = command.output().expect("run LOSAT");
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(
         output.status.success(),
-        "{switches:?} threshold {threshold:?} threads {threads}: {stderr}"
+        "{switches:?} {options:?} threads {threads}: {stderr}"
     );
     if switches.contains(&REFERENCE) {
         // The chunk-switch gate sends every batch to the reference frame loop: no unit runs.
@@ -114,7 +127,7 @@ fn tblastx(
         assert_eq!(
             (units, fallback_gate >= 1),
             (0, true),
-            "{switches:?} threshold {threshold:?} threads {threads}: the frame loop:\n{stderr}"
+            "{switches:?} {options:?} threads {threads}: the frame loop:\n{stderr}"
         );
     }
     (output.stdout, stderr)
@@ -215,6 +228,41 @@ fn every_word_threshold_gives_the_same_report() {
         built_in_place(&reach),
         "-threshold +inf: the table was not built in place"
     );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The one-hit word finder (`-window_size 0`, which runs in the reference frame loop) with words of
+/// 4 and 2 letters and another matrix than BLOSUM62 (item X2e of line RG: the table of 4-letter
+/// words from the joint builder, the others from the direct builder; before, the chain builder,
+/// which held 1.3x NCBI's memory at `-word_size 4 -threshold 1`): the report is the chain
+/// builder's (`=0`) and the table was built in place, at one and four threads. A 450-base query
+/// against 3 kb.
+#[test]
+fn the_one_hit_loop_reports_the_same_at_other_word_sizes_and_matrices() {
+    let dir = temp_dir("one-hit");
+    let query = write(&dir, "q.fna", &[("mje", &letters("MjeNMV.fasta")[..450])]);
+    let subject = write(
+        &dir,
+        "s.fna",
+        &[("mela", &letters("MelaMJNV.fasta")[..3_000])],
+    );
+    for options in [
+        &["-window_size", "0", "-word_size", "4", "-threshold", "7"][..],
+        &["-window_size", "0", "-word_size", "2", "-threshold", "9"][..],
+        &["-window_size", "0", "-matrix", "BLOSUM45"][..],
+    ] {
+        for threads in [1, 4] {
+            let (base, _) = tblastx_with(&query, &subject, options, threads, &[SWITCH_OFF]);
+            assert!(!base.is_empty(), "{options:?}: no hits to compare");
+            let reach = reach_support::Reach::new("tbxlut-one-hit");
+            let (with, _) = tblastx_with(&query, &subject, options, threads, &[reach.var()]);
+            assert_eq!(base, with, "LOSAT_X_TBXLUT, {options:?}, threads {threads}");
+            assert!(
+                built_in_place(&reach),
+                "{options:?}, threads {threads}: the table was not built in place"
+            );
+        }
+    }
     std::fs::remove_dir_all(&dir).ok();
 }
 

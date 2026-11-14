@@ -1507,6 +1507,18 @@ fn search(
                     .and_then(crate::algorithm::pssm_search::PsiSearch::request_pssm),
             )
             .write(strategy, 0, input_records, None)?;
+            // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:270,307
+            // ```c++
+            //         formatter.PrintProlog();
+            // ...
+            //             SaveSearchStrategy(args, m_CmdLineArgs, query_factory, m_OptsHndl, pssm);
+            // ```
+            // NCBI's posts of the bytes replaced in that request (the `-db` name; NCBI 2.17.0
+            // probe RG K/k4b/agent7/probe4 `tbn_dbe_m45_f0`: the prolog, the posts, the error),
+            // saved in the error archive with outfmt 11 (`tbn_dbe_m45_f11`). The PSSM's own strings
+            // hold none: NCBI's reader replaced them before the prolog with its own messages, and
+            // LOSAT refuses such a PSSM (`in_pssm::psi_search_and_object`).
+            strategy.write_posts(&mut *outputs.diagnostics, args.archive.as_ref())?;
         }
         return Err(stop.error());
     }

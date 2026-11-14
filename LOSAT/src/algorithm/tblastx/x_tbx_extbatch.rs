@@ -521,7 +521,8 @@ impl<M: TbxScore> XPairPar<M> {
         exact
     }
 
-    // The scan loop of `scan_unit` (RI:3082-3168 on one unit) with `x_hit_batched` for `x_hit` and
+    // The scan loop of `scan_unit` (the reference's, `scan_chunk_plain` with
+    // `word_finder::scan_next_hits`, on one unit) with `x_hit_batched` for `x_hit` and
     // the batch resolved at the end of the unit (module doc). LOSAT_X_TBXPREFETCH's hint (`PF`) as
     // in `scan_unit`.
     /// Scans one unit and saves its init HSPs, in scan order, into `init_hsps`, with batches of

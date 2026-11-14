@@ -426,15 +426,23 @@ fn backslashed_counts_the_backslashes_before() {
 #[test]
 fn the_notice_and_the_last_value_are_ncbis() {
     let read = unix(b"garbage\n");
-    assert_eq!(
-        syntax_error_notice(read.error.as_ref().unwrap()),
+    let notice = |root: &str| {
         format!(
-            "Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:\n    T0 \"{}/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'garbage' (m_Pos = 1)\n\n",
-            crate::ncbi_exception::NCBI_BUILD_ROOT
+            "Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:\n    T0 \"{root}/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'garbage' (m_Pos = 1)\n\n",
         )
+    };
+    assert_eq!(
+        syntax_error_notice(read.error.as_ref().unwrap(), "blastn"),
+        notice(crate::ncbi_exception::NCBI_BUILD_ROOT)
+    );
+    // NCBI rpsbproc 0.5.1 of the 2025-05-13 package names its own build tree (env parity probe I,
+    // case `s722.h`).
+    assert_eq!(
+        syntax_error_notice(read.error.as_ref().unwrap(), "rpsbproc"),
+        notice("/export/home/tomcat/TeamCity/Agent2/work/b895474bf74772ad/struct_tree")
     );
     let read = unix(b"[BLAST]\nX\0Y\n");
-    assert!(syntax_error_notice(read.error.as_ref().unwrap())
+    assert!(syntax_error_notice(read.error.as_ref().unwrap(), "blastn")
         .ends_with("Invalid registry entry format: 'X\n"));
     let read = unix(b"[BLAST]\nBLASTDB=/a\n[blast]\nblastdb=/b\n[NCBI]\nBLASTDB=/c\n");
     assert_eq!(read.last_value("Blast", "BlastDB"), Some(&b"/b"[..]));

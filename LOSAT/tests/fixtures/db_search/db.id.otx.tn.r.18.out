@@ -1,0 +1,20 @@
+
+                                          Tax BLAST report                                          
+
+Query= P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains:
+RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName:
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin
+[Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha;
+AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+Contains: RecName: Full=Hemopressin [Pan troglodytes]
+
+Length=142
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ 3         human HBA1 cDNA                                                             286   9e-105  
+ 1         human HBA2 cDNA                                                             286   9e-105  

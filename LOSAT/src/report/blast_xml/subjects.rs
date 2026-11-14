@@ -22,10 +22,11 @@ pub enum XmlSubjects<'a> {
         length: &'a dyn Fn(usize) -> usize,
         protein: bool,
     },
-    /// A database: the sequences with hits by rank (`ordinals[rank]` the ordinal id, the
-    /// stored title `titles.get(rank)`, `length(rank)` the sequence length).
+    /// A database: the sequences with hits by rank (`ordinals[rank]` the ordinal id, whose OID
+    /// `oids` gives, the stored title `titles.get(rank)`, `length(rank)` the sequence length).
     Database {
         ordinals: &'a [u32],
+        oids: crate::seqdb::OidMap<'a>,
         titles: XmlTitles<'a>,
         /// The Blast-def-line taxid of each sequence by rank, 0 for none; only XML2 shows
         /// it. Empty where the program has not read them (outfmt 5 alone): every taxid is
@@ -163,18 +164,18 @@ impl SubjectNames {
         })
     }
 
-    /// The names of the database sequence `ordinal` with the stored title `title`
+    /// The names of the database sequence `oid` with the stored title `title`
     /// (`gnl|BL_ORD_ID|n`, the title as stored).
     pub fn of_database_sequence(
-        ordinal: impl std::fmt::Display,
+        oid: crate::seqdb::Oid,
         title: &[u8],
         taxid: i32,
         taxonomy: HitTaxonomy,
     ) -> Result<Self, Refusal> {
         Ok(SubjectNames {
-            id: format!("gnl|BL_ORD_ID|{ordinal}").into_bytes(),
+            id: oid.fasta_id().into_bytes(),
             title: names::xml_db_title(title)?,
-            accession: ordinal.to_string().into_bytes(),
+            accession: oid.get().to_string().into_bytes(),
             taxid,
             taxonomy,
             descriptions: Vec::new(),
@@ -256,6 +257,7 @@ impl XmlSubjects<'_> {
             }
             XmlSubjects::Database {
                 ordinals,
+                oids,
                 titles,
                 taxids,
                 taxonomy,
@@ -276,7 +278,7 @@ impl XmlSubjects<'_> {
                     .context("HSP of an unknown database sequence")?;
                 let taxid = taxids.get(s_idx).copied().unwrap_or(0);
                 let taxonomy = taxonomy.get(s_idx).cloned().unwrap_or_default();
-                SubjectNames::of_database_sequence(ordinal, title, taxid, taxonomy)
+                SubjectNames::of_database_sequence(oids.oid(ordinal), title, taxid, taxonomy)
                     .map_err(|refusal: Refusal| refusal.error(program, "a database title"))
             }
         }

@@ -17,6 +17,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod temp_support;
+use temp_support::{Finished, TempFile};
+
 fn temp_dir(stem: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -31,11 +34,11 @@ fn temp_dir(stem: &str) -> PathBuf {
     dir
 }
 
-fn run_str(args: &[&str]) -> Output {
+fn run_str(args: &[&str]) -> Finished<Output, TempFile> {
     run_env(args, &[])
 }
 
-fn run_env(args: &[&str], env: &[(&str, &str)]) -> Output {
+fn run_env(args: &[&str], env: &[(&str, &str)]) -> Finished<Output, TempFile> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") {
@@ -43,12 +46,11 @@ fn run_env(args: &[&str], env: &[(&str, &str)]) -> Output {
         }
     }
     // An --all-features binary at 2+ threads keeps this variable (see the other tests).
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_outfmt5_worker.log"),
-    );
+    let log = TempFile::keep_on_failure("losat_outfmt5_worker", "worker.log");
+    command.env("LOSAT_BLASTX_WORKER_LOG", &log);
     command.envs(env.iter().copied());
-    command.args(args).output().expect("run LOSAT")
+    let output = command.args(args).output().expect("run LOSAT");
+    Finished::new(output, log)
 }
 
 const PROTEIN: &str = "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG";
@@ -271,7 +273,7 @@ fn several_batches_make_one_document_with_global_iteration_numbers() {
         ]);
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(0), "{stderr}");
-        let text = String::from_utf8(output.stdout).expect("ASCII");
+        let text = String::from_utf8(output.stdout.clone()).expect("ASCII");
         assert_eq!(text.matches("<?xml").count(), 1);
         assert_eq!(text.matches("<BlastOutput_program>").count(), 1);
         assert_eq!(text.matches("<Iteration>").count(), 30);
@@ -301,7 +303,7 @@ fn runs(
     query: &Path,
     subject: &Path,
     extra: &[&str],
-) -> Vec<(String, Output, Vec<u8>)> {
+) -> Vec<(String, Finished<Output, TempFile>, Vec<u8>)> {
     let mut results = Vec::new();
     let variants: [(&str, &str, &[(&str, &str)]); 3] = [
         ("1 thread", "1", &[]),
@@ -335,7 +337,7 @@ fn runs(
 
 /// `refused` for every run of `runs`: rc 1, the message, nothing on standard output, and an
 /// empty `-out` file.
-fn all_refused(results: &[(String, Output, Vec<u8>)], what: &str) {
+fn all_refused(results: &[(String, Finished<Output, TempFile>, Vec<u8>)], what: &str) {
     for (variant, output, file) in results {
         refused_as(output, what, &format!("{what} ({variant})"));
         assert!(
@@ -408,7 +410,7 @@ fn a_bad_subject_title_whose_only_hit_is_in_a_later_batch_writes_nothing() {
         "1e-10",
     ]);
     assert_eq!(control.status.code(), Some(0));
-    let text = String::from_utf8(control.stdout).expect("ASCII");
+    let text = String::from_utf8(control.stdout.clone()).expect("ASCII");
     assert_eq!(
         text.matches("<Hit_def>s2 plain</Hit_def>").count(),
         5,
@@ -484,7 +486,13 @@ fn one_query_files(dir: &Path) -> (Vec<u8>, PathBuf) {
 
 /// `blastx` reading the query from a named pipe that a writer thread fills.
 #[cfg(unix)]
-fn run_fifo(dir: &Path, text: &[u8], subject: &Path, format: &str, out: Option<&Path>) -> Output {
+fn run_fifo(
+    dir: &Path,
+    text: &[u8],
+    subject: &Path,
+    format: &str,
+    out: Option<&Path>,
+) -> Finished<Output, TempFile> {
     use std::io::Write;
     let fifo = dir.join(format!("query_{format}.fifo"));
     let made = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
@@ -520,7 +528,7 @@ fn run_fifo(dir: &Path, text: &[u8], subject: &Path, format: &str, out: Option<&
 
 /// `blastx -query /dev/stdin` with a pipe on standard input.
 #[cfg(unix)]
-fn run_dev_stdin(text: &[u8], subject: &Path, format: &str) -> Output {
+fn run_dev_stdin(text: &[u8], subject: &Path, format: &str) -> Finished<Output, TempFile> {
     use std::io::Write;
     use std::process::Stdio;
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
@@ -529,10 +537,8 @@ fn run_dev_stdin(text: &[u8], subject: &Path, format: &str) -> Output {
             command.env_remove(name);
         }
     }
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_outfmt5_worker.log"),
-    );
+    let log = TempFile::keep_on_failure("losat_outfmt5_worker", "worker.log");
+    command.env("LOSAT_BLASTX_WORKER_LOG", &log);
     let mut child = command
         .args([
             "blastx",
@@ -557,7 +563,7 @@ fn run_dev_stdin(text: &[u8], subject: &Path, format: &str) -> Output {
     });
     let output = child.wait_with_output().expect("wait");
     writer.join().expect("writer thread");
-    output
+    Finished::new(output, log)
 }
 
 #[cfg(unix)]
@@ -581,7 +587,7 @@ fn a_named_pipe_query_is_refused_for_outfmt_5_and_works_for_outfmt_6() {
     // The other formats read the pipe once, as NCBI does.
     let tabular = run_fifo(&dir, &text, &subject, "6", None);
     assert_eq!(tabular.status.code(), Some(0));
-    let rows = String::from_utf8(tabular.stdout).unwrap();
+    let rows = String::from_utf8(tabular.stdout.clone()).unwrap();
     assert!(rows.starts_with("q1\ts1\t"), "{rows}");
     // The same query as a regular file gives the document.
     let query = dir.join("q.fa");
@@ -610,7 +616,7 @@ fn dev_stdin_from_a_pipe_is_refused_for_outfmt_5_and_works_for_outfmt_6() {
     refused_not_regular(&run_dev_stdin(&text, &subject, "5"), "/dev/stdin");
     let tabular = run_dev_stdin(&text, &subject, "6");
     assert_eq!(tabular.status.code(), Some(0));
-    let rows = String::from_utf8(tabular.stdout).unwrap();
+    let rows = String::from_utf8(tabular.stdout.clone()).unwrap();
     assert!(rows.starts_with("q1\ts1\t"), "{rows}");
     fs::remove_dir_all(dir).ok();
 }
@@ -671,7 +677,7 @@ fn a_held_document_is_written_when_the_run_ends_with_a_reader_error() {
                     assert!(output.stdout.is_empty(), "{label} {threads}");
                     fs::read(&out).unwrap()
                 } else {
-                    output.stdout
+                    output.stdout.clone()
                 };
                 results.push((
                     format!(
@@ -679,7 +685,7 @@ fn a_held_document_is_written_when_the_run_ends_with_a_reader_error() {
                         if to_file { "-out" } else { "stdout" }
                     ),
                     written,
-                    output.stderr,
+                    output.stderr.clone(),
                 ));
             }
         }

@@ -121,7 +121,7 @@
 //! its candidate loop. On x86-64 with AVX2 and POPCNT the direct loop scans the subjects of batches
 //! with few hits per used cell (BXDIAGMIN: short queries); elsewhere every batch.
 
-use super::x_ungap_sent::XSent;
+use super::x_ungap_sent::{by_word_size, XSent};
 use super::*;
 use crate::algorithm::blastp::extension::BlastpTwoHitUngappedResult;
 use crate::algorithm::blastp::x_seed_fused::XHitBf;
@@ -332,16 +332,20 @@ fn x_word_finder_scan_with<S: BxScoring>(
         }
     }
     if let Some(sent) = sent {
-        return x_word_finder_direct_sent(
-            batch,
-            parameters,
-            options,
-            subject,
-            lookup,
-            diagonals,
-            x_bxscan_byte(),
-            x_bxhitbf(),
-            sent,
+        // The instance of the word size, chosen once for the subject (item SC9b-1).
+        return by_word_size!(
+            options.word_size,
+            W => x_word_finder_direct_sent::<S, W>(
+                batch,
+                parameters,
+                options,
+                subject,
+                lookup,
+                diagonals,
+                x_bxscan_byte(),
+                x_bxhitbf(),
+                sent,
+            )
         );
     }
     if !S::BLOSUM62 {
@@ -480,10 +484,11 @@ fn x_word_finder_direct(
 /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): `x_word_finder_direct` with the extension of `sent`
 /// (`x_ungap_sent.rs`), in a function of its own so that the loops without it keep their code.
 /// With another matrix (item SC6b) the walks are its keys' and the one-hit argument is never
-/// called (`sent` exists only with a two-hit window).
+/// called (`sent` exists only with a two-hit window). `W` is `options.word_size` as a const (2 to
+/// 4), the walks' instance: the caller chooses it once per subject (`by_word_size!`).
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn x_word_finder_direct_sent<S: BxScoring>(
+fn x_word_finder_direct_sent<S: BxScoring, const W: usize>(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
@@ -512,7 +517,7 @@ fn x_word_finder_direct_sent<S: BxScoring>(
                 diagonals,
                 scan_byte,
                 move |_: &[u8], _: &[u8], s_left_off, s_right_off, q_right_off, dropoff, _| {
-                    sent.two_hit::<$shadow>(s_left_off, s_right_off, q_right_off, dropoff)
+                    sent.two_hit::<$shadow, W>(s_left_off, s_right_off, q_right_off, dropoff)
                 },
                 extend_one_hit_blosum62,
             )
@@ -1092,16 +1097,19 @@ mod tests {
                 }
                 for (&(scan_byte, hit_bf), pair) in arms.iter().zip(&mut sent_tables) {
                     for (d, shadow) in pair.iter_mut().zip([false, true]) {
-                        let hits = x_word_finder_direct_sent(
-                            &batch,
-                            &params,
-                            &options,
-                            &subject,
-                            &lookup,
-                            d,
-                            scan_byte,
-                            hit_bf,
-                            XSent::for_test(Blosum62Bx, &batch.sequence_start, &lead, shadow),
+                        let hits = by_word_size!(
+                            options.word_size,
+                            W => x_word_finder_direct_sent::<_, W>(
+                                &batch,
+                                &params,
+                                &options,
+                                &subject,
+                                &lookup,
+                                d,
+                                scan_byte,
+                                hit_bf,
+                                XSent::for_test(Blosum62Bx, &batch.sequence_start, &lead, shadow),
+                            )
                         )
                         .unwrap();
                         let arm = format!(

@@ -50,6 +50,8 @@ pub(super) enum ShownSubjects<'a> {
         name: &'a str,
         pairwise: &'a PairwiseDatabase,
         reported: &'a super::database::ReportedSubjects,
+        /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
+        oids: crate::seqdb::OidMap<'a>,
     },
 }
 
@@ -79,11 +81,11 @@ impl ShownSubjects<'_> {
             .map(|pairwise| pairwise.definition.as_slice())
     }
 
-    /// The ordinal ID of the reported database sequence of rank `rank`, `None` for `-subject`.
-    pub(super) fn ordinal(&self, rank: usize) -> Option<u32> {
+    /// The OID of the reported database sequence of rank `rank`, `None` for `-subject`.
+    pub(super) fn oid(&self, rank: usize) -> Option<crate::seqdb::Oid> {
         match self {
             Self::Fasta { .. } => None,
-            Self::Database { reported, .. } => Some(reported.ordinals[rank]),
+            Self::Database { reported, oids, .. } => Some(oids.oid(reported.ordinals[rank])),
         }
     }
 
@@ -196,6 +198,10 @@ pub(super) fn render(
     formatting: crate::blastinput::report_counts::FormattingArgs,
     genetic_code: u8,
     seg: Option<&SegParams>,
+    // The `-seg` options as NCBI's filter string prints them (`SegSpec::filter_options`), not the
+    // SEG parameters `seg` (a value not above 0 or NaN there is SEG's default, a hicut below the
+    // locut the locut): BLAST XML's `Parameters_filter`.
+    seg_filter: Option<(i32, f64, f64)>,
     mask_lowercase: bool,
     query_warning_lines: &[Vec<u8>],
     // The texts of the subjects that each query's report reads one by one (its batch's prefetch
@@ -283,7 +289,7 @@ pub(super) fn render(
             query_batch_skipped,
             scoring,
             matrix_name,
-            seg,
+            seg_filter,
             ranges,
             xml_is_xml2,
             xml_only_xml2,
@@ -425,7 +431,7 @@ pub(super) fn render(
         });
         // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
         let side_sink = format.sink.side_files().cloned();
-        let mut writer = format.sink.ostream()?;
+        let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
         match format_number(format.outfmt) {
             // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
             // (`tabular`); never the default 6 and 7 below.
@@ -1723,6 +1729,7 @@ mod tests {
                 Default::default(),
                 1,
                 Some(&seg),
+                Some((12, 2.2, 2.5)),
                 false,
                 &[],
                 &[],

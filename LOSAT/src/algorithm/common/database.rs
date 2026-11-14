@@ -287,11 +287,7 @@ pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error 
     //     }                                                                       \
     // ```
     if let Some(exception) = error.ncbi_exception() {
-        return NativeError {
-            exit: 255,
-            message: format!("Error: {}\n", exception.what()),
-        }
-        .into();
+        return NativeError::exception(exception).into();
     }
     match error.ncbi_message() {
         Some(text) => NativeError {
@@ -1081,11 +1077,12 @@ impl BatchReads {
     }
 }
 
-/// `PRE_FETCH_SEQS_LIMIT` as `NStr::StringToInt` reads it; `None` when it is not set or is no
-/// integer.
+/// The limit of `PRE_FETCH_SEQS_LIMIT` (`app::prefetch_seqs_limit`); `None` when it is not set. A
+/// value that NCBI cannot convert stops the first batch before its prefetch
+/// (`app::check_prefetch_environment`), so no batch's prefetch is decided by it: the plans made
+/// before the search count it as unset.
 fn prefetch_seqs_limit() -> Option<i32> {
-    std::env::var_os("PRE_FETCH_SEQS_LIMIT")
-        .and_then(|value| crate::blastinput::query_batch::ncbi_string_to_int(&value))
+    crate::blastinput::app::prefetch_seqs_limit().ok().flatten()
 }
 
 impl<'a> HeaderReader<'a> {
@@ -1260,7 +1257,7 @@ impl<'a> HeaderReader<'a> {
                 }
             }
         };
-        let own = self.db.oid(ordinal);
+        let own = self.db.oid(ordinal).get();
         let first = oids.first().copied();
         // What the lookup gives instead, where the scan of the other holders goes on.
         let mut given = first.is_none().then_some(FoundInstead::Nothing);
@@ -1298,18 +1295,53 @@ impl<'a> HeaderReader<'a> {
             Ok(oids) => oids,
             Err(error) => return failed(error),
         };
+        // LOSAT's own search of the keys in another letter case (version 5, a name or a `pir` or
+        // `prf` id): where it fails, NCBI's exact lookup may still succeed, so the holders are
+        // unknown (review 1 of line DBID pircase, L1).
+        let variants = match lookup.case_variant_oids(id) {
+            Ok(oids) => oids,
+            Err(error) => {
+                return (
+                    Some(FoundInstead::CaseUnknown(
+                        error.ncbi_message().unwrap_or_else(|| error.to_string()),
+                    )),
+                    None,
+                    None,
+                )
+            }
+        };
         let mut keys = Vec::new();
         crate::report::db_subject::scope_keys(subject, &mut keys);
+        // A sequence found under a key in another letter case holds such an id where it holds one
+        // of the Seq-align id's own handle: the key of a name is the same in every alternative and
+        // release, which the handles keep apart (`gb||locusy` and `emb||LOCUSY`, `sp||NAMEY` and
+        // `tr||namey`: review 1 of line DBID pircase, H1).
+        let handle = (!variants.is_empty())
+            .then(|| {
+                crate::seqid::mask_handle::mask_handle_key(id)
+                    .ok()
+                    .flatten()
+            })
+            .flatten();
         // The first was compared above. Besides a sequence given instead, any other holder
         // (also a copy of the subject's record) is one the scope can read for it.
         let mut also_held = None;
-        for other in oids
+        for (other, variant) in oids
             .iter()
             .chain(&folded)
-            .filter(|&&oid| oid != own && Some(oid) != first)
-            .map(|&oid| self.db.ordinal_of(oid))
+            .map(|oid| (oid, false))
+            .chain(variants.iter().map(|oid| (oid, true)))
+            .filter(|&(&oid, _)| oid != own && Some(oid) != first)
+            .map(|(&oid, variant)| (self.db.ordinal_of(oid), variant))
         {
-            if !self.holds_key(other, &keys, crate::seqid::defline_set::scope_keys) {
+            let held = if variant {
+                handle
+                    .as_deref()
+                    .is_some_and(|handle| self.holds_handle(other, handle))
+            } else {
+                self.holds_key(other, &keys, crate::seqid::defline_set::scope_keys)
+            };
+            if !held {
                 continue;
             }
             if given.is_some() {
@@ -1411,7 +1443,7 @@ impl<'a> HeaderReader<'a> {
             };
             found.extend(lookup.seqid_to_oids(&name_alone, true)?);
         }
-        let own = self.db.oid(ordinal);
+        let own = self.db.oid(ordinal).get();
         Ok(found
             .iter()
             .filter(|&&oid| oid != own)
@@ -1421,6 +1453,21 @@ impl<'a> HeaderReader<'a> {
                     && self.copy_of(subject, ordinal, other) == RecordCopy::Differs
             })
             .map(WeakMatch::Held))
+    }
+
+    /// Whether a Seq-id of the sequence `ordinal` is one `CSeq_id_Handle` with the key `handle`
+    /// (`seqid::mask_handle::mask_handle_key`).
+    fn holds_handle(&self, ordinal: u32, handle: &[u8]) -> bool {
+        let Ok(crate::seqdb::SequenceHeader::Parsed(set)) = self.db.read_header(ordinal) else {
+            return false;
+        };
+        set.deflines
+            .iter()
+            .flat_map(|defline| &defline.ids)
+            .any(|id| {
+                crate::seqid::mask_handle::mask_handle_key(id)
+                    .is_ok_and(|key| key.as_deref() == Some(handle))
+            })
     }
 
     /// Whether a Seq-id of the sequence `ordinal` has one of the keys `keys` that `key_of` gives
@@ -2110,7 +2157,7 @@ pub(crate) fn library_subject(
             .to_vec()
     });
     crate::api::local_blast::ReportedSubject {
-        oid: db.oid(ordinal),
+        oid: db.oid(ordinal).get(),
         id: std::sync::Arc::from(String::from_utf8_lossy(&id)),
         length,
     }
@@ -3580,10 +3627,52 @@ pub(crate) fn read_reported_taxonomy(
     Ok((taxids, taxonomy, parsed_taxonomy, notes))
 }
 
-/// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search (`x_CheckTaxDB`'s
-/// `SeqDB_ResolveDbPath("taxdb.bti")`: the current directory, `BLASTDB` and the registry's
-/// `[BLAST] BLASTDB`, as a database is looked for, `seqdb::SearchPath`). A registry value that
-/// LOSAT does not read as NCBI is its refusal, as for `-db`; `program` names it.
+/// The `[BLAST] BLASTDB` value of a run's application settings (`ApplicationSettings::blastdb`):
+/// the registry's part of the search path through which a `-subject` search's reports look for the
+/// taxonomy database (`subject_taxonomy`). The command line takes it from its settings; the library
+/// API gives it to a search of records whose reports look every taxid up (`api::run`, with the
+/// call's start); LOSAT Web gives none (it has no files: the database is not found).
+#[derive(Clone, Debug)]
+pub struct TaxdbSetting(Result<Option<String>, String>);
+
+impl TaxdbSetting {
+    /// The value of `settings`.
+    pub(crate) fn of(settings: &ApplicationSettings) -> Self {
+        TaxdbSetting(settings.blastdb.clone())
+    }
+}
+
+/// What the tabular reports of a `-subject` search know of the taxonomy database
+/// (`subject_taxonomy`).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SubjectTaxonomy {
+    /// The organism report's database (outfmt 18, `SubjectTaxdb`), when `taxdb.bti` is on the
+    /// search path.
+    pub(crate) taxdb: Option<SubjectTaxdb>,
+    /// Whether `taxdb.bti` is on the search path; `None` when no report looks every taxid up.
+    pub(crate) found: Option<bool>,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:582-603
+// ```c++
+// void CBlastTabularInfo::x_SetTaxInfo(const CBioseq_Handle & handle, const CRef<CBlast_def_line_set> & bdlRef)
+// {
+//     m_SubjectTaxId = ZERO_TAX_ID;
+//     ...
+//     if(m_SubjectTaxId == ZERO_TAX_ID)
+//             return;
+// ```
+/// What the tabular reports `specs` of a `-subject` search of `program` (upper case) ask of the
+/// taxonomy database where NCBI makes their formatters: whether `taxdb.bti` is on the search path
+/// of `setting` (`x_CheckTaxDB`'s `SeqDB_ResolveDbPath("taxdb.bti")`: the current directory,
+/// `BLASTDB` and the registry's `[BLAST] BLASTDB`, as a database is looked for, `seqdb::SearchPath`)
+/// for the plural names, which warn without it, and the organism report, whose lookups open it
+/// (`SubjectTaxdb`). A report of singular names reads nothing: NCBI looks a singular name up by
+/// the subject's taxid, and the records of `-subject` have none. A registry value that LOSAT does
+/// not read as NCBI is its refusal, as for `-db`. `setting` is `None` in LOSAT Web: not found.
+///
+/// The command line and the library's searches of records call it at the same point, after the
+/// options are processed (each program's `open_search_database`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
 /// ```c++
@@ -3594,15 +3683,42 @@ pub(crate) fn read_reported_taxonomy(
 ///    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
 ///    		if(resolved.empty())
 /// ```
-pub(crate) fn subject_taxdb_found(settings: &ApplicationSettings, program: &str) -> Result<bool> {
-    Ok(subject_search_path(settings, program)?
-        .resolve_file("taxdb.bti")
-        .is_some())
+pub(crate) fn subject_taxonomy<'s>(
+    setting: Option<&TaxdbSetting>,
+    program: &str,
+    specs: impl IntoIterator<Item = &'s crate::report::tabular::TabularSpec>,
+) -> Result<SubjectTaxonomy> {
+    let (mut looks_up, mut tax_report) = (false, false);
+    for spec in specs {
+        looks_up |= spec.looks_up_every_taxid();
+        tax_report |= spec.kind == crate::report::tabular::TabularKind::TaxReport;
+    }
+    if !looks_up {
+        return Ok(SubjectTaxonomy::default());
+    }
+    let Some(setting) = setting else {
+        return Ok(SubjectTaxonomy {
+            taxdb: None,
+            found: Some(false),
+        });
+    };
+    let path = subject_search_path(setting, program)?;
+    let found = path.resolve_file("taxdb.bti").is_some();
+    // The organism report's lookups open the run's own database.
+    let taxdb = (tax_report && found).then(|| {
+        SubjectTaxdb(std::sync::Arc::new(crate::seqdb::taxdb::LazyTaxDb::new(
+            path,
+        )))
+    });
+    Ok(SubjectTaxonomy {
+        taxdb,
+        found: Some(found),
+    })
 }
 
-/// The search path of NCBI's databases of a `-subject` search (`subject_taxdb_found`).
-fn subject_search_path(settings: &ApplicationSettings, program: &str) -> Result<SearchPath> {
-    let registry = match &settings.blastdb {
+/// The search path of NCBI's databases of a `-subject` search (`subject_taxonomy`).
+fn subject_search_path(setting: &TaxdbSetting, program: &str) -> Result<SearchPath> {
+    let registry = match &setting.0 {
         Ok(value) => value.as_deref(),
         Err(reason) => bail!("{reason}; this is not supported by LOSAT's {program}"),
     };
@@ -3618,25 +3734,12 @@ fn subject_search_path(settings: &ApplicationSettings, program: &str) -> Result<
 // ```
 /// The taxonomy database of a `-subject` search's organism report (outfmt 18): NCBI's
 /// `GetTaxNames` opens its static `CTaxDBFileInfo` through the search path of NCBI's databases at
-/// the report's first lookup. One per run, as a `-db` search's (`TaxdbRun`), made by the command
-/// line with `subject_taxdb_found` (`run_local`'s callers give no search path: none, DECISIONS 7
-/// of line CLI C2, every lookup fails).
+/// the report's first lookup. One per run, as a `-db` search's (`TaxdbRun`), made by
+/// `subject_taxonomy` (LOSAT Web gives no search path: none, every lookup fails).
 #[derive(Clone, Debug)]
 pub struct SubjectTaxdb(std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>);
 
 impl SubjectTaxdb {
-    /// The run's database where `taxdb.bti` is on the search path of `settings` (else `None`),
-    /// not opened before the report's first lookup. A registry value that LOSAT does not read as
-    /// NCBI is its refusal (`subject_taxdb_found`); `program` names it.
-    pub(crate) fn of(settings: &ApplicationSettings, program: &str) -> Result<Option<Self>> {
-        let path = subject_search_path(settings, program)?;
-        Ok(path.resolve_file("taxdb.bti").is_some().then(|| {
-            SubjectTaxdb(std::sync::Arc::new(crate::seqdb::taxdb::LazyTaxDb::new(
-                path,
-            )))
-        }))
-    }
-
     /// The names that the organism report of a query batch asks for in it
     /// (`TabularNames::for_report`); a database that LOSAT cannot read as NCBI does is refused as
     /// in [`tabular_names`].
@@ -4441,7 +4544,10 @@ pub(crate) fn scope_bioseq(
         }
         None
         | Some(
-            FoundInstead::AlsoHeld(_) | FoundInstead::OtherTaxids(_) | FoundInstead::CopyApart(..),
+            FoundInstead::AlsoHeld(_)
+            | FoundInstead::CaseUnknown(_)
+            | FoundInstead::OtherTaxids(_)
+            | FoundInstead::CopyApart(..),
         ) => Ok(ScopeBioseq {
             blob: Some(ordinal),
             bioseq: subject.bioseq_holds_alignment_id(),
@@ -4834,14 +4940,41 @@ mod taxdb_prepass_tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests")
     }
 
+    /// A database and the empty current directory it was opened from (its search path keeps it for
+    /// the files looked for later), which is removed with it.
+    struct Opened {
+        db: SeqDb,
+        cwd: PathBuf,
+    }
+
+    impl std::ops::Deref for Opened {
+        type Target = SeqDb;
+
+        fn deref(&self) -> &SeqDb {
+            &self.db
+        }
+    }
+
+    impl Drop for Opened {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.cwd);
+        }
+    }
+
     /// The database `name` of `tests/fixtures/outfmt16/db` opened with `BLASTDB=taxdb`
     /// (`None`: not set), from an empty current directory.
-    fn database(name: &str, taxdb: Option<&Path>) -> SeqDb {
-        let cwd = std::env::temp_dir().join(format!("losat_prepass_cwd_{}", std::process::id()));
+    fn database(name: &str, taxdb: Option<&Path>) -> Opened {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let cwd = std::env::temp_dir().join(format!(
+            "losat_prepass_cwd_{}_{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
         std::fs::create_dir_all(&cwd).unwrap();
         let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None).unwrap();
         let path = root().join("fixtures/outfmt16/db").join(name);
-        SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap()
+        let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap();
+        Opened { db, cwd }
     }
 
     fn variant(name: &str) -> PathBuf {

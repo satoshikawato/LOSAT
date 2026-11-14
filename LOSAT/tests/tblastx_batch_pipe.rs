@@ -20,8 +20,11 @@
 //! the switch off. Each query record below is longer than TBLASTX's batch size (10,002 letters),
 //! so each is a batch of its own.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Output};
+
+mod temp_support;
+use temp_support::TempFile;
 
 const PIPE_OFF: (&str, &str) = ("LOSAT_X_TBXPIPE", "0");
 const NO_EARLY: (&str, &str) = ("LOSAT_X_TBXPIPEHSPS", "0");
@@ -42,11 +45,10 @@ fn letters(name: &str) -> Vec<u8> {
         .collect()
 }
 
-/// A FASTA file of `records` (title, letters) in this test's temporary directory.
-fn write_fasta(file: &str, records: &[(String, &[u8])]) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("losat-tbxpipe-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temporary directory");
-    let path = dir.join(file);
+/// A FASTA file of `records` (title, letters) in a temporary directory of its own, removed with
+/// the file when the value is dropped (kept when the test panics, to be looked at).
+fn write_fasta(file: &str, records: &[(String, &[u8])]) -> TempFile {
+    let path = TempFile::keep_on_failure("losat-tbxpipe", file);
     let mut text = Vec::new();
     for (title, seq) in records {
         text.extend_from_slice(format!(">{title}\n").as_bytes());
@@ -60,7 +62,7 @@ fn write_fasta(file: &str, records: &[(String, &[u8])]) -> PathBuf {
 }
 
 /// Four query batches of 10,500 letters each from MelaMJNV, then the records `tail`.
-fn queries(file: &str, tail: &[(String, &[u8])]) -> PathBuf {
+fn queries(file: &str, tail: &[(String, &[u8])]) -> TempFile {
     let mela = letters("MelaMJNV.fasta");
     let mut records: Vec<(String, &[u8])> = (0..4)
         .map(|i| (format!("mela_{i}"), &mela[i * 60_000..i * 60_000 + 10_500]))
@@ -69,19 +71,17 @@ fn queries(file: &str, tail: &[(String, &[u8])]) -> PathBuf {
     write_fasta(file, &records)
 }
 
-/// Two subjects of 45,000 letters each from PemoMJNVA, written once (the tests run in parallel).
-fn subjects() -> &'static Path {
-    static SUBJECTS: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    SUBJECTS.get_or_init(|| {
-        let pemo = letters("PemoMJNVA.fasta");
-        write_fasta(
-            "subjects.fa",
-            &[
-                ("pemo_a".to_string(), &pemo[..45_000]),
-                ("pemo_b".to_string(), &pemo[150_000..195_000]),
-            ],
-        )
-    })
+/// Two subjects of 45,000 letters each from PemoMJNVA, written per test (the tests run in
+/// parallel; the reports name the file, so the runs of a test share it).
+fn subjects() -> TempFile {
+    let pemo = letters("PemoMJNVA.fasta");
+    write_fasta(
+        "subjects.fa",
+        &[
+            ("pemo_a".to_string(), &pemo[..45_000]),
+            ("pemo_b".to_string(), &pemo[150_000..195_000]),
+        ],
+    )
 }
 
 /// The binary with the given variables as its only `LOSAT_*` variables that choose a code path
@@ -89,7 +89,13 @@ fn subjects() -> &'static Path {
 /// as soon as a search has more than one thread, and it selects nothing). `LOSAT_X_PAIRPARGATE=0`:
 /// the batches are short, and the gate would send them to the reference frame loop; the pipe acts
 /// on both, and the unit path is the one long batches take.
-fn tblastx(query: &Path, threads: u32, outfmt: &str, switches: &[(&str, &str)]) -> Output {
+fn tblastx(
+    query: &Path,
+    subjects: &Path,
+    threads: u32,
+    outfmt: &str,
+    switches: &[(&str, &str)],
+) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
@@ -103,7 +109,7 @@ fn tblastx(query: &Path, threads: u32, outfmt: &str, switches: &[(&str, &str)]) 
         .arg("-query")
         .arg(query)
         .arg("-subject")
-        .arg(subjects())
+        .arg(subjects)
         .args(["-outfmt", outfmt])
         .args(["-num_threads", &threads.to_string()])
         .output()
@@ -135,11 +141,12 @@ fn counters<const N: usize>(output: &Output, names: [&str; N]) -> [u64; N] {
 #[test]
 fn the_report_does_not_depend_on_the_pipe_at_any_thread_count() {
     let query = queries("four.fa", &[]);
-    let off = tblastx(&query, 1, "6", &[PIPE_OFF]);
+    let subjects = subjects();
+    let off = tblastx(&query, &subjects, 1, "6", &[PIPE_OFF]);
     assert!(off.status.success(), "{}", stderr(&off));
     assert!(!off.stdout.is_empty(), "the pairs have hits");
     for threads in THREADS {
-        let on = tblastx(&query, threads, "6", &[STATS]);
+        let on = tblastx(&query, &subjects, threads, "6", &[STATS]);
         assert!(on.status.success(), "threads {threads}: {}", stderr(&on));
         assert_eq!(on.stdout, off.stdout, "threads {threads}");
         if threads == 1 {
@@ -162,8 +169,9 @@ fn the_report_does_not_depend_on_the_pipe_at_any_thread_count() {
 #[test]
 fn the_pairwise_report_does_not_depend_on_the_pipe() {
     let query = queries("four_pairwise.fa", &[]);
-    let off = tblastx(&query, 4, "0", &[PIPE_OFF]);
-    let on = tblastx(&query, 4, "0", &[]);
+    let subjects = subjects();
+    let off = tblastx(&query, &subjects, 4, "0", &[PIPE_OFF]);
+    let on = tblastx(&query, &subjects, 4, "0", &[]);
     assert!(
         off.status.success() && on.status.success(),
         "{}",
@@ -175,8 +183,9 @@ fn the_pairwise_report_does_not_depend_on_the_pipe() {
 #[test]
 fn without_room_for_held_hsps_the_loop_starts_every_batch() {
     let query = queries("four_no_early.fa", &[]);
-    let off = tblastx(&query, 4, "6", &[PIPE_OFF]);
-    let held = tblastx(&query, 4, "6", &[NO_EARLY, STATS]);
+    let subjects = subjects();
+    let off = tblastx(&query, &subjects, 4, "6", &[PIPE_OFF]);
+    let held = tblastx(&query, &subjects, 4, "6", &[NO_EARLY, STATS]);
     assert!(held.status.success(), "{}", stderr(&held));
     assert_eq!(held.stdout, off.stdout);
     assert_eq!(
@@ -191,8 +200,9 @@ fn without_room_for_held_hsps_the_loop_starts_every_batch() {
 #[test]
 fn a_batch_that_fails_its_checks_stops_the_search_where_the_loop_stopped_it() {
     let query = queries("four_then_empty.fa", &[("empty".to_string(), &[][..])]);
-    let off = tblastx(&query, 8, "6", &[PIPE_OFF]);
-    let on = tblastx(&query, 8, "6", &[STATS]);
+    let subjects = subjects();
+    let off = tblastx(&query, &subjects, 8, "6", &[PIPE_OFF]);
+    let on = tblastx(&query, &subjects, 8, "6", &[STATS]);
     assert_eq!(on.status.code(), off.status.code());
     assert_eq!(off.status.code(), Some(3), "{}", stderr(&off));
     assert_eq!(on.stdout, off.stdout);

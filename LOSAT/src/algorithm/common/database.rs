@@ -704,13 +704,15 @@ pub(crate) fn stored_title(
 /// Keeps the source `source` of the reported sequence of rank `rank` (of `ranks`) in `sources`,
 /// the side data of the reports by rank (`StoredTitle::source`), which stays empty, and is not
 /// allocated, until a sequence has a source that names its organism or that LOSAT refuses.
+/// Inlined: the reports of every search ask it for each reported sequence, almost all unnamed.
+#[inline]
 pub(crate) fn keep_source(
     sources: &mut Vec<crate::report::defline::SourceTaxname>,
     rank: usize,
     ranks: usize,
     source: crate::report::defline::SourceTaxname,
 ) {
-    if source == crate::report::defline::SourceTaxname::Unnamed {
+    if matches!(source, crate::report::defline::SourceTaxname::Unnamed) {
         return;
     }
     if sources.is_empty() {
@@ -1227,7 +1229,7 @@ impl<'a> HeaderReader<'a> {
     /// do not read are LOSAT's refusal.
     fn stored_source(&self, title: &[u8], ordinal: u32) -> crate::report::defline::SourceTaxname {
         use crate::report::defline::SourceTaxname;
-        if !crate::report::defline::bioseq_title_from_source(title, &Default::default())
+        if !crate::report::defline::bioseq_title_from_source(title, Default::default)
             || self.taxdb().is_none()
         {
             return SourceTaxname::Unnamed;
@@ -2712,7 +2714,7 @@ mod tests {
         assert!(check_shown_protein_title(b", ,", 7, "BLASTP").is_err());
         assert!(!crate::report::defline::bioseq_title_from_source(
             b", ,",
-            &BioseqFacts::default()
+            BioseqFacts::default
         ));
     }
 

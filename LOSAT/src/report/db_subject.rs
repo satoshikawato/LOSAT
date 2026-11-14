@@ -930,7 +930,7 @@ impl ParsedSubject {
     /// and that source has a taxid: the title then depends on the taxonomy database.
     pub fn title_from_taxonomy(&self) -> bool {
         let title = self.target().title.as_deref().unwrap_or_default();
-        bioseq_title_from_source(title, &self.bioseq_facts()) && self.has_source()
+        bioseq_title_from_source(title, || self.bioseq_facts()) && self.has_source()
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3964-3972
@@ -991,7 +991,7 @@ impl ParsedSubject {
     /// `blastdb-ids-20261021/R/titlesrc/p1`).
     pub fn pairwise_title_reads_source(&self, protein: bool, taxdb_found: bool) -> bool {
         let title = self.target().title.as_deref().unwrap_or_default();
-        (taxdb_found && bioseq_title_from_source(title, &self.bioseq_facts()))
+        (taxdb_found && bioseq_title_from_source(title, || self.bioseq_facts()))
             || (protein && self.title_ends_in_bracket() && self.heading_generates_title())
     }
 

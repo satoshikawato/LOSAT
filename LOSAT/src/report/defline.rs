@@ -465,14 +465,16 @@ pub fn generate_bioseq_defline(
 /// of a record that is neither a `pdb` record with a chain nor a `patent` one). A database
 /// sequence's Bioseq has a source for each definition line with a taxid other than 0, with the
 /// names of the taxonomy database when NCBI finds one (seqdbvol.cpp:1055-1160): the title is
-/// then the organism's (`unnamed protein product [Homo sapiens]`).
-pub fn bioseq_title_from_source(title: &[u8], ids: &BioseqFacts) -> bool {
+/// then the organism's (`unnamed protein product [Homo sapiens]`). `ids` gives the Bioseq's
+/// facts, asked only for a title that is empty once trimmed (a titled sequence, the readers'
+/// usual one, needs none).
+pub fn bioseq_title_from_source(title: &[u8], ids: impl FnOnce() -> BioseqFacts) -> bool {
     // `trim_end_of` without a copy: the stored titles of every reported sequence are asked.
     let main_title = match title.iter().rposition(|byte| !b".,;~ ".contains(byte)) {
         Some(pos) => &title[..=pos],
         None => title,
     };
-    main_title.is_empty() && pdb_or_patent_title(ids).is_empty()
+    main_title.is_empty() && pdb_or_patent_title(&ids()).is_empty()
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1815-1858

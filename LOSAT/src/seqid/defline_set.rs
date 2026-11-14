@@ -390,19 +390,18 @@ impl DeflineSet {
     }
 
     /// `taxonomy_lookups` as an iterator.
-    fn taxonomy_order<'a>(
-        &'a self,
-        target: Option<&ParsedSeqId>,
-    ) -> impl Iterator<Item = i32> + 'a {
+    fn taxonomy_order(&self, target: Option<&ParsedSeqId>) -> TaxonomyOrder<'_> {
         let front = target.and_then(|target| {
             self.deflines
                 .iter()
                 .position(|defline| seqid_in(&defline.ids, target))
         });
-        front
-            .into_iter()
-            .chain((0..self.deflines.len()).filter(move |&index| Some(index) != front))
-            .filter_map(|index| self.deflines[index].taxid.filter(|&taxid| taxid > 0))
+        TaxonomyOrder {
+            deflines: &self.deflines,
+            front,
+            front_given: false,
+            next: 0,
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4741-4785
@@ -1463,4 +1462,44 @@ fn pdb_match(a: &PdbSeqId, b: &PdbSeqId) -> bool {
         }
     }
     a.mol == b.mol
+}
+
+/// The positive taxids of a sequence's definition lines in the order of NCBI's lookups
+/// (`DeflineSet::taxonomy_order`): the line `front` first, then the others in their stored order.
+/// A plain loop over the lines (no iterator adapters: the readers ask its first item of every
+/// sequence they read).
+#[derive(Clone)]
+pub(crate) struct TaxonomyOrder<'a> {
+    deflines: &'a [BlastDefline],
+    front: Option<usize>,
+    front_given: bool,
+    next: usize,
+}
+
+impl Iterator for TaxonomyOrder<'_> {
+    type Item = i32;
+
+    fn next(&mut self) -> Option<i32> {
+        if !self.front_given {
+            self.front_given = true;
+            if let Some(taxid) = self
+                .front
+                .and_then(|index| self.deflines[index].taxid)
+                .filter(|&taxid| taxid > 0)
+            {
+                return Some(taxid);
+            }
+        }
+        while let Some(defline) = self.deflines.get(self.next) {
+            let index = self.next;
+            self.next += 1;
+            if Some(index) == self.front {
+                continue;
+            }
+            if let Some(taxid) = defline.taxid.filter(|&taxid| taxid > 0) {
+                return Some(taxid);
+            }
+        }
+        None
+    }
 }

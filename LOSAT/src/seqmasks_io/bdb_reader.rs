@@ -159,8 +159,8 @@ impl MaskBdbReader {
         // NCBI makes the title of a sequence without one from its BioSource (the taxonomy
         // names of a definition line with a taxid; seqdbvol.cpp:1100-1188).
         let taxname = if self.title_printed
+            && bioseq_title_from_source(&title, || bioseq_facts(&ids))
             && set.first_source_taxid(None).is_some()
-            && bioseq_title_from_source(&title, &bioseq_facts(&ids))
         {
             self.source_taxname(oid, &set)?
         } else {

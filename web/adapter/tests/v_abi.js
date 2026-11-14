@@ -611,7 +611,7 @@ function checkFiles(reactor) {
   const binary = registerFile(reactor, "u9.binary", path.join(counts, "dm2L_u9.binary"));
   assert.equal(binary.response.stat_type, "binary");
   assert.equal(reactor.call("losat_web2_file_release", binary.handle).status, 0);
-  for (const [kind, name, error] of [[2, "x", /^unknown input file kind 2$/], [1, "", /^an input file needs a name$/]]) {
+  for (const [kind, name, error] of [[3, "x", /^unknown input file kind 3$/], [1, "", /^an input file needs a name$/]]) {
     const refused = reactor.call("losat_web2_file_begin", kind, name, 1);
     assert.equal(refused.status, -1);
     assert.match(refused.error, error);

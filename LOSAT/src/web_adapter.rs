@@ -23,8 +23,11 @@ use std::ffi::OsString;
 // messages, and the command line's own errors.
 pub use crate::cli::{render_message, Cli, Commands, NativeError};
 
-/// `cli::try_parse_from` for the command line's own arguments (`Cli`): the argv read as the
-/// command line reads it, NCBI's single-dash options included.
+/// `cli::try_parse_with_own_start` for the command line's own arguments (`Cli`): the argv read as
+/// the command line reads it after its application start, NCBI's single-dash options included. A
+/// run of ABI v2 makes its own start (`start_run`), so the toolkit's words that the start reads
+/// (`-logfile`, `-conffile`, `-dryrun`) are taken, as the library API takes them; the versions and
+/// `-xmlhelp`, whose texts only the command line writes, are refused.
 ///
 /// Only `Cli`: the adapter parses nothing else, so the façade does not offer the parser for any
 /// other clap type.
@@ -33,7 +36,35 @@ where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    crate::cli::try_parse_from(argv)
+    crate::cli::try_parse_with_own_start(argv)
+}
+
+// The NCBI application start of a run (`api::start`, line RG item E1w-3a): the words that it reads
+// before the arguments (`preparse`, NCBI's scan of `-logfile`), the registry files that the host
+// registered (`RegistryFiles`), and where the run's files go (`RunFiles`: the file of `-logfile`).
+pub use crate::api::start::CallerStart;
+pub use crate::blastinput::ncbi_environment::{
+    log_file, preparse, ApplicationSettings, Preparsed, RegistryFiles,
+};
+pub use crate::report::run_files::{FileReceiver, RunFiles};
+
+/// The NCBI application start of a run of `program` with the arguments `words` (after the
+/// program's name), as the command line's (`cli::main_entry`) in an environment of the
+/// `variables` alone, with the registry files of `files` (`ApplicationStart::with_files`) and the
+/// file of `-logfile` going to `run_files` (`api::start::begin_with`): the messages that go to
+/// `cerr` are written to `diagnostics`.
+pub fn start_run(
+    program: &str,
+    words: &[&str],
+    variables: &[(&str, &str)],
+    files: &dyn RegistryFiles,
+    run_files: &RunFiles,
+    diagnostics: &mut dyn std::io::Write,
+) -> Result<CallerStart, String> {
+    let start = crate::blastinput::ncbi_environment::ApplicationStart::with_files(
+        program, words, variables, files,
+    );
+    crate::api::start::begin_with(start, words, run_files, diagnostics)
 }
 
 // The checks of the options alone, without the inputs (the `validate` of ABI v2), and BLASTN's
@@ -57,7 +88,7 @@ pub use crate::api::local_blast::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
     with_run_pool, FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs,
 };
-pub use crate::report::blast_xml2::{SideFileReceiver, SideFileSink};
+pub use crate::report::blast_xml2::SideFileSink;
 pub use crate::report::PairwiseHit;
 
 // The output formats of the application layer (`blastinput/app.rs`, NCBI's CFormattingArgs):

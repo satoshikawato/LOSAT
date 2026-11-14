@@ -1,7 +1,9 @@
 //! Named input files (docs/web/abi_v2.md §4 `file_begin`): files that an argv names by a value
 //! of an option, which the host gives in chunks under that name. Kind 1 is a WindowMasker unit
 //! counts file: the value of BLASTN's `-window_masker_db`, or the file of `-window_masker_taxid
-//! <taxid>`, `windowmasker/<taxid>/wmasker.obinary` (`WINDOW_MASKER_PATH`).
+//! <taxid>`, `windowmasker/<taxid>/wmasker.obinary` (`WINDOW_MASKER_PATH`). Kind 2 is a registry
+//! file of NCBI's application start: the file of `-conffile`, which the start of a run reads
+//! (`registry_files`; line RG item E1w-3a).
 //!
 //! The command line opens the counts file by its name twice: NCBI's check of the format
 //! (`DiscoverStatType`) and its reader (`CSeqMaskerIstatFactory::create`). A registered file
@@ -25,6 +27,9 @@ use crate::json;
 /// The kind of a WindowMasker unit counts file (`-window_masker_db`, `-window_masker_taxid`).
 pub const KIND_WINDOW_MASKER_COUNTS: u32 = 1;
 
+/// The kind of a registry file of NCBI's application start (`-conffile`).
+pub const KIND_REGISTRY: u32 = 2;
+
 /// The directory of BLASTN's `-window_masker_taxid` in LOSAT Web, where the command line reads
 /// NCBI's registry entry `[WINDOW_MASKER] WINDOW_MASKER_PATH`: the counts file of a taxid is the
 /// file registered as `windowmasker/<taxid>/wmasker.obinary` (the engine joins the names as NCBI
@@ -33,6 +38,7 @@ pub const WINDOW_MASKER_PATH: &str = "windowmasker";
 
 /// A file whose chunks are coming.
 struct Loading {
+    kind: u32,
     name: String,
     size: usize,
     bytes: Vec<u8>,
@@ -52,11 +58,18 @@ struct Counts {
     counts: Result<Arc<UnitCounts>, WinMaskError>,
 }
 
+/// A registered registry file: its bytes, which the start of each run reads (`registry_files`).
+struct RegistryFile {
+    name: String,
+    bytes: Vec<u8>,
+}
+
 #[derive(Default)]
 struct Files {
     next: u32,
     loading: HashMap<u32, Loading>,
     registered: HashMap<u32, Arc<Counts>>,
+    registry: HashMap<u32, Arc<RegistryFile>>,
 }
 
 impl Files {
@@ -65,6 +78,7 @@ impl Files {
             .values()
             .map(|file| file.name.as_str())
             .chain(self.registered.values().map(|file| file.name.as_str()))
+            .chain(self.registry.values().map(|file| file.name.as_str()))
     }
 }
 
@@ -77,9 +91,11 @@ fn files() -> &'static Mutex<Files> {
 /// memory for the bytes is taken here, so that a file that does not fit fails before its chunks
 /// are copied.
 pub fn begin(kind: u32, name: &str, size: usize) -> Result<u32, String> {
-    if kind != KIND_WINDOW_MASKER_COUNTS {
-        return Err(format!("unknown input file kind {kind}"));
-    }
+    let what = match kind {
+        KIND_WINDOW_MASKER_COUNTS => "the WindowMasker counts",
+        KIND_REGISTRY => "the registry file",
+        _ => return Err(format!("unknown input file kind {kind}")),
+    };
     if name.is_empty() {
         return Err("an input file needs a name".to_string());
     }
@@ -90,9 +106,9 @@ pub fn begin(kind: u32, name: &str, size: usize) -> Result<u32, String> {
         ));
     }
     let mut bytes = Vec::new();
-    bytes.try_reserve_exact(size).map_err(|_| {
-        format!("not enough memory for the WindowMasker counts {name} ({size} bytes)")
-    })?;
+    bytes
+        .try_reserve_exact(size)
+        .map_err(|_| format!("not enough memory for {what} {name} ({size} bytes)"))?;
     let handle = files
         .next
         .checked_add(1)
@@ -102,6 +118,7 @@ pub fn begin(kind: u32, name: &str, size: usize) -> Result<u32, String> {
     files.loading.insert(
         handle,
         Loading {
+            kind,
             name: name.to_string(),
             size,
             bytes,
@@ -150,6 +167,7 @@ pub fn end(file: u32) -> Result<String, String> {
         ));
     }
     let Loading {
+        kind,
         name,
         size,
         bytes,
@@ -158,6 +176,23 @@ pub fn end(file: u32) -> Result<String, String> {
     let mut sha256 = String::with_capacity(64);
     for byte in sha.finalize() {
         let _ = write!(sha256, "{byte:02x}");
+    }
+    if kind == KIND_REGISTRY {
+        // The bytes are kept: the start of each run reads the file as the command line's start
+        // reads it from the disk (`registry_files`), its errors included.
+        let mut out = String::new();
+        let _ = write!(out, "{{\"handle\":{file},\"name\":");
+        json::string(&mut out, &name);
+        let _ = write!(
+            out,
+            ",\"kind\":\"registry\",\"size\":{size},\"sha256\":\"{sha256}\"}}"
+        );
+        files()
+            .lock()
+            .expect("files")
+            .registry
+            .insert(file, Arc::new(RegistryFile { name, bytes }));
+        return Ok(out);
     }
     let found = discover_stat_type_in(&mut Cursor::new(bytes.as_slice()));
     // The command line's reader with blastn's settings (`s_BuildSeqMasker`); for a format other
@@ -183,7 +218,9 @@ pub fn end(file: u32) -> Result<String, String> {
 /// `file_release`: forgets the file (registered or still loading) and frees its memory.
 pub fn release(file: u32) -> Result<(), String> {
     let mut files = files().lock().expect("files");
-    let removed = files.registered.remove(&file).is_some() || files.loading.remove(&file).is_some();
+    let removed = files.registered.remove(&file).is_some()
+        || files.registry.remove(&file).is_some()
+        || files.loading.remove(&file).is_some();
     if removed {
         Ok(())
     } else {
@@ -294,7 +331,8 @@ impl CountsSource for RegisteredCounts {
     }
 }
 
-/// Whether a file of this name is registered (`file_end` succeeded and it was not released).
+/// Whether a counts file of this name is registered (`file_end` succeeded and it was not
+/// released).
 pub fn registered(name: &str) -> bool {
     files()
         .lock()
@@ -314,6 +352,53 @@ pub fn source() -> Arc<dyn CountsSource> {
             .map(|file| (file.name.clone(), file.clone()))
             .collect(),
     })
+}
+
+/// The registry files of a run (kind 2), by name: the files that its application start reads
+/// instead of the file system (`losat::web_adapter::start_run`). A registered file is the file of
+/// its name in the command line's working directory: the start finds it by that name (a
+/// `-conffile` value) and by that name after `./`, the working directory on NCBI's registry search
+/// path; nothing else is a file. The table is copied when the run starts.
+pub struct RegisteredRegistry {
+    files: HashMap<String, Arc<RegistryFile>>,
+}
+
+impl RegisteredRegistry {
+    fn file(&self, path: &std::path::Path) -> Option<&RegistryFile> {
+        let by_name = |path: &std::path::Path| {
+            path.to_str()
+                .and_then(|name| self.files.get(name))
+                .map(|file| &**file)
+        };
+        by_name(path).or_else(|| {
+            path.strip_prefix(".")
+                .ok()
+                .filter(|rest| !rest.as_os_str().is_empty())
+                .and_then(by_name)
+        })
+    }
+}
+
+impl losat::web_adapter::RegistryFiles for RegisteredRegistry {
+    fn is_file(&self, path: &std::path::Path) -> bool {
+        self.file(path).is_some()
+    }
+
+    fn read(&self, path: &std::path::Path) -> Option<std::io::Result<Vec<u8>>> {
+        self.file(path).map(|file| Ok(file.bytes.clone()))
+    }
+}
+
+/// The registry files for a run: the files of kind 2 registered now.
+pub fn registry_files() -> RegisteredRegistry {
+    let files = files().lock().expect("files");
+    RegisteredRegistry {
+        files: files
+            .registry
+            .values()
+            .map(|file| (file.name.clone(), file.clone()))
+            .collect(),
+    }
 }
 
 #[cfg(test)]

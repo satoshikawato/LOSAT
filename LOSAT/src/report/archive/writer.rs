@@ -324,7 +324,7 @@ fn write_request_body<E: Encoder>(
     out.enc.end_variant();
     out.enc.end_member();
 
-    write_request_options(out, request, batch, sets, database_list);
+    write_request_options(out, request, batch, sets, database_params);
     out.enc.end_sequence();
     out.enc.end_variant();
     out.enc.end_member();
@@ -382,14 +382,14 @@ fn write_bioseq_queries<E: Encoder>(out: &mut ArchiveOut<'_, E>, queries: &[Bios
 }
 
 /// The options of a request: `algorithm-options` (the command line's with what the handle holds,
-/// `sets`), `program-options` (the query's range and masks, the database's list) and
-/// `format-options` (psiblast's `Web_StepNumber`).
+/// `sets`), `program-options` (the query's range and masks, the database's list and masking,
+/// `database_params`) and `format-options` (psiblast's `Web_StepNumber`).
 fn write_request_options<E: Encoder>(
     out: &mut ArchiveOut<'_, E>,
     request: &super::ArchiveRequest,
     batch: &RequestInputs<'_>,
     sets: &[Param],
-    database_list: Option<&Param>,
+    database_params: &[Param],
 ) {
     out.enc.member("algorithm-options", 5);
     out.enc.begin_named("Blast4-parameters");

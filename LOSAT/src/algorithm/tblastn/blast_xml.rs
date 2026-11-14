@@ -273,37 +273,37 @@ pub(super) fn prepare(
         if list.hsps.hsps.is_empty() {
             continue;
         }
-        let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
-        if subject_names[oid].is_some() {
+        let s_idx = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
+        if subject_names[s_idx].is_some() {
             continue;
         }
         let record = subject_records
-            .get(oid)
+            .get(s_idx)
             .context("TBLASTN subject OID out of range")?;
-        subject_names[oid] = Some(match shown.ordinal(oid) {
+        subject_names[s_idx] = Some(match shown.oid(s_idx) {
             None => match record.believed() {
                 Some(ids) => SubjectNames::of_believed(ids, record.title(), false),
                 None => SubjectNames::of_record(record.local_id.as_bytes(), record.title(), false),
             }
             .map_err(|refusal| refusal.error(PROGRAM, "a subject title"))?,
             // The taxid is shown by XML2 alone (`taxa` is empty for the other formats).
-            Some(ordinal) => match shown.parsed_subject(oid) {
+            Some(db_oid) => match shown.parsed_subject(s_idx) {
                 Some(parsed) => SubjectNames::of_parsed(
                     parsed,
-                    taxa.parsed_taxonomy.get(oid).map_or(&[], Vec::as_slice),
+                    taxa.parsed_taxonomy.get(s_idx).map_or(&[], Vec::as_slice),
                 ),
                 None => SubjectNames::of_database_sequence(
-                    ordinal,
+                    db_oid,
                     record.title(),
-                    taxa.taxids.get(oid).copied().unwrap_or(0),
-                    taxa.taxonomy.get(oid).cloned().unwrap_or_default(),
+                    taxa.taxids.get(s_idx).copied().unwrap_or(0),
+                    taxa.taxonomy.get(s_idx).cloned().unwrap_or_default(),
                 ),
             }
             .map_err(|refusal| refusal.error(PROGRAM, "a database title"))?,
         });
         // The whole record (`-subject_loc` searches part of it).
-        subject_lengths[oid] =
-            i32::try_from(ranges.subjects.length(oid, subject_letters.length(oid)))?;
+        subject_lengths[s_idx] =
+            i32::try_from(ranges.subjects.length(s_idx, subject_letters.length(s_idx)))?;
     }
     let (db_name, db_num, db_len) = match shown {
         ShownSubjects::Fasta { .. } => (String::new(), 0, 0),

@@ -87,6 +87,8 @@ pub(crate) enum TabularSubjects<'a> {
     Database {
         ids: &'a [Arc<[u8]>],
         ordinals: &'a [u32],
+        /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
+        oids: crate::seqdb::OidMap<'a>,
         records: &'a [FastaRecord],
         parsed: &'a [Option<Arc<ParsedSubject>>],
         lengths: &'a [usize],
@@ -159,11 +161,12 @@ impl<'a> TabularSubjects<'a> {
             },
             TabularSubjects::Database {
                 ordinals,
+                oids,
                 records,
                 taxonomy,
                 ..
             } => TaxPlain::Stored {
-                ordinal: ordinals.get(s_idx).copied().unwrap_or_default(),
+                oid: oids.oid(ordinals.get(s_idx).copied().unwrap_or_default()),
                 title: records.get(s_idx).map_or(&[][..], |record| &record.title),
                 taxid: taxonomy.get(s_idx).map_or(0, |taxonomy| taxonomy.taxid),
             },
@@ -242,6 +245,7 @@ impl<'a> TabularSubjects<'a> {
             TabularSubjects::Database {
                 ids,
                 ordinals,
+                oids: _,
                 records,
                 parsed,
                 lengths,

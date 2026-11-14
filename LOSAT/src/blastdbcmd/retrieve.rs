@@ -1527,7 +1527,9 @@ impl Run<'_, '_, '_> {
     fn tax_id_list(&mut self, tax_ids: &BTreeSet<i32>, config: &Config) -> Result<bool, Stop> {
         let db = self.source.db;
         let oids: Vec<u32> = if db.is_restricted() {
-            (0..db.num_seqs()).map(|ordinal| db.oid(ordinal)).collect()
+            (0..db.num_seqs())
+                .map(|ordinal| db.oid(ordinal).get())
+                .collect()
         } else {
             db.tax_id_lookup()?.tax_ids_to_oids(tax_ids)?
         };

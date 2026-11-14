@@ -212,6 +212,7 @@ pub(super) fn write_tblastx_tabular(
         Some(database) => TabularSubjects::Database {
             ids: tab.subject_ids,
             ordinals: &database.reported.ordinals,
+            oids: database.oids,
             records: &database.reported.records,
             parsed: &database.reported.parsed,
             lengths: &lengths,

@@ -2111,6 +2111,8 @@ pub(crate) struct ReportDatabase<'a> {
     pub pairwise: &'a crate::report::pairwise::PairwiseDatabase,
     /// The reported sequences by rank (their tabular ids).
     pub reported: &'a super::super::database::ReportedSubjects,
+    /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
+    pub oids: crate::seqdb::OidMap<'a>,
 }
 
 /// The `Database:` text of the reports of a local `-subject` search.
@@ -2220,6 +2222,7 @@ fn seqalign_subjects<'a>(
     match &run.database {
         Some(database) => crate::algorithm::tblastx::seqalign::SeqalignSubjects::Database {
             ordinals: &database.reported.ordinals,
+            oids: database.oids,
             title: &database.pairwise.definition,
             parsed: &database.reported.parsed,
         },
@@ -2651,6 +2654,7 @@ fn write_tblastx_outputs(
                         Some(database) => {
                             crate::algorithm::tblastx::seqalign::SeqalignSubjects::Database {
                                 ordinals: &database.reported.ordinals,
+                                oids: database.oids,
                                 title: &database.pairwise.definition,
                                 parsed: &database.reported.parsed,
                             }
@@ -4267,6 +4271,7 @@ impl BatchReports<'_> {
                         name: database.name(),
                         pairwise,
                         reported: &reported_subjects,
+                        oids: database.oid_map(),
                     }),
                 )
             }

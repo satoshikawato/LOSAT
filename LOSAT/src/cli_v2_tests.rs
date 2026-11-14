@@ -1363,11 +1363,16 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "13", None, NcbiLater("Please provide a file name for outfmt 13.")),
         (ALL, "13", Some("-"), NcbiLater("Please provide a file name for outfmt 13.")),
         (ALL, "14", None, NcbiLater("Please provide a file name for outfmt 14.")),
-        // Line OF track T (text formats): not written yet.
-        (ALL, "1", None, UNSUPPORTED),
-        (ALL, "2", None, UNSUPPORTED),
-        (ALL, "3", None, UNSUPPORTED),
-        (ALL, "4", None, UNSUPPORTED),
+        // Line RG T3 (the query-anchored formats): BLASTP writes them (T3a), the others not yet.
+        (&["blastp"], "1", None, Writes(QueryAnchoredIdentities)),
+        (&["blastp"], "2", None, Writes(QueryAnchoredNoIdentities)),
+        (&["blastp"], "3", None, Writes(FlatQueryAnchoredIdentities)),
+        (&["blastp"], "4", None, Writes(FlatQueryAnchoredNoIdentities)),
+        (&["blastp"], "1 qseqid", None, Writes(QueryAnchoredIdentities)),
+        (&["blastn", "blastx", "tblastn", "tblastx"], "1", None, UNSUPPORTED),
+        (&["blastn", "blastx", "tblastn", "tblastx"], "2", None, UNSUPPORTED),
+        (&["blastn", "blastx", "tblastn", "tblastx"], "3", None, UNSUPPORTED),
+        (&["blastn", "blastx", "tblastn", "tblastx"], "4", None, UNSUPPORTED),
         // Line RG T2: the organism report in every program.
         (SHARED, "18", None, Writes(TaxFormat)),
         (SHARED, "18 qseqid", None, Writes(TaxFormat)),

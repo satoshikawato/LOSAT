@@ -446,19 +446,21 @@ pub(super) fn x_scan_two_hit_ranges<F>(
 //                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
 //                     }
 // ```
-/// The outfmt 0 copies of `hits` with each subject row's masked letters in lower case. A query's
-/// hits with a subject show the lower-case runs of the subject's record (record coordinates) that
-/// meet the closed range `[offset, end]` of one of their HSPs in the searched letters (the end is
-/// one past the HSP): with `-subject_loc` the two coordinates differ by the interval's start, so a
-/// run is kept by where it would lie in the interval and shown where it lies in the record. A `-db`
-/// subject has no records here, and its rows stay as they are.
+/// The subject masks of each query's hits (`GetSubjectMasks` of the query's results, by (query,
+/// subject)): the lower-case runs of the subject's record (record coordinates, inclusive) that
+/// meet the closed range `[offset, end]` of one of the query's HSPs with it in the searched letters
+/// (the end is one past the HSP): with `-subject_loc` the two coordinates differ by the interval's
+/// start, so a run is kept by where it would lie in the interval and shown where it lies in the
+/// record. A `-db` subject has no records here and no masks. The outfmt 0 rows show them
+/// ([`x_masked_subject_rows`]), the query-anchored reports map them to their columns
+/// (`report::query_anchored`).
 #[cold]
 #[inline(never)]
-pub(super) fn x_masked_subject_rows(
+pub(super) fn x_subject_masks(
     hits: &[PairwiseHit],
     subject_records: &[FastaRecord],
     placements: &Placements,
-) -> Vec<PairwiseHit> {
+) -> HashMap<(u32, u32), Vec<(i32, i32)>> {
     let mut hsp_ranges: HashMap<(u32, u32), Vec<(i32, i32)>> = HashMap::new();
     for hit in hits {
         let shift = placements.offset(hit.hit.s_idx as usize);
@@ -470,26 +472,41 @@ pub(super) fn x_masked_subject_rows(
                 (hit.hit.s_end - shift) as i32,
             ));
     }
+    hsp_ranges
+        .into_iter()
+        .filter_map(|(key, ranges)| {
+            let record = subject_records.get(key.1 as usize)?;
+            let runs: Vec<(i32, i32)> = lowercase_runs(record.archive_letters())
+                .into_iter()
+                .filter(|&(from, to)| {
+                    ranges
+                        .iter()
+                        .any(|&(offset, end)| from <= end && offset <= to)
+                })
+                .collect();
+            (!runs.is_empty()).then_some((key, runs))
+        })
+        .collect()
+}
+
+/// The outfmt 0 copies of `hits` with each subject row's masked letters in lower case: the runs
+/// of [`x_subject_masks`] of the row's query and subject that hold its letters.
+#[cold]
+#[inline(never)]
+pub(super) fn x_masked_subject_rows(
+    hits: &[PairwiseHit],
+    subject_records: &[FastaRecord],
+    placements: &Placements,
+) -> Vec<PairwiseHit> {
+    let masks = x_subject_masks(hits, subject_records, placements);
     let mut hits = hits.to_vec();
     for hit in &mut hits {
-        let Some(record) = subject_records.get(hit.hit.s_idx as usize) else {
+        let Some(runs) = masks.get(&(hit.hit.q_idx, hit.hit.s_idx)) else {
             continue;
         };
         let Some(row) = hit.subject_seq.as_mut() else {
             continue;
         };
-        let ranges = &hsp_ranges[&(hit.hit.q_idx, hit.hit.s_idx)];
-        let runs: Vec<(i32, i32)> = lowercase_runs(record.archive_letters())
-            .into_iter()
-            .filter(|&(from, to)| {
-                ranges
-                    .iter()
-                    .any(|&(offset, end)| from <= end && offset <= to)
-            })
-            .collect();
-        if runs.is_empty() {
-            continue;
-        }
         let mut bytes = std::mem::take(row).into_bytes();
         let mut position = hit.hit.s_start as i32 - 1;
         for (column, letter) in bytes.iter_mut().enumerate() {

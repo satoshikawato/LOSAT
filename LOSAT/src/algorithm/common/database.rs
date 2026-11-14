@@ -1926,6 +1926,64 @@ pub(crate) fn refuse_id_of_a_query(
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1588-1589, 432-433, 497-498
+// ```c++
+//         const CBioseq_Handle& handle = m_ScopeRef->GetBioseqHandle(*id);
+//         x_FillDeflineAndId(handle, *id, use_this_seqid, sdl, blast_rank);
+//     ...
+//     sdl->id = CAlignFormatUtil::GetDisplayIds(handle,aln_id,use_this_seqid,&sdl->gi,&sdl->taxid,&sdl->textSeqID);
+//     ...
+//     sdl->defline = CDeflineGenerator().GenerateDefline(m_ScopeRef->GetBioseqHandle(*(sdl->id)), sequence::CDeflineGenerator::fLeavePrefixSuffix);
+// ```
+/// LOSAT's refusal of a database sequence that a description table shows (outfmt 0 to 4, the
+/// first `-num_descriptions` subjects) whose display id (`ParsedSubject::display_id`, the id of its
+/// description line) is, or is matched weakly by NCBI's scope to, the id of a query of the scope
+/// `queries` (`QueryScopeKeys::display`): the description line looks its title up again by that
+/// id, a second lookup after the one by the Seq-align id (`refuse_id_of_a_query`, every format),
+/// and NCBI's scope finds the query, so NCBI BLAST+ shows the query's title there (`gi|779|lcl|abc`
+/// and a query `lcl|abc`; review 3 of line RG item T3a). `queries` holds the ids of queries read
+/// with `-parse_deflines` (or of the PSSM query of `-in_pssm`), or, with `generated`, the local
+/// ids `Query_N` of queries read without it, which BLASTP refuses in outfmt 1 to 4 only (line RG
+/// item X7 owns NCBI's behaviour for them in outfmt 0).
+pub(crate) fn refuse_display_id_of_a_query(
+    subject: &crate::report::db_subject::ParsedSubject,
+    oid: crate::seqdb::Oid,
+    queries: &crate::blastinput::query_batch::QueryScope,
+    generated: bool,
+    program: &str,
+) -> Result<()> {
+    if !queries.has_key(&subject.query_scope_keys().display) {
+        return Ok(());
+    }
+    let mut display = Vec::new();
+    if let Some(id) = subject.display_id() {
+        crate::seqid::label::fasta(id, &mut display);
+    }
+    let (queries, weak, formats) = if generated {
+        (
+            "without -parse_deflines",
+            "",
+            "the query-anchored formats, outfmt 1 to 4",
+        )
+    } else {
+        (
+            "with -parse_deflines (or of the PSSM query of -in_pssm)",
+            ", or an id that NCBI BLAST+'s scope matches weakly to it",
+            "outfmt 0 to 4",
+        )
+    };
+    Err(parsed_refusal(
+        oid,
+        &format!(
+            "has the display id {} (the id of its description line), the id of a query read \
+             {queries} in the query batch that reports it{weak}: NCBI BLAST+ shows that query's \
+             title in its description line ({formats})",
+            String::from_utf8_lossy(&display)
+        ),
+        program,
+    ))
+}
+
 /// `refuse_id_of_a_query` of each reported sequence of `reported` (a searched query, by its index
 /// in `scopes`, and a sequence that its report names, by ordinal id; `oids` the database's OIDs)
 /// whose header `titles` holds with parsed Seq-ids, with the scope of that query. A program calls it for each query batch
@@ -5092,7 +5150,7 @@ pub(crate) fn seq_annots_prefetch(outfmt: Option<i32>) -> bool {
 }
 
 /// Whether the first format of a call is one whose batches prefetch their reported subjects
-/// and that shows no taxonomy of them (`prefetch_messages`): outfmt 0, 5, 6, 7 and 17, and with
+/// and that shows no taxonomy of them (`prefetch_messages`): outfmt 0 to 7 and 17, and with
 /// `PRE_FETCH_SEQS_LIMIT=2147483647` the Seq-annots 8, 9 and 12 too (`s_PreFetchSeqs`, quoted at
 /// [`prefetch_may_be_off`], returns before its test of the format). The query warnings, which
 /// the batch's messages go with, are written with the first format (the Seq-annots write only
@@ -5102,7 +5160,8 @@ pub(crate) fn seq_annots_prefetch(outfmt: Option<i32>) -> bool {
 /// outfmt 8, 9, 11 and 12).
 pub(crate) fn prefetches_subjects(outfmt: Option<i32>) -> bool {
     match outfmt {
-        Some(0 | 5 | 6 | 7 | 17) => true,
+        // `s_IsPrefetchFormat` takes the query-anchored formats 1 to 4 as 0 (DECISIONS T3-4).
+        Some(0..=7 | 17) => true,
         Some(8 | 9 | 12) => prefetch_seqs_limit() == Some(i32::MAX),
         _ => false,
     }

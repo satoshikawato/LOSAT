@@ -252,6 +252,34 @@ pub(crate) fn gapped_segments(
     }
 }
 
+/// The Dense-seg segments of a hit of a protein search without translation (BLASTP) whose
+/// coordinates are in its records (`Hit::q_start` and `s_start`, 1-based, after the shift to the
+/// records): `collect_seq_align_data` of the HSP at those coordinates. NCBI makes the segments in
+/// the searched letters and `RemapToQueryLoc` and `s_RemapToSubjectLoc` add the starts of the
+/// ranges to the rows: the same starts, as a protein row has no strand to remap (the query-anchored
+/// reports, `report::query_anchored`).
+pub(crate) fn protein_row_segments(hit: &crate::common::Hit, segments: &mut Segments) {
+    let record = HspRecord {
+        subject: 0,
+        q_offset: hit.q_start as i32 - 1,
+        q_end: hit.q_end as i32,
+        s_offset: hit.s_start as i32 - 1,
+        s_end: hit.s_end as i32,
+        q_frame: 0,
+        s_frame: 0,
+        score: hit.raw_score,
+        num: 0,
+        evalue: hit.e_value,
+        bit_score: hit.bit_score,
+        num_ident: hit.num_ident as i32,
+        num_positives: hit.num_positives as i32,
+        comp_adjust: 0,
+        ops: hit.gap_info.as_deref().unwrap_or(&[]),
+    };
+    // A protein row's strand is unknown: the lengths are not read.
+    collect_seq_align_data(&record, 0, 0, false, false, segments);
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:89-100
 /// ```c++
 /// static int

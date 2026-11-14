@@ -1,0 +1,74 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: database sequences whose display id is a query id
+           4 sequences; 600 total letters
+
+
+
+Query= second query
+
+Length=150
+                                                                      Score   Total  Query    E     Max
+Sequences producing significant alignments:                          (Bits)   Score  cover   Value  Ident
+
+dbo2 other two                                                        13.9     13.9   9%     4.2    46%       
+dbo1 other one                                                        13.9     13.9   9%     4.8    36%       
+abc db gi abc                                                         14.6     27.7   29%    2.9    32%       
+
+
+
+Query_1  42   LDDGCNEFTVFWSTYHKMWGLLPTTIRVKNCHFLMNMWSMTQQVAWAHHCECGVVGTMAG  101
+dbo2     23                                                     A....ENGQW  32
+dbo1     92   .ENMRDVI..L.R.                                                105
+abc      100          ..L.R.D.CG.SDWNWWQL..SV.RV..KMAKVYEPEFTN.F.           146
+                                           \                              
+                                           |                              
+                                        CYEY
+abc      5               .T.QD.-.FR..SIAFLSKE.M.FS                          28
+Query_1  100          ..L.R.D.CG.SDWNWWQL..SV.RV..KMAKVYEPEFTN.F.           146
+                                           \                              
+                                           |                              
+                                        CYEY
+Query_1  5               .T.QD.-.FR..SIAFLSKE.M.FS                          28
+
+Query_1  102  TLM  104
+dbo2     33   .V.  35
+
+
+Lambda      K        H        a         alpha
+   0.324    0.136    0.483    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 62500
+
+
+  Database: database sequences whose display id is a query id
+    Posted date:  Nov 14, 2026  8:41 PM
+  Number of letters in database: 600
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

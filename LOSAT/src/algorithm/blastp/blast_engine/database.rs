@@ -1173,6 +1173,118 @@ impl ListedTitles<'_> {
         Ok(())
     }
 
+    /// Outfmt 1 to 4 of queries read without `-parse_deflines` (line RG T3a, review 2 D2): LOSAT's
+    /// refusal of a subject with parsed Seq-ids of the final hit lists `hit_lists` whose Seq-align
+    /// id is the generated id (`lcl|Query_N`) of a query of the batch that reports it, as NCBI's
+    /// scope finds an id (`scope_of`: that batch's scope, by query, `QueryScope::of_generated_ids`;
+    /// the keys of `refuse_id_of_a_query`). NCBI's formatter adds the batch's queries to its scope
+    /// before their reports and empties it after them (`query_batch::QueryScopeSpan::Batch`; no
+    /// outfmt 5 here) and finds such a subject there: its reports show the query's title and
+    /// letters in the subject's place, and the query-anchored merge of the query's own Bioseq can
+    /// abort (`double free or corruption`, as `pairwise::blastp_section_aborts`). A weak match
+    /// (`QueryScopeKeys::weak`, of text Seq-ids) never meets a local id. Then the subjects whose
+    /// description lines the reports show (`described`) and whose display id is such an id
+    /// (`refuse_display_ids`; review 3 of T3a, D1: `gi|777|lcl|Query_1`): NCBI shows the query's
+    /// title in that line.
+    pub(super) fn refuse_generated_query_ids<'s>(
+        &self,
+        hit_lists: &[Option<BlastpHitList>],
+        scope_of: impl Fn(usize) -> &'s crate::blastinput::query_batch::QueryScope,
+        described: impl FnMut(usize) -> Result<Vec<u32>>,
+    ) -> Result<()> {
+        if self.parsed.is_empty() {
+            return Ok(());
+        }
+        for (query, hit_list) in hit_lists.iter().enumerate() {
+            let Some(hit_list) = hit_list else {
+                continue;
+            };
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            for hsp_list in &hit_list.hsplist_array[..count] {
+                let rank = hsp_list.oid as usize;
+                let Some(subject) = &self.parsed[rank] else {
+                    continue;
+                };
+                if scope_of(query).has_key(&subject.query_scope_keys().own) {
+                    return Err(shared::parsed_refusal(
+                        self.oids.oid(self.listed.ordinals[rank]),
+                        &format!(
+                            "has the Seq-id {}, the id of a query read without -parse_deflines \
+                             in the query batch that reports it: NCBI BLAST+ shows that query in \
+                             its place in the query-anchored formats (outfmt 1 to 4)",
+                            String::from_utf8_lossy(&subject.alignment_fasta())
+                        ),
+                        self.program,
+                    ));
+                }
+            }
+        }
+        self.refuse_display_ids(hit_lists, scope_of, true, described)
+    }
+
+    /// With `-parse_deflines` (or a PSSM query shown with its ids) and a description table
+    /// (outfmt 0 to 4): `common::database::refuse_display_id_of_a_query` of the subjects whose
+    /// description lines the reports show (`described`), with the scope of the query whose list
+    /// reaches each (`scopes`, as `refuse_ids_of_queries`, which refuses their Seq-align ids in
+    /// every format; review 3 of line RG T3a, D1: `gi|779|lcl|abc` and a query `lcl|abc`).
+    pub(super) fn refuse_display_ids_of_queries(
+        &self,
+        hit_lists: &[Option<BlastpHitList>],
+        scopes: crate::blastinput::query_batch::QueryScopesFrom<'_>,
+        described: impl FnMut(usize) -> Result<Vec<u32>>,
+    ) -> Result<()> {
+        self.refuse_display_ids(hit_lists, |query| scopes.of_query(query), false, described)
+    }
+
+    /// `common::database::refuse_display_id_of_a_query` (`generated` as there) of each subject
+    /// with parsed Seq-ids of the final hit lists `hit_lists` whose description line a report
+    /// shows, with the scope `scope_of` of the query whose list reaches it: `described(query)`
+    /// gives the subjects (by rank) of the query's description table
+    /// (`pairwise::blastp_described_subjects`), asked only for a query whose list holds a subject
+    /// whose display id the scope has (`QueryScopeKeys::display`).
+    fn refuse_display_ids<'s>(
+        &self,
+        hit_lists: &[Option<BlastpHitList>],
+        scope_of: impl Fn(usize) -> &'s crate::blastinput::query_batch::QueryScope,
+        generated: bool,
+        mut described: impl FnMut(usize) -> Result<Vec<u32>>,
+    ) -> Result<()> {
+        if self.parsed.is_empty() {
+            return Ok(());
+        }
+        for (query, hit_list) in hit_lists.iter().enumerate() {
+            let Some(hit_list) = hit_list else {
+                continue;
+            };
+            let scope = scope_of(query);
+            let mut shown: Option<Vec<u32>> = None;
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            for hsp_list in &hit_list.hsplist_array[..count] {
+                let rank = hsp_list.oid as usize;
+                let Some(subject) = &self.parsed[rank] else {
+                    continue;
+                };
+                if !scope.has_key(&subject.query_scope_keys().display) {
+                    continue;
+                }
+                let shown = match &mut shown {
+                    Some(shown) => shown,
+                    None => shown.insert(described(query)?),
+                };
+                if shown.contains(&(rank as u32)) {
+                    shared::refuse_display_id_of_a_query(
+                        subject,
+                        self.oids.oid(self.listed.ordinals[rank]),
+                        scope,
+                        generated,
+                        self.program,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// The stored title of the subject of rank `rank` (empty for a subject in no final hit
     /// list).
     fn title(&self, rank: usize) -> &[u8] {

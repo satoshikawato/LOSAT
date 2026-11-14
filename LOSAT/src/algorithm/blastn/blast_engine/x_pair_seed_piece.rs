@@ -50,8 +50,10 @@
 //! the strips stage takes a new buffer only when it has none to give back); the strip the
 //! slowest partition is in (the lowest strip a partition has not folded all of) alone may take
 //! the last `RESERVED` slots, so that it can always go on (no wait for a piece
-//! nobody frees). A participant produces one piece per turn and parks the rest of the strip, so
-//! that a helper never holds a strip half-scanned (it can leave a stalled stage at any turn).
+//! nobody frees). A participant makes a strip's pieces one after another while the pool has a
+//! slot for the next one and parks the rest of the strip when it has none, so that a helper never
+//! waits holding a strip half-scanned (it can leave a stalled stage at any turn), and a thread
+//! leaves a strip's scan for its folds no more often than the strips stage does.
 //!
 //! Why the output is the same: a partition folds the pieces of a strip in order and the strips
 //! in order, a piece's seeds of the partition in scan order (the blocks of its chain), so each
@@ -804,8 +806,12 @@ where
         min_next
     };
 
-    // One piece of the lowest parked strip, or of the next strip within `ahead` strips of the
-    // slowest partition's (`low`), if a slot of the pool is free for it; `false` if not.
+    // The pieces of the lowest parked strip, or of the next strip within `ahead` strips of the
+    // slowest partition's (`low`), while a slot of the pool is free for them; `false` if none was.
+    // (One piece per turn made a participant leave a strip's scan for its folds after each piece:
+    // BLASTN-short of 30,000 short queries x 3 Mb at 16 threads cut a strip into 2.3 pieces on
+    // average, and its folds took +1.2 % cycles at the same instructions, their loads missing L1
+    // evenly more, line EB s20l1.)
     let produce = |low: usize| -> bool {
         // (the pieces every partition has folded go back first, so that the piece takes one of
         // their slots before one no piece has used)
@@ -826,7 +832,7 @@ where
                 return false;
             }
         }
-        let (strip, from, k, slot) = {
+        let (strip, mut from, mut k, mut slot) = {
             let mut s = lock(&sched);
             let lowest = s
                 .parked
@@ -862,55 +868,71 @@ where
             };
             (strip, from, k, slot)
         };
-        let (next, k_end, empty) = {
-            // SAFETY: the slot was taken from the schedule just now, and a slot goes back to it
-            // only when every partition's lane is past its piece (`slowest`).
-            let arena = unsafe { pool[slot as usize].0.fill() };
-            arena.reset(parts, piece_seeds);
-            let mut sink = PieceSink {
-                table: &table,
-                seeds: arena.seeds,
-                pos: arena.pos,
-                links: &mut arena.links,
-                k,
-                limit: k + piece_seeds as u32,
+        loop {
+            let (next, k_end, empty) = {
+                // SAFETY: the slot was taken from the schedule just now, and a slot goes back to
+                // it only when every partition's lane is past its piece (`slowest`).
+                let arena = unsafe { pool[slot as usize].0.fill() };
+                arena.reset(parts, piece_seeds);
+                let mut sink = PieceSink {
+                    table: &table,
+                    seeds: arena.seeds,
+                    pos: arena.pos,
+                    links: &mut arena.links,
+                    k,
+                    limit: k + piece_seeds as u32,
+                };
+                let next = scan(strip, from, &mut sink);
+                let k_end = sink.k;
+                (next, k_end, arena.links.used == 0)
             };
-            let next = scan(strip, from, &mut sink);
-            let k_end = sink.k;
-            (next, k_end, arena.links.used == 0)
-        };
-        let st = &strips[strip].0;
-        let count = if empty {
-            // (a piece stops only when it is full, so an empty one ends its strip)
-            debug_assert!(next.is_none());
+            let st = &strips[strip].0;
+            let count = if empty {
+                // (a piece stops only when it is full, so an empty one ends its strip)
+                debug_assert!(next.is_none());
+                let mut s = lock(&sched);
+                s.free.push(slot);
+                free_n.store(s.avail(slots_n), Ordering::Relaxed);
+                given_n.store(s.free.len(), Ordering::Relaxed);
+                st.published.load(Ordering::Relaxed)
+            } else {
+                // (one participant at a time makes the strip's pieces: the parked strip passes
+                // through the schedule's lock, so the count is the one it last stored)
+                let k = st.published.load(Ordering::Relaxed) & !DONE;
+                piece_slots.at(strip, k).store(slot, Ordering::Relaxed);
+                k + 1
+            };
+            st.published.store(
+                count | if next.is_none() { DONE } else { 0 },
+                Ordering::Release,
+            );
+            produced.fetch_add(1, Ordering::Relaxed);
+            let Some(next) = next else {
+                return true;
+            };
+            // the strip's next piece in a slot of the pool if one is free for it (as above),
+            // else the strip is parked, so that no participant waits holding it
+            if given_n.load(Ordering::Relaxed) == 0 {
+                slowest();
+            }
             let mut s = lock(&sched);
-            s.free.push(slot);
-            free_n.store(s.avail(slots_n), Ordering::Relaxed);
-            given_n.store(s.free.len(), Ordering::Relaxed);
-            st.published.load(Ordering::Relaxed)
-        } else {
-            // (one participant at a time makes the strip's pieces: the parked strip passes
-            // through the schedule's lock, so the count is the one it last stored)
-            let k = st.published.load(Ordering::Relaxed) & !DONE;
-            piece_slots.at(strip, k).store(slot, Ordering::Relaxed);
-            k + 1
-        };
-        st.published.store(
-            count | if next.is_none() { DONE } else { 0 },
-            Ordering::Release,
-        );
-        produced.fetch_add(1, Ordering::Relaxed);
-        if let Some(from) = next {
-            let mut s = lock(&sched);
+            let avail = s.avail(slots_n);
+            if avail > RESERVED || (strip == low && avail > 0) {
+                slot = s.take();
+                free_n.store(s.avail(slots_n), Ordering::Relaxed);
+                given_n.store(s.free.len(), Ordering::Relaxed);
+                (from, k) = (Some(next), k_end);
+                continue;
+            }
             s.parked.push(Parked {
                 strip,
-                from,
+                from: next,
                 k: k_end,
             });
             parked_n.store(s.parked.len(), Ordering::Relaxed);
             low_parked.store(lowest_parked(&s.parked), Ordering::Relaxed);
+            return true;
         }
-        true
     };
 
     // (the owner's time in scans, in waits and in the ungapped extensions of its folds)

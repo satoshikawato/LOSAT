@@ -77,13 +77,13 @@ pub(super) mod x_subject_meta;
 // `-comp_based_stats 0`: NCBI's ordinary traceback in place of the composition-based redo.
 mod traceback;
 // psiblast `-in_pssm` (series PS, item PS4a): the stages of a PSSM search, reached through the
-// `psi_search` hooks of `run_resolved_in_pool`.
+// `psi_search` hooks of `run_call`.
 mod pssm_hooks;
 // rpsblast (series PR, item PS11a): the RPS engine's search, reached through the `rps_search`
-// hooks of `search_cli` and `run_resolved_in_pool`.
+// hooks of `search_cli` and `run_call`.
 mod rps_hooks;
 // psiblast's rounds of FASTA queries (series PS, item PS5a): the round driver, reached from
-// `search`, and the round's outcome hook of `run_resolved_in_pool`.
+// `search`, and the round's outcome hook of `run_call`.
 mod psi_round;
 // The rendered rows of the final hits a window of queries at a time, as the reports read them.
 pub(super) mod query_rows;
@@ -6635,7 +6635,7 @@ fn resolve_for_formats(
 /// sequence when the database has no letters: a database without sequences has none, and
 /// psiblast stops with `BLAST Database error: OID not found` (exit 2), after the prolog, whatever
 /// its query (NCBI 2.17.0 with `tk.faa` and an all-X query; probes `n.ps.empty.*` of the PS5c review;
-/// blastp's `CLocalBlast` fails earlier, `run_resolved_in_pool`; line PS DECISIONS 30).
+/// blastp's `CLocalBlast` fails earlier, `run_call`; line PS DECISIONS 30).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:932-936
 /// ```c
@@ -7062,7 +7062,7 @@ fn search(
         check_identity_compressed_lookup_of(&args)?;
     }
     // The titles that the BLAST archive (outfmt 11) cannot write are refused where the archive
-    // of the searched batches is written (`run_resolved_in_pool`), after their search: the batch
+    // of the searched batches is written (`run_call`), after their search: the batch
     // that stops the run here, and one whose search fails, write no archive. The titles are read
     // once here: only when a searched query or a subject has such a title does a call check its
     // own (`BlastpReports::titles_may_refuse`).
@@ -7317,7 +7317,7 @@ fn search(
     //                         "unsupported score matrix");
     // ```
     // NCBI fails when it formats the first batch's results in BLAST XML with a matrix name that
-    // its XML data does not know ("unsupported score matrix", `run_resolved_in_pool`'s format
+    // its XML data does not know ("unsupported score matrix", `run_call`'s format
     // loop): the search strategy's file then holds the first batch's request alone (probe 7 of
     // RG-F1, `-matrix blosum62` with outfmt 5 and 16), whichever call writes it.
     if let Some(strategy) = args.strategy.as_ref() {
@@ -7760,7 +7760,7 @@ fn search(
 //        continue;
 //    }
 // ```
-/// EXPERIMENT (LOSAT_X_BPQBLOCK): the encoding of `run_resolved_in_pool`
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): the encoding of `run_call`
 /// (`prepare_blastp_subjects_preserving_order`), made once for all blocks.
 fn x_bp_encode_block_subjects(
     subject_records: &[FastaRecord],
@@ -7843,7 +7843,7 @@ fn x_query_block_plan(
         return None;
     }
     // A title that the archive cannot write is refused where the archive of the searched batches
-    // is written, after their search (`run_resolved_in_pool`): a block's archive would come before
+    // is written, after their search (`run_call`): a block's archive would come before
     // the refusal of a later block's title, so such a run takes the search of all queries
     // (`titles_may_refuse`, `search`).
     if titles_may_refuse {
@@ -7947,7 +7947,7 @@ fn x_query_block_plan(
                 return None;
             }
         }
-        // A database without sequences fails in the first batch (`run_resolved_in_pool`).
+        // A database without sequences fails in the first batch (`run_call`).
         BlastpSubjectSource::Database(database) => {
             if database.num_sequences() == 0 {
                 return None;
@@ -7988,7 +7988,7 @@ fn x_query_block_plan(
 // EXPERIMENT (LOSAT_X_BPQBLOCK): whether the search of all queries passes the checks that refuse
 // it before any row is written and that a block search would make only in the block that holds
 // the cause, after the rows of the blocks before:
-// - the diagonal table of all queries (`check_diag_table_window` in `run_resolved_in_pool`, with
+// - the diagonal table of all queries (`check_diag_table_window` in `run_call`, with
 //   the concatenated length of all queries; a block's is shorter);
 // - the split of a long query batch (the `ensure!`s of `search_split_query_batches`);
 // - with the compressed lookup table, a table of one of NCBI's query batches (or of a query
@@ -8118,7 +8118,7 @@ fn x_word_blocks(
             Vec::new(),
         ));
     }
-    // The threshold as the table is built (`run_resolved_in_pool`), with the words of the search's
+    // The threshold as the table is built (`run_call`), with the words of the search's
     // matrix (`blastp_matrix_compressed_lookup` builds another matrix's table).
     let counter = CompressedWordCount::new_of(
         args.scoring.matrix,
@@ -9136,7 +9136,7 @@ struct BlastpReports<'a> {
         Option<&'a std::sync::Mutex<Option<crate::algorithm::psiblast::pssm::PssmFiles>>>,
     /// With the BLAST archive (outfmt 11): a searched query or a subject that `search` read has a
     /// title the archive cannot write, so the call checks its own queries and subjects where it
-    /// writes the archive (`run_resolved_in_pool`); without such a title no call can refuse.
+    /// writes the archive (`run_call`); without such a title no call can refuse.
     titles_may_refuse: bool,
     /// Under `-parse_deflines` against a database, the scopes of the call's queries
     /// (`query_batch::QueryScopes`, numbered from the call's first), whose ids the reported
@@ -9154,7 +9154,7 @@ struct BlastpReports<'a> {
 /// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`). The values that NCBI
 /// converts in each query batch stop its first batch: `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` in its
 /// query splitter (`read_query_batches`; not `OVERLAP_CHUNK_SIZE` in RPSBLAST, whose queries it
-/// never splits) and `PRE_FETCH_SEQS_LIMIT` in its prefetch (`run_resolved_in_pool`). Other batch
+/// never splits) and `PRE_FETCH_SEQS_LIMIT` in its prefetch (`run_call`). Other batch
 /// sizes change a blastp report only through the query batches (`read_query_batches`; the redo of
 /// a query reads the heaps of its batch, `kappa_query_batches`) and the query split
 /// (`search_split_query_batches`).
@@ -9435,7 +9435,7 @@ mod anchored;
 /// The query frames of a search: each record encoded with the search's SEG parameters
 /// (`encode_protein_query_frame_with_seg`; `encode_protein_query_frame_soft_masked` with
 /// `-soft_masking true`; `encode_protein_query_frame_lcase` with `-lcase_masking`).
-/// `run_resolved_in_pool` encodes its queries with it, and so
+/// `run_call` encodes its queries with it, and so
 /// does the build of the next block's lookup ahead of that block (LOSAT_X_BPLKPAHEAD,
 /// `x_lookup_ahead.rs`).
 fn blastp_query_frames(
@@ -9518,7 +9518,7 @@ fn x_bp_runtime_lookup(built: XBpLookup) -> BlastpRuntimeLookup {
 //     lookup->threshold = (Int4)opt->threshold;
 // ```
 /// The lookup table of exact blastp (`AaLookupTable`) and the query contexts of `query_frames`, as
-/// the lookup region of `run_resolved_in_pool` builds them, of the search's word size (3, 2:
+/// the lookup region of `run_call` builds them, of the search's word size (3, 2:
 /// blastp-short and `-word_size 2`, item SC3, or 4, item SC8b). The threshold takes the x86-64
 /// conversion: `INT_MIN` for a threshold beyond `Int4` (every word). The table is filled in place,
 /// without the reference builder's chains (lookup/x_lut_direct.rs); a table of 4-letter words by
@@ -9690,7 +9690,7 @@ fn blastp_aa_lookup_on_block_spare(
 // s_CompressedLookupFinalize(lookup);
 // ```
 /// The compressed lookup table of blastp-fast (`CompressedAaLookupTable`) and the query contexts of
-/// `query_frames`, as the lookup region of `run_resolved_in_pool` builds them: `query_batches` and
+/// `query_frames`, as the lookup region of `run_call` builds them: `query_batches` and
 /// `query_lengths` are the search's (its batches of the whole input, its records' lengths), and
 /// `x_for` says which build of a block search this is (the spare vectors it takes,
 /// `x_query_blocks::XLookupFor`; a query chunk's NCBI tables are its one table). The build of the

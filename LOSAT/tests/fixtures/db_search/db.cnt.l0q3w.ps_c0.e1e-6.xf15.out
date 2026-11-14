@@ -24,7 +24,7 @@ other refinements", Nucleic Acids Res. 29:2994-3005.
 
 
 Database: t
-           3 sequences; 0 total letters
+           5 sequences; 0 total letters
 
 Results from round 1
 
@@ -39,6 +39,8 @@ Sequences producing significant alignments:                          (Bits)  Val
 weak10 tk.faa 1-110, a barrier of 30, tk.faa 118-127                  223     2e-62
 weak11 tk.faa 1-110, a barrier of 30, tk.faa 115-125                  223     6e-63
 gap7 tk.faa 1-110, a barrier of 30, tk.faa 118-124, W, tk.faa 125...  223     5e-63
+gap7p tk.faa 1-110, a barrier of 36 against the matrix and the PS...  223     5e-63
+long8k tk.faa 1-110, a barrier of 30 against the matrix and the P...  223     5e-63
 
 
 >weak10 tk.faa 1-110, a barrier of 30, tk.faa 118-127
@@ -103,6 +105,38 @@ Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRL  110
 Sbjct  81   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRL  130
 
 
+>gap7p tk.faa 1-110, a barrier of 36 against the matrix and the 
+PSSM, tk.faa 118-124, W, tk.faa 125-131
+Length=201
+
+ Score = 223 bits (567),  Expect = 5e-63
+ Identities = 110/110 (100%), Positives = 110/110 (100%), Gaps = 0/110 (0%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  21   MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  80
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRL  110
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRL
+Sbjct  81   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRL  130
+
+
+>long8k tk.faa 1-110, a barrier of 30 against the matrix and the 
+PSSM, tk.faa 118-127 with D127E, 7,810 random letters
+Length=8000
+
+ Score = 223 bits (567),  Expect = 5e-63
+ Identities = 110/110 (100%), Positives = 110/110 (100%), Gaps = 0/110 (0%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  21   MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  80
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRL  110
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRL
+Sbjct  81   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRL  130
+
+
 
 Lambda      K        H        a         alpha
    0.320    0.137    0.406    0.792     4.96 
@@ -115,9 +149,9 @@ Effective search space used: 61545
 
 
   Database: t
-    Posted date:  Nov 15, 2026  1:00 AM
+    Posted date:  Nov 15, 2026  5:08 AM
   Number of letters in database: 0
-  Number of sequences in database:  3
+  Number of sequences in database:  5
 
 
 

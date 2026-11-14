@@ -1,5 +1,5 @@
 //! The stages of an rpsblast search (series PR, item PS11a) that differ from blastp's, called
-//! once per run from `search_cli` and `run_resolved_in_pool` when the search is RPS-BLAST's
+//! once per run from `search_cli` and `run_call` when the search is RPS-BLAST's
 //! (`ResolvedBlastpArgs::rps_search`): the check of the database's frequency ratios, the queries'
 //! contexts, and the whole RPS search (`algorithm::rps_search`) into the final hit lists, whose
 //! subjects are the profiles' consensus sequences of the database. blastp's driver does the rest
@@ -225,7 +225,7 @@ pub(super) fn rps_contexts(
     (BlastpRuntimeLookup::Aa(table), contexts)
 }
 
-/// The per-run values of the search that `run_resolved_in_pool` computed for blastp.
+/// The per-run values of the search that `run_call` computed for blastp.
 pub(super) struct RpsSearchRun<'a> {
     pub(super) contexts: &'a [QueryContext],
     /// `kbp_gap_std`: BLOSUM62 11/1's table values.

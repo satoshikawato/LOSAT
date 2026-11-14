@@ -11,6 +11,80 @@ use crate::seqid::model::{
     PdbSeqId, TextseqId,
 };
 
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:1497-1527
+// ```c++
+// void CDense_seg::CReserveHook::PreReadClassMember(CObjectIStream& in,
+//                                                   const CObjectInfoMI& member)
+// {
+//     static CSafeStatic<NCBI_PARAM_TYPE(OBJECTS, DENSE_SEG_RESERVE)> s_Reserve;
+//
+//     if ( !s_Reserve->Get() ) {
+//         return;
+//     }
+//     CDense_seg& ds = *CType<CDense_seg>::Get(member.GetClassObject());
+//     size_t numseg = ds.GetNumseg();
+//     try {
+//         switch ( member.GetMemberIndex() ) {
+//         case 4: // "starts"
+//             ds.SetStarts().reserve(ds.GetDim()*numseg);
+//             break;
+//         case 5: // "lens"
+//             ds.SetLens().reserve(numseg);
+//             break;
+//         case 6: // "strands"
+//             ds.SetStrands().reserve(ds.GetDim()*numseg);
+//             break;
+//         default:
+//             break;
+//         }
+//     }
+//     catch ( bad_alloc& /*ignored*/ ) {
+//         // ignore insufficient memory exception from advisory reserve()
+//     }
+// }
+// ```
+// NCBI reference (598d8ae6): c++/include/objects/seqalign/Dense_seg.hpp:181-182 (the hook is global:
+// `NCBISER_HAVE_GLOBAL_READ_MEMBER_HOOK(CDense_seg, "starts,lens,strands", ...)`)
+// `numseg` and `dim` are `int` (Dense_seg_.hpp:92-93), so a negative one is a huge `size_t`, and the
+// product wraps. `reserve` throws `std::length_error("vector::reserve")` above `max_size()`,
+// PTRDIFF_MAX / 4 = 2^61 - 1 for the 4-byte elements of the three vectors (NCBI 2.17.0 probes p5:
+// dim 2^30 x numseg 2^31-1 reads on, dim 2^30+1 stops), which no frame catches (they catch
+// `CException`s): `CATCH_ALL`'s `std::exception` clause reports it, exit status 255. A smaller
+// request that cannot be allocated is a `bad_alloc`, which the hook ignores, as LOSAT does not
+// allocate. (`OBJECTS_DENSE_SEG_RESERVE` is NCBI's default, true: LOSAT reads no NCBI parameter.)
+// The reserve hooks of Seq-graph (`numval` is a TSeqPos: never above `max_size()`) and of
+// SeqTable-multi-data (only in a Seq-annot, which the PSSM search refuses) need nothing here.
+/// The hook of NCBI's class `ty` before the value of its member at position `member` is read,
+/// with the members `read` so far.
+pub(super) fn pre_read_member(
+    ty: u16,
+    member: usize,
+    read: &[(u16, Value)],
+) -> Result<(), ReadError> {
+    if ty != named::DENSE_SEG {
+        return Ok(());
+    }
+    let get = |name: &str| {
+        let index = member_index(named::DENSE_SEG, name);
+        read.iter()
+            .find(|(position, _)| usize::from(*position) == index)
+            .map(|(_, value)| int(value))
+    };
+    // `GetDim()`: the DEFAULT 2 when the member was not read.
+    let dim = get("dim").unwrap_or(2) as i32 as i64 as u64;
+    let numseg = get("numseg").unwrap_or(0) as i32 as i64 as u64;
+    const MAX_SIZE: u64 = (i64::MAX as u64) / 4;
+    let size = match super::members(ty)[member].name {
+        "starts" | "strands" => dim.wrapping_mul(numseg),
+        "lens" => numseg,
+        _ => return Ok(()),
+    };
+    if size > MAX_SIZE {
+        return Err(ReadError::Std("vector::reserve"));
+    }
+    Ok(())
+}
+
 /// The hook of the type `ty` after its value was read (not after a skip).
 pub(super) fn post_read(ty: u16, value: Value, posts: &mut Vec<Post>) -> Result<Value, ReadError> {
     match ty {

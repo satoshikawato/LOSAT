@@ -72,6 +72,9 @@ pub(crate) enum ReadError {
     Exception(NcbiException),
     /// A `CEofException` that leaves the reader: the text ends directly in the root object.
     Eof,
+    /// A `std::exception` that leaves the reader (its `what()`): `std::length_error` of a reserve
+    /// hook (`hooks::pre_read_member`).
+    Std(&'static str),
 }
 
 /// What the reader read, and the messages it posted before it stopped or finished.
@@ -426,7 +429,7 @@ impl TypedReader<'_> {
         let info = resolved(ty);
         let target = alias_target(ty);
         let value = match info.kind {
-            Kind::Sequence(members) => self.sequence(info.name, members, skip)?,
+            Kind::Sequence(members) => self.sequence(target, info.name, members, skip)?,
             Kind::Choice(variants) => self.choice(info.name, variants, skip)?,
             Kind::List { element, .. } => self.list(element, skip)?,
             Kind::Alias(_) => unreachable!("resolved"),
@@ -480,16 +483,22 @@ impl TypedReader<'_> {
     //     } \
     // }
     // ```
-    fn sequence(&mut self, name: &'static str, members: &'static [Member], skip: bool) -> R<Value> {
+    fn sequence(
+        &mut self,
+        ty: u16,
+        name: &'static str,
+        members: &'static [Member],
+        skip: bool,
+    ) -> R<Value> {
         self.push(FrameKind::Class, Some(name), skip);
-        let result = self.sequence_in_frame(members, skip);
+        let result = self.sequence_in_frame(ty, members, skip);
         self.pop(result)
     }
 
-    fn sequence_in_frame(&mut self, members: &'static [Member], skip: bool) -> R<Value> {
+    fn sequence_in_frame(&mut self, ty: u16, members: &'static [Member], skip: bool) -> R<Value> {
         self.r.start_block()?;
         self.push(FrameKind::ClassMember, None, skip);
-        let result = self.members(members, skip);
+        let result = self.members(ty, members, skip);
         let (values, pos) = self.pop(result)?;
         for member in &members[pos..] {
             expected_member(member)?;
@@ -498,7 +507,14 @@ impl TypedReader<'_> {
         Ok(Value::Sequence(values))
     }
 
-    fn members(&mut self, members: &'static [Member], skip: bool) -> R<(Vec<(u16, Value)>, usize)> {
+    /// The members of the SEQUENCE `ty`; a read (not a skip) runs the class's member hooks
+    /// before each member's value (`hooks::pre_read_member`).
+    fn members(
+        &mut self,
+        ty: u16,
+        members: &'static [Member],
+        skip: bool,
+    ) -> R<(Vec<(u16, Value)>, usize)> {
         let mut values = Vec::new();
         let mut pos = 0;
         let mut block_start = true;
@@ -508,6 +524,9 @@ impl TypedReader<'_> {
             self.set_member(member.name);
             for missing in &members[pos..index] {
                 expected_member(missing)?;
+            }
+            if !skip {
+                super::hooks::pre_read_member(ty, index, &values)?;
             }
             let value = if member.flags & super::DELAYED != 0 && !skip {
                 self.delayed(member.ty)?

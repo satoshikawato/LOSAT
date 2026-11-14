@@ -6,3 +6,5 @@
   exception report (exit status 255); a byte outside the visible ASCII range is read as `#` with NCBI's message (the
   search goes on, as NCBI's), and so are the messages of a `Variation-ref`'s deprecated members. The members that
   LOSAT skipped are kept (line RG item D3-1).
+  A query whose `annot` holds data that NCBI's object manager indexes (feature tables, alignments, graphs,
+  locations, Seq-tables: NCBI posts messages naming memory addresses, or stops) is refused.

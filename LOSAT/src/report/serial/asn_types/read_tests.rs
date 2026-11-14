@@ -613,3 +613,38 @@ fn the_file_header_names_the_root() {
         Value::Choice(0, Box::new(Value::Str(b"x".to_vec())))
     );
 }
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:1497-1527 (quoted at
+// `hooks::pre_read_member`): a reserve above `max_size()` (2^61 - 1 elements) is NCBI's
+// `std::length_error` (NCBI 2.17.0 probes p5 d01-d12); the missing members come first.
+#[test]
+fn dense_seg_reserve_above_max_size_is_a_length_error() {
+    let seg = |body: &str| format!("Dense-seg ::= {{ {body} }}");
+    let reserve = Err(ReadError::Std("vector::reserve"));
+    for body in [
+        "dim 2, numseg -1, ids { }, starts { }",
+        "numseg -5, ids { }, starts { }",
+        "dim -1, numseg 1, ids { }, starts { }, lens { }",
+        "dim -2, numseg -3, ids { }, starts { }, lens { }",
+        "dim 1073741825, numseg 2147483647, ids { }, starts { }",
+    ] {
+        assert_eq!(read(named::DENSE_SEG, seg(body)).0, reserve, "{body}");
+    }
+    // Below the limit the reserve's `bad_alloc` is ignored: the grammar decides.
+    serial(
+        named::DENSE_SEG,
+        &seg("dim 1073741824, numseg 2147483647, ids { }, starts { }"),
+    );
+    serial(
+        named::DENSE_SEG,
+        &seg("dim 2, numseg -1, ids { }, lens { }"),
+    );
+    assert!(matches!(
+        read(
+            named::DENSE_SEG,
+            seg("dim 2, numseg 1, ids { local id 1, local id 2 }, starts { 0, 0 }, lens { 1 }")
+        )
+        .0,
+        Ok(Value::Sequence(_))
+    ));
+}

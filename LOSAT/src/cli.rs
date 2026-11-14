@@ -1569,6 +1569,22 @@ impl NativeError {
             message: format!("Error: {}\n", e.what()),
         }
     }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
+    // ```c++
+    //     catch (const std::exception& e) {                                       \
+    //         LOG_POST(Error << "Error: " << e.what());                           \
+    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+    //     }                                                                       \
+    // ```
+    /// `CATCH_ALL`'s report of a `std::exception` (one that is neither a `CException` nor
+    /// `bad_alloc` nor `ios::failure`) whose `what()` is `what`: exit status 255.
+    pub(crate) fn std_exception(what: &str) -> NativeError {
+        NativeError {
+            exit: 255,
+            message: format!("Error: {what}\n"),
+        }
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:118-119

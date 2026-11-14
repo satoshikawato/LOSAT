@@ -162,6 +162,24 @@ impl PssmQuery {
             .flatten()
             .any(|descriptor| descriptor.variant_name() == "molinfo")
     }
+
+    /// The kinds of data of the query's annotations (`Seq-annot.data`'s variant: `ftable`,
+    /// `align`, `graph`, `ids`, `locs`, `seq-table`), in order.
+    pub fn annot_data_kinds(&self) -> Vec<&'static str> {
+        use super::asn_types::{member_index, members, table::named};
+        let data = member_index(named::SEQ_ANNOT, "data");
+        let data_ty = members(named::SEQ_ANNOT)[data].ty;
+        self.annot
+            .iter()
+            .flatten()
+            .filter_map(|annot| match annot.member(data) {
+                Some(Value::Choice(variant, _)) => {
+                    Some(members(data_ty)[usize::from(*variant)].name)
+                }
+                _ => None,
+            })
+            .collect()
+    }
 }
 
 /// `Seq-inst`.

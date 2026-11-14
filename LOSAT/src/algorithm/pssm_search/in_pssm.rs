@@ -364,7 +364,8 @@ pub(crate) fn read_in_pssm(
     // NCBI's reader posts its messages as it reads (`Post`), before its error when it stops. Its
     // `CSerialException` is the handler's "Unrecognized format"; a `CUtilException` of a number
     // or a `CStringException` of a tag leaves the handler and `CATCH_ALL` reports it with the
-    // lines of the reader's stack (exit status 255); a `CEofException` (a `CIOException`, the
+    // lines of the reader's stack (exit status 255), and so does a `std::length_error` of
+    // Dense-seg's reserve hook (`Error: vector::reserve`); a `CEofException` (a `CIOException`, the
     // text ending directly in the root object) is caught without a word and the run ends with
     // exit status 0 (NCBI BLAST+ 2.17.0, `PssmWithParameters ::=` alone; line RG D3-1 probe e01).
     let read = crate::blastinput::pssm_text::read_pssm(&bytes);
@@ -382,6 +383,9 @@ pub(crate) fn read_in_pssm(
         }
         Err(PssmReadError::Ncbi(ReadError::Exception(exception))) => {
             return Err(crate::cli::NativeError::exception(&exception).into())
+        }
+        Err(PssmReadError::Ncbi(ReadError::Std(what))) => {
+            return Err(crate::cli::NativeError::std_exception(what).into())
         }
         Err(PssmReadError::Ncbi(ReadError::Eof)) => {
             return Err(crate::cli::NativeError {
@@ -505,6 +509,50 @@ pub(crate) fn psi_search_and_object(
         return Err(reader
             .refuse("a PSSM without a query sequence (NCBI BLAST+ stops with a C++ exception)"));
     };
+    // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:403-427
+    // ```c++
+    // void CSeq_annot_Info::x_InitAnnotList(void)
+    // {
+    //     ...
+    //     switch ( data.Which() ) {
+    //     case C_Data::e_Ftable:
+    //         x_InitFeatList(data.SetFtable());
+    //         break;
+    //     case C_Data::e_Align:
+    //         x_InitAlignList(data.SetAlign());
+    //         break;
+    //     case C_Data::e_Graph:
+    //         x_InitGraphList(data.SetGraph());
+    //         break;
+    //     case C_Data::e_Locs:
+    //         x_InitLocsList(data.SetLocs());
+    //         break;
+    //     case C_Data::e_Seq_table:
+    //         x_InitFeatTable(data.SetSeq_table());
+    //         break;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:1055-1058 (one of the posts of
+    // the index, which name the TSE by its address, `CTSE_Info::GetDescription`, tse_info.cpp:2049-2056)
+    // ```c++
+    //                 ERR_POST_X(7, "Empty region in "<<GetDescription()<<
+    // ```
+    // The query's Bioseq joins NCBI's scope with its annotations (psiblast_app.cpp:537,
+    // tblastn_app.cpp's own), whose object manager indexes those of these kinds: NCBI BLAST+ 2.17.0
+    // posts messages for some (`Empty region in 0x... Seq-feat ::= ...` with a memory address,
+    // `Invalid 'lens' size in denseg`, the Seq-table column checks of seq_table_info.cpp) and stops
+    // with C++ exceptions for others (`Duplicate partial column`; a null pointer with a stack of
+    // addresses), line RG D3-1 probe p2. LOSAT does not index them: refused (`ids`, which NCBI does
+    // not index, and an empty `annot` are read and kept).
+    let indexed: Vec<&str> = query
+        .annot_data_kinds()
+        .into_iter()
+        .filter(|kind| *kind != "ids")
+        .collect();
+    if let Some(kind) = indexed.first() {
+        return Err(reader.refuse(format!(
+            "a PSSM query whose annot holds a Seq-annot of {kind} (NCBI's object manager indexes the query's annotations, with messages that name memory addresses and errors that LOSAT does not reproduce)"
+        )));
+    }
     let validation_error = validation_error(&pssm);
     // A PSSM of frequency ratios only: NCBI computes its scores with the PSSM engine
     // (`x_CreatePssmScoresFromFrequencyRatios`, below).
@@ -1658,6 +1706,40 @@ mod tests {
         assert_eq!(warning(b".", vec![]), b"");
         assert_eq!(warning(b"rnd random", vec!["Seqdesc"]), b"rnd random");
         assert_eq!(warning(b"rnd random", vec!["Seqdesc", "molinfo"]), b"");
+    }
+
+    // Line RG D3-1 (probe p2): the annotations of the kinds NCBI's object manager indexes are
+    // refused; `ids` and an empty `annot` are searched.
+    #[test]
+    fn indexed_annotations_are_refused() {
+        use crate::report::serial::asn_types::{member_index, members, table::named};
+        let data = member_index(named::SEQ_ANNOT, "data");
+        let kinds = members(named::SEQ_ANNOT)[data].ty;
+        let with_annot = |kinds_of_data: &[&str]| {
+            let mut pssm = rnd();
+            pssm.pssm.query.as_mut().unwrap().annot = Some(
+                kinds_of_data
+                    .iter()
+                    .map(|kind| {
+                        let variant = member_index(kinds, kind) as u16;
+                        Value::Sequence(vec![(
+                            data as u16,
+                            Value::Choice(variant, Box::new(Value::List(Vec::new()))),
+                        )])
+                    })
+                    .collect(),
+            );
+            psi_search_of(pssm)
+        };
+        assert!(with_annot(&[]).is_ok());
+        assert!(with_annot(&["ids"]).is_ok());
+        for kind in ["ftable", "align", "graph", "locs", "seq-table"] {
+            let error = with_annot(&["ids", kind]).unwrap_err().to_string();
+            assert!(
+                error.contains(&format!("annot holds a Seq-annot of {kind}")),
+                "{error}"
+            );
+        }
     }
 
     // The review of PS4a, S2 and N3: the record's local id is the Seq-id's `GetSeqIdString()`

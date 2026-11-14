@@ -19,8 +19,8 @@
 use super::traceback_finish::TracebackCtx;
 use super::{
     adjust_blastn_offsets, calculate_blastn_context_statistics, encode_iupac_to_blastna,
-    traceback_finish, traceback_list, ungapped, x_blastna_into_pool, BlastnHsp, BlastnSubjectRef,
-    ContextKarlin, GapAlignScratch, PrelimHit, SubjectCtx, SubjectHits, SubjectScratch,
+    traceback_list, ungapped, x_blastna_into_pool, BlastnHsp, BlastnSubjectRef, ContextKarlin,
+    GapAlignScratch, PrelimHit, SubjectCtx, SubjectHits, SubjectScratch,
 };
 use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::utils::threading::SearchPool;
@@ -177,16 +177,15 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
     } = subject_ctx;
     // EXPERIMENT (LOSAT_X_BNTBRANGE): set when a traceback alignment met a fence.
     let x_fenced = subject.x_fenced;
+    // A subject shorter than a word kept nothing (the preliminary stage returned before its
+    // search); returning here keeps its debug line off, as before.
     if s_len_full < effective_word_size {
         return;
     }
 
     // BLASTN debug: Log cutoff scores for this query-subject pair
     if blastn_debug {
-        eprintln!(
-            "[BLASTN_DEBUG] Subject {} (len={}): cutoff_scores={:?}",
-            s_id, s_len_full, cutoff_scores
-        );
+        subject_ctx.debug_cutoffs();
     }
 
     let mut combined_prelim_hits: Vec<PrelimHit> = Vec::new();
@@ -212,8 +211,8 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
     let hits = &mut subject_scratch.hits;
     hits.clear();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1567-1573 (the
-    // subject of the traceback, `traceback_subject::traceback_subject_blastna`). The letters
-    // made for it are this buffer's, which lives as long as `s_seq_blastna` is read.
+    // subject of the traceback, `traceback_subject_blastna`). The letters made for it are this
+    // buffer's, which lives as long as `s_seq_blastna` is read.
     let mut s_seq_blastna_vec: Vec<u8> = Vec::new();
     let s_seq_blastna: &[u8] =
         traceback_subject_blastna(subject, parallel_pool, &mut s_seq_blastna_vec);
@@ -221,7 +220,7 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
     // The values the traceback reads (`traceback_subject.rs`, `traceback_hsp.rs` and
     // `traceback_finish.rs`), for the query group tasks, the look-ahead helpers and the
     // speculative batch's jobs on the pool as for the owner thread.
-    let traceback_ctx = traceback_finish::TracebackCtx {
+    let traceback_ctx = TracebackCtx {
         timing_ref,
         timing_enabled,
         blastn_trace_enabled,
@@ -263,8 +262,7 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
     //                                   hit_params->options->hitlist_size);
     // ```
     // The traceback of an ungapped (`-ungapped`) search aligns nothing and purges nothing
-    // (`traceback_subject::ungapped_traceback_hits`); a subject with hits gives them to the
-    // results.
+    // (`ungapped_traceback_hits`); a subject with hits gives them to the results.
     if UNGAPPED {
         let final_hits = ungapped_traceback_hits(&traceback_ctx, &combined_prelim_hits);
         if !final_hits.is_empty() {

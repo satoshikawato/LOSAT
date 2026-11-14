@@ -1,8 +1,7 @@
 //! The preliminary search of one blastn subject, as `search_query_batch`'s `process_subject` calls
 //! it for the preliminary stage (`prelim_subject`): the subject's lowercase masks or database masks
 //! (`-db_soft_mask`) and the set-up of its chunks, then the chunk loop (`collect_subject_prelim`):
-//! the subject in chunks of at most
-//! `MAX_DBSEQ_LEN` letters that overlap by `DBSEQ_CHUNK_OVERLAP`
+//! the subject in chunks of at most `MAX_DBSEQ_LEN` letters that overlap by `DBSEQ_CHUNK_OVERLAP`
 //! (`SubjectSplitState::next_chunk`), each chunk searched (`prelim_chunk_hits`: its scan and
 //! ungapped extensions, by `two_stage_scan::scan_two_stage_lookup` or `na_scan::scan_na_lookup`
 //! unless a strips dispatch of `x_pair_seed.rs` takes the chunk, then its HSP list,
@@ -48,13 +47,12 @@
 //! `diag_hash_insert_window`, `merge_prelim_hit_lists`, `prelim_subject_best_hit`,
 //! `build_subject_seq_ranges_from_masks`, `read_db_soft_ranges`, `ungapped_subject_stage`, the
 //! e-value helpers, `database` and the child modules of the scans and of the HSP list). Its
-//! functions are the statements of
-//! `process_subject`'s preliminary side (the subject's set-up, the reap and the `-ungapped`
-//! finish), of what was its closure `collect_prelim_hits_for_chunk` and of the chunk loop, in their
-//! order. What they read that is the same for every subject of a batch is `PrelimBatch`, built once
-//! per batch; what `process_subject` read of the call is `SubjectCtx`; what is the same for every
-//! chunk of a subject is `PrelimSubject`, built once per subject. `PrelimBatch` and `PrelimSubject`
-//! are `Sync`, for the chunks on the pool.
+//! functions are the statements of `process_subject`'s preliminary side (the subject's set-up, the
+//! reap and the `-ungapped` finish), of what was its closure `collect_prelim_hits_for_chunk` and of
+//! the chunk loop, in their order. What they read that is the same for every subject of a batch is
+//! `PrelimBatch`, built once per batch; what `process_subject` read of the call is `SubjectCtx`;
+//! what is the same for every chunk of a subject is `PrelimSubject`, built once per subject.
+//! `PrelimBatch` and `PrelimSubject` are `Sync`, for the chunks on the pool.
 
 #[cfg(all(
     feature = "parallel",
@@ -72,21 +70,19 @@ use super::x_few_subj;
 use super::{
     advance_diag_table_offset, build_subject_seq_ranges_from_masks,
     calculate_blastn_context_statistics, database, diag_hash_insert_window,
-    hsp_survives_evalue_reap, merge_prelim_hit_lists, na_scan, prelim_hsp_list,
-    prelim_subject_best_hit, read_db_soft_ranges, two_stage_scan, ungapped_subject_stage,
-    x_diag_lv, x_pair_seed, BlastnSubjectRef, BlastnTiming, DiagStruct, GapAlignScratch,
-    HspListSplit, PrelimHit, QueryContext, QueryContextIndex, SubjectChunk, SubjectChunkStatus,
-    SubjectCtx, SubjectScratch, SubjectSplitState, COMPRESSION_RATIO, DBSEQ_CHUNK_OVERLAP,
+    encode_iupac_to_blastna, hsp_survives_evalue_reap, merge_prelim_hit_lists, na_scan,
+    prelim_hsp_list, prelim_subject_best_hit, read_db_soft_ranges, two_stage_scan,
+    ungapped_subject_stage, x_diag_lv, x_pair_seed, BlastnSubjectRef, BlastnTiming, ContextKarlin,
+    DiagStruct, GapAlignScratch, HspListSplit, PrelimHit, QueryContext, QueryContextIndex,
+    SubjectChunk, SubjectChunkStatus, SubjectCtx, SubjectScratch, SubjectSplitState,
+    COMPRESSION_RATIO, DBSEQ_CHUNK_OVERLAP,
 };
 use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
-use crate::algorithm::blastn::alignment::x_greedy_prelim;
 use crate::algorithm::blastn::alignment::x_greedy_prelim::XPrelimSubject;
 use crate::algorithm::blastn::coordination::{collect_lowercase_masks, LookupTables};
 use crate::algorithm::blastn::lookup::{NaLookupTable, PvDirectLookup, TwoStageLookup};
-use crate::algorithm::blastn::scoring::ContextKarlin;
 use crate::algorithm::blastn::x_subject_store::x_blastna_into;
 use crate::blastinput::fasta_reader::FastaRecord;
-use crate::core::blast_encoding::encode_iupac_to_blastna;
 use crate::utils::threading::SearchPool;
 
 /// What the preliminary search of a subject reads that is the same for every subject of the batch,
@@ -1424,8 +1420,8 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
         timing_enabled,
         ..
     } = subject_ctx;
-    // The batch's lookup tables: the preliminary stage's calls pass them, the traceback's
-    // (`prelim_source` set) pass `None` and do not scan (LOSAT_X_BNLUTDROP, graduated; `x_lut_drop.rs`).
+    // The batch's lookup tables: the preliminary stage's calls of `process_subject` pass them, the
+    // traceback's pass `None` and do not scan (LOSAT_X_BNLUTDROP, graduated; `x_lut_drop.rs`).
     let two_stage_lookup_ref = lookups.and_then(|tables| tables.two_stage_lookup.as_ref());
     let pv_direct_lookup_ref = lookups.and_then(|tables| tables.pv_direct_lookup.as_ref());
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:131-156
@@ -1558,20 +1554,15 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
     // No NCBI counterpart: this subject's packed sequence widened to one base per byte for
     // the preliminary greedy alignment instead: a window around each call's ungapped hit, and
     // the whole subject once a call reads past its window (made then, shared by every chunk
-    // and worker of this subject). Off unless the search uses the greedy aligner and this is
-    // the preliminary stage.
-    let x_prelim_subject =
-        x_greedy_prelim::XPrelimSubject::new(!use_dp, s_seq_packed_full, s_len_full);
+    // and worker of this subject). Off unless the search uses the greedy aligner.
+    let x_prelim_subject = XPrelimSubject::new(!use_dp, s_seq_packed_full, s_len_full);
 
     let dbseq_chunk_overlap = DBSEQ_CHUNK_OVERLAP;
     let mut split_state = SubjectSplitState::new(s_len_full, soft_ranges);
 
     // BLASTN debug: Log cutoff scores for this query-subject pair
     if blastn_debug {
-        eprintln!(
-            "[BLASTN_DEBUG] Subject {} (len={}): cutoff_scores={:?}",
-            s_id, s_len_full, cutoff_scores
-        );
+        subject_ctx.debug_cutoffs();
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-483,593-599
@@ -1587,9 +1578,8 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
     // ...
     //     *hsp_list_out_ptr = combined_hsp_list;
     // ```
-    // The subject's chunks searched and their lists merged
-    // (`prelim_subject::collect_subject_prelim`), with what the search of its chunks reads,
-    // built once per subject.
+    // The subject's chunks searched and their lists merged (`collect_subject_prelim`), with what
+    // the search of its chunks reads, built once per subject.
     let mut combined_prelim_hits = collect_subject_prelim::<UNGAPPED>(
         batch,
         &PrelimSubject {
@@ -1728,7 +1718,7 @@ pub(super) fn reap_prelim_by_evalue(
 /// finishes its list, `x_ungapped_database_stage`), then each HSP re-evaluated on it with the
 /// identity test, the score sort, and the e-values with the reap (`ungapped_subject_stage`).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1492-1497,1521-1526
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1492-1497,1521-1526,1534-1536
 /// (`BLAST_PreliminarySearchEngine`)
 /// ```c
 ///                status =
@@ -1744,7 +1734,12 @@ pub(super) fn reap_prelim_by_evalue(
 ///                                           gapped_calculation, FALSE,
 ///                                           sbp, 0, 1.0);
 ///                }
+/// ...
+///                }else {
+///                    status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
+///                }
 /// ```
+/// The tab that indents line 1535 is written as spaces.
 pub(super) fn finish_ungapped_prelim(
     batch: &PrelimBatch<'_>,
     subject_ctx: &SubjectCtx<'_>,
@@ -1791,8 +1786,9 @@ pub(super) fn finish_ungapped_prelim(
         (None, None, None) => None,
     };
     if let Some(s_blastna) = s_blastna {
-        // (`percent_identity` and the cutoffs are the values the traceback below
-        // reads already; the query coverage is reaped by the collector's caller.)
+        // (`percent_identity` and the cutoffs are the values the traceback
+        // (`traceback_subject::traceback_subject`) reads too; the query coverage is reaped by the
+        // collector's caller.)
         ungapped_subject_stage(
             combined_prelim_hits,
             s_blastna,

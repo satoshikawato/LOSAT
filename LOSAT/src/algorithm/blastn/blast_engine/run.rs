@@ -9730,6 +9730,11 @@ impl<'a> BlastnSubjectRef<'a> {
 /// ...
 ///       stat_length = seq_arg.seq->length;
 /// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1521
+/// (`BLAST_ComputeTraceback_MT`'s loop on the subjects' batches)
+/// ```c
+///         for (i = 0; i < batches->num_batches; i++) {
+/// ```
 /// The trace id and the timing counters have no NCBI counterpart.
 struct SubjectCtx<'a> {
     s_idx: usize,
@@ -9744,6 +9749,18 @@ struct SubjectCtx<'a> {
     reduced_cutoff_scores: &'a Vec<i32>,
     timing_ref: Option<&'a BlastnTiming>,
     timing_enabled: bool,
+}
+
+impl SubjectCtx<'_> {
+    /// LOSAT_DEBUG_BLASTN: the subject's cutoffs, printed by each stage of `process_subject` before
+    /// it searches the subject (`prelim_subject::prelim_subject`,
+    /// `traceback_subject::traceback_subject`). No NCBI counterpart (a LOSAT diagnostic line).
+    fn debug_cutoffs(&self) {
+        eprintln!(
+            "[BLASTN_DEBUG] Subject {} (len={}): cutoff_scores={:?}",
+            self.s_id, self.s_len_full, self.cutoff_scores
+        );
+    }
 }
 
 /// The results of one query batch, with the values of its query contexts that the reports

@@ -358,8 +358,9 @@ pub struct TblastxArgs {
     #[arg(skip)]
     pub first_query_ordinal: usize,
     /// The file that NCBI BLAST+ reads for a `-matrix` that its tables do not have
-    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found by the command line before
-    /// the search; `None` elsewhere. Not a public option.
+    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found before the search by the
+    /// command line and the library API (`find_matrix_file`); `None` in LOSAT Web. Not a public
+    /// option.
     #[arg(skip)]
     pub matrix_file: Option<std::path::PathBuf>,
 }
@@ -422,6 +423,23 @@ impl TblastxArgs {
         } else {
             TblastxMatrix::Unknown
         }
+    }
+
+    /// Looks up the file that NCBI reads for an `Unknown` matrix (`scoring_matrix`) with `search`
+    /// (`MatrixSearch::file`) into `matrix_file`: the first step of the command line's run
+    /// (`run`) and of the library's searches (`run_local_database`, `api::run`'s search of
+    /// records), before the options and the outputs, as NCBI's score block, which looks for it
+    /// when it sets up a batch, refuses the run there (`run_in_pool`).
+    pub(crate) fn find_matrix_file(
+        &mut self,
+        search: &crate::blastinput::ncbi_environment::MatrixSearch,
+    ) -> anyhow::Result<()> {
+        if self.scoring_matrix() == TblastxMatrix::Unknown {
+            self.matrix_file = search
+                .file(self.matrix_name())
+                .map_err(anyhow::Error::msg)?;
+        }
+        Ok(())
     }
 
     /// The word threshold: `-threshold`, or the matrix's suggestion for a translated subject.

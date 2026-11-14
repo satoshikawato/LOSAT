@@ -1,0 +1,22 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 1,
+      message "Warning: [blastn] To obtain better run time performance, please
+ run blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> -seqid_file_out
+ <OUT_FILE_NAME> and use <OUT_FILE_NAME> as the argument to -seqidlist"
+    },
+    {
+      code 2,
+      message "BLAST options error: Masking algorithm ID 99 is not supported
+ in nucleotide 'tests/db_search/dbmask/p5' BLAST database"
+    }
+  }
+}

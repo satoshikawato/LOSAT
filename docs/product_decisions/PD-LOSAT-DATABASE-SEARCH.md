@@ -162,7 +162,9 @@ give is opened and searched once. The reports show one record per name, each the
 of that name opened alone (NCBI's `GetBlastDbInfo`): the outfmt 0 header joins the titles
 with `; ` and sums the counts, the epilog has one block per name, a name given twice shows
 twice. Refused: a version 5 list that mixes databases with and without the accession table
-of `makeblastdb -parse_seqids` (`PD-LOSAT-NCBI-DEFECTS`, rule 3). `losat blastdbcmd` keeps one
+of `makeblastdb -parse_seqids` (`PD-LOSAT-NCBI-DEFECTS`, rule 3), where NCBI starts the search
+(series NP, M4a-2a review 2: after `Query is Empty!`, which ends such a run with exit status 0
+as in NCBI, and after the formatter's errors, such as a `-db_soft_mask` id that a name lacks). `losat blastdbcmd` keeps one
 database per `-db`. Since line RG (series D, D1a, 2026-11-12) a volume reached through an
 alias file and again is read once and counted for each node that names it, as NCBI's walks
 count it.
@@ -219,7 +221,7 @@ is an explicit error of `LOSAT/src/seqdb`:
 | Alias keys `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`; `NSEQ` or `LENGTH` whose value is not the number of sequences or the total length of the alias file's databases | read since line RG D1a (2026-11-12) as NCBI's walks; the values listed above as refused until D1a-3 and D1a-4 |
 | A name that lists several databases | one database per search (P4); searched since version 1.2 |
 | A volume listed more than once, a group alias file (`index.alx`) in a directory, two volumes of one name in different directories | NCBI derives counts or the volume order from them in ways the reader does not reproduce; since version 1.2 two volumes of one name in different directories are read (NCBI orders them by base name, then path); since line RG D1a a volume listed more than once is read once and counted per alias node, as NCBI does |
-| Column files of a volume (mask data of `makeblastdb -mask_data`) | not read; searched since 2026-11-11 (line SW, SW8 follow-up 2): NCBI's searches open no column file without a database mask named by `-db_soft_mask`, `-db_hard_mask` or an imported search strategy (`-import_search_strategy`; LOSAT refuses all three), so LOSAT searches the volume without reading them, whatever they hold |
+| Column files of a volume (mask data of `makeblastdb -mask_data`) | not read; searched since 2026-11-11 (line SW, SW8 follow-up 2): NCBI's searches open no column file without a database mask named by `-db_soft_mask`, `-db_hard_mask` or an imported search strategy (`-import_search_strategy`), so LOSAT searches the volume without reading them, whatever they hold; since 2026-11-14 BLASTN reads the mask column for `-db_soft_mask` (line NP, M4a-2a; LOSAT refuses the other two) |
 
 Two errors are NCBI's own and are reproduced: volumes of version 4 and of version 5 in one
 database, and a version 5 volume whose LMDB file is missing.
@@ -227,8 +229,8 @@ database, and a version 5 volume whose LMDB file is missing.
 Left unread without an error: the id and taxonomy files of a version 5 database, which serve
 lookups by id or taxonomy only, the LMDB file's volume list, which NCBI compares with the
 volumes, and (since 2026-11-11) the column files of a volume, which NCBI's searches read only for
-a database mask named by `-db_soft_mask`, `-db_hard_mask` or an imported search strategy (LOSAT
-refuses all three). The LMDB file is opened when the
+a database mask named by `-db_soft_mask`, `-db_hard_mask` or an imported search strategy (since
+2026-11-14 BLASTN reads the mask column for `-db_soft_mask`; LOSAT refuses the other two). The LMDB file is opened when the
 database is opened. Since version 1.3 a search looks
 the Seq-align id of a reported sequence with parsed Seq-ids up in the LMDB file or the ISAM
 files, as NCBI's formatters do. Since stage DB-3 a `-db`
@@ -600,7 +602,9 @@ title rules are those of BLASTP's `-db`.
   A sequence longer than 5,000,000 bases is searched in NCBI's overlapping chunks, as with
   `-subject`. The alignments decode the whole sequence in hand (NCBI decodes the ranges it
   needs and refetches the whole sequence when an alignment leaves them, with the same result),
-  and outfmt 0 holds the letters of the reported sequences until the reports are written.
+  and outfmt 0 holds the letters of the reported sequences until the reports are written. On
+  2026-11-14 line NP M4a-2a searched BLASTN with `-db_soft_mask` (section "BLASTN database masks")
+  and read `-db_hard_mask` up to the search, which it refuses.
 - Reports: the `Database:` lines of outfmt 0 (title, counts, `Posted date`), `>` and the stored
   title, subject ids made from the title as for BLASTP, `# Database:` of outfmt 7 with the `-db`
   value as given. A title of punctuation that NCBI's cleaner reads past (`, ,`; NCBI BLAST+
@@ -616,7 +620,7 @@ Rejected explicitly, besides what BLASTP `-db` and the reader reject (the same r
 
 | Rejected | Why |
 | --- | --- |
-| `-searchsp`, `-db_soft_mask`, `-db_hard_mask` | a stage of its own; masks are not read (P4) |
+| `-searchsp`, `-db_soft_mask`, `-db_hard_mask` | a stage of its own; masks are not read (P4). Since 2026-11-14 `-db_soft_mask` is searched and `-db_hard_mask` is refused where it would mask the search (line NP, M4a-2a; section "BLASTN database masks") |
 | In the tabular formats that print a subject id (the default fields, `sseqid`, `sacc`, `saccver`, `sallseqid`, `sallacc`), a reported subject with an empty title and a tax id that the taxonomy database names (line DBID ordname) | NCBI makes the title from the tax id, as in outfmt 0 (line DBID H3, the row of BLASTP), and prints its first word, the organism's (`Homo` for 9606), in the place of the id; the other fields show the stored title (`N/A`) and the taxonomy as LOSAT does. A title of spaces, and an empty title without such a tax id, give no word: NCBI prints the general id, `gnl|BL_ORD_ID|n` for `sseqid` and `BL_ORD_ID:n` for `sacc` and `saccver` with n the sequence's OID, as LOSAT does (for a protein an empty title gives `unnamed`) |
 | `-dbsize` whose effective search space overflows NCBI's `Int8` | NCBI's arithmetic overflows |
 | A database of more letters than the target's `usize` (32-bit targets) | |
@@ -665,6 +669,35 @@ opener, the reader's error texts and the title rules are those of BLASTP's and B
 
 Rejected explicitly, besides what BLASTN `-db` and the reader reject (the same rules apply):
 `-searchsp`, `-db_soft_mask`, `-db_hard_mask`, and the options TBLASTN rejects with `-subject`.
+
+## BLASTN database masks (line NP, M4a-2a, 2026-11-14)
+
+`losat blastn -db NAME -db_soft_mask ID` searches with the masks of the filtering algorithm `ID`
+that `makeblastdb -mask_data` stored in the database, as NCBI BLAST+ 2.17.0 does, byte for byte:
+
+- The option is an id when it is a 32-bit integer in NCBI's form (`+11` and `011` are 11) and a
+  name otherwise (looked up as stored, letter case included: the description of `-mask_id`'s name).
+  An id above 0 that the database does not have is NCBI's options error when the database is
+  opened (exit 1); after the test for an empty query, a name that the database does not have and
+  the id -1 give NCBI's warning and a search without masks, and any other id must be known to the
+  database of each name of the `-db` list, else NCBI's database error with that database's
+  algorithms (exit 2).
+- Every database sequence is searched as a masked subject: words inside its masks start no hit;
+  the extensions and the alignments read the real letters. The ranges between the masks are
+  taken in the order the masks are stored, so unsorted or overlapping masks give NCBI's results.
+- Outfmt 0 shows `Masked using:` after the database title (the first name's algorithm) and in
+  each database block of the end (each name's), and the database letters inside a mask that meets
+  an HSP in lower case. The BLAST archive and the search strategy write
+  `DbFilteringAlgorithmKey` for a name or `DbFilteringAlgorithmId`, then `SubjectMaskingType`.
+  The other formats change only through the results.
+
+Refused: `-db_hard_mask` where it would mask the search (its errors and its warning are NCBI's;
+line NP, M4a-2b), a search that reads the masks of a volume that has masks but not the algorithm
+(NCBI reads the masks of another volume's algorithm through a cache, or an unset value; M/DECISIONS
+9 of line NP) or of a volume whose mask column has its big-endian file alone (NCBI reads its
+numbers reversed). Such a volume is searched when no sequence that the search reads from it
+(after `-seqidlist`, `-taxids` and the like) has mask data, as NCBI then reads none of it.
+LOSAT Web refuses both options until it searches databases.
 
 ## What BLASTX `-db` of stage DB-5 does and rejects
 

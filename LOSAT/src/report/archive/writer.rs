@@ -270,7 +270,7 @@ fn write_request_body<E: Encoder>(
     request: &super::ArchiveRequest,
     batch: &RequestInputs<'_>,
     sets: &[Param],
-    database_list: Option<&Param>,
+    database_params: &[Param],
 ) {
     out.enc.member("body", 1);
     out.enc.variant("Blast4-request-body", "queue-search", 8);
@@ -324,7 +324,7 @@ fn write_request_body<E: Encoder>(
     out.enc.end_variant();
     out.enc.end_member();
 
-    write_request_options(out, request, batch, sets, database_list);
+    write_request_options(out, request, batch, sets, database_params);
     out.enc.end_sequence();
     out.enc.end_variant();
     out.enc.end_member();
@@ -382,14 +382,14 @@ fn write_bioseq_queries<E: Encoder>(out: &mut ArchiveOut<'_, E>, queries: &[Bios
 }
 
 /// The options of a request: `algorithm-options` (the command line's with what the handle holds,
-/// `sets`), `program-options` (the query's range and masks, the database's list) and
-/// `format-options` (psiblast's `Web_StepNumber`).
+/// `sets`), `program-options` (the query's range and masks, the database's list and masking,
+/// `database_params`) and `format-options` (psiblast's `Web_StepNumber`).
 fn write_request_options<E: Encoder>(
     out: &mut ArchiveOut<'_, E>,
     request: &super::ArchiveRequest,
     batch: &RequestInputs<'_>,
     sets: &[Param],
-    database_list: Option<&Param>,
+    database_params: &[Param],
 ) {
     out.enc.member("algorithm-options", 5);
     out.enc.begin_named("Blast4-parameters");
@@ -410,7 +410,7 @@ fn write_request_options<E: Encoder>(
     out.enc.end_named();
     out.enc.end_member();
 
-    if batch.required.is_some() || !batch.lcase_masks.is_empty() || database_list.is_some() {
+    if batch.required.is_some() || !batch.lcase_masks.is_empty() || !database_params.is_empty() {
         out.enc.member("program-options", 6);
         out.enc.begin_named("Blast4-parameters");
         out.enc.begin_list(false);
@@ -444,8 +444,10 @@ fn write_request_options<E: Encoder>(
         //     x_Process_Query(query);
         //     x_Process_SearchDb(db);
         // ```
-        // The database's list comes after the parameters of the query.
-        if let Some(param) = database_list {
+        // The database's list and masking come after the parameters of the query
+        // (search_strategy.cpp:480-516: `TaxidList` or `NegativeTaxidList`, then
+        // `DbFilteringAlgorithmKey` or `DbFilteringAlgorithmId`, then `SubjectMaskingType`).
+        for param in database_params {
             write_param(&mut out.enc, param);
         }
         out.enc.end_list();
@@ -488,7 +490,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     request: &super::ArchiveRequest,
     batch: &BatchArchive<'_>,
     sets: &[Param],
-    database_list: Option<&Param>,
+    database_params: &[Param],
     messages: &[Message],
     aligns: &mut A,
 ) -> Result<()> {
@@ -500,7 +502,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     // The request's `ident` is `CBlastVersion::Print()` (`crate::NCBI_BLAST_VERSION`).
     out.enc.visible_str(crate::NCBI_BLAST_VERSION.as_bytes());
     out.enc.end_member();
-    write_request_body(out, request, &batch.request, sets, database_list);
+    write_request_body(out, request, &batch.request, sets, database_params);
     out.enc.end_sequence();
     out.enc.end_member();
 
@@ -562,11 +564,11 @@ pub(super) fn write_strategy_document<E: Encoder>(
     request: &super::ArchiveRequest,
     batch: &RequestInputs<'_>,
     sets: &[Param],
-    database_list: Option<&Param>,
+    database_params: &[Param],
 ) {
     out.enc.begin_document("Blast4-request");
     out.enc.begin_sequence("Blast4-request");
-    write_request_body(out, request, batch, sets, database_list);
+    write_request_body(out, request, batch, sets, database_params);
     out.enc.end_sequence();
     out.enc.end_document();
 }
@@ -622,7 +624,7 @@ pub fn write_archive<A: AlignSource>(
 ) -> Result<()> {
     let messages = handle.take_messages();
     let sets = handle.request_sets(batch.searched_space);
-    let list = handle.options().database_list();
+    let params = handle.options().database_params();
     let request = handle.request();
     match handle.encoding() {
         ArchiveEncoding::Nothing => Ok(()),
@@ -633,7 +635,7 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 io_error: None,
             };
-            write_search_archive(&mut out, request, batch, &sets, list, &messages, aligns)?;
+            write_search_archive(&mut out, request, batch, &sets, &params, &messages, aligns)?;
             out.finish()
         }
         ArchiveEncoding::Text => {
@@ -643,7 +645,7 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 io_error: None,
             };
-            write_search_archive(&mut out, request, batch, &sets, list, &messages, aligns)?;
+            write_search_archive(&mut out, request, batch, &sets, &params, &messages, aligns)?;
             out.finish()
         }
         ArchiveEncoding::Binary => {
@@ -653,7 +655,7 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 io_error: None,
             };
-            write_search_archive(&mut out, request, batch, &sets, list, &messages, aligns)?;
+            write_search_archive(&mut out, request, batch, &sets, &params, &messages, aligns)?;
             out.finish()
         }
     }

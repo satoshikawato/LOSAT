@@ -1055,6 +1055,7 @@ fn search_database(
     }
     // The letters of a reader batch (`native::run_inner`).
     let batch_size = app::query_batch_size(BATCH_SIZE as u32)? as usize;
+    database.check_accession_tables()?;
     app::check_search_environment("BLASTX", false)?;
     let pairwise = database.pairwise_database();
     let no_reported = ReportedSubjects::default();

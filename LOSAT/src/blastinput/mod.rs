@@ -11,6 +11,9 @@ pub mod app;
 pub mod compressed;
 // NCBI blastinput/blast_args.cpp (s_GetTaxIDList): the taxid options of a database search.
 pub mod db_filter;
+// NCBI blastinput/blast_args.cpp:2342-2356, api/uniform_search.cpp: the database masks of a
+// database search (`-db_soft_mask`, `-db_hard_mask`).
+pub mod db_mask;
 // NCBI blastinput/blast_fasta_input.cpp, objtools/readers/fasta.cpp, util/line_reader.cpp:
 // the FASTA input of BLASTN, TBLASTX, TBLASTN and BLASTP.
 pub mod fasta_reader;

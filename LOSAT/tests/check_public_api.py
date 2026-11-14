@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep the public API of `LOSAT::api` equal to its reviewed listing, `public_api.txt`.
+"""Keep the public API of `losat::api` equal to its reviewed listing, `public_api.txt`.
 
 No NCBI counterpart: this checks the library's own surface (docs/losat_library_surface_plan.md
 §14), not ported behavior.
@@ -114,7 +114,7 @@ def write_summary(diff: Sequence[str]) -> None:
     if not summary:
         return
     with open(summary, "a", encoding="utf-8") as out:
-        out.write("### The public API of `LOSAT::api` changed\n\n```diff\n")
+        out.write("### The public API of `losat::api` changed\n\n```diff\n")
         out.writelines(diff)
         out.write("```\n")
 

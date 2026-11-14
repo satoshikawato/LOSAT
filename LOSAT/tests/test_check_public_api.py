@@ -52,14 +52,14 @@ class ToolchainTests(unittest.TestCase):
 
 class ListingTests(unittest.TestCase):
     def test_equal_listings_have_no_diff(self) -> None:
-        self.assertEqual(check.listing_diff("pub mod LOSAT\n", "pub mod LOSAT\n"), [])
+        self.assertEqual(check.listing_diff("pub mod losat\n", "pub mod losat\n"), [])
 
     def test_a_removed_item_is_a_minus_line(self) -> None:
         diff = check.listing_diff(
-            "pub const LOSAT::api::API_OWNED: &[&str]\npub const LOSAT::api::VERSION: &str\n",
-            "pub const LOSAT::api::VERSION: &str\n",
+            "pub const losat::api::API_OWNED: &[&str]\npub const losat::api::VERSION: &str\n",
+            "pub const losat::api::VERSION: &str\n",
         )
-        self.assertIn("-pub const LOSAT::api::API_OWNED: &[&str]\n", diff)
+        self.assertIn("-pub const losat::api::API_OWNED: &[&str]\n", diff)
 
     def test_command_pins_the_toolchain_and_leaves_out_blanket_impls(self) -> None:
         command = check.listing_command(Path("/repo"))
@@ -69,7 +69,7 @@ class ListingTests(unittest.TestCase):
 
     def test_snapshot_exists_and_lists_the_api_module(self) -> None:
         snapshot = (ROOT / check.SNAPSHOT).read_text(encoding="utf-8")
-        self.assertIn("pub mod LOSAT::api\n", snapshot)
+        self.assertIn("pub mod losat::api\n", snapshot)
 
 
 class WorkflowPinTests(unittest.TestCase):
@@ -106,28 +106,28 @@ class MainTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / check.SNAPSHOT).parent.mkdir(parents=True)
-            (root / check.SNAPSHOT).write_text("pub mod LOSAT\n", encoding="utf-8")
+            (root / check.SNAPSHOT).write_text("pub mod losat\n", encoding="utf-8")
             summary = root / "summary.md"
             # CI sets GITHUB_STEP_SUMMARY for every step: the test writes its fake diff to its own file.
             with mock.patch.dict(check.os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}), mock.patch.object(
                 check, "environment_error", return_value=None
             ), mock.patch.object(
-                check, "current_listing", side_effect=["pub mod LOSAT\n", "pub mod LOSAT\npub mod LOSAT::x\n"]
+                check, "current_listing", side_effect=["pub mod losat\n", "pub mod losat\npub mod losat::x\n"]
             ), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(check.main(["check", "--root", tmp]), 0)
                 self.assertFalse(summary.exists())
                 self.assertEqual(check.main(["check", "--root", tmp]), 1)
-            self.assertIn("+pub mod LOSAT::x\n", summary.read_text(encoding="utf-8"))
+            self.assertIn("+pub mod losat::x\n", summary.read_text(encoding="utf-8"))
 
     def test_update_writes_the_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / check.SNAPSHOT).parent.mkdir(parents=True)
             with mock.patch.object(check, "environment_error", return_value=None), mock.patch.object(
-                check, "current_listing", return_value="pub mod LOSAT\n"
+                check, "current_listing", return_value="pub mod losat\n"
             ), contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(check.main(["update", "--root", tmp]), 0)
-            self.assertEqual((root / check.SNAPSHOT).read_text(encoding="utf-8"), "pub mod LOSAT\n")
+            self.assertEqual((root / check.SNAPSHOT).read_text(encoding="utf-8"), "pub mod losat\n")
 
 
 if __name__ == "__main__":

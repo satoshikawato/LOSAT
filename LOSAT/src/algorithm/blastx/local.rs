@@ -889,6 +889,7 @@ pub fn run_local_database(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::BLASTX_TASK.check(&mut args.task)?;
+    args.matrix_search = Some(settings.matrix_search.clone());
     let requested = requested_formats(&args, outputs);
     let (choices, resolutions) = read_format_options(&args, &requested)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
@@ -1198,6 +1199,14 @@ fn read_format_options(
         match args.resolve_with_format(choice) {
             Err(error) if error.downcast_ref::<SemanticOptionsError>().is_none() => {
                 return Err(error)
+            }
+            // The file of an unknown matrix, looked up where the command line looks it up
+            // (`native::run`), with the settings of the library's start.
+            Ok(mut options) => {
+                if let Some(search) = &args.matrix_search {
+                    options.find_matrix_file(search)?;
+                }
+                resolutions.push(Ok(options));
             }
             resolution => resolutions.push(resolution),
         }

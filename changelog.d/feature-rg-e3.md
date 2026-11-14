@@ -3,5 +3,5 @@
   package, without the lines that NCBI's build writes about itself. They were refused.
 - `-version`, `-h` and `-help` no longer stop with a panic (exit status 134) when the standard output cannot be written
   (`-version > /dev/full`): the text is dropped and the program exits 0, as NCBI's does.
-- The library API and the Web engine refuse `-version` and the full versions by name, as they refuse `-logfile`,
-  `-conffile` and `-dryrun`; `-version=1` is an unknown option, as in NCBI.
+- The library API's search programs and the Web engine refuse `-version` and the full versions by name; `-version=1` is
+  an unknown option, as in NCBI.

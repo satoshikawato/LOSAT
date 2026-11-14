@@ -121,13 +121,16 @@ fn the_molecule_of_the_id_decides_the_residues() {
 }
 
 // NCBI writes `#` for each byte of `-masking_options` outside the visible ASCII range of the
-// ASN.1 VisibleString and posts `Error: (803.7) Blast-db-mask-info.algo-options` with the byte's
-// line or offset (convert2blastmask 2.17.0, `-masking_options 'é window=64'`, exit status 0);
-// LOSAT's serial writer refuses the byte, as in an archive. The XML form writes the bytes
-// (fixture `opt_utf8_xml`).
+// ASN.1 VisibleString and posts `Error: (803.7) Blast-db-mask-info.algo-options`, the byte, its
+// line (text) or offset (binary) and the string (convert2blastmask 2.17.0, probe
+// RG K/k4/probe case c_txt_e_win / c_bin_e_win: `-masking_options 'é window=64'`, exit status
+// 0). The XML form writes such bytes as they are (fixture `opt_utf8_xml`).
 #[test]
-fn a_masking_option_outside_the_visible_ascii_range_is_refused_in_asn() {
-    for outfmt in ["maskinfo_asn1_text", "maskinfo_asn1_bin"] {
+fn a_masking_option_outside_the_visible_ascii_range_is_written_as_ncbi_writes_it() {
+    for (outfmt, at) in [
+        ("maskinfo_asn1_text", ["line 4", "line 4"]),
+        ("maskinfo_asn1_bin", ["byte 20", "byte 21"]),
+    ] {
         let (status, out, err) = run_words(
             &[
                 "-masking_algorithm",
@@ -139,12 +142,15 @@ fn a_masking_option_outside_the_visible_ascii_range_is_refused_in_asn() {
             ],
             b">a\nacgt\n",
         );
-        assert_eq!((status, out), (1, String::new()), "{outfmt}");
+        assert_eq!(status, 0, "{outfmt}");
+        assert!(out.contains("## window=64"), "{outfmt}: {out}");
         assert_eq!(
             err,
-            "Error: an object on which LOSAT's serial writer stops (a character 0xc3 outside the \
-             visible ASCII range in an ASN.1 VisibleString is not supported by LOSAT) is not \
-             supported by LOSAT's CONVERT2BLASTMASK\n",
+            format!(
+                "Error: (803.7) Blast-db-mask-info.algo-options\nBad char [0xC3] in string at {}\né window=64\n\
+                 Error: (803.7) Blast-db-mask-info.algo-options\nBad char [0xA9] in string at {}\né window=64\n",
+                at[0], at[1]
+            ),
             "{outfmt}"
         );
     }

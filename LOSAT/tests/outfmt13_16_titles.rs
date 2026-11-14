@@ -466,7 +466,7 @@ fn the_title_before_a_last_batch_without_letters_is_not_refused() {
 }
 
 /// The library API (`examples/library_command_line`, the command line's arguments through
-/// `LOSAT::api::run`; a failure ends with status 1) reads the whole query before it searches, so
+/// `losat::api::run`; a failure ends with status 1) reads the whole query before it searches, so
 /// its batches meet no reader error; a last batch without letters stops it as it stops the
 /// command line. Its refusals look at the same reports and come before the first byte (BLASTX's
 /// library wrote the start of the document, or the reports of the batches before, first).
@@ -540,7 +540,7 @@ fn the_library_refuses_only_the_titles_that_ncbi_writes_before_the_first_byte() 
 /// last batch has no letters, which NCBI fails.)
 #[test]
 fn a_library_call_with_outfmt_5_refuses_the_held_title_before_any_format_writes() {
-    use LOSAT::api::{read_inputs, run, validate, Inputs, Program};
+    use losat::api::{read_inputs, run, validate, Inputs, Program};
     let proteins = random_proteins(3, 10_000);
     let query = format!(
         ">qa plain\n{}\n>qb caf\u{e9}\n{}\n>qc no letters\n",

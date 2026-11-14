@@ -1094,13 +1094,9 @@ pub fn run(
 ) -> Result<()> {
     args.id_scope = args.parse_deflines.then(Default::default);
     // NCBI's score block looks for the file of a `-matrix` that its tables do not have when it
-    // sets up a batch (`ApplicationSettings::matrix_file`); the run refuses it there, as the
-    // name that NCBI aborts on (`run_in_pool`).
-    if args.scoring_matrix() == TblastxMatrix::Unknown {
-        args.matrix_file = settings
-            .matrix_file(args.matrix_name())
-            .map_err(anyhow::Error::msg)?;
-    }
+    // sets up a batch (`TblastxArgs::find_matrix_file`); the run refuses it there, as the name
+    // that NCBI aborts on (`run_in_pool`).
+    args.find_matrix_file(&settings.matrix_search)?;
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:106-111
     // ```c
     // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
@@ -1971,6 +1967,8 @@ pub fn run_local_database(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // The file of an unknown `-matrix`, first, as the command line's `run` looks it up.
+    args.find_matrix_file(&settings.matrix_search)?;
     // NCBI parses -outfmt before its option handlers run; `search` checks the formats again.
     check_report_formats(outputs, args.out.as_deref())?;
     let archive_requested = outputs

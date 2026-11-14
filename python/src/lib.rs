@@ -103,7 +103,9 @@ fn validate(program: &str, argv: Vec<String>) -> PyResult<()> {
 /// Whether a checked argv has `-dryrun` (`api::Search::dry_run`).
 #[pyfunction]
 fn dry_run(program: &str, argv: Vec<String>) -> PyResult<bool> {
-    Ok(search::checked(program, &argv).map_err(exception)?.dry_run())
+    Ok(search::checked(program, &argv)
+        .map_err(exception)?
+        .dry_run())
 }
 
 #[pymodule]

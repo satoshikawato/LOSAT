@@ -733,11 +733,6 @@ impl BlastnDatabase {
         option.resolve(&self.db, &self.name, PROGRAM, warning)
     }
 
-    /// LOSAT's refusal of mixed accession tables (`shared::check_accession_tables`).
-    pub(super) fn check_accession_tables(&self) -> Result<()> {
-        shared::check_accession_tables(&self.db, PROGRAM)
-    }
-
     /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`).
     pub(super) fn check_mask_limits(&self, mask: &ResolvedMask) -> Result<()> {
         mask.check_losat_limits(&self.db, PROGRAM)

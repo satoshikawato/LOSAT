@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.21
+- Version: 1.22
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -38,7 +38,10 @@
   1.20 2026-11-14 (the explicit rejections of `-outfmt 18`, rule 3, line RG items T2 and T2c);
   1.21 2026-11-14 (TBLASTX's one-hit HSPs of length 0 or less ported, rule 4, and the explicit
   rejection of their merge across subject chunks with a sum of lengths of 0, rule 3, line RG item
-  X2b)
+  X2b);
+  1.22 2026-11-14 (a version 5 database list that mixes databases with and without accession
+  tables is searched; the rejection of 1.9 keeps only a run whose reports look a parsed Seq-id up
+  in a file without the table, rule 3, line DBID item mixdb, Owner-delegated)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -453,15 +456,21 @@ asks the maintainer to accept it, as the PRs of versions 1.5 and 1.13 did.
 - A version 5 database list (several names in `-db`, or the `DBLIST` of an alias file) that
   mixes databases with and without the accession table (`acc2oid`) of `makeblastdb
   -parse_seqids`: NCBI searches it, and before it writes a batch's reports (every format but
-  the archive) its BlastDb data loader looks each hit's Seq-id up in every LMDB file of the
-  list (`BlastFormatter_PreFetchSequenceData`, `CSeqDBLMDBSet::AccessionToOids`); a hit with
-  a parsed Seq-id then stops the run with `BLAST Database error: DB contains no accession
-  info.` (exit 2), after the outfmt 0 header and the earlier batches. Without such a hit, and
-  for outfmt 11, NCBI runs to the end; a taxid list stops it up front. LOSAT refuses the list
-  before the search (`the databases mix version 5 files with the accession table of
-  makeblastdb -parse_seqids ... and without it`; version 1.9, line DI-8 `DECISIONS.md` 31,
-  probe DI-8f F42, P14, H09, H15-H19): whether NCBI fails depends on the hits, and
-  reproducing that would need the lookup before every batch's reports in every program.
+  the Seq-annots and the archive) its BlastDb data loader looks each hit's Seq-id up in every
+  LMDB file of the list (`BlastFormatter_PreFetchSequenceData`,
+  `CSeqDBLMDBSet::AccessionToOids`); a hit with a parsed Seq-id then stops the run with `BLAST
+  Database error: DB contains no accession info.` (exit 2), after the outfmt 0 header and the
+  earlier batches. Where `PRE_FETCH_SEQS_LIMIT` turns the prefetch off, the reports write
+  `Unknown` for such a hit, and then the outfmt 0 alignments stop with that error, the tabular
+  formats crash (`CCoreException`, exit 255) and the JSON and XML2 documents end with its trace.
+  Without such a hit (a `gnl|BL_ORD_ID|n` of a database without parsed Seq-ids, or of one made
+  with `-input_type blastdb`, needs no accession table), and for the Seq-annots and the archive,
+  NCBI runs to the end; `-seqidlist` and `-negative_seqidlist` stop it up front with the same
+  error. LOSAT searches such a list as NCBI does (line DBID item mixdb, probe of 4,080 runs:
+  6 programs, 20 formats, the prefetch on and off, 17 lists and alias files) and refuses a run
+  whose reports or prefetch look a parsed Seq-id up in a file without the table (`... whose
+  lookup in the database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0 stops)`).
+  Versions 1.9 to 1.21 refused every such list before the search (line DI-8 `DECISIONS.md` 31).
 
 - A negative seqid list that excludes a sequence (every id of its `.nos`/`.pos` record
   listed) of a volume that the database does not hold, while the database holds other

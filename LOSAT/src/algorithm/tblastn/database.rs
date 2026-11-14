@@ -56,12 +56,6 @@ pub(super) struct TblastnDatabase {
 }
 
 impl TblastnDatabase {
-    /// LOSAT's refusal of mixed accession tables (`shared::check_accession_tables`), with the
-    /// program's other limits.
-    pub(super) fn check_accession_tables(&self) -> Result<()> {
-        shared::check_accession_tables(&self.db, PROGRAM)
-    }
-
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
     /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
     pub(super) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {

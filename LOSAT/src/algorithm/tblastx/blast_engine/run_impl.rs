@@ -2106,9 +2106,6 @@ fn search(
     // (`check_report_formats`: `xinclude_check`), as the other format checks of each
     // requested format.
     check_report_formats(outputs, args.out.as_deref())?;
-    if let SubjectSource::Database(database) = &source {
-        database.check_accession_tables()?;
-    }
     crate::blastinput::app::check_search_environment(
         "TBLASTX",
         !matches!(source, SubjectSource::Database(_)),

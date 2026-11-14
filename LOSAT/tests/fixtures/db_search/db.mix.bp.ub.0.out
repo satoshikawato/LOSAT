@@ -1,0 +1,125 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: noacc_v5 (no parsed Seq-ids); tfu_p
+           7 sequences; 791 total letters
+
+
+
+Query= P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains:
+RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName:
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin
+[Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha;
+AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+Contains: RecName: Full=Hemopressin [Pan troglodytes]
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+human hemoglobin theta-1                                              182     3e-64
+human hemoglobin zeta                                                 176     5e-62
+tuna hemoglobin alpha                                                 155     4e-54
+
+
+>human hemoglobin theta-1
+Length=142
+
+ Score = 182 bits (461),  Expect = 3e-64, Method: Compositional matrix adjust.
+ Identities = 88/142 (62%), Positives = 110/142 (77%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            M LS  D+  V+A W K+G++ G Y  EALER FL+FP TKTYF H DLS GS+QV+ HG
+Sbjct  1    MALSAEDRALVRALWKKLGSNVGVYTTEALERTFLAFPATKTYFSHLDLSPGSSQVRAHG  60
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            +KVADAL+ AV  +DD+P+ALSALS LHA +LRVDP +F+LL HCLLVTLA H P +F+P
+Sbjct  61   QKVADALSLAVERLDDLPHALSALSHLHACQLRVDPASFQLLGHCLLVTLARHYPGDFSP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            A+ ASLDKFL+ V + L S+YR
+Sbjct  121  ALQASLDKFLSHVISALVSEYR  142
+
+
+>human hemoglobin zeta
+Length=142
+
+ Score = 176 bits (446),  Expect = 5e-62, Method: Compositional matrix adjust.
+ Identities = 85/142 (60%), Positives = 104/142 (73%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            M L+  ++T + + W K+   A   G E LER+FLS P TKTYFPHFDL  GSAQ++ HG
+Sbjct  1    MSLTKTERTIIVSMWAKISTQADTIGTETLERLFLSHPQTKTYFPHFDLHPGSAQLRAHG  60
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+             KV  A+ +AV  +DD+  ALS LS+LHA+ LRVDPVNFKLLSHCLLVTLAA  PA+FT 
+Sbjct  61   SKVVAAVGDAVKSIDDIGGALSKLSELHAYILRVDPVNFKLLSHCLLVTLAARFPADFTA  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+              HA+ DKFL+ VS+VLT KYR
+Sbjct  121  EAHAAWDKFLSVVSSVLTEKYR  142
+
+
+>tuna hemoglobin alpha
+Length=143
+
+ Score = 155 bits (393),  Expect = 4e-54, Method: Compositional matrix adjust.
+ Identities = 78/141 (55%), Positives = 94/141 (67%), Gaps = 1/141 (1%)
+
+Query  3    LSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLSHGSAQVKGHGK  61
+            LS  DK+ VKA WGK+   A   GA+AL RM   +P TKTYF H+ D+S GS  VK HGK
+Sbjct  3    LSDKDKSTVKALWGKISKSADAIGADALGRMLAVYPQTKTYFSHWPDMSPGSGPVKAHGK  62
+
+Query  62   KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA  121
+            KV   +  AV  +DD+   L  LS+LHA K+RVDP NFK+LSHC+LV +A   P EFTP 
+Sbjct  63   KVMGGVALAVTKIDDLTTGLGDLSELHAFKMRVDPSNFKILSHCILVVVAKMFPKEFTPD  122
+
+Query  122  VHASLDKFLASVSTVLTSKYR  142
+             H SLDKFLASV+  L  +YR
+Sbjct  123  AHVSLDKFLASVALALAERYR  143
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.130    0.385    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 70644
+
+
+  Database: noacc_v5 (no parsed Seq-ids)
+    Posted date:  Oct 30, 2026  11:50 PM
+  Number of letters in database: 221
+  Number of sequences in database:  3
+
+  Database: tfu_p
+    Posted date:  Nov 14, 2026  3:57 PM
+  Number of letters in database: 570
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

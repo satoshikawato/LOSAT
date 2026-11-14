@@ -161,10 +161,11 @@ base name, then path; independent of the order of the names), and a volume that 
 give is opened and searched once. The reports show one record per name, each the database
 of that name opened alone (NCBI's `GetBlastDbInfo`): the outfmt 0 header joins the titles
 with `; ` and sums the counts, the epilog has one block per name, a name given twice shows
-twice. Refused: a version 5 list that mixes databases with and without the accession table
-of `makeblastdb -parse_seqids` (`PD-LOSAT-NCBI-DEFECTS`, rule 3), where NCBI starts the search
-(series NP, M4a-2a review 2: after `Query is Empty!`, which ends such a run with exit status 0
-as in NCBI, and after the formatter's errors, such as a `-db_soft_mask` id that a name lacks). `losat blastdbcmd` keeps one
+twice. A version 5 list that mixes databases with and without the accession table of
+`makeblastdb -parse_seqids` is searched as NCBI searches it; refused is a run whose reports or
+prefetch look a parsed Seq-id up in a file without the table, where NCBI stops with `DB contains
+no accession info.` (`PD-LOSAT-NCBI-DEFECTS`, rule 3; before line DBID item mixdb, every such
+list where NCBI starts the search). `losat blastdbcmd` keeps one
 database per `-db`. Since line RG (series D, D1a, 2026-11-12) a volume reached through an
 alias file and again is read once and counted for each node that names it, as NCBI's walks
 count it.

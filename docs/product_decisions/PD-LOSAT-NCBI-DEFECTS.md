@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.26
+- Version: 1.27
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -50,7 +50,7 @@
   1.25 2026-11-14 (a version 5 database list that mixes databases with and without accession
   tables is searched; the rejection of 1.9 keeps only a run whose reports look a parsed Seq-id up
   in a file without the table, rule 3, line DBID item mixdb, Owner-delegated);
-  1.26 2026-11-15 (the rule-2 item of a seqid list of gi ids only narrowed to what NCBI's runs
+  1.27 2026-11-15 (the rule-2 item of a seqid list of gi ids only narrowed to what NCBI's runs
   show: a positive list keeps every sequence only where NCBI's OID bit set is its special
   all-set one, and none elsewhere, line DBID item gisl, Owner-delegated)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the

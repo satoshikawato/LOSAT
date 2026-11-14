@@ -32,8 +32,8 @@ use rayon::prelude::*;
 
 use crate::algorithm::tblastx::chaining::UngappedHit;
 use crate::algorithm::tblastx::diagnostics::diagnostics_enabled;
-use crate::algorithm::tblastx::extension::convert_coords;
 use crate::algorithm::tblastx::lookup::QueryContext;
+use crate::algorithm::tblastx::tracing::int4_nucleotide_coords;
 use crate::algorithm::tblastx::ungapped_hit_sort::sort_ungapped_hits_by_index_replay;
 
 use super::params::LinkingParams;
@@ -218,35 +218,17 @@ fn parse_trace_hsp_target_env(var_name: &str) -> Option<TraceHspTarget> {
     })
 }
 
-#[inline(always)]
-fn trace_match_target(
-    target: TraceHspTarget,
-    q_start: usize,
-    q_end: usize,
-    s_start: usize,
-    s_end: usize,
-) -> bool {
-    q_start as i32 == target.q_start
-        && q_end as i32 == target.q_end
-        && s_start as i32 == target.s_start
-        && s_end as i32 == target.s_end
-}
-
+// No NCBI counterpart (diagnostics): whether an HSP's nucleotide coordinates, its ends read as
+// NCBI's `Int4` (`tracing::int4_nucleotide_coords`), are the trace target's.
 #[inline(always)]
 fn trace_hit_matches_target(target: TraceHspTarget, h: &UngappedHit) -> bool {
-    let (q_start, q_end) = convert_coords(
-        h.q_aa_start as usize,
-        h.q_aa_end as usize,
-        h.q_frame,
-        h.q_orig_len as usize,
-    );
-    let (s_start, s_end) = convert_coords(
-        h.s_aa_start as usize,
-        h.s_aa_end as usize,
-        h.s_frame,
-        h.s_orig_len as usize,
-    );
-    trace_match_target(target, q_start, q_end, s_start, s_end)
+    int4_nucleotide_coords(h)
+        == (
+            i64::from(target.q_start),
+            i64::from(target.q_end),
+            i64::from(target.s_start),
+            i64::from(target.s_end),
+        )
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:343-349
@@ -298,6 +280,38 @@ fn rev_compare_hsps_tbx(a: &UngappedHit, b: &UngappedHit) -> Ordering {
         .then_with(|| b.q_aa_end.cmp(&a.q_aa_end))
         .then_with(|| b.s_aa_start.cmp(&a.s_aa_start))
         .then_with(|| b.s_aa_end.cmp(&a.s_aa_end))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:359-374
+// ```c
+// 	if (h1->query.offset < h2->query.offset)
+// 		return  1;
+// 	if (h1->query.offset > h2->query.offset)
+// 		return -1;
+// 	if (h1->query.end < h2->query.end)
+// 		return  1;
+// 	if (h1->query.end > h2->query.end)
+// 		return -1;
+// 	if (h1->subject.offset < h2->subject.offset)
+// 		return  1;
+// 	if (h1->subject.offset > h2->subject.offset)
+// 		return -1;
+// 	if (h1->subject.end < h2->subject.end)
+// 		return  1;
+// 	if (h1->subject.end > h2->subject.end)
+// 		return -1;
+// ```
+// `s_RevCompareHSPsTbx` with the ends read as NCBI's `Int4` (`UngappedHit::q_end_int4`), for a
+// list of the one-hit word finder that holds an HSP of length 0 or less
+// (`link_one_hit_with_int4_ends`). On ends of 0 or more it is `rev_compare_hsps_tbx`.
+fn rev_compare_hsps_tbx_int4(a: &UngappedHit, b: &UngappedHit) -> Ordering {
+    translated_context_group(a)
+        .cmp(&translated_context_group(b))
+        .then_with(|| a.s_frame.signum().cmp(&b.s_frame.signum()))
+        .then_with(|| b.q_aa_start.cmp(&a.q_aa_start))
+        .then_with(|| b.q_end_int4().cmp(&a.q_end_int4()))
+        .then_with(|| b.s_aa_start.cmp(&a.s_aa_start))
+        .then_with(|| b.s_end_int4().cmp(&a.s_end_int4()))
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:234-263
@@ -967,6 +981,80 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     replay_ncbi_output_list(references)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873 (the first
+// `BLAST_LinkHsps` of `s_BlastSearchEngineCore`) and c++/src/algo/blast/core/blast_hits.c:2703-2731
+// (`Blast_HSPListReevaluateUngapped`, called at blast_engine.c:1492-1497)
+// ```c
+//          delete_hsp =
+//             Blast_HSPReevaluateWithAmbiguitiesUngapped(hsp, query_start,
+//                subject_start, word_params, sbp, kTranslateSubject);
+// ...
+//       if (delete_hsp) { /* This HSP is now below the cutoff */
+//          hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+// ...
+//    Blast_HSPListPurgeNullHSPs(hsp_list);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:687,699 (in
+// `Blast_HSPReevaluateWithAmbiguitiesUngapped`) and :452-453 (in `s_UpdateReevaluatedHSP`)
+// ```c
+//    Int4 hsp_length = hsp->query.end - hsp->query.offset;
+// ...
+//    for (index = 0; index < hsp_length; ++index) {
+// ...
+//     if (hsp->score >= cutoff_score) {
+// ```
+// The first linking call of a subject whose list from the one-hit word finder (`-window_size 0`)
+// holds an HSP of length 0 or less (`UngappedHit::is_int4_inverted`), with its ends as NCBI's
+// `Int4` (`chaining.rs`, the impl of `UngappedHit`). The list is first sorted by score with the
+// `Int4` comparator: NCBI's frame lists are combined by that sort (blast_hits.c:2758-2766), which
+// LOSAT's `append_frame_hits` does with the `u32` one. The two comparators order an end below 0
+// differently but have the same ties (two `i32` are equal exactly when their `u32` bits are), so
+// the stable `u32` sorts of the appends keep every tie class of the `Int4` comparator in the
+// order of the concatenated frame lists, and this stable sort then gives NCBI's list (the stable
+// sort of that concatenation; `x_link_sort.rs`, (S)). The link is then `link_in_place`'s with
+// `rev_compare_hsps_tbx_int4` and the literal port `link_hsp_group_ncbi` for every group
+// (`x_hsp_inplace::link_in_place_int4`): the incremental kernel assumes HSPs whose end is after
+// their start (`linking_incr.rs`), while the literal port computes with `Int4` coordinates as NCBI
+// does. NCBI then sorts by score, reaps by the preliminary E-value and re-evaluates, which scores
+// an HSP of length 0 or less 0 (its loop does not run), below every context's cutoff (at least 1),
+// and deletes it. The reap reads each HSP's own E-value and the sorts are stable, so dropping
+// those HSPs here, before the sort, leaves the other HSPs NCBI keeps in NCBI's order; nothing
+// after this reads a dropped one or an `Int4` end below 0. This path runs only for such a
+// subject; the same subject without such an HSP links with
+// `apply_sum_stats_even_gap_linking_with_parallel`.
+/// The first linking call of a one-hit list holding an HSP of length 0 or less, after which those
+/// HSPs are dropped.
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn link_one_hit_with_int4_ends(
+    mut hits: Vec<UngappedHit>,
+    params: &KarlinParams,
+    linking_params: &LinkingParams,
+    query_contexts: &[QueryContext],
+    subject_frame_bases: &[i32],
+    length_adj_per_context: &[i64],
+    eff_searchsp_per_context: &[i64],
+    allow_parallel: bool,
+) -> Vec<UngappedHit> {
+    if hits.is_empty() {
+        return hits;
+    }
+    crate::algorithm::tblastx::blast_gapalign::sort_ungapped_hits_by_score_int4(&mut hits);
+    let mut linked = x_hsp_inplace::link_in_place_int4(
+        hits,
+        params,
+        linking_params,
+        query_contexts,
+        subject_frame_bases,
+        length_adj_per_context,
+        eff_searchsp_per_context,
+        allow_parallel,
+    );
+    linked.retain(|hit| !hit.is_int4_inverted());
+    linked
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1012-1028
 // ```c
 // /* hook up the HSP's. */
@@ -1136,9 +1224,9 @@ macro_rules! visit_large_gap_predecessor {
                 eprintln!(
                     "    Linked HSP: q_aa={}-{}, s_aa={}-{}, score={}, num={}",
                     $group_hits[j].q_aa_start,
-                    $group_hits[j].q_aa_end,
+                    $group_hits[j].q_end_int4(),
                     $group_hits[j].s_aa_start,
-                    $group_hits[j].s_aa_end,
+                    $group_hits[j].s_end_int4(),
                     $pool_hsp_links[j].score,
                     $pool_hsp_links[j].num[1]
                 );
@@ -1283,6 +1371,14 @@ fn link_hsp_group_incremental(
     pool_lh_helpers: &mut Vec<LhHelper>,
     pool_hsp_links: &mut Vec<HspLink>,
 ) -> Vec<UngappedHit> {
+    // No NCBI counterpart: the incremental kernel's large-gap sweep assumes every end is after its
+    // start (`linking_incr.rs`). A list that holds an HSP of the one-hit word finder of length 0 or
+    // less links with the literal port (`x_hsp_inplace::link_in_place_int4`), so none arrives here
+    // (debug builds check it).
+    debug_assert!(
+        group_hits.iter().all(|hit| !hit.is_int4_inverted()),
+        "an HSP of length 0 or less reached the incremental linking kernel"
+    );
     let expected = link_shadow_enabled().then(|| {
         link_hsp_group_ncbi(
             group_hits.clone(),
@@ -1352,6 +1448,14 @@ fn link_hsp_group_incremental_slice(
     pool_lh_helpers: &mut Vec<LhHelper>,
     pool_hsp_links: &mut Vec<HspLink>,
 ) {
+    // No NCBI counterpart: the incremental kernel's large-gap sweep assumes every end is after its
+    // start (`linking_incr.rs`). A list that holds an HSP of the one-hit word finder of length 0 or
+    // less links with the literal port (`x_hsp_inplace::link_in_place_int4`), so none arrives here
+    // (debug builds check it).
+    debug_assert!(
+        group_hits.iter().all(|hit| !hit.is_int4_inverted()),
+        "an HSP of length 0 or less reached the incremental linking kernel"
+    );
     let expected = link_shadow_enabled().then(|| {
         link_hsp_group_ncbi(
             group_hits.to_vec(),
@@ -1448,12 +1552,14 @@ fn link_hsp_group_ncbi(
     fn frame_relative_coords(hit: &UngappedHit) -> (i32, i32, i32, i32) {
         // NCBI parity: hsp->query.offset is frame-relative (0-indexed after
         // s_AdjustInitialHSPOffsets subtracts context offset).
-        // LOSAT's hit.q_aa_start is already 0-indexed frame-relative.
+        // LOSAT's hit.q_aa_start is already 0-indexed frame-relative. The ends are NCBI's `Int4`
+        // (`UngappedHit::q_end_int4`): a one-hit list may hold an HSP of length 0 or less, whose
+        // end lies at or before its start (`x_hsp_inplace::link_in_place_int4`).
         (
             hit.q_aa_start as i32,
-            hit.q_aa_end as i32,
+            hit.q_end_int4(),
             hit.s_aa_start as i32,
-            hit.s_aa_end as i32,
+            hit.s_end_int4(),
         )
     }
 
@@ -1647,18 +1753,7 @@ fn link_hsp_group_ncbi(
     if debug_chaining {
         if let Some(i) = target_hsp_idx {
             let hit = &group_hits[i];
-            let (q_start, q_end) = convert_coords(
-                hit.q_aa_start as usize,
-                hit.q_aa_end as usize,
-                hit.q_frame,
-                hit.q_orig_len as usize,
-            );
-            let (s_start, s_end) = convert_coords(
-                hit.s_aa_start as usize,
-                hit.s_aa_end as usize,
-                hit.s_frame,
-                hit.s_orig_len as usize,
-            );
+            let (q_start, q_end, s_start, s_end) = int4_nucleotide_coords(hit);
             let link = &pool_hsp_links[i];
             eprintln!(
                 "[TRACE_LINKING] target_in_group idx={} raw_score={} q_frame={} s_frame={} q={}-{} s={}-{} q_aa={}-{} s_aa={}-{} q_trim={}..{} s_trim={}..{} cutoff_small={} cutoff_big={}",
@@ -1671,9 +1766,9 @@ fn link_hsp_group_ncbi(
                 s_start,
                 s_end,
                 hit.q_aa_start,
-                hit.q_aa_end,
+                hit.q_end_int4(),
                 hit.s_aa_start,
-                hit.s_aa_end,
+                hit.s_end_int4(),
                 link.q_off_trim,
                 link.q_end_trim,
                 link.s_off_trim,
@@ -1991,9 +2086,9 @@ fn link_hsp_group_ncbi(
                                     eprintln!(
                                         "    Linked HSP: q_aa={}-{}, s_aa={}-{}, score={}, num={}",
                                         group_hits[j].q_aa_start,
-                                        group_hits[j].q_aa_end,
+                                        group_hits[j].q_end_int4(),
                                         group_hits[j].s_aa_start,
-                                        group_hits[j].s_aa_end,
+                                        group_hits[j].s_end_int4(),
                                         pool_hsp_links[j].score,
                                         pool_hsp_links[j].num[0]
                                     );
@@ -2600,26 +2695,15 @@ fn link_hsp_group_ncbi(
                     link.sum[1],
                     link.xsum[1],
                     hit.q_aa_start,
-                    hit.q_aa_end,
+                    hit.q_end_int4(),
                     hit.s_aa_start,
-                    hit.s_aa_end,
+                    hit.s_end_int4(),
                     hit.q_frame,
                     hit.s_frame
                 )
             };
             let head = &group_hits[best_i];
-            let (head_q_start, head_q_end) = convert_coords(
-                head.q_aa_start as usize,
-                head.q_aa_end as usize,
-                head.q_frame,
-                head.q_orig_len as usize,
-            );
-            let (head_s_start, head_s_end) = convert_coords(
-                head.s_aa_start as usize,
-                head.s_aa_end as usize,
-                head.s_frame,
-                head.s_orig_len as usize,
-            );
+            let (head_q_start, head_q_end, head_s_start, head_s_end) = int4_nucleotide_coords(head);
             eprintln!(
                 "[TRACE_LINK_SELECTION] context={} subject_sign={} round={} remaining_before={} used_current_max={} path_changed_in={} selected={} evalue={:.6e} chain_len={} linked_set={} target_in_chain={} prob_small={:.6e} prob_large={:.6e} head_idx={} head_raw={} head_q={}-{} head_s={}-{} head_q_frame={} head_s_frame={} best_small={} best_large={}",
                 query_context,
@@ -2667,18 +2751,7 @@ fn link_hsp_group_ncbi(
             );
             for &idx in &chain_members {
                 let hit = &group_hits[idx];
-                let (q_start, q_end) = convert_coords(
-                    hit.q_aa_start as usize,
-                    hit.q_aa_end as usize,
-                    hit.q_frame,
-                    hit.q_orig_len as usize,
-                );
-                let (s_start, s_end) = convert_coords(
-                    hit.s_aa_start as usize,
-                    hit.s_aa_end as usize,
-                    hit.s_frame,
-                    hit.s_orig_len as usize,
-                );
+                let (q_start, q_end, s_start, s_end) = int4_nucleotide_coords(hit);
                 let mark = if chain_target_hsp_idx == Some(idx) {
                     "*"
                 } else {
@@ -2696,9 +2769,9 @@ fn link_hsp_group_ncbi(
                     hit.q_frame,
                     hit.s_frame,
                     hit.q_aa_start,
-                    hit.q_aa_end,
+                    hit.q_end_int4(),
                     hit.s_aa_start,
-                    hit.s_aa_end,
+                    hit.s_end_int4(),
                     hit.start_of_chain,
                 );
             }
@@ -2729,9 +2802,9 @@ fn link_hsp_group_ncbi(
                     link.sum[1],
                     link.xsum[1],
                     hit.q_aa_start,
-                    hit.q_aa_end,
+                    hit.q_end_int4(),
                     hit.s_aa_start,
-                    hit.s_aa_end
+                    hit.s_end_int4()
                 )
             };
             eprintln!(
@@ -2752,18 +2825,7 @@ fn link_hsp_group_ncbi(
             );
             for &idx in &chain_members {
                 let hit = &group_hits[idx];
-                let (q_start, q_end) = convert_coords(
-                    hit.q_aa_start as usize,
-                    hit.q_aa_end as usize,
-                    hit.q_frame,
-                    hit.q_orig_len as usize,
-                );
-                let (s_start, s_end) = convert_coords(
-                    hit.s_aa_start as usize,
-                    hit.s_aa_end as usize,
-                    hit.s_frame,
-                    hit.s_orig_len as usize,
-                );
+                let (q_start, q_end, s_start, s_end) = int4_nucleotide_coords(hit);
                 let next = pool_hsp_links[idx].link[ordering];
                 let next_str = if next == SENTINEL_IDX {
                     "END".to_string()
@@ -2785,9 +2847,9 @@ fn link_hsp_group_ncbi(
                     s_start,
                     s_end,
                     hit.q_aa_start,
-                    hit.q_aa_end,
+                    hit.q_end_int4(),
                     hit.s_aa_start,
-                    hit.s_aa_end,
+                    hit.s_end_int4(),
                     hit.start_of_chain,
                     next_str,
                 );

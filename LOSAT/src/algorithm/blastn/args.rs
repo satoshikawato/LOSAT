@@ -550,16 +550,23 @@ pub struct BlastnArgs {
     pub window_masker_registry:
         Option<Result<crate::blastinput::ncbi_environment::WindowMaskerRegistry, String>>,
     /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
-    /// by the command line before the search where a tabular field list shows a name of the
-    /// taxonomy database (`algorithm::blastn::tabular`); `None` elsewhere (`run_local`'s callers
-    /// give no search path: not found). Not a public option.
+    /// before the search where a tabular field list looks every taxid up (the plural names of the
+    /// taxonomy database, the organism report; `algorithm::blastn::tabular`), by the command line
+    /// and the library (`common::database::subject_taxonomy`); `None` elsewhere (LOSAT Web has no
+    /// files: not found). Not a public option.
     #[arg(skip)]
     pub tabular_taxdb: Option<bool>,
-    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made by the
-    /// command line with `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere.
-    /// Not a public option.
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made with
+    /// `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere. Not a public option.
     #[arg(skip)]
     pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
+    /// The `[BLAST] BLASTDB` setting through which a `-subject` search's tabular reports look for
+    /// the taxonomy database (`common::database::subject_taxonomy`), which a search of records of
+    /// the library (`api::run`) reads from the call's application settings when a report looks
+    /// every taxid up; `None` elsewhere (the command line passes its settings, LOSAT Web has no
+    /// files). Not a public option.
+    #[arg(skip)]
+    pub taxdb_setting: Option<crate::algorithm::common::database::TaxdbSetting>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
     // ```c++
     //         arg_desc.AddDefaultKey(kArgStrand, "strand",

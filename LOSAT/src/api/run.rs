@@ -25,8 +25,7 @@
 //! ```
 #![warn(missing_docs, unused)]
 
-use std::fs::File;
-use std::io::{self, BufWriter, Write};
+use std::io::{self, Write};
 use std::ops::Range;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -38,7 +37,7 @@ use super::local_blast::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_database_blastn,
     run_local_database_blastp, run_local_database_blastx, run_local_database_tblastn,
     run_local_database_tblastx, run_local_tblastn, run_local_tblastx, with_run_pool,
-    FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs, ReportedSubject,
+    FormatObserver, FormatOutput, HspIndex, OutFile, OutputSink, ReportOutputs, ReportedSubject,
 };
 use super::program::Program;
 use super::search::Search;
@@ -132,7 +131,7 @@ pub struct HspRecord {
     /// keeps its place).
     pub q_idx: usize,
     /// 0-based index of the subject record in the inputs; for a database
-    /// (`Inputs::database`), the sequence's ordinal id (the `n` of `gnl|BL_ORD_ID|n`).
+    /// (`Inputs::database`), the sequence's OID (the `n` of `gnl|BL_ORD_ID|n`).
     pub s_idx: usize,
     /// 0-based position of the HSP among the HSPs of its query.
     pub rank: usize,
@@ -652,33 +651,48 @@ pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usiz
 // {
 // 	static CTaxDBFileInfo t;
 // ```
-// The organism report (outfmt 18) looks the taxonomy database up itself, through the search
-// path of NCBI's databases: a search of records reads the application settings for it, as the
-// command line does (`common::database::SubjectTaxdb`).
-/// The taxonomy database of `name`'s organism report when `outputs` has one (outfmt 18), found
-/// with the call's settings (`start`).
-fn subject_taxdb(
-    name: &str,
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
+// ```c++
+// void CBlastTabularInfo::x_CheckTaxDB()
+// {
+//    	if( x_IsFieldRequested(eSubjectSciNames) ||
+//     ...
+//    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
+// ```
+// The formatters of the plural names (`x_CheckTaxDB`) and the organism report (outfmt 18) look
+// the taxonomy database up themselves, through the search path of NCBI's databases: a search of
+// records reads the application settings for them, as the command line does, and the search asks
+// where the command line asks (`common::database::subject_taxonomy`).
+/// The `[BLAST] BLASTDB` setting of the call (`start`) when a report of `outputs` looks every
+/// taxid up (the plural names of the taxonomy database, the organism report); `None` otherwise,
+/// without reading the settings.
+fn taxdb_setting(
     outputs: &mut ReportOutputs<'_>,
     start: &mut CallStart,
-) -> anyhow::Result<Option<crate::algorithm::common::database::SubjectTaxdb>> {
-    let tax_report = outputs.formats.iter().any(|format| {
-        crate::blastinput::app::parse_formatting_string(format.outfmt)
-            .is_ok_and(|choice| choice.number == 18)
+) -> anyhow::Result<Option<crate::algorithm::common::database::TaxdbSetting>> {
+    use crate::blastinput::app::{parse_formatting_string, ReportFormat};
+    let looks_up = outputs.formats.iter().any(|format| {
+        parse_formatting_string(format.outfmt).is_ok_and(|choice| {
+            ReportFormat::from_number(choice.number)
+                .and_then(|report| crate::report::tabular::TabularSpec::of(report, &choice))
+                .is_some_and(|spec| spec.looks_up_every_taxid())
+        })
     });
-    if !tax_report {
+    if !looks_up {
         return Ok(None);
     }
     let settings = start.settings(&mut *outputs.diagnostics)?;
-    crate::algorithm::common::database::SubjectTaxdb::of(&settings, &name.to_ascii_uppercase())
+    Ok(Some(crate::algorithm::common::database::TaxdbSetting::of(
+        &settings,
+    )))
 }
 
 // NCBI's application layer reads its environment and registry files before its own code runs,
 // and a database is found by them (the `BLASTDB` search path); LOSAT rejects the settings that
 // change the output. A search of records reads neither, but for the directory of BLASTN's
-// `-window_masker_taxid`, the taxonomy database of the organism report (outfmt 18) and the file
-// of a `-matrix` that NCBI's tables do not have (TBLASTX, ungapped BLASTX), which NCBI's library
-// looks for itself. The settings are the call's application start's
+// `-window_masker_taxid`, the taxonomy database of the plural names and the organism report
+// (outfmt 18) and the file of a `-matrix` that NCBI's tables do not have (TBLASTX, ungapped
+// BLASTX), which NCBI's library looks for itself. The settings are the call's application start's
 // (`start::CallStart::settings`).
 /// One `run_local` call: the program's entry for the parsed arguments and `inputs`.
 pub(super) fn run_local(
@@ -710,17 +724,15 @@ pub(super) fn run_local(
     }
     match command {
         Commands::Blastp(mut args) => {
-            args.subject_taxdb = subject_taxdb("blastp", outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             run_local_blastp(args, query, subject, "", "", outputs)
         }
         Commands::Tblastn(mut args) => {
-            args.subject_taxdb = subject_taxdb("tblastn", outputs, start)?;
-            args.tabular_taxdb = args.subject_taxdb.as_ref().map(|_| true);
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             run_local_tblastn(args, query, subject, outputs)
         }
         Commands::Blastn(mut args) => {
-            args.subject_taxdb = subject_taxdb("blastn", outputs, start)?;
-            args.tabular_taxdb = args.subject_taxdb.as_ref().map(|_| true);
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-448
             // ```c++
             //     if (args.Exist(kArgWindowMaskerDatabase) &&
@@ -757,12 +769,11 @@ pub(super) fn run_local(
                 let settings = start.settings(&mut *outputs.diagnostics)?;
                 args.find_matrix_file(&settings.matrix_search)?;
             }
-            args.subject_taxdb = subject_taxdb("tblastx", outputs, start)?;
-            args.tabular_taxdb = args.subject_taxdb.as_ref().map(|_| true);
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             run_local_tblastx(args, query, subject, outputs)
         }
         Commands::Blastx(mut args) => {
-            args.subject_taxdb = subject_taxdb("blastx", outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             // The file of a `-matrix` that NCBI's tables do not have, looked up after the options
             // are resolved, as on the command line (`ResolvedOptions::find_matrix_file`).
             if args.unknown_matrix_name() {
@@ -771,7 +782,8 @@ pub(super) fn run_local(
             run_local_blastx(args, query, subject, outputs)
         }
         Commands::Psiblast(args) => {
-            let args = psiblast_args(args, outputs)?;
+            let mut args = psiblast_args(args, outputs)?;
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             run_local_blastp(args, query, subject, "", "", outputs)
         }
         Commands::Rpsblast(_)
@@ -948,6 +960,13 @@ pub fn run(
 /// come through here: the file is the master file, which names the side files that the search
 /// writes next to it (`path_1.json` or `path_1.xml`, ...). The error is the command line's, as in
 /// [`run`].
+///
+/// `path` is the command line's `-out`: its parser checks the name (NCBI's `Illegal value` for a
+/// file name of 256 bytes or more, dry run or not), and the search makes the file where the
+/// command line makes `-out`, after it has read the subjects (or the taxid or seqid list of `-db`)
+/// and before it processes the options: an error before that point leaves no file, an error after
+/// it an empty one, and the subjects' warnings come before an error of a file that cannot be made.
+/// A dry run makes no file.
 pub fn run_to_file(
     search: &Search,
     inputs: Inputs<'_>,
@@ -961,6 +980,7 @@ pub fn run_to_file(
             "run_to_file writes a file: `run` gives a report to a writer".to_string(),
         ));
     }
+    let search = &search.writing_to(path);
     let mut start = CallStart::new(search, inputs, &mut *diagnostics)?;
     // The command line's dry run does not make the `-out` file (line RG item E1b).
     if start.dry_run() {
@@ -973,18 +993,15 @@ pub fn run_to_file(
         let formats = [outfmt];
         searches(search, inputs, &formats, &mut log)?.1
     };
-    let mut command = search.command(inputs)?;
-    set_output_file(&mut command, path);
-    let file =
-        File::create(path).map_err(|_| log.failed(&crate::cli::inaccessible("out", path)))?;
-    let mut file = BufWriter::new(file);
+    let command = search.command(inputs)?;
+    let mut file = OutFile::new(path, out_file_program(search.program()));
     with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
         let mut sink = log.sink(&mut *diagnostics, true);
         let result = {
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt,
-                    sink: OutputSink::Writer(&mut file),
+                    sink: OutputSink::Out(&mut file),
                 }],
                 diagnostics: &mut sink,
                 hits: None,
@@ -992,28 +1009,33 @@ pub fn run_to_file(
             };
             run_local(command, inputs, &mut outputs, &mut start)
         };
-        result.map_err(|error| sink.failed(&error))
+        result.map_err(|error| {
+            // TBLASTX's command line removes a `-out` that it made and left empty after a title
+            // that the archive cannot hold (`run`).
+            if search.program() == Program::Tblastx
+                && error
+                    .downcast_ref::<crate::report::archive::TitleRefusal>()
+                    .is_some()
+            {
+                file.remove_new_empty();
+            }
+            sink.failed(&error)
+        })
     })?;
     file.flush()
         .map_err(|error| Error::search(&anyhow::Error::from(error)))
 }
 
-/// The search's `-out` file: a report names its side files by it (`run_to_file`).
-fn set_output_file(command: &mut Commands, path: &Path) {
-    let out = Some(path.to_path_buf());
-    match command {
-        Commands::Blastp(args) => args.out = out,
-        Commands::Tblastn(args) => args.out = out,
-        Commands::Blastn(args) => args.out = out,
-        Commands::Tblastx(args) => args.out = out,
-        Commands::Blastx(args) => args.out = out,
-        Commands::Psiblast(args) => args.out = out,
-        Commands::Rpsblast(_)
-        | Commands::Rpstblastn(_)
-        | Commands::Makedb(_)
-        | Commands::Rpsbproc(_) => {
-            unreachable!("Program::parse admits the search programs only")
-        }
+/// The program whose `-out` file names must be UTF-8, as its command line checks them
+/// (`cli::create_out_file`): every search program but BLASTX.
+fn out_file_program(program: Program) -> Option<&'static str> {
+    match program {
+        Program::Blastn => Some("BLASTN"),
+        Program::Blastp => Some("BLASTP"),
+        Program::Psiblast => Some("PSIBLAST"),
+        Program::Tblastn => Some("TBLASTN"),
+        Program::Tblastx => Some("TBLASTX"),
+        Program::Blastx => None,
     }
 }
 

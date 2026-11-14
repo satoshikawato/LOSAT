@@ -62,6 +62,12 @@ impl TblastnDatabase {
         shared::check_accession_tables(&self.db, PROGRAM)
     }
 
+    /// The OIDs of the database's ordinal ids, which name the reported sequences without
+    /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
+    pub(super) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
+        self.db.oid_map()
+    }
+
     /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
     pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
         self.db.set_reports_show_gis(show_gis);
@@ -603,7 +609,7 @@ pub(super) fn reported_subjects(
         records.push(FastaRecord {
             // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
             // (line DI-8).
-            local_id: format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
+            local_id: database.db.oid(ordinal).fasta_id(),
             title,
             sequence: Vec::new(),
             warnings: Vec::new(),

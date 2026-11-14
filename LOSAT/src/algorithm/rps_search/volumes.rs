@@ -218,7 +218,7 @@ impl RpsVolumeSetup {
         volume: &Volume,
         cbs: bool,
     ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
-        let files = match self.files(volume, cbs)? {
+        let files = match self.files(volume, cbs, true)? {
             Ok(files) => files,
             Err(error) => return Ok(Err(error)),
         };
@@ -233,7 +233,7 @@ impl RpsVolumeSetup {
         if let Some(costs) = &self.first_costs {
             return Some(costs.clone());
         }
-        match self.files(volume, false) {
+        match self.files(volume, false, true) {
             Ok(Ok(files)) => Some((
                 files.aux.matrix.clone(),
                 files.aux.gap_open,
@@ -250,7 +250,7 @@ impl RpsVolumeSetup {
         volume: &Volume,
         cbs: bool,
     ) -> Result<std::result::Result<(), RpsVolumeError>> {
-        let files = match self.files(volume, cbs)? {
+        let files = match self.files(volume, cbs, true)? {
             Ok(files) => files,
             Err(error) => return Ok(Err(error)),
         };
@@ -259,20 +259,24 @@ impl RpsVolumeSetup {
     }
 
     /// The files of `volume`, which `check` has checked in this run, opened again for a search
-    /// (the consensus letters: `Consensus`).
+    /// (the consensus letters: `Consensus`) without LOSAT's checks of `check` (series PR, item
+    /// PS12s, D6: `RpsVolumeFiles::open_checked`); NCBI's own errors of the files come where its
+    /// search of a batch meets them.
     pub(crate) fn reopen(
         &self,
         volume: &Volume,
         cbs: bool,
     ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
-        self.files(volume, cbs)
+        self.files(volume, cbs, false)
     }
 
-    /// The volume's files (and frequency ratios when `cbs`).
+    /// The volume's files (and frequency ratios when `cbs`), the table's hits checked when
+    /// `check_hits` (`RpsVolumeFiles::open_for`, `open_checked`).
     fn files(
         &self,
         volume: &Volume,
         cbs: bool,
+        check_hits: bool,
     ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
         let num_seqs = volume.num_oids();
         let lengths = (0..num_seqs)
@@ -281,7 +285,12 @@ impl RpsVolumeSetup {
             .map_err(|error| {
                 crate::algorithm::common::database::database_error(error, self.program)
             })?;
-        let mut files = match RpsVolumeFiles::open_for(volume.base(), &lengths, self.program) {
+        let opened = if check_hits {
+            RpsVolumeFiles::open_for(volume.base(), &lengths, self.program)
+        } else {
+            RpsVolumeFiles::open_checked(volume.base(), &lengths, self.program)
+        };
+        let mut files = match opened {
             Ok(files) => files,
             Err(RpsVolumeFault::Files(RpsOpenError::Refused(text))) => bail!(text),
             Err(RpsVolumeFault::Files(RpsOpenError::Ncbi(text))) => {

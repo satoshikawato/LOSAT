@@ -394,9 +394,15 @@ impl CallerCallback {
 
 // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
 // /* Use a local diagnostics structure ... shared between multiple threads */
+// LOSAT_WASI_THREADS_DEBUG is read once per process, as LOSAT's other switches are: the stage
+// reports run once per subject chunk, and a read of the environment there cost about 340
+// instructions each (3 % of a megablast search of 20,000 short subjects).
 pub fn diagnostics_enabled() -> bool {
-    std::env::var("LOSAT_WASI_THREADS_DEBUG")
-        .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("LOSAT_WASI_THREADS_DEBUG")
+            .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    })
 }
 
 // Diagnostic lines go out as one write, so a line another thread or the host

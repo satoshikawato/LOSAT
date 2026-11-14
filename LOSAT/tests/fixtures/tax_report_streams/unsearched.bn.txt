@@ -1,0 +1,7 @@
+Warning: [blastn] Query_1 xn all N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+
+                                          Tax BLAST report                                          
+
+Query= xn all N
+
+Length=60

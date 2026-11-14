@@ -6726,7 +6726,7 @@ fn post_process_hits_and_write(
         // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
         //     : m_FormatType(format_type), ..., m_Outfile(outfile),
         // ```
-        let mut writer = format.sink.ostream()?;
+        let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
         if output_format == BlastnOutputFormat::Pairwise {
             let (queries, pairwise_report) = pairwise_data
                 .as_ref()
@@ -7333,16 +7333,19 @@ fn write_custom_tabular(
                     .queries
                     .placements
                     .length(q_idx, query_lengths.get(q_idx).copied().unwrap_or_default()),
-                hsps: hit_list
-                    .iter()
-                    .flat_map(|hit_list| &hit_list.hsplist_array)
-                    .flat_map(|hsp_list| &hsp_list.hsps)
-                    .map(|hsp| crate::report::tax_report::TaxHsp {
-                        subject: hsp.s_idx as usize,
-                        evalue: hsp.e_value,
-                        bit_score: hsp.bit_score,
-                    })
-                    .collect(),
+                // A query of a batch that NCBI did not search has no Seq-align-set.
+                hsps: (!unsearched.get(q_idx).copied().unwrap_or(false)).then(|| {
+                    hit_list
+                        .iter()
+                        .flat_map(|hit_list| &hit_list.hsplist_array)
+                        .flat_map(|hsp_list| &hsp_list.hsps)
+                        .map(|hsp| crate::report::tax_report::TaxHsp {
+                            subject: hsp.s_idx as usize,
+                            evalue: hsp.e_value,
+                            bit_score: hsp.bit_score,
+                        })
+                        .collect()
+                }),
             })
             .collect();
         return crate::algorithm::common::tabular::write_tax_report(

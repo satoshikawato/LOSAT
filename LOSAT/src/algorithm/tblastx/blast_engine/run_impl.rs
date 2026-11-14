@@ -2489,7 +2489,7 @@ fn write_tblastx_outputs(
         let prolog = !prolog_before_search(&format.sink);
         // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
         let side_sink = format.sink.side_files().cloned();
-        let mut writer = format.sink.ostream()?;
+        let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
         match output_format {
             report::TblastxOutputFormat::Pairwise => {
                 let queries: Vec<crate::report::pairwise::TblastxPairwiseQuery> = run

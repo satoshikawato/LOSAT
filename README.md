@@ -83,7 +83,7 @@ The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blas
 | `15` | Single-file BLAST JSON | all five | all five (with `-subject` and `-db`) |
 | `16` | Single-file BLAST XML2 | all five | all five (with `-subject` and `-db`) |
 | `17` | Sequence Alignment/Map (SAM) | `blastn` only | `blastn` (with `-subject` and `-db`; `SQ` and `SR` as in NCBI) |
-| `18` | Organism Report | all five | all five programs (with `-subject` and `-db`) |
+| `18` | Organism Report | all five | all five programs (with `-subject` and `-db`; a query batch that NCBI does not search is refused, see [What LOSAT refuses](#what-losat-refuses)) |
 | `20` | Comma-separated values with header lines | all five | all five programs |
 
 Outfmt `17` (SAM, `blastn` only) is NCBI's document byte for byte except the `CL:` tag of its `@PG` line, which holds LOSAT's own command line (every argument followed by one space, as NCBI writes its own); a run without a command line (the library) has no `CL:` tag. NCBI writes the whole document when the search ends, and so does LOSAT, which holds the records as text until then. `-outfmt "17 SQ"` writes the target's letters in SEQ and `-outfmt "17 SR"` makes the subject the reference; other words are ignored, as in NCBI.
@@ -483,6 +483,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 - `-outfmt 1`, `2`, `3` and `4`: all five programs.
 - `-html`: all five programs.
 - `-outfmt 18` with a taxonomy database that names a taxid of a shown group with the text `<@bl_taxid@>` (NCBI BLAST+ writes an uninitialised number there), with a `./.ncbirc` that has a syntax error (NCBI's report stops there with an exception) or `[NCBI] .Inherits` (NCBI's report reads the files it names), and with a shown row of a database sequence whose empty title NCBI makes from its taxids and the taxonomy database (as outfmt `0` refuses it): all five programs, before the query batch's first byte.
+- `-outfmt 18` with a query batch that NCBI BLAST+ does not search (no query of it has a valid context: "Could not calculate ungapped Karlin-Altschul parameters", such as a batch of one query of only `N` or `X`): all five programs. NCBI BLAST+ 2.17.0 stops at the query's report with a null pointer exception (exit status 255); LOSAT writes what NCBI writes before it (the earlier queries' reports and the query's first lines, up to `Length=`) and then stops with the error. A query without a valid context in a batch that NCBI searches gets the report of a query without hits, as in NCBI.
 - `-sorthits` with a description table that lists every subject and whose last subject alone has a total score above 99999 bits: all five programs. NCBI BLAST+ 2.17.0 pads that row with spaces without end, so it never finishes the report and has no output to use there either; LOSAT writes what NCBI writes before that table (the earlier queries' reports and the query's first lines) and then stops with the error.
 
 **Scoring and search settings**

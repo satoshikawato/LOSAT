@@ -15118,8 +15118,8 @@ fn run_call(
             BlastpReport::CustomTabular(spec) => (|| -> Result<()> {
                 // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
                 // (`tabular`); never the default 6 and 7 below. The format's stream as the sink
-                // opens it (`OutputSink::ostream`): the organism report's.
-                let mut writer = format.sink.ostream()?;
+                // opens it (`cli::NcbiOstream::sink`): the organism report's.
+                let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
                 let needs = spec.needs();
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
                 // ```c++

@@ -37,7 +37,7 @@ TARGETS = {
     ("native", "x86_64-apple-darwin", "LOSAT-0.2.0-x86_64-apple-darwin.tar.gz"),
     ("wasm", "wasm32-wasip1", "LOSAT-0.2.0-wasm32-wasip1.tar.gz"),
     ("wasm", "wasm32-wasip1-threads", "LOSAT-0.2.0-wasm32-wasip1-threads.tar.gz"),
-    ("source", "source", "LOSAT-0.2.0.crate"),
+    ("source", "source", "losat-0.2.0.crate"),
 }
 
 
@@ -100,7 +100,7 @@ class TempRepo:
         commit_file(
             self.root,
             "LOSAT/Cargo.toml",
-            '[package]\nname = "LOSAT"\nversion = "0.2.0"\n',
+            '[package]\nname = "losat"\nversion = "0.2.0"\n',
         )
         commit_file(self.root, "LOSAT/src/lib.rs", "// runtime\n")
         commit_file(self.root, "LOSAT/tests/fixture.txt", "fixture\n")
@@ -383,7 +383,7 @@ class LineageTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseFailure, "candidate SHA mismatch"):
             release.validate_candidate(self.repo.root, "a" * 40, contract)
         commit_file(
-            self.repo.root, "LOSAT/Cargo.toml", '[package]\nname = "LOSAT"\nversion = "0.1.0"\n'
+            self.repo.root, "LOSAT/Cargo.toml", '[package]\nname = "losat"\nversion = "0.1.0"\n'
         )
         with self.assertRaisesRegex(release.ReleaseFailure, "package version"):
             self.validate(contract)
@@ -549,16 +549,16 @@ class ArchiveTests(unittest.TestCase):
 
     def test_source_crate_rejects_generated_content(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            crate = Path(temp_dir) / "LOSAT-0.2.0.crate"
+            crate = Path(temp_dir) / "losat-0.2.0.crate"
             with tarfile.open(crate, "w:gz") as handle:
                 for name in (
-                    "LOSAT-0.2.0/Cargo.toml",
-                    "LOSAT-0.2.0/Cargo.lock",
-                    "LOSAT-0.2.0/README.md",
-                    "LOSAT-0.2.0/target/debug/losat",
+                    "losat-0.2.0/Cargo.toml",
+                    "losat-0.2.0/Cargo.lock",
+                    "losat-0.2.0/README.md",
+                    "losat-0.2.0/target/debug/losat",
                 ):
                     data = (
-                        b'[package]\nname = "LOSAT"\nversion = "0.2.0"\nlicense = "MIT"\n'
+                        b'[package]\nname = "losat"\nversion = "0.2.0"\nlicense = "MIT"\n'
                         if name.endswith("Cargo.toml")
                         else b"fixture"
                     )
@@ -567,7 +567,7 @@ class ArchiveTests(unittest.TestCase):
                     info.mode = 0o644
                     handle.addfile(info, io.BytesIO(data))
             with self.assertRaisesRegex(release.ReleaseFailure, "generated/scratch"):
-                release.crate_members(crate, "LOSAT-0.2.0")
+                release.crate_members(crate, "losat-0.2.0")
 
 
 class SmokeTests(unittest.TestCase):

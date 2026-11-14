@@ -1,14 +1,14 @@
 //! The Python binding of LOSAT's library API: `pylosat._pylosat`, which `pylosat/_api.py` wraps.
 //!
-//! This crate hands `LOSAT::api` its inputs and hands Python what comes back. It computes no
+//! This crate hands `losat::api` its inputs and hands Python what comes back. It computes no
 //! BLAST-defined value and writes no report (`PD-LOSAT-PYTHON-BINDING-BOUNDARY`); what NCBI does
 //! not have, Arrow and pickle, stays here and out of `LOSAT/`.
 
 mod search;
 mod table;
 
+use losat::api::{self, Program, ValueKind};
 use pyo3::prelude::*;
-use LOSAT::api::{self, Program, ValueKind};
 
 pyo3::create_exception!(
     pylosat,

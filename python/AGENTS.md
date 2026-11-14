@@ -12,9 +12,9 @@ governs everything under `LOSAT/`, including engine changes made for the binding
 
 ## Rules
 
-1. Reach the engine through `LOSAT::api` only. No other `LOSAT::` path, even one that compiles.
+1. Reach the engine through `losat::api` only. No other `losat::` path, even one that compiles.
 2. Do not compute or format BLAST-defined values (scores, E-values, identities, coverages, NCBI
-   number formats, alignment text). Add a value that is missing to `LOSAT::api`, under the root
+   number formats, alignment text). Add a value that is missing to `losat::api`, under the root
    rules.
 3. Reports stay byte for byte what the engine wrote.
 4. Give the engine only an argv and FASTA bytes. Never split one search into independent searches

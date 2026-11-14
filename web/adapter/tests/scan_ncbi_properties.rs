@@ -15,9 +15,9 @@
 //! records, a BOM, Seq-id first lines, implausible first data lines, and records longer
 //! than the checkpoint spacing.
 
+use losat::api::FastaRecord;
+use losat::web_adapter::{FastaInputSource, ParseErrorCode, ReadError, ReaderConfig};
 use losat_web_adapter::scan::{scan_ncbi, LineLayout, NcbiScanner, ScanRecord, CHECKPOINT_EVERY};
-use LOSAT::api::FastaRecord;
-use LOSAT::web_adapter::{FastaInputSource, ParseErrorCode, ReadError, ReaderConfig};
 
 /// A small deterministic generator (xorshift64*).
 struct Random(u64);

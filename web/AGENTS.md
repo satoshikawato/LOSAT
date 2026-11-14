@@ -51,8 +51,8 @@ still governs everything under `LOSAT/`, including engine changes made for LOSAT
    of the npm workspaces `web/app` and `web/packages/losat` (`web/package.json`).
    Justify any new runtime dependency in the commit message.
 9. Keep application commits separate from engine (`LOSAT/`) commits.
-10. The adapter (`web/adapter`) names the engine through `LOSAT::api` and the hidden
-    façade `LOSAT::web_adapter` (`LOSAT/src/web_adapter.rs`) only. An engine item that the
+10. The adapter (`web/adapter`) names the engine through `losat::api` and the hidden
+    façade `losat::web_adapter` (`LOSAT/src/web_adapter.rs`) only. An engine item that the
     adapter needs is named there on its own (no glob, no module), and the façade keeps only
     items that the adapter uses; `web/adapter/tests/engine_boundary.rs` checks this. A
     function there must also be sound for every input a safe caller can give (review).
